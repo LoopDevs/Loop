@@ -120,6 +120,42 @@ Full env var docs → `docs/development.md`.
 
 ---
 
+## Documentation update rules
+
+**Every code change must update the relevant docs in the same commit.** Use this checklist:
+
+| If you changed… | Update… |
+|-----------------|---------|
+| An API endpoint (add/remove/modify) | `docs/architecture.md` → Backend API endpoints section |
+| An env var (add/remove/rename) | `docs/development.md`, `AGENTS.md` env summary, `.env.example` files |
+| A build command or dev workflow | `docs/development.md`, `AGENTS.md` quick commands |
+| Deploy config (Dockerfile, Fly.io, Vercel) | `docs/deployment.md` |
+| Test patterns or coverage rules | `docs/testing.md` |
+| A code convention or standard | `docs/standards.md` |
+| An architectural decision | Add/update `docs/adr/NNN-title.md` |
+| File structure (add/move/delete files) | `AGENTS.md` file boundaries table |
+| `packages/shared` exports | Check both `apps/web` and `apps/backend` imports |
+| Dependencies (add/remove) | Verify no duplicates across packages |
+
+**If unsure, update `AGENTS.md`.** It is the first thing AI agents read. Stale instructions here cause cascading errors.
+
+---
+
+## Shared code rules
+
+**All code used by both web and backend MUST live in `packages/shared`.** Never duplicate logic between apps.
+
+| Shared concern | Location |
+|---------------|----------|
+| TypeScript types (Merchant, Order, API) | `packages/shared/src/*.ts` |
+| Slug generation | `packages/shared/src/slugs.ts` |
+| Error codes and API constants | `packages/shared/src/api.ts` |
+| Protobuf generated types | `packages/shared/src/proto/` |
+
+Before creating a utility in `apps/web` or `apps/backend`, check if it already exists in shared or should be added there.
+
+---
+
 ## What NOT to do
 
 - Fetch data in server-side loaders (pure API client architecture)

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // Mock env before any other imports
 vi.mock('../env.js', () => ({
@@ -45,8 +45,8 @@ vi.mock('../merchants/sync.js', () => ({
 
 // Mock image proxy eviction
 vi.mock('../images/proxy.js', async (importOriginal) => {
-  const orig = await importOriginal<typeof import('../images/proxy.js')>();
-  return { ...orig, evictExpiredImageCache: vi.fn() };
+  const orig = await importOriginal();
+  return { ...(orig as Record<string, unknown>), evictExpiredImageCache: vi.fn() };
 });
 
 // Mock clustering handler to avoid proto import (proto types not yet generated)

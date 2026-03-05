@@ -44,23 +44,25 @@ export function PaymentStep({ merchantName, paymentAddress, xlmAmount, orderId }
       return;
     }
 
-    const timer = setTimeout(async () => {
-      try {
-        const { order } = await fetchOrder(orderId);
-        if (order.status === 'completed') {
-          if (!order.giftCardCode) {
-            store.setError('Order completed but gift card code is unavailable. Please contact support.');
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const { order } = await fetchOrder(orderId);
+          if (order.status === 'completed') {
+            if (!order.giftCardCode) {
+              store.setError('Order completed but gift card code is unavailable. Please contact support.');
+            } else {
+              store.setComplete(order.giftCardCode, order.giftCardPin);
+            }
+          } else if (order.status === 'failed' || order.status === 'expired') {
+            store.setError(`Order ${order.status}. Please try again.`);
           } else {
-            store.setComplete(order.giftCardCode, order.giftCardPin);
+            setPollCount((c) => c + 1);
           }
-        } else if (order.status === 'failed' || order.status === 'expired') {
-          store.setError(`Order ${order.status}. Please try again.`);
-        } else {
+        } catch {
           setPollCount((c) => c + 1);
         }
-      } catch {
-        setPollCount((c) => c + 1);
-      }
+      })();
     }, POLL_INTERVAL_MS);
 
     return () => clearTimeout(timer);

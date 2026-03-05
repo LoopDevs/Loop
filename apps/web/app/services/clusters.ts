@@ -43,6 +43,7 @@ async function decodeProtobufClusters(buffer: ArrayBuffer): Promise<ClusterRespo
   const msg = ProtobufClusterResponse.fromBinary(new Uint8Array(buffer)) as any;
 
   return {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     locationPoints: msg.locationPoints.map((p: any) => ({
       type: 'Feature' as const,
       properties: {

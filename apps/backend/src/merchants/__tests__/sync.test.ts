@@ -19,7 +19,7 @@ vi.mock('../../logger.js', () => ({
   logger: { child: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }) },
 }));
 
-import { merchantSlug } from '../sync.js';
+import { merchantSlug } from '@loop/shared';
 
 describe('merchantSlug', () => {
   it('lowercases and replaces spaces with hyphens', () => {

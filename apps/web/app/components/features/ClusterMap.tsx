@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Map as LeafletMap, Layer } from 'leaflet';
+import type * as LeafletNamespace from 'leaflet';
 import type { ClusterParams, ClusterResponse } from '@loop/shared';
 import { fetchClusters } from '~/services/clusters';
 import { getImageProxyUrl } from '~/utils/image';
@@ -24,7 +25,7 @@ export default function ClusterMap(): React.JSX.Element {
     merchantsById.current = new Map(merchants.map((m) => [m.id, m.name]));
   }, [merchants]);
 
-  const updateMarkers = useCallback(async (map: LeafletMap, L: typeof import('leaflet')): Promise<void> => {
+  const updateMarkers = useCallback(async (map: LeafletMap, L: typeof LeafletNamespace): Promise<void> => {
     const bounds = map.getBounds();
     const zoom = Math.round(map.getZoom());
 

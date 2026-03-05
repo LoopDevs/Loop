@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Capacitor } from '@capacitor/core';
+import type { Platform } from '~/native/platform';
+import { getPlatform, isNativePlatform } from '~/native/platform';
 
-export type Platform = 'ios' | 'android' | 'web';
+export type { Platform };
 
 export interface NativePlatform {
   platform: Platform;
@@ -17,8 +18,8 @@ export function useNativePlatform(): NativePlatform {
 
   useEffect(() => {
     setState({
-      platform: Capacitor.getPlatform() as Platform,
-      isNative: Capacitor.isNativePlatform(),
+      platform: getPlatform(),
+      isNative: isNativePlatform(),
     });
   }, []);
 

@@ -1,4 +1,5 @@
 import type { Merchant, MerchantDenominations } from '@loop/shared';
+import { merchantSlug } from '@loop/shared';
 import { logger } from '../logger.js';
 import { env } from '../env.js';
 
@@ -46,11 +47,6 @@ interface MerchantStore {
   merchantsById: Map<string, Merchant>;
   merchantsBySlug: Map<string, Merchant>;
   loadedAt: number;
-}
-
-/** Computes the URL slug for a merchant name (mirrors frontend encodeUrlName). */
-export function merchantSlug(name: string): string {
-  return name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
 }
 
 let store: MerchantStore = {

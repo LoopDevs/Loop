@@ -1,4 +1,5 @@
-/** Encodes a merchant name to its URL slug. Matches backend `merchantSlug()`. */
-export function toSlug(name: string): string {
-  return encodeURIComponent(name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''));
-}
+/**
+ * Re-exports merchantSlug from @loop/shared as `toSlug` for convenience.
+ * This is the single source of truth — both web and backend use the same function.
+ */
+export { merchantSlug as toSlug } from '@loop/shared';

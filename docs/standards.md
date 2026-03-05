@@ -629,7 +629,7 @@ const expiryMs = otpExpirySeconds * 1000;
 
 ### Keeping docs current
 
-Documentation that is wrong is worse than no documentation. When you change behaviour, update the relevant docs in the same PR. A PR that changes an API endpoint must update `docs/api.md`. A PR that makes an architectural change must add or update an ADR.
+Documentation that is wrong is worse than no documentation. When you change behaviour, update the relevant docs in the same PR. A PR that changes an API endpoint must update `docs/architecture.md`. A PR that makes an architectural change must add or update an ADR.
 
 ---
 
@@ -747,7 +747,7 @@ All async functions that can fail must have error handling at every `await`. An 
 }
 ```
 
-Error codes are `SCREAMING_SNAKE_CASE` strings, stable across versions, documented in `docs/api.md`. HTTP status codes follow convention (400 bad request, 401 unauthenticated, 403 forbidden, 404 not found, 500 server error).
+Error codes are `SCREAMING_SNAKE_CASE` strings, stable across versions, documented in `docs/architecture.md`. HTTP status codes follow convention (400 bad request, 401 unauthenticated, 403 forbidden, 404 not found, 500 server error).
 
 ---
 
@@ -868,7 +868,7 @@ All review comments must be addressed before merging — either by making the ch
 ### Per quarter
 
 - Review ADRs — are any decisions now outdated and worth revisiting?
-- Review `docs/api.md` for accuracy against the running backend.
+- Review `docs/architecture.md` for accuracy against the running backend.
 - Dependency major version review — are any major updates worth taking?
 - Security audit of auth and payment code paths.
 

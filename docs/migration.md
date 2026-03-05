@@ -324,6 +324,6 @@ A phase is not complete until every item is true:
 - [ ] All build targets succeed
 - [ ] Branding audit — zero legacy brand strings in source
 - [ ] CI pipeline green on `main`
-- [ ] Any new API endpoints documented in `docs/api.md`
+- [ ] Any new API endpoints documented in `docs/architecture.md`
 - [ ] Any architectural decisions documented in `docs/adr/`
 - [ ] Code reviewed

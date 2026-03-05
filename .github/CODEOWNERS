@@ -1,0 +1,8 @@
+# Default — all PRs require at least one review
+* @LoopDevs/engineering
+
+# Security-sensitive paths — require explicit security review
+apps/backend/src/auth/      @LoopDevs/engineering
+apps/backend/src/orders/    @LoopDevs/engineering
+apps/web/app/native/        @LoopDevs/engineering
+apps/web/app/stores/auth*   @LoopDevs/engineering

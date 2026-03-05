@@ -13,6 +13,13 @@ export default [
       '**/.react-router/**',
       '**/packages/shared/src/proto/**',
       '**/*.generated.ts',
+      '**/vitest.config.ts',
+      '**/vite.config.ts',
+      '**/react-router.config.ts',
+      '**/capacitor.config.ts',
+      'playwright.config.ts',
+      'commitlint.config.js',
+      'tests/**',
     ],
   },
   // ─── All TypeScript files ───────────────────────────────────────────────────
@@ -64,6 +71,24 @@ export default [
       'react/prop-types': 'off',
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
+    },
+  },
+  // ─── Web app — enforce import boundaries ────────────────────────────────────
+  {
+    files: ['apps/web/app/**/*.ts', 'apps/web/app/**/*.tsx'],
+    ignores: ['apps/web/app/native/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@capacitor/*'],
+              message: 'Capacitor plugins must only be imported in app/native/. Import from ~/native/ instead.',
+            },
+          ],
+        },
+      ],
     },
   },
   // ─── Test files — relax rules that hamper test expressiveness ───────────────
