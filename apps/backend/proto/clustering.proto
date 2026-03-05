@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package clustering;
+
+option go_package = "./";
+
+// Geographic coordinates
+message Coordinates {
+  double longitude = 1;
+  double latitude = 2;
+}
+
+// Geometry for GeoJSON-like structure
+message Geometry {
+  string type = 1;
+  Coordinates coordinates = 2;
+}
+
+// Properties for individual location points
+message LocationProperties {
+  bool cluster = 1;
+  string merchant_id = 2;
+  string map_pin_url = 3;
+}
+
+// Properties for cluster points
+message ClusterProperties {
+  bool cluster = 1;
+  int32 point_count = 2;
+}
+
+// Individual location point
+message LocationPoint {
+  string type = 1;
+  LocationProperties properties = 2;
+  Geometry geometry = 3;
+}
+
+// Cluster point
+message ClusterPoint {
+  string type = 1;
+  ClusterProperties properties = 2;
+  Geometry geometry = 3;
+  int32 id = 4;
+}
+
+// Bounding box
+message Bounds {
+  double west = 1;
+  double south = 2;
+  double east = 3;
+  double north = 4;
+}
+
+// Main clustering response
+message ProtobufClusterResponse {
+  repeated LocationPoint location_points = 1;
+  repeated ClusterPoint cluster_points = 2;
+  int32 total = 3;
+  int32 zoom = 4;
+  int64 loaded_at = 5; // Unix timestamp
+  Bounds bounds = 6;
+}

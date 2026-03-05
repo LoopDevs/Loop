@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+build/
+dist/
+.react-router/
+
+# Environment files — never commit
+.env
+.env.local
+.env.*.local
+
+# Native build artefacts
+apps/mobile/ios/
+apps/mobile/android/
+*.xcworkspace
+*.xcodeproj
+Pods/
+*.ipa
+*.apk
+*.aab
+
+# Capacitor
+.capacitor/
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs
+*.log
+logs/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Misc
+*.db
+merchants.db
+server.log

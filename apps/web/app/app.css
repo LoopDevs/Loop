@@ -1,0 +1,129 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Default light mode */
+html,
+body {
+  background-color: white;
+  color: #111827;
+  min-width: 320px;
+}
+
+/* Explicit light mode - only apply to html/body, not children */
+html.light {
+  background-color: white !important;
+}
+
+html.light body {
+  background-color: white !important;
+  color: #111827 !important;
+}
+
+/* Explicit dark mode - only apply to html/body, not children */
+html.dark {
+  background-color: rgb(3, 7, 18) !important;
+}
+
+html.dark body {
+  background-color: rgb(3, 7, 18) !important;
+  color: white !important;
+}
+
+/* System preference dark mode (only if no explicit class) */
+@media (prefers-color-scheme: dark) {
+  html:not(.light):not(.dark) {
+    background-color: rgb(3, 7, 18);
+  }
+  
+  html:not(.light):not(.dark) body {
+    background-color: rgb(3, 7, 18);
+    color: white;
+  }
+}
+
+
+/* Hero SVG fill - explicit overrides for theme classes */
+html.light .hero-shape-fill {
+  fill: white;
+}
+
+html.dark .hero-shape-fill {
+  fill: rgb(3, 7, 18);
+}
+
+/* System preference only when no explicit class */
+@media (prefers-color-scheme: dark) {
+  html:not(.light):not(.dark) .hero-shape-fill {
+    fill: rgb(3, 7, 18);
+  }
+}
+
+/* Default light mode for hero SVG */
+.hero-shape-fill {
+  fill: white;
+}
+
+/* Theme toggler icon CSS - prevents flash by using html.dark/.light classes */
+.theme-icon-sun,
+.theme-icon-moon {
+  display: none;
+}
+
+/* Dark mode: show sun icon (to switch to light) */
+html.dark .theme-icon-sun {
+  display: block;
+}
+
+/* Light mode: show moon icon (to switch to dark) */
+html.light .theme-icon-moon {
+  display: block;
+}
+
+
+/* Prevent scroll wheel from changing input values */
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Disable scroll wheel behavior on focused number inputs */
+input[type="number"]:focus {
+  -moz-appearance: textfield;
+}
+
+/* Prevent wheel events from bubbling up on number inputs */
+input[type="number"] {
+  pointer-events: auto;
+}
+
+/* JavaScript to handle wheel events will be added via script */
+
+/* Dark mode styling for Leaflet map tiles */
+.dark .leaflet-pane.leaflet-tile-pane {
+  filter: sepia(50%) hue-rotate(180deg) saturate(300%) contrast(1.1) brightness(2);
+}
+
+.dark .leaflet-container {
+  background: rgb(25 34 51);
+}
+
+@keyframes loading {
+  0% {
+    background-position: -200px 0;
+  }
+  100% {
+    background-position: calc(200px + 100%) 0;
+  }
+}
+
