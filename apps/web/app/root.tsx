@@ -88,7 +88,7 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
     <>
       <OfflineBanner />
       {isNative && <div className="native-safe-top" />}
-      <div className={isNative ? 'pb-20' : ''}>{children}</div>
+      <div className={isNative ? 'native-tab-clearance' : ''}>{children}</div>
       <NativeTabBar />
     </>
   );
