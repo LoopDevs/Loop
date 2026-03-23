@@ -6,7 +6,7 @@ import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAuth } from '~/hooks/use-auth';
 import { fetchOrders } from '~/services/orders';
 import { Navbar } from '~/components/features/Navbar';
-import { Spinner } from '~/components/ui/Spinner';
+import { OrderRowSkeleton } from '~/components/ui/Skeleton';
 import { Button } from '~/components/ui/Button';
 import { useEffect } from 'react';
 
@@ -136,8 +136,10 @@ export default function OrdersRoute(): React.JSX.Element {
         )}
 
         {isAuthenticated && isLoading && (
-          <div className="flex justify-center py-12">
-            <Spinner />
+          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <OrderRowSkeleton key={i} />
+            ))}
           </div>
         )}
 

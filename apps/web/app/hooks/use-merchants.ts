@@ -25,6 +25,7 @@ export function useMerchants(options: UseMerchantsOptions = {}): UseMerchantsRes
     queryKey: ['merchants', { page, limit, q }],
     queryFn: () => fetchMerchants({ page, limit, ...(q !== undefined ? { q } : {}) }),
     staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
   });
 
   return {

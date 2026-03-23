@@ -13,6 +13,7 @@ import { useNativePlatform } from '~/hooks/use-native-platform';
 import { NativeTabBar } from '~/components/features/NativeTabBar';
 import { setStatusBarOverlay, setStatusBarStyle } from '~/native/status-bar';
 import { registerBackButton } from '~/native/back-button';
+import { OfflineBanner } from '~/components/ui/OfflineBanner';
 import './app.css';
 
 const queryClient = new QueryClient({
@@ -74,6 +75,7 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
 
   useEffect(() => {
     if (isNative) {
+      document.documentElement.classList.add('native');
       void setStatusBarOverlay();
       // Match status bar to current theme
       const isDark = document.documentElement.classList.contains('dark');
@@ -84,6 +86,7 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
 
   return (
     <>
+      <OfflineBanner />
       {isNative && <div className="native-safe-top" />}
       <div className={isNative ? 'pb-20' : ''}>{children}</div>
       <NativeTabBar />

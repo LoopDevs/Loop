@@ -4,7 +4,7 @@ import { useNativePlatform } from '~/hooks/use-native-platform';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
 import { MerchantCard } from '~/components/features/MerchantCard';
-import { Spinner } from '~/components/ui/Spinner';
+import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
 
 export function meta(): Route.MetaDescriptors {
   return [
@@ -93,8 +93,10 @@ function HomeContent(): React.JSX.Element {
             </p>
           </div>
           {isLoading ? (
-            <div className="flex justify-center py-16">
-              <Spinner />
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 px-4 sm:px-6">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <MerchantCardSkeleton key={i} />
+              ))}
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">

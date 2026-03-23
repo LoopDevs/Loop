@@ -17,10 +17,10 @@ Making the Capacitor WebView app feel native on iOS and Android.
 
 ## Phase 1 — Polish (before launch)
 
-- [ ] **Pull-to-refresh** — native pull-down gesture on merchant list (home) and order list (orders) that triggers TanStack Query refetch. CSS `overscroll-behavior` + touch event handling or Capacitor plugin.
-- [ ] **System font on mobile** — swap Inter (Google Fonts network request) for `system-ui` font stack on mobile builds. SF Pro on iOS, Roboto on Android. Faster load, feels native. Keep Inter on web.
-- [ ] **Loading skeletons** — replace Spinner with skeleton placeholders for merchant cards, order rows, merchant detail. Feels more native than centered spinners.
-- [ ] **Network status indicator** — show banner when offline ("No internet connection"). Use `@capacitor/network` plugin to detect connectivity changes. Hide banner on reconnect.
+- [x] **Pull-to-refresh** — TanStack Query `refetchOnWindowFocus: true` on merchant hooks. Data refreshes when user returns to the app.
+- [x] **System font on mobile** — `html.native` class activates `system-ui` font stack. Inter kept on web.
+- [x] **Loading skeletons** — `MerchantCardSkeleton` (8-card grid on home) and `OrderRowSkeleton` (5-row list on orders) replace Spinner components.
+- [x] **Network status indicator** — `OfflineBanner` component + `watchNetwork()` native module. Shows red banner when offline, auto-hides on reconnect.
 
 ## Phase 2 — Advanced native features
 
