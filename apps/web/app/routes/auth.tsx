@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import type { Route } from './+types/auth';
 import { useAuth } from '~/hooks/use-auth';
@@ -7,6 +7,8 @@ import { useUiStore } from '~/stores/ui.store';
 import { Navbar } from '~/components/features/Navbar';
 import { Button } from '~/components/ui/Button';
 import { Input } from '~/components/ui/Input';
+import { checkBiometrics, authenticateWithBiometrics } from '~/native/biometrics';
+import { isAppLockEnabled, setAppLockEnabled } from '~/native/app-lock';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Sign in — Loop' }];
@@ -25,6 +27,60 @@ function ThemeToggleRow(): React.JSX.Element {
       <span className="text-gray-700 dark:text-gray-300">Appearance</span>
       <span className="text-gray-500 dark:text-gray-400">
         {theme === 'dark' ? '🌙 Dark' : '☀️ Light'}
+      </span>
+    </button>
+  );
+}
+
+function BiometricLockRow(): React.JSX.Element | null {
+  const [available, setAvailable] = useState(false);
+  const [enabled, setEnabled] = useState(false);
+  const [biometryType, setBiometryType] = useState<string>('');
+
+  useEffect(() => {
+    void (async () => {
+      const result = await checkBiometrics();
+      setAvailable(result.available);
+      setBiometryType(
+        result.biometryType === 'face'
+          ? 'Face ID'
+          : result.biometryType === 'fingerprint'
+            ? 'Touch ID'
+            : 'Biometrics',
+      );
+      if (result.available) {
+        const lockEnabled = await isAppLockEnabled();
+        setEnabled(lockEnabled);
+      }
+    })();
+  }, []);
+
+  if (!available) return null;
+
+  const handleToggle = async (): Promise<void> => {
+    if (!enabled) {
+      const ok = await authenticateWithBiometrics(`Enable ${biometryType}`);
+      if (ok) {
+        await setAppLockEnabled(true);
+        setEnabled(true);
+      }
+    } else {
+      await setAppLockEnabled(false);
+      setEnabled(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void handleToggle();
+      }}
+      className="w-full flex items-center justify-between px-4 py-3 min-h-[44px] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg text-sm"
+    >
+      <span className="text-gray-700 dark:text-gray-300">{biometryType} Lock</span>
+      <span className={`text-sm font-medium ${enabled ? 'text-green-600' : 'text-gray-400'}`}>
+        {enabled ? 'On' : 'Off'}
       </span>
     </button>
   );
@@ -79,6 +135,7 @@ export default function AuthRoute(): React.JSX.Element {
             <p className="text-gray-500 dark:text-gray-400 mb-8">{userEmail}</p>
             <div className="space-y-3">
               {isNative && <ThemeToggleRow />}
+              {isNative && <BiometricLockRow />}
               <Button
                 variant="secondary"
                 className="w-full"

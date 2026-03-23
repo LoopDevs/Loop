@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '~/components/ui/Button';
 import { triggerHapticNotification } from '~/native/haptics';
 import { copyToClipboard } from '~/native/clipboard';
+import { enableScreenshotGuard } from '~/native/screenshot-guard';
+import { nativeShare } from '~/native/share';
 
 interface PurchaseCompleteProps {
   merchantName: string;
@@ -30,8 +32,20 @@ export function PurchaseComplete({
     }
   };
 
+  const handleShare = async (): Promise<void> => {
+    await nativeShare({
+      title: `${merchantName} Gift Card`,
+      text: `Gift card code: ${code}${pin ? `\nPIN: ${pin}` : ''}`,
+    });
+  };
+
   useEffect(() => {
     void triggerHapticNotification('success');
+  }, []);
+
+  // Blur screen when app is backgrounded to protect gift card code
+  useEffect(() => {
+    return enableScreenshotGuard();
   }, []);
 
   useEffect(() => {
@@ -87,9 +101,20 @@ export function PurchaseComplete({
         Save this code — you'll need it to redeem your gift card.
       </p>
 
-      <Button onClick={onDone} variant="secondary">
-        Done
-      </Button>
+      <div className="flex gap-3">
+        <Button
+          onClick={() => {
+            void handleShare();
+          }}
+          variant="secondary"
+          className="flex-1"
+        >
+          Share
+        </Button>
+        <Button onClick={onDone} variant="secondary" className="flex-1">
+          Done
+        </Button>
+      </div>
     </div>
   );
 }

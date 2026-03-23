@@ -154,3 +154,19 @@ input[type='number'] {
 .native-full-height {
   height: calc(100vh - env(safe-area-inset-top) - 3.5rem - env(safe-area-inset-bottom));
 }
+
+/* Page transitions — slide in on route changes (native only) */
+html.native .route-enter {
+  animation: slide-in 0.25s ease-out;
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(4%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}

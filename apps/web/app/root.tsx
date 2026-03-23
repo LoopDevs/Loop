@@ -6,6 +6,7 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
+  useLocation,
 } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { Route } from './+types/root';
@@ -13,6 +14,7 @@ import { useNativePlatform } from '~/hooks/use-native-platform';
 import { NativeTabBar } from '~/components/features/NativeTabBar';
 import { setStatusBarOverlay, setStatusBarStyle } from '~/native/status-bar';
 import { registerBackButton } from '~/native/back-button';
+import { registerAppLockGuard } from '~/native/app-lock';
 import { OfflineBanner } from '~/components/ui/OfflineBanner';
 import { NativeBackButton } from '~/components/features/NativeBackButton';
 import './app.css';
@@ -73,6 +75,7 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
 
 function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Element {
   const { isNative } = useNativePlatform();
+  const location = useLocation();
 
   useEffect(() => {
     if (isNative) {
@@ -83,6 +86,15 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
       void setStatusBarStyle(isDark ? 'dark' : 'light');
       registerBackButton();
     }
+  }, [isNative]);
+
+  // Register biometric app lock guard on native
+  useEffect(() => {
+    if (!isNative) return;
+    const cleanupAppLock = registerAppLockGuard();
+    return () => {
+      cleanupAppLock();
+    };
   }, [isNative]);
 
   // Update status bar when theme changes
@@ -103,7 +115,15 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
       <OfflineBanner />
       <NativeBackButton />
       {isNative && <div className="native-safe-top" />}
-      <div className={isNative ? 'native-tab-clearance' : ''}>{children}</div>
+      <div className={isNative ? 'native-tab-clearance' : ''}>
+        {isNative ? (
+          <div key={location.pathname} className="route-enter">
+            {children}
+          </div>
+        ) : (
+          children
+        )}
+      </div>
       <NativeTabBar />
     </>
   );
