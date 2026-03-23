@@ -23,7 +23,7 @@ The migration plan (`docs/migration.md`) covered getting the monorepo to a worki
 - [ ] Deploy web (SSR) to Fly.io or Vercel
 - [ ] Set `IMAGE_PROXY_ALLOWED_HOSTS` in production backend for SSRF prevention
 - [ ] Set up monitoring / error tracking (e.g., Sentry)
-- [ ] Configure production CORS allowlist in backend (`loopfinance.io`)
+- [x] ~~Configure production CORS allowlist~~ — already set in `index.ts` (loopfinance.io in production, \* in dev)
 - [ ] DNS: point `loopfinance.io` → web deployment, `api.loopfinance.io` → backend deployment
 - [ ] TLS certificates (automatic via Fly.io / Vercel)
 
@@ -47,7 +47,7 @@ The migration plan (`docs/migration.md`) covered getting the monorepo to a worki
 
 ### Upstream API integration
 
-- [ ] Obtain production credentials for upstream gift card API (CTX)
+- [x] ~~Obtain production credentials~~ — no credentials needed; upstream API is public
 - [ ] Validate order creation flow end-to-end with real credentials
 - [ ] Confirm merchant sync pagination works with full catalog
 - [ ] Confirm location data sync and clustering against real data
@@ -133,7 +133,7 @@ The migration plan (`docs/migration.md`) covered getting the monorepo to a worki
 
 ### Observability
 
-- [ ] Request correlation logging (X-Request-ID middleware)
+- [x] ~~Request correlation logging~~ — already implemented via Hono requestId() middleware
 - [ ] Prometheus metrics endpoint
 - [ ] Analytics (privacy-respecting, no PII in events)
 - [ ] Performance monitoring (Core Web Vitals, API latency)
