@@ -21,10 +21,8 @@ interface PurchaseContainerProps {
  */
 export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.JSX.Element {
   const navigate = useNavigate();
-  const { email, isAuthenticated } = useAuthStore((s) => ({
-    email: s.email,
-    isAuthenticated: s.accessToken !== null,
-  }));
+  const email = useAuthStore((s) => s.email);
+  const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
   const store = usePurchaseStore();
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);

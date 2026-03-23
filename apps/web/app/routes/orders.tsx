@@ -118,7 +118,7 @@ export default function OrdersRoute(): React.JSX.Element {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
       {!isNative && <Navbar />}
 
-      <main className="max-w-2xl mx-auto px-4 py-8">
+      <main className="max-w-2xl mx-auto px-4 py-8 pt-20">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Your orders</h1>
 
         {!isAuthenticated && (

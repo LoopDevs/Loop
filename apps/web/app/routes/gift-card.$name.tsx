@@ -61,7 +61,7 @@ export default function GiftCardRoute(): React.JSX.Element {
     <div>
       {!isNative && <Navbar />}
 
-      <div className="container mx-auto px-4 py-8 lg:py-12 max-w-5xl">
+      <div className="container mx-auto px-4 py-8 pt-20 lg:py-12 lg:pt-20 max-w-5xl">
         <div className="flex items-center gap-4 mb-8">
           {logoUrl !== undefined && (
             <img
