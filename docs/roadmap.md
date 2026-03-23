@@ -27,6 +27,24 @@ The migration plan (`docs/migration.md`) covered getting the monorepo to a worki
 - [ ] DNS: point `loopfinance.io` → web deployment, `api.loopfinance.io` → backend deployment
 - [ ] TLS certificates (automatic via Fly.io / Vercel)
 
+### Code hardening (before connecting to real upstream)
+
+- [ ] **Validate upstream responses with Zod** — auth handler and order handler forward raw `response.json()` to the client. If upstream returns unexpected shape, web app crashes or leaks upstream internals. Add Zod schemas for `VerifyOtpResponse`, `RefreshResponse`, `CreateOrderResponse`, and `Order`.
+- [ ] **Reject orders for unknown merchants** — `createOrderHandler` silently defaults `fiatCurrency` to USD if merchant not in cache. Should return 400 "Merchant not found" or log a warning.
+- [ ] **Add rate limiting on `/api/image`** — anyone can trigger unlimited upstream fetches + sharp processing. Production DDoS vector. Add Hono rate-limit middleware.
+- [ ] **Map upstream response fields to our types** — web expects `CreateOrderResponse` with `orderId`, `paymentAddress`, `xlmAmount`, `expiresAt`. If upstream uses different field names, purchase flow silently breaks. Add an explicit mapping layer in the order handler.
+- [ ] **Use `expiresAt` in PaymentStep** — backend returns it in `CreateOrderResponse` but web ignores it. Should show a countdown timer and stop polling at expiry instead of fixed 5-minute timeout.
+- [ ] **Remove `savingsBips` field** — redundant with `savingsPercentage`, never consumed by web. Remove from shared types and backend sync.
+
+### Code hardening (before production)
+
+- [ ] **Add upstream health to `/health` endpoint** — currently returns "healthy" even when upstream is unreachable. Should probe upstream `/status` or report staleness.
+- [ ] **Test merchant sync error paths** — `refreshMerchants()` pagination, error recovery, and atomic store swap are untested (0% coverage).
+- [ ] **Test location sync error paths** — same gap as merchants.
+- [ ] **Test image proxy SSRF validation** — private IP blocking, IPv6 edge cases, allowlist enforcement are untested.
+- [ ] **Test order proxy upstream behavior** — only 401-without-token tested. Upstream 502, timeout, malformed JSON untested.
+- [ ] **Add request correlation logging** — no way to trace a request through backend → upstream → response. Add X-Request-ID middleware.
+
 ### Upstream API integration
 
 - [ ] Obtain production credentials for upstream gift card API (CTX)
@@ -100,14 +118,31 @@ The migration plan (`docs/migration.md`) covered getting the monorepo to a worki
 
 ## Phase 3 — Growth & polish
 
-- [ ] Swap Leaflet for MapLibre GL JS (WebGL rendering, better mobile perf)
+### Scaling & performance
+
+- [ ] Swap Leaflet for MapLibre GL JS (WebGL rendering, better mobile perf with many markers)
 - [ ] Server-side merchant search (replace client-side 1000-merchant fetch in Navbar)
+- [ ] Add circuit breaker on upstream API (fail fast after N consecutive failures instead of 30s timeout per request)
+- [ ] Add staleness alerting for background refreshes (if merchant/location data >24h old, alert)
+
+### Features
+
+- [ ] Order history page (route + service exist, no UI wired up)
 - [ ] Favourites / recently purchased merchants
-- [ ] Order history with re-purchase
 - [ ] Referral program
+
+### Observability
+
+- [ ] Request correlation logging (X-Request-ID middleware)
+- [ ] Prometheus metrics endpoint
 - [ ] Analytics (privacy-respecting, no PII in events)
 - [ ] Performance monitoring (Core Web Vitals, API latency)
+
+### Quality
+
 - [ ] Accessibility audit (WCAG 2.1 AA)
+- [ ] Distinguish error types in auth hook (network error vs invalid code vs upstream failure)
+- [ ] Distinguish error types in payment polling (transient vs permanent failure)
 
 ---
 
