@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { cors } from 'hono/cors';
+import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
 import { logger as honoLogger } from 'hono/logger';
 import { env } from './env.js';
@@ -64,6 +65,7 @@ app.use(
         : '*',
   }),
 );
+app.use('*', bodyLimit({ maxSize: 1024 * 1024 }));
 app.use('*', requestId());
 app.use('*', honoLogger());
 

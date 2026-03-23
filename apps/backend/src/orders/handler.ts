@@ -1,9 +1,9 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { getMerchants } from '../merchants/sync.js';
 import { upstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
+import { upstreamUrl } from '../upstream.js';
 
 const log = logger.child({ handler: 'orders' });
 
@@ -31,10 +31,6 @@ const GetOrderUpstreamResponse = z
     giftCardPin: z.string().optional(),
   })
   .passthrough();
-
-function upstreamUrl(path: string): string {
-  return `${env.GIFT_CARD_API_BASE_URL.replace(/\/$/, '')}${path}`;
-}
 
 /**
  * POST /api/orders
@@ -138,7 +134,15 @@ export async function listOrdersHandler(c: Context): Promise<Response> {
       return c.json({ code: 'UPSTREAM_ERROR', message: 'Failed to fetch orders' }, 502);
     }
 
-    return c.json(await response.json());
+    const raw = await response.json();
+    if (typeof raw !== 'object' || raw === null) {
+      log.error('Upstream order list response is not an object');
+      return c.json(
+        { code: 'UPSTREAM_ERROR', message: 'Unexpected response from order provider' },
+        502,
+      );
+    }
+    return c.json(raw);
   } catch (err) {
     if (err instanceof CircuitOpenError) {
       return c.json(

@@ -12,7 +12,12 @@ interface PurchaseCompleteProps {
 /**
  * Shows the redeemed gift card code with a barcode and optionally a PIN.
  */
-export function PurchaseComplete({ merchantName, code, pin, onDone }: PurchaseCompleteProps): React.JSX.Element {
+export function PurchaseComplete({
+  merchantName,
+  code,
+  pin,
+  onDone,
+}: PurchaseCompleteProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -40,7 +45,9 @@ export function PurchaseComplete({ merchantName, code, pin, onDone }: PurchaseCo
     <div className="rounded-xl border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 p-6 text-center">
       <div className="text-4xl mb-3">🎉</div>
       <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Gift card ready!</h2>
-      <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">Your {merchantName} gift card code:</p>
+      <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+        Your {merchantName} gift card code:
+      </p>
 
       <canvas ref={canvasRef} className="mx-auto max-w-full mb-4" />
 
@@ -54,9 +61,13 @@ export function PurchaseComplete({ merchantName, code, pin, onDone }: PurchaseCo
         </p>
       )}
 
-      <p className="text-xs text-gray-500 mb-6">A copy of this code has been sent to your email.</p>
+      <p className="text-xs text-gray-500 mb-6">
+        Save this code — you'll need it to redeem your gift card.
+      </p>
 
-      <Button onClick={onDone} variant="secondary">Done</Button>
+      <Button onClick={onDone} variant="secondary">
+        Done
+      </Button>
     </div>
   );
 }

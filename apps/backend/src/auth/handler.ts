@@ -1,8 +1,8 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { upstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
+import { upstreamUrl } from '../upstream.js';
 
 const log = logger.child({ handler: 'auth' });
 
@@ -20,10 +20,6 @@ const RefreshUpstreamResponse = z.object({
   accessToken: z.string().min(1),
   refreshToken: z.string().optional(),
 });
-
-function upstreamUrl(path: string): string {
-  return `${env.GIFT_CARD_API_BASE_URL.replace(/\/$/, '')}${path}`;
-}
 
 /**
  * POST /api/auth/request-otp

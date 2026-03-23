@@ -25,75 +25,78 @@ export default function ClusterMap(): React.JSX.Element {
     merchantsById.current = new Map(merchants.map((m) => [m.id, m.name]));
   }, [merchants]);
 
-  const updateMarkers = useCallback(async (map: LeafletMap, L: typeof LeafletNamespace): Promise<void> => {
-    const bounds = map.getBounds();
-    const zoom = Math.round(map.getZoom());
+  const updateMarkers = useCallback(
+    async (map: LeafletMap, L: typeof LeafletNamespace): Promise<void> => {
+      const bounds = map.getBounds();
+      const zoom = Math.round(map.getZoom());
 
-    const params: ClusterParams = {
-      west: bounds.getWest(),
-      south: bounds.getSouth(),
-      east: bounds.getEast(),
-      north: bounds.getNorth(),
-      zoom,
-    };
+      const params: ClusterParams = {
+        west: bounds.getWest(),
+        south: bounds.getSouth(),
+        east: bounds.getEast(),
+        north: bounds.getNorth(),
+        zoom,
+      };
 
-    let data: ClusterResponse;
-    try {
-      data = await fetchClusters(params);
-    } catch {
-      return;
-    }
+      let data: ClusterResponse;
+      try {
+        data = await fetchClusters(params);
+      } catch {
+        return;
+      }
 
-    // Remove existing markers
-    for (const layer of markersRef.current) {
-      map.removeLayer(layer);
-    }
-    markersRef.current = [];
+      // Remove existing markers
+      for (const layer of markersRef.current) {
+        map.removeLayer(layer);
+      }
+      markersRef.current = [];
 
-    const total = data.locationPoints.length + data.clusterPoints.length;
-    setStatus(`${total} ${zoom >= 14 ? 'locations' : 'clusters'} • zoom ${zoom}`);
+      const total = data.locationPoints.length + data.clusterPoints.length;
+      setStatus(`${total} ${zoom >= 14 ? 'locations' : 'clusters'} • zoom ${zoom}`);
 
-    // Add cluster markers
-    for (const cluster of data.clusterPoints) {
-      const { longitude: lng, latitude: lat } = cluster.geometry.coordinates;
-      const count = cluster.properties.pointCount;
+      // Add cluster markers
+      for (const cluster of data.clusterPoints) {
+        const { longitude: lng, latitude: lat } = cluster.geometry.coordinates;
+        const count = cluster.properties.pointCount;
 
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="width:40px;height:40px;border-radius:50%;background:rgba(37,99,235,0.85);border:2px solid white;display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.3)">${count}</div>`,
-        iconSize: [40, 40],
-        iconAnchor: [20, 20],
-      });
+        const icon = L.divIcon({
+          className: '',
+          html: `<div style="width:40px;height:40px;border-radius:50%;background:rgba(37,99,235,0.85);border:2px solid white;display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.3)">${count}</div>`,
+          iconSize: [40, 40],
+          iconAnchor: [20, 20],
+        });
 
-      const marker = L.marker([lat, lng], { icon });
-      marker.on('click', () => map.setZoom(zoom + 2));
-      marker.addTo(map);
-      markersRef.current.push(marker);
-    }
+        const marker = L.marker([lat, lng], { icon });
+        marker.on('click', () => map.setZoom(zoom + 2));
+        marker.addTo(map);
+        markersRef.current.push(marker);
+      }
 
-    // Add individual location markers
-    for (const point of data.locationPoints) {
-      const { longitude: lng, latitude: lat } = point.geometry.coordinates;
-      const { merchantId, mapPinUrl } = point.properties;
+      // Add individual location markers
+      for (const point of data.locationPoints) {
+        const { longitude: lng, latitude: lat } = point.geometry.coordinates;
+        const { merchantId, mapPinUrl } = point.properties;
 
-      const iconHtml = mapPinUrl
-        ? `<img src="${getImageProxyUrl(mapPinUrl, 64)}" style="width:32px;height:32px;border-radius:50%;border:2px solid white;object-fit:cover;box-shadow:0 2px 6px rgba(0,0,0,0.3)" />`
-        : `<div style="width:32px;height:32px;border-radius:50%;background:#2563eb;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3)"></div>`;
+        const iconHtml = mapPinUrl
+          ? `<img src="${getImageProxyUrl(mapPinUrl, 64)}" style="width:32px;height:32px;border-radius:50%;border:2px solid white;object-fit:cover;box-shadow:0 2px 6px rgba(0,0,0,0.3)" />`
+          : `<div style="width:32px;height:32px;border-radius:50%;background:#2563eb;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3)"></div>`;
 
-      const icon = L.divIcon({
-        className: '',
-        html: iconHtml,
-        iconSize: [32, 32],
-        iconAnchor: [16, 16],
-      });
+        const icon = L.divIcon({
+          className: '',
+          html: iconHtml,
+          iconSize: [32, 32],
+          iconAnchor: [16, 16],
+        });
 
-      const marker = L.marker([lat, lng], { icon });
-      const merchantName = merchantsById.current.get(merchantId) ?? merchantId;
-      marker.bindPopup(`<strong>${merchantName}</strong>`);
-      marker.addTo(map);
-      markersRef.current.push(marker);
-    }
-  }, []);
+        const marker = L.marker([lat, lng], { icon });
+        const merchantName = merchantsById.current.get(merchantId) ?? merchantId;
+        marker.bindPopup(`<strong>${merchantName}</strong>`);
+        marker.addTo(map);
+        markersRef.current.push(marker);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (mapContainerRef.current === null) return;
@@ -112,9 +115,9 @@ export default function ClusterMap(): React.JSX.Element {
       // Fix Leaflet default icon path issue in bundlers
       delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)['_getIconUrl'];
       L.Icon.Default.mergeOptions({
-        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-        iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+        iconRetinaUrl: '/leaflet/marker-icon-2x.png',
+        iconUrl: '/leaflet/marker-icon.png',
+        shadowUrl: '/leaflet/marker-shadow.png',
       });
 
       const map = L.map(mapContainerRef.current, {

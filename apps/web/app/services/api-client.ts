@@ -14,10 +14,7 @@ interface RequestOptions {
  * Performs an authenticated or unauthenticated request to the Loop backend.
  * Throws ApiException on non-2xx responses.
  */
-export async function apiRequest<T>(
-  path: string,
-  options: RequestOptions = {},
-): Promise<T> {
+export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, headers = {}, binary = false } = options;
 
   const init: RequestInit = {
@@ -59,10 +56,17 @@ async function tryRefresh(): Promise<string | null> {
   if (refreshToken === null) return null;
 
   try {
-    const res = await apiRequest<{ accessToken: string }>('/api/auth/refresh', {
-      method: 'POST',
-      body: { refreshToken },
-    });
+    const res = await apiRequest<{ accessToken: string; refreshToken?: string }>(
+      '/api/auth/refresh',
+      {
+        method: 'POST',
+        body: { refreshToken },
+      },
+    );
+    if (res.refreshToken) {
+      const { storeRefreshToken } = await import('~/native/secure-storage');
+      void storeRefreshToken(res.refreshToken);
+    }
     return res.accessToken;
   } catch {
     return null;
