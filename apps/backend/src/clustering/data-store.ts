@@ -100,10 +100,18 @@ export async function refreshLocations(): Promise<void> {
 
 /** Starts the background refresh timer. Call once at startup. */
 export function startLocationRefresh(): void {
+  const log = logger.child({ module: 'data-store' });
   void refreshLocations();
 
   const intervalMs = env.LOCATION_REFRESH_INTERVAL_HOURS * 60 * 60 * 1000;
+  const staleMs = intervalMs * 2;
   setInterval(() => {
+    if (Date.now() - store.loadedAt > staleMs && store.locations.length > 0) {
+      log.warn(
+        { ageMs: Date.now() - store.loadedAt, threshold: staleMs },
+        'Location data is stale — refresh may be failing',
+      );
+    }
     void refreshLocations();
   }, intervalMs);
 }

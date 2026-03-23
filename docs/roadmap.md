@@ -11,9 +11,9 @@ The migration plan (`docs/migration.md`) covered getting the monorepo to a worki
 ### Remaining setup tasks
 
 - [x] ~~Run `npx buf generate`~~ — proto schema created, types generated to `packages/shared/src/proto/`
-- [ ] Add `.env` files (copy from `.env.example` files, fill real values)
+- [x] ~~Add `.env` files~~ — created from `.env.example`
 - [x] ~~Run `npx cap add ios && npx cap add android`~~ — native projects created
-- [ ] Install Playwright browsers: `npx playwright install`
+- [x] ~~Install Playwright browsers~~ — chromium installed
 - [x] ~~Set GitHub repo secrets for CI~~ — no secrets needed; upstream API is public
 - [ ] Set up GitHub branch protection rules on `main`
 
@@ -123,11 +123,11 @@ The migration plan (`docs/migration.md`) covered getting the monorepo to a worki
 - [ ] Swap Leaflet for MapLibre GL JS (WebGL rendering, better mobile perf with many markers)
 - [ ] Server-side merchant search (replace client-side 1000-merchant fetch in Navbar)
 - [x] ~~Add circuit breaker on upstream API~~ — shared `upstreamCircuit` (5 failures → 30s OPEN → HALF_OPEN probe). Returns 503 when open. 13 tests.
-- [ ] Add staleness alerting for background refreshes (if merchant/location data >24h old, alert)
+- [x] ~~Add staleness alerting for background refreshes~~ — warns in logs when data exceeds 2x refresh interval
 
 ### Features
 
-- [ ] Order history page (route + service exist, no UI wired up)
+- [x] ~~Order history page~~ — `/orders` route with pagination, status badges, sign-in prompt. Navbar link added.
 - [ ] Favourites / recently purchased merchants
 - [ ] Referral program
 

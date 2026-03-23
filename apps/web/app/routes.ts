@@ -5,4 +5,5 @@ export default [
   route('map', 'routes/map.tsx'),
   route('gift-card/:name', 'routes/gift-card.$name.tsx'),
   route('auth', 'routes/auth.tsx'),
+  route('orders', 'routes/orders.tsx'),
 ] satisfies RouteConfig;

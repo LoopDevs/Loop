@@ -119,10 +119,19 @@ export async function refreshMerchants(): Promise<void> {
 
 /** Starts the background refresh timer. Call once at startup. */
 export function startMerchantRefresh(): void {
+  const log = logger.child({ module: 'merchants-sync' });
   void refreshMerchants();
 
   const intervalMs = env.REFRESH_INTERVAL_HOURS * 60 * 60 * 1000;
+  const staleMs = intervalMs * 2;
   setInterval(() => {
+    // Warn if data is stale (>2x refresh interval since last successful load)
+    if (Date.now() - store.loadedAt > staleMs && store.merchants.length > 0) {
+      log.warn(
+        { ageMs: Date.now() - store.loadedAt, threshold: staleMs },
+        'Merchant data is stale — refresh may be failing',
+      );
+    }
     void refreshMerchants();
   }, intervalMs);
 }
