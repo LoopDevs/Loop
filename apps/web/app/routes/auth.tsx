@@ -4,6 +4,7 @@ import type { Route } from './+types/auth';
 import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useUiStore } from '~/stores/ui.store';
+import type { ThemePreference } from '~/stores/ui.store';
 import { Navbar } from '~/components/features/Navbar';
 import { Button } from '~/components/ui/Button';
 import { Input } from '~/components/ui/Input';
@@ -17,17 +18,30 @@ export function meta(): Route.MetaDescriptors {
 type AuthStep = 'email' | 'otp';
 
 function ThemeToggleRow(): React.JSX.Element {
-  const { theme, toggleTheme } = useUiStore();
+  const { themePreference, setThemePreference } = useUiStore();
+
+  const options: Array<{ value: ThemePreference; label: string }> = [
+    { value: 'system', label: '\uD83D\uDCF1 System' },
+    { value: 'light', label: '\u2600\uFE0F Light' },
+    { value: 'dark', label: '\uD83C\uDF19 Dark' },
+  ];
+
+  const current = options.find((o) => o.value === themePreference) ?? options[0]!;
+
+  const handleCycle = (): void => {
+    const idx = options.findIndex((o) => o.value === themePreference);
+    const next = options[(idx + 1) % options.length]!;
+    setThemePreference(next.value);
+  };
+
   return (
     <button
       type="button"
-      onClick={toggleTheme}
+      onClick={handleCycle}
       className="w-full flex items-center justify-between px-4 py-3 min-h-[44px] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg text-sm"
     >
       <span className="text-gray-700 dark:text-gray-300">Appearance</span>
-      <span className="text-gray-500 dark:text-gray-400">
-        {theme === 'dark' ? '🌙 Dark' : '☀️ Light'}
-      </span>
+      <span className="text-gray-500 dark:text-gray-400">{current.label}</span>
     </button>
   );
 }

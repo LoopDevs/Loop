@@ -73,7 +73,11 @@ export function PurchaseComplete({
         Your {merchantName} gift card code:
       </p>
 
-      <canvas ref={canvasRef} className="mx-auto max-w-full mb-4" />
+      <canvas
+        ref={canvasRef}
+        className="mx-auto max-w-full mb-4"
+        aria-label={`Barcode for gift card code ${code}`}
+      />
 
       <div className="bg-white dark:bg-gray-900 rounded-lg p-3 font-mono text-lg font-bold tracking-widest text-gray-900 dark:text-white mb-2">
         {code}

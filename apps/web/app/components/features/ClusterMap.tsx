@@ -157,7 +157,12 @@ export default function ClusterMap(): React.JSX.Element {
 
   return (
     <div className="relative w-full h-full">
-      <div ref={mapContainerRef} className="w-full h-full" />
+      <div
+        ref={mapContainerRef}
+        className="w-full h-full"
+        role="region"
+        aria-label="Merchant locations map"
+      />
       {status !== '' && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-sm pointer-events-none">
           {status}

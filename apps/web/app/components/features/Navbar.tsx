@@ -6,7 +6,7 @@ import { useUiStore } from '~/stores/ui.store';
 import { getImageProxyUrl } from '~/utils/image';
 
 interface NavbarProps {
-  alwaysDark?: boolean;
+  // extensible for future props
 }
 
 interface SearchResult {
@@ -170,7 +170,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
 
 SearchBar.displayName = 'SearchBar';
 
-export function Navbar({ alwaysDark: _alwaysDark = false }: NavbarProps): React.JSX.Element {
+export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
   const mobileSearchRef = useRef<HTMLInputElement>(null);

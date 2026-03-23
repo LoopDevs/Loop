@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router';
 import type { Merchant } from '@loop/shared';
 import { useAuthStore } from '~/stores/auth.store';
 import { usePurchaseStore } from '~/stores/purchase.store';
@@ -19,6 +20,7 @@ interface PurchaseContainerProps {
  * Email is sourced from the global auth session — no re-entry needed.
  */
 export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.JSX.Element {
+  const navigate = useNavigate();
   const { email, isAuthenticated } = useAuthStore((s) => ({
     email: s.email,
     isAuthenticated: s.accessToken !== null,
@@ -33,7 +35,7 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
         <p className="text-gray-600 dark:text-gray-400 mb-4">Sign in to purchase gift cards.</p>
         <Button
           onClick={() => {
-            window.location.assign('/auth');
+            void navigate('/auth');
           }}
         >
           Sign in

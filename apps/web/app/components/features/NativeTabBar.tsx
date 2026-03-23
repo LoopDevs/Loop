@@ -42,6 +42,7 @@ export function NativeTabBar(): React.JSX.Element | null {
             <Link
               key={tab.path}
               to={tab.path}
+              aria-label={tab.label}
               className={`flex flex-col items-center justify-center flex-1 h-full transition-colors ${isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`}
             >
               <span className="text-xl leading-none mb-0.5">

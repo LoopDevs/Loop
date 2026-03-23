@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router';
 import type { Route } from './+types/not-found';
 import { Navbar } from '~/components/features/Navbar';
 import { Button } from '~/components/ui/Button';
@@ -9,6 +10,7 @@ export function meta(): Route.MetaDescriptors {
 
 export default function NotFoundRoute(): React.JSX.Element {
   const { isNative } = useNativePlatform();
+  const navigate = useNavigate();
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
@@ -19,7 +21,7 @@ export default function NotFoundRoute(): React.JSX.Element {
           <p className="text-xl text-gray-600 dark:text-gray-400 mb-6">Page not found</p>
           <Button
             onClick={() => {
-              window.location.assign('/');
+              void navigate('/');
             }}
           >
             Go home

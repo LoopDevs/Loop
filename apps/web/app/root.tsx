@@ -17,6 +17,7 @@ import { registerBackButton } from '~/native/back-button';
 import { registerAppLockGuard } from '~/native/app-lock';
 import { OfflineBanner } from '~/components/ui/OfflineBanner';
 import { NativeBackButton } from '~/components/features/NativeBackButton';
+import { useUiStore } from '~/stores/ui.store';
 import './app.css';
 
 const queryClient = new QueryClient({
@@ -58,7 +59,7 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
         {/* Inline theme init prevents flash of unstyled content */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('theme'),d=window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.classList.add(t==='dark'||(t===null&&d)?'dark':'light');}catch(e){document.documentElement.classList.add('light');}})();`,
+            __html: `(function(){try{var t=localStorage.getItem('theme');var d=window.matchMedia('(prefers-color-scheme: dark)').matches;var isDark=(t==='dark')||(t!=='light'&&d);document.documentElement.classList.add(isDark?'dark':'light');}catch(e){document.documentElement.classList.add('light');}})();`,
           }}
         />
         <Meta />
@@ -109,6 +110,20 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
     return () => observer.disconnect();
   }, [isNative]);
+
+  // Listen for system theme changes
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (): void => {
+      const { themePreference, setThemePreference } = useUiStore.getState();
+      if (themePreference === 'system') {
+        // Re-resolve system theme
+        setThemePreference('system');
+      }
+    };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   return (
     <>

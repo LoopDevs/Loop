@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router';
 import type { Route } from './+types/orders';
 import type { Order } from '@loop/shared';
 import { ApiException } from '@loop/shared';
@@ -8,7 +9,6 @@ import { fetchOrders } from '~/services/orders';
 import { Navbar } from '~/components/features/Navbar';
 import { OrderRowSkeleton } from '~/components/ui/Skeleton';
 import { Button } from '~/components/ui/Button';
-import { useEffect } from 'react';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Orders — Loop' }];
@@ -81,6 +81,7 @@ function OrderRow({ order }: { order: Order }): React.JSX.Element {
 export default function OrdersRoute(): React.JSX.Element {
   const { isNative } = useNativePlatform();
   const { isAuthenticated } = useAuth();
+  const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +128,7 @@ export default function OrdersRoute(): React.JSX.Element {
             </p>
             <Button
               onClick={() => {
-                window.location.assign('/auth');
+                void navigate('/auth');
               }}
             >
               Sign in
@@ -157,7 +158,7 @@ export default function OrdersRoute(): React.JSX.Element {
             <p className="text-gray-500 dark:text-gray-400 mb-4">No orders yet.</p>
             <Button
               onClick={() => {
-                window.location.assign('/');
+                void navigate('/');
               }}
             >
               Browse gift cards

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
-type Theme = 'light' | 'dark';
+export type ThemePreference = 'system' | 'light' | 'dark';
+export type ResolvedTheme = 'light' | 'dark';
 
 interface Toast {
   id: string;
@@ -9,34 +10,69 @@ interface Toast {
 }
 
 interface UiState {
-  theme: Theme;
+  themePreference: ThemePreference;
+  theme: ResolvedTheme;
   toasts: Toast[];
 }
 
 interface UiActions {
-  setTheme: (theme: Theme) => void;
+  setThemePreference: (pref: ThemePreference) => void;
   toggleTheme: () => void;
   addToast: (message: string, type?: Toast['type']) => void;
   removeToast: (id: string) => void;
 }
 
+function resolveTheme(pref: ThemePreference): ResolvedTheme {
+  if (pref === 'system') {
+    return typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light';
+  }
+  return pref;
+}
+
+function applyTheme(theme: ResolvedTheme): void {
+  document.documentElement.classList.remove('light', 'dark');
+  document.documentElement.classList.add(theme);
+}
+
+function loadPreference(): ThemePreference {
+  try {
+    const stored = localStorage.getItem('theme');
+    if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
+  } catch {
+    // localStorage unavailable
+  }
+  return 'system';
+}
+
+function savePreference(pref: ThemePreference): void {
+  try {
+    localStorage.setItem('theme', pref);
+  } catch {
+    // localStorage unavailable
+  }
+}
+
+const initialPref = loadPreference();
+
 export const useUiStore = create<UiState & UiActions>((set, get) => ({
-  theme: 'light',
+  themePreference: initialPref,
+  theme: resolveTheme(initialPref),
   toasts: [],
 
-  setTheme: (theme) => {
-    document.documentElement.classList.remove('light', 'dark');
-    document.documentElement.classList.add(theme);
-    try {
-      localStorage.setItem('theme', theme);
-    } catch {
-      // sessionStorage unavailable in some embedded contexts
-    }
-    set({ theme });
+  setThemePreference: (pref) => {
+    const theme = resolveTheme(pref);
+    applyTheme(theme);
+    savePreference(pref);
+    set({ themePreference: pref, theme });
   },
 
   toggleTheme: () => {
-    get().setTheme(get().theme === 'light' ? 'dark' : 'light');
+    const current = get().theme;
+    const next = current === 'light' ? 'dark' : 'light';
+    get().setThemePreference(next);
   },
 
   addToast: (message, type = 'info') => {
