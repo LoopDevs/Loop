@@ -14,7 +14,7 @@ The migration plan (`docs/migration.md`) covered getting the monorepo to a worki
 - [ ] Add `.env` files (copy from `.env.example` files, fill real values)
 - [ ] Run `npx cap add ios && npx cap add android` in `apps/mobile/`
 - [ ] Install Playwright browsers: `npx playwright install`
-- [ ] Set GitHub repo secrets for CI (`CI_JWT_SECRET`, `CI_JWT_REFRESH_SECRET`, `CI_GIFT_CARD_API_*`)
+- [ ] Set GitHub repo secrets for CI (`CI_GIFT_CARD_API_BASE_URL`, `CI_GIFT_CARD_API_KEY`, `CI_GIFT_CARD_API_SECRET`)
 - [ ] Set up GitHub branch protection rules on `main`
 
 ### Production infrastructure
