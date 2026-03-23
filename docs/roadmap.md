@@ -10,9 +10,9 @@ The migration plan (`docs/migration.md`) covered getting the monorepo to a worki
 
 ### Remaining setup tasks
 
-- [ ] Run `npx buf generate` in `apps/backend/` to generate proto types
+- [x] ~~Run `npx buf generate`~~ — proto schema created, types generated to `packages/shared/src/proto/`
 - [ ] Add `.env` files (copy from `.env.example` files, fill real values)
-- [ ] Run `npx cap add ios && npx cap add android` in `apps/mobile/`
+- [x] ~~Run `npx cap add ios && npx cap add android`~~ — native projects created
 - [ ] Install Playwright browsers: `npx playwright install`
 - [ ] Set GitHub repo secrets for CI (`CI_GIFT_CARD_API_BASE_URL`, `CI_GIFT_CARD_API_KEY`, `CI_GIFT_CARD_API_SECRET`)
 - [ ] Set up GitHub branch protection rules on `main`

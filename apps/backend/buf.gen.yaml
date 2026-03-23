@@ -1,6 +1,6 @@
 version: v2
 plugins:
   - remote: buf.build/bufbuild/es
-    out: ../../packages/shared/src/proto
+    out: ../../packages/shared/src
     opt:
       - target=ts
