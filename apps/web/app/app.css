@@ -149,3 +149,8 @@ input[type='number'] {
 .native-tab-clearance {
   padding-bottom: calc(3.5rem + env(safe-area-inset-bottom));
 }
+
+/* Full height minus safe areas + tab bar — for full-screen views like map */
+.native-full-height {
+  height: calc(100vh - env(safe-area-inset-top) - 3.5rem - env(safe-area-inset-bottom));
+}

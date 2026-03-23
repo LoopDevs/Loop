@@ -29,7 +29,7 @@ export default function MapRoute(): React.JSX.Element {
   const { isNative } = useNativePlatform();
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className={`flex flex-col ${isNative ? 'native-full-height' : 'h-screen'}`}>
       {!isNative && <Navbar alwaysDark />}
       <div className="flex-1 relative">
         <Suspense
