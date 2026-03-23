@@ -2,8 +2,8 @@
 
 ## Prerequisites
 
-- Node.js ≥ 20
-- npm ≥ 10 (bundled with Node 20)
+- Node.js ≥ 22
+- npm ≥ 10 (bundled with Node 22)
 - Xcode (iOS builds) / Android Studio (Android builds)
 - `buf` CLI (only if modifying `.proto` files): installed as dev dep, use `npx buf`
 
@@ -42,7 +42,7 @@ VITE_API_URL=http://localhost:8080
 ### apps/web/.env.production (committed, safe — no secrets)
 
 ```bash
-VITE_API_URL=https://api.loop.app
+VITE_API_URL=https://api.loopfinance.io
 ```
 
 **Rule**: `VITE_*` vars are inlined at build time and visible in the browser bundle. Never put secrets here.
@@ -70,7 +70,7 @@ SMTP_HOST=smtp.example.com
 SMTP_PORT=587
 SMTP_USER=...
 SMTP_PASS=...
-EMAIL_FROM=noreply@loop.app
+EMAIL_FROM=noreply@loopfinance.io
 
 # Refresh intervals (optional)
 REFRESH_INTERVAL_HOURS=6                # merchant cache refresh
@@ -142,6 +142,7 @@ npx cap open android                   # open Android Studio
 ```
 
 **Live reload during mobile development:**
+
 1. Edit `apps/mobile/capacitor.config.ts` — temporarily add `server: { url: 'http://<local-ip>:5173' }`
 2. `cd apps/web && npm run dev`
 3. `cd apps/mobile && npx cap sync && npx cap open ios`
@@ -155,6 +156,7 @@ Protobuf schema: `apps/backend/proto/clustering.proto`
 Generated output: `packages/shared/src/proto/`
 
 Regenerate whenever the proto schema changes:
+
 ```bash
 npm run proto:generate
 ```
@@ -175,6 +177,7 @@ Scopes: web | mobile | backend | shared | infra | deps
 ```
 
 Examples:
+
 ```
 feat(web): add merchant search filter
 fix(backend): correct cluster centroid calculation

@@ -48,7 +48,7 @@ These underpin every specific rule below. When a situation isn't covered by a sp
 loop-app/
 ├── apps/
 │   ├── web/          # React Router v7 + Vite
-│   ├── mobile/       # Capacitor v7 shell
+│   ├── mobile/       # Capacitor v8 shell
 │   └── backend/      # TypeScript + Hono
 ├── packages/
 │   └── shared/       # Types, proto generated code, constants
@@ -69,14 +69,14 @@ loop-app/
 
 ### File naming
 
-| Type | Convention | Example |
-|------|-----------|---------|
-| React components | `PascalCase.tsx` | `MerchantCard.tsx` |
-| Hooks | `use-kebab-case.ts` | `use-native-platform.ts` |
-| Utilities / services | `kebab-case.ts` | `api-client.ts` |
-| TypeScript types file | `kebab-case.types.ts` | `merchant.types.ts` |
-| Test files | co-located, same name | `MerchantCard.test.tsx` |
-| Constants | `kebab-case.constants.ts` | `stellar.constants.ts` |
+| Type                  | Convention                | Example                  |
+| --------------------- | ------------------------- | ------------------------ |
+| React components      | `PascalCase.tsx`          | `MerchantCard.tsx`       |
+| Hooks                 | `use-kebab-case.ts`       | `use-native-platform.ts` |
+| Utilities / services  | `kebab-case.ts`           | `api-client.ts`          |
+| TypeScript types file | `kebab-case.types.ts`     | `merchant.types.ts`      |
+| Test files            | co-located, same name     | `MerchantCard.test.tsx`  |
+| Constants             | `kebab-case.constants.ts` | `stellar.constants.ts`   |
 
 ### One export per file (with exceptions)
 
@@ -146,6 +146,7 @@ import { fetchMerchants } from '~/services/api';
 ### Avoid type assertions
 
 `as SomeType` is a lie to the compiler. Prefer type guards and proper narrowing. The only acceptable uses are:
+
 - Casting event targets (`e.target as HTMLInputElement`)
 - Generated protobuf/external types where you have no control
 
@@ -155,7 +156,11 @@ Use `const` objects over TypeScript enums to avoid runtime overhead and unexpect
 
 ```typescript
 // Wrong
-enum OrderStatus { Pending, Complete, Failed }
+enum OrderStatus {
+  Pending,
+  Complete,
+  Failed,
+}
 
 // Right
 export const ORDER_STATUS = {
@@ -163,7 +168,7 @@ export const ORDER_STATUS = {
   Complete: 'complete',
   Failed: 'failed',
 } as const;
-export type OrderStatus = typeof ORDER_STATUS[keyof typeof ORDER_STATUS];
+export type OrderStatus = (typeof ORDER_STATUS)[keyof typeof ORDER_STATUS];
 ```
 
 ---
@@ -297,14 +302,14 @@ export function MerchantCard({ merchant, onSelect }: MerchantCardProps) {
 
 ### Tools
 
-| Tool | Purpose | Runs |
-|------|---------|------|
-| ESLint (v9 flat config) | Code quality + style | Pre-commit, CI |
-| Prettier | Formatting | Pre-commit, CI |
-| TypeScript (`tsc --noEmit`) | Type checking | Pre-commit (affected packages), CI |
-| Husky | Git hooks | On commit, on commit-msg |
-| lint-staged | Run linters on staged files only | Pre-commit |
-| commitlint | Enforce commit message format | On commit-msg |
+| Tool                        | Purpose                          | Runs                               |
+| --------------------------- | -------------------------------- | ---------------------------------- |
+| ESLint (v9 flat config)     | Code quality + style             | Pre-commit, CI                     |
+| Prettier                    | Formatting                       | Pre-commit, CI                     |
+| TypeScript (`tsc --noEmit`) | Type checking                    | Pre-commit (affected packages), CI |
+| Husky                       | Git hooks                        | On commit, on commit-msg           |
+| lint-staged                 | Run linters on staged files only | Pre-commit                         |
+| commitlint                  | Enforce commit message format    | On commit-msg                      |
 
 ### Prettier config (`.prettierrc`)
 
@@ -342,6 +347,7 @@ eqeqeq                                        error
 ### Pre-commit hook behaviour
 
 Husky runs on every `git commit`:
+
 1. `lint-staged` — runs ESLint + Prettier on staged `.ts`/`.tsx` files
 
 If lint fails, the commit is rejected. Fix the issue and commit again. **Never use `--no-verify`.**
@@ -366,18 +372,18 @@ All commits must follow the [Conventional Commits](https://www.conventionalcommi
 
 **Types:**
 
-| Type | Use for |
-|------|---------|
-| `feat` | New feature or capability |
-| `fix` | Bug fix |
+| Type       | Use for                                         |
+| ---------- | ----------------------------------------------- |
+| `feat`     | New feature or capability                       |
+| `fix`      | Bug fix                                         |
 | `refactor` | Code change that is neither a fix nor a feature |
-| `perf` | Performance improvement |
-| `test` | Adding or correcting tests |
-| `docs` | Documentation only |
-| `chore` | Maintenance — deps, config, tooling |
-| `ci` | CI/CD pipeline changes |
-| `build` | Build system changes |
-| `revert` | Reverting a previous commit |
+| `perf`     | Performance improvement                         |
+| `test`     | Adding or correcting tests                      |
+| `docs`     | Documentation only                              |
+| `chore`    | Maintenance — deps, config, tooling             |
+| `ci`       | CI/CD pipeline changes                          |
+| `build`    | Build system changes                            |
+| `revert`   | Reverting a previous commit                     |
 
 **Scopes:** `web`, `mobile`, `backend`, `shared`, `infra`, `deps`
 
@@ -467,24 +473,24 @@ Tags follow [semver](https://semver.org/). Mobile app version numbers in Xcode/A
 
 ### Tools
 
-| Tool | Used for |
-|------|---------|
-| Vitest | Unit and integration tests (web, backend, shared) |
-| `@testing-library/react` | React component tests |
-| `msw` (Mock Service Worker) | Mocking HTTP in tests |
-| Playwright | End-to-end tests (critical paths only) |
+| Tool                        | Used for                                          |
+| --------------------------- | ------------------------------------------------- |
+| Vitest                      | Unit and integration tests (web, backend, shared) |
+| `@testing-library/react`    | React component tests                             |
+| `msw` (Mock Service Worker) | Mocking HTTP in tests                             |
+| Playwright                  | End-to-end tests (critical paths only)            |
 
 ### Coverage thresholds (enforced in CI)
 
-| Package / directory | Line coverage |
-|--------------------|---------------|
-| `packages/shared` | 90% |
-| `apps/backend/src/clustering/` | 85% |
-| `apps/backend/src/auth/` | 85% |
-| `apps/backend/src/orders/` | 80% |
-| `apps/web/app/services/` | 80% |
-| `apps/web/app/hooks/` | 70% |
-| Overall minimum | 65% |
+| Package / directory            | Line coverage |
+| ------------------------------ | ------------- |
+| `packages/shared`              | 90%           |
+| `apps/backend/src/clustering/` | 85%           |
+| `apps/backend/src/auth/`       | 85%           |
+| `apps/backend/src/orders/`     | 80%           |
+| `apps/web/app/services/`       | 80%           |
+| `apps/web/app/hooks/`          | 70%           |
+| Overall minimum                | 65%           |
 
 CI fails if any threshold is breached. Coverage is measured on every PR — not just at release.
 
@@ -497,6 +503,7 @@ CI fails if any threshold is breached. Coverage is measured on every PR — not 
 **E2E test (Playwright):** critical user journeys only — do not use E2E where a unit or integration test would suffice.
 
 Critical paths for E2E:
+
 1. Auth: email entry → OTP → authenticated → home screen visible
 2. Purchase: select merchant → choose denomination → pay → order confirmation
 3. Map: map loads, clusters visible, zoom in shows individual pins
@@ -555,19 +562,20 @@ Use explicit, readable test fixtures — not random generation unless specifical
 
 ### Where documentation lives
 
-| Type | Location |
-|------|---------|
-| Engineering standards | `docs/standards.md` (this file) |
-| Architecture decisions | `docs/adr/NNN-title.md` |
-| API reference | `docs/architecture.md` (Backend API endpoints section) |
-| Migration plan | `docs/migration.md` |
-| AI agent instructions | `AGENTS.md` (symlinked as `CLAUDE.md`) |
-| Component/hook usage | JSDoc on the export |
-| Complex algorithm explanation | Inline comment in the file |
+| Type                          | Location                                               |
+| ----------------------------- | ------------------------------------------------------ |
+| Engineering standards         | `docs/standards.md` (this file)                        |
+| Architecture decisions        | `docs/adr/NNN-title.md`                                |
+| API reference                 | `docs/architecture.md` (Backend API endpoints section) |
+| Migration plan                | `docs/migration.md`                                    |
+| AI agent instructions         | `AGENTS.md` (symlinked as `CLAUDE.md`)                 |
+| Component/hook usage          | JSDoc on the export                                    |
+| Complex algorithm explanation | Inline comment in the file                             |
 
 ### When to write an ADR
 
 Write an Architecture Decision Record when:
+
 - You are choosing between two or more non-trivial technical approaches
 - You are making a decision that will be hard to reverse
 - Future developers will wonder "why did they do it this way?"
@@ -578,22 +586,28 @@ ADR format (`docs/adr/NNN-title.md`):
 # NNN — Title
 
 ## Status
+
 Accepted | Superseded by ADR-NNN
 
 ## Date
+
 YYYY-MM-DD
 
 ## Context
+
 What is the problem or situation that required a decision?
 
 ## Decision
+
 What did we decide?
 
 ## Consequences
+
 What are the trade-offs? What becomes easier? What becomes harder?
 ```
 
 Existing decisions to record as ADRs:
+
 - `001-static-export-capacitor.md` — Static export over remote URL
 - `002-typescript-backend.md` — TypeScript over Go for the backend
 - `003-protobuf-clustering.md` — Protobuf for clustering endpoint
@@ -608,7 +622,10 @@ Every exported function must have a JSDoc comment. It must explain what the func
  * Lowercases, replaces spaces with hyphens, strips non-alphanumeric characters.
  */
 export function toMerchantSlug(name: string): string {
-  return name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+  return name
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '');
 }
 ```
 
@@ -638,6 +655,7 @@ Documentation that is wrong is worse than no documentation. When you change beha
 ### Adding a dependency
 
 Before adding any package, ask:
+
 1. Is this functionality already available in a package we have?
 2. Is the package actively maintained (last release < 6 months)?
 3. Does it have a healthy download count and GitHub star count?
@@ -696,6 +714,7 @@ These are hard rules. There are no exceptions without explicit documented justif
 ### The rule: errors must be handled or explicitly propagated
 
 There are no silent failures. Every `try/catch` either:
+
 1. Handles the error (logs it, returns a fallback, shows the user a message), or
 2. Re-throws it with added context
 
@@ -772,6 +791,7 @@ Use a structured logger (e.g. `pino`). All log entries are JSON objects with con
 ```
 
 **Log levels:**
+
 - `debug` — detailed info for development. Never enabled in production.
 - `info` — routine operational events (sync complete, server started, request received).
 - `warn` — something unexpected but recoverable happened.
@@ -798,7 +818,7 @@ jobs:
   security:
     - npm audit (fail on high/critical)
 
-  e2e:              # Only on PRs targeting main
+  e2e: # Only on PRs targeting main
     - playwright tests against preview deployment
 ```
 

@@ -23,7 +23,7 @@ const EnvSchema = z.object({
   SMTP_PORT: z.coerce.number().optional(),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
-  EMAIL_FROM: z.string().default('noreply@loop.app'),
+  EMAIL_FROM: z.string().default('noreply@loopfinance.io'),
 
   // Image proxy: comma-separated list of allowed hostnames.
   // If set, only URLs from these hosts are fetched. Recommended in production.

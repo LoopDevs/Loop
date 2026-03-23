@@ -12,7 +12,7 @@
 - [x] **4. Missing Dockerfiles** — Updated `docs/deployment.md` with actual Dockerfile content.
 - [x] **5. ESLint config doesn't match standards.md** — Updated `docs/standards.md` to match actual `eslint.config.js`.
 - [x] **6. File naming convention contradiction** — Updated `docs/standards.md` to document PascalCase for React components.
-- [x] **7. Capacitor v8 doesn't exist** — Fixed all docs to say "Capacitor v7".
+- [x] **7. Capacitor version mismatch** — Upgraded to Capacitor v8; all docs updated accordingly.
 
 ---
 
@@ -50,7 +50,7 @@
 
 ## Medium — Documentation Drift
 
-- [x] **25. Domain inconsistency** — Changed `env.ts` default to `noreply@loop.app`.
+- [x] **25. Domain inconsistency** — Standardised all references to `loopfinance.io` (env.ts, CI, docs, AGENTS.md).
 - [x] **26. Health endpoint response mismatch** — Fixed `docs/deployment.md` to say `"healthy"`.
 - [x] **27. Pre-commit doesn't run tsc** — Fixed `docs/standards.md` description.
 - [x] **28. E2E test location inconsistency** — Fixed `docs/standards.md` to say `tests/e2e/`.

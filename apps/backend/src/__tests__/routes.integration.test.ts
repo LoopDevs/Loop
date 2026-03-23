@@ -68,7 +68,7 @@ describe('GET /health', () => {
     const res = await app.request('/health');
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = (await res.json()) as Record<string, unknown>;
     expect(body.status).toBe('healthy');
     expect(body).toHaveProperty('locationCount');
     expect(body).toHaveProperty('merchantCount');
@@ -81,7 +81,7 @@ describe('GET /api/merchants', () => {
     const res = await app.request('/api/merchants');
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = (await res.json()) as Record<string, unknown>;
     expect(body).toHaveProperty('merchants');
     expect(Array.isArray(body.merchants)).toBe(true);
   });

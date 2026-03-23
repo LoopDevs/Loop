@@ -4,14 +4,15 @@
 
 ## Docs index
 
-| Doc | Contents |
-|-----|----------|
-| `docs/architecture.md` | System design, data flows, component responsibilities |
-| `docs/development.md` | Getting started, env vars, all dev commands |
-| `docs/deployment.md` | How to deploy backend, web, and mobile |
-| `docs/testing.md` | Testing pyramid, when tests run, coverage requirements |
-| `docs/standards.md` | Code style, commit format, branching, review rules |
-| `docs/adr/` | Architecture Decision Records |
+| Doc                    | Contents                                               |
+| ---------------------- | ------------------------------------------------------ |
+| `docs/architecture.md` | System design, data flows, component responsibilities  |
+| `docs/development.md`  | Getting started, env vars, all dev commands            |
+| `docs/deployment.md`   | How to deploy backend, web, and mobile                 |
+| `docs/testing.md`      | Testing pyramid, when tests run, coverage requirements |
+| `docs/standards.md`    | Code style, commit format, branching, review rules     |
+| `docs/roadmap.md`      | What's left for Phase 1, Phase 2, Phase 3              |
+| `docs/adr/`            | Architecture Decision Records                          |
 
 ---
 
@@ -24,8 +25,8 @@
 ## Architecture (one-liner per layer)
 
 ```
-apps/mobile   Capacitor v7 shell — loads static web build from disk
-apps/web      React Router v7 + Vite — SSR for loop.app, static export for mobile
+apps/mobile   Capacitor v8 shell — loads static web build from disk
+apps/web      React Router v7 + Vite — SSR for loopfinance.io, static export for mobile
 apps/backend  TypeScript + Hono — merchant cache, clustering, image proxy, auth, order proxy
 packages/shared  Shared TypeScript types (Merchant, Order, ClusterResponse, etc.)
 upstream API  Gift Card provider — merchant catalog, gift card orders (managed externally)
@@ -87,15 +88,15 @@ npm run proto:generate       # buf generate → packages/shared/src/proto/
 
 ## File boundaries (web)
 
-| Path | Responsibility |
-|------|----------------|
-| `app/routes/` | Route definitions, page layout, meta |
-| `app/components/` | Presentational — no direct API calls |
-| `app/hooks/` | Stateful logic (useAuth, useMerchants, useNativePlatform) |
-| `app/services/` | Typed API client — one function per endpoint |
-| `app/native/` | All Capacitor plugin interactions |
-| `app/stores/` | Zustand — session and UI state |
-| `packages/shared/` | Types shared across web, mobile, backend |
+| Path               | Responsibility                                            |
+| ------------------ | --------------------------------------------------------- |
+| `app/routes/`      | Route definitions, page layout, meta                      |
+| `app/components/`  | Presentational — no direct API calls                      |
+| `app/hooks/`       | Stateful logic (useAuth, useMerchants, useNativePlatform) |
+| `app/services/`    | Typed API client — one function per endpoint              |
+| `app/native/`      | All Capacitor plugin interactions                         |
+| `app/stores/`      | Zustand — session and UI state                            |
+| `packages/shared/` | Types shared across web, mobile, backend                  |
 
 ---
 
@@ -113,7 +114,7 @@ GIFT_CARD_API_BASE_URL=<url>
 GIFT_CARD_API_KEY=<key>
 GIFT_CARD_API_SECRET=<secret>
 SMTP_HOST=<host>  SMTP_PORT=587  SMTP_USER=<user>  SMTP_PASS=<pass>
-EMAIL_FROM=noreply@loop.app
+EMAIL_FROM=noreply@loopfinance.io
 ```
 
 Full env var docs → `docs/development.md`.
@@ -124,18 +125,18 @@ Full env var docs → `docs/development.md`.
 
 **Every code change must update the relevant docs in the same commit.** Use this checklist:
 
-| If you changed… | Update… |
-|-----------------|---------|
-| An API endpoint (add/remove/modify) | `docs/architecture.md` → Backend API endpoints section |
-| An env var (add/remove/rename) | `docs/development.md`, `AGENTS.md` env summary, `.env.example` files |
-| A build command or dev workflow | `docs/development.md`, `AGENTS.md` quick commands |
-| Deploy config (Dockerfile, Fly.io, Vercel) | `docs/deployment.md` |
-| Test patterns or coverage rules | `docs/testing.md` |
-| A code convention or standard | `docs/standards.md` |
-| An architectural decision | Add/update `docs/adr/NNN-title.md` |
-| File structure (add/move/delete files) | `AGENTS.md` file boundaries table |
-| `packages/shared` exports | Check both `apps/web` and `apps/backend` imports |
-| Dependencies (add/remove) | Verify no duplicates across packages |
+| If you changed…                            | Update…                                                              |
+| ------------------------------------------ | -------------------------------------------------------------------- |
+| An API endpoint (add/remove/modify)        | `docs/architecture.md` → Backend API endpoints section               |
+| An env var (add/remove/rename)             | `docs/development.md`, `AGENTS.md` env summary, `.env.example` files |
+| A build command or dev workflow            | `docs/development.md`, `AGENTS.md` quick commands                    |
+| Deploy config (Dockerfile, Fly.io, Vercel) | `docs/deployment.md`                                                 |
+| Test patterns or coverage rules            | `docs/testing.md`                                                    |
+| A code convention or standard              | `docs/standards.md`                                                  |
+| An architectural decision                  | Add/update `docs/adr/NNN-title.md`                                   |
+| File structure (add/move/delete files)     | `AGENTS.md` file boundaries table                                    |
+| `packages/shared` exports                  | Check both `apps/web` and `apps/backend` imports                     |
+| Dependencies (add/remove)                  | Verify no duplicates across packages                                 |
 
 **If unsure, update `AGENTS.md`.** It is the first thing AI agents read. Stale instructions here cause cascading errors.
 
@@ -145,12 +146,12 @@ Full env var docs → `docs/development.md`.
 
 **All code used by both web and backend MUST live in `packages/shared`.** Never duplicate logic between apps.
 
-| Shared concern | Location |
-|---------------|----------|
-| TypeScript types (Merchant, Order, API) | `packages/shared/src/*.ts` |
-| Slug generation | `packages/shared/src/slugs.ts` |
-| Error codes and API constants | `packages/shared/src/api.ts` |
-| Protobuf generated types | `packages/shared/src/proto/` |
+| Shared concern                          | Location                       |
+| --------------------------------------- | ------------------------------ |
+| TypeScript types (Merchant, Order, API) | `packages/shared/src/*.ts`     |
+| Slug generation                         | `packages/shared/src/slugs.ts` |
+| Error codes and API constants           | `packages/shared/src/api.ts`   |
+| Protobuf generated types                | `packages/shared/src/proto/`   |
 
 Before creating a utility in `apps/web` or `apps/backend`, check if it already exists in shared or should be added there.
 

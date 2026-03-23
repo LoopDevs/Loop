@@ -10,6 +10,7 @@ export default [
       '**/node_modules/**',
       '**/build/**',
       '**/dist/**',
+      '**/coverage/**',
       '**/.react-router/**',
       '**/packages/shared/src/proto/**',
       '**/*.generated.ts',

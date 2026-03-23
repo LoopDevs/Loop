@@ -41,7 +41,7 @@ app/
 
 `react-router.config.ts` switches SSR on/off via `BUILD_TARGET`:
 
-- Default (`npm run build`): SSR enabled — for loop.app
+- Default (`npm run build`): SSR enabled — for loopfinance.io
 - `BUILD_TARGET=mobile` (`npm run build:mobile`): static export — for Capacitor
 
 In static mode, server-side loaders cannot run. All data fetching is client-side via TanStack Query.

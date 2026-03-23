@@ -4,7 +4,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  apps/mobile  (Capacitor v7)                                │
+│  apps/mobile  (Capacitor v8)                                │
 │  Thin native shell — iOS + Android                          │
 │  Loads static build from apps/web/build/client/             │
 └──────────────────────┬──────────────────────────────────────┘
@@ -33,9 +33,9 @@
 
 `react-router.config.ts` exports `ssr: process.env.BUILD_TARGET !== 'mobile'`.
 
-| Command | Mode | Used for |
-|---------|------|----------|
-| `npm run build` (web) | SSR | Deployed to loop.app |
+| Command                | Mode          | Used for                      |
+| ---------------------- | ------------- | ----------------------------- |
+| `npm run build` (web)  | SSR           | Deployed to loopfinance.io    |
 | `npm run build:mobile` | Static export | Bundled into Capacitor binary |
 
 **Static export constraint**: React Router loaders cannot run server-side in static export mode. Loaders may only handle layout structure and `<meta>` tags. All data fetching is client-side via TanStack Query.
@@ -62,16 +62,16 @@ Located in `apps/backend/src/clustering/algorithm.ts`.
 1. Expand viewport bbox by 50% (pre-loads clusters for smooth panning)
 2. Select `gridSize` based on zoom level:
 
-   | Zoom | Grid cell |
-   |------|-----------|
-   | ≤3 | 20.0° |
-   | ≤5 | 10.0° |
-   | 6 | 5.0° |
-   | ≤7 | 1.5° |
-   | ≤9 | 0.5° |
-   | ≤11 | 0.1° |
-   | ≤13 | 0.03° |
-   | ≥14 | individual points |
+   | Zoom | Grid cell         |
+   | ---- | ----------------- |
+   | ≤3   | 20.0°             |
+   | ≤5   | 10.0°             |
+   | 6    | 5.0°              |
+   | ≤7   | 1.5°              |
+   | ≤9   | 0.5°              |
+   | ≤11  | 0.1°              |
+   | ≤13  | 0.03°             |
+   | ≥14  | individual points |
 
 3. Group locations by `(floor(lat/grid), floor(lng/grid))` cell key
 4. Single point in cell → `LocationPoint`; multiple → `ClusterPoint` (centroid of visible-only points)
@@ -99,6 +99,7 @@ Purchase
 ```
 
 **Token storage:**
+
 - Access token: Zustand memory only (15-min TTL)
 - Refresh token: Capacitor Preferences on native; sessionStorage on web (30-day TTL)
 - Server always returns refresh token in JSON body — client stores it via platform-appropriate secure storage
@@ -128,11 +129,11 @@ Both web and backend use dynamic import for proto types with JSON fallback — s
 
 2-of-3 multisig per user:
 
-| Key | Location | Signs when |
-|-----|----------|------------|
-| Device key | iOS Keychain / Android Keystore (biometric) | On-device after Face ID / Touch ID |
-| Server key | Backend env (encrypted reference) | Every transaction as co-signer |
-| Recovery key | Third-party custodian | Account recovery only |
+| Key          | Location                                    | Signs when                         |
+| ------------ | ------------------------------------------- | ---------------------------------- |
+| Device key   | iOS Keychain / Android Keystore (biometric) | On-device after Face ID / Touch ID |
+| Server key   | Backend env (encrypted reference)           | Every transaction as co-signer     |
+| Recovery key | Third-party custodian                       | Account recovery only              |
 
 Device key never leaves the device. Backend never sees the private key.
 
@@ -142,7 +143,8 @@ Device key never leaves the device. Backend never sees the private key.
 
 ```
 GET  /health
-GET  /api/merchants          ?page=&limit=&q=
+GET  /api/merchants              ?page=&limit=&q=
+GET  /api/merchants/by-slug/:slug
 GET  /api/merchants/:id
 GET  /api/clusters           ?west=&south=&east=&north=&zoom=
 GET  /api/image              ?url=&width=&height=&quality=

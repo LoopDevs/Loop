@@ -16,7 +16,7 @@ export interface Merchant {
   logoUrl?: string | undefined;
   cardImageUrl?: string | undefined;
   savingsPercentage?: number | undefined;
-  /** Savings in basis points (1 bip = 0.01%). */
+  /** Savings as raw upstream percentage value (e.g. 10 means 10%). See savingsPercentage for the decimal form. */
   savingsBips?: number | undefined;
   denominations?: MerchantDenominations | undefined;
   description?: string | undefined;

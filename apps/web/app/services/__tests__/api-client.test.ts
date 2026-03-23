@@ -19,7 +19,10 @@ describe('apiRequest', () => {
 
     const result = await apiRequest('/api/merchants');
     expect(result).toEqual(mockData);
-    expect(fetch).toHaveBeenCalledWith('http://test-api/api/merchants', expect.objectContaining({ method: 'GET' }));
+    expect(fetch).toHaveBeenCalledWith(
+      'http://test-api/api/merchants',
+      expect.objectContaining({ method: 'GET' }),
+    );
   });
 
   it('sends JSON body for POST requests', async () => {
@@ -32,7 +35,8 @@ describe('apiRequest', () => {
       body: { email: 'test@example.com' },
     });
 
-    const [, init] = vi.mocked(fetch).mock.calls[0];
+    const call = vi.mocked(fetch).mock.calls[0]!;
+    const [, init] = call;
     expect(init?.body).toBe(JSON.stringify({ email: 'test@example.com' }));
     expect((init?.headers as Record<string, string>)['Content-Type']).toBe('application/json');
   });
@@ -69,9 +73,7 @@ describe('apiRequest', () => {
 
   it('returns ArrayBuffer when binary option is set', async () => {
     const buffer = new ArrayBuffer(8);
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(buffer, { status: 200 }),
-    );
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(buffer, { status: 200 }));
 
     const result = await apiRequest('/api/image', { binary: true });
     expect(result).toBeInstanceOf(ArrayBuffer);

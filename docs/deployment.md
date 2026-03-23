@@ -7,7 +7,7 @@
 Create `apps/backend/Dockerfile`:
 
 ```dockerfile
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
 COPY apps/backend/package*.json apps/backend/
@@ -16,7 +16,7 @@ RUN npm ci
 COPY . .
 RUN npm run build -w @loop/backend
 
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 COPY --from=builder /app/apps/backend/dist ./dist
 COPY --from=builder /app/apps/backend/package.json .
@@ -50,13 +50,14 @@ fly secrets set \
   SMTP_PORT=587 \
   SMTP_USER=... \
   SMTP_PASS=... \
-  EMAIL_FROM=noreply@loop.app
+  EMAIL_FROM=noreply@loopfinance.io
 
 # Deploy
 fly deploy
 ```
 
 `fly.toml` (create in `apps/backend/`):
+
 ```toml
 app = "loop-backend"
 primary_region = "lhr"
@@ -96,6 +97,7 @@ fly deploy
 ```
 
 `fly.toml` for web:
+
 ```toml
 app = "loop-web"
 primary_region = "lhr"
@@ -112,8 +114,9 @@ primary_region = "lhr"
 ```
 
 `apps/web/Dockerfile`:
+
 ```dockerfile
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
 COPY apps/web/package*.json apps/web/
@@ -122,7 +125,7 @@ RUN npm ci
 COPY . .
 RUN npm run build -w @loop/web
 
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 COPY --from=builder /app/apps/web/build ./build
 COPY --from=builder /app/apps/web/package.json .
@@ -140,7 +143,7 @@ CMD ["node", "./build/server/index.js"]
 # Output directory: build/client (for assets) — Vercel auto-detects SSR
 
 # Environment variables in Vercel dashboard:
-VITE_API_URL=https://api.loop.app
+VITE_API_URL=https://api.loopfinance.io
 ```
 
 ---
@@ -150,6 +153,7 @@ VITE_API_URL=https://api.loop.app
 ### Prerequisites
 
 1. Build web static export:
+
    ```bash
    cd apps/web && npm run build:mobile
    ```
@@ -167,6 +171,7 @@ npx cap open ios          # Opens Xcode
 ```
 
 In Xcode:
+
 - Select team and bundle ID `io.loopfinance.app`
 - Product → Archive
 - Distribute App → App Store Connect
@@ -180,6 +185,7 @@ npx cap open android      # Opens Android Studio
 ```
 
 In Android Studio:
+
 - Build → Generate Signed Bundle / APK
 - Upload `.aab` to Play Console
 
@@ -199,12 +205,12 @@ Deployment is **not** automated from CI — deployments are manual (`fly deploy`
 
 ## Secrets management
 
-| Secret | Where stored |
-|--------|-------------|
-| Backend env vars | Fly.io secrets (`fly secrets set`) |
-| Web env vars | Vercel environment variables |
-| Apple certificates | Keychain / Xcode managed |
-| Google keystore | Android Studio / Play Console |
-| Git repo secrets (for CI) | GitHub repository secrets |
+| Secret                    | Where stored                       |
+| ------------------------- | ---------------------------------- |
+| Backend env vars          | Fly.io secrets (`fly secrets set`) |
+| Web env vars              | Vercel environment variables       |
+| Apple certificates        | Keychain / Xcode managed           |
+| Google keystore           | Android Studio / Play Console      |
+| Git repo secrets (for CI) | GitHub repository secrets          |
 
 Never commit `.env` files, `.p8` keys, `.p12` certificates, or keystore files.
