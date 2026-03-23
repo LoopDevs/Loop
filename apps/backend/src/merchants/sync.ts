@@ -4,14 +4,32 @@ import { logger } from '../logger.js';
 import { env } from '../env.js';
 import { upstreamCircuit } from '../circuit-breaker.js';
 
+/** Shape returned by the upstream CTX merchants endpoint. */
 interface UpstreamMerchant {
   id: string;
   name: string;
+  slug?: string;
   logoUrl?: string;
   cardImageUrl?: string;
   mapPinUrl?: string;
   enabled: boolean;
-  data?: string; // JSON blob
+  country?: string;
+  currency?: string;
+  savingsPercentage?: number;
+  userDiscount?: number;
+  denominationsType?: 'fixed' | 'min-max';
+  denominations?: string[];
+  denominationValues?: string[];
+  locationCount?: number;
+  cachedLocationCount?: number;
+  redeemType?: string;
+  redeemLocation?: string;
+  info?: {
+    description?: string;
+    instructions?: string;
+    intro?: string;
+    terms?: string;
+  };
 }
 
 interface UpstreamListResponse {
@@ -22,25 +40,6 @@ interface UpstreamListResponse {
     total: number;
   };
   result: UpstreamMerchant[];
-}
-
-interface UpstreamMerchantData {
-  savingsPercentage?: number;
-  denominationMin?: number;
-  denominationMax?: number;
-  denominations?: string[];
-  denominationsType?: 'fixed' | 'min-max';
-  currency?: string;
-  cachedLocationCount?: number;
-  enabled?: boolean;
-  description?: string;
-  instructions?: string;
-  terms?: string;
-  info?: {
-    description?: string;
-    instructions?: string;
-    terms?: string;
-  };
 }
 
 interface MerchantStore {
@@ -125,7 +124,6 @@ export function startMerchantRefresh(): void {
   const intervalMs = env.REFRESH_INTERVAL_HOURS * 60 * 60 * 1000;
   const staleMs = intervalMs * 2;
   setInterval(() => {
-    // Warn if data is stale (>2x refresh interval since last successful load)
     if (Date.now() - store.loadedAt > staleMs && store.merchants.length > 0) {
       log.warn(
         { ageMs: Date.now() - store.loadedAt, threshold: staleMs },
@@ -136,57 +134,60 @@ export function startMerchantRefresh(): void {
   }, intervalMs);
 }
 
+/**
+ * Maps an upstream CTX merchant to our Merchant type.
+ * The upstream returns all fields flat (no nested `data` JSON blob).
+ */
 function mapUpstreamMerchant(item: UpstreamMerchant): Merchant | null {
   if (!item.name) return null;
+  if (!item.enabled) return null;
 
-  let parsedData: UpstreamMerchantData = {};
-  if (item.data) {
-    try {
-      parsedData = JSON.parse(item.data) as UpstreamMerchantData;
-    } catch {
-      // Ignore malformed data blobs
-    }
-  }
-
-  const enabled = parsedData.enabled !== false && item.enabled;
-  if (!enabled) return null;
-
+  // Parse denominations from the flat upstream fields
   let denominations: MerchantDenominations | undefined;
-  if (parsedData.denominationsType === 'fixed' && parsedData.denominations?.length) {
+  const currency = item.currency ?? 'USD';
+
+  if (item.denominationsType === 'fixed' && item.denominations?.length) {
     denominations = {
       type: 'fixed',
-      denominations: parsedData.denominations,
-      currency: parsedData.currency ?? 'USD',
+      denominations: item.denominations,
+      currency,
     };
-  } else if (parsedData.denominationsType === 'min-max') {
+  } else if (item.denominationsType === 'min-max' && item.denominations?.length) {
+    // Upstream sends min-max as denominations array: ["5", "200"] = [$5, $200]
+    const values = item.denominations
+      .map(Number)
+      .filter((n) => !isNaN(n))
+      .sort((a, b) => a - b);
     denominations = {
       type: 'min-max',
-      denominations: [],
-      currency: parsedData.currency ?? 'USD',
-      ...(parsedData.denominationMin !== undefined ? { min: parsedData.denominationMin } : {}),
-      ...(parsedData.denominationMax !== undefined ? { max: parsedData.denominationMax } : {}),
+      denominations: item.denominations,
+      currency,
+      ...(values[0] !== undefined ? { min: values[0] } : {}),
+      ...(values[values.length - 1] !== undefined ? { max: values[values.length - 1] } : {}),
     };
   }
 
-  const description = parsedData.info?.description ?? parsedData.description;
-  const instructions = parsedData.info?.instructions ?? parsedData.instructions;
-  const terms = parsedData.info?.terms ?? parsedData.terms;
+  // savingsPercentage from upstream is in hundredths (e.g. 400 = 4.00%).
+  // Convert to percentage for display (4.0).
+  const savingsPercentage =
+    item.savingsPercentage !== undefined ? item.savingsPercentage / 100 : undefined;
+
+  const description = item.info?.description;
+  const instructions = item.info?.instructions;
+  const terms = item.info?.terms;
+  const locationCount = item.locationCount ?? item.cachedLocationCount;
 
   return {
     id: item.id,
     name: item.name,
     ...(item.logoUrl ? { logoUrl: item.logoUrl } : {}),
     ...(item.cardImageUrl ? { cardImageUrl: item.cardImageUrl } : {}),
-    ...(parsedData.savingsPercentage !== undefined
-      ? { savingsPercentage: parsedData.savingsPercentage / 100 }
-      : {}),
+    ...(savingsPercentage !== undefined ? { savingsPercentage } : {}),
     ...(denominations !== undefined ? { denominations } : {}),
-    ...(description !== undefined ? { description } : {}),
-    ...(instructions !== undefined ? { instructions } : {}),
-    ...(terms !== undefined ? { terms } : {}),
+    ...(description ? { description } : {}),
+    ...(instructions ? { instructions } : {}),
+    ...(terms ? { terms } : {}),
     enabled: true,
-    ...(parsedData.cachedLocationCount !== undefined
-      ? { locationCount: parsedData.cachedLocationCount }
-      : {}),
+    ...(locationCount !== undefined ? { locationCount } : {}),
   };
 }

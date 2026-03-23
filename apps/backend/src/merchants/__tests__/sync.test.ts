@@ -41,7 +41,15 @@ interface FakeUpstreamMerchant {
   logoUrl?: string;
   cardImageUrl?: string;
   enabled: boolean;
-  data?: string;
+  savingsPercentage?: number;
+  denominationsType?: 'fixed' | 'min-max';
+  denominations?: string[];
+  currency?: string;
+  info?: {
+    description?: string;
+    instructions?: string;
+    terms?: string;
+  };
 }
 
 function upstreamResponse(
@@ -100,10 +108,7 @@ describe('refreshMerchants', () => {
             name: 'Home Depot',
             logoUrl: 'https://img.test/hd.png',
             enabled: true,
-            data: JSON.stringify({
-              savingsPercentage: 10,
-              enabled: true,
-            }),
+            savingsPercentage: 1000,
           },
         ],
         1,
@@ -119,10 +124,7 @@ describe('refreshMerchants', () => {
             id: 'merchant-2',
             name: 'Target',
             enabled: true,
-            data: JSON.stringify({
-              savingsPercentage: 5,
-              enabled: true,
-            }),
+            savingsPercentage: 500,
           },
         ],
         2,
@@ -138,10 +140,10 @@ describe('refreshMerchants', () => {
     const second = store.merchants[1]!;
     expect(first.id).toBe('merchant-1');
     expect(first.name).toBe('Home Depot');
-    expect(first.savingsPercentage).toBe(0.1);
+    expect(first.savingsPercentage).toBe(10.0);
     expect(second.id).toBe('merchant-2');
     expect(second.name).toBe('Target');
-    expect(second.savingsPercentage).toBe(0.05);
+    expect(second.savingsPercentage).toBe(5.0);
 
     // Verify both pages were fetched
     expect(mockFetch).toHaveBeenCalledTimes(2);
@@ -161,7 +163,6 @@ describe('refreshMerchants', () => {
             id: 'merchant-existing',
             name: 'Existing Store',
             enabled: true,
-            data: JSON.stringify({ enabled: true }),
           },
         ],
         1,
@@ -189,19 +190,11 @@ describe('refreshMerchants', () => {
             id: 'enabled-merchant',
             name: 'Active Store',
             enabled: true,
-            data: JSON.stringify({ enabled: true }),
           },
           {
-            id: 'disabled-at-top-level',
+            id: 'disabled-merchant',
             name: 'Disabled Store',
             enabled: false,
-            data: JSON.stringify({ enabled: true }),
-          },
-          {
-            id: 'disabled-in-data',
-            name: 'Data Disabled Store',
-            enabled: true,
-            data: JSON.stringify({ enabled: false }),
           },
         ],
         1,
@@ -214,8 +207,7 @@ describe('refreshMerchants', () => {
     const store = getMerchants();
     expect(store.merchants).toHaveLength(1);
     expect(store.merchants[0]!.id).toBe('enabled-merchant');
-    expect(store.merchantsById.has('disabled-at-top-level')).toBe(false);
-    expect(store.merchantsById.has('disabled-in-data')).toBe(false);
+    expect(store.merchantsById.has('disabled-merchant')).toBe(false);
   });
 
   it('correctly parses fixed denominations', async () => {
@@ -226,12 +218,9 @@ describe('refreshMerchants', () => {
             id: 'fixed-denom',
             name: 'Fixed Card',
             enabled: true,
-            data: JSON.stringify({
-              enabled: true,
-              denominationsType: 'fixed',
-              denominations: ['10', '25', '50', '100'],
-              currency: 'USD',
-            }),
+            denominationsType: 'fixed',
+            denominations: ['10', '25', '50', '100'],
+            currency: 'USD',
           },
         ],
         1,
@@ -258,13 +247,9 @@ describe('refreshMerchants', () => {
             id: 'minmax-denom',
             name: 'Range Card',
             enabled: true,
-            data: JSON.stringify({
-              enabled: true,
-              denominationsType: 'min-max',
-              denominationMin: 5,
-              denominationMax: 500,
-              currency: 'EUR',
-            }),
+            denominationsType: 'min-max',
+            denominations: ['5', '500'],
+            currency: 'EUR',
           },
         ],
         1,
@@ -278,7 +263,7 @@ describe('refreshMerchants', () => {
     expect(merchant).toBeDefined();
     expect(merchant!.denominations).toEqual({
       type: 'min-max',
-      denominations: [],
+      denominations: ['5', '500'],
       currency: 'EUR',
       min: 5,
       max: 500,
@@ -301,7 +286,6 @@ describe('refreshMerchants', () => {
             id: 'second-call',
             name: 'Should Not Appear',
             enabled: true,
-            data: JSON.stringify({ enabled: true }),
           },
         ],
         1,
@@ -329,7 +313,6 @@ describe('refreshMerchants', () => {
             id: 'first-call',
             name: 'First Merchant',
             enabled: true,
-            data: JSON.stringify({ enabled: true }),
           },
         ],
         1,
