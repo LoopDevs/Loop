@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { ApiException } from '@loop/shared';
 import { fetchOrder } from '~/services/orders';
 import { usePurchaseStore } from '~/stores/purchase.store';
 import { Button } from '~/components/ui/Button';
@@ -29,6 +30,7 @@ export function PaymentStep({
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState<string>('');
   const [expired, setExpired] = useState(false);
+  const consecutiveErrors = useRef(0);
 
   // Generate QR code
   useEffect(() => {
@@ -88,9 +90,25 @@ export function PaymentStep({
             return;
           }
           // Still pending — trigger next poll via state update
+          consecutiveErrors.current = 0;
           setTimeLeft((prev) => prev); // force re-render to schedule next poll
-        } catch {
-          // Transient error — next poll will retry
+        } catch (err) {
+          consecutiveErrors.current++;
+          // Permanent failure: auth expired or service down — stop polling
+          if (err instanceof ApiException && (err.status === 401 || err.status === 503)) {
+            store.setError(
+              err.status === 401
+                ? 'Your session has expired. Please sign in again.'
+                : 'Service temporarily unavailable. Please try again later.',
+            );
+            return;
+          }
+          // After 5 consecutive transient errors, give up
+          if (consecutiveErrors.current >= 5) {
+            store.setError('Unable to check order status. Please try again later.');
+            return;
+          }
+          // Otherwise retry on next poll cycle
         }
       })();
     }, POLL_INTERVAL_MS);

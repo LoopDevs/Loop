@@ -141,8 +141,8 @@ The migration plan (`docs/migration.md`) covered getting the monorepo to a worki
 ### Quality
 
 - [ ] Accessibility audit (WCAG 2.1 AA)
-- [ ] Distinguish error types in auth hook (network error vs invalid code vs upstream failure)
-- [ ] Distinguish error types in payment polling (transient vs permanent failure)
+- [x] ~~Distinguish error types in auth hook~~ — maps 401/429/502/503 to user-facing messages, throws instead of returning boolean
+- [x] ~~Distinguish error types in payment polling~~ — stops on 401/503 (permanent), retries transient up to 5 times, then gives up
 
 ---
 

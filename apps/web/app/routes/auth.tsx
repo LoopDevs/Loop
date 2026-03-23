@@ -15,9 +15,15 @@ export function ErrorBoundary(): React.JSX.Element {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
       <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Something went wrong</h1>
-        <p className="text-gray-600 dark:text-gray-300 mb-6">We couldn&apos;t load the sign-in page.</p>
-        <a href="/auth" className="text-blue-600 underline">Try again</a>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+          Something went wrong
+        </h1>
+        <p className="text-gray-600 dark:text-gray-300 mb-6">
+          We couldn&apos;t load the sign-in page.
+        </p>
+        <a href="/auth" className="text-blue-600 underline">
+          Try again
+        </a>
       </div>
     </div>
   );
@@ -41,8 +47,8 @@ export default function AuthRoute(): React.JSX.Element {
     try {
       await requestOtp(email);
       setStep('otp');
-    } catch {
-      setError('Failed to send verification code. Please try again.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send verification code.');
     } finally {
       setIsLoading(false);
     }
@@ -54,12 +60,10 @@ export default function AuthRoute(): React.JSX.Element {
     setIsLoading(true);
 
     try {
-      const success = await verifyAndStore(email, otp);
-      if (success) {
-        void navigate('/');
-      } else {
-        setError('Incorrect code. Please try again.');
-      }
+      await verifyAndStore(email, otp);
+      void navigate('/');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Verification failed.');
     } finally {
       setIsLoading(false);
     }
@@ -79,7 +83,12 @@ export default function AuthRoute(): React.JSX.Element {
         </div>
 
         {step === 'email' ? (
-          <form onSubmit={(e) => { void handleEmailSubmit(e); }} className="space-y-4">
+          <form
+            onSubmit={(e) => {
+              void handleEmailSubmit(e);
+            }}
+            className="space-y-4"
+          >
             <Input
               type="email"
               placeholder="you@example.com"
@@ -95,7 +104,12 @@ export default function AuthRoute(): React.JSX.Element {
             </Button>
           </form>
         ) : (
-          <form onSubmit={(e) => { void handleOtpSubmit(e); }} className="space-y-4">
+          <form
+            onSubmit={(e) => {
+              void handleOtpSubmit(e);
+            }}
+            className="space-y-4"
+          >
             <Input
               type="text"
               inputMode="numeric"
