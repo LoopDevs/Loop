@@ -52,7 +52,8 @@ export async function refreshLocations(): Promise<void> {
 
   try {
     while (page <= totalPages) {
-      const url = new URL('/api/locations', env.GIFT_CARD_API_BASE_URL);
+      const base = env.GIFT_CARD_API_BASE_URL.replace(/\/$/, '');
+      const url = new URL(`${base}/locations`);
       url.searchParams.set('page', String(page));
       url.searchParams.set('perPage', '500');
 

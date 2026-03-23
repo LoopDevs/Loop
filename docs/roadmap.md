@@ -21,7 +21,6 @@ The migration plan (`docs/migration.md`) covered getting the monorepo to a worki
 
 - [ ] Deploy backend to Fly.io (see `docs/deployment.md`)
 - [ ] Deploy web (SSR) to Fly.io or Vercel
-- [ ] Configure production SMTP provider (e.g., Resend, Postmark, SES) for OTP emails
 - [ ] Set `IMAGE_PROXY_ALLOWED_HOSTS` in production backend for SSRF prevention
 - [ ] Set up monitoring / error tracking (e.g., Sentry)
 - [ ] Configure production CORS allowlist in backend (`loopfinance.io`)

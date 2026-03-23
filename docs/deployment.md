@@ -41,16 +41,9 @@ fly launch --name loop-backend --region lhr
 
 # Set secrets (do not commit .env)
 fly secrets set \
-  JWT_SECRET=... \
-  JWT_REFRESH_SECRET=... \
   GIFT_CARD_API_BASE_URL=... \
   GIFT_CARD_API_KEY=... \
-  GIFT_CARD_API_SECRET=... \
-  SMTP_HOST=... \
-  SMTP_PORT=587 \
-  SMTP_USER=... \
-  SMTP_PASS=... \
-  EMAIL_FROM=noreply@loopfinance.io
+  GIFT_CARD_API_SECRET=...
 
 # Deploy
 fly deploy

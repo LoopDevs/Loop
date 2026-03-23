@@ -56,21 +56,10 @@ PORT=8080
 LOG_LEVEL=info                          # debug | info | warn | error
 NODE_ENV=development
 
-# Gift Card API (required)
-GIFT_CARD_API_BASE_URL=https://...
+# Upstream Gift Card API (required)
+GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 GIFT_CARD_API_KEY=...
 GIFT_CARD_API_SECRET=...
-
-# Auth (required — generate with: node -e "console.log(require('crypto').randomBytes(64).toString('hex'))")
-JWT_SECRET=...
-JWT_REFRESH_SECRET=...
-
-# Email (required for OTP)
-SMTP_HOST=smtp.example.com
-SMTP_PORT=587
-SMTP_USER=...
-SMTP_PASS=...
-EMAIL_FROM=noreply@loopfinance.io
 
 # Refresh intervals (optional)
 REFRESH_INTERVAL_HOURS=6                # merchant cache refresh

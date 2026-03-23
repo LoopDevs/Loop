@@ -81,28 +81,33 @@ Located in `apps/backend/src/clustering/algorithm.ts`.
 
 ## Auth flow
 
+Authentication is proxied through the upstream CTX API. Our backend does not issue its own tokens — it forwards auth requests to upstream and passes tokens back to the client.
+
 ```
 App open
   → check stored refresh token
   → valid  → home
   → absent → /auth (email step)
-               → POST /api/auth/request-otp  (6-digit OTP, 10-min TTL)
+               → POST /api/auth/request-otp  → proxied to upstream POST /login
+               → OTP email sent by upstream (branded for Loop)
                → OTP step
-               → POST /api/auth/verify-otp   (returns JWT pair)
+               → POST /api/auth/verify-otp   → proxied to upstream POST /verify-email
+               → upstream returns token pair
                → store tokens (see below)
                → home
 
 Purchase
   → email already in session — not re-entered
   → Bearer access token on all authenticated requests
-  → POST /api/orders (proxied to upstream API)
+  → POST /api/orders → proxied to upstream POST /gift-cards (with Bearer auth)
 ```
 
 **Token storage:**
 
-- Access token: Zustand memory only (15-min TTL)
-- Refresh token: Capacitor Preferences on native; sessionStorage on web (30-day TTL)
-- Server always returns refresh token in JSON body — client stores it via platform-appropriate secure storage
+- Access token: Zustand memory only
+- Refresh token: Capacitor Preferences on native; sessionStorage on web
+- Tokens are upstream (CTX) tokens — backend proxies without verification
+- Token refresh: POST /api/auth/refresh → proxied to upstream POST /refresh-token
 
 ---
 

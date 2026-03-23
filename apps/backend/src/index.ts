@@ -8,21 +8,19 @@ import { startLocationRefresh, getLocations } from './clustering/data-store.js';
 import { startMerchantRefresh, getMerchants } from './merchants/sync.js';
 import { clustersHandler } from './clustering/handler.js';
 import { imageProxyHandler, evictExpiredImageCache } from './images/proxy.js';
-import { merchantListHandler, merchantBySlugHandler, merchantDetailHandler } from './merchants/handler.js';
+import {
+  merchantListHandler,
+  merchantBySlugHandler,
+  merchantDetailHandler,
+} from './merchants/handler.js';
 import {
   requestOtpHandler,
   verifyOtpHandler,
   refreshHandler,
   logoutHandler,
   requireAuth,
-  evictExpiredRateLimits,
 } from './auth/handler.js';
-import { evictExpiredOtps } from './auth/otp.js';
-import {
-  createOrderHandler,
-  listOrdersHandler,
-  getOrderHandler,
-} from './orders/handler.js';
+import { createOrderHandler, listOrdersHandler, getOrderHandler } from './orders/handler.js';
 
 export const app = new Hono();
 
@@ -31,9 +29,10 @@ export const app = new Hono();
 app.use(
   '*',
   cors({
-    origin: env.NODE_ENV === 'production'
-      ? ['https://loopfinance.io', 'https://www.loopfinance.io']
-      : '*',
+    origin:
+      env.NODE_ENV === 'production'
+        ? ['https://loopfinance.io', 'https://www.loopfinance.io']
+        : '*',
   }),
 );
 app.use('*', honoLogger());
@@ -86,11 +85,12 @@ startLocationRefresh();
 startMerchantRefresh();
 
 // Periodic cleanup every hour
-setInterval(() => {
-  evictExpiredOtps();
-  evictExpiredRateLimits();
-  evictExpiredImageCache();
-}, 60 * 60 * 1000);
+setInterval(
+  () => {
+    evictExpiredImageCache();
+  },
+  60 * 60 * 1000,
+);
 
 // ─── Start server ─────────────────────────────────────────────────────────────
 

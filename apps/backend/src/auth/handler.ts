@@ -1,56 +1,21 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { generateOtp, verifyOtp } from './otp.js';
-import { sendOtpEmail } from './mailer.js';
-import { issueTokenPair, refreshAccessToken, verifyAccessToken } from './jwt.js';
+import { env } from '../env.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'auth' });
 
-// ─── Rate limiting ──────────────────────────────────────────────────────────
-const OTP_RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
-const OTP_RATE_LIMIT_MAX = 3; // max 3 OTP requests per email per minute
-
-const otpRateMap = new Map<string, { count: number; resetAt: number }>();
-
-function isOtpRateLimited(email: string): boolean {
-  const key = email.toLowerCase();
-  const now = Date.now();
-  const entry = otpRateMap.get(key);
-
-  if (entry === undefined || now > entry.resetAt) {
-    otpRateMap.set(key, { count: 1, resetAt: now + OTP_RATE_LIMIT_WINDOW_MS });
-    return false;
-  }
-
-  entry.count++;
-  return entry.count > OTP_RATE_LIMIT_MAX;
-}
-
-/** Redacts an email for safe logging: "foo@bar.com" -> "fo***@bar.com". */
-function redactEmail(email: string): string {
-  const [local, domain] = email.split('@');
-  if (local === undefined || domain === undefined) return '***';
-  return `${local.slice(0, 2)}***@${domain}`;
-}
-
-/** Removes expired rate limit entries. Call periodically. */
-export function evictExpiredRateLimits(): void {
-  const now = Date.now();
-  for (const [key, entry] of otpRateMap) {
-    if (now > entry.resetAt) {
-      otpRateMap.delete(key);
-    }
-  }
-}
-
 const RequestOtpBody = z.object({ email: z.string().email() });
-const VerifyOtpBody = z.object({ email: z.string().email(), otp: z.string().length(6) });
+const VerifyOtpBody = z.object({ email: z.string().email(), otp: z.string().min(1) });
 const RefreshBody = z.object({ refreshToken: z.string().min(1) });
+
+function upstreamUrl(path: string): string {
+  return `${env.GIFT_CARD_API_BASE_URL.replace(/\/$/, '')}${path}`;
+}
 
 /**
  * POST /api/auth/request-otp
- * Body: { email }
+ * Proxies to upstream POST /login.
  */
 export async function requestOtpHandler(c: Context): Promise<Response> {
   const parsed = RequestOtpBody.safeParse(await c.req.json().catch(() => null));
@@ -58,84 +23,104 @@ export async function requestOtpHandler(c: Context): Promise<Response> {
     return c.json({ code: 'VALIDATION_ERROR', message: 'Valid email is required' }, 400);
   }
 
-  const { email } = parsed.data;
-
-  if (isOtpRateLimited(email)) {
-    return c.json({ code: 'RATE_LIMITED', message: 'Too many requests. Please wait before trying again.' }, 429);
-  }
-
-  const otp = generateOtp(email);
-
   try {
-    await sendOtpEmail(email, otp);
+    const response = await fetch(upstreamUrl('/login'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: parsed.data.email }),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      log.error({ status: response.status, body }, 'Upstream login request failed');
+      return c.json({ code: 'UPSTREAM_ERROR', message: 'Failed to send verification code' }, 502);
+    }
+
+    return c.json({ message: 'Verification code sent' });
   } catch (err) {
-    log.error({ err, email: redactEmail(email) }, 'Failed to send OTP email');
+    log.error({ err }, 'Auth proxy error');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to send verification code' }, 500);
   }
-
-  return c.json({ message: 'Verification code sent' }, 200);
 }
 
 /**
  * POST /api/auth/verify-otp
- * Body: { email, otp }
- * Returns { accessToken, refreshToken } for all clients.
- * Client is responsible for storing the refresh token securely:
- *   - Native (iOS/Android): Capacitor Preferences
- *   - Web: sessionStorage
+ * Proxies to upstream POST /verify-email.
+ * Maps { email, otp } → { email, code } for upstream.
  */
 export async function verifyOtpHandler(c: Context): Promise<Response> {
   const parsed = VerifyOtpBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
-    return c.json({ code: 'VALIDATION_ERROR', message: 'email and 6-digit otp are required' }, 400);
+    return c.json({ code: 'VALIDATION_ERROR', message: 'email and otp are required' }, 400);
   }
 
-  const { email, otp } = parsed.data;
-  const result = verifyOtp(email, otp);
+  try {
+    const response = await fetch(upstreamUrl('/verify-email'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: parsed.data.email, code: parsed.data.otp }),
+      signal: AbortSignal.timeout(15_000),
+    });
 
-  if (!result.success) {
-    const messages: Record<typeof result.reason, string> = {
-      not_found: 'No verification code found for this email',
-      expired: 'Verification code has expired',
-      invalid: 'Incorrect verification code',
-      too_many_attempts: 'Too many attempts — please request a new code',
-    };
-    return c.json({ code: 'UNAUTHORIZED', message: messages[result.reason] }, 401);
+    if (!response.ok) {
+      const status = response.status;
+      if (status === 401 || status === 400) {
+        return c.json(
+          { code: 'UNAUTHORIZED', message: 'Invalid or expired verification code' },
+          401,
+        );
+      }
+      return c.json({ code: 'UPSTREAM_ERROR', message: 'Verification failed' }, 502);
+    }
+
+    const data = await response.json();
+    return c.json(data);
+  } catch (err) {
+    log.error({ err }, 'Verify proxy error');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Verification failed' }, 500);
   }
-
-  const { accessToken, refreshToken } = issueTokenPair(email);
-  return c.json({ accessToken, refreshToken });
 }
 
 /**
  * POST /api/auth/refresh
- * Body: { refreshToken }
+ * Proxies to upstream POST /refresh-token.
  */
 export async function refreshHandler(c: Context): Promise<Response> {
   const parsed = RefreshBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
-    return c.json({ code: 'UNAUTHORIZED', message: 'refreshToken is required' }, 401);
+    return c.json({ code: 'VALIDATION_ERROR', message: 'refreshToken is required' }, 400);
   }
 
-  const accessToken = refreshAccessToken(parsed.data.refreshToken);
-  if (accessToken === null) {
-    return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired refresh token' }, 401);
-  }
+  try {
+    const response = await fetch(upstreamUrl('/refresh-token'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: parsed.data.refreshToken }),
+      signal: AbortSignal.timeout(15_000),
+    });
 
-  return c.json({ accessToken });
+    if (!response.ok) {
+      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired refresh token' }, 401);
+    }
+
+    const data = await response.json();
+    return c.json(data);
+  } catch (err) {
+    log.error({ err }, 'Refresh proxy error');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Token refresh failed' }, 500);
+  }
 }
 
-/**
- * DELETE /api/auth/session
- * Client clears stored tokens on its side.
- */
+/** DELETE /api/auth/session — client clears tokens locally. */
 export function logoutHandler(c: Context): Response {
   return c.json({ message: 'Logged out' });
 }
 
 /**
- * Middleware: validates the Authorization: Bearer <token> header.
- * Sets c.set('email', ...) on success.
+ * Middleware: extracts Bearer token from Authorization header.
+ * Does not verify the token — upstream validates on each proxied call.
+ * Sets c.set('bearerToken', token) for downstream handlers.
  */
 export async function requireAuth(c: Context, next: () => Promise<void>): Promise<Response | void> {
   const authHeader = c.req.header('Authorization');
@@ -145,11 +130,6 @@ export async function requireAuth(c: Context, next: () => Promise<void>): Promis
     return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
 
-  const email = verifyAccessToken(token);
-  if (email === null) {
-    return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired token' }, 401);
-  }
-
-  c.set('email', email);
+  c.set('bearerToken', token);
   await next();
 }

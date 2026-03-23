@@ -108,13 +108,9 @@ VITE_API_URL=http://localhost:8080
 
 # apps/backend/.env (git-ignored — see apps/backend/.env.example)
 PORT=8080
-JWT_SECRET=<secret>
-JWT_REFRESH_SECRET=<secret>
 GIFT_CARD_API_BASE_URL=<url>
 GIFT_CARD_API_KEY=<key>
 GIFT_CARD_API_SECRET=<secret>
-SMTP_HOST=<host>  SMTP_PORT=587  SMTP_USER=<user>  SMTP_PASS=<pass>
-EMAIL_FROM=noreply@loopfinance.io
 ```
 
 Full env var docs → `docs/development.md`.

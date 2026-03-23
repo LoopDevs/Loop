@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock env before any other imports
 vi.mock('../env.js', () => ({
@@ -9,11 +9,8 @@ vi.mock('../env.js', () => ({
     GIFT_CARD_API_BASE_URL: 'http://test-upstream.local',
     GIFT_CARD_API_KEY: 'test-key',
     GIFT_CARD_API_SECRET: 'test-secret',
-    JWT_SECRET: 'test-jwt-secret-that-is-long-enough-32-chars',
-    JWT_REFRESH_SECRET: 'test-refresh-secret-long-enough-32-chars',
     REFRESH_INTERVAL_HOURS: 6,
     LOCATION_REFRESH_INTERVAL_HOURS: 24,
-    EMAIL_FROM: 'test@test.com',
   },
 }));
 
@@ -23,7 +20,7 @@ vi.mock('../logger.js', () => ({
     info: vi.fn(),
     error: vi.fn(),
     warn: vi.fn(),
-    child: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
+    child: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }),
   },
 }));
 
@@ -49,19 +46,22 @@ vi.mock('../images/proxy.js', async (importOriginal) => {
   return { ...(orig as Record<string, unknown>), evictExpiredImageCache: vi.fn() };
 });
 
-// Mock clustering handler to avoid proto import (proto types not yet generated)
+// Mock clustering handler to avoid proto import
 vi.mock('../clustering/handler.js', () => ({
   clustersHandler: vi.fn(async (c: { json: (data: unknown) => Response }) =>
     c.json({ clusterPoints: [], locationPoints: [] }),
   ),
 }));
 
-// Mock mailer to prevent SMTP connections
-vi.mock('../auth/mailer.js', () => ({
-  sendOtpEmail: vi.fn().mockResolvedValue(undefined),
-}));
-
 import { app } from '../index.js';
+
+// Mock global fetch for upstream proxy calls
+const mockFetch = vi.fn();
+vi.stubGlobal('fetch', mockFetch);
+
+beforeEach(() => {
+  mockFetch.mockReset();
+});
 
 describe('GET /health', () => {
   it('returns 200 with status healthy', async () => {
@@ -111,13 +111,32 @@ describe('POST /api/auth/request-otp', () => {
     expect(res.status).toBe(400);
   });
 
-  it('returns 200 for valid email', async () => {
+  it('returns 200 when upstream accepts the login request', async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: 'ok' }), { status: 200 }),
+    );
+
     const res = await app.request('/api/auth/request-otp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: 'test@example.com' }),
     });
     expect(res.status).toBe(200);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://test-upstream.local/login',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('returns 502 when upstream rejects the login request', async () => {
+    mockFetch.mockResolvedValueOnce(new Response('error', { status: 500 }));
+
+    const res = await app.request('/api/auth/request-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'test@example.com' }),
+    });
+    expect(res.status).toBe(502);
   });
 });
 
@@ -131,7 +150,24 @@ describe('POST /api/auth/verify-otp', () => {
     expect(res.status).toBe(400);
   });
 
-  it('returns 401 for invalid OTP', async () => {
+  it('returns tokens when upstream verifies successfully', async () => {
+    const tokens = { accessToken: 'at-123', refreshToken: 'rt-456' };
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify(tokens), { status: 200 }));
+
+    const res = await app.request('/api/auth/verify-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'test@example.com', otp: '123456' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.accessToken).toBe('at-123');
+    expect(body.refreshToken).toBe('rt-456');
+  });
+
+  it('returns 401 when upstream rejects the code', async () => {
+    mockFetch.mockResolvedValueOnce(new Response('invalid', { status: 401 }));
+
     const res = await app.request('/api/auth/verify-otp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -142,13 +178,27 @@ describe('POST /api/auth/verify-otp', () => {
 });
 
 describe('POST /api/auth/refresh', () => {
-  it('returns 401 for missing refresh token', async () => {
+  it('returns 400 for missing refresh token', async () => {
     const res = await app.request('/api/auth/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     });
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(400);
+  });
+
+  it('returns new tokens when upstream accepts refresh', async () => {
+    const tokens = { accessToken: 'new-at' };
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify(tokens), { status: 200 }));
+
+    const res = await app.request('/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: 'rt-valid' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.accessToken).toBe('new-at');
   });
 });
 

@@ -10,20 +10,9 @@ const EnvSchema = z.object({
   GIFT_CARD_API_KEY: z.string().min(1),
   GIFT_CARD_API_SECRET: z.string().min(1),
 
-  // JWT
-  JWT_SECRET: z.string().min(32),
-  JWT_REFRESH_SECRET: z.string().min(32),
-
   // Refresh intervals (hours)
   REFRESH_INTERVAL_HOURS: z.coerce.number().int().positive().default(6),
   LOCATION_REFRESH_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
-
-  // Email (for OTP sending)
-  SMTP_HOST: z.string().optional(),
-  SMTP_PORT: z.coerce.number().optional(),
-  SMTP_USER: z.string().optional(),
-  SMTP_PASS: z.string().optional(),
-  EMAIL_FROM: z.string().default('noreply@loopfinance.io'),
 
   // Image proxy: comma-separated list of allowed hostnames.
   // If set, only URLs from these hosts are fetched. Recommended in production.

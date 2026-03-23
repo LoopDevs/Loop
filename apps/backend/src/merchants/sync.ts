@@ -79,7 +79,8 @@ export async function refreshMerchants(): Promise<void> {
 
   try {
     while (page <= totalPages) {
-      const url = new URL('/api/merchants', env.GIFT_CARD_API_BASE_URL);
+      const base = env.GIFT_CARD_API_BASE_URL.replace(/\/$/, '');
+      const url = new URL(`${base}/merchants`);
       url.searchParams.set('page', String(page));
       url.searchParams.set('perPage', '100');
 
@@ -171,13 +172,18 @@ function mapUpstreamMerchant(item: UpstreamMerchant): Merchant | null {
     ...(item.logoUrl ? { logoUrl: item.logoUrl } : {}),
     ...(item.cardImageUrl ? { cardImageUrl: item.cardImageUrl } : {}),
     ...(parsedData.savingsPercentage !== undefined
-      ? { savingsPercentage: parsedData.savingsPercentage / 100, savingsBips: parsedData.savingsPercentage }
+      ? {
+          savingsPercentage: parsedData.savingsPercentage / 100,
+          savingsBips: parsedData.savingsPercentage,
+        }
       : {}),
     ...(denominations !== undefined ? { denominations } : {}),
     ...(description !== undefined ? { description } : {}),
     ...(instructions !== undefined ? { instructions } : {}),
     ...(terms !== undefined ? { terms } : {}),
     enabled: true,
-    ...(parsedData.cachedLocationCount !== undefined ? { locationCount: parsedData.cachedLocationCount } : {}),
+    ...(parsedData.cachedLocationCount !== undefined
+      ? { locationCount: parsedData.cachedLocationCount }
+      : {}),
   };
 }
