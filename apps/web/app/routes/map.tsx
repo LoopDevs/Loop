@@ -17,7 +17,9 @@ export function ErrorBoundary(): React.JSX.Element {
       <div className="text-center">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Map unavailable</h1>
         <p className="text-gray-600 dark:text-gray-300 mb-6">We couldn&apos;t load the map.</p>
-        <a href="/map" className="text-blue-600 underline">Try again</a>
+        <a href="/map" className="text-blue-600 underline">
+          Try again
+        </a>
       </div>
     </div>
   );

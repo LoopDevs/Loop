@@ -14,13 +14,13 @@ Three approaches were evaluated for wrapping an existing Next.js web app: Capaci
 
 **Expo DOM Components** (SDK 52+) are intriguing but immature. The `"use dom"` directive renders React components in a WebView within an Expo shell. However, this requires restructuring your entire codebase into Expo's project format and Metro bundler—it's not "point at your URL." **3–5 weeks minimum**, making it impractical for the 2–4 week timeline.
 
-| Factor | Capacitor | RN WebView | Expo DOM |
-|--------|-----------|------------|----------|
-| Code reuse from existing app | ~100% | ~0% (wrapper only) | ~70-90% (restructuring) |
-| Time to TestFlight | 1–2 weeks | 2–3 weeks | 3–5 weeks |
-| App Store approval risk | Low-Medium | Medium-High | Low |
-| Native feature access | Excellent | Poor (from WebView) | Excellent |
-| Learning curve for web devs | Very low | High | Medium |
+| Factor                       | Capacitor  | RN WebView          | Expo DOM                |
+| ---------------------------- | ---------- | ------------------- | ----------------------- |
+| Code reuse from existing app | ~100%      | ~0% (wrapper only)  | ~70-90% (restructuring) |
+| Time to TestFlight           | 1–2 weeks  | 2–3 weeks           | 3–5 weeks               |
+| App Store approval risk      | Low-Medium | Medium-High         | Low                     |
+| Native feature access        | Excellent  | Poor (from WebView) | Excellent               |
+| Learning curve for web devs  | Very low   | High                | Medium                  |
 
 ---
 
@@ -74,12 +74,12 @@ The complete authentication lifecycle works as follows. After initial login (ema
 await NativeBiometric.setCredentials({
   username: userId,
   password: refreshToken,
-  server: "api.yourapp.com",
-  accessControl: "BIOMETRY_ANY"
+  server: 'api.yourapp.com',
+  accessControl: 'BIOMETRY_ANY',
 });
 
 // Retrieve on app resume (auto-prompts biometric)
-const creds = await NativeBiometric.getCredentials({ server: "api.yourapp.com" });
+const creds = await NativeBiometric.getCredentials({ server: 'api.yourapp.com' });
 const session = await api.refreshSession(creds.password);
 ```
 
@@ -154,7 +154,7 @@ The key pattern combines Capacitor's splash screen with auth state checking. Kee
 import { SplashScreen } from '@capacitor/splash-screen';
 
 async function initApp() {
-  const hasCredentials = await NativeBiometric.hasCredentials({ server: "api.yourapp.com" });
+  const hasCredentials = await NativeBiometric.hasCredentials({ server: 'api.yourapp.com' });
   if (hasCredentials) {
     await attemptBiometricLogin();
   } else {

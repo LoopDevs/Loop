@@ -29,7 +29,10 @@ function HomeContent(): React.JSX.Element {
 
       {/* Hero */}
       <div className="text-white relative overflow-hidden">
-        <div className="absolute inset-0 bg-cover bg-center bg-no-repeat" style={{ backgroundImage: 'url("/hero.webp")' }} />
+        <div
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+          style={{ backgroundImage: 'url("/hero.webp")' }}
+        />
         <div className="absolute inset-0 bg-gray-950/60" />
         <div className="relative z-0 text-center pt-32 pb-16 px-6 lg:pt-48 lg:pb-24">
           <h1 className="text-5xl font-bold mb-4">Save money every time you shop</h1>
@@ -40,23 +43,38 @@ function HomeContent(): React.JSX.Element {
           </div>
         </div>
         <div className="absolute pointer-events-none inset-x-0 bottom-0">
-          <svg viewBox="0 0 2880 48" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" className="w-full" style={{ transform: 'scale(2)', transformOrigin: 'top center' }}>
-            <path d="M0 48H1437.5H2880V0H2160C1442.5 52 720 0 720 0H0V48Z" className="hero-shape-fill" />
+          <svg
+            viewBox="0 0 2880 48"
+            xmlns="http://www.w3.org/2000/svg"
+            preserveAspectRatio="none"
+            className="w-full"
+            style={{ transform: 'scale(2)', transformOrigin: 'top center' }}
+          >
+            <path
+              d="M0 48H1437.5H2880V0H2160C1442.5 52 720 0 720 0H0V48Z"
+              className="hero-shape-fill"
+            />
           </svg>
         </div>
       </div>
 
       <div className="container mx-auto px-4 py-12 lg:py-20">
         {isError && (
-          <p className="text-center text-red-500 mb-8">Failed to load merchants. Please try again.</p>
+          <p className="text-center text-red-500 mb-8">
+            Failed to load merchants. Please try again.
+          </p>
         )}
 
         {/* Featured */}
         {featured.length > 0 && (
           <section className="mb-16">
             <div className="text-center mb-12">
-              <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Featured Merchants</h2>
-              <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">Top-rated merchants with the highest savings</p>
+              <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+                Featured Merchants
+              </h2>
+              <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
+                Top-rated merchants with the highest savings
+              </p>
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
               {featured.map((merchant, i) => (
@@ -70,10 +88,14 @@ function HomeContent(): React.JSX.Element {
         <section>
           <div className="text-center mb-12">
             <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">All Merchants</h2>
-            <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">Browse our complete collection of gift cards</p>
+            <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
+              Browse our complete collection of gift cards
+            </p>
           </div>
           {isLoading ? (
-            <div className="flex justify-center py-16"><Spinner /></div>
+            <div className="flex justify-center py-16">
+              <Spinner />
+            </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
               {merchants.map((merchant, i) => (
@@ -105,9 +127,15 @@ export default function Home(): React.JSX.Element {
 export function ErrorBoundary(): React.JSX.Element {
   return (
     <div className="container mx-auto px-4 py-16 text-center">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Something went wrong</h1>
-      <p className="text-gray-600 dark:text-gray-300 mb-6">We couldn&apos;t load the merchant directory.</p>
-      <a href="/" className="text-blue-600 underline">Reload page</a>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+        Something went wrong
+      </h1>
+      <p className="text-gray-600 dark:text-gray-300 mb-6">
+        We couldn&apos;t load the merchant directory.
+      </p>
+      <a href="/" className="text-blue-600 underline">
+        Reload page
+      </a>
     </div>
   );
 }

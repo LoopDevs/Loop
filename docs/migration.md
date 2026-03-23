@@ -8,12 +8,12 @@ Setting up the Loop monorepo from scratch and migrating existing codebases in as
 
 The monorepo consolidates three existing projects:
 
-| Source | Destination | Notes |
-|--------|------------|-------|
-| Existing React Router web app | `apps/web/` | Rebranded to Loop, white-label removed, API client refactored |
-| Existing Go clustering service | `apps/backend/` | Ported to TypeScript (Hono), clustering logic preserved |
-| (new) | `apps/mobile/` | Capacitor shell, built fresh |
-| (new) | `packages/shared/` | Shared TypeScript types, built fresh |
+| Source                         | Destination        | Notes                                                         |
+| ------------------------------ | ------------------ | ------------------------------------------------------------- |
+| Existing React Router web app  | `apps/web/`        | Rebranded to Loop, white-label removed, API client refactored |
+| Existing Go clustering service | `apps/backend/`    | Ported to TypeScript (Hono), clustering logic preserved       |
+| (new)                          | `apps/mobile/`     | Capacitor shell, built fresh                                  |
+| (new)                          | `packages/shared/` | Shared TypeScript types, built fresh                          |
 
 All source code entering the monorepo must pass the full standards defined in `docs/standards.md` before being considered done. No legacy code is merged as-is.
 
@@ -44,6 +44,7 @@ Set up the workspace before any existing code is touched.
 ### Step 1.1 — Copy source files
 
 Copy the `app/` directory and config files into `apps/web/`. Do not copy:
+
 - `node_modules/`, `build/`, `merchants.db`
 - Any legacy brand config, database, or scheduler files (see step 1.2)
 - Any unrelated media files
@@ -52,16 +53,16 @@ Copy the `app/` directory and config files into `apps/web/`. Do not copy:
 
 **Delete these files entirely — do not migrate them:**
 
-| File | Reason |
-|------|--------|
-| `lib/brand-config.ts` | White-label system — Loop is the only brand |
-| `lib/database.ts` | SQLite merchant cache — moves to backend |
-| `lib/scheduler.ts` | Cron sync — moves to backend |
-| `app/contexts/BrandContext.tsx` | White-label context — no longer needed |
-| `app/welcome/` | Framework template placeholder |
-| `REFACTORING_PLAN.md` | Stale legacy doc |
-| `REFACTOR_COMPLETE.md` | Stale legacy doc |
-| `WHITE_LABEL_SETUP.md` | White-label doc — Loop is single-brand |
+| File                            | Reason                                      |
+| ------------------------------- | ------------------------------------------- |
+| `lib/brand-config.ts`           | White-label system — Loop is the only brand |
+| `lib/database.ts`               | SQLite merchant cache — moves to backend    |
+| `lib/scheduler.ts`              | Cron sync — moves to backend                |
+| `app/contexts/BrandContext.tsx` | White-label context — no longer needed      |
+| `app/welcome/`                  | Framework template placeholder              |
+| `REFACTORING_PLAN.md`           | Stale legacy doc                            |
+| `REFACTOR_COMPLETE.md`          | Stale legacy doc                            |
+| `WHITE_LABEL_SETUP.md`          | White-label doc — Loop is single-brand      |
 
 ### Step 1.3 — Branding removal
 
@@ -69,30 +70,30 @@ Replace all legacy brand references across `apps/web/`. Every item in this table
 
 #### Text replacements
 
-| Find | Replace | Notes |
-|------|---------|-------|
-| `Stellar Spend` | `Loop` | |
-| `StellarSpend` | `Loop` | |
-| `stellarspend` | `loop` | |
-| `Dash Spend` | `Loop` | |
-| `DashSpend` | `Loop` | |
-| `dashspend` | `loop` | |
-| `stellarspend.com` | `loopfinance.io` | |
-| `dashspend.com` | `loopfinance.io` | |
-| `Save money with Stellar` | `Save money every time you shop` | Tagline |
-| Any hardcoded upstream API URL | `import.meta.env.VITE_API_URL` | Web never calls upstream directly |
-| Any hardcoded clustering service URL | `import.meta.env.VITE_API_URL` | |
+| Find                                 | Replace                          | Notes                             |
+| ------------------------------------ | -------------------------------- | --------------------------------- |
+| `Stellar Spend`                      | `Loop`                           |                                   |
+| `StellarSpend`                       | `Loop`                           |                                   |
+| `stellarspend`                       | `loop`                           |                                   |
+| `Dash Spend`                         | `Loop`                           |                                   |
+| `DashSpend`                          | `Loop`                           |                                   |
+| `dashspend`                          | `loop`                           |                                   |
+| `stellarspend.com`                   | `loopfinance.io`                 |                                   |
+| `dashspend.com`                      | `loopfinance.io`                 |                                   |
+| `Save money with Stellar`            | `Save money every time you shop` | Tagline                           |
+| Any hardcoded upstream API URL       | `import.meta.env.VITE_API_URL`   | Web never calls upstream directly |
+| Any hardcoded clustering service URL | `import.meta.env.VITE_API_URL`   |                                   |
 
 #### Assets to replace
 
-| Remove | Replace with |
-|--------|-------------|
-| `stellarspend-logo.svg` | `loop-logo.svg` |
+| Remove                     | Replace with       |
+| -------------------------- | ------------------ |
+| `stellarspend-logo.svg`    | `loop-logo.svg`    |
 | `stellarspend-favicon.ico` | `loop-favicon.ico` |
 | `stellarspend-favicon.png` | `loop-favicon.png` |
-| `dashspend-logo.svg` | (delete) |
-| `dashspend-favicon.ico` | (delete) |
-| `dashspend-favicon.png` | (delete) |
+| `dashspend-logo.svg`       | (delete)           |
+| `dashspend-favicon.ico`    | (delete)           |
+| `dashspend-favicon.png`    | (delete)           |
 
 Loop brand assets must be created before this step can be completed.
 
@@ -112,27 +113,33 @@ All commands must return zero results. These checks run in CI permanently — th
 The web app must be a pure API client. Remove all server-side data access.
 
 **`app/routes/home.tsx`** — server-side loader calls a local database:
+
 - Remove the database call from the `loader` function
 - Replace with TanStack Query fetching `GET /api/merchants` from the backend
 
 **`app/routes/gift-card.$name.tsx`** — likely has server-side merchant lookup:
+
 - Same pattern: remove, replace with TanStack Query
 
 **Delete these route files** — their API logic moves to `apps/backend/`:
+
 - `app/routes/api.sync.ts`
 - `app/routes/api.merchants.$id.ts`
 - `app/routes/api.search.ts`
 
 **`app/components/ClientOnlyMap.tsx`** — hardcodes upstream service URLs and uses an inline proto schema string:
+
 - Replace hardcoded service URLs with `import.meta.env.VITE_API_URL`
 - Replace inline proto schema string with generated types from `@loop/shared`
 - Replace `protobufjs` with `@bufbuild/protobuf`
 
 **`package.json`** — remove:
+
 - `better-sqlite3`, `@types/better-sqlite3`
 - `node-cron`, `@types/node-cron`
 
 Add:
+
 - `@bufbuild/protobuf`
 
 (`@tanstack/react-query` is already present.)
@@ -140,6 +147,7 @@ Add:
 ### Step 1.5 — Add build mode flag
 
 `react-router.config.ts`:
+
 ```typescript
 export default {
   ssr: process.env.BUILD_TARGET !== 'mobile',
@@ -147,6 +155,7 @@ export default {
 ```
 
 `package.json`:
+
 ```json
 "build:mobile": "BUILD_TARGET=mobile react-router build"
 ```
@@ -178,6 +187,7 @@ Remove all `localStorage.setItem('appMode', ...)` calls.
 ### Step 1.7 — Apply standards
 
 Run through the full standards checklist:
+
 - ESLint: zero errors
 - `tsc --noEmit`: zero errors
 - File naming: all files `kebab-case`
@@ -189,12 +199,14 @@ Run through the full standards checklist:
 ### Step 1.8 — Tests
 
 Write tests to reach coverage thresholds:
+
 - `app/services/api-client.test.ts` — mock HTTP, cover all API functions
 - `app/hooks/use-native-platform.test.ts` — mock Capacitor
 - `app/hooks/use-merchants.test.ts`
 - `app/hooks/use-purchase-flow.test.ts`
 
 **Phase 1 exit criteria:**
+
 - [ ] `npm run lint` — zero errors
 - [ ] `npm run typecheck` — zero errors
 - [ ] `npm test` — passing, coverage thresholds met
@@ -223,6 +235,7 @@ Port the existing Go clustering service to TypeScript and extend with the full L
 The clustering service performs grid-based geographic clustering. Port this logic precisely — do not optimise or change behaviour during the port. Get it working identically first.
 
 Key files:
+
 - `src/clustering/algorithm.ts` — grid clustering, zoom-adaptive grid sizes
 - `src/clustering/data-store.ts` — in-memory location store, periodic refresh
 - `src/clustering/handler.ts` — Hono route handler, protobuf/JSON response switching
@@ -232,15 +245,15 @@ Key files:
 
 **Clustering grid sizes to preserve exactly:**
 
-| Zoom | Grid size |
-|------|-----------|
-| ≤ 3 | 20.0° |
-| ≤ 5 | 10.0° |
-| 6 | 5.0° |
-| ≤ 7 | 1.5° |
-| ≤ 9 | 0.5° |
-| ≤ 11 | 0.1° |
-| ≤ 13 | 0.03° |
+| Zoom | Grid size                         |
+| ---- | --------------------------------- |
+| ≤ 3  | 20.0°                             |
+| ≤ 5  | 10.0°                             |
+| 6    | 5.0°                              |
+| ≤ 7  | 1.5°                              |
+| ≤ 9  | 0.5°                              |
+| ≤ 11 | 0.1°                              |
+| ≤ 13 | 0.03°                             |
 | ≥ 14 | No clustering (individual points) |
 
 Write a comparison test that feeds identical location data to both the old and new implementations and asserts identical output. This prevents silent behavioural regression.
@@ -273,6 +286,7 @@ Write a comparison test that feeds identical location data to both the old and n
 - `src/merchants/sync.test.ts` — pagination, error recovery
 
 **Phase 2 exit criteria:**
+
 - [ ] `npm run lint` — zero errors
 - [ ] `npm run typecheck` — zero errors
 - [ ] `npm test` — passing, coverage thresholds met
@@ -309,6 +323,7 @@ Write a comparison test that feeds identical location data to both the old and n
 ### Step 3.4 — Decommission legacy deployments
 
 Once the Loop backend is running in production and the web app is confirmed pointing to it:
+
 - Retire the old clustering service deployment
 - Archive the source repositories (do not delete — retain as reference)
 

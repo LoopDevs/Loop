@@ -9,8 +9,12 @@ export function Footer(): React.JSX.Element {
             <img src="/loop-logo.svg" alt="Loop" className="h-7 opacity-80" />
           </div>
           <nav className="flex flex-wrap justify-center gap-6 text-sm">
-            <Link to="/" className="hover:text-white transition-colors">Directory</Link>
-            <Link to="/map" className="hover:text-white transition-colors">Map</Link>
+            <Link to="/" className="hover:text-white transition-colors">
+              Directory
+            </Link>
+            <Link to="/map" className="hover:text-white transition-colors">
+              Map
+            </Link>
           </nav>
           <p className="text-xs text-gray-600">
             &copy; {new Date().getFullYear()} Loop. All rights reserved.

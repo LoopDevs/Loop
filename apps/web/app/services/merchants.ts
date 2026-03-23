@@ -1,8 +1,14 @@
-import type { MerchantListResponse, MerchantDetailResponse, MerchantListParams } from '@loop/shared';
+import type {
+  MerchantListResponse,
+  MerchantDetailResponse,
+  MerchantListParams,
+} from '@loop/shared';
 import { apiRequest } from './api-client';
 
 /** Fetches a paginated merchant list. */
-export async function fetchMerchants(params: MerchantListParams = {}): Promise<MerchantListResponse> {
+export async function fetchMerchants(
+  params: MerchantListParams = {},
+): Promise<MerchantListResponse> {
   const qs = new URLSearchParams();
   if (params.page !== undefined) qs.set('page', String(params.page));
   if (params.limit !== undefined) qs.set('limit', String(params.limit));

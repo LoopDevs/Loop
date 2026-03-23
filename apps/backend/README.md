@@ -25,15 +25,15 @@ npm run typecheck        # tsc --noEmit
 
 ## Key modules
 
-| Path | Purpose |
-|------|---------|
-| `src/index.ts` | Entry point, route registration, startup timers |
-| `src/clustering/` | Grid-based map clustering algorithm + HTTP handler |
-| `src/merchants/` | Upstream merchant sync + in-memory cache |
-| `src/auth/` | Email OTP, JWT issuance/validation, middleware |
-| `src/images/` | Image resize proxy using sharp |
-| `src/orders/` | Gift card order proxy to upstream API |
-| `src/env.ts` | Zod-validated env var schema — fails fast on startup |
+| Path              | Purpose                                              |
+| ----------------- | ---------------------------------------------------- |
+| `src/index.ts`    | Entry point, route registration, startup timers      |
+| `src/clustering/` | Grid-based map clustering algorithm + HTTP handler   |
+| `src/merchants/`  | Upstream merchant sync + in-memory cache             |
+| `src/auth/`       | Email OTP, JWT issuance/validation, middleware       |
+| `src/images/`     | Image resize proxy using sharp                       |
+| `src/orders/`     | Gift card order proxy to upstream API                |
+| `src/env.ts`      | Zod-validated env var schema — fails fast on startup |
 
 ## Environment variables
 

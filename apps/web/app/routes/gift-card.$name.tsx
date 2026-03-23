@@ -19,9 +19,13 @@ export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
 export function ErrorBoundary(): React.JSX.Element {
   return (
     <div className="container mx-auto px-4 py-16 text-center">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Something went wrong</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+        Something went wrong
+      </h1>
       <p className="text-gray-600 dark:text-gray-300 mb-6">We couldn&apos;t load this gift card.</p>
-      <Link to="/" className="text-blue-600 underline">Back to home</Link>
+      <Link to="/" className="text-blue-600 underline">
+        Back to home
+      </Link>
     </div>
   );
 }
@@ -43,7 +47,9 @@ export default function GiftCardRoute(): React.JSX.Element {
     return (
       <div className="container mx-auto px-4 py-16 text-center">
         <h1 className="text-2xl font-bold mb-4">Merchant not found</h1>
-        <Link to="/" className="text-primary underline">Back to home</Link>
+        <Link to="/" className="text-primary underline">
+          Back to home
+        </Link>
       </div>
     );
   }
@@ -58,7 +64,11 @@ export default function GiftCardRoute(): React.JSX.Element {
       <div className="container mx-auto px-4 py-8 lg:py-12 max-w-5xl">
         <div className="flex items-center gap-4 mb-8">
           {logoUrl !== undefined && (
-            <img src={logoUrl} alt={`${merchant.name} logo`} className="w-16 h-16 object-contain rounded-lg" />
+            <img
+              src={logoUrl}
+              alt={`${merchant.name} logo`}
+              className="w-16 h-16 object-contain rounded-lg"
+            />
           )}
           <div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{merchant.name}</h1>

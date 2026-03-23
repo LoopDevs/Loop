@@ -16,12 +16,13 @@ export function merchantListHandler(c: Context): Response {
   const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10) || 1);
   const limit = Math.min(
     MAX_PAGE_SIZE,
-    Math.max(1, parseInt(c.req.query('limit') ?? String(DEFAULT_PAGE_SIZE), 10) || DEFAULT_PAGE_SIZE),
+    Math.max(
+      1,
+      parseInt(c.req.query('limit') ?? String(DEFAULT_PAGE_SIZE), 10) || DEFAULT_PAGE_SIZE,
+    ),
   );
 
-  const filtered = q
-    ? merchants.filter((m) => m.name.toLowerCase().includes(q))
-    : merchants;
+  const filtered = q ? merchants.filter((m) => m.name.toLowerCase().includes(q)) : merchants;
 
   const total = filtered.length;
   const totalPages = Math.ceil(total / limit);

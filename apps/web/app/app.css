@@ -1,8 +1,9 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif,
-    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+    'Segoe UI Symbol', 'Noto Color Emoji';
 }
 
 @custom-variant dark (&:where(.dark, .dark *));
@@ -40,13 +41,12 @@ html.dark body {
   html:not(.light):not(.dark) {
     background-color: rgb(3, 7, 18);
   }
-  
+
   html:not(.light):not(.dark) body {
     background-color: rgb(3, 7, 18);
     color: white;
   }
 }
-
 
 /* Hero SVG fill - explicit overrides for theme classes */
 html.light .hero-shape-fill {
@@ -85,25 +85,24 @@ html.light .theme-icon-moon {
   display: block;
 }
 
-
 /* Prevent scroll wheel from changing input values */
-input[type="number"] {
+input[type='number'] {
   -moz-appearance: textfield;
 }
 
-input[type="number"]::-webkit-outer-spin-button,
-input[type="number"]::-webkit-inner-spin-button {
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
 
 /* Disable scroll wheel behavior on focused number inputs */
-input[type="number"]:focus {
+input[type='number']:focus {
   -moz-appearance: textfield;
 }
 
 /* Prevent wheel events from bubbling up on number inputs */
-input[type="number"] {
+input[type='number'] {
   pointer-events: auto;
 }
 
@@ -126,4 +125,3 @@ input[type="number"] {
     background-position: calc(200px + 100%) 0;
   }
 }
-

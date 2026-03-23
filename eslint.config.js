@@ -85,7 +85,8 @@ export default [
           patterns: [
             {
               group: ['@capacitor/*'],
-              message: 'Capacitor plugins must only be imported in app/native/. Import from ~/native/ instead.',
+              message:
+                'Capacitor plugins must only be imported in app/native/. Import from ~/native/ instead.',
             },
           ],
         },

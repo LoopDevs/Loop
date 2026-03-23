@@ -101,8 +101,10 @@ describe('clusterLocations', () => {
     // Three points in three separate cells at zoom 14 won't cluster.
     // Put them in cells that will cluster at zoom 1 — two pairs.
     const locations = [
-      loc('a', 1, 1), loc('b', 2, 2),   // same 20° cell
-      loc('c', 25, 25), loc('d', 26, 26), // different 20° cell
+      loc('a', 1, 1),
+      loc('b', 2, 2), // same 20° cell
+      loc('c', 25, 25),
+      loc('d', 26, 26), // different 20° cell
     ];
     const result = clusterLocations(locations, BOUNDS, 1);
     const ids = result.clusterPoints.map((p) => p.id).sort((a, b) => a - b);

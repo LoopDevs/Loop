@@ -80,7 +80,10 @@ export async function imageProxyHandler(c: Context): Promise<Response> {
     });
 
     if (!upstream.ok) {
-      return c.json({ code: 'UPSTREAM_ERROR', message: `Upstream returned ${upstream.status}` }, 502);
+      return c.json(
+        { code: 'UPSTREAM_ERROR', message: `Upstream returned ${upstream.status}` },
+        502,
+      );
     }
 
     const contentLength = parseInt(upstream.headers.get('Content-Length') ?? '0', 10);
@@ -96,7 +99,10 @@ export async function imageProxyHandler(c: Context): Promise<Response> {
     let pipeline = sharp(buffer);
 
     if (width > 0 || height > 0) {
-      pipeline = pipeline.resize(width || null, height || null, { fit: 'inside', withoutEnlargement: true });
+      pipeline = pipeline.resize(width || null, height || null, {
+        fit: 'inside',
+        withoutEnlargement: true,
+      });
     }
 
     const { data, info } = await pipeline.jpeg({ quality }).toBuffer({ resolveWithObject: true });
@@ -113,7 +119,10 @@ export async function imageProxyHandler(c: Context): Promise<Response> {
     });
     totalCacheBytes += output.byteLength;
 
-    log.debug({ url: imageUrl, width: info.width, height: info.height, bytes: output.byteLength }, 'Image processed');
+    log.debug(
+      { url: imageUrl, width: info.width, height: info.height, bytes: output.byteLength },
+      'Image processed',
+    );
     return imageResponse(output, mimeType);
   } catch (err) {
     log.error({ err, url: imageUrl }, 'Image proxy error');
