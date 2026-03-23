@@ -6,6 +6,7 @@ import { createOrder } from '~/services/orders';
 import { AmountSelection } from './AmountSelection';
 import { PaymentStep } from './PaymentStep';
 import { PurchaseComplete } from './PurchaseComplete';
+import { RedeemFlow } from './RedeemFlow';
 import { Button } from '~/components/ui/Button';
 import { triggerHaptic, triggerHapticNotification } from '~/native/haptics';
 
@@ -48,6 +49,17 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
         code={store.giftCardCode}
         pin={store.giftCardPin ?? undefined}
         onDone={store.reset}
+      />
+    );
+  }
+
+  if (store.step === 'redeem' && store.redeemUrl !== null && store.redeemChallengeCode !== null) {
+    return (
+      <RedeemFlow
+        merchantName={merchant.name}
+        redeemUrl={store.redeemUrl}
+        challengeCode={store.redeemChallengeCode}
+        scripts={store.redeemScripts}
       />
     );
   }

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type PurchaseStep = 'amount' | 'payment' | 'processing' | 'complete' | 'error';
+export type PurchaseStep = 'amount' | 'payment' | 'processing' | 'complete' | 'redeem' | 'error';
 
 interface PurchaseState {
   step: PurchaseStep;
@@ -16,6 +16,9 @@ interface PurchaseState {
   expiresAt: number | null;
   giftCardCode: string | null;
   giftCardPin: string | null;
+  redeemUrl: string | null;
+  redeemChallengeCode: string | null;
+  redeemScripts: { injectChallenge?: string; scrapeResult?: string } | null;
   error: string | null;
 }
 
@@ -29,6 +32,11 @@ interface PurchaseActions {
     expiresAt: number;
   }) => void;
   setComplete: (giftCardCode: string, giftCardPin?: string) => void;
+  setRedeemRequired: (params: {
+    redeemUrl: string;
+    redeemChallengeCode: string;
+    redeemScripts?: { injectChallenge?: string; scrapeResult?: string };
+  }) => void;
   setError: (message: string) => void;
   reset: () => void;
 }
@@ -44,6 +52,9 @@ const INITIAL_STATE: PurchaseState = {
   expiresAt: null,
   giftCardCode: null,
   giftCardPin: null,
+  redeemUrl: null,
+  redeemChallengeCode: null,
+  redeemScripts: null,
   error: null,
 };
 
@@ -59,6 +70,9 @@ export const usePurchaseStore = create<PurchaseState & PurchaseActions>((set) =>
 
   setComplete: (giftCardCode, giftCardPin) =>
     set({ step: 'complete', giftCardCode, giftCardPin: giftCardPin ?? null }),
+
+  setRedeemRequired: ({ redeemUrl, redeemChallengeCode, redeemScripts }) =>
+    set({ step: 'redeem', redeemUrl, redeemChallengeCode, redeemScripts: redeemScripts ?? null }),
 
   setError: (message) => set({ step: 'error', error: message }),
 

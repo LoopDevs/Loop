@@ -29,6 +29,14 @@ const GetOrderUpstreamResponse = z
     status: z.enum(['pending', 'processing', 'completed', 'failed', 'expired']),
     giftCardCode: z.string().optional(),
     giftCardPin: z.string().optional(),
+    redeemUrl: z.string().optional(),
+    redeemChallengeCode: z.string().optional(),
+    redeemScripts: z
+      .object({
+        injectChallenge: z.string().optional(),
+        scrapeResult: z.string().optional(),
+      })
+      .optional(),
   })
   .passthrough();
 

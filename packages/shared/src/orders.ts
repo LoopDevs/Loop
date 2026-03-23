@@ -15,6 +15,17 @@ export interface Order {
   giftCardCode?: string;
   /** Gift card PIN — only present for PIN-based cards. */
   giftCardPin?: string;
+  /** Redemption URL — present instead of giftCardCode for URL-based redemption. */
+  redeemUrl?: string;
+  /** Challenge code to enter on the redemption page. */
+  redeemChallengeCode?: string;
+  /** Optional scripts from CTX for automating redemption. */
+  redeemScripts?: {
+    /** JS to auto-fill the challenge input on the provider page. Challenge value is pre-baked by CTX. */
+    injectChallenge?: string;
+    /** JS that observes the provider page and posts { type: 'loop:giftcard', code, pin } when gift card details appear. */
+    scrapeResult?: string;
+  };
   createdAt: number;
   completedAt?: number;
 }

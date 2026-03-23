@@ -86,12 +86,19 @@ export function PaymentStep({
         try {
           const { order } = await fetchOrder(orderId);
           if (order.status === 'completed') {
-            if (!order.giftCardCode) {
-              store.setError(
-                'Order completed but gift card code is unavailable. Please contact support.',
-              );
-            } else {
+            if (order.redeemUrl && order.redeemChallengeCode) {
+              // URL-based redemption — switch to redeem flow
+              store.setRedeemRequired({
+                redeemUrl: order.redeemUrl,
+                redeemChallengeCode: order.redeemChallengeCode,
+                ...(order.redeemScripts ? { redeemScripts: order.redeemScripts } : {}),
+              });
+            } else if (order.giftCardCode) {
               store.setComplete(order.giftCardCode, order.giftCardPin);
+            } else {
+              store.setError(
+                'Order completed but gift card details are unavailable. Please contact support.',
+              );
             }
             return;
           }

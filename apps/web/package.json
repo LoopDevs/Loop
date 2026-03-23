@@ -25,6 +25,7 @@
     "@capacitor/preferences": "^8.0.1",
     "@capacitor/share": "^8.0.1",
     "@capacitor/status-bar": "^8.0.1",
+    "@capgo/inappbrowser": "^8.3.0",
     "@loop/shared": "*",
     "@react-router/node": "^7.7.1",
     "@react-router/serve": "^7.7.1",
