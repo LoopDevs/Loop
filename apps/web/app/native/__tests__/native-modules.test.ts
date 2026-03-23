@@ -92,6 +92,7 @@ import { enableScreenshotGuard } from '../screenshot-guard';
 import { nativeShare } from '../share';
 import { checkBiometrics, authenticateWithBiometrics } from '../biometrics';
 import { isAppLockEnabled, setAppLockEnabled, registerAppLockGuard } from '../app-lock';
+import { openWebView } from '../webview';
 
 // ────────────────────────────────────────────────────────────
 // 1. Platform
@@ -428,5 +429,70 @@ describe('app-lock', () => {
       (call: unknown[]) => call[0] === 'resume',
     );
     expect(resumeCall).toBeUndefined();
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// 12. WebView
+// ────────────────────────────────────────────────────────────
+describe('webview', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    // Clean up window.open mock
+    delete (window as unknown as Record<string, unknown>).open;
+  });
+
+  it('opens URL in new tab on web', async () => {
+    const mockWin = { close: vi.fn(), closed: false };
+    const openFn = vi.fn(() => mockWin);
+    (window as unknown as Record<string, unknown>).open = openFn;
+
+    const controller = await openWebView({ url: 'https://example.com' });
+
+    expect(openFn).toHaveBeenCalledWith('https://example.com', '_blank');
+    expect(controller).toHaveProperty('close');
+  });
+
+  it('close() calls window.close on the opened tab', async () => {
+    const mockWin = { close: vi.fn(), closed: false };
+    (window as unknown as Record<string, unknown>).open = vi.fn(() => mockWin);
+
+    const controller = await openWebView({ url: 'https://example.com' });
+    await controller.close();
+
+    expect(mockWin.close).toHaveBeenCalled();
+  });
+
+  it('calls onClose when the opened tab is closed', async () => {
+    vi.useFakeTimers();
+    const mockWin = { close: vi.fn(), closed: false };
+    (window as unknown as Record<string, unknown>).open = vi.fn(() => mockWin);
+
+    const onClose = vi.fn();
+    await openWebView({ url: 'https://example.com', onClose });
+
+    // Tab is still open
+    vi.advanceTimersByTime(1500);
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Tab closes
+    mockWin.closed = true;
+    vi.advanceTimersByTime(1500);
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    vi.useRealTimers();
+  });
+
+  it('ignores scripts on web (no injection capability)', async () => {
+    const mockWin = { close: vi.fn(), closed: false };
+    (window as unknown as Record<string, unknown>).open = vi.fn(() => mockWin);
+
+    // Should not throw even with scripts provided
+    const controller = await openWebView({
+      url: 'https://example.com',
+      scripts: ['console.log("injected")'],
+    });
+
+    expect(controller).toHaveProperty('close');
   });
 });
