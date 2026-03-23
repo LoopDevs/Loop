@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import type { Route } from './+types/auth';
 import { useAuth } from '~/hooks/use-auth';
+import { useNativePlatform } from '~/hooks/use-native-platform';
+import { Navbar } from '~/components/features/Navbar';
 import { Button } from '~/components/ui/Button';
 import { Input } from '~/components/ui/Input';
 
@@ -31,13 +33,50 @@ export function ErrorBoundary(): React.JSX.Element {
 
 export default function AuthRoute(): React.JSX.Element {
   const navigate = useNavigate();
-  const { requestOtp, verifyOtp: verifyAndStore } = useAuth();
+  const {
+    email: userEmail,
+    isAuthenticated,
+    requestOtp,
+    verifyOtp: verifyAndStore,
+    logout,
+  } = useAuth();
+  const { isNative } = useNativePlatform();
 
   const [step, setStep] = useState<AuthStep>('email');
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // If authenticated, show account view
+  if (isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+        {!isNative && <Navbar />}
+        <div className="flex items-center justify-center min-h-[80vh] px-4">
+          <div className="w-full max-w-sm text-center">
+            <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span className="text-2xl">👤</span>
+            </div>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Your account</h1>
+            <p className="text-gray-500 dark:text-gray-400 mb-6">{userEmail}</p>
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={() => {
+                void (async () => {
+                  await logout();
+                  void navigate('/');
+                })();
+              }}
+            >
+              Sign out
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const handleEmailSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();

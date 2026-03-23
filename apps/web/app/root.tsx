@@ -14,6 +14,7 @@ import { NativeTabBar } from '~/components/features/NativeTabBar';
 import { setStatusBarOverlay, setStatusBarStyle } from '~/native/status-bar';
 import { registerBackButton } from '~/native/back-button';
 import { OfflineBanner } from '~/components/ui/OfflineBanner';
+import { NativeBackButton } from '~/components/features/NativeBackButton';
 import './app.css';
 
 const queryClient = new QueryClient({
@@ -84,9 +85,23 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
     }
   }, [isNative]);
 
+  // Update status bar when theme changes
+  useEffect(() => {
+    if (!isNative) return;
+
+    const observer = new MutationObserver(() => {
+      const isDark = document.documentElement.classList.contains('dark');
+      void setStatusBarStyle(isDark ? 'dark' : 'light');
+    });
+
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, [isNative]);
+
   return (
     <>
       <OfflineBanner />
+      <NativeBackButton />
       {isNative && <div className="native-safe-top" />}
       <div className={isNative ? 'native-tab-clearance' : ''}>{children}</div>
       <NativeTabBar />
