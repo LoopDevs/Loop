@@ -58,7 +58,13 @@ export async function refreshLocations(): Promise<void> {
       url.searchParams.set('page', String(page));
       url.searchParams.set('perPage', '500');
 
+      const headers: Record<string, string> = {};
+      if (env.GIFT_CARD_API_KEY) {
+        headers['X-Api-Key'] = env.GIFT_CARD_API_KEY;
+      }
+
       const response = await upstreamCircuit.fetch(url.toString(), {
+        headers,
         signal: AbortSignal.timeout(30_000),
       });
 

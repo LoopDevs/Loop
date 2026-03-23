@@ -140,7 +140,7 @@ export function startMerchantRefresh(): void {
  */
 function mapUpstreamMerchant(item: UpstreamMerchant): Merchant | null {
   if (!item.name) return null;
-  if (!item.enabled) return null;
+  if (!item.enabled && !env.INCLUDE_DISABLED_MERCHANTS) return null;
 
   // Parse denominations from the flat upstream fields
   let denominations: MerchantDenominations | undefined;
