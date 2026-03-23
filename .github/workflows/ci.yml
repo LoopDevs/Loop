@@ -24,7 +24,7 @@ jobs:
       - run: npm run typecheck
 
   lint:
-    name: Lint & format
+    name: Lint, format & docs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +47,8 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
-      - run: npm test
+      - name: Run tests with coverage
+        run: npm run test:coverage --workspaces --if-present
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4
@@ -57,6 +58,19 @@ jobs:
             apps/backend/coverage/
             apps/web/coverage/
           retention-days: 7
+          if-no-files-found: ignore
+
+  audit:
+    name: Security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm audit --audit-level=high
 
   build:
     name: Build verification
@@ -72,6 +86,10 @@ jobs:
         run: npm run build -w @loop/backend
       - name: Build web (SSR)
         run: npm run build -w @loop/web
+        env:
+          VITE_API_URL: https://api.loopfinance.io
+      - name: Build web (mobile static export)
+        run: npm run build:mobile -w @loop/web
         env:
           VITE_API_URL: https://api.loopfinance.io
 
@@ -101,6 +119,7 @@ jobs:
           PORT: 8080
           NODE_ENV: test
           GIFT_CARD_API_BASE_URL: https://spend.ctx.com
+          INCLUDE_DISABLED_MERCHANTS: 'true'
       - name: Wait for backend
         run: npx wait-on http://localhost:8080/health --timeout 30000
       - name: Run e2e tests
