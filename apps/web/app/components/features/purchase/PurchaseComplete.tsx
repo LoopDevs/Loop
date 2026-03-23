@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '~/components/ui/Button';
 import { triggerHapticNotification } from '~/native/haptics';
+import { copyToClipboard } from '~/native/clipboard';
 
 interface PurchaseCompleteProps {
   merchantName: string;
@@ -19,6 +20,15 @@ export function PurchaseComplete({
   onDone,
 }: PurchaseCompleteProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async (text: string): Promise<void> => {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   useEffect(() => {
     void triggerHapticNotification('success');
@@ -53,6 +63,18 @@ export function PurchaseComplete({
 
       <div className="bg-white dark:bg-gray-900 rounded-lg p-3 font-mono text-lg font-bold tracking-widest text-gray-900 dark:text-white mb-2">
         {code}
+      </div>
+
+      <div className="text-center mb-2">
+        <button
+          type="button"
+          onClick={() => {
+            void handleCopy(code);
+          }}
+          className="text-xs text-blue-600 dark:text-blue-400 mt-1"
+        >
+          {copied ? 'Copied!' : 'Copy code'}
+        </button>
       </div>
 
       {pin !== undefined && (

@@ -6,14 +6,14 @@ Making the Capacitor WebView app feel native on iOS and Android.
 
 ## Phase 1 — App Store submission (must-have)
 
-- [ ] **Safe area handling** — status bar, home indicator (iPhone), notch, camera cutout (Android). Add `viewport-fit=cover` meta tag + `env(safe-area-inset-*)` CSS padding on root layout, tab bar, and full-screen views (map).
-- [ ] **Bottom tab bar** — fixed bottom navigation visible only on native (hidden on web). 4 tabs: Home, Map, Orders, Account/Profile. Replace the hidden web navbar as the mobile navigation.
-- [ ] **Status bar styling** — match status bar text color to app theme (light content on dark bg, dark content on light bg). Use `@capacitor/status-bar` plugin. Update on theme toggle.
-- [ ] **Android back button** — hardware/gesture back navigates history, confirms exit on home screen. Use `@capacitor/app` `backButton` listener.
-- [ ] **Keyboard handling** — inputs scroll into view when keyboard opens, not covered. Configure `KeyboardResize` in Capacitor config or `adjustPan` on Android. Ensure email, OTP, and amount inputs are visible when focused.
-- [ ] **Viewport meta fixes** — add `viewport-fit=cover` (safe areas), `maximum-scale=1` (prevent iOS auto-zoom on inputs < 16px), `user-scalable=no` (prevent double-tap zoom breaking app feel).
-- [ ] **Copy to clipboard** — "Copy" button on payment address (PaymentStep) and gift card code (PurchaseComplete). Use `navigator.clipboard` with `@capacitor/clipboard` fallback. Haptic feedback on copy.
-- [ ] **Touch target audit** — ensure all tappable elements meet minimum 44x44pt (iOS) / 48x48dp (Android). Audit: navbar mobile links (`text-xs`), denomination buttons, search results, map markers.
+- [x] **Safe area handling** — `viewport-fit=cover` + CSS `env(safe-area-inset-*)` utility classes. NativeShell adds top safe area + bottom padding for tab bar.
+- [x] **Bottom tab bar** — `NativeTabBar` component with Home/Map/Orders/Account tabs. Fixed bottom, safe-area-aware, native only.
+- [x] **Status bar styling** — `@capacitor/status-bar` overlay mode + theme-matched style. Set on app mount in NativeShell.
+- [x] **Android back button** — `@capacitor/app` backButton listener. Navigates history or exits app.
+- [x] **Keyboard handling** — Capacitor Keyboard plugin configured with `resize: 'body'` + `resizeOnFullScreen: true` in capacitor.config.ts.
+- [x] **Viewport meta fixes** — `viewport-fit=cover`, `maximum-scale=1`, `user-scalable=no`.
+- [x] **Copy to clipboard** — Copy buttons on payment address (PaymentStep) and gift card code (PurchaseComplete). Capacitor Clipboard on native, navigator.clipboard on web. Haptic on copy.
+- [x] **Touch target audit** — `min-h-[44px]` on all Buttons, `py-3 min-h-[44px]` on denomination buttons. Navbar mobile links are web-only (hidden on native). Tab bar tabs are 56px tall.
 
 ## Phase 1 — Polish (before launch)
 

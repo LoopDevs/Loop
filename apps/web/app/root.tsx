@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import {
   isRouteErrorResponse,
   Links,
@@ -8,6 +9,10 @@ import {
 } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { Route } from './+types/root';
+import { useNativePlatform } from '~/hooks/use-native-platform';
+import { NativeTabBar } from '~/components/features/NativeTabBar';
+import { setStatusBarOverlay, setStatusBarStyle } from '~/native/status-bar';
+import { registerBackButton } from '~/native/back-button';
 import './app.css';
 
 const queryClient = new QueryClient({
@@ -42,7 +47,10 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
     <html lang="en" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
+        />
         {/* Inline theme init prevents flash of unstyled content */}
         <script
           dangerouslySetInnerHTML={{
@@ -61,10 +69,34 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
   );
 }
 
+function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Element {
+  const { isNative } = useNativePlatform();
+
+  useEffect(() => {
+    if (isNative) {
+      void setStatusBarOverlay();
+      // Match status bar to current theme
+      const isDark = document.documentElement.classList.contains('dark');
+      void setStatusBarStyle(isDark ? 'dark' : 'light');
+      registerBackButton();
+    }
+  }, [isNative]);
+
+  return (
+    <>
+      {isNative && <div className="native-safe-top" />}
+      <div className={isNative ? 'pb-20' : ''}>{children}</div>
+      <NativeTabBar />
+    </>
+  );
+}
+
 export default function App(): React.JSX.Element {
   return (
     <QueryClientProvider client={queryClient}>
-      <Outlet />
+      <NativeShell>
+        <Outlet />
+      </NativeShell>
     </QueryClientProvider>
   );
 }

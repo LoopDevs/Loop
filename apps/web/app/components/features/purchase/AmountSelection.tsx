@@ -57,7 +57,7 @@ export function AmountSelection({
                 setSelected(d);
                 setValidationError(null);
               }}
-              className={`py-2 px-4 rounded-lg border text-sm font-semibold transition-colors ${selected === d ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'border-gray-200 dark:border-gray-700 hover:border-blue-400'}`}
+              className={`py-3 px-4 min-h-[44px] rounded-lg border text-sm font-semibold transition-colors ${selected === d ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'border-gray-200 dark:border-gray-700 hover:border-blue-400'}`}
             >
               ${d}
             </button>

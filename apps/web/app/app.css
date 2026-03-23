@@ -125,3 +125,17 @@ input[type='number'] {
     background-position: calc(200px + 100%) 0;
   }
 }
+
+/* Native safe areas — applied when running inside Capacitor */
+.native-safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.native-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.native-safe-x {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}

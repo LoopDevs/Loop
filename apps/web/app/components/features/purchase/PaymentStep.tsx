@@ -4,6 +4,7 @@ import { fetchOrder } from '~/services/orders';
 import { usePurchaseStore } from '~/stores/purchase.store';
 import { Button } from '~/components/ui/Button';
 import { Spinner } from '~/components/ui/Spinner';
+import { copyToClipboard } from '~/native/clipboard';
 
 interface PaymentStepProps {
   merchantName: string;
@@ -31,6 +32,15 @@ export function PaymentStep({
   const [timeLeft, setTimeLeft] = useState<string>('');
   const [expired, setExpired] = useState(false);
   const consecutiveErrors = useRef(0);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async (text: string): Promise<void> => {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   // Generate QR code
   useEffect(() => {
@@ -141,6 +151,18 @@ export function PaymentStep({
 
       <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 text-center break-all font-mono text-sm text-gray-700 dark:text-gray-300 mb-4">
         {paymentAddress}
+      </div>
+
+      <div className="text-center mb-4">
+        <button
+          type="button"
+          onClick={() => {
+            void handleCopy(paymentAddress);
+          }}
+          className="text-xs text-blue-600 dark:text-blue-400 mt-1"
+        >
+          {copied ? 'Copied!' : 'Copy address'}
+        </button>
       </div>
 
       <div className="text-center mb-4">
