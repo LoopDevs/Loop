@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { cors } from 'hono/cors';
+import { requestId } from 'hono/request-id';
 import { logger as honoLogger } from 'hono/logger';
 import { env } from './env.js';
 import { logger } from './logger.js';
@@ -63,18 +64,43 @@ app.use(
         : '*',
   }),
 );
+app.use('*', requestId());
 app.use('*', honoLogger());
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 
-app.get('/health', (c) => {
-  const { locations, loadedAt } = getLocations();
-  const { merchants } = getMerchants();
+app.get('/health', async (c) => {
+  const { locations, loadedAt: locLoadedAt } = getLocations();
+  const { merchants, loadedAt: merLoadedAt } = getMerchants();
+
+  // Check staleness — data older than 2x the refresh interval is stale
+  const now = Date.now();
+  const merchantStaleMs = env.REFRESH_INTERVAL_HOURS * 2 * 60 * 60 * 1000;
+  const locationStaleMs = env.LOCATION_REFRESH_INTERVAL_HOURS * 2 * 60 * 60 * 1000;
+  const merchantsStale = now - merLoadedAt > merchantStaleMs;
+  const locationsStale = now - locLoadedAt > locationStaleMs;
+
+  // Quick upstream probe (non-blocking, 3s timeout)
+  let upstreamReachable = true;
+  try {
+    const base = env.GIFT_CARD_API_BASE_URL.replace(/\/$/, '');
+    const res = await fetch(`${base}/status`, { signal: AbortSignal.timeout(3000) });
+    upstreamReachable = res.ok;
+  } catch {
+    upstreamReachable = false;
+  }
+
+  const degraded = merchantsStale || locationsStale || !upstreamReachable;
+
   return c.json({
-    status: 'healthy',
+    status: degraded ? 'degraded' : 'healthy',
     locationCount: locations.length,
     merchantCount: merchants.length,
-    loadedAt: new Date(loadedAt).toISOString(),
+    merchantsLoadedAt: new Date(merLoadedAt).toISOString(),
+    locationsLoadedAt: new Date(locLoadedAt).toISOString(),
+    merchantsStale,
+    locationsStale,
+    upstreamReachable,
   });
 });
 

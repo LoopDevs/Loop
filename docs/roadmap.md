@@ -38,12 +38,12 @@ The migration plan (`docs/migration.md`) covered getting the monorepo to a worki
 
 ### Code hardening (before production)
 
-- [ ] **Add upstream health to `/health` endpoint** — currently returns "healthy" even when upstream is unreachable. Should probe upstream `/status` or report staleness.
-- [ ] **Test merchant sync error paths** — `refreshMerchants()` pagination, error recovery, and atomic store swap are untested (0% coverage).
-- [ ] **Test location sync error paths** — same gap as merchants.
-- [ ] **Test image proxy SSRF validation** — private IP blocking, IPv6 edge cases, allowlist enforcement are untested.
-- [ ] **Test order proxy upstream behavior** — only 401-without-token tested. Upstream 502, timeout, malformed JSON untested.
-- [ ] **Add request correlation logging** — no way to trace a request through backend → upstream → response. Add X-Request-ID middleware.
+- [x] ~~**Add upstream health to `/health` endpoint**~~ — probes upstream `/status`, reports `degraded` when unreachable or data is stale.
+- [x] ~~**Test merchant sync error paths**~~ — pagination, error recovery, disabled merchants, denominations, concurrent guard (7 tests).
+- [x] ~~**Test location sync error paths**~~ — pagination, error recovery, NaN coords, disabled locations, concurrent guard (5 tests).
+- [x] ~~**Test image proxy SSRF validation**~~ — localhost, loopback, private ranges, IPv6, allowlist, HTTPS enforcement (9 tests).
+- [x] ~~**Test order proxy upstream behavior**~~ — unknown merchant, bad response shape, 401, success validation, path traversal, query passthrough (7 tests).
+- [x] ~~**Add request correlation logging**~~ — Hono `requestId()` middleware adds `X-Request-Id` to all requests.
 
 ### Upstream API integration
 

@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// Mock server to prevent port binding
+vi.mock('@hono/node-server', () => ({ serve: vi.fn() }));
+
 // Mock env before any other imports
 vi.mock('../env.js', () => ({
   env: {
@@ -64,7 +67,10 @@ beforeEach(() => {
 });
 
 describe('GET /health', () => {
-  it('returns 200 with status healthy', async () => {
+  it('returns 200 with status healthy when upstream is reachable', async () => {
+    // Mock the upstream /status probe
+    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+
     const res = await app.request('/health');
     expect(res.status).toBe(200);
 
@@ -72,7 +78,19 @@ describe('GET /health', () => {
     expect(body.status).toBe('healthy');
     expect(body).toHaveProperty('locationCount');
     expect(body).toHaveProperty('merchantCount');
-    expect(body).toHaveProperty('loadedAt');
+    expect(body).toHaveProperty('upstreamReachable');
+    expect(body.upstreamReachable).toBe(true);
+  });
+
+  it('returns degraded when upstream is unreachable', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('connection refused'));
+
+    const res = await app.request('/health');
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.status).toBe('degraded');
+    expect(body.upstreamReachable).toBe(false);
   });
 });
 
