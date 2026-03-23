@@ -91,42 +91,17 @@ npm run proto:generate       # buf generate → packages/shared/src/proto/
 
 ---
 
-## File boundaries (web)
+## Per-package agent guides
 
-| Path              | Responsibility                                            |
-| ----------------- | --------------------------------------------------------- |
-| `app/routes/`     | Route definitions, page layout, meta                      |
-| `app/components/` | Presentational — no direct API calls                      |
-| `app/hooks/`      | Stateful logic (useAuth, useMerchants, useNativePlatform) |
-| `app/services/`   | Typed API client — one function per endpoint              |
-| `app/native/`     | All Capacitor plugin interactions                         |
-| `app/stores/`     | Zustand — session and UI state                            |
+Each package has its own `AGENTS.md` with file structure, patterns, and recipes:
 
-## File boundaries (backend)
+| Package            | Guide                       | When to read                                  |
+| ------------------ | --------------------------- | --------------------------------------------- |
+| `apps/backend/`    | `apps/backend/AGENTS.md`    | Modifying API endpoints, sync, auth, orders   |
+| `apps/web/`        | `apps/web/AGENTS.md`        | Modifying routes, components, hooks, services |
+| `packages/shared/` | `packages/shared/AGENTS.md` | Modifying shared types, adding new types      |
 
-| Path                     | Responsibility                                      |
-| ------------------------ | --------------------------------------------------- |
-| `src/app.ts`             | Hono app creation, middleware, route registration   |
-| `src/index.ts`           | Server startup only — `serve()` + background tasks  |
-| `src/auth/handler.ts`    | Auth proxy to upstream CTX (login, verify, refresh) |
-| `src/orders/handler.ts`  | Order proxy to upstream CTX (create, list, get)     |
-| `src/merchants/`         | Merchant catalog sync + API handlers                |
-| `src/clustering/`        | Location sync, grid clustering algorithm, handler   |
-| `src/images/proxy.ts`    | Image resize proxy with LRU cache + SSRF protection |
-| `src/circuit-breaker.ts` | Shared circuit breaker for all upstream calls       |
-| `src/upstream.ts`        | Upstream URL builder helper                         |
-| `src/env.ts`             | Zod-validated environment config                    |
-
-## Shared package (`packages/shared/`)
-
-| Concern                                 | Location                       |
-| --------------------------------------- | ------------------------------ |
-| TypeScript types (Merchant, Order, API) | `packages/shared/src/*.ts`     |
-| Slug generation                         | `packages/shared/src/slugs.ts` |
-| Error codes and API constants           | `packages/shared/src/api.ts`   |
-| Protobuf generated types                | `packages/shared/src/proto/`   |
-
-Before creating a utility in `apps/web` or `apps/backend`, check if it already exists in shared or should be added there.
+**Read the relevant package guide before making changes.** It has the file structure, key patterns, and step-by-step recipes for common tasks (add endpoint, add route, add env var, etc.).
 
 ---
 
