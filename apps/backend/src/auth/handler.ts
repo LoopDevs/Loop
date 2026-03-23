@@ -9,6 +9,17 @@ const RequestOtpBody = z.object({ email: z.string().email() });
 const VerifyOtpBody = z.object({ email: z.string().email(), otp: z.string().min(1) });
 const RefreshBody = z.object({ refreshToken: z.string().min(1) });
 
+// Upstream response schemas — validate before forwarding to client
+const VerifyOtpUpstreamResponse = z.object({
+  accessToken: z.string().min(1),
+  refreshToken: z.string().min(1),
+});
+
+const RefreshUpstreamResponse = z.object({
+  accessToken: z.string().min(1),
+  refreshToken: z.string().optional(),
+});
+
 function upstreamUrl(path: string): string {
   return `${env.GIFT_CARD_API_BASE_URL.replace(/\/$/, '')}${path}`;
 }
@@ -74,8 +85,19 @@ export async function verifyOtpHandler(c: Context): Promise<Response> {
       return c.json({ code: 'UPSTREAM_ERROR', message: 'Verification failed' }, 502);
     }
 
-    const data = await response.json();
-    return c.json(data);
+    const raw = await response.json();
+    const validated = VerifyOtpUpstreamResponse.safeParse(raw);
+    if (!validated.success) {
+      log.error(
+        { issues: validated.error.issues },
+        'Upstream verify response did not match expected shape',
+      );
+      return c.json(
+        { code: 'UPSTREAM_ERROR', message: 'Unexpected response from auth provider' },
+        502,
+      );
+    }
+    return c.json(validated.data);
   } catch (err) {
     log.error({ err }, 'Verify proxy error');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Verification failed' }, 500);
@@ -104,8 +126,19 @@ export async function refreshHandler(c: Context): Promise<Response> {
       return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired refresh token' }, 401);
     }
 
-    const data = await response.json();
-    return c.json(data);
+    const raw = await response.json();
+    const validated = RefreshUpstreamResponse.safeParse(raw);
+    if (!validated.success) {
+      log.error(
+        { issues: validated.error.issues },
+        'Upstream refresh response did not match expected shape',
+      );
+      return c.json(
+        { code: 'UPSTREAM_ERROR', message: 'Unexpected response from auth provider' },
+        502,
+      );
+    }
+    return c.json(validated.data);
   } catch (err) {
     log.error({ err }, 'Refresh proxy error');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Token refresh failed' }, 500);

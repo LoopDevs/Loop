@@ -11,6 +11,26 @@ const CreateOrderBody = z.object({
   amount: z.number().positive(),
 });
 
+// Upstream response schemas — validate before forwarding to client
+const CreateOrderUpstreamResponse = z
+  .object({
+    orderId: z.string(),
+    paymentAddress: z.string(),
+    xlmAmount: z.string(),
+    expiresAt: z.number(),
+  })
+  .passthrough();
+
+const GetOrderUpstreamResponse = z
+  .object({
+    id: z.string(),
+    merchantId: z.string(),
+    status: z.enum(['pending', 'processing', 'completed', 'failed', 'expired']),
+    giftCardCode: z.string().optional(),
+    giftCardPin: z.string().optional(),
+  })
+  .passthrough();
+
 function upstreamUrl(path: string): string {
   return `${env.GIFT_CARD_API_BASE_URL.replace(/\/$/, '')}${path}`;
 }
@@ -31,10 +51,13 @@ export async function createOrderHandler(c: Context): Promise<Response> {
   const bearerToken = c.get('bearerToken') as string;
   const { merchantId, amount } = parsed.data;
 
-  // Look up merchant to determine fiat currency
+  // Look up merchant — reject if not in cache
   const { merchantsById } = getMerchants();
   const merchant = merchantsById.get(merchantId);
-  const fiatCurrency = merchant?.denominations?.currency ?? 'USD';
+  if (merchant === undefined) {
+    return c.json({ code: 'NOT_FOUND', message: 'Merchant not found' }, 404);
+  }
+  const fiatCurrency = merchant.denominations?.currency ?? 'USD';
 
   try {
     const response = await fetch(upstreamUrl('/gift-cards'), {
@@ -62,8 +85,19 @@ export async function createOrderHandler(c: Context): Promise<Response> {
       return c.json({ code: 'UPSTREAM_ERROR', message: 'Order creation failed' }, 502);
     }
 
-    const order = await response.json();
-    return c.json(order, 201);
+    const raw = await response.json();
+    const validated = CreateOrderUpstreamResponse.safeParse(raw);
+    if (!validated.success) {
+      log.error(
+        { issues: validated.error.issues },
+        'Upstream order response did not match expected shape',
+      );
+      return c.json(
+        { code: 'UPSTREAM_ERROR', message: 'Unexpected response from order provider' },
+        502,
+      );
+    }
+    return c.json(validated.data, 201);
   } catch (err) {
     log.error({ err, merchantId }, 'Order proxy error');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to create order' }, 500);
@@ -110,7 +144,12 @@ export async function listOrdersHandler(c: Context): Promise<Response> {
  */
 export async function getOrderHandler(c: Context): Promise<Response> {
   const bearerToken = c.get('bearerToken') as string;
-  const orderId = c.req.param('id');
+  const orderId = c.req.param('id') ?? '';
+
+  // Sanitize order ID — reject path traversal or non-alphanumeric/dash/underscore
+  if (!/^[\w-]+$/.test(orderId)) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'Invalid order ID' }, 400);
+  }
 
   try {
     const response = await fetch(upstreamUrl(`/gift-cards/${orderId}`), {
@@ -130,7 +169,19 @@ export async function getOrderHandler(c: Context): Promise<Response> {
       return c.json({ code: 'UPSTREAM_ERROR', message: 'Failed to fetch order' }, 502);
     }
 
-    return c.json(await response.json());
+    const raw = await response.json();
+    const validated = GetOrderUpstreamResponse.safeParse(raw);
+    if (!validated.success) {
+      log.error(
+        { issues: validated.error.issues, orderId },
+        'Upstream order detail did not match expected shape',
+      );
+      return c.json(
+        { code: 'UPSTREAM_ERROR', message: 'Unexpected response from order provider' },
+        502,
+      );
+    }
+    return c.json({ order: validated.data });
   } catch (err) {
     log.error({ err, orderId }, 'Order get proxy error');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch order' }, 500);

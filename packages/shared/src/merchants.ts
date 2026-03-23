@@ -15,9 +15,8 @@ export interface Merchant {
   category?: string | undefined;
   logoUrl?: string | undefined;
   cardImageUrl?: string | undefined;
+  /** Savings as a decimal (e.g. 0.10 means 10% off). */
   savingsPercentage?: number | undefined;
-  /** Savings as raw upstream percentage value (e.g. 10 means 10%). See savingsPercentage for the decimal form. */
-  savingsBips?: number | undefined;
   denominations?: MerchantDenominations | undefined;
   description?: string | undefined;
   instructions?: string | undefined;

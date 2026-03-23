@@ -172,10 +172,7 @@ function mapUpstreamMerchant(item: UpstreamMerchant): Merchant | null {
     ...(item.logoUrl ? { logoUrl: item.logoUrl } : {}),
     ...(item.cardImageUrl ? { cardImageUrl: item.cardImageUrl } : {}),
     ...(parsedData.savingsPercentage !== undefined
-      ? {
-          savingsPercentage: parsedData.savingsPercentage / 100,
-          savingsBips: parsedData.savingsPercentage,
-        }
+      ? { savingsPercentage: parsedData.savingsPercentage / 100 }
       : {}),
     ...(denominations !== undefined ? { denominations } : {}),
     ...(description !== undefined ? { description } : {}),

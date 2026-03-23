@@ -1,5 +1,6 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { cors } from 'hono/cors';
 import { logger as honoLogger } from 'hono/logger';
 import { env } from './env.js';
@@ -23,6 +24,33 @@ import {
 import { createOrderHandler, listOrdersHandler, getOrderHandler } from './orders/handler.js';
 
 export const app = new Hono();
+
+// ─── Rate limiting ───────────────────────────────────────────────────────────
+
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+/** Simple per-IP rate limiter. Returns 429 if limit exceeded within the window. */
+function rateLimit(
+  maxRequests: number,
+  windowMs: number,
+): (c: Context, next: () => Promise<void>) => Promise<void | Response> {
+  return async (c, next): Promise<void | Response> => {
+    const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+    const now = Date.now();
+    const entry = rateLimitMap.get(ip);
+
+    if (entry === undefined || now > entry.resetAt) {
+      rateLimitMap.set(ip, { count: 1, resetAt: now + windowMs });
+    } else {
+      entry.count++;
+      if (entry.count > maxRequests) {
+        return c.json({ code: 'RATE_LIMITED', message: 'Too many requests' }, 429);
+      }
+    }
+
+    await next();
+  };
+}
 
 // ─── Global middleware ────────────────────────────────────────────────────────
 
@@ -56,7 +84,8 @@ app.get('/api/clusters', clustersHandler);
 
 // ─── Image proxy ──────────────────────────────────────────────────────────────
 
-app.get('/api/image', imageProxyHandler);
+// 60 requests per IP per minute — prevents abuse of upstream fetches + sharp processing
+app.get('/api/image', rateLimit(60, 60_000), imageProxyHandler);
 
 // ─── Merchants ────────────────────────────────────────────────────────────────
 
@@ -66,7 +95,7 @@ app.get('/api/merchants/:id', merchantDetailHandler);
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
-app.post('/api/auth/request-otp', requestOtpHandler);
+app.post('/api/auth/request-otp', rateLimit(5, 60_000), requestOtpHandler);
 app.post('/api/auth/verify-otp', verifyOtpHandler);
 app.post('/api/auth/refresh', refreshHandler);
 app.delete('/api/auth/session', logoutHandler);
@@ -88,6 +117,11 @@ startMerchantRefresh();
 setInterval(
   () => {
     evictExpiredImageCache();
+    // Clear expired rate limit entries
+    const now = Date.now();
+    for (const [key, entry] of rateLimitMap) {
+      if (now > entry.resetAt) rateLimitMap.delete(key);
+    }
   },
   60 * 60 * 1000,
 );

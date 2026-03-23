@@ -30,17 +30,44 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
     return (
       <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-6 text-center">
         <p className="text-gray-600 dark:text-gray-400 mb-4">Sign in to purchase gift cards.</p>
-        <Button onClick={() => { window.location.assign('/auth'); }}>Sign in</Button>
+        <Button
+          onClick={() => {
+            window.location.assign('/auth');
+          }}
+        >
+          Sign in
+        </Button>
       </div>
     );
   }
 
   if (store.step === 'complete' && store.giftCardCode !== null) {
-    return <PurchaseComplete merchantName={merchant.name} code={store.giftCardCode} pin={store.giftCardPin ?? undefined} onDone={store.reset} />;
+    return (
+      <PurchaseComplete
+        merchantName={merchant.name}
+        code={store.giftCardCode}
+        pin={store.giftCardPin ?? undefined}
+        onDone={store.reset}
+      />
+    );
   }
 
-  if (store.step === 'payment' && store.paymentAddress !== null && store.xlmAmount !== null && store.orderId !== null) {
-    return <PaymentStep merchantName={merchant.name} paymentAddress={store.paymentAddress} xlmAmount={store.xlmAmount} orderId={store.orderId} />;
+  if (
+    store.step === 'payment' &&
+    store.paymentAddress !== null &&
+    store.xlmAmount !== null &&
+    store.orderId !== null &&
+    store.expiresAt !== null
+  ) {
+    return (
+      <PaymentStep
+        merchantName={merchant.name}
+        paymentAddress={store.paymentAddress}
+        xlmAmount={store.xlmAmount}
+        orderId={store.orderId}
+        expiresAt={store.expiresAt}
+      />
+    );
   }
 
   const handlePurchase = async (amount: number): Promise<void> => {
@@ -57,6 +84,7 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
         orderId: result.orderId,
         paymentAddress: result.paymentAddress,
         xlmAmount: result.xlmAmount,
+        expiresAt: result.expiresAt,
       });
       void triggerHapticNotification('success');
     } catch {
@@ -73,7 +101,13 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
         Purchasing as <strong className="text-gray-700 dark:text-gray-300">{email}</strong>
       </div>
 
-      <AmountSelection merchant={merchant} onConfirm={(amount) => { void handlePurchase(amount); }} isLoading={isCreatingOrder} />
+      <AmountSelection
+        merchant={merchant}
+        onConfirm={(amount) => {
+          void handlePurchase(amount);
+        }}
+        isLoading={isCreatingOrder}
+      />
 
       {orderError !== null && (
         <p className="mt-3 text-sm text-red-600 dark:text-red-400">{orderError}</p>

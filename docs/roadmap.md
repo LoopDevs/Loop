@@ -29,12 +29,12 @@ The migration plan (`docs/migration.md`) covered getting the monorepo to a worki
 
 ### Code hardening (before connecting to real upstream)
 
-- [ ] **Validate upstream responses with Zod** — auth handler and order handler forward raw `response.json()` to the client. If upstream returns unexpected shape, web app crashes or leaks upstream internals. Add Zod schemas for `VerifyOtpResponse`, `RefreshResponse`, `CreateOrderResponse`, and `Order`.
-- [ ] **Reject orders for unknown merchants** — `createOrderHandler` silently defaults `fiatCurrency` to USD if merchant not in cache. Should return 400 "Merchant not found" or log a warning.
-- [ ] **Add rate limiting on `/api/image`** — anyone can trigger unlimited upstream fetches + sharp processing. Production DDoS vector. Add Hono rate-limit middleware.
-- [ ] **Map upstream response fields to our types** — web expects `CreateOrderResponse` with `orderId`, `paymentAddress`, `xlmAmount`, `expiresAt`. If upstream uses different field names, purchase flow silently breaks. Add an explicit mapping layer in the order handler.
-- [ ] **Use `expiresAt` in PaymentStep** — backend returns it in `CreateOrderResponse` but web ignores it. Should show a countdown timer and stop polling at expiry instead of fixed 5-minute timeout.
-- [ ] **Remove `savingsBips` field** — redundant with `savingsPercentage`, never consumed by web. Remove from shared types and backend sync.
+- [x] ~~**Validate upstream responses with Zod**~~ — auth and order handlers now validate all upstream JSON with Zod schemas before forwarding.
+- [x] ~~**Reject orders for unknown merchants**~~ — returns 404 if merchantId not in cache.
+- [x] ~~**Add rate limiting**~~ — `/api/image` (60/min/IP) and `/api/auth/request-otp` (5/min/IP). In-memory rate limiter with hourly cleanup.
+- [x] ~~**Map upstream response fields to our types**~~ — Zod schemas validate and strip upstream responses. Order ID param sanitized against path traversal.
+- [x] ~~**Use `expiresAt` in PaymentStep**~~ — shows live countdown timer, stops polling at expiry.
+- [x] ~~**Remove `savingsBips` field**~~ — removed from shared types and backend sync.
 
 ### Code hardening (before production)
 

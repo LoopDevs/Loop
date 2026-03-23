@@ -12,6 +12,8 @@ interface PurchaseState {
   /** XLM amount to send. */
   xlmAmount: string | null;
   orderId: string | null;
+  /** Unix timestamp (seconds) — payment window closes after this. */
+  expiresAt: number | null;
   giftCardCode: string | null;
   giftCardPin: string | null;
   error: string | null;
@@ -24,6 +26,7 @@ interface PurchaseActions {
     orderId: string;
     paymentAddress: string;
     xlmAmount: string;
+    expiresAt: number;
   }) => void;
   setComplete: (giftCardCode: string, giftCardPin?: string) => void;
   setError: (message: string) => void;
@@ -38,6 +41,7 @@ const INITIAL_STATE: PurchaseState = {
   paymentAddress: null,
   xlmAmount: null,
   orderId: null,
+  expiresAt: null,
   giftCardCode: null,
   giftCardPin: null,
   error: null,
@@ -46,13 +50,12 @@ const INITIAL_STATE: PurchaseState = {
 export const usePurchaseStore = create<PurchaseState & PurchaseActions>((set) => ({
   ...INITIAL_STATE,
 
-  startPurchase: (merchantId, merchantName) =>
-    set({ ...INITIAL_STATE, merchantId, merchantName }),
+  startPurchase: (merchantId, merchantName) => set({ ...INITIAL_STATE, merchantId, merchantName }),
 
   setAmount: (amount) => set({ amount }),
 
-  setOrderCreated: ({ orderId, paymentAddress, xlmAmount }) =>
-    set({ step: 'payment', orderId, paymentAddress, xlmAmount }),
+  setOrderCreated: ({ orderId, paymentAddress, xlmAmount, expiresAt }) =>
+    set({ step: 'payment', orderId, paymentAddress, xlmAmount, expiresAt }),
 
   setComplete: (giftCardCode, giftCardPin) =>
     set({ step: 'complete', giftCardCode, giftCardPin: giftCardPin ?? null }),
