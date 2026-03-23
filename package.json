@@ -17,7 +17,8 @@
     "format:check": "prettier --check .",
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "playwright test",
-    "verify": "npm run typecheck && eslint . && npm test",
+    "verify": "npm run typecheck && eslint . && npm test && ./scripts/lint-docs.sh",
+    "lint:docs": "./scripts/lint-docs.sh",
     "build": "npm run build --workspaces --if-present",
     "proto:generate": "cd apps/backend && npx buf generate",
     "prepare": "husky"
