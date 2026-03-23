@@ -20,12 +20,15 @@ Framework: **Vitest** (configured per-app in `vitest.config.ts`)
 
 ### Backend — what to test
 
-| File | Tests |
-|------|-------|
-| `src/clustering/algorithm.ts` | All zoom levels, edge cases, centroid accuracy |
-| `src/auth/otp.ts` | Generate, verify, expiry, max attempts |
-| `src/auth/jwt.ts` | Issue pair, verify access, refresh, expired tokens |
-| `src/merchants/sync.ts` | Mapping, filtering disabled merchants |
+| Module                         | Tests                                                              |
+| ------------------------------ | ------------------------------------------------------------------ |
+| `src/clustering/algorithm.ts`  | All zoom levels, edge cases, centroid accuracy                     |
+| `src/clustering/data-store.ts` | Location sync pagination, error recovery, NaN handling             |
+| `src/merchants/sync.ts`        | Merchant sync pagination, disabled filtering, denomination parsing |
+| `src/auth/handler.ts`          | Auth proxy validation, upstream response shape                     |
+| `src/orders/handler.ts`        | Order proxy, merchant lookup, upstream validation                  |
+| `src/images/proxy.ts`          | SSRF validation (private IPs, allowlist, HTTPS)                    |
+| `src/circuit-breaker.ts`       | State transitions (closed → open → half-open → closed)             |
 
 ```bash
 cd apps/backend && npm test              # run once
@@ -37,11 +40,11 @@ Coverage thresholds (backend): **80% lines/functions/branches** for `src/cluster
 
 ### Web — what to test
 
-| File | Tests |
-|------|-------|
-| `app/services/*.ts` | API client functions (mock fetch) |
-| `app/stores/auth.store.ts` | State transitions |
-| `app/hooks/use-merchants.ts` | Query key, return shape |
+| File                         | Tests                             |
+| ---------------------------- | --------------------------------- |
+| `app/services/*.ts`          | API client functions (mock fetch) |
+| `app/stores/auth.store.ts`   | State transitions                 |
+| `app/hooks/use-merchants.ts` | Query key, return shape           |
 
 ```bash
 cd apps/web && npm test
@@ -66,6 +69,7 @@ expect(res.status).toBe(200);
 ```
 
 Test the full request/response cycle for:
+
 - `GET /health`
 - `GET /api/merchants` (mock data store)
 - `POST /api/auth/request-otp` → `POST /api/auth/verify-otp`
@@ -90,12 +94,12 @@ npm run test:e2e -- tests/e2e/auth.test.ts  # single file
 
 ### What to cover
 
-| Test file | Scenario |
-|-----------|----------|
-| `tests/e2e/smoke.test.ts` | App loads, home page renders, no console errors |
-| `tests/e2e/auth.test.ts` | Email → OTP → authenticated home |
-| `tests/e2e/merchants.test.ts` | Merchant list loads, search works, detail page |
-| `tests/e2e/purchase.test.ts` | Select denomination → create order → confirmation |
+| Test file                     | Scenario                                          |
+| ----------------------------- | ------------------------------------------------- |
+| `tests/e2e/smoke.test.ts`     | App loads, home page renders, no console errors   |
+| `tests/e2e/auth.test.ts`      | Email → OTP → authenticated home                  |
+| `tests/e2e/merchants.test.ts` | Merchant list loads, search works, detail page    |
+| `tests/e2e/purchase.test.ts`  | Select denomination → create order → confirmation |
 
 E2e tests run against a **local dev stack** (web on :5173, backend on :8080 with test env vars).
 
@@ -106,6 +110,7 @@ E2e tests run against a **local dev stack** (web on :5173, backend on :8080 with
 ### Pre-commit (Husky lint-staged)
 
 Automatically on every `git commit`:
+
 - ESLint --fix on staged `.ts` / `.tsx` files
 - Prettier --write on staged files
 
@@ -114,6 +119,7 @@ Commit is **blocked** if lint fails.
 ### Pre-push (Husky pre-push)
 
 Automatically on every `git push`:
+
 - `npm test` — all unit tests across all workspaces
 
 Push is **blocked** if any test fails. This keeps CI green.
@@ -122,13 +128,13 @@ Push is **blocked** if any test fails. This keeps CI green.
 
 Runs on every **push** and **pull request** to `main`:
 
-| Step | What runs |
-|------|-----------|
-| typecheck | `npm run typecheck` |
-| lint | `npm run lint` + `npm run format:check` |
-| test:unit | `npm test` |
-| test:e2e | `npm run test:e2e` (on PRs to main only) |
-| build | `npm run build` (verifies build doesn't break) |
+| Step      | What runs                                      |
+| --------- | ---------------------------------------------- |
+| typecheck | `npm run typecheck`                            |
+| lint      | `npm run lint` + `npm run format:check`        |
+| test:unit | `npm test`                                     |
+| test:e2e  | `npm run test:e2e` (on PRs to main only)       |
+| build     | `npm run build` (verifies build doesn't break) |
 
 PRs **cannot be merged** if any CI step fails.
 
@@ -157,8 +163,8 @@ cd apps/web && npm run test:coverage
 
 Target coverage (not enforced in config — review during PRs):
 
-| Package | Target |
-|---------|--------|
-| backend `src/clustering/` | 90% |
-| backend `src/auth/` | 85% |
-| web `app/services/` | 70% |
+| Package                   | Target |
+| ------------------------- | ------ |
+| backend `src/clustering/` | 90%    |
+| backend `src/auth/`       | 85%    |
+| web `app/services/`       | 70%    |

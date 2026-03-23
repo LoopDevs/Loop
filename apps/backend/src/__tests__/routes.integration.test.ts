@@ -1,8 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock server to prevent port binding
-vi.mock('@hono/node-server', () => ({ serve: vi.fn() }));
-
 // Mock env before any other imports
 vi.mock('../env.js', () => ({
   env: {
@@ -72,7 +69,7 @@ vi.mock('../circuit-breaker.js', () => {
   };
 });
 
-import { app } from '../index.js';
+import { app } from '../app.js';
 
 // Mock global fetch for upstream proxy calls
 const mockFetch = vi.fn();

@@ -17,6 +17,7 @@
     "format:check": "prettier --check .",
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "playwright test",
+    "verify": "npm run typecheck && eslint . && npm test",
     "build": "npm run build --workspaces --if-present",
     "proto:generate": "cd apps/backend && npx buf generate",
     "prepare": "husky"

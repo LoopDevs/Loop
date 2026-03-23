@@ -1,8 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock server to prevent port binding
-vi.mock('@hono/node-server', () => ({ serve: vi.fn() }));
-
 // vi.hoisted runs in the hoisted scope so mockEnv is available to vi.mock factories
 const mockEnv = vi.hoisted(() => {
   const obj: Record<string, unknown> = {
@@ -66,7 +63,7 @@ vi.mock('sharp', () => ({
   })),
 }));
 
-import { app } from '../../index.js';
+import { app } from '../../app.js';
 
 // Mock global fetch for upstream image fetches
 const mockFetch = vi.fn();
