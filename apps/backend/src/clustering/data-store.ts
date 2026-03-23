@@ -1,6 +1,7 @@
 import type { Location } from './algorithm.js';
 import { logger } from '../logger.js';
 import { env } from '../env.js';
+import { upstreamCircuit } from '../circuit-breaker.js';
 
 interface ApiLocationResponse {
   pagination: {
@@ -57,7 +58,7 @@ export async function refreshLocations(): Promise<void> {
       url.searchParams.set('page', String(page));
       url.searchParams.set('perPage', '500');
 
-      const response = await fetch(url.toString(), {
+      const response = await upstreamCircuit.fetch(url.toString(), {
         headers: {
           'X-Api-Key': env.GIFT_CARD_API_KEY,
           'X-Api-Secret': env.GIFT_CARD_API_SECRET,

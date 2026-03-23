@@ -2,6 +2,7 @@ import type { Merchant, MerchantDenominations } from '@loop/shared';
 import { merchantSlug } from '@loop/shared';
 import { logger } from '../logger.js';
 import { env } from '../env.js';
+import { upstreamCircuit } from '../circuit-breaker.js';
 
 interface UpstreamMerchant {
   id: string;
@@ -84,7 +85,7 @@ export async function refreshMerchants(): Promise<void> {
       url.searchParams.set('page', String(page));
       url.searchParams.set('perPage', '100');
 
-      const response = await fetch(url.toString(), {
+      const response = await upstreamCircuit.fetch(url.toString(), {
         headers: {
           'X-Api-Key': env.GIFT_CARD_API_KEY,
           'X-Api-Secret': env.GIFT_CARD_API_SECRET,

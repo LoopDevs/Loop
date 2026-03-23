@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { getMerchants } from '../merchants/sync.js';
+import { upstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 
 const log = logger.child({ handler: 'orders' });
 
@@ -60,7 +61,7 @@ export async function createOrderHandler(c: Context): Promise<Response> {
   const fiatCurrency = merchant.denominations?.currency ?? 'USD';
 
   try {
-    const response = await fetch(upstreamUrl('/gift-cards'), {
+    const response = await upstreamCircuit.fetch(upstreamUrl('/gift-cards'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -99,6 +100,12 @@ export async function createOrderHandler(c: Context): Promise<Response> {
     }
     return c.json(validated.data, 201);
   } catch (err) {
+    if (err instanceof CircuitOpenError) {
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' },
+        503,
+      );
+    }
     log.error({ err, merchantId }, 'Order proxy error');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to create order' }, 500);
   }
@@ -118,7 +125,7 @@ export async function listOrdersHandler(c: Context): Promise<Response> {
       url.searchParams.set(key, value as string);
     }
 
-    const response = await fetch(url.toString(), {
+    const response = await upstreamCircuit.fetch(url.toString(), {
       headers: { Authorization: `Bearer ${bearerToken}` },
       signal: AbortSignal.timeout(15_000),
     });
@@ -133,6 +140,12 @@ export async function listOrdersHandler(c: Context): Promise<Response> {
 
     return c.json(await response.json());
   } catch (err) {
+    if (err instanceof CircuitOpenError) {
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' },
+        503,
+      );
+    }
     log.error({ err }, 'Order list proxy error');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch orders' }, 500);
   }
@@ -152,7 +165,7 @@ export async function getOrderHandler(c: Context): Promise<Response> {
   }
 
   try {
-    const response = await fetch(upstreamUrl(`/gift-cards/${orderId}`), {
+    const response = await upstreamCircuit.fetch(upstreamUrl(`/gift-cards/${orderId}`), {
       headers: { Authorization: `Bearer ${bearerToken}` },
       signal: AbortSignal.timeout(15_000),
     });
@@ -183,6 +196,12 @@ export async function getOrderHandler(c: Context): Promise<Response> {
     }
     return c.json({ order: validated.data });
   } catch (err) {
+    if (err instanceof CircuitOpenError) {
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' },
+        503,
+      );
+    }
     log.error({ err, orderId }, 'Order get proxy error');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch order' }, 500);
   }

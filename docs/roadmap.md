@@ -122,7 +122,7 @@ The migration plan (`docs/migration.md`) covered getting the monorepo to a worki
 
 - [ ] Swap Leaflet for MapLibre GL JS (WebGL rendering, better mobile perf with many markers)
 - [ ] Server-side merchant search (replace client-side 1000-merchant fetch in Navbar)
-- [ ] Add circuit breaker on upstream API (fail fast after N consecutive failures instead of 30s timeout per request)
+- [x] ~~Add circuit breaker on upstream API~~ — shared `upstreamCircuit` (5 failures → 30s OPEN → HALF_OPEN probe). Returns 503 when open. 13 tests.
 - [ ] Add staleness alerting for background refreshes (if merchant/location data >24h old, alert)
 
 ### Features

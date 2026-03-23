@@ -56,6 +56,24 @@ vi.mock('../clustering/handler.js', () => ({
   ),
 }));
 
+// Mock circuit breaker to pass through to global fetch (avoids cross-test state leaks)
+vi.mock('../circuit-breaker.js', () => {
+  class CircuitOpenError extends Error {
+    constructor() {
+      super('Circuit breaker is open — upstream service unavailable');
+      this.name = 'CircuitOpenError';
+    }
+  }
+  return {
+    CircuitOpenError,
+    upstreamCircuit: {
+      fetch: (...args: Parameters<typeof globalThis.fetch>) => globalThis.fetch(...args),
+      getState: () => 'closed' as const,
+      reset: () => {},
+    },
+  };
+});
+
 import { app } from '../index.js';
 
 // Mock global fetch for upstream proxy calls

@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
+import { upstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 
 const log = logger.child({ handler: 'auth' });
 
@@ -35,7 +36,7 @@ export async function requestOtpHandler(c: Context): Promise<Response> {
   }
 
   try {
-    const response = await fetch(upstreamUrl('/login'), {
+    const response = await upstreamCircuit.fetch(upstreamUrl('/login'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: parsed.data.email }),
@@ -50,6 +51,12 @@ export async function requestOtpHandler(c: Context): Promise<Response> {
 
     return c.json({ message: 'Verification code sent' });
   } catch (err) {
+    if (err instanceof CircuitOpenError) {
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' },
+        503,
+      );
+    }
     log.error({ err }, 'Auth proxy error');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to send verification code' }, 500);
   }
@@ -67,7 +74,7 @@ export async function verifyOtpHandler(c: Context): Promise<Response> {
   }
 
   try {
-    const response = await fetch(upstreamUrl('/verify-email'), {
+    const response = await upstreamCircuit.fetch(upstreamUrl('/verify-email'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: parsed.data.email, code: parsed.data.otp }),
@@ -99,6 +106,12 @@ export async function verifyOtpHandler(c: Context): Promise<Response> {
     }
     return c.json(validated.data);
   } catch (err) {
+    if (err instanceof CircuitOpenError) {
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' },
+        503,
+      );
+    }
     log.error({ err }, 'Verify proxy error');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Verification failed' }, 500);
   }
@@ -115,7 +128,7 @@ export async function refreshHandler(c: Context): Promise<Response> {
   }
 
   try {
-    const response = await fetch(upstreamUrl('/refresh-token'), {
+    const response = await upstreamCircuit.fetch(upstreamUrl('/refresh-token'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken: parsed.data.refreshToken }),
@@ -140,6 +153,12 @@ export async function refreshHandler(c: Context): Promise<Response> {
     }
     return c.json(validated.data);
   } catch (err) {
+    if (err instanceof CircuitOpenError) {
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' },
+        503,
+      );
+    }
     log.error({ err }, 'Refresh proxy error');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Token refresh failed' }, 500);
   }

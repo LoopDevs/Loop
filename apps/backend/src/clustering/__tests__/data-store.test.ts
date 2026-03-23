@@ -17,6 +17,15 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
+// Mock circuit breaker to pass through to global fetch (avoids cross-test state leaks)
+vi.mock('../../circuit-breaker.js', () => ({
+  upstreamCircuit: {
+    fetch: (...args: Parameters<typeof globalThis.fetch>) => globalThis.fetch(...args),
+    getState: () => 'closed' as const,
+    reset: () => {},
+  },
+}));
+
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 

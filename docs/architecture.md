@@ -130,6 +130,30 @@ Both web and backend use dynamic import for proto types with JSON fallback — s
 
 ---
 
+## Circuit breaker
+
+All upstream API calls (auth, orders, merchant sync, location sync) are routed through a shared circuit breaker (`apps/backend/src/circuit-breaker.ts`). This prevents cascading failures when the upstream gift card API is down.
+
+```
+CLOSED ──(N consecutive failures)──→ OPEN ──(cooldown elapsed)──→ HALF_OPEN
+  ↑                                                                  │
+  └──────────(probe succeeds)──────────────────────────────────────────┘
+                                     ↑
+  OPEN ←───────────────(probe fails)─┘
+```
+
+| Parameter          | Default | Description                                  |
+| ------------------ | ------- | -------------------------------------------- |
+| `failureThreshold` | 5       | Consecutive 5xx/network failures to trip     |
+| `cooldownMs`       | 30 000  | Milliseconds in OPEN before allowing a probe |
+
+- **4xx responses** do not count as failures (client errors, not upstream outage).
+- When OPEN, upstream proxy handlers return **503** `Service temporarily unavailable` (not 502).
+- The `/health` endpoint bypasses the circuit breaker — it probes upstream directly so external monitors can detect recovery.
+- A single shared instance (`upstreamCircuit`) is used for all upstream calls.
+
+---
+
 ## Phase 2 — Stellar wallet + cashback
 
 2-of-3 multisig per user:
