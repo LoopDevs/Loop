@@ -5,10 +5,8 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
 
-  // Gift card upstream API
+  // Upstream gift card API — no auth needed for public endpoints
   GIFT_CARD_API_BASE_URL: z.string().url(),
-  GIFT_CARD_API_KEY: z.string().min(1),
-  GIFT_CARD_API_SECRET: z.string().min(1),
 
   // Refresh intervals (hours)
   REFRESH_INTERVAL_HOURS: z.coerce.number().int().positive().default(6),

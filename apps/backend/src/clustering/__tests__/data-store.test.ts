@@ -4,8 +4,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 vi.mock('../../env.js', () => ({
   env: {
     GIFT_CARD_API_BASE_URL: 'http://test-upstream.local',
-    GIFT_CARD_API_KEY: 'test-key',
-    GIFT_CARD_API_SECRET: 'test-secret',
     LOCATION_REFRESH_INTERVAL_HOURS: 24,
   },
 }));

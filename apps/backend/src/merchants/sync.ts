@@ -86,10 +86,6 @@ export async function refreshMerchants(): Promise<void> {
       url.searchParams.set('perPage', '100');
 
       const response = await upstreamCircuit.fetch(url.toString(), {
-        headers: {
-          'X-Api-Key': env.GIFT_CARD_API_KEY,
-          'X-Api-Secret': env.GIFT_CARD_API_SECRET,
-        },
         signal: AbortSignal.timeout(30_000),
       });
 

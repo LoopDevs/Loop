@@ -3,8 +3,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../../env.js', () => ({
   env: {
     GIFT_CARD_API_BASE_URL: 'http://test',
-    GIFT_CARD_API_KEY: 'test',
-    GIFT_CARD_API_SECRET: 'test',
     JWT_SECRET: 'test-secret-that-is-long-enough-32ch',
     JWT_REFRESH_SECRET: 'test-refresh-secret-long-enough-32',
     PORT: 8080,

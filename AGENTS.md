@@ -108,9 +108,7 @@ VITE_API_URL=http://localhost:8080
 
 # apps/backend/.env (git-ignored — see apps/backend/.env.example)
 PORT=8080
-GIFT_CARD_API_BASE_URL=<url>
-GIFT_CARD_API_KEY=<key>
-GIFT_CARD_API_SECRET=<secret>
+GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 ```
 
 Full env var docs → `docs/development.md`.

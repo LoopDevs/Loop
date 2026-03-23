@@ -39,11 +39,9 @@ cd apps/backend
 # First-time setup
 fly launch --name loop-backend --region lhr
 
-# Set secrets (do not commit .env)
+# Set config (do not commit .env)
 fly secrets set \
-  GIFT_CARD_API_BASE_URL=... \
-  GIFT_CARD_API_KEY=... \
-  GIFT_CARD_API_SECRET=...
+  GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 
 # Deploy
 fly deploy

@@ -99,9 +99,7 @@ jobs:
         env:
           PORT: 8080
           NODE_ENV: test
-          GIFT_CARD_API_BASE_URL: ${{ secrets.CI_GIFT_CARD_API_BASE_URL }}
-          GIFT_CARD_API_KEY: ${{ secrets.CI_GIFT_CARD_API_KEY }}
-          GIFT_CARD_API_SECRET: ${{ secrets.CI_GIFT_CARD_API_SECRET }}
+          GIFT_CARD_API_BASE_URL: https://spend.ctx.com
       - name: Wait for backend
         run: npx wait-on http://localhost:8080/health --timeout 30000
       - name: Run e2e tests

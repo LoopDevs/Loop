@@ -10,8 +10,6 @@ const mockEnv = vi.hoisted(() => {
     NODE_ENV: 'development',
     LOG_LEVEL: 'silent',
     GIFT_CARD_API_BASE_URL: 'http://test-upstream.local',
-    GIFT_CARD_API_KEY: 'test-key',
-    GIFT_CARD_API_SECRET: 'test-secret',
     REFRESH_INTERVAL_HOURS: 6,
     LOCATION_REFRESH_INTERVAL_HOURS: 24,
   };

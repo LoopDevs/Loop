@@ -56,10 +56,8 @@ PORT=8080
 LOG_LEVEL=info                          # debug | info | warn | error
 NODE_ENV=development
 
-# Upstream Gift Card API (required)
+# Upstream Gift Card API (public — no auth needed)
 GIFT_CARD_API_BASE_URL=https://spend.ctx.com
-GIFT_CARD_API_KEY=...
-GIFT_CARD_API_SECRET=...
 
 # Refresh intervals (optional)
 REFRESH_INTERVAL_HOURS=6                # merchant cache refresh
