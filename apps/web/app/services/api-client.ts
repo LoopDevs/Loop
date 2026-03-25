@@ -116,6 +116,8 @@ export async function authenticatedRequest<T>(
           headers: { ...options.headers, Authorization: `Bearer ${newToken}` },
         });
       }
+      // Refresh also failed — clear stale session
+      useAuthStore.getState().clearSession();
     }
     throw err;
   }

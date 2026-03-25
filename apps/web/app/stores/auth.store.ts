@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { storeRefreshToken, clearRefreshToken } from '~/native/secure-storage';
+import { storeRefreshToken, storeEmail, clearRefreshToken } from '~/native/secure-storage';
 
 interface AuthState {
   email: string | null;
@@ -28,6 +28,7 @@ export const useAuthStore = create<AuthState & AuthActions>((set) => ({
     if (refreshToken !== null) {
       void storeRefreshToken(refreshToken);
     }
+    void storeEmail(email);
     set({ email, accessToken });
   },
 
