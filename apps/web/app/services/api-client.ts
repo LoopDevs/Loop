@@ -56,11 +56,14 @@ async function tryRefresh(): Promise<string | null> {
   if (refreshToken === null) return null;
 
   try {
+    const { getPlatform } = await import('~/native/platform');
+    const platform = getPlatform();
+
     const res = await apiRequest<{ accessToken: string; refreshToken?: string }>(
       '/api/auth/refresh',
       {
         method: 'POST',
-        body: { refreshToken },
+        body: { refreshToken, platform },
       },
     );
     if (res.refreshToken) {

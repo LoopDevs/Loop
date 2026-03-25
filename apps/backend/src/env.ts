@@ -7,6 +7,10 @@ const EnvSchema = z.object({
 
   // Upstream gift card API
   GIFT_CARD_API_BASE_URL: z.string().url(),
+  // Client IDs for upstream auth — one per platform
+  CTX_CLIENT_ID_WEB: z.string().default('loopweb'),
+  CTX_CLIENT_ID_IOS: z.string().default('loopios'),
+  CTX_CLIENT_ID_ANDROID: z.string().default('loopandroid'),
   // Optional API credentials — needed for endpoints that require auth (e.g. /locations)
   GIFT_CARD_API_KEY: z.string().optional(),
   GIFT_CARD_API_SECRET: z.string().optional(),

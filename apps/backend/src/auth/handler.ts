@@ -1,14 +1,27 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
+import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { upstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
 
 const log = logger.child({ handler: 'auth' });
 
-const RequestOtpBody = z.object({ email: z.string().email() });
-const VerifyOtpBody = z.object({ email: z.string().email(), otp: z.string().min(1) });
-const RefreshBody = z.object({ refreshToken: z.string().min(1) });
+const PlatformEnum = z.enum(['web', 'ios', 'android']).default('web');
+const RequestOtpBody = z.object({ email: z.string().email(), platform: PlatformEnum });
+const VerifyOtpBody = z.object({
+  email: z.string().email(),
+  otp: z.string().min(1),
+  platform: PlatformEnum,
+});
+const RefreshBody = z.object({ refreshToken: z.string().min(1), platform: PlatformEnum });
+
+/** Maps platform to the upstream CTX client ID. */
+function clientIdForPlatform(platform: 'web' | 'ios' | 'android'): string {
+  if (platform === 'ios') return env.CTX_CLIENT_ID_IOS;
+  if (platform === 'android') return env.CTX_CLIENT_ID_ANDROID;
+  return env.CTX_CLIENT_ID_WEB;
+}
 
 // Upstream response schemas — validate before forwarding to client
 const VerifyOtpUpstreamResponse = z.object({
@@ -35,7 +48,10 @@ export async function requestOtpHandler(c: Context): Promise<Response> {
     const response = await upstreamCircuit.fetch(upstreamUrl('/login'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: parsed.data.email }),
+      body: JSON.stringify({
+        email: parsed.data.email,
+        clientId: clientIdForPlatform(parsed.data.platform),
+      }),
       signal: AbortSignal.timeout(15_000),
     });
 
@@ -73,7 +89,11 @@ export async function verifyOtpHandler(c: Context): Promise<Response> {
     const response = await upstreamCircuit.fetch(upstreamUrl('/verify-email'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: parsed.data.email, code: parsed.data.otp }),
+      body: JSON.stringify({
+        email: parsed.data.email,
+        code: parsed.data.otp,
+        clientId: clientIdForPlatform(parsed.data.platform),
+      }),
       signal: AbortSignal.timeout(15_000),
     });
 
@@ -127,7 +147,10 @@ export async function refreshHandler(c: Context): Promise<Response> {
     const response = await upstreamCircuit.fetch(upstreamUrl('/refresh-token'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken: parsed.data.refreshToken }),
+      body: JSON.stringify({
+        refreshToken: parsed.data.refreshToken,
+        clientId: clientIdForPlatform(parsed.data.platform),
+      }),
       signal: AbortSignal.timeout(15_000),
     });
 

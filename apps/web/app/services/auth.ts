@@ -1,11 +1,12 @@
 import type { VerifyOtpResponse, RefreshResponse } from '@loop/shared';
+import { getPlatform } from '~/native/platform';
 import { apiRequest } from './api-client';
 
 /** Sends a verification code to the given email. */
 export async function requestOtp(email: string): Promise<void> {
   await apiRequest<{ message: string }>('/api/auth/request-otp', {
     method: 'POST',
-    body: { email },
+    body: { email, platform: getPlatform() },
   });
 }
 
@@ -16,7 +17,7 @@ export async function requestOtp(email: string): Promise<void> {
 export async function verifyOtp(email: string, otp: string): Promise<VerifyOtpResponse> {
   return apiRequest<VerifyOtpResponse>('/api/auth/verify-otp', {
     method: 'POST',
-    body: { email, otp },
+    body: { email, otp, platform: getPlatform() },
   });
 }
 
@@ -24,11 +25,13 @@ export async function verifyOtp(email: string, otp: string): Promise<VerifyOtpRe
 export async function refreshAccessToken(refreshToken: string): Promise<RefreshResponse> {
   return apiRequest<RefreshResponse>('/api/auth/refresh', {
     method: 'POST',
-    body: { refreshToken },
+    body: { refreshToken, platform: getPlatform() },
   });
 }
 
 /** Signals logout to the server (client clears stored tokens separately). */
 export async function logout(): Promise<void> {
-  await apiRequest<{ message: string }>('/api/auth/session', { method: 'DELETE' });
+  await apiRequest<{ message: string }>('/api/auth/session', {
+    method: 'DELETE',
+  });
 }
