@@ -150,7 +150,7 @@ describe('POST /api/orders', () => {
     expect(body.code).toBe('UNAUTHORIZED');
   });
 
-  it('returns 201 with validated data on success', async () => {
+  it('returns 201 with mapped data on success', async () => {
     mockGetMerchants.mockReturnValue({
       merchants: [{ id: 'm-1', name: 'Test Store', denominations: { currency: 'USD' } }],
       merchantsById: new Map([
@@ -160,11 +160,25 @@ describe('POST /api/orders', () => {
       loadedAt: Date.now(),
     });
 
+    // Real CTX upstream response shape
     const upstreamResponse = {
-      orderId: 'order-abc',
-      paymentAddress: 'GABCDEF1234567890',
-      xlmAmount: '100.5',
-      expiresAt: 1700000000,
+      id: '372a9846-abc',
+      merchantId: 'm-1',
+      merchantName: 'Test Store',
+      cardFiatAmount: '25.00',
+      cardFiatCurrency: 'USD',
+      paymentCryptoAmount: '100.5',
+      paymentCryptoCurrency: 'XLM',
+      paymentCryptoChain: 'XLM',
+      paymentUrls: {
+        XLM: 'web+stellar:pay?destination=GABCDEF1234567890&amount=100.5&memo=ctx%3Amtz6lwWw',
+      },
+      status: 'unpaid',
+      paymentStatus: 'unpaid',
+      fulfilmentStatus: 'pending',
+      percentDiscount: '2.00',
+      rate: '0.1773',
+      created: '2026-03-25T18:30:00Z',
     };
 
     mockFetch.mockResolvedValueOnce(
@@ -179,10 +193,13 @@ describe('POST /api/orders', () => {
 
     expect(res.status).toBe(201);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body.orderId).toBe('order-abc');
+    expect(body.orderId).toBe('372a9846-abc');
     expect(body.paymentAddress).toBe('GABCDEF1234567890');
     expect(body.xlmAmount).toBe('100.5');
-    expect(body.expiresAt).toBe(1700000000);
+    expect(body.paymentUri).toBe(
+      'web+stellar:pay?destination=GABCDEF1234567890&amount=100.5&memo=ctx%3Amtz6lwWw',
+    );
+    expect(body.memo).toBe('ctx:mtz6lwWw');
   });
 });
 
@@ -210,11 +227,59 @@ describe('GET /api/orders/:id', () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.code).toBe('UPSTREAM_ERROR');
   });
+
+  it('returns mapped order with status and redemption fields', async () => {
+    const upstreamResponse = {
+      id: '88ab206f-abc',
+      merchantId: 'a8f90501-xyz',
+      merchantName: 'Aerie',
+      cardFiatAmount: '10.00',
+      cardFiatCurrency: 'USD',
+      paymentCryptoAmount: '55.2735680',
+      status: 'fulfilled',
+      paymentStatus: 'paid',
+      fulfilmentStatus: 'complete',
+      redeemType: 'url',
+      redeemUrl: 'https://spend.ctx.com/gift-cards/88ab206f-abc/redeem?token=xyz',
+      redeemUrlChallenge: 'WCBENDRJXR',
+      created: '2026-03-25T18:08:58Z',
+      updated: '2026-03-25T18:09:12Z',
+    };
+
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify(upstreamResponse), { status: 200 }),
+    );
+
+    const res = await app.request('/api/orders/88ab206f-abc', {
+      headers: AUTH_HEADER,
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { order: Record<string, unknown> };
+    expect(body.order.id).toBe('88ab206f-abc');
+    expect(body.order.status).toBe('completed'); // fulfilled → completed
+    expect(body.order.amount).toBe(10);
+    expect(body.order.currency).toBe('USD');
+    expect(body.order.redeemUrl).toBe(
+      'https://spend.ctx.com/gift-cards/88ab206f-abc/redeem?token=xyz',
+    );
+    expect(body.order.redeemChallengeCode).toBe('WCBENDRJXR'); // mapped from redeemUrlChallenge
+    expect(body.order.createdAt).toBe('2026-03-25T18:08:58Z');
+  });
 });
 
 describe('GET /api/orders', () => {
   it('passes query params to upstream', async () => {
-    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ orders: [] }), { status: 200 }));
+    // Real CTX list response shape
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          pagination: { page: 2, pages: 27, perPage: 10, total: 265 },
+          result: [],
+        }),
+        { status: 200 },
+      ),
+    );
 
     const res = await app.request('/api/orders?page=2&status=completed', {
       headers: AUTH_HEADER,
@@ -227,5 +292,77 @@ describe('GET /api/orders', () => {
     const url = new URL(calledUrl);
     expect(url.searchParams.get('page')).toBe('2');
     expect(url.searchParams.get('status')).toBe('completed');
+  });
+
+  it('maps upstream list response to our format', async () => {
+    const upstreamResponse = {
+      pagination: { page: 1, pages: 3, perPage: 10, total: 25 },
+      result: [
+        {
+          id: 'order-1',
+          merchantId: 'm-1',
+          merchantName: 'Aerie',
+          cardFiatAmount: '25.00',
+          cardFiatCurrency: 'USD',
+          paymentCryptoAmount: '138.18',
+          status: 'fulfilled',
+          fulfilmentStatus: 'complete',
+          redeemType: 'url',
+          created: '2026-03-25T18:08:58Z',
+        },
+        {
+          id: 'order-2',
+          merchantId: 'm-2',
+          merchantName: 'Target',
+          cardFiatAmount: '50.00',
+          cardFiatCurrency: 'USD',
+          paymentCryptoAmount: '276.36',
+          status: 'unpaid',
+          fulfilmentStatus: 'pending',
+          created: '2026-03-25T18:30:00Z',
+        },
+      ],
+    };
+
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify(upstreamResponse), { status: 200 }),
+    );
+
+    const res = await app.request('/api/orders', {
+      headers: AUTH_HEADER,
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      orders: Array<Record<string, unknown>>;
+      pagination: Record<string, unknown>;
+    };
+
+    expect(body.orders).toHaveLength(2);
+    expect(body.orders[0]!.id).toBe('order-1');
+    expect(body.orders[0]!.status).toBe('completed'); // fulfilled → completed
+    expect(body.orders[0]!.amount).toBe(25);
+    expect(body.orders[0]!.createdAt).toBe('2026-03-25T18:08:58Z');
+    expect(body.orders[1]!.status).toBe('pending'); // unpaid → pending
+
+    expect(body.pagination.page).toBe(1);
+    expect(body.pagination.limit).toBe(10);
+    expect(body.pagination.total).toBe(25);
+    expect(body.pagination.totalPages).toBe(3);
+    expect(body.pagination.hasNext).toBe(true);
+    expect(body.pagination.hasPrev).toBe(false);
+  });
+
+  it('returns 502 when upstream response has unexpected shape', async () => {
+    // Missing result and pagination
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ orders: [] }), { status: 200 }));
+
+    const res = await app.request('/api/orders', {
+      headers: AUTH_HEADER,
+    });
+
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.code).toBe('UPSTREAM_ERROR');
   });
 });

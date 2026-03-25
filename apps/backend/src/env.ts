@@ -7,8 +7,9 @@ const EnvSchema = z.object({
 
   // Upstream gift card API
   GIFT_CARD_API_BASE_URL: z.string().url(),
-  // Optional API key — only needed for endpoints that require auth (e.g. /locations)
+  // Optional API credentials — needed for endpoints that require auth (e.g. /locations)
   GIFT_CARD_API_KEY: z.string().optional(),
+  GIFT_CARD_API_SECRET: z.string().optional(),
 
   // Refresh intervals (hours)
   REFRESH_INTERVAL_HOURS: z.coerce.number().int().positive().default(6),

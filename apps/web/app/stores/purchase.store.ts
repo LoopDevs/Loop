@@ -14,6 +14,8 @@ interface PurchaseState {
   orderId: string | null;
   /** Unix timestamp (seconds) — payment window closes after this. */
   expiresAt: number | null;
+  /** Payment memo (required for Stellar payment identification). */
+  memo: string | null;
   giftCardCode: string | null;
   giftCardPin: string | null;
   redeemUrl: string | null;
@@ -30,6 +32,7 @@ interface PurchaseActions {
     paymentAddress: string;
     xlmAmount: string;
     expiresAt: number;
+    memo: string;
   }) => void;
   setComplete: (giftCardCode: string, giftCardPin?: string) => void;
   setRedeemRequired: (params: {
@@ -50,6 +53,7 @@ const INITIAL_STATE: PurchaseState = {
   xlmAmount: null,
   orderId: null,
   expiresAt: null,
+  memo: null,
   giftCardCode: null,
   giftCardPin: null,
   redeemUrl: null,
@@ -65,8 +69,8 @@ export const usePurchaseStore = create<PurchaseState & PurchaseActions>((set) =>
 
   setAmount: (amount) => set({ amount }),
 
-  setOrderCreated: ({ orderId, paymentAddress, xlmAmount, expiresAt }) =>
-    set({ step: 'payment', orderId, paymentAddress, xlmAmount, expiresAt }),
+  setOrderCreated: ({ orderId, paymentAddress, xlmAmount, expiresAt, memo }) =>
+    set({ step: 'payment', orderId, paymentAddress, xlmAmount, expiresAt, memo }),
 
   setComplete: (giftCardCode, giftCardPin) =>
     set({ step: 'complete', giftCardCode, giftCardPin: giftCardPin ?? null }),

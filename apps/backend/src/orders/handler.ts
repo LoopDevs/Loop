@@ -15,10 +15,10 @@ const CreateOrderBody = z.object({
 // Upstream response schemas — validate before forwarding to client
 const CreateOrderUpstreamResponse = z
   .object({
-    orderId: z.string(),
-    paymentAddress: z.string(),
-    xlmAmount: z.string(),
-    expiresAt: z.number(),
+    id: z.string(),
+    paymentCryptoAmount: z.string(),
+    paymentUrls: z.record(z.string(), z.string()).optional(),
+    status: z.string(),
   })
   .passthrough();
 
@@ -26,19 +26,33 @@ const GetOrderUpstreamResponse = z
   .object({
     id: z.string(),
     merchantId: z.string(),
-    status: z.enum(['pending', 'processing', 'completed', 'failed', 'expired']),
-    giftCardCode: z.string().optional(),
-    giftCardPin: z.string().optional(),
+    merchantName: z.string().optional(),
+    cardFiatAmount: z.string(),
+    cardFiatCurrency: z.string().optional(),
+    paymentCryptoAmount: z.string().optional(),
+    status: z.string(),
+    fulfilmentStatus: z.string().optional(),
+    percentDiscount: z.string().optional(),
+    redeemType: z.string().optional(),
     redeemUrl: z.string().optional(),
-    redeemChallengeCode: z.string().optional(),
+    redeemUrlChallenge: z.string().optional(),
     redeemScripts: z
       .object({
         injectChallenge: z.string().optional(),
         scrapeResult: z.string().optional(),
       })
       .optional(),
+    created: z.string(),
   })
   .passthrough();
+
+/** Maps upstream CTX status values to our normalized OrderStatus. */
+function mapStatus(ctxStatus: string): 'pending' | 'completed' | 'failed' | 'expired' {
+  if (ctxStatus === 'fulfilled') return 'completed';
+  if (ctxStatus === 'expired') return 'expired';
+  if (ctxStatus === 'refunded') return 'failed';
+  return 'pending'; // unpaid, processing, etc.
+}
 
 /**
  * POST /api/orders
@@ -102,7 +116,23 @@ export async function createOrderHandler(c: Context): Promise<Response> {
         502,
       );
     }
-    return c.json(validated.data, 201);
+
+    const paymentUri = validated.data.paymentUrls?.['XLM'] ?? '';
+    // Parse destination and memo from stellar URI: web+stellar:pay?destination=X&amount=Y&memo=Z
+    const uriParams = new URLSearchParams(paymentUri.replace(/^web\+stellar:pay\?/, ''));
+    const paymentAddress = uriParams.get('destination') ?? '';
+    const memo = decodeURIComponent(uriParams.get('memo') ?? '');
+
+    return c.json(
+      {
+        orderId: validated.data.id,
+        paymentUri,
+        paymentAddress,
+        xlmAmount: validated.data.paymentCryptoAmount,
+        memo,
+      },
+      201,
+    );
   } catch (err) {
     if (err instanceof CircuitOpenError) {
       return c.json(
@@ -142,15 +172,44 @@ export async function listOrdersHandler(c: Context): Promise<Response> {
       return c.json({ code: 'UPSTREAM_ERROR', message: 'Failed to fetch orders' }, 502);
     }
 
-    const raw = await response.json();
-    if (typeof raw !== 'object' || raw === null) {
-      log.error('Upstream order list response is not an object');
+    const raw = (await response.json()) as Record<string, unknown>;
+    if (typeof raw !== 'object' || raw === null || !('result' in raw) || !('pagination' in raw)) {
+      log.error('Upstream order list response has unexpected shape');
       return c.json(
         { code: 'UPSTREAM_ERROR', message: 'Unexpected response from order provider' },
         502,
       );
     }
-    return c.json(raw);
+
+    const upstream = raw as {
+      result: Array<Record<string, unknown>>;
+      pagination: { page: number; pages: number; perPage: number; total: number };
+    };
+
+    const orders = upstream.result.map((item) => ({
+      id: item.id,
+      merchantId: item.merchantId,
+      merchantName: item.merchantName ?? '',
+      amount: parseFloat(String(item.cardFiatAmount ?? '0')),
+      currency: item.cardFiatCurrency ?? 'USD',
+      status: mapStatus(String(item.status ?? 'unpaid')),
+      xlmAmount: item.paymentCryptoAmount ?? '0',
+      percentDiscount: item.percentDiscount,
+      redeemType: item.redeemType,
+      createdAt: item.created,
+    }));
+
+    return c.json({
+      orders,
+      pagination: {
+        page: upstream.pagination.page,
+        limit: upstream.pagination.perPage,
+        total: upstream.pagination.total,
+        totalPages: upstream.pagination.pages,
+        hasNext: upstream.pagination.page < upstream.pagination.pages,
+        hasPrev: upstream.pagination.page > 1,
+      },
+    });
   } catch (err) {
     if (err instanceof CircuitOpenError) {
       return c.json(
@@ -206,7 +265,32 @@ export async function getOrderHandler(c: Context): Promise<Response> {
         502,
       );
     }
-    return c.json({ order: validated.data });
+
+    const order: Record<string, unknown> = {
+      id: validated.data.id,
+      merchantId: validated.data.merchantId,
+      merchantName: validated.data.merchantName ?? '',
+      amount: parseFloat(validated.data.cardFiatAmount),
+      currency: validated.data.cardFiatCurrency ?? 'USD',
+      status: mapStatus(validated.data.status),
+      xlmAmount: validated.data.paymentCryptoAmount ?? '0',
+      percentDiscount: validated.data.percentDiscount,
+      redeemType: validated.data.redeemType,
+      createdAt: validated.data.created,
+    };
+
+    // Add redemption fields based on type
+    if (validated.data.redeemUrl) {
+      order.redeemUrl = validated.data.redeemUrl;
+    }
+    if (validated.data.redeemUrlChallenge) {
+      order.redeemChallengeCode = validated.data.redeemUrlChallenge;
+    }
+    if (validated.data.redeemScripts) {
+      order.redeemScripts = validated.data.redeemScripts;
+    }
+
+    return c.json({ order });
   } catch (err) {
     if (err instanceof CircuitOpenError) {
       return c.json(

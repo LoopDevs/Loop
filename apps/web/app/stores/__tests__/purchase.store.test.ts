@@ -31,6 +31,7 @@ describe('purchase store', () => {
       paymentAddress: 'GXXX',
       xlmAmount: '10.5',
       expiresAt: 1234567890,
+      memo: 'ctx:testmemo123',
     });
     const state = usePurchaseStore.getState();
     expect(state.step).toBe('payment');
@@ -38,6 +39,7 @@ describe('purchase store', () => {
     expect(state.paymentAddress).toBe('GXXX');
     expect(state.xlmAmount).toBe('10.5');
     expect(state.expiresAt).toBe(1234567890);
+    expect(state.memo).toBe('ctx:testmemo123');
   });
 
   it('setComplete transitions to complete step with code and pin', () => {

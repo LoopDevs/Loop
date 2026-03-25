@@ -12,6 +12,7 @@ interface PaymentStepProps {
   xlmAmount: string;
   orderId: string;
   expiresAt: number;
+  memo: string;
 }
 
 const POLL_INTERVAL_MS = 3000;
@@ -26,6 +27,7 @@ export function PaymentStep({
   xlmAmount,
   orderId,
   expiresAt,
+  memo,
 }: PaymentStepProps): React.JSX.Element {
   const store = usePurchaseStore();
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -42,18 +44,23 @@ export function PaymentStep({
     }
   };
 
+  // Build full Stellar URI for QR code — wallets can parse it directly
+  const stellarUri = memo
+    ? `web+stellar:pay?destination=${paymentAddress}&amount=${xlmAmount}&memo=${encodeURIComponent(memo)}`
+    : paymentAddress;
+
   // Generate QR code
   useEffect(() => {
     void (async () => {
       try {
         const QRCode = await import('qrcode');
-        const url = await QRCode.toDataURL(paymentAddress, { width: 200, margin: 1 });
+        const url = await QRCode.toDataURL(stellarUri, { width: 200, margin: 1 });
         setQrDataUrl(url);
       } catch {
         // QR code generation failed — address still shown as text
       }
     })();
-  }, [paymentAddress]);
+  }, [stellarUri]);
 
   // Countdown timer
   const updateCountdown = useCallback((): boolean => {
@@ -171,6 +178,26 @@ export function PaymentStep({
           {copied ? 'Copied!' : 'Copy address'}
         </button>
       </div>
+
+      {memo && (
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 text-center mb-4">
+          <p className="text-xs text-yellow-700 dark:text-yellow-300 mb-1 font-medium">
+            Required memo
+          </p>
+          <p className="font-mono text-sm font-bold text-yellow-800 dark:text-yellow-200 break-all">
+            {memo}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              void handleCopy(memo);
+            }}
+            className="text-xs text-blue-600 dark:text-blue-400 mt-1"
+          >
+            {copied ? 'Copied!' : 'Copy memo'}
+          </button>
+        </div>
+      )}
 
       <div className="text-center mb-4">
         <p

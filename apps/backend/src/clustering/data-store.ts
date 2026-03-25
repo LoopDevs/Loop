@@ -62,6 +62,9 @@ export async function refreshLocations(): Promise<void> {
       if (env.GIFT_CARD_API_KEY) {
         headers['X-Api-Key'] = env.GIFT_CARD_API_KEY;
       }
+      if (env.GIFT_CARD_API_SECRET) {
+        headers['X-Api-Secret'] = env.GIFT_CARD_API_SECRET;
+      }
 
       const response = await upstreamCircuit.fetch(url.toString(), {
         headers,

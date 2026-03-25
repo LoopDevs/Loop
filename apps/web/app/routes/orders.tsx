@@ -34,10 +34,6 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
     label: 'Pending',
     color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
   },
-  processing: {
-    label: 'Processing',
-    color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-  },
   completed: {
     label: 'Completed',
     color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
@@ -54,7 +50,7 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
 
 function OrderRow({ order }: { order: Order }): React.JSX.Element {
   const status = STATUS_LABELS[order.status] ?? STATUS_LABELS['pending']!;
-  const date = new Date(order.createdAt * 1000).toLocaleDateString(undefined, {
+  const date = new Date(order.createdAt).toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',

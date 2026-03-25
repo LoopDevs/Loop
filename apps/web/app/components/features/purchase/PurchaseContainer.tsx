@@ -78,6 +78,7 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
         xlmAmount={store.xlmAmount}
         orderId={store.orderId}
         expiresAt={store.expiresAt}
+        memo={store.memo ?? ''}
       />
     );
   }
@@ -96,7 +97,8 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
         orderId: result.orderId,
         paymentAddress: result.paymentAddress,
         xlmAmount: result.xlmAmount,
-        expiresAt: result.expiresAt,
+        expiresAt: Math.floor(Date.now() / 1000) + 30 * 60, // 30 min from now (CTX doesn't return expiresAt)
+        memo: result.memo,
       });
       void triggerHapticNotification('success');
     } catch {

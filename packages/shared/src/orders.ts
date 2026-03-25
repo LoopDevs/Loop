@@ -1,33 +1,35 @@
 /** Status of a gift card order. */
-export type OrderStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'expired';
+export type OrderStatus = 'pending' | 'completed' | 'failed' | 'expired';
 
 /** A placed gift card order. */
 export interface Order {
   id: string;
   merchantId: string;
   merchantName: string;
+  /** Fiat amount of the gift card (e.g. 10.00). */
   amount: number;
   currency: string;
   status: OrderStatus;
-  /** XLM amount paid. */
-  xlmAmount?: string;
-  /** Gift card code — only present when status is "completed". */
+  /** XLM amount to pay / paid. */
+  xlmAmount: string;
+  /** Savings percentage for this order (e.g. "2.00"). */
+  percentDiscount?: string;
+  /** Redemption type: "url" (open URL + challenge) or "barcode" (code + pin). */
+  redeemType?: 'url' | 'barcode';
+  /** Gift card code — present when redeemType is "barcode" and status is "completed". */
   giftCardCode?: string;
-  /** Gift card PIN — only present for PIN-based cards. */
+  /** Gift card PIN — present for PIN-based cards. */
   giftCardPin?: string;
-  /** Redemption URL — present instead of giftCardCode for URL-based redemption. */
+  /** Redemption URL — present when redeemType is "url" and status is "completed". */
   redeemUrl?: string;
-  /** Challenge code to enter on the redemption page. */
+  /** Challenge code for the redemption page. */
   redeemChallengeCode?: string;
   /** Optional scripts from CTX for automating redemption. */
   redeemScripts?: {
-    /** JS to auto-fill the challenge input on the provider page. Challenge value is pre-baked by CTX. */
     injectChallenge?: string;
-    /** JS that observes the provider page and posts { type: 'loop:giftcard', code, pin } when gift card details appear. */
     scrapeResult?: string;
   };
-  createdAt: number;
-  completedAt?: number;
+  createdAt: string;
 }
 
 /** Request body for POST /api/orders. */
@@ -40,12 +42,14 @@ export interface CreateOrderRequest {
 /** Response for POST /api/orders. */
 export interface CreateOrderResponse {
   orderId: string;
-  /** XLM payment address. */
+  /** Stellar payment URI (web+stellar:pay?destination=...&amount=...&memo=...). */
+  paymentUri: string;
+  /** XLM payment address (extracted from URI). */
   paymentAddress: string;
   /** XLM amount to send. */
   xlmAmount: string;
-  /** Unix timestamp — payment window expires after this. */
-  expiresAt: number;
+  /** Payment memo (required for payment identification). */
+  memo: string;
 }
 
 /** Paginated order history response. */

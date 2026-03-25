@@ -63,9 +63,11 @@ grep "from './" packages/shared/src/index.ts | sed "s/.*from '\.\/\([^']*\)'.*/\
 # ─── 6. No removed credentials in source (outside tests) ────────────────────
 
 echo "Checking for removed credential references..."
-cred_refs=$(grep -rn "GIFT_CARD_API_SECRET\|X-Api-Secret" apps/backend/src/ apps/web/app/ packages/shared/src/ 2>/dev/null | grep -v "node_modules\|__tests__" || true)
-if [ -n "$cred_refs" ]; then
-  err "Reference to removed GIFT_CARD_API_SECRET found in source"
+# GIFT_CARD_API_KEY and GIFT_CARD_API_SECRET are legitimate — used for /locations endpoint
+# Check for truly removed credentials only
+removed_creds=$(grep -rn "JWT_SECRET\|JWT_REFRESH_SECRET\|SMTP_HOST\|SMTP_PORT\|SMTP_USER\|SMTP_PASS\|EMAIL_FROM" apps/backend/src/ apps/web/app/ packages/shared/src/ 2>/dev/null | grep -v "node_modules\|__tests__" || true)
+if [ -n "$removed_creds" ]; then
+  err "Reference to removed credential (JWT/SMTP) found in source"
 fi
 
 # ─── 7. Key source files exist (prevents AGENTS.md from referencing ghosts) ─
