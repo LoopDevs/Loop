@@ -3,15 +3,24 @@ import { logger } from '../logger.js';
 import { env } from '../env.js';
 import { upstreamCircuit } from '../circuit-breaker.js';
 
-/** Shape returned by the upstream CTX /dcg/locations endpoint (flat array). */
-interface UpstreamLocation {
-  merchantId: string;
-  active: boolean;
-  latitude: number;
-  longitude: number;
-  logoLocation?: string;
-  name?: string;
-  city?: string;
+/** Paginated response from upstream GET /locations. */
+interface LocationsResponse {
+  pagination: {
+    page: number;
+    pages: number;
+    perPage: number;
+    total: number;
+  };
+  result: Array<{
+    id: string;
+    merchantId: string;
+    enabled: boolean;
+    latLong: {
+      latitude: string;
+      longitude: string;
+    };
+    mapPinUrl?: string;
+  }>;
 }
 
 interface StoreData {
@@ -40,45 +49,56 @@ export async function refreshLocations(): Promise<void> {
   log.info('Refreshing location data from upstream API');
 
   const locations: Location[] = [];
+  let page = 1;
+  let totalPages = 1;
 
   try {
-    const base = env.GIFT_CARD_API_BASE_URL.replace(/\/$/, '');
-    const url = `${base}/dcg/locations`;
+    while (page <= totalPages) {
+      const base = env.GIFT_CARD_API_BASE_URL.replace(/\/$/, '');
+      const url = new URL(`${base}/locations`);
+      url.searchParams.set('page', String(page));
+      url.searchParams.set('perPage', '1000');
 
-    const headers: Record<string, string> = {};
-    if (env.GIFT_CARD_API_KEY) {
-      headers['X-Api-Key'] = env.GIFT_CARD_API_KEY;
-    }
-    if (env.GIFT_CARD_API_SECRET) {
-      headers['X-Api-Secret'] = env.GIFT_CARD_API_SECRET;
-    }
+      const headers: Record<string, string> = {};
+      if (env.GIFT_CARD_API_KEY) {
+        headers['X-Api-Key'] = env.GIFT_CARD_API_KEY;
+      }
+      if (env.GIFT_CARD_API_SECRET) {
+        headers['X-Api-Secret'] = env.GIFT_CARD_API_SECRET;
+      }
 
-    const response = await upstreamCircuit.fetch(url, {
-      headers,
-      signal: AbortSignal.timeout(30_000),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Upstream locations API returned ${response.status}`);
-    }
-
-    // /dcg/locations returns a flat array (no pagination wrapper)
-    const data = (await response.json()) as UpstreamLocation[];
-
-    for (const item of data) {
-      if (!item.active) continue;
-      if (item.latitude === 0 && item.longitude === 0) continue;
-      if (isNaN(item.latitude) || isNaN(item.longitude)) continue;
-
-      locations.push({
-        merchantId: item.merchantId,
-        mapPinUrl: item.logoLocation ?? null,
-        latitude: item.latitude,
-        longitude: item.longitude,
+      const response = await upstreamCircuit.fetch(url.toString(), {
+        headers,
+        signal: AbortSignal.timeout(30_000),
       });
+
+      if (!response.ok) {
+        throw new Error(`Upstream locations API returned ${response.status}`);
+      }
+
+      const data = (await response.json()) as LocationsResponse;
+      totalPages = data.pagination.pages;
+
+      for (const item of data.result) {
+        if (!item.enabled) continue;
+
+        const lat = parseFloat(item.latLong.latitude);
+        const lng = parseFloat(item.latLong.longitude);
+
+        if (isNaN(lat) || isNaN(lng)) continue;
+        if (lat === 0 && lng === 0) continue;
+
+        locations.push({
+          merchantId: item.merchantId,
+          mapPinUrl: item.mapPinUrl ?? null,
+          latitude: lat,
+          longitude: lng,
+        });
+      }
+
+      page++;
     }
 
-    // Atomic hot-swap — callers in flight with the old reference are unaffected
     store = { locations, loadedAt: Date.now() };
     log.info({ count: locations.length }, 'Location data refreshed');
   } catch (err) {
