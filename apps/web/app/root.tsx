@@ -16,6 +16,8 @@ import { NativeTabBar } from '~/components/features/NativeTabBar';
 import { setStatusBarOverlay, setStatusBarStyle } from '~/native/status-bar';
 import { registerBackButton } from '~/native/back-button';
 import { registerAppLockGuard } from '~/native/app-lock';
+import { getPlatform } from '~/native/platform';
+import { setupNotificationChannels } from '~/native/notifications';
 import { OfflineBanner } from '~/components/ui/OfflineBanner';
 import { NativeBackButton } from '~/components/features/NativeBackButton';
 import { useUiStore } from '~/stores/ui.store';
@@ -87,6 +89,23 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
       const isDark = document.documentElement.classList.contains('dark');
       void setStatusBarStyle(isDark ? 'dark' : 'light');
       registerBackButton();
+
+      // iOS: enable keyboard accessory bar (Done/Previous/Next)
+      if (getPlatform() === 'ios') {
+        void (async () => {
+          try {
+            const { Keyboard } = await import('@capacitor/keyboard');
+            await Keyboard.setAccessoryBarVisible({ isVisible: true });
+          } catch {
+            /* Keyboard plugin not available */
+          }
+        })();
+      }
+
+      // Android: set up notification channels
+      if (getPlatform() === 'android') {
+        void setupNotificationChannels();
+      }
     }
   }, [isNative]);
 

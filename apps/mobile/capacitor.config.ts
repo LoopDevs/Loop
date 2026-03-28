@@ -15,6 +15,7 @@ const config: CapacitorConfig = {
     Keyboard: {
       resize: 'body',
       resizeOnFullScreen: true,
+      style: 'dark',
     },
     PushNotifications: {
       presentationOptions: ['badge', 'sound', 'alert'],

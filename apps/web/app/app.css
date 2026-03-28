@@ -131,6 +131,31 @@ input[type='number'] {
   }
 }
 
+/* Prevent text selection and callout on interactive elements (native only) */
+html.native button,
+html.native a,
+html.native [role='button'] {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Allow text selection on inputs and content areas */
+html.native input,
+html.native textarea,
+html.native [contenteditable],
+html.native .prose,
+html.native p,
+html.native .selectable {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Disable Android overscroll glow — looks non-native in an app */
+html.native body {
+  overscroll-behavior: none;
+}
+
 /* Native safe areas — applied when running inside Capacitor */
 .native-safe-top {
   padding-top: env(safe-area-inset-top);

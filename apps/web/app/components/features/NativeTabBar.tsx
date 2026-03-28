@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router';
 import { useNativePlatform } from '~/hooks/use-native-platform';
+import { triggerHaptic } from '~/native/haptics';
 
 interface Tab {
   path: string;
@@ -43,6 +44,13 @@ export function NativeTabBar(): React.JSX.Element | null {
               key={tab.path}
               to={tab.path}
               aria-label={tab.label}
+              onClick={(e) => {
+                void triggerHaptic();
+                if (tab.path === activeTabPath) {
+                  e.preventDefault();
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+              }}
               className={`flex flex-col items-center justify-center flex-1 h-full transition-colors ${isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`}
             >
               <span className="text-xl leading-none mb-0.5">

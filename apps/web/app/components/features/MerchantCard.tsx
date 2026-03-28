@@ -2,6 +2,7 @@ import { Link } from 'react-router';
 import type { Merchant } from '@loop/shared';
 import { toSlug } from '~/hooks/slug';
 import { getImageProxyUrl } from '~/utils/image';
+import { triggerHaptic } from '~/native/haptics';
 
 export interface MerchantCardProps {
   merchant: Merchant;
@@ -21,7 +22,14 @@ export function MerchantCard({
     merchant.logoUrl !== undefined ? getImageProxyUrl(merchant.logoUrl, 160) : undefined;
 
   return (
-    <Link to={`/gift-card/${slug}`} className="group block" data-index={displayIndex}>
+    <Link
+      to={`/gift-card/${slug}`}
+      className="group block"
+      data-index={displayIndex}
+      onClick={() => {
+        void triggerHaptic();
+      }}
+    >
       <div
         className={`overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 transition-all duration-300 md:group-hover:shadow-xl md:group-hover:-translate-y-1 ${className}`}
       >
