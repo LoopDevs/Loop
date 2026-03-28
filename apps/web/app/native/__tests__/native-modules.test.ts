@@ -93,6 +93,7 @@ import { nativeShare } from '../share';
 import { checkBiometrics, authenticateWithBiometrics } from '../biometrics';
 import { isAppLockEnabled, setAppLockEnabled, registerAppLockGuard } from '../app-lock';
 import { openWebView } from '../webview';
+import { savePendingOrder, loadPendingOrder, clearPendingOrder } from '../purchase-storage';
 
 // ────────────────────────────────────────────────────────────
 // 1. Platform
@@ -494,5 +495,46 @@ describe('webview', () => {
     });
 
     expect(controller).toHaveProperty('close');
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// 13. Purchase Storage
+// ────────────────────────────────────────────────────────────
+describe('purchase-storage', () => {
+  beforeEach(() => {
+    mockSessionStorage.store.clear();
+  });
+
+  it('savePendingOrder stores to sessionStorage on web', async () => {
+    await savePendingOrder({ orderId: 'test-123', step: 'payment' });
+    const stored = mockSessionStorage.getItem('loop_pending_order');
+    expect(stored).not.toBeNull();
+    expect(JSON.parse(stored!)).toEqual({ orderId: 'test-123', step: 'payment' });
+  });
+
+  it('loadPendingOrder returns data if not expired', async () => {
+    const data = { step: 'payment', expiresAt: Math.floor(Date.now() / 1000) + 3600 };
+    mockSessionStorage.setItem('loop_pending_order', JSON.stringify(data));
+    const result = await loadPendingOrder();
+    expect(result).toEqual(data);
+  });
+
+  it('loadPendingOrder returns null if expired', async () => {
+    const data = { step: 'payment', expiresAt: Math.floor(Date.now() / 1000) - 100 };
+    mockSessionStorage.setItem('loop_pending_order', JSON.stringify(data));
+    const result = await loadPendingOrder();
+    expect(result).toBeNull();
+  });
+
+  it('loadPendingOrder returns null if no data stored', async () => {
+    const result = await loadPendingOrder();
+    expect(result).toBeNull();
+  });
+
+  it('clearPendingOrder removes from sessionStorage', async () => {
+    mockSessionStorage.setItem('loop_pending_order', '{}');
+    await clearPendingOrder();
+    expect(mockSessionStorage.getItem('loop_pending_order')).toBeNull();
   });
 });
