@@ -26,6 +26,7 @@ export function useMerchants(options: UseMerchantsOptions = {}): UseMerchantsRes
     queryFn: () => fetchMerchants({ page, limit, ...(q !== undefined ? { q } : {}) }),
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 
   return {
@@ -50,6 +51,7 @@ export function useMerchantBySlug(slug: string): {
     queryFn: () => fetchMerchantBySlug(slug),
     staleTime: 5 * 60 * 1000,
     enabled: slug.length > 0,
+    refetchOnReconnect: true,
   });
 
   return {
@@ -72,6 +74,7 @@ export function useMerchant(id: string): {
     queryFn: () => fetchMerchant(id),
     staleTime: 5 * 60 * 1000,
     enabled: id.length > 0,
+    refetchOnReconnect: true,
   });
 
   return {

@@ -62,23 +62,82 @@ const INITIAL_STATE: PurchaseState = {
   error: null,
 };
 
-export const usePurchaseStore = create<PurchaseState & PurchaseActions>((set) => ({
+const STORAGE_KEY = 'loop_pending_order';
+
+function loadPendingOrder(): Partial<PurchaseState> | null {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as Partial<PurchaseState>;
+    // Only restore if not expired
+    if (data.expiresAt && data.expiresAt > Math.floor(Date.now() / 1000)) {
+      return data;
+    }
+    sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* sessionStorage unavailable */
+  }
+  return null;
+}
+
+function clearPendingOrder(): void {
+  try {
+    sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* sessionStorage unavailable */
+  }
+}
+
+const restored = loadPendingOrder();
+
+export const usePurchaseStore = create<PurchaseState & PurchaseActions>((set, get) => ({
   ...INITIAL_STATE,
+  ...(restored ?? {}),
 
   startPurchase: (merchantId, merchantName) => set({ ...INITIAL_STATE, merchantId, merchantName }),
 
   setAmount: (amount) => set({ amount }),
 
-  setOrderCreated: ({ orderId, paymentAddress, xlmAmount, expiresAt, memo }) =>
-    set({ step: 'payment', orderId, paymentAddress, xlmAmount, expiresAt, memo }),
+  setOrderCreated: ({ orderId, paymentAddress, xlmAmount, expiresAt, memo }) => {
+    set({ step: 'payment', orderId, paymentAddress, xlmAmount, expiresAt, memo });
+    // Persist so app kill doesn't lose payment state
+    try {
+      sessionStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          step: 'payment',
+          orderId,
+          paymentAddress,
+          xlmAmount,
+          expiresAt,
+          memo,
+          merchantId: get().merchantId,
+          merchantName: get().merchantName,
+          amount: get().amount,
+        }),
+      );
+    } catch {
+      /* sessionStorage unavailable */
+    }
+  },
 
-  setComplete: (giftCardCode, giftCardPin) =>
-    set({ step: 'complete', giftCardCode, giftCardPin: giftCardPin ?? null }),
+  setComplete: (giftCardCode, giftCardPin) => {
+    clearPendingOrder();
+    set({ step: 'complete', giftCardCode, giftCardPin: giftCardPin ?? null });
+  },
 
-  setRedeemRequired: ({ redeemUrl, redeemChallengeCode, redeemScripts }) =>
-    set({ step: 'redeem', redeemUrl, redeemChallengeCode, redeemScripts: redeemScripts ?? null }),
+  setRedeemRequired: ({ redeemUrl, redeemChallengeCode, redeemScripts }) => {
+    clearPendingOrder();
+    set({ step: 'redeem', redeemUrl, redeemChallengeCode, redeemScripts: redeemScripts ?? null });
+  },
 
-  setError: (message) => set({ step: 'error', error: message }),
+  setError: (message) => {
+    clearPendingOrder();
+    set({ step: 'error', error: message });
+  },
 
-  reset: () => set(INITIAL_STATE),
+  reset: () => {
+    clearPendingOrder();
+    set(INITIAL_STATE);
+  },
 }));

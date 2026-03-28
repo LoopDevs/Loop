@@ -35,6 +35,7 @@ export function PaymentStep({
   const [expired, setExpired] = useState(false);
   const consecutiveErrors = useRef(0);
   const [copied, setCopied] = useState(false);
+  const [connectionIssue, setConnectionIssue] = useState(false);
 
   const handleCopy = async (text: string): Promise<void> => {
     const ok = await copyToClipboard(text);
@@ -92,6 +93,8 @@ export function PaymentStep({
       void (async () => {
         try {
           const { order } = await fetchOrder(orderId);
+          setConnectionIssue(false);
+          consecutiveErrors.current = 0;
           if (order.status === 'completed') {
             if (order.redeemUrl && order.redeemChallengeCode) {
               // URL-based redemption — switch to redeem flow
@@ -114,25 +117,22 @@ export function PaymentStep({
             return;
           }
           // Still pending — trigger next poll via state update
-          consecutiveErrors.current = 0;
           setTimeLeft((prev) => prev); // force re-render to schedule next poll
         } catch (err) {
           consecutiveErrors.current++;
-          // Permanent failure: auth expired or service down — stop polling
-          if (err instanceof ApiException && (err.status === 401 || err.status === 503)) {
-            store.setError(
-              err.status === 401
-                ? 'Your session has expired. Please sign in again.'
-                : 'Service temporarily unavailable. Please try again later.',
-            );
+          setConnectionIssue(true);
+          // Permanent failure: auth expired — stop polling
+          if (err instanceof ApiException && err.status === 401) {
+            store.setError('Your session has expired. Please sign in again.');
             return;
           }
-          // After 5 consecutive transient errors, give up
-          if (consecutiveErrors.current >= 5) {
-            store.setError('Unable to check order status. Please try again later.');
-            return;
+          // Service down — pause but don't give up (will retry on next cycle)
+          if (err instanceof ApiException && err.status === 503) {
+            // Don't increment, just wait for next poll
+            consecutiveErrors.current--;
           }
-          // Otherwise retry on next poll cycle
+          // Network/transient errors: keep retrying (don't give up)
+          // The countdown timer continues, polling retries each cycle
         }
       })();
     }, POLL_INTERVAL_MS);
@@ -196,6 +196,12 @@ export function PaymentStep({
           >
             {copied ? 'Copied!' : 'Copy memo'}
           </button>
+        </div>
+      )}
+
+      {connectionIssue && !expired && (
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 text-center text-sm text-yellow-700 dark:text-yellow-300 mb-4">
+          Connection issue — still checking for your payment...
         </div>
       )}
 

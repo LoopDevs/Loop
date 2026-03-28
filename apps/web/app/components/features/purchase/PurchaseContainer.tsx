@@ -10,6 +10,7 @@ import { PurchaseComplete } from './PurchaseComplete';
 import { RedeemFlow } from './RedeemFlow';
 import { Button } from '~/components/ui/Button';
 import { triggerHaptic, triggerHapticNotification } from '~/native/haptics';
+import { friendlyError } from '~/utils/error-messages';
 
 interface PurchaseContainerProps {
   merchant: Merchant;
@@ -101,8 +102,8 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
         memo: result.memo,
       });
       void triggerHapticNotification('success');
-    } catch {
-      setOrderError('Failed to create order. Please try again.');
+    } catch (err) {
+      setOrderError(friendlyError(err, 'Failed to create order. Please try again.'));
       void triggerHapticNotification('error');
     } finally {
       setIsCreatingOrder(false);
