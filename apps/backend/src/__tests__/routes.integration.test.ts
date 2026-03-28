@@ -26,6 +26,7 @@ vi.mock('../logger.js', () => ({
 vi.mock('../clustering/data-store.js', () => ({
   startLocationRefresh: vi.fn(),
   getLocations: () => ({ locations: [], loadedAt: Date.now() }),
+  isLocationLoading: () => false,
 }));
 
 vi.mock('../merchants/sync.js', () => ({

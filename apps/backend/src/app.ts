@@ -6,7 +6,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
 import { logger as honoLogger } from 'hono/logger';
 import { env } from './env.js';
-import { getLocations } from './clustering/data-store.js';
+import { getLocations, isLocationLoading } from './clustering/data-store.js';
 import { getMerchants } from './merchants/sync.js';
 import { clustersHandler } from './clustering/handler.js';
 import { imageProxyHandler, evictExpiredImageCache } from './images/proxy.js';
@@ -97,6 +97,7 @@ app.get('/health', async (c) => {
   return c.json({
     status: degraded ? 'degraded' : 'healthy',
     locationCount: locations.length,
+    locationsLoading: isLocationLoading(),
     merchantCount: merchants.length,
     merchantsLoadedAt: new Date(merLoadedAt).toISOString(),
     locationsLoadedAt: new Date(locLoadedAt).toISOString(),

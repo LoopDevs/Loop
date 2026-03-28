@@ -38,6 +38,11 @@ export function getLocations(): StoreData {
 
 let isLocationRefreshing = false;
 
+/** Returns true while a location refresh is in progress. */
+export function isLocationLoading(): boolean {
+  return isLocationRefreshing;
+}
+
 /**
  * Fetches all location pages from the upstream API and atomically replaces
  * the in-memory store.
@@ -94,6 +99,10 @@ export async function refreshLocations(): Promise<void> {
           latitude: lat,
           longitude: lng,
         });
+      }
+
+      if (page % 10 === 0 || page === totalPages) {
+        log.info({ page, totalPages, locationsSoFar: locations.length }, 'Location sync progress');
       }
 
       page++;

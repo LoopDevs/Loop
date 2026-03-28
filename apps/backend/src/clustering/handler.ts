@@ -114,7 +114,10 @@ export async function clustersHandler(c: Context): Promise<Response> {
 
       const bytes = msg.toBinary();
       return new Response(bytes, {
-        headers: { 'Content-Type': PROTOBUF_MIME },
+        headers: {
+          'Content-Type': PROTOBUF_MIME,
+          'Cache-Control': 'public, max-age=60',
+        },
       });
     } catch {
       // Protobuf types not yet generated — fall through to JSON
@@ -122,6 +125,7 @@ export async function clustersHandler(c: Context): Promise<Response> {
     }
   }
 
+  c.header('Cache-Control', 'public, max-age=60'); // 1 minute cache for clusters
   return c.json({
     locationPoints: result.locationPoints,
     clusterPoints: result.clusterPoints,

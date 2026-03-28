@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { savePendingOrder, clearPendingOrder as clearPending } from '~/native/purchase-storage';
 
 export type PurchaseStep = 'amount' | 'payment' | 'processing' | 'complete' | 'redeem' | 'error';
 
@@ -62,33 +63,26 @@ const INITIAL_STATE: PurchaseState = {
   error: null,
 };
 
-const STORAGE_KEY = 'loop_pending_order';
-
-function loadPendingOrder(): Partial<PurchaseState> | null {
+/**
+ * Synchronous sessionStorage restore for initial web state.
+ * On native, async restoration happens via useSessionRestore.
+ */
+function loadPendingOrderSync(): Partial<PurchaseState> | null {
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
+    const raw = sessionStorage.getItem('loop_pending_order');
     if (!raw) return null;
     const data = JSON.parse(raw) as Partial<PurchaseState>;
-    // Only restore if not expired
     if (data.expiresAt && data.expiresAt > Math.floor(Date.now() / 1000)) {
       return data;
     }
-    sessionStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem('loop_pending_order');
   } catch {
-    /* sessionStorage unavailable */
+    /* sessionStorage unavailable (native or SSR) */
   }
   return null;
 }
 
-function clearPendingOrder(): void {
-  try {
-    sessionStorage.removeItem(STORAGE_KEY);
-  } catch {
-    /* sessionStorage unavailable */
-  }
-}
-
-const restored = loadPendingOrder();
+const restored = loadPendingOrderSync();
 
 export const usePurchaseStore = create<PurchaseState & PurchaseActions>((set, get) => ({
   ...INITIAL_STATE,
@@ -101,43 +95,36 @@ export const usePurchaseStore = create<PurchaseState & PurchaseActions>((set, ge
   setOrderCreated: ({ orderId, paymentAddress, xlmAmount, expiresAt, memo }) => {
     set({ step: 'payment', orderId, paymentAddress, xlmAmount, expiresAt, memo });
     // Persist so app kill doesn't lose payment state
-    try {
-      sessionStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
-          step: 'payment',
-          orderId,
-          paymentAddress,
-          xlmAmount,
-          expiresAt,
-          memo,
-          merchantId: get().merchantId,
-          merchantName: get().merchantName,
-          amount: get().amount,
-        }),
-      );
-    } catch {
-      /* sessionStorage unavailable */
-    }
+    void savePendingOrder({
+      step: 'payment',
+      orderId,
+      paymentAddress,
+      xlmAmount,
+      expiresAt,
+      memo,
+      merchantId: get().merchantId,
+      merchantName: get().merchantName,
+      amount: get().amount,
+    });
   },
 
   setComplete: (giftCardCode, giftCardPin) => {
-    clearPendingOrder();
+    void clearPending();
     set({ step: 'complete', giftCardCode, giftCardPin: giftCardPin ?? null });
   },
 
   setRedeemRequired: ({ redeemUrl, redeemChallengeCode, redeemScripts }) => {
-    clearPendingOrder();
+    void clearPending();
     set({ step: 'redeem', redeemUrl, redeemChallengeCode, redeemScripts: redeemScripts ?? null });
   },
 
   setError: (message) => {
-    clearPendingOrder();
+    void clearPending();
     set({ step: 'error', error: message });
   },
 
   reset: () => {
-    clearPendingOrder();
+    void clearPending();
     set(INITIAL_STATE);
   },
 }));

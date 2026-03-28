@@ -1,4 +1,4 @@
-import type { VerifyOtpResponse, RefreshResponse } from '@loop/shared';
+import type { VerifyOtpResponse } from '@loop/shared';
 import { getPlatform } from '~/native/platform';
 import { apiRequest } from './api-client';
 
@@ -18,14 +18,6 @@ export async function verifyOtp(email: string, otp: string): Promise<VerifyOtpRe
   return apiRequest<VerifyOtpResponse>('/api/auth/verify-otp', {
     method: 'POST',
     body: { email, otp, platform: getPlatform() },
-  });
-}
-
-/** Exchanges a refresh token for a new access token. */
-export async function refreshAccessToken(refreshToken: string): Promise<RefreshResponse> {
-  return apiRequest<RefreshResponse>('/api/auth/refresh', {
-    method: 'POST',
-    body: { refreshToken, platform: getPlatform() },
   });
 }
 

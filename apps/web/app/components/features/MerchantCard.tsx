@@ -8,12 +8,15 @@ export interface MerchantCardProps {
   merchant: Merchant;
   displayIndex?: number;
   className?: string;
+  /** When true, images load eagerly (use for above-the-fold cards). */
+  eager?: boolean;
 }
 
 export function MerchantCard({
   merchant,
   displayIndex = 0,
   className = '',
+  eager = false,
 }: MerchantCardProps): React.JSX.Element {
   const slug = toSlug(merchant.name);
   const cardImgUrl =
@@ -39,7 +42,7 @@ export function MerchantCard({
             <img
               src={cardImgUrl}
               alt={`${merchant.name} card`}
-              loading="lazy"
+              loading={eager ? 'eager' : 'lazy'}
               decoding="async"
               width={640}
               height={360}
@@ -59,7 +62,7 @@ export function MerchantCard({
               <img
                 src={logoImgUrl}
                 alt={`${merchant.name} logo`}
-                loading="lazy"
+                loading={eager ? 'eager' : 'lazy'}
                 decoding="async"
                 width={80}
                 height={80}

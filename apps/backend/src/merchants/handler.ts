@@ -29,6 +29,7 @@ export function merchantListHandler(c: Context): Response {
   const start = (page - 1) * limit;
   const paginated = filtered.slice(start, start + limit);
 
+  c.header('Cache-Control', 'public, max-age=300'); // 5 minute cache
   return c.json({
     merchants: paginated,
     pagination: {
@@ -57,6 +58,7 @@ export function merchantBySlugHandler(c: Context): Response {
     return c.json({ code: 'NOT_FOUND', message: 'Merchant not found' }, 404);
   }
 
+  c.header('Cache-Control', 'public, max-age=300'); // 5 minute cache
   return c.json({ merchant });
 }
 
@@ -72,5 +74,6 @@ export function merchantDetailHandler(c: Context): Response {
     return c.json({ code: 'NOT_FOUND', message: 'Merchant not found' }, 404);
   }
 
+  c.header('Cache-Control', 'public, max-age=300'); // 5 minute cache
   return c.json({ merchant });
 }

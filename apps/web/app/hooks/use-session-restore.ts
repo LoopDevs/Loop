@@ -46,6 +46,18 @@ export function useSessionRestore(): { isRestoring: boolean } {
         }
       } catch {
         // Refresh failed — user will need to log in again
+      }
+
+      // Also restore any pending purchase (native Preferences survive app kill)
+      try {
+        const { loadPendingOrder } = await import('~/native/purchase-storage');
+        const pending = await loadPendingOrder();
+        if (pending && pending.step === 'payment') {
+          const { usePurchaseStore } = await import('~/stores/purchase.store');
+          usePurchaseStore.setState(pending);
+        }
+      } catch {
+        // purchase restore failed — not critical
       } finally {
         setIsRestoring(false);
       }

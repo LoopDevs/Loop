@@ -78,7 +78,12 @@ function HomeContent(): React.JSX.Element {
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
               {featured.map((merchant, i) => (
-                <MerchantCard key={merchant.id} merchant={merchant} displayIndex={i} />
+                <MerchantCard
+                  key={merchant.id}
+                  merchant={merchant}
+                  displayIndex={i}
+                  eager={i < 4}
+                />
               ))}
             </div>
           </section>
@@ -101,7 +106,12 @@ function HomeContent(): React.JSX.Element {
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
               {merchants.map((merchant, i) => (
-                <MerchantCard key={merchant.id} merchant={merchant} displayIndex={i + 6} />
+                <MerchantCard
+                  key={merchant.id}
+                  merchant={merchant}
+                  displayIndex={i + 6}
+                  eager={i < 4}
+                />
               ))}
             </div>
           )}
