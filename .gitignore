@@ -49,6 +49,9 @@ coverage/
 *.postman_collection.json
 *.postman_environment.json
 
+# Test payment script (contains wallet secret key)
+scripts/pay-order.mjs
+
 # Misc
 *.db
 merchants.db

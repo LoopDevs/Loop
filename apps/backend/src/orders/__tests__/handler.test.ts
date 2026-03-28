@@ -150,6 +150,47 @@ describe('POST /api/orders', () => {
     expect(body.code).toBe('UNAUTHORIZED');
   });
 
+  it('forwards X-Client-Id header to upstream', async () => {
+    // Put merchant in cache
+    mockGetMerchants.mockReturnValue({
+      merchants: [{ id: 'm-1', name: 'Test' }],
+      merchantsById: new Map([
+        ['m-1', { id: 'm-1', name: 'Test', denominations: { currency: 'USD' } }],
+      ]),
+      merchantsBySlug: new Map(),
+      loadedAt: Date.now(),
+    });
+
+    // Mock successful upstream response
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'order-1',
+          paymentCryptoAmount: '1.0',
+          paymentUrls: { XLM: 'web+stellar:pay?destination=GXXX&amount=1.0&memo=test' },
+          status: 'unpaid',
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await app.request('/api/orders', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-token',
+        'X-Client-Id': 'loopweb',
+      },
+      body: JSON.stringify({ merchantId: 'm-1', amount: 10 }),
+    });
+
+    // Verify X-Client-Id was forwarded to upstream
+    const fetchCall = mockFetch.mock.calls[0]!;
+    const fetchInit = fetchCall[1] as RequestInit;
+    const headers = fetchInit.headers as Record<string, string>;
+    expect(headers['X-Client-Id']).toBe('loopweb');
+  });
+
   it('returns 201 with mapped data on success', async () => {
     mockGetMerchants.mockReturnValue({
       merchants: [{ id: 'm-1', name: 'Test Store', denominations: { currency: 'USD' } }],

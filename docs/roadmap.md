@@ -48,9 +48,9 @@ The migration plan (`docs/migration.md`) covered getting the monorepo to a worki
 ### Upstream API integration
 
 - [x] ~~Obtain production credentials~~ — no credentials needed; upstream API is public
-- [ ] Validate order creation flow end-to-end with real credentials
-- [ ] Confirm merchant sync pagination works with full catalog
-- [ ] Confirm location data sync and clustering against real data
+- [x] ~~Validate order creation flow end-to-end with real credentials~~ — tested with real CTX Bearer token, orders created successfully
+- [x] ~~Confirm merchant sync pagination works with full catalog~~ — 117 merchants across 12 pages
+- [x] ~~Confirm location data sync and clustering against real data~~ — 116,219 locations, clustering verified at multiple zoom levels
 - [ ] Test gift card barcode/PIN retrieval in purchase flow
 
 ### Brand & design

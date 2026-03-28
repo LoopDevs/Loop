@@ -87,8 +87,14 @@ export async function authenticatedRequest<T>(
 ): Promise<T> {
   // Lazy import to avoid circular deps and allow store to hydrate first
   const { useAuthStore } = await import('~/stores/auth.store');
+  const { getPlatform } = await import('~/native/platform');
   const store = useAuthStore.getState();
   let token = store.accessToken;
+
+  // Map platform to CTX client ID
+  const platform = getPlatform();
+  const clientIdMap = { web: 'loopweb', ios: 'loopios', android: 'loopandroid' } as const;
+  const clientId = clientIdMap[platform] ?? 'loopweb';
 
   // If no token in memory, try to refresh before the first attempt
   if (token === null) {
@@ -103,7 +109,7 @@ export async function authenticatedRequest<T>(
   try {
     return await apiRequest<T>(path, {
       ...options,
-      headers: { ...options.headers, Authorization: `Bearer ${token}` },
+      headers: { ...options.headers, Authorization: `Bearer ${token}`, 'X-Client-Id': clientId },
     });
   } catch (err) {
     // On 401, attempt one silent refresh and retry
@@ -113,7 +119,11 @@ export async function authenticatedRequest<T>(
         useAuthStore.getState().setAccessToken(newToken);
         return apiRequest<T>(path, {
           ...options,
-          headers: { ...options.headers, Authorization: `Bearer ${newToken}` },
+          headers: {
+            ...options.headers,
+            Authorization: `Bearer ${newToken}`,
+            'X-Client-Id': clientId,
+          },
         });
       }
       // Refresh also failed — clear stale session

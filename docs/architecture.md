@@ -185,3 +185,39 @@ POST /api/orders             [authenticated]
 GET  /api/orders             [authenticated]
 GET  /api/orders/:id         [authenticated]
 ```
+
+---
+
+## CTX upstream field mapping
+
+Our backend maps CTX API responses to Loop's internal types. Key transformations:
+
+### Order creation (`POST /gift-cards`)
+
+| CTX field             | Loop field                             | Notes                              |
+| --------------------- | -------------------------------------- | ---------------------------------- |
+| `id`                  | `orderId`                              |                                    |
+| `paymentCryptoAmount` | `xlmAmount`                            |                                    |
+| `paymentUrls.XLM`     | `paymentUri`, `paymentAddress`, `memo` | Stellar URI parsed into components |
+
+### Order status
+
+| CTX status  | Loop status |
+| ----------- | ----------- |
+| `unpaid`    | `pending`   |
+| `fulfilled` | `completed` |
+| `expired`   | `expired`   |
+| `refunded`  | `failed`    |
+
+### Order detail (`GET /gift-cards/:id`)
+
+| CTX field                 | Loop field            |
+| ------------------------- | --------------------- |
+| `cardFiatAmount` (string) | `amount` (number)     |
+| `cardFiatCurrency`        | `currency`            |
+| `redeemUrlChallenge`      | `redeemChallengeCode` |
+| `created` (ISO string)    | `createdAt`           |
+
+### Auth
+
+All auth requests include `clientId` mapped from platform: `web` → `loopweb`, `ios` → `loopios`, `android` → `loopandroid`. All authenticated upstream requests include `X-Client-Id` header.

@@ -115,6 +115,10 @@ VITE_API_URL=http://localhost:8080
 GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # Optional:
 # GIFT_CARD_API_KEY=<key>              — needed for /locations endpoint
+# GIFT_CARD_API_SECRET=<secret>        — needed for /locations endpoint
+# CTX_CLIENT_ID_WEB=loopweb           — client ID for web auth (default: loopweb)
+# CTX_CLIENT_ID_IOS=loopios           — client ID for iOS auth (default: loopios)
+# CTX_CLIENT_ID_ANDROID=loopandroid   — client ID for Android auth (default: loopandroid)
 # INCLUDE_DISABLED_MERCHANTS=true      — dev mode: show disabled merchants
 ```
 

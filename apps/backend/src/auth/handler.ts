@@ -202,5 +202,12 @@ export async function requireAuth(c: Context, next: () => Promise<void>): Promis
   }
 
   c.set('bearerToken', token);
+
+  // Forward X-Client-Id if present — CTX uses this to determine entity context
+  const clientId = c.req.header('X-Client-Id');
+  if (clientId) {
+    c.set('clientId', clientId);
+  }
+
   await next();
 }

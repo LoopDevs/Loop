@@ -7,6 +7,18 @@ import { upstreamUrl } from '../upstream.js';
 
 const log = logger.child({ handler: 'orders' });
 
+/** Builds auth headers for upstream requests, including optional X-Client-Id. */
+function upstreamHeaders(c: Context): Record<string, string> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${c.get('bearerToken') as string}`,
+  };
+  const clientId = c.get('clientId') as string | undefined;
+  if (clientId) {
+    headers['X-Client-Id'] = clientId;
+  }
+  return headers;
+}
+
 const CreateOrderBody = z.object({
   merchantId: z.string().min(1),
   amount: z.number().positive(),
@@ -67,7 +79,7 @@ export async function createOrderHandler(c: Context): Promise<Response> {
     );
   }
 
-  const bearerToken = c.get('bearerToken') as string;
+  // bearerToken + clientId handled by upstreamHeaders(c)
   const { merchantId, amount } = parsed.data;
 
   // Look up merchant — reject if not in cache
@@ -82,8 +94,8 @@ export async function createOrderHandler(c: Context): Promise<Response> {
     const response = await upstreamCircuit.fetch(upstreamUrl('/gift-cards'), {
       method: 'POST',
       headers: {
+        ...upstreamHeaders(c),
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${bearerToken}`,
       },
       body: JSON.stringify({
         cryptoCurrency: 'XLM',
@@ -150,7 +162,7 @@ export async function createOrderHandler(c: Context): Promise<Response> {
  * Authenticated. Proxies to upstream GET /gift-cards.
  */
 export async function listOrdersHandler(c: Context): Promise<Response> {
-  const bearerToken = c.get('bearerToken') as string;
+  // bearerToken + clientId handled by upstreamHeaders(c)
 
   try {
     const url = new URL(upstreamUrl('/gift-cards'));
@@ -160,7 +172,7 @@ export async function listOrdersHandler(c: Context): Promise<Response> {
     }
 
     const response = await upstreamCircuit.fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${bearerToken}` },
+      headers: upstreamHeaders(c),
       signal: AbortSignal.timeout(15_000),
     });
 
@@ -227,7 +239,7 @@ export async function listOrdersHandler(c: Context): Promise<Response> {
  * Authenticated. Proxies to upstream GET /gift-cards/:id.
  */
 export async function getOrderHandler(c: Context): Promise<Response> {
-  const bearerToken = c.get('bearerToken') as string;
+  // bearerToken + clientId handled by upstreamHeaders(c)
   const orderId = c.req.param('id') ?? '';
 
   // Sanitize order ID — reject path traversal or non-alphanumeric/dash/underscore
@@ -237,7 +249,7 @@ export async function getOrderHandler(c: Context): Promise<Response> {
 
   try {
     const response = await upstreamCircuit.fetch(upstreamUrl(`/gift-cards/${orderId}`), {
-      headers: { Authorization: `Bearer ${bearerToken}` },
+      headers: upstreamHeaders(c),
       signal: AbortSignal.timeout(15_000),
     });
 

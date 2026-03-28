@@ -140,6 +140,8 @@ export function startMerchantRefresh(): void {
  */
 function mapUpstreamMerchant(item: UpstreamMerchant): Merchant | null {
   if (!item.name) return null;
+  // NOTE: CTX currently returns all 117 merchants with enabled: true.
+  // This filter only matters if CTX starts returning disabled merchants.
   if (!item.enabled && !env.INCLUDE_DISABLED_MERCHANTS) return null;
 
   // Parse denominations from the flat upstream fields
