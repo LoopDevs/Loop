@@ -32,7 +32,10 @@ export function MerchantCard({
               src={cardImgUrl}
               alt={`${merchant.name} card`}
               loading="lazy"
-              className="w-full h-full object-cover transition-transform duration-300 md:group-hover:scale-105"
+              decoding="async"
+              width={640}
+              height={360}
+              className="w-full h-full object-cover transition-transform duration-300 md:group-hover:scale-105 text-transparent"
             />
           ) : (
             <div className="w-full h-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
@@ -49,7 +52,10 @@ export function MerchantCard({
                 src={logoImgUrl}
                 alt={`${merchant.name} logo`}
                 loading="lazy"
-                className="w-full h-full object-cover"
+                decoding="async"
+                width={80}
+                height={80}
+                className="w-full h-full object-cover text-transparent"
               />
             ) : (
               <span className="text-gray-500 text-sm font-bold">

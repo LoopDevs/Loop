@@ -18,7 +18,6 @@ import { registerBackButton } from '~/native/back-button';
 import { registerAppLockGuard } from '~/native/app-lock';
 import { OfflineBanner } from '~/components/ui/OfflineBanner';
 import { NativeBackButton } from '~/components/features/NativeBackButton';
-import { Spinner } from '~/components/ui/Spinner';
 import { useUiStore } from '~/stores/ui.store';
 import './app.css';
 
@@ -147,17 +146,7 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
 }
 
 export default function App(): React.JSX.Element {
-  const { isRestoring } = useSessionRestore();
-
-  if (isRestoring) {
-    return (
-      <QueryClientProvider client={queryClient}>
-        <div className="flex items-center justify-center min-h-screen">
-          <Spinner />
-        </div>
-      </QueryClientProvider>
-    );
-  }
+  useSessionRestore();
 
   return (
     <QueryClientProvider client={queryClient}>

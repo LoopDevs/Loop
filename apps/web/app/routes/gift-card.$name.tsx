@@ -80,9 +80,36 @@ export default function GiftCardRoute(): React.JSX.Element {
 
         <PurchaseContainer merchant={merchant} />
 
-        {merchant.description !== undefined && (
-          <div className="mt-8 prose dark:prose-invert max-w-none">
-            <p className="text-gray-600 dark:text-gray-300">{merchant.description}</p>
+        {merchant.description && (
+          <div className="mt-8">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">
+              About {merchant.name}
+            </h2>
+            <div className="text-gray-600 dark:text-gray-300 space-y-3 leading-relaxed">
+              {merchant.description.split('\n\n').map((paragraph, i) => (
+                <p key={i}>{paragraph}</p>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {merchant.instructions && (
+          <div className="mt-8">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">How to redeem</h2>
+            <div className="text-gray-600 dark:text-gray-300 space-y-3 leading-relaxed whitespace-pre-wrap text-sm">
+              {merchant.instructions}
+            </div>
+          </div>
+        )}
+
+        {merchant.terms && (
+          <div className="mt-8">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">
+              Terms & conditions
+            </h2>
+            <p className="text-gray-500 dark:text-gray-400 text-xs leading-relaxed whitespace-pre-wrap">
+              {merchant.terms}
+            </p>
           </div>
         )}
       </div>
