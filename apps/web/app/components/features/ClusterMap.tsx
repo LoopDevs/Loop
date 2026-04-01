@@ -78,8 +78,8 @@ export default function ClusterMap(): React.JSX.Element {
         const { merchantId, mapPinUrl } = point.properties;
 
         const iconHtml = mapPinUrl
-          ? `<img src="${getImageProxyUrl(mapPinUrl, 64)}" style="width:32px;height:32px;border-radius:50%;border:2px solid white;object-fit:cover;box-shadow:0 2px 6px rgba(0,0,0,0.3)" />`
-          : `<div style="width:32px;height:32px;border-radius:50%;background:#2563eb;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3)"></div>`;
+          ? `<div style="width:32px;height:32px;border-radius:6px;border:2px solid #fff;box-shadow:0 2px 5px rgba(0,0,0,0.3);background-image:url('${getImageProxyUrl(mapPinUrl, 64)}');background-size:cover;background-position:center;background-repeat:no-repeat;"></div>`
+          : `<div style="width:32px;height:32px;border-radius:6px;background:#2563eb;border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.3)"></div>`;
 
         const icon = L.divIcon({
           className: '',
@@ -102,6 +102,7 @@ export default function ClusterMap(): React.JSX.Element {
     if (mapContainerRef.current === null) return;
 
     let mounted = true;
+    let themeObserver: MutationObserver | null = null;
 
     void (async () => {
       const [leafletModule] = await Promise.all([
@@ -126,10 +127,37 @@ export default function ClusterMap(): React.JSX.Element {
         zoomControl: true,
       });
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
-        maxZoom: 19,
+      const isDark =
+        document.documentElement.classList.contains('dark') ||
+        (!document.documentElement.classList.contains('light') &&
+          window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+      const tileUrl = isDark
+        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+        : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+
+      const tileLayer = L.tileLayer(tileUrl, {
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+        maxZoom: 20,
+        subdomains: 'abcd',
       }).addTo(map);
+
+      // Watch for theme changes and swap tile layer
+      themeObserver = new MutationObserver(() => {
+        const nowDark =
+          document.documentElement.classList.contains('dark') ||
+          (!document.documentElement.classList.contains('light') &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches);
+        const newUrl = nowDark
+          ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+          : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+        tileLayer.setUrl(newUrl);
+      });
+      themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['class'],
+      });
 
       mapRef.current = map;
 
@@ -149,6 +177,7 @@ export default function ClusterMap(): React.JSX.Element {
 
     return () => {
       mounted = false;
+      themeObserver?.disconnect();
       if (debounceRef.current !== null) clearTimeout(debounceRef.current);
       mapRef.current?.remove();
       mapRef.current = null;
