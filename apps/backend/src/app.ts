@@ -64,7 +64,12 @@ app.use(
         : '*',
   }),
 );
-app.use('*', secureHeaders());
+app.use(
+  '*',
+  secureHeaders({
+    crossOriginResourcePolicy: env.NODE_ENV === 'production' ? 'same-origin' : 'cross-origin',
+  }),
+);
 app.use('*', bodyLimit({ maxSize: 1024 * 1024 }));
 app.use('*', requestId());
 app.use('*', honoLogger());
