@@ -122,6 +122,32 @@ input[type='number'] {
   background: rgb(25 34 51);
 }
 
+/* Leaflet merchant popup styling */
+.merchant-popup .leaflet-popup-content-wrapper {
+  border-radius: 12px;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.merchant-popup .leaflet-popup-content {
+  margin: 0;
+  width: auto !important;
+}
+
+.merchant-popup .leaflet-popup-tip {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+html.dark .merchant-popup .leaflet-popup-content-wrapper {
+  background: #1f2937;
+  color: #f3f4f6;
+}
+
+html.dark .merchant-popup .leaflet-popup-tip {
+  background: #1f2937;
+}
+
 @keyframes loading {
   0% {
     background-position: -200px 0;

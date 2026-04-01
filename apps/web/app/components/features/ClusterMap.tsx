@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Map as LeafletMap, Layer } from 'leaflet';
 import type * as LeafletNamespace from 'leaflet';
 import type { ClusterParams, ClusterResponse } from '@loop/shared';
+import { merchantSlug } from '@loop/shared';
 import { fetchClusters } from '~/services/clusters';
 import { getImageProxyUrl } from '~/utils/image';
 import { useMerchants } from '~/hooks/use-merchants';
@@ -90,7 +91,34 @@ export default function ClusterMap(): React.JSX.Element {
 
         const marker = L.marker([lat, lng], { icon });
         const merchantName = merchantsById.current.get(merchantId) ?? merchantId;
-        marker.bindPopup(`<strong>${merchantName}</strong>`);
+        const slug = merchantSlug(merchantName);
+
+        // Build rich popup content
+        const popupContent = `
+          <div style="min-width:250px;font-family:system-ui,sans-serif;">
+            ${mapPinUrl ? `<div style="width:100%;height:120px;background-image:url('${getImageProxyUrl(mapPinUrl, 300)}');background-size:cover;background-position:center;border-radius:8px 8px 0 0;"></div>` : ''}
+            <div style="padding:12px;">
+              <div style="font-weight:600;font-size:15px;margin-bottom:4px;">${merchantName}</div>
+              <a href="/gift-card/${encodeURIComponent(slug)}"
+                 style="display:inline-block;margin-top:8px;padding:8px 16px;background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-size:13px;font-weight:500;">
+                Buy Gift Card
+              </a>
+            </div>
+          </div>
+        `;
+
+        const popup = L.popup({
+          minWidth: 260,
+          maxWidth: 300,
+          className: 'merchant-popup',
+          closeButton: true,
+        });
+        marker.bindPopup(popup);
+
+        marker.on('click', () => {
+          popup.setContent(popupContent);
+        });
+
         marker.addTo(map);
         markersRef.current.push(marker);
       }
