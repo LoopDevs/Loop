@@ -222,6 +222,15 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+      <div className="mb-4">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{merchant.name}</h3>
+        {merchant.savingsPercentage !== undefined && merchant.savingsPercentage > 0 && (
+          <span className="inline-block mt-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs font-semibold px-2 py-0.5 rounded-full">
+            Save {merchant.savingsPercentage.toFixed(1)}%
+          </span>
+        )}
+      </div>
+
       <div className="mb-4 text-sm text-gray-500 dark:text-gray-400">
         Purchasing as <strong className="text-gray-700 dark:text-gray-300">{email}</strong>
       </div>

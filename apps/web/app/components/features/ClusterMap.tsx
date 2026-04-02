@@ -9,11 +9,15 @@ import { useMerchants } from '~/hooks/use-merchants';
 
 const DEBOUNCE_MS = 300;
 
+interface ClusterMapProps {
+  onMerchantSelect?: ((merchantId: string) => void) | undefined;
+}
+
 /**
  * Full-screen Leaflet map with protobuf cluster data from the Loop backend.
  * This component is lazy-loaded — Leaflet requires browser APIs.
  */
-export default function ClusterMap(): React.JSX.Element {
+export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React.JSX.Element {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const markersRef = useRef<Layer[]>([]);
@@ -21,6 +25,11 @@ export default function ClusterMap(): React.JSX.Element {
   const [status, setStatus] = useState<string>('');
   const { merchants } = useMerchants({ limit: 1000 });
   const merchantsById = useRef(new Map<string, string>());
+  const onMerchantSelectRef = useRef(onMerchantSelect);
+
+  useEffect(() => {
+    onMerchantSelectRef.current = onMerchantSelect;
+  }, [onMerchantSelect]);
 
   useEffect(() => {
     merchantsById.current = new Map(merchants.map((m) => [m.id, m.name]));
@@ -117,6 +126,7 @@ export default function ClusterMap(): React.JSX.Element {
 
         marker.on('click', () => {
           popup.setContent(popupContent);
+          onMerchantSelectRef.current?.(merchantId);
         });
 
         marker.addTo(map);

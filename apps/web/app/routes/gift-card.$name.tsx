@@ -6,6 +6,7 @@ import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
 import { PurchaseContainer } from '~/components/features/purchase/PurchaseContainer';
 import { Spinner } from '~/components/ui/Spinner';
+import { LazyImage } from '~/components/ui/LazyImage';
 import { getImageProxyUrl } from '~/utils/image';
 
 export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
@@ -108,10 +109,13 @@ export default function GiftCardRoute(): React.JSX.Element {
                 {/* Card image */}
                 <div className="aspect-video bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-600 dark:to-gray-700 relative">
                   {cardUrl && (
-                    <img
+                    <LazyImage
                       src={cardUrl}
                       alt={`${merchant.name} card`}
-                      className="w-full h-full object-cover"
+                      width={640}
+                      height={360}
+                      eager
+                      className="w-full h-full"
                     />
                   )}
                 </div>
@@ -120,10 +124,13 @@ export default function GiftCardRoute(): React.JSX.Element {
                 <div className="flex justify-start -mt-10 px-6 mb-4 relative z-20">
                   <div className="w-20 h-20 bg-gray-50 dark:bg-gray-700 rounded-lg border-[3px] border-white dark:border-gray-800 shadow-md flex items-center justify-center overflow-hidden">
                     {logoUrl ? (
-                      <img
+                      <LazyImage
                         src={logoUrl}
                         alt={`${merchant.name} logo`}
-                        className="w-full h-full object-cover"
+                        width={80}
+                        height={80}
+                        eager
+                        className="w-full h-full"
                       />
                     ) : (
                       <span className="text-gray-400 text-xl font-bold">
@@ -203,10 +210,13 @@ export default function GiftCardRoute(): React.JSX.Element {
               <div className="flex items-center gap-6 mb-4">
                 {logoUrl && (
                   <div className="w-24 h-24 bg-gray-50 dark:bg-gray-800 rounded-lg border-[3px] border-white dark:border-gray-700 shadow-md flex items-center justify-center overflow-hidden flex-shrink-0">
-                    <img
+                    <LazyImage
                       src={logoUrl}
                       alt={`${merchant.name} logo`}
-                      className="w-full h-full object-cover"
+                      width={96}
+                      height={96}
+                      eager
+                      className="w-full h-full"
                     />
                   </div>
                 )}

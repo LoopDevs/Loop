@@ -20,6 +20,7 @@ import { getPlatform } from '~/native/platform';
 import { setupNotificationChannels } from '~/native/notifications';
 import { OfflineBanner } from '~/components/ui/OfflineBanner';
 import { NativeBackButton } from '~/components/features/NativeBackButton';
+import { ToastContainer } from '~/components/ui/ToastContainer';
 import { useUiStore } from '~/stores/ui.store';
 import './app.css';
 
@@ -149,6 +150,7 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
     <>
       <OfflineBanner />
       <NativeBackButton />
+      <ToastContainer />
       {isNative && <div className="native-safe-top" />}
       <div className={isNative ? 'native-tab-clearance' : ''}>
         {isNative ? (

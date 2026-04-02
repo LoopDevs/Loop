@@ -3,6 +3,7 @@ import type { Merchant } from '@loop/shared';
 import { toSlug } from '~/hooks/slug';
 import { getImageProxyUrl } from '~/utils/image';
 import { triggerHaptic } from '~/native/haptics';
+import { LazyImage } from '~/components/ui/LazyImage';
 
 export interface MerchantCardProps {
   merchant: Merchant;
@@ -39,14 +40,13 @@ export function MerchantCard({
         {/* Card image */}
         <div className="relative aspect-video overflow-hidden bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800">
           {cardImgUrl !== undefined ? (
-            <img
+            <LazyImage
               src={cardImgUrl}
               alt={`${merchant.name} card`}
-              loading={eager ? 'eager' : 'lazy'}
-              decoding="async"
               width={640}
               height={360}
-              className="w-full h-full object-cover transition-transform duration-300 md:group-hover:scale-105 text-transparent"
+              eager={eager}
+              className="w-full h-full"
             />
           ) : (
             <div className="w-full h-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
@@ -59,14 +59,13 @@ export function MerchantCard({
           {/* Logo */}
           <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gray-50 dark:bg-gray-800 rounded-lg border-[3px] border-white dark:border-gray-900 shadow-md flex items-center justify-center -mt-12 sm:-mt-16 mb-3 relative z-10 overflow-hidden">
             {logoImgUrl !== undefined ? (
-              <img
+              <LazyImage
                 src={logoImgUrl}
                 alt={`${merchant.name} logo`}
-                loading={eager ? 'eager' : 'lazy'}
-                decoding="async"
                 width={80}
                 height={80}
-                className="w-full h-full object-cover text-transparent"
+                eager={eager}
+                className="w-full h-full"
               />
             ) : (
               <span className="text-gray-500 text-sm font-bold">
