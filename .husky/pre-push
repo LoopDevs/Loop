@@ -1,2 +1,10 @@
+# Enforce branch naming convention
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [ "$BRANCH" != "main" ] && ! echo "$BRANCH" | grep -qE "^(feat|fix|chore|docs|test|refactor|perf|ci|build)/"; then
+  echo "ERROR: Branch name '$BRANCH' doesn't match convention."
+  echo "Use: feat/, fix/, chore/, docs/, test/, refactor/, perf/, ci/, build/"
+  exit 1
+fi
+
 npm test
 ./scripts/lint-docs.sh

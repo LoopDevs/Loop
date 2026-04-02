@@ -92,6 +92,19 @@ jobs:
         run: npm run build:mobile -w @loop/web
         env:
           VITE_API_URL: https://api.loopfinance.io
+      - name: Report bundle size
+        run: |
+          echo "## Bundle Size" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Asset | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|------|" >> $GITHUB_STEP_SUMMARY
+          SSR_SIZE=$(du -sh apps/web/build/client/ | cut -f1)
+          echo "| Web (SSR client) | $SSR_SIZE |" >> $GITHUB_STEP_SUMMARY
+          for f in apps/web/build/client/assets/*.js; do
+            SIZE=$(du -sh "$f" | cut -f1)
+            NAME=$(basename "$f")
+            echo "| $NAME | $SIZE |" >> $GITHUB_STEP_SUMMARY
+          done
 
   test-e2e:
     name: E2E tests

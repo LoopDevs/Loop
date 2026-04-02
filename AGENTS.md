@@ -156,7 +156,8 @@ Applied in order on every request:
 | Deploy config (Dockerfile, Fly.io, Vercel) | `docs/deployment.md`                                                 |
 | Test patterns or coverage rules            | `docs/testing.md`                                                    |
 | A code convention or standard              | `docs/standards.md`                                                  |
-| An architectural decision                  | Add/update `docs/adr/NNN-title.md`                                   |
+| An architectural decision                  | **Required:** Add/update `docs/adr/NNN-title.md` before implementing |
+| A new dependency                           | **Required:** ADR justifying the addition before `npm install`       |
 | File structure (add/move/delete files)     | `AGENTS.md` file boundaries table                                    |
 | `packages/shared` exports                  | Check both `apps/web` and `apps/backend` imports                     |
 | Dependencies (add/remove)                  | Verify no duplicates across packages                                 |
