@@ -16,7 +16,7 @@
     "@bufbuild/protobuf": "^2.11.0",
     "@hono/node-server": "^1.19.11",
     "@loop/shared": "*",
-    "@sentry/node": "^10.47.0",
+    "@sentry/hono": "^10.47.0",
     "hono": "^4.12.9",
     "pino": "^10.3.1",
     "sharp": "^0.34.5",

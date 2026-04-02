@@ -1,5 +1,5 @@
 import { serve } from '@hono/node-server';
-import * as Sentry from '@sentry/node';
+import * as Sentry from '@sentry/hono/node';
 import { env } from './env.js';
 import { logger } from './logger.js';
 import { app } from './app.js';
