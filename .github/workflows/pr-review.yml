@@ -1,0 +1,62 @@
+name: Claude PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    name: AI Code Review
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Review PR
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get the diff
+          DIFF=$(gh pr diff $PR_NUMBER)
+          
+          # Run Claude review
+          REVIEW=$(claude -p --print "You are reviewing a PR for the Loop gift card app. 
+
+Rules to check (from docs/standards.md and AGENTS.md):
+- No hardcoded secrets or tokens
+- No direct Capacitor imports outside app/native/
+- No server-side data fetching in loaders
+- No 'any' types except proto bridge
+- All upstream responses must be Zod-validated
+- Docs must be updated when code changes (check AGENTS.md doc update checklist)
+- Tests must be added for new logic
+- Conventional commit messages
+- No console.log in source
+
+Review this diff and provide:
+1. Any rule violations (CRITICAL)
+2. Any bugs or logic errors (HIGH)  
+3. Any suggestions for improvement (MEDIUM)
+4. Whether docs need updating (CHECK)
+
+If everything looks good, say so. Be concise.
+
+Diff:
+$DIFF" 2>/dev/null || echo "Review failed — check ANTHROPIC_API_KEY secret")
+          
+          # Post review as PR comment
+          if [ -n "$REVIEW" ] && [ "$REVIEW" != "Review failed — check ANTHROPIC_API_KEY secret" ]; then
+            gh pr comment $PR_NUMBER --body "## 🤖 Claude Code Review
+
+$REVIEW"
+          fi

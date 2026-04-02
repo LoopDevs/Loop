@@ -1,0 +1,40 @@
+name: PR Automation
+
+on:
+  pull_request:
+    types: [opened, synchronize, labeled]
+
+jobs:
+  label:
+    name: Auto-label
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/labeler@v5
+        with:
+          repo-token: "${{ secrets.GITHUB_TOKEN }}"
+
+  size-check:
+    name: PR size check
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check PR size
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ADDITIONS=$(gh pr view ${{ github.event.pull_request.number }} --json additions -q '.additions')
+          DELETIONS=$(gh pr view ${{ github.event.pull_request.number }} --json deletions -q '.deletions')
+          TOTAL=$((ADDITIONS + DELETIONS))
+          
+          echo "PR size: +$ADDITIONS -$DELETIONS ($TOTAL lines changed)"
+          
+          if [ "$TOTAL" -gt 500 ]; then
+            gh pr comment ${{ github.event.pull_request.number }} --body "⚠️ **Large PR** — $TOTAL lines changed (+$ADDITIONS/-$DELETIONS). Consider splitting into smaller PRs for easier review."
+          fi

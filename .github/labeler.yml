@@ -1,0 +1,29 @@
+backend:
+  - changed-files:
+    - any-glob-to-any-file: 'apps/backend/**'
+
+web:
+  - changed-files:
+    - any-glob-to-any-file: 'apps/web/**'
+
+mobile:
+  - changed-files:
+    - any-glob-to-any-file: 'apps/mobile/**'
+
+shared:
+  - changed-files:
+    - any-glob-to-any-file: 'packages/shared/**'
+
+docs:
+  - changed-files:
+    - any-glob-to-any-file: 'docs/**'
+    - any-glob-to-any-file: '*.md'
+
+ci:
+  - changed-files:
+    - any-glob-to-any-file: '.github/**'
+
+dependencies:
+  - changed-files:
+    - any-glob-to-any-file: 'package-lock.json'
+    - any-glob-to-any-file: '**/package.json'
