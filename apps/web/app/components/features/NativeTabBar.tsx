@@ -44,6 +44,7 @@ export function NativeTabBar(): React.JSX.Element | null {
               key={tab.path}
               to={tab.path}
               aria-label={tab.label}
+              aria-current={isActive ? 'page' : undefined}
               onClick={(e) => {
                 void triggerHaptic();
                 if (tab.path === activeTabPath) {

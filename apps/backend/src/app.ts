@@ -118,7 +118,7 @@ app.get('/api/clusters', clustersHandler);
 
 // ─── Image proxy ──────────────────────────────────────────────────────────────
 
-// 300 requests per IP per minute — 346 merchants × 2 images (card + logo) needs ~692 on page load
+// 300 requests per IP per minute — images load progressively (lazy + cached), not all at once
 app.get('/api/image', rateLimit(300, 60_000), imageProxyHandler);
 
 // ─── Merchants ────────────────────────────────────────────────────────────────

@@ -13,6 +13,7 @@ export function OfflineBanner(): React.JSX.Element | null {
 
   return (
     <div
+      role="alert"
       className="fixed left-0 right-0 z-[9999] bg-red-600 dark:bg-red-800 text-white text-center text-sm py-2 px-4"
       style={{ top: 'env(safe-area-inset-top)' }}
     >

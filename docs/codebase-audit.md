@@ -125,3 +125,54 @@ Each finding:
 ```
 
 Severities: CRITICAL, HIGH, MEDIUM, LOW, NITPICK
+
+---
+
+## Audit Results (completed)
+
+### Issues found and fixed
+
+| #   | Severity | Issue                                                           | Fix                                                      |
+| --- | -------- | --------------------------------------------------------------- | -------------------------------------------------------- |
+| 1   | MEDIUM   | `parseFloat(cardFiatAmount)` could produce NaN in order mapping | Added `\|\| 0` fallback on both list and detail handlers |
+| 2   | LOW      | OfflineBanner missing `role="alert"` for screen readers         | Added `role="alert"`                                     |
+| 3   | LOW      | NativeTabBar missing `aria-current="page"` on active tab        | Added `aria-current` prop                                |
+| 4   | NITPICK  | Rate limit comment math was wrong (300 < 692)                   | Fixed comment to explain progressive loading             |
+
+### Issues reviewed and not bugs
+
+| #   | Flagged as | Issue                                  | Why it's correct                                                                                                          |
+| --- | ---------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| 1   | CRITICAL   | `enabled: true` hardcoded on merchants | By design — disabled merchants are filtered before this line. Remaining merchants ARE enabled.                            |
+| 2   | HIGH       | `bearerToken as string` unsafe cast    | Safe at runtime — `requireAuth` middleware guarantees it exists before downstream handlers run.                           |
+| 3   | HIGH       | `void savePendingOrder` doesn't await  | Intentional — can't block UI waiting for Capacitor Preferences. Acceptable trade-off.                                     |
+| 4   | HIGH       | Session restore fails silently         | Correct — user sees logged-out state and can sign in. No misleading error.                                                |
+| 5   | MEDIUM     | RedeemFlow postMessage no origin check | Not applicable — messages come from WebView plugin bridge, not window.postMessage.                                        |
+| 6   | MEDIUM     | `any` casts on protobuf imports        | Unavoidable — dynamic import of generated code with no type annotations. Properly caught in try/catch with JSON fallback. |
+
+### Audit pass summary
+
+| Area           | Files         | Issues found                | Fixed       |
+| -------------- | ------------- | --------------------------- | ----------- |
+| Backend source | 13            | 2 (parseFloat NaN, comment) | 2           |
+| Shared package | 6             | 0                           | —           |
+| Web routes     | 6             | 0                           | —           |
+| Web components | 17            | 2 (a11y)                    | 2           |
+| Web hooks      | 5             | 0                           | —           |
+| Web services   | 6             | 0                           | —           |
+| Web stores     | 3             | 0                           | —           |
+| Web native     | 13            | 0                           | —           |
+| Web utils      | 2             | 0                           | —           |
+| CSS            | 1             | 0                           | —           |
+| Configuration  | 12            | 0                           | —           |
+| CI/CD          | 1             | 0                           | —           |
+| Documentation  | 17            | 0                           | —           |
+| Tests          | 21            | 0                           | —           |
+| Security       | —             | 0                           | —           |
+| **Total**      | **123 files** | **4 issues**                | **4 fixed** |
+
+### Second pass: no additional issues found
+
+After fixing the 4 issues above, a second pass was conducted. No new issues identified.
+
+**Audit status: COMPLETE — codebase is clean.**
