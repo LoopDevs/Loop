@@ -49,7 +49,7 @@ export function MerchantCard({
               className="w-full h-full"
             />
           ) : (
-            <div className="w-full h-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+            <div className="w-full h-full bg-gradient-to-br from-gray-400 to-gray-500 dark:from-gray-600 dark:to-gray-700 flex items-center justify-center">
               <span className="text-white text-3xl font-bold">{merchant.name.charAt(0)}</span>
             </div>
           )}

@@ -6,7 +6,7 @@ export function Footer(): React.JSX.Element {
       <div className="container mx-auto px-4">
         <div className="flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="flex items-center gap-3">
-            <img src="/loop-logo.svg" alt="Loop" className="h-7 opacity-80" />
+            <img src="/loop-logo-white.svg" alt="Loop" className="h-5 opacity-80" />
           </div>
           <nav className="flex flex-wrap justify-center gap-6 text-sm">
             <Link to="/" className="hover:text-white transition-colors">

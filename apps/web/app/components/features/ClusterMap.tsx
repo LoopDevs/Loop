@@ -104,12 +104,19 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
 
         // Build rich popup content
         const popupContent = `
-          <div style="min-width:250px;font-family:system-ui,sans-serif;">
-            ${mapPinUrl ? `<div style="width:100%;height:120px;background-image:url('${getImageProxyUrl(mapPinUrl, 300)}');background-size:cover;background-position:center;border-radius:8px 8px 0 0;"></div>` : ''}
-            <div style="padding:12px;">
-              <div style="font-weight:600;font-size:15px;margin-bottom:4px;">${merchantName}</div>
+          <div style="width:280px;font-family:system-ui,sans-serif;">
+            ${mapPinUrl ? `<div style="width:100%;height:140px;background-image:url('${getImageProxyUrl(mapPinUrl, 400)}');background-size:cover;background-position:center;border-radius:8px 8px 0 0;"></div>` : '<div style="width:100%;height:60px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:8px 8px 0 0;"></div>'}
+            <div style="padding:16px;">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                ${mapPinUrl ? `<div style="width:40px;height:40px;border-radius:8px;border:2px solid #e5e7eb;background-image:url('${getImageProxyUrl(mapPinUrl, 80)}');background-size:cover;flex-shrink:0;"></div>` : ''}
+                <div>
+                  <div style="font-weight:600;font-size:15px;line-height:1.3;">${merchantName}</div>
+                </div>
+              </div>
               <a href="/gift-card/${encodeURIComponent(slug)}"
-                 style="display:inline-block;margin-top:8px;padding:8px 16px;background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-size:13px;font-weight:500;">
+                 style="display:block;text-align:center;padding:10px 16px;background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;transition:background 0.2s;"
+                 onmouseover="this.style.background='#1d4ed8'"
+                 onmouseout="this.style.background='#2563eb'">
                 Buy Gift Card
               </a>
             </div>

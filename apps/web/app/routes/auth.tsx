@@ -21,12 +21,10 @@ function ThemeToggleRow(): React.JSX.Element {
   const { themePreference, setThemePreference } = useUiStore();
 
   const options: Array<{ value: ThemePreference; label: string }> = [
-    { value: 'system', label: '\uD83D\uDCF1 System' },
-    { value: 'light', label: '\u2600\uFE0F Light' },
-    { value: 'dark', label: '\uD83C\uDF19 Dark' },
+    { value: 'system', label: 'System' },
+    { value: 'light', label: 'Light' },
+    { value: 'dark', label: 'Dark' },
   ];
-
-  const current = options.find((o) => o.value === themePreference) ?? options[0]!;
 
   const handleCycle = (): void => {
     const idx = options.findIndex((o) => o.value === themePreference);
@@ -41,7 +39,38 @@ function ThemeToggleRow(): React.JSX.Element {
       className="w-full flex items-center justify-between px-4 py-3 min-h-[44px] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg text-sm"
     >
       <span className="text-gray-700 dark:text-gray-300">Appearance</span>
-      <span className="text-gray-500 dark:text-gray-400">{current.label}</span>
+      <span className="text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+        {themePreference === 'dark' ? (
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            strokeWidth={1.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"
+            />
+          </svg>
+        ) : themePreference === 'light' ? (
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            strokeWidth={1.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"
+            />
+          </svg>
+        ) : null}
+        {themePreference === 'dark' ? 'Dark' : themePreference === 'light' ? 'Light' : 'System'}
+      </span>
     </button>
   );
 }
@@ -203,7 +232,12 @@ export default function AuthRoute(): React.JSX.Element {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <img src="/loop-logo.svg" alt="Loop" className="h-10 mx-auto mb-4" />
+          <img src="/loop-logo.svg" alt="Loop" className="h-8 mx-auto mb-4 dark:hidden" />
+          <img
+            src="/loop-logo-white.svg"
+            alt="Loop"
+            className="h-8 mx-auto mb-4 hidden dark:block"
+          />
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
             {step === 'email' ? 'Sign in to Loop' : 'Check your email'}
           </h1>

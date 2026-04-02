@@ -29,11 +29,7 @@ function HomeContent(): React.JSX.Element {
 
       {/* Hero */}
       <div className="text-white relative overflow-hidden">
-        <div
-          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
-          style={{ backgroundImage: 'url("/hero.webp")' }}
-        />
-        <div className="absolute inset-0 bg-gray-950/60" />
+        <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900" />
         <div className="relative z-0 text-center pt-32 pb-16 px-6 lg:pt-48 lg:pb-24">
           <h1 className="text-5xl font-bold mb-4">Save money every time you shop</h1>
           <div className="flex flex-row justify-center items-center gap-8 md:gap-16 mt-12 mb-12">
