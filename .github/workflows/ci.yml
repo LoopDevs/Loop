@@ -141,6 +141,7 @@ jobs:
       - name: Notify Discord
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_DEPLOYMENTS }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
             STATUS="❌ FAILED"
@@ -150,10 +151,13 @@ jobs:
             COLOR=3066993
           fi
 
+          # Sanitize commit message for JSON (escape quotes, remove newlines)
+          SAFE_MSG=$(echo "$COMMIT_MSG" | head -1 | sed 's/"/\\"/g' | sed "s/'/\\'/g" | tr -d '`')
+
           curl -s -H "Content-Type: application/json" -d "{
             \"embeds\": [{
               \"title\": \"$STATUS — CI Pipeline\",
-              \"description\": \"**Commit:** \`${{ github.event.head_commit.message }}\`\n**Branch:** ${{ github.ref_name }}\n**Author:** ${{ github.actor }}\",
+              \"description\": \"**Commit:** ${SAFE_MSG}\n**Branch:** ${{ github.ref_name }}\n**Author:** ${{ github.actor }}\",
               \"color\": $COLOR,
               \"url\": \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\",
               \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
