@@ -15,6 +15,7 @@ export default [
       '**/packages/shared/src/proto/**',
       '**/*.generated.ts',
       '**/vitest.config.ts',
+      '**/tsup.config.ts',
       '**/vite.config.ts',
       '**/react-router.config.ts',
       '**/capacitor.config.ts',

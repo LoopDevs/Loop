@@ -36,6 +36,7 @@
     "@commitlint/cli": "^20.5.0",
     "@commitlint/config-conventional": "^20.5.0",
     "@playwright/test": "^1.58.2",
+    "@stellar/stellar-sdk": "^15.0.1",
     "@typescript-eslint/eslint-plugin": "^8.35.1",
     "@typescript-eslint/parser": "^8.35.1",
     "concurrently": "^9.1.2",
@@ -44,9 +45,9 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.1.2",
-    "wait-on": "^8.0.3",
     "prettier": "^3.5.3",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "wait-on": "^8.0.3"
   },
   "engines": {
     "node": ">=22.0.0"
