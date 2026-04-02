@@ -5,7 +5,7 @@ import { secureHeaders } from 'hono/secure-headers';
 import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
 import { logger as honoLogger } from 'hono/logger';
-import { sentry } from '@sentry/hono/node';
+import { sentry, captureException } from '@sentry/hono/node';
 import { env } from './env.js';
 import { getLocations, isLocationLoading } from './clustering/data-store.js';
 import { getMerchants } from './merchants/sync.js';
@@ -168,8 +168,9 @@ app.get('/api/orders/:id', getOrderHandler);
 
 // ─── Error handler ───────────────────────────────────────────────────────────
 
-// Catch-all — Sentry captures via middleware, this returns a clean JSON response
-app.onError((_err, c) => {
+// Catch-all error handler — explicitly capture to Sentry + return clean JSON
+app.onError((err, c) => {
+  captureException(err);
   return c.json({ code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' }, 500);
 });
 
