@@ -166,8 +166,18 @@ Applied in order on every request:
 
 ---
 
+## Git workflow
+
+- **Never push directly to `main`** — all changes via PR.
+- E2E tests only run on PRs (not on pushes to main). This means if you push directly, e2e tests are skipped and regressions can slip through.
+- Create a feature branch, push, open a PR. CI runs all 6 jobs including e2e.
+- Discord `#loop-deployments` notifies on CI pass/fail.
+
+---
+
 ## What NOT to do
 
+- Push directly to `main` — all changes via PR
 - Fetch data in server-side loaders (pure API client architecture)
 - Import Capacitor plugins outside `app/native/`
 - Install Expo or React Native packages
