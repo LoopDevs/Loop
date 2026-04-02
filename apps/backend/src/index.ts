@@ -5,8 +5,13 @@ import { app } from './app.js';
 import { startLocationRefresh } from './clustering/data-store.js';
 import { startMerchantRefresh } from './merchants/sync.js';
 
-startLocationRefresh();
+// Merchants load first (startMerchantRefresh triggers initial refresh).
+// Locations start after a short delay to ensure merchant data is available
+// for cross-referencing pin logos.
 startMerchantRefresh();
+setTimeout(() => {
+  startLocationRefresh();
+}, 3000);
 
 const port = parseInt(env.PORT, 10);
 logger.info({ port }, 'Loop backend starting');

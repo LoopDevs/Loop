@@ -2,6 +2,7 @@ import type { Location } from './algorithm.js';
 import { logger } from '../logger.js';
 import { env } from '../env.js';
 import { upstreamCircuit } from '../circuit-breaker.js';
+import { getMerchants } from '../merchants/sync.js';
 
 /** Paginated response from upstream GET /locations. */
 interface LocationsResponse {
@@ -84,6 +85,10 @@ export async function refreshLocations(): Promise<void> {
       const data = (await response.json()) as LocationsResponse;
       totalPages = data.pagination.pages;
 
+      // Cross-reference with merchant data for mapPinUrl (logos)
+      // The /locations endpoint doesn't include mapPinUrl — it comes from /merchants
+      const { merchantsById } = getMerchants();
+
       for (const item of data.result) {
         if (!item.enabled) continue;
 
@@ -93,9 +98,13 @@ export async function refreshLocations(): Promise<void> {
         if (isNaN(lat) || isNaN(lng)) continue;
         if (lat === 0 && lng === 0) continue;
 
+        // Look up merchant logo from the merchant store
+        const merchant = merchantsById.get(item.merchantId);
+        const mapPinUrl = item.mapPinUrl ?? merchant?.logoUrl ?? null;
+
         locations.push({
           merchantId: item.merchantId,
-          mapPinUrl: item.mapPinUrl ?? null,
+          mapPinUrl,
           latitude: lat,
           longitude: lng,
         });
