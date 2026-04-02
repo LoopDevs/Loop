@@ -26,6 +26,9 @@ const EnvSchema = z.object({
   // If set, only URLs from these hosts are fetched. Recommended in production.
   // Example: "cdn.giftcards.com,images.merchant.com"
   IMAGE_PROXY_ALLOWED_HOSTS: z.string().optional(),
+
+  // Error tracking (optional — get DSN from sentry.io)
+  SENTRY_DSN: z.string().url().optional(),
 });
 
 const parsed = EnvSchema.safeParse(process.env);

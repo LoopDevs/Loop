@@ -37,6 +37,9 @@ npm run dev          # backend on :8080, web on :5173
 
 ```bash
 VITE_API_URL=http://localhost:8080
+
+# Error tracking (optional — get DSN from sentry.io)
+# VITE_SENTRY_DSN=https://xxx@yyy.ingest.sentry.io/zzz
 ```
 
 ### apps/web/.env.production (committed, safe — no secrets)
@@ -62,6 +65,9 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # Refresh intervals (optional)
 REFRESH_INTERVAL_HOURS=6                # merchant cache refresh
 LOCATION_REFRESH_INTERVAL_HOURS=24     # location data refresh
+
+# Error tracking (optional — get DSN from sentry.io)
+# SENTRY_DSN=https://xxx@yyy.ingest.sentry.io/zzz
 ```
 
 ### Inheritance model

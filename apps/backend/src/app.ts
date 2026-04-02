@@ -5,6 +5,7 @@ import { secureHeaders } from 'hono/secure-headers';
 import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
 import { logger as honoLogger } from 'hono/logger';
+import * as Sentry from '@sentry/node';
 import { env } from './env.js';
 import { getLocations, isLocationLoading } from './clustering/data-store.js';
 import { getMerchants } from './merchants/sync.js';
@@ -23,6 +24,15 @@ import {
   requireAuth,
 } from './auth/handler.js';
 import { createOrderHandler, listOrdersHandler, getOrderHandler } from './orders/handler.js';
+
+// Initialize Sentry (no-op if DSN not configured)
+if (env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: env.SENTRY_DSN,
+    environment: env.NODE_ENV,
+    tracesSampleRate: env.NODE_ENV === 'production' ? 0.1 : 1.0,
+  });
+}
 
 export const app = new Hono();
 
@@ -141,6 +151,14 @@ app.use('/api/orders/*', requireAuth);
 app.post('/api/orders', createOrderHandler);
 app.get('/api/orders', listOrdersHandler);
 app.get('/api/orders/:id', getOrderHandler);
+
+// ─── Sentry error capture ────────────────────────────────────────────────────
+
+// Must be after all routes — catch-all error handler
+app.onError((err, c) => {
+  Sentry.captureException(err);
+  return c.json({ code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' }, 500);
+});
 
 // ─── Periodic cleanup ────────────────────────────────────────────────────────
 

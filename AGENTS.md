@@ -110,6 +110,7 @@ Each package has its own `AGENTS.md` with file structure, patterns, and recipes:
 ```bash
 # apps/web/.env.local (dev only, git-ignored)
 VITE_API_URL=http://localhost:8080
+# VITE_SENTRY_DSN=<dsn>               — optional, Sentry error tracking for web
 
 # apps/backend/.env (git-ignored — see apps/backend/.env.example)
 GIFT_CARD_API_BASE_URL=https://spend.ctx.com
@@ -120,6 +121,7 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # CTX_CLIENT_ID_IOS=loopios           — client ID for iOS auth (default: loopios)
 # CTX_CLIENT_ID_ANDROID=loopandroid   — client ID for Android auth (default: loopandroid)
 # INCLUDE_DISABLED_MERCHANTS=true      — dev mode: show disabled merchants
+# SENTRY_DSN=<dsn>                    — optional, Sentry error tracking for backend
 ```
 
 Full env var docs → `docs/development.md`.

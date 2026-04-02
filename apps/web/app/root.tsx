@@ -9,6 +9,7 @@ import {
   useLocation,
 } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import * as Sentry from '@sentry/react';
 import type { Route } from './+types/root';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useSessionRestore } from '~/hooks/use-session-restore';
@@ -23,6 +24,16 @@ import { NativeBackButton } from '~/components/features/NativeBackButton';
 import { ToastContainer } from '~/components/ui/ToastContainer';
 import { useUiStore } from '~/stores/ui.store';
 import './app.css';
+
+// Initialize Sentry on client side
+if (typeof window !== 'undefined' && import.meta.env.VITE_SENTRY_DSN) {
+  Sentry.init({
+    dsn: import.meta.env.VITE_SENTRY_DSN,
+    environment: import.meta.env.MODE,
+    integrations: [Sentry.browserTracingIntegration()],
+    tracesSampleRate: import.meta.env.PROD ? 0.1 : 1.0,
+  });
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -179,6 +190,11 @@ export default function App(): React.JSX.Element {
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps): React.JSX.Element {
+  // Report to Sentry
+  if (typeof window !== 'undefined') {
+    Sentry.captureException(error);
+  }
+
   let message = 'Oops!';
   let details = 'An unexpected error occurred.';
   let stack: string | undefined;
