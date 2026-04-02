@@ -1,4 +1,5 @@
 import { logger } from './logger.js';
+import { notifyCircuitBreaker } from './discord.js';
 
 type CircuitState = 'closed' | 'open' | 'half_open';
 
@@ -44,9 +45,13 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
   }
 
   function onSuccess(): void {
+    const wasOpen = state === 'half_open';
     consecutiveFailures = 0;
     halfOpenInFlight = false;
     transitionTo('closed');
+    if (wasOpen) {
+      notifyCircuitBreaker('closed', 0);
+    }
   }
 
   function onFailure(): void {
@@ -55,6 +60,7 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
     if (consecutiveFailures >= failureThreshold) {
       openedAt = Date.now();
       transitionTo('open');
+      notifyCircuitBreaker('open', consecutiveFailures);
     }
   }
 

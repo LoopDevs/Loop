@@ -66,6 +66,10 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 REFRESH_INTERVAL_HOURS=6                # merchant cache refresh
 LOCATION_REFRESH_INTERVAL_HOURS=24     # location data refresh
 
+# Discord webhooks (optional — for notifications)
+# DISCORD_WEBHOOK_ORDERS=https://discord.com/api/webhooks/...
+# DISCORD_WEBHOOK_MONITORING=https://discord.com/api/webhooks/...
+
 # Error tracking (optional — get DSN from sentry.io)
 # SENTRY_DSN=https://xxx@yyy.ingest.sentry.io/zzz
 ```

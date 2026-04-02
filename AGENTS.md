@@ -122,6 +122,8 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # CTX_CLIENT_ID_ANDROID=loopandroid   — client ID for Android auth (default: loopandroid)
 # INCLUDE_DISABLED_MERCHANTS=true      — dev mode: show disabled merchants
 # SENTRY_DSN=<dsn>                    — optional, Sentry error tracking for backend
+# DISCORD_WEBHOOK_ORDERS=<url>        — optional, Discord webhook for order notifications
+# DISCORD_WEBHOOK_MONITORING=<url>    — optional, Discord webhook for health/circuit breaker alerts
 ```
 
 Full env var docs → `docs/development.md`.

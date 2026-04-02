@@ -24,6 +24,7 @@ import {
   requireAuth,
 } from './auth/handler.js';
 import { createOrderHandler, listOrdersHandler, getOrderHandler } from './orders/handler.js';
+import { notifyHealthChange } from './discord.js';
 
 // Initialize Sentry (no-op if DSN not configured)
 if (env.SENTRY_DSN) {
@@ -86,6 +87,8 @@ app.use('*', honoLogger());
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 
+let lastHealthStatus: 'healthy' | 'degraded' | null = null;
+
 app.get('/health', async (c) => {
   const { locations, loadedAt: locLoadedAt } = getLocations();
   const { merchants, loadedAt: merLoadedAt } = getMerchants();
@@ -108,6 +111,15 @@ app.get('/health', async (c) => {
   }
 
   const degraded = merchantsStale || locationsStale || !upstreamReachable;
+
+  const currentStatus = degraded ? 'degraded' : 'healthy';
+  if (lastHealthStatus !== null && lastHealthStatus !== currentStatus) {
+    const details = degraded
+      ? `Merchants stale: ${merchantsStale}, Locations stale: ${locationsStale}, Upstream: ${upstreamReachable ? 'up' : 'DOWN'}`
+      : 'All systems operational';
+    notifyHealthChange(currentStatus, details);
+  }
+  lastHealthStatus = currentStatus;
 
   return c.json({
     status: degraded ? 'degraded' : 'healthy',

@@ -4,6 +4,7 @@ import { logger } from '../logger.js';
 import { getMerchants } from '../merchants/sync.js';
 import { upstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
+import { notifyOrderCreated } from '../discord.js';
 
 const log = logger.child({ handler: 'orders' });
 
@@ -134,6 +135,15 @@ export async function createOrderHandler(c: Context): Promise<Response> {
     const uriParams = new URLSearchParams(paymentUri.replace(/^web\+stellar:pay\?/, ''));
     const paymentAddress = uriParams.get('destination') ?? '';
     const memo = decodeURIComponent(uriParams.get('memo') ?? '');
+
+    // Notify Discord
+    notifyOrderCreated(
+      validated.data.id,
+      merchant.name,
+      amount,
+      fiatCurrency,
+      validated.data.paymentCryptoAmount,
+    );
 
     return c.json(
       {

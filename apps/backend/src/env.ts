@@ -27,6 +27,10 @@ const EnvSchema = z.object({
   // Example: "cdn.giftcards.com,images.merchant.com"
   IMAGE_PROXY_ALLOWED_HOSTS: z.string().optional(),
 
+  // Discord webhooks (optional — for notifications)
+  DISCORD_WEBHOOK_ORDERS: z.string().url().optional(),
+  DISCORD_WEBHOOK_MONITORING: z.string().url().optional(),
+
   // Error tracking (optional — get DSN from sentry.io)
   SENTRY_DSN: z.string().url().optional(),
 });

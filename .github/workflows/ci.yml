@@ -131,3 +131,31 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  notify:
+    name: Discord notification
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [typecheck, lint, test-unit, audit, build]
+    steps:
+      - name: Notify Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_DEPLOYMENTS }}
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
+            STATUS="❌ FAILED"
+            COLOR=15158332
+          else
+            STATUS="✅ PASSED"
+            COLOR=3066993
+          fi
+
+          curl -s -H "Content-Type: application/json" -d "{
+            \"embeds\": [{
+              \"title\": \"$STATUS — CI Pipeline\",
+              \"description\": \"**Commit:** \`${{ github.event.head_commit.message }}\`\n**Branch:** ${{ github.ref_name }}\n**Author:** ${{ github.actor }}\",
+              \"color\": $COLOR,
+              \"url\": \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\",
+              \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+            }]
+          }" "$DISCORD_WEBHOOK" || true
