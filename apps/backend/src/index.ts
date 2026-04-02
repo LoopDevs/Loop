@@ -1,5 +1,5 @@
 import { serve } from '@hono/node-server';
-import * as Sentry from '@sentry/hono/node';
+import { flush as sentryFlush } from '@sentry/hono/node';
 import { env } from './env.js';
 import { logger } from './logger.js';
 import { app } from './app.js';
@@ -23,7 +23,7 @@ const server = serve({ fetch: app.fetch, port });
 function shutdown(signal: string): void {
   logger.info({ signal }, 'Received shutdown signal, closing server');
   server.close(() => {
-    void Sentry.flush(5000).finally(() => {
+    void sentryFlush(5000).finally(() => {
       logger.info('Server closed, exiting');
       process.exit(0);
     });
