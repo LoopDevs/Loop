@@ -1,140 +1,147 @@
 # Deployment
 
-## Backend — Fly.io (recommended) or Docker
+## Architecture
 
-### Docker
-
-Create `apps/backend/Dockerfile`:
-
-```dockerfile
-FROM node:22-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
-COPY apps/backend/package*.json apps/backend/
-COPY packages/shared/package*.json packages/shared/
-RUN npm ci
-COPY . .
-RUN npm run build -w @loop/backend
-
-FROM node:22-alpine
-WORKDIR /app
-COPY --from=builder /app/apps/backend/dist ./dist
-COPY --from=builder /app/apps/backend/package.json .
-COPY --from=builder /app/packages/shared ./packages/shared
-RUN npm ci --omit=dev
-CMD ["node", "dist/index.js"]
+```
+                    ┌──────────────┐
+                    │  Fly.io      │
+                    │  Anycast DNS │
+                    └──────┬───────┘
+                           │
+              ┌────────────┼────────────┐
+              │                         │
+     ┌────────▼────────┐     ┌─────────▼────────┐
+     │  iad (Virginia)  │     │  lhr (London)     │
+     │  loop-backend    │     │  loop-backend     │
+     │  loop-web        │     │  loop-web         │
+     └──────────────────┘     └──────────────────┘
 ```
 
-```bash
-# Build and run locally
-docker build -t loop-backend -f apps/backend/Dockerfile .
-docker run -p 8080:8080 --env-file apps/backend/.env loop-backend
-```
+Users hit the nearest region automatically via Fly.io anycast routing.
+No shared state between regions — each instance fetches merchants/locations independently.
 
-### Fly.io
+---
+
+## Backend — Fly.io
+
+### First-time setup
 
 ```bash
 cd apps/backend
+fly launch --name loop-backend --region iad --no-deploy
 
-# First-time setup
-fly launch --name loop-backend --region lhr
-
-# Set config (do not commit .env)
+# Set secrets (API credentials for /locations endpoint)
 fly secrets set \
-  GIFT_CARD_API_BASE_URL=https://spend.ctx.com
+  GIFT_CARD_API_BASE_URL=https://spend.ctx.com \
+  GIFT_CARD_API_KEY=<key> \
+  GIFT_CARD_API_SECRET=<secret>
+
+# Add EU region
+fly regions add lhr
 
 # Deploy
 fly deploy
 ```
 
-`fly.toml` (create in `apps/backend/`):
+### Configuration
 
-```toml
-app = "loop-backend"
-primary_region = "lhr"
+See `apps/backend/fly.toml`:
 
-[build]
+- Primary region: `iad` (Virginia, US)
+- VM: 512MB shared-cpu (handles 116K locations in memory)
+- Health check: `GET /health` every 15s, 30s grace period
+- Auto-stop/start: machines stop when idle, start on request
+- Min 1 machine per region always running
+- Force HTTPS
 
-[http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = "stop"
-  auto_start_machines = true
-  min_machines_running = 1
+### Environment variables
 
-[[vm]]
-  memory = "512mb"
-  cpu_kind = "shared"
-  cpus = 1
+| Variable                     | Required | Default       | Description                |
+| ---------------------------- | -------- | ------------- | -------------------------- |
+| `GIFT_CARD_API_BASE_URL`     | Yes      | —             | CTX API base URL           |
+| `GIFT_CARD_API_KEY`          | No       | —             | API key for /locations     |
+| `GIFT_CARD_API_SECRET`       | No       | —             | API secret for /locations  |
+| `CTX_CLIENT_ID_WEB`          | No       | `loopweb`     | Client ID for web auth     |
+| `CTX_CLIENT_ID_IOS`          | No       | `loopios`     | Client ID for iOS auth     |
+| `CTX_CLIENT_ID_ANDROID`      | No       | `loopandroid` | Client ID for Android auth |
+| `INCLUDE_DISABLED_MERCHANTS` | No       | `false`       | Show disabled merchants    |
+| `PORT`                       | No       | `8080`        | Server port                |
+| `NODE_ENV`                   | No       | `production`  | Environment                |
+| `LOG_LEVEL`                  | No       | `info`        | Pino log level             |
+
+### Subsequent deploys
+
+```bash
+cd apps/backend && fly deploy
 ```
 
-Health check: `GET /health` → `200 { status: "healthy", ... }`
+### Scaling
+
+```bash
+fly scale count 2 --region iad    # 2 machines in US
+fly scale count 2 --region lhr    # 2 machines in EU
+fly scale vm shared-cpu-2x        # Upgrade CPU if needed
+```
+
+### Monitoring
+
+```bash
+fly status                    # Machine status
+fly logs                      # Live logs
+fly ssh console               # SSH into machine
+curl https://loop-backend.fly.dev/health  # Health check
+```
 
 ---
 
-## Web (SSR) — Fly.io or Vercel
+## Web (SSR) — Fly.io
 
-### Fly.io
+### First-time setup
 
 ```bash
 cd apps/web
+fly launch --name loop-web --region iad --no-deploy
 
-# Build
-npm run build
+# Add EU region
+fly regions add lhr
 
-# Fly config — create apps/web/fly.toml
-fly launch --name loop-web --region lhr
+# Deploy
 fly deploy
 ```
 
-`fly.toml` for web:
+### Configuration
 
-```toml
-app = "loop-web"
-primary_region = "lhr"
+See `apps/web/fly.toml`:
 
-[build]
-  dockerfile = "Dockerfile"
+- Primary region: `iad`
+- VM: 256MB shared-cpu (SSR is lightweight)
+- `VITE_API_URL` baked in at build time (set in fly.toml build args)
+- Force HTTPS
 
-[env]
-  VITE_API_URL = "https://loop-backend.fly.dev"
-
-[http_service]
-  internal_port = 3000
-  force_https = true
-```
-
-`apps/web/Dockerfile`:
-
-```dockerfile
-FROM node:22-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
-COPY apps/web/package*.json apps/web/
-COPY packages/shared/package*.json packages/shared/
-RUN npm ci
-COPY . .
-RUN npm run build -w @loop/web
-
-FROM node:22-alpine
-WORKDIR /app
-COPY --from=builder /app/apps/web/build ./build
-COPY --from=builder /app/apps/web/package.json .
-RUN npm ci --omit=dev
-CMD ["node", "./build/server/index.js"]
-```
-
-### Vercel
+### Subsequent deploys
 
 ```bash
-# In Vercel dashboard:
-# Framework: React Router / Vite (or Other)
-# Root directory: apps/web
-# Build command: npm run build
-# Output directory: build/client (for assets) — Vercel auto-detects SSR
+cd apps/web && fly deploy
+```
 
-# Environment variables in Vercel dashboard:
-VITE_API_URL=https://api.loopfinance.io
+---
+
+## DNS
+
+Point these domains to Fly.io:
+
+```
+api.loopfinance.io  → CNAME loop-backend.fly.dev
+loopfinance.io      → CNAME loop-web.fly.dev
+www.loopfinance.io  → CNAME loop-web.fly.dev
+```
+
+Fly.io handles TLS certificates automatically via Let's Encrypt.
+
+```bash
+# Register custom domains with Fly
+cd apps/backend && fly certs add api.loopfinance.io
+cd apps/web && fly certs add loopfinance.io && fly certs add www.loopfinance.io
 ```
 
 ---
@@ -157,22 +164,18 @@ VITE_API_URL=https://api.loopfinance.io
 ### iOS (App Store)
 
 ```bash
-cd apps/mobile
-npx cap open ios          # Opens Xcode
+cd apps/mobile && npx cap open ios
 ```
 
 In Xcode:
 
 - Select team and bundle ID `io.loopfinance.app`
-- Product → Archive
-- Distribute App → App Store Connect
-- Upload
+- Product → Archive → Distribute App → App Store Connect
 
 ### Android (Google Play)
 
 ```bash
-cd apps/mobile
-npx cap open android      # Opens Android Studio
+cd apps/mobile && npx cap open android
 ```
 
 In Android Studio:
@@ -180,28 +183,44 @@ In Android Studio:
 - Build → Generate Signed Bundle / APK
 - Upload `.aab` to Play Console
 
-### Version bumping
+---
 
-Before each release, update `version` in `apps/mobile/package.json` and corresponding native project files (`Info.plist` / `build.gradle`).
+## Docker (local testing)
+
+```bash
+# Build images
+docker build -t loop-backend -f apps/backend/Dockerfile .
+docker build -t loop-web -f apps/web/Dockerfile .
+
+# Run backend
+docker run -p 8080:8080 \
+  -e GIFT_CARD_API_BASE_URL=https://spend.ctx.com \
+  loop-backend
+
+# Run web
+docker run -p 3000:3000 loop-web
+```
 
 ---
 
-## CI/CD
+## Graceful shutdown
 
-GitHub Actions handles automated deployment on merge to `main`. See `.github/workflows/ci.yml`.
+The backend handles SIGTERM/SIGINT:
 
-Deployment is **not** automated from CI — deployments are manual (`fly deploy` / Xcode Archive) until deployment pipelines are established.
+1. Stops accepting new connections
+2. Drains in-flight requests (up to 10s)
+3. Exits cleanly
+
+Fly.io sends SIGTERM on deploy, giving the process time to drain before force-killing.
 
 ---
 
-## Secrets management
+## Startup sequence
 
-| Secret                    | Where stored                       |
-| ------------------------- | ---------------------------------- |
-| Backend env vars          | Fly.io secrets (`fly secrets set`) |
-| Web env vars              | Vercel environment variables       |
-| Apple certificates        | Keychain / Xcode managed           |
-| Google keystore           | Android Studio / Play Console      |
-| Git repo secrets (for CI) | GitHub repository secrets          |
+1. Backend starts, begins listening on port immediately
+2. Merchants sync from CTX (~1s) — lightweight, loads first
+3. Locations sync starts 3s later (~3 min for 116K locations)
+4. During location loading: health reports `locationsLoading: true`, map shows no markers
+5. After loading: full data available, health reports `locationsLoading: false`
 
-Never commit `.env` files, `.p8` keys, `.p12` certificates, or keystore files.
+Rolling deploys ensure at least one instance has full data at all times.
