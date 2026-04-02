@@ -16,4 +16,21 @@ setTimeout(() => {
 const port = parseInt(env.PORT, 10);
 logger.info({ port }, 'Loop backend starting');
 
-serve({ fetch: app.fetch, port });
+const server = serve({ fetch: app.fetch, port });
+
+// Graceful shutdown — let in-flight requests complete before exiting
+function shutdown(signal: string): void {
+  logger.info({ signal }, 'Received shutdown signal, closing server');
+  server.close(() => {
+    logger.info('Server closed, exiting');
+    process.exit(0);
+  });
+  // Force exit after 10s if connections don't drain
+  setTimeout(() => {
+    logger.warn('Forcing exit after timeout');
+    process.exit(1);
+  }, 10_000);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
