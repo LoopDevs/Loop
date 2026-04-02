@@ -26,6 +26,8 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
   const { merchants } = useMerchants({ limit: 1000 });
   const merchantsById = useRef(new Map<string, string>());
   const onMerchantSelectRef = useRef(onMerchantSelect);
+  // Track open popup so we can re-open it after zoom/pan marker refresh
+  const openPopupRef = useRef<{ merchantId: string; lat: number; lng: number } | null>(null);
 
   useEffect(() => {
     onMerchantSelectRef.current = onMerchantSelect;
@@ -133,8 +135,30 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
 
         marker.on('click', () => {
           popup.setContent(popupContent);
+          openPopupRef.current = { merchantId, lat, lng };
           onMerchantSelectRef.current?.(merchantId);
         });
+
+        popup.on('remove', () => {
+          // Only clear if this popup is still the tracked one
+          if (
+            openPopupRef.current?.merchantId === merchantId &&
+            openPopupRef.current?.lat === lat
+          ) {
+            openPopupRef.current = null;
+          }
+        });
+
+        // Re-open popup if this marker matches the previously open one
+        if (
+          openPopupRef.current !== null &&
+          openPopupRef.current.merchantId === merchantId &&
+          Math.abs(openPopupRef.current.lat - lat) < 0.0001 &&
+          Math.abs(openPopupRef.current.lng - lng) < 0.0001
+        ) {
+          popup.setContent(popupContent);
+          marker.openPopup();
+        }
 
         marker.addTo(map);
         markersRef.current.push(marker);
