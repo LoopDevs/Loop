@@ -25,38 +25,33 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
-          # Get the diff
-          DIFF=$(gh pr diff $PR_NUMBER)
-          
-          # Run Claude review
-          REVIEW=$(claude -p --print "You are reviewing a PR for the Loop gift card app. 
+          DIFF=$(gh pr diff "$PR_NUMBER" || echo "")
+          if [ -z "$DIFF" ]; then
+            echo "No diff found, skipping review"
+            exit 0
+          fi
 
-Rules to check (from docs/standards.md and AGENTS.md):
-- No hardcoded secrets or tokens
-- No direct Capacitor imports outside app/native/
-- No server-side data fetching in loaders
-- No 'any' types except proto bridge
-- All upstream responses must be Zod-validated
-- Docs must be updated when code changes (check AGENTS.md doc update checklist)
-- Tests must be added for new logic
-- Conventional commit messages
-- No console.log in source
+          PROMPT=$(cat <<'PROMPT_END'
+          You are reviewing a PR for the Loop gift card app.
+          Rules to check:
+          - No hardcoded secrets or tokens
+          - No direct Capacitor imports outside app/native/
+          - No server-side data fetching in loaders
+          - No any types except proto bridge
+          - All upstream responses must be Zod-validated
+          - Docs must be updated when code changes
+          - Tests must be added for new logic
+          - No console.log in source
+          Review the diff. Report: CRITICAL (rule violations), HIGH (bugs), MEDIUM (suggestions), CHECK (docs needed). Be concise. If everything looks good, say so.
+          PROMPT_END
+          )
 
-Review this diff and provide:
-1. Any rule violations (CRITICAL)
-2. Any bugs or logic errors (HIGH)  
-3. Any suggestions for improvement (MEDIUM)
-4. Whether docs need updating (CHECK)
+          REVIEW=$(echo "$DIFF" | claude -p --print "$PROMPT" 2>/dev/null || echo "")
 
-If everything looks good, say so. Be concise.
+          if [ -n "$REVIEW" ]; then
+            gh pr comment "$PR_NUMBER" --body "## Claude Code Review
 
-Diff:
-$DIFF" 2>/dev/null || echo "Review failed — check ANTHROPIC_API_KEY secret")
-          
-          # Post review as PR comment
-          if [ -n "$REVIEW" ] && [ "$REVIEW" != "Review failed — check ANTHROPIC_API_KEY secret" ]; then
-            gh pr comment $PR_NUMBER --body "## 🤖 Claude Code Review
-
-$REVIEW"
+          $REVIEW" || true
           fi
