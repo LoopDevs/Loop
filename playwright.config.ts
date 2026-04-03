@@ -19,10 +19,15 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
-    {
-      name: 'mobile-safari',
-      use: { ...devices['iPhone 14'] },
-    },
+    // Mobile Safari only runs locally (CI installs chromium only)
+    ...(!process.env['CI']
+      ? [
+          {
+            name: 'mobile-safari',
+            use: { ...devices['iPhone 14'] },
+          },
+        ]
+      : []),
   ],
 
   // Start web dev server automatically in CI / local if not already running
