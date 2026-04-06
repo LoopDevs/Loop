@@ -53,7 +53,7 @@
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitest/coverage-v8": "^4.1.2",
-    "msw": "^2.12.14",
+    "msw": "^2.13.0",
     "tailwindcss": "^4.2.2",
     "typescript": "*",
     "vite": "^7.0.0",
