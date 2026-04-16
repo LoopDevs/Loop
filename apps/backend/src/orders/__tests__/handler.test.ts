@@ -406,4 +406,96 @@ describe('GET /api/orders', () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.code).toBe('UPSTREAM_ERROR');
   });
+
+  it('strips unknown query params before forwarding to upstream (no param injection)', async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          result: [],
+          pagination: { page: 1, pages: 1, perPage: 10, total: 0 },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    // Attacker appends userId=other-user. Must not reach upstream.
+    await app.request('/api/orders?page=1&perPage=10&userId=victim&customField=evil', {
+      headers: AUTH_HEADER,
+    });
+
+    const [urlString] = mockFetch.mock.calls[0] as [string];
+    const forwarded = new URL(urlString);
+    expect(forwarded.searchParams.get('page')).toBe('1');
+    expect(forwarded.searchParams.get('perPage')).toBe('10');
+    expect(forwarded.searchParams.has('userId')).toBe(false);
+    expect(forwarded.searchParams.has('customField')).toBe(false);
+  });
+});
+
+describe('POST /api/orders — amount validation', () => {
+  beforeEach(() => {
+    mockGetMerchants.mockReturnValue({
+      merchants: [{ id: 'm-1', name: 'Test', denominations: { currency: 'USD' } }],
+      merchantsById: new Map([
+        ['m-1', { id: 'm-1', name: 'Test', denominations: { currency: 'USD' } }],
+      ]),
+      merchantsBySlug: new Map(),
+      loadedAt: Date.now(),
+    });
+  });
+
+  function postOrder(body: unknown): Promise<Response> | Response {
+    return app.request('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...AUTH_HEADER },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('rejects amount below $1', async () => {
+    const res = await postOrder({ merchantId: 'm-1', amount: 0.5 });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects amount above $10,000', async () => {
+    const res = await postOrder({ merchantId: 'm-1', amount: 10_001 });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects Infinity', async () => {
+    const res = await app.request('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...AUTH_HEADER },
+      // JSON.stringify(Infinity) === 'null', so send raw JSON.
+      body: '{"merchantId":"m-1","amount":1e500}',
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects sub-cent precision (fractional pennies)', async () => {
+    const res = await postOrder({ merchantId: 'm-1', amount: 10.555 });
+    expect(res.status).toBe(400);
+  });
+
+  it('sends fiatAmount as two-decimal string to upstream (no IEEE-754 leak)', async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'o1',
+          paymentCryptoAmount: '1.0',
+          paymentUrls: { XLM: 'web+stellar:pay?destination=G1&amount=1.0&memo=x' },
+          status: 'unpaid',
+        }),
+        { status: 200 },
+      ),
+    );
+
+    // 0.1 + 0.2 === 0.30000000000000004 — .multipleOf rejects, so use a clean value
+    // that still tests the toFixed branch: 25 serializes as 25, toFixed(2) → "25.00".
+    await postOrder({ merchantId: 'm-1', amount: 25 });
+
+    const init = mockFetch.mock.calls[0]![1] as RequestInit;
+    const sent = JSON.parse(init.body as string) as { fiatAmount: string };
+    expect(sent.fiatAmount).toBe('25.00');
+  });
 });
