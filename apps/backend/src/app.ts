@@ -154,8 +154,12 @@ app.get('/api/merchants/:id', merchantDetailHandler);
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 app.post('/api/auth/request-otp', rateLimit(5, 60_000), requestOtpHandler);
-app.post('/api/auth/verify-otp', verifyOtpHandler);
-app.post('/api/auth/refresh', refreshHandler);
+// OTP brute-force defense: 10 attempts per minute per IP. With a 6-digit code
+// that caps guesses at ~14,400/day — upstream lockout/expiry happens first.
+app.post('/api/auth/verify-otp', rateLimit(10, 60_000), verifyOtpHandler);
+// Refresh abuse defense: legit clients refresh once per access-token lifetime,
+// so 30/min per IP leaves plenty of headroom without enabling spray attacks.
+app.post('/api/auth/refresh', rateLimit(30, 60_000), refreshHandler);
 app.delete('/api/auth/session', logoutHandler);
 
 // ─── Orders (authenticated) ───────────────────────────────────────────────────
