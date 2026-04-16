@@ -11,6 +11,7 @@ import { getLocations, isLocationLoading } from './clustering/data-store.js';
 import { getMerchants } from './merchants/sync.js';
 import { clustersHandler } from './clustering/handler.js';
 import { imageProxyHandler, evictExpiredImageCache } from './images/proxy.js';
+import { upstreamUrl } from './upstream.js';
 import {
   merchantListHandler,
   merchantBySlugHandler,
@@ -105,8 +106,7 @@ app.get('/health', async (c) => {
   // Quick upstream probe (non-blocking, 3s timeout)
   let upstreamReachable = true;
   try {
-    const base = env.GIFT_CARD_API_BASE_URL.replace(/\/$/, '');
-    const res = await fetch(`${base}/status`, { signal: AbortSignal.timeout(3000) });
+    const res = await fetch(upstreamUrl('/status'), { signal: AbortSignal.timeout(3000) });
     upstreamReachable = res.ok;
   } catch {
     upstreamReachable = false;

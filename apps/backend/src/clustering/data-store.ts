@@ -2,6 +2,7 @@ import type { Location } from './algorithm.js';
 import { logger } from '../logger.js';
 import { env } from '../env.js';
 import { upstreamCircuit } from '../circuit-breaker.js';
+import { upstreamUrl } from '../upstream.js';
 import { getMerchants } from '../merchants/sync.js';
 
 /** Paginated response from upstream GET /locations. */
@@ -60,8 +61,7 @@ export async function refreshLocations(): Promise<void> {
 
   try {
     while (page <= totalPages) {
-      const base = env.GIFT_CARD_API_BASE_URL.replace(/\/$/, '');
-      const url = new URL(`${base}/locations`);
+      const url = new URL(upstreamUrl('/locations'));
       url.searchParams.set('page', String(page));
       url.searchParams.set('perPage', '1000');
 

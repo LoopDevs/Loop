@@ -3,6 +3,7 @@ import { merchantSlug } from '@loop/shared';
 import { logger } from '../logger.js';
 import { env } from '../env.js';
 import { upstreamCircuit } from '../circuit-breaker.js';
+import { upstreamUrl } from '../upstream.js';
 
 /** Shape returned by the upstream CTX merchants endpoint. */
 interface UpstreamMerchant {
@@ -79,8 +80,7 @@ export async function refreshMerchants(): Promise<void> {
 
   try {
     while (page <= totalPages) {
-      const base = env.GIFT_CARD_API_BASE_URL.replace(/\/$/, '');
-      const url = new URL(`${base}/merchants`);
+      const url = new URL(upstreamUrl('/merchants'));
       url.searchParams.set('page', String(page));
       url.searchParams.set('perPage', '100');
 
