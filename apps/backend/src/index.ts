@@ -14,10 +14,9 @@ setTimeout(() => {
   startLocationRefresh();
 }, 3000);
 
-const port = parseInt(env.PORT, 10);
-logger.info({ port }, 'Loop backend starting');
+logger.info({ port: env.PORT }, 'Loop backend starting');
 
-const server = serve({ fetch: app.fetch, port });
+const server = serve({ fetch: app.fetch, port: env.PORT });
 
 // Graceful shutdown — let in-flight requests complete before exiting
 function shutdown(signal: string): void {
