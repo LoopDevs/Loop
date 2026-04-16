@@ -139,7 +139,7 @@ Applied in order on every request:
 3. **Body limit** — 1MB max request body
 4. **Request ID** — unique `X-Request-Id` on every request
 5. **Logger** — access log for every request
-6. **Rate limiting** — per-IP on `/api/image` (60/min) and `/api/auth/request-otp` (5/min)
+6. **Rate limiting** — per-IP: `/api/image` (300/min), `/api/auth/request-otp` (5/min), `/api/auth/verify-otp` (10/min), `/api/auth/refresh` (30/min). 429 responses include `Retry-After`.
 7. **Circuit breaker** — shared `upstreamCircuit` on all upstream calls (5 failures → 30s open → probe)
 
 ---

@@ -258,3 +258,44 @@ describe('GET /api/clusters', () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe('app-level middleware', () => {
+  it('returns JSON 404 with NOT_FOUND code for unmatched routes', async () => {
+    const res = await app.request('/api/does-not-exist');
+    expect(res.status).toBe(404);
+    expect(res.headers.get('Content-Type')).toContain('application/json');
+    const body = (await res.json()) as Record<string, string>;
+    expect(body.code).toBe('NOT_FOUND');
+  });
+
+  it('includes Retry-After header when rate-limited', async () => {
+    const ip = '203.0.113.42';
+    const doReq = (): Promise<Response> | Response =>
+      app.request('/api/auth/request-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-forwarded-for': ip },
+        body: JSON.stringify({ email: 'u@example.com' }),
+      });
+
+    mockFetch.mockResolvedValue(new Response('{}', { status: 200 }));
+
+    // Burn through the 5/min limit
+    for (let i = 0; i < 5; i++) await doReq();
+
+    const limited = await doReq();
+    expect(limited.status).toBe(429);
+    const retryAfter = limited.headers.get('Retry-After');
+    expect(retryAfter).not.toBeNull();
+    // Retry-After is seconds; must be a positive integer
+    expect(Number(retryAfter)).toBeGreaterThan(0);
+    expect(Number.isInteger(Number(retryAfter))).toBe(true);
+  });
+
+  it('sets X-Request-Id header on every response', async () => {
+    const res = await app.request('/health');
+    // requestId middleware generates an id even if the client did not send one
+    const id = res.headers.get('X-Request-Id');
+    expect(id).not.toBeNull();
+    expect(id!.length).toBeGreaterThan(0);
+  });
+});
