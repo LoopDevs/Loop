@@ -23,7 +23,7 @@ export function AmountSelection({
   // Mirror the backend zod schema in apps/backend/src/orders/handler.ts
   // (CreateOrderBody). If these drift, the user submits, gets a 400, and sees
   // a generic error — a bad UX that pushes validation friction to the server.
-  const BACKEND_MIN = 1;
+  const BACKEND_MIN = 0.01;
   const BACKEND_MAX = 10_000;
 
   const handleConfirm = (): void => {
