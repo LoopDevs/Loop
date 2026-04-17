@@ -200,7 +200,21 @@ export async function createOrderHandler(c: Context): Promise<Response> {
       );
     }
 
-    const paymentUri = validated.data.paymentUrls?.['XLM'] ?? '';
+    const paymentUri = validated.data.paymentUrls?.['XLM'];
+    // An order with no XLM payment URL is unpayable. Fail loudly here rather
+    // than returning a 201 with an empty URI — the client would otherwise
+    // show a broken payment screen and blame us for silently accepting the
+    // order upstream.
+    if (paymentUri === undefined || paymentUri === '') {
+      log.error(
+        { orderId: validated.data.id, merchantId },
+        'Upstream order created without XLM payment URL',
+      );
+      return c.json(
+        { code: 'UPSTREAM_ERROR', message: 'Order created but no payment URL available' },
+        502,
+      );
+    }
     // Parse destination and memo from stellar URI: web+stellar:pay?destination=X&amount=Y&memo=Z
     const uriParams = new URLSearchParams(paymentUri.replace(/^web\+stellar:pay\?/, ''));
     const paymentAddress = uriParams.get('destination') ?? '';
@@ -265,6 +279,8 @@ export async function listOrdersHandler(c: Context): Promise<Response> {
     }
 
     if (!response.ok) {
+      const body = (await response.text()).slice(0, 500);
+      log.error({ status: response.status, body }, 'Upstream order list failed');
       return c.json({ code: 'UPSTREAM_ERROR', message: 'Failed to fetch orders' }, 502);
     }
 
@@ -349,6 +365,8 @@ export async function getOrderHandler(c: Context): Promise<Response> {
     }
 
     if (!response.ok) {
+      const body = (await response.text()).slice(0, 500);
+      log.error({ status: response.status, body, orderId }, 'Upstream order fetch failed');
       return c.json({ code: 'UPSTREAM_ERROR', message: 'Failed to fetch order' }, 502);
     }
 
