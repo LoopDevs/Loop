@@ -81,8 +81,14 @@ function BiometricLockRow(): React.JSX.Element | null {
   const [biometryType, setBiometryType] = useState<string>('');
 
   useEffect(() => {
+    // Cancellation guard — the check is async and may resolve after the
+    // component has unmounted (user navigates away from /auth mid-check).
+    // Without this, the setState calls below would fire on an unmounted
+    // tree and warn in React 18 / silently drop in 19.
+    let cancelled = false;
     void (async () => {
       const result = await checkBiometrics();
+      if (cancelled) return;
       setAvailable(result.available);
       setBiometryType(
         result.biometryType === 'face'
@@ -93,24 +99,29 @@ function BiometricLockRow(): React.JSX.Element | null {
       );
       if (result.available) {
         const lockEnabled = await isAppLockEnabled();
-        setEnabled(lockEnabled);
+        if (!cancelled) setEnabled(lockEnabled);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (!available) return null;
 
   const handleToggle = async (): Promise<void> => {
-    if (!enabled) {
-      const ok = await authenticateWithBiometrics(`Enable ${biometryType}`);
-      if (ok) {
-        await setAppLockEnabled(true);
-        setEnabled(true);
-      }
-    } else {
-      await setAppLockEnabled(false);
-      setEnabled(false);
-    }
+    // Disabling must require biometrics too, not just enabling. Otherwise a
+    // thief with an already-unlocked phone can open account settings and
+    // turn the lock off — completely defeating the purpose of the feature
+    // for every future launch. Both directions of the toggle require the
+    // same proof of presence.
+    const ok = await authenticateWithBiometrics(
+      enabled ? `Disable ${biometryType}` : `Enable ${biometryType}`,
+    );
+    if (!ok) return;
+    const next = !enabled;
+    await setAppLockEnabled(next);
+    setEnabled(next);
   };
 
   return (
