@@ -20,18 +20,36 @@ export function AmountSelection({
   const [selected, setSelected] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
 
+  // Mirror the backend zod schema in apps/backend/src/orders/handler.ts
+  // (CreateOrderBody). If these drift, the user submits, gets a 400, and sees
+  // a generic error — a bad UX that pushes validation friction to the server.
+  const BACKEND_MIN = 1;
+  const BACKEND_MAX = 10_000;
+
   const handleConfirm = (): void => {
     const raw = selected ?? customAmount;
     const amount = parseFloat(raw);
 
-    if (isNaN(amount) || amount <= 0) {
+    if (!Number.isFinite(amount) || amount <= 0) {
       setValidationError('Please enter a valid amount.');
       return;
     }
 
+    // Reject sub-cent precision — backend's multipleOf(0.01) rejects these
+    // and we'd rather catch it here than round-trip to a 400.
+    if (Math.round(amount * 100) !== amount * 100) {
+      setValidationError('Amount cannot have more than 2 decimal places.');
+      return;
+    }
+
+    if (amount < BACKEND_MIN || amount > BACKEND_MAX) {
+      setValidationError(`Amount must be between $${BACKEND_MIN} and $${BACKEND_MAX}.`);
+      return;
+    }
+
     if (denominations?.type === 'min-max') {
-      const min = denominations.min ?? 0;
-      const max = denominations.max ?? Infinity;
+      const min = denominations.min ?? BACKEND_MIN;
+      const max = denominations.max ?? BACKEND_MAX;
       if (amount < min || amount > max) {
         setValidationError(`Amount must be between $${min} and $${max}.`);
         return;

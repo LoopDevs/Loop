@@ -11,32 +11,41 @@ import { upstreamUrl } from '../upstream.js';
  * are validated strictly; everything else is optional because CTX sometimes
  * omits them. `.passthrough()` preserves unknown fields without rejection.
  */
+// Size caps stop a compromised or buggy upstream from bloating every merchant
+// list response (which we cache and serve to every client). Generous relative
+// to real merchant data but tight enough to catch "CTX returns a 1MB string".
+const MAX_NAME_LENGTH = 256;
+const MAX_ID_LENGTH = 128;
+const MAX_URL_LENGTH = 2048;
+const MAX_CURRENCY_LENGTH = 10;
+const MAX_INFO_LENGTH = 50_000;
+
 const UpstreamMerchantSchema = z
   .object({
-    id: z.string().min(1),
-    name: z.string().min(1),
-    slug: z.string().optional(),
-    logoUrl: z.string().optional(),
-    cardImageUrl: z.string().optional(),
-    mapPinUrl: z.string().optional(),
+    id: z.string().min(1).max(MAX_ID_LENGTH),
+    name: z.string().min(1).max(MAX_NAME_LENGTH),
+    slug: z.string().max(MAX_NAME_LENGTH).optional(),
+    logoUrl: z.string().max(MAX_URL_LENGTH).optional(),
+    cardImageUrl: z.string().max(MAX_URL_LENGTH).optional(),
+    mapPinUrl: z.string().max(MAX_URL_LENGTH).optional(),
     enabled: z.boolean(),
-    country: z.string().optional(),
-    currency: z.string().optional(),
+    country: z.string().max(MAX_CURRENCY_LENGTH).optional(),
+    currency: z.string().max(MAX_CURRENCY_LENGTH).optional(),
     savingsPercentage: z.number().optional(),
     userDiscount: z.number().optional(),
     denominationsType: z.enum(['fixed', 'min-max']).optional(),
-    denominations: z.array(z.string()).optional(),
-    denominationValues: z.array(z.string()).optional(),
+    denominations: z.array(z.string().max(32)).optional(),
+    denominationValues: z.array(z.string().max(32)).optional(),
     locationCount: z.number().optional(),
     cachedLocationCount: z.number().optional(),
-    redeemType: z.string().optional(),
-    redeemLocation: z.string().optional(),
+    redeemType: z.string().max(64).optional(),
+    redeemLocation: z.string().max(64).optional(),
     info: z
       .object({
-        description: z.string().optional(),
-        instructions: z.string().optional(),
-        intro: z.string().optional(),
-        terms: z.string().optional(),
+        description: z.string().max(MAX_INFO_LENGTH).optional(),
+        instructions: z.string().max(MAX_INFO_LENGTH).optional(),
+        intro: z.string().max(MAX_INFO_LENGTH).optional(),
+        terms: z.string().max(MAX_INFO_LENGTH).optional(),
       })
       .optional(),
   })
