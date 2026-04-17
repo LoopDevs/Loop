@@ -30,6 +30,14 @@ RUN npm ci --omit=dev --ignore-scripts
 # Copy bundled output (single file, no monorepo path issues)
 COPY --from=builder /app/apps/backend/dist apps/backend/dist
 
+# Run as the non-root `node` user that node:*-alpine ships with. The default
+# is root — meaning any RCE in a dep would land with full container
+# privileges. `node` has no write access outside its home, which is all this
+# process needs. Chown the workdir so the user can still read the bundled
+# dist + package.json it just lost the ability to modify.
+RUN chown -R node:node /app
+USER node
+
 EXPOSE 8080
 ENV PORT=8080 NODE_ENV=production
 

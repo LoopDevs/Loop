@@ -1,0 +1,67 @@
+# The Docker build context is the repo root (see apps/backend/Dockerfile).
+# Without this file, Fly's build tarball would include every node_modules
+# tree (~500 MB), .git history (~100 MB), test artefacts, and editor state —
+# all of which the Dockerfile would then discard, just much slower. The
+# rules below keep the context to actual source.
+#
+# Keep this in sync with .gitignore where possible, but note they serve
+# different purposes: .gitignore filters commits, .dockerignore filters
+# build-context uploads. A file can be committed AND excluded from Docker
+# (e.g. docs/, tests/) if it's not needed at runtime.
+
+# Node
+node_modules
+apps/*/node_modules
+packages/*/node_modules
+
+# Build outputs (the Dockerfile produces its own)
+dist
+build
+.react-router
+apps/*/dist
+apps/*/build
+apps/web/build
+apps/backend/dist
+
+# Git + CI metadata (build doesn't read any of these)
+.git
+.github
+.gitignore
+.gitattributes
+
+# Editor + local state
+.vscode
+.idea
+.claude
+*.swp
+*.swo
+.DS_Store
+
+# Native app shells — Docker image is backend-only
+apps/mobile
+
+# Test + coverage artefacts
+coverage
+apps/*/coverage
+playwright-report
+test-results
+
+# Docs and planning — not needed at runtime
+docs
+*.md
+!apps/backend/README.md
+
+# Root tooling not needed inside the image
+.husky
+.npmrc
+scripts
+tests
+playwright.config.ts
+eslint.config.mjs
+commitlint.config.cjs
+postcss.config.js
+
+# Secrets — double insurance; these are already .gitignore'd
+.env
+.env.local
+.env.*.local
