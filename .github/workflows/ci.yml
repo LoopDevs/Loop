@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main]
 
+# Principle of least privilege — default GITHUB_TOKEN permissions grant
+# write on almost everything, which is more than any job here needs. Set
+# the workflow default to read-only on contents; a compromised dep
+# running in one of these jobs cannot then mutate the repo, open PRs,
+# or move tags. The sibling workflows (pr-automation, pr-review) already
+# scope their tokens explicitly; bringing ci.yml in line closes the gap.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
