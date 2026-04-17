@@ -150,6 +150,37 @@ describe('clusterLocations', () => {
     expect(result.clusterPoints[0]!.properties.pointCount).toBe(2);
   });
 
+  it('assigns a point at exactly 0.3° to the correct cell at zoom 10 (FP precision)', () => {
+    // Regression: `Math.floor(0.3 / 0.1)` is 2 in IEEE-754 (0.3/0.1 yields
+    // 2.9999999999999996), but the mathematically correct cell is 3. The
+    // algorithm uses `Math.floor(lng * invGridSize)` to dodge the issue;
+    // this test pins that invariant. Two merchants sitting at exactly 0.3°
+    // must share a cell with a third at 0.31° (both in cell 3), not with
+    // a merchant at 0.25° (which belongs in cell 2).
+    const bounds: Bounds = { west: 0, south: 0, east: 1, north: 1 };
+    const locations = [loc('at-30', 0.3, 0.3), loc('near-31', 0.31, 0.31)];
+    const result = clusterLocations(locations, bounds, 10);
+    // Both in cell (3,3) — should produce a cluster, not two lone points.
+    expect(result.clusterPoints).toHaveLength(1);
+    expect(result.clusterPoints[0]!.properties.pointCount).toBe(2);
+  });
+
+  it('filters out locations with non-finite coordinates', () => {
+    const locations = [
+      loc('good', 1, 1),
+      loc('nan-lng', Number.NaN, 1),
+      loc('nan-lat', 1, Number.NaN),
+      loc('inf-lng', Number.POSITIVE_INFINITY, 1),
+      loc('neg-inf-lat', 1, Number.NEGATIVE_INFINITY),
+      loc('good2', 2, 2),
+    ];
+    const result = clusterLocations(locations, BOUNDS, 1);
+    // NaN/Infinity points must not form a bogus "NaN,NaN" cell that would
+    // cluster every invalid record together. Only the two valid points count.
+    expect(result.clusterPoints).toHaveLength(1);
+    expect(result.clusterPoints[0]!.properties.pointCount).toBe(2);
+  });
+
   it('includes points on the exact bounds edge (inclusive ≤)', () => {
     const bounds: Bounds = { west: 0, south: 0, east: 10, north: 10 };
     // Points sitting exactly on each edge must be visible (the check is ≤).
