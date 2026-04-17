@@ -241,6 +241,12 @@ describe('POST /api/orders', () => {
       'web+stellar:pay?destination=GABCDEF1234567890&amount=100.5&memo=ctx%3Amtz6lwWw',
     );
     expect(body.memo).toBe('ctx:mtz6lwWw');
+    // Server-authoritative payment window: unix seconds now + ORDER_EXPIRY_SECONDS (30min).
+    const nowSec = Math.floor(Date.now() / 1000);
+    expect(typeof body.expiresAt).toBe('number');
+    const expiresAt = body.expiresAt as number;
+    expect(expiresAt).toBeGreaterThanOrEqual(nowSec + 29 * 60);
+    expect(expiresAt).toBeLessThanOrEqual(nowSec + 31 * 60);
   });
 });
 
