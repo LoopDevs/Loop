@@ -214,6 +214,26 @@ html.native body {
   margin-top: calc(-1 * env(safe-area-inset-top));
 }
 
+/* Fixed backdrop that paints a solid/gradient behind the system status bar
+   so its icons always have contrast, regardless of what each page renders
+   underneath (dark hero image, light product grid, etc.). Sits on top of
+   page content (pointer-events: none so it never steals taps). */
+html.native body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top);
+  background: linear-gradient(to bottom, rgb(255, 255, 255) 60%, rgba(255, 255, 255, 0));
+  pointer-events: none;
+  z-index: 1050;
+}
+
+html.dark.native body::before {
+  background: linear-gradient(to bottom, rgb(3, 7, 18) 60%, rgba(3, 7, 18, 0));
+}
+
 .native-safe-x {
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);

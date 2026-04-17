@@ -27,75 +27,78 @@ function HomeContent(): React.JSX.Element {
     <div>
       {!isNative && <Navbar />}
 
-      {/* Hero — extends under the translucent status bar on native so the
-          gradient isn't broken by the opaque safe-area strip above it. */}
-      <div className="text-white relative overflow-hidden native-bleed-top">
-        <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900" />
-        <div className="relative z-0 text-center pt-16 pb-12 px-6 sm:pt-24 sm:pb-16 lg:pt-48 lg:pb-24">
-          <h1 className="text-5xl font-bold mb-4">Save money every time you shop</h1>
-          <div className="flex flex-row justify-center items-center gap-8 md:gap-16 mt-12 mb-12">
-            <Feature
-              icon={
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M13 10V3L4 14h7v7l9-11h-7z"
-                  />
-                </svg>
-              }
-              label="Instant Delivery"
-            />
-            <Feature
-              icon={
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-                  />
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-                  />
-                </svg>
-              }
-              label="100,000+ Locations"
-            />
-            <Feature
-              icon={
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-              }
-              label="Save up to 25%"
-            />
+      {/* Hero — skipped on native where the app goes straight to the merchant
+          grid. The pitch section is for web visitors who need convincing; on
+          mobile the user has already installed the app. */}
+      {!isNative && (
+        <div className="text-white relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900" />
+          <div className="relative z-0 text-center pt-16 pb-12 px-6 sm:pt-24 sm:pb-16 lg:pt-48 lg:pb-24">
+            <h1 className="text-5xl font-bold mb-4">Save money every time you shop</h1>
+            <div className="flex flex-row justify-center items-center gap-8 md:gap-16 mt-12 mb-12">
+              <Feature
+                icon={
+                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M13 10V3L4 14h7v7l9-11h-7z"
+                    />
+                  </svg>
+                }
+                label="Instant Delivery"
+              />
+              <Feature
+                icon={
+                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                  </svg>
+                }
+                label="100,000+ Locations"
+              />
+              <Feature
+                icon={
+                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                }
+                label="Save up to 25%"
+              />
+            </div>
+          </div>
+          <div className="absolute pointer-events-none inset-x-0 bottom-0">
+            <svg
+              viewBox="0 0 2880 48"
+              xmlns="http://www.w3.org/2000/svg"
+              preserveAspectRatio="none"
+              className="w-full"
+              style={{ transform: 'scale(2)', transformOrigin: 'top center' }}
+            >
+              <path
+                d="M0 48H1437.5H2880V0H2160C1442.5 52 720 0 720 0H0V48Z"
+                className="hero-shape-fill"
+              />
+            </svg>
           </div>
         </div>
-        <div className="absolute pointer-events-none inset-x-0 bottom-0">
-          <svg
-            viewBox="0 0 2880 48"
-            xmlns="http://www.w3.org/2000/svg"
-            preserveAspectRatio="none"
-            className="w-full"
-            style={{ transform: 'scale(2)', transformOrigin: 'top center' }}
-          >
-            <path
-              d="M0 48H1437.5H2880V0H2160C1442.5 52 720 0 720 0H0V48Z"
-              className="hero-shape-fill"
-            />
-          </svg>
-        </div>
-      </div>
+      )}
 
       <div className="container mx-auto px-4 py-12 lg:py-20">
         {isError && (
