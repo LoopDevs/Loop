@@ -196,8 +196,18 @@ async function payOrder({ paymentAddress, xlmAmount, memo }) {
   const kp = Keypair.fromSecret(WALLET_SECRET);
   log(`Paying ${xlmAmount} XLM from ${kp.publicKey()} to ${paymentAddress} (memo=${memo})`);
   const account = await server.loadAccount(kp.publicKey());
+  // Fetch the current network fee stats and use the p70 fee so we're above
+  // whatever is currently required — a static 100 stroops (the historic
+  // minimum) has been rejected as tx_insufficient_fee in the past.
+  let fee = '1000';
+  try {
+    const stats = await server.feeStats();
+    fee = stats?.fee_charged?.p70 ?? stats?.last_ledger_base_fee ?? fee;
+  } catch (e) {
+    log(`Could not fetch fee stats (${e?.message ?? e}); using fallback fee ${fee}`);
+  }
   const tx = new TransactionBuilder(account, {
-    fee: '100',
+    fee: String(fee),
     networkPassphrase: Networks.PUBLIC,
   })
     .addOperation(
@@ -211,9 +221,20 @@ async function payOrder({ paymentAddress, xlmAmount, memo }) {
     .setTimeout(120)
     .build();
   tx.sign(kp);
-  const result = await server.submitTransaction(tx);
-  log(`Stellar tx submitted: ${result.hash}`);
-  return result.hash;
+  try {
+    const result = await server.submitTransaction(tx);
+    log(`Stellar tx submitted: ${result.hash}`);
+    return result.hash;
+  } catch (err) {
+    // Horizon returns the useful detail in response.data.extras.result_codes;
+    // the default AxiosError toString is just "Request failed with status
+    // code 400" which tells us nothing.
+    const codes = err?.response?.data?.extras?.result_codes;
+    const detail = codes ? JSON.stringify(codes) : (err?.response?.data ?? err?.message);
+    throw new Error(
+      `Stellar submit failed: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`,
+    );
+  }
 }
 
 async function pollForFulfilment(accessToken, orderId) {
