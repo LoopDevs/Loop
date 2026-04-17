@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Merchant } from '@loop/shared';
 import { useAuthStore } from '~/stores/auth.store';
 import { usePurchaseStore } from '~/stores/purchase.store';
@@ -37,8 +37,26 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
+  // Store state only applies to THIS merchant. Without this guard, opening
+  // merchant B while merchant A has a pending payment shows B's page with
+  // A's payment card (wrong address, wrong amount).
+  const isCurrentMerchant = store.merchantId === merchant.id;
+
+  // Navigating to a different merchant (or off the page entirely) cancels
+  // any in-progress purchase rather than carrying it over — the user
+  // explicitly left the flow, so the state shouldn't follow them.
+  useEffect(() => {
+    if (store.merchantId !== null && store.merchantId !== merchant.id) {
+      store.reset();
+    }
+    return () => {
+      store.reset();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [merchant.id]);
+
   // Completed states (redeem, complete)
-  if (store.step === 'complete' && store.giftCardCode !== null) {
+  if (isCurrentMerchant && store.step === 'complete' && store.giftCardCode !== null) {
     return (
       <PurchaseComplete
         merchantName={merchant.name}
@@ -49,7 +67,12 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
     );
   }
 
-  if (store.step === 'redeem' && store.redeemUrl !== null && store.redeemChallengeCode !== null) {
+  if (
+    isCurrentMerchant &&
+    store.step === 'redeem' &&
+    store.redeemUrl !== null &&
+    store.redeemChallengeCode !== null
+  ) {
     return (
       <RedeemFlow
         merchantName={merchant.name}
@@ -61,6 +84,7 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
   }
 
   if (
+    isCurrentMerchant &&
     store.step === 'payment' &&
     store.paymentAddress !== null &&
     store.xlmAmount !== null &&
@@ -83,7 +107,7 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
   // Error state — previously fell through to amount selection, which meant
   // users hitting "order failed/expired" or polling-result errors from
   // PaymentStep silently landed back at amount selection with no message.
-  if (store.step === 'error' && store.error !== null) {
+  if (isCurrentMerchant && store.step === 'error' && store.error !== null) {
     return (
       <div className="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-6">
         <h3 className="text-lg font-semibold text-red-900 dark:text-red-200 mb-2">
