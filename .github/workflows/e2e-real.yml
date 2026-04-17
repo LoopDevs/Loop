@@ -34,8 +34,11 @@ jobs:
           cache: 'npm'
       - name: Install deps
         run: npm ci
+      # The `dev` script uses `tsx watch --env-file=.env`, which would error in
+      # CI since no `.env` exists. Run tsx directly against the source so only
+      # the workflow `env:` block applies.
       - name: Start backend against real CTX
-        run: npm run dev -w @loop/backend &
+        run: npm exec -w @loop/backend -- tsx src/index.ts &
         env:
           PORT: 8080
           NODE_ENV: test
