@@ -2,48 +2,51 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Purchase flow', () => {
   test('merchant detail page loads with purchase card', async ({ page }) => {
-    // Go to home, wait for merchants to load, click the first one
     await page.goto('/');
-    await page.waitForTimeout(4000);
 
-    // Find any merchant card link and click it
+    // Auto-retrying assertion: waits up to the default timeout (30s) for a
+    // merchant link to appear. Previously this used waitForTimeout(4000) and
+    // then `if (await link.isVisible())`, which made the whole test a silent
+    // no-op when merchants failed to load — the worst case of "green CI that
+    // actually caught nothing".
     const merchantLink = page.locator('a[href^="/gift-card/"]').first();
-    if (await merchantLink.isVisible()) {
-      await merchantLink.click();
-      await page.waitForURL(/\/gift-card\//);
-      await page.waitForTimeout(2000);
+    await expect(merchantLink).toBeVisible();
+    await merchantLink.click();
+    await page.waitForURL(/\/gift-card\//);
 
-      // Should show the purchase card with email input (inline auth)
-      await expect(page.getByLabel(/Email address/i)).toBeVisible();
-    }
+    // Purchase card has an inline email input (inline auth flow).
+    await expect(page.getByLabel(/Email address/i)).toBeVisible();
   });
 
   test('search finds merchants and navigates to detail', async ({ page }) => {
     await page.goto('/');
-    await page.waitForTimeout(3000);
 
-    // Desktop search
+    // Wait for merchant data to be available. Navbar's search hooks into
+    // useMerchants; until that resolves, the dropdown has nothing to show
+    // even for a valid query.
+    await expect(page.locator('a[href^="/gift-card/"]').first()).toBeVisible();
+
     const searchInput = page.locator('input[placeholder="Search for gift cards"]').first();
-    if (await searchInput.isVisible()) {
-      // Type a single letter to get results
-      await searchInput.fill('a');
-      await page.waitForTimeout(500);
+    await expect(searchInput).toBeVisible();
 
-      const results = page.locator('[role="option"]');
-      if ((await results.count()) > 0) {
-        await results.first().click();
-        await page.waitForURL(/\/gift-card\//);
-        // Should be on a merchant page
-        await expect(page.url()).toContain('/gift-card/');
-      }
-    }
+    // The Navbar search only renders results for queries > 1 character. Use
+    // two letters so the filter actually runs. 'am' matches 'Amazon'/similar
+    // for the real CTX merchant list; picking any 2-char substring common in
+    // names is sufficient.
+    await searchInput.fill('am');
+
+    const results = page.locator('[role="option"]');
+    await expect(results.first()).toBeVisible();
+
+    await results.first().click();
+    await page.waitForURL(/\/gift-card\//);
   });
 
   test('map page loads with leaflet', async ({ page }) => {
     await page.goto('/map');
-    await page.waitForTimeout(5000);
 
-    // Map container exists
+    // Map container exists (lazy-loaded, so Leaflet's container takes a
+    // moment to attach). toBeVisible auto-retries so no fixed wait needed.
     await expect(
       page.locator('[role="region"][aria-label="Merchant locations map"]'),
     ).toBeVisible();
