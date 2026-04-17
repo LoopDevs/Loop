@@ -8,6 +8,15 @@ interface CircuitBreakerOptions {
   failureThreshold?: number;
   /** Milliseconds to wait in OPEN state before allowing a probe. Default: 30_000 */
   cooldownMs?: number;
+  /**
+   * Upper bound on how long a HALF_OPEN probe is allowed to run before the
+   * breaker gives up on it and transitions back to OPEN. Protects against
+   * callers that forget to pass an AbortSignal — without this failsafe a
+   * hung probe would leave `halfOpenInFlight` stuck forever and every
+   * subsequent request would fail with `CircuitOpenError` even after the
+   * original upstream recovered. Default: 60_000.
+   */
+  probeTimeoutMs?: number;
 }
 
 interface CircuitBreaker {
@@ -29,6 +38,7 @@ interface CircuitBreaker {
 export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBreaker {
   const failureThreshold = options?.failureThreshold ?? 5;
   const cooldownMs = options?.cooldownMs ?? 30_000;
+  const probeTimeoutMs = options?.probeTimeoutMs ?? 60_000;
 
   const log = logger.child({ module: 'circuit-breaker' });
 
@@ -36,6 +46,32 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
   let consecutiveFailures = 0;
   let openedAt = 0;
   let halfOpenInFlight = false;
+  let probeTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function clearProbeTimer(): void {
+    if (probeTimer !== null) {
+      clearTimeout(probeTimer);
+      probeTimer = null;
+    }
+  }
+
+  function armProbeTimer(): void {
+    clearProbeTimer();
+    probeTimer = setTimeout(() => {
+      // Failsafe: the probe has taken longer than probeTimeoutMs. Assume
+      // the caller's fetch is hung and treat the probe as a failure so the
+      // circuit can bounce back to OPEN and a future request can retry
+      // after the next cooldown. Without this, `halfOpenInFlight` would
+      // stay true forever and every subsequent request would reject.
+      if (halfOpenInFlight && state === 'half_open') {
+        log.warn({ probeTimeoutMs }, 'HALF_OPEN probe timed out — forcing circuit back to OPEN');
+        onFailure();
+      }
+    }, probeTimeoutMs);
+    // Avoid keeping the event loop alive just for this timer (important so
+    // graceful shutdown isn't blocked by an in-flight breaker).
+    probeTimer.unref?.();
+  }
 
   function transitionTo(newState: CircuitState): void {
     if (state !== newState) {
@@ -45,11 +81,12 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
   }
 
   function onSuccess(): void {
-    const wasOpen = state === 'half_open';
+    const wasHalfOpen = state === 'half_open';
     consecutiveFailures = 0;
     halfOpenInFlight = false;
+    clearProbeTimer();
     transitionTo('closed');
-    if (wasOpen) {
+    if (wasHalfOpen) {
       notifyCircuitBreaker('closed', 0);
     }
   }
@@ -57,6 +94,7 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
   function onFailure(): void {
     consecutiveFailures++;
     halfOpenInFlight = false;
+    clearProbeTimer();
     // Only transition (and notify) if we are not already OPEN. When many
     // concurrent requests fail against a down upstream, the first N to
     // complete will push us past the threshold, but requests that were
@@ -80,12 +118,14 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
       }
     }
 
-    // HALF_OPEN — only one probe request at a time
+    // HALF_OPEN — only one probe request at a time. Arm a failsafe timer
+    // so a hung probe can't leave the circuit stuck.
     if (state === 'half_open') {
       if (halfOpenInFlight) {
         throw new CircuitOpenError();
       }
       halfOpenInFlight = true;
+      armProbeTimer();
     }
 
     try {
@@ -116,6 +156,7 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
     consecutiveFailures = 0;
     openedAt = 0;
     halfOpenInFlight = false;
+    clearProbeTimer();
   }
 
   return { fetch: wrappedFetch, getState, reset };
