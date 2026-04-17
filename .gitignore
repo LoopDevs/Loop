@@ -48,6 +48,10 @@ Thumbs.db
 coverage/
 .nyc_output/
 
+# Playwright
+playwright-report/
+test-results/
+
 # Postman / API collections
 *.postman_collection.json
 *.postman_environment.json

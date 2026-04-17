@@ -45,12 +45,13 @@
 | `utils/image.ts`            | 8     | URL construction, encoding, width/quality params                                                                                            |
 | `hooks/slug.ts`             | 5     | Slugification, special chars, empty input                                                                                                   |
 
-### E2E — 9 tests across 2 files
+### E2E — 11 tests across 3 files
 
-| Test file               | Tests | Coverage                                                      |
-| ----------------------- | ----- | ------------------------------------------------------------- |
-| `smoke.test.ts`         | 5     | Home, auth, map, orders, 404                                  |
-| `purchase-flow.test.ts` | 4     | Merchant detail, search navigation, sign-in flow, map loading |
+| Test file                                | Tests | Coverage                                                                                        |
+| ---------------------------------------- | ----- | ----------------------------------------------------------------------------------------------- |
+| `tests/e2e/smoke.test.ts`                | 5     | Home, auth, map, orders, 404                                                                    |
+| `tests/e2e/purchase-flow.test.ts`        | 4     | Merchant detail, search navigation, sign-in flow, map loading (real CTX upstream)               |
+| `tests/e2e-mocked/purchase-flow.test.ts` | 2     | Full purchase happy path (email → OTP → amount → payment → redeem) + wrong-OTP, mocked upstream |
 
 ---
 
@@ -72,8 +73,13 @@ cd apps/web && npm run test:watch
 cd apps/backend && npm run test:coverage
 cd apps/web && npm run test:coverage
 
-# E2E (requires dev servers running)
+# E2E against real upstream (Playwright starts its own dev servers)
 npm run test:e2e
+
+# E2E against mocked CTX upstream — fully deterministic, no external deps.
+# Boots mock-ctx + backend + web on isolated ports (9091/8081/5174) so it
+# can run alongside the real-upstream suite.
+npm run test:e2e:mocked
 
 # Everything at once
 npm run verify
@@ -87,8 +93,8 @@ npm run verify
 | ---------------------------------- | --------------------------------------------------------------------------------------------------- |
 | `git commit`                       | lint-staged (ESLint + Prettier on changed files)                                                    |
 | `git push`                         | `npm test` + `lint:docs` (blocks push on failure)                                                   |
-| CI (every push)                    | typecheck + lint + test + audit + build                                                             |
-| CI (PRs only)                      | + e2e tests with Playwright                                                                         |
+| CI (every push)                    | typecheck + lint + test + audit + build + mocked e2e                                                |
+| CI (PRs only)                      | + real-upstream e2e tests with Playwright                                                           |
 | GitHub Actions `workflow_dispatch` | **E2E (real CTX + wallet)** — manually triggered full purchase flow that spends real XLM; see below |
 
 ### Manual: real CTX + wallet purchase workflow
