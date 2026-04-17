@@ -50,7 +50,10 @@ const HORIZON_URL = process.env.HORIZON_URL ?? 'https://horizon.stellar.org';
 const REFRESH_TOKEN = process.env.CTX_TEST_REFRESH_TOKEN;
 const WALLET_SECRET = process.env.STELLAR_TEST_SECRET_KEY;
 const MERCHANT_ID = process.env.E2E_MERCHANT_ID;
-const AMOUNT_USD = process.env.E2E_AMOUNT_USD ?? '5';
+// Undefined means "use each candidate merchant's own `min` denomination" —
+// buys the cheapest possible card so CI runs don't waste real money. Set
+// the env var to force a specific amount (e.g. to reproduce a user's order).
+const AMOUNT_USD = process.env.E2E_AMOUNT_USD;
 const POLL_TIMEOUT_MS = Number(process.env.POLL_TIMEOUT_MS ?? 600_000);
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 5_000);
 const NEW_REFRESH_TOKEN_OUT = process.env.NEW_REFRESH_TOKEN_OUT;
@@ -132,27 +135,41 @@ async function refreshAccessToken() {
 async function pickMerchantCandidates(accessToken) {
   if (MERCHANT_ID) {
     log(`Using merchant from env: ${MERCHANT_ID}`);
-    return [{ id: MERCHANT_ID, name: `(env override ${MERCHANT_ID})` }];
+    const amount = AMOUNT_USD !== undefined ? Number(AMOUNT_USD) : undefined;
+    return [{ id: MERCHANT_ID, name: `(env override ${MERCHANT_ID})`, amount }];
   }
   const data = await api('/api/merchants', { accessToken });
   const merchants = data?.merchants ?? [];
-  const amount = Number(AMOUNT_USD);
-  const candidates = merchants.filter(
-    (m) =>
-      m?.enabled === true &&
-      m?.denominations?.type === 'min-max' &&
-      (m.denominations.min ?? 0) <= amount &&
-      (m.denominations.max ?? Infinity) >= amount,
-  );
-  if (candidates.length === 0) {
+  // If AMOUNT_USD is set, require the merchant's range to cover it. Otherwise
+  // buy at the merchant's own minimum — cheapest possible card per run.
+  const filtered = merchants.filter((m) => {
+    if (m?.enabled !== true) return false;
+    if (m?.denominations?.type !== 'min-max') return false;
+    if (AMOUNT_USD !== undefined) {
+      const amount = Number(AMOUNT_USD);
+      return (m.denominations.min ?? 0) <= amount && (m.denominations.max ?? Infinity) >= amount;
+    }
+    return m.denominations.min !== undefined && m.denominations.min > 0;
+  });
+  if (filtered.length === 0) {
     throw new Error(
-      `No enabled min-max merchant covers $${AMOUNT_USD} (of ${merchants.length} merchants returned)`,
+      `No enabled min-max merchant${AMOUNT_USD !== undefined ? ` covers $${AMOUNT_USD}` : ''} (of ${merchants.length} merchants returned)`,
     );
   }
-  log(`Found ${candidates.length} candidate merchants; first few:`, {
-    names: candidates.slice(0, 5).map((m) => m.name),
+  // When buying at min, try the cheapest merchants first so a wallet with
+  // limited funds goes further.
+  const sorted =
+    AMOUNT_USD !== undefined
+      ? filtered
+      : [...filtered].sort((a, b) => (a.denominations.min ?? 0) - (b.denominations.min ?? 0));
+  log(`Found ${sorted.length} candidate merchants; first few:`, {
+    merchants: sorted.slice(0, 5).map((m) => `${m.name} (min $${m.denominations.min})`),
   });
-  return candidates.map((m) => ({ id: m.id, name: m.name }));
+  return sorted.map((m) => ({
+    id: m.id,
+    name: m.name,
+    amount: AMOUNT_USD !== undefined ? Number(AMOUNT_USD) : m.denominations.min,
+  }));
 }
 
 /**
@@ -164,12 +181,12 @@ async function pickMerchantCandidates(accessToken) {
 async function createOrderWithFallback(accessToken, candidates) {
   const errors = [];
   for (const candidate of candidates.slice(0, 10)) {
-    log(`Creating order for ${candidate.name} (${candidate.id}), $${AMOUNT_USD}`);
+    log(`Creating order for ${candidate.name} (${candidate.id}), $${candidate.amount}`);
     try {
       const order = await api('/api/orders', {
         method: 'POST',
         accessToken,
-        body: { merchantId: candidate.id, amount: Number(AMOUNT_USD) },
+        body: { merchantId: candidate.id, amount: candidate.amount },
       });
       log('Order created', {
         orderId: order.orderId,
