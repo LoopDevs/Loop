@@ -110,4 +110,56 @@ describe('clusterLocations', () => {
     const ids = result.clusterPoints.map((p) => p.id).sort((a, b) => a - b);
     expect(ids).toEqual([0, 1]);
   });
+
+  it('pointCount reflects full cell membership, not just visible subset', () => {
+    // Documented behaviour (matches Go reference impl): callers pre-load an
+    // expanded bbox, so a cell can contain points outside the visible bounds.
+    // The cluster's pointCount shows the TOTAL, while the centroid is the
+    // mean of only the visible points.
+    const bounds: Bounds = { west: 0, south: 0, east: 10, north: 10 };
+    const locations = [
+      loc('visible-1', 1, 1),
+      loc('visible-2', 2, 2),
+      loc('hidden-1', 15, 15), // outside bounds but same 20° cell at zoom 1
+    ];
+    const result = clusterLocations(locations, bounds, 1);
+    expect(result.clusterPoints).toHaveLength(1);
+    expect(result.clusterPoints[0]!.properties.pointCount).toBe(3);
+    // Centroid is mean of ONLY visible points: (1+2)/2, (1+2)/2
+    expect(result.clusterPoints[0]!.geometry.coordinates.longitude).toBeCloseTo(1.5, 5);
+    expect(result.clusterPoints[0]!.geometry.coordinates.latitude).toBeCloseTo(1.5, 5);
+  });
+
+  it('omits clusters whose every point is outside bounds', () => {
+    // Cell has 2+ points but none are visible → cluster is suppressed.
+    // Prevents rendering a cluster pin that would appear in empty map space.
+    const bounds: Bounds = { west: 0, south: 0, east: 10, north: 10 };
+    const locations = [loc('hidden-1', 25, 25), loc('hidden-2', 26, 26)];
+    const result = clusterLocations(locations, bounds, 1);
+    expect(result.clusterPoints).toHaveLength(0);
+    expect(result.locationPoints).toHaveLength(0);
+  });
+
+  it('clusters negative coordinates correctly (southern/western hemispheres)', () => {
+    // Western hemisphere regression — Math.floor on negative numbers can be
+    // subtle. Two points at (-5, -5) and (-6, -6) must land in the same
+    // 20° cell at zoom 1: floor(-5/20) = floor(-6/20) = -1.
+    const locations = [loc('a', -5, -5), loc('b', -6, -6)];
+    const result = clusterLocations(locations, BOUNDS, 1);
+    expect(result.clusterPoints).toHaveLength(1);
+    expect(result.clusterPoints[0]!.properties.pointCount).toBe(2);
+  });
+
+  it('includes points on the exact bounds edge (inclusive ≤)', () => {
+    const bounds: Bounds = { west: 0, south: 0, east: 10, north: 10 };
+    // Points sitting exactly on each edge must be visible (the check is ≤).
+    const locations = [
+      loc('north-edge', 5, 10),
+      loc('south-edge', 5, 0),
+      loc('east-edge', 10, 5),
+      loc('west-edge', 0, 5),
+    ];
+    const result = clusterLocations(locations, bounds, 14);
+    expect(result.locationPoints).toHaveLength(4);
+  });
 });
