@@ -173,6 +173,20 @@ describe('GET /api/clusters — response shape', () => {
     expect(body.total).toBe(0);
   });
 
+  it('clamps the 50%-expanded bbox to the globe (no -140° latitudes)', async () => {
+    // Starting bounds span the full globe — a naive 50% buffer would push
+    // south to -135°, which is nonsense. A merchant at (-90, -90) must still
+    // be filtered IN, and the computation must not crash or produce empties.
+    seed([loc('m-south-pole', 0, -90), loc('m-north-pole', 0, 90)]);
+    const res = await app.request('/api/clusters?west=-180&south=-90&east=180&north=90&zoom=1');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { clusterPoints: unknown[]; locationPoints: unknown[] };
+    // Two points at distant cells won't cluster at zoom 1 (20° grid) — they
+    // land in cell (-5, -5) and (-5, 4), separate cells. Expected: two location
+    // points, no clusters.
+    expect(body.locationPoints.length + body.clusterPoints.length).toBeGreaterThan(0);
+  });
+
   it('falls back to JSON when Accept requests protobuf but types are unavailable', async () => {
     // Proto types aren't generated in test environment — handler catches the
     // dynamic-import error and falls through to JSON. Ensures the fallback
