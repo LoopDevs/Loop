@@ -16,9 +16,11 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "npm run test -w @loop/backend -w @loop/web",
+    "test:coverage": "npm run test:coverage --workspaces --if-present",
     "test:e2e": "playwright test",
     "verify": "./scripts/verify.sh",
     "lint:docs": "./scripts/lint-docs.sh",
+    "audit": "npm audit --audit-level=high",
     "build": "npm run build -w @loop/backend -w @loop/web",
     "proto:generate": "cd apps/backend && npx buf generate",
     "prepare": "husky"
@@ -28,7 +30,7 @@
       "eslint --fix",
       "prettier --write"
     ],
-    "*.{json,md,css}": [
+    "*.{json,md,css,yml,yaml}": [
       "prettier --write"
     ]
   },
