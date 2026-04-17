@@ -138,8 +138,14 @@ async function pickMerchantCandidates(accessToken) {
     const amount = AMOUNT_USD !== undefined ? Number(AMOUNT_USD) : undefined;
     return [{ id: MERCHANT_ID, name: `(env override ${MERCHANT_ID})`, amount }];
   }
-  const data = await api('/api/merchants', { accessToken });
-  const merchants = data?.merchants ?? [];
+  // GET /api/merchants paginates (max 100 per page) — fetch every page so
+  // the candidate list covers the whole catalog, not just the first 20.
+  const merchants = [];
+  for (let page = 1; ; page++) {
+    const data = await api(`/api/merchants?page=${page}&limit=100`, { accessToken });
+    merchants.push(...(data?.merchants ?? []));
+    if (!data?.pagination?.hasNext) break;
+  }
   // If AMOUNT_USD is set, require the merchant's range to cover it. Otherwise
   // buy at the merchant's own minimum — cheapest possible card per run.
   const filtered = merchants.filter((m) => {
