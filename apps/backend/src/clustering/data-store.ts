@@ -98,6 +98,15 @@ export async function refreshLocations(): Promise<void> {
       });
 
       if (!response.ok) {
+        // Capture a truncated body snippet so schema-drift or auth-rejection
+        // debugging doesn't require reproducing. Same pattern as auth/orders.
+        // Cap at 500 chars — pino redact is field-based, can't scrub tokens
+        // if upstream ever echoed one in an error string.
+        const body = await response.text().catch(() => '');
+        log.error(
+          { status: response.status, body: body.slice(0, 500), page },
+          'Upstream locations API returned non-ok status',
+        );
         throw new Error(`Upstream locations API returned ${response.status}`);
       }
 
@@ -158,6 +167,9 @@ export async function refreshLocations(): Promise<void> {
     }
 
     store = { locations, loadedAt: Date.now() };
+    // Successful refresh clears the stale-warning dedup so a *future* staleness
+    // event can warn again.
+    hasWarnedStale = false;
     log.info({ count: locations.length }, 'Location data refreshed');
   } catch (err) {
     log.error({ err }, 'Failed to refresh location data — retaining previous data');
@@ -167,6 +179,11 @@ export async function refreshLocations(): Promise<void> {
 }
 
 let refreshInterval: NodeJS.Timeout | null = null;
+// Stale-data warning dedup. The timer fires every `intervalMs` (24h default)
+// and would otherwise re-warn on every tick while upstream stays down. We
+// only want one "location data is stale" entry per outage; reset when a
+// refresh successfully completes (see refreshLocations).
+let hasWarnedStale = false;
 
 /** Starts the background refresh timer. Call once at startup. */
 export function startLocationRefresh(): void {
@@ -176,11 +193,12 @@ export function startLocationRefresh(): void {
   const intervalMs = env.LOCATION_REFRESH_INTERVAL_HOURS * 60 * 60 * 1000;
   const staleMs = intervalMs * 2;
   refreshInterval = setInterval(() => {
-    if (Date.now() - store.loadedAt > staleMs && store.locations.length > 0) {
+    if (!hasWarnedStale && Date.now() - store.loadedAt > staleMs && store.locations.length > 0) {
       log.warn(
         { ageMs: Date.now() - store.loadedAt, threshold: staleMs },
         'Location data is stale — refresh may be failing',
       );
+      hasWarnedStale = true;
     }
     void refreshLocations();
   }, intervalMs);
