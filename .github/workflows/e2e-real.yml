@@ -1,0 +1,54 @@
+name: E2E (real CTX + wallet)
+
+# Manually triggered only — this spends real XLM and creates a real order
+# against the upstream CTX sandbox/production. Never run automatically.
+on:
+  workflow_dispatch:
+    inputs:
+      amount_usd:
+        description: 'USD amount to purchase (as a string)'
+        required: false
+        default: '5'
+      merchant_id:
+        description: 'Override merchant id (blank = first min-max in catalog)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-real
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Full purchase flow
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install deps
+        run: npm ci
+      - name: Start backend against real CTX
+        run: npm run dev -w @loop/backend &
+        env:
+          PORT: 8080
+          NODE_ENV: test
+          LOG_LEVEL: info
+          GIFT_CARD_API_BASE_URL: https://spend.ctx.com
+          INCLUDE_DISABLED_MERCHANTS: 'false'
+      - name: Wait for backend
+        run: npx wait-on http://localhost:8080/health --timeout 60000
+      - name: Run real purchase workflow
+        run: node scripts/e2e-real.mjs
+        env:
+          BACKEND_URL: http://localhost:8080
+          CTX_TEST_REFRESH_TOKEN: ${{ secrets.CTX_TEST_REFRESH_TOKEN }}
+          STELLAR_TEST_SECRET_KEY: ${{ secrets.STELLAR_TEST_SECRET_KEY }}
+          E2E_AMOUNT_USD: ${{ inputs.amount_usd }}
+          E2E_MERCHANT_ID: ${{ inputs.merchant_id }}

@@ -83,12 +83,34 @@ npm run verify
 
 ## When tests run
 
-| Trigger         | What runs                                         |
-| --------------- | ------------------------------------------------- |
-| `git commit`    | lint-staged (ESLint + Prettier on changed files)  |
-| `git push`      | `npm test` + `lint:docs` (blocks push on failure) |
-| CI (every push) | typecheck + lint + test + audit + build           |
-| CI (PRs only)   | + e2e tests with Playwright                       |
+| Trigger                            | What runs                                                                                           |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `git commit`                       | lint-staged (ESLint + Prettier on changed files)                                                    |
+| `git push`                         | `npm test` + `lint:docs` (blocks push on failure)                                                   |
+| CI (every push)                    | typecheck + lint + test + audit + build                                                             |
+| CI (PRs only)                      | + e2e tests with Playwright                                                                         |
+| GitHub Actions `workflow_dispatch` | **E2E (real CTX + wallet)** — manually triggered full purchase flow that spends real XLM; see below |
+
+### Manual: real CTX + wallet purchase workflow
+
+`scripts/e2e-real.mjs` + `.github/workflows/e2e-real.yml` drive the full
+purchase flow end-to-end against the real CTX upstream, paying an order
+from the funded test Stellar wallet and polling until it is fulfilled.
+
+Repository secrets required:
+
+- `CTX_TEST_REFRESH_TOKEN` — refresh token for the test CTX account
+- `STELLAR_TEST_SECRET_KEY` — secret key (`S…`) of the funded test wallet
+
+Trigger: GitHub → Actions → **E2E (real CTX + wallet)** → Run workflow.
+Optional inputs: `amount_usd` (default `5`), `merchant_id` (default:
+first min-max merchant in the catalog).
+
+The script can also be run locally against a running backend:
+
+```bash
+CTX_TEST_REFRESH_TOKEN=… STELLAR_TEST_SECRET_KEY=… node scripts/e2e-real.mjs
+```
 
 ---
 
