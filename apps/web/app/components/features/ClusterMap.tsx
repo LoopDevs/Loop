@@ -40,7 +40,10 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
   const markersRef = useRef<Layer[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [status, setStatus] = useState<string>('');
-  const { merchants } = useMerchants({ limit: 1000 });
+  // Backend caps the limit at MAX_PAGE_SIZE=100. Asking for 1000 was silently
+  // clamped, which hid the fact that merchants past index 100 fell back to
+  // showing their id in the popup instead of their name. Match the cap.
+  const { merchants } = useMerchants({ limit: 100 });
   const merchantsById = useRef(new Map<string, string>());
   const onMerchantSelectRef = useRef(onMerchantSelect);
   // Track open popup so we can re-open it after zoom/pan marker refresh

@@ -30,7 +30,12 @@ export function ErrorBoundary(): React.JSX.Element {
 export default function MapRoute(): React.JSX.Element {
   const { isNative } = useNativePlatform();
   const [selectedMerchantId, setSelectedMerchantId] = useState<string | null>(null);
-  const { merchants } = useMerchants({ limit: 1000 });
+  // Backend caps /api/merchants limit at MAX_PAGE_SIZE=100. Asking for 1000
+  // was silently clamped — the remaining 17 merchants (we have ~117) would
+  // have shown their raw id in the popup name lookup below instead of a
+  // human-readable name. Match the cap here; revisit with pagination when
+  // the merchant count outgrows 100.
+  const { merchants } = useMerchants({ limit: 100 });
 
   const selectedMerchant = selectedMerchantId
     ? (merchants.find((m) => m.id === selectedMerchantId) ?? null)
