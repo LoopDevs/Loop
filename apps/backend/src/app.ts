@@ -12,6 +12,7 @@ import { getMerchants } from './merchants/sync.js';
 import { clustersHandler } from './clustering/handler.js';
 import { imageProxyHandler, evictExpiredImageCache } from './images/proxy.js';
 import { upstreamUrl } from './upstream.js';
+import { getAllCircuitStates } from './circuit-breaker.js';
 import {
   merchantListHandler,
   merchantBySlugHandler,
@@ -44,6 +45,13 @@ if (env.SENTRY_DSN) {
 
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
+// Cap on the rate-limit map. Without this, an attacker spraying requests
+// from fresh IPs faster than the hourly cleanup runs could grow the map
+// until the process OOMs. With the cap, once we hit it we evict the
+// oldest entry before inserting — the attacker loses memory of their own
+// earlier hits but we stay stable.
+const RATE_LIMIT_MAP_MAX = 10_000;
+
 /** Simple per-IP rate limiter. Returns 429 if limit exceeded within the window. */
 function rateLimit(
   maxRequests: number,
@@ -55,6 +63,12 @@ function rateLimit(
     const entry = rateLimitMap.get(ip);
 
     if (entry === undefined || now > entry.resetAt) {
+      // Evict the oldest entry if we're at capacity. Map iteration order is
+      // insertion order, so keys().next().value is the oldest.
+      if (rateLimitMap.size >= RATE_LIMIT_MAP_MAX && entry === undefined) {
+        const oldest = rateLimitMap.keys().next().value;
+        if (oldest !== undefined) rateLimitMap.delete(oldest);
+      }
       rateLimitMap.set(ip, { count: 1, resetAt: now + windowMs });
     } else {
       entry.count++;
@@ -63,6 +77,7 @@ function rateLimit(
         // instead of hot-looping retries.
         const retryAfterSec = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
         c.header('Retry-After', String(retryAfterSec));
+        metrics.rateLimitHitsTotal++;
         return c.json({ code: 'RATE_LIMITED', message: 'Too many requests' }, 429);
       }
     }
@@ -86,11 +101,75 @@ app.use(
   '*',
   secureHeaders({
     crossOriginResourcePolicy: env.NODE_ENV === 'production' ? 'same-origin' : 'cross-origin',
+    // API-appropriate CSP: this host only ever serves JSON/binary data
+    // (no HTML), so any browser that receives an injected response should
+    // refuse to execute scripts or load sub-resources from it. default-src
+    // 'none' is the strictest possible base; frame-ancestors 'none'
+    // prevents clickjacking embeds even on error pages. A second line of
+    // defense against any future XSS class of bug (like the ClusterMap
+    // innerHTML one caught in the hardening sweep).
+    contentSecurityPolicy: {
+      defaultSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+      baseUri: ["'none'"],
+      formAction: ["'none'"],
+    },
   }),
 );
 app.use('*', bodyLimit({ maxSize: 1024 * 1024 }));
 app.use('*', requestId());
 app.use('*', honoLogger());
+
+// ─── Metrics ─────────────────────────────────────────────────────────────────
+
+interface Metrics {
+  rateLimitHitsTotal: number;
+  requestsTotal: Map<string, number>;
+}
+const metrics: Metrics = {
+  rateLimitHitsTotal: 0,
+  requestsTotal: new Map(),
+};
+
+// Request counter middleware. Runs after all other middleware + the handler
+// so it observes the final status. Keys are `METHOD:ROUTE:STATUS` with the
+// route being the matched pattern (not the URL) to keep cardinality bounded.
+app.use('*', async (c, next) => {
+  await next();
+  // Skip the metrics endpoint itself so we don't count our own scraper.
+  if (c.req.path === '/metrics') return;
+  const route = c.req.routePath ?? c.req.path;
+  const key = `${c.req.method}:${route}:${c.res.status}`;
+  metrics.requestsTotal.set(key, (metrics.requestsTotal.get(key) ?? 0) + 1);
+});
+
+app.get('/metrics', (c) => {
+  const lines: string[] = [];
+
+  lines.push('# HELP loop_rate_limit_hits_total Total 429 responses issued.');
+  lines.push('# TYPE loop_rate_limit_hits_total counter');
+  lines.push(`loop_rate_limit_hits_total ${metrics.rateLimitHitsTotal}`);
+  lines.push('');
+
+  lines.push('# HELP loop_requests_total Total HTTP requests by method/route/status.');
+  lines.push('# TYPE loop_requests_total counter');
+  for (const [key, count] of metrics.requestsTotal) {
+    const [method, route, status] = key.split(':');
+    const labels = `method="${method}",route="${route}",status="${status}"`;
+    lines.push(`loop_requests_total{${labels}} ${count}`);
+  }
+  lines.push('');
+
+  lines.push('# HELP loop_circuit_state Circuit breaker state per upstream endpoint.');
+  lines.push('# HELP loop_circuit_state 0=closed,1=half_open,2=open.');
+  lines.push('# TYPE loop_circuit_state gauge');
+  for (const [key, state] of Object.entries(getAllCircuitStates())) {
+    const val = state === 'closed' ? 0 : state === 'half_open' ? 1 : 2;
+    lines.push(`loop_circuit_state{endpoint="${key}"} ${val}`);
+  }
+
+  return c.text(lines.join('\n') + '\n', 200, { 'Content-Type': 'text/plain; version=0.0.4' });
+});
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 
@@ -168,7 +247,10 @@ app.post('/api/auth/verify-otp', rateLimit(10, 60_000), verifyOtpHandler);
 // Refresh abuse defense: legit clients refresh once per access-token lifetime,
 // so 30/min per IP leaves plenty of headroom without enabling spray attacks.
 app.post('/api/auth/refresh', rateLimit(30, 60_000), refreshHandler);
-app.delete('/api/auth/session', logoutHandler);
+// Logout: 20/min per IP. The handler fans out to an upstream revoke, so
+// without a limit an attacker could cheaply spam arbitrary refresh tokens
+// at CTX through us.
+app.delete('/api/auth/session', rateLimit(20, 60_000), logoutHandler);
 
 // ─── Orders (authenticated) ───────────────────────────────────────────────────
 

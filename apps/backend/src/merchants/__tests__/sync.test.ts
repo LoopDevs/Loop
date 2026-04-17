@@ -19,11 +19,12 @@ vi.mock('../../logger.js', () => ({
 
 // Mock circuit breaker to pass through to global fetch (avoids cross-test state leaks)
 vi.mock('../../circuit-breaker.js', () => ({
-  upstreamCircuit: {
+  getAllCircuitStates: () => ({}),
+  getUpstreamCircuit: () => ({
     fetch: (...args: Parameters<typeof globalThis.fetch>) => globalThis.fetch(...args),
     getState: () => 'closed' as const,
     reset: () => {},
-  },
+  }),
 }));
 
 import { merchantSlug } from '@loop/shared';

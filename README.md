@@ -24,16 +24,19 @@ packages/shared Shared TypeScript types, slug utilities, protobuf definitions
 
 ## Documentation
 
-| Doc                                            | Contents                                                   |
-| ---------------------------------------------- | ---------------------------------------------------------- |
-| [`AGENTS.md`](AGENTS.md)                       | AI agent instructions, architecture rules, file boundaries |
-| [`docs/architecture.md`](docs/architecture.md) | System design, data flows, API endpoints                   |
-| [`docs/development.md`](docs/development.md)   | Getting started, env vars, all dev commands                |
-| [`docs/deployment.md`](docs/deployment.md)     | Deploy backend, web, and mobile                            |
-| [`docs/testing.md`](docs/testing.md)           | Testing pyramid, coverage requirements                     |
-| [`docs/standards.md`](docs/standards.md)       | Code style, commit format, branching, review rules         |
-| [`docs/roadmap.md`](docs/roadmap.md)           | What's left for Phase 1, Phase 2, Phase 3                  |
-| [`docs/adr/`](docs/adr/)                       | Architecture Decision Records                              |
+| Doc                                                  | Contents                                                   |
+| ---------------------------------------------------- | ---------------------------------------------------------- |
+| [`AGENTS.md`](AGENTS.md)                             | AI agent instructions, architecture rules, file boundaries |
+| [`docs/architecture.md`](docs/architecture.md)       | System design, data flows, API endpoints                   |
+| [`docs/development.md`](docs/development.md)         | Getting started, env vars, all dev commands                |
+| [`docs/deployment.md`](docs/deployment.md)           | Deploy backend, web, and mobile                            |
+| [`docs/testing.md`](docs/testing.md)                 | Testing pyramid, coverage requirements                     |
+| [`docs/standards.md`](docs/standards.md)             | Code style, commit format, branching, review rules         |
+| [`docs/roadmap.md`](docs/roadmap.md)                 | What's left for Phase 1, Phase 2, Phase 3                  |
+| [`docs/codebase-audit.md`](docs/codebase-audit.md)   | Audit program, scope, and completion criteria              |
+| [`docs/audit-checklist.md`](docs/audit-checklist.md) | Detailed audit checklist by workstream                     |
+| [`docs/audit-tracker.md`](docs/audit-tracker.md)     | Working tracker for evidence, findings, and status         |
+| [`docs/adr/`](docs/adr/)                             | Architecture Decision Records                              |
 
 ## Commands
 

@@ -2,7 +2,7 @@ import type { Location } from './algorithm.js';
 import { z } from 'zod';
 import { logger } from '../logger.js';
 import { env } from '../env.js';
-import { upstreamCircuit } from '../circuit-breaker.js';
+import { getUpstreamCircuit } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
 import { getMerchants } from '../merchants/sync.js';
 
@@ -92,7 +92,7 @@ export async function refreshLocations(): Promise<void> {
         headers['X-Api-Secret'] = env.GIFT_CARD_API_SECRET;
       }
 
-      const response = await upstreamCircuit.fetch(url.toString(), {
+      const response = await getUpstreamCircuit('locations').fetch(url.toString(), {
         headers,
         signal: AbortSignal.timeout(30_000),
       });

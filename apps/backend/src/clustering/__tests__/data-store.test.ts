@@ -19,9 +19,10 @@ vi.mock('../../logger.js', () => ({
 }));
 
 vi.mock('../../circuit-breaker.js', () => ({
-  upstreamCircuit: {
+  getAllCircuitStates: () => ({}),
+  getUpstreamCircuit: () => ({
     fetch: (...args: Parameters<typeof globalThis.fetch>) => globalThis.fetch(...args),
-  },
+  }),
 }));
 
 const mockFetch = vi.fn();

@@ -19,7 +19,15 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
-    // Mobile Safari only runs locally (CI installs chromium only)
+    // Mobile viewport via chromium — runs everywhere (locally and CI, since
+    // CI only installs chromium). Catches layout/UX regressions that only
+    // show up at narrow widths. For full mobile-Safari parity run the
+    // 'mobile-safari' project locally after `npx playwright install webkit`.
+    {
+      name: 'mobile-chrome',
+      use: { ...devices['Pixel 7'] },
+    },
+    // Full mobile Safari only runs locally (CI installs chromium only).
     ...(!process.env['CI']
       ? [
           {

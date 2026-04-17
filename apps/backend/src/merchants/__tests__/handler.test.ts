@@ -52,11 +52,12 @@ vi.mock('../../circuit-breaker.js', () => ({
       this.name = 'CircuitOpenError';
     }
   },
-  upstreamCircuit: {
+  getAllCircuitStates: () => ({}),
+  getUpstreamCircuit: () => ({
     fetch: (...args: Parameters<typeof globalThis.fetch>) => globalThis.fetch(...args),
     getState: () => 'closed' as const,
     reset: () => {},
-  },
+  }),
 }));
 
 import { app } from '../../app.js';

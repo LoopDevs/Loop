@@ -58,6 +58,9 @@ loop-app/
 │   ├── deployment.md    # Deploy backend, web, mobile
 │   ├── testing.md       # Testing pyramid, coverage
 │   ├── standards.md     # This file
+│   ├── codebase-audit.md # Audit program and exit criteria
+│   ├── audit-checklist.md # Workstream checklist
+│   ├── audit-tracker.md # Audit execution tracker
 │   ├── migration.md     # Migration plan and checklist
 │   └── adr/             # Architecture Decision Records
 ├── .github/
