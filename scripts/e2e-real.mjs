@@ -127,13 +127,22 @@ async function pickMerchant(accessToken) {
   }
   const data = await api('/api/merchants', { accessToken });
   const merchants = data?.merchants ?? [];
-  // Prefer a min-max merchant so a flat $5 amount works for most cards.
-  const firstMinMax = merchants.find(
+  // Prefer a min-max merchant whose range covers AMOUNT_USD. Type enum is
+  // 'min-max' (see packages/shared/src/merchants.ts) — an earlier typo of
+  // 'minMax' here silently fell through to the first merchant, which was
+  // a fixed-denom card that rejected the amount at upstream.
+  const amount = Number(AMOUNT_USD);
+  const chosen = merchants.find(
     (m) =>
-      m?.denominations?.type === 'minMax' && (m?.denominations?.min ?? 0) <= Number(AMOUNT_USD),
+      m?.denominations?.type === 'min-max' &&
+      (m.denominations.min ?? 0) <= amount &&
+      (m.denominations.max ?? Infinity) >= amount,
   );
-  const chosen = firstMinMax ?? merchants[0];
-  if (!chosen?.id) throw new Error('No merchants returned from /api/merchants');
+  if (!chosen?.id) {
+    throw new Error(
+      `No min-max merchant covers $${AMOUNT_USD} (of ${merchants.length} merchants returned)`,
+    );
+  }
   log(`Picked merchant: ${chosen.name} (${chosen.id})`);
   return chosen.id;
 }

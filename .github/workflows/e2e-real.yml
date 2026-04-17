@@ -36,9 +36,16 @@ jobs:
         run: npm ci
       # The `dev` script uses `tsx watch --env-file=.env`, which would error in
       # CI since no `.env` exists. Run tsx directly against the source so only
-      # the workflow `env:` block applies.
+      # the workflow `env:` block applies. Redirect stdout+stderr to a file so
+      # a later "Dump backend log" step can surface upstream errors — backend
+      # logs are the only place we see the CTX status/body when the script
+      # hits a 502 UPSTREAM_ERROR.
       - name: Start backend against real CTX
-        run: npm exec -w @loop/backend -- tsx src/index.ts &
+        run: |
+          mkdir -p "${{ runner.temp }}"
+          nohup npm exec -w @loop/backend -- tsx src/index.ts \
+            > "${{ runner.temp }}/backend.log" 2>&1 &
+          echo $! > "${{ runner.temp }}/backend.pid"
         env:
           PORT: 8080
           NODE_ENV: test
@@ -92,3 +99,12 @@ jobs:
             < "$TOKEN_FILE"
           rm -f "$TOKEN_FILE"
           echo "Rotated CTX_TEST_REFRESH_TOKEN."
+      - name: Dump backend log
+        if: always()
+        run: |
+          if [ -f "${{ runner.temp }}/backend.log" ]; then
+            echo "### Backend log (tail 200)"
+            tail -n 200 "${{ runner.temp }}/backend.log"
+          else
+            echo "No backend log captured."
+          fi
