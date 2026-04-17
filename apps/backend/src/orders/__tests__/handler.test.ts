@@ -249,6 +249,41 @@ describe('POST /api/orders', () => {
     expect(expiresAt).toBeGreaterThanOrEqual(nowSec + 29 * 60);
     expect(expiresAt).toBeLessThanOrEqual(nowSec + 31 * 60);
   });
+
+  it('returns 502 when upstream creates an order but omits the XLM payment URL', async () => {
+    mockGetMerchants.mockReturnValue({
+      merchants: [{ id: 'm-1', name: 'Test Store', denominations: { currency: 'USD' } }],
+      merchantsById: new Map([
+        ['m-1', { id: 'm-1', name: 'Test Store', denominations: { currency: 'USD' } }],
+      ]),
+      merchantsBySlug: new Map(),
+      loadedAt: Date.now(),
+    });
+
+    // Upstream returns a valid-shape response but without XLM in paymentUrls.
+    // The client can't pay an order with no URI; surface as 502 instead of
+    // returning a broken 201 that sets up a useless payment screen.
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'no-xlm-order',
+          paymentCryptoAmount: '100',
+          paymentUrls: { BTC: 'bitcoin:abc' },
+          status: 'unpaid',
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const res = await app.request('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...AUTH_HEADER },
+      body: JSON.stringify({ merchantId: 'm-1', amount: 25 }),
+    });
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('UPSTREAM_ERROR');
+  });
 });
 
 describe('GET /api/orders/:id', () => {
