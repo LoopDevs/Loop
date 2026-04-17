@@ -61,11 +61,12 @@ vi.mock('../../circuit-breaker.js', () => {
   }
   return {
     CircuitOpenError,
-    upstreamCircuit: {
+    getAllCircuitStates: () => ({}),
+    getUpstreamCircuit: () => ({
       fetch: (...args: Parameters<typeof globalThis.fetch>) => globalThis.fetch(...args),
       getState: () => 'closed' as const,
       reset: () => {},
-    },
+    }),
   };
 });
 
@@ -309,5 +310,65 @@ describe('requireAuth middleware (via /api/orders)', () => {
       headers: { Authorization: 'Basic abc123' },
     });
     expect(res.status).toBe(401);
+  });
+});
+
+describe('DELETE /api/auth/session', () => {
+  it('forwards refreshToken to upstream /logout', async () => {
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    const res = await app.request('/api/auth/session', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '10.0.0.1' },
+      body: JSON.stringify({ refreshToken: 'rt-to-revoke', platform: 'web' }),
+    });
+
+    expect(res.status).toBe(200);
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/logout');
+    const sent = JSON.parse(init.body as string) as { refreshToken: string; clientId: string };
+    expect(sent.refreshToken).toBe('rt-to-revoke');
+    expect(sent.clientId).toBe('loopweb');
+  });
+
+  it('returns 200 even when upstream revoke fails (client always gets to log out)', async () => {
+    mockFetch.mockResolvedValueOnce(new Response('nope', { status: 500 }));
+
+    const res = await app.request('/api/auth/session', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '10.0.0.2' },
+      body: JSON.stringify({ refreshToken: 'rt-x', platform: 'web' }),
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it('succeeds without calling upstream when no refreshToken provided', async () => {
+    const res = await app.request('/api/auth/session', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '10.0.0.3' },
+      body: JSON.stringify({ platform: 'web' }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('rate limits at 20/min per IP', async () => {
+    mockFetch.mockResolvedValue(new Response(null, { status: 204 }));
+    const ip = '203.0.113.200';
+    const doReq = (): Promise<Response> | Response =>
+      app.request('/api/auth/session', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', 'x-forwarded-for': ip },
+        body: JSON.stringify({ refreshToken: 'x', platform: 'web' }),
+      });
+
+    for (let i = 0; i < 20; i++) {
+      const r = await doReq();
+      expect(r.status).toBe(200);
+    }
+    const limited = await doReq();
+    expect(limited.status).toBe(429);
   });
 });

@@ -2,7 +2,7 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
-import { upstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
+import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
 
 const log = logger.child({ handler: 'auth' });
@@ -45,7 +45,7 @@ export async function requestOtpHandler(c: Context): Promise<Response> {
   }
 
   try {
-    const response = await upstreamCircuit.fetch(upstreamUrl('/login'), {
+    const response = await getUpstreamCircuit('login').fetch(upstreamUrl('/login'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -95,7 +95,7 @@ export async function verifyOtpHandler(c: Context): Promise<Response> {
   }
 
   try {
-    const response = await upstreamCircuit.fetch(upstreamUrl('/verify-email'), {
+    const response = await getUpstreamCircuit('verify-email').fetch(upstreamUrl('/verify-email'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -153,15 +153,18 @@ export async function refreshHandler(c: Context): Promise<Response> {
   }
 
   try {
-    const response = await upstreamCircuit.fetch(upstreamUrl('/refresh-token'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        refreshToken: parsed.data.refreshToken,
-        clientId: clientIdForPlatform(parsed.data.platform),
-      }),
-      signal: AbortSignal.timeout(15_000),
-    });
+    const response = await getUpstreamCircuit('refresh-token').fetch(
+      upstreamUrl('/refresh-token'),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          refreshToken: parsed.data.refreshToken,
+          clientId: clientIdForPlatform(parsed.data.platform),
+        }),
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
 
     if (!response.ok) {
       return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired refresh token' }, 401);
@@ -192,8 +195,53 @@ export async function refreshHandler(c: Context): Promise<Response> {
   }
 }
 
-/** DELETE /api/auth/session — client clears tokens locally. */
-export function logoutHandler(c: Context): Response {
+const LogoutBody = z.object({
+  refreshToken: z.string().min(1).optional(),
+  platform: PlatformEnum,
+});
+
+/**
+ * DELETE /api/auth/session — best-effort upstream revoke + success.
+ *
+ * If the client supplies a refresh token we try to revoke it upstream so a
+ * leaked token can't outlive the user's intent to log out. Upstream errors
+ * are logged and swallowed: the client has already decided to log out, so
+ * failing the request would just trap the token in-store. The client
+ * always clears local state on receiving 200.
+ */
+export async function logoutHandler(c: Context): Promise<Response> {
+  const parsed = LogoutBody.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success || parsed.data.refreshToken === undefined) {
+    // No token in body — nothing to revoke upstream. Still succeed so the
+    // client proceeds with local clear.
+    return c.json({ message: 'Logged out' });
+  }
+
+  try {
+    const response = await getUpstreamCircuit('logout').fetch(upstreamUrl('/logout'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        refreshToken: parsed.data.refreshToken,
+        clientId: clientIdForPlatform(parsed.data.platform),
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      log.warn(
+        { status: response.status },
+        'Upstream logout returned non-success — token may still be valid upstream',
+      );
+    }
+  } catch (err) {
+    if (err instanceof CircuitOpenError) {
+      // Upstream unreachable — client still gets its local clear.
+      log.info('Logout attempted while upstream circuit open');
+    } else {
+      log.warn({ err }, 'Logout upstream call failed');
+    }
+  }
+
   return c.json({ message: 'Logged out' });
 }
 

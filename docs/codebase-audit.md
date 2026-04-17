@@ -1,178 +1,181 @@
-# Codebase Audit Plan
+# Comprehensive Codebase Audit Program
 
-Comprehensive audit of every file, pattern, and system in the Loop monorepo.
+This document is the audit hub for Loop. It replaces the previous `docs/codebase-audit.md`, which mixed a partial checklist with a false "complete" conclusion and is not sufficient for a full-project audit.
 
-## Audit phases
+## Goal
 
-### Phase 1: File inventory
+The standard is not "we glanced at the code and found a few issues." The standard is:
 
-- Count every source file across all packages
-- Identify any orphaned/unused files
-- Check file naming conventions (kebab-case)
+- every meaningful surface of the repo is explicitly audited
+- every audit stream has evidence, not just opinions
+- all critical and high-severity findings are resolved before sign-off
+- medium findings are either resolved or accepted with an owner, rationale, and date
+- residual risk is explicit, not hidden
+- docs, tests, and operational guidance are reconciled with reality
 
-### Phase 2: Backend audit
+Absolute perfection cannot be proven. For this project, "audit complete" means there are no unreviewed material surfaces left and no unowned meaningful risks.
 
-- [ ] `src/app.ts` — middleware order, route registration, health endpoint
-- [ ] `src/index.ts` — startup sequence, timing
-- [ ] `src/env.ts` — all env vars validated, defaults sensible
-- [ ] `src/upstream.ts` — URL builder correctness
-- [ ] `src/circuit-breaker.ts` — state machine, edge cases
-- [ ] `src/logger.ts` — configuration
-- [ ] `src/auth/handler.ts` — validation, proxy logic, error handling, clientId
-- [ ] `src/orders/handler.ts` — Zod schemas match CTX, mapping correctness, X-Client-Id
-- [ ] `src/merchants/sync.ts` — pagination, field mapping, savingsPercentage conversion
-- [ ] `src/merchants/handler.ts` — search, pagination, cache headers
-- [ ] `src/clustering/algorithm.ts` — grid sizes, edge cases
-- [ ] `src/clustering/data-store.ts` — cross-reference, pagination, startup order
-- [ ] `src/clustering/handler.ts` — protobuf, JSON fallback, content negotiation
-- [ ] `src/images/proxy.ts` — SSRF, caching, resize, allowlist
+## Depth Standard
 
-### Phase 3: Shared package audit
+This audit is intentionally both wide and deep.
 
-- [ ] `src/index.ts` — barrel exports complete
-- [ ] `src/api.ts` — error types, auth types
-- [ ] `src/merchants.ts` — Merchant type matches CTX reality
-- [ ] `src/orders.ts` — Order type matches CTX reality
-- [ ] `src/slugs.ts` — slug generation correctness
-- [ ] `src/proto/` — generated types, import paths
+- Wide means every material surface is reviewed: product flows, architecture, code, tests, native shell, CI/CD, docs, automation, deployment, operational readiness, and backlog assumptions.
+- Deep means each important surface is reviewed from multiple levels:
+  - system level: architecture, responsibilities, boundaries, failure modes, lifecycle
+  - implementation level: concrete files, functions, branches, state transitions, schemas, and configs
+  - behavioural level: user journeys, degraded states, recovery paths, and abuse paths
 
-### Phase 4: Web app audit
+The audit should not optimize for speed. It should optimize for confidence.
 
-- [ ] Routes: home, auth, gift-card, map, orders, not-found
-- [ ] Components: Navbar, Footer, MerchantCard, ClusterMap, MapBottomSheet, NativeBackButton, NativeTabBar
-- [ ] Purchase flow: PurchaseContainer, AmountSelection, PaymentStep, PurchaseComplete, RedeemFlow
-- [ ] UI primitives: Button, Input, Spinner, Skeleton, LazyImage, OfflineBanner, ToastContainer
-- [ ] Hooks: use-auth, use-merchants, use-native-platform, use-session-restore, slug
-- [ ] Services: api-client, auth, merchants, orders, clusters, config
-- [ ] Stores: auth.store, purchase.store, ui.store
-- [ ] Native modules: all 13 files in native/
-- [ ] Utils: image.ts, error-messages.ts
-- [ ] CSS: app.css — all custom classes, dark mode, animations, safe areas
+## Audit Principles
 
-### Phase 5: Configuration & infrastructure audit
+- Audit the system, not just the code.
+- Prefer evidence over assumptions.
+- Verify architecture rules against implementation.
+- Follow the highest-risk flows end to end.
+- Treat mobile, CI/CD, docs, and operational readiness as first-class audit targets.
+- Separate findings from fixes. The audit should stay useful even before remediation starts.
 
-- [ ] Root package.json — scripts, workspaces, engines
-- [ ] Per-package package.json — dependencies, scripts
-- [ ] TypeScript configs — strict mode, paths, base config
-- [ ] ESLint config — rules, ignores, import boundaries
-- [ ] Prettier config
-- [ ] Husky hooks — pre-commit, pre-push, commit-msg
-- [ ] CI workflow — jobs, caching, secrets, e2e
-- [ ] Capacitor config — plugins, settings
-- [ ] Vite config — plugins, optimizeDeps
-- [ ] Vitest configs — coverage, environment
+## Audit Method
 
-### Phase 6: Documentation audit
+The audit runs in ordered passes. Each pass must leave behind evidence in the tracker.
 
-- [ ] AGENTS.md (root) — current and accurate
-- [ ] Per-package AGENTS.md files — current and accurate
-- [ ] docs/architecture.md — matches code reality
-- [ ] docs/development.md — commands work, env vars current
-- [ ] docs/deployment.md — Dockerfiles, Fly.io, Vercel
-- [ ] docs/testing.md — test inventory matches reality
-- [ ] docs/standards.md — rules enforced
-- [ ] docs/roadmap.md — items correctly marked
-- [ ] docs/mobile-native-ux.md — items correctly marked
-- [ ] docs/ui-restoration-plan.md — items correctly marked
-- [ ] docs/migration.md — historical accuracy
+1. Baseline and inventory
+   Capture commit SHA, package inventory, commands, env assumptions, workflow files, deploy surfaces, and third-party integrations.
+2. High-level system review
+   Reconcile implementation against `AGENTS.md`, ADRs, architecture docs, package boundaries, and critical rules.
+3. Low-level implementation review
+   Read code, tests, configs, scripts, and docs for each workstream listed below.
+4. End-to-end behaviour review
+   Trace critical user and operator flows from entry to completion, including retries, interruption, and recovery.
+5. Runtime and build verification
+   Run typecheck, lint, unit tests, build, and targeted exploratory checks. Record failures, flakiness, slow paths, and hidden prerequisites.
+6. Adversarial review
+   Threat-model auth, tokens, upstream proxying, image proxying, native storage, payment flows, error states, abuse cases, and operational failure modes.
+7. Cross-source reconciliation
+   Compare code, tests, docs, CI, deployment config, and package metadata for drift.
+8. Reverse-direction review
+   Re-check the system from the opposite direction: from docs to code, from tests to implementation, from workflows to expected protections, and from roadmap claims to shipped reality.
+9. Findings triage
+   Classify severity, blast radius, exploitability, reproducibility, and fix confidence.
+10. Remediation planning
+    Group findings into change batches, regression checks, and docs updates.
+11. Final sign-off
+    Confirm nothing material remains unaudited and that residual risks are explicit.
 
-### Phase 7: Test audit
+## Review Lenses
 
-- [ ] Backend test coverage — every handler, every edge case
-- [ ] Web test coverage — stores, hooks, services, native modules
-- [ ] E2E tests — smoke + purchase flow
-- [ ] Test quality — mocks correct, assertions meaningful
-- [ ] Missing tests for new code
+Each workstream should be reviewed through several lenses, not just one:
 
-### Phase 8: Security audit
+- architectural: does the shape of the system make sense?
+- correctness: does it do the right thing?
+- resilience: does it behave safely under failure?
+- security and abuse: can it be broken or exploited?
+- maintainability: is it understandable and durable?
+- operability: can it be deployed, monitored, debugged, and recovered?
+- product quality: does it feel complete and intentional to the user?
 
-- [ ] No secrets in source or git history
-- [ ] CORS configuration correct
-- [ ] SSRF protection complete
-- [ ] Auth token handling secure
-- [ ] Rate limiting adequate
-- [ ] Input validation complete
-- [ ] No XSS vectors
-- [ ] Secure headers present
+No important area should be signed off after a single-lens review.
 
-### Phase 9: Performance audit
+## Audit Workstreams
 
-- [ ] Bundle size analysis
-- [ ] Lazy loading effectiveness
-- [ ] API response times
-- [ ] Image proxy efficiency
-- [ ] Memory usage patterns
-- [ ] N+1 query patterns
+Every audit run must cover all of these workstreams:
 
-### Phase 10: Cross-cutting concerns
+1. Repository hygiene and governance
+2. Architecture and boundary compliance
+3. Backend correctness and resilience
+4. Web correctness and UX integrity
+5. Mobile shell and native integration
+6. Shared types, contracts, and serialization
+7. Auth, session, identity, and token handling
+8. Orders, payment, redemption, and business-flow correctness
+9. Security, privacy, abuse, and trust boundaries
+10. Performance, caching, bundle/runtime efficiency
+11. Accessibility, responsiveness, and degraded-network behaviour
+12. Tests, test quality, and regression confidence
+13. CI/CD, release safety, and deployment correctness
+14. Observability, alerting, and incident readiness
+15. Dependencies, supply chain, licenses, and update posture
+16. Documentation accuracy and operational usability
+17. Backlog, roadmap, and delivery-risk alignment
 
-- [ ] Error handling consistency
-- [ ] Logging completeness
-- [ ] TypeScript strictness (no any leaks)
-- [ ] Dark mode completeness
-- [ ] Accessibility
-- [ ] Offline handling
-- [ ] Mobile UX
+Detailed checklists live in [docs/audit-checklist.md](docs/audit-checklist.md). Execution state lives in [docs/audit-tracker.md](docs/audit-tracker.md).
 
-## Findings format
+## Evidence Standard
 
-Each finding:
+No workstream is complete without concrete evidence. Acceptable evidence includes:
 
-```
-[SEVERITY] Category > File:line — Description
-  Impact: ...
-  Fix: ...
-```
+- code references
+- config or workflow references
+- test references
+- command results
+- runtime screenshots or logs when relevant
+- documented contradictions between code and docs
+- explicitly stated assumptions when an area cannot be fully verified
 
-Severities: CRITICAL, HIGH, MEDIUM, LOW, NITPICK
+Every finding must point to its evidence. Every "no issue found" conclusion should still cite what was checked.
+Every workstream should ideally include both high-level evidence and low-level evidence.
 
----
+## Severity Model
 
-## Audit Results (completed)
+- `CRITICAL`: exploitable security issue, irreversible fund loss, auth bypass, data leak, or release blocker
+- `HIGH`: serious correctness or safety issue with meaningful user or business impact
+- `MEDIUM`: real defect, drift, or maintainability issue that can plausibly cause breakage
+- `LOW`: minor defect, inconsistency, or weakness with limited blast radius
+- `NIT`: polish, clarity, or minor hygiene issue
 
-### Issues found and fixed
+Severity is based on impact and likelihood together. "Important architecture violation with no current symptom" can still be `HIGH`.
 
-| #   | Severity | Issue                                                           | Fix                                                      |
-| --- | -------- | --------------------------------------------------------------- | -------------------------------------------------------- |
-| 1   | MEDIUM   | `parseFloat(cardFiatAmount)` could produce NaN in order mapping | Added `\|\| 0` fallback on both list and detail handlers |
-| 2   | LOW      | OfflineBanner missing `role="alert"` for screen readers         | Added `role="alert"`                                     |
-| 3   | LOW      | NativeTabBar missing `aria-current="page"` on active tab        | Added `aria-current` prop                                |
-| 4   | NITPICK  | Rate limit comment math was wrong (300 < 692)                   | Fixed comment to explain progressive loading             |
+## Exit Criteria
 
-### Issues reviewed and not bugs
+The audit is not done until all of the following are true:
 
-| #   | Flagged as | Issue                                  | Why it's correct                                                                                                          |
-| --- | ---------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| 1   | CRITICAL   | `enabled: true` hardcoded on merchants | By design — disabled merchants are filtered before this line. Remaining merchants ARE enabled.                            |
-| 2   | HIGH       | `bearerToken as string` unsafe cast    | Safe at runtime — `requireAuth` middleware guarantees it exists before downstream handlers run.                           |
-| 3   | HIGH       | `void savePendingOrder` doesn't await  | Intentional — can't block UI waiting for Capacitor Preferences. Acceptable trade-off.                                     |
-| 4   | HIGH       | Session restore fails silently         | Correct — user sees logged-out state and can sign in. No misleading error.                                                |
-| 5   | MEDIUM     | RedeemFlow postMessage no origin check | Not applicable — messages come from WebView plugin bridge, not window.postMessage.                                        |
-| 6   | MEDIUM     | `any` casts on protobuf imports        | Unavoidable — dynamic import of generated code with no type annotations. Properly caught in try/catch with JSON fallback. |
+- every workstream in the tracker is marked `complete` or `blocked`
+- every blocked item explains exactly what evidence is missing and why
+- all critical and high findings have an approved remediation path
+- all commands required for confidence have been run, or the reason they could not be run is documented
+- docs that materially misdescribe the system are logged as findings
+- the audit has a final gap-review pass with no new material categories added
+- each major workstream has been reviewed at both system level and implementation level
+- critical user journeys and critical operator journeys have been traced end to end
 
-### Audit pass summary
+## Plan Review History
 
-| Area           | Files         | Issues found                | Fixed       |
-| -------------- | ------------- | --------------------------- | ----------- |
-| Backend source | 13            | 2 (parseFloat NaN, comment) | 2           |
-| Shared package | 6             | 0                           | —           |
-| Web routes     | 6             | 0                           | —           |
-| Web components | 17            | 2 (a11y)                    | 2           |
-| Web hooks      | 5             | 0                           | —           |
-| Web services   | 6             | 0                           | —           |
-| Web stores     | 3             | 0                           | —           |
-| Web native     | 13            | 0                           | —           |
-| Web utils      | 2             | 0                           | —           |
-| CSS            | 1             | 0                           | —           |
-| Configuration  | 12            | 0                           | —           |
-| CI/CD          | 1             | 0                           | —           |
-| Documentation  | 17            | 0                           | —           |
-| Tests          | 21            | 0                           | —           |
-| Security       | —             | 0                           | —           |
-| **Total**      | **123 files** | **4 issues**                | **4 fixed** |
+The plan was expanded through multiple gap-review passes before execution:
 
-### Second pass: no additional issues found
+### Pass 1
 
-After fixing the 4 issues above, a second pass was conducted. No new issues identified.
+Started from the obvious repo surfaces: backend, web, shared, config, tests, docs, security, and performance.
 
-**Audit status: COMPLETE — codebase is clean.**
+### Gap Review 1
+
+Added major missing areas:
+
+- mobile shell and native runtime risk
+- CI/CD, release controls, and deploy safety
+- observability, alerting, and incident response
+- dependency supply chain and license posture
+- privacy, abuse, and trust-boundary review
+- roadmap and backlog alignment with current code reality
+
+### Gap Review 2
+
+Added methodology gaps:
+
+- evidence requirements for "no issue found"
+- cross-source reconciliation between docs, tests, code, and workflows
+- runtime verification, not just static reading
+- explicit exit criteria and severity model
+- separation of tracker vs. checklist vs. findings
+
+### Gap Review 3
+
+Added end-to-end product-risk streams that are easy to miss in file-by-file audits:
+
+- auth/session restoration under failure
+- order creation, payment, polling, redemption, and recovery paths
+- degraded network, offline, and retry behaviours
+- native storage, WebView, browser bridge, and app-shell assumptions
+- release-time correctness for branch protections, workflows, and PR-only checks
+
+After the third review pass, no additional material audit categories remained unaccounted for.

@@ -173,6 +173,34 @@ export class CircuitOpenError extends Error {
   }
 }
 
-// ─── Singleton instance for all upstream API calls ──────────────────────────
+// ─── Per-endpoint instances ─────────────────────────────────────────────────
 
-export const upstreamCircuit = createCircuitBreaker();
+const circuitsByKey = new Map<string, CircuitBreaker>();
+
+/**
+ * Returns the circuit breaker for a given upstream endpoint category, lazily
+ * creating it on first use. Callers pass a stable key string (e.g. 'login',
+ * 'gift-cards', 'merchants'). Each key gets its own independent breaker so
+ * that one failing endpoint doesn't trip the circuit for healthy ones —
+ * previously `/merchants` sync timing out would have killed auth too.
+ */
+export function getUpstreamCircuit(key: string): CircuitBreaker {
+  let cb = circuitsByKey.get(key);
+  if (cb === undefined) {
+    cb = createCircuitBreaker();
+    circuitsByKey.set(key, cb);
+  }
+  return cb;
+}
+
+/**
+ * Snapshot of every known breaker's state. Exposed for the /metrics
+ * endpoint; also useful for tests.
+ */
+export function getAllCircuitStates(): Record<string, CircuitState> {
+  const out: Record<string, CircuitState> = {};
+  for (const [key, cb] of circuitsByKey) {
+    out[key] = cb.getState();
+  }
+  return out;
+}

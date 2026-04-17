@@ -66,6 +66,13 @@ const initialPref = loadPreference();
 // wall of duplicates and keep growing. Drop the oldest when full.
 const MAX_TOASTS = 5;
 
+// Track auto-dismiss timers so removeToast can cancel the pending
+// setTimeout. Previously a user-dismissed toast still fired its 5s timer,
+// attempting to remove a now-absent id. Harmless but wasteful, and if the
+// map-cap evicted a toast before its timer, the timer ran forever as a
+// no-op leak.
+const toastTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 export const useUiStore = create<UiState & UiActions>((set, get) => ({
   themePreference: initialPref,
   theme: resolveTheme(initialPref),
@@ -88,12 +95,33 @@ export const useUiStore = create<UiState & UiActions>((set, get) => ({
     const id = `${Date.now()}-${Math.random()}`;
     set((s) => {
       const next = [...s.toasts, { id, message, type }];
-      return { toasts: next.length > MAX_TOASTS ? next.slice(-MAX_TOASTS) : next };
+      if (next.length > MAX_TOASTS) {
+        // When we drop the oldest, also cancel its dismiss timer so we
+        // don't later fire a removeToast for an id that no longer exists.
+        const dropped = next.slice(0, next.length - MAX_TOASTS);
+        for (const d of dropped) {
+          const t = toastTimers.get(d.id);
+          if (t !== undefined) {
+            clearTimeout(t);
+            toastTimers.delete(d.id);
+          }
+        }
+        return { toasts: next.slice(-MAX_TOASTS) };
+      }
+      return { toasts: next };
     });
-    setTimeout(() => get().removeToast(id), 5000);
+    toastTimers.set(
+      id,
+      setTimeout(() => get().removeToast(id), 5000),
+    );
   },
 
   removeToast: (id) => {
+    const t = toastTimers.get(id);
+    if (t !== undefined) {
+      clearTimeout(t);
+      toastTimers.delete(id);
+    }
     set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
   },
 }));

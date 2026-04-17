@@ -7,6 +7,10 @@ vi.mock('~/services/api-client', () => ({
 vi.mock('~/native/platform', () => ({
   getPlatform: vi.fn(() => 'web'),
 }));
+const mockGetRefreshToken = vi.fn<() => Promise<string | null>>();
+vi.mock('~/native/secure-storage', () => ({
+  getRefreshToken: () => mockGetRefreshToken(),
+}));
 
 import { requestOtp, verifyOtp, logout } from '../auth';
 import { apiRequest } from '../api-client';
@@ -19,6 +23,7 @@ describe('auth service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetPlatform.mockReturnValue('web');
+    mockGetRefreshToken.mockResolvedValue(null);
   });
 
   describe('requestOtp', () => {
@@ -76,12 +81,29 @@ describe('auth service', () => {
   });
 
   describe('logout', () => {
-    it('sends DELETE to session endpoint', async () => {
+    it('sends DELETE to session endpoint with platform and no refreshToken when absent', async () => {
       mockApiRequest.mockResolvedValue({ message: 'ok' });
+      mockGetRefreshToken.mockResolvedValue(null);
       await logout();
       expect(mockApiRequest).toHaveBeenCalledWith('/api/auth/session', {
         method: 'DELETE',
+        body: { platform: 'web' },
       });
+    });
+
+    it('includes refreshToken in body when available (upstream revoke)', async () => {
+      mockApiRequest.mockResolvedValue({ message: 'ok' });
+      mockGetRefreshToken.mockResolvedValue('rt-abc');
+      await logout();
+      expect(mockApiRequest).toHaveBeenCalledWith('/api/auth/session', {
+        method: 'DELETE',
+        body: { platform: 'web', refreshToken: 'rt-abc' },
+      });
+    });
+
+    it('swallows errors so local logout always proceeds', async () => {
+      mockApiRequest.mockRejectedValue(new Error('network down'));
+      await expect(logout()).resolves.toBeUndefined();
     });
 
     it('returns void (discards response)', async () => {

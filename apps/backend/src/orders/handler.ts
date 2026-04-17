@@ -2,7 +2,7 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import { logger } from '../logger.js';
 import { getMerchants } from '../merchants/sync.js';
-import { upstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
+import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
 import { notifyOrderCreated } from '../discord.js';
 
@@ -159,7 +159,7 @@ export async function createOrderHandler(c: Context): Promise<Response> {
   const fiatCurrency = merchant.denominations?.currency ?? 'USD';
 
   try {
-    const response = await upstreamCircuit.fetch(upstreamUrl('/gift-cards'), {
+    const response = await getUpstreamCircuit('gift-cards').fetch(upstreamUrl('/gift-cards'), {
       method: 'POST',
       headers: {
         ...upstreamHeaders(c),
@@ -255,7 +255,7 @@ export async function listOrdersHandler(c: Context): Promise<Response> {
       }
     }
 
-    const response = await upstreamCircuit.fetch(url.toString(), {
+    const response = await getUpstreamCircuit('gift-cards').fetch(url.toString(), {
       headers: upstreamHeaders(c),
       signal: AbortSignal.timeout(15_000),
     });
@@ -332,10 +332,13 @@ export async function getOrderHandler(c: Context): Promise<Response> {
   }
 
   try {
-    const response = await upstreamCircuit.fetch(upstreamUrl(`/gift-cards/${orderId}`), {
-      headers: upstreamHeaders(c),
-      signal: AbortSignal.timeout(15_000),
-    });
+    const response = await getUpstreamCircuit('gift-cards').fetch(
+      upstreamUrl(`/gift-cards/${orderId}`),
+      {
+        headers: upstreamHeaders(c),
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
 
     if (response.status === 404) {
       return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);

@@ -62,11 +62,12 @@ vi.mock('../circuit-breaker.js', () => {
   }
   return {
     CircuitOpenError,
-    upstreamCircuit: {
+    getAllCircuitStates: () => ({}),
+    getUpstreamCircuit: () => ({
       fetch: (...args: Parameters<typeof globalThis.fetch>) => globalThis.fetch(...args),
       getState: () => 'closed' as const,
       reset: () => {},
-    },
+    }),
   };
 });
 
@@ -297,5 +298,33 @@ describe('app-level middleware', () => {
     const id = res.headers.get('X-Request-Id');
     expect(id).not.toBeNull();
     expect(id!.length).toBeGreaterThan(0);
+  });
+
+  it('sets a strict Content-Security-Policy on every response', async () => {
+    const res = await app.request('/health');
+    const csp = res.headers.get('Content-Security-Policy');
+    expect(csp).not.toBeNull();
+    // API never serves HTML — default-src 'none' forbids every resource
+    // class unless we override it, which we do not.
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("base-uri 'none'");
+    expect(csp).toContain("form-action 'none'");
+  });
+
+  it('/metrics exposes Prometheus-format counters and circuit state', async () => {
+    // Drive one request through so requestsTotal has an entry, then scrape.
+    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+    await app.request('/health');
+
+    const res = await app.request('/metrics');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/plain');
+    const body = await res.text();
+    expect(body).toContain('# TYPE loop_rate_limit_hits_total counter');
+    expect(body).toContain('# TYPE loop_requests_total counter');
+    expect(body).toContain('# TYPE loop_circuit_state gauge');
+    // The health request just counted above should appear.
+    expect(body).toMatch(/loop_requests_total\{method="GET",route="\/health",status="200"\}/);
   });
 });

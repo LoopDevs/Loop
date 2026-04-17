@@ -37,6 +37,9 @@ logs/
 *.swp
 *.swo
 
+# Claude Code — local session state
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db

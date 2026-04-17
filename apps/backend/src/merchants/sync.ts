@@ -3,7 +3,7 @@ import { merchantSlug } from '@loop/shared';
 import { z } from 'zod';
 import { logger } from '../logger.js';
 import { env } from '../env.js';
-import { upstreamCircuit } from '../circuit-breaker.js';
+import { getUpstreamCircuit } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
 
 /**
@@ -115,7 +115,7 @@ export async function refreshMerchants(): Promise<void> {
       url.searchParams.set('page', String(page));
       url.searchParams.set('perPage', '100');
 
-      const response = await upstreamCircuit.fetch(url.toString(), {
+      const response = await getUpstreamCircuit('merchants').fetch(url.toString(), {
         signal: AbortSignal.timeout(30_000),
       });
 
