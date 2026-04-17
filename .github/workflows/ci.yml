@@ -10,22 +10,18 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-jobs:
-  typecheck:
-    name: Type check
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-      - run: npm ci
-      - run: npm run typecheck
+# Every non-audit job needs node_modules. The setup pattern used below is:
+#   1. checkout
+#   2. setup-node (for node itself + npm download cache)
+#   3. actions/cache keyed on package-lock.json for the installed node_modules
+#   4. npm ci only if the cache missed
+#
+# The cache saves ~20s per job on a hit. Invalidates whenever package-lock.json
+# changes. husky's `prepare` script is a no-op in CI (nothing to hook into).
 
-  lint:
-    name: Lint, format & docs
+jobs:
+  quality:
+    name: Quality (typecheck, lint, format, docs)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -34,7 +30,19 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm ci
+      - name: Cache node_modules
+        id: npm-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install deps
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        run: npm ci
+      - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
       - run: npm run lint:docs
@@ -49,7 +57,18 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm ci
+      - name: Cache node_modules
+        id: npm-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install deps
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        run: npm ci
       - name: Run tests with coverage
         run: npm run test:coverage --workspaces --if-present
       - name: Upload coverage
@@ -69,11 +88,11 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
+      # `npm audit` reads package-lock.json directly — no install needed.
+      # setup-node is still useful for the npm binary and consistent version.
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
-      - run: npm ci
       - run: npm audit --audit-level=high
 
   build:
@@ -86,7 +105,18 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm ci
+      - name: Cache node_modules
+        id: npm-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install deps
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        run: npm ci
       - name: Build backend
         run: npm run build -w @loop/backend
       - name: Build web (SSR)
@@ -110,28 +140,62 @@ jobs:
             NAME=$(basename "$f")
             echo "| $NAME | $SIZE |" >> $GITHUB_STEP_SUMMARY
           done
+      # Upload the backend build so test-e2e can reuse it instead of compiling
+      # the backend a second time.
+      - name: Upload backend build
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-dist
+          path: apps/backend/dist/
+          retention-days: 1
 
   test-e2e:
     name: E2E tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
     if: github.event_name == 'pull_request'
-    needs: [typecheck, lint, test-unit, build]
+    needs: [quality, test-unit, build]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm ci
+      - name: Cache node_modules
+        id: npm-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install deps
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        run: npm ci
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
-      - name: Build backend
-        run: npm run build -w @loop/backend
-      - name: Build web for e2e
-        run: npm run build -w @loop/web
-        env:
-          VITE_API_URL: http://localhost:8080
+      - name: Install Playwright system deps (cache hit path)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      # Reuse the backend dist produced by the `build` job — saves ~30s of
+      # rebuilding the same code the previous job already built.
+      - name: Download backend build
+        uses: actions/download-artifact@v7
+        with:
+          name: backend-dist
+          path: apps/backend/dist/
+      # NOTE: no `Build web` step here. Playwright's webServer config
+      # (playwright.config.ts) runs `npm run dev:web` itself with
+      # VITE_API_URL threaded through its `env` block. Building web up front
+      # produced output nothing read.
       - name: Start backend
         run: npm run start -w @loop/backend &
         env:
@@ -159,7 +223,7 @@ jobs:
     # Include test-e2e so the Discord status matches the actual PR gate. Without
     # it, Discord reported PASSED whenever the fast jobs were green, even if
     # e2e had failed.
-    needs: [typecheck, lint, test-unit, audit, build, test-e2e]
+    needs: [quality, test-unit, audit, build, test-e2e]
     steps:
       - name: Notify Discord
         env:
