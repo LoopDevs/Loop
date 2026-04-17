@@ -172,6 +172,8 @@ Device key never leaves the device. Backend never sees the private key.
 
 ```
 GET  /health
+GET  /metrics                               — Prometheus format
+GET  /openapi.json                          — full OpenAPI 3.1 spec
 GET  /api/merchants              ?page=&limit=&q=
 GET  /api/merchants/by-slug/:slug
 GET  /api/merchants/:id
@@ -185,6 +187,13 @@ POST /api/orders             [authenticated]
 GET  /api/orders             [authenticated]
 GET  /api/orders/:id         [authenticated]
 ```
+
+Full request/response shapes — including field types, pagination
+envelopes, and error codes per endpoint — are generated from the backend
+zod schemas and served live at `GET /openapi.json`. The schema source is
+[`apps/backend/src/openapi.ts`](../apps/backend/src/openapi.ts). Any PR
+that changes a request/response contract must keep that file in sync
+with the handler's validator.
 
 ---
 

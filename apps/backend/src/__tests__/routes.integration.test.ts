@@ -312,6 +312,33 @@ describe('app-level middleware', () => {
     expect(csp).toContain("form-action 'none'");
   });
 
+  it('/openapi.json returns a valid OpenAPI 3.1 spec with our routes', async () => {
+    const res = await app.request('/openapi.json');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('application/json');
+    const body = (await res.json()) as {
+      openapi: string;
+      info: { title: string; version: string };
+      paths: Record<string, unknown>;
+      components: { securitySchemes?: Record<string, unknown> };
+    };
+    expect(body.openapi).toBe('3.1.0');
+    expect(body.info.title).toBe('Loop API');
+    // Sample a handful of endpoints — full coverage is tested at the
+    // schema layer; this just confirms the spec actually reaches them.
+    expect(body.paths['/health']).toBeDefined();
+    expect(body.paths['/api/auth/verify-otp']).toBeDefined();
+    expect(body.paths['/api/orders']).toBeDefined();
+    expect(body.paths['/api/clusters']).toBeDefined();
+    // Bearer auth scheme is registered once and referenced by secured ops.
+    expect(body.components.securitySchemes?.bearerAuth).toBeDefined();
+  });
+
+  it('/openapi.json is cacheable', async () => {
+    const res = await app.request('/openapi.json');
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=3600');
+  });
+
   it('/metrics exposes Prometheus-format counters and circuit state', async () => {
     // Drive one request through so requestsTotal has an entry, then scrape.
     mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
