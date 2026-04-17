@@ -11,6 +11,24 @@ export interface WebViewOptions {
 }
 
 /**
+ * Rejects URL schemes that could execute script in the current page or read
+ * local files. Only http(s) is acceptable for a remote redeem URL. If a
+ * caller somehow ends up with an untrusted URL, this turns the symptom into
+ * a failure instead of code execution.
+ */
+function assertSafeUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`openWebView: invalid URL ${JSON.stringify(url)}`);
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error(`openWebView: only http(s) URLs are allowed (got ${parsed.protocol})`);
+  }
+}
+
+/**
  * Opens a URL in an in-app WebView with optional JS injection.
  * Falls back to window.open on web.
  * Returns a controller object.
@@ -19,6 +37,7 @@ export async function openWebView(
   options: WebViewOptions,
 ): Promise<{ close: () => Promise<void> }> {
   const { url, scripts = [], onMessage, onClose } = options;
+  assertSafeUrl(url);
 
   // Native: try @capgo/inappbrowser WebView
   if (Capacitor.isNativePlatform()) {
@@ -74,13 +93,19 @@ export async function openWebView(
     }
   }
 
-  // Web fallback: open in new tab
-  const win = window.open(url, '_blank');
+  // Web fallback: open in new tab. noopener,noreferrer blocks the classic
+  // reverse-tabnabbing vector where the opened tab uses window.opener to
+  // navigate our tab to a phishing URL.
+  const win = window.open(url, '_blank', 'noopener,noreferrer');
+
+  // Track the poll so we can clear it when the controller's close() is called,
+  // so the interval doesn't leak for the lifetime of the page.
+  let poll: ReturnType<typeof setInterval> | null = null;
   if (onClose) {
-    // Poll to detect when the tab is closed
-    const poll = setInterval(() => {
+    poll = setInterval(() => {
       if (win?.closed) {
-        clearInterval(poll);
+        if (poll !== null) clearInterval(poll);
+        poll = null;
         onClose();
       }
     }, 1000);
@@ -88,6 +113,10 @@ export async function openWebView(
 
   return {
     close: async (): Promise<void> => {
+      if (poll !== null) {
+        clearInterval(poll);
+        poll = null;
+      }
       win?.close();
     },
   };
