@@ -73,20 +73,69 @@ const INITIAL_STATE: PurchaseState = {
 /**
  * Synchronous sessionStorage restore for initial web state.
  * On native, async restoration happens via useSessionRestore.
+ *
+ * Validates the shape and step of the persisted record before adopting any
+ * of it — otherwise a corrupted (or attacker-set) sessionStorage value
+ * could drop the store directly into `step: 'complete'` with a fake gift
+ * card code. We only ever *persist* the 'payment' step, so we only ever
+ * *restore* the 'payment' step; anything else is evidence of tampering or
+ * a bug and is discarded.
  */
 function loadPendingOrderSync(): Partial<PurchaseState> | null {
   try {
     const raw = sessionStorage.getItem(PENDING_ORDER_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw) as Partial<PurchaseState>;
-    if (data.expiresAt && data.expiresAt > Math.floor(Date.now() / 1000)) {
-      return data;
-    }
+    if (raw === null) return null;
+    const parsed: unknown = JSON.parse(raw);
+    const clean = validatePersistedPurchase(parsed);
+    if (clean !== null) return clean;
     sessionStorage.removeItem(PENDING_ORDER_KEY);
   } catch {
-    /* sessionStorage unavailable (native or SSR) */
+    /* sessionStorage unavailable (native or SSR) or invalid JSON */
   }
   return null;
+}
+
+/**
+ * Type-check the persisted record and return a whitelist-only subset.
+ * Returns null if the record is malformed, expired, or not a payment-step
+ * snapshot. Deliberately ignores unknown keys so an attacker can't inject
+ * arbitrary state into the store.
+ */
+function validatePersistedPurchase(data: unknown): Partial<PurchaseState> | null {
+  if (data === null || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (d.step !== 'payment') return null;
+  if (typeof d.expiresAt !== 'number' || d.expiresAt <= Math.floor(Date.now() / 1000)) return null;
+  const isStr = (v: unknown): v is string => typeof v === 'string';
+  const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+  if (!isStr(d.orderId)) return null;
+  if (!isStr(d.paymentAddress)) return null;
+  if (!isStr(d.xlmAmount)) return null;
+  if (!isStr(d.memo)) return null;
+  return {
+    step: 'payment',
+    orderId: d.orderId,
+    paymentAddress: d.paymentAddress,
+    xlmAmount: d.xlmAmount,
+    expiresAt: d.expiresAt,
+    memo: d.memo,
+    merchantId: isStr(d.merchantId) ? d.merchantId : null,
+    merchantName: isStr(d.merchantName) ? d.merchantName : null,
+    amount: isNum(d.amount) ? d.amount : null,
+  };
+}
+
+/**
+ * Serializes persistence ops (save, clear) through a single promise chain so
+ * a save/clear pair initiated in quick succession always lands in the order
+ * the actions were called. Without this, Capacitor Preferences on native
+ * can race: a `clearPending` issued right after `savePendingOrder` may
+ * resolve first, leaving stale state behind.
+ */
+let persistQueue: Promise<unknown> = Promise.resolve();
+function enqueuePersist(op: () => Promise<void>): void {
+  persistQueue = persistQueue.catch(() => {}).then(op);
+  void persistQueue;
 }
 
 const restored = loadPendingOrderSync();
@@ -101,37 +150,41 @@ export const usePurchaseStore = create<PurchaseState & PurchaseActions>((set, ge
 
   setOrderCreated: ({ orderId, paymentAddress, xlmAmount, expiresAt, memo }) => {
     set({ step: 'payment', orderId, paymentAddress, xlmAmount, expiresAt, memo });
-    // Persist so app kill doesn't lose payment state
-    void savePendingOrder({
-      step: 'payment',
-      orderId,
-      paymentAddress,
-      xlmAmount,
-      expiresAt,
-      memo,
-      merchantId: get().merchantId,
-      merchantName: get().merchantName,
-      amount: get().amount,
-    });
+    // Persist so app kill doesn't lose payment state. Queued so a subsequent
+    // clear (in setComplete etc.) can't race this and leave stale state.
+    const snapshot = get();
+    enqueuePersist(() =>
+      savePendingOrder({
+        step: 'payment',
+        orderId,
+        paymentAddress,
+        xlmAmount,
+        expiresAt,
+        memo,
+        merchantId: snapshot.merchantId,
+        merchantName: snapshot.merchantName,
+        amount: snapshot.amount,
+      }),
+    );
   },
 
   setComplete: (giftCardCode, giftCardPin) => {
-    void clearPending();
+    enqueuePersist(() => clearPending());
     set({ step: 'complete', giftCardCode, giftCardPin: giftCardPin ?? null });
   },
 
   setRedeemRequired: ({ redeemUrl, redeemChallengeCode, redeemScripts }) => {
-    void clearPending();
+    enqueuePersist(() => clearPending());
     set({ step: 'redeem', redeemUrl, redeemChallengeCode, redeemScripts: redeemScripts ?? null });
   },
 
   setError: (message) => {
-    void clearPending();
+    enqueuePersist(() => clearPending());
     set({ step: 'error', error: message });
   },
 
   reset: () => {
-    void clearPending();
+    enqueuePersist(() => clearPending());
     set(INITIAL_STATE);
   },
 }));
