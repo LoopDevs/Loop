@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import type { Route } from './+types/orders';
 import type { Order } from '@loop/shared';
 import { ApiException } from '@loop/shared';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAuth } from '~/hooks/use-auth';
-import { fetchOrders } from '~/services/orders';
+import { useOrders } from '~/hooks/use-orders';
 import { Navbar } from '~/components/features/Navbar';
 import { OrderRowSkeleton } from '~/components/ui/Skeleton';
 import { Button } from '~/components/ui/Button';
@@ -79,41 +79,22 @@ function OrderRow({ order }: { order: Order }): React.JSX.Element {
   );
 }
 
+function errorMessage(err: Error | null): string | null {
+  if (err === null) return null;
+  if (err instanceof ApiException && err.status === 401) {
+    return 'Please sign in to view your orders.';
+  }
+  return 'Failed to load orders.';
+}
+
 export default function OrdersRoute(): React.JSX.Element {
   const { isNative } = useNativePlatform();
   const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const [hasNext, setHasNext] = useState(false);
 
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setIsLoading(false);
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-
-    void (async () => {
-      try {
-        const data = await fetchOrders(page);
-        setOrders(data.orders);
-        setHasNext(data.pagination.hasNext);
-      } catch (err) {
-        if (err instanceof ApiException && err.status === 401) {
-          setError('Please sign in to view your orders.');
-        } else {
-          setError('Failed to load orders.');
-        }
-      } finally {
-        setIsLoading(false);
-      }
-    })();
-  }, [isAuthenticated, page]);
+  const { orders, hasNext, hasPrev, isLoading, error } = useOrders(page, isAuthenticated);
+  const errorText = errorMessage(error);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
@@ -145,16 +126,16 @@ export default function OrdersRoute(): React.JSX.Element {
           </div>
         )}
 
-        {error !== null && (
+        {errorText !== null && (
           <div className="text-center py-12">
-            <p className="text-red-500 mb-4">{error}</p>
+            <p className="text-red-500 mb-4">{errorText}</p>
             <Button variant="secondary" onClick={() => setPage(1)}>
               Retry
             </Button>
           </div>
         )}
 
-        {isAuthenticated && !isLoading && error === null && orders.length === 0 && (
+        {isAuthenticated && !isLoading && errorText === null && orders.length === 0 && (
           <div className="text-center py-12">
             <p className="text-gray-500 dark:text-gray-400 mb-4">No orders yet.</p>
             <Button
@@ -178,12 +159,16 @@ export default function OrdersRoute(): React.JSX.Element {
             <div className="flex justify-between mt-4">
               <Button
                 variant="secondary"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => p - 1)}
+                disabled={!hasPrev || isLoading}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
               >
                 Previous
               </Button>
-              <Button variant="secondary" disabled={!hasNext} onClick={() => setPage((p) => p + 1)}>
+              <Button
+                variant="secondary"
+                disabled={!hasNext || isLoading}
+                onClick={() => setPage((p) => p + 1)}
+              >
                 Next
               </Button>
             </div>

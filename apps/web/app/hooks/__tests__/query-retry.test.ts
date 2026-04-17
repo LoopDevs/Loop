@@ -1,19 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { ApiException } from '@loop/shared';
+import { shouldRetry } from '../query-retry';
 
-// Re-derivation of the retry predicate from use-merchants.ts. The predicate
-// is module-private; we replicate the logic here and assert on the wire so
-// the behaviour is locked in: 4xx never retries, everything else retries up
-// to 2 times. If this contract changes in use-merchants.ts, this test file
-// should be updated together.
-function shouldRetry(failureCount: number, error: Error): boolean {
-  if (error instanceof ApiException) {
-    if (error.status >= 400 && error.status < 500) return false;
-  }
-  return failureCount < 2;
-}
-
-describe('merchant-query retry policy', () => {
+describe('query retry policy (used by every useQuery hook)', () => {
   it('does not retry on 400 validation errors', () => {
     const err = new ApiException(400, { code: 'VALIDATION_ERROR', message: 'bad' });
     expect(shouldRetry(0, err)).toBe(false);
