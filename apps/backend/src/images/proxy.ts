@@ -113,6 +113,15 @@ export async function imageProxyHandler(c: Context): Promise<Response> {
       return c.json({ code: 'IMAGE_TOO_LARGE', message: 'Image exceeds 10 MB limit' }, 413);
     }
 
+    // Inspect the input to decide output format: inputs with an alpha
+    // channel (typically PNG merchant logos on transparent backgrounds)
+    // must not be re-encoded as JPEG — that would paint the transparent
+    // pixels a flat colour. WebP preserves alpha, is smaller than PNG, and
+    // is supported by every browser we target (Safari 14+, Chrome/Firefox
+    // current, WebKit on Capacitor).
+    const metadata = await sharp(buffer).metadata();
+    const hasAlpha = metadata.hasAlpha === true;
+
     let pipeline = sharp(buffer);
 
     if (width > 0 || height > 0) {
@@ -122,8 +131,11 @@ export async function imageProxyHandler(c: Context): Promise<Response> {
       });
     }
 
-    const { data, info } = await pipeline.jpeg({ quality }).toBuffer({ resolveWithObject: true });
-    const mimeType = 'image/jpeg';
+    const encoded = hasAlpha
+      ? await pipeline.webp({ quality }).toBuffer({ resolveWithObject: true })
+      : await pipeline.jpeg({ quality }).toBuffer({ resolveWithObject: true });
+    const { data, info } = encoded;
+    const mimeType = hasAlpha ? 'image/webp' : 'image/jpeg';
     const output = new Uint8Array(data);
 
     if (output.byteLength <= MAX_CACHE_BYTES) {
@@ -208,6 +220,16 @@ async function readBodyWithLimit(res: Response, limit: number): Promise<Buffer |
  *   loopback, link-local, CGNAT, or multicast (SSRF / DNS-rebinding defense)
  *
  * Returns an error string if invalid, or null if valid.
+ *
+ * KNOWN LIMITATION — DNS rebinding TOCTOU.
+ * We validate the resolved IPs here, but `fetch()` below performs its own
+ * DNS lookup that we do not control. An attacker-controlled DNS server can
+ * return a public IP to our validation and a private IP to the subsequent
+ * fetch. The practical mitigation is `IMAGE_PROXY_ALLOWED_HOSTS`: when set,
+ * only operator-trusted hostnames can be resolved at all. Untrusted input
+ * without an allowlist remains exposed to this class of attack; a tighter
+ * fix would require a custom undici `dispatcher.connect` that reuses the
+ * already-resolved IP with the expected `Host` header.
  */
 async function validateImageUrl(rawUrl: string): Promise<string | null> {
   let parsed: URL;
