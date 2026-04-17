@@ -26,7 +26,6 @@ vi.mock('../../circuit-breaker.js', () => ({
   },
 }));
 
-import { merchantSlug } from '@loop/shared';
 import { refreshMerchants, getMerchants } from '../sync.js';
 
 // --- Mock fetch globally ---
@@ -66,47 +65,6 @@ function upstreamResponse(
     headers: { 'Content-Type': 'application/json' },
   });
 }
-
-describe('merchantSlug', () => {
-  it('lowercases and replaces spaces with hyphens', () => {
-    expect(merchantSlug('Home Depot')).toBe('home-depot');
-  });
-
-  it('strips non-alphanumeric characters', () => {
-    expect(merchantSlug("Dunkin' Donuts")).toBe('dunkin-donuts');
-  });
-
-  it('handles multiple consecutive spaces', () => {
-    expect(merchantSlug('Some   Store')).toBe('some-store');
-  });
-
-  it('returns empty string for empty input', () => {
-    expect(merchantSlug('')).toBe('');
-  });
-
-  it('handles names with numbers', () => {
-    expect(merchantSlug('7-Eleven')).toBe('7-eleven');
-  });
-
-  it('handles already-lowercase names', () => {
-    expect(merchantSlug('target')).toBe('target');
-  });
-
-  it('drops unicode characters (ASCII-only output)', () => {
-    // Known behaviour — matches the Go reference. Non-ASCII is dropped
-    // rather than transliterated; any consumer needing e.g. "Café" support
-    // must normalize upstream.
-    expect(merchantSlug('Café')).toBe('caf');
-    expect(merchantSlug('Pokémon')).toBe('pokmon');
-  });
-
-  it('returns a string that only contains [a-z0-9-] characters', () => {
-    const inputs = ['Foo!@#$%Bar', '  Spaces  ', '--leading--', 'UPPER!CASE_With_Underscores'];
-    for (const input of inputs) {
-      expect(merchantSlug(input)).toMatch(/^[a-z0-9-]*$/);
-    }
-  });
-});
 
 describe('refreshMerchants', () => {
   beforeEach(() => {

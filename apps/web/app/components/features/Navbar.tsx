@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect, forwardRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useMerchants } from '~/hooks/use-merchants';
-import { toSlug } from '~/hooks/slug';
+import { merchantSlug } from '@loop/shared';
 import { useUiStore } from '~/stores/ui.store';
 import { getImageProxyUrl } from '~/utils/image';
 
@@ -184,7 +184,7 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
   }, [location.pathname]);
 
   const handleSelect = (r: SearchResult): void => {
-    void navigate(`/gift-card/${toSlug(r.name)}`);
+    void navigate(`/gift-card/${merchantSlug(r.name)}`);
     setShowMobileSearch(false);
   };
 

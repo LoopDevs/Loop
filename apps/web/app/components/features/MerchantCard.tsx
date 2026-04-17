@@ -1,6 +1,6 @@
 import { Link } from 'react-router';
 import type { Merchant } from '@loop/shared';
-import { toSlug } from '~/hooks/slug';
+import { merchantSlug } from '@loop/shared';
 import { getImageProxyUrl } from '~/utils/image';
 import { triggerHaptic } from '~/native/haptics';
 import { LazyImage } from '~/components/ui/LazyImage';
@@ -19,7 +19,7 @@ export function MerchantCard({
   className = '',
   eager = false,
 }: MerchantCardProps): React.JSX.Element {
-  const slug = toSlug(merchant.name);
+  const slug = merchantSlug(merchant.name);
   const cardImgUrl =
     merchant.cardImageUrl !== undefined ? getImageProxyUrl(merchant.cardImageUrl, 640) : undefined;
   const logoImgUrl =
