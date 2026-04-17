@@ -267,6 +267,21 @@ describe('POST /api/auth/refresh', () => {
     expect(body.accessToken).toBe('new-access');
   });
 
+  it('returns 502 UPSTREAM_ERROR on upstream 5xx (not 401 UNAUTHORIZED)', async () => {
+    // A 5xx from the upstream is a server-side problem — the user's refresh
+    // token is presumably still valid. Previously we returned 401 here,
+    // which would have logged a user out on every transient upstream blip
+    // (causing a re-auth loop). Must now surface as UPSTREAM_ERROR so the
+    // client can retry instead of clearing session.
+    mockFetch.mockResolvedValueOnce(
+      new Response('upstream boom', { status: 502, statusText: 'Bad Gateway' }),
+    );
+    const res = await post('/api/auth/refresh', { refreshToken: 'rt-good', platform: 'web' });
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('UPSTREAM_ERROR');
+  });
+
   it('accepts refresh response without new refreshToken (optional field)', async () => {
     mockFetch.mockResolvedValueOnce(
       new Response(JSON.stringify({ accessToken: 'only-access' }), {

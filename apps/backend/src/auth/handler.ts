@@ -114,6 +114,11 @@ export async function verifyOtpHandler(c: Context): Promise<Response> {
           401,
         );
       }
+      // Log body for schema-drift debugging. Truncate: pino redact is
+      // field-based so an upstream echoing a token string would leak
+      // through the body verbatim.
+      const body = (await response.text()).slice(0, 500);
+      log.error({ status, body }, 'Upstream verify request failed');
       return c.json({ code: 'UPSTREAM_ERROR', message: 'Verification failed' }, 502);
     }
 
@@ -167,7 +172,22 @@ export async function refreshHandler(c: Context): Promise<Response> {
     );
 
     if (!response.ok) {
-      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired refresh token' }, 401);
+      // 400/401/403 → refresh token is genuinely invalid/expired; the client
+      // should drop session and re-auth. Anything else (5xx, 429, etc.) is an
+      // upstream problem — returning 401 here would tell a user with a
+      // perfectly good token that they've been "logged out" on every
+      // transient upstream blip. Surface it as UPSTREAM_ERROR instead so the
+      // client can retry.
+      const status = response.status;
+      if (status === 400 || status === 401 || status === 403) {
+        log.info({ status }, 'Upstream rejected refresh token');
+        return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired refresh token' }, 401);
+      }
+      // Only read the body for debug-logging on unexpected statuses. Reading
+      // unconditionally wastes work on the hot path.
+      const body = (await response.text()).slice(0, 500);
+      log.error({ status, body }, 'Upstream refresh request failed');
+      return c.json({ code: 'UPSTREAM_ERROR', message: 'Token refresh failed' }, 502);
     }
 
     const raw = await response.json();
