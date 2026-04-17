@@ -110,8 +110,28 @@ export function registerAppLockGuard(): () => void {
     void attemptUnlock();
   };
 
-  // Cold-start check only — no resume listener (see function docstring).
-  void runLockCheck();
+  // If the app boots while the OS is still transitioning — e.g. the user
+  // launched from a notification so the device hasn't finished unlocking —
+  // firing the biometric prompt immediately makes the overlay appear over
+  // the system lock screen, which is confusing and occasionally results
+  // in the prompt itself getting dismissed by the keyguard. Wait until
+  // the document is actually visible (Android fires `visibilitychange`
+  // once the app is really on top) before prompting.
+  const startWhenVisible = (): void => {
+    if (cancelled) return;
+    if (document.visibilityState === 'visible') {
+      void runLockCheck();
+      return;
+    }
+    const handler = (): void => {
+      if (document.visibilityState !== 'visible') return;
+      document.removeEventListener('visibilitychange', handler);
+      if (!cancelled) void runLockCheck();
+    };
+    document.addEventListener('visibilitychange', handler);
+  };
+
+  startWhenVisible();
 
   return () => {
     cancelled = true;
