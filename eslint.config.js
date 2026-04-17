@@ -1,7 +1,14 @@
 import tseslint from '@typescript-eslint/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
-import reactPlugin from 'eslint-plugin-react';
 import reactHooksPlugin from 'eslint-plugin-react-hooks';
+
+// eslint-plugin-react intentionally NOT imported: we never opted into its
+// `recommended` config, and the only two rules we referenced
+// (react/react-in-jsx-scope, react/prop-types) were both set to `off`. It
+// was dead weight that also blocked upgrading to eslint 10 because its peer
+// range is capped at `^9.7`. If we later want real React rules (jsx-key,
+// jsx-no-target-blank), re-add the plugin in a focused PR with an explicit
+// set of enabled rules.
 
 /** @type {import('eslint').Linter.Config[]} */
 export default [
@@ -44,11 +51,7 @@ export default [
     },
     plugins: {
       '@typescript-eslint': tseslint,
-      react: reactPlugin,
       'react-hooks': reactHooksPlugin,
-    },
-    settings: {
-      react: { version: 'detect' },
     },
     rules: {
       // TypeScript — basic rules (no type information needed)
@@ -72,9 +75,7 @@ export default [
       'prefer-const': 'error',
       eqeqeq: ['error', 'always'],
 
-      // React
-      'react/react-in-jsx-scope': 'off',
-      'react/prop-types': 'off',
+      // React hooks
       'react-hooks/rules-of-hooks': 'error',
       // exhaustive-deps catches real bugs (most recently the PaymentStep
       // polling regression). Warnings get ignored; make this an error so CI
