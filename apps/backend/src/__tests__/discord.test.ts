@@ -89,13 +89,22 @@ describe('notifyOrderCreated', () => {
 });
 
 describe('notifyOrderFulfilled', () => {
-  it('includes currency in amount field', async () => {
+  it('formats EUR amounts with the euro symbol, not a dollar sign', async () => {
     notifyOrderFulfilled('o1', 'Acme', 25, 'EUR', 'barcode');
     await new Promise((r) => setTimeout(r, 10));
     const body = lastBody();
     const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
     const amount = embed.fields.find((f) => f.name === 'Amount');
-    expect(amount?.value).toBe('$25.00 EUR');
+    expect(amount?.value).toBe('€25.00 EUR');
+  });
+
+  it('formats unknown currencies with the code only (no symbol)', async () => {
+    notifyOrderFulfilled('o1', 'Acme', 25, 'NOK', 'barcode');
+    await new Promise((r) => setTimeout(r, 10));
+    const body = lastBody();
+    const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
+    const amount = embed.fields.find((f) => f.name === 'Amount');
+    expect(amount?.value).toBe('25.00 NOK');
   });
 });
 
@@ -130,13 +139,31 @@ describe('notifyHealthChange', () => {
   });
 });
 
+describe('mention injection defense', () => {
+  it('sets allowed_mentions.parse=[] so upstream names cannot ping @everyone', async () => {
+    notifyOrderCreated('o1', '@everyone nice try', 25, 'USD', '1');
+    await new Promise((r) => setTimeout(r, 10));
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const payload = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(payload.allowed_mentions).toEqual({ parse: [] });
+  });
+
+  it('applies allowed_mentions on monitoring webhooks too', async () => {
+    notifyCircuitBreaker('open', 5, 30);
+    await new Promise((r) => setTimeout(r, 10));
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const payload = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(payload.allowed_mentions).toEqual({ parse: [] });
+  });
+});
+
 describe('sendWebhook error handling', () => {
-  it('logs a warning when Discord returns non-success', async () => {
+  it('logs a warning with response body when Discord returns non-success', async () => {
     mockFetch.mockResolvedValueOnce(new Response('bad payload', { status: 400 }));
     notifyOrderCreated('o1', 'Acme', 25, 'USD', '1');
     await new Promise((r) => setTimeout(r, 10));
     expect(mockLog.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 400 }),
+      expect.objectContaining({ status: 400, body: 'bad payload' }),
       expect.stringContaining('non-success'),
     );
   });
