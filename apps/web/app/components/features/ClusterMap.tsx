@@ -39,6 +39,12 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
   const mapRef = useRef<LeafletMap | null>(null);
   const markersRef = useRef<Layer[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Cancels the previous in-flight cluster fetch when a new move/zoom fires
+  // after the 300ms debounce. Without this, two fast pans could have two
+  // fetches in flight and the slower one (stale for the old viewport) would
+  // clobber the markers from the fresh one. fetchClusters signal support
+  // added in PR #55 surfaces the abort as a swallowed TIMEOUT-coded error.
+  const fetchAbortRef = useRef<AbortController | null>(null);
   const [status, setStatus] = useState<string>('');
   // Backend caps the limit at MAX_PAGE_SIZE=100. Asking for 1000 was silently
   // clamped, which hid the fact that merchants past index 100 fell back to
@@ -70,12 +76,24 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
         zoom,
       };
 
+      // Abort any previous in-flight fetch — a fast sequence of pans used
+      // to stack requests, and the slowest-completing one could clobber
+      // fresher markers.
+      fetchAbortRef.current?.abort();
+      const controller = new AbortController();
+      fetchAbortRef.current = controller;
+
       let data: ClusterResponse;
       try {
-        data = await fetchClusters(params);
+        data = await fetchClusters(params, controller.signal);
       } catch {
+        // Either the request was aborted by a newer call (expected — the new
+        // one will render its own markers) or a real error fell through to
+        // the error boundary. Either way, this stale call does nothing.
         return;
       }
+      // If another fetch started while we were awaiting, let it render.
+      if (fetchAbortRef.current !== controller) return;
 
       // Remove existing markers
       for (const layer of markersRef.current) {
@@ -273,6 +291,8 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
       mounted = false;
       themeObserver?.disconnect();
       if (debounceRef.current !== null) clearTimeout(debounceRef.current);
+      fetchAbortRef.current?.abort();
+      fetchAbortRef.current = null;
       mapRef.current?.remove();
       mapRef.current = null;
     };
