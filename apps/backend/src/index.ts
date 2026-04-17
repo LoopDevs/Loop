@@ -3,7 +3,7 @@ import { flush as sentryFlush } from '@sentry/hono/node';
 import { env } from './env.js';
 import { logger } from './logger.js';
 import { app, stopCleanupInterval } from './app.js';
-import { startLocationRefresh } from './clustering/data-store.js';
+import { startLocationRefresh, stopLocationRefresh } from './clustering/data-store.js';
 import { startMerchantRefresh, stopMerchantRefresh } from './merchants/sync.js';
 
 // Merchants load first (startMerchantRefresh triggers initial refresh).
@@ -38,6 +38,7 @@ function shutdown(signal: string): void {
   // server drain.
   stopCleanupInterval();
   stopMerchantRefresh();
+  stopLocationRefresh();
 
   server.close(() => {
     void sentryFlush(5000).finally(() => {
