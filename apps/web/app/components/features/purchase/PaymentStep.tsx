@@ -85,62 +85,75 @@ export function PaymentStep({
     return () => clearInterval(timer);
   }, [updateCountdown]);
 
-  // Poll order status
+  // Poll order status. Self-scheduling: after each fetch completes (success or
+  // failure) we schedule the next one POLL_INTERVAL_MS later, guarded by a
+  // `cancelled` flag so unmount / expiry / terminal status stops the loop.
+  //
+  // An earlier version kept `timeLeft` in the dep array and tried to re-trigger
+  // polling by bumping state each tick; that reset the setTimeout every second
+  // and polls never actually fired. Anyone waiting on a gift card status saw
+  // the spinner spin forever until manual refresh.
   useEffect(() => {
     if (expired) return;
 
-    const timer = setTimeout(() => {
-      void (async () => {
-        try {
-          const { order } = await fetchOrder(orderId);
-          setConnectionIssue(false);
-          consecutiveErrors.current = 0;
-          if (order.status === 'completed') {
-            if (order.redeemUrl && order.redeemChallengeCode) {
-              // URL-based redemption — switch to redeem flow
-              store.setRedeemRequired({
-                redeemUrl: order.redeemUrl,
-                redeemChallengeCode: order.redeemChallengeCode,
-                ...(order.redeemScripts ? { redeemScripts: order.redeemScripts } : {}),
-              });
-            } else if (order.giftCardCode) {
-              store.setComplete(order.giftCardCode, order.giftCardPin);
-            } else {
-              store.setError(
-                'Order completed but gift card details are unavailable. Please contact support.',
-              );
-            }
-            return;
-          }
-          if (order.status === 'failed' || order.status === 'expired') {
-            store.setError(`Order ${order.status}. Please try again.`);
-            return;
-          }
-          // Still pending — trigger next poll via state update
-          setTimeLeft((prev) => prev); // force re-render to schedule next poll
-        } catch (err) {
-          consecutiveErrors.current++;
-          setConnectionIssue(true);
-          // Permanent failure: auth expired — stop polling
-          if (err instanceof ApiException && err.status === 401) {
-            store.setError('Your session has expired. Please sign in again.');
-            return;
-          }
-          // Service down — pause but don't give up (will retry on next cycle)
-          if (err instanceof ApiException && err.status === 503) {
-            // Don't increment, just wait for next poll
-            consecutiveErrors.current--;
-          }
-          // Network/transient errors: keep retrying (don't give up)
-          // The countdown timer continues, polling retries each cycle
-        }
-      })();
-    }, POLL_INTERVAL_MS);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    return () => clearTimeout(timer);
-    // Re-poll whenever timeLeft changes (every second) — effectively continuous polling
+    const poll = async (): Promise<void> => {
+      if (cancelled) return;
+      try {
+        const { order } = await fetchOrder(orderId);
+        if (cancelled) return;
+        setConnectionIssue(false);
+        consecutiveErrors.current = 0;
+        if (order.status === 'completed') {
+          if (order.redeemUrl && order.redeemChallengeCode) {
+            store.setRedeemRequired({
+              redeemUrl: order.redeemUrl,
+              redeemChallengeCode: order.redeemChallengeCode,
+              ...(order.redeemScripts ? { redeemScripts: order.redeemScripts } : {}),
+            });
+          } else if (order.giftCardCode) {
+            store.setComplete(order.giftCardCode, order.giftCardPin);
+          } else {
+            store.setError(
+              'Order completed but gift card details are unavailable. Please contact support.',
+            );
+          }
+          return; // terminal — no reschedule
+        }
+        if (order.status === 'failed' || order.status === 'expired') {
+          store.setError(`Order ${order.status}. Please try again.`);
+          return; // terminal — no reschedule
+        }
+      } catch (err) {
+        if (cancelled) return;
+        consecutiveErrors.current++;
+        setConnectionIssue(true);
+        if (err instanceof ApiException && err.status === 401) {
+          store.setError('Your session has expired. Please sign in again.');
+          return; // terminal — no reschedule
+        }
+        if (err instanceof ApiException && err.status === 503) {
+          consecutiveErrors.current--;
+        }
+        // Other transient errors fall through to reschedule.
+      }
+      if (!cancelled) {
+        timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
+      }
+    };
+
+    timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) clearTimeout(timer);
+    };
+    // `store` identity changes on each render but its setter methods are stable;
+    // re-running the effect just to re-bind them would restart polling needlessly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderId, timeLeft, expired]);
+  }, [orderId, expired]);
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-6">
