@@ -51,11 +51,20 @@ vi.mock('../../clustering/handler.js', () => ({
   ),
 }));
 
-// Mock sharp — native module, not needed for URL validation tests
+// Mock sharp — native module, not needed for URL validation tests. The
+// handler now calls `sharp(buffer).metadata()` first to decide whether
+// to output JPEG (opaque) or WebP (alpha-preserving), so the mock must
+// respond to both `.metadata()` and the encoder chain. Default:
+// hasAlpha=false → JPEG path.
+const mockSharpMetadata = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ hasAlpha: false, format: 'jpeg' }),
+);
 vi.mock('sharp', () => ({
   default: vi.fn(() => ({
+    metadata: mockSharpMetadata,
     resize: vi.fn().mockReturnThis(),
     jpeg: vi.fn().mockReturnThis(),
+    webp: vi.fn().mockReturnThis(),
     toBuffer: vi.fn().mockResolvedValue({
       data: Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
       info: { width: 100, height: 100 },
@@ -80,6 +89,8 @@ vi.stubGlobal('fetch', mockFetch);
 beforeEach(() => {
   mockFetch.mockReset();
   mockDnsLookup.mockReset();
+  mockSharpMetadata.mockReset();
+  mockSharpMetadata.mockResolvedValue({ hasAlpha: false, format: 'jpeg' });
   // Default DNS: everything resolves to a harmless public IP. Tests that
   // care about resolution (rebinding, private-IP lookup) override per-call.
   mockDnsLookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
@@ -308,6 +319,38 @@ describe('GET /api/image — upstream hardening', () => {
     expect(res.status).toBe(502);
     const body = (await res.json()) as Record<string, string>;
     expect(body.code).toBe('NOT_AN_IMAGE');
+  });
+
+  it('outputs WebP when input has an alpha channel (preserves logo transparency)', async () => {
+    mockSharpMetadata.mockResolvedValueOnce({ hasAlpha: true, format: 'png' });
+    mockFetch.mockResolvedValueOnce(
+      new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+        status: 200,
+        headers: { 'Content-Type': 'image/png', 'Content-Length': '4' },
+      }),
+    );
+
+    const res = await app.request(
+      `/api/image?url=${encodeURIComponent('https://cdn.example.com/logo.png')}`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('image/webp');
+  });
+
+  it('outputs JPEG when input has no alpha channel (default path)', async () => {
+    // mockSharpMetadata defaults to hasAlpha:false in beforeEach
+    mockFetch.mockResolvedValueOnce(
+      new Response(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]), {
+        status: 200,
+        headers: { 'Content-Type': 'image/jpeg', 'Content-Length': '4' },
+      }),
+    );
+
+    const res = await app.request(
+      `/api/image?url=${encodeURIComponent('https://cdn.example.com/card.jpg')}`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('image/jpeg');
   });
 
   it('rejects upstream Content-Length exceeding 10MB', async () => {
