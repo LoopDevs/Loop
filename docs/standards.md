@@ -671,7 +671,18 @@ New dependencies in `apps/web` must not increase the initial bundle by more than
 
 - Run `npm audit` weekly. Fix `high` and `critical` findings immediately.
 - Update minor/patch versions monthly. Update major versions intentionally with a dedicated PR.
-- Do not use `^` for major-version packages that are architecturally critical (React, React Router, Capacitor). Pin these and update deliberately.
+
+### Exact pinning
+
+All dependency and devDependency versions are pinned exactly — **no `^` or `~`**. Reasons:
+
+1. Lockfile-only pinning is fine when everyone runs `npm ci` in a clean environment, but anything that runs `npm install` (including `npm install <pkg>` for a new dep) resolves the caret and can bump every other package silently.
+2. When a caret-pinned transitive dep ships a regression, the next `npm install` picks it up on exactly one machine without any signal in a PR. Exact pins make version changes show up as explicit edits to the manifest.
+3. Renovate / Dependabot handles bumping; exact pins give those tools a clean diff and give reviewers a clean approval surface.
+
+Exceptions: `@loop/shared: "*"` (workspace protocol), `typescript: "*"` in leaf workspaces (resolves to the root-pinned version), `engines.node: ">=22.0.0"` (runtime constraint, not a dep).
+
+The repo-level `.npmrc` sets `save-exact=true` so any `npm install <pkg>` records the concrete version automatically.
 
 ### No duplicate dependencies
 
