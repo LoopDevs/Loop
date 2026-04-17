@@ -142,7 +142,11 @@ app.get('/health', async (c) => {
 
 // ─── Map clustering ───────────────────────────────────────────────────────────
 
-app.get('/api/clusters', clustersHandler);
+// 60 requests per IP per minute. Each cluster request iterates every cached
+// location and computes centroids; real clients are debounced at 300ms in
+// ClusterMap so 60/min leaves them plenty of headroom while stopping a bot
+// from spamming varied bounds/zoom to pressure the backend.
+app.get('/api/clusters', rateLimit(60, 60_000), clustersHandler);
 
 // ─── Image proxy ──────────────────────────────────────────────────────────────
 

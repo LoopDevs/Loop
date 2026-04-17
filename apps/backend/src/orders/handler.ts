@@ -179,7 +179,10 @@ export async function createOrderHandler(c: Context): Promise<Response> {
     }
 
     if (!response.ok) {
-      const body = await response.text();
+      // Truncate the body before logging — pino redact only matches structured
+      // field names, not substrings of strings. Cap at 500 chars as
+      // defense-in-depth against an upstream echoing sensitive data.
+      const body = (await response.text()).slice(0, 500);
       log.error({ status: response.status, body, merchantId }, 'Upstream order creation failed');
       return c.json({ code: 'UPSTREAM_ERROR', message: 'Order creation failed' }, 502);
     }
