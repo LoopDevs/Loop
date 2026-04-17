@@ -1,8 +1,18 @@
 import { defineConfig } from 'vitest/config';
-import tsconfigPaths from 'vite-tsconfig-paths';
+
+// vitest.config.ts replaces (rather than merges with) vite.config.ts, so
+// path aliases need to be declared here too. Mirror tsconfig.json:
+//   ~/* -> ./app/*
+// Using resolve.tsconfigPaths would be cleaner but vitest's vite layer
+// doesn't pick that option up the same way the app build does.
+import path from 'node:path';
 
 export default defineConfig({
-  plugins: [tsconfigPaths()],
+  resolve: {
+    alias: {
+      '~': path.resolve(__dirname, 'app'),
+    },
+  },
   test: {
     globals: false,
     environment: 'node',

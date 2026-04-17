@@ -1,6 +1,11 @@
 import { Capacitor } from '@capacitor/core';
 
-const PENDING_ORDER_KEY = 'loop_pending_order';
+/**
+ * Storage key for pending order state. Exported so stores/purchase.store.ts
+ * can read the same key from sessionStorage on synchronous init without
+ * duplicating the literal string.
+ */
+export const PENDING_ORDER_KEY = 'loop_pending_order';
 /** Default expiry window for a saved pending order if caller doesn't set one. */
 const DEFAULT_EXPIRY_SECONDS = 15 * 60; // 15 minutes
 

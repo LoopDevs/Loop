@@ -57,6 +57,11 @@ function savePreference(pref: ThemePreference): void {
 
 const initialPref = loadPreference();
 
+// Cap the toast stack. If something misbehaves and spams addToast (e.g. a
+// failing action inside a tight poll), an uncapped array would paint a
+// wall of duplicates and keep growing. Drop the oldest when full.
+const MAX_TOASTS = 5;
+
 export const useUiStore = create<UiState & UiActions>((set, get) => ({
   themePreference: initialPref,
   theme: resolveTheme(initialPref),
@@ -77,7 +82,10 @@ export const useUiStore = create<UiState & UiActions>((set, get) => ({
 
   addToast: (message, type = 'info') => {
     const id = `${Date.now()}-${Math.random()}`;
-    set((s) => ({ toasts: [...s.toasts, { id, message, type }] }));
+    set((s) => {
+      const next = [...s.toasts, { id, message, type }];
+      return { toasts: next.length > MAX_TOASTS ? next.slice(-MAX_TOASTS) : next };
+    });
     setTimeout(() => get().removeToast(id), 5000);
   },
 

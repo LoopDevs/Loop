@@ -1,5 +1,9 @@
 import { create } from 'zustand';
-import { savePendingOrder, clearPendingOrder as clearPending } from '~/native/purchase-storage';
+import {
+  PENDING_ORDER_KEY,
+  savePendingOrder,
+  clearPendingOrder as clearPending,
+} from '~/native/purchase-storage';
 
 export type PurchaseStep = 'amount' | 'payment' | 'processing' | 'complete' | 'redeem' | 'error';
 
@@ -69,13 +73,13 @@ const INITIAL_STATE: PurchaseState = {
  */
 function loadPendingOrderSync(): Partial<PurchaseState> | null {
   try {
-    const raw = sessionStorage.getItem('loop_pending_order');
+    const raw = sessionStorage.getItem(PENDING_ORDER_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw) as Partial<PurchaseState>;
     if (data.expiresAt && data.expiresAt > Math.floor(Date.now() / 1000)) {
       return data;
     }
-    sessionStorage.removeItem('loop_pending_order');
+    sessionStorage.removeItem(PENDING_ORDER_KEY);
   } catch {
     /* sessionStorage unavailable (native or SSR) */
   }
