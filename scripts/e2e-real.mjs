@@ -120,47 +120,75 @@ async function refreshAccessToken() {
   return data.accessToken;
 }
 
-async function pickMerchant(accessToken) {
+/**
+ * Returns candidate merchants to try, in priority order. If E2E_MERCHANT_ID
+ * is set we trust it and return only that one.
+ *
+ * Otherwise: min-max merchants whose range covers AMOUNT_USD and that report
+ * `enabled: true`. Even enabled-in-cache merchants can report "merchant
+ * disabled" at order time (CTX's order API enforces stricter state than
+ * the catalog), so the caller retries down the list.
+ */
+async function pickMerchantCandidates(accessToken) {
   if (MERCHANT_ID) {
     log(`Using merchant from env: ${MERCHANT_ID}`);
-    return MERCHANT_ID;
+    return [{ id: MERCHANT_ID, name: `(env override ${MERCHANT_ID})` }];
   }
   const data = await api('/api/merchants', { accessToken });
   const merchants = data?.merchants ?? [];
-  // Prefer a min-max merchant whose range covers AMOUNT_USD. Type enum is
-  // 'min-max' (see packages/shared/src/merchants.ts) — an earlier typo of
-  // 'minMax' here silently fell through to the first merchant, which was
-  // a fixed-denom card that rejected the amount at upstream.
   const amount = Number(AMOUNT_USD);
-  const chosen = merchants.find(
+  const candidates = merchants.filter(
     (m) =>
+      m?.enabled === true &&
       m?.denominations?.type === 'min-max' &&
       (m.denominations.min ?? 0) <= amount &&
       (m.denominations.max ?? Infinity) >= amount,
   );
-  if (!chosen?.id) {
+  if (candidates.length === 0) {
     throw new Error(
-      `No min-max merchant covers $${AMOUNT_USD} (of ${merchants.length} merchants returned)`,
+      `No enabled min-max merchant covers $${AMOUNT_USD} (of ${merchants.length} merchants returned)`,
     );
   }
-  log(`Picked merchant: ${chosen.name} (${chosen.id})`);
-  return chosen.id;
+  log(`Found ${candidates.length} candidate merchants; first few:`, {
+    names: candidates.slice(0, 5).map((m) => m.name),
+  });
+  return candidates.map((m) => ({ id: m.id, name: m.name }));
 }
 
-async function createOrder(accessToken, merchantId) {
-  log(`Creating order for merchant ${merchantId}, $${AMOUNT_USD}`);
-  const order = await api('/api/orders', {
-    method: 'POST',
-    accessToken,
-    body: { merchantId, amount: Number(AMOUNT_USD) },
-  });
-  log('Order created', {
-    orderId: order.orderId,
-    paymentAddress: order.paymentAddress,
-    xlmAmount: order.xlmAmount,
-    memo: order.memo,
-  });
-  return order;
+/**
+ * Tries each candidate in order; returns the first order that's successfully
+ * created. CTX occasionally flags merchants as disabled at order time even
+ * when they look fine in the catalog, so we treat "merchant disabled" and
+ * any 502 as retry-worthy rather than a hard failure.
+ */
+async function createOrderWithFallback(accessToken, candidates) {
+  const errors = [];
+  for (const candidate of candidates.slice(0, 10)) {
+    log(`Creating order for ${candidate.name} (${candidate.id}), $${AMOUNT_USD}`);
+    try {
+      const order = await api('/api/orders', {
+        method: 'POST',
+        accessToken,
+        body: { merchantId: candidate.id, amount: Number(AMOUNT_USD) },
+      });
+      log('Order created', {
+        orderId: order.orderId,
+        paymentAddress: order.paymentAddress,
+        xlmAmount: order.xlmAmount,
+        memo: order.memo,
+      });
+      return order;
+    } catch (err) {
+      const msg = err?.message ?? String(err);
+      errors.push(`${candidate.name}: ${msg}`);
+      // Retry on 502 UPSTREAM_ERROR (covers "merchant disabled" and other
+      // upstream rejections). Any other error — 401, 400 validation, etc. —
+      // is a problem with our request, not the specific merchant.
+      if (!/→ 502:/.test(msg)) throw err;
+      log(`Order attempt failed, trying next merchant`);
+    }
+  }
+  throw new Error(`All ${errors.length} merchant candidates failed:\n  ${errors.join('\n  ')}`);
 }
 
 async function payOrder({ paymentAddress, xlmAmount, memo }) {
@@ -216,8 +244,8 @@ async function pollForFulfilment(accessToken, orderId) {
 
 async function main() {
   const accessToken = await refreshAccessToken();
-  const merchantId = await pickMerchant(accessToken);
-  const order = await createOrder(accessToken, merchantId);
+  const candidates = await pickMerchantCandidates(accessToken);
+  const order = await createOrderWithFallback(accessToken, candidates);
   await payOrder(order);
   await pollForFulfilment(accessToken, order.orderId);
   log('E2E real purchase flow succeeded');
