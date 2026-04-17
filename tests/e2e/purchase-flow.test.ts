@@ -39,7 +39,7 @@ test.describe('Purchase flow', () => {
     }
   });
 
-  test('map page loads with tile layer', async ({ page }) => {
+  test('map page loads with leaflet', async ({ page }) => {
     await page.goto('/map');
     await page.waitForTimeout(5000);
 
@@ -48,7 +48,10 @@ test.describe('Purchase flow', () => {
       page.locator('[role="region"][aria-label="Merchant locations map"]'),
     ).toBeVisible();
 
-    // Leaflet tile layer loaded
-    await expect(page.locator('.leaflet-tile-container')).toBeVisible();
+    // Leaflet mounted — `.leaflet-container` is stable once Leaflet attaches.
+    // Avoid asserting on `.leaflet-tile-container`: Leaflet toggles its
+    // visibility during zoom animations and it depends on an external tile
+    // fetch completing in CI, which made this test flaky.
+    await expect(page.locator('.leaflet-container')).toBeVisible();
   });
 });
