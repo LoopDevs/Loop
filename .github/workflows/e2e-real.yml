@@ -83,11 +83,12 @@ jobs:
               "The refresh token used by this run is now invalid."
             exit 1
           fi
-          # --body-file avoids ever echoing the secret into the shell;
-          # GitHub's log-masking kicks in on the next line onward once the
-          # secret value is registered.
+          # Pipe the token via stdin so it's never visible in `ps` or logs.
+          # The runner's gh CLI doesn't support --body-file; stdin is the
+          # documented alternative ("reads from standard input if not
+          # specified").
           gh secret set CTX_TEST_REFRESH_TOKEN \
-            --body-file "$TOKEN_FILE" \
-            --repo "$GITHUB_REPOSITORY"
+            --repo "$GITHUB_REPOSITORY" \
+            < "$TOKEN_FILE"
           rm -f "$TOKEN_FILE"
           echo "Rotated CTX_TEST_REFRESH_TOKEN."
