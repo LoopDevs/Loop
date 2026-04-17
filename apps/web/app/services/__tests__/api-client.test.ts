@@ -78,4 +78,45 @@ describe('apiRequest', () => {
     const result = await apiRequest('/api/image', { binary: true });
     expect(result).toBeInstanceOf(ArrayBuffer);
   });
+
+  it('passes an AbortSignal with the request (timeout wired up)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
+
+    await apiRequest('/api/merchants');
+
+    const init = vi.mocked(fetch).mock.calls[0]![1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('translates TimeoutError into ApiException{ code: TIMEOUT }', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+      new DOMException('The operation timed out.', 'TimeoutError'),
+    );
+
+    await expect(apiRequest('/api/slow')).rejects.toMatchObject({
+      name: 'ApiException',
+      code: 'TIMEOUT',
+      status: 0,
+    });
+  });
+
+  it('translates other fetch rejections into ApiException{ code: NETWORK_ERROR }', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Failed to fetch'));
+
+    await expect(apiRequest('/api/broken')).rejects.toMatchObject({
+      name: 'ApiException',
+      code: 'NETWORK_ERROR',
+      status: 0,
+    });
+  });
+
+  it('honors timeoutMs=0 to disable the default timeout', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
+
+    await apiRequest('/api/slow-on-purpose', { timeoutMs: 0 });
+
+    const init = vi.mocked(fetch).mock.calls[0]![1] as RequestInit;
+    // No caller signal + timeoutMs=0 means we don't pass a signal at all.
+    expect(init.signal ?? null).toBeNull();
+  });
 });
