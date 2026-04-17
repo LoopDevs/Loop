@@ -12,7 +12,7 @@
               │                         │
      ┌────────▼────────┐     ┌─────────▼────────┐
      │  iad (Virginia)  │     │  lhr (London)     │
-     │  loop-backend    │     │  loop-backend     │
+     │  loopfinance-api    │     │  loopfinance-api     │
      │  loop-web        │     │  loop-web         │
      └──────────────────┘     └──────────────────┘
 ```
@@ -28,7 +28,7 @@ No shared state between regions — each instance fetches merchants/locations in
 
 ```bash
 cd apps/backend
-fly launch --name loop-backend --region iad --no-deploy
+fly launch --name loopfinance-api --region iad --no-deploy
 
 # Set secrets (API credentials for /locations endpoint)
 fly secrets set \
@@ -89,7 +89,7 @@ fly scale vm shared-cpu-2x        # Upgrade CPU if needed
 fly status                    # Machine status
 fly logs                      # Live logs
 fly ssh console               # SSH into machine
-curl https://loop-backend.fly.dev/health  # Health check
+curl https://loopfinance-api.fly.dev/health  # Health check
 ```
 
 ---
@@ -131,7 +131,7 @@ cd apps/web && fly deploy
 Point these domains to Fly.io:
 
 ```
-api.loopfinance.io  → CNAME loop-backend.fly.dev
+api.loopfinance.io  → CNAME loopfinance-api.fly.dev
 loopfinance.io      → CNAME loop-web.fly.dev
 www.loopfinance.io  → CNAME loop-web.fly.dev
 ```
@@ -189,13 +189,13 @@ In Android Studio:
 
 ```bash
 # Build images
-docker build -t loop-backend -f apps/backend/Dockerfile .
+docker build -t loopfinance-api -f apps/backend/Dockerfile .
 docker build -t loop-web -f apps/web/Dockerfile .
 
 # Run backend
 docker run -p 8080:8080 \
   -e GIFT_CARD_API_BASE_URL=https://spend.ctx.com \
-  loop-backend
+  loopfinance-api
 
 # Run web
 docker run -p 3000:3000 loop-web
