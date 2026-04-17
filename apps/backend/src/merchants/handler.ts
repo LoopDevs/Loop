@@ -9,6 +9,20 @@ const MAX_PAGE_SIZE = 100;
 const MAX_QUERY_LENGTH = 100;
 
 /**
+ * Lowercase + strip diacritics so `q=cafe` matches merchant `Café`, and so a
+ * user searching `Dunkin'` matches `Dunkin'` regardless of smart quotes
+ * vs straight apostrophes. Canonicalizes to NFD (decomposes accented chars
+ * into base + combining mark) then removes the combining-diacritic block
+ * (U+0300–U+036F). ASCII input passes through untouched.
+ */
+function foldForSearch(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+/**
  * GET /api/merchants
  *
  * Query params: page, limit, q (search)
@@ -16,7 +30,7 @@ const MAX_QUERY_LENGTH = 100;
 export function merchantListHandler(c: Context): Response {
   const { merchants } = getMerchants();
 
-  const q = (c.req.query('q') ?? '').toLowerCase().trim().slice(0, MAX_QUERY_LENGTH);
+  const q = foldForSearch((c.req.query('q') ?? '').trim().slice(0, MAX_QUERY_LENGTH));
   const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10) || 1);
   const limit = Math.min(
     MAX_PAGE_SIZE,
@@ -26,7 +40,7 @@ export function merchantListHandler(c: Context): Response {
     ),
   );
 
-  const filtered = q ? merchants.filter((m) => m.name.toLowerCase().includes(q)) : merchants;
+  const filtered = q ? merchants.filter((m) => foldForSearch(m.name).includes(q)) : merchants;
 
   const total = filtered.length;
   const totalPages = Math.ceil(total / limit);
@@ -54,7 +68,10 @@ export function merchantListHandler(c: Context): Response {
  * Slug mirrors the frontend encodeUrlName: lowercase, spaces→hyphens, strip non-alphanumeric.
  */
 export function merchantBySlugHandler(c: Context): Response {
-  const slug = c.req.param('slug') ?? '';
+  // Slugs in the index are always lowercase (see merchantSlug in @loop/shared).
+  // Accept a case-insensitive match so a hand-typed URL like `/by-slug/Target`
+  // still resolves instead of 404'ing.
+  const slug = (c.req.param('slug') ?? '').toLowerCase();
   const { merchantsBySlug } = getMerchants();
 
   const merchant = merchantsBySlug.get(slug);

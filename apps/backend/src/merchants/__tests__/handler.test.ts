@@ -134,6 +134,22 @@ describe('GET /api/merchants', () => {
     expect(body.merchants.map((m) => m.id).sort()).toEqual(['m-1', 'm-3']);
   });
 
+  it('filters by q across diacritics (q=cafe matches Café)', async () => {
+    // Users typing ASCII search queries shouldn't miss accented merchant names.
+    seed([merchant('m-1', 'Café Coco'), merchant('m-2', 'Target')]);
+    const res = await app.request('/api/merchants?q=cafe');
+    const body = (await res.json()) as { merchants: Merchant[] };
+    expect(body.merchants.map((m) => m.id)).toEqual(['m-1']);
+  });
+
+  it('matches diacritic query against unaccented name too (q=café matches Cafe)', async () => {
+    // Symmetric: users typing with accents shouldn't miss ASCII-only names.
+    seed([merchant('m-1', 'Cafe Nero'), merchant('m-2', 'Target')]);
+    const res = await app.request(`/api/merchants?q=${encodeURIComponent('café')}`);
+    const body = (await res.json()) as { merchants: Merchant[] };
+    expect(body.merchants.map((m) => m.id)).toEqual(['m-1']);
+  });
+
   it('clamps absurd limit down to MAX_PAGE_SIZE (100)', async () => {
     seed(Array.from({ length: 150 }, (_, i) => merchant(`m-${i}`, `Store ${i}`)));
     const res = await app.request('/api/merchants?limit=9999');
@@ -192,6 +208,16 @@ describe('GET /api/merchants/by-slug/:slug', () => {
     expect(res.status).toBe(404);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('NOT_FOUND');
+  });
+
+  it('resolves case-insensitively when slug uses mixed case', async () => {
+    // Stored slugs are always lowercase; accept a hand-typed URL that got
+    // the case wrong rather than 404'ing.
+    seed([merchant('m-1', 'Home Depot')]);
+    const res = await app.request('/api/merchants/by-slug/Home-Depot');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { merchant: Merchant };
+    expect(body.merchant.id).toBe('m-1');
   });
 });
 
