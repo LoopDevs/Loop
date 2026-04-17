@@ -47,7 +47,7 @@ export function NativeTabBar(): React.JSX.Element | null {
               to={tab.path}
               aria-label={tab.label}
               aria-current={isActive ? 'page' : undefined}
-              onClick={(e) => {
+              onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
                 void triggerHaptic();
                 if (tab.path === activeTabPath) {
                   e.preventDefault();
