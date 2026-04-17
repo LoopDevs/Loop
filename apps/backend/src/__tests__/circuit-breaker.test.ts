@@ -255,7 +255,7 @@ describe('notification behavior', () => {
 
     expect(cb.getState()).toBe('open');
     expect(mockNotify).toHaveBeenCalledTimes(1);
-    expect(mockNotify).toHaveBeenCalledWith('open', expect.any(Number));
+    expect(mockNotify).toHaveBeenCalledWith('open', expect.any(Number), expect.any(Number));
   });
 
   it('fires one "closed" notification when HALF_OPEN probe succeeds', async () => {
@@ -266,7 +266,7 @@ describe('notification behavior', () => {
       mockFetch.mockResolvedValueOnce(new Response('err', { status: 500 }));
       await cb.fetch('http://x');
     }
-    expect(mockNotify).toHaveBeenCalledWith('open', expect.any(Number));
+    expect(mockNotify).toHaveBeenCalledWith('open', expect.any(Number), expect.any(Number));
 
     mockNotify.mockClear();
 

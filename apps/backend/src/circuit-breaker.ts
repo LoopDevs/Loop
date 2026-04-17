@@ -66,7 +66,7 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
     if (state !== 'open' && consecutiveFailures >= failureThreshold) {
       openedAt = Date.now();
       transitionTo('open');
-      notifyCircuitBreaker('open', consecutiveFailures);
+      notifyCircuitBreaker('open', consecutiveFailures, Math.round(cooldownMs / 1000));
     }
   }
 
