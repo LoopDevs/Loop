@@ -1,19 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { ApiException } from '@loop/shared';
 import type { Merchant, MerchantListResponse } from '@loop/shared';
 import { fetchMerchants, fetchMerchant, fetchMerchantBySlug } from '~/services/merchants';
-
-/**
- * Retry predicate: don't retry 4xx responses (client errors won't become 2xx
- * by trying again — 400 stays 400, 404 stays 404). Retry up to 2 times for
- * 5xx, timeouts, and network errors.
- */
-function shouldRetry(failureCount: number, error: Error): boolean {
-  if (error instanceof ApiException) {
-    if (error.status >= 400 && error.status < 500) return false;
-  }
-  return failureCount < 2;
-}
+import { shouldRetry } from './query-retry';
 
 export interface UseMerchantsOptions {
   page?: number;
