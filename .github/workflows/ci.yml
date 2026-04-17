@@ -14,6 +14,7 @@ jobs:
   typecheck:
     name: Type check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
@@ -26,6 +27,7 @@ jobs:
   lint:
     name: Lint, format & docs
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
@@ -40,6 +42,7 @@ jobs:
   test-unit:
     name: Unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
@@ -63,6 +66,7 @@ jobs:
   audit:
     name: Security audit
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
@@ -75,6 +79,7 @@ jobs:
   build:
     name: Build verification
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
@@ -109,6 +114,7 @@ jobs:
   test-e2e:
     name: E2E tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name == 'pull_request'
     needs: [typecheck, lint, test-unit, build]
     steps:
@@ -148,15 +154,26 @@ jobs:
   notify:
     name: Discord notification
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: always()
-    needs: [typecheck, lint, test-unit, audit, build]
+    # Include test-e2e so the Discord status matches the actual PR gate. Without
+    # it, Discord reported PASSED whenever the fast jobs were green, even if
+    # e2e had failed.
+    needs: [typecheck, lint, test-unit, audit, build, test-e2e]
     steps:
       - name: Notify Discord
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_DEPLOYMENTS }}
           COMMIT_MSG: ${{ github.event.head_commit.message }}
+          BRANCH: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          FAILED: ${{ contains(needs.*.result, 'failure') }}
         run: |
-          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
+          set -euo pipefail
+          if [ "$FAILED" = "true" ]; then
             STATUS="❌ FAILED"
             COLOR=15158332
           else
@@ -164,15 +181,23 @@ jobs:
             COLOR=3066993
           fi
 
-          # Sanitize commit message for JSON (escape quotes, remove newlines)
-          SAFE_MSG=$(echo "$COMMIT_MSG" | head -1 | sed 's/"/\\"/g' | sed "s/'/\\'/g" | tr -d '`')
+          # Take the first line of the commit message; everything else (quotes,
+          # backslashes, newlines) is handled by jq's JSON encoder. The previous
+          # sed-based sanitizer could leave a literal backslash in the body,
+          # which made the JSON malformed and a careful commit message could
+          # inject extra JSON fields.
+          FIRST_LINE=$(printf '%s' "${COMMIT_MSG:-}" | head -n1)
+          DESCRIPTION=$(printf '**Commit:** %s\n**Branch:** %s\n**Author:** %s' \
+            "$FIRST_LINE" "$BRANCH" "$ACTOR")
+          URL="$SERVER_URL/$REPO/actions/runs/$RUN_ID"
+          TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-          curl -s -H "Content-Type: application/json" -d "{
-            \"embeds\": [{
-              \"title\": \"$STATUS — CI Pipeline\",
-              \"description\": \"**Commit:** ${SAFE_MSG}\n**Branch:** ${{ github.ref_name }}\n**Author:** ${{ github.actor }}\",
-              \"color\": $COLOR,
-              \"url\": \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\",
-              \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
-            }]
-          }" "$DISCORD_WEBHOOK" || true
+          PAYLOAD=$(jq -cn \
+            --arg title "$STATUS — CI Pipeline" \
+            --arg desc  "$DESCRIPTION" \
+            --argjson color $COLOR \
+            --arg url   "$URL" \
+            --arg ts    "$TIMESTAMP" \
+            '{embeds:[{title:$title,description:$desc,color:$color,url:$url,timestamp:$ts}]}')
+
+          curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK" || true
