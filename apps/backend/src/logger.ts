@@ -9,20 +9,26 @@ import { env } from './env.js';
  *
  * We deliberately do NOT redact `email` — operators need to know which user
  * an auth failure applied to. OTP codes and all token variants ARE redacted.
+ *
+ * Exported so tests can assert against the same list that production uses,
+ * rather than keeping a drift-prone copy.
  */
-const REDACT_PATHS = [
+export const REDACT_PATHS: readonly string[] = [
   // Auth headers in any nested shape
   'authorization',
   'Authorization',
   '*.authorization',
   '*.Authorization',
+  '*.*.authorization',
+  '*.*.Authorization',
   'req.headers.authorization',
   'req.headers.Authorization',
   'req.headers.cookie',
   'headers.authorization',
   'headers.Authorization',
   'headers.cookie',
-  // Token fields in bodies / parsed payloads
+  '*.cookie',
+  // Token fields in bodies / parsed payloads, any depth up to two levels
   'accessToken',
   'refreshToken',
   '*.accessToken',
@@ -35,24 +41,45 @@ const REDACT_PATHS = [
   '*.otp',
   'password',
   '*.password',
-  // API credentials
+  // API credentials — cover top-level AND nested, since callers may log
+  // either the raw config object or a fetch options object that puts these
+  // under `headers` or similar.
+  'apiKey',
+  'apiSecret',
   '*.apiKey',
   '*.apiSecret',
+  '*.*.apiKey',
+  '*.*.apiSecret',
+  'X-Api-Key',
+  'X-Api-Secret',
   '*.X-Api-Key',
   '*.X-Api-Secret',
+  // Phase 2 — Stellar wallet material. None of this should ever touch the
+  // backend, but defence-in-depth: if a bug ever causes a secret key,
+  // mnemonic, or seed phrase to be logged, the value is redacted.
+  'secret',
+  'privateKey',
+  'secretKey',
+  'seedPhrase',
+  'mnemonic',
+  '*.secret',
+  '*.privateKey',
+  '*.secretKey',
+  '*.seedPhrase',
+  '*.mnemonic',
 ];
+
+const basePinoOptions = {
+  level: env.LOG_LEVEL,
+  base: { service: 'loop-backend', env: env.NODE_ENV },
+  redact: { paths: [...REDACT_PATHS], censor: '[REDACTED]' },
+};
 
 /** Structured logger for the Loop backend. */
 export const logger =
   env.NODE_ENV === 'development'
     ? pino({
-        level: env.LOG_LEVEL,
-        base: { service: 'loop-backend', env: env.NODE_ENV },
-        redact: { paths: REDACT_PATHS, censor: '[REDACTED]' },
+        ...basePinoOptions,
         transport: { target: 'pino-pretty', options: { colorize: true } },
       })
-    : pino({
-        level: env.LOG_LEVEL,
-        base: { service: 'loop-backend', env: env.NODE_ENV },
-        redact: { paths: REDACT_PATHS, censor: '[REDACTED]' },
-      });
+    : pino(basePinoOptions);
