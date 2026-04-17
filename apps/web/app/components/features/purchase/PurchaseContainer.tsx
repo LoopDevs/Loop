@@ -80,6 +80,23 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
     );
   }
 
+  // Error state — previously fell through to amount selection, which meant
+  // users hitting "order failed/expired" or polling-result errors from
+  // PaymentStep silently landed back at amount selection with no message.
+  if (store.step === 'error' && store.error !== null) {
+    return (
+      <div className="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-6">
+        <h3 className="text-lg font-semibold text-red-900 dark:text-red-200 mb-2">
+          Purchase failed
+        </h3>
+        <p className="text-sm text-red-700 dark:text-red-300 mb-4">{store.error}</p>
+        <Button variant="secondary" onClick={store.reset}>
+          Start over
+        </Button>
+      </div>
+    );
+  }
+
   // Inline auth flow (not authenticated)
   if (!isAuthenticated) {
     const handleEmailSubmit = async (): Promise<void> => {

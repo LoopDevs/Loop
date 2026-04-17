@@ -5,7 +5,10 @@ import {
   clearPendingOrder as clearPending,
 } from '~/native/purchase-storage';
 
-export type PurchaseStep = 'amount' | 'payment' | 'processing' | 'complete' | 'redeem' | 'error';
+// 'processing' is intentionally absent — no action transitions to it. If a
+// future flow needs an intermediate pre-complete state, add it here and
+// wire up the corresponding setter + UI branch in PurchaseContainer.
+export type PurchaseStep = 'amount' | 'payment' | 'complete' | 'redeem' | 'error';
 
 interface PurchaseState {
   step: PurchaseStep;

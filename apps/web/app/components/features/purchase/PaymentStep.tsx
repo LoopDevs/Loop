@@ -114,6 +114,12 @@ export function PaymentStep({
               ...(order.redeemScripts ? { redeemScripts: order.redeemScripts } : {}),
             });
           } else if (order.giftCardCode) {
+            // Currently unreachable via polling — the backend's GetOrder
+            // handler doesn't populate giftCardCode. For barcode-type gift
+            // cards the upstream /gift-cards/:id/barcode endpoint would
+            // need a separate proxy (Phase 2). RedeemFlow still sets these
+            // via WebView postMessage after the URL flow completes, so
+            // Order.giftCardCode remains a live field elsewhere.
             store.setComplete(order.giftCardCode, order.giftCardPin);
           } else {
             store.setError(

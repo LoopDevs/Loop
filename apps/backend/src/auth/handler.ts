@@ -56,7 +56,10 @@ export async function requestOtpHandler(c: Context): Promise<Response> {
     });
 
     if (!response.ok) {
-      const body = await response.text();
+      // Truncate the body before logging — pino redact only matches structured
+      // field names, so if an upstream ever echoed a token in an error string
+      // it would slip through. Cap at 500 chars to keep logs parseable.
+      const body = (await response.text()).slice(0, 500);
       log.error({ status: response.status, body }, 'Upstream login request failed');
       // Enumeration defense: return 200 with a generic message for 4xx from upstream
       // (e.g. "no such user") so an attacker cannot distinguish valid vs invalid emails.
