@@ -13,6 +13,7 @@ import { clustersHandler } from './clustering/handler.js';
 import { imageProxyHandler, evictExpiredImageCache } from './images/proxy.js';
 import { upstreamUrl } from './upstream.js';
 import { getAllCircuitStates } from './circuit-breaker.js';
+import { generateOpenApiSpec } from './openapi.js';
 import {
   merchantListHandler,
   merchantBySlugHandler,
@@ -170,6 +171,16 @@ app.get('/metrics', (c) => {
 
   return c.text(lines.join('\n') + '\n', 200, { 'Content-Type': 'text/plain; version=0.0.4' });
 });
+
+// ─── OpenAPI spec ─────────────────────────────────────────────────────────────
+
+// Generate once at module load. The spec is a pure function of the zod
+// registrations in openapi.ts — it does not depend on runtime state — so
+// serializing on every request would just burn CPU.
+const openApiSpec = generateOpenApiSpec();
+app.get('/openapi.json', (c) =>
+  c.json(openApiSpec, 200, { 'Cache-Control': 'public, max-age=3600' }),
+);
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 
