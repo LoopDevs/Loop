@@ -43,15 +43,15 @@ export function registerAppLockGuard(): () => void {
   // a page the caller has already torn down. Flag every branch against
   // `cancelled` before mutating DOM.
   let cancelled = false;
-  // The native biometric dialog is itself a system-level window —
-  // opening/closing it causes Android to emit pause/resume around the
-  // prompt. Without this guard, every successful unlock immediately
-  // triggered a resume → runLockCheck → prompt again, looping forever.
-  // If a resume fires within this window of an unlock, treat it as part
-  // of the dialog lifecycle and skip. Three seconds comfortably covers
-  // the auth dialog's tear-down; a genuine background → foreground
-  // trip in that window is not a threat anyone cares about.
-  const UNLOCK_GRACE_MS = 3000;
+  // Don't re-prompt if the app has been unlocked recently. Two reasons:
+  // (1) the biometric dialog itself emits a pause/resume around itself, so
+  // every unlock would immediately trigger another prompt. (2) normal
+  // phone use involves brief context switches — pulling down the
+  // notification shade, picking a photo, answering a quick notification —
+  // and re-authenticating every time makes the app feel hostile. A one-
+  // minute grace period comfortably covers "I popped out for ten seconds"
+  // while still locking if the phone actually sat idle (or was stolen).
+  const UNLOCK_GRACE_MS = 60_000;
   let lastUnlockedAt = 0;
 
   const showLockScreen = (): void => {
