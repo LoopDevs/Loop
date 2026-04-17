@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '~/stores/auth.store';
+import { validatePersistedPurchase } from '~/stores/purchase.store';
 
 /** Attempts to restore the auth session from stored refresh token on app mount. */
 export function useSessionRestore(): { isRestoring: boolean } {
@@ -13,11 +14,19 @@ export function useSessionRestore(): { isRestoring: boolean } {
       return;
     }
 
+    // Guard against setState-after-unmount. If the component unmounts while
+    // the async IIFE is still running, every `setIsRestoring` call would
+    // warn (React 18) or be silently dropped (React 19). Flag here and
+    // gate each setState.
+    let cancelled = false;
+
     void (async () => {
       try {
         const { getRefreshToken, getEmail } = await import('~/native/secure-storage');
         const refreshToken = await getRefreshToken();
         const email = await getEmail();
+
+        if (cancelled) return;
 
         if (refreshToken === null) {
           setIsRestoring(false);
@@ -30,6 +39,8 @@ export function useSessionRestore(): { isRestoring: boolean } {
         // and an early authenticated query race to rotate the refresh token.
         const { tryRefresh } = await import('~/services/api-client');
         const accessToken = await tryRefresh();
+
+        if (cancelled) return;
 
         if (accessToken !== null) {
           store.setAccessToken(accessToken);
@@ -46,16 +57,22 @@ export function useSessionRestore(): { isRestoring: boolean } {
       try {
         const { loadPendingOrder } = await import('~/native/purchase-storage');
         const pending = await loadPendingOrder();
-        if (pending && pending.step === 'payment') {
+        if (cancelled) return;
+        const validated = validatePersistedPurchase(pending);
+        if (validated !== null) {
           const { usePurchaseStore } = await import('~/stores/purchase.store');
-          usePurchaseStore.setState(pending);
+          usePurchaseStore.setState(validated);
         }
       } catch {
         // purchase restore failed — not critical
       } finally {
-        setIsRestoring(false);
+        if (!cancelled) setIsRestoring(false);
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
