@@ -42,4 +42,33 @@ describe('upstreamUrl', () => {
     expect(() => upstreamUrl('/path\u0000injection')).toThrow(/control/);
     expect(() => upstreamUrl('/path\u0007bell')).toThrow(/control/);
   });
+
+  it('throws on C1 control characters (0x80–0x9f)', () => {
+    expect(() => upstreamUrl('/path\u0080cc1')).toThrow(/control/);
+    expect(() => upstreamUrl('/path\u009fcc1')).toThrow(/control/);
+  });
+
+  it('throws on a leading // (protocol-relative shape)', () => {
+    expect(() => upstreamUrl('//evil.com/admin')).toThrow(/protocol-relative/);
+  });
+
+  it('throws on percent-encoded traversal segments', () => {
+    expect(() => upstreamUrl('/gift-cards/%2e%2e/admin')).toThrow(/percent-encoded traversal/);
+    expect(() => upstreamUrl('/gift-cards/%2E%2E/admin')).toThrow(/percent-encoded traversal/);
+    // Mixed encoding is also rejected — catches %2e%2E as well.
+    expect(() => upstreamUrl('/gift-cards/%2e%2E/admin')).toThrow(/percent-encoded traversal/);
+  });
+
+  it('allows single percent-encoded dots (not a traversal)', () => {
+    // `%2e` on its own is just an encoded `.` — not traversal.
+    expect(() => upstreamUrl('/v1/file%2ejson')).not.toThrow();
+  });
+
+  it('normalises a trailing slash on the base URL to avoid double-slash', async () => {
+    vi.resetModules();
+    vi.doMock('../env.js', () => ({ env: { GIFT_CARD_API_BASE_URL: 'https://spend.ctx.com/' } }));
+    const { upstreamUrl: freshUrl } = await import('../upstream.js');
+    expect(freshUrl('/login')).toBe('https://spend.ctx.com/login');
+    vi.doUnmock('../env.js');
+  });
 });
