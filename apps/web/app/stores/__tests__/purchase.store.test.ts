@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockSave = vi.fn(async () => undefined);
-const mockClear = vi.fn(async () => undefined);
+const mockSave = vi.fn<(data: Record<string, unknown>) => Promise<void>>();
+const mockClear = vi.fn<() => Promise<void>>();
 vi.mock('~/native/purchase-storage', () => ({
   PENDING_ORDER_KEY: 'loop_pending_order',
   savePendingOrder: (data: Record<string, unknown>) => mockSave(data),
@@ -12,6 +12,8 @@ import { usePurchaseStore } from '../purchase.store';
 
 describe('purchase store', () => {
   beforeEach(async () => {
+    mockSave.mockResolvedValue(undefined);
+    mockClear.mockResolvedValue(undefined);
     usePurchaseStore.getState().reset();
     // The reset above enqueues a clearPending on the persistence queue.
     // Flush microtasks so it lands before we zero the mocks, otherwise
