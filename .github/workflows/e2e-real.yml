@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       amount_usd:
-        description: 'USD amount to purchase (as a string)'
+        description: 'USD amount to purchase (blank = use merchant min — cheapest card)'
         required: false
-        default: '5'
+        default: ''
       merchant_id:
         description: 'Override merchant id (blank = first min-max in catalog)'
         required: false
