@@ -21,15 +21,20 @@ test.describe('Purchase flow', () => {
   test('search finds merchants and navigates to detail', async ({ page }) => {
     await page.goto('/');
 
-    // Wait for the search input to mount (it lives in the nav which renders
-    // as soon as the page loads — no need to wait for merchant data).
+    // Wait for merchant data to be available. Navbar's search hooks into
+    // useMerchants; until that resolves, the dropdown has nothing to show
+    // even for a valid query.
+    await expect(page.locator('a[href^="/gift-card/"]').first()).toBeVisible();
+
     const searchInput = page.locator('input[placeholder="Search for gift cards"]').first();
     await expect(searchInput).toBeVisible();
 
-    // Type a letter common to many merchant names.
-    await searchInput.fill('a');
+    // The Navbar search only renders results for queries > 1 character. Use
+    // two letters so the filter actually runs. 'am' matches 'Amazon'/similar
+    // for the real CTX merchant list; picking any 2-char substring common in
+    // names is sufficient.
+    await searchInput.fill('am');
 
-    // Wait for dropdown results. The Navbar debounces input at 150ms.
     const results = page.locator('[role="option"]');
     await expect(results.first()).toBeVisible();
 
