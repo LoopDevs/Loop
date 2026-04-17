@@ -199,6 +199,21 @@ html.native body {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+/* Pushes the whole page below the status bar on native. Default for every
+   route via root.tsx; pages that want a full-bleed hero cancel it locally
+   with `.native-bleed-top` on the element that should extend upward. */
+.native-safe-page {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* Negates `.native-safe-page` — lets a hero banner extend under the
+   translucent status bar while the rest of the page stays below it. Apply
+   to the hero wrapper; anything inside that wrapper still renders from the
+   top, so add padding inside if content shouldn't touch the status bar. */
+.native-bleed-top {
+  margin-top: calc(-1 * env(safe-area-inset-top));
+}
+
 .native-safe-x {
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);

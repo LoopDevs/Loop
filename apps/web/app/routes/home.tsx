@@ -27,10 +27,11 @@ function HomeContent(): React.JSX.Element {
     <div>
       {!isNative && <Navbar />}
 
-      {/* Hero */}
-      <div className="text-white relative overflow-hidden">
+      {/* Hero — extends under the translucent status bar on native so the
+          gradient isn't broken by the opaque safe-area strip above it. */}
+      <div className="text-white relative overflow-hidden native-bleed-top">
         <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900" />
-        <div className="relative z-0 text-center pt-32 pb-16 px-6 lg:pt-48 lg:pb-24">
+        <div className="relative z-0 text-center pt-16 pb-12 px-6 sm:pt-24 sm:pb-16 lg:pt-48 lg:pb-24">
           <h1 className="text-5xl font-bold mb-4">Save money every time you shop</h1>
           <div className="flex flex-row justify-center items-center gap-8 md:gap-16 mt-12 mb-12">
             <Feature
