@@ -12,6 +12,7 @@
     "skipLibCheck": true,
     "moduleDetection": "force",
     "verbatimModuleSyntax": false,
+    "isolatedModules": true,
     "lib": ["ES2022"],
     "target": "ES2022"
   }

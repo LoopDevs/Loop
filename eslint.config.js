@@ -21,7 +21,11 @@ export default [
       '**/capacitor.config.ts',
       'playwright.config.ts',
       'commitlint.config.js',
-      'tests/**',
+      // NOTE: tests/ is intentionally NOT listed here. A top-level `ignores`
+      // block excludes files from every subsequent config in flat config —
+      // so if we ignored `tests/**` here, the `files: ['tests/**/*.ts']`
+      // override below would never match and our Playwright e2e tests
+      // would go completely unlinted.
     ],
   },
   // ─── All TypeScript files ───────────────────────────────────────────────────
@@ -72,7 +76,11 @@ export default [
       'react/react-in-jsx-scope': 'off',
       'react/prop-types': 'off',
       'react-hooks/rules-of-hooks': 'error',
-      'react-hooks/exhaustive-deps': 'warn',
+      // exhaustive-deps catches real bugs (most recently the PaymentStep
+      // polling regression). Warnings get ignored; make this an error so CI
+      // fails on it. Intentional escape hatches still work via inline
+      // // eslint-disable-next-line react-hooks/exhaustive-deps comments.
+      'react-hooks/exhaustive-deps': 'error',
     },
   },
   // ─── Web app — enforce import boundaries ────────────────────────────────────
@@ -105,11 +113,28 @@ export default [
     },
   },
   // ─── Playwright e2e tests ───────────────────────────────────────────────────
+  // tests/ doesn't have its own tsconfig.json, so typed-lint rules (which
+  // require parserOptions.project) can't resolve. Override with project:null
+  // so only untyped rules run. That's enough to catch no-console, eqeqeq,
+  // prefer-const style issues in e2e specs; full typed-lint on e2e would
+  // require a tests/tsconfig.json and isn't worth the setup right now.
   {
     files: ['tests/**/*.ts'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: 'module',
+        project: null,
+      },
+    },
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-floating-promises': 'off',
+      // Typed rules that need parserOptions.project — disable explicitly so
+      // their `| never` unreachable config doesn't get evaluated.
+      '@typescript-eslint/await-thenable': 'off',
+      '@typescript-eslint/no-misused-promises': 'off',
     },
   },
 ];
