@@ -43,6 +43,16 @@ export function registerAppLockGuard(): () => void {
   // a page the caller has already torn down. Flag every branch against
   // `cancelled` before mutating DOM.
   let cancelled = false;
+  // The native biometric dialog is itself a system-level window —
+  // opening/closing it causes Android to emit pause/resume around the
+  // prompt. Without this guard, every successful unlock immediately
+  // triggered a resume → runLockCheck → prompt again, looping forever.
+  // If a resume fires within this window of an unlock, treat it as part
+  // of the dialog lifecycle and skip. Three seconds comfortably covers
+  // the auth dialog's tear-down; a genuine background → foreground
+  // trip in that window is not a threat anyone cares about.
+  const UNLOCK_GRACE_MS = 3000;
+  let lastUnlockedAt = 0;
 
   const showLockScreen = (): void => {
     if (cancelled) return;
@@ -66,10 +76,14 @@ export function registerAppLockGuard(): () => void {
 
   const attemptUnlock = async (): Promise<void> => {
     const ok = await authenticateWithBiometrics('Unlock Loop');
-    if (!cancelled && ok) hideLockScreen();
+    if (!cancelled && ok) {
+      lastUnlockedAt = Date.now();
+      hideLockScreen();
+    }
   };
 
   const runLockCheck = async (): Promise<void> => {
+    if (Date.now() - lastUnlockedAt < UNLOCK_GRACE_MS) return;
     const enabled = await isAppLockEnabled();
     if (cancelled || !enabled) return;
     const { available } = await checkBiometrics();
