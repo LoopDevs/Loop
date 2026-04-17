@@ -77,7 +77,9 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
-  const { merchants } = useMerchants({ limit: 1000 });
+  // Backend clamps at MAX_PAGE_SIZE=100. Asking for 1000 was silently capped,
+  // meaning search only saw the first page of merchants anyway. Match the cap.
+  const { merchants } = useMerchants({ limit: 100 });
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query), 150);
