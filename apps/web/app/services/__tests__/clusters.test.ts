@@ -101,12 +101,52 @@ describe('clusters service', () => {
     });
   });
 
-  it('throws ApiException with NETWORK_ERROR when body is not JSON', async () => {
+  it('throws ApiException with UPSTREAM_ERROR when body is not JSON', async () => {
     mockFetch.mockResolvedValue(new Response('Not Found', { status: 404 }));
     await expect(fetchClusters(defaultParams)).rejects.toMatchObject({
       name: 'ApiException',
       status: 404,
-      code: 'NETWORK_ERROR',
+      code: 'UPSTREAM_ERROR',
     });
+  });
+
+  it('normalizes wrong-shape JSON error to UPSTREAM_ERROR', async () => {
+    // A gateway or misconfigured proxy returning JSON but without our
+    // `{code, message}` shape must not produce `ApiException { code: undefined }` —
+    // that would break every `switch (err.code)` downstream. Mirrors the
+    // normalization in api-client.ts.
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ foo: 'bar' }), {
+        status: 502,
+        statusText: 'Bad Gateway',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    await expect(fetchClusters(defaultParams)).rejects.toMatchObject({
+      status: 502,
+      code: 'UPSTREAM_ERROR',
+      message: 'Bad Gateway',
+    });
+  });
+
+  it('aborts the in-flight fetch when the caller signal aborts', async () => {
+    // A map component unmounting mid-fetch should be able to cancel rather
+    // than wait 30s. The composed signal in fetchClusters must surface the
+    // caller abort as a TIMEOUT-coded ApiException (the component doesn't
+    // distinguish abort from timeout semantically).
+    const controller = new AbortController();
+    mockFetch.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            reject(new DOMException('aborted', 'AbortError'));
+          });
+        }),
+    );
+    const promise = fetchClusters(defaultParams, controller.signal).catch((e) => e);
+    controller.abort();
+    const err = (await promise) as { status: number; code: string };
+    expect(err.status).toBe(0);
+    expect(err.code).toBe('TIMEOUT');
   });
 });

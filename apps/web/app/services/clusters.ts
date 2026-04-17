@@ -9,8 +9,16 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  * Fetches map cluster data, requesting protobuf for bandwidth efficiency.
  * Falls back to JSON if the protobuf types are unavailable (during development
  * before `buf generate` has been run).
+ *
+ * @param params  viewport bounds + zoom
+ * @param signal  optional AbortSignal — wired up with the timeout so a map
+ *                component that unmounts (e.g. user pans quickly) can cancel
+ *                in-flight fetches and avoid setState-after-unmount warnings.
  */
-export async function fetchClusters(params: ClusterParams): Promise<ClusterResponse> {
+export async function fetchClusters(
+  params: ClusterParams,
+  signal?: AbortSignal,
+): Promise<ClusterResponse> {
   const qs = new URLSearchParams({
     west: String(params.west),
     south: String(params.south),
@@ -19,27 +27,51 @@ export async function fetchClusters(params: ClusterParams): Promise<ClusterRespo
     zoom: String(params.zoom),
   });
 
+  // Compose caller signal with our timeout so either fires cancellation.
+  const composed = signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(DEFAULT_TIMEOUT_MS)])
+    : AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
+
   let response: Response;
   try {
     response = await fetch(`${API_BASE}/api/clusters?${qs.toString()}`, {
       headers: { Accept: PROTOBUF_MIME },
-      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+      signal: composed,
     });
   } catch (err) {
     if (err instanceof DOMException && err.name === 'TimeoutError') {
       throw new ApiException(0, { code: 'TIMEOUT', message: 'Cluster request timed out' });
     }
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new ApiException(0, { code: 'TIMEOUT', message: 'Cluster request aborted' });
+    }
     throw new ApiException(0, { code: 'NETWORK_ERROR', message: 'Cluster request failed' });
   }
 
   if (!response.ok) {
-    // Consistency with apiRequest: decode the backend's JSON error shape
-    // if present, otherwise fall back to a status-derived message.
+    // Normalize the error body so downstream consumers always get a valid
+    // `{ code, message }`. Mirrors the logic in api-client.ts (PR #36) —
+    // proxies, gateways, or HTML error pages can all land here with bodies
+    // that don't match our shape, and those previously produced ApiException
+    // instances with `code: undefined`, breaking every `switch (err.code)`
+    // in downstream code.
     let error: ApiError;
     try {
-      error = (await response.json()) as ApiError;
+      const body = (await response.json()) as unknown;
+      if (body !== null && typeof body === 'object') {
+        const b = body as { code?: unknown; message?: unknown; details?: unknown };
+        error = {
+          code: typeof b.code === 'string' ? b.code : 'UPSTREAM_ERROR',
+          message: typeof b.message === 'string' ? b.message : response.statusText,
+          ...(b.details !== undefined && typeof b.details === 'object' && b.details !== null
+            ? { details: b.details as Record<string, unknown> }
+            : {}),
+        };
+      } else {
+        error = { code: 'UPSTREAM_ERROR', message: response.statusText };
+      }
     } catch {
-      error = { code: 'NETWORK_ERROR', message: response.statusText };
+      error = { code: 'UPSTREAM_ERROR', message: response.statusText };
     }
     throw new ApiException(response.status, error);
   }
