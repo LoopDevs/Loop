@@ -23,36 +23,28 @@ export async function setAppLockEnabled(enabled: boolean): Promise<void> {
 }
 
 /**
- * Registers a listener that prompts for biometrics when app resumes from
- * background AND on initial registration (cold start). Returns a cleanup
- * function.
+ * Prompts for biometrics once on cold start when app-lock is enabled.
+ * Returns a cleanup function.
  *
- * Covering cold start matters: the resume event only fires when the app
- * transitions from background to foreground. A stolen-phone scenario
- * where the thief kills and relaunches the app skips that transition
- * entirely, so app lock without a cold-start check leaves a gap right
- * where it's needed most.
+ * Design choice: we intentionally do NOT re-prompt on resume. A Loop gift
+ * card can only be bought by paying XLM from the user's own wallet, so a
+ * phone thief in possession of an unlocked handset still can't make a
+ * fraudulent purchase. Re-authenticating on every brief context switch
+ * (pulling down notifications, reading an SMS, switching apps for five
+ * seconds) makes the app feel hostile for no real security benefit. The
+ * cold-start prompt catches the "someone found/stole a locked phone and
+ * managed to get it unlocked" case; anything more is theatre.
  */
 export function registerAppLockGuard(): () => void {
   if (!Capacitor.isNativePlatform()) return () => {};
 
   let overlay: HTMLDivElement | null = null;
   // Cancellation flag — the async check below kicks off at registration
-  // time and again on every resume. If cleanup runs while one is still
-  // in-flight, its eventual showLockScreen() would leak an overlay onto
-  // a page the caller has already torn down. Flag every branch against
-  // `cancelled` before mutating DOM.
+  // time. If cleanup runs while it is still in-flight, its eventual
+  // showLockScreen() would leak an overlay onto a page the caller has
+  // already torn down. Flag every branch against `cancelled` before
+  // mutating DOM.
   let cancelled = false;
-  // Don't re-prompt if the app has been unlocked recently. Two reasons:
-  // (1) the biometric dialog itself emits a pause/resume around itself, so
-  // every unlock would immediately trigger another prompt. (2) normal
-  // phone use involves brief context switches — pulling down the
-  // notification shade, picking a photo, answering a quick notification —
-  // and re-authenticating every time makes the app feel hostile. A one-
-  // minute grace period comfortably covers "I popped out for ten seconds"
-  // while still locking if the phone actually sat idle (or was stolen).
-  const UNLOCK_GRACE_MS = 60_000;
-  let lastUnlockedAt = 0;
 
   const showLockScreen = (): void => {
     if (cancelled) return;
@@ -76,14 +68,10 @@ export function registerAppLockGuard(): () => void {
 
   const attemptUnlock = async (): Promise<void> => {
     const ok = await authenticateWithBiometrics('Unlock Loop');
-    if (!cancelled && ok) {
-      lastUnlockedAt = Date.now();
-      hideLockScreen();
-    }
+    if (!cancelled && ok) hideLockScreen();
   };
 
   const runLockCheck = async (): Promise<void> => {
-    if (Date.now() - lastUnlockedAt < UNLOCK_GRACE_MS) return;
     const enabled = await isAppLockEnabled();
     if (cancelled || !enabled) return;
     const { available } = await checkBiometrics();
@@ -92,17 +80,11 @@ export function registerAppLockGuard(): () => void {
     void attemptUnlock();
   };
 
-  const onResume = (): void => {
-    void runLockCheck();
-  };
-
-  // Cold-start check — runs once as soon as the guard is registered.
+  // Cold-start check only — no resume listener (see function docstring).
   void runLockCheck();
 
-  document.addEventListener('resume', onResume);
   return () => {
     cancelled = true;
-    document.removeEventListener('resume', onResume);
     hideLockScreen();
   };
 }
