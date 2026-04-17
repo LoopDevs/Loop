@@ -40,14 +40,27 @@ async function sendWebhook(webhookUrl: string | undefined, embed: DiscordEmbed):
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         embeds: [{ ...embed, timestamp: embed.timestamp ?? new Date().toISOString() }],
+        // Discord webhooks default to parsing @everyone/@here/@user mentions
+        // out of message content AND embed fields. A merchant or order field
+        // containing `@everyone` would ping the whole channel. Explicitly
+        // setting `parse: []` suppresses every mention type. Our embeds
+        // never need to ping anyone, so this is a pure safety setting.
+        allowed_mentions: { parse: [] },
       }),
       signal: AbortSignal.timeout(5000),
     });
     // Discord returns 204 on success, 400 for malformed payloads, 429 if
     // we've hit the per-webhook rate limit. Log bad statuses so we notice
-    // schema drift or accidental webhook flooding before ops does.
+    // schema drift or accidental webhook flooding before ops does. Include
+    // a truncated body so schema-drift debugging doesn't require reproducing.
     if (!response.ok) {
-      log.warn({ status: response.status }, 'Discord webhook returned non-success status');
+      let body = '';
+      try {
+        body = (await response.text()).slice(0, 500);
+      } catch {
+        /* body unreadable */
+      }
+      log.warn({ status: response.status, body }, 'Discord webhook returned non-success status');
     }
   } catch (err) {
     log.warn({ err }, 'Failed to send Discord notification');
@@ -63,6 +76,21 @@ const BLUE = 3447003;
 // Discord field-value cap per API docs.
 const FIELD_VALUE_MAX = 1024;
 const DESCRIPTION_MAX = 4096;
+
+/**
+ * Format an amount for display. The previous code always prefixed `$`
+ * regardless of currency, producing nonsense like "$25.00 EUR". Use the
+ * currency-specific symbol when we know it, otherwise fall back to the
+ * currency code on its own (e.g. "25.00 GBP"). Deliberately narrow
+ * mapping — anything not in this table falls back to the safe format.
+ */
+const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', EUR: '€', GBP: '£', CAD: 'C$' };
+function formatAmount(amount: number, currency: string): string {
+  const code = escapeMarkdown(currency);
+  const body = amount.toFixed(2);
+  const symbol = CURRENCY_SYMBOLS[currency.toUpperCase()];
+  return symbol !== undefined ? `${symbol}${body} ${code}` : `${body} ${code}`;
+}
 
 /** Notify: new order created */
 export function notifyOrderCreated(
@@ -81,7 +109,7 @@ export function notifyOrderCreated(
         value: truncate(escapeMarkdown(merchantName), FIELD_VALUE_MAX),
         inline: true,
       },
-      { name: 'Amount', value: `$${amount.toFixed(2)} ${escapeMarkdown(currency)}`, inline: true },
+      { name: 'Amount', value: formatAmount(amount, currency), inline: true },
       { name: 'XLM', value: truncate(escapeMarkdown(xlmAmount), FIELD_VALUE_MAX), inline: true },
       { name: 'Order ID', value: `\`${escapeMarkdown(orderId)}\``, inline: false },
     ],
@@ -105,7 +133,7 @@ export function notifyOrderFulfilled(
         value: truncate(escapeMarkdown(merchantName), FIELD_VALUE_MAX),
         inline: true,
       },
-      { name: 'Amount', value: `$${amount.toFixed(2)} ${escapeMarkdown(currency)}`, inline: true },
+      { name: 'Amount', value: formatAmount(amount, currency), inline: true },
       {
         name: 'Redeem',
         value: truncate(escapeMarkdown(redeemType), FIELD_VALUE_MAX),
