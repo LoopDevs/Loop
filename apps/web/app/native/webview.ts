@@ -98,12 +98,21 @@ export async function openWebView(
   // navigate our tab to a phishing URL.
   const win = window.open(url, '_blank', 'noopener,noreferrer');
 
+  // A null return from window.open means a popup blocker intercepted us.
+  // Previously we returned a no-op controller here and the caller's
+  // "redeeming..." UI sat forever while nothing actually opened. Surface
+  // the failure so callers can show a "please allow popups and retry"
+  // affordance instead.
+  if (win === null) {
+    throw new Error('openWebView: popup blocked — allow popups for this site and retry');
+  }
+
   // Track the poll so we can clear it when the controller's close() is called,
   // so the interval doesn't leak for the lifetime of the page.
   let poll: ReturnType<typeof setInterval> | null = null;
   if (onClose) {
     poll = setInterval(() => {
-      if (win?.closed) {
+      if (win.closed) {
         if (poll !== null) clearInterval(poll);
         poll = null;
         onClose();
@@ -117,7 +126,7 @@ export async function openWebView(
         clearInterval(poll);
         poll = null;
       }
-      win?.close();
+      win.close();
     },
   };
 }

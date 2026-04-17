@@ -523,6 +523,15 @@ describe('webview', () => {
     expect(openFn).not.toHaveBeenCalled();
   });
 
+  it('surfaces popup-blocker rejection when window.open returns null', async () => {
+    // Popup blockers make window.open return null. Before this fix, the
+    // controller was silently a no-op and the caller's "redeeming…" UI
+    // stuck forever. Now the caller gets a specific error they can map
+    // to a "please allow popups" UX.
+    (window as unknown as Record<string, unknown>).open = vi.fn(() => null);
+    await expect(openWebView({ url: 'https://example.com' })).rejects.toThrow(/popup blocked/);
+  });
+
   it('close() calls window.close on the opened tab', async () => {
     const mockWin = { close: vi.fn(), closed: false };
     (window as unknown as Record<string, unknown>).open = vi.fn(() => mockWin);
