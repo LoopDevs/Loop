@@ -208,7 +208,10 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
         orderId: result.orderId,
         paymentAddress: result.paymentAddress,
         xlmAmount: result.xlmAmount,
-        expiresAt: Math.floor(Date.now() / 1000) + 30 * 60,
+        // Server-authoritative: the backend sends unix seconds. Recomputing
+        // from Date.now() here would drift under any clock skew between the
+        // client and the server and break the payment countdown.
+        expiresAt: result.expiresAt,
         memo: result.memo,
       });
       void triggerHapticNotification('success');

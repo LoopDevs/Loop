@@ -57,6 +57,12 @@ export interface CreateOrderResponse {
   xlmAmount: string;
   /** Payment memo (required for payment identification). */
   memo: string;
+  /**
+   * Unix timestamp (seconds) after which the payment window is closed.
+   * Server-authoritative — use this directly rather than re-computing on the
+   * client, which would drift relative to the server under clock skew.
+   */
+  expiresAt: number;
 }
 
 /** Paginated order history response. */

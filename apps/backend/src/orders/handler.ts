@@ -39,6 +39,18 @@ const CreateOrderUpstreamResponse = z
   })
   .passthrough();
 
+/**
+ * Seconds the client should consider an order valid for payment. The client
+ * used to hardcode this to now() + 30min, which drifted relative to the
+ * server under any clock skew — the payment countdown could expire mid-pay or
+ * show a bogus value. Now the server computes and returns the expiry, making
+ * the backend authoritative for the payment window.
+ *
+ * If CTX starts returning its own expiry in the `/gift-cards` response we can
+ * prefer that; for now the upstream schema doesn't surface one.
+ */
+const ORDER_EXPIRY_SECONDS = 30 * 60;
+
 const GetOrderUpstreamResponse = z
   .object({
     id: z.string(),
@@ -209,6 +221,7 @@ export async function createOrderHandler(c: Context): Promise<Response> {
         paymentAddress,
         xlmAmount: validated.data.paymentCryptoAmount,
         memo,
+        expiresAt: Math.floor(Date.now() / 1000) + ORDER_EXPIRY_SECONDS,
       },
       201,
     );
