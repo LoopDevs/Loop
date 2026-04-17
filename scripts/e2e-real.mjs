@@ -68,7 +68,13 @@ function log(msg, data) {
 
 async function api(path, { method = 'GET', body, accessToken } = {}) {
   const headers = { 'Content-Type': 'application/json' };
-  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+    // CTX binds the access token to the clientId used at auth. Omitting
+    // X-Client-Id on authenticated requests causes upstream to 401 even
+    // though the bearer token is otherwise valid.
+    headers['X-Client-Id'] = 'loopweb';
+  }
   const res = await fetch(`${BACKEND_URL}${path}`, {
     method,
     headers,
