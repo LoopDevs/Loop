@@ -50,10 +50,13 @@ const HORIZON_URL = process.env.HORIZON_URL ?? 'https://horizon.stellar.org';
 const REFRESH_TOKEN = process.env.CTX_TEST_REFRESH_TOKEN;
 const WALLET_SECRET = process.env.STELLAR_TEST_SECRET_KEY;
 const MERCHANT_ID = process.env.E2E_MERCHANT_ID;
-// Undefined means "use each candidate merchant's own `min` denomination" —
-// buys the cheapest possible card so CI runs don't waste real money. Set
-// the env var to force a specific amount (e.g. to reproduce a user's order).
-const AMOUNT_USD = process.env.E2E_AMOUNT_USD;
+// Unset (undefined OR empty string) means "use each candidate merchant's own
+// `min` denomination" — buys the cheapest possible card. The workflow passes
+// E2E_AMOUNT_USD: '' when the manual input is blank, so treat '' as unset.
+const AMOUNT_USD =
+  process.env.E2E_AMOUNT_USD && process.env.E2E_AMOUNT_USD.trim() !== ''
+    ? process.env.E2E_AMOUNT_USD
+    : undefined;
 const POLL_TIMEOUT_MS = Number(process.env.POLL_TIMEOUT_MS ?? 600_000);
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 5_000);
 const NEW_REFRESH_TOKEN_OUT = process.env.NEW_REFRESH_TOKEN_OUT;
