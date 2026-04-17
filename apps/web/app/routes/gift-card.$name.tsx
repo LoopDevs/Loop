@@ -300,9 +300,17 @@ export default function GiftCardRoute(): React.JSX.Element {
 
               {merchant.description ? (
                 <div className="text-gray-600 dark:text-gray-300 space-y-3 leading-relaxed text-sm">
-                  {merchant.description.split('\n\n').map((p, i) => (
-                    <p key={i}>{p}</p>
-                  ))}
+                  {merchant.description
+                    // Accept any run of newlines (with optional whitespace on
+                    // blank lines) as a paragraph break. A strict `\n\n`
+                    // split rendered \r\n\r\n sources and single-newline-only
+                    // descriptions as one wall of text.
+                    .split(/\n\s*\n+/)
+                    .map((p) => p.trim())
+                    .filter((p) => p.length > 0)
+                    .map((p, i) => (
+                      <p key={i}>{p}</p>
+                    ))}
                 </div>
               ) : (
                 <p className="text-gray-500 dark:text-gray-400 text-sm">
