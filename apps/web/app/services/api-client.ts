@@ -67,11 +67,27 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
 
   if (!response.ok) {
+    // Upstream/backend errors are expected to be `{ code, message }`, but
+    // proxies, intermediate gateways, and misconfigured servers can return
+    // anything — HTML error pages, empty bodies, or JSON without our fields.
+    // Normalize so `ApiException.code` and `.message` are always strings.
     let error: ApiError;
     try {
-      error = (await response.json()) as ApiError;
+      const body = (await response.json()) as unknown;
+      if (body !== null && typeof body === 'object') {
+        const b = body as { code?: unknown; message?: unknown; details?: unknown };
+        error = {
+          code: typeof b.code === 'string' ? b.code : 'UPSTREAM_ERROR',
+          message: typeof b.message === 'string' ? b.message : response.statusText,
+          ...(b.details !== undefined && typeof b.details === 'object' && b.details !== null
+            ? { details: b.details as Record<string, unknown> }
+            : {}),
+        };
+      } else {
+        error = { code: 'UPSTREAM_ERROR', message: response.statusText };
+      }
     } catch {
-      error = { code: 'NETWORK_ERROR', message: response.statusText };
+      error = { code: 'UPSTREAM_ERROR', message: response.statusText };
     }
     throw new ApiException(response.status, error);
   }
@@ -130,7 +146,10 @@ async function doRefresh(): Promise<string | null> {
     );
     if (res.refreshToken) {
       const { storeRefreshToken } = await import('~/native/secure-storage');
-      void storeRefreshToken(res.refreshToken);
+      // Await so a storage failure can't leave the rotated refresh token in
+      // memory-only — next app load would then read the stale previous
+      // token from storage and force a silent re-login.
+      await storeRefreshToken(res.refreshToken);
     }
     return res.accessToken;
   } catch {
@@ -158,9 +177,9 @@ export async function authenticatedRequest<T>(
   const clientIdMap = { web: 'loopweb', ios: 'loopios', android: 'loopandroid' } as const;
   const clientId = clientIdMap[platform] ?? 'loopweb';
 
-  // If no token in memory, try to refresh before the first attempt.
-  // Use the freshest store reference for the write so we never overwrite a
-  // token that was set by another refresh that resolved while we awaited.
+  // If no token in memory, try to refresh before the first attempt. Because
+  // `tryRefresh` coalesces concurrent callers into a single underlying
+  // request, parallel authenticated calls will all see the same new token.
   if (token === null) {
     token = await tryRefresh();
     if (token !== null) {
