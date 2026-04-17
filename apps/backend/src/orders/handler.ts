@@ -26,7 +26,7 @@ function upstreamHeaders(c: Context): Record<string, string> {
 // IEEE-754 garbage (0.1 + 0.2 = 0.30000000000000004) to upstream.
 const CreateOrderBody = z.object({
   merchantId: z.string().min(1).max(128),
-  amount: z.number().finite().positive().min(1).max(10_000).multipleOf(0.01),
+  amount: z.number().finite().positive().min(0.01).max(10_000).multipleOf(0.01),
 });
 
 // Upstream response schemas — validate before forwarding to client

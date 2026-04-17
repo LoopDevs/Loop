@@ -494,8 +494,8 @@ describe('POST /api/orders — amount validation', () => {
     });
   }
 
-  it('rejects amount below $1', async () => {
-    const res = await postOrder({ merchantId: 'm-1', amount: 0.5 });
+  it('rejects amount below $0.01', async () => {
+    const res = await postOrder({ merchantId: 'm-1', amount: 0.005 });
     expect(res.status).toBe(400);
   });
 
