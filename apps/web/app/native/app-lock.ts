@@ -23,15 +23,29 @@ export async function setAppLockEnabled(enabled: boolean): Promise<void> {
 }
 
 /**
- * Registers a listener that prompts for biometrics when app resumes.
- * Returns a cleanup function.
+ * Registers a listener that prompts for biometrics when app resumes from
+ * background AND on initial registration (cold start). Returns a cleanup
+ * function.
+ *
+ * Covering cold start matters: the resume event only fires when the app
+ * transitions from background to foreground. A stolen-phone scenario
+ * where the thief kills and relaunches the app skips that transition
+ * entirely, so app lock without a cold-start check leaves a gap right
+ * where it's needed most.
  */
 export function registerAppLockGuard(): () => void {
   if (!Capacitor.isNativePlatform()) return () => {};
 
   let overlay: HTMLDivElement | null = null;
+  // Cancellation flag — the async check below kicks off at registration
+  // time and again on every resume. If cleanup runs while one is still
+  // in-flight, its eventual showLockScreen() would leak an overlay onto
+  // a page the caller has already torn down. Flag every branch against
+  // `cancelled` before mutating DOM.
+  let cancelled = false;
 
   const showLockScreen = (): void => {
+    if (cancelled) return;
     if (overlay) return;
     overlay = document.createElement('div');
     overlay.id = 'app-lock-overlay';
@@ -52,22 +66,28 @@ export function registerAppLockGuard(): () => void {
 
   const attemptUnlock = async (): Promise<void> => {
     const ok = await authenticateWithBiometrics('Unlock Loop');
-    if (ok) hideLockScreen();
+    if (!cancelled && ok) hideLockScreen();
+  };
+
+  const runLockCheck = async (): Promise<void> => {
+    const enabled = await isAppLockEnabled();
+    if (cancelled || !enabled) return;
+    const { available } = await checkBiometrics();
+    if (cancelled || !available) return;
+    showLockScreen();
+    void attemptUnlock();
   };
 
   const onResume = (): void => {
-    void (async () => {
-      const enabled = await isAppLockEnabled();
-      const { available } = await checkBiometrics();
-      if (enabled && available) {
-        showLockScreen();
-        void attemptUnlock();
-      }
-    })();
+    void runLockCheck();
   };
+
+  // Cold-start check — runs once as soon as the guard is registered.
+  void runLockCheck();
 
   document.addEventListener('resume', onResume);
   return () => {
+    cancelled = true;
     document.removeEventListener('resume', onResume);
     hideLockScreen();
   };
