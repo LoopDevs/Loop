@@ -9,11 +9,17 @@ vi.hoisted(() => {
   }
 });
 
+import { REDACT_PATHS } from '../logger.js';
+
 /**
- * Rebuild a pino logger that mirrors the shape of `src/logger.ts` but writes
- * to an in-memory stream so we can inspect the produced JSON. Importing the
- * real logger directly would send output to stdout or pino-pretty and make
- * assertions brittle.
+ * Rebuild a pino logger that uses the *same* REDACT_PATHS as the production
+ * logger, but writes to an in-memory stream so we can inspect the produced
+ * JSON. Importing the real logger directly would send output to stdout or
+ * pino-pretty and make assertions brittle.
+ *
+ * Critical: we import REDACT_PATHS from `../logger.js` rather than keeping a
+ * copy here. If the production list grows or shrinks, these tests follow —
+ * no drift.
  */
 function makeLogger(): { logger: pino.Logger; records: Record<string, unknown>[] } {
   const records: Record<string, unknown>[] = [];
@@ -32,28 +38,7 @@ function makeLogger(): { logger: pino.Logger; records: Record<string, unknown>[]
     {
       level: 'info',
       base: { service: 'loop-backend', env: 'test' },
-      redact: {
-        paths: [
-          'authorization',
-          'Authorization',
-          '*.authorization',
-          '*.Authorization',
-          'req.headers.authorization',
-          'headers.authorization',
-          'headers.Authorization',
-          'headers.cookie',
-          'accessToken',
-          'refreshToken',
-          '*.accessToken',
-          '*.refreshToken',
-          'otp',
-          'code',
-          '*.otp',
-          'password',
-          '*.password',
-        ],
-        censor: '[REDACTED]',
-      },
+      redact: { paths: [...REDACT_PATHS], censor: '[REDACTED]' },
     },
     stream,
   );
@@ -86,6 +71,7 @@ describe('logger redaction', () => {
         accessToken: 'AAA.BBB',
         refreshToken: 'rtok',
         tokens: { accessToken: 'nested', refreshToken: 'nested-rt' },
+        auth: { tokens: { accessToken: 'deep', refreshToken: 'deep-rt' } },
       },
       'test',
     );
@@ -95,6 +81,9 @@ describe('logger redaction', () => {
     const tokens = r.tokens as Record<string, string>;
     expect(tokens.accessToken).toBe('[REDACTED]');
     expect(tokens.refreshToken).toBe('[REDACTED]');
+    const auth = r.auth as { tokens: Record<string, string> };
+    expect(auth.tokens.accessToken).toBe('[REDACTED]');
+    expect(auth.tokens.refreshToken).toBe('[REDACTED]');
   });
 
   it('redacts OTP and password fields', () => {
@@ -103,6 +92,80 @@ describe('logger redaction', () => {
     const r = records[0] as Record<string, unknown>;
     expect(r.otp).toBe('[REDACTED]');
     expect(r.password).toBe('[REDACTED]');
+  });
+
+  it('redacts API credentials at top level and nested', () => {
+    const { logger, records } = makeLogger();
+    logger.info(
+      {
+        apiKey: 'top-key',
+        apiSecret: 'top-secret',
+        config: { apiKey: 'nested-key', apiSecret: 'nested-secret' },
+        headers: { 'X-Api-Key': 'hdr-key', 'X-Api-Secret': 'hdr-secret' },
+      },
+      'test',
+    );
+    const r = records[0] as Record<string, unknown>;
+    expect(r.apiKey).toBe('[REDACTED]');
+    expect(r.apiSecret).toBe('[REDACTED]');
+    const config = r.config as Record<string, string>;
+    expect(config.apiKey).toBe('[REDACTED]');
+    expect(config.apiSecret).toBe('[REDACTED]');
+    const headers = r.headers as Record<string, string>;
+    expect(headers['X-Api-Key']).toBe('[REDACTED]');
+    expect(headers['X-Api-Secret']).toBe('[REDACTED]');
+  });
+
+  it('redacts Stellar wallet material (Phase 2 defence-in-depth)', () => {
+    const { logger, records } = makeLogger();
+    logger.info(
+      {
+        secret: 'SAXXX',
+        privateKey: 'pk-1',
+        secretKey: 'sk-1',
+        seedPhrase: 'word word word',
+        mnemonic: 'abandon ability able',
+        wallet: {
+          secret: 'SAYYY',
+          privateKey: 'pk-2',
+          secretKey: 'sk-2',
+          seedPhrase: 'nested seed',
+          mnemonic: 'nested mnemonic',
+        },
+      },
+      'test',
+    );
+    const r = records[0] as Record<string, unknown>;
+    expect(r.secret).toBe('[REDACTED]');
+    expect(r.privateKey).toBe('[REDACTED]');
+    expect(r.secretKey).toBe('[REDACTED]');
+    expect(r.seedPhrase).toBe('[REDACTED]');
+    expect(r.mnemonic).toBe('[REDACTED]');
+    const wallet = r.wallet as Record<string, string>;
+    expect(wallet.secret).toBe('[REDACTED]');
+    expect(wallet.privateKey).toBe('[REDACTED]');
+    expect(wallet.secretKey).toBe('[REDACTED]');
+    expect(wallet.seedPhrase).toBe('[REDACTED]');
+    expect(wallet.mnemonic).toBe('[REDACTED]');
+  });
+
+  it('redacts cookie headers at common nesting depths', () => {
+    const { logger, records } = makeLogger();
+    logger.info(
+      {
+        headers: { cookie: 'sid=abc' },
+        req: { headers: { cookie: 'sid=def' } },
+        session: { cookie: 'sid=ghi' },
+      },
+      'test',
+    );
+    const r = records[0] as Record<string, unknown>;
+    const headers = r.headers as Record<string, string>;
+    const req = r.req as { headers: Record<string, string> };
+    const session = r.session as Record<string, string>;
+    expect(headers.cookie).toBe('[REDACTED]');
+    expect(req.headers.cookie).toBe('[REDACTED]');
+    expect(session.cookie).toBe('[REDACTED]');
   });
 
   it('does not redact email (operators need it for debugging)', () => {
