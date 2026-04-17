@@ -87,13 +87,26 @@ describe('clusters service', () => {
     expect(result.locationPoints).toHaveLength(1);
   });
 
-  it('throws on non-ok response', async () => {
-    mockFetch.mockResolvedValue(new Response('Internal Server Error', { status: 500 }));
-    await expect(fetchClusters(defaultParams)).rejects.toThrow('Cluster request failed: 500');
+  it('throws ApiException on non-ok response with JSON error body', async () => {
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ code: 'INTERNAL_ERROR', message: 'boom' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    await expect(fetchClusters(defaultParams)).rejects.toMatchObject({
+      name: 'ApiException',
+      status: 500,
+      code: 'INTERNAL_ERROR',
+    });
   });
 
-  it('throws on 404 response', async () => {
+  it('throws ApiException with NETWORK_ERROR when body is not JSON', async () => {
     mockFetch.mockResolvedValue(new Response('Not Found', { status: 404 }));
-    await expect(fetchClusters(defaultParams)).rejects.toThrow('Cluster request failed: 404');
+    await expect(fetchClusters(defaultParams)).rejects.toMatchObject({
+      name: 'ApiException',
+      status: 404,
+      code: 'NETWORK_ERROR',
+    });
   });
 });

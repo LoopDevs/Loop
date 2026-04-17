@@ -9,6 +9,23 @@ import { useMerchants } from '~/hooks/use-merchants';
 
 const DEBOUNCE_MS = 300;
 
+/**
+ * Escapes a string for safe interpolation into HTML text content. Leaflet's
+ * popup.setContent and divIcon.html both set innerHTML, so any upstream value
+ * we interpolate into a popup template (merchant name, anything from the
+ * cluster response) has to be escaped. The backend validates these fields
+ * as non-empty strings but does not HTML-escape them — if CTX ever returns
+ * a merchant with `<script>…</script>` in the name we'd XSS ourselves.
+ */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 interface ClusterMapProps {
   onMerchantSelect?: ((merchantId: string) => void) | undefined;
 }
@@ -90,7 +107,7 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
         const { merchantId, mapPinUrl } = point.properties;
 
         const iconHtml = mapPinUrl
-          ? `<div style="width:32px;height:32px;border-radius:6px;border:2px solid #fff;box-shadow:0 2px 5px rgba(0,0,0,0.3);background-image:url('${getImageProxyUrl(mapPinUrl, 64)}');background-size:cover;background-position:center;background-repeat:no-repeat;"></div>`
+          ? `<div style="width:32px;height:32px;border-radius:6px;border:2px solid #fff;box-shadow:0 2px 5px rgba(0,0,0,0.3);background-image:url('${escapeHtml(getImageProxyUrl(mapPinUrl, 64))}');background-size:cover;background-position:center;background-repeat:no-repeat;"></div>`
           : `<div style="width:32px;height:32px;border-radius:6px;background:#2563eb;border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.3)"></div>`;
 
         const icon = L.divIcon({
@@ -103,19 +120,24 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
         const marker = L.marker([lat, lng], { icon });
         const merchantName = merchantsById.current.get(merchantId) ?? merchantId;
         const slug = merchantSlug(merchantName);
+        // Escape before interpolation: Leaflet sets innerHTML on popup content.
+        const safeName = escapeHtml(merchantName);
+        const safePinLargeUrl = mapPinUrl ? escapeHtml(getImageProxyUrl(mapPinUrl, 400)) : '';
+        const safePinSmallUrl = mapPinUrl ? escapeHtml(getImageProxyUrl(mapPinUrl, 80)) : '';
+        const safeHref = `/gift-card/${encodeURIComponent(slug)}`;
 
         // Build rich popup content
         const popupContent = `
           <div style="width:280px;font-family:system-ui,sans-serif;">
-            ${mapPinUrl ? `<div style="width:100%;height:140px;background-image:url('${getImageProxyUrl(mapPinUrl, 400)}');background-size:cover;background-position:center;border-radius:8px 8px 0 0;"></div>` : '<div style="width:100%;height:60px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:8px 8px 0 0;"></div>'}
+            ${mapPinUrl ? `<div style="width:100%;height:140px;background-image:url('${safePinLargeUrl}');background-size:cover;background-position:center;border-radius:8px 8px 0 0;"></div>` : '<div style="width:100%;height:60px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:8px 8px 0 0;"></div>'}
             <div style="padding:16px;">
               <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-                ${mapPinUrl ? `<div style="width:40px;height:40px;border-radius:8px;border:2px solid #e5e7eb;background-image:url('${getImageProxyUrl(mapPinUrl, 80)}');background-size:cover;flex-shrink:0;"></div>` : ''}
+                ${mapPinUrl ? `<div style="width:40px;height:40px;border-radius:8px;border:2px solid #e5e7eb;background-image:url('${safePinSmallUrl}');background-size:cover;flex-shrink:0;"></div>` : ''}
                 <div>
-                  <div style="font-weight:600;font-size:15px;line-height:1.3;">${merchantName}</div>
+                  <div style="font-weight:600;font-size:15px;line-height:1.3;">${safeName}</div>
                 </div>
               </div>
-              <a href="/gift-card/${encodeURIComponent(slug)}"
+              <a href="${safeHref}"
                  style="display:block;text-align:center;padding:10px 16px;background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;transition:background 0.2s;"
                  onmouseover="this.style.background='#1d4ed8'"
                  onmouseout="this.style.background='#2563eb'">

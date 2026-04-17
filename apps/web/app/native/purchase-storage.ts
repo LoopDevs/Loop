@@ -1,10 +1,23 @@
 import { Capacitor } from '@capacitor/core';
 
 const PENDING_ORDER_KEY = 'loop_pending_order';
+/** Default expiry window for a saved pending order if caller doesn't set one. */
+const DEFAULT_EXPIRY_SECONDS = 15 * 60; // 15 minutes
 
-/** Saves pending order state for recovery after app kill. */
+/**
+ * Saves pending order state for recovery after app kill.
+ *
+ * `loadPendingOrder` requires `expiresAt` (unix seconds) and returns null
+ * for records without one — a silent no-op footgun if the caller forgets.
+ * Default to now + 15min so a caller that omits expiresAt still gets a
+ * functional round-trip. Callers can override by including their own.
+ */
 export async function savePendingOrder(data: Record<string, unknown>): Promise<void> {
-  const json = JSON.stringify(data);
+  const payload =
+    typeof data.expiresAt === 'number'
+      ? data
+      : { ...data, expiresAt: Math.floor(Date.now() / 1000) + DEFAULT_EXPIRY_SECONDS };
+  const json = JSON.stringify(payload);
   if (Capacitor.isNativePlatform()) {
     const { Preferences } = await import('@capacitor/preferences');
     await Preferences.set({ key: PENDING_ORDER_KEY, value: json });

@@ -12,7 +12,6 @@ export interface MerchantDenominations {
 export interface Merchant {
   id: string;
   name: string;
-  category?: string | undefined;
   logoUrl?: string | undefined;
   cardImageUrl?: string | undefined;
   /** Savings as a percentage for display (e.g. 4.0 means 4% off). */

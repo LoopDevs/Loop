@@ -21,12 +21,37 @@ export async function clustersHandler(c: Context): Promise<Response> {
   const north = parseFloat(c.req.query('north') ?? '');
   const rawZoom = parseInt(c.req.query('zoom') ?? '', 10);
 
-  if ([west, south, east, north, rawZoom].some((v) => isNaN(v))) {
+  if ([west, south, east, north, rawZoom].some((v) => !Number.isFinite(v))) {
     return c.json(
-      { code: 'VALIDATION_ERROR', message: 'west, south, east, north, zoom are required' },
+      {
+        code: 'VALIDATION_ERROR',
+        message: 'west, south, east, north, zoom are required and must be finite',
+      },
       400,
     );
   }
+
+  // Reject physically-impossible coordinate ranges. These would otherwise pass
+  // through and silently produce an empty result (south > north) or random
+  // output (lat/lng outside the globe) without telling the client why.
+  if (
+    south < -90 ||
+    south > 90 ||
+    north < -90 ||
+    north > 90 ||
+    west < -180 ||
+    west > 180 ||
+    east < -180 ||
+    east > 180
+  ) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'bounds are outside the globe' }, 400);
+  }
+  if (south > north) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'south must be <= north' }, 400);
+  }
+  // Note: west > east is not rejected here — some map clients legitimately
+  // send date-line-crossing bounds. The current algorithm returns empty for
+  // that case (documented limitation); see algorithm.ts audit notes.
 
   const zoom = Math.max(0, Math.min(28, rawZoom));
 

@@ -1,6 +1,19 @@
 import { useQuery } from '@tanstack/react-query';
+import { ApiException } from '@loop/shared';
 import type { Merchant, MerchantListResponse } from '@loop/shared';
 import { fetchMerchants, fetchMerchant, fetchMerchantBySlug } from '~/services/merchants';
+
+/**
+ * Retry predicate: don't retry 4xx responses (client errors won't become 2xx
+ * by trying again — 400 stays 400, 404 stays 404). Retry up to 2 times for
+ * 5xx, timeouts, and network errors.
+ */
+function shouldRetry(failureCount: number, error: Error): boolean {
+  if (error instanceof ApiException) {
+    if (error.status >= 400 && error.status < 500) return false;
+  }
+  return failureCount < 2;
+}
 
 export interface UseMerchantsOptions {
   page?: number;
@@ -27,6 +40,7 @@ export function useMerchants(options: UseMerchantsOptions = {}): UseMerchantsRes
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
+    retry: shouldRetry,
   });
 
   return {
@@ -46,12 +60,15 @@ export function useMerchantBySlug(slug: string): {
   isError: boolean;
   error: Error | null;
 } {
+  // Trim upstream so whitespace-only slugs don't fire a guaranteed-404 request.
+  const normalized = slug.trim();
   const query = useQuery<{ merchant: Merchant }, Error>({
-    queryKey: ['merchant-by-slug', slug],
-    queryFn: () => fetchMerchantBySlug(slug),
+    queryKey: ['merchant-by-slug', normalized],
+    queryFn: () => fetchMerchantBySlug(normalized),
     staleTime: 5 * 60 * 1000,
-    enabled: slug.length > 0,
+    enabled: normalized.length > 0,
     refetchOnReconnect: true,
+    retry: shouldRetry,
   });
 
   return {
@@ -69,12 +86,14 @@ export function useMerchant(id: string): {
   isError: boolean;
   error: Error | null;
 } {
+  const normalized = id.trim();
   const query = useQuery<{ merchant: Merchant }, Error>({
-    queryKey: ['merchant', id],
-    queryFn: () => fetchMerchant(id),
+    queryKey: ['merchant', normalized],
+    queryFn: () => fetchMerchant(normalized),
     staleTime: 5 * 60 * 1000,
-    enabled: id.length > 0,
+    enabled: normalized.length > 0,
     refetchOnReconnect: true,
+    retry: shouldRetry,
   });
 
   return {

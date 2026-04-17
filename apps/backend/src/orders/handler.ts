@@ -20,9 +20,13 @@ function upstreamHeaders(c: Context): Record<string, string> {
   return headers;
 }
 
+// Gift card denominations in the wild span roughly $1 to $10k; reject anything
+// outside that band to prevent accidental or malicious orders. `.finite()` blocks
+// Infinity/NaN; `.multipleOf(0.01)` enforces cents-precision so we never send
+// IEEE-754 garbage (0.1 + 0.2 = 0.30000000000000004) to upstream.
 const CreateOrderBody = z.object({
-  merchantId: z.string().min(1),
-  amount: z.number().positive(),
+  merchantId: z.string().min(1).max(128),
+  amount: z.number().finite().positive().min(1).max(10_000).multipleOf(0.01),
 });
 
 // Upstream response schemas — validate before forwarding to client
@@ -59,12 +63,63 @@ const GetOrderUpstreamResponse = z
   })
   .passthrough();
 
+// Upstream list-orders response — previously cast with `as`, now Zod-validated
+// so an unexpected shape fails fast with a clear 502 instead of corrupting JSON.
+const ListOrdersUpstreamItem = z
+  .object({
+    id: z.string(),
+    merchantId: z.string(),
+    merchantName: z.string().optional(),
+    cardFiatAmount: z.string().optional(),
+    cardFiatCurrency: z.string().optional(),
+    status: z.string().optional(),
+    paymentCryptoAmount: z.string().optional(),
+    percentDiscount: z.string().optional(),
+    redeemType: z.string().optional(),
+    created: z.string().optional(),
+  })
+  .passthrough();
+
+const ListOrdersUpstreamResponse = z
+  .object({
+    result: z.array(ListOrdersUpstreamItem),
+    pagination: z.object({
+      page: z.number(),
+      pages: z.number(),
+      perPage: z.number(),
+      total: z.number(),
+    }),
+  })
+  .passthrough();
+
+// Only these upstream query params are safe to forward. Blind passthrough
+// would let a client inject upstream-only parameters (e.g. to read another
+// user's data if CTX naively respected a `userId` param).
+const ALLOWED_LIST_QUERY_PARAMS = new Set(['page', 'perPage', 'status']);
+
 /** Maps upstream CTX status values to our normalized OrderStatus. */
 function mapStatus(ctxStatus: string): 'pending' | 'completed' | 'failed' | 'expired' {
   if (ctxStatus === 'fulfilled') return 'completed';
   if (ctxStatus === 'expired') return 'expired';
   if (ctxStatus === 'refunded') return 'failed';
-  return 'pending'; // unpaid, processing, etc.
+  const known = new Set(['unpaid', 'processing', 'paid', 'pending']);
+  if (!known.has(ctxStatus)) {
+    log.warn({ ctxStatus }, 'Unknown upstream order status — defaulting to pending');
+  }
+  return 'pending';
+}
+
+/**
+ * Parses a money string from upstream. Returns 0 only for missing/empty values.
+ * Throws on a non-numeric string so we never silently treat corrupt data as $0.
+ */
+function parseMoney(raw: string | undefined): number {
+  if (raw === undefined || raw === '') return 0;
+  const n = parseFloat(raw);
+  if (!Number.isFinite(n)) {
+    throw new Error(`Non-numeric money value from upstream: ${JSON.stringify(raw)}`);
+  }
+  return n;
 }
 
 /**
@@ -101,7 +156,7 @@ export async function createOrderHandler(c: Context): Promise<Response> {
       body: JSON.stringify({
         cryptoCurrency: 'XLM',
         fiatCurrency,
-        fiatAmount: String(amount),
+        fiatAmount: amount.toFixed(2),
         merchantId,
       }),
       signal: AbortSignal.timeout(30_000),
@@ -134,7 +189,9 @@ export async function createOrderHandler(c: Context): Promise<Response> {
     // Parse destination and memo from stellar URI: web+stellar:pay?destination=X&amount=Y&memo=Z
     const uriParams = new URLSearchParams(paymentUri.replace(/^web\+stellar:pay\?/, ''));
     const paymentAddress = uriParams.get('destination') ?? '';
-    const memo = decodeURIComponent(uriParams.get('memo') ?? '');
+    // URLSearchParams.get() already decodes percent-encoding. Calling decodeURIComponent
+    // again would double-decode (and throw on malformed sequences like "%ZZ"). Use raw value.
+    const memo = uriParams.get('memo') ?? '';
 
     // Notify Discord
     notifyOrderCreated(
@@ -176,9 +233,10 @@ export async function listOrdersHandler(c: Context): Promise<Response> {
 
   try {
     const url = new URL(upstreamUrl('/gift-cards'));
-    // Pass through any query params (page, status, etc.)
     for (const [key, value] of Object.entries(c.req.query())) {
-      url.searchParams.set(key, value as string);
+      if (ALLOWED_LIST_QUERY_PARAMS.has(key)) {
+        url.searchParams.set(key, value as string);
+      }
     }
 
     const response = await upstreamCircuit.fetch(url.toString(), {
@@ -194,42 +252,42 @@ export async function listOrdersHandler(c: Context): Promise<Response> {
       return c.json({ code: 'UPSTREAM_ERROR', message: 'Failed to fetch orders' }, 502);
     }
 
-    const raw = (await response.json()) as Record<string, unknown>;
-    if (typeof raw !== 'object' || raw === null || !('result' in raw) || !('pagination' in raw)) {
-      log.error('Upstream order list response has unexpected shape');
+    const raw = await response.json();
+    const validated = ListOrdersUpstreamResponse.safeParse(raw);
+    if (!validated.success) {
+      log.error(
+        { issues: validated.error.issues },
+        'Upstream order list response did not match expected shape',
+      );
       return c.json(
         { code: 'UPSTREAM_ERROR', message: 'Unexpected response from order provider' },
         502,
       );
     }
 
-    const upstream = raw as {
-      result: Array<Record<string, unknown>>;
-      pagination: { page: number; pages: number; perPage: number; total: number };
-    };
-
-    const orders = upstream.result.map((item) => ({
+    const orders = validated.data.result.map((item) => ({
       id: item.id,
       merchantId: item.merchantId,
       merchantName: item.merchantName ?? '',
-      amount: parseFloat(String(item.cardFiatAmount ?? '0')) || 0,
+      amount: parseMoney(item.cardFiatAmount),
       currency: item.cardFiatCurrency ?? 'USD',
-      status: mapStatus(String(item.status ?? 'unpaid')),
+      status: mapStatus(item.status ?? 'unpaid'),
       xlmAmount: item.paymentCryptoAmount ?? '0',
       percentDiscount: item.percentDiscount,
       redeemType: item.redeemType,
       createdAt: item.created,
     }));
 
+    const { page, pages, perPage, total } = validated.data.pagination;
     return c.json({
       orders,
       pagination: {
-        page: upstream.pagination.page,
-        limit: upstream.pagination.perPage,
-        total: upstream.pagination.total,
-        totalPages: upstream.pagination.pages,
-        hasNext: upstream.pagination.page < upstream.pagination.pages,
-        hasPrev: upstream.pagination.page > 1,
+        page,
+        limit: perPage,
+        total,
+        totalPages: pages,
+        hasNext: page < pages,
+        hasPrev: page > 1,
       },
     });
   } catch (err) {
@@ -292,7 +350,7 @@ export async function getOrderHandler(c: Context): Promise<Response> {
       id: validated.data.id,
       merchantId: validated.data.merchantId,
       merchantName: validated.data.merchantName ?? '',
-      amount: parseFloat(validated.data.cardFiatAmount) || 0,
+      amount: parseMoney(validated.data.cardFiatAmount),
       currency: validated.data.cardFiatCurrency ?? 'USD',
       status: mapStatus(validated.data.status),
       xlmAmount: validated.data.paymentCryptoAmount ?? '0',

@@ -10,7 +10,16 @@ import { LazyImage } from '~/components/ui/LazyImage';
 import { getImageProxyUrl } from '~/utils/image';
 
 export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
-  const name = decodeURIComponent(params.name ?? '').replace(/-/g, ' ');
+  // decodeURIComponent throws on malformed percent escapes (e.g. "%ZZ"). A
+  // crawler hitting a junk URL like /gift-card/%ZZ would otherwise 500 the
+  // SSR render. Fall back to the raw slug on malformed input.
+  let name = params.name ?? '';
+  try {
+    name = decodeURIComponent(name);
+  } catch {
+    // keep the raw value
+  }
+  name = name.replace(/-/g, ' ');
   return [
     { title: `${name} Gift Card — Loop` },
     { name: 'description', content: `Buy ${name} gift cards with XLM and save money.` },

@@ -11,6 +11,7 @@ import { getLocations, isLocationLoading } from './clustering/data-store.js';
 import { getMerchants } from './merchants/sync.js';
 import { clustersHandler } from './clustering/handler.js';
 import { imageProxyHandler, evictExpiredImageCache } from './images/proxy.js';
+import { upstreamUrl } from './upstream.js';
 import {
   merchantListHandler,
   merchantBySlugHandler,
@@ -58,6 +59,10 @@ function rateLimit(
     } else {
       entry.count++;
       if (entry.count > maxRequests) {
+        // Tell the client when the window resets so clients can back off
+        // instead of hot-looping retries.
+        const retryAfterSec = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+        c.header('Retry-After', String(retryAfterSec));
         return c.json({ code: 'RATE_LIMITED', message: 'Too many requests' }, 429);
       }
     }
@@ -105,8 +110,7 @@ app.get('/health', async (c) => {
   // Quick upstream probe (non-blocking, 3s timeout)
   let upstreamReachable = true;
   try {
-    const base = env.GIFT_CARD_API_BASE_URL.replace(/\/$/, '');
-    const res = await fetch(`${base}/status`, { signal: AbortSignal.timeout(3000) });
+    const res = await fetch(upstreamUrl('/status'), { signal: AbortSignal.timeout(3000) });
     upstreamReachable = res.ok;
   } catch {
     upstreamReachable = false;
@@ -154,8 +158,12 @@ app.get('/api/merchants/:id', merchantDetailHandler);
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 app.post('/api/auth/request-otp', rateLimit(5, 60_000), requestOtpHandler);
-app.post('/api/auth/verify-otp', verifyOtpHandler);
-app.post('/api/auth/refresh', refreshHandler);
+// OTP brute-force defense: 10 attempts per minute per IP. With a 6-digit code
+// that caps guesses at ~14,400/day — upstream lockout/expiry happens first.
+app.post('/api/auth/verify-otp', rateLimit(10, 60_000), verifyOtpHandler);
+// Refresh abuse defense: legit clients refresh once per access-token lifetime,
+// so 30/min per IP leaves plenty of headroom without enabling spray attacks.
+app.post('/api/auth/refresh', rateLimit(30, 60_000), refreshHandler);
 app.delete('/api/auth/session', logoutHandler);
 
 // ─── Orders (authenticated) ───────────────────────────────────────────────────
@@ -166,25 +174,50 @@ app.post('/api/orders', createOrderHandler);
 app.get('/api/orders', listOrdersHandler);
 app.get('/api/orders/:id', getOrderHandler);
 
+// ─── 404 fallback ────────────────────────────────────────────────────────────
+
+// Return our consistent JSON error shape for unmatched routes instead of
+// Hono's default text 404 so clients can parse errors uniformly.
+app.notFound((c) => {
+  return c.json({ code: 'NOT_FOUND', message: 'Route not found' }, 404);
+});
+
 // ─── Error handler ───────────────────────────────────────────────────────────
 
-// Catch-all error handler — explicitly capture to Sentry + return clean JSON
+// Catch-all error handler — explicitly capture to Sentry + return clean JSON.
+// Includes the request ID so clients can report specific failures without us
+// having to cross-reference Sentry timestamps.
 app.onError((err, c) => {
   captureException(err);
-  return c.json({ code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' }, 500);
+  const requestId = c.get('requestId') ?? c.req.header('X-Request-Id');
+  return c.json(
+    { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred', requestId },
+    500,
+  );
 });
 
 // ─── Periodic cleanup ────────────────────────────────────────────────────────
 
-// Periodic cleanup every hour
-setInterval(
-  () => {
-    evictExpiredImageCache();
-    // Clear expired rate limit entries
-    const now = Date.now();
-    for (const [key, entry] of rateLimitMap) {
-      if (now > entry.resetAt) rateLimitMap.delete(key);
-    }
-  },
-  60 * 60 * 1000,
-);
+function runCleanup(): void {
+  evictExpiredImageCache();
+  const now = Date.now();
+  for (const [key, entry] of rateLimitMap) {
+    if (now > entry.resetAt) rateLimitMap.delete(key);
+  }
+}
+
+// Start the cleanup interval unless we are in the test runner — tests import
+// app.ts repeatedly and a leaked interval keeps vitest alive and can trigger
+// timer-leak warnings in suites that use vi.useFakeTimers().
+let cleanupInterval: NodeJS.Timeout | null = null;
+if (env.NODE_ENV !== 'test') {
+  cleanupInterval = setInterval(runCleanup, 60 * 60 * 1000);
+}
+
+/** Stops the periodic cleanup interval. Intended for graceful shutdown. */
+export function stopCleanupInterval(): void {
+  if (cleanupInterval !== null) {
+    clearInterval(cleanupInterval);
+    cleanupInterval = null;
+  }
+}

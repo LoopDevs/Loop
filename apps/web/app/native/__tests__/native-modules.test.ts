@@ -443,15 +443,44 @@ describe('webview', () => {
     delete (window as unknown as Record<string, unknown>).open;
   });
 
-  it('opens URL in new tab on web', async () => {
+  it('opens URL in new tab on web with noopener,noreferrer (tabnabbing defense)', async () => {
     const mockWin = { close: vi.fn(), closed: false };
     const openFn = vi.fn(() => mockWin);
     (window as unknown as Record<string, unknown>).open = openFn;
 
     const controller = await openWebView({ url: 'https://example.com' });
 
-    expect(openFn).toHaveBeenCalledWith('https://example.com', '_blank');
+    expect(openFn).toHaveBeenCalledWith('https://example.com', '_blank', 'noopener,noreferrer');
     expect(controller).toHaveProperty('close');
+  });
+
+  it('rejects javascript: URLs before opening', async () => {
+    const openFn = vi.fn();
+    (window as unknown as Record<string, unknown>).open = openFn;
+
+    await expect(openWebView({ url: 'javascript:alert(1)' })).rejects.toThrow(
+      /only http\(s\) URLs/,
+    );
+    expect(openFn).not.toHaveBeenCalled();
+  });
+
+  it('rejects file: and data: URLs before opening', async () => {
+    const openFn = vi.fn();
+    (window as unknown as Record<string, unknown>).open = openFn;
+
+    await expect(openWebView({ url: 'file:///etc/passwd' })).rejects.toThrow(/only http\(s\)/);
+    await expect(openWebView({ url: 'data:text/html,<script>alert(1)</script>' })).rejects.toThrow(
+      /only http\(s\)/,
+    );
+    expect(openFn).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed URLs', async () => {
+    const openFn = vi.fn();
+    (window as unknown as Record<string, unknown>).open = openFn;
+
+    await expect(openWebView({ url: 'not a url' })).rejects.toThrow(/invalid URL/);
+    expect(openFn).not.toHaveBeenCalled();
   });
 
   it('close() calls window.close on the opened tab', async () => {
@@ -506,11 +535,28 @@ describe('purchase-storage', () => {
     mockSessionStorage.store.clear();
   });
 
-  it('savePendingOrder stores to sessionStorage on web', async () => {
+  it('savePendingOrder stores to sessionStorage on web with default expiresAt', async () => {
+    const before = Math.floor(Date.now() / 1000);
     await savePendingOrder({ orderId: 'test-123', step: 'payment' });
     const stored = mockSessionStorage.getItem('loop_pending_order');
     expect(stored).not.toBeNull();
-    expect(JSON.parse(stored!)).toEqual({ orderId: 'test-123', step: 'payment' });
+    const parsed = JSON.parse(stored!) as Record<string, unknown>;
+    expect(parsed.orderId).toBe('test-123');
+    expect(parsed.step).toBe('payment');
+    // Default expiry is now + 15min. Guard against the footgun where a caller
+    // omits expiresAt and loadPendingOrder silently no-ops.
+    expect(typeof parsed.expiresAt).toBe('number');
+    expect(parsed.expiresAt).toBeGreaterThanOrEqual(before + 14 * 60);
+    expect(parsed.expiresAt).toBeLessThanOrEqual(before + 16 * 60);
+  });
+
+  it('savePendingOrder preserves caller-provided expiresAt', async () => {
+    await savePendingOrder({ orderId: 'x', step: 'payment', expiresAt: 9_999_999_999 });
+    const parsed = JSON.parse(mockSessionStorage.getItem('loop_pending_order')!) as Record<
+      string,
+      unknown
+    >;
+    expect(parsed.expiresAt).toBe(9_999_999_999);
   });
 
   it('loadPendingOrder returns data if not expired', async () => {

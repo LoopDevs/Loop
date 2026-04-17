@@ -1,7 +1,7 @@
 import { logger } from './logger.js';
 import { notifyCircuitBreaker } from './discord.js';
 
-type CircuitState = 'closed' | 'open' | 'half_open';
+export type CircuitState = 'closed' | 'open' | 'half_open';
 
 interface CircuitBreakerOptions {
   /** Number of consecutive failures before opening the circuit. Default: 5 */
@@ -57,10 +57,16 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
   function onFailure(): void {
     consecutiveFailures++;
     halfOpenInFlight = false;
-    if (consecutiveFailures >= failureThreshold) {
+    // Only transition (and notify) if we are not already OPEN. When many
+    // concurrent requests fail against a down upstream, the first N to
+    // complete will push us past the threshold, but requests that were
+    // already in flight when the circuit tripped also end in onFailure.
+    // Without this guard they each re-fire the Discord notification and
+    // keep pushing openedAt forward, extending the cooldown indefinitely.
+    if (state !== 'open' && consecutiveFailures >= failureThreshold) {
       openedAt = Date.now();
       transitionTo('open');
-      notifyCircuitBreaker('open', consecutiveFailures);
+      notifyCircuitBreaker('open', consecutiveFailures, Math.round(cooldownMs / 1000));
     }
   }
 

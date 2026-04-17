@@ -198,4 +198,93 @@ describe('refreshLocations', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(getLocations().locations).toHaveLength(1);
   });
+
+  it('skips individual malformed locations without poisoning the page', async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          pagination: { page: 1, pages: 1, perPage: 1000, total: 4 },
+          result: [
+            {
+              id: 'good-1',
+              merchantId: 'm-1',
+              enabled: true,
+              latLong: { latitude: '40.0', longitude: '-74.0' },
+            },
+            // missing merchantId → rejected by Zod
+            { id: 'bad-1', enabled: true, latLong: { latitude: '40', longitude: '-74' } },
+            // missing latLong entirely → rejected by Zod
+            { id: 'bad-2', merchantId: 'm-2', enabled: true },
+            {
+              id: 'good-2',
+              merchantId: 'm-3',
+              enabled: true,
+              latLong: { latitude: '34.0', longitude: '-118.0' },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await refreshLocations();
+
+    const ids = getLocations().locations.map((l) => l.merchantId);
+    expect(ids).toContain('m-1');
+    expect(ids).toContain('m-3');
+    expect(ids).not.toContain('m-2');
+  });
+
+  it('rejects locations with out-of-range coordinates', async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          pagination: { page: 1, pages: 1, perPage: 1000, total: 4 },
+          result: [
+            {
+              id: 'ok',
+              merchantId: 'm-ok',
+              enabled: true,
+              latLong: { latitude: '40', longitude: '-74' },
+            },
+            {
+              id: 'lat-too-high',
+              merchantId: 'm-lat',
+              enabled: true,
+              latLong: { latitude: '91', longitude: '0' },
+            },
+            {
+              id: 'lng-too-low',
+              merchantId: 'm-lng',
+              enabled: true,
+              latLong: { latitude: '0', longitude: '-181' },
+            },
+            {
+              id: 'null-island',
+              merchantId: 'm-zero',
+              enabled: true,
+              latLong: { latitude: '0', longitude: '0' },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await refreshLocations();
+
+    const ids = getLocations().locations.map((l) => l.merchantId);
+    expect(ids).toEqual(['m-ok']);
+  });
+
+  it('rejects an upstream response that is missing pagination', async () => {
+    // Previously this would have crashed on data.pagination.pages access.
+    // Now the Zod validator rejects cleanly and the catch preserves previous data.
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }));
+
+    await refreshLocations();
+
+    // No throw propagated; store retains whatever it had before.
+    expect(Array.isArray(getLocations().locations)).toBe(true);
+  });
 });

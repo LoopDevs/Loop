@@ -58,6 +58,12 @@ export async function requestOtpHandler(c: Context): Promise<Response> {
     if (!response.ok) {
       const body = await response.text();
       log.error({ status: response.status, body }, 'Upstream login request failed');
+      // Enumeration defense: return 200 with a generic message for 4xx from upstream
+      // (e.g. "no such user") so an attacker cannot distinguish valid vs invalid emails.
+      // Still surface infrastructure failures (5xx) so legitimate users are not left waiting.
+      if (response.status >= 400 && response.status < 500) {
+        return c.json({ message: 'Verification code sent' });
+      }
       return c.json({ code: 'UPSTREAM_ERROR', message: 'Failed to send verification code' }, 502);
     }
 

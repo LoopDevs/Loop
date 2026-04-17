@@ -1,46 +1,75 @@
 import type { Merchant, MerchantDenominations } from '@loop/shared';
 import { merchantSlug } from '@loop/shared';
+import { z } from 'zod';
 import { logger } from '../logger.js';
 import { env } from '../env.js';
 import { upstreamCircuit } from '../circuit-breaker.js';
+import { upstreamUrl } from '../upstream.js';
 
-/** Shape returned by the upstream CTX merchants endpoint. */
-interface UpstreamMerchant {
-  id: string;
-  name: string;
-  slug?: string;
-  logoUrl?: string;
-  cardImageUrl?: string;
-  mapPinUrl?: string;
-  enabled: boolean;
-  country?: string;
-  currency?: string;
-  savingsPercentage?: number;
-  userDiscount?: number;
-  denominationsType?: 'fixed' | 'min-max';
-  denominations?: string[];
-  denominationValues?: string[];
-  locationCount?: number;
-  cachedLocationCount?: number;
-  redeemType?: string;
-  redeemLocation?: string;
-  info?: {
-    description?: string;
-    instructions?: string;
-    intro?: string;
-    terms?: string;
-  };
-}
+/**
+ * Zod schema for upstream CTX merchants. Required fields (id, name, enabled)
+ * are validated strictly; everything else is optional because CTX sometimes
+ * omits them. `.passthrough()` preserves unknown fields without rejection.
+ */
+// Size caps stop a compromised or buggy upstream from bloating every merchant
+// list response (which we cache and serve to every client). Generous relative
+// to real merchant data but tight enough to catch "CTX returns a 1MB string".
+const MAX_NAME_LENGTH = 256;
+const MAX_ID_LENGTH = 128;
+const MAX_URL_LENGTH = 2048;
+const MAX_CURRENCY_LENGTH = 10;
+const MAX_INFO_LENGTH = 50_000;
 
-interface UpstreamListResponse {
-  pagination: {
-    page: number;
-    pages: number;
-    perPage: number;
-    total: number;
-  };
-  result: UpstreamMerchant[];
-}
+const UpstreamMerchantSchema = z
+  .object({
+    id: z.string().min(1).max(MAX_ID_LENGTH),
+    name: z.string().min(1).max(MAX_NAME_LENGTH),
+    slug: z.string().max(MAX_NAME_LENGTH).optional(),
+    logoUrl: z.string().max(MAX_URL_LENGTH).optional(),
+    cardImageUrl: z.string().max(MAX_URL_LENGTH).optional(),
+    mapPinUrl: z.string().max(MAX_URL_LENGTH).optional(),
+    enabled: z.boolean(),
+    country: z.string().max(MAX_CURRENCY_LENGTH).optional(),
+    currency: z.string().max(MAX_CURRENCY_LENGTH).optional(),
+    savingsPercentage: z.number().optional(),
+    userDiscount: z.number().optional(),
+    denominationsType: z.enum(['fixed', 'min-max']).optional(),
+    denominations: z.array(z.string().max(32)).optional(),
+    denominationValues: z.array(z.string().max(32)).optional(),
+    locationCount: z.number().optional(),
+    cachedLocationCount: z.number().optional(),
+    redeemType: z.string().max(64).optional(),
+    redeemLocation: z.string().max(64).optional(),
+    info: z
+      .object({
+        description: z.string().max(MAX_INFO_LENGTH).optional(),
+        instructions: z.string().max(MAX_INFO_LENGTH).optional(),
+        intro: z.string().max(MAX_INFO_LENGTH).optional(),
+        terms: z.string().max(MAX_INFO_LENGTH).optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
+
+type UpstreamMerchant = z.infer<typeof UpstreamMerchantSchema>;
+
+// Wrap individual merchants in .safeParse so one malformed entry does not
+// poison the whole page — we skip it and keep going.
+const UpstreamListResponseSchema = z
+  .object({
+    pagination: z.object({
+      page: z.number().int().nonnegative(),
+      pages: z.number().int().nonnegative(),
+      perPage: z.number().int().nonnegative(),
+      total: z.number().int().nonnegative(),
+    }),
+    result: z.array(z.unknown()),
+  })
+  .passthrough();
+
+// Defensive ceiling: if upstream ever reports an absurd `pages` value (bug or
+// misconfiguration), we cap iteration instead of looping for hours.
+const MAX_PAGES = 100;
 
 interface MerchantStore {
   merchants: Merchant[];
@@ -49,11 +78,14 @@ interface MerchantStore {
   loadedAt: number;
 }
 
+// loadedAt starts at 0 so /health reports merchants as stale until the first
+// successful refresh lands. Previously it was set to Date.now() at module
+// load, which let /health report 'healthy' for ~12h even with empty data.
 let store: MerchantStore = {
   merchants: [],
   merchantsById: new Map(),
   merchantsBySlug: new Map(),
-  loadedAt: Date.now(),
+  loadedAt: 0,
 };
 
 /** Returns the current merchant snapshot. */
@@ -78,9 +110,8 @@ export async function refreshMerchants(): Promise<void> {
   let totalPages = 1;
 
   try {
-    while (page <= totalPages) {
-      const base = env.GIFT_CARD_API_BASE_URL.replace(/\/$/, '');
-      const url = new URL(`${base}/merchants`);
+    while (page <= totalPages && page <= MAX_PAGES) {
+      const url = new URL(upstreamUrl('/merchants'));
       url.searchParams.set('page', String(page));
       url.searchParams.set('perPage', '100');
 
@@ -92,17 +123,34 @@ export async function refreshMerchants(): Promise<void> {
         throw new Error(`Upstream merchants API returned ${response.status}`);
       }
 
-      const data = (await response.json()) as UpstreamListResponse;
-      totalPages = data.pagination.pages;
+      const raw = await response.json();
+      const parsed = UpstreamListResponseSchema.safeParse(raw);
+      if (!parsed.success) {
+        throw new Error(
+          `Upstream merchants response has unexpected shape: ${parsed.error.message}`,
+        );
+      }
+      totalPages = parsed.data.pagination.pages;
 
-      for (const item of data.result) {
-        const merchant = mapUpstreamMerchant(item);
+      for (const item of parsed.data.result) {
+        const merchantParsed = UpstreamMerchantSchema.safeParse(item);
+        if (!merchantParsed.success) {
+          log.warn(
+            { issues: merchantParsed.error.issues },
+            'Skipping malformed merchant from upstream',
+          );
+          continue;
+        }
+        const merchant = mapUpstreamMerchant(merchantParsed.data);
         if (merchant !== null) {
           merchants.push(merchant);
         }
       }
 
       page++;
+    }
+    if (page > MAX_PAGES && page <= totalPages) {
+      log.warn({ page, totalPages }, 'Hit MAX_PAGES cap while paginating merchants — truncating');
     }
 
     const merchantsById = new Map(merchants.map((m) => [m.id, m]));
@@ -116,6 +164,8 @@ export async function refreshMerchants(): Promise<void> {
   }
 }
 
+let refreshInterval: NodeJS.Timeout | null = null;
+
 /** Starts the background refresh timer. Call once at startup. */
 export function startMerchantRefresh(): void {
   const log = logger.child({ module: 'merchants-sync' });
@@ -123,7 +173,7 @@ export function startMerchantRefresh(): void {
 
   const intervalMs = env.REFRESH_INTERVAL_HOURS * 60 * 60 * 1000;
   const staleMs = intervalMs * 2;
-  setInterval(() => {
+  refreshInterval = setInterval(() => {
     if (Date.now() - store.loadedAt > staleMs && store.merchants.length > 0) {
       log.warn(
         { ageMs: Date.now() - store.loadedAt, threshold: staleMs },
@@ -132,6 +182,14 @@ export function startMerchantRefresh(): void {
     }
     void refreshMerchants();
   }, intervalMs);
+}
+
+/** Stops the background refresh timer. Intended for graceful shutdown. */
+export function stopMerchantRefresh(): void {
+  if (refreshInterval !== null) {
+    clearInterval(refreshInterval);
+    refreshInterval = null;
+  }
 }
 
 /**
@@ -189,7 +247,11 @@ function mapUpstreamMerchant(item: UpstreamMerchant): Merchant | null {
     ...(description ? { description } : {}),
     ...(instructions ? { instructions } : {}),
     ...(terms ? { terms } : {}),
-    enabled: true,
+    // Reflect the actual upstream flag — hardcoding true was a bug that
+    // only didn't bite because CTX currently returns all merchants enabled.
+    // With INCLUDE_DISABLED_MERCHANTS=true (dev), this lets the UI see the
+    // real state instead of a falsified `enabled: true` on every record.
+    enabled: item.enabled,
     ...(locationCount !== undefined ? { locationCount } : {}),
   };
 }

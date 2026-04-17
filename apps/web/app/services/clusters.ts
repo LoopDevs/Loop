@@ -1,7 +1,9 @@
-import type { ClusterResponse, ClusterParams } from '@loop/shared';
+import { ApiException } from '@loop/shared';
+import type { ApiError, ClusterResponse, ClusterParams } from '@loop/shared';
 import { API_BASE } from './config';
 
 const PROTOBUF_MIME = 'application/x-protobuf';
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
  * Fetches map cluster data, requesting protobuf for bandwidth efficiency.
@@ -17,12 +19,29 @@ export async function fetchClusters(params: ClusterParams): Promise<ClusterRespo
     zoom: String(params.zoom),
   });
 
-  const response = await fetch(`${API_BASE}/api/clusters?${qs.toString()}`, {
-    headers: { Accept: PROTOBUF_MIME },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/api/clusters?${qs.toString()}`, {
+      headers: { Accept: PROTOBUF_MIME },
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'TimeoutError') {
+      throw new ApiException(0, { code: 'TIMEOUT', message: 'Cluster request timed out' });
+    }
+    throw new ApiException(0, { code: 'NETWORK_ERROR', message: 'Cluster request failed' });
+  }
 
   if (!response.ok) {
-    throw new Error(`Cluster request failed: ${response.status}`);
+    // Consistency with apiRequest: decode the backend's JSON error shape
+    // if present, otherwise fall back to a status-derived message.
+    let error: ApiError;
+    try {
+      error = (await response.json()) as ApiError;
+    } catch {
+      error = { code: 'NETWORK_ERROR', message: response.statusText };
+    }
+    throw new ApiException(response.status, error);
   }
 
   const contentType = response.headers.get('Content-Type') ?? '';

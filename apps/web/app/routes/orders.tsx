@@ -50,11 +50,16 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
 
 function OrderRow({ order }: { order: Order }): React.JSX.Element {
   const status = STATUS_LABELS[order.status] ?? STATUS_LABELS['pending']!;
-  const date = new Date(order.createdAt).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
+  // A malformed upstream createdAt would otherwise render "Invalid Date" in
+  // the UI. Fall back to the raw string so the row is still informative.
+  const parsed = new Date(order.createdAt);
+  const date = Number.isNaN(parsed.getTime())
+    ? order.createdAt
+    : parsed.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      });
 
   return (
     <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800 last:border-0">

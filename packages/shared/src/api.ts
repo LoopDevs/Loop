@@ -20,16 +20,35 @@ export class ApiException extends Error {
   }
 }
 
-/** Standard API error codes. */
+/**
+ * Platform identifier used for all auth endpoints. The backend maps platform
+ * to the upstream CTX client ID (`CTX_CLIENT_ID_WEB|IOS|ANDROID`).
+ */
+export type Platform = 'web' | 'ios' | 'android';
+
+/**
+ * Standard API error codes. Kept in sync with every `{ code: '...' }` returned
+ * by the backend so the frontend can `switch` on `ApiErrorCodeValue` instead
+ * of comparing to untyped string literals.
+ */
 export const ApiErrorCode = {
+  // Client-side (never sent by backend)
   NETWORK_ERROR: 'NETWORK_ERROR',
   TIMEOUT: 'TIMEOUT',
+  // Request validation
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   NOT_FOUND: 'NOT_FOUND',
   UNAUTHORIZED: 'UNAUTHORIZED',
   FORBIDDEN: 'FORBIDDEN',
-  INTERNAL_ERROR: 'INTERNAL_ERROR',
   RATE_LIMITED: 'RATE_LIMITED',
+  // Server / upstream
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+  UPSTREAM_ERROR: 'UPSTREAM_ERROR',
+  UPSTREAM_REDIRECT: 'UPSTREAM_REDIRECT',
+  SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
+  // Image proxy specific
+  IMAGE_TOO_LARGE: 'IMAGE_TOO_LARGE',
+  NOT_AN_IMAGE: 'NOT_AN_IMAGE',
 } as const;
 
 export type ApiErrorCodeValue = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];
@@ -39,12 +58,16 @@ export type ApiErrorCodeValue = (typeof ApiErrorCode)[keyof typeof ApiErrorCode]
 /** POST /api/auth/request-otp */
 export interface RequestOtpRequest {
   email: string;
+  /** Backend defaults to 'web' if omitted. */
+  platform?: Platform;
 }
 
 /** POST /api/auth/verify-otp */
 export interface VerifyOtpRequest {
   email: string;
   otp: string;
+  /** Backend defaults to 'web' if omitted. */
+  platform?: Platform;
 }
 
 /** Response from POST /api/auth/verify-otp */
@@ -55,13 +78,17 @@ export interface VerifyOtpResponse {
 
 /** POST /api/auth/refresh */
 export interface RefreshRequest {
-  /** Required when the refresh token is not in a cookie (mobile). */
-  refreshToken?: string;
+  /** Required — the backend's zod schema rejects empty refresh tokens. */
+  refreshToken: string;
+  /** Backend defaults to 'web' if omitted. */
+  platform?: Platform;
 }
 
 /** Response from POST /api/auth/refresh */
 export interface RefreshResponse {
   accessToken: string;
+  /** Upstream may rotate the refresh token; when present, clients must replace the stored one. */
+  refreshToken?: string;
 }
 
 // ─── Image proxy ─────────────────────────────────────────────────────────────

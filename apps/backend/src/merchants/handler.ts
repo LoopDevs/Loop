@@ -3,6 +3,10 @@ import { getMerchants } from './sync.js';
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
+// Defensive cap on the search input. Merchant names are short and this keeps
+// a pathological `q` string (e.g. from a fuzzer) from running includes()
+// against an unbounded pattern.
+const MAX_QUERY_LENGTH = 100;
 
 /**
  * GET /api/merchants
@@ -12,7 +16,7 @@ const MAX_PAGE_SIZE = 100;
 export function merchantListHandler(c: Context): Response {
   const { merchants } = getMerchants();
 
-  const q = (c.req.query('q') ?? '').toLowerCase().trim();
+  const q = (c.req.query('q') ?? '').toLowerCase().trim().slice(0, MAX_QUERY_LENGTH);
   const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10) || 1);
   const limit = Math.min(
     MAX_PAGE_SIZE,

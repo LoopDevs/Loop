@@ -63,6 +63,14 @@ vi.mock('sharp', () => ({
   })),
 }));
 
+// Mock DNS — default to returning a public IP for any hostname. Individual
+// tests override via mockDnsLookup.mockResolvedValueOnce(...) to simulate
+// DNS rebinding or private-IP resolution.
+const mockDnsLookup = vi.hoisted(() => vi.fn());
+vi.mock('node:dns/promises', () => ({
+  lookup: mockDnsLookup,
+}));
+
 import { app } from '../../app.js';
 
 // Mock global fetch for upstream image fetches
@@ -71,6 +79,10 @@ vi.stubGlobal('fetch', mockFetch);
 
 beforeEach(() => {
   mockFetch.mockReset();
+  mockDnsLookup.mockReset();
+  // Default DNS: everything resolves to a harmless public IP. Tests that
+  // care about resolution (rebinding, private-IP lookup) override per-call.
+  mockDnsLookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
   // Reset env to defaults before each test
   mockEnv.NODE_ENV = 'development';
   delete mockEnv.IMAGE_PROXY_ALLOWED_HOSTS;
@@ -191,5 +203,129 @@ describe('GET /api/image — SSRF validation', () => {
     const body = (await res.json()) as Record<string, string>;
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(body.message).toContain('Only HTTPS');
+  });
+
+  it('rejects https://0.0.0.0/image.jpg (unspecified)', async () => {
+    const res = await app.request(
+      `/api/image?url=${encodeURIComponent('https://0.0.0.0/image.jpg')}`,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, string>;
+    expect(body.message).toContain('Private and loopback');
+  });
+
+  it('rejects https://169.254.169.254/ (cloud metadata, link-local)', async () => {
+    const res = await app.request(
+      `/api/image?url=${encodeURIComponent('https://169.254.169.254/latest/meta-data/')}`,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, string>;
+    expect(body.message).toContain('Private and loopback');
+  });
+
+  it('rejects https://[::ffff:127.0.0.1]/ (IPv4-mapped IPv6 loopback)', async () => {
+    const res = await app.request(
+      `/api/image?url=${encodeURIComponent('https://[::ffff:127.0.0.1]/image.jpg')}`,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, string>;
+    expect(body.message).toContain('Private and loopback');
+  });
+
+  it('rejects hostname that resolves to a private IP (DNS rebinding defense)', async () => {
+    // Hostname looks public, but DNS resolves to AWS metadata address.
+    mockDnsLookup.mockResolvedValueOnce([{ address: '169.254.169.254', family: 4 }]);
+
+    const url = 'https://metadata-proxy.evil.com/latest/meta-data/';
+    const res = await app.request(`/api/image?url=${encodeURIComponent(url)}`);
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, string>;
+    expect(body.message).toContain('Private and loopback');
+    // Fetch must not have been called — validation blocks before any network I/O.
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects when DNS resolution returns mixed public + private addresses', async () => {
+    // Attacker advertises one public and one private A record.
+    mockDnsLookup.mockResolvedValueOnce([
+      { address: '93.184.216.34', family: 4 },
+      { address: '10.0.0.5', family: 4 },
+    ]);
+
+    const res = await app.request(
+      `/api/image?url=${encodeURIComponent('https://mixed.evil.com/x.jpg')}`,
+    );
+    expect(res.status).toBe(400);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects when DNS lookup fails', async () => {
+    mockDnsLookup.mockRejectedValueOnce(new Error('ENOTFOUND'));
+
+    const res = await app.request(
+      `/api/image?url=${encodeURIComponent('https://nonexistent.invalid/x.jpg')}`,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, string>;
+    expect(body.message).toContain('resolve');
+  });
+});
+
+describe('GET /api/image — upstream hardening', () => {
+  it('rejects upstream 302 redirect (prevents SSRF via redirect chain)', async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(null, {
+        status: 302,
+        headers: { Location: 'http://169.254.169.254/latest/meta-data/' },
+      }),
+    );
+
+    const res = await app.request(
+      `/api/image?url=${encodeURIComponent('https://cdn.example.com/image.jpg')}`,
+    );
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as Record<string, string>;
+    expect(body.code).toBe('UPSTREAM_REDIRECT');
+    // Verify redirect:'manual' was requested so fetch did not follow.
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://cdn.example.com/image.jpg',
+      expect.objectContaining({ redirect: 'manual' }),
+    );
+  });
+
+  it('rejects non-image Content-Type (e.g. HTML from a misconfigured origin)', async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response('<html>not an image</html>', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    );
+
+    const res = await app.request(
+      `/api/image?url=${encodeURIComponent('https://cdn.example.com/page.html')}`,
+    );
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as Record<string, string>;
+    expect(body.code).toBe('NOT_AN_IMAGE');
+  });
+
+  it('rejects upstream Content-Length exceeding 10MB', async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(new Uint8Array([0xff, 0xd8]), {
+        status: 200,
+        headers: {
+          'Content-Type': 'image/jpeg',
+          'Content-Length': String(50 * 1024 * 1024),
+        },
+      }),
+    );
+
+    const res = await app.request(
+      `/api/image?url=${encodeURIComponent('https://cdn.example.com/huge.jpg')}`,
+    );
+    expect(res.status).toBe(413);
+    const body = (await res.json()) as Record<string, string>;
+    expect(body.code).toBe('IMAGE_TOO_LARGE');
   });
 });
