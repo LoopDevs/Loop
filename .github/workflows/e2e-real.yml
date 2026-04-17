@@ -55,3 +55,39 @@ jobs:
           STELLAR_TEST_SECRET_KEY: ${{ secrets.STELLAR_TEST_SECRET_KEY }}
           E2E_AMOUNT_USD: ${{ inputs.amount_usd }}
           E2E_MERCHANT_ID: ${{ inputs.merchant_id }}
+          # Script writes the rotated refresh token here immediately after
+          # the refresh call succeeds. The next step persists it back to
+          # the repo secret regardless of whether the rest of the flow
+          # passes — the old token is already dead.
+          NEW_REFRESH_TOKEN_OUT: ${{ runner.temp }}/new-refresh-token.txt
+      # CTX rotates refresh tokens on every call to /refresh-token, so the
+      # secret MUST be updated after each run or the next workflow run will
+      # 401 on the very first request. `if: always()` ensures we persist
+      # the new token even if a later step (payment, poll, etc.) fails.
+      #
+      # Requires a fine-grained PAT (`GH_SECRETS_PAT`) scoped to this repo
+      # with "Secrets: Read and write" permission — the default GITHUB_TOKEN
+      # has no way to write secrets.
+      - name: Rotate CTX_TEST_REFRESH_TOKEN secret
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_SECRETS_PAT }}
+          TOKEN_FILE: ${{ runner.temp }}/new-refresh-token.txt
+        run: |
+          if [ ! -s "$TOKEN_FILE" ]; then
+            echo "No rotated refresh token to persist — skipping."
+            exit 0
+          fi
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::GH_SECRETS_PAT is not set — cannot rotate secret." \
+              "The refresh token used by this run is now invalid."
+            exit 1
+          fi
+          # --body-file avoids ever echoing the secret into the shell;
+          # GitHub's log-masking kicks in on the next line onward once the
+          # secret value is registered.
+          gh secret set CTX_TEST_REFRESH_TOKEN \
+            --body-file "$TOKEN_FILE" \
+            --repo "$GITHUB_REPOSITORY"
+          rm -f "$TOKEN_FILE"
+          echo "Rotated CTX_TEST_REFRESH_TOKEN."

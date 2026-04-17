@@ -99,8 +99,14 @@ from the funded test Stellar wallet and polling until it is fulfilled.
 
 Repository secrets required:
 
-- `CTX_TEST_REFRESH_TOKEN` — refresh token for the test CTX account
-- `STELLAR_TEST_SECRET_KEY` — secret key (`S…`) of the funded test wallet
+- `CTX_TEST_REFRESH_TOKEN` — refresh token for the test CTX account. CTX
+  rotates this on every `/refresh-token` call, so the workflow rewrites
+  the secret with the new value after each run.
+- `STELLAR_TEST_SECRET_KEY` — secret key (`S…`) of the funded test wallet.
+- `GH_SECRETS_PAT` — fine-grained PAT scoped to this repo with
+  **Secrets: Read and write** permission. Used only by the "Rotate
+  CTX_TEST_REFRESH_TOKEN secret" step; without it each run leaves the
+  stored refresh token invalid and the next run 401s immediately.
 
 Trigger: GitHub → Actions → **E2E (real CTX + wallet)** → Run workflow.
 Optional inputs: `amount_usd` (default `5`), `merchant_id` (default:

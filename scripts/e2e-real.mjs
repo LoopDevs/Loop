@@ -22,11 +22,19 @@
  *   E2E_AMOUNT_USD           — USD amount to purchase; defaults to '5'
  *   POLL_TIMEOUT_MS          — total poll budget; defaults to 600000 (10m)
  *   POLL_INTERVAL_MS         — poll cadence; defaults to 5000 (5s)
+ *   NEW_REFRESH_TOKEN_OUT    — path to write the rotated refresh token to.
+ *                              CTX rotates on every /refresh-token call, so
+ *                              the workflow must persist the new value back
+ *                              to the CTX_TEST_REFRESH_TOKEN secret before
+ *                              the next run. Written immediately after the
+ *                              refresh succeeds so a failure later in the
+ *                              flow still allows the rotation step to run.
  *
  * Exit codes:
  *   0 on fulfilment, non-zero otherwise.
  */
 
+import { writeFileSync } from 'node:fs';
 import {
   Keypair,
   TransactionBuilder,
@@ -45,6 +53,7 @@ const MERCHANT_ID = process.env.E2E_MERCHANT_ID;
 const AMOUNT_USD = process.env.E2E_AMOUNT_USD ?? '5';
 const POLL_TIMEOUT_MS = Number(process.env.POLL_TIMEOUT_MS ?? 600_000);
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 5_000);
+const NEW_REFRESH_TOKEN_OUT = process.env.NEW_REFRESH_TOKEN_OUT;
 
 if (!REFRESH_TOKEN || !WALLET_SECRET) {
   console.error('Missing CTX_TEST_REFRESH_TOKEN or STELLAR_TEST_SECRET_KEY');
@@ -87,6 +96,21 @@ async function refreshAccessToken() {
     body: { refreshToken: REFRESH_TOKEN, platform: 'web' },
   });
   if (!data?.accessToken) throw new Error('No accessToken in refresh response');
+
+  // CTX rotates refresh tokens on every /refresh-token call — the token we
+  // just used is now dead. Persist the new one to disk IMMEDIATELY so the
+  // workflow can rotate the repo secret even if a later step fails. If
+  // upstream ever stops returning a new token, skip silently (the old one
+  // is still valid).
+  if (NEW_REFRESH_TOKEN_OUT !== undefined && NEW_REFRESH_TOKEN_OUT !== '') {
+    if (data.refreshToken) {
+      writeFileSync(NEW_REFRESH_TOKEN_OUT, data.refreshToken, { mode: 0o600 });
+      log(`Wrote rotated refresh token to ${NEW_REFRESH_TOKEN_OUT}`);
+    } else {
+      log('Upstream did not return a new refresh token — skipping rotation');
+    }
+  }
+
   return data.accessToken;
 }
 
