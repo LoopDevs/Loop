@@ -185,6 +185,14 @@ html.native body {
 /* Native safe areas — applied when running inside Capacitor */
 .native-safe-top {
   padding-top: env(safe-area-inset-top);
+  position: sticky;
+  top: 0;
+  z-index: 1100;
+  background-color: white;
+}
+
+.dark .native-safe-top {
+  background-color: rgb(3, 7, 18);
 }
 
 .native-safe-bottom {
@@ -194,6 +202,13 @@ html.native body {
 .native-safe-x {
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
+}
+
+/* Auth screen — fill remaining viewport on native (no scrollbar) */
+html.native .native-auth-screen {
+  min-height: 0;
+  height: calc(100dvh - env(safe-area-inset-top));
+  overflow: hidden;
 }
 
 /* Content padding to clear the tab bar + gesture area */

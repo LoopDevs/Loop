@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router';
 import { useNativePlatform } from '~/hooks/use-native-platform';
+import { useAuthStore } from '~/stores/auth.store';
 import { triggerHaptic } from '~/native/haptics';
 
 interface Tab {
@@ -29,8 +30,9 @@ function getActiveTabPath(pathname: string): string {
 export function NativeTabBar(): React.JSX.Element | null {
   const { isNative } = useNativePlatform();
   const location = useLocation();
+  const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
 
-  if (!isNative) return null;
+  if (!isNative || !isAuthenticated) return null;
 
   const activeTabPath = getActiveTabPath(location.pathname);
 

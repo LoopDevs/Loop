@@ -229,7 +229,7 @@ export default function AuthRoute(): React.JSX.Element {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4 native-auth-screen">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <img src="/loop-logo.svg" alt="Loop" className="h-8 mx-auto mb-4 dark:hidden" />
