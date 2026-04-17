@@ -96,9 +96,14 @@ let inFlightRefresh: Promise<string | null> | null = null;
  * Attempts to get a fresh access token using the stored refresh token.
  * Returns the new access token or null on failure. Concurrent callers
  * share a single underlying refresh promise.
+ *
+ * Exported so session-restore and any future caller can participate in the
+ * same coalesced refresh — if two places both need a refreshed token at the
+ * same moment, only one network round-trip should happen.
+ *
  * Inlined here (not imported from services/auth) to avoid circular deps.
  */
-async function tryRefresh(): Promise<string | null> {
+export async function tryRefresh(): Promise<string | null> {
   if (inFlightRefresh !== null) return inFlightRefresh;
 
   inFlightRefresh = doRefresh().finally(() => {

@@ -24,25 +24,19 @@ export function useSessionRestore(): { isRestoring: boolean } {
           return;
         }
 
-        // Try to refresh
-        const { getPlatform } = await import('~/native/platform');
-        const { apiRequest } = await import('~/services/api-client');
-        const platform = getPlatform();
+        // Delegate to the shared tryRefresh so this call participates in the
+        // same in-flight coalescing as any concurrent authenticatedRequest()
+        // that also hits /refresh. Without this, mount-time session-restore
+        // and an early authenticated query race to rotate the refresh token.
+        const { tryRefresh } = await import('~/services/api-client');
+        const accessToken = await tryRefresh();
 
-        const res = await apiRequest<{ accessToken: string; refreshToken?: string }>(
-          '/api/auth/refresh',
-          { method: 'POST', body: { refreshToken, platform } },
-        );
-
-        if (res.refreshToken) {
-          const { storeRefreshToken } = await import('~/native/secure-storage');
-          void storeRefreshToken(res.refreshToken);
-        }
-
-        store.setAccessToken(res.accessToken);
-        if (email) {
-          // Restore email to store without re-storing tokens
-          useAuthStore.setState({ email });
+        if (accessToken !== null) {
+          store.setAccessToken(accessToken);
+          if (email) {
+            // Restore email to store without re-storing tokens
+            useAuthStore.setState({ email });
+          }
         }
       } catch {
         // Refresh failed — user will need to log in again
