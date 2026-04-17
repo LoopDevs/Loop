@@ -159,7 +159,7 @@ describe('AmountSelection — free amount (min-max)', () => {
 });
 
 describe('AmountSelection — no denomination config', () => {
-  it('falls back to backend-wide limits (1–10000)', () => {
+  it('falls back to backend-wide limits (0.01–10000)', () => {
     const onConfirm = vi.fn();
     render(<AmountSelection merchant={merchant()} onConfirm={onConfirm} />);
     const input = screen.getByRole('spinbutton') as HTMLInputElement;
@@ -167,7 +167,7 @@ describe('AmountSelection — no denomination config', () => {
     fireEvent.change(input, { target: { value: '20000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     expect(onConfirm).not.toHaveBeenCalled();
-    expect(screen.getByText(/\$1 and \$10000/)).toBeDefined();
+    expect(screen.getByText(/\$0\.01 and \$10000/)).toBeDefined();
   });
 
   it('defaults currency to USD in the label when unspecified', () => {
