@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, lazy, Suspense } from 'react';
 import {
   isRouteErrorResponse,
   Links,
@@ -22,8 +22,11 @@ import { setupNotificationChannels } from '~/native/notifications';
 import { OfflineBanner } from '~/components/ui/OfflineBanner';
 import { NativeBackButton } from '~/components/features/NativeBackButton';
 import { ToastContainer } from '~/components/ui/ToastContainer';
+import { useAuthStore } from '~/stores/auth.store';
 import { useUiStore } from '~/stores/ui.store';
 import './app.css';
+
+const AuthRoute = lazy(() => import('~/routes/auth'));
 
 // Initialize Sentry on client side
 if (typeof window !== 'undefined' && import.meta.env.VITE_SENTRY_DSN) {
@@ -177,8 +180,44 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
   );
 }
 
+function NativeSplash(): React.JSX.Element {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+      <img src="/loop-logo.svg" alt="Loop" className="h-10 animate-pulse dark:hidden" />
+      <img src="/loop-logo-white.svg" alt="Loop" className="h-10 animate-pulse hidden dark:block" />
+    </div>
+  );
+}
+
 export default function App(): React.JSX.Element {
-  useSessionRestore();
+  const { isRestoring } = useSessionRestore();
+  const { isNative } = useNativePlatform();
+  const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
+
+  // On native: gate the entire app behind auth
+  if (isNative) {
+    if (isRestoring) {
+      return (
+        <QueryClientProvider client={queryClient}>
+          <NativeShell>
+            <NativeSplash />
+          </NativeShell>
+        </QueryClientProvider>
+      );
+    }
+
+    if (!isAuthenticated) {
+      return (
+        <QueryClientProvider client={queryClient}>
+          <NativeShell>
+            <Suspense fallback={<NativeSplash />}>
+              <AuthRoute />
+            </Suspense>
+          </NativeShell>
+        </QueryClientProvider>
+      );
+    }
+  }
 
   return (
     <QueryClientProvider client={queryClient}>
