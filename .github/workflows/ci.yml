@@ -224,6 +224,55 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
+  test-e2e-mocked:
+    name: E2E tests (mocked CTX)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Deterministic, no external dependencies — runs on every push and PR
+    # (unlike `test-e2e` which talks to the real upstream and is PR-gated).
+    needs: [quality, test-unit]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Cache node_modules
+        id: npm-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install deps
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        run: npm ci
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Playwright system deps (cache hit path)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      # The mocked suite's playwright config boots mock-ctx, backend (tsx),
+      # and the web dev server itself — no extra setup here.
+      - name: Run mocked e2e tests
+        run: npm run test:e2e:mocked
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-mocked
+          path: playwright-report/
+          retention-days: 7
+
   notify:
     name: Discord notification
     runs-on: ubuntu-latest
@@ -232,7 +281,7 @@ jobs:
     # Include test-e2e so the Discord status matches the actual PR gate. Without
     # it, Discord reported PASSED whenever the fast jobs were green, even if
     # e2e had failed.
-    needs: [quality, test-unit, audit, build, test-e2e]
+    needs: [quality, test-unit, audit, build, test-e2e, test-e2e-mocked]
     steps:
       - name: Notify Discord
         env:

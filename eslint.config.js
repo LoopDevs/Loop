@@ -27,6 +27,7 @@ export default [
       '**/react-router.config.ts',
       '**/capacitor.config.ts',
       'playwright.config.ts',
+      'playwright.mocked.config.ts',
       'commitlint.config.js',
       // NOTE: tests/ is intentionally NOT listed here. A top-level `ignores`
       // block excludes files from every subsequent config in flat config —
