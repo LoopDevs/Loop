@@ -83,8 +83,15 @@ if (typeof globalThis.navigator === 'undefined') {
 // Import modules under test
 import { getPlatform, isNativePlatform } from '../platform';
 import { copyToClipboard } from '../clipboard';
-import { triggerHaptic, triggerHapticNotification } from '../haptics';
-import { storeRefreshToken, getRefreshToken, clearRefreshToken } from '../secure-storage';
+import { triggerHaptic, triggerHapticMedium, triggerHapticNotification } from '../haptics';
+import {
+  storeRefreshToken,
+  getRefreshToken,
+  clearRefreshToken,
+  storeEmail,
+  getEmail,
+} from '../secure-storage';
+import { setupNotificationChannels } from '../notifications';
 import { setStatusBarStyle, setStatusBarOverlay } from '../status-bar';
 import { registerBackButton } from '../back-button';
 import { watchNetwork } from '../network';
@@ -143,8 +150,17 @@ describe('haptics', () => {
     await expect(triggerHaptic()).resolves.toBeUndefined();
   });
 
+  it('triggerHapticMedium is a no-op on web', async () => {
+    await expect(triggerHapticMedium()).resolves.toBeUndefined();
+  });
+
   it('triggerHapticNotification is a no-op on web', async () => {
     await expect(triggerHapticNotification('success')).resolves.toBeUndefined();
+  });
+
+  it('triggerHapticNotification accepts warning and error variants', async () => {
+    await expect(triggerHapticNotification('warning')).resolves.toBeUndefined();
+    await expect(triggerHapticNotification('error')).resolves.toBeUndefined();
   });
 });
 
@@ -182,6 +198,30 @@ describe('secure-storage', () => {
     await storeRefreshToken('token-v1');
     await storeRefreshToken('token-v2');
     expect(mockSessionStorage.store.get('loop_refresh_token')).toBe('token-v2');
+  });
+
+  it('storeEmail persists email to sessionStorage on web', async () => {
+    await storeEmail('user@example.com');
+    expect(mockSessionStorage.store.get('loop_user_email')).toBe('user@example.com');
+  });
+
+  it('getEmail reads email from sessionStorage on web', async () => {
+    mockSessionStorage.store.set('loop_user_email', 'restored@example.com');
+    const email = await getEmail();
+    expect(email).toBe('restored@example.com');
+  });
+
+  it('getEmail returns null when no email is stored', async () => {
+    const email = await getEmail();
+    expect(email).toBeNull();
+  });
+
+  it('clearRefreshToken also clears the stored email (single logout action)', async () => {
+    mockSessionStorage.store.set('loop_refresh_token', 'rt');
+    mockSessionStorage.store.set('loop_user_email', 'u@example.com');
+    await clearRefreshToken();
+    expect(mockSessionStorage.store.has('loop_refresh_token')).toBe(false);
+    expect(mockSessionStorage.store.has('loop_user_email')).toBe(false);
   });
 });
 
@@ -582,5 +622,14 @@ describe('purchase-storage', () => {
     mockSessionStorage.setItem('loop_pending_order', '{}');
     await clearPendingOrder();
     expect(mockSessionStorage.getItem('loop_pending_order')).toBeNull();
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// 14. Notifications
+// ────────────────────────────────────────────────────────────
+describe('notifications', () => {
+  it('setupNotificationChannels is a no-op on web (resolves without throwing)', async () => {
+    await expect(setupNotificationChannels()).resolves.toBeUndefined();
   });
 });

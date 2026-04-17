@@ -12,6 +12,11 @@ export function enableScreenshotGuard(): () => void {
   let overlay: HTMLDivElement | null = null;
 
   const onPause = (): void => {
+    // Guard against repeat pause events — on some platforms the `pause`
+    // listener can fire more than once before a matching `resume`, which
+    // previously leaked stacked overlays (the first reference was lost when
+    // we reassigned `overlay`).
+    if (overlay !== null) return;
     overlay = document.createElement('div');
     overlay.id = 'privacy-overlay';
     overlay.style.cssText =
