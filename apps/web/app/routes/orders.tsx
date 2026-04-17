@@ -9,6 +9,7 @@ import { useOrders } from '~/hooks/use-orders';
 import { Navbar } from '~/components/features/Navbar';
 import { OrderRowSkeleton } from '~/components/ui/Skeleton';
 import { Button } from '~/components/ui/Button';
+import { friendlyError } from '~/utils/error-messages';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Orders — Loop' }];
@@ -81,10 +82,13 @@ function OrderRow({ order }: { order: Order }): React.JSX.Element {
 
 function errorMessage(err: Error | null): string | null {
   if (err === null) return null;
+  // 401 is the only status with list-specific copy — every other class of
+  // error (offline / 429 / 503 / 502 / 504 / timeout) has a better generic
+  // message in friendlyError than our old "Failed to load orders." string.
   if (err instanceof ApiException && err.status === 401) {
     return 'Please sign in to view your orders.';
   }
-  return 'Failed to load orders.';
+  return friendlyError(err, 'Failed to load orders.');
 }
 
 export default function OrdersRoute(): React.JSX.Element {
