@@ -1,4 +1,4 @@
-app = "loop-backend"
+app = "loopfinance-api"
 primary_region = "iad"
 
 [build]
