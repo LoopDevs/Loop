@@ -89,13 +89,25 @@ function rateLimit(
 
 // ─── Global middleware ────────────────────────────────────────────────────────
 
+// Production CORS allowlist. The three non-web origins below are the local
+// schemes Capacitor WebViews use on iOS (default `capacitor://localhost`)
+// and Android (`https://localhost` since Capacitor 3; `http://localhost`
+// kept as well for older debug builds). Without them, every fetch from the
+// native app to the production API would fail preflight — a "works in dev,
+// CORS errors in production" regression on mobile release that would be
+// easy to catch late.
+const PRODUCTION_ORIGINS = [
+  'https://loopfinance.io',
+  'https://www.loopfinance.io',
+  'capacitor://localhost',
+  'https://localhost',
+  'http://localhost',
+];
+
 app.use(
   '*',
   cors({
-    origin:
-      env.NODE_ENV === 'production'
-        ? ['https://loopfinance.io', 'https://www.loopfinance.io']
-        : '*',
+    origin: env.NODE_ENV === 'production' ? PRODUCTION_ORIGINS : '*',
   }),
 );
 app.use(
