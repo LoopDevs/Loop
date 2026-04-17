@@ -36,6 +36,18 @@ describe('friendlyError', () => {
     expect(msg).toBe('Server error fallback');
   });
 
+  it('returns a provider-trouble message for 502 UPSTREAM_ERROR', () => {
+    vi.stubGlobal('navigator', { onLine: true });
+    const msg = friendlyError({ status: 502 }, 'Fallback');
+    expect(msg).toContain('provider');
+  });
+
+  it('returns a provider-timeout message for 504 GATEWAY_TIMEOUT', () => {
+    vi.stubGlobal('navigator', { onLine: true });
+    const msg = friendlyError({ status: 504 }, 'Fallback');
+    expect(msg.toLowerCase()).toContain('timed out');
+  });
+
   it('returns fallback for null error', () => {
     vi.stubGlobal('navigator', { onLine: true });
     const msg = friendlyError(null, 'Null fallback');
