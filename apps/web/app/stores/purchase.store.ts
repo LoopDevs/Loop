@@ -101,7 +101,7 @@ function loadPendingOrderSync(): Partial<PurchaseState> | null {
  * snapshot. Deliberately ignores unknown keys so an attacker can't inject
  * arbitrary state into the store.
  */
-function validatePersistedPurchase(data: unknown): Partial<PurchaseState> | null {
+export function validatePersistedPurchase(data: unknown): Partial<PurchaseState> | null {
   if (data === null || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
   if (d.step !== 'payment') return null;
