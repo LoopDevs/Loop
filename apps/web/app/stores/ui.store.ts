@@ -33,6 +33,10 @@ function resolveTheme(pref: ThemePreference): ResolvedTheme {
 }
 
 function applyTheme(theme: ResolvedTheme): void {
+  // SSR guard — `document` is undefined during server-render. `useEffect`
+  // in consuming components re-runs the theme application on hydration,
+  // so silently skipping here is correct.
+  if (typeof document === 'undefined') return;
   document.documentElement.classList.remove('light', 'dark');
   document.documentElement.classList.add(theme);
 }

@@ -1,9 +1,27 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const mockSave = vi.fn<(data: Record<string, unknown>) => Promise<void>>();
+const mockClear = vi.fn<() => Promise<void>>();
+vi.mock('~/native/purchase-storage', () => ({
+  PENDING_ORDER_KEY: 'loop_pending_order',
+  savePendingOrder: (data: Record<string, unknown>) => mockSave(data),
+  clearPendingOrder: () => mockClear(),
+}));
+
 import { usePurchaseStore } from '../purchase.store';
 
 describe('purchase store', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    mockSave.mockResolvedValue(undefined);
+    mockClear.mockResolvedValue(undefined);
     usePurchaseStore.getState().reset();
+    // The reset above enqueues a clearPending on the persistence queue.
+    // Flush microtasks so it lands before we zero the mocks, otherwise
+    // invocationCallOrder leaks across tests and the ordering assertions
+    // read stale call records.
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    mockSave.mockClear();
+    mockClear.mockClear();
   });
 
   it('initializes with amount step', () => {
@@ -98,5 +116,76 @@ describe('purchase store', () => {
     expect(state.step).toBe('amount');
     expect(state.giftCardCode).toBeNull();
     expect(state.redeemUrl).toBeNull();
+  });
+
+  describe('persistence side effects', () => {
+    // `enqueuePersist` schedules on a promise chain; flush microtasks so
+    // tests can observe the mocked save/clear calls.
+    const flush = async (): Promise<void> => {
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    };
+
+    it('setOrderCreated persists the payment snapshot', async () => {
+      usePurchaseStore.getState().startPurchase('m-1', 'Target');
+      usePurchaseStore.getState().setAmount(25);
+      usePurchaseStore.getState().setOrderCreated({
+        orderId: 'o-1',
+        paymentAddress: 'GXXX',
+        xlmAmount: '10.5',
+        expiresAt: Math.floor(Date.now() / 1000) + 600,
+        memo: 'ctx:memo',
+      });
+      await flush();
+      expect(mockSave).toHaveBeenCalledTimes(1);
+      const payload = mockSave.mock.calls[0]![0];
+      expect(payload).toMatchObject({
+        step: 'payment',
+        orderId: 'o-1',
+        merchantId: 'm-1',
+        merchantName: 'Target',
+        amount: 25,
+      });
+    });
+
+    it('setComplete clears persisted state', async () => {
+      usePurchaseStore.getState().setComplete('CODE');
+      await flush();
+      expect(mockClear).toHaveBeenCalled();
+    });
+
+    it('setRedeemRequired clears persisted state', async () => {
+      usePurchaseStore.getState().setRedeemRequired({
+        redeemUrl: 'https://x',
+        redeemChallengeCode: 'C',
+      });
+      await flush();
+      expect(mockClear).toHaveBeenCalled();
+    });
+
+    it('setError clears persisted state', async () => {
+      usePurchaseStore.getState().setError('oops');
+      await flush();
+      expect(mockClear).toHaveBeenCalled();
+    });
+
+    it('save-then-complete sequences save before clear (no race)', async () => {
+      usePurchaseStore.getState().startPurchase('m-1', 'Target');
+      usePurchaseStore.getState().setOrderCreated({
+        orderId: 'o-1',
+        paymentAddress: 'GXXX',
+        xlmAmount: '10.5',
+        expiresAt: Math.floor(Date.now() / 1000) + 600,
+        memo: 'ctx:memo',
+      });
+      usePurchaseStore.getState().setComplete('CODE');
+      await flush();
+      // Both ran, and save ran before clear — vitest records each call with
+      // an `invocationCallOrder`, so comparing gives strict ordering.
+      expect(mockSave).toHaveBeenCalled();
+      expect(mockClear).toHaveBeenCalled();
+      const saveOrder = mockSave.mock.invocationCallOrder[0]!;
+      const clearOrder = mockClear.mock.invocationCallOrder[0]!;
+      expect(saveOrder).toBeLessThan(clearOrder);
+    });
   });
 });
