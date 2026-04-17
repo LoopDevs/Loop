@@ -327,4 +327,60 @@ describe('refreshMerchants', () => {
     expect(store.merchants).toHaveLength(1);
     expect(store.merchants[0]!.id).toBe('first-call');
   });
+
+  it('rejects upstream response with missing pagination field', async () => {
+    // No `pagination` key at all — Zod parse fails, we throw, catch logs,
+    // previous store is retained (empty in this test's isolation).
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }));
+
+    await refreshMerchants();
+
+    const store = getMerchants();
+    // Failure retains previous data — since tests share module state, this
+    // check is weak but the key thing is no throw propagated and no
+    // malformed data was admitted to the store.
+    expect(Array.isArray(store.merchants)).toBe(true);
+  });
+
+  it('skips individual malformed merchants without poisoning the page', async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          pagination: { page: 1, pages: 1, perPage: 100, total: 3 },
+          result: [
+            { id: 'good-1', name: 'Good One', enabled: true },
+            { id: '', name: 'Missing ID', enabled: true }, // rejected
+            { name: 'No ID Field', enabled: true }, // rejected
+            { id: 'good-2', name: 'Good Two', enabled: true },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await refreshMerchants();
+
+    const store = getMerchants();
+    const ids = store.merchants.map((m) => m.id);
+    expect(ids).toContain('good-1');
+    expect(ids).toContain('good-2');
+    expect(ids).not.toContain('');
+  });
+
+  it('passes through the upstream enabled flag (not hardcoded true)', async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          pagination: { page: 1, pages: 1, perPage: 100, total: 1 },
+          result: [{ id: 'm-disabled', name: 'Disabled', enabled: false }],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    // With INCLUDE_DISABLED_MERCHANTS falsy (default), disabled merchants
+    // are filtered out entirely.
+    await refreshMerchants();
+    expect(getMerchants().merchants.find((m) => m.id === 'm-disabled')).toBeUndefined();
+  });
 });

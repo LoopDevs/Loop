@@ -4,7 +4,7 @@ import { env } from './env.js';
 import { logger } from './logger.js';
 import { app, stopCleanupInterval } from './app.js';
 import { startLocationRefresh } from './clustering/data-store.js';
-import { startMerchantRefresh } from './merchants/sync.js';
+import { startMerchantRefresh, stopMerchantRefresh } from './merchants/sync.js';
 
 // Merchants load first (startMerchantRefresh triggers initial refresh).
 // Locations start after a short delay to ensure merchant data is available
@@ -34,9 +34,10 @@ function shutdown(signal: string): void {
   // Cancel the pending location-refresh kickoff so it doesn't start a fresh
   // upstream call after we've begun draining.
   clearTimeout(locationStartTimer);
-  // Stop the hourly cleanup interval so it doesn't pin the event loop open
-  // past server drain.
+  // Stop background intervals so they don't pin the event loop open past
+  // server drain.
   stopCleanupInterval();
+  stopMerchantRefresh();
 
   server.close(() => {
     void sentryFlush(5000).finally(() => {
