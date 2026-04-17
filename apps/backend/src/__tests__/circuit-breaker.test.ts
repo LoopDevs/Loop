@@ -200,6 +200,58 @@ describe('createCircuitBreaker', () => {
     expect(cb.getState()).toBe('closed');
   });
 
+  it('probe timeout failsafe unsticks the circuit when a HALF_OPEN probe hangs', async () => {
+    // Scenario: a caller forgets to pass an AbortSignal and the probe
+    // fetch hangs. Without the failsafe, `halfOpenInFlight` would stay true
+    // forever and every later request would reject. The failsafe must
+    // call `onFailure`, which clears the flag and transitions back to OPEN
+    // with a fresh `openedAt` so a future request can retry after cooldown.
+    const cb = createCircuitBreaker({
+      failureThreshold: 2,
+      // Large cooldown so the test doesn't race the failsafe transition.
+      cooldownMs: 10_000,
+      probeTimeoutMs: 40,
+    });
+
+    // Trip the circuit
+    for (let i = 0; i < 2; i++) {
+      mockFetch.mockResolvedValueOnce(new Response('err', { status: 500 }));
+      await cb.fetch('http://x');
+    }
+    expect(cb.getState()).toBe('open');
+
+    // Force the circuit into HALF_OPEN for the test — the easiest way is
+    // to reset then re-trip with a short cooldown. Instead we use a
+    // dedicated breaker tuned for this test.
+    const probe = createCircuitBreaker({
+      failureThreshold: 2,
+      cooldownMs: 20,
+      probeTimeoutMs: 40,
+    });
+    for (let i = 0; i < 2; i++) {
+      mockFetch.mockResolvedValueOnce(new Response('err', { status: 500 }));
+      await probe.fetch('http://x');
+    }
+    expect(probe.getState()).toBe('open');
+
+    // Cooldown elapses
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Probe fetch hangs indefinitely — we never resolve this promise.
+    mockFetch.mockReturnValueOnce(new Promise<Response>(() => {}));
+    const hung = probe.fetch('http://x').catch(() => undefined);
+
+    // Give the failsafe time to fire (probeTimeoutMs + margin).
+    await new Promise((r) => setTimeout(r, 60));
+
+    // Circuit should have kicked itself back to OPEN. The core invariant:
+    // the failsafe must have cleared `halfOpenInFlight` so future work is
+    // not blocked by a stuck in-flight probe.
+    expect(probe.getState()).toBe('open');
+
+    void hung;
+  });
+
   it('reset() restores CLOSED state', async () => {
     const cb = createCircuitBreaker({ failureThreshold: 2, cooldownMs: 60_000 });
 
