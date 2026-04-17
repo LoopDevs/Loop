@@ -91,6 +91,21 @@ describe('merchantSlug', () => {
   it('handles already-lowercase names', () => {
     expect(merchantSlug('target')).toBe('target');
   });
+
+  it('drops unicode characters (ASCII-only output)', () => {
+    // Known behaviour — matches the Go reference. Non-ASCII is dropped
+    // rather than transliterated; any consumer needing e.g. "Café" support
+    // must normalize upstream.
+    expect(merchantSlug('Café')).toBe('caf');
+    expect(merchantSlug('Pokémon')).toBe('pokmon');
+  });
+
+  it('returns a string that only contains [a-z0-9-] characters', () => {
+    const inputs = ['Foo!@#$%Bar', '  Spaces  ', '--leading--', 'UPPER!CASE_With_Underscores'];
+    for (const input of inputs) {
+      expect(merchantSlug(input)).toMatch(/^[a-z0-9-]*$/);
+    }
+  });
 });
 
 describe('refreshMerchants', () => {

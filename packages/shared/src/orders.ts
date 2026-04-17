@@ -32,10 +32,17 @@ export interface Order {
   createdAt: string;
 }
 
-/** Request body for POST /api/orders. */
+/**
+ * Request body for POST /api/orders.
+ *
+ * Backend zod schema enforces the following — keep these in sync with
+ * `CreateOrderBody` in apps/backend/src/orders/handler.ts:
+ *   - merchantId: non-empty, max 128 chars
+ *   - amount:     finite, 1 ≤ n ≤ 10_000, multipleOf 0.01 (2-decimal precision)
+ */
 export interface CreateOrderRequest {
   merchantId: string;
-  /** Amount in the merchant's currency (e.g. USD). */
+  /** Amount in the merchant's currency. Must be in [1, 10_000] with 2-decimal precision. */
   amount: number;
 }
 
