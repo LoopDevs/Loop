@@ -184,8 +184,8 @@ Applied in order on every request:
 ## Git workflow
 
 - **Never push directly to `main`** — all changes via PR. This is a **team convention** rather than a GitHub-enforced rule: the repo is private on the free plan (audit A-037), and branch-protection rules require GitHub Pro / Team or a public repo. The `gh api repos/LoopDevs/Loop/branches/main/protection` endpoint returns 403 ("Upgrade to GitHub Pro or make this repository public to enable this feature"), so nothing mechanically blocks a direct push. Treat the convention as strict regardless.
-- E2E tests only run on PRs (not on pushes to main). This means if you push directly, e2e tests are skipped and regressions can slip through.
-- Create a feature branch, push, open a PR. CI runs all 6 jobs including e2e.
+- The **real-upstream** e2e suite (`test-e2e`, Playwright against a running backend pointed at spend.ctx.com) is **PR-only**. The self-contained **mocked** e2e suite (`test-e2e-mocked`, boots mock-ctx + backend + web on isolated ports) runs on every push to main and every PR (audit A-003). So a direct push to main still gets the deterministic mocked flow, but not the upstream contract check.
+- Create a feature branch, push, open a PR. CI runs seven jobs: `quality`, `test-unit`, `audit`, `build`, `test-e2e-mocked`, `test-e2e` (PR only), and `notify`.
 - Discord `#loop-deployments` notifies on CI pass/fail.
 - If/when the org upgrades plans or the repo goes public, turn on branch protection (require a PR, require passing checks for quality/unit/e2e, disallow force-push) so the convention becomes mechanically enforced.
 
