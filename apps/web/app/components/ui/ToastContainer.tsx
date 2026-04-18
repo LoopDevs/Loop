@@ -21,6 +21,12 @@ export function ToastContainer(): React.JSX.Element | null {
       {toasts.map((toast) => (
         <div
           key={toast.id}
+          // Error toasts use `role="alert"` (assertive live region — AT
+          // interrupts current speech). Success/info use `role="status"`
+          // (polite — queued). Without a role, toasts render silently for
+          // screen-reader users; the 5-second auto-dismiss means the
+          // notification was effectively invisible-to-AT.
+          role={toast.type === 'error' ? 'alert' : 'status'}
           className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium animate-slide-in ${TYPE_STYLES[toast.type]}`}
         >
           <div className="flex items-center justify-between gap-3">
