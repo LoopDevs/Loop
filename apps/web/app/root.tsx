@@ -24,6 +24,7 @@ import { NativeBackButton } from '~/components/features/NativeBackButton';
 import { ToastContainer } from '~/components/ui/ToastContainer';
 import { useAuthStore } from '~/stores/auth.store';
 import { useUiStore } from '~/stores/ui.store';
+import { buildSecurityHeaders } from '~/utils/security-headers';
 import './app.css';
 
 const AuthRoute = lazy(() => import('~/routes/auth'));
@@ -66,10 +67,25 @@ export const links: Route.LinksFunction = () => [
 ];
 
 export function Layout({ children }: { children: React.ReactNode }): React.JSX.Element {
+  // Audit A-027 — CSP is emitted via <meta http-equiv> because RR v7 SPA
+  // mode (our mobile static export) rejects a route-module `headers`
+  // export and the build fails. HTTP headers that can't live in meta
+  // (X-Frame-Options, HSTS, Permissions-Policy, etc.) are applied at
+  // the deploy edge — Fly.io's `force_https=true` already delivers
+  // HSTS-equivalent. `buildSecurityHeaders` is the single source of
+  // truth, locked by `security-headers.test.ts`.
+  const csp = buildSecurityHeaders({
+    apiOrigin:
+      typeof import.meta.env !== 'undefined' && import.meta.env['VITE_API_URL']
+        ? (import.meta.env['VITE_API_URL'] as string)
+        : 'https://api.loopfinance.io',
+  })['Content-Security-Policy'];
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
+        {csp !== undefined && <meta httpEquiv="Content-Security-Policy" content={csp} />}
+        <meta name="referrer" content="strict-origin-when-cross-origin" />
         <meta
           name="viewport"
           content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
