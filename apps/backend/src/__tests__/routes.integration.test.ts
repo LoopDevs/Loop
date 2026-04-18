@@ -362,4 +362,21 @@ describe('app-level middleware', () => {
     // The health request just counted above should appear.
     expect(body).toMatch(/loop_requests_total\{method="GET",route="\/health",status="200"\}/);
   });
+
+  it('/metrics emits exactly one HELP line per metric (audit A-016)', async () => {
+    // Prometheus exposition format requires at most one HELP line per
+    // metric. We briefly emitted two for loop_circuit_state (one for the
+    // description, one for the state-value mapping) which some scrapers
+    // rejected. This test locks in the "exactly one" invariant.
+    const res = await app.request('/metrics');
+    const body = await res.text();
+    for (const metric of [
+      'loop_rate_limit_hits_total',
+      'loop_requests_total',
+      'loop_circuit_state',
+    ]) {
+      const helpLines = body.split('\n').filter((l) => l.startsWith(`# HELP ${metric} `));
+      expect(helpLines, `expected exactly one HELP line for ${metric}`).toHaveLength(1);
+    }
+  });
 });
