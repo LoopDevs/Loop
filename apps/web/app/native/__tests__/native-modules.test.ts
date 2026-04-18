@@ -523,6 +523,30 @@ describe('webview', () => {
     expect(openFn).not.toHaveBeenCalled();
   });
 
+  // Audit A-009 — in dev/test we allow http:// so the mocked suites work;
+  // production builds must refuse plain http to keep a MITM from swapping
+  // the redeem target.
+  it('accepts http:// URLs in dev/test builds', async () => {
+    const mockWin = { close: vi.fn(), closed: false };
+    (window as unknown as Record<string, unknown>).open = vi.fn(() => mockWin);
+    const controller = await openWebView({ url: 'http://redeem.test/abc' });
+    expect(controller).toHaveProperty('close');
+  });
+
+  it('refuses http:// URLs when `import.meta.env.PROD` is true (regression A-009)', async () => {
+    const openFn = vi.fn();
+    (window as unknown as Record<string, unknown>).open = openFn;
+    vi.stubEnv('PROD', 'true');
+    try {
+      await expect(openWebView({ url: 'http://redeem.test/abc' })).rejects.toThrow(
+        /rejected in production/,
+      );
+      expect(openFn).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('surfaces popup-blocker rejection when window.open returns null', async () => {
     // Popup blockers make window.open return null. Before this fix, the
     // controller was silently a no-op and the caller's "redeeming…" UI
