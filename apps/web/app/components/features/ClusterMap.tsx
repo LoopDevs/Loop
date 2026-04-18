@@ -248,9 +248,16 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
         ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
         : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
 
+      // Attribution links are external — open in a new tab so clicking
+      // the footer doesn't navigate the user away from the map, and
+      // pair with `rel="noopener noreferrer"` to block the classic
+      // reverse-tabnabbing vector (the opened tab could otherwise use
+      // `window.opener` to redirect the Loop tab to a phishing page).
+      const ATTRIBUTION_LINK_ATTRS = 'target="_blank" rel="noopener noreferrer"';
       const tileLayer = L.tileLayer(tileUrl, {
         attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+          `&copy; <a href="https://www.openstreetmap.org/copyright" ${ATTRIBUTION_LINK_ATTRS}>OpenStreetMap</a> contributors ` +
+          `&copy; <a href="https://carto.com/" ${ATTRIBUTION_LINK_ATTRS}>CARTO</a>`,
         maxZoom: 20,
         subdomains: 'abcd',
       }).addTo(map);
