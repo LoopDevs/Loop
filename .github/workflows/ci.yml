@@ -214,8 +214,10 @@ jobs:
           INCLUDE_DISABLED_MERCHANTS: 'true'
       - name: Wait for backend
         run: npx wait-on http://localhost:8080/health --timeout 30000
-      - name: Run e2e tests
-        run: npm run test:e2e
+      - name: Run e2e tests (real CTX)
+        # `test:e2e:real` is the explicit opt-in for the real-upstream suite.
+        # `test:e2e` is the self-contained mocked default (audit A-003).
+        run: npm run test:e2e:real
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v7

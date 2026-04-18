@@ -71,13 +71,18 @@ cd apps/web && npm run test:watch
 cd apps/backend && npm run test:coverage
 cd apps/web && npm run test:coverage
 
-# E2E against real upstream (Playwright starts its own dev servers)
+# E2E — self-contained mocked suite (default). Boots mock-ctx + backend +
+# web on isolated ports (9091/8081/5174). No external deps, no env vars
+# required. This is what `test:e2e` resolves to (audit A-003: previously
+# `test:e2e` silently depended on a real backend being up separately and
+# failed with missing merchant data).
 npm run test:e2e
+npm run test:e2e:mocked   # explicit alias for the same mocked suite
 
-# E2E against mocked CTX upstream — fully deterministic, no external deps.
-# Boots mock-ctx + backend + web on isolated ports (9091/8081/5174) so it
-# can run alongside the real-upstream suite.
-npm run test:e2e:mocked
+# E2E — real upstream. Requires apps/backend to be running locally against
+# real CTX (see `docs/development.md`). Only use when validating the live
+# upstream contract; `test:e2e` is the right default for feature work.
+npm run test:e2e:real
 
 # Everything at once
 npm run verify
@@ -91,8 +96,8 @@ npm run verify
 | ---------------------------------- | --------------------------------------------------------------------------------------------------- |
 | `git commit`                       | lint-staged (ESLint + Prettier on changed files)                                                    |
 | `git push`                         | `npm test` + `lint:docs` (blocks push on failure)                                                   |
-| CI (every push)                    | typecheck + lint + test + audit + build + mocked e2e                                                |
-| CI (PRs only)                      | + real-upstream e2e tests with Playwright                                                           |
+| CI (every push)                    | typecheck + lint + test + audit + build + mocked e2e (`test:e2e`)                                   |
+| CI (PRs only)                      | + real-upstream e2e tests with Playwright (`test:e2e:real`)                                         |
 | GitHub Actions `workflow_dispatch` | **E2E (real CTX + wallet)** — manually triggered full purchase flow that spends real XLM; see below |
 
 ### Manual: real CTX + wallet purchase workflow

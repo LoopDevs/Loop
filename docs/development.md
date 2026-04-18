@@ -100,7 +100,8 @@ npm run lint:fix         # ESLint with auto-fix
 npm run format           # Prettier write
 npm run format:check     # Prettier check (CI uses this)
 npm test                 # vitest run across all workspaces
-npm run test:e2e         # Playwright e2e tests
+npm run test:e2e         # Playwright e2e — self-contained mocked suite
+npm run test:e2e:real    # Playwright e2e — against a running real-CTX backend
 npm run build            # production build across all workspaces
 npm run proto:generate   # buf generate → packages/shared/src/proto/
 ```
