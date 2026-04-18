@@ -72,14 +72,14 @@ loop-app/
 
 ### File naming
 
-| Type                  | Convention                | Example                  |
-| --------------------- | ------------------------- | ------------------------ |
-| React components      | `PascalCase.tsx`          | `MerchantCard.tsx`       |
-| Hooks                 | `use-kebab-case.ts`       | `use-native-platform.ts` |
-| Utilities / services  | `kebab-case.ts`           | `api-client.ts`          |
-| TypeScript types file | `kebab-case.types.ts`     | `merchant.types.ts`      |
-| Test files            | co-located, same name     | `MerchantCard.test.tsx`  |
-| Constants             | `kebab-case.constants.ts` | `stellar.constants.ts`   |
+| Type                  | Convention                | Example                           |
+| --------------------- | ------------------------- | --------------------------------- |
+| React components      | `PascalCase.tsx`          | `MerchantCard.tsx`                |
+| Hooks                 | `use-kebab-case.ts`       | `use-native-platform.ts`          |
+| Utilities / services  | `kebab-case.ts`           | `api-client.ts`                   |
+| TypeScript types file | `kebab-case.types.ts`     | `merchant.types.ts`               |
+| Test files            | `__tests__/` sibling dir  | `__tests__/MerchantCard.test.tsx` |
+| Constants             | `kebab-case.constants.ts` | `stellar.constants.ts`            |
 
 ### One export per file (with exceptions)
 
@@ -476,26 +476,36 @@ Tags follow [semver](https://semver.org/). Mobile app version numbers in Xcode/A
 
 ### Tools
 
-| Tool                        | Used for                                          |
-| --------------------------- | ------------------------------------------------- |
-| Vitest                      | Unit and integration tests (web, backend, shared) |
-| `@testing-library/react`    | React component tests                             |
-| `msw` (Mock Service Worker) | Mocking HTTP in tests                             |
-| Playwright                  | End-to-end tests (critical paths only)            |
+| Tool                     | Used for                                                                                           |
+| ------------------------ | -------------------------------------------------------------------------------------------------- |
+| Vitest                   | Unit and integration tests (web, backend)                                                          |
+| `@testing-library/react` | Purchase-flow component tests (`AmountSelection`, `PaymentStep`, `RedeemFlow`, `PurchaseComplete`) |
+| `vi.mock()` / `vi.fn()`  | Mocking HTTP and Capacitor plugins in tests                                                        |
+| Playwright               | End-to-end tests — self-contained mocked + opt-in real-CTX                                         |
 
-### Coverage thresholds (enforced in CI)
+> `msw` is listed in `apps/web/package.json` but not currently used — tests
+> mock at the `globalThis.fetch` level via `vi.stubGlobal('fetch', vi.fn())`.
 
-| Package / directory            | Line coverage |
-| ------------------------------ | ------------- |
-| `packages/shared`              | 90%           |
-| `apps/backend/src/clustering/` | 85%           |
-| `apps/backend/src/auth/`       | 85%           |
-| `apps/backend/src/orders/`     | 80%           |
-| `apps/web/app/services/`       | 80%           |
-| `apps/web/app/hooks/`          | 70%           |
-| Overall minimum                | 65%           |
+### Coverage thresholds (enforced in CI, per-workspace)
 
-CI fails if any threshold is breached. Coverage is measured on every PR — not just at release.
+Thresholds are **regression gates**, not aspirational targets. The floors
+sit a few points below the measured baseline (audit A-014) so normal churn
+doesn't fail CI, but a real coverage drop does. The explicit goal is to
+ratchet these up as new tests land, never to widen the gap between
+claimed and measured coverage.
+
+| Workspace      | lines | functions | branches | statements |
+| -------------- | ----- | --------- | -------- | ---------- |
+| `apps/backend` | 80    | 75        | 72       | 80         |
+| `apps/web`     | 37    | 40        | 32       | 35         |
+
+Backend coverage is high because the backend is almost entirely
+pure-logic handlers that are testable without a DOM. Web coverage is
+lower because the vitest environment is `node` (ADR-005 §7) and
+components / routes are covered via Playwright e2e rather than unit
+tests. See `apps/backend/vitest.config.ts` and
+`apps/web/vitest.config.ts` for the enforced values — this table is
+the manually-maintained reflection.
 
 ### What to test
 
@@ -520,17 +530,22 @@ Critical paths for E2E:
 
 ### Test file location
 
-Tests are co-located with the code they test:
+Unit tests live in a sibling `__tests__/` directory next to the code
+they cover:
 
 ```
 app/services/api-client.ts
-app/services/api-client.test.ts
+app/services/__tests__/api-client.test.ts
 
 app/hooks/use-merchants.ts
-app/hooks/use-merchants.test.ts
+app/hooks/__tests__/use-merchants.test.ts
 ```
 
-E2E tests live in `tests/e2e/` at the repo root.
+E2E tests live at the repo root:
+
+- `tests/e2e/` — real-upstream Playwright suite (opt-in via `test:e2e:real`)
+- `tests/e2e-mocked/` — self-contained mocked suite (default `test:e2e`),
+  with the deterministic mock CTX in `tests/e2e-mocked/fixtures/mock-ctx.mjs`
 
 ### Test naming
 
