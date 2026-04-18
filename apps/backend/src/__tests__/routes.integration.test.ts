@@ -344,6 +344,33 @@ describe('app-level middleware', () => {
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=3600');
   });
 
+  it('/metrics labels unmatched routes as NOT_FOUND (audit A-022)', async () => {
+    // Hit several random paths. Without the fix, each distinct path would
+    // create a separate metric key and balloon cardinality; with the fix,
+    // all of them collapse into a single {route="NOT_FOUND"} series.
+    await app.request('/fuzz-path-1');
+    await app.request('/fuzz-path-2');
+    await app.request('/fuzz-path-3?q=abc');
+    await app.request('/api/totally-made-up-endpoint');
+
+    const res = await app.request('/metrics');
+    const body = await res.text();
+
+    // No raw paths leak into label space.
+    for (const path of [
+      '/fuzz-path-1',
+      '/fuzz-path-2',
+      '/fuzz-path-3',
+      '/api/totally-made-up-endpoint',
+    ]) {
+      expect(body).not.toContain(`route="${path}"`);
+    }
+    // All unmatched traffic lands on the single constant label.
+    expect(body).toMatch(
+      /loop_requests_total\{method="GET",route="NOT_FOUND",status="404"\} [1-9]/,
+    );
+  });
+
   it('/metrics exposes Prometheus-format counters and circuit state', async () => {
     // Drive one request through so requestsTotal has an entry, then scrape.
     mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
