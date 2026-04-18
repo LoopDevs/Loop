@@ -5,6 +5,7 @@ import { secureHeaders } from 'hono/secure-headers';
 import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
 import { logger as honoLogger } from 'hono/logger';
+import { getConnInfo } from '@hono/node-server/conninfo';
 import { sentry, captureException } from '@sentry/hono/node';
 import { env } from './env.js';
 import { getLocations, isLocationLoading } from './clustering/data-store.js';
@@ -46,6 +47,42 @@ if (env.SENTRY_DSN) {
 
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
+/**
+ * Resolves the client IP the rate limiter should key on. Audit A-023:
+ * previously `c.req.header('x-forwarded-for')?.split(',')[0]` was used
+ * unconditionally, meaning any client could send an `X-Forwarded-For`
+ * header with an arbitrary value and bypass per-IP limits by rotating
+ * that value.
+ *
+ * Policy:
+ *   - `env.TRUST_PROXY === true`: we're behind a trusted edge proxy
+ *     (Fly.io, nginx, Cloud Run, etc.) that writes X-Forwarded-For. Use
+ *     the leftmost value — that's the original client the edge saw.
+ *   - `env.TRUST_PROXY === false`: no trusted proxy in front of us. Use
+ *     the TCP socket's remote address. Ignores X-Forwarded-For entirely.
+ *
+ * Returns the string `'unknown'` only if both sources fail — rate limits
+ * still apply but everyone lands in the same bucket, which is
+ * conservative.
+ */
+function clientIpFor(c: Context): string {
+  if (env.TRUST_PROXY) {
+    const xff = c.req.header('x-forwarded-for');
+    if (xff !== undefined && xff.length > 0) {
+      const first = xff.split(',')[0]?.trim();
+      if (first !== undefined && first.length > 0) return first;
+    }
+  }
+  try {
+    const info = getConnInfo(c);
+    const address = info.remote.address;
+    if (address !== undefined && address.length > 0) return address;
+  } catch {
+    /* conninfo unavailable — dev server/test harness */
+  }
+  return 'unknown';
+}
+
 // Cap on the rate-limit map. Without this, an attacker spraying requests
 // from fresh IPs faster than the hourly cleanup runs could grow the map
 // until the process OOMs. With the cap, once we hit it we evict the
@@ -59,7 +96,7 @@ function rateLimit(
   windowMs: number,
 ): (c: Context, next: () => Promise<void>) => Promise<void | Response> {
   return async (c, next): Promise<void | Response> => {
-    const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+    const ip = clientIpFor(c);
     const now = Date.now();
     const entry = rateLimitMap.get(ip);
 

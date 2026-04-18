@@ -43,6 +43,14 @@ export const EnvSchema = z.object({
   // Example: "cdn.giftcards.com,images.merchant.com"
   IMAGE_PROXY_ALLOWED_HOSTS: z.string().optional(),
 
+  // Rate-limiter trust boundary (audit A-023). When `true` the rate limiter
+  // reads the client IP from the first value in X-Forwarded-For (required
+  // when running behind Fly.io / a load balancer). When `false` it falls
+  // back to the TCP socket's remote address so an arbitrary client cannot
+  // spoof its own IP to bypass per-IP limits. Default `false` — prod
+  // deployments set it to `true` explicitly via `fly.toml`.
+  TRUST_PROXY: z.coerce.boolean().default(false),
+
   // Discord webhooks (optional — for notifications)
   DISCORD_WEBHOOK_ORDERS: z.string().url().optional(),
   DISCORD_WEBHOOK_MONITORING: z.string().url().optional(),

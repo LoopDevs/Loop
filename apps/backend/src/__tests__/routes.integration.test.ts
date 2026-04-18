@@ -14,6 +14,9 @@ vi.mock('../env.js', () => ({
     CTX_CLIENT_ID_WEB: 'loopweb',
     CTX_CLIENT_ID_IOS: 'loopios',
     CTX_CLIENT_ID_ANDROID: 'loopandroid',
+    // Audit A-023 — rate limiter trusts X-Forwarded-For only when this
+    // is true. Integration tests inject XFF values, so enable trust.
+    TRUST_PROXY: true,
   },
 }));
 
