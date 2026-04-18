@@ -10,6 +10,10 @@ const mockEnv = vi.hoisted(() => ({
   CTX_CLIENT_ID_ANDROID: 'loopandroid',
   REFRESH_INTERVAL_HOURS: 6,
   LOCATION_REFRESH_INTERVAL_HOURS: 24,
+  // Audit A-023 — rate limiter trusts X-Forwarded-For only when this is
+  // true. The existing auth tests inject synthetic XFF values to get
+  // per-"client" isolation, so we turn trust on for the test harness.
+  TRUST_PROXY: true,
 }));
 
 vi.mock('../../env.js', () => ({ env: mockEnv }));

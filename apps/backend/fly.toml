@@ -13,6 +13,10 @@ primary_region = "iad"
   # the raw image blobs CTX links from. Anything outside this list gets
   # 403'd by `validateImageUrl()` before any fetch.
   IMAGE_PROXY_ALLOWED_HOSTS = "spend.ctx.com,ctx-spend.s3.us-west-2.amazonaws.com"
+  # Audit A-023 — Fly.io fronts each machine with its own edge proxy that
+  # populates X-Forwarded-For. Turn trust on here so the rate limiter
+  # keys on the actual client IP instead of the edge's single address.
+  TRUST_PROXY = "true"
 
 [http_service]
   internal_port = 8080
