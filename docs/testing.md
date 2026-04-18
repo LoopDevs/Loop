@@ -163,13 +163,41 @@ vi.mock('@capacitor/core', () => ({
 
 ---
 
-## Coverage thresholds
+## Coverage
 
-| Area                | Target |
-| ------------------- | ------ |
-| Backend clustering  | 85%    |
-| Backend auth/orders | 85%    |
-| Web services        | 80%    |
-| Web stores          | 80%    |
-| Web hooks           | 70%    |
-| Overall minimum     | 65%    |
+Coverage thresholds are a **regression gate**, not an aspiration. They are
+set just below the currently-measured coverage number so that a change
+which drags coverage down fails CI. The explicit goal is to **ratchet
+them up** as new tests land — never to widen the gap between "what we
+test" and "what we claim to test" (audit A-014).
+
+### Authoritative thresholds
+
+Defined in `apps/backend/vitest.config.ts` and `apps/web/vitest.config.ts`.
+If you're writing this table from memory, re-run `npm run test:coverage`
+in each workspace — the config files are the source of truth.
+
+| Surface                             | Lines | Branches | Functions | Statements |
+| ----------------------------------- | ----- | -------- | --------- | ---------- |
+| `apps/backend` (unit + integration) | 80%   | 72%      | 75%       | 80%        |
+| `apps/web` (excl. routes + root)    | 37%   | 32%      | 40%       | 35%        |
+
+### Web coverage scope
+
+`apps/web/vitest.config.ts` excludes `app/routes/**` and `app/root.tsx`
+from coverage on purpose — those surfaces are exercised by Playwright
+e2e (`tests/e2e`, `tests/e2e-mocked`), not by unit tests. Double-counting
+them would make the number look better without adding confidence.
+
+The 37–45% web unit figure reflects the fact that most user-facing UI
+is route-level; everything unit-tested today is `services/`, `stores/`,
+`hooks/`, `utils/`, `native/`, and leaf `components/`. When moving
+route-only logic out into a unit-testable module, add the unit test and
+ratchet the threshold up.
+
+### Backend coverage scope
+
+Backend currently sits at lines 85%, branches 77%, functions 79%,
+statements 84%. The thresholds above (80/72/75/80) are just below those
+numbers so ordinary work doesn't need to add tests but a clear
+regression fails CI.
