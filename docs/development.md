@@ -218,7 +218,7 @@ Conventional Commits enforced via commitlint + Husky:
 <type>(<scope>): <description>
 
 Types:  feat | fix | refactor | perf | test | docs | chore | ci | build | revert
-Scopes: web | mobile | backend | shared | infra | deps
+Scopes: web | mobile | backend | shared | infra | deps | ci
 ```
 
 Examples:
