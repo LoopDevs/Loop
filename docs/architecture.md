@@ -175,7 +175,8 @@ Device key never leaves the device. Backend never sees the private key.
 GET  /health
 GET  /metrics                               — Prometheus format
 GET  /openapi.json                          — full OpenAPI 3.1 spec
-GET  /api/merchants              ?page=&limit=&q=
+GET  /api/merchants              ?page=&limit=&q=      — paginated, max 100 per page
+GET  /api/merchants/all                                 — full catalog in one response (audit A-002)
 GET  /api/merchants/by-slug/:slug
 GET  /api/merchants/:id
 GET  /api/clusters           ?west=&south=&east=&north=&zoom=

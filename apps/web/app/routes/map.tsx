@@ -1,7 +1,7 @@
 import { lazy, Suspense, useState, useCallback } from 'react';
 import type { Route } from './+types/map';
 import { useNativePlatform } from '~/hooks/use-native-platform';
-import { useMerchants } from '~/hooks/use-merchants';
+import { useAllMerchants } from '~/hooks/use-merchants';
 import { Navbar } from '~/components/features/Navbar';
 import { MapBottomSheet } from '~/components/features/MapBottomSheet';
 import { Spinner } from '~/components/ui/Spinner';
@@ -30,12 +30,10 @@ export function ErrorBoundary(): React.JSX.Element {
 export default function MapRoute(): React.JSX.Element {
   const { isNative } = useNativePlatform();
   const [selectedMerchantId, setSelectedMerchantId] = useState<string | null>(null);
-  // Backend caps /api/merchants limit at MAX_PAGE_SIZE=100. Asking for 1000
-  // was silently clamped — the remaining 17 merchants (we have ~117) would
-  // have shown their raw id in the popup name lookup below instead of a
-  // human-readable name. Match the cap here; revisit with pagination when
-  // the merchant count outgrows 100.
-  const { merchants } = useMerchants({ limit: 100 });
+  // Full catalog via /api/merchants/all (audit A-002). The paginated endpoint
+  // caps at 100 items per page, which truncated popup name lookup once the
+  // catalog grew past 100 merchants.
+  const { merchants } = useAllMerchants();
 
   const selectedMerchant = selectedMerchantId
     ? (merchants.find((m) => m.id === selectedMerchantId) ?? null)

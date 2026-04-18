@@ -2,6 +2,7 @@ import type {
   MerchantListResponse,
   MerchantDetailResponse,
   MerchantListParams,
+  MerchantAllResponse,
 } from '@loop/shared';
 import { apiRequest } from './api-client';
 
@@ -16,6 +17,16 @@ export async function fetchMerchants(
 
   const query = qs.toString();
   return apiRequest<MerchantListResponse>(`/api/merchants${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Fetches the full merchant catalog in a single request (audit A-002).
+ * Use this for UI surfaces that need every merchant — home directory,
+ * map name lookup, navbar search — where pagination would silently
+ * truncate the catalog.
+ */
+export async function fetchAllMerchants(): Promise<MerchantAllResponse> {
+  return apiRequest<MerchantAllResponse>('/api/merchants/all');
 }
 
 /** Fetches a single merchant by id. */

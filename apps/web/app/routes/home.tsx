@@ -1,5 +1,5 @@
 import type { Route } from './+types/home';
-import { useMerchants } from '~/hooks/use-merchants';
+import { useAllMerchants } from '~/hooks/use-merchants';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
@@ -16,7 +16,7 @@ export function meta(): Route.MetaDescriptors {
 /** Thin wrapper that owns the QueryClient for this route tree. */
 function HomeContent(): React.JSX.Element {
   const { isNative } = useNativePlatform();
-  const { merchants, isLoading, isError } = useMerchants({ limit: 100 });
+  const { merchants, isLoading, isError } = useAllMerchants();
 
   const featured = [...merchants]
     .filter((m) => m.savingsPercentage !== undefined && m.savingsPercentage > 0)

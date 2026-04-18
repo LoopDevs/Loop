@@ -16,6 +16,7 @@ import { getAllCircuitStates } from './circuit-breaker.js';
 import { generateOpenApiSpec } from './openapi.js';
 import {
   merchantListHandler,
+  merchantAllHandler,
   merchantBySlugHandler,
   merchantDetailHandler,
 } from './merchants/handler.js';
@@ -258,6 +259,8 @@ app.get('/api/image', rateLimit(300, 60_000), imageProxyHandler);
 // ─── Merchants ────────────────────────────────────────────────────────────────
 
 app.get('/api/merchants', merchantListHandler);
+// /all must come before /:id so that 'all' is not interpreted as an id.
+app.get('/api/merchants/all', merchantAllHandler);
 app.get('/api/merchants/by-slug/:slug', merchantBySlugHandler); // must be before /:id
 app.get('/api/merchants/:id', merchantDetailHandler);
 

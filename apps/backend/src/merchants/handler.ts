@@ -62,6 +62,26 @@ export function merchantListHandler(c: Context): Response {
 }
 
 /**
+ * GET /api/merchants/all
+ *
+ * Returns the entire enabled merchant catalog in a single response.
+ * Audit A-002: `/api/merchants` hard-caps at 100 items per page, which
+ * silently truncated UI surfaces (home, map, navbar search) that need the
+ * full catalog. This endpoint serves them directly, avoiding the need for
+ * the client to page through. Response shape is `{ merchants: Merchant[] }`
+ * — no pagination envelope, since the whole point is to skip paging.
+ *
+ * The catalog is already in memory (`getMerchants()`) so this is O(N) over
+ * the cached slice and costs no upstream call. 5-minute public cache
+ * matches the per-page endpoint.
+ */
+export function merchantAllHandler(c: Context): Response {
+  const { merchants } = getMerchants();
+  c.header('Cache-Control', 'public, max-age=300');
+  return c.json({ merchants, total: merchants.length });
+}
+
+/**
  * GET /api/merchants/by-slug/:slug
  *
  * O(1) slug lookup — preferred over fetching all merchants client-side.

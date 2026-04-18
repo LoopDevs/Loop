@@ -192,6 +192,44 @@ describe('GET /api/merchants', () => {
   });
 });
 
+describe('GET /api/merchants/all', () => {
+  it('returns the full catalog in a single response (audit A-002)', async () => {
+    // 150 merchants: one full page (100) + overflow (50). The paginated endpoint
+    // would truncate at 100; /all must return every entry.
+    seed(Array.from({ length: 150 }, (_, i) => merchant(`m-${i}`, `Store ${i}`)));
+    const res = await app.request('/api/merchants/all');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { merchants: Merchant[]; total: number };
+    expect(body.merchants).toHaveLength(150);
+    expect(body.total).toBe(150);
+    expect(body.merchants[0]?.id).toBe('m-0');
+    expect(body.merchants[149]?.id).toBe('m-149');
+  });
+
+  it('sets the same 5-minute public cache header as the paginated endpoint', async () => {
+    seed([merchant('m-1', 'A')]);
+    const res = await app.request('/api/merchants/all');
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
+  });
+
+  it('returns an empty array when the catalog is empty (no 404)', async () => {
+    seed([]);
+    const res = await app.request('/api/merchants/all');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { merchants: Merchant[]; total: number };
+    expect(body.merchants).toEqual([]);
+    expect(body.total).toBe(0);
+  });
+
+  it('does not collide with /api/merchants/:id route ordering', async () => {
+    // If /:id were registered first, a request for /all would hit merchantDetailHandler
+    // and return 404. Guard against that regression.
+    seed([merchant('m-1', 'A')]);
+    const res = await app.request('/api/merchants/all');
+    expect(res.status).toBe(200);
+  });
+});
+
 describe('GET /api/merchants/by-slug/:slug', () => {
   it('returns merchant when slug matches', async () => {
     seed([merchant('m-1', 'Home Depot')]);
