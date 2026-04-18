@@ -19,6 +19,7 @@ import { registerBackButton } from '~/native/back-button';
 import { registerAppLockGuard } from '~/native/app-lock';
 import { getPlatform } from '~/native/platform';
 import { setupNotificationChannels } from '~/native/notifications';
+import { setKeyboardAccessoryBarVisible } from '~/native/keyboard';
 import { OfflineBanner } from '~/components/ui/OfflineBanner';
 import { NativeBackButton } from '~/components/features/NativeBackButton';
 import { ToastContainer } from '~/components/ui/ToastContainer';
@@ -121,17 +122,10 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
       void setStatusBarStyle(isDark ? 'dark' : 'light');
       registerBackButton();
 
-      // iOS: enable keyboard accessory bar (Done/Previous/Next)
-      if (getPlatform() === 'ios') {
-        void (async () => {
-          try {
-            const { Keyboard } = await import('@capacitor/keyboard');
-            await Keyboard.setAccessoryBarVisible({ isVisible: true });
-          } catch {
-            /* Keyboard plugin not available */
-          }
-        })();
-      }
+      // iOS: enable keyboard accessory bar (Done/Previous/Next). Wrapper
+      // lives in app/native/ so the @capacitor/keyboard import does not
+      // sit in root.tsx (audit A-005 — Capacitor boundary compliance).
+      void setKeyboardAccessoryBarVisible(true);
 
       // Android: set up notification channels
       if (getPlatform() === 'android') {
