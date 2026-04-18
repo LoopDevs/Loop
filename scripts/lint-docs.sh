@@ -60,6 +60,30 @@ grep "from './" packages/shared/src/index.ts | sed "s/.*from '\.\/\([^']*\)'.*/\
     fi
   done
 
+# ─── 5b. No hardcoded Stellar secret keys anywhere in tracked files ─────────
+#
+# Stellar secret seeds are 56-char Base32 strings starting with 'S'. A
+# pre-audit helper (`scripts/pay-order.mjs`, finding A-001) had one
+# hardcoded; catch any future regression before it gets committed.
+# Scan tracked files only — ignored artifacts are fine, the repo is what
+# we audit. Exclude tests/fixtures/docs that use the literal "S" + 55
+# A's as an obviously-fake placeholder.
+
+echo "Checking for hardcoded Stellar secret keys..."
+# `git ls-files -z` lists tracked files; grep scans across all of them
+# for the seed pattern. `-P` (Perl regex) + `\b` + `[A-Z2-7]{55}` catches
+# real 56-char Base32 seeds. Exclude anything inside docs/ (examples) or
+# the .gitignore history note.
+stellar_secret_hits=$(git ls-files -z \
+  | xargs -0 grep -nPH '\bS[A-Z2-7]{55}\b' 2>/dev/null \
+  | grep -v "docs/\|.gitignore\|CHANGELOG" \
+  | grep -vE "S[A]{55}|SAMPLE|EXAMPLE" \
+  || true)
+if [ -n "$stellar_secret_hits" ]; then
+  err "Possible hardcoded Stellar secret seed in tracked file(s):"
+  echo "$stellar_secret_hits" >&2
+fi
+
 # ─── 6. No removed credentials in source (outside tests) ────────────────────
 
 echo "Checking for removed credential references..."

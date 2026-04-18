@@ -56,8 +56,11 @@ test-results/
 *.postman_collection.json
 *.postman_environment.json
 
-# Test payment script (contains wallet secret key)
-scripts/pay-order.mjs
+# (Removed in audit A-001 — `scripts/pay-order.mjs` used to live here
+# as a gitignored helper that hardcoded the test Stellar secret key.
+# Replaced by `scripts/e2e-real.mjs`, which reads the secret from
+# STELLAR_TEST_SECRET_KEY env. Anyone still carrying a local copy of
+# the old file should `rm scripts/pay-order.mjs`.)
 
 # Misc
 *.db

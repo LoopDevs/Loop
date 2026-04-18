@@ -694,7 +694,7 @@ If `packages/shared` already contains a utility, do not reimplement it in `apps/
 
 These are hard rules. There are no exceptions without explicit documented justification reviewed by a second engineer.
 
-- **No secrets in source code.** API keys, JWT secrets, private keys, and credentials live in environment variables only. Never in `.env` files committed to the repository.
+- **No secrets in source code.** API keys, JWT secrets, private keys, and credentials live in environment variables only. Never in `.env` files committed to the repository. This includes helper/one-off scripts in `scripts/` — if a script needs a wallet seed or API secret it must read from env (see `scripts/e2e-real.mjs`). `scripts/lint-docs.sh` scans tracked files for hardcoded Stellar secret seeds and fails verify/CI on any match.
 - **No access tokens in persistent storage.** Access tokens live in memory (Zustand store) only. They are gone when the app is refreshed/closed.
 - **Refresh tokens on mobile:** Capacitor secure storage only. Not `localStorage`. Not `sessionStorage`. Not `AsyncStorage`.
 - **All inputs validated.** Validate at the API boundary in the backend. Never trust client-supplied data.
