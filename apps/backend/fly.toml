@@ -30,14 +30,21 @@ primary_region = "iad"
     hard_limit = 250
     soft_limit = 200
 
+  # HTTP health check attached to the [http_service] block (modern Fly
+  # syntax). Previously this was a top-level `[[services.http_checks]]`
+  # block without a parent `[[services]]` — which `flyctl config
+  # validate` reported as an orphaned `services` block and the scheduler
+  # silently ignored. Effect: no HTTP health probes were running, so an
+  # instance stuck at 500 would keep serving traffic until a deploy or
+  # manual restart.
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/health"
+
 [[vm]]
   memory = "512mb"
   cpu_kind = "shared"
   cpus = 1
-
-[[services.http_checks]]
-  interval = "15s"
-  timeout = "5s"
-  grace_period = "30s"
-  method = "GET"
-  path = "/health"
