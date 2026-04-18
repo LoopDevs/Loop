@@ -9,6 +9,11 @@ vi.mock('../../env.js', () => ({
     GIFT_CARD_API_BASE_URL: 'http://test-upstream.local',
     REFRESH_INTERVAL_HOURS: 6,
     LOCATION_REFRESH_INTERVAL_HOURS: 24,
+    // Match the zod defaults so the A-036 X-Client-Id allowlist
+    // in `requireAuth` includes `loopweb`/`loopios`/`loopandroid`.
+    CTX_CLIENT_ID_WEB: 'loopweb',
+    CTX_CLIENT_ID_IOS: 'loopios',
+    CTX_CLIENT_ID_ANDROID: 'loopandroid',
   },
 }));
 
@@ -149,6 +154,46 @@ describe('POST /api/orders', () => {
     expect(res.status).toBe(401);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.code).toBe('UNAUTHORIZED');
+  });
+
+  // Audit A-036 — requireAuth drops X-Client-Id values outside the
+  // server-side allowlist. `x-attacker` is not in the env set, so the
+  // upstream request must NOT carry it through.
+  it('drops unknown X-Client-Id values before forwarding upstream (A-036)', async () => {
+    mockGetMerchants.mockReturnValue({
+      merchants: [{ id: 'm-1', name: 'Test' }],
+      merchantsById: new Map([
+        ['m-1', { id: 'm-1', name: 'Test', denominations: { currency: 'USD' } }],
+      ]),
+      merchantsBySlug: new Map(),
+      loadedAt: Date.now(),
+    });
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'order-1',
+          paymentCryptoAmount: '1.0',
+          paymentUrls: { XLM: 'web+stellar:pay?destination=GXXX&amount=1.0&memo=test' },
+          status: 'unpaid',
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await app.request('/api/orders', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-token',
+        'X-Client-Id': 'x-attacker',
+      },
+      body: JSON.stringify({ merchantId: 'm-1', amount: 10 }),
+    });
+
+    const fetchCall = mockFetch.mock.calls[0]!;
+    const fetchInit = fetchCall[1] as RequestInit;
+    const headers = fetchInit.headers as Record<string, string>;
+    expect(headers['X-Client-Id']).toBeUndefined();
   });
 
   it('forwards X-Client-Id header to upstream', async () => {
