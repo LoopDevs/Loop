@@ -423,6 +423,23 @@ app.delete('/api/auth/session', rateLimit(20, 60_000), logoutHandler);
 
 app.use('/api/orders', requireAuth);
 app.use('/api/orders/*', requireAuth);
+
+// Force Cache-Control: private, no-store on every response under
+// /api/orders — these contain a specific user's purchase history and
+// gift-card redemption payloads. Without this, a CDN or intermediate
+// proxy keyed on URL alone (not Authorization) could cache one user's
+// `GET /api/orders` response and serve it to another user's next
+// request. Fly.io itself doesn't proxy-cache, but this removes the
+// footgun before any future edge caching is introduced.
+app.use('/api/orders', async (c, next) => {
+  await next();
+  c.header('Cache-Control', 'private, no-store');
+});
+app.use('/api/orders/*', async (c, next) => {
+  await next();
+  c.header('Cache-Control', 'private, no-store');
+});
+
 app.post('/api/orders', rateLimit(10, 60_000), createOrderHandler);
 app.get('/api/orders', rateLimit(60, 60_000), listOrdersHandler);
 app.get('/api/orders/:id', rateLimit(120, 60_000), getOrderHandler);
