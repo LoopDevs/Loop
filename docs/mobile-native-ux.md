@@ -49,11 +49,15 @@ padding-right: env(safe-area-inset-right);
 ### Viewport meta (in root.tsx)
 
 ```html
-<meta
-  name="viewport"
-  content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
-/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 ```
+
+`maximum-scale=1` / `user-scalable=no` were intentionally dropped in
+PR #143 for WCAG 1.4.4 (Resize Text) compliance on the mobile web
+build — iOS has respected `maximum-scale=1` since iOS 10 regardless
+of `user-scalable=no`, so leaving them in actively blocked low-vision
+users from zooming text. Capacitor's native webview is fine without
+the restriction.
 
 ### Bottom tab bar structure
 
