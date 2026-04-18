@@ -308,11 +308,15 @@ registry.registerPath({
       content: { 'application/json': { schema: ErrorResponse } },
     },
     429: {
-      description: 'Rate limit exceeded',
+      description: 'Rate limit exceeded (5/min per IP)',
       content: { 'application/json': { schema: ErrorResponse } },
     },
     502: {
       description: 'Upstream error',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    503: {
+      description: 'Circuit breaker open — upstream unavailable',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
@@ -335,7 +339,15 @@ registry.registerPath({
       content: { 'application/json': { schema: ErrorResponse } },
     },
     429: {
-      description: 'Rate limit exceeded',
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    502: {
+      description: 'Upstream returned an unexpected shape or non-auth error',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    503: {
+      description: 'Circuit breaker open — upstream unavailable',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
@@ -357,6 +369,18 @@ registry.registerPath({
       description: 'Refresh token invalid',
       content: { 'application/json': { schema: ErrorResponse } },
     },
+    429: {
+      description: 'Rate limit exceeded (30/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    502: {
+      description: 'Upstream transient error — refresh token may still be valid',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    503: {
+      description: 'Circuit breaker open — upstream unavailable',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
   },
 });
 
@@ -370,6 +394,10 @@ registry.registerPath({
     200: {
       description: 'Logged out (always succeeds even if upstream revoke fails)',
       content: { 'application/json': { schema: z.object({ message: z.string() }) } },
+    },
+    429: {
+      description: 'Rate limit exceeded (20/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
     },
   },
 });
