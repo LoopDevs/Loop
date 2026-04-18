@@ -852,38 +852,48 @@ operators need to correlate an auth failure to a specific user.
 
 ### Pipeline runs on every PR and every push to `main`
 
+See `.github/workflows/ci.yml` for the canonical job graph. Current
+structure:
+
 ```yaml
 jobs:
-  quality:
-    - typecheck (all packages)
-    - lint (all packages)
-    - test (all packages, with coverage thresholds)
-    - build:web (SSR mode)
-    - build:mobile (static export)
-    - build:backend
-
-  security:
-    - npm audit (fail on high/critical)
-
-  e2e: # Only on PRs targeting main
-    - playwright tests against preview deployment
+  quality: # typecheck + lint + format:check + lint:docs (flyctl validate)
+  test-unit: # vitest run --coverage on backend and web
+  audit: # npm audit --audit-level=high
+  build: # backend tsup + web SSR build + web mobile static export
+  test-e2e-mocked: # playwright mocked suite — runs on every push (audit A-003)
+  test-e2e: # playwright real-upstream suite — PR-only
+  notify: # Discord status — always, depends on all of the above
 ```
 
 ### Branch protection on `main`
 
-- All CI jobs must pass
-- At least 1 approving review
-- Dismiss stale approvals on new commits
-- No force pushes
-- No direct pushes
+- **Not enforced at the GitHub level.** The repo is private on the
+  free plan; GitHub rejects branch-protection API writes with 403
+  `Upgrade to GitHub Pro or make this repository public to enable
+this feature` (audit A-037 documented this residual risk in
+  ADR-005). The "no direct push / require PR / require passing
+  checks" rules are team convention only.
+- **When the plan upgrades** (or the repo flips public), flip on:
+  all CI jobs must pass, at least 1 approving review, dismiss
+  stale approvals on new commits, no force pushes, no direct
+  pushes.
 
-### Environment promotion
+### Deployment
+
+Deploys are currently **manual** via `fly deploy`, not automated
+from CI:
 
 ```
-feature branch → preview deploy (automatic, ephemeral)
-main           → staging deploy (automatic)
-git tag vX.Y.Z → production deploy (manual trigger)
+feature branch → local verify + CI green
+main           → maintainer runs `fly deploy` from apps/backend
+               + `fly deploy` from apps/web after review
+git tag        → not yet wired to a release pipeline
 ```
+
+An automated deploy pipeline is on the roadmap (see
+`docs/roadmap.md` §Production infrastructure) once the repo /
+org reaches a plan that unlocks it.
 
 ---
 
