@@ -65,7 +65,8 @@ npm run format               # Prettier across all packages
 
 # Tests
 npm test                     # Unit tests across all packages (vitest)
-npm run test:e2e             # Playwright end-to-end tests
+npm run test:e2e             # Playwright e2e — self-contained mocked suite (default)
+npm run test:e2e:real        # Playwright e2e — requires a running real-CTX backend
 
 # Proto
 npm run proto:generate       # buf generate → packages/shared/src/proto/

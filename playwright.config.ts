@@ -1,5 +1,20 @@
 import { defineConfig, devices } from '@playwright/test';
 
+/**
+ * Playwright config for the REAL-UPSTREAM end-to-end suite.
+ *
+ * Run via `npm run test:e2e:real`. This config assumes a real backend is
+ * already running locally against production CTX (see
+ * `docs/development.md`); it only boots the web dev server.
+ *
+ * Before audit A-003 this config was bound to `npm run test:e2e`, which
+ * silently required a local backend that most developers did not have
+ * running — purchase-flow tests failed with missing merchant data because
+ * the web app had no API to talk to. `test:e2e` now defaults to the
+ * self-contained mocked config (`playwright.mocked.config.ts`), and this
+ * real-upstream suite has been moved to `test:e2e:real` as the explicit
+ * opt-in.
+ */
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
