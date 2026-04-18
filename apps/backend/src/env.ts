@@ -2,6 +2,33 @@ import { z } from 'zod';
 import { DEFAULT_CLIENT_IDS } from '@loop/shared';
 
 /**
+ * Parses a process.env boolean the way operators actually write them.
+ *
+ * `z.coerce.boolean()` is a footgun here: it uses JavaScript's truthy
+ * semantics, so `"false"`, `"0"`, and `"no"` all coerce to `true`
+ * (any non-empty string is truthy). An operator setting
+ * `TRUST_PROXY=false` would silently enable X-Forwarded-For trust —
+ * the opposite of what they wrote.
+ *
+ * Accept a small set of conventional strings, case-insensitive:
+ * - true / 1 / yes / on → true
+ * - false / 0 / no / off / "" → false
+ * Anything else rejects with a clear validation error rather than
+ * picking a direction silently.
+ */
+const envBoolean = z.union([z.boolean(), z.string()]).transform((v, ctx) => {
+  if (typeof v === 'boolean') return v;
+  const s = v.trim().toLowerCase();
+  if (s === 'true' || s === '1' || s === 'yes' || s === 'on') return true;
+  if (s === 'false' || s === '0' || s === 'no' || s === 'off' || s === '') return false;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    message: `expected boolean (true/false/1/0/yes/no/on/off), got ${JSON.stringify(v)}`,
+  });
+  return z.NEVER;
+});
+
+/**
  * Environment schema. Exported for testing; the validated `env` object
  * is what production code should consume.
  */
@@ -43,7 +70,7 @@ export const EnvSchema = z.object({
   LOCATION_REFRESH_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
 
   // Dev mode: include disabled merchants so UI can be tested before CTX enables them
-  INCLUDE_DISABLED_MERCHANTS: z.coerce.boolean().default(false),
+  INCLUDE_DISABLED_MERCHANTS: envBoolean.default(false),
 
   // Image proxy: comma-separated list of allowed hostnames.
   // If set, only URLs from these hosts are fetched. Recommended in production.
@@ -56,7 +83,7 @@ export const EnvSchema = z.object({
   // back to the TCP socket's remote address so an arbitrary client cannot
   // spoof its own IP to bypass per-IP limits. Default `false` — prod
   // deployments set it to `true` explicitly via `fly.toml`.
-  TRUST_PROXY: z.coerce.boolean().default(false),
+  TRUST_PROXY: envBoolean.default(false),
 
   // Discord webhooks (optional — for notifications)
   DISCORD_WEBHOOK_ORDERS: z.string().url().optional(),
