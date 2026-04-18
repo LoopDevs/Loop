@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { Link } from 'react-router';
 import type { Merchant } from '@loop/shared';
 import { merchantSlug } from '@loop/shared';
@@ -20,13 +21,45 @@ export function MapBottomSheet({ merchant, onClose }: MapBottomSheetProps): Reac
   const logoUrl = merchant.logoUrl ? getImageProxyUrl(merchant.logoUrl, 80) : undefined;
   const slug = merchantSlug(merchant.name);
 
+  // Keyboard dismiss + focus the primary action so tab-key users don't
+  // land on the invisible backdrop. The onClick-on-backdrop path dismissed
+  // for mouse/touch users but left keyboard users stuck in the sheet's
+  // parent — Escape now closes, and the Buy button gets focus on open.
+  const primaryActionRef = useRef<HTMLAnchorElement | null>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    primaryActionRef.current?.focus();
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
     <>
-      {/* Backdrop */}
-      <div className="fixed inset-0 z-[1000] bg-black/40 animate-fade-in" onClick={onClose} />
+      {/* Backdrop. role=button + keyboard handler so assistive tech can
+          dismiss the sheet without a mouse; Escape also closes it. */}
+      <div
+        role="button"
+        tabIndex={-1}
+        aria-label="Close merchant details"
+        className="fixed inset-0 z-[1000] bg-black/40 animate-fade-in"
+        onClick={onClose}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onClose();
+          }
+        }}
+      />
 
       {/* Sheet */}
-      <div className="fixed bottom-0 left-0 right-0 z-[1001] animate-slide-up native-safe-bottom">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${merchant.name} details`}
+        className="fixed bottom-0 left-0 right-0 z-[1001] animate-slide-up native-safe-bottom"
+      >
         <div className="bg-white dark:bg-gray-900 rounded-t-2xl shadow-2xl overflow-hidden max-w-lg mx-auto">
           {/* Drag handle */}
           <div className="flex justify-center py-2">
@@ -80,6 +113,7 @@ export function MapBottomSheet({ merchant, onClose }: MapBottomSheetProps): Reac
             </div>
 
             <Link
+              ref={primaryActionRef}
               to={`/gift-card/${encodeURIComponent(slug)}`}
               onClick={() => {
                 void triggerHaptic();
