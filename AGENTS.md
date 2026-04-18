@@ -16,7 +16,7 @@
 | `docs/audit-checklist.md`           | Detailed audit checklist by workstream                 |
 | `docs/audit-tracker.md`             | Working tracker for evidence, findings, and status     |
 | `docs/adr/`                         | Architecture Decision Records                          |
-| `docs/adr/002-known-limitations.md` | Items we deliberately do NOT fix in Phase 1            |
+| `docs/adr/005-known-limitations.md` | Items we deliberately do NOT fix in Phase 1            |
 
 ---
 
