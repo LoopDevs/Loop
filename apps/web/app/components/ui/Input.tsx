@@ -31,6 +31,14 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     const [focused, setFocused] = useState(false);
     const generatedId = useId();
     const inputId = id ?? (label !== undefined ? generatedId : undefined);
+    // Stable ids for the error / hint nodes so `aria-describedby` can
+    // point at them. Without this, AT users heard the input label but
+    // got no association to the error message displayed below it (it
+    // rendered silently next to the field). `aria-invalid` also flips
+    // when `error` is set so the state is announced on focus.
+    const errorId = error !== undefined && inputId !== undefined ? `${inputId}-error` : undefined;
+    const hintId = hint !== undefined && inputId !== undefined ? `${inputId}-hint` : undefined;
+    const describedBy = [errorId, hintId].filter((v): v is string => v !== undefined).join(' ');
 
     const borderClass =
       error !== undefined
@@ -73,6 +81,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             id={inputId}
             type={type}
             required={required}
+            aria-invalid={error !== undefined ? true : undefined}
+            aria-describedby={describedBy !== '' ? describedBy : undefined}
             className={inputClass}
             onChange={(e) => onChange?.(e.target.value)}
             onFocus={(e) => {
@@ -93,10 +103,14 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           )}
         </div>
         {error !== undefined && (
-          <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>
+          <p id={errorId} className="mt-1 text-sm text-red-600 dark:text-red-400">
+            {error}
+          </p>
         )}
         {hint !== undefined && error === undefined && (
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{hint}</p>
+          <p id={hintId} className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            {hint}
+          </p>
         )}
       </div>
     );
