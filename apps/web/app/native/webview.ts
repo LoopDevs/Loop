@@ -30,6 +30,13 @@ function assertSafeUrl(url: string): void {
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
     throw new Error(`openWebView: only http(s) URLs are allowed (got ${parsed.protocol})`);
   }
+  // Reject URLs with embedded credentials — `https://user:pass@evil.com`
+  // parses cleanly but is a classic phishing vector: the prefix lets the
+  // attacker mask the true host in older WebView chrome, and CTX has no
+  // legitimate reason to return a redeem URL with userinfo. Fail closed.
+  if (parsed.username !== '' || parsed.password !== '') {
+    throw new Error('openWebView: URLs with embedded credentials are not allowed');
+  }
   const isProduction = typeof import.meta.env !== 'undefined' && import.meta.env.PROD === true;
   if (isProduction && parsed.protocol === 'http:') {
     throw new Error(

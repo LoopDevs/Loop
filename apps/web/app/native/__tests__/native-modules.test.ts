@@ -547,6 +547,19 @@ describe('webview', () => {
     }
   });
 
+  it('rejects URLs with embedded credentials (phishing vector)', async () => {
+    const openFn = vi.fn();
+    (window as unknown as Record<string, unknown>).open = openFn;
+
+    await expect(openWebView({ url: 'https://user:pass@redeem.test/abc' })).rejects.toThrow(
+      /embedded credentials/,
+    );
+    await expect(openWebView({ url: 'https://user@redeem.test/abc' })).rejects.toThrow(
+      /embedded credentials/,
+    );
+    expect(openFn).not.toHaveBeenCalled();
+  });
+
   it('surfaces popup-blocker rejection when window.open returns null', async () => {
     // Popup blockers make window.open return null. Before this fix, the
     // controller was silently a no-op and the caller's "redeeming…" UI
