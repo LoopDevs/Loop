@@ -23,6 +23,18 @@ function clientIdForPlatform(platform: 'web' | 'ios' | 'android'): string {
   return env.CTX_CLIENT_ID_WEB;
 }
 
+/**
+ * Every client ID we're prepared to forward upstream. Audit A-036 flagged
+ * that `requireAuth` previously echoed whatever `X-Client-Id` a client sent
+ * straight into the upstream CTX request, so a compromised client could
+ * pick an arbitrary entity context. Restrict to the three values we set at
+ * auth time (web / ios / android), resolved from the same env vars used
+ * by `clientIdForPlatform`.
+ */
+function allowedClientIds(): ReadonlySet<string> {
+  return new Set([env.CTX_CLIENT_ID_WEB, env.CTX_CLIENT_ID_IOS, env.CTX_CLIENT_ID_ANDROID]);
+}
+
 // Upstream response schemas — validate before forwarding to client
 const VerifyOtpUpstreamResponse = z.object({
   accessToken: z.string().min(1),
@@ -280,10 +292,16 @@ export async function requireAuth(c: Context, next: () => Promise<void>): Promis
 
   c.set('bearerToken', token);
 
-  // Forward X-Client-Id if present — CTX uses this to determine entity context
+  // Forward X-Client-Id if present — CTX uses this to determine entity
+  // context. Only honor values from the server-side allowlist (audit A-036);
+  // an untrusted or unknown value is dropped rather than forwarded, which
+  // makes the downstream handler fall back to the default CTX client
+  // binding rather than a client-supplied one.
   const clientId = c.req.header('X-Client-Id');
-  if (clientId) {
+  if (clientId !== undefined && allowedClientIds().has(clientId)) {
     c.set('clientId', clientId);
+  } else if (clientId !== undefined) {
+    log.warn({ clientId }, 'Rejected untrusted X-Client-Id value on authenticated request');
   }
 
   await next();

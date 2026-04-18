@@ -9,6 +9,11 @@ vi.mock('../env.js', () => ({
     GIFT_CARD_API_BASE_URL: 'http://test-upstream.local',
     REFRESH_INTERVAL_HOURS: 6,
     LOCATION_REFRESH_INTERVAL_HOURS: 24,
+    // Mirror zod defaults so the A-036 X-Client-Id allowlist in
+    // requireAuth doesn't drop the default values.
+    CTX_CLIENT_ID_WEB: 'loopweb',
+    CTX_CLIENT_ID_IOS: 'loopios',
+    CTX_CLIENT_ID_ANDROID: 'loopandroid',
   },
 }));
 
