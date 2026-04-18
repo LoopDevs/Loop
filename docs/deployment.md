@@ -164,10 +164,13 @@ cd apps/web && fly certs add loopfinance.io && fly certs add www.loopfinance.io
    cd apps/web && npm run build:mobile
    ```
 
-2. Sync to native projects:
+2. Sync to native projects, then re-apply the overlays so audit
+   A-033 (Android backup rules) and A-034
+   (`NSFaceIDUsageDescription`) survive the regeneration:
    ```bash
-   cd apps/mobile && npx cap sync
+   cd apps/mobile && npx cap sync && ./scripts/apply-native-overlays.sh
    ```
+   The overlay script is idempotent — safe to run every time.
 
 ### iOS (App Store)
 

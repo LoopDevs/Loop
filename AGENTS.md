@@ -57,7 +57,10 @@ npm run build                # Build all packages
 cd apps/web && npm run build:mobile   # Static export for Capacitor
 
 # Mobile (after web build)
-cd apps/mobile && npx cap sync && npx cap open ios
+cd apps/mobile && npx cap sync && ./scripts/apply-native-overlays.sh && npx cap open ios
+# apply-native-overlays.sh is idempotent; re-run after every cap sync so
+# audit A-033 (Android backup rules) and A-034 (NSFaceIDUsageDescription)
+# survive the native-project regeneration (ADR-007).
 
 # Code quality
 npm run verify               # typecheck + lint + test (one command)
