@@ -1,6 +1,6 @@
 # Audit Checklist
 
-Use this with [docs/codebase-audit.md](docs/codebase-audit.md) and record progress in [docs/audit-tracker.md](docs/audit-tracker.md).
+Use this with [`codebase-audit.md`](codebase-audit.md) and record progress in [`audit-tracker.md`](audit-tracker.md).
 
 ## How To Use This Checklist
 
