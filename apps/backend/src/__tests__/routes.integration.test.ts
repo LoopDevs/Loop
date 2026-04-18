@@ -79,7 +79,7 @@ vi.mock('../circuit-breaker.js', () => {
   };
 });
 
-import { app } from '../app.js';
+import { app, __resetHealthProbeCacheForTests } from '../app.js';
 
 // Mock global fetch for upstream proxy calls
 const mockFetch = vi.fn();
@@ -87,6 +87,11 @@ vi.stubGlobal('fetch', mockFetch);
 
 beforeEach(() => {
   mockFetch.mockReset();
+  // /health caches the upstream reachability probe for 10s so external
+  // spammers don't turn into an outbound fetch amplifier. Invalidate the
+  // cache between cases so the reachable→unreachable transition is
+  // observable inside a single test run.
+  __resetHealthProbeCacheForTests();
 });
 
 describe('GET /health', () => {
@@ -114,6 +119,22 @@ describe('GET /health', () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.status).toBe('degraded');
     expect(body.upstreamReachable).toBe(false);
+  });
+
+  it('caches the upstream probe so bursts of /health do not amplify outbound traffic', async () => {
+    mockFetch.mockResolvedValue(new Response('ok', { status: 200 }));
+
+    // First call triggers a probe; next 4 within the TTL should reuse it.
+    await app.request('/health');
+    await app.request('/health');
+    await app.request('/health');
+    await app.request('/health');
+    await app.request('/health');
+
+    // The upstream status probe calls go through mockFetch; requireAuth
+    // and other handlers don't run for /health, so every fetch call is
+    // the probe. Exactly one probe should have fired for 5 inbound calls.
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });
 

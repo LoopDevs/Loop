@@ -96,6 +96,18 @@ export function __resetRateLimitsForTests(): void {
   rateLimitMap.clear();
 }
 
+/**
+ * Test helper: clear the /health upstream-probe cache. The `/health`
+ * handler caches the upstream fetch result for 10s so that external
+ * spammers don't generate outbound traffic proportional to inbound.
+ * Tests that simulate upstream reachability changes need to invalidate
+ * the cache between cases to observe the transition.
+ */
+export function __resetHealthProbeCacheForTests(): void {
+  upstreamProbeCache = null;
+  upstreamProbeInFlight = null;
+}
+
 // Cap on the rate-limit map. Without this, an attacker spraying requests
 // from fresh IPs faster than the hourly cleanup runs could grow the map
 // until the process OOMs. With the cap, once we hit it we evict the
@@ -288,6 +300,42 @@ app.get('/openapi.json', (c) =>
 
 let lastHealthStatus: 'healthy' | 'degraded' | null = null;
 
+// Cache the upstream reachability probe: `/health` is unauthenticated and
+// unrate-limited (Fly.io probes it every 15s, k8s-ish liveness patterns also
+// do the same). Without a cache every external call — including from an
+// attacker spamming the endpoint — triggers a fresh outbound fetch to CTX,
+// which both generates upstream load we don't want to be responsible for
+// and burns our local socket budget. 10s is shorter than the Fly probe
+// interval so the cached value is always the one from the last probe.
+const UPSTREAM_PROBE_TTL_MS = 10_000;
+let upstreamProbeCache: { reachable: boolean; at: number } | null = null;
+let upstreamProbeInFlight: Promise<boolean> | null = null;
+
+async function probeUpstream(): Promise<boolean> {
+  const now = Date.now();
+  if (upstreamProbeCache !== null && now - upstreamProbeCache.at < UPSTREAM_PROBE_TTL_MS) {
+    return upstreamProbeCache.reachable;
+  }
+  // Coalesce concurrent probes — a burst of /health requests that arrive
+  // within the TTL window should share one outbound fetch, not each fire
+  // their own.
+  if (upstreamProbeInFlight !== null) return upstreamProbeInFlight;
+
+  upstreamProbeInFlight = (async () => {
+    let reachable = true;
+    try {
+      const res = await fetch(upstreamUrl('/status'), { signal: AbortSignal.timeout(3000) });
+      reachable = res.ok;
+    } catch {
+      reachable = false;
+    }
+    upstreamProbeCache = { reachable, at: Date.now() };
+    upstreamProbeInFlight = null;
+    return reachable;
+  })();
+  return upstreamProbeInFlight;
+}
+
 app.get('/health', async (c) => {
   const { locations, loadedAt: locLoadedAt } = getLocations();
   const { merchants, loadedAt: merLoadedAt } = getMerchants();
@@ -299,14 +347,7 @@ app.get('/health', async (c) => {
   const merchantsStale = now - merLoadedAt > merchantStaleMs;
   const locationsStale = now - locLoadedAt > locationStaleMs;
 
-  // Quick upstream probe (non-blocking, 3s timeout)
-  let upstreamReachable = true;
-  try {
-    const res = await fetch(upstreamUrl('/status'), { signal: AbortSignal.timeout(3000) });
-    upstreamReachable = res.ok;
-  } catch {
-    upstreamReachable = false;
-  }
+  const upstreamReachable = await probeUpstream();
 
   const degraded = merchantsStale || locationsStale || !upstreamReachable;
 
