@@ -4,10 +4,10 @@ import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
-import { logger as honoLogger } from 'hono/logger';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { sentry, captureException } from '@sentry/hono/node';
 import { env } from './env.js';
+import { logger } from './logger.js';
 import { getLocations, isLocationLoading } from './clustering/data-store.js';
 import { getMerchants } from './merchants/sync.js';
 import { clustersHandler } from './clustering/handler.js';
@@ -169,7 +169,29 @@ app.use(
 );
 app.use('*', bodyLimit({ maxSize: 1024 * 1024 }));
 app.use('*', requestId());
-app.use('*', honoLogger());
+
+// Audit A-021: replace the default `hono/logger` with a Pino-backed
+// access logger so request logs share the same structure, redaction
+// list, and transport as the rest of the backend. Uses the `X-Request-Id`
+// the preceding middleware attaches so every access log correlates with
+// the handler-side logs for the same request.
+const accessLog = logger.child({ component: 'access' });
+app.use('*', async (c, next) => {
+  const start = Date.now();
+  await next();
+  const ms = Date.now() - start;
+  const status = c.res.status;
+  accessLog.info(
+    {
+      method: c.req.method,
+      path: c.req.path,
+      status,
+      durationMs: ms,
+      requestId: c.req.header('X-Request-Id'),
+    },
+    `${c.req.method} ${c.req.path} ${status} ${ms}ms`,
+  );
+});
 
 // ─── Metrics ─────────────────────────────────────────────────────────────────
 
