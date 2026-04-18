@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Map as LeafletMap, Layer } from 'leaflet';
 import type * as LeafletNamespace from 'leaflet';
 import type { ClusterParams, ClusterResponse } from '@loop/shared';
-import { merchantSlug } from '@loop/shared';
+import { ApiException, merchantSlug } from '@loop/shared';
+import * as Sentry from '@sentry/react';
 import { fetchClusters } from '~/services/clusters';
 import { getImageProxyUrl } from '~/utils/image';
 import { useAllMerchants } from '~/hooks/use-merchants';
@@ -86,10 +87,27 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
       let data: ClusterResponse;
       try {
         data = await fetchClusters(params, controller.signal);
-      } catch {
-        // Either the request was aborted by a newer call (expected — the new
-        // one will render its own markers) or a real error fell through to
-        // the error boundary. Either way, this stale call does nothing.
+      } catch (err) {
+        // Audit A-015: previously the catch swallowed everything silently
+        // and claimed errors "fell through to the error boundary" — they
+        // couldn't, because the catch was here. Distinguish now:
+        //
+        //   - aborts (newer fetch superseded this one) are expected; stay silent.
+        //   - everything else is a real failure. Surface a status banner so
+        //     the user knows the map isn't live and report to Sentry so we
+        //     notice systemic failures in prod.
+        const isAbort = err instanceof ApiException && err.code === 'TIMEOUT';
+        if (!isAbort) {
+          setStatus(
+            `Map data unavailable (${err instanceof ApiException ? err.code : 'unknown'}). Pan or zoom to retry.`,
+          );
+          if (err instanceof Error) {
+            Sentry.captureException(err, {
+              tags: { area: 'map.cluster-fetch' },
+              extra: { params },
+            });
+          }
+        }
         return;
       }
       // If another fetch started while we were awaiting, let it render.
