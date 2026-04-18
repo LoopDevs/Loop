@@ -122,18 +122,48 @@ Each package has its own `AGENTS.md` with file structure, patterns, and recipes:
 VITE_API_URL=http://localhost:8080
 # VITE_SENTRY_DSN=<dsn>               — optional, Sentry error tracking for web
 
-# apps/backend/.env (git-ignored — see apps/backend/.env.example)
+# apps/backend/.env (git-ignored — `apps/backend/.env.example` is the
+# authoritative reference; `scripts/lint-docs.sh` enforces parity with
+# `env.ts`. This summary is a quick-look; keep it in sync when you add
+# a new var.)
 GIFT_CARD_API_BASE_URL=https://spend.ctx.com
-# Optional:
-# GIFT_CARD_API_KEY=<key>              — needed for /locations endpoint
-# GIFT_CARD_API_SECRET=<secret>        — needed for /locations endpoint
-# CTX_CLIENT_ID_WEB=loopweb           — client ID for web auth (default: loopweb)
-# CTX_CLIENT_ID_IOS=loopios           — client ID for iOS auth (default: loopios)
-# CTX_CLIENT_ID_ANDROID=loopandroid   — client ID for Android auth (default: loopandroid)
-# INCLUDE_DISABLED_MERCHANTS=true      — dev mode: show disabled merchants
-# SENTRY_DSN=<dsn>                    — optional, Sentry error tracking for backend
-# DISCORD_WEBHOOK_ORDERS=<url>        — optional, Discord webhook for order notifications
-# DISCORD_WEBHOOK_MONITORING=<url>    — optional, Discord webhook for health/circuit breaker alerts
+
+# Production-required (audit A-025) — boot fails without it in
+# NODE_ENV=production unless DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1
+# IMAGE_PROXY_ALLOWED_HOSTS=spend.ctx.com,ctx-spend.s3.us-west-2.amazonaws.com
+
+# Rate-limiter trust boundary (audit A-023). Set `true` only when
+# behind a trusted edge proxy (Fly.io, Cloudflare) — otherwise clients
+# can spoof X-Forwarded-For and bypass per-IP limits.
+# TRUST_PROXY=true
+
+# Optional: API credentials for endpoints that require auth (/locations)
+# GIFT_CARD_API_KEY=<key>
+# GIFT_CARD_API_SECRET=<secret>
+
+# CTX client IDs (audit A-018) — override per-deployment; the web
+# bundle bakes DEFAULT_CLIENT_IDS from @loop/shared at build time, so
+# divergence emits a boot warn.
+# CTX_CLIENT_ID_WEB=loopweb
+# CTX_CLIENT_ID_IOS=loopios
+# CTX_CLIENT_ID_ANDROID=loopandroid
+
+# Dev mode: show disabled merchants
+# INCLUDE_DISABLED_MERCHANTS=true
+
+# Refresh cadences
+# REFRESH_INTERVAL_HOURS=6
+# LOCATION_REFRESH_INTERVAL_HOURS=24
+
+# Runtime
+# PORT=8080
+# NODE_ENV=development
+# LOG_LEVEL=info                      — trace|debug|info|warn|error|fatal|silent
+
+# Observability
+# SENTRY_DSN=<dsn>
+# DISCORD_WEBHOOK_ORDERS=<url>
+# DISCORD_WEBHOOK_MONITORING=<url>
 ```
 
 Full env var docs → `docs/development.md`.
