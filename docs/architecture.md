@@ -133,7 +133,7 @@ Both web and backend use dynamic import for proto types with JSON fallback — s
 
 ## Circuit breaker
 
-All upstream API calls (auth, orders, merchant sync, location sync) are routed through a shared circuit breaker (`apps/backend/src/circuit-breaker.ts`). This prevents cascading failures when the upstream gift card API is down.
+All upstream API calls (auth, orders, merchant sync, location sync) are routed through an endpoint-scoped circuit breaker (`apps/backend/src/circuit-breaker.ts`, `getUpstreamCircuit(key)`). This prevents cascading failures when a specific upstream endpoint is down, without tripping healthy ones.
 
 ```
 CLOSED ──(N consecutive failures)──→ OPEN ──(cooldown elapsed)──→ HALF_OPEN
@@ -213,12 +213,17 @@ Our backend maps CTX API responses to Loop's internal types. Key transformations
 
 ### Order status
 
-| CTX status  | Loop status |
-| ----------- | ----------- |
-| `unpaid`    | `pending`   |
-| `fulfilled` | `completed` |
-| `expired`   | `expired`   |
-| `refunded`  | `failed`    |
+`mapStatus()` in `apps/backend/src/orders/handler.ts` is the source of
+truth; unknown values default to `pending` and log a warn so schema drift
+surfaces in ops logs.
+
+| CTX status                                | Loop status               |
+| ----------------------------------------- | ------------------------- |
+| `fulfilled`                               | `completed`               |
+| `expired`                                 | `expired`                 |
+| `refunded`                                | `failed`                  |
+| `unpaid`, `processing`, `paid`, `pending` | `pending`                 |
+| anything else                             | `pending` (with warn log) |
 
 ### Order detail (`GET /gift-cards/:id`)
 
