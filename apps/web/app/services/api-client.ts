@@ -1,4 +1,4 @@
-import { ApiException } from '@loop/shared';
+import { ApiException, DEFAULT_CLIENT_IDS } from '@loop/shared';
 import type { ApiError } from '@loop/shared';
 import { API_BASE } from './config';
 
@@ -186,10 +186,13 @@ export async function authenticatedRequest<T>(
   const store = useAuthStore.getState();
   let token = store.accessToken;
 
-  // Map platform to CTX client ID
+  // Map platform to CTX client ID. `DEFAULT_CLIENT_IDS` in @loop/shared is
+  // the single source of truth for these values — the backend's env
+  // defaults and allowlist in `requireAuth()` read from the same constant,
+  // so a rename propagates atomically and the backend warns if an env
+  // override diverges from it (audit A-018).
   const platform = getPlatform();
-  const clientIdMap = { web: 'loopweb', ios: 'loopios', android: 'loopandroid' } as const;
-  const clientId = clientIdMap[platform] ?? 'loopweb';
+  const clientId = DEFAULT_CLIENT_IDS[platform] ?? DEFAULT_CLIENT_IDS.web;
 
   // If no token in memory, try to refresh before the first attempt. Because
   // `tryRefresh` coalesces concurrent callers into a single underlying

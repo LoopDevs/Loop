@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_CLIENT_IDS } from '@loop/shared';
 
 /**
  * Environment schema. Exported for testing; the validated `env` object
@@ -23,10 +24,16 @@ export const EnvSchema = z.object({
     .refine((u) => u.startsWith('http://') || u.startsWith('https://'), {
       message: 'must use http or https protocol',
     }),
-  // Client IDs for upstream auth — one per platform
-  CTX_CLIENT_ID_WEB: z.string().default('loopweb'),
-  CTX_CLIENT_ID_IOS: z.string().default('loopios'),
-  CTX_CLIENT_ID_ANDROID: z.string().default('loopandroid'),
+  // Client IDs for upstream auth — one per platform. Defaults come from
+  // `@loop/shared/DEFAULT_CLIENT_IDS` so `apps/web` (which sends
+  // `X-Client-Id`) and the backend allowlist in `requireAuth()` can't
+  // drift silently (audit A-018). Env overrides stay supported for
+  // per-deployment variation; `parseEnv` warns below if the effective
+  // value diverges from the shared default so operators remember to
+  // update the web bundle too.
+  CTX_CLIENT_ID_WEB: z.string().default(DEFAULT_CLIENT_IDS.web),
+  CTX_CLIENT_ID_IOS: z.string().default(DEFAULT_CLIENT_IDS.ios),
+  CTX_CLIENT_ID_ANDROID: z.string().default(DEFAULT_CLIENT_IDS.android),
   // Optional API credentials — needed for endpoints that require auth (e.g. /locations)
   GIFT_CARD_API_KEY: z.string().optional(),
   GIFT_CARD_API_SECRET: z.string().optional(),
@@ -84,6 +91,43 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     // eslint-disable-next-line no-console
     console.warn(
       '[env] INCLUDE_DISABLED_MERCHANTS=true in production — disabled merchants will be visible to end users',
+    );
+  }
+
+  // Audit A-018: operators can override client IDs per environment, but
+  // the web bundle hardcodes `DEFAULT_CLIENT_IDS` (via @loop/shared) at
+  // build time. Warn when the effective server value diverges from that
+  // default so the operator knows to rebuild the web app with matching
+  // values, or the client-id allowlist in `requireAuth()` will reject
+  // authenticated requests after login.
+  const divergentClientIds: Array<[string, string, string]> = [];
+  if (parsed.data.CTX_CLIENT_ID_WEB !== DEFAULT_CLIENT_IDS.web) {
+    divergentClientIds.push([
+      'CTX_CLIENT_ID_WEB',
+      parsed.data.CTX_CLIENT_ID_WEB,
+      DEFAULT_CLIENT_IDS.web,
+    ]);
+  }
+  if (parsed.data.CTX_CLIENT_ID_IOS !== DEFAULT_CLIENT_IDS.ios) {
+    divergentClientIds.push([
+      'CTX_CLIENT_ID_IOS',
+      parsed.data.CTX_CLIENT_ID_IOS,
+      DEFAULT_CLIENT_IDS.ios,
+    ]);
+  }
+  if (parsed.data.CTX_CLIENT_ID_ANDROID !== DEFAULT_CLIENT_IDS.android) {
+    divergentClientIds.push([
+      'CTX_CLIENT_ID_ANDROID',
+      parsed.data.CTX_CLIENT_ID_ANDROID,
+      DEFAULT_CLIENT_IDS.android,
+    ]);
+  }
+  for (const [name, actual, expected] of divergentClientIds) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[env] ${name}=${actual} differs from @loop/shared DEFAULT_CLIENT_IDS (${expected}). ` +
+        `The web bundle sends X-Client-Id from the shared constant, so authenticated requests will ` +
+        `fail the X-Client-Id allowlist (audit A-036) until apps/web is rebuilt with a matching value.`,
     );
   }
 

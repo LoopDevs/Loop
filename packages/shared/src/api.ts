@@ -27,6 +27,25 @@ export class ApiException extends Error {
 export type Platform = 'web' | 'ios' | 'android';
 
 /**
+ * Default CTX client IDs per platform. Single source of truth shared by
+ * `apps/web` (sends `X-Client-Id` on authenticated requests) and
+ * `apps/backend` (env defaults for `CTX_CLIENT_ID_*` + allowlist in
+ * `requireAuth`). Hardcoding the mapping on both sides would let them
+ * drift — web would keep sending `loopweb` if backend rolled over to a
+ * new client ID for a migration — so both sides import from here.
+ *
+ * Backend can still override via env vars, but the backend's boot-time
+ * warning (see `parseEnv` in apps/backend/src/env.ts) flags when the
+ * effective value diverges from this default so operators know to
+ * update the web bundle too.
+ */
+export const DEFAULT_CLIENT_IDS: Record<Platform, string> = {
+  web: 'loopweb',
+  ios: 'loopios',
+  android: 'loopandroid',
+};
+
+/**
  * Standard API error codes. Kept in sync with every `{ code: '...' }` returned
  * by the backend so the frontend can `switch` on `ApiErrorCodeValue` instead
  * of comparing to untyped string literals.
