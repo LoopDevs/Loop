@@ -203,9 +203,14 @@ In Android Studio:
 docker build -t loopfinance-api -f apps/backend/Dockerfile .
 docker build -t loop-web -f apps/web/Dockerfile .
 
-# Run backend
+# Run backend — the Dockerfile hardcodes NODE_ENV=production, so the
+# audit A-025 allowlist is required; either set IMAGE_PROXY_ALLOWED_HOSTS
+# (preferred) or set DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1 to skip
+# the production boot check for quick local tests.
 docker run -p 8080:8080 \
   -e GIFT_CARD_API_BASE_URL=https://spend.ctx.com \
+  -e IMAGE_PROXY_ALLOWED_HOSTS=spend.ctx.com,ctx-spend.s3.us-west-2.amazonaws.com \
+  -e TRUST_PROXY=false \
   loopfinance-api
 
 # Run web
