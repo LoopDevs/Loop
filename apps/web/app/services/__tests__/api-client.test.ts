@@ -8,10 +8,11 @@ vi.mock('~/services/config', () => ({ API_BASE: 'http://test-api' }));
 // exported function — unused ones are no-ops.
 const mockGetRefreshToken = vi.fn<() => Promise<string | null>>();
 const mockStoreRefreshToken = vi.fn<(token: string) => Promise<void>>();
+const mockClearRefreshToken = vi.fn<() => Promise<void>>();
 vi.mock('~/native/secure-storage', () => ({
   getRefreshToken: () => mockGetRefreshToken(),
   storeRefreshToken: (t: string) => mockStoreRefreshToken(t),
-  clearRefreshToken: vi.fn(async () => undefined),
+  clearRefreshToken: () => mockClearRefreshToken(),
   storeEmail: vi.fn(async () => undefined),
   getEmail: vi.fn(async () => null),
 }));
@@ -169,8 +170,14 @@ describe('tryRefresh', () => {
     vi.restoreAllMocks();
     mockGetRefreshToken.mockReset();
     mockStoreRefreshToken.mockReset();
+    mockClearRefreshToken.mockResolvedValue();
     mockGetPlatform.mockReturnValue('web');
+    // `clearSession()` itself calls `clearRefreshToken()` via the mock, so
+    // reset the spy AFTER clearing auth state — otherwise every test
+    // starts at callCount === 1 and the "not called" assertions below
+    // fail spuriously.
     useAuthStore.getState().clearSession();
+    mockClearRefreshToken.mockClear();
   });
 
   it('returns null when no refresh token is stored', async () => {
@@ -223,6 +230,44 @@ describe('tryRefresh', () => {
     expect(b).toBe('at-coalesced');
     expect(c).toBe('at-coalesced');
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears the stored refresh token on definitive rejection (audit A-020)', async () => {
+    mockGetRefreshToken.mockResolvedValue('rt-expired');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ code: 'UNAUTHORIZED', message: 'expired' }), { status: 401 }),
+    );
+    const token = await tryRefresh();
+    expect(token).toBeNull();
+    expect(mockClearRefreshToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the stored refresh token on transient 5xx failure (audit A-020)', async () => {
+    mockGetRefreshToken.mockResolvedValue('rt-still-valid');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 503 }));
+    const token = await tryRefresh();
+    expect(token).toBeNull();
+    expect(mockClearRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it('keeps the stored refresh token on 429 rate limit (audit A-020)', async () => {
+    mockGetRefreshToken.mockResolvedValue('rt-still-valid');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ code: 'RATE_LIMITED', message: 'too many' }), { status: 429 }),
+    );
+    const token = await tryRefresh();
+    expect(token).toBeNull();
+    expect(mockClearRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it('keeps the stored refresh token on network error (audit A-020)', async () => {
+    mockGetRefreshToken.mockResolvedValue('rt-still-valid');
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('ECONNREFUSED'));
+    const token = await tryRefresh();
+    expect(token).toBeNull();
+    // NETWORK_ERROR is represented as ApiException(0, …). status 0 is not
+    // in the "definitively rejected" range, so storage must survive.
+    expect(mockClearRefreshToken).not.toHaveBeenCalled();
   });
 
   it('releases the coalescing slot after completion (next call re-fetches)', async () => {

@@ -152,7 +152,21 @@ async function doRefresh(): Promise<string | null> {
       await storeRefreshToken(res.refreshToken);
     }
     return res.accessToken;
-  } catch {
+  } catch (err) {
+    // Audit A-020: distinguish definitive rejection from transient failure.
+    // Upstream returning 4xx (except 429 "too many requests") means the
+    // refresh token is permanently dead — the user can't recover by
+    // retrying later, so clearing storage now avoids N guaranteed-401s
+    // on every subsequent startup. 5xx, 429, and network errors stay on
+    // disk because the token might still be valid once upstream recovers.
+    if (err instanceof ApiException) {
+      const s = err.status;
+      const definitivelyRejected = s >= 400 && s < 500 && s !== 429;
+      if (definitivelyRejected) {
+        const { clearRefreshToken } = await import('~/native/secure-storage');
+        await clearRefreshToken();
+      }
+    }
     return null;
   }
 }
