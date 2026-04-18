@@ -37,7 +37,14 @@ export function AmountSelection({
 
     // Reject sub-cent precision — backend's multipleOf(0.01) rejects these
     // and we'd rather catch it here than round-trip to a 400.
-    if (Math.round(amount * 100) !== amount * 100) {
+    //
+    // The obvious check `Math.round(n * 100) !== n * 100` is broken: IEEE-754
+    // drift means `0.29 * 100 === 28.999999999999996`, which would wrongly
+    // flag $0.29 as sub-cent. Normalize by rounding back down before
+    // comparing — `Math.round(n * 100) / 100` hits the exact IEEE-754 bit
+    // pattern for a 2-decimal value, so this is true iff `n` is already a
+    // valid cent amount.
+    if (Math.round(amount * 100) / 100 !== amount) {
       setValidationError('Amount cannot have more than 2 decimal places.');
       return;
     }
