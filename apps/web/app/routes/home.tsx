@@ -9,7 +9,7 @@ import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
 export function meta(): Route.MetaDescriptors {
   return [
     { title: 'Loop — Save money every time you shop' },
-    { name: 'description', content: 'Buy discounted gift cards with XLM and earn cashback.' },
+    { name: 'description', content: 'Buy discounted gift cards with XLM.' },
   ];
 }
 

@@ -50,7 +50,7 @@ const queryClient = new QueryClient({
 export function meta(): Route.MetaDescriptors {
   return [
     { title: 'Loop — Save money every time you shop' },
-    { name: 'description', content: 'Buy discounted gift cards and earn cashback with Loop.' },
+    { name: 'description', content: 'Buy discounted gift cards with XLM on Loop.' },
   ];
 }
 
