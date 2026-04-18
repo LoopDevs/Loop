@@ -450,7 +450,7 @@ Use hyphens, no spaces, all lowercase.
 
 ### Rules
 
-- **`main` is protected.** No direct pushes. All changes via PR.
+- **`main` is protected by convention.** No direct pushes. All changes via PR. GitHub-level branch protection isn't available on the current private-repo free plan (audit A-037, ADR-005 §Residual Risks — the API returns 403 `Upgrade to GitHub Pro or make this repository public`), so this rule is enforced by team discipline until the plan upgrades. §15 CI/CD has the full note.
 - **Feature branches are short-lived.** Target < 2 days from branch to merge. If it takes longer, the change is too large — split it.
 - **One concern per branch.** A branch that touches both the map clustering and the auth flow needs to be split.
 - **Rebase, don't merge.** Keep a linear history. Rebase feature branches onto current `main` before raising a PR.
@@ -468,7 +468,7 @@ v0.2.0   Auth flow complete
 v1.0.0   App Store submission
 ```
 
-Tags follow [semver](https://semver.org/). Mobile app version numbers in Xcode/Android are derived from git tags via CI.
+Tags follow [semver](https://semver.org/). Mobile app version numbers are still set manually in the Xcode / Android Studio projects; an automated "tag → mobile version" pipeline is on the roadmap (see `docs/roadmap.md` §Phase 1 — Mobile app submission).
 
 ---
 
