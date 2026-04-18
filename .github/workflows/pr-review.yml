@@ -18,7 +18,12 @@ jobs:
           fetch-depth: 0
 
       - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
+        # Audit A-031: pin to a specific published version so an upstream
+        # @anthropic-ai/claude-code tag bump can't silently change review
+        # behaviour (or, worst case, pull in a compromised release). Bump
+        # deliberately — bumping this line is the only way review semantics
+        # should change.
+        run: npm install -g @anthropic-ai/claude-code@2.1.114
 
       - name: Review PR
         env:
