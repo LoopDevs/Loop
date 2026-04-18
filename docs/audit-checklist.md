@@ -158,7 +158,7 @@ The goal is to find both obvious defects and the subtler reasons the project may
 ## 16. Documentation Accuracy And Operational Usability
 
 - Reconcile every key doc with current code and workflow reality.
-- Include non-`docs/` operational artifacts in that pass: `README.md`, `CONTRIBUTING.md`, `RESEARCH.md`, `claude-audit.md`, and `ctx.postman_collection.json`.
+- Include non-`docs/` operational artifacts in that pass: `README.md` and `CONTRIBUTING.md` (plus `ctx.postman_collection.json` if present locally — it is gitignored). Legacy one-offs (`claude-audit.md`, pre-implementation `RESEARCH.md`) were removed/archived to `docs/archive/` as part of finding A-035.
 - Verify commands actually exist and behave as documented.
 - Check env var docs, examples, defaults, and required/optional status.
 - Audit whether docs are enough for onboarding, debugging, deployment, and incident response.

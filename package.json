@@ -11,7 +11,7 @@
     "dev:web": "npm run dev -w @loop/web",
     "dev:backend": "npm run dev -w @loop/backend",
     "typecheck": "npm run typecheck -w @loop/backend -w @loop/web -w @loop/shared",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

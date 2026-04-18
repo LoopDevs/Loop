@@ -1,3 +1,9 @@
+> **HISTORICAL — NOT CURRENT.** This was a pre-implementation research doc
+> written before the stack was chosen. It references Next.js (superseded by
+> React Router v7) and assumes a framework/auth posture that no longer
+> matches the codebase. Kept for context only; see `docs/architecture.md`,
+> `docs/standards.md`, and the ADRs in `docs/adr/` for the current design.
+
 # Technical plan for a cross-platform gift card cashback app
 
 **Capacitor is the clear best choice for wrapping your existing Next.js app into a native mobile shell, achievable within 2–4 weeks to TestFlight.** The architecture combines Capacitor's WebView wrapper with biometric-protected Stellar wallet keys stored in iOS Keychain/Android Keystore, social login via Google and Apple, and sponsored multisig accounts so users never touch crypto. This plan covers every layer—from framework selection through App Store approval—with specific libraries, code patterns, and architectural decisions ready for implementation.
