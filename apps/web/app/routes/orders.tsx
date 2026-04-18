@@ -98,7 +98,7 @@ export default function OrdersRoute(): React.JSX.Element {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
 
-  const { orders, hasNext, hasPrev, isLoading, error } = useOrders(page, isAuthenticated);
+  const { orders, hasNext, hasPrev, isLoading, error, refetch } = useOrders(page, isAuthenticated);
   const errorText = errorMessage(error);
 
   return (
@@ -134,7 +134,16 @@ export default function OrdersRoute(): React.JSX.Element {
         {errorText !== null && (
           <div className="text-center py-12">
             <p className="text-red-500 mb-4">{errorText}</p>
-            <Button variant="secondary" onClick={() => setPage(1)}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                // `setPage(1)` would no-op if we were already on page 1 —
+                // the queryKey stays the same so TanStack Query serves the
+                // cached error instead of refetching. Use `refetch()` so
+                // Retry always triggers a fresh request regardless of page.
+                refetch();
+              }}
+            >
               Retry
             </Button>
           </div>
