@@ -17,9 +17,9 @@ Requires Node.js >= 22.
 
 ```
 apps/web        React Router v7 + Vite — SSR for loopfinance.io, static export for mobile
-apps/backend    TypeScript + Hono — merchant cache, clustering, image proxy, auth, order proxy
+apps/backend    TypeScript + Hono — merchant cache, clustering, image proxy, auth proxy, order proxy
 apps/mobile     Capacitor v8 shell — loads static web build from disk
-packages/shared Shared TypeScript types, slug utilities, protobuf definitions
+packages/shared Shared TypeScript types, slug + search utilities, protobuf definitions
 ```
 
 ## Documentation
