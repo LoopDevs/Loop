@@ -483,8 +483,10 @@ Tags follow [semver](https://semver.org/). Mobile app version numbers in Xcode/A
 | `vi.mock()` / `vi.fn()`  | Mocking HTTP and Capacitor plugins in tests                                                        |
 | Playwright               | End-to-end tests — self-contained mocked + opt-in real-CTX                                         |
 
-> `msw` is listed in `apps/web/package.json` but not currently used — tests
-> mock at the `globalThis.fetch` level via `vi.stubGlobal('fetch', vi.fn())`.
+HTTP is mocked at the `globalThis.fetch` level via
+`vi.stubGlobal('fetch', vi.fn())` — we do not run MSW. The previous
+`msw` dep was dropped in the same tick as this doc update after a
+cross-check found zero production imports.
 
 ### Coverage thresholds (enforced in CI, per-workspace)
 
@@ -511,7 +513,7 @@ the manually-maintained reflection.
 
 **Unit test:** pure functions, data transformations, clustering algorithm, auth token logic, currency formatting, URL building.
 
-**Integration test (Vitest + msw):** API client functions (mock the HTTP layer), auth flow (OTP request → verify → token storage), order creation flow, full clustering pipeline from raw locations to clustered output.
+**Integration test (Vitest):** API client functions (stub `globalThis.fetch`), auth flow (OTP request → verify → token storage), order creation flow, full clustering pipeline from raw locations to clustered output.
 
 **E2E test (Playwright):** critical user journeys only — do not use E2E where a unit or integration test would suffice.
 

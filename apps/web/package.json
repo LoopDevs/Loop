@@ -55,7 +55,6 @@
     "@vitest/coverage-v8": "4.1.4",
     "jsbarcode": "3.12.3",
     "jsdom": "29.0.2",
-    "msw": "2.13.4",
     "tailwindcss": "4.2.2",
     "typescript": "5.9.3",
     "vite": "8.0.8",
