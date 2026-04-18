@@ -60,9 +60,15 @@ npm install                                        # pulls plugins
 cd apps/web && npm run build:mobile                # static web build
 cd apps/mobile
 npx cap add ios && npx cap add android             # regen native trees
-./scripts/apply-native-overlays.sh                 # re-apply our config
 npx cap sync                                       # wire the web build in
+./scripts/apply-native-overlays.sh                 # re-apply our config
 ```
+
+The overlay step must run _after_ `cap sync`, not before — `cap sync`
+can update native-project config (Info.plist, AndroidManifest) from
+its templates, which would otherwise erase the audit A-033 / A-034
+bits the overlay injected. The script is idempotent by design, so
+re-running on every sync is cheap and expected.
 
 Each step is deterministic. The `cap sync` output is reproducible
 from the versioned inputs, modulo what Capacitor itself changes
