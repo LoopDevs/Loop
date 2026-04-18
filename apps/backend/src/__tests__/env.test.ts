@@ -100,8 +100,50 @@ describe('parseEnv', () => {
 
   it('warns (does not throw) on INCLUDE_DISABLED_MERCHANTS=true in production', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    parseEnv({ ...base, NODE_ENV: 'production', INCLUDE_DISABLED_MERCHANTS: 'true' });
+    parseEnv({
+      ...base,
+      NODE_ENV: 'production',
+      INCLUDE_DISABLED_MERCHANTS: 'true',
+      IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+    });
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('INCLUDE_DISABLED_MERCHANTS'));
     warn.mockRestore();
+  });
+
+  // Audit A-025 — image proxy allowlist is mandatory in production.
+  it('refuses to start in production when IMAGE_PROXY_ALLOWED_HOSTS is unset', () => {
+    expect(() => parseEnv({ ...base, NODE_ENV: 'production' })).toThrow(
+      /IMAGE_PROXY_ALLOWED_HOSTS/,
+    );
+  });
+
+  it('refuses to start in production when IMAGE_PROXY_ALLOWED_HOSTS is empty', () => {
+    expect(() =>
+      parseEnv({ ...base, NODE_ENV: 'production', IMAGE_PROXY_ALLOWED_HOSTS: '   ' }),
+    ).toThrow(/IMAGE_PROXY_ALLOWED_HOSTS/);
+  });
+
+  it('accepts production config once IMAGE_PROXY_ALLOWED_HOSTS is set', () => {
+    const env = parseEnv({
+      ...base,
+      NODE_ENV: 'production',
+      IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com,images.example.com',
+    });
+    expect(env.NODE_ENV).toBe('production');
+    expect(env.IMAGE_PROXY_ALLOWED_HOSTS).toBe('cdn.example.com,images.example.com');
+  });
+
+  it('allows DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1 as an explicit emergency override', () => {
+    const env = parseEnv({
+      ...base,
+      NODE_ENV: 'production',
+      DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT: '1',
+    });
+    expect(env.NODE_ENV).toBe('production');
+  });
+
+  it('does not enforce the allowlist in development or test', () => {
+    expect(() => parseEnv({ ...base, NODE_ENV: 'development' })).not.toThrow();
+    expect(() => parseEnv({ ...base, NODE_ENV: 'test' })).not.toThrow();
   });
 });

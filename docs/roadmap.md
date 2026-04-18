@@ -23,7 +23,7 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 
 - [ ] Deploy backend to Fly.io (see `docs/deployment.md`)
 - [ ] Deploy web (SSR) to Fly.io or Vercel
-- [ ] Set `IMAGE_PROXY_ALLOWED_HOSTS` in production backend for SSRF prevention
+- [x] ~~Set `IMAGE_PROXY_ALLOWED_HOSTS` in production backend~~ — now enforced at boot (audit A-025); `apps/backend/fly.toml` ships with the CTX hostnames baked in.
 - [ ] Set up monitoring / error tracking (e.g., Sentry)
 - [x] ~~Configure production CORS allowlist~~ — already set in `index.ts` (loopfinance.io in production, \* in dev)
 - [ ] DNS: point `loopfinance.io` → web deployment, `api.loopfinance.io` → backend deployment

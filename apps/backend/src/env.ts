@@ -79,6 +79,24 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     );
   }
 
+  // Audit A-025: the image proxy's strongest SSRF mitigation is the
+  // hostname allowlist. Without it we only have best-effort IP validation,
+  // which the proxy's own source documents as TOCTOU-vulnerable to DNS
+  // rebinding. Refuse to start in production unless the allowlist is set.
+  // Emergency opt-out is DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1.
+  if (
+    parsed.data.NODE_ENV === 'production' &&
+    (parsed.data.IMAGE_PROXY_ALLOWED_HOSTS === undefined ||
+      parsed.data.IMAGE_PROXY_ALLOWED_HOSTS.trim() === '') &&
+    source['DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT'] !== '1'
+  ) {
+    throw new Error(
+      'Invalid environment variables — IMAGE_PROXY_ALLOWED_HOSTS must be set in production (audit A-025). ' +
+        'Set it to a comma-separated list of upstream image hostnames (e.g. "cdn.ctx.com,ctx-spend.s3.us-west-2.amazonaws.com"), ' +
+        'or set DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1 to override for an emergency push.',
+    );
+  }
+
   return parsed.data;
 }
 
