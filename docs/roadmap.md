@@ -150,7 +150,7 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 
 ## Upstream API reference
 
-The upstream gift card provider (CTX) exposes these endpoints (see Postman collection in repo root):
+The upstream gift card provider (CTX) exposes these endpoints. Field shapes + integration notes are maintained in `docs/architecture.md` §CTX upstream field mapping; the historical Postman collection was retired during the audit hygiene pass (A-010 / A-035).
 
 | Endpoint                    | Method | Auth                     | Purpose                         |
 | --------------------------- | ------ | ------------------------ | ------------------------------- |
