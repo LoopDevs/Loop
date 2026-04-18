@@ -150,8 +150,8 @@ CLOSED ──(N consecutive failures)──→ OPEN ──(cooldown elapsed)─�
 
 - **4xx responses** do not count as failures (client errors, not upstream outage).
 - When OPEN, upstream proxy handlers return **503** `Service temporarily unavailable` (not 502).
-- The `/health` endpoint bypasses the circuit breaker — it probes upstream directly so external monitors can detect recovery.
-- A single shared instance (`upstreamCircuit`) is used for all upstream calls.
+- The `/health` endpoint bypasses the circuit breaker — it probes upstream directly so external monitors can detect recovery. Result is cached 10s (PR #131) to stop an attacker from turning `/health` into an outbound-fetch amplifier.
+- One breaker **per upstream endpoint** — `login`, `verify-email`, `refresh-token`, `logout`, `merchants`, `locations`, `gift-cards`. Lazily created via `getUpstreamCircuit(key)` in `circuit-breaker.ts`. Independent so a failing merchants sync can't trip auth, and a failing gift-cards endpoint can't trip clusters.
 
 ---
 
