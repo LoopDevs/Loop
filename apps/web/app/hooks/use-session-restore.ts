@@ -21,6 +21,10 @@ export function useSessionRestore(): { isRestoring: boolean } {
     let cancelled = false;
 
     void (async () => {
+      // Auth restore and pending-purchase restore are independent flows.
+      // Each lives in its own try/catch so a no-refresh-token state (audit
+      // A-008) or a definitively-rejected refresh (audit A-020) does not
+      // stop the pending purchase from being recovered.
       try {
         const { getRefreshToken, getEmail } = await import('~/native/secure-storage');
         const refreshToken = await getRefreshToken();
@@ -28,32 +32,40 @@ export function useSessionRestore(): { isRestoring: boolean } {
 
         if (cancelled) return;
 
-        if (refreshToken === null) {
-          setIsRestoring(false);
-          return;
-        }
+        if (refreshToken !== null) {
+          // Delegate to the shared tryRefresh so this call participates in
+          // the same in-flight coalescing as any concurrent
+          // authenticatedRequest() that also hits /refresh. Without this,
+          // mount-time session-restore and an early authenticated query
+          // race to rotate the refresh token.
+          const { tryRefresh } = await import('~/services/api-client');
+          const accessToken = await tryRefresh();
 
-        // Delegate to the shared tryRefresh so this call participates in the
-        // same in-flight coalescing as any concurrent authenticatedRequest()
-        // that also hits /refresh. Without this, mount-time session-restore
-        // and an early authenticated query race to rotate the refresh token.
-        const { tryRefresh } = await import('~/services/api-client');
-        const accessToken = await tryRefresh();
+          if (cancelled) return;
 
-        if (cancelled) return;
-
-        if (accessToken !== null) {
-          store.setAccessToken(accessToken);
-          if (email) {
-            // Restore email to store without re-storing tokens
-            useAuthStore.setState({ email });
+          if (accessToken !== null) {
+            store.setAccessToken(accessToken);
+            if (email) {
+              // Restore email to store without re-storing tokens
+              useAuthStore.setState({ email });
+            }
+          } else {
+            // Audit A-020: tryRefresh() already removed the refresh token
+            // from storage on a definitive 4xx rejection. Mirror that in
+            // memory so any lingering email from a previous session is
+            // cleared too. (On transient failures tryRefresh kept the
+            // token, so clearSession here is a no-op on disk.)
+            store.clearSession();
           }
         }
       } catch {
         // Refresh failed — user will need to log in again
       }
 
-      // Also restore any pending purchase (native Preferences survive app kill)
+      // Also restore any pending purchase (native Preferences survive app
+      // kill). Intentionally runs whether or not a refresh token was
+      // present, so a user who was interrupted mid-purchase before ever
+      // logging in still lands back on the right step.
       try {
         const { loadPendingOrder } = await import('~/native/purchase-storage');
         const pending = await loadPendingOrder();
