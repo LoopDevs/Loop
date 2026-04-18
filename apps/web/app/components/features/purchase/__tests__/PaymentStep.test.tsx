@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
+import { ApiException } from '@loop/shared';
 
 const mockFetchOrder = vi.fn<(id: string) => Promise<Record<string, unknown>>>();
 const mockCopy = vi.fn<(text: string) => Promise<boolean>>();
@@ -62,6 +63,57 @@ describe('PaymentStep — expiry', () => {
   it('renders an expired UI when expiresAt is in the past', () => {
     render(<PaymentStep {...baseProps} expiresAt={Math.floor(Date.now() / 1000) - 10} />);
     expect(screen.getAllByText(/expired/i).length).toBeGreaterThan(0);
+  });
+});
+
+describe('PaymentStep — retry budget (audit A-030)', () => {
+  it('stops polling and sets an error after MAX_CONSECUTIVE_ERRORS failures', async () => {
+    // Every fetch rejects with a 500 — the counter must climb until the
+    // 5th failure, at which point polling stops and an error is surfaced.
+    mockFetchOrder.mockRejectedValue(
+      new ApiException(500, { code: 'UPSTREAM_ERROR', message: 'boom' }),
+    );
+    render(<PaymentStep {...baseProps} expiresAt={Math.floor(Date.now() / 1000) + 600} />);
+
+    // Six full poll intervals — well past the 5-error budget. Each
+    // advance triggers setTimeout → poll() → setTimeout (reschedule),
+    // so we drain microtasks between ticks.
+    for (let i = 0; i < 6; i += 1) {
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+
+    expect(mockFetchOrder).toHaveBeenCalledTimes(5);
+    const err = usePurchaseStore.getState().error;
+    expect(err).toMatch(/trouble checking your payment/);
+  });
+
+  it('does not count 503 (circuit-breaker open) against the budget', async () => {
+    // 503s are issued by the upstream circuit breaker, which has its own
+    // cooldown. If we counted each against the budget, 5 probe-attempts
+    // would nuke the polling even though the breaker is already pacing
+    // retries correctly. Verify the counter stays at 0 after five 503s.
+    mockFetchOrder.mockRejectedValue(
+      new ApiException(503, { code: 'SERVICE_UNAVAILABLE', message: 'open' }),
+    );
+    render(<PaymentStep {...baseProps} expiresAt={Math.floor(Date.now() / 1000) + 600} />);
+
+    for (let i = 0; i < 6; i += 1) {
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+
+    // Polling continued past the would-be budget — error should NOT be set.
+    expect(usePurchaseStore.getState().error).toBeNull();
+    expect(mockFetchOrder.mock.calls.length).toBeGreaterThan(5);
   });
 });
 
