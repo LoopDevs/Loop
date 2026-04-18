@@ -124,7 +124,7 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 
 - [ ] Swap Leaflet for MapLibre GL JS (WebGL rendering, better mobile perf with many markers)
 - [ ] Server-side merchant search (replace client-side 1000-merchant fetch in Navbar)
-- [x] ~~Add circuit breaker on upstream API~~ — shared `upstreamCircuit` (5 failures → 30s OPEN → HALF_OPEN probe). Returns 503 when open. 13 tests.
+- [x] ~~Add circuit breaker on upstream API~~ — per-upstream-endpoint breakers (login, verify-email, refresh-token, logout, merchants, locations, gift-cards), each 5 failures → 30s OPEN → HALF_OPEN probe. Returns 503 when open. Independent so a failing endpoint doesn't trip the circuit for healthy ones (audit-hardening split — see `apps/backend/src/circuit-breaker.ts` `getUpstreamCircuit(key)` and ADR-004 §Per-endpoint circuit breakers).
 - [x] ~~Add staleness alerting for background refreshes~~ — warns in logs when data exceeds 2x refresh interval
 
 ### Features
