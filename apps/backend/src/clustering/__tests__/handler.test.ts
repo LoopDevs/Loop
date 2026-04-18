@@ -128,12 +128,16 @@ describe('GET /api/clusters — validation', () => {
 });
 
 describe('GET /api/clusters — response shape', () => {
-  it('returns JSON by default with Cache-Control', async () => {
+  it('returns JSON by default with Cache-Control and Vary: Accept', async () => {
     seed([loc('m-1', 0, 0.5), loc('m-2', 0.5, 0)]);
     const res = await app.request('/api/clusters?west=-1&south=-1&east=1&north=1&zoom=14');
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toContain('application/json');
     expect(res.headers.get('Cache-Control')).toContain('max-age=60');
+    // The handler negotiates protobuf vs JSON on Accept and caches both
+    // for 60s. Without Vary: Accept, a browser/CDN would hand the wrong
+    // variant to a client asking for the other.
+    expect(res.headers.get('Vary')).toBe('Accept');
     const body = (await res.json()) as {
       locationPoints: Array<{ properties: { merchantId: string } }>;
       clusterPoints: unknown[];

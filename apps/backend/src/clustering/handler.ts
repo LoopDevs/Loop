@@ -156,12 +156,19 @@ export async function clustersHandler(c: Context): Promise<Response> {
         headers: {
           'Content-Type': PROTOBUF_MIME,
           'Cache-Control': 'public, max-age=60',
+          // The endpoint negotiates protobuf vs JSON on `Accept`. Without
+          // this, a browser/CDN cache that served one variant would hand
+          // the wrong bytes to a client that asked for the other — the
+          // protobuf-expecting client would get raw JSON, fail to decode,
+          // and the map would silently stop updating.
+          Vary: 'Accept',
         },
       });
     }
   }
 
   c.header('Cache-Control', 'public, max-age=60'); // 1 minute cache for clusters
+  c.header('Vary', 'Accept'); // See the protobuf branch above for rationale
   return c.json({
     locationPoints: result.locationPoints,
     clusterPoints: result.clusterPoints,
