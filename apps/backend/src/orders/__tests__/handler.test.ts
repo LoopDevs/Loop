@@ -90,7 +90,7 @@ vi.mock('../../circuit-breaker.js', () => {
   };
 });
 
-import { app } from '../../app.js';
+import { app, __resetRateLimitsForTests } from '../../app.js';
 
 // Mock global fetch for upstream proxy calls
 const mockFetch = vi.fn();
@@ -102,6 +102,12 @@ beforeEach(() => {
   mockFetch.mockReset();
   mockNotifyOrderCreated.mockReset();
   mockNotifyOrderFulfilled.mockReset();
+  // `/api/orders` endpoints picked up per-IP rate limits (10/min POST,
+  // 60/min list, 120/min get-by-id). The in-memory limiter map persists
+  // across `app.request(...)` calls, so the order-validation suite —
+  // which fires a burst of rejections back-to-back — would otherwise
+  // saturate the POST bucket and see 429 from test 11 onward.
+  __resetRateLimitsForTests();
   mockGetMerchants.mockReturnValue({
     merchants: [],
     merchantsById: new Map(),

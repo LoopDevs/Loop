@@ -84,6 +84,18 @@ function clientIpFor(c: Context): string {
   return 'unknown';
 }
 
+/**
+ * Test helper: wipe the rate-limit map between cases. Module state
+ * persists across `app.request(...)` calls, so a test that exercises
+ * the same route many times in a loop will start receiving 429 as soon
+ * as it passes the route's per-minute budget. Tests that hit the budget
+ * intentionally (the order-validation suite fires dozens of rejections
+ * back-to-back) call this from `beforeEach` to reset.
+ */
+export function __resetRateLimitsForTests(): void {
+  rateLimitMap.clear();
+}
+
 // Cap on the rate-limit map. Without this, an attacker spraying requests
 // from fresh IPs faster than the hourly cleanup runs could grow the map
 // until the process OOMs. With the cap, once we hit it we evict the
@@ -356,12 +368,23 @@ app.post('/api/auth/refresh', rateLimit(30, 60_000), refreshHandler);
 app.delete('/api/auth/session', rateLimit(20, 60_000), logoutHandler);
 
 // ─── Orders (authenticated) ───────────────────────────────────────────────────
+//
+// Per-IP rate limits here are defense in depth beyond requireAuth: a
+// compromised or leaked bearer token would otherwise let the attacker
+// hammer us — creating billable orders upstream (POST), or spamming
+// CTX with list/read traffic (GET). Budgets are tuned against legit
+// usage:
+//   - POST: a user rarely creates more than one order per minute;
+//     10/min leaves room for retry-after-error without enabling abuse.
+//   - GET /api/orders: the Orders page navigates; 60/min is generous.
+//   - GET /api/orders/:id: PaymentStep polls every 3s (~20/min);
+//     120/min accommodates multiple pending orders and a retry burst.
 
 app.use('/api/orders', requireAuth);
 app.use('/api/orders/*', requireAuth);
-app.post('/api/orders', createOrderHandler);
-app.get('/api/orders', listOrdersHandler);
-app.get('/api/orders/:id', getOrderHandler);
+app.post('/api/orders', rateLimit(10, 60_000), createOrderHandler);
+app.get('/api/orders', rateLimit(60, 60_000), listOrdersHandler);
+app.get('/api/orders/:id', rateLimit(120, 60_000), getOrderHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 
