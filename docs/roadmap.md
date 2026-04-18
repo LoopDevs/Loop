@@ -33,7 +33,7 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 
 - [x] ~~**Validate upstream responses with Zod**~~ — auth and order handlers now validate all upstream JSON with Zod schemas before forwarding.
 - [x] ~~**Reject orders for unknown merchants**~~ — returns 404 if merchantId not in cache.
-- [x] ~~**Add rate limiting**~~ — `/api/image` (60/min/IP) and `/api/auth/request-otp` (5/min/IP). In-memory rate limiter with hourly cleanup.
+- [x] ~~**Add rate limiting**~~ — per-IP across every public and authenticated endpoint the roadmap originally scoped plus those added later: `/api/image` (300/min), `/api/clusters` (60/min), `/api/auth/request-otp` (5/min), `/api/auth/verify-otp` (10/min), `/api/auth/refresh` (30/min), `DELETE /api/auth/session` (20/min), `POST /api/orders` (10/min), `GET /api/orders` (60/min), `GET /api/orders/:id` (120/min). In-memory limiter with hourly cleanup, 10k-entry cap with LRU eviction, 429 responses include `Retry-After`. IP source is `TRUST_PROXY`-gated (audit A-023).
 - [x] ~~**Map upstream response fields to our types**~~ — Zod schemas validate and strip upstream responses. Order ID param sanitized against path traversal.
 - [x] ~~**Use `expiresAt` in PaymentStep**~~ — shows live countdown timer, stops polling at expiry.
 - [x] ~~**Remove `savingsBips` field**~~ — removed from shared types and backend sync.
