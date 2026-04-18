@@ -788,30 +788,46 @@ Error codes are `SCREAMING_SNAKE_CASE` strings, stable across versions, document
 
 ### Web app
 
-No `console.log` in committed code. For development debugging, use `console.debug` which is stripped in production builds via the bundler config.
+No `console` usage at all in committed code. ESLint `no-console` is
+set to `error` in `eslint.config.js`, so `console.log` / `.debug` /
+`.warn` / `.error` all fail the lint step. For development debugging
+use a breakpoint, the React Devtools, or Sentry breadcrumbs. There is
+no bundler-level strip pass — the lint rule is the gate.
 
 ### Backend
 
-Use a structured logger (e.g. `pino`). All log entries are JSON objects with consistent fields:
+Uses Pino (`apps/backend/src/logger.ts`). All log entries are JSON:
 
 ```json
 {
   "level": "info",
   "time": "2025-03-05T12:00:00.000Z",
   "msg": "Merchant sync complete",
+  "service": "loop-backend",
+  "env": "production",
   "count": 1247,
   "duration_ms": 2341
 }
 ```
 
+`service` / `env` are injected from the base config; `pino-pretty`
+transforms the JSON stream into human-friendly output in development
+only.
+
 **Log levels:**
 
-- `debug` — detailed info for development. Never enabled in production.
-- `info` — routine operational events (sync complete, server started, request received).
-- `warn` — something unexpected but recoverable happened.
-- `error` — something failed. Always include the error object.
+- `trace` / `debug` — verbose diagnostics. Never left on in production.
+- `info` — routine operational events (sync complete, server started, access log via the `component: 'access'` child logger).
+- `warn` — something unexpected but recoverable (upstream non-success, malformed cache entry skipped).
+- `error` — something failed; always include `err` as the object key so Pino's error-serializer picks up stack and cause.
+- `fatal` / `silent` — accepted levels for emergency / test overrides (see `env.ts`).
 
-**Never log:** tokens, OTPs, raw passwords, full email addresses (use first 3 chars + `***`), full API keys.
+**Redaction is centralized.** `REDACT_PATHS` in
+`apps/backend/src/logger.ts` is the single source of truth; its own
+test file locks the list. Covered: access tokens, refresh tokens,
+OTP codes, API keys/secrets, session cookies, Stellar wallet
+material. **Email addresses are deliberately not redacted** —
+operators need to correlate an auth failure to a specific user.
 
 ---
 
