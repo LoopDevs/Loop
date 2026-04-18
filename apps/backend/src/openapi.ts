@@ -152,6 +152,14 @@ const MerchantDetailResponse = registry.register(
   z.object({ merchant: Merchant }),
 );
 
+const MerchantAllResponse = registry.register(
+  'MerchantAllResponse',
+  z.object({
+    merchants: z.array(Merchant),
+    total: z.number(),
+  }),
+);
+
 // ─── Orders ─────────────────────────────────────────────────────────────────
 
 const CreateOrderBody = registry.register(
@@ -368,6 +376,20 @@ registry.registerPath({
     200: {
       description: 'Merchant page',
       content: { 'application/json': { schema: MerchantListResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/merchants/all',
+  summary:
+    'Full merchant catalog in a single response. Serves UI surfaces that need every merchant (audit A-002).',
+  tags: ['Merchants'],
+  responses: {
+    200: {
+      description: 'Complete merchant catalog',
+      content: { 'application/json': { schema: MerchantAllResponse } },
     },
   },
 });

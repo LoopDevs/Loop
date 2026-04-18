@@ -42,6 +42,18 @@ export interface MerchantDetailResponse {
   merchant: Merchant;
 }
 
+/**
+ * Full catalog response for `GET /api/merchants/all`. Used by UI surfaces
+ * that need every merchant in one shot (home directory, map popups, navbar
+ * search) without paginating. Total reflects the array length at fetch
+ * time — intentionally no `pagination` envelope, since /all returns the
+ * entire cached slice.
+ */
+export interface MerchantAllResponse {
+  merchants: Merchant[];
+  total: number;
+}
+
 /** Query params for GET /api/merchants. */
 export interface MerchantListParams {
   page?: number | undefined;

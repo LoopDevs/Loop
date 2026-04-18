@@ -1,6 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import type { Merchant, MerchantListResponse } from '@loop/shared';
-import { fetchMerchants, fetchMerchant, fetchMerchantBySlug } from '~/services/merchants';
+import type { Merchant, MerchantAllResponse, MerchantListResponse } from '@loop/shared';
+import {
+  fetchMerchants,
+  fetchMerchant,
+  fetchMerchantBySlug,
+  fetchAllMerchants,
+} from '~/services/merchants';
 import { shouldRetry } from './query-retry';
 
 export interface UseMerchantsOptions {
@@ -35,6 +40,38 @@ export function useMerchants(options: UseMerchantsOptions = {}): UseMerchantsRes
     merchants: query.data?.merchants ?? [],
     totalPages: query.data?.pagination.totalPages ?? 0,
     total: query.data?.pagination.total ?? 0,
+    isLoading: query.isLoading,
+    isError: query.isError,
+    error: query.error,
+  };
+}
+
+/**
+ * Fetches the complete enabled merchant catalog via `/api/merchants/all`.
+ * Use on surfaces that must see every merchant (home directory, map popup
+ * name lookup, navbar search). The paginated `useMerchants` is capped at
+ * 100 items per page by the backend (audit A-002), so it would silently
+ * truncate a catalog larger than 100.
+ */
+export function useAllMerchants(): {
+  merchants: Merchant[];
+  total: number;
+  isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
+} {
+  const query = useQuery<MerchantAllResponse, Error>({
+    queryKey: ['merchants-all'],
+    queryFn: () => fetchAllMerchants(),
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    retry: shouldRetry,
+  });
+
+  return {
+    merchants: query.data?.merchants ?? [],
+    total: query.data?.total ?? 0,
     isLoading: query.isLoading,
     isError: query.isError,
     error: query.error,

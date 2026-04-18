@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect, forwardRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { useMerchants } from '~/hooks/use-merchants';
+import { useAllMerchants } from '~/hooks/use-merchants';
 import { merchantSlug } from '@loop/shared';
 import { useUiStore } from '~/stores/ui.store';
 import { getImageProxyUrl } from '~/utils/image';
@@ -77,9 +77,10 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
-  // Backend clamps at MAX_PAGE_SIZE=100. Asking for 1000 was silently capped,
-  // meaning search only saw the first page of merchants anyway. Match the cap.
-  const { merchants } = useMerchants({ limit: 100 });
+  // Full catalog via /api/merchants/all (audit A-002). Paginated /api/merchants
+  // silently truncated search to the first 100 merchants once the catalog grew
+  // past that.
+  const { merchants } = useAllMerchants();
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query), 150);

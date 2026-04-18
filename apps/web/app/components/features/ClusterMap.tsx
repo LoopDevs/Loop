@@ -5,7 +5,7 @@ import type { ClusterParams, ClusterResponse } from '@loop/shared';
 import { merchantSlug } from '@loop/shared';
 import { fetchClusters } from '~/services/clusters';
 import { getImageProxyUrl } from '~/utils/image';
-import { useMerchants } from '~/hooks/use-merchants';
+import { useAllMerchants } from '~/hooks/use-merchants';
 
 const DEBOUNCE_MS = 300;
 
@@ -46,10 +46,10 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
   // added in PR #55 surfaces the abort as a swallowed TIMEOUT-coded error.
   const fetchAbortRef = useRef<AbortController | null>(null);
   const [status, setStatus] = useState<string>('');
-  // Backend caps the limit at MAX_PAGE_SIZE=100. Asking for 1000 was silently
-  // clamped, which hid the fact that merchants past index 100 fell back to
-  // showing their id in the popup instead of their name. Match the cap.
-  const { merchants } = useMerchants({ limit: 100 });
+  // Full catalog via /api/merchants/all (audit A-002) — the paginated endpoint
+  // would silently truncate past 100 merchants and popups would fall back to
+  // showing the raw merchant id instead of the name.
+  const { merchants } = useAllMerchants();
   const merchantsById = useRef(new Map<string, string>());
   const onMerchantSelectRef = useRef(onMerchantSelect);
   // Track open popup so we can re-open it after zoom/pan marker refresh
