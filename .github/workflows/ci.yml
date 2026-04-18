@@ -51,6 +51,12 @@ jobs:
       - name: Install deps
         if: steps.npm-cache.outputs.cache-hit != 'true'
         run: npm ci
+      # Install flyctl so `lint:docs` can run `flyctl config validate` on
+      # every fly.toml in the repo. Without this, a regression like the
+      # orphaned `[[services.http_checks]]` block (PR #120) slips through
+      # CI and only surfaces when an ops engineer runs validate locally.
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
