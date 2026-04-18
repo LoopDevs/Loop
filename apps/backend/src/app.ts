@@ -396,6 +396,16 @@ app.get('/api/merchants/:id', merchantDetailHandler);
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
+// Auth responses carry access + refresh tokens. POST/DELETE aren't cached
+// by standards-compliant caches, but a misconfigured intermediate proxy
+// that treats any HTTP response as cacheable would otherwise hand one
+// user's freshly-minted tokens to the next caller of the same URL. Same
+// defense-in-depth pattern used for /api/orders.
+app.use('/api/auth/*', async (c, next) => {
+  await next();
+  c.header('Cache-Control', 'no-store');
+});
+
 app.post('/api/auth/request-otp', rateLimit(5, 60_000), requestOtpHandler);
 // OTP brute-force defense: 10 attempts per minute per IP. With a 6-digit code
 // that caps guesses at ~14,400/day — upstream lockout/expiry happens first.

@@ -195,6 +195,10 @@ describe('POST /api/auth/verify-otp', () => {
     const body = (await res.json()) as Record<string, string>;
     expect(body.accessToken).toBe('AAA.BBB.CCC');
     expect(body.refreshToken).toBe('r-token');
+    // Auth responses carry tokens — make sure a misconfigured proxy that
+    // treats any response as cacheable doesn't serve one user's
+    // just-minted tokens to the next caller.
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
   });
 
   it('returns 502 when upstream returns unexpected shape', async () => {
