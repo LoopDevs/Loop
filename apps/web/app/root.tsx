@@ -56,6 +56,10 @@ export function meta(): Route.MetaDescriptors {
   ];
 }
 
+// Inter is fetched from Google Fonts at page load. This is a documented and
+// accepted third-party runtime dependency — see
+// `docs/adr/005-known-limitations.md` §10. Allowlisted in CSP by
+// `buildSecurityHeaders`. Audit A-032.
 export const links: Route.LinksFunction = () => [
   { rel: 'icon', href: '/loop-favicon.ico' },
   { rel: 'icon', type: 'image/png', href: '/loop-favicon.png' },
