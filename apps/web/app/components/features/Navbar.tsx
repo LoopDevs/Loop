@@ -36,6 +36,11 @@ function SearchDropdown({
       {results.map((r, i) => (
         <button
           key={r.id}
+          // Matches the `aria-activedescendant="search-option-${i}"` on the
+          // combobox input so the screen reader announces the focused
+          // option (audit A-013). Without this id the ARIA pointer was
+          // dangling and AT keyboard focus was broken.
+          id={`search-option-${i}`}
           type="button"
           role="option"
           aria-selected={i === selectedIndex}
