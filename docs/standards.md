@@ -388,7 +388,7 @@ All commits must follow the [Conventional Commits](https://www.conventionalcommi
 | `build`    | Build system changes                            |
 | `revert`   | Reverting a previous commit                     |
 
-**Scopes:** `web`, `mobile`, `backend`, `shared`, `infra`, `deps`
+**Scopes:** `web`, `mobile`, `backend`, `shared`, `infra`, `deps`, `ci` (source of truth: `commitlint.config.js` `scope-enum`). commitlint rejects any other scope.
 
 **Examples:**
 
@@ -398,7 +398,7 @@ fix(backend): resolve off-by-one error in cluster grid calculation
 refactor(shared): extract currency formatting to shared utility
 perf(backend): cache upstream API responses with ETags
 test(backend): add coverage for OTP expiry edge cases
-docs(api): document /api/clusters endpoint parameters
+docs(backend): document /api/clusters endpoint parameters
 chore(deps): update @bufbuild/protobuf to 2.x
 ci: add coverage threshold enforcement to workflow
 ```
