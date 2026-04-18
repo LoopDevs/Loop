@@ -12,6 +12,8 @@ export interface UseOrdersResult {
   isLoading: boolean;
   isError: boolean;
   error: Error | null;
+  /** Force a refetch of the current page. Callers like a "Retry" button. */
+  refetch: () => void;
 }
 
 /**
@@ -46,6 +48,9 @@ export function useOrders(page: number, isAuthenticated: boolean): UseOrdersResu
     isLoading: query.isLoading,
     isError: query.isError,
     error: query.error,
+    refetch: () => {
+      void query.refetch();
+    },
   };
 }
 
