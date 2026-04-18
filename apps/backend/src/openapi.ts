@@ -559,6 +559,10 @@ registry.registerPath({
       description: 'Validation error',
       content: { 'application/json': { schema: ErrorResponse } },
     },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
   },
 });
 
@@ -589,6 +593,10 @@ registry.registerPath({
     },
     413: {
       description: 'Image exceeds 10MB limit',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (300/min per IP)',
       content: { 'application/json': { schema: ErrorResponse } },
     },
     502: {
