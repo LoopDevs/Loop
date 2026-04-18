@@ -699,7 +699,7 @@ These are hard rules. There are no exceptions without explicit documented justif
 - **Refresh tokens on mobile:** Keychain (iOS) / EncryptedSharedPreferences (Android) via `@aparajita/capacitor-secure-storage`. Not `@capacitor/preferences` (plaintext `NSUserDefaults` / `SharedPreferences`), not `localStorage`, not `sessionStorage`, not `AsyncStorage`. Implementation: `apps/web/app/native/secure-storage.ts`. Rationale: ADR-006, audit A-024.
 - **All inputs validated.** Validate at the API boundary in the backend. Never trust client-supplied data.
 - **Stellar private keys never leave the device.** Generated on-device. Never transmitted. The backend receives only the public key.
-- **No logging of sensitive data.** No logging of tokens, OTPs, email addresses in full, or any PII. Truncate or redact.
+- **No logging of secrets.** Access tokens, refresh tokens, OTP codes, API keys, API secrets, session cookies, Stellar wallet material — all redacted at the Pino layer via `REDACT_PATHS` in `apps/backend/src/logger.ts`. Tests lock the list. Email addresses are **deliberately not redacted** so operators can correlate an auth failure to a specific user; the docstring on `REDACT_PATHS` documents this exception. If a future regulatory requirement forces email redaction, the same REDACT_PATHS list is where the change lands — test file locks the current behaviour.
 - **Auth and payment code requires two-person review.** Any PR touching `apps/backend/src/auth/`, `apps/backend/src/orders/`, `apps/backend/src/stellar/`, or any Capacitor secure storage call requires approval from a second engineer who reviews security implications specifically.
 
 ---
