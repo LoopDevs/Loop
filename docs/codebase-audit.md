@@ -99,7 +99,7 @@ Every audit run must cover all of these workstreams:
 16. Documentation accuracy and operational usability
 17. Backlog, roadmap, and delivery-risk alignment
 
-Detailed checklists live in [docs/audit-checklist.md](docs/audit-checklist.md). Execution state lives in [docs/audit-tracker.md](docs/audit-tracker.md).
+Detailed checklists live in [`audit-checklist.md`](audit-checklist.md). Execution state lives in [`audit-tracker.md`](audit-tracker.md).
 
 ## Evidence Standard
 
