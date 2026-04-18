@@ -88,7 +88,7 @@ npm run proto:generate       # buf generate → packages/shared/src/proto/
 ## Critical security rules
 
 - **NEVER** hardcode secrets — env vars only.
-- **Access tokens: memory only** (Zustand). Refresh tokens: Capacitor Preferences on native, sessionStorage on web.
+- **Access tokens: memory only** (Zustand). Refresh tokens: `@aparajita/capacitor-secure-storage` on native (Keychain / EncryptedSharedPreferences — ADR-006, audit A-024), sessionStorage on web.
 - **NEVER** store or transmit Stellar private keys from backend. Generated on-device, stays on-device.
 - **ALL** auth, payment, and Stellar code requires human review before merge.
 - **NEVER** use `--no-verify` to skip hooks — fix the root cause.
