@@ -154,7 +154,29 @@ export async function refreshMerchants(): Promise<void> {
     }
 
     const merchantsById = new Map(merchants.map((m) => [m.id, m]));
-    const merchantsBySlug = new Map(merchants.map((m) => [merchantSlug(m.name), m]));
+    // Build merchantsBySlug explicitly so a slug collision (e.g. `T-Mobile`
+    // and `T Mobile` both slugify to `t-mobile`) is visible in logs rather
+    // than silently clobbering the first entry. Frontend links only see
+    // the last-inserted merchant for a given slug, so the operator needs a
+    // signal to rename one of the conflicting merchants upstream.
+    const merchantsBySlug = new Map<string, Merchant>();
+    for (const m of merchants) {
+      const slug = merchantSlug(m.name);
+      const existing = merchantsBySlug.get(slug);
+      if (existing !== undefined) {
+        log.warn(
+          {
+            slug,
+            keptId: m.id,
+            keptName: m.name,
+            droppedId: existing.id,
+            droppedName: existing.name,
+          },
+          'Merchant slug collision — later merchant wins, earlier entry unreachable by slug',
+        );
+      }
+      merchantsBySlug.set(slug, m);
+    }
     store = { merchants, merchantsById, merchantsBySlug, loadedAt: Date.now() };
     log.info({ count: merchants.length }, 'Merchant data refreshed');
   } catch (err) {
