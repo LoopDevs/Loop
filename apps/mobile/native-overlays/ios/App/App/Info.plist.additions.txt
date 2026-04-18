@@ -1,0 +1,35 @@
+Audit A-034 — required Info.plist keys
+=======================================
+
+Capacitor regenerates `apps/mobile/ios/App/App/Info.plist` when `npx cap
+add ios` is rerun, so these keys need to land every time. The apply
+script (apps/mobile/scripts/apply-native-overlays.sh) uses PlistBuddy
+to set the values below if they are not already present.
+
+Required keys (add inside the top-level <dict>):
+
+    <key>NSFaceIDUsageDescription</key>
+    <string>Loop uses Face ID to lock the app and keep your gift cards
+private when your device is unlocked to someone else.</string>
+
+Why
+---
+
+The app ships `@aparajita/capacitor-biometric-auth` (see
+`apps/web/app/native/biometrics.ts`) and an app-lock feature that
+prompts for Face ID on iOS. Apple's App Store review team rejects
+binaries that invoke LocalAuthentication without a user-facing
+usage-description string — the prompt sheet has nowhere to render
+the explanation.
+
+Without `NSFaceIDUsageDescription` the app would:
+  1. Fail App Store review on first submission.
+  2. On devices that already have the binary (e.g. TestFlight), the
+     LAContext.evaluatePolicy call errors out with "missing usage
+     description" and the app-lock feature is silently broken.
+
+Revisit
+-------
+
+If we ever drop the biometric-auth plugin, remove this key. Otherwise
+it stays permanent.

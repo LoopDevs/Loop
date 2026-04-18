@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Audit A-033: pre-Android-12 auto-backup exclusion for sensitive
+    auth / purchase state. The web layer stores refresh tokens, the
+    user's email, and pending-order state via the Capacitor Preferences
+    plugin, backed by SharedPreferences under the default name
+    "CapacitorStorage". Without this rules file those preferences
+    would be swept into Google Drive / ADB full-backup channels and
+    restored onto any device the user signs in on.
+
+    Applied to the generated `apps/mobile/android/` project by
+    `apps/mobile/scripts/apply-native-overlays.sh` after `npx cap add`
+    / `npx cap sync`. `apps/mobile/android/` is gitignored (audit A-012)
+    so this overlay file is the canonical source of truth.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="CapacitorStorage.xml" />
+</full-backup-content>

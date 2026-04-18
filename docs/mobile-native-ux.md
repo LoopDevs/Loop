@@ -95,3 +95,28 @@ versions.
 > The biometric plugin is `@aparajita/capacitor-biometric-auth`, not the
 > older `@capacitor-community/biometric-auth` package some earlier docs
 > pointed at — the community plugin has been unmaintained since Capacitor 5.
+
+### Native-config overlays
+
+`apps/mobile/android/` and `apps/mobile/ios/` are gitignored (see audit
+A-012 in `docs/audit-tracker.md`), so any config that must land in a
+native file is versioned instead under `apps/mobile/native-overlays/`
+and applied by `apps/mobile/scripts/apply-native-overlays.sh`. Run the
+script after `npx cap add` or whenever `cap sync` may have regenerated
+config. It is idempotent — it checks before writing.
+
+Current overlays:
+
+| File                                        | Target                                                   | Why                                                                                                           |
+| ------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `android/.../xml/backup_rules.xml`          | `android/app/src/main/res/xml/backup_rules.xml`          | Audit A-033: pre-Android-12 `fullBackupContent` rule excluding the Capacitor Preferences SharedPreferences.   |
+| `android/.../xml/data_extraction_rules.xml` | `android/app/src/main/res/xml/data_extraction_rules.xml` | Audit A-033: Android-12+ `dataExtractionRules` excluding the same file from cloud-backup and device-transfer. |
+| `ios/.../Info.plist.additions.txt`          | `ios/App/App/Info.plist` (PlistBuddy merge)              | Audit A-034: adds `NSFaceIDUsageDescription` required by the biometric-auth plugin + App Store review.        |
+
+The Android overlay also patches `AndroidManifest.xml` to reference the
+two new XML files via `fullBackupContent` / `dataExtractionRules`
+attributes on `<application>`.
+
+Rerun after each `npx cap add android` / `npx cap add ios` (audit A-012
+leaves those native projects ungenerated in fresh checkouts), or if you
+bump the Capacitor CLI and `cap sync` rewrites a config file.
