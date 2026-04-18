@@ -36,13 +36,16 @@ export interface Order {
  * Request body for POST /api/orders.
  *
  * Backend zod schema enforces the following — keep these in sync with
- * `CreateOrderBody` in apps/backend/src/orders/handler.ts:
+ * `CreateOrderBody` in apps/backend/src/orders/handler.ts and the mirrored
+ * OpenAPI schema in apps/backend/src/openapi.ts:
  *   - merchantId: non-empty, max 128 chars
- *   - amount:     finite, 1 ≤ n ≤ 10_000, multipleOf 0.01 (2-decimal precision)
+ *   - amount:     finite, 0.01 ≤ n ≤ 10_000, multipleOf 0.01 (2-decimal precision).
+ *                 The floor was lowered from $1 to $0.01 to cover CTX
+ *                 merchants (e.g. Aerie) whose own minimum is a penny.
  */
 export interface CreateOrderRequest {
   merchantId: string;
-  /** Amount in the merchant's currency. Must be in [1, 10_000] with 2-decimal precision. */
+  /** Amount in the merchant's currency. Must be in [0.01, 10_000] with 2-decimal precision. */
   amount: number;
 }
 
