@@ -295,6 +295,77 @@ describe('POST /api/orders', () => {
     expect(expiresAt).toBeLessThanOrEqual(nowSec + 31 * 60);
   });
 
+  it('returns 502 when the XLM payment URL uses a non-stellar scheme', async () => {
+    // Regression for the silently-broken 201 path: if CTX ever swapped the
+    // scheme to something other than `web+stellar:pay?`, the old code
+    // would still return 201 with an empty destination/memo because
+    // `URLSearchParams(whole-uri)` parses zero params. Now we refuse.
+    mockGetMerchants.mockReturnValue({
+      merchants: [{ id: 'm-1', name: 'Test Store', denominations: { currency: 'USD' } }],
+      merchantsById: new Map([
+        ['m-1', { id: 'm-1', name: 'Test Store', denominations: { currency: 'USD' } }],
+      ]),
+      merchantsBySlug: new Map(),
+      loadedAt: Date.now(),
+    });
+
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'wrong-scheme-order',
+          paymentCryptoAmount: '100',
+          // Same key ("XLM") but scheme is bitcoin:, not web+stellar:pay?
+          paymentUrls: { XLM: 'bitcoin:abc?amount=1' },
+          status: 'unpaid',
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const res = await app.request('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...AUTH_HEADER },
+      body: JSON.stringify({ merchantId: 'm-1', amount: 25 }),
+    });
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('UPSTREAM_ERROR');
+    expect(body.message).toMatch(/unexpected scheme/);
+  });
+
+  it('returns 502 when the XLM payment URL is missing the destination param', async () => {
+    mockGetMerchants.mockReturnValue({
+      merchants: [{ id: 'm-1', name: 'Test Store', denominations: { currency: 'USD' } }],
+      merchantsById: new Map([
+        ['m-1', { id: 'm-1', name: 'Test Store', denominations: { currency: 'USD' } }],
+      ]),
+      merchantsBySlug: new Map(),
+      loadedAt: Date.now(),
+    });
+
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'no-dest-order',
+          paymentCryptoAmount: '100',
+          paymentUrls: { XLM: 'web+stellar:pay?amount=1&memo=m' },
+          status: 'unpaid',
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const res = await app.request('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...AUTH_HEADER },
+      body: JSON.stringify({ merchantId: 'm-1', amount: 25 }),
+    });
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('UPSTREAM_ERROR');
+    expect(body.message).toMatch(/missing destination/);
+  });
+
   it('returns 502 when upstream creates an order but omits the XLM payment URL', async () => {
     mockGetMerchants.mockReturnValue({
       merchants: [{ id: 'm-1', name: 'Test Store', denominations: { currency: 'USD' } }],
