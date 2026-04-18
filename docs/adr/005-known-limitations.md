@@ -40,18 +40,23 @@ and where the fix work would happen.
 
 ### 2. Barcode gift card redemption is Phase 2
 
-- **What**: `Order.redeemType === 'barcode'` returns a `giftCardCode` and
-  optional `giftCardPin`. The UI today only renders them as copy-to-clipboard
-  strings; there's no actual barcode rendering, no scanner-friendly layout,
-  no full-screen brightness.
-- **Why accepted**: Most merchants in the current catalog use `url` redemption.
-  Barcode support matters once CTX onboards retailers where barcode-only
-  cards are the redemption path.
+- **What**: The rendering side is done — `PurchaseComplete.tsx` dynamically
+  imports `jsbarcode` and paints a CODE128 canvas when `giftCardCode` is
+  present, with an `aria-label` on the canvas and the code + optional PIN
+  shown as text below. What's still Phase 2 is the **data wiring**: the
+  backend's `getOrderHandler` comment explicitly notes that populating
+  `giftCardCode` from upstream is not yet implemented (see
+  `apps/backend/src/orders/handler.ts` — the barcode path "is currently
+  unreachable via polling"). There's also no scanner-friendly full-screen
+  brightness prompt.
+- **Why accepted**: Most merchants in the current catalog use `url`
+  redemption. The extra upstream wiring for barcode-only cards only pays
+  off once CTX onboards retailers where that's the primary path.
 - **Revisit**: When a barcode-primary merchant is added to the catalog, or
-  when user research shows copy-paste is insufficient.
-- **Where**: `apps/web/app/components/features/purchase/RedeemFlow.tsx` (barcode
-  branch), likely a new `BarcodeRedeem.tsx` component with the
-  `jsbarcode` or `bwip-js` library.
+  when user research shows the current flow is insufficient.
+- **Where**: `apps/backend/src/orders/handler.ts` (populate `giftCardCode`
+  when upstream returns barcode data), and likely a brightness-maxing
+  wrapper around the existing canvas in `PurchaseComplete.tsx`.
 
 ### 3. `eslint-plugin-react` is not in use
 
