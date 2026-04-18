@@ -8,6 +8,11 @@ primary_region = "iad"
   NODE_ENV = "production"
   GIFT_CARD_API_BASE_URL = "https://spend.ctx.com"
   LOG_LEVEL = "info"
+  # Audit A-025: image-proxy SSRF allowlist is enforced in production.
+  # `spend.ctx.com` hosts merchant card / logo URLs; the S3 bucket hosts
+  # the raw image blobs CTX links from. Anything outside this list gets
+  # 403'd by `validateImageUrl()` before any fetch.
+  IMAGE_PROXY_ALLOWED_HOSTS = "spend.ctx.com,ctx-spend.s3.us-west-2.amazonaws.com"
 
 [http_service]
   internal_port = 8080
