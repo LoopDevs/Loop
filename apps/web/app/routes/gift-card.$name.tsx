@@ -75,8 +75,11 @@ export default function GiftCardRoute(): React.JSX.Element {
     <div>
       {!isNative && <Navbar />}
 
-      {/* Hero Banner */}
-      <div className="relative h-64 sm:h-80 lg:h-96 overflow-hidden">
+      {/* Hero Banner — on mobile it's short so the purchase card mostly
+          covers it; desktop keeps the larger backdrop. `native-bleed-top`
+          negates the native safe-area padding so the image extends under
+          the translucent status bar. */}
+      <div className="relative h-40 sm:h-80 lg:h-96 overflow-hidden native-bleed-top">
         {heroUrl ? (
           <div
             className="absolute inset-0 bg-cover bg-center"
@@ -108,8 +111,9 @@ export default function GiftCardRoute(): React.JSX.Element {
         </div>
       </div>
 
-      {/* Content */}
-      <div className="container mx-auto px-4 relative z-20 -mt-8">
+      {/* Content — heavy negative margin on mobile so the purchase card
+          mostly covers the hero; only a thin strip peeks out above. */}
+      <div className="container mx-auto px-4 relative z-20 -mt-24 sm:-mt-16 lg:-mt-8">
         <div className="flex flex-col lg:flex-row gap-8 mb-12">
           {/* Right column — Purchase card (sticky on desktop) */}
           <div className="lg:w-2/5 xl:w-1/2 2xl:w-2/5 lg:order-2">

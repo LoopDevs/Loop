@@ -23,46 +23,61 @@ export async function setAppLockEnabled(enabled: boolean): Promise<void> {
 }
 
 /**
- * Registers a listener that prompts for biometrics when app resumes from
- * background AND on initial registration (cold start). Returns a cleanup
- * function.
+ * Prompts for biometrics once on cold start when app-lock is enabled.
+ * Returns a cleanup function.
  *
- * Covering cold start matters: the resume event only fires when the app
- * transitions from background to foreground. A stolen-phone scenario
- * where the thief kills and relaunches the app skips that transition
- * entirely, so app lock without a cold-start check leaves a gap right
- * where it's needed most.
+ * Design choice: we intentionally do NOT re-prompt on resume. A Loop gift
+ * card can only be bought by paying XLM from the user's own wallet, so a
+ * phone thief in possession of an unlocked handset still can't make a
+ * fraudulent purchase. Re-authenticating on every brief context switch
+ * (pulling down notifications, reading an SMS, switching apps for five
+ * seconds) makes the app feel hostile for no real security benefit. The
+ * cold-start prompt catches the "someone found/stole a locked phone and
+ * managed to get it unlocked" case; anything more is theatre.
  */
 export function registerAppLockGuard(): () => void {
   if (!Capacitor.isNativePlatform()) return () => {};
 
   let overlay: HTMLDivElement | null = null;
   // Cancellation flag — the async check below kicks off at registration
-  // time and again on every resume. If cleanup runs while one is still
-  // in-flight, its eventual showLockScreen() would leak an overlay onto
-  // a page the caller has already torn down. Flag every branch against
-  // `cancelled` before mutating DOM.
+  // time. If cleanup runs while it is still in-flight, its eventual
+  // showLockScreen() would leak an overlay onto a page the caller has
+  // already torn down. Flag every branch against `cancelled` before
+  // mutating DOM.
   let cancelled = false;
-  // The native biometric dialog is itself a system-level window —
-  // opening/closing it causes Android to emit pause/resume around the
-  // prompt. Without this guard, every successful unlock immediately
-  // triggered a resume → runLockCheck → prompt again, looping forever.
-  // If a resume fires within this window of an unlock, treat it as part
-  // of the dialog lifecycle and skip. Three seconds comfortably covers
-  // the auth dialog's tear-down; a genuine background → foreground
-  // trip in that window is not a threat anyone cares about.
-  const UNLOCK_GRACE_MS = 3000;
-  let lastUnlockedAt = 0;
 
   const showLockScreen = (): void => {
     if (cancelled) return;
     if (overlay) return;
+    // Match the splash screen's look (background + logo) so the overlay
+    // feels like a natural extension of the app's boot state rather than
+    // a jarring security prompt. Theme follows the html.dark class set by
+    // the inline theme script in root.tsx so it paints correctly on the
+    // very first paint.
+    const isDark = document.documentElement.classList.contains('dark');
+    const bg = isDark ? 'rgb(3, 7, 18)' : 'rgb(249, 250, 251)';
+    const fg = isDark ? 'rgba(255, 255, 255, 0.55)' : 'rgba(17, 24, 39, 0.55)';
+    const logo = isDark ? '/loop-logo-white.svg' : '/loop-logo.svg';
     overlay = document.createElement('div');
     overlay.id = 'app-lock-overlay';
-    overlay.style.cssText =
-      'position:fixed;inset:0;z-index:99998;background:rgb(3,7,18);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1rem;';
-    overlay.innerHTML =
-      '<div style="font-size:3rem">&#128274;</div><div style="color:white;font-size:1rem">Tap to unlock</div>';
+    overlay.style.cssText = [
+      'position:fixed',
+      'inset:0',
+      'z-index:99998',
+      `background:${bg}`,
+      'display:flex',
+      'align-items:center',
+      'justify-content:center',
+      'flex-direction:column',
+      'gap:1.25rem',
+      'opacity:1',
+      'transition:opacity 200ms ease-out',
+      'cursor:pointer',
+    ].join(';');
+    overlay.innerHTML = `
+      <img src="${logo}" alt="Loop" style="height:2.5rem" />
+      <div style="color:${fg};font-size:0.875rem;letter-spacing:0.01em;">Unlock to continue</div>
+    `;
     overlay.addEventListener('click', () => {
       void attemptUnlock();
     });
@@ -70,20 +85,23 @@ export function registerAppLockGuard(): () => void {
   };
 
   const hideLockScreen = (): void => {
-    overlay?.remove();
+    if (!overlay) return;
+    // Fade out so the content reveal feels intentional, not a flicker.
+    // Detach a local reference because the class-level `overlay` gets
+    // nulled immediately — otherwise a rapid re-show could race against
+    // the scheduled removal and drop the new overlay instead of the old.
+    const el = overlay;
+    el.style.opacity = '0';
     overlay = null;
+    window.setTimeout(() => el.remove(), 200);
   };
 
   const attemptUnlock = async (): Promise<void> => {
     const ok = await authenticateWithBiometrics('Unlock Loop');
-    if (!cancelled && ok) {
-      lastUnlockedAt = Date.now();
-      hideLockScreen();
-    }
+    if (!cancelled && ok) hideLockScreen();
   };
 
   const runLockCheck = async (): Promise<void> => {
-    if (Date.now() - lastUnlockedAt < UNLOCK_GRACE_MS) return;
     const enabled = await isAppLockEnabled();
     if (cancelled || !enabled) return;
     const { available } = await checkBiometrics();
@@ -92,17 +110,31 @@ export function registerAppLockGuard(): () => void {
     void attemptUnlock();
   };
 
-  const onResume = (): void => {
-    void runLockCheck();
+  // If the app boots while the OS is still transitioning — e.g. the user
+  // launched from a notification so the device hasn't finished unlocking —
+  // firing the biometric prompt immediately makes the overlay appear over
+  // the system lock screen, which is confusing and occasionally results
+  // in the prompt itself getting dismissed by the keyguard. Wait until
+  // the document is actually visible (Android fires `visibilitychange`
+  // once the app is really on top) before prompting.
+  const startWhenVisible = (): void => {
+    if (cancelled) return;
+    if (document.visibilityState === 'visible') {
+      void runLockCheck();
+      return;
+    }
+    const handler = (): void => {
+      if (document.visibilityState !== 'visible') return;
+      document.removeEventListener('visibilitychange', handler);
+      if (!cancelled) void runLockCheck();
+    };
+    document.addEventListener('visibilitychange', handler);
   };
 
-  // Cold-start check — runs once as soon as the guard is registered.
-  void runLockCheck();
+  startWhenVisible();
 
-  document.addEventListener('resume', onResume);
   return () => {
     cancelled = true;
-    document.removeEventListener('resume', onResume);
     hideLockScreen();
   };
 }

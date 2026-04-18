@@ -199,6 +199,49 @@ html.native body {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+/* Pushes the whole page below the status bar on native. Default for every
+   route via root.tsx; pages that want a full-bleed hero cancel it locally
+   with `.native-bleed-top` on the element that should extend upward. */
+/* The device's reported safe-area-inset-top hugs the status bar icons so
+   tightly that page headings look cramped. Add a bit of breathing room
+   below it — one variable so `.native-safe-page`, `.native-bleed-top`,
+   and the ::before backdrop stay in lockstep. */
+:root {
+  --safe-top: calc(env(safe-area-inset-top) + 0.75rem);
+}
+
+.native-safe-page {
+  padding-top: var(--safe-top);
+}
+
+/* Negates `.native-safe-page` — lets a hero banner extend under the
+   translucent status bar while the rest of the page stays below it. Apply
+   to the hero wrapper; anything inside that wrapper still renders from the
+   top, so add padding inside if content shouldn't touch the status bar. */
+.native-bleed-top {
+  margin-top: calc(-1 * var(--safe-top));
+}
+
+/* Fixed backdrop that paints a solid/gradient behind the system status bar
+   so its icons always have contrast, regardless of what each page renders
+   underneath (dark hero image, light product grid, etc.). Sits on top of
+   page content (pointer-events: none so it never steals taps). */
+html.native body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--safe-top);
+  background: linear-gradient(to bottom, rgb(255, 255, 255) 60%, rgba(255, 255, 255, 0));
+  pointer-events: none;
+  z-index: 1050;
+}
+
+html.dark.native body::before {
+  background: linear-gradient(to bottom, rgb(3, 7, 18) 60%, rgba(3, 7, 18, 0));
+}
+
 .native-safe-x {
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);

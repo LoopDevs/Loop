@@ -179,8 +179,7 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
       <OfflineBanner />
       <NativeBackButton />
       <ToastContainer />
-      {isNative && <div className="native-safe-top" />}
-      <div className={isNative ? 'native-tab-clearance' : ''}>
+      <div className={isNative ? 'native-safe-page native-tab-clearance' : ''}>
         {isNative ? (
           <div key={location.pathname} className="route-enter">
             {children}
