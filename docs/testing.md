@@ -35,7 +35,8 @@ Vitest unit + integration tests covering:
 
 ### Web (`apps/web`)
 
-Vitest tests against a jsdom-like environment covering:
+Vitest in the **node** environment (not jsdom — see ADR-005 §7 for the
+tradeoff; component/hook tests are covered via e2e instead). Covers:
 
 - Native wrappers under `app/native/` — platform detection, clipboard, haptics, preferences, status bar, back button, network, screenshot, share, biometrics, app-lock, webview, pending-purchase storage.
 - Zustand stores — `auth.store`, `purchase.store` (full state machine: amount → payment → complete/redeem/error), `ui.store`.
