@@ -36,7 +36,9 @@ primary_region = "iad"
   # validate` reported as an orphaned `services` block and the scheduler
   # silently ignored. Effect: no HTTP health probes were running, so an
   # instance stuck at 500 would keep serving traffic until a deploy or
-  # manual restart.
+  # manual restart. Also see `scripts/lint-docs.sh` §8, which guards
+  # against regression by running `flyctl config validate` on every
+  # fly.toml on every push.
   [[http_service.checks]]
     interval = "15s"
     timeout = "5s"

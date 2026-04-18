@@ -125,6 +125,32 @@ for f in "${critical_files[@]}"; do
   fi
 done
 
+# ─── 8. Fly deploy configs validate cleanly ─────────────────────────────────
+#
+# The health-check bug caught in PR #120 — `[[services.http_checks]]` orphaned
+# under a `[http_service]` root — would have been caught by
+# `flyctl config validate` the moment it regressed. Running the validator
+# here keeps every fly.toml in the repo from drifting into a shape Fly's
+# scheduler silently ignores. Skip cleanly on machines without flyctl so
+# this doesn't break fresh contributor laptops; CI should install it (see
+# `.github/workflows/ci.yml`) before the docs-lint step.
+echo "Checking Fly deploy configs..."
+if command -v flyctl >/dev/null 2>&1; then
+  while IFS= read -r fly_toml; do
+    dir=$(dirname "$fly_toml")
+    output=$(cd "$dir" && flyctl config validate 2>&1 || echo "FLYCTL_FAILED")
+    if echo "$output" | grep -q "FLYCTL_FAILED"; then
+      echo "$output" | sed 's/^/  /' >&2
+      err "flyctl config validate failed for $fly_toml"
+    elif echo "$output" | grep -qi "warning"; then
+      echo "$output" | sed 's/^/  /' >&2
+      err "flyctl config validate emitted a warning for $fly_toml"
+    fi
+  done < <(find apps -maxdepth 3 -name "fly.toml" -not -path "*/node_modules/*")
+else
+  echo "  (flyctl not installed — skipping; install from https://fly.io/docs/flyctl/install/)"
+fi
+
 # ─── Done ───────────────────────────────────────────────────────────────────
 
 echo ""
