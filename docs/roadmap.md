@@ -100,8 +100,8 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 ### Authentication upgrades
 
 - [ ] Social login (Apple Sign-In required for App Store, Google optional)
-- [ ] Login gate — require auth before any purchase or wallet feature
-- [ ] Session persistence across app restarts (refresh token flow)
+- [x] ~~Login gate — require auth before any purchase~~ — `PurchaseContainer` renders the inline email/OTP flow when the store has no access token; remains open for wallet features once those ship in Phase 2.
+- [x] ~~Session persistence across app restarts (refresh token flow)~~ — `use-session-restore` hook restores on mount by pulling the refresh token from secure storage (Keychain on iOS, EncryptedSharedPreferences on Android, sessionStorage on web) and calling `tryRefresh`. Audits A-008 / A-020 / A-024 and ADR-006 cover the storage and recovery paths.
 
 ### Backend extensions
 
