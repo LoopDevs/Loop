@@ -155,20 +155,24 @@ Applied in order on every request:
 
 **Every code change must update the relevant docs in the same commit.** Use this checklist:
 
-| If you changed…                            | Update…                                                              |
-| ------------------------------------------ | -------------------------------------------------------------------- |
-| An API endpoint (add/remove/modify)        | `docs/architecture.md` → Backend API endpoints section               |
-| An env var (add/remove/rename)             | `docs/development.md`, `AGENTS.md` env summary, `.env.example` files |
-| A build command or dev workflow            | `docs/development.md`, `AGENTS.md` quick commands                    |
-| Deploy config (Dockerfile, Fly.io, Vercel) | `docs/deployment.md`                                                 |
-| Test patterns or coverage rules            | `docs/testing.md`                                                    |
-| A code convention or standard              | `docs/standards.md`                                                  |
-| An architectural decision                  | **Required:** Add/update `docs/adr/NNN-title.md` before implementing |
-| A new dependency                           | **Required:** ADR justifying the addition before `npm install`       |
-| File structure (add/move/delete files)     | `AGENTS.md` file boundaries table                                    |
-| `packages/shared` exports                  | Check both `apps/web` and `apps/backend` imports                     |
-| Dependencies (add/remove)                  | Verify no duplicates across packages                                 |
-| Middleware or backend infrastructure       | `AGENTS.md` middleware stack section                                 |
+| If you changed…                                         | Update…                                                                                                                                                                                                                           |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An API endpoint (add/remove/modify)                     | `docs/architecture.md` → Backend API endpoints section, **and** `apps/backend/src/openapi.ts` registration — declare every status code the handler can return (429 if rate-limited, 502 for upstream-proxy, 503 for circuit-open) |
+| An API response shape or field                          | Shared type in `packages/shared/`, **and** the matching schema in `apps/backend/src/openapi.ts` so generated clients don't strip the field                                                                                        |
+| A rate limit, Cache-Control, or middleware ordering     | `AGENTS.md` middleware stack section, **and** the 429 entry in the endpoint's `openapi.ts` registration                                                                                                                           |
+| An env var (add/remove/rename)                          | `docs/development.md`, `AGENTS.md` env summary, `.env.example` files, `docs/deployment.md` env table                                                                                                                              |
+| A build command or dev workflow                         | `docs/development.md`, `AGENTS.md` quick commands                                                                                                                                                                                 |
+| Deploy config (Dockerfile, fly.toml) on backend AND web | Make sure both stay parity — web Dockerfile/fly drift has happened (PRs #149/#150)                                                                                                                                                |
+| Deploy config (Dockerfile, Fly.io, Vercel)              | `docs/deployment.md`                                                                                                                                                                                                              |
+| Test patterns or coverage rules                         | `docs/testing.md`                                                                                                                                                                                                                 |
+| A code convention or standard                           | `docs/standards.md`                                                                                                                                                                                                               |
+| An architectural decision                               | **Required:** Add/update `docs/adr/NNN-title.md` before implementing                                                                                                                                                              |
+| A new dependency                                        | **Required:** ADR justifying the addition before `npm install`                                                                                                                                                                    |
+| A Capacitor plugin used by the web runtime              | Declare in **both** `apps/web/package.json` and `apps/mobile/package.json` at the same version (PR #151) — `cap sync` discovers via workspace hoisting, but isolated installs break without the mobile declaration                |
+| File structure (add/move/delete files)                  | `AGENTS.md` file boundaries table, per-package `AGENTS.md` Files table                                                                                                                                                            |
+| `packages/shared` exports                               | Check both `apps/web` and `apps/backend` imports; add the file to `packages/shared/AGENTS.md` Files                                                                                                                               |
+| Dependencies (add/remove)                               | Verify no duplicates across packages                                                                                                                                                                                              |
+| Middleware or backend infrastructure                    | `AGENTS.md` middleware stack section                                                                                                                                                                                              |
 
 **If unsure, update `AGENTS.md`.** It is the first thing AI agents read. Stale instructions here cause cascading errors.
 
