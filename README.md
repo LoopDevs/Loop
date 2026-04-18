@@ -45,8 +45,10 @@ npm run dev              # web + backend concurrently
 npm run typecheck        # tsc across all packages
 npm run lint             # ESLint across all packages
 npm test                 # unit tests (vitest)
-npm run test:e2e         # Playwright e2e tests
+npm run test:e2e         # Playwright e2e — self-contained mocked suite (default)
+npm run test:e2e:real    # Playwright e2e — against a running real-CTX backend
 npm run build            # production build
+npm run verify           # typecheck + lint + format + docs + test (one command)
 ```
 
 ## License
