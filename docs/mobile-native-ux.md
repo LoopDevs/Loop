@@ -11,7 +11,7 @@ Making the Capacitor WebView app feel native on iOS and Android.
 - [x] **Status bar styling** — `@capacitor/status-bar` overlay mode + theme-matched style. Set on app mount in NativeShell.
 - [x] **Android back button** — `@capacitor/app` backButton listener. Navigates history or exits app.
 - [x] **Keyboard handling** — Capacitor Keyboard plugin configured with `resize: 'body'` + `resizeOnFullScreen: true` in capacitor.config.ts.
-- [x] **Viewport meta fixes** — `viewport-fit=cover`, `maximum-scale=1`, `user-scalable=no`.
+- [x] **Viewport meta fixes** — `width=device-width, initial-scale=1, viewport-fit=cover`. `maximum-scale=1` / `user-scalable=no` were intentionally removed (PR #143) so mobile web satisfies WCAG 1.4.4 (Resize Text); the Capacitor webview doesn't need them either.
 - [x] **Copy to clipboard** — Copy buttons on payment address (PaymentStep) and gift card code (PurchaseComplete). Capacitor Clipboard on native, navigator.clipboard on web. Haptic on copy.
 - [x] **Touch target audit** — `min-h-[44px]` on all Buttons, `py-3 min-h-[44px]` on denomination buttons. Navbar mobile links are web-only (hidden on native). Tab bar tabs are 56px tall.
 
