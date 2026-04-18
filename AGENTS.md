@@ -202,7 +202,6 @@ Applied in order on every request:
 - Commit `.env`, signing certificates, or provisioning profiles
 - Use Web Crypto API for Stellar signing — use `@stellar/stellar-sdk`
 - Add multi-brand / white-label logic — Loop only
-- Push directly to `main` — all changes via PR
 - Merge a PR with failing tests or lint errors
 - Write a TODO without a ticket reference or date
 - Import from `src/index.ts` in tests — import from `src/app.ts` instead
