@@ -432,7 +432,7 @@ registry.registerPath({
   security: [{ bearerAuth: [] }],
   request: { body: { content: { 'application/json': { schema: CreateOrderBody } } } },
   responses: {
-    200: {
+    201: {
       description: 'Order created',
       content: { 'application/json': { schema: CreateOrderResponse } },
     },
@@ -446,6 +446,18 @@ registry.registerPath({
     },
     404: {
       description: 'Unknown merchant',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    502: {
+      description: 'Upstream error from CTX',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    503: {
+      description: 'Circuit breaker open',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
@@ -463,6 +475,14 @@ registry.registerPath({
       description: 'Missing or invalid access token',
       content: { 'application/json': { schema: ErrorResponse } },
     },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    502: {
+      description: 'Upstream error from CTX',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
   },
 });
 
@@ -475,11 +495,27 @@ registry.registerPath({
   request: { params: z.object({ id: z.string() }) },
   responses: {
     200: { description: 'Order', content: { 'application/json': { schema: Order } } },
+    400: {
+      description: 'Invalid order id',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
     401: {
       description: 'Missing or invalid access token',
       content: { 'application/json': { schema: ErrorResponse } },
     },
     404: { description: 'Not found', content: { 'application/json': { schema: ErrorResponse } } },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    502: {
+      description: 'Upstream error from CTX',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    503: {
+      description: 'Circuit breaker open',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
   },
 });
 
