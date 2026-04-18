@@ -242,10 +242,13 @@ export default function App(): React.JSX.Element {
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps): React.JSX.Element {
-  // Report to Sentry
-  if (typeof window !== 'undefined') {
+  // Report to Sentry — inside useEffect so a re-render triggered by (say) a
+  // parent provider change doesn't fire a duplicate capture for the same
+  // error. React Router remounts the boundary on a new error, so the
+  // [error]-keyed effect fires exactly once per distinct failure.
+  useEffect(() => {
     Sentry.captureException(error);
-  }
+  }, [error]);
 
   let message = 'Oops!';
   let details = 'An unexpected error occurred.';
