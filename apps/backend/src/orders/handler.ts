@@ -230,11 +230,42 @@ export async function createOrderHandler(c: Context): Promise<Response> {
       );
     }
     // Parse destination and memo from stellar URI: web+stellar:pay?destination=X&amount=Y&memo=Z
-    const uriParams = new URLSearchParams(paymentUri.replace(/^web\+stellar:pay\?/, ''));
+    //
+    // Previously this replace+URLSearchParams path would silently coerce any
+    // non-matching URI (e.g. a `bitcoin:` URL if CTX ever reshuffled schemes)
+    // into a "no-op replace → URLSearchParams of the whole string" flow that
+    // produced empty destination + memo, leading to a 201 with unpayable
+    // data. Validate the scheme up front so a schema shift from upstream
+    // surfaces as 502 instead of a silently-broken payment screen.
+    const STELLAR_PAY_PREFIX = 'web+stellar:pay?';
+    if (!paymentUri.startsWith(STELLAR_PAY_PREFIX)) {
+      log.error(
+        { orderId: validated.data.id, merchantId, paymentUriScheme: paymentUri.slice(0, 32) },
+        'Upstream XLM payment URL does not use the expected web+stellar:pay? scheme',
+      );
+      return c.json(
+        {
+          code: 'UPSTREAM_ERROR',
+          message: 'Order payment URL uses an unexpected scheme',
+        },
+        502,
+      );
+    }
+    const uriParams = new URLSearchParams(paymentUri.slice(STELLAR_PAY_PREFIX.length));
     const paymentAddress = uriParams.get('destination') ?? '';
     // URLSearchParams.get() already decodes percent-encoding. Calling decodeURIComponent
     // again would double-decode (and throw on malformed sequences like "%ZZ"). Use raw value.
     const memo = uriParams.get('memo') ?? '';
+    if (paymentAddress === '') {
+      log.error(
+        { orderId: validated.data.id, merchantId },
+        'Upstream XLM payment URL missing destination parameter',
+      );
+      return c.json(
+        { code: 'UPSTREAM_ERROR', message: 'Order payment URL missing destination' },
+        502,
+      );
+    }
 
     // Notify Discord
     notifyOrderCreated(
