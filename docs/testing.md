@@ -83,6 +83,19 @@ npm run test:e2e:mocked
 npm run verify
 ```
 
+### Mobile Safari opt-in (audit A-004, A-026)
+
+The real-upstream config has a `mobile-safari` project scoped to `smoke.test.ts` only — the purchase-flow suite asserts desktop-only UI (Navbar search is hidden behind `md:block`) and would always fail at mobile widths.
+
+The project is **off by default**: it requires a manually-installed WebKit build and would otherwise break a fresh checkout for anyone who forgot to run `npx playwright install webkit`. Opt in explicitly:
+
+```bash
+npx playwright install webkit     # once per machine
+MOBILE_SAFARI=1 npm run test:e2e:real
+```
+
+`CI` always skips the project regardless of `MOBILE_SAFARI` — GitHub Actions installs chromium only.
+
 ---
 
 ## When tests run
