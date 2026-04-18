@@ -21,6 +21,20 @@ primary_region = "iad"
     hard_limit = 250
     soft_limit = 200
 
+  # HTTP health probe — same pattern as apps/backend/fly.toml after
+  # PR #120 + PR #121. Without this, Fly only knows the machine is up;
+  # a crashed or hung `react-router-serve` that leaves the TCP listener
+  # open would pass the default check while serving broken responses.
+  # `/` is the cheapest route to probe: the home loader is
+  # client-fetched-only (no SSR data fetch) so a hit just renders the
+  # static shell. 15s interval matches backend.
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/"
+
 [[vm]]
   memory = "256mb"
   cpu_kind = "shared"
