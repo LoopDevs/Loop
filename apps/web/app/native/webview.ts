@@ -15,6 +15,10 @@ export interface WebViewOptions {
  * local files. Only http(s) is acceptable for a remote redeem URL. If a
  * caller somehow ends up with an untrusted URL, this turns the symptom into
  * a failure instead of code execution.
+ *
+ * Production builds (`import.meta.env.PROD`) additionally reject plain
+ * `http:` — audit A-009. Dev / test still accept http so the mocked
+ * suites and local backends work.
  */
 function assertSafeUrl(url: string): void {
   let parsed: URL;
@@ -25,6 +29,12 @@ function assertSafeUrl(url: string): void {
   }
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
     throw new Error(`openWebView: only http(s) URLs are allowed (got ${parsed.protocol})`);
+  }
+  const isProduction = typeof import.meta.env !== 'undefined' && import.meta.env.PROD === true;
+  if (isProduction && parsed.protocol === 'http:') {
+    throw new Error(
+      `openWebView: http:// URLs are rejected in production (got ${url}). Redeem URLs must be https.`,
+    );
   }
 }
 
