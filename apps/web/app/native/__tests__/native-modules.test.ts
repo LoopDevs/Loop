@@ -536,7 +536,7 @@ describe('webview', () => {
   it('refuses http:// URLs when `import.meta.env.PROD` is true (regression A-009)', async () => {
     const openFn = vi.fn();
     (window as unknown as Record<string, unknown>).open = openFn;
-    vi.stubEnv('PROD', 'true');
+    vi.stubEnv('PROD', true);
     try {
       await expect(openWebView({ url: 'http://redeem.test/abc' })).rejects.toThrow(
         /rejected in production/,
