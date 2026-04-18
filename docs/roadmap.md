@@ -4,7 +4,7 @@ What remains to ship Loop Phase 1 and what comes after.
 
 The migration plan (`docs/migration.md`) covered getting the monorepo to a working state. This document tracks what's left to reach production and beyond.
 
-Known limitations we are **consciously not fixing** in the current phase are tracked separately in [ADR-005 — Known Limitations](adr/005-known-limitations.md). Check there before filing a bug for Stellar, barcode redemption, `eslint-plugin-react`, distributed rate limiting, DNS rebinding, probe timeouts, jsdom coverage, proto drift, metrics scraping, or upstream token passthrough.
+Known limitations we are **consciously not fixing** in the current phase are tracked separately in [ADR-005 — Known Limitations](adr/005-known-limitations.md). Check there before filing a bug for Stellar, barcode redemption, `eslint-plugin-react`, distributed rate limiting, DNS rebinding, probe timeouts, jsdom coverage, proto drift, metrics scraping, third-party fonts / tile hosts, or upstream token passthrough.
 
 ---
 
