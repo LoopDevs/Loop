@@ -145,7 +145,11 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
         });
 
         const marker = L.marker([lat, lng], { icon });
-        marker.on('click', () => map.setZoom(zoom + 2));
+        // `setZoom` keeps the current centre, so clicking a cluster just
+        // zoomed in on wherever the user was looking. Pan to the cluster
+        // AND zoom via `setView` so the interaction feels like drilling
+        // into the cluster the user tapped.
+        marker.on('click', () => map.setView([lat, lng], zoom + 2));
         marker.addTo(map);
         markersRef.current.push(marker);
       }
