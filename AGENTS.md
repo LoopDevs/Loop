@@ -4,19 +4,21 @@
 
 ## Docs index
 
-| Doc                                 | Contents                                               |
-| ----------------------------------- | ------------------------------------------------------ |
-| `docs/architecture.md`              | System design, data flows, component responsibilities  |
-| `docs/development.md`               | Getting started, env vars, all dev commands            |
-| `docs/deployment.md`                | How to deploy backend, web, and mobile                 |
-| `docs/testing.md`                   | Testing pyramid, when tests run, coverage requirements |
-| `docs/standards.md`                 | Code style, commit format, branching, review rules     |
-| `docs/roadmap.md`                   | What's left for Phase 1, Phase 2, Phase 3              |
-| `docs/codebase-audit.md`            | Audit program, scope, evidence model, exit criteria    |
-| `docs/audit-checklist.md`           | Detailed audit checklist by workstream                 |
-| `docs/audit-tracker.md`             | Working tracker for evidence, findings, and status     |
-| `docs/adr/`                         | Architecture Decision Records                          |
-| `docs/adr/005-known-limitations.md` | Items we deliberately do NOT fix in Phase 1            |
+| Doc                                               | Contents                                                      |
+| ------------------------------------------------- | ------------------------------------------------------------- |
+| `docs/architecture.md`                            | System design, data flows, component responsibilities         |
+| `docs/development.md`                             | Getting started, env vars, all dev commands                   |
+| `docs/deployment.md`                              | How to deploy backend, web, and mobile                        |
+| `docs/testing.md`                                 | Testing pyramid, when tests run, coverage requirements        |
+| `docs/standards.md`                               | Code style, commit format, branching, review rules            |
+| `docs/roadmap.md`                                 | What's left for Phase 1, Phase 2, Phase 3                     |
+| `docs/codebase-audit.md`                          | Audit program, scope, evidence model, exit criteria           |
+| `docs/audit-checklist.md`                         | Detailed audit checklist by workstream                        |
+| `docs/audit-tracker.md`                           | Working tracker for evidence, findings, and status            |
+| `docs/adr/`                                       | Architecture Decision Records                                 |
+| `docs/adr/005-known-limitations.md`               | Items we deliberately do NOT fix in Phase 1                   |
+| `docs/adr/006-keychain-backed-secure-storage.md`  | Keychain/EncryptedSharedPreferences for refresh tokens        |
+| `docs/adr/007-native-projects-source-of-truth.md` | Why native iOS/Android projects stay generated, not versioned |
 
 ---
 

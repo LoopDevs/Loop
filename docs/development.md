@@ -134,10 +134,24 @@ npm run typecheck        # tsc --noEmit
 ```bash
 cd apps/web && npm run build:mobile    # build static export first
 cd apps/mobile
-npx cap sync                           # copy build + sync plugins
+
+# First time only: generate the native projects. They're gitignored
+# (see ADR-007) — the overlay script below re-applies the audited
+# config that `cap sync` would otherwise overwrite.
+npx cap add ios                        # once per checkout
+npx cap add android                    # once per checkout
+./scripts/apply-native-overlays.sh     # after every `cap add` / `cap sync`
+
+npx cap sync                           # copy web build + sync plugins
 npx cap open ios                       # open Xcode
 npx cap open android                   # open Android Studio
 ```
+
+Rerun `./scripts/apply-native-overlays.sh` after any `cap add` or
+`cap sync` to keep the A-033 backup exclusions and the A-034 Face ID
+usage description in place — both are enforced by overlay files in
+`apps/mobile/native-overlays/`. See `docs/mobile-native-ux.md`
+§Native-config overlays.
 
 **Live reload during mobile development:**
 
