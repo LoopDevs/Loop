@@ -30,6 +30,7 @@ export function RedeemFlow({
   const [copied, setCopied] = useState(false);
   const [webViewOpen, setWebViewOpen] = useState(false);
   const [showManualEntry, setShowManualEntry] = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
   const [manualCode, setManualCode] = useState('');
   const [manualPin, setManualPin] = useState('');
   const webViewRef = useRef<{ close: () => Promise<void> } | null>(null);
@@ -45,6 +46,15 @@ export function RedeemFlow({
 
   const handleOpenWebView = async (): Promise<void> => {
     void triggerHaptic();
+    // Audit A-019: `openWebView` rejects when popup-blockers (web) or the
+    // Capacitor Browser plugin (native) refuse to open. We used to fire
+    // this as `void handleOpenWebView()` and swallow the rejection, which
+    // left the user stuck on "Opening..." forever and produced an
+    // unhandled promise rejection in Sentry. Now we reset `webViewOpen`,
+    // surface the error in a dedicated banner, and offer the manual-entry
+    // path as a fallback — so a pop-up-blocked state is recoverable
+    // without a reload.
+    setOpenError(null);
 
     // Build scripts to inject
     const injectScripts: string[] = [];
@@ -57,36 +67,48 @@ export function RedeemFlow({
 
     setWebViewOpen(true);
 
-    const controller = await openWebView({
-      url: redeemUrl,
-      scripts: injectScripts,
-      onMessage: (data) => {
-        // Check for gift card result from scrapeResult script
-        if (
-          data !== null &&
-          typeof data === 'object' &&
-          'type' in data &&
-          (data as Record<string, unknown>).type === 'loop:giftcard'
-        ) {
-          const result = data as { code?: string; pin?: string };
-          if (result.code) {
-            receivedCodeRef.current = true;
-            void triggerHapticNotification('success');
-            store.setComplete(result.code, result.pin);
-            void controller.close();
+    try {
+      const controller = await openWebView({
+        url: redeemUrl,
+        scripts: injectScripts,
+        onMessage: (data) => {
+          // Check for gift card result from scrapeResult script
+          if (
+            data !== null &&
+            typeof data === 'object' &&
+            'type' in data &&
+            (data as Record<string, unknown>).type === 'loop:giftcard'
+          ) {
+            const result = data as { code?: string; pin?: string };
+            if (result.code) {
+              receivedCodeRef.current = true;
+              void triggerHapticNotification('success');
+              store.setComplete(result.code, result.pin);
+              void controller.close();
+            }
           }
-        }
-      },
-      onClose: () => {
-        setWebViewOpen(false);
-        // If we didn't get the code via script, prompt for manual entry
-        if (!receivedCodeRef.current) {
-          setShowManualEntry(true);
-        }
-      },
-    });
+        },
+        onClose: () => {
+          setWebViewOpen(false);
+          // If we didn't get the code via script, prompt for manual entry
+          if (!receivedCodeRef.current) {
+            setShowManualEntry(true);
+          }
+        },
+      });
 
-    webViewRef.current = controller;
+      webViewRef.current = controller;
+    } catch (err) {
+      setWebViewOpen(false);
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : 'We could not open the redemption page.';
+      setOpenError(
+        `${message} If your browser blocked a pop-up, allow pop-ups for this site and try again, or enter the code manually below.`,
+      );
+      void triggerHapticNotification('error');
+    }
   };
 
   // Timeout: if WebView is open too long, close and show manual entry
@@ -178,6 +200,15 @@ export function RedeemFlow({
         </button>
       </div>
 
+      {openError !== null && (
+        <div
+          className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 mb-3 text-sm text-red-700 dark:text-red-300"
+          role="alert"
+        >
+          {openError}
+        </div>
+      )}
+
       <Button
         className="w-full"
         onClick={() => {
@@ -187,6 +218,16 @@ export function RedeemFlow({
       >
         {webViewOpen ? 'Opening...' : 'Open redemption page'}
       </Button>
+
+      {openError !== null && (
+        <button
+          type="button"
+          onClick={() => setShowManualEntry(true)}
+          className="w-full text-sm text-blue-600 dark:text-blue-400 mt-3 underline min-h-[44px]"
+        >
+          Enter code manually instead
+        </button>
+      )}
     </div>
   );
 }
