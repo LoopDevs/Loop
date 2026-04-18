@@ -1,6 +1,6 @@
 # Loop
 
-Cross-platform gift card cashback app. Buy discounted gift cards and earn cashback to a Stellar wallet.
+Cross-platform app for buying discounted gift cards with XLM. Cashback-to-Stellar is a Phase 2 feature on the roadmap — not yet shipped.
 
 ## Quick start
 

@@ -10,6 +10,7 @@ import { Navbar } from '~/components/features/Navbar';
 import { OrderRowSkeleton } from '~/components/ui/Skeleton';
 import { Button } from '~/components/ui/Button';
 import { friendlyError } from '~/utils/error-messages';
+import { formatMoney } from '~/utils/money';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Orders — Loop' }];
@@ -70,7 +71,7 @@ function OrderRow({ order }: { order: Order }): React.JSX.Element {
       </div>
       <div className="flex items-center gap-3 ml-4">
         <span className="text-sm font-semibold text-gray-900 dark:text-white">
-          ${order.amount.toFixed(2)} {order.currency}
+          {formatMoney(order.amount, order.currency)}
         </span>
         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${status.color}`}>
           {status.label}
