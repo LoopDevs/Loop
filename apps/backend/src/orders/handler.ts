@@ -123,7 +123,9 @@ function mapStatus(ctxStatus: string): 'pending' | 'completed' | 'failed' | 'exp
 
 /**
  * Parses a money string from upstream. Returns 0 only for missing/empty values.
- * Throws on a non-numeric string so we never silently treat corrupt data as $0.
+ * Throws on a non-numeric string so the single-order handler never silently
+ * treats corrupt data as $0. List callers use `parseMoneyOrNull` instead so
+ * one bad row doesn't 500 the whole page.
  */
 function parseMoney(raw: string | undefined): number {
   if (raw === undefined || raw === '') return 0;
@@ -132,6 +134,18 @@ function parseMoney(raw: string | undefined): number {
     throw new Error(`Non-numeric money value from upstream: ${JSON.stringify(raw)}`);
   }
   return n;
+}
+
+/**
+ * List-safe variant: returns null on non-numeric input. The list handler
+ * filters null rows out rather than crashing the whole response — one
+ * order with a malformed `cardFiatAmount` should not hide the user's
+ * entire purchase history.
+ */
+function parseMoneyOrNull(raw: string | undefined): number | null {
+  if (raw === undefined || raw === '') return 0;
+  const n = parseFloat(raw);
+  return Number.isFinite(n) ? n : null;
 }
 
 /**
@@ -297,18 +311,30 @@ export async function listOrdersHandler(c: Context): Promise<Response> {
       );
     }
 
-    const orders = validated.data.result.map((item) => ({
-      id: item.id,
-      merchantId: item.merchantId,
-      merchantName: item.merchantName ?? '',
-      amount: parseMoney(item.cardFiatAmount),
-      currency: item.cardFiatCurrency ?? 'USD',
-      status: mapStatus(item.status ?? 'unpaid'),
-      xlmAmount: item.paymentCryptoAmount ?? '0',
-      percentDiscount: item.percentDiscount,
-      redeemType: item.redeemType,
-      createdAt: item.created,
-    }));
+    const orders = validated.data.result.flatMap((item) => {
+      const amount = parseMoneyOrNull(item.cardFiatAmount);
+      if (amount === null) {
+        log.warn(
+          { orderId: item.id, rawAmount: item.cardFiatAmount },
+          'Skipping order with non-numeric cardFiatAmount from upstream',
+        );
+        return [];
+      }
+      return [
+        {
+          id: item.id,
+          merchantId: item.merchantId,
+          merchantName: item.merchantName ?? '',
+          amount,
+          currency: item.cardFiatCurrency ?? 'USD',
+          status: mapStatus(item.status ?? 'unpaid'),
+          xlmAmount: item.paymentCryptoAmount ?? '0',
+          percentDiscount: item.percentDiscount,
+          redeemType: item.redeemType,
+          createdAt: item.created,
+        },
+      ];
+    });
 
     const { page, pages, perPage, total } = validated.data.pagination;
     return c.json({
