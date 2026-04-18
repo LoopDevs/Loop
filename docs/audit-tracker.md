@@ -176,7 +176,16 @@ Do not mark the audit complete until all are true:
 
 - every workstream has evidence attached **✓**
 - every critical and high finding has an agreed remediation path **✓**
-- every blocked item has a concrete reason **✓** (A-023 / PR #89 blocked on GitHub billing; flagged under Residual Risks)
-- no material gaps remain after a final reconciliation pass **✓** (this sweep)
+- every blocked item has a concrete reason **✓** — no items remain blocked;
+  GitHub Actions was billing-blocked during remediation, so every PR was
+  verified locally via `npm run verify` in lieu of CI
+- no material gaps remain after a final reconciliation pass **✓**
 
-All 37 findings are either merged to `main` or have an open PR with remediation landed locally and green on `npm run verify`. See the Status column of the findings register for the PR-by-PR closing notes.
+**Audit status: closed.** All 37 findings merged to `main` — see the Status
+column of the findings register for per-PR closing notes. Additional
+hardening landed in the same remediation window (cache-leak protection on
+`/api/orders` + `/api/auth/*`, viewport zoom for WCAG 1.4.4, shared
+`foldForSearch`, OpenAPI drift fixes across every endpoint, web Dockerfile
+non-root user, web `fly.toml` health check, mobile `secure-storage` dep
+declaration, and others) beyond the original register; those are tracked
+via the PR history, not in this file.
