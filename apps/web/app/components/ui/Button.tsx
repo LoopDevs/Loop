@@ -53,11 +53,19 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         type={type}
         disabled={disabled === true || loading === true}
+        // Announce loading state to AT. Without `aria-busy`, a screen
+        // reader user only heard the button label; the visible spinner
+        // had no text equivalent so the loading transition was silent.
+        aria-busy={loading === true ? true : undefined}
         className={classes}
         {...props}
       >
         {loading === true && (
           <svg
+            // `aria-hidden` because the spinner is decorative — the
+            // `aria-busy` attribute already conveys the state and we
+            // don't want AT to announce "img" or anything on top of it.
+            aria-hidden="true"
             className="animate-spin h-4 w-4"
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
