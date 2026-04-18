@@ -60,6 +60,17 @@ vi.mock('../../clustering/handler.js', () => ({
   ),
 }));
 
+// Mock Discord notifications so we can assert fulfilled-dedup behaviour
+// below without pulling in env-based webhook wiring.
+const mockNotifyOrderCreated = vi.fn();
+const mockNotifyOrderFulfilled = vi.fn();
+vi.mock('../../discord.js', () => ({
+  notifyOrderCreated: (...args: unknown[]) => mockNotifyOrderCreated(...args),
+  notifyOrderFulfilled: (...args: unknown[]) => mockNotifyOrderFulfilled(...args),
+  notifyHealthChange: vi.fn(),
+  notifyCircuitBreaker: vi.fn(),
+}));
+
 // Mock circuit breaker to pass through to global fetch (avoids cross-test state leaks)
 vi.mock('../../circuit-breaker.js', () => {
   class CircuitOpenError extends Error {
@@ -89,6 +100,8 @@ const AUTH_HEADER = { Authorization: 'Bearer test-token' };
 
 beforeEach(() => {
   mockFetch.mockReset();
+  mockNotifyOrderCreated.mockReset();
+  mockNotifyOrderFulfilled.mockReset();
   mockGetMerchants.mockReturnValue({
     merchants: [],
     merchantsById: new Map(),
@@ -464,6 +477,61 @@ describe('GET /api/orders/:id', () => {
     );
     expect(body.order.redeemChallengeCode).toBe('WCBENDRJXR'); // mapped from redeemUrlChallenge
     expect(body.order.createdAt).toBe('2026-03-25T18:08:58Z');
+  });
+
+  it('fires notifyOrderFulfilled once on the first fulfilled observation', async () => {
+    const upstreamResponse = {
+      id: 'fulfil-once-1',
+      merchantId: 'm-42',
+      merchantName: 'Aerie',
+      cardFiatAmount: '10.00',
+      cardFiatCurrency: 'USD',
+      paymentCryptoAmount: '55.27',
+      status: 'fulfilled',
+      redeemType: 'url',
+      created: '2026-03-25T18:08:58Z',
+    };
+    // Three polls of the same fulfilled order — PaymentStep polls every 3s.
+    // Only the first should fire the Discord notification; subsequent polls
+    // are suppressed by the dedup set.
+    mockFetch
+      .mockResolvedValueOnce(new Response(JSON.stringify(upstreamResponse), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(upstreamResponse), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(upstreamResponse), { status: 200 }));
+
+    await app.request('/api/orders/fulfil-once-1', { headers: AUTH_HEADER });
+    await app.request('/api/orders/fulfil-once-1', { headers: AUTH_HEADER });
+    await app.request('/api/orders/fulfil-once-1', { headers: AUTH_HEADER });
+
+    expect(mockNotifyOrderFulfilled).toHaveBeenCalledTimes(1);
+    expect(mockNotifyOrderFulfilled).toHaveBeenCalledWith(
+      'fulfil-once-1',
+      'Aerie',
+      10,
+      'USD',
+      'url',
+    );
+  });
+
+  it('does not fire notifyOrderFulfilled for pending/unpaid orders', async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'pending-1',
+          merchantId: 'm-42',
+          merchantName: 'Aerie',
+          cardFiatAmount: '10.00',
+          cardFiatCurrency: 'USD',
+          status: 'unpaid',
+          created: '2026-03-25T18:08:58Z',
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await app.request('/api/orders/pending-1', { headers: AUTH_HEADER });
+
+    expect(mockNotifyOrderFulfilled).not.toHaveBeenCalled();
   });
 });
 

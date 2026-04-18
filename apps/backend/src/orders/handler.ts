@@ -4,7 +4,29 @@ import { logger } from '../logger.js';
 import { getMerchants } from '../merchants/sync.js';
 import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
-import { notifyOrderCreated } from '../discord.js';
+import { notifyOrderCreated, notifyOrderFulfilled } from '../discord.js';
+
+/**
+ * Tracks which order ids we've already Discord-notified as fulfilled,
+ * so repeated PaymentStep / orders-page polls of a completed order
+ * don't spam the channel. Keyed on `orderId` alone (status is
+ * implicit: entry exists iff we've notified).
+ *
+ * Bounded like the rate-limit map — unbounded growth would give an
+ * attacker with a valid bearer a cheap memory-bloat vector by
+ * polling new synthetic orderIds. Map iteration is insertion-ordered,
+ * so `keys().next()` is the oldest entry.
+ */
+const notifiedFulfilled = new Set<string>();
+const NOTIFIED_FULFILLED_MAX = 10_000;
+
+function markFulfilledNotified(orderId: string): void {
+  if (notifiedFulfilled.size >= NOTIFIED_FULFILLED_MAX) {
+    const oldest = notifiedFulfilled.values().next().value;
+    if (oldest !== undefined) notifiedFulfilled.delete(oldest);
+  }
+  notifiedFulfilled.add(orderId);
+}
 
 const log = logger.child({ handler: 'orders' });
 
@@ -440,13 +462,17 @@ export async function getOrderHandler(c: Context): Promise<Response> {
       );
     }
 
+    const status = mapStatus(validated.data.status);
+    const amount = parseMoney(validated.data.cardFiatAmount);
+    const currency = validated.data.cardFiatCurrency ?? 'USD';
+
     const order: Record<string, unknown> = {
       id: validated.data.id,
       merchantId: validated.data.merchantId,
       merchantName: validated.data.merchantName ?? '',
-      amount: parseMoney(validated.data.cardFiatAmount),
-      currency: validated.data.cardFiatCurrency ?? 'USD',
-      status: mapStatus(validated.data.status),
+      amount,
+      currency,
+      status,
       xlmAmount: validated.data.paymentCryptoAmount ?? '0',
       percentDiscount: validated.data.percentDiscount,
       redeemType: validated.data.redeemType,
@@ -462,6 +488,23 @@ export async function getOrderHandler(c: Context): Promise<Response> {
     }
     if (validated.data.redeemScripts) {
       order.redeemScripts = validated.data.redeemScripts;
+    }
+
+    // Wire up the fulfilled-order Discord notification. This handler is
+    // the only place that sees upstream status transitions — PaymentStep
+    // polls here every 3s during a purchase, so the first poll after
+    // CTX flips to `fulfilled` is the right fire-once hook. A bounded
+    // in-memory set prevents repeated notifications for the same order
+    // on subsequent polls or a returning user refreshing orders.
+    if (status === 'completed' && !notifiedFulfilled.has(validated.data.id)) {
+      markFulfilledNotified(validated.data.id);
+      notifyOrderFulfilled(
+        validated.data.id,
+        validated.data.merchantName ?? '',
+        amount,
+        currency,
+        validated.data.redeemType ?? 'unknown',
+      );
     }
 
     return c.json({ order });
