@@ -29,13 +29,13 @@ src/
 **Every handler follows this pattern:**
 
 1. Validate input (Zod for body, manual for query params)
-2. Do work (call upstream via `upstreamCircuit.fetch`, or read from in-memory store)
+2. Do work (call upstream via `getUpstreamCircuit('<endpoint>').fetch(...)`, or read from in-memory store)
 3. Validate upstream response (Zod) before forwarding
 4. Return typed JSON response with standard error shape `{ code, message }`
 
 **Upstream calls always use:**
 
-- `upstreamCircuit.fetch()` — not bare `fetch()` (circuit breaker protection)
+- `getUpstreamCircuit('<endpoint-key>').fetch()` — per-endpoint breakers (keys in use: `login`, `verify-email`, `refresh-token`, `logout`, `merchants`, `locations`, `gift-cards`). Never bare `fetch()`. The per-endpoint split (ADR-004 §Per-endpoint circuit breakers) means a failing endpoint can't trip healthy ones.
 - `upstreamUrl('/path')` — builds full URL from env
 - `AbortSignal.timeout()` — every call has a timeout
 - Zod validation on response before forwarding
@@ -52,12 +52,12 @@ Status codes: 400 (validation), 401 (auth), 404 (not found), 429 (rate limit), 5
 
 1. Add the handler function in the appropriate module (auth, orders, merchants)
 2. Validate request input with Zod
-3. Call upstream via `upstreamCircuit.fetch(upstreamUrl('/path'), { ... })`
+3. Call upstream via `getUpstreamCircuit('<endpoint-key>').fetch(upstreamUrl('/path'), { ... })` — pick an existing key if the call lands on the same upstream endpoint category; add a new key if it's a fresh category (tests: `circuit-breaker.test.ts` exercises registration)
 4. Validate upstream response with Zod schema using `.safeParse()`
-5. Handle errors: 401 → 401, 404 → 404, circuit open → 503, other → 502
+5. Handle errors: 401 → 401, 404 → 404, `CircuitOpenError` → 503, other → 502
 6. Register the route in `src/app.ts`
 7. Add integration test in `src/__tests__/` or module `__tests__/`
-8. Update `docs/architecture.md` API endpoints section
+8. Update `docs/architecture.md` API endpoints section and `apps/backend/src/openapi.ts` path registration (declare every status code the handler can return — including 429 if the route is rate-limited and 503 if it proxies to CTX)
 
 ## Recipe: Add a new env var
 
