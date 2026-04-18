@@ -207,6 +207,17 @@ const Order = registry.register(
     giftCardPin: z.string().optional(),
     redeemUrl: z.string().optional(),
     redeemChallengeCode: z.string().optional(),
+    // CTX sometimes returns helper scripts for automating redemption
+    // inside the WebView (inject challenge, scrape result). Present in
+    // the handler response and in the shared `Order` type, previously
+    // missing from the OpenAPI schema — a generated client would have
+    // stripped them as unknown fields.
+    redeemScripts: z
+      .object({
+        injectChallenge: z.string().optional(),
+        scrapeResult: z.string().optional(),
+      })
+      .optional(),
     createdAt: z.string(),
   }),
 );
