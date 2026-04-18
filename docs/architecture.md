@@ -106,7 +106,7 @@ Purchase
 **Token storage:**
 
 - Access token: Zustand memory only
-- Refresh token: Capacitor Preferences on native; sessionStorage on web
+- Refresh token: `@aparajita/capacitor-secure-storage` on native (Keychain / EncryptedSharedPreferences — ADR-006, audit A-024); sessionStorage on web
 - Tokens are upstream (CTX) tokens — backend proxies without verification
 - Token refresh: POST /api/auth/refresh → proxied to upstream POST /refresh-token
 
