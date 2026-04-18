@@ -17,7 +17,7 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 - [x] ~~Run `npx cap add ios && npx cap add android`~~ — native projects created
 - [x] ~~Install Playwright browsers~~ — chromium installed
 - [x] ~~Set GitHub repo secrets for CI~~ — no secrets needed; upstream API is public
-- [ ] Set up GitHub branch protection rules on `main`
+- [ ] Set up GitHub branch protection rules on `main` — **blocked**: GitHub rejects branch-protection writes on private repos on the free plan with 403 "Upgrade to GitHub Pro or make this repository public" (audit A-037). Until the org upgrades or the repo goes public, the "no direct pushes to `main`" rule is enforced by team convention only (see `AGENTS.md` §Git workflow). When unblocked, require a PR, passing quality/unit/e2e checks, and disallow force-push.
 
 ### Production infrastructure
 
