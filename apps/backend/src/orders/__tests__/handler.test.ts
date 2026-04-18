@@ -604,6 +604,24 @@ describe('GET /api/orders', () => {
     expect(url.searchParams.get('status')).toBe('completed');
   });
 
+  it('returns Cache-Control: private, no-store to keep user-specific data out of shared caches', async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          pagination: { page: 1, pages: 1, perPage: 20, total: 0 },
+          result: [],
+        }),
+        { status: 200 },
+      ),
+    );
+    const res = await app.request('/api/orders', { headers: AUTH_HEADER });
+    expect(res.status).toBe(200);
+    // A CDN keyed on URL alone would otherwise cache one user's order list
+    // and serve it to the next authenticated caller — the Authorization
+    // header is not part of the cache key. Enforce private+no-store.
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store');
+  });
+
   it('maps upstream list response to our format', async () => {
     const upstreamResponse = {
       pagination: { page: 1, pages: 3, perPage: 10, total: 25 },
