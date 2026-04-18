@@ -18,7 +18,8 @@
 ┌──────────────────────▼──────────────────────────────────────┐
 │  apps/backend  (TypeScript + Hono, Node.js)                 │
 │  Merchant cache · map clustering · image proxy              │
-│  Email OTP auth · JWT · gift card order proxy               │
+│  Email OTP / refresh-token proxy · gift card order proxy    │
+│  (backend does NOT mint its own tokens — it forwards CTX's) │
 └──────────────────────┬──────────────────────────────────────┘
                        │ REST API
 ┌──────────────────────▼──────────────────────────────────────┐

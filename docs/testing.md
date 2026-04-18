@@ -16,42 +16,40 @@
 
 ## Test inventory
 
-### Backend — 176 tests across 14 files
+Exact test counts drift every time anyone adds or removes a test, so this
+section used to get stale within a week. Instead, treat the vitest / Playwright
+output as the source of truth — re-run with `npm test` / `npm run test:e2e`
+any time you need an up-to-date number.
 
-| Module                     | Tests | Coverage                                                               |
-| -------------------------- | ----- | ---------------------------------------------------------------------- |
-| `clustering/algorithm.ts`  | 13    | All zoom levels, edge cases, centroid accuracy                         |
-| `clustering/data-store.ts` | 5     | Pagination, error recovery, NaN coords, disabled, concurrent guard     |
-| `merchants/sync.ts`        | 12    | Pagination, disabled filtering, denomination parsing, concurrent guard |
-| `orders/handler.ts`        | 10    | Merchant lookup, upstream validation, X-Client-Id, path traversal      |
-| `images/proxy.ts`          | 9     | SSRF: localhost, private IPs, IPv6, allowlist, HTTPS enforcement       |
-| `circuit-breaker.ts`       | 27    | All state transitions, 4xx exclusion, concurrent probes                |
-| Integration routes         | 16    | Health, merchants, auth, orders, clusters                              |
+### Backend (`apps/backend`)
 
-### Web — 133 tests across 12 files
+Vitest unit + integration tests covering:
 
-| Module                      | Tests | Coverage                                                                                                                                    |
-| --------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Native modules (13 modules) | 47    | Platform, clipboard, haptics, storage, status bar, back button, network, screenshot, share, biometrics, app lock, webview, purchase storage |
-| `stores/auth.store.ts`      | 8     | Session management, token storage, clear                                                                                                    |
-| `stores/purchase.store.ts`  | 10    | Full state machine: amount → payment → complete/redeem/error                                                                                |
-| `stores/ui.store.ts`        | 9     | Theme system/light/dark, toasts, localStorage                                                                                               |
-| `services/api-client.ts`    | 6     | GET/POST, auth headers, error handling, binary responses                                                                                    |
-| `services/merchants.ts`     | 12    | fetchMerchants, fetchMerchant, fetchMerchantBySlug                                                                                          |
-| `services/orders.ts`        | 9     | createOrder, fetchOrders, fetchOrder                                                                                                        |
-| `services/auth.ts`          | 8     | requestOtp, verifyOtp, logout, platform detection                                                                                           |
-| `services/clusters.ts`      | 5     | Fetch params, Accept header, JSON fallback, errors                                                                                          |
-| `utils/error-messages.ts`   | 7     | Offline detection, status codes, fallbacks                                                                                                  |
-| `utils/image.ts`            | 8     | URL construction, encoding, width/quality params                                                                                            |
-| `hooks/slug.ts`             | 5     | Slugification, special chars, empty input                                                                                                   |
+- `clustering/` — zoom levels, centroid accuracy, pagination, concurrent-refresh guard.
+- `merchants/sync.ts` — pagination, denomination parsing, disabled-merchant filtering.
+- `orders/handler.ts` — merchant lookup, amount validation (`0.01`–`10_000`), upstream validation, path traversal, `X-Client-Id` plumbing.
+- `images/proxy.ts` — SSRF (localhost / private-IP / IPv6 / allowlist / HTTPS enforcement), DNS-rebinding limitations.
+- `circuit-breaker.ts` — state transitions, 4xx exclusion, concurrent-probe safety.
+- `auth/handler.ts` — request-OTP / verify-OTP / refresh / logout proxies.
+- Integration routes — `/health`, `/metrics`, merchants, auth, orders, clusters.
 
-### E2E — 11 tests across 3 files
+### Web (`apps/web`)
 
-| Test file                                | Tests | Coverage                                                                                        |
-| ---------------------------------------- | ----- | ----------------------------------------------------------------------------------------------- |
-| `tests/e2e/smoke.test.ts`                | 5     | Home, auth, map, orders, 404                                                                    |
-| `tests/e2e/purchase-flow.test.ts`        | 4     | Merchant detail, search navigation, sign-in flow, map loading (real CTX upstream)               |
-| `tests/e2e-mocked/purchase-flow.test.ts` | 2     | Full purchase happy path (email → OTP → amount → payment → redeem) + wrong-OTP, mocked upstream |
+Vitest tests against a jsdom-like environment covering:
+
+- Native wrappers under `app/native/` — platform detection, clipboard, haptics, preferences, status bar, back button, network, screenshot, share, biometrics, app-lock, webview, pending-purchase storage.
+- Zustand stores — `auth.store`, `purchase.store` (full state machine: amount → payment → complete/redeem/error), `ui.store`.
+- Services — `api-client`, `merchants`, `orders`, `auth`, `clusters`.
+- Utilities — `error-messages`, `image`, `money` (currency-aware formatter), `slug` hook.
+
+### E2E (`tests/e2e` + `tests/e2e-mocked`)
+
+Playwright suites:
+
+- `tests/e2e/smoke.test.ts` — home / auth / map / orders / 404 smoke on real upstream.
+- `tests/e2e/purchase-flow.test.ts` — merchant detail, search navigation, sign-in, map loading on real upstream.
+- `tests/e2e-mocked/purchase-flow.test.ts` — full purchase happy path (email → OTP → amount → payment → redeem) + wrong-OTP path, backed by the deterministic mock CTX in `tests/e2e-mocked/fixtures/mock-ctx.mjs`.
+- `scripts/e2e-real.mjs` + `.github/workflows/e2e-real.yml` — manually dispatched real CTX + real Stellar wallet end-to-end run (see **Manual: real CTX + wallet purchase workflow** below).
 
 ---
 

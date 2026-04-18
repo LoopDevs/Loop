@@ -1,5 +1,13 @@
 # Loop — Migration Plan
 
+> **HISTORICAL** — this is the original monorepo-assembly plan. The
+> migration completed; for the current architecture see
+> [`docs/architecture.md`](architecture.md). Some details here describe
+> a target the project deliberately deviated from — most notably the
+> auth module, which proxies upstream CTX tokens rather than minting
+> local JWTs (see [AGENTS.md §auth](../AGENTS.md) and the auth handler
+> in `apps/backend/src/auth/handler.ts`).
+
 Setting up the Loop monorepo from scratch and migrating existing codebases in as clean, standards-compliant packages.
 
 ---
