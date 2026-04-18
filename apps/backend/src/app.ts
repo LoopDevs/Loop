@@ -173,8 +173,14 @@ app.get('/metrics', (c) => {
   }
   lines.push('');
 
-  lines.push('# HELP loop_circuit_state Circuit breaker state per upstream endpoint.');
-  lines.push('# HELP loop_circuit_state 0=closed,1=half_open,2=open.');
+  // Prometheus exposition format allows exactly one HELP line per metric.
+  // We used to emit two (one for the description, one for the state-value
+  // mapping) which some scrapers/parsers rejected outright. Merge into one
+  // and move the mapping into separate comment lines so the information
+  // is still visible but not mistaken for metadata.
+  lines.push(
+    '# HELP loop_circuit_state Circuit breaker state per upstream endpoint (0=closed, 1=half_open, 2=open).',
+  );
   lines.push('# TYPE loop_circuit_state gauge');
   for (const [key, state] of Object.entries(getAllCircuitStates())) {
     const val = state === 'closed' ? 0 : state === 'half_open' ? 1 : 2;
