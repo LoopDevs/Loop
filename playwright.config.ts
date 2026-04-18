@@ -47,12 +47,24 @@ export default defineConfig({
       use: { ...devices['Pixel 7'] },
       testMatch: /smoke\.test\.ts$/,
     },
-    // Full mobile Safari only runs locally (CI installs chromium only).
-    ...(!process.env['CI']
+    // Full mobile Safari only runs locally (CI installs chromium only),
+    // AND only when the operator opts in by setting `MOBILE_SAFARI=1`
+    // (audit A-004). The project requires a manually-installed WebKit
+    // build (`npx playwright install webkit`) — without it, Playwright
+    // fails the whole run at setup with a missing-executable error,
+    // which makes `npm run test:e2e:real` unusable on a fresh checkout
+    // even when Chromium coverage is healthy. Opting in is explicit.
+    //
+    // Also scoped to the smoke suite: the purchase-flow tests assert
+    // UI that's desktop-only (e.g. the Navbar search input is hidden
+    // behind `md:block`), so running them in a mobile-Safari viewport
+    // would always fail regardless of WebKit presence (audit A-026).
+    ...(!process.env['CI'] && process.env['MOBILE_SAFARI'] === '1'
       ? [
           {
             name: 'mobile-safari',
             use: { ...devices['iPhone 14'] },
+            testMatch: /smoke\.test\.ts$/,
           },
         ]
       : []),
