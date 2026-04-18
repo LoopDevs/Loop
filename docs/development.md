@@ -52,7 +52,11 @@ VITE_API_URL=https://api.loopfinance.io
 
 ### apps/backend/.env (git-ignored)
 
-See `apps/backend/.env.example` for all variables with descriptions.
+`apps/backend/.env.example` is the authoritative source of every variable
+with descriptions. Keep this snapshot in sync when you add a new var —
+the `scripts/lint-docs.sh` check fails CI if a variable is in
+`env.ts` but absent from `.env.example`, but this page is updated by
+hand.
 
 ```bash
 PORT=8080
@@ -62,9 +66,36 @@ NODE_ENV=development
 # Upstream Gift Card API (public — no auth needed)
 GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 
+# Optional upstream API credentials — needed only for /locations endpoint
+# GIFT_CARD_API_KEY=...
+# GIFT_CARD_API_SECRET=...
+
+# Per-platform CTX client IDs — default to the @loop/shared constants
+# (loopweb / loopios / loopandroid). Override per-deployment; the
+# boot-time parseEnv warns on divergence from the shared defaults
+# because the web bundle bakes those client IDs in at build time.
+# CTX_CLIENT_ID_WEB=loopweb
+# CTX_CLIENT_ID_IOS=loopios
+# CTX_CLIENT_ID_ANDROID=loopandroid
+
 # Refresh intervals (optional)
 REFRESH_INTERVAL_HOURS=6                # merchant cache refresh
 LOCATION_REFRESH_INTERVAL_HOURS=24     # location data refresh
+
+# Dev mode — show disabled merchants so UI can be tested before CTX enables them.
+# INCLUDE_DISABLED_MERCHANTS=true
+
+# Image proxy SSRF allowlist — REQUIRED in production (audit A-025).
+# Comma-separated upstream hostnames. Boot fails in production if unset
+# unless DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1.
+# IMAGE_PROXY_ALLOWED_HOSTS=spend.ctx.com,ctx-spend.s3.us-west-2.amazonaws.com
+
+# Rate-limit trust boundary (audit A-023). Set TRUST_PROXY=true only
+# when running behind a trusted edge proxy that rewrites
+# X-Forwarded-For (Fly.io, Cloudflare, etc.). Otherwise leave unset so
+# the rate limiter falls back to the TCP socket address that clients
+# cannot spoof.
+# TRUST_PROXY=true
 
 # Discord webhooks (optional — for notifications)
 # DISCORD_WEBHOOK_ORDERS=https://discord.com/api/webhooks/...
