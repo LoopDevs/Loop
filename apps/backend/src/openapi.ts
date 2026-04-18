@@ -158,8 +158,9 @@ const CreateOrderBody = registry.register(
   'CreateOrderBody',
   z.object({
     merchantId: z.string().min(1).max(128),
-    amount: z.number().min(1).max(10_000).openapi({
-      description: '2-decimal precision, in merchant currency.',
+    amount: z.number().min(0.01).max(10_000).multipleOf(0.01).openapi({
+      description:
+        '2-decimal precision, in merchant currency. Accepted range is 0.01 – 10_000, matching the runtime CreateOrderBody schema in apps/backend/src/orders/handler.ts.',
     }),
   }),
 );
