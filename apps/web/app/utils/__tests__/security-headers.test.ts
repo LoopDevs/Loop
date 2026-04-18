@@ -20,7 +20,10 @@ describe('buildSecurityHeaders', () => {
     const csp = h['Content-Security-Policy'] ?? '';
     expect(csp).toContain('fonts.googleapis.com');
     expect(csp).toContain('fonts.gstatic.com');
-    expect(csp).toContain('basemaps.cartocdn.com');
+    // Leaflet substitutes `{s}` with `a`/`b`/`c`/`d` on CARTO tile URLs,
+    // so the CSP must whitelist the wildcard — the bare hostname does not
+    // match subdomains under CSP host-source semantics.
+    expect(csp).toContain('*.basemaps.cartocdn.com');
     expect(csp).toContain('ingest.sentry.io');
   });
 
