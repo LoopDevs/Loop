@@ -185,11 +185,23 @@ const metrics: Metrics = {
 // Request counter middleware. Runs after all other middleware + the handler
 // so it observes the final status. Keys are `METHOD:ROUTE:STATUS` with the
 // route being the matched pattern (not the URL) to keep cardinality bounded.
+//
+// Audit A-022: unmatched paths had no routePath, so the fallback emitted
+// the raw URL as the label. A fuzz scan (or an ordinary crawler) could
+// then spray `/api/foo`, `/api/bar`, `/xyz-…` and each would create a
+// fresh metric key, ballooning the Prometheus series cardinality until
+// the map (and the scraper) struggled. Collapse every unmatched route
+// to the single constant label `NOT_FOUND` so cardinality stays O(number
+// of declared routes).
 app.use('*', async (c, next) => {
   await next();
   // Skip the metrics endpoint itself so we don't count our own scraper.
   if (c.req.path === '/metrics') return;
-  const route = c.req.routePath ?? c.req.path;
+  // Hono sets routePath to the matched middleware pattern when no route
+  // handler matches (for us, that's the wildcard catch-all '/*' or '*').
+  // Treat both as NOT_FOUND — everything else is a real registered route.
+  const raw = c.req.routePath;
+  const route = raw === undefined || raw === '/*' || raw === '*' ? 'NOT_FOUND' : raw;
   const key = `${c.req.method}:${route}:${c.res.status}`;
   metrics.requestsTotal.set(key, (metrics.requestsTotal.get(key) ?? 0) + 1);
 });
