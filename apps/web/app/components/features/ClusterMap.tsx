@@ -244,6 +244,10 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
         (!document.documentElement.classList.contains('light') &&
           window.matchMedia('(prefers-color-scheme: dark)').matches);
 
+      // CARTO basemap tiles are a documented and accepted third-party
+      // runtime dependency — see `docs/adr/005-known-limitations.md` §10.
+      // CSP allowlists `basemaps.cartocdn.com` in `buildSecurityHeaders`.
+      // Audit A-032.
       const tileUrl = isDark
         ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
         : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';

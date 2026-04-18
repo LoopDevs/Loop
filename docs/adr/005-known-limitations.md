@@ -168,7 +168,31 @@ and where the fix work would happen.
   state beyond the Discord webhook fan-outs.
 - **Where**: Fly.io config (`fly.toml`), Grafana Cloud scrape config.
 
-### 10. Secret token transport on login is via upstream
+### 10. Third-party runtime dependencies (Google Fonts, CARTO/OSM tiles)
+
+- **What**: `apps/web/app/root.tsx` loads Inter from `fonts.googleapis.com` /
+  `fonts.gstatic.com`. `apps/web/app/components/features/ClusterMap.tsx`
+  loads basemap tiles from `basemaps.cartocdn.com` and attributes
+  OpenStreetMap + CARTO in the map footer. Both issue third-party requests
+  at page load (fonts) and at every viewport change (tiles).
+- **Why accepted**: Self-hosting the Inter font file set adds ~200 KB to the
+  bundle for a benefit users won't see; CARTO's free basemap policy covers
+  the traffic volume Loop expects for Phase 1. Both providers are named
+  explicitly in the CSP allowlist (audit A-027) so "unsanctioned new
+  third-party origin" is blocked at the browser layer.
+- **Privacy note**: Both services see the user's IP at request time. No
+  Loop-specific identifiers (cookies, tokens, email) are transmitted —
+  the fetches are cookie-less cross-origin GETs. Users in EU jurisdictions
+  should still be informed; that copy lands with the privacy policy work
+  under "Mobile app submission" in `docs/roadmap.md`.
+- **Revisit**: If we ship a self-hosted assets bundle (likely alongside
+  MapLibre GL JS in Phase 3), retire both third-party origins in the
+  same pass and drop them from `buildSecurityHeaders`.
+- **Where**: `apps/web/app/root.tsx` (font `<link>` tags),
+  `apps/web/app/components/features/ClusterMap.tsx` (tile layer),
+  `apps/web/app/utils/security-headers.ts` (CSP allowlist).
+
+### 11. Secret token transport on login is via upstream
 
 - **What**: `accessToken` and `refreshToken` are minted by upstream CTX and
   returned through our `/api/auth/verify-otp` proxy. We don't rotate or
