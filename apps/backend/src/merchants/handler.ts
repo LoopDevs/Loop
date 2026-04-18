@@ -1,4 +1,5 @@
 import type { Context } from 'hono';
+import { foldForSearch } from '@loop/shared';
 import { getMerchants } from './sync.js';
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -7,20 +8,6 @@ const MAX_PAGE_SIZE = 100;
 // a pathological `q` string (e.g. from a fuzzer) from running includes()
 // against an unbounded pattern.
 const MAX_QUERY_LENGTH = 100;
-
-/**
- * Lowercase + strip diacritics so `q=cafe` matches merchant `Café`, and so a
- * user searching `Dunkin'` matches `Dunkin'` regardless of smart quotes
- * vs straight apostrophes. Canonicalizes to NFD (decomposes accented chars
- * into base + combining mark) then removes the combining-diacritic block
- * (U+0300–U+036F). ASCII input passes through untouched.
- */
-function foldForSearch(s: string): string {
-  return s
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-}
 
 /**
  * GET /api/merchants

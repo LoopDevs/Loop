@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect, forwardRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useAllMerchants } from '~/hooks/use-merchants';
-import { merchantSlug } from '@loop/shared';
+import { foldForSearch, merchantSlug } from '@loop/shared';
 import { useUiStore } from '~/stores/ui.store';
 import { getImageProxyUrl } from '~/utils/image';
 
@@ -92,10 +92,16 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
     return () => clearTimeout(timer);
   }, [query]);
 
+  // Use the shared foldForSearch so navbar filtering matches backend
+  // /api/merchants?q= behaviour — a query of "cafe" finds merchants
+  // named "Café". Without this, users typing the un-accented form
+  // missed the merchant in the client-side navbar search even though
+  // the same query via the API would have found it.
+  const foldedQuery = foldForSearch(debouncedQuery);
   const results: SearchResult[] =
     debouncedQuery.length > 1
       ? merchants
-          .filter((m) => m.name.toLowerCase().includes(debouncedQuery.toLowerCase()))
+          .filter((m) => foldForSearch(m.name).includes(foldedQuery))
           .slice(0, 8)
           .map((m) => ({
             id: m.id,
