@@ -1,4 +1,4 @@
-# ADR-002: Known Limitations
+# ADR-005: Known Limitations
 
 - **Status**: Accepted
 - **Date**: 2026-04-17
@@ -195,4 +195,4 @@ and where the fix work would happen.
 - [PR #33 — security hardening bundle](https://github.com/LoopDevs/Loop/pull/33)
 - [PR #38 — image proxy alpha + DNS rebinding note](https://github.com/LoopDevs/Loop/pull/38)
 - [PR #40 — circuit breaker probe failsafe](https://github.com/LoopDevs/Loop/pull/40)
-- [ADR-001 — security hardening pass](001-security-hardening-pass.md)
+- [ADR-004 — security hardening pass](004-security-hardening-pass.md)

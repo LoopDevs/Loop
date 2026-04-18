@@ -1,4 +1,4 @@
-# ADR 001: Security-hardening architectural decisions
+# ADR 004: Security-hardening architectural decisions
 
 **Status:** Accepted
 **Date:** 2026-04-17
