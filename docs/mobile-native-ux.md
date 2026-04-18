@@ -71,21 +71,27 @@ padding-right: env(safe-area-inset-right);
 - Highlights active tab based on current route
 - Account tab: shows auth state (sign in / email)
 
-### Capacitor plugins needed
+### Capacitor plugins installed
+
+All plugins referenced anywhere in the app are already installed — see
+`apps/mobile/package.json` + `apps/web/package.json` for the pinned
+versions.
 
 ```
-Already installed:
-  @capacitor/app          — back button, deep linking
-  @capacitor/haptics      — haptic feedback
-  @capacitor/preferences  — token storage
-  @capacitor/push-notifications — push (not wired)
-  @capacitor/splash-screen — splash config
-
-Need to install:
-  @capacitor/status-bar   — status bar styling
-  @capacitor/keyboard     — keyboard handling
-  @capacitor/clipboard    — copy to clipboard
-  @capacitor/network      — offline detection
-  @capacitor/share        — native share sheet (Phase 2)
-  @capacitor-community/biometric-auth — biometrics (Phase 2)
+@capacitor/app                       — back button, deep linking
+@capacitor/clipboard                 — copy to clipboard
+@capacitor/haptics                   — haptic feedback
+@capacitor/keyboard                  — keyboard handling + accessory bar
+@capacitor/network                   — offline detection
+@capacitor/preferences               — token + pending-order + app-lock storage
+@capacitor/push-notifications        — order notifications (wired as of Phase 2)
+@capacitor/share                     — native share sheet
+@capacitor/splash-screen             — splash config
+@capacitor/status-bar                — status bar styling + overlay
+@capgo/inappbrowser                  — in-app browser for redeem URLs
+@aparajita/capacitor-biometric-auth  — Face ID / Touch ID for the app lock
 ```
+
+> The biometric plugin is `@aparajita/capacitor-biometric-auth`, not the
+> older `@capacitor-community/biometric-auth` package some earlier docs
+> pointed at — the community plugin has been unmaintained since Capacitor 5.
