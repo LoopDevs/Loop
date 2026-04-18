@@ -304,7 +304,18 @@ export default function AuthRoute(): React.JSX.Element {
             <button
               type="button"
               className="w-full text-sm text-gray-500 underline"
-              onClick={() => setStep('email')}
+              onClick={() => {
+                // Clear OTP + error state alongside the step flip —
+                // otherwise a user who typed a wrong code, saw an error,
+                // then backed out to try another email would see the
+                // OTP-step error leak onto the email form, and the
+                // stale OTP buffer would be submitted alongside the
+                // new email if they forgot to retype. Matches the
+                // inline-auth handler in `PurchaseContainer`.
+                setStep('email');
+                setOtp('');
+                setError(null);
+              }}
             >
               Use a different email
             </button>
