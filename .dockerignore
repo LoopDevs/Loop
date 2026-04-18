@@ -57,9 +57,9 @@ docs
 scripts
 tests
 playwright.config.ts
-eslint.config.mjs
-commitlint.config.cjs
-postcss.config.js
+playwright.mocked.config.ts
+eslint.config.js
+commitlint.config.js
 
 # Secrets — double insurance; these are already .gitignore'd
 .env
