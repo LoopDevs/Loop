@@ -16,6 +16,14 @@ interface PaymentStepProps {
 }
 
 const POLL_INTERVAL_MS = 3000;
+// Audit A-030: the roadmap documented "transient up to 5 times, then gives
+// up" but the code only *counted* consecutive errors — it never used the
+// counter to stop polling, so users sat in retry-until-expiry limbo on
+// persistent failures. `MAX_CONSECUTIVE_ERRORS` is the documented budget,
+// enforced here. 503s (circuit-breaker open) still roll back the counter
+// (see the handler below) because the breaker's own probe cadence is the
+// correct backoff for that case.
+const MAX_CONSECUTIVE_ERRORS = 5;
 
 /**
  * Shows the XLM payment address with a countdown timer and polls the
@@ -142,6 +150,15 @@ export function PaymentStep({
         }
         if (err instanceof ApiException && err.status === 503) {
           consecutiveErrors.current--;
+        }
+        // Audit A-030: enforce the documented retry budget. Past this many
+        // consecutive failures we stop polling and surface a user-visible
+        // error rather than spinning until the payment window expires.
+        if (consecutiveErrors.current >= MAX_CONSECUTIVE_ERRORS) {
+          store.setError(
+            "We're having trouble checking your payment. If you've already paid, we'll process it as soon as we can reach the network again — or please try again.",
+          );
+          return; // terminal — no reschedule
         }
         // Other transient errors fall through to reschedule.
       }

@@ -144,7 +144,7 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 
 - [ ] Accessibility audit (WCAG 2.1 AA)
 - [x] ~~Distinguish error types in auth hook~~ — maps 401/429/502/503 to user-facing messages, throws instead of returning boolean
-- [x] ~~Distinguish error types in payment polling~~ — stops on 401/503 (permanent), retries transient up to 5 times, then gives up
+- [x] ~~Distinguish error types in payment polling~~ — stops on 401 (session expired); 503 keeps polling (circuit breaker handles its own backoff); other transient errors retry up to 5 consecutive times, then surface a connection error (audit A-030)
 
 ---
 
