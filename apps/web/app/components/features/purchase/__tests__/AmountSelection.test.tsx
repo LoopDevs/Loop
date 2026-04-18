@@ -130,6 +130,37 @@ describe('AmountSelection — free amount (min-max)', () => {
     expect(screen.getByText(/more than 2 decimal places/)).toBeDefined();
   });
 
+  // Regression: `0.29 * 100 === 28.999999999999996` under IEEE-754. The old
+  // check `Math.round(n * 100) !== n * 100` wrongly flagged valid two-decimal
+  // amounts whose internal multiplication drifted. Spot-check a handful of
+  // drift-prone values.
+  it.each([
+    ['0.29', 0.29],
+    ['0.58', 0.58],
+    ['1.07', 1.07],
+    ['5.11', 5.11],
+    ['7.23', 7.23],
+  ])('accepts the IEEE-754-drift-prone cent value %s', (input, expected) => {
+    const onConfirm = vi.fn();
+    render(
+      <AmountSelection
+        merchant={merchant({
+          denominations: {
+            type: 'min-max',
+            denominations: ['0.01', '500'],
+            currency: 'USD',
+            min: 0.01,
+            max: 500,
+          },
+        })}
+        onConfirm={onConfirm}
+      />,
+    );
+    fireEvent.change(getInput(), { target: { value: input } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(onConfirm).toHaveBeenCalledWith(expected);
+  });
+
   it('rejects non-numeric input by showing an error', () => {
     const onConfirm = vi.fn();
     render(<AmountSelection merchant={minMaxMerchant} onConfirm={onConfirm} />);
