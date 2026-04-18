@@ -71,7 +71,7 @@ and where the fix work would happen.
     JSX `<a>` tags in components.
 - **Revisit**: When `eslint-plugin-react` publishes an ESLint-10-compatible
   release. Track upstream: https://github.com/jsx-eslint/eslint-plugin-react/issues
-- **Where**: `.eslintrc` / `eslint.config.mjs` at the repo root.
+- **Where**: `eslint.config.js` at the repo root.
 
 ### 4. Rate limiting is per-process in-memory
 
