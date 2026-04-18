@@ -34,6 +34,15 @@ RUN npm ci --omit=dev --ignore-scripts
 COPY --from=builder /app/apps/web/build apps/web/build
 COPY --from=builder /app/packages/shared packages/shared
 
+# Run as the non-root `node` user that node:*-alpine ships with. Same
+# hardening as apps/backend/Dockerfile (PR #61). The default is root —
+# meaning any RCE in a dep running under this image would land with
+# full container privileges. `node` has no write access outside its
+# home, which is all react-router-serve needs. Chown the workdir so
+# the user can still read the bundled assets.
+RUN chown -R node:node /app
+USER node
+
 EXPOSE 3000
 ENV PORT=3000 NODE_ENV=production
 
