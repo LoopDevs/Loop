@@ -30,11 +30,11 @@ app/
 
 **API calls:** Always through `services/api-client.ts`. Authenticated calls use `authenticatedRequest()` which handles token injection and silent refresh on 401.
 
-**Auth flow:** `useAuth()` hook → `services/auth.ts` → backend proxy → upstream CTX. Tokens stored: access token in Zustand (memory only), refresh token in Capacitor Preferences (native) or sessionStorage (web).
+**Auth flow:** `useAuth()` hook → `services/auth.ts` → backend proxy → upstream CTX. Tokens stored: access token in Zustand (memory only), refresh token via `@aparajita/capacitor-secure-storage` (Keychain on iOS / EncryptedSharedPreferences on Android — audit A-024, ADR-006) on native, or `sessionStorage` on web. The secure-storage wrapper also one-shot-migrates any legacy `@capacitor/preferences` value on first read so upgrades don't log every user out.
 
-**Purchase flow state machine:** Managed by `stores/purchase.store.ts`. Steps: `amount → payment → complete | error`. The `PurchaseContainer` orchestrates the flow, `PaymentStep` polls order status with countdown timer.
+**Purchase flow state machine:** Managed by `stores/purchase.store.ts`. Steps: `amount → payment → complete | redeem | error`. The `PurchaseContainer` orchestrates the flow, `PaymentStep` polls order status with a countdown timer and enforces a bounded retry budget (`MAX_CONSECUTIVE_ERRORS = 5`, audit A-030).
 
-**Error handling:** `useAuth()` throws `Error` with user-facing messages mapped from `ApiException` status codes (401, 429, 502, 503). Payment polling distinguishes permanent (401, 503) from transient errors.
+**Error handling:** `useAuth()` throws `Error` with user-facing messages mapped from `ApiException` status codes (401, 429, 502, 503). Payment polling stops on 401 (session expired) and surfaces a connection error after 5 consecutive transient failures; 503 doesn't count against the budget because the circuit breaker runs its own backoff.
 
 **Capacitor plugins:** Only imported in `app/native/`. Components use the native wrappers, never `@capacitor/*` directly. ESLint enforces this.
 
