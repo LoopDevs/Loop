@@ -83,6 +83,31 @@ describe('parseEnv', () => {
     );
   });
 
+  // Regression: `z.coerce.boolean()` treats any non-empty string as true,
+  // so `TRUST_PROXY=false` would silently enable X-Forwarded-For trust —
+  // the opposite of what the operator wrote. The custom envBoolean parser
+  // must honour the common "off" spellings.
+  it.each([
+    ['true', true],
+    ['1', true],
+    ['yes', true],
+    ['on', true],
+    ['TRUE', true],
+    ['Yes', true],
+    ['false', false],
+    ['0', false],
+    ['no', false],
+    ['off', false],
+    ['False', false],
+    ['', false],
+  ])('envBoolean TRUST_PROXY=%j → %s', (input, expected) => {
+    expect(parseEnv({ ...base, TRUST_PROXY: input }).TRUST_PROXY).toBe(expected);
+  });
+
+  it('rejects unparseable TRUST_PROXY values instead of guessing', () => {
+    expect(() => parseEnv({ ...base, TRUST_PROXY: 'maybe' })).toThrow(/TRUST_PROXY/);
+  });
+
   it('accepts pino levels silent and fatal', () => {
     expect(parseEnv({ ...base, LOG_LEVEL: 'silent' }).LOG_LEVEL).toBe('silent');
     expect(parseEnv({ ...base, LOG_LEVEL: 'fatal' }).LOG_LEVEL).toBe('fatal');
