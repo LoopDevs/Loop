@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router';
 import type { Map as LeafletMap, Layer } from 'leaflet';
 import type * as LeafletNamespace from 'leaflet';
 import type { ClusterParams, ClusterResponse } from '@loop/shared';
@@ -53,12 +54,21 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
   const { merchants } = useAllMerchants();
   const merchantsById = useRef(new Map<string, string>());
   const onMerchantSelectRef = useRef(onMerchantSelect);
+  // Leaflet popup click handlers run outside React — capture navigate in a
+  // ref so the 'popupopen' listener can invoke client-side nav without
+  // forcing a full page reload on every "Buy Gift Card" tap.
+  const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
   // Track open popup so we can re-open it after zoom/pan marker refresh
   const openPopupRef = useRef<{ merchantId: string; lat: number; lng: number } | null>(null);
 
   useEffect(() => {
     onMerchantSelectRef.current = onMerchantSelect;
   }, [onMerchantSelect]);
+
+  useEffect(() => {
+    navigateRef.current = navigate;
+  }, [navigate]);
 
   useEffect(() => {
     merchantsById.current = new Map(merchants.map((m) => [m.id, m.name]));
@@ -311,6 +321,39 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
 
       map.on('moveend', refresh);
       map.on('zoomend', refresh);
+
+      // Intercept "Buy Gift Card" link clicks so they stay within the SPA.
+      // Leaflet injects popup HTML via innerHTML, so the <a href> would
+      // otherwise trigger a full page reload — losing the map viewport,
+      // re-downloading the JS bundle, and re-fetching clusters on return.
+      map.on('popupopen', (e) => {
+        const container = (
+          e as { popup: { getElement: () => HTMLElement | undefined } }
+        ).popup.getElement();
+        if (container === undefined) return;
+        const anchor = container.querySelector<HTMLAnchorElement>('a[href^="/gift-card/"]');
+        if (anchor === null) return;
+        anchor.addEventListener(
+          'click',
+          (clickEvent) => {
+            // Preserve the user's ability to open in a new tab via modifier
+            // keys / middle-click; only intercept the plain-click case.
+            if (
+              clickEvent.defaultPrevented ||
+              clickEvent.button !== 0 ||
+              clickEvent.metaKey ||
+              clickEvent.ctrlKey ||
+              clickEvent.shiftKey ||
+              clickEvent.altKey
+            ) {
+              return;
+            }
+            clickEvent.preventDefault();
+            void navigateRef.current(anchor.getAttribute('href') ?? '/');
+          },
+          { once: true },
+        );
+      });
 
       // Initial load
       void updateMarkers(map, L);
