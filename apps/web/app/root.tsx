@@ -91,10 +91,15 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
         <meta charSet="utf-8" />
         {csp !== undefined && <meta httpEquiv="Content-Security-Policy" content={csp} />}
         <meta name="referrer" content="strict-origin-when-cross-origin" />
-        <meta
-          name="viewport"
-          content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
-        />
+        {/* Viewport intentionally omits `maximum-scale=1, user-scalable=no`.
+         * Those two disable pinch-zoom, which fails WCAG SC 1.4.4 (Resize
+         * Text): a low-vision user on mobile web loopfinance.io must be
+         * able to zoom text up to 200%. Capacitor's native webview is
+         * fine without the restriction — users don't typically pinch-
+         * zoom inside an app and the layout is responsive, so
+         * accidentally zooming just reflows cleanly. `viewport-fit=cover`
+         * stays so safe-area insets still work on notched devices. */}
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
         {/* Inline theme init prevents flash of unstyled content */}
         <script
           dangerouslySetInnerHTML={{
