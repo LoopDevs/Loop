@@ -21,8 +21,9 @@
  *     style-src is unavoidable.
  *   - fonts.googleapis.com + fonts.gstatic.com — Google Fonts (accepted
  *     third-party dep, see audit A-032).
- *   - basemaps.cartocdn.com + *.tile.openstreetmap.org — Leaflet raster
- *     tiles.
+ *   - *.basemaps.cartocdn.com + *.tile.openstreetmap.org — Leaflet raster
+ *     tiles. Wildcard on cartocdn is required because Leaflet substitutes
+ *     `{s}` with `a`/`b`/`c`/`d` for load-spreading.
  *   - *.ingest.sentry.io / *.ingest.de.sentry.io — error telemetry.
  *   - `blob:` + `data:` on img-src — Leaflet internal markers and
  *     inline SVG data URIs.
@@ -39,7 +40,11 @@ export function buildSecurityHeaders(options: SecurityHeadersOptions = {}): Reco
     `script-src 'self' 'unsafe-inline'`,
     `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com`,
     `font-src 'self' https://fonts.gstatic.com`,
-    `img-src 'self' data: blob: ${apiOrigin} https://basemaps.cartocdn.com https://*.tile.openstreetmap.org`,
+    // `https://basemaps.cartocdn.com` only matches that exact hostname;
+    // Leaflet's tile URLs substitute `{s}` with `a`/`b`/`c`/`d` and fetch
+    // from `a.basemaps.cartocdn.com` etc., so the bare-domain entry would
+    // block every tile load. Use the wildcard form for both CARTO and OSM.
+    `img-src 'self' data: blob: ${apiOrigin} https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org`,
     `connect-src 'self' ${apiOrigin} https://*.ingest.sentry.io https://*.ingest.de.sentry.io`,
     "frame-ancestors 'none'",
     "base-uri 'none'",
