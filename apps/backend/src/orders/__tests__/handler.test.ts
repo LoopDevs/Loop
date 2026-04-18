@@ -385,6 +385,43 @@ describe('POST /api/orders', () => {
     expect(body.message).toMatch(/missing destination/);
   });
 
+  it('returns 502 when the XLM payment URL is missing the memo param', async () => {
+    mockGetMerchants.mockReturnValue({
+      merchants: [{ id: 'm-1', name: 'Test Store', denominations: { currency: 'USD' } }],
+      merchantsById: new Map([
+        ['m-1', { id: 'm-1', name: 'Test Store', denominations: { currency: 'USD' } }],
+      ]),
+      merchantsBySlug: new Map(),
+      loadedAt: Date.now(),
+    });
+
+    // CTX identifies which order an XLM payment belongs to by the memo.
+    // A URI without memo would let the user pay but the order would
+    // never complete — fail closed so the frontend doesn't render an
+    // unpayable payment screen.
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'no-memo-order',
+          paymentCryptoAmount: '100',
+          paymentUrls: { XLM: 'web+stellar:pay?destination=GXXX&amount=1' },
+          status: 'unpaid',
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const res = await app.request('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...AUTH_HEADER },
+      body: JSON.stringify({ merchantId: 'm-1', amount: 25 }),
+    });
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('UPSTREAM_ERROR');
+    expect(body.message).toMatch(/missing memo/);
+  });
+
   it('returns 502 when upstream creates an order but omits the XLM payment URL', async () => {
     mockGetMerchants.mockReturnValue({
       merchants: [{ id: 'm-1', name: 'Test Store', denominations: { currency: 'USD' } }],

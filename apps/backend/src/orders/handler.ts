@@ -288,6 +288,19 @@ export async function createOrderHandler(c: Context): Promise<Response> {
         502,
       );
     }
+    if (memo === '') {
+      // CTX uses a shared custodial Stellar wallet + per-order memo to match
+      // incoming payments to orders. A URI without memo means a user who
+      // pays it will have their XLM credited, but CTX can never associate
+      // the payment with this order — the order times out and the XLM is
+      // effectively lost to support. Fail closed here so the frontend never
+      // shows an unpayable payment screen.
+      log.error(
+        { orderId: validated.data.id, merchantId },
+        'Upstream XLM payment URL missing memo parameter',
+      );
+      return c.json({ code: 'UPSTREAM_ERROR', message: 'Order payment URL missing memo' }, 502);
+    }
 
     // Notify Discord
     notifyOrderCreated(
