@@ -246,10 +246,13 @@ const HealthResponse = registry.register(
   z.object({
     status: z.enum(['healthy', 'degraded']),
     locationCount: z.number(),
+    locationsLoading: z.boolean(),
     merchantCount: z.number(),
+    merchantsLoadedAt: z.string().openapi({ format: 'date-time' }),
+    locationsLoadedAt: z.string().openapi({ format: 'date-time' }),
+    merchantsStale: z.boolean(),
+    locationsStale: z.boolean(),
     upstreamReachable: z.boolean(),
-    locationsStale: z.boolean().optional(),
-    merchantsStale: z.boolean().optional(),
   }),
 );
 
