@@ -167,13 +167,15 @@ cd apps/web && npm run build:mobile    # build static export first
 cd apps/mobile
 
 # First time only: generate the native projects. They're gitignored
-# (see ADR-007) — the overlay script below re-applies the audited
-# config that `cap sync` would otherwise overwrite.
+# (see ADR-007) — regenerated with `cap add`, updated with `cap sync`.
 npx cap add ios                        # once per checkout
 npx cap add android                    # once per checkout
-./scripts/apply-native-overlays.sh     # after every `cap add` / `cap sync`
 
 npx cap sync                           # copy web build + sync plugins
+./scripts/apply-native-overlays.sh     # MUST run after every `cap add`
+                                       # or `cap sync` — re-applies the
+                                       # audited A-033 / A-034 config
+                                       # that regeneration would drop
 npx cap open ios                       # open Xcode
 npx cap open android                   # open Android Studio
 ```
@@ -188,7 +190,7 @@ usage description in place — both are enforced by overlay files in
 
 1. Edit `apps/mobile/capacitor.config.ts` — temporarily add `server: { url: 'http://<local-ip>:5173' }`
 2. `cd apps/web && npm run dev`
-3. `cd apps/mobile && npx cap sync && npx cap open ios`
+3. `cd apps/mobile && npx cap sync && ./scripts/apply-native-overlays.sh && npx cap open ios`
 4. Remove `server.url` before committing
 
 ---
