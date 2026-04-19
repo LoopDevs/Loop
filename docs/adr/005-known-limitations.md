@@ -91,9 +91,10 @@ and where the fix work would happen.
   demonstrates that they can bypass per-IP limits by distributing across
   machines. The `/metrics` endpoint exposes `loop_rate_limit_hits_total` —
   watching that counter jump without triggering per-IP 429s is the signal.
-- **Where**: `apps/backend/src/app.ts` (`hitRateLimit`, the
-  `rateLimitMap`). Replace with a shared store (Upstash Redis is the Fly-
-  friendly option) and keep the existing interface so call sites don't move.
+- **Where**: `apps/backend/src/app.ts` — the `rateLimit` middleware
+  factory plus the `rateLimitMap` it reads from. Replace with a shared
+  store (Upstash Redis is the Fly-friendly option) and keep the
+  existing interface so call sites don't move.
 
 ### 5. Image proxy DNS-rebinding TOCTOU
 
