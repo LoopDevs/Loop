@@ -283,7 +283,13 @@ app.get('/metrics', (c) => {
     lines.push(`loop_circuit_state{endpoint="${key}"} ${val}`);
   }
 
-  return c.text(lines.join('\n') + '\n', 200, { 'Content-Type': 'text/plain; version=0.0.4' });
+  return c.text(lines.join('\n') + '\n', 200, {
+    'Content-Type': 'text/plain; version=0.0.4',
+    // /metrics reports live counters + gauges. A CDN in front caching
+    // this would report stale numbers to the scraper; no-store makes
+    // that impossible without requiring specific scraper config.
+    'Cache-Control': 'no-store',
+  });
 });
 
 // ─── OpenAPI spec ─────────────────────────────────────────────────────────────
@@ -360,6 +366,12 @@ app.get('/health', async (c) => {
   }
   lastHealthStatus = currentStatus;
 
+  // /health reports live service state (merchant/location staleness,
+  // upstream reachability). A CDN in front caching this would serve
+  // "healthy" for the cache TTL after upstream went down — masking
+  // outages from external probes. `no-store` is the safe default
+  // even though Fly's own probe path doesn't cache.
+  c.header('Cache-Control', 'no-store');
   return c.json({
     status: degraded ? 'degraded' : 'healthy',
     locationCount: locations.length,

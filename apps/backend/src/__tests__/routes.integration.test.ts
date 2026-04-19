@@ -121,6 +121,13 @@ describe('GET /health', () => {
     expect(body.upstreamReachable).toBe(false);
   });
 
+  it('sets Cache-Control: no-store so a CDN in front cannot mask an outage', async () => {
+    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+    const res = await app.request('/health');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+  });
+
   it('caches the upstream probe so bursts of /health do not amplify outbound traffic', async () => {
     mockFetch.mockResolvedValue(new Response('ok', { status: 200 }));
 
@@ -403,6 +410,9 @@ describe('app-level middleware', () => {
     const res = await app.request('/metrics');
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toContain('text/plain');
+    // Live counter values — a cache in front must not serve a stale
+    // scrape to the next collector.
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
     const body = await res.text();
     expect(body).toContain('# TYPE loop_rate_limit_hits_total counter');
     expect(body).toContain('# TYPE loop_requests_total counter');
