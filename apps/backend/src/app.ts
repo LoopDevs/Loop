@@ -302,6 +302,33 @@ app.get('/openapi.json', (c) =>
   c.json(openApiSpec, 200, { 'Cache-Control': 'public, max-age=3600' }),
 );
 
+// ─── Test-only reset endpoint ─────────────────────────────────────────────────
+//
+// Mocked e2e tests run against this process as a long-lived server (each
+// test spawns a fresh browser context but hits the same backend). Per-IP
+// rate-limit state accumulates across tests — a single IP exercising
+// `/api/auth/request-otp` across multiple tests + Playwright retries will
+// blow through the 5/min budget and start seeing 429, which manifests as
+// a disabled Continue button that never re-enables (the UI sees it as a
+// network error and leaves auth-loading stuck in its cleanup path).
+//
+// Expose a reset hook for the mocked suite's `beforeEach` to call. Gated
+// on `NODE_ENV=test` so production can't be nudged into dropping the
+// limiter. The unit-test rate-limit coverage (see
+// `routes.integration.test.ts`) imports `__resetRateLimitsForTests`
+// directly and isn't affected by this endpoint.
+if (env.NODE_ENV === 'test') {
+  // Deliberately outside the `/api` namespace so it doesn't appear in
+  // the OpenAPI spec and the lint-docs "route must be in architecture.md"
+  // check leaves it alone.
+  app.post('/__test__/reset', (c) => {
+    rateLimitMap.clear();
+    upstreamProbeCache = null;
+    upstreamProbeInFlight = null;
+    return c.json({ message: 'reset' });
+  });
+}
+
 // ─── Health ───────────────────────────────────────────────────────────────────
 
 let lastHealthStatus: 'healthy' | 'degraded' | null = null;

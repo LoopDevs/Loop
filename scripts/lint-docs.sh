@@ -160,13 +160,22 @@ done
 # `flyctl config validate` the moment it regressed. Running the validator
 # here keeps every fly.toml in the repo from drifting into a shape Fly's
 # scheduler silently ignores. Skip cleanly on machines without flyctl so
-# this doesn't break fresh contributor laptops; CI should install it (see
+# this doesn't break fresh contributor laptops; CI installs it (see
 # `.github/workflows/ci.yml`) before the docs-lint step.
+#
+# `flyctl config validate` requires auth to resolve the referenced app.
+# In CI we don't wire FLY_API_TOKEN (deploys are manual from a maintainer
+# laptop), so treat the "no access token" case the same way we treat
+# "flyctl not installed" — a skip with a warning, not a hard failure.
 echo "Checking Fly deploy configs..."
 if command -v flyctl >/dev/null 2>&1; then
   while IFS= read -r fly_toml; do
     dir=$(dirname "$fly_toml")
     output=$(cd "$dir" && flyctl config validate 2>&1 || echo "FLYCTL_FAILED")
+    if echo "$output" | grep -q "no access token available"; then
+      echo "  (flyctl installed but not authenticated — skipping $fly_toml; run 'flyctl auth login' to enable this check)"
+      continue
+    fi
     if echo "$output" | grep -q "FLYCTL_FAILED"; then
       echo "$output" | sed 's/^/  /' >&2
       err "flyctl config validate failed for $fly_toml"
