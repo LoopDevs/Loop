@@ -88,7 +88,7 @@ versions.
 @capacitor/keyboard                    — keyboard handling + accessory bar
 @capacitor/network                     — offline detection
 @capacitor/preferences                 — pending-order + app-lock-enabled flag storage
-@capacitor/push-notifications          — order notifications (wired as of Phase 2)
+@capacitor/push-notifications          — installed and Android notification channels pre-created; end-to-end flow (register → send token → backend push on order status) is Phase 2, tracked as an unchecked item below
 @capacitor/share                       — native share sheet
 @capacitor/splash-screen               — splash config
 @capacitor/status-bar                  — status bar styling + overlay
