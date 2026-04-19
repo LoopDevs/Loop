@@ -35,13 +35,19 @@ Vitest unit + integration tests covering:
 
 ### Web (`apps/web`)
 
-Vitest in the **node** environment (not jsdom — see ADR-005 §7 for the
-tradeoff; component/hook tests are covered via e2e instead). Covers:
+Vitest defaults to the **node** environment (see ADR-005 §7 for the
+tradeoff); most UI is covered by Playwright e2e. Purchase-flow
+components override the environment per-file with
+`// @vitest-environment jsdom` so `@testing-library/react` can render
+the amount-input → payment-step → completion state machine without
+spinning up a browser. Covers:
 
 - Native wrappers under `app/native/` — `platform`, `clipboard`, `haptics`, `secure-storage` (A-024 / ADR-006 Keychain-backed), `status-bar`, `back-button`, `keyboard`, `network`, `notifications`, `screenshot-guard`, `share`, `biometrics`, `app-lock`, `webview`, `purchase-storage` (pending-order state).
 - Zustand stores — `auth.store`, `purchase.store` (full state machine: amount → payment → complete/redeem/error), `ui.store`.
 - Services — `api-client`, `merchants`, `orders`, `auth`, `clusters`.
 - Utilities — `error-messages`, `image` (proxy URL builder), `money` (currency-aware formatter), `security-headers`.
+- Purchase-flow components (jsdom opt-in per file) — `AmountSelection`, `PaymentStep`, `PurchaseComplete`, `RedeemFlow` — render + event assertions via `@testing-library/react`.
+- Hooks — `use-auth`, `use-native-platform`, `use-session-restore`, `query-retry`.
 
 ### E2E (`tests/e2e` + `tests/e2e-mocked`)
 
