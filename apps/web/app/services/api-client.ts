@@ -75,13 +75,19 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     try {
       const body = (await response.json()) as unknown;
       if (body !== null && typeof body === 'object') {
-        const b = body as { code?: unknown; message?: unknown; details?: unknown };
+        const b = body as {
+          code?: unknown;
+          message?: unknown;
+          details?: unknown;
+          requestId?: unknown;
+        };
         error = {
           code: typeof b.code === 'string' ? b.code : 'UPSTREAM_ERROR',
           message: typeof b.message === 'string' ? b.message : response.statusText,
           ...(b.details !== undefined && typeof b.details === 'object' && b.details !== null
             ? { details: b.details as Record<string, unknown> }
             : {}),
+          ...(typeof b.requestId === 'string' ? { requestId: b.requestId } : {}),
         };
       } else {
         error = { code: 'UPSTREAM_ERROR', message: response.statusText };
