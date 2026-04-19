@@ -18,6 +18,10 @@ jobs:
 
   size-check:
     name: PR size check
+    # Skip on `labeled` — adding/removing labels doesn't change diff size, so
+    # re-running would just waste CI minutes (or re-post the warning if the
+    # dedup below ever regressed).
+    if: github.event.action != 'labeled'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -29,6 +33,8 @@ jobs:
       - name: Check PR size
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
         run: |
           # Get additions/deletions from the event payload (no API call needed)
           ADDITIONS=${{ github.event.pull_request.additions || 0 }}
@@ -37,6 +43,20 @@ jobs:
 
           echo "PR size: +$ADDITIONS -$DELETIONS ($TOTAL lines changed)"
 
-          if [ "$TOTAL" -gt 500 ]; then
-            gh pr comment ${{ github.event.pull_request.number }} --body "⚠️ **Large PR** — $TOTAL lines changed (+$ADDITIONS/-$DELETIONS). Consider splitting into smaller PRs for easier review." || true
+          if [ "$TOTAL" -le 500 ]; then
+            exit 0
           fi
+
+          # standards.md §"PR size" describes a single "large PR" flag per PR —
+          # without dedup, every `synchronize` push to an already-large PR
+          # would post another identical comment.
+          EXISTING=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+            --json comments \
+            --jq '[.comments[] | select(.body | startswith("⚠️ **Large PR**"))] | length')
+
+          if [ "$EXISTING" != "0" ]; then
+            echo "Large-PR comment already posted — skipping."
+            exit 0
+          fi
+
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "⚠️ **Large PR** — $TOTAL lines changed (+$ADDITIONS/-$DELETIONS). Consider splitting into smaller PRs for easier review." || true
