@@ -48,8 +48,17 @@
 Backend holds two hot-swappable in-memory stores:
 
 ```
-merchantsById: Map<string, Merchant>   — refreshed every 6h
-locationStore: { locations, loadedAt } — refreshed every 24h
+merchantStore: {
+  merchants:       Merchant[]            // list, preserves upstream ordering
+  merchantsById:   Map<string, Merchant> // O(1) id lookup (GET /api/merchants/:id)
+  merchantsBySlug: Map<string, Merchant> // O(1) slug lookup (GET /api/merchants/by-slug/:slug)
+  loadedAt:        number                // unix ms — drives /health staleness check
+}                                        // refreshed every 6h (REFRESH_INTERVAL_HOURS)
+
+locationStore: {
+  locations: Location[]
+  loadedAt:  number
+}                                        // refreshed every 24h (LOCATION_REFRESH_INTERVAL_HOURS)
 ```
 
 Hot-swap is safe in Node.js because JS is single-threaded — the store reference is replaced atomically on each refresh. No locks needed.
