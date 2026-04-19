@@ -487,7 +487,7 @@ Conventional Commit `type` used in the eventual squash-merge title.
 
 ### Rules
 
-- **`main` is protected by convention.** No direct pushes. All changes via PR. GitHub-level branch protection isn't available on the current private-repo free plan (audit A-037, ADR-005 §Residual Risks — the API returns 403 `Upgrade to GitHub Pro or make this repository public`), so this rule is enforced by team discipline until the plan upgrades. §15 CI/CD has the full note.
+- **`main` is mechanically protected.** No direct pushes. All changes via PR. GitHub branch protection is live (audit A-037 closed after the repo went public): required passing checks are `Quality`, `Unit tests`, `Security audit`, `Build verification`, and `E2E tests (mocked CTX)`; force-push and branch deletion are blocked; stale reviews dismiss on new commits. See §15 CI/CD for the exact ruleset and the API pointer.
 - **Feature branches are short-lived.** Target < 2 days from branch to merge. If it takes longer, the change is too large — split it.
 - **One concern per branch.** A branch that touches both the map clustering and the auth flow needs to be split.
 - **Rebase, don't merge.** Keep a linear history. Rebase feature branches onto current `main` before raising a PR.
@@ -940,16 +940,25 @@ jobs:
 
 ### Branch protection on `main`
 
-- **Not enforced at the GitHub level.** The repo is private on the
-  free plan; GitHub rejects branch-protection API writes with 403
-  `Upgrade to GitHub Pro or make this repository public to enable
-this feature` (audit A-037 documented this residual risk in
-  ADR-005). The "no direct push / require PR / require passing
-  checks" rules are team convention only.
-- **When the plan upgrades** (or the repo flips public), flip on:
-  all CI jobs must pass, at least 1 approving review, dismiss
-  stale approvals on new commits, no force pushes, no direct
-  pushes.
+- **Enforced at the GitHub level** (audit A-037 closed once the
+  repo went public). The active ruleset:
+  - Required passing status checks:
+    `Quality (typecheck, lint, format, docs)`, `Unit tests`,
+    `Security audit`, `Build verification`, and
+    `E2E tests (mocked CTX)`.
+  - `strict: true` — branch must be up-to-date with `main` before
+    it can merge.
+  - Stale approvals dismiss on new commits.
+  - Force-push and branch deletion disabled.
+  - `enforce_admins: false` so a maintainer can still squash a
+    hot-fix PR without a second approving review (the required-
+    checks gate still applies).
+- Inspect or modify with
+  `gh api repos/LoopDevs/Loop/branches/main/protection`.
+- The real-upstream `E2E tests` job is intentionally NOT in the
+  required-checks list. It runs against `spend.ctx.com` on every
+  PR and depending on upstream health can be flaky in ways that
+  aren't about our code. The mocked suite is the hermetic gate.
 
 ### Deployment
 

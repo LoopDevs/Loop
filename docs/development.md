@@ -233,7 +233,7 @@ chore(deps): bump react-router to 7.7.1
 
 ## Branching
 
-- `main` — always deployable. Protected by team convention; GitHub branch protection is not mechanically enforced (audit A-037 / ADR-005 §Residual Risks — the private-repo free plan returns 403 on `branches/main/protection`). Direct pushes remain physically possible — don't.
+- `main` — always deployable. GitHub branch protection is active (audit A-037 closed once the repo went public): required passing checks are Quality, Unit tests, Security audit, Build verification, and E2E tests (mocked CTX); force-push and branch deletion are blocked. See `docs/standards.md §15 CI/CD` for the exact ruleset.
 - `feat/<ticket>-description` — feature work
 - `fix/<ticket>-description` — bug fixes
 
