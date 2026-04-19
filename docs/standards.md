@@ -437,8 +437,8 @@ email delivery latency data.
 
 ```
 main           ← always deployable, protected
-├── feature/merchant-search
-├── feature/purchase-flow
+├── feat/merchant-search
+├── feat/purchase-flow
 ├── fix/cluster-zoom-calculation
 └── chore/update-protobuf-types
 ```
@@ -446,13 +446,22 @@ main           ← always deployable, protected
 ### Branch naming
 
 ```
-feature/<short-description>     feat(web): add merchant search
+feat/<short-description>        feat(web): add merchant search
 fix/<short-description>         fix(backend): otp-expiry-window
 chore/<short-description>       chore(deps): update-protobuf
 refactor/<short-description>    refactor(shared): currency-utils
+docs/<short-description>        docs(infra): agents file boundaries
+test/<short-description>        test(backend): circuit-breaker probe race
+perf/<short-description>        perf(web): defer leaflet bundle
+ci/<short-description>          ci(infra): cache playwright browsers
+build/<short-description>       build(web): bump vite to 8
 ```
 
-Use hyphens, no spaces, all lowercase.
+Use hyphens, no spaces, all lowercase. The Husky `pre-push` hook
+enforces this with
+`^(feat|fix|chore|docs|test|refactor|perf|ci|build)/` — push is
+rejected for any other prefix. The branch prefix mirrors the
+Conventional Commit `type` used in the eventual squash-merge title.
 
 ### Rules
 
