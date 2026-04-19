@@ -128,13 +128,19 @@ npm run dev:backend      # backend only
 npm run typecheck        # tsc --noEmit across all workspaces
 npm run lint             # ESLint across all workspaces
 npm run lint:fix         # ESLint with auto-fix
+npm run lint:docs        # ./scripts/lint-docs.sh (env/arch/fly-toml drift checks)
 npm run format           # Prettier write
 npm run format:check     # Prettier check (CI uses this)
 npm test                 # vitest run (backend + web; shared has no runtime code to test)
-npm run test:e2e         # Playwright e2e — self-contained mocked suite
+npm run test:coverage    # vitest run --coverage across workspaces
+npm run test:e2e         # Playwright e2e — self-contained mocked suite (alias)
+npm run test:e2e:mocked  # Playwright e2e — same mocked suite, explicit name
 npm run test:e2e:real    # Playwright e2e — against a running real-CTX backend
+npm run audit            # npm audit --audit-level=high
 npm run build            # production build across all workspaces
 npm run proto:generate   # buf generate → packages/shared/src/proto/
+npm run verify           # typecheck + lint + format:check + lint:docs + test — the
+                         # one-command gate; mirrors the CI quality + unit-test jobs
 ```
 
 ### apps/web
@@ -145,7 +151,8 @@ npm run build            # SSR production build
 npm run build:mobile     # Static export for Capacitor (BUILD_TARGET=mobile)
 npm start                # Serve SSR build locally
 npm run typecheck        # react-router typegen + tsc --noEmit
-npm test                 # vitest run
+npm test                 # vitest run (single-run)
+npm run test:watch       # vitest (watch mode — re-runs on file change)
 npm run test:coverage    # vitest run --coverage
 ```
 
@@ -155,7 +162,8 @@ npm run test:coverage    # vitest run --coverage
 npm run dev              # tsx watch src/index.ts — hot reload
 npm run build            # tsup → dist/ (bundles @loop/shared into one file)
 npm start                # node dist/index.js (production)
-npm test                 # vitest run
+npm test                 # vitest run (single-run)
+npm run test:watch       # vitest (watch mode — re-runs on file change)
 npm run test:coverage    # vitest run --coverage
 npm run typecheck        # tsc --noEmit
 ```
