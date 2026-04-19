@@ -66,7 +66,7 @@ fi
 # ─── iOS: NSFaceIDUsageDescription (audit A-034) ────────────────────────────
 if [ -f "$IOS_PLIST" ]; then
   FACE_ID_KEY="NSFaceIDUsageDescription"
-  FACE_ID_VALUE="Loop uses Face ID to lock the app and keep your gift cards private when your device is unlocked to someone else."
+  FACE_ID_VALUE="Loop uses Face ID to lock the app so your gift cards stay private, even if your unlocked device is in someone else's hands."
 
   if /usr/libexec/PlistBuddy -c "Print :$FACE_ID_KEY" "$IOS_PLIST" >/dev/null 2>&1; then
     say "Info.plist already has $FACE_ID_KEY, skipping"

@@ -9,8 +9,8 @@ to set the values below if they are not already present.
 Required keys (add inside the top-level <dict>):
 
     <key>NSFaceIDUsageDescription</key>
-    <string>Loop uses Face ID to lock the app and keep your gift cards
-private when your device is unlocked to someone else.</string>
+    <string>Loop uses Face ID to lock the app so your gift cards stay
+private, even if your unlocked device is in someone else's hands.</string>
 
 Why
 ---
