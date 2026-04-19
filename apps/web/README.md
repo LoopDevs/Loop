@@ -19,7 +19,8 @@ npm run build            # SSR production build
 npm run build:mobile     # static export for Capacitor (BUILD_TARGET=mobile)
 npm start                # serve SSR build locally
 npm run typecheck        # react-router typegen + tsc --noEmit
-npm test                 # vitest run
+npm test                 # vitest run (single-run)
+npm run test:watch       # vitest (watch mode — re-runs on file change)
 npm run test:coverage    # vitest + coverage report
 ```
 
