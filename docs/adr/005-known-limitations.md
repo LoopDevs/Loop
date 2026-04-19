@@ -218,8 +218,8 @@ and where the fix work would happen.
 - **Revisit**: If we ever want session-level controls CTX doesn't offer
   (forced re-auth, per-device revocation UI). That likely coincides with
   Phase 2.
-- **Where**: `apps/backend/src/auth/handler.ts` (`verifyEmail`,
-  `refreshToken`).
+- **Where**: `apps/backend/src/auth/handler.ts` (`verifyOtpHandler`,
+  `refreshHandler`).
 
 ## Consequences
 
