@@ -130,7 +130,7 @@ npm run lint             # ESLint across all workspaces
 npm run lint:fix         # ESLint with auto-fix
 npm run format           # Prettier write
 npm run format:check     # Prettier check (CI uses this)
-npm test                 # vitest run across all workspaces
+npm test                 # vitest run (backend + web; shared has no runtime code to test)
 npm run test:e2e         # Playwright e2e — self-contained mocked suite
 npm run test:e2e:real    # Playwright e2e — against a running real-CTX backend
 npm run build            # production build across all workspaces
@@ -233,7 +233,7 @@ chore(deps): bump react-router to 7.7.1
 
 ## Branching
 
-- `main` — always deployable, protected
+- `main` — always deployable. Protected by team convention; GitHub branch protection is not mechanically enforced (audit A-037 / ADR-005 §Residual Risks — the private-repo free plan returns 403 on `branches/main/protection`). Direct pushes remain physically possible — don't.
 - `feat/<ticket>-description` — feature work
 - `fix/<ticket>-description` — bug fixes
 
