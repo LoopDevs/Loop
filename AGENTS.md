@@ -63,7 +63,7 @@ cd apps/mobile && npx cap sync && ./scripts/apply-native-overlays.sh && npx cap 
 # survive the native-project regeneration (ADR-007).
 
 # Code quality
-npm run verify               # typecheck + lint + test (one command)
+npm run verify               # typecheck + lint + format:check + lint:docs + test (one command — runs ./scripts/verify.sh)
 npm run typecheck            # tsc across all packages
 npm run lint                 # ESLint across all packages
 npm run format               # Prettier across all packages
