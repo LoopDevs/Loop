@@ -3,6 +3,14 @@ export interface ApiError {
   code: string;
   message: string;
   details?: Record<string, unknown> | undefined;
+  /**
+   * Correlation id echoed by the backend's catch-all 500 handler (and
+   * mirrored into the `X-Request-Id` response header on every response).
+   * Present only when the backend attaches it to the body — most handlers
+   * don't. Useful for quoting in bug reports without hunting through
+   * devtools for the header.
+   */
+  requestId?: string | undefined;
 }
 
 /** Error thrown when a backend API call fails. */
@@ -10,6 +18,7 @@ export class ApiException extends Error {
   public readonly code: string;
   public readonly status: number;
   public readonly details: Record<string, unknown> | undefined;
+  public readonly requestId: string | undefined;
 
   constructor(status: number, error: ApiError) {
     super(error.message);
@@ -17,6 +26,7 @@ export class ApiException extends Error {
     this.code = error.code;
     this.status = status;
     this.details = error.details;
+    this.requestId = error.requestId;
   }
 }
 
