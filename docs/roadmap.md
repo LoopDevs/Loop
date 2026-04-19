@@ -57,8 +57,9 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 
 ### Brand & design
 
-- [ ] Create Loop brand assets: `loop-logo.svg`, `loop-favicon.ico`, `loop-favicon.png`, `hero.webp`
-- [ ] Integrate assets into web app (`apps/web/public/`)
+- [x] ~~Create core Loop brand assets~~ — `loop-logo.svg`, `loop-logo-white.svg`, `loop-favicon.svg`, `loop-favicon.ico`, `loop-favicon.png` live in `apps/web/public/` and are wired into `root.tsx`, `Navbar`, `Footer`, `auth`, and the app-lock overlay.
+- [ ] Create marketing `hero.webp` (only remaining asset — not yet wired anywhere)
+- [x] ~~Integrate assets into web app (`apps/web/public/`)~~ — core assets referenced from every surface above.
 - [ ] Configure splash screen assets for iOS and Android
 - [ ] App icon for iOS (1024x1024) and Android (512x512)
 
