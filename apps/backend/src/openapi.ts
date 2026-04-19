@@ -296,11 +296,14 @@ registry.registerPath({
   method: 'post',
   path: '/api/auth/request-otp',
   summary: 'Request a one-time password be emailed to the given address.',
+  description:
+    'Email-enumeration defense: returns 200 with "Verification code sent" even when upstream responds with 4xx (e.g. "no such user"). Clients cannot distinguish "email was accepted" from "email was rejected as unknown" by the response status. Only 5xx upstream errors surface as 502 so legitimate users are not left waiting on real outages.',
   tags: ['Auth'],
   request: { body: { content: { 'application/json': { schema: RequestOtpBody } } } },
   responses: {
     200: {
-      description: 'OTP queued upstream',
+      description:
+        'OTP queued upstream — OR, by design, email rejected upstream with a 4xx (see description for enumeration-defense rationale).',
       content: { 'application/json': { schema: z.object({ message: z.string() }) } },
     },
     400: {

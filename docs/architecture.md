@@ -91,6 +91,10 @@ App open
   → absent → /auth (email step)
                → POST /api/auth/request-otp  → proxied to upstream POST /login
                → OTP email sent by upstream (branded for Loop)
+               → (email-enumeration defense: our handler returns 200
+                  even when upstream rejects the email with 4xx, so the
+                  client flow cannot distinguish "new email accepted"
+                  from "unknown email rejected")
                → OTP step
                → POST /api/auth/verify-otp   → proxied to upstream POST /verify-email
                → upstream returns token pair
