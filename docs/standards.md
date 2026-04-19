@@ -103,7 +103,8 @@ app/components/ui/
 
 ### Strict mode — non-negotiable
 
-All packages run with TypeScript strict mode:
+All packages inherit `tsconfig.base.json`, which turns on the strict
+family plus the following additional compiler checks:
 
 ```json
 {
@@ -112,10 +113,15 @@ All packages run with TypeScript strict mode:
     "noUncheckedIndexedAccess": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
-    "exactOptionalPropertyTypes": true
+    "exactOptionalPropertyTypes": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
   }
 }
 ```
+
+`tsconfig.base.json` is the source of truth — check it before
+relying on this snippet.
 
 ### No `any`
 
