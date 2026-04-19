@@ -167,7 +167,7 @@ Use short entries. Link files, commands, tests, workflow names, or screenshots/l
 ## Residual Risks
 
 - Production-only behaviour still cannot be fully verified from this audit alone: real CTX account/entity behaviour, production secrets, production deployment edge configuration, and App Store / device-only native behaviour may surface additional issues.
-- **GitHub Actions billing** is currently blocking CI runs on the remediation PRs — jobs queue and fail within seconds with "recent account payments have failed or your spending limit needs to be increased" (observed on the A-023 trusted-proxy PR). This is an operator action, not a code gap; code has been verified locally via `npm run verify` before each PR.
+- **GitHub Actions billing block** (previously blocked CI on the remediation PRs with "recent account payments have failed or your spending limit needs to be increased") was **resolved** when the repo flipped to public — public repos get unlimited free Actions minutes on standard runners. CI now runs on every push and PR.
 - PR-level diff visibility into the runtime native-project state is limited by ADR-007's decision to keep the native trees generated. Mitigated by App Store / Play review and by the overlay system enforcing store-visible metadata (bundle id, usage descriptions, backup rules).
 
 ## Final Audit Gate
@@ -176,9 +176,11 @@ Do not mark the audit complete until all are true:
 
 - every workstream has evidence attached **✓**
 - every critical and high finding has an agreed remediation path **✓**
-- every blocked item has a concrete reason **✓** — no items remain blocked;
-  GitHub Actions was billing-blocked during remediation, so every PR was
-  verified locally via `npm run verify` in lieu of CI
+- every blocked item has a concrete reason **✓** — no items remain blocked.
+  GitHub Actions was billing-blocked during the original remediation sweep
+  (so each PR was verified locally via `npm run verify` in lieu of CI);
+  once the repo went public the block lifted and CI now runs end-to-end on
+  every push / PR against `main`
 - no material gaps remain after a final reconciliation pass **✓**
 
 **Audit status: closed.** All 37 findings merged to `main` — see the Status
