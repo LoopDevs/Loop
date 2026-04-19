@@ -69,7 +69,7 @@ Hot-swap is safe in Node.js because JS is single-threaded — the store referenc
 
 Located in `apps/backend/src/clustering/algorithm.ts`.
 
-1. Expand viewport bbox by 50% (pre-loads clusters for smooth panning)
+1. Extend each side of the viewport bbox by 50% of its dimension (north / south / east / west each shift outward by half the viewport's height/width). The resulting bbox is 2× the original on both axes (4× area). Pre-loads clusters so panning doesn't instantly reveal empty edges.
 2. Select `gridSize` based on zoom level:
 
    | Zoom | Grid cell         |

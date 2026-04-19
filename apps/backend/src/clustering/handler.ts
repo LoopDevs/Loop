@@ -55,10 +55,12 @@ export async function clustersHandler(c: Context): Promise<Response> {
 
   const zoom = Math.max(0, Math.min(28, rawZoom));
 
-  // Expand bbox by 50% for pre-loading — matching Go reference behaviour.
-  // Clamp the expansion to the globe so the filter below doesn't waste work
-  // walking through points that couldn't be valid anyway (e.g. south-buffered
-  // past -90° with a zoomed-out bbox).
+  // Extend each side of the bbox by 50% of its dimension for pre-loading —
+  // matching the Go reference behaviour. Each side grows by 0.5 × the
+  // viewport's height/width, so the resulting bbox is 2× the original on
+  // both axes (4× area). Clamp the expansion to the globe so the filter
+  // below doesn't waste work walking through points that couldn't be valid
+  // anyway (e.g. south-buffered past -90° with a zoomed-out bbox).
   const latBuf = (north - south) * 0.5;
   const lngBuf = (east - west) * 0.5;
   const expandedBounds = {
