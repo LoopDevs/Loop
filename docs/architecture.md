@@ -235,12 +235,21 @@ surfaces in ops logs.
 
 ### Order detail (`GET /gift-cards/:id`)
 
-| CTX field                 | Loop field            |
-| ------------------------- | --------------------- |
-| `cardFiatAmount` (string) | `amount` (number)     |
-| `cardFiatCurrency`        | `currency`            |
-| `redeemUrlChallenge`      | `redeemChallengeCode` |
-| `created` (ISO string)    | `createdAt`           |
+| CTX field                   | Loop field            | Notes                                                                                       |
+| --------------------------- | --------------------- | ------------------------------------------------------------------------------------------- |
+| `id`                        | `id`                  |                                                                                             |
+| `merchantId`                | `merchantId`          |                                                                                             |
+| `merchantName`              | `merchantName`        | Empty string when upstream omits it                                                         |
+| `cardFiatAmount` (string)   | `amount` (number)     | Parsed via `parseMoney` — single-order handler throws on non-numeric                        |
+| `cardFiatCurrency`          | `currency`            | Defaults to `USD` if upstream omits                                                         |
+| `status`                    | `status`              | Mapped via `mapStatus`: fulfilled→completed, expired→expired, refunded→failed, else→pending |
+| `paymentCryptoAmount`       | `xlmAmount`           | Defaults to `'0'` if upstream omits                                                         |
+| `percentDiscount`           | `percentDiscount`     |                                                                                             |
+| `redeemType`                | `redeemType`          |                                                                                             |
+| `redeemUrl` (optional)      | `redeemUrl`           | Only present when upstream returns it                                                       |
+| `redeemUrlChallenge` (opt.) | `redeemChallengeCode` | Only present when upstream returns it                                                       |
+| `redeemScripts` (optional)  | `redeemScripts`       | Only present when upstream returns it                                                       |
+| `created` (ISO string)      | `createdAt`           |                                                                                             |
 
 ### Auth
 
