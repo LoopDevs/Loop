@@ -26,6 +26,7 @@ import { ToastContainer } from '~/components/ui/ToastContainer';
 import { useAuthStore } from '~/stores/auth.store';
 import { useUiStore } from '~/stores/ui.store';
 import { buildSecurityHeaders } from '~/utils/security-headers';
+import { shouldRetry } from '~/hooks/query-retry';
 import './app.css';
 
 const AuthRoute = lazy(() => import('~/routes/auth'));
@@ -43,7 +44,13 @@ if (typeof window !== 'undefined' && import.meta.env.VITE_SENTRY_DSN) {
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      // Use the shared retry predicate as the default so any new hook
+      // picks up the right behaviour without having to opt in: don't
+      // retry 4xx (won't become 2xx on retry — 400 stays 400, 429 means
+      // back off), up to 2 retries for 5xx / timeout / network. Every
+      // existing hook also sets `retry: shouldRetry` explicitly — those
+      // stays valid and wins by explicit override.
+      retry: shouldRetry,
       staleTime: 5 * 60 * 1000,
     },
   },
