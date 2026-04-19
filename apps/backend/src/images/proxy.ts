@@ -77,6 +77,15 @@ export async function imageProxyHandler(c: Context): Promise<Response> {
   }
 
   try {
+    // Deliberately bare `fetch`, NOT `getUpstreamCircuit('...').fetch`.
+    // Our breakers are keyed per fixed endpoint category
+    // (`login`, `gift-cards`, etc.). Image URLs here are arbitrary
+    // allowlisted hosts — one bad host would trip a shared breaker and
+    // fail every other host's logo fetches. This handler already has a
+    // `FETCH_TIMEOUT_MS` bound + a 100 MB / 7-day LRU cache in front,
+    // which is the right level of protection for this shape. Documented
+    // exception in `apps/backend/AGENTS.md` under "Upstream calls
+    // always use". See also ADR-005 §5 (DNS rebinding rationale).
     const upstream = await fetch(imageUrl, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       redirect: 'manual',
