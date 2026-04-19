@@ -2,8 +2,13 @@
 <!--
     Audit A-033: Android 12+ split auto-backup into `cloud-backup`
     (Google Drive) and `device-transfer` (setup-time device-to-device).
-    Exclude the Capacitor Preferences file from both — refresh tokens
-    and pending-order state stay on the device where they were issued.
+    Exclude the Capacitor Preferences file from both — it holds
+    pending-order state and any pre-A-024 refresh-token residue that
+    may still exist from an upgrade path. Post-A-024/ADR-006 refresh
+    tokens live in EncryptedSharedPreferences via
+    @aparajita/capacitor-secure-storage with Keystore-bound keys that
+    do not transfer across devices, so a backup sweep of that file
+    yields ciphertext that cannot be decrypted on the restore target.
 
     Paired with `backup_rules.xml` which covers pre-Android-12 devices
     via `fullBackupContent`.
