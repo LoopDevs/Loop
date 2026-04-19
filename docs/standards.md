@@ -663,11 +663,15 @@ What did we decide?
 What are the trade-offs? What becomes easier? What becomes harder?
 ```
 
-Existing decisions to record as ADRs:
+Existing ADRs — see [`docs/adr/`](adr/) for the full set:
 
 - `001-static-export-capacitor.md` — Static export over remote URL
 - `002-typescript-backend.md` — TypeScript over Go for the backend
 - `003-protobuf-clustering.md` — Protobuf for clustering endpoint
+- `004-security-hardening-pass.md` — Per-endpoint circuit breakers, coalesced refresh, strict CSP, structured log redaction
+- `005-known-limitations.md` — Phase-1 items we consciously aren't fixing
+- `006-keychain-backed-secure-storage.md` — Keychain / EncryptedSharedPreferences for refresh tokens (audit A-024)
+- `007-native-projects-source-of-truth.md` — Native iOS/Android projects stay generated, not versioned (audit A-012)
 
 ### JSDoc on exported functions
 
