@@ -83,9 +83,12 @@ and where the fix work would happen.
 ### 4. Rate limiting is per-process in-memory
 
 - **What**: `apps/backend/src/app.ts` uses an in-memory `Map` for rate limit
-  buckets, capped at 10k entries with LRU eviction (PR #33). If we scale the
-  backend to more than one Fly.io machine, each machine's rate limit is
-  independent and the effective per-IP limit multiplies by instance count.
+  buckets, capped at 10k entries with insertion-order (FIFO) eviction when
+  the cap is reached — `rateLimitMap.keys().next().value` returns the
+  oldest-inserted key, which we delete. Not strict LRU; hits do not
+  move the entry. If we scale the backend to more than one Fly.io
+  machine, each machine's rate limit is independent and the effective
+  per-IP limit multiplies by instance count.
 - **Why accepted**: Phase 1 runs on a single Fly machine. Adding Redis just
   for rate-limit state doubles the infrastructure and operational surface
   before we have the traffic to justify it.
