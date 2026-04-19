@@ -160,7 +160,7 @@ npm run test:coverage    # vitest run --coverage
 
 ```bash
 npm run dev              # tsx watch src/index.ts — hot reload
-npm run build            # tsup → dist/ (bundles @loop/shared into one file)
+npm run build            # tsup → dist/ (bundles @loop/shared in; proto types split into a dynamic-import chunk)
 npm start                # node dist/index.js (production)
 npm test                 # vitest run (single-run)
 npm run test:watch       # vitest (watch mode — re-runs on file change)

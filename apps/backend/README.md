@@ -15,7 +15,7 @@ Server starts on `http://localhost:8080` (configurable via `PORT`).
 
 ```bash
 npm run dev              # development (tsx watch — restarts on file change)
-npm run build            # tsup → dist/ (bundles @loop/shared into a single file)
+npm run build            # tsup → dist/ (bundles @loop/shared in; proto types split into a dynamic-import chunk)
 npm start                # production (node dist/index.js)
 npm test                 # vitest run
 npm run test:watch       # vitest watch
