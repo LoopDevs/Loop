@@ -92,11 +92,19 @@ grep "from './" packages/shared/src/index.ts | sed "s/.*from '\.\/\([^']*\)'.*/\
 
 echo "Checking for hardcoded Stellar secret keys..."
 # `git ls-files -z` lists tracked files; grep scans across all of them
-# for the seed pattern. `-P` (Perl regex) + `\b` + `[A-Z2-7]{55}` catches
-# real 56-char Base32 seeds. Exclude anything inside docs/ (examples) or
-# the .gitignore history note.
+# for the seed pattern. `-E` + `S[A-Z2-7]{55}` catches real 56-char
+# Base32 seeds. Originally used `-P` (Perl regex) + `\b` word boundaries,
+# but BSD grep on macOS rejects `-P`, the stderr was suppressed by
+# `2>/dev/null`, and `|| true` swallowed the non-zero exit — producing
+# a silent false-negative on every maintainer's laptop. CI on Ubuntu
+# (GNU grep) would still catch it, but the local-verify guarantee was
+# broken. `-E` with `{55}` is portable across BSD and GNU grep. The
+# lost `\b` boundary is acceptable: a 56-char Base32 suffix that happens
+# to start with S is still very likely a leaked secret worth flagging.
+# Exclude docs/ (examples), .gitignore history note, CHANGELOG, and
+# common placeholder strings.
 stellar_secret_hits=$(git ls-files -z \
-  | xargs -0 grep -nPH '\bS[A-Z2-7]{55}\b' 2>/dev/null \
+  | xargs -0 grep -nHE 'S[A-Z2-7]{55}' 2>/dev/null \
   | grep -v "docs/\|.gitignore\|CHANGELOG" \
   | grep -vE "S[A]{55}|SAMPLE|EXAMPLE" \
   || true)
