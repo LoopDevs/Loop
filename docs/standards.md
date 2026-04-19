@@ -396,6 +396,15 @@ All commits must follow the [Conventional Commits](https://www.conventionalcommi
 
 **Scopes:** `web`, `mobile`, `backend`, `shared`, `infra`, `deps`, `ci` (source of truth: `commitlint.config.js` `scope-enum`). commitlint rejects any other scope.
 
+**Length limits** (also enforced by `commitlint.config.js`):
+
+- Subject line: **72 characters** max (`subject-max-length`).
+- Body lines: **100 characters** max per line (`body-max-line-length`) — wrap long paragraphs.
+
+A commit that exceeds either limit is rejected by the `commit-msg`
+Husky hook at commit time. `--no-verify` is still not the answer;
+tighten the message instead.
+
 **Examples:**
 
 ```
