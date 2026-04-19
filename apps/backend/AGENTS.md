@@ -59,7 +59,7 @@ Status codes: 400 (validation), 401 (auth), 404 (not found), 429 (rate limit), 5
 2. Validate request input with Zod
 3. Call upstream via `getUpstreamCircuit('<endpoint-key>').fetch(upstreamUrl('/path'), { ... })` — pick an existing key if the call lands on the same upstream endpoint category; add a new key if it's a fresh category (tests: `circuit-breaker.test.ts` exercises registration)
 4. Validate upstream response with Zod schema using `.safeParse()`
-5. Handle errors: 401 → 401, 404 → 404, `CircuitOpenError` → 503, other → 502
+5. Handle errors. Translate upstream response status — 401 → 401, 404 → 404, any other non-success → 502. Wrap the whole body in `try/catch` and in the catch block handle `CircuitOpenError` → 503 and any other exception → 500 (`{ code: 'INTERNAL_ERROR', ... }`). Skipping the catch-all lets a runtime error fall through as a default Hono response that doesn't match the `{ code, message }` shape — every existing handler follows this pattern for a reason.
 6. Register the route in `src/app.ts`
 7. Add integration test in `src/__tests__/` or module `__tests__/`
 8. Update `docs/architecture.md` API endpoints section and `apps/backend/src/openapi.ts` path registration (declare every status code the handler can return — including 429 if the route is rate-limited and 503 if it proxies to CTX)
