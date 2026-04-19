@@ -53,7 +53,7 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 - [x] ~~Validate order creation flow end-to-end with real credentials~~ — tested with real CTX Bearer token, orders created successfully
 - [x] ~~Confirm merchant sync pagination works with full catalog~~ — 117 merchants across 12 pages
 - [x] ~~Confirm location data sync and clustering against real data~~ — 116,219 locations, clustering verified at multiple zoom levels
-- ~~Test gift card barcode/PIN retrieval in purchase flow~~ — **deferred to Phase 2**: the upstream `giftCardCode` wiring is not implemented yet (see `apps/backend/src/orders/handler.ts` inline comment and ADR-005 §2). The rendering side (`PurchaseComplete.tsx` + `jsbarcode`) is done and covered by unit tests, so there's nothing to test in Phase 1 until the backend populates `giftCardCode`.
+- ~~Test gift card barcode/PIN retrieval in purchase flow~~ — **deferred to Phase 2**: the upstream-response zod shape in `apps/backend/src/orders/handler.ts` (`SingleOrderUpstreamResponse` + `getOrderHandler`'s construction block) maps `redeemUrl` / `redeemUrlChallenge` / `redeemScripts` but has no `giftCardCode` field; see ADR-005 §2 for the full rationale. The rendering side (`PurchaseComplete.tsx` + `jsbarcode`) is done and covered by unit tests, so there's nothing to test in Phase 1 until the backend populates `giftCardCode`.
 
 ### Brand & design
 
@@ -153,18 +153,21 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 
 The upstream gift card provider (CTX) exposes these endpoints. Field shapes + integration notes are maintained in `docs/architecture.md` §CTX upstream field mapping; the historical Postman collection was retired during the audit hygiene pass (A-010 / A-035).
 
-| Endpoint                    | Method | Auth                     | Purpose                         |
-| --------------------------- | ------ | ------------------------ | ------------------------------- |
-| `/login`                    | POST   | none                     | Request OTP (email)             |
-| `/verify-email`             | POST   | none                     | Verify OTP → tokens             |
-| `/refresh-token`            | POST   | none                     | Refresh access token            |
-| `/gift-cards`               | POST   | Bearer                   | Create gift card order          |
-| `/gift-cards?txid=<txid>`   | GET    | Bearer                   | Get gift card by txid           |
-| `/gift-cards/:id/barcode`   | GET    | Bearer                   | Get gift card barcode           |
-| `/merchants/:id`            | GET    | Bearer                   | Get merchant details            |
-| `/merchants/:id/card-image` | GET    | Bearer                   | Get merchant card image         |
-| `/merchants/:id/logo`       | GET    | Bearer                   | Get merchant logo               |
-| `/merchants`                | GET    | X-Api-Key + X-Api-Secret | List merchants/locations (bulk) |
-| `/status`                   | GET    | none                     | Health check                    |
+| Endpoint                    | Method | Auth                                | Purpose                                                                        |
+| --------------------------- | ------ | ----------------------------------- | ------------------------------------------------------------------------------ |
+| `/login`                    | POST   | none                                | Request OTP (email)                                                            |
+| `/verify-email`             | POST   | none                                | Verify OTP → tokens                                                            |
+| `/refresh-token`            | POST   | none                                | Refresh access token (refresh token rotates every call)                        |
+| `/logout`                   | POST   | none (refreshToken in body)         | Revoke refresh token                                                           |
+| `/gift-cards`               | POST   | Bearer                              | Create gift card order                                                         |
+| `/gift-cards`               | GET    | Bearer                              | List authenticated user's orders (pagination via query)                        |
+| `/gift-cards/:id`           | GET    | Bearer                              | Get a single order by id                                                       |
+| `/gift-cards/:id/barcode`   | GET    | Bearer                              | Get gift card barcode (Phase 2 — barcode redemption)                           |
+| `/merchants/:id`            | GET    | Bearer                              | Get merchant details                                                           |
+| `/merchants/:id/card-image` | GET    | Bearer                              | Get merchant card image                                                        |
+| `/merchants/:id/logo`       | GET    | Bearer                              | Get merchant logo                                                              |
+| `/merchants`                | GET    | none                                | Bulk merchant catalog (paginated); our backend syncs without api-key headers   |
+| `/locations`                | GET    | X-Api-Key + X-Api-Secret (when set) | Bulk merchant-location list (~116K rows); headers optional but operator-scoped |
+| `/status`                   | GET    | none                                | Health check                                                                   |
 
 Our backend proxies and adapts these — the web app never calls upstream directly.
