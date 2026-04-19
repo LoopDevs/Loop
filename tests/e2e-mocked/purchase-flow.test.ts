@@ -12,10 +12,15 @@ import { test, expect, type Page } from '@playwright/test';
  */
 
 const MOCK_CTX_URL = 'http://localhost:9091';
+const BACKEND_URL = 'http://localhost:8081';
 const FIXED_OTP = '123456';
 
 async function resetMock(page: Page): Promise<void> {
   await page.request.post(`${MOCK_CTX_URL}/_test/reset`);
+  // Also reset backend per-IP rate-limit state so retries across tests
+  // don't stack up against the 5/min /api/auth/request-otp budget.
+  // Endpoint is gated on NODE_ENV=test (see apps/backend/src/app.ts).
+  await page.request.post(`${BACKEND_URL}/__test__/reset`);
 }
 
 async function markOrderFulfilled(
