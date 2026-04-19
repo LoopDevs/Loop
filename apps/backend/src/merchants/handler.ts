@@ -72,7 +72,10 @@ export function merchantAllHandler(c: Context): Response {
  * GET /api/merchants/by-slug/:slug
  *
  * O(1) slug lookup — preferred over fetching all merchants client-side.
- * Slug mirrors the frontend encodeUrlName: lowercase, spaces→hyphens, strip non-alphanumeric.
+ * Slug format (lowercase, spaces→hyphens, strip non-alphanumeric) comes
+ * from `merchantSlug()` in `@loop/shared/slugs.ts` — the single source
+ * of truth shared with the frontend, so the backend index and frontend
+ * links can't drift.
  */
 export function merchantBySlugHandler(c: Context): Response {
   // Slugs in the index are always lowercase (see merchantSlug in @loop/shared).
