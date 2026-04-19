@@ -357,6 +357,14 @@ async function probeUpstream(): Promise<boolean> {
   upstreamProbeInFlight = (async () => {
     let reachable = true;
     try {
+      // Deliberately bare `fetch`, NOT `getUpstreamCircuit('status').fetch`.
+      // /health needs to detect upstream *recovery*; if we routed through
+      // a circuit breaker that was open (because a different endpoint just
+      // failed, for example), the probe would short-circuit to
+      // CircuitOpenError and /health would keep reporting `degraded` long
+      // after upstream came back. See `docs/architecture.md §Circuit
+      // breaker` — this is the one documented exception to the AGENTS.md
+      // "never bare fetch" rule for upstream calls.
       const res = await fetch(upstreamUrl('/status'), { signal: AbortSignal.timeout(3000) });
       reachable = res.ok;
     } catch {

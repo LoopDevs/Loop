@@ -37,7 +37,7 @@ src/
 
 **Upstream calls always use:**
 
-- `getUpstreamCircuit('<endpoint-key>').fetch()` — per-endpoint breakers (keys in use: `login`, `verify-email`, `refresh-token`, `logout`, `merchants`, `locations`, `gift-cards`). Never bare `fetch()`. The per-endpoint split (ADR-004 §Per-endpoint circuit breakers) means a failing endpoint can't trip healthy ones.
+- `getUpstreamCircuit('<endpoint-key>').fetch()` — per-endpoint breakers (keys in use: `login`, `verify-email`, `refresh-token`, `logout`, `merchants`, `locations`, `gift-cards`). Never bare `fetch()` from handlers. The per-endpoint split (ADR-004 §Per-endpoint circuit breakers) means a failing endpoint can't trip healthy ones. **Exception:** `probeUpstream()` in `app.ts` (`/health`) uses bare `fetch` on purpose so the endpoint can detect upstream recovery even when the circuit is open — see `docs/architecture.md §Circuit breaker`. Don't replicate that pattern elsewhere.
 - `upstreamUrl('/path')` — builds full URL from env
 - `AbortSignal.timeout()` — every call has a timeout
 - Zod validation on response before forwarding
