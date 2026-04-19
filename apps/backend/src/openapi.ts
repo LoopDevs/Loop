@@ -525,6 +525,10 @@ registry.registerPath({
       description: 'Upstream error from CTX',
       content: { 'application/json': { schema: ErrorResponse } },
     },
+    503: {
+      description: 'Circuit breaker open',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
   },
 });
 
