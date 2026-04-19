@@ -923,7 +923,13 @@ org reaches a plan that unlocks it.
 
 ### PR size
 
-Target < 400 lines changed. Large PRs are hard to review well and slow everything down. Split large changes into a stack of smaller PRs if needed.
+Target < 400 lines changed. Large PRs are hard to review well and
+slow everything down. Split large changes into a stack of smaller
+PRs if needed. The `.github/workflows/pr-automation.yml` size-check
+job posts a "large PR" comment on any PR exceeding 500 lines — the
+aspirational target and the mechanical warning are deliberately
+offset so a 420-line PR doesn't auto-spam but the reviewer still
+sees the flag when a change crosses the comfort zone.
 
 ### Review turnaround
 
