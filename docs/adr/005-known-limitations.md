@@ -34,9 +34,11 @@ and where the fix work would happen.
 - **Why accepted**: Phase 1 ships discounted gift cards via external XLM
   payment only. The wallet features are the entire Phase 2 deliverable.
 - **Revisit**: When Phase 2 is prioritised on the roadmap.
-- **Where**: `apps/web/app/stores/`, `apps/web/app/native/biometrics.ts` (stub),
-  new `apps/web/app/native/stellar-wallet.ts`, plus `@stellar/stellar-sdk`
-  integration on-device (never on the backend — see CLAUDE.md rule).
+- **Where**: `apps/web/app/stores/`, `apps/web/app/native/biometrics.ts`
+  (already implemented for app-lock; Phase 2 wires it into wallet
+  signing), new `apps/web/app/native/stellar-wallet.ts`, plus
+  `@stellar/stellar-sdk` integration on-device (never on the backend —
+  see CLAUDE.md rule).
 
 ### 2. Barcode gift card redemption is Phase 2
 
