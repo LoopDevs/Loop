@@ -326,8 +326,27 @@ export function MerchantCard({ merchant, onSelect }: MerchantCardProps) {
   // e. Render
 }
 
-// 5. No default export (except React Router route files)
+// 5. No default export (see "Default exports" below)
 ```
+
+### Default exports
+
+Prefer named exports. Default exports are reserved for three cases
+where the framework or a dynamic-import pattern requires them:
+
+1. **React Router route modules** (`apps/web/app/routes/*.tsx`) — RR
+   v7 reads the default export as the route component.
+2. **The root route tree** (`apps/web/app/routes.ts` and
+   `apps/web/app/root.tsx`) — same RR v7 convention for the root
+   config + root layout.
+3. **`React.lazy()` targets.** `lazy(() => import('…'))` resolves
+   the module's default export. Components imported this way
+   (currently `ClusterMap`) must default-export. A named export
+   with `lazy(() => import('…').then(m => ({ default: m.ClusterMap })))`
+   works but adds noise — the default export is cleaner.
+
+A default-exported file outside those three categories is a rule
+violation. Flag it in review.
 
 ---
 
