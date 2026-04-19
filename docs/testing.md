@@ -132,8 +132,9 @@ Repository secrets required:
   stored refresh token invalid and the next run 401s immediately.
 
 Trigger: GitHub → Actions → **E2E (real CTX + wallet)** → Run workflow.
-Optional inputs: `amount_usd` (default `5`), `merchant_id` (default:
-first min-max merchant in the catalog).
+Optional inputs: `amount_usd` (blank = merchant minimum — the cheapest
+card; any numeric value overrides), `merchant_id` (blank = first
+min-max merchant in the catalog).
 
 The script can also be run locally against a running backend:
 
