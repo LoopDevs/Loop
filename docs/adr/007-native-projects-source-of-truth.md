@@ -50,8 +50,11 @@ top** of the generated tree. That is now fully versioned:
   the bundle id, app name, plugin config, and server-url dev
   overrides.
 - **`apps/web/package.json`** — plugin set is versioned. `cap sync`
-  picks up every installed `@capacitor/*` and `@aparajita/*` plugin
-  from there.
+  picks up every installed Capacitor-ecosystem plugin from there —
+  current scopes include `@capacitor/*`, `@aparajita/*`, and
+  `@capgo/*` (the same three namespaces the ESLint
+  `no-restricted-imports` rule enforces must stay inside
+  `apps/web/app/native/`).
 
 Bootstrap flow for a fresh clone:
 
