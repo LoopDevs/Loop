@@ -45,7 +45,7 @@ and where the fix work would happen.
   present, with an `aria-label` on the canvas and the code + optional PIN
   shown as text below. What's still Phase 2 is the **data wiring**: the
   upstream-response schema in
-  `apps/backend/src/orders/handler.ts` (the `SingleOrderUpstreamResponse`
+  `apps/backend/src/orders/handler.ts` (the `GetOrderUpstreamResponse`
   zod shape and the corresponding construction block in
   `getOrderHandler`) maps `redeemUrl`, `redeemUrlChallenge`, and
   `redeemScripts` — there is no `giftCardCode` / barcode field being
