@@ -825,16 +825,40 @@ All async functions that can fail must have error handling at every `await`. An 
 
 ### Backend error responses
 
+Every non-2xx backend response uses the same flat shape defined by
+the `ErrorResponse` component in `apps/backend/src/openapi.ts`:
+
 ```json
 {
-  "error": {
-    "code": "OTP_EXPIRED",
-    "message": "The verification code has expired. Please request a new one."
-  }
+  "code": "VALIDATION_ERROR",
+  "message": "email and otp are required",
+  "details": {}
 }
 ```
 
-Error codes are `SCREAMING_SNAKE_CASE` strings, stable across versions, documented in `docs/architecture.md`. HTTP status codes follow convention (400 bad request, 401 unauthenticated, 403 forbidden, 404 not found, 500 server error).
+`code` is a `SCREAMING_SNAKE_CASE` string, stable across versions,
+and enumerated in `ApiErrorCode` in `packages/shared/src/api.ts`.
+`message` is a human-readable string. `details` is optional and used
+only where a structured extra field is helpful (most handlers omit
+it). Do **not** wrap this object in an `error` envelope — the web
+client's `authenticatedRequest` / `apiRequest` parse the flat shape
+directly.
+
+HTTP status codes follow the conventions used across the backend
+handlers (see each handler's openapi.ts registration for the
+authoritative per-endpoint list):
+
+- `200` / `201` — success (`201` is used by `POST /api/orders`)
+- `400` — validation error
+- `401` — missing or invalid bearer token
+- `403` — authenticated but not permitted
+- `404` — resource not found
+- `413` — payload too large (image proxy >10 MB)
+- `429` — rate-limited (see `AGENTS.md` middleware stack for
+  per-route thresholds; responses include `Retry-After`)
+- `500` — unhandled internal error
+- `502` — upstream CTX proxied an unexpected error
+- `503` — per-upstream circuit breaker is open (ADR-004)
 
 ---
 
