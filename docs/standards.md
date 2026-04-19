@@ -359,7 +359,7 @@ violation. Flag it in review.
 | ESLint (v10 flat config)    | Code quality + style             | Pre-commit, CI                     |
 | Prettier                    | Formatting                       | Pre-commit, CI                     |
 | TypeScript (`tsc --noEmit`) | Type checking                    | Pre-commit (affected packages), CI |
-| Husky                       | Git hooks                        | On commit, on commit-msg           |
+| Husky                       | Git hooks                        | pre-commit, commit-msg, pre-push   |
 | lint-staged                 | Run linters on staged files only | Pre-commit                         |
 | commitlint                  | Enforce commit message format    | On commit-msg                      |
 
@@ -396,15 +396,37 @@ prefer-const                                  error
 eqeqeq                                        error
 ```
 
-### Pre-commit hook behaviour
+### Git hook behaviour
 
-Husky runs on every `git commit`:
+Husky wires three hooks. All three can reject the action on
+failure. **Never use `--no-verify`** to bypass any of them — the
+hooks exist to catch regressions before they leave the local
+machine. If a hook fails, fix the root cause and try again.
 
-1. `lint-staged` — runs ESLint + Prettier on staged `.ts`/`.tsx` files
+**pre-commit** (runs on `git commit`):
 
-If lint fails, the commit is rejected. Fix the issue and commit again. **Never use `--no-verify`.**
+1. `lint-staged` — runs ESLint + Prettier on staged `.ts`/`.tsx`
+   files, Prettier only on staged `.json`/`.md`/`.css`/`.yml`/`.yaml`.
+   Typecheck is deliberately omitted here so commits stay fast;
+   CI picks it up.
 
-Typecheck runs via CI (not pre-commit) to keep commits fast.
+**commit-msg** (runs after the message is entered):
+
+1. `commitlint --edit` — enforces the Conventional Commits format,
+   including the `type-enum` / `scope-enum` / `subject-max-length`
+   / `body-max-line-length` rules described below.
+
+**pre-push** (runs on `git push`):
+
+1. Branch name must match
+   `^(feat|fix|chore|docs|test|refactor|perf|ci|build)/` (or be
+   `main` itself).
+2. `npm test` across backend + web.
+3. `./scripts/lint-docs.sh` (env / route / ADR / Fly checks).
+
+The pre-push set is a lighter-weight subset of `npm run verify`
+— verify adds typecheck + lint + format:check. Run `verify`
+manually when you want the full CI-equivalent pass locally.
 
 ---
 
