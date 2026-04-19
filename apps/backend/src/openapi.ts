@@ -231,6 +231,13 @@ const OrderListResponse = registry.register(
   z.object({ orders: z.array(Order), pagination: Pagination }),
 );
 
+// The GET /api/orders/{id} handler wraps its result as `{ order }` — see
+// `c.json({ order })` in `apps/backend/src/orders/handler.ts`. The web
+// client (`services/orders.ts`) also consumes the wrapped shape. Register
+// the wrapper explicitly so generated OpenAPI clients parse the same
+// envelope instead of trying to unmarshal the raw Order type.
+const OrderDetailResponse = registry.register('OrderDetailResponse', z.object({ order: Order }));
+
 // ─── Clustering ─────────────────────────────────────────────────────────────
 
 const ClusterBounds = z.object({
@@ -547,7 +554,7 @@ registry.registerPath({
   security: [{ bearerAuth: [] }],
   request: { params: z.object({ id: z.string() }) },
   responses: {
-    200: { description: 'Order', content: { 'application/json': { schema: Order } } },
+    200: { description: 'Order', content: { 'application/json': { schema: OrderDetailResponse } } },
     400: {
       description: 'Invalid order id',
       content: { 'application/json': { schema: ErrorResponse } },
