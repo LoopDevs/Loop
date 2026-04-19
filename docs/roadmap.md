@@ -25,7 +25,7 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 - [ ] Deploy web (SSR) to Fly.io or Vercel
 - [x] ~~Set `IMAGE_PROXY_ALLOWED_HOSTS` in production backend~~ — now enforced at boot (audit A-025); `apps/backend/fly.toml` ships with the CTX hostnames baked in.
 - [ ] Set up monitoring / error tracking — **code side wired**: backend uses `sentry()` middleware gated on `env.SENTRY_DSN` (`app.ts`); web calls `Sentry.init` on the client gated on `VITE_SENTRY_DSN` (`root.tsx`, with `browserTracingIntegration`, `tracesSampleRate: 0.1` in prod). **Operator side remaining**: set `SENTRY_DSN` in Fly secrets + `VITE_SENTRY_DSN` in the web build args.
-- [x] ~~Configure production CORS allowlist~~ — already set in `index.ts` (loopfinance.io in production, \* in dev)
+- [x] ~~Configure production CORS allowlist~~ — already set in `apps/backend/src/app.ts` (`PRODUCTION_ORIGINS` includes `loopfinance.io`, `www.loopfinance.io`, and the Capacitor native origins `capacitor://localhost` / `https://localhost` / `http://localhost`; dev allows `*`).
 - [ ] DNS: point `loopfinance.io` → web deployment, `api.loopfinance.io` → backend deployment
 - [ ] TLS certificates (automatic via Fly.io / Vercel)
 
