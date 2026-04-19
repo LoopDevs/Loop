@@ -36,6 +36,10 @@ const ErrorResponse = registry.register(
         .record(z.string(), z.unknown().openapi({ type: 'object' }))
         .optional()
         .openapi({ type: 'object' }),
+      requestId: z.string().optional().openapi({
+        description:
+          'Echoes the X-Request-Id header. Present on the catch-all 500 response so a bug report can quote one identifier to correlate with Sentry + backend logs; mirrored from the response header, so consumers can still read it from X-Request-Id on any response.',
+      }),
     })
     .openapi({ description: 'Standard error body returned for every non-2xx response.' }),
 );

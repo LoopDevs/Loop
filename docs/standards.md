@@ -851,9 +851,11 @@ the `ErrorResponse` component in `apps/backend/src/openapi.ts`:
 and enumerated in `ApiErrorCode` in `packages/shared/src/api.ts`.
 `message` is a human-readable string. `details` is optional and used
 only where a structured extra field is helpful (most handlers omit
-it). Do **not** wrap this object in an `error` envelope — the web
-client's `authenticatedRequest` / `apiRequest` parse the flat shape
-directly.
+it). `requestId` is optional and echoed by the catch-all 500
+handler so a bug report can quote the same id that appears in the
+`X-Request-Id` response header and in Sentry / backend logs. Do
+**not** wrap this object in an `error` envelope — the web client's
+`authenticatedRequest` / `apiRequest` parse the flat shape directly.
 
 HTTP status codes follow the conventions used across the backend
 handlers (see each handler's openapi.ts registration for the
