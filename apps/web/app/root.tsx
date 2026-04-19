@@ -79,12 +79,27 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
   // the deploy edge — Fly.io's `force_https=true` already delivers
   // HSTS-equivalent. `buildSecurityHeaders` is the single source of
   // truth, locked by `security-headers.test.ts`.
-  const csp = buildSecurityHeaders({
+  //
+  // A subset of CSP directives — `frame-ancestors`, `report-uri`,
+  // `sandbox` — are explicitly ignored by browsers when delivered via
+  // meta, and Chrome logs a console.error every page load. That breaks
+  // the smoke e2e's `expect(consoleErrors).toHaveLength(0)` assertion
+  // and adds noise for operators reading devtools. Strip those
+  // directives from the meta-emitted string; clickjacking defense on
+  // web comes from `X-Frame-Options: DENY` which the edge must deliver
+  // as an HTTP header (tracked alongside the other non-meta headers
+  // above), and the Capacitor webview doesn't need frame-ancestors.
+  const fullCsp = buildSecurityHeaders({
     apiOrigin:
       typeof import.meta.env !== 'undefined' && import.meta.env['VITE_API_URL']
         ? (import.meta.env['VITE_API_URL'] as string)
         : 'https://api.loopfinance.io',
   })['Content-Security-Policy'];
+  const csp = fullCsp
+    ?.split(';')
+    .map((d) => d.trim())
+    .filter((d) => !/^(frame-ancestors|report-uri|sandbox)\b/.test(d))
+    .join('; ');
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
