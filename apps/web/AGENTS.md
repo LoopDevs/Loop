@@ -14,13 +14,19 @@ app/
 │   ├── orders.tsx    ← Order history (paginated)
 │   └── not-found.tsx ← 404 catch-all
 ├── components/
-│   ├── features/     ← Domain components (Navbar, MerchantCard, ClusterMap, purchase/)
-│   └── ui/           ← Primitives (Button, Input, Spinner)
-├── hooks/            ← useAuth, useMerchants, useNativePlatform, slug
-├── services/         ← Typed API client (one function per backend endpoint)
-├── stores/           ← Zustand (auth session, purchase flow, UI state)
-├── native/           ← Capacitor plugin wrappers (haptics, secure storage, platform)
-├── utils/            ← Image proxy URL builder
+│   ├── features/     ← Domain components (Navbar, Footer, MerchantCard, ClusterMap,
+│   │                   MapBottomSheet, NativeTabBar, NativeBackButton, purchase/)
+│   └── ui/           ← Primitives (Button, Input, LazyImage, OfflineBanner, Skeleton,
+│                       Spinner, ToastContainer)
+├── hooks/            ← TanStack Query wrappers + lifecycle (use-auth, use-merchants,
+│                       use-orders, use-native-platform, use-session-restore, query-retry)
+├── services/         ← Typed API client (api-client, auth, clusters, merchants, orders, config)
+├── stores/           ← Zustand (auth.store, purchase.store, ui.store)
+├── native/           ← Capacitor plugin wrappers (platform, haptics, secure-storage,
+│                       biometrics, app-lock, back-button, clipboard, keyboard, network,
+│                       notifications, purchase-storage, screenshot-guard, share,
+│                       status-bar, webview)
+├── utils/            ← error-messages, image (proxy URL builder), money, security-headers
 └── root.tsx          ← Layout, QueryClientProvider, meta, links
 ```
 
