@@ -326,7 +326,7 @@ export function MerchantCard({ merchant, onSelect }: MerchantCardProps) {
 
 | Tool                        | Purpose                          | Runs                               |
 | --------------------------- | -------------------------------- | ---------------------------------- |
-| ESLint (v9 flat config)     | Code quality + style             | Pre-commit, CI                     |
+| ESLint (v10 flat config)    | Code quality + style             | Pre-commit, CI                     |
 | Prettier                    | Formatting                       | Pre-commit, CI                     |
 | TypeScript (`tsc --noEmit`) | Type checking                    | Pre-commit (affected packages), CI |
 | Husky                       | Git hooks                        | On commit, on commit-msg           |
