@@ -525,6 +525,15 @@ registry.registerPath({
   summary: 'List orders for the authenticated user.',
   tags: ['Orders'],
   security: [{ bearerAuth: [] }],
+  request: {
+    // Only these three are forwarded to upstream; unknown params are
+    // stripped — see `ALLOWED_LIST_QUERY_PARAMS` in `orders/handler.ts`.
+    query: z.object({
+      page: z.coerce.number().int().min(1).optional(),
+      perPage: z.coerce.number().int().min(1).max(100).optional(),
+      status: z.string().max(32).optional(),
+    }),
+  },
   responses: {
     200: { description: 'Orders', content: { 'application/json': { schema: OrderListResponse } } },
     401: {
