@@ -86,6 +86,13 @@ export default [
     },
   },
   // ─── Web app — enforce import boundaries ────────────────────────────────────
+  //
+  // AGENTS.md architecture rule #3: "All Capacitor plugin calls live in
+  // `apps/web/app/native/`." The intent covers the whole Capacitor
+  // ecosystem, not just the `@capacitor/*` core — `@aparajita/capacitor-*`
+  // (biometric-auth, secure-storage, ADR-006) and `@capgo/inappbrowser`
+  // are Capacitor plugins that must be wrapped in native/ so web still
+  // gets a graceful fallback and test files can mock them at one boundary.
   {
     files: ['apps/web/app/**/*.ts', 'apps/web/app/**/*.tsx'],
     ignores: ['apps/web/app/native/**'],
@@ -95,7 +102,7 @@ export default [
         {
           patterns: [
             {
-              group: ['@capacitor/*'],
+              group: ['@capacitor/*', '@aparajita/capacitor-*', '@capgo/*'],
               message:
                 'Capacitor plugins must only be imported in app/native/. Import from ~/native/ instead.',
             },
