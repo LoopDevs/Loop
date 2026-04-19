@@ -125,7 +125,20 @@ relying on this snippet.
 
 ### No `any`
 
-`any` is banned. Use `unknown` when a type is genuinely unknown and narrow it explicitly. The only exception is Capacitor plugin type bridges — add `// TODO: type properly` on every line that uses `any`.
+`any` is banned by ESLint (`@typescript-eslint/no-explicit-any: error`).
+Use `unknown` when a type is genuinely unknown and narrow it
+explicitly. The one deliberate exception is the dynamically-imported
+protobuf bridge
+(`apps/backend/src/clustering/handler.ts`,
+`apps/web/app/services/clusters.ts`) — the generated
+`clustering_pb.js` module is loaded with a dynamic `import()` so the
+static type isn't available, and the caller constructs / consumes
+the protobuf message through the returned `any`. Those call sites
+must sit inside an explicit
+`// eslint-disable-next-line @typescript-eslint/no-explicit-any` (or
+the matching block form), with a nearby comment explaining why the
+type isn't inferable — per AGENTS.md §Critical architecture rules
+#6. No other `any` usage is accepted.
 
 ### Explicit return types on exported functions
 
