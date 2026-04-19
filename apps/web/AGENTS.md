@@ -42,7 +42,7 @@ app/
 
 **Error handling:** `useAuth()` throws `Error` with user-facing messages mapped from `ApiException` status codes (401, 429, 502, 503). Payment polling stops on 401 (session expired) and surfaces a connection error after 5 consecutive transient failures; 503 doesn't count against the budget because the circuit breaker runs its own backoff.
 
-**Capacitor plugins:** Only imported in `app/native/`. Components use the native wrappers, never `@capacitor/*` directly. ESLint enforces this.
+**Capacitor plugins:** Only imported in `app/native/`. Components use the native wrappers, never `@capacitor/*`, `@aparajita/capacitor-*`, or `@capgo/*` directly. ESLint `no-restricted-imports` blocks all three patterns outside `app/native/`.
 
 ## Recipe: Add a new route
 
@@ -60,10 +60,10 @@ app/
 
 ## Recipe: Add a Capacitor plugin
 
-1. Install the plugin: `npm install @capacitor/foo -w @loop/web -w @loop/mobile`
+1. Install the plugin: `npm install @capacitor/foo -w @loop/web -w @loop/mobile` (or `@aparajita/capacitor-foo`, `@capgo/foo` — the ESLint boundary covers all three org patterns)
 2. Create wrapper in `app/native/foo.ts` (lazy import, graceful web fallback)
-3. Use the wrapper in components — never import `@capacitor/foo` directly
-4. ESLint will block direct imports outside `app/native/`
+3. Use the wrapper in components — never import the plugin package directly
+4. ESLint `no-restricted-imports` will block `@capacitor/*`, `@aparajita/capacitor-*`, and `@capgo/*` imports outside `app/native/`
 
 ## Build modes
 
