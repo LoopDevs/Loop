@@ -44,11 +44,13 @@ and where the fix work would happen.
   imports `jsbarcode` and paints a CODE128 canvas when `giftCardCode` is
   present, with an `aria-label` on the canvas and the code + optional PIN
   shown as text below. What's still Phase 2 is the **data wiring**: the
-  backend's `getOrderHandler` comment explicitly notes that populating
-  `giftCardCode` from upstream is not yet implemented (see
-  `apps/backend/src/orders/handler.ts` — the barcode path "is currently
-  unreachable via polling"). There's also no scanner-friendly full-screen
-  brightness prompt.
+  upstream-response schema in
+  `apps/backend/src/orders/handler.ts` (the `SingleOrderUpstreamResponse`
+  zod shape and the corresponding construction block in
+  `getOrderHandler`) maps `redeemUrl`, `redeemUrlChallenge`, and
+  `redeemScripts` — there is no `giftCardCode` / barcode field being
+  populated from upstream today. There's also no scanner-friendly
+  full-screen brightness prompt.
 - **Why accepted**: Most merchants in the current catalog use `url`
   redemption. The extra upstream wiring for barcode-only cards only pays
   off once CTX onboards retailers where that's the primary path.
