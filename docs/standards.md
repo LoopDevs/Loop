@@ -72,14 +72,15 @@ loop-app/
 
 ### File naming
 
-| Type                  | Convention                | Example                           |
-| --------------------- | ------------------------- | --------------------------------- |
-| React components      | `PascalCase.tsx`          | `MerchantCard.tsx`                |
-| Hooks                 | `use-kebab-case.ts`       | `use-native-platform.ts`          |
-| Utilities / services  | `kebab-case.ts`           | `api-client.ts`                   |
-| TypeScript types file | `kebab-case.types.ts`     | `merchant.types.ts`               |
-| Test files            | `__tests__/` sibling dir  | `__tests__/MerchantCard.test.tsx` |
-| Constants             | `kebab-case.constants.ts` | `stellar.constants.ts`            |
+| Type                  | Convention                | Example                              |
+| --------------------- | ------------------------- | ------------------------------------ |
+| React components      | `PascalCase.tsx`          | `MerchantCard.tsx`                   |
+| Hooks                 | `use-kebab-case.ts`       | `use-native-platform.ts`             |
+| Utilities / services  | `kebab-case.ts`           | `api-client.ts`                      |
+| Zustand stores        | `kebab-case.store.ts`     | `auth.store.ts`, `purchase.store.ts` |
+| TypeScript types file | `kebab-case.types.ts`     | `merchant.types.ts`                  |
+| Test files            | `__tests__/` sibling dir  | `__tests__/MerchantCard.test.tsx`    |
+| Constants             | `kebab-case.constants.ts` | `stellar.constants.ts`               |
 
 ### One export per file (with exceptions)
 
