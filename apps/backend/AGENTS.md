@@ -12,7 +12,9 @@ src/
 ├── logger.ts           ← Pino logger
 ├── upstream.ts         ← upstreamUrl() helper
 ├── circuit-breaker.ts  ← Shared circuit breaker for upstream calls
-├── auth/handler.ts     ← Auth proxy (login, verify, refresh → upstream CTX)
+├── discord.ts          ← Webhook senders (order created/fulfilled, health, circuit)
+├── openapi.ts          ← OpenAPI 3.1 spec (every new handler registers its path + status codes)
+├── auth/handler.ts     ← Auth proxy (request-otp, verify-otp, refresh, logout → upstream CTX)
 ├── orders/handler.ts   ← Order proxy (create, list, get → upstream CTX)
 ├── merchants/
 │   ├── sync.ts         ← Background sync from upstream /merchants
