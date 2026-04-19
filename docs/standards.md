@@ -255,7 +255,7 @@ setTimeout(refresh, MERCHANT_REFRESH_INTERVAL_MS);
 if (zoom > CLUSTERING_MAX_ZOOM) { ... }
 ```
 
-Constants live in a `*.constants.ts` file in the same directory as the code that uses them, or in `packages/shared/src/constants.ts` if used across packages.
+Constants live in a `*.constants.ts` file in the same directory as the code that uses them. Cross-package constants go in the most topical file under `packages/shared/src/` — for example `DEFAULT_CLIENT_IDS` and `ApiErrorCode` live next to the related types in `packages/shared/src/api.ts`. There is deliberately no `constants.ts` grab-bag; colocation with the related types makes renames and removals propagate cleanly.
 
 ### No commented-out code
 
