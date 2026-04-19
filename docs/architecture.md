@@ -119,6 +119,14 @@ Purchase
 - Fetches upstream image, resizes with `sharp`, serves with cache headers
 - LRU in-memory cache: 100 MB max, 7-day TTL
 - Prevents CORS issues and normalises image dimensions
+- SSRF-hardened (audit A-025): the target URL is validated before
+  fetch — rejects non-http/https schemes, localhost / private / IPv6
+  link-local addresses, and hosts outside the
+  `IMAGE_PROXY_ALLOWED_HOSTS` allowlist. The backend refuses to boot
+  in `NODE_ENV=production` without the allowlist set, unless
+  `DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1` is an explicit
+  emergency opt-out. Requests capped at 10 MB and 2000px per
+  dimension.
 
 ---
 
