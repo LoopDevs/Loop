@@ -19,7 +19,12 @@
  *   BACKEND_URL              — defaults to http://localhost:8080
  *   E2E_MERCHANT_ID          — merchant id to buy from; defaults to first
  *                              min-max merchant in the catalog
- *   E2E_AMOUNT_USD           — USD amount to purchase; defaults to '5'
+ *   E2E_AMOUNT_USD           — USD amount to purchase. Unset or empty
+ *                              means "buy each candidate merchant's `min`
+ *                              denomination" (the cheapest possible card).
+ *                              The GitHub workflow passes the manual-input
+ *                              value through as '' when blank, which the
+ *                              script treats the same as unset.
  *   POLL_TIMEOUT_MS          — total poll budget; defaults to 600000 (10m)
  *   POLL_INTERVAL_MS         — poll cadence; defaults to 5000 (5s)
  *   NEW_REFRESH_TOKEN_OUT    — path to write the rotated refresh token to.
