@@ -37,7 +37,9 @@ app/
 │   │                # PurchaseComplete / RedeemFlow, orchestrated by
 │   │                # PurchaseContainer)
 │   └── ui/          # Primitives — Button, Input, Spinner, LazyImage,
-│                    # OfflineBanner, ToastContainer
+│                    # OfflineBanner, ToastContainer, Skeleton
+│                    # (with MerchantCardSkeleton + OrderRowSkeleton
+│                    # variants used by home + orders routes)
 ├── hooks/           # useAuth, useAllMerchants, useMerchants,
 │                    # useMerchantBySlug, useMerchant, useOrders,
 │                    # useOrder, useNativePlatform, useSessionRestore,
