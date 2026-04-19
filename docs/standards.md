@@ -265,6 +265,16 @@ Delete it. Git history exists. Commented-out code causes confusion about whether
 
 All logging goes through the logger (see [Logging](#14-logging)). ESLint bans `console.log` in committed code.
 
+**One deliberate exception:** `apps/backend/src/env.ts` uses
+`console.warn` for boot-time misconfiguration alerts (e.g.
+`INCLUDE_DISABLED_MERCHANTS=true` in production, CTX client ID
+diverging from the shared default). `env.ts` is imported _by_
+`logger.ts`, so it can't import `logger` itself without creating
+a circular dependency — the logger doesn't exist yet at env-parse
+time. Those two call sites carry
+`// eslint-disable-next-line no-console` with a rationale comment;
+don't add new `console.*` calls elsewhere on that basis.
+
 ### Import ordering
 
 Enforced by ESLint `import/order`. Order must be:
