@@ -53,7 +53,7 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 - [x] ~~Validate order creation flow end-to-end with real credentials~~ — tested with real CTX Bearer token, orders created successfully
 - [x] ~~Confirm merchant sync pagination works with full catalog~~ — 117 merchants across 12 pages
 - [x] ~~Confirm location data sync and clustering against real data~~ — 116,219 locations, clustering verified at multiple zoom levels
-- [ ] Test gift card barcode/PIN retrieval in purchase flow
+- ~~Test gift card barcode/PIN retrieval in purchase flow~~ — **deferred to Phase 2**: the upstream `giftCardCode` wiring is not implemented yet (see `apps/backend/src/orders/handler.ts` inline comment and ADR-005 §2). The rendering side (`PurchaseComplete.tsx` + `jsbarcode`) is done and covered by unit tests, so there's nothing to test in Phase 1 until the backend populates `giftCardCode`.
 
 ### Brand & design
 
