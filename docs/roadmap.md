@@ -16,7 +16,7 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 - [x] ~~Add `.env` files~~ — created from `.env.example`
 - [x] ~~Run `npx cap add ios && npx cap add android`~~ — native projects created
 - [x] ~~Install Playwright browsers~~ — chromium installed
-- [x] ~~Set GitHub repo secrets for CI~~ — no secrets needed; upstream API is public
+- [x] ~~Set GitHub repo secrets for CI~~ — no **CTX API** secrets needed (upstream `/merchants`, `/login`, `/verify-email`, `/refresh-token` are public). Other workflow secrets that **do** need to be set when enabling the relevant workflow: `CTX_TEST_REFRESH_TOKEN` + `STELLAR_TEST_SECRET_KEY` + `GH_SECRETS_PAT` (rotates the refresh token back to Actions secrets after each run) for `e2e-real.yml`; `DISCORD_WEBHOOK_DEPLOYMENTS` for the CI-status notify job; `ANTHROPIC_API_KEY` for the Claude PR-review job.
 - [ ] Set up GitHub branch protection rules on `main` — **blocked**: GitHub rejects branch-protection writes on private repos on the free plan with 403 "Upgrade to GitHub Pro or make this repository public" (audit A-037). Until the org upgrades or the repo goes public, the "no direct pushes to `main`" rule is enforced by team convention only (see `AGENTS.md` §Git workflow). When unblocked, require a PR, passing quality/unit/e2e checks, and disallow force-push.
 
 ### Production infrastructure
