@@ -4,12 +4,21 @@
 
 ## Type of change
 
+(Pick the one that matches the Conventional Commit type in the PR
+title — commitlint enforces the same set; see
+`commitlint.config.js` `type-enum` and `docs/standards.md §Commit
+discipline`.)
+
 - [ ] `feat` — new feature
 - [ ] `fix` — bug fix
 - [ ] `refactor` — code change (no new feature, no bug fix)
+- [ ] `perf` — performance improvement
 - [ ] `docs` — documentation only
 - [ ] `test` — adding or updating tests
 - [ ] `chore` — maintenance (deps, config, tooling)
+- [ ] `ci` — CI/CD pipeline change
+- [ ] `build` — build system / bundler / dependency graph change
+- [ ] `revert` — reverting a previous commit
 
 ## Checklist
 
