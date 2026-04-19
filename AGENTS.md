@@ -179,7 +179,7 @@ Applied in order on every request:
 3. **Body limit** — 1MB max request body
 4. **Request ID** — unique `X-Request-Id` on every request
 5. **Logger** — Pino-backed access log for every request (audit A-021); shares service/env/redaction with application logs and correlates via `X-Request-Id`
-6. **Rate limiting** — per-IP: `/api/image` (300/min), `/api/auth/request-otp` (5/min), `/api/auth/verify-otp` (10/min), `/api/auth/refresh` (30/min), `DELETE /api/auth/session` (20/min), `POST /api/orders` (10/min), `GET /api/orders` (60/min), `GET /api/orders/:id` (120/min). 429 responses include `Retry-After`.
+6. **Rate limiting** — per-IP: `/api/clusters` (60/min), `/api/image` (300/min), `/api/auth/request-otp` (5/min), `/api/auth/verify-otp` (10/min), `/api/auth/refresh` (30/min), `DELETE /api/auth/session` (20/min), `POST /api/orders` (10/min), `GET /api/orders` (60/min), `GET /api/orders/:id` (120/min). 429 responses include `Retry-After`.
 7. **Circuit breaker** — per-upstream-endpoint breakers (login, verify-email, refresh-token, logout, merchants, locations, gift-cards), each 5 failures → 30s open → HALF_OPEN probe. Independent so a failing `/locations` doesn't trip auth.
 
 ---
