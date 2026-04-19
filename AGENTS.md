@@ -38,7 +38,7 @@ packages/shared  Shared TypeScript types (Merchant, Order, ClusterResponse, etc.
 upstream API  CTX gift card provider at spend.ctx.com — merchant catalog, auth, gift card orders
 ```
 
-**Auth is proxied, not custom.** Backend forwards login/verify/refresh to upstream CTX API. Tokens are upstream tokens — backend does not issue its own JWTs. See `docs/architecture.md` for full auth flow.
+**Auth is proxied, not custom.** Backend forwards request-otp, verify-otp, refresh, and logout to upstream CTX API. Tokens are upstream tokens — backend does not issue its own JWTs. See `docs/architecture.md` for full auth flow.
 
 ---
 
