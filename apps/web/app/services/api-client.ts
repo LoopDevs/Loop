@@ -1,5 +1,5 @@
 import { ApiException, DEFAULT_CLIENT_IDS } from '@loop/shared';
-import type { ApiError } from '@loop/shared';
+import type { ApiError, RefreshRequest } from '@loop/shared';
 import { API_BASE } from './config';
 
 // Browsers have no default fetch timeout. Without this, a backend that hangs
@@ -143,11 +143,12 @@ async function doRefresh(): Promise<string | null> {
     const { getPlatform } = await import('~/native/platform');
     const platform = getPlatform();
 
+    const body: RefreshRequest = { refreshToken, platform };
     const res = await apiRequest<{ accessToken: string; refreshToken?: string }>(
       '/api/auth/refresh',
       {
         method: 'POST',
-        body: { refreshToken, platform },
+        body,
       },
     );
     if (res.refreshToken) {

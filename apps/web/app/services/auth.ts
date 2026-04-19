@@ -1,12 +1,13 @@
-import type { VerifyOtpResponse } from '@loop/shared';
+import type { RequestOtpRequest, VerifyOtpRequest, VerifyOtpResponse } from '@loop/shared';
 import { getPlatform } from '~/native/platform';
 import { apiRequest } from './api-client';
 
 /** Sends a verification code to the given email. */
 export async function requestOtp(email: string): Promise<void> {
+  const body: RequestOtpRequest = { email, platform: getPlatform() };
   await apiRequest<{ message: string }>('/api/auth/request-otp', {
     method: 'POST',
-    body: { email, platform: getPlatform() },
+    body,
   });
 }
 
@@ -15,9 +16,10 @@ export async function requestOtp(email: string): Promise<void> {
  * The caller is responsible for storing the refresh token via secure-storage.
  */
 export async function verifyOtp(email: string, otp: string): Promise<VerifyOtpResponse> {
+  const body: VerifyOtpRequest = { email, otp, platform: getPlatform() };
   return apiRequest<VerifyOtpResponse>('/api/auth/verify-otp', {
     method: 'POST',
-    body: { email, otp, platform: getPlatform() },
+    body,
   });
 }
 
