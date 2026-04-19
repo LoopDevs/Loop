@@ -30,9 +30,11 @@ No shared state between regions — each instance fetches merchants/locations in
 cd apps/backend
 fly launch --name loopfinance-api --region iad --no-deploy
 
-# Set secrets (API credentials for /locations endpoint)
+# Set secrets (API credentials for /locations endpoint only — the
+# non-secret config like GIFT_CARD_API_BASE_URL, IMAGE_PROXY_ALLOWED_HOSTS,
+# TRUST_PROXY, PORT, NODE_ENV, and LOG_LEVEL are baked into the
+# apps/backend/fly.toml [env] block)
 fly secrets set \
-  GIFT_CARD_API_BASE_URL=https://spend.ctx.com \
   GIFT_CARD_API_KEY=<key> \
   GIFT_CARD_API_SECRET=<secret>
 
