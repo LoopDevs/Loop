@@ -540,11 +540,15 @@ claimed and measured coverage.
 
 Backend coverage is high because the backend is almost entirely
 pure-logic handlers that are testable without a DOM. Web coverage is
-lower because the vitest environment is `node` (ADR-005 §7) and
-components / routes are covered via Playwright e2e rather than unit
-tests. See `apps/backend/vitest.config.ts` and
-`apps/web/vitest.config.ts` for the enforced values — this table is
-the manually-maintained reflection.
+lower because the vitest default environment is `node`
+(ADR-005 §7) — component + hook tests opt into jsdom per file
+with a `// @vitest-environment jsdom` pragma, and route-level
+surfaces (`app/routes/**`, `app/root.tsx`) are covered by
+Playwright e2e rather than unit tests (excluded from the coverage
+threshold via `apps/web/vitest.config.ts`). See
+`apps/backend/vitest.config.ts` and `apps/web/vitest.config.ts` for
+the enforced values — this table is the manually-maintained
+reflection.
 
 ### What to test
 
