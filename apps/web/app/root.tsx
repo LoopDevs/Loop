@@ -49,7 +49,7 @@ const queryClient = new QueryClient({
       // retry 4xx (won't become 2xx on retry — 400 stays 400, 429 means
       // back off), up to 2 retries for 5xx / timeout / network. Every
       // existing hook also sets `retry: shouldRetry` explicitly — those
-      // stays valid and wins by explicit override.
+      // stay valid and win by explicit override.
       retry: shouldRetry,
       staleTime: 5 * 60 * 1000,
     },
