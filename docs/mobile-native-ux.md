@@ -82,18 +82,19 @@ All plugins referenced anywhere in the app are already installed — see
 versions.
 
 ```
-@capacitor/app                       — back button, deep linking
-@capacitor/clipboard                 — copy to clipboard
-@capacitor/haptics                   — haptic feedback
-@capacitor/keyboard                  — keyboard handling + accessory bar
-@capacitor/network                   — offline detection
-@capacitor/preferences               — token + pending-order + app-lock storage
-@capacitor/push-notifications        — order notifications (wired as of Phase 2)
-@capacitor/share                     — native share sheet
-@capacitor/splash-screen             — splash config
-@capacitor/status-bar                — status bar styling + overlay
-@capgo/inappbrowser                  — in-app browser for redeem URLs
-@aparajita/capacitor-biometric-auth  — Face ID / Touch ID for the app lock
+@capacitor/app                         — back button, deep linking
+@capacitor/clipboard                   — copy to clipboard
+@capacitor/haptics                     — haptic feedback
+@capacitor/keyboard                    — keyboard handling + accessory bar
+@capacitor/network                     — offline detection
+@capacitor/preferences                 — pending-order + app-lock-enabled flag storage
+@capacitor/push-notifications          — order notifications (wired as of Phase 2)
+@capacitor/share                       — native share sheet
+@capacitor/splash-screen               — splash config
+@capacitor/status-bar                  — status bar styling + overlay
+@capgo/inappbrowser                    — in-app browser for redeem URLs
+@aparajita/capacitor-biometric-auth    — Face ID / Touch ID for the app lock
+@aparajita/capacitor-secure-storage    — refresh token + user email (Keychain / EncryptedSharedPreferences, audit A-024, ADR-006)
 ```
 
 > The biometric plugin is `@aparajita/capacitor-biometric-auth`, not the
