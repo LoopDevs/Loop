@@ -17,8 +17,10 @@ interface AuthActions {
  * Authentication state store.
  *
  * Access tokens are held in memory only.
- * Refresh tokens are stored via the platform-appropriate secure storage
- * (Capacitor Preferences on mobile, sessionStorage on web).
+ * Refresh tokens are stored via the platform-appropriate secure storage:
+ * Keychain / EncryptedSharedPreferences on native via
+ * `@aparajita/capacitor-secure-storage` (audit A-024, ADR-006),
+ * sessionStorage on web.
  */
 export const useAuthStore = create<AuthState & AuthActions>((set) => ({
   email: null,

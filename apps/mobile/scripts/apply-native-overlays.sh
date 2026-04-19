@@ -8,8 +8,12 @@
 # overwrite on regeneration:
 #
 #   - Android backup exclusions (audit A-033) — stops auto-backup from
-#     sweeping the Capacitor Preferences file (refresh token, pending
-#     purchase state) into Google Drive / device-transfer.
+#     sweeping the Capacitor Preferences file (pending purchase state
+#     and any pre-A-024 refresh-token residue) into Google Drive /
+#     device-transfer. Post-A-024/ADR-006 refresh tokens live in
+#     EncryptedSharedPreferences via @aparajita/capacitor-secure-storage
+#     and are Keystore-bound, so even if they were backed up they
+#     cannot be decrypted on a different device.
 #   - iOS NSFaceIDUsageDescription (audit A-034) — required for the
 #     biometric-auth plugin to work and for App Store approval.
 #
