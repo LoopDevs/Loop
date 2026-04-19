@@ -35,8 +35,18 @@ grep -E "app\.(get|post|put|delete)\(" apps/backend/src/app.ts | \
 # ─── 3. No references to deleted files ──────────────────────────────────────
 
 echo "Checking for stale references to deleted files..."
-for stale in "auth/otp.ts" "auth/jwt.ts" "auth/mailer.ts" "nodemailer" "JWT_SECRET" "SMTP_HOST"; do
-  matches=$(grep -rn "$stale" docs/ AGENTS.md apps/*/AGENTS.md packages/*/AGENTS.md 2>/dev/null | grep -v "node_modules\|__tests__" || true)
+for stale in \
+  "auth/otp.ts" "auth/jwt.ts" "auth/mailer.ts" \
+  "nodemailer" "JWT_SECRET" "SMTP_HOST" \
+  "claude-audit.md" "RESEARCH.md" "ctx.postman_collection.json" \
+  "dashdirect"; do
+  # docs/archive/ and docs/audit-tracker.md deliberately preserve some of
+  # these names in their historical narratives — exclude them so the
+  # check only fires on *active* docs where the reference would be a
+  # live bug.
+  matches=$(grep -rn "$stale" docs/ AGENTS.md apps/*/AGENTS.md packages/*/AGENTS.md 2>/dev/null \
+    | grep -v "node_modules\|__tests__\|docs/archive/\|docs/audit-tracker.md\|scripts/lint-docs.sh" \
+    || true)
   if [ -n "$matches" ]; then
     err "Stale reference to '$stale' in docs"
   fi
