@@ -38,10 +38,10 @@ Vitest unit + integration tests covering:
 Vitest in the **node** environment (not jsdom — see ADR-005 §7 for the
 tradeoff; component/hook tests are covered via e2e instead). Covers:
 
-- Native wrappers under `app/native/` — platform detection, clipboard, haptics, preferences, status bar, back button, network, screenshot, share, biometrics, app-lock, webview, pending-purchase storage.
+- Native wrappers under `app/native/` — `platform`, `clipboard`, `haptics`, `secure-storage` (A-024 / ADR-006 Keychain-backed), `status-bar`, `back-button`, `keyboard`, `network`, `notifications`, `screenshot-guard`, `share`, `biometrics`, `app-lock`, `webview`, `purchase-storage` (pending-order state).
 - Zustand stores — `auth.store`, `purchase.store` (full state machine: amount → payment → complete/redeem/error), `ui.store`.
 - Services — `api-client`, `merchants`, `orders`, `auth`, `clusters`.
-- Utilities — `error-messages`, `image`, `money` (currency-aware formatter), `slug` hook.
+- Utilities — `error-messages`, `image` (proxy URL builder), `money` (currency-aware formatter), `security-headers`.
 
 ### E2E (`tests/e2e` + `tests/e2e-mocked`)
 
