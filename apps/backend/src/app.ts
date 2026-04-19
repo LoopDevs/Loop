@@ -196,9 +196,13 @@ app.use('*', requestId());
 
 // Audit A-021: replace the default `hono/logger` with a Pino-backed
 // access logger so request logs share the same structure, redaction
-// list, and transport as the rest of the backend. Uses the `X-Request-Id`
-// the preceding middleware attaches so every access log correlates with
-// the handler-side logs for the same request.
+// list, and transport as the rest of the backend. Correlates with the
+// handler-side logs via the `requestId` context variable that Hono's
+// `requestId()` middleware (`app.use('*', requestId())` above) sets —
+// that middleware writes the id to the response header and the context
+// var but does NOT mutate the incoming request's headers, so reading
+// `c.req.header('X-Request-Id')` would be undefined for every client
+// that didn't already send one (almost all of them).
 const accessLog = logger.child({ component: 'access' });
 app.use('*', async (c, next) => {
   const start = Date.now();
@@ -211,7 +215,7 @@ app.use('*', async (c, next) => {
       path: c.req.path,
       status,
       durationMs: ms,
-      requestId: c.req.header('X-Request-Id'),
+      requestId: c.get('requestId') ?? c.req.header('X-Request-Id'),
     },
     `${c.req.method} ${c.req.path} ${status} ${ms}ms`,
   );
