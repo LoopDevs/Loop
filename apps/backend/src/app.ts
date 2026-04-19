@@ -431,9 +431,6 @@ app.delete('/api/auth/session', rateLimit(20, 60_000), logoutHandler);
 //   - GET /api/orders/:id: PaymentStep polls every 3s (~20/min);
 //     120/min accommodates multiple pending orders and a retry burst.
 
-app.use('/api/orders', requireAuth);
-app.use('/api/orders/*', requireAuth);
-
 // Force Cache-Control: private, no-store on every response under
 // /api/orders — these contain a specific user's purchase history and
 // gift-card redemption payloads. Without this, a CDN or intermediate
@@ -441,6 +438,11 @@ app.use('/api/orders/*', requireAuth);
 // `GET /api/orders` response and serve it to another user's next
 // request. Fly.io itself doesn't proxy-cache, but this removes the
 // footgun before any future edge caching is introduced.
+//
+// Registered BEFORE requireAuth so the header still applies on the
+// 401 response requireAuth emits when no Bearer is present — a
+// misbehaving CDN that caches 401s wouldn't then leak the "this URL
+// needs auth" shape across requests.
 app.use('/api/orders', async (c, next) => {
   await next();
   c.header('Cache-Control', 'private, no-store');
@@ -449,6 +451,9 @@ app.use('/api/orders/*', async (c, next) => {
   await next();
   c.header('Cache-Control', 'private, no-store');
 });
+
+app.use('/api/orders', requireAuth);
+app.use('/api/orders/*', requireAuth);
 
 app.post('/api/orders', rateLimit(10, 60_000), createOrderHandler);
 app.get('/api/orders', rateLimit(60, 60_000), listOrdersHandler);

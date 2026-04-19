@@ -622,6 +622,15 @@ describe('GET /api/orders', () => {
     expect(res.headers.get('Cache-Control')).toBe('private, no-store');
   });
 
+  it('sets Cache-Control even on the 401 requireAuth emits without a bearer', async () => {
+    // Registering the cache-control middleware before requireAuth
+    // means a misbehaving CDN that caches 401s can't serve the
+    // "this URL needs auth" body cross-user. Lock the ordering.
+    const res = await app.request('/api/orders');
+    expect(res.status).toBe(401);
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store');
+  });
+
   it('maps upstream list response to our format', async () => {
     const upstreamResponse = {
       pagination: { page: 1, pages: 3, perPage: 10, total: 25 },
