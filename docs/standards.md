@@ -277,7 +277,13 @@ don't add new `console.*` calls elsewhere on that basis.
 
 ### Import ordering
 
-Enforced by ESLint `import/order`. Order must be:
+Convention only — not currently ESLint-enforced. `eslint-plugin-import`
+is not installed (same ESLint-10 compatibility reason as
+`eslint-plugin-react` — see ADR-005 §3). Follow the order below by hand
+and during review; revisit once an ESLint-10-compatible release of
+`eslint-plugin-import` is published and adoption is worth an ADR.
+
+Order must be:
 
 ```typescript
 // 1. Node built-ins
