@@ -129,7 +129,7 @@ and where the fix work would happen.
   somebody.
 - **Where**: `apps/backend/src/circuit-breaker.ts` `wrappedFetch`.
 
-### 7. Web vitest runs in `node` environment, not `jsdom`
+### 7. Web vitest defaults to `node` environment; jsdom is per-file opt-in
 
 - **What**: `apps/web/vitest.config.ts` sets `environment: 'node'`. Rendering
   React components or invoking hooks through `@testing-library/react`'s
@@ -137,14 +137,23 @@ and where the fix work would happen.
 - **Why accepted**: Most web tests today are pure-logic (service clients,
   stores, utility functions). Switching the default to `jsdom` slows every
   test file (~100 ms startup) and pulls in a sizeable dependency.
-- **Consequence**: `useAuth`, `useSessionRestore`, and the purchase-flow
-  components (Task #11) are covered by e2e tests only. Per-hook/per-component
-  unit coverage is a known gap.
-- **Revisit**: When Task #11 (purchase-flow component tests) lands. The likely
-  resolution is a per-file `// @vitest-environment jsdom` pragma for the
-  component suites rather than a global flip.
-- **Where**: `apps/web/vitest.config.ts`, per-file pragmas in future
-  component tests.
+- **Status (resolved, partial)**: The "flip environment per file" escape
+  hatch has landed. Purchase-flow components
+  (`AmountSelection`, `PaymentStep`, `PurchaseComplete`, `RedeemFlow`) and
+  several hooks (`use-auth`, `use-session-restore`,
+  `use-native-platform`, `query-retry`) now carry a
+  `// @vitest-environment jsdom` pragma in their test files and render
+  with `@testing-library/react`. The original "covered by e2e only" gap
+  is closed for those surfaces. Anything added beyond this set that
+  needs rendering or hooks should follow the same pragma pattern — no
+  global environment flip required.
+- **Remaining gap**: route-level components and the root layout still
+  rely on Playwright e2e for coverage, which is why
+  `apps/web/vitest.config.ts` excludes `app/routes/**` + `app/root.tsx`
+  from the coverage threshold calculation (see also
+  `docs/testing.md §Web coverage scope`).
+- **Where**: `apps/web/vitest.config.ts`, per-file pragmas in the
+  component + hook tests.
 
 ### 8. Proto generation is manual
 
