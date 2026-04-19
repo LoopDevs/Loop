@@ -734,7 +734,10 @@ All dependency and devDependency versions are pinned exactly — **no `^` or `~`
 2. When a caret-pinned transitive dep ships a regression, the next `npm install` picks it up on exactly one machine without any signal in a PR. Exact pins make version changes show up as explicit edits to the manifest.
 3. Renovate / Dependabot handles bumping; exact pins give those tools a clean diff and give reviewers a clean approval surface.
 
-Exceptions: `@loop/shared: "*"` (workspace protocol), `typescript: "*"` in leaf workspaces (resolves to the root-pinned version), `engines.node: ">=22.0.0"` (runtime constraint, not a dep).
+Exceptions:
+
+- `@loop/shared: "*"` in apps that consume the internal workspace package (`apps/web`, `apps/backend`). The workspace resolves this to the local source at install time — there is no published version to pin.
+- `engines.node: ">=22.0.0"` in the root `package.json` — that's a runtime constraint, not a dependency version. Every other `engines` field and every real dep / devDep resolves to an exact version (including `typescript`, which is pinned to the same exact version in every workspace).
 
 The repo-level `.npmrc` sets `save-exact=true` so any `npm install <pkg>` records the concrete version automatically.
 
