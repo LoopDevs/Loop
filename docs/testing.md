@@ -112,13 +112,13 @@ MOBILE_SAFARI=1 npm run test:e2e:real
 
 ## When tests run
 
-| Trigger                            | What runs                                                                                           |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `git commit`                       | lint-staged (ESLint + Prettier on changed files)                                                    |
-| `git push`                         | `npm test` + `lint:docs` (blocks push on failure)                                                   |
-| CI (every push)                    | typecheck + lint + test + audit + build + mocked e2e (`test:e2e`)                                   |
-| CI (PRs only)                      | + real-upstream e2e tests with Playwright (`test:e2e:real`)                                         |
-| GitHub Actions `workflow_dispatch` | **E2E (real CTX + wallet)** — manually triggered full purchase flow that spends real XLM; see below |
+| Trigger                            | What runs                                                                                                                    |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `git commit`                       | lint-staged (ESLint + Prettier on changed files)                                                                             |
+| `git push`                         | `npm test` + `lint:docs` (blocks push on failure)                                                                            |
+| CI (every push)                    | Quality (typecheck + lint + format:check + lint:docs) + Unit tests + Security audit + Build + mocked e2e (`test:e2e:mocked`) |
+| CI (PRs only)                      | + real-upstream e2e tests with Playwright (`test:e2e:real`)                                                                  |
+| GitHub Actions `workflow_dispatch` | **E2E (real CTX + wallet)** — manually triggered full purchase flow that spends real XLM; see below                          |
 
 ### Manual: real CTX + wallet purchase workflow
 
