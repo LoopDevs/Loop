@@ -55,7 +55,18 @@ done
 # ─── 4. No references to wrong domain ───────────────────────────────────────
 
 echo "Checking for stale domain references..."
-stale_domains=$(grep -rn "loop\.app" docs/ AGENTS.md apps/*/AGENTS.md .github/ apps/backend/.env.example 2>/dev/null | grep -v "node_modules" || true)
+# Cover every contributor-facing doc and every versioned config where a
+# URL could land: root + package READMEs, AGENTS guides, workflow files,
+# .env.example, fly.toml, capacitor.config.ts. Missing any of these
+# would let the pre-rename `loop.app` sneak back in via an overlooked
+# surface.
+stale_domains=$(grep -rn "loop\.app" \
+  README.md \
+  AGENTS.md \
+  apps/*/AGENTS.md apps/*/README.md apps/*/fly.toml apps/*/capacitor.config.ts \
+  packages/*/AGENTS.md \
+  docs/ .github/ apps/backend/.env.example \
+  2>/dev/null | grep -v "node_modules" || true)
 if [ -n "$stale_domains" ]; then
   err "Stale 'loop.app' reference found (should be loopfinance.io)"
 fi
