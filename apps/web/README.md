@@ -30,12 +30,12 @@ app/
 ├── routes/          # File-based routes — home, auth, map, orders,
 │                    # gift-card.$name, not-found; declared in app/routes.ts
 ├── components/
-│   ├── features/    # Domain components — Navbar, MerchantCard,
-│   │                # ClusterMap, MapBottomSheet, NativeTabBar,
-│   │                # NativeBackButton, and the purchase/ subtree
-│   │                # (AmountSelection → PaymentStep →
-│   │                # PurchaseComplete / RedeemFlow, orchestrated by
-│   │                # PurchaseContainer)
+│   ├── features/    # Domain components — Navbar, Footer (web only,
+│   │                # hidden via `!isNative`), MerchantCard, ClusterMap,
+│   │                # MapBottomSheet, NativeTabBar, NativeBackButton,
+│   │                # and the purchase/ subtree (AmountSelection →
+│   │                # PaymentStep → PurchaseComplete / RedeemFlow,
+│   │                # orchestrated by PurchaseContainer)
 │   └── ui/          # Primitives — Button, Input, Spinner, LazyImage,
 │                    # OfflineBanner, ToastContainer, Skeleton
 │                    # (with MerchantCardSkeleton + OrderRowSkeleton
