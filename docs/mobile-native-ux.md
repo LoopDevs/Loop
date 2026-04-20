@@ -25,7 +25,7 @@ Making the Capacitor WebView app feel native on iOS and Android.
 ## Phase 2 — Advanced native features
 
 - [x] **Page transitions** — CSS `slide-in` animation on route change (native only). Triggered via `key={location.pathname}` on content wrapper.
-- [x] **Biometric app lock** — Face ID / Touch ID via `@aparajita/capacitor-biometric-auth`. Toggle on Account page. Lock screen on app resume with biometric prompt. Preference persisted in Capacitor Preferences.
+- [x] **Biometric app lock** — Face ID / Touch ID via `@aparajita/capacitor-biometric-auth`. Toggle on Account page. Lock screen on cold start only (deliberately not on resume — see the design-choice comment on `registerAppLockGuard` in `apps/web/app/native/app-lock.ts`). Preference persisted in Capacitor Preferences.
 - [ ] **Deep linking** — `loopfinance.io/gift-card/:slug` opens the app directly to that merchant. iOS Universal Links + Android App Links. Configure in Capacitor `@capacitor/app` + server-side `apple-app-site-association` / `assetlinks.json`.
 - [ ] **Push notifications** — order status updates (payment received, gift card ready). Wire up `@capacitor/push-notifications`: register on app open, send token to backend, backend triggers push on order status change.
 - [ ] **App badge** — show pending order count on app icon via push notification badge.
