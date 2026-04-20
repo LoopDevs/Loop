@@ -74,22 +74,6 @@ html.dark .hero-shape-fill {
   fill: white;
 }
 
-/* Theme toggler icon CSS - prevents flash by using html.dark/.light classes */
-.theme-icon-sun,
-.theme-icon-moon {
-  display: none;
-}
-
-/* Dark mode: show sun icon (to switch to light) */
-html.dark .theme-icon-sun {
-  display: block;
-}
-
-/* Light mode: show moon icon (to switch to dark) */
-html.light .theme-icon-moon {
-  display: block;
-}
-
 /* Prevent scroll wheel from changing input values */
 input[type='number'] {
   -moz-appearance: textfield;
