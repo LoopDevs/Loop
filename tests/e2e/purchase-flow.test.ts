@@ -26,7 +26,7 @@ test.describe('Purchase flow', () => {
     // even for a valid query.
     await expect(page.locator('a[href^="/gift-card/"]').first()).toBeVisible();
 
-    const searchInput = page.locator('input[placeholder="Search for gift cards"]').first();
+    const searchInput = page.locator('input[placeholder="Search"]').first();
     await expect(searchInput).toBeVisible();
 
     // The Navbar search only renders results for queries > 1 character. Use
