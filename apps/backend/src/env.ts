@@ -29,8 +29,10 @@ const envBoolean = z.union([z.boolean(), z.string()]).transform((v, ctx) => {
 });
 
 /**
- * Environment schema. Exported for testing; the validated `env` object
- * is what production code should consume.
+ * Environment schema. Exported so tests can exercise it directly if they
+ * ever need to (today they go through `parseEnv` instead); production
+ * code should consume the validated `env` object at the bottom of this
+ * file, not the raw schema.
  */
 export const EnvSchema = z.object({
   // Coerce + bound: process.env.PORT is always a string, but downstream code
