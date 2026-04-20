@@ -62,6 +62,7 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
         merchantName={merchant.name}
         code={store.giftCardCode}
         pin={store.giftCardPin ?? undefined}
+        barcodeImageUrl={store.barcodeImageUrl ?? undefined}
         onDone={store.reset}
       />
     );
@@ -175,7 +176,6 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
               value={authEmail}
               onChange={setAuthEmail}
               required
-              autoFocus
               label="Email address"
             />
             {authError !== null && <p className="text-red-500 text-sm">{authError}</p>}
@@ -273,10 +273,6 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
             Save {merchant.savingsPercentage.toFixed(1)}%
           </span>
         )}
-      </div>
-
-      <div className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-        Purchasing as <strong className="text-gray-700 dark:text-gray-300">{email}</strong>
       </div>
 
       <AmountSelection

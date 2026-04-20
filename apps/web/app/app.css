@@ -41,17 +41,16 @@ html.dark body {
   color: white !important;
 }
 
-/* System preference dark mode (only if no explicit class) */
-@media (prefers-color-scheme: dark) {
-  html:not(.light):not(.dark) {
-    background-color: rgb(3, 7, 18);
-  }
-
-  html:not(.light):not(.dark) body {
-    background-color: rgb(3, 7, 18);
-    color: white;
-  }
-}
+/* Theme is driven entirely by the inline script in root.tsx setting
+   `html.dark` or `html.light` before body paints. We used to also
+   honour `@media (prefers-color-scheme: dark)` as a fallback, but
+   that fought with Tailwind's class-based `dark:` variants during
+   the tiny window before the stylesheet + script finished loading:
+   body went dark via the media query while Tailwind dark: variants
+   on content were still inactive, producing a visible mix of light
+   content on a dark body on no-cache refresh. Dropping the media
+   fallback means users with JS disabled see the light theme — the
+   script's catch-block already handles that case explicitly. */
 
 /* Hero SVG fill - explicit overrides for theme classes */
 html.light .hero-shape-fill {
@@ -60,13 +59,6 @@ html.light .hero-shape-fill {
 
 html.dark .hero-shape-fill {
   fill: rgb(3, 7, 18);
-}
-
-/* System preference only when no explicit class */
-@media (prefers-color-scheme: dark) {
-  html:not(.light):not(.dark) .hero-shape-fill {
-    fill: rgb(3, 7, 18);
-  }
 }
 
 /* Default light mode for hero SVG */
@@ -161,7 +153,8 @@ html.native .selectable {
   user-select: text;
 }
 
-/* Disable Android overscroll glow — looks non-native in an app */
+/* Disable overscroll glow — looks non-native in an app */
+html.native,
 html.native body {
   overscroll-behavior: none;
 }
@@ -191,7 +184,7 @@ html.native body {
    below it — one variable so `.native-safe-page`, `.native-bleed-top`,
    and the ::before backdrop stay in lockstep. */
 :root {
-  --safe-top: calc(env(safe-area-inset-top) + 0.75rem);
+  --safe-top: env(safe-area-inset-top);
 }
 
 .native-safe-page {
@@ -216,19 +209,85 @@ html.native body::before {
   top: 0;
   left: 0;
   right: 0;
-  height: var(--safe-top);
-  background: linear-gradient(to bottom, rgb(255, 255, 255) 60%, rgba(255, 255, 255, 0));
+  /* Extended well beyond safe-top so the strong top stops have
+     visible real-estate before the fade. With a small height the
+     gradient crushes the top 80% alpha into just a few pixels and
+     the surface reads as "no shadow" — a taller element spreads the
+     same alpha curve across more area so the baseline actually paints.
+  */
+  height: calc(var(--safe-top) + 5rem);
+  /* Dark gradient, multi-stop so the top third stays near-full alpha
+     before easing to transparent — much more visible at baseline
+     than a straight linear fade. Alpha at every stop is scaled by
+     `--status-bar-intensity` (0 → 1, driven by the scroll listener
+     in root.tsx over the first 50px of scroll). So baseline (0 scroll)
+     paints 50% of each stop and scrolling ramps it to 100%. */
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, calc(0.8 * (0.5 + var(--status-bar-intensity, 0) * 0.5))) 0%,
+    rgba(0, 0, 0, calc(0.7 * (0.5 + var(--status-bar-intensity, 0) * 0.5))) 30%,
+    rgba(0, 0, 0, calc(0.4 * (0.5 + var(--status-bar-intensity, 0) * 0.5))) 60%,
+    rgba(0, 0, 0, calc(0.15 * (0.5 + var(--status-bar-intensity, 0) * 0.5))) 85%,
+    rgba(0, 0, 0, 0) 100%
+  );
   pointer-events: none;
   z-index: 1050;
-}
-
-html.dark.native body::before {
-  background: linear-gradient(to bottom, rgb(3, 7, 18) 60%, rgba(3, 7, 18, 0));
 }
 
 .native-safe-x {
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
+}
+
+/* Styled scrollbar for the navbar search dropdown — the default
+   browser scrollbar was a bright light-theme bar against a near-black
+   dropdown, which looked unstyled. Firefox uses scrollbar-color;
+   Chromium/Safari use the ::-webkit-scrollbar pseudo-elements.
+   Track is transparent so the dropdown background shows through. */
+.search-dropdown-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(55 65 81) transparent; /* gray-700 on transparent */
+}
+.search-dropdown-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.search-dropdown-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.search-dropdown-scroll::-webkit-scrollbar-thumb {
+  background-color: rgb(55 65 81); /* gray-700 */
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.search-dropdown-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(75 85 99); /* gray-600 */
+  background-clip: padding-box;
+}
+
+/* Material-style ripple for bottom tab bar taps. Spawned by
+   `spawnRipple` in NativeTabBar.tsx at the click point; CSS
+   animates it outward and cleans up via `animationend`. `scale(0)`
+   starting state means the element occupies zero visible area until
+   the animation runs. `currentColor` picks up the tab's own colour
+   (blue on the active tab, gray otherwise) so the ripple reads
+   thematically. pointer-events:none keeps the ripple from swallowing
+   subsequent taps while it's still fading. */
+.tab-ripple {
+  position: absolute;
+  border-radius: 50%;
+  transform: scale(0);
+  opacity: 0.35;
+  pointer-events: none;
+  background: currentColor;
+  animation: tab-ripple 550ms ease-out;
+}
+
+@keyframes tab-ripple {
+  to {
+    transform: scale(2.25);
+    opacity: 0;
+  }
 }
 
 /* Auth screen — fill remaining viewport on native (no scrollbar) */
@@ -238,29 +297,41 @@ html.native .native-auth-screen {
   overflow: hidden;
 }
 
-/* Content padding to clear the tab bar + gesture area */
+/* Content padding to clear the tab bar + gesture area. 4rem matches
+   the tab bar's h-16 — keep in lockstep if the bar height changes. */
 .native-tab-clearance {
-  padding-bottom: calc(3.5rem + env(safe-area-inset-bottom));
+  padding-bottom: calc(4rem + env(safe-area-inset-bottom));
 }
 
-/* Full height minus safe areas + tab bar — for full-screen views like map */
+/* Full height minus safe areas + tab bar — for full-screen views like
+   map. 4rem matches the tab bar's h-16. */
 .native-full-height {
-  height: calc(100vh - env(safe-area-inset-top) - 3.5rem - env(safe-area-inset-bottom));
+  height: calc(100vh - env(safe-area-inset-top) - 4rem - env(safe-area-inset-bottom));
 }
 
-/* Page transitions — slide in on route changes (native only) */
+/* Full-screen view that bleeds under the status bar — cancels the
+   parent's .native-safe-page padding-top and stretches all the way to
+   the tab bar. Used by the map so the tiles run edge-to-edge. */
+.native-full-bleed {
+  margin-top: calc(-1 * var(--safe-top));
+  height: calc(100vh - 4rem - env(safe-area-inset-bottom));
+}
+
+/* Page transitions — fade in on route changes (native only). We used to
+   also translateX from 4%, but Android WebView drags the fixed tab bar
+   along with the sibling transform for ~500ms before snapping it back.
+   Opacity-only is compositor-cheap, doesn't invalidate fixed siblings,
+   and still reads as an intentional transition rather than a flicker. */
 html.native .route-enter {
-  animation: slide-in 0.25s ease-out;
+  animation: route-fade-in 0.2s ease-out;
 }
 
-@keyframes slide-in {
+@keyframes route-fade-in {
   from {
     opacity: 0;
-    transform: translateX(4%);
   }
   to {
     opacity: 1;
-    transform: translateX(0);
   }
 }
 

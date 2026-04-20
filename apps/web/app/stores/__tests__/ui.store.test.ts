@@ -1,10 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock DOM APIs before importing the store (it runs loadPreference at module init)
+// Mock DOM APIs before importing the store (it runs loadPreference at module init).
+// `contains` needs to track what add/remove have done because toggleTheme now
+// reads the html.dark class as its source of truth for the current theme
+// (the inline theme script in root.tsx can race with the store, so reading
+// the class avoids a "first click does nothing" UX).
+const currentClasses = new Set<string>();
 const mockClassList = {
-  add: vi.fn(),
-  remove: vi.fn(),
-  contains: vi.fn(() => false),
+  add: vi.fn((...names: string[]) => {
+    for (const n of names) currentClasses.add(n);
+  }),
+  remove: vi.fn((...names: string[]) => {
+    for (const n of names) currentClasses.delete(n);
+  }),
+  contains: vi.fn((name: string) => currentClasses.has(name)),
 };
 vi.stubGlobal('document', {
   documentElement: { classList: mockClassList },
@@ -22,6 +31,7 @@ import { useUiStore } from '../ui.store';
 describe('ui store', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    currentClasses.clear();
   });
 
   it('defaults to system theme preference', () => {

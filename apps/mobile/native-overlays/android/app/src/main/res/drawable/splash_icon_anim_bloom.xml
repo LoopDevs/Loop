@@ -1,0 +1,113 @@
+<!--
+  Variant G: per-letter circle bloom (organic reveal).
+
+  Each letter's clip-path is a circle centred on the letter. The
+  animation grows that circle from a 1-unit speck at the letter's
+  midpoint out to full coverage, so the letter "blooms" open from
+  the inside with no straight edges or distortion. 100ms stagger
+  (tighter than the wipe's 150ms) keeps the reveals overlapping so
+  the eye reads it as continuous growth rather than discrete steps.
+  decelerate_cubic eases the expansion so it decelerates into place
+  — reads as organic rather than mechanical.
+
+  pathType interpolation: valueFrom and valueTo must share command
+  structure (M C C C C Z here — 4 cubic beziers approximating a
+  circle via the 0.5523 magic number). Generated paths come from
+  the script that emitted the valueFrom/valueTo strings below.
+-->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:drawable="@drawable/splash_icon_vector">
+    <!-- L -->
+    <target android:name="letter_l_clip">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="pathData"
+                android:valueFrom="M14,26 C14,25.4477 14.4477,25 15,25 C15.5523,25 16,25.4477 16,26 C16,26.5523 15.5523,27 15,27 C14.4477,27 14,26.5523 14,26 Z"
+                android:valueTo="M-16,26 C-16,8.8787 -2.1213,-5 15,-5 C32.1213,-5 46,8.8787 46,26 C46,43.1213 32.1213,57 15,57 C-2.1213,57 -16,43.1213 -16,26 Z"
+                android:valueType="pathType"
+                android:duration="500"
+                android:startOffset="0"
+                android:interpolator="@android:interpolator/decelerate_cubic"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_l_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="500"
+                android:startOffset="0"/>
+        </aapt:attr>
+    </target>
+    <!-- O1 -->
+    <target android:name="letter_o1_clip">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="pathData"
+                android:valueFrom="M54.5,31 C54.5,30.4477 54.9477,30 55.5,30 C56.0523,30 56.5,30.4477 56.5,31 C56.5,31.5523 56.0523,32 55.5,32 C54.9477,32 54.5,31.5523 54.5,31 Z"
+                android:valueTo="M22.5,31 C22.5,12.7741 37.2741,-2 55.5,-2 C73.7259,-2 88.5,12.7741 88.5,31 C88.5,49.2259 73.7259,64 55.5,64 C37.2741,64 22.5,49.2259 22.5,31 Z"
+                android:valueType="pathType"
+                android:duration="500"
+                android:startOffset="100"
+                android:interpolator="@android:interpolator/decelerate_cubic"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_o1_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="500"
+                android:startOffset="100"/>
+        </aapt:attr>
+    </target>
+    <!-- O2 -->
+    <target android:name="letter_o2_clip">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="pathData"
+                android:valueFrom="M101.5,31 C101.5,30.4477 101.948,30 102.5,30 C103.052,30 103.5,30.4477 103.5,31 C103.5,31.5523 103.052,32 102.5,32 C101.948,32 101.5,31.5523 101.5,31 Z"
+                android:valueTo="M69.5,31 C69.5,12.7741 84.2741,-2 102.5,-2 C120.726,-2 135.5,12.7741 135.5,31 C135.5,49.2259 120.726,64 102.5,64 C84.2741,64 69.5,49.2259 69.5,31 Z"
+                android:valueType="pathType"
+                android:duration="500"
+                android:startOffset="200"
+                android:interpolator="@android:interpolator/decelerate_cubic"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_o2_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="500"
+                android:startOffset="200"/>
+        </aapt:attr>
+    </target>
+    <!-- P -->
+    <target android:name="letter_p_clip">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="pathData"
+                android:valueFrom="M149,39.5 C149,38.9477 149.448,38.5 150,38.5 C150.552,38.5 151,38.9477 151,39.5 C151,40.0523 150.552,40.5 150,40.5 C149.448,40.5 149,40.0523 149,39.5 Z"
+                android:valueTo="M110,39.5 C110,17.408 127.908,-0.5 150,-0.5 C172.092,-0.5 190,17.408 190,39.5 C190,61.592 172.092,79.5 150,79.5 C127.908,79.5 110,61.592 110,39.5 Z"
+                android:valueType="pathType"
+                android:duration="500"
+                android:startOffset="300"
+                android:interpolator="@android:interpolator/decelerate_cubic"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_p_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="500"
+                android:startOffset="300"/>
+        </aapt:attr>
+    </target>
+</animated-vector>

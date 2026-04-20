@@ -48,7 +48,7 @@ export default function MapRoute(): React.JSX.Element {
   }, []);
 
   return (
-    <div className={`flex flex-col ${isNative ? 'native-full-height' : 'h-screen'}`}>
+    <div className={`flex flex-col ${isNative ? 'native-full-bleed' : 'h-screen'}`}>
       {!isNative && <Navbar />}
       <div className="flex-1 relative">
         <Suspense

@@ -122,13 +122,13 @@ export function PaymentStep({
               ...(order.redeemScripts ? { redeemScripts: order.redeemScripts } : {}),
             });
           } else if (order.giftCardCode) {
-            // Currently unreachable via polling — the backend's GetOrder
-            // handler doesn't populate giftCardCode. For barcode-type gift
-            // cards the upstream /gift-cards/:id/barcode endpoint would
-            // need a separate proxy (Phase 2). RedeemFlow still sets these
-            // via WebView postMessage after the URL flow completes, so
-            // Order.giftCardCode remains a live field elsewhere.
-            store.setComplete(order.giftCardCode, order.giftCardPin);
+            // Barcode-type completed orders: backend extracts the
+            // gift card number / pin / (optional) barcode image URL
+            // from CTX's /gift-cards/:id response and attaches them
+            // to the order. RedeemFlow also invokes this path via
+            // WebView postMessage after URL flow completes, so
+            // barcodeImageUrl may be undefined on that path.
+            store.setComplete(order.giftCardCode, order.giftCardPin, order.barcodeImageUrl);
           } else {
             store.setError(
               'Order completed but gift card details are unavailable. Please contact support.',
@@ -196,6 +196,38 @@ export function PaymentStep({
       {qrDataUrl !== null && (
         <div className="flex justify-center mb-4">
           <img src={qrDataUrl} alt="Payment QR code" className="rounded-lg" />
+        </div>
+      )}
+
+      {/* Deep-link button — hands the full web+stellar:pay URI to the
+          OS so the user's registered Stellar wallet can open and
+          prefill the payment. Rendered as an anchor so Capacitor's
+          WebView treats it as a real navigation (the bridge then
+          delegates unknown schemes to Intent.ACTION_VIEW on Android /
+          UIApplication.open on iOS — which surfaces the installed
+          wallet picker). Only shown when we actually have a memo +
+          destination (skip the raw-address fallback case). */}
+      {memo && (
+        <div className="text-center mb-4">
+          <a
+            href={stellarUri}
+            className="inline-flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold shadow-sm"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-4 w-4"
+              aria-hidden="true"
+            >
+              <path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <path d="M8 12l3 3 5-6" />
+            </svg>
+            Open in wallet
+          </a>
         </div>
       )}
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import type { Route } from './+types/orders';
 import type { Order } from '@loop/shared';
 import { ApiException } from '@loop/shared';
@@ -64,7 +64,10 @@ function OrderRow({ order }: { order: Order }): React.JSX.Element {
       });
 
   return (
-    <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800 last:border-0">
+    <Link
+      to={`/orders/${encodeURIComponent(order.id)}`}
+      className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+    >
       <div className="flex-1 min-w-0">
         <p className="font-medium text-gray-900 dark:text-white truncate">{order.merchantName}</p>
         <p className="text-sm text-gray-500 dark:text-gray-400">{date}</p>
@@ -77,7 +80,7 @@ function OrderRow({ order }: { order: Order }): React.JSX.Element {
           {status.label}
         </span>
       </div>
-    </div>
+    </Link>
   );
 }
 

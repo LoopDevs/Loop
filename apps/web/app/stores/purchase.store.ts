@@ -26,6 +26,11 @@ interface PurchaseState {
   memo: string | null;
   giftCardCode: string | null;
   giftCardPin: string | null;
+  /** URL of an upstream-rendered barcode image (CTX-provided). When
+   *  present, PurchaseComplete shows this image instead of generating
+   *  a client-side CODE128 canvas — so the format matches what the
+   *  merchant's POS expects (CODE128, CODE39, QR, etc.). */
+  barcodeImageUrl: string | null;
   redeemUrl: string | null;
   redeemChallengeCode: string | null;
   redeemScripts: { injectChallenge?: string; scrapeResult?: string } | null;
@@ -42,7 +47,7 @@ interface PurchaseActions {
     expiresAt: number;
     memo: string;
   }) => void;
-  setComplete: (giftCardCode: string, giftCardPin?: string) => void;
+  setComplete: (giftCardCode: string, giftCardPin?: string, barcodeImageUrl?: string) => void;
   setRedeemRequired: (params: {
     redeemUrl: string;
     redeemChallengeCode: string;
@@ -64,6 +69,7 @@ const INITIAL_STATE: PurchaseState = {
   memo: null,
   giftCardCode: null,
   giftCardPin: null,
+  barcodeImageUrl: null,
   redeemUrl: null,
   redeemChallengeCode: null,
   redeemScripts: null,
@@ -168,9 +174,14 @@ export const usePurchaseStore = create<PurchaseState & PurchaseActions>((set, ge
     );
   },
 
-  setComplete: (giftCardCode, giftCardPin) => {
+  setComplete: (giftCardCode, giftCardPin, barcodeImageUrl) => {
     enqueuePersist(() => clearPending());
-    set({ step: 'complete', giftCardCode, giftCardPin: giftCardPin ?? null });
+    set({
+      step: 'complete',
+      giftCardCode,
+      giftCardPin: giftCardPin ?? null,
+      barcodeImageUrl: barcodeImageUrl ?? null,
+    });
   },
 
   setRedeemRequired: ({ redeemUrl, redeemChallengeCode, redeemScripts }) => {

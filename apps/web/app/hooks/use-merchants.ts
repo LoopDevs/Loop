@@ -104,19 +104,30 @@ export function useMerchantBySlug(slug: string): {
   };
 }
 
-/** Fetches a single merchant by id. */
-export function useMerchant(id: string): {
+/**
+ * Fetches a single merchant by id via the authenticated detail endpoint.
+ * That endpoint proxies CTX's `/merchants/:id` (with the user's bearer
+ * + X-Client-Id) to enrich the cached list record with long-form
+ * content — longDescription / terms / instructions. Only fires when
+ * `enabled` is true, i.e. when the caller has confirmed the user is
+ * authed; otherwise it 401s unnecessarily.
+ */
+export function useMerchant(
+  id: string,
+  options: { enabled?: boolean } = {},
+): {
   merchant: Merchant | undefined;
   isLoading: boolean;
   isError: boolean;
   error: Error | null;
 } {
   const normalized = id.trim();
+  const enabled = (options.enabled ?? true) && normalized.length > 0;
   const query = useQuery<{ merchant: Merchant }, Error>({
     queryKey: ['merchant', normalized],
     queryFn: () => fetchMerchant(normalized),
     staleTime: 5 * 60 * 1000,
-    enabled: normalized.length > 0,
+    enabled,
     refetchOnReconnect: true,
     retry: shouldRetry,
   });

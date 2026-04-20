@@ -31,7 +31,19 @@ export async function authenticateWithBiometrics(reason: string): Promise<boolea
 
   try {
     const { BiometricAuth } = await import('@aparajita/capacitor-biometric-auth');
-    await BiometricAuth.authenticate({ reason, cancelTitle: 'Cancel' });
+    // androidConfirmationRequired: false — after a successful weak
+    // biometric match (face on most Android devices), skip the extra
+    // "Confirm" tap. Banking / screen-unlock apps do the same. Safe
+    // here because this prompt gates UI visibility, not a transaction:
+    // the refresh token is already keychain-backed
+    // (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` / Keystore +
+    // EncryptedSharedPreferences, ADR-006 / audit A-024), so the
+    // biometric is friction reduction, not the secret's custodian.
+    await BiometricAuth.authenticate({
+      reason,
+      cancelTitle: 'Cancel',
+      androidConfirmationRequired: false,
+    });
     return true;
   } catch {
     return false;

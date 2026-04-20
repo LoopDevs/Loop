@@ -4,7 +4,7 @@ import type {
   MerchantListParams,
   MerchantAllResponse,
 } from '@loop/shared';
-import { apiRequest } from './api-client';
+import { apiRequest, authenticatedRequest } from './api-client';
 
 /** Fetches a paginated merchant list. */
 export async function fetchMerchants(
@@ -29,9 +29,15 @@ export async function fetchAllMerchants(): Promise<MerchantAllResponse> {
   return apiRequest<MerchantAllResponse>('/api/merchants/all');
 }
 
-/** Fetches a single merchant by id. */
+/**
+ * Fetches a single merchant by id, enriched with upstream CTX
+ * long-form content (longDescription / terms / instructions) via the
+ * authenticated backend handler. Requires a valid session — returns
+ * 401 otherwise. Unauthenticated callers can use `fetchMerchantBySlug`
+ * for the cached basics.
+ */
 export async function fetchMerchant(id: string): Promise<MerchantDetailResponse> {
-  return apiRequest<MerchantDetailResponse>(`/api/merchants/${encodeURIComponent(id)}`);
+  return authenticatedRequest<MerchantDetailResponse>(`/api/merchants/${encodeURIComponent(id)}`);
 }
 
 /**

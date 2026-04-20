@@ -1,7 +1,24 @@
 import { Link, useLocation } from 'react-router';
-import { useNativePlatform } from '~/hooks/use-native-platform';
-import { useAuthStore } from '~/stores/auth.store';
 import { triggerHaptic } from '~/native/haptics';
+
+/**
+ * Material-style ripple: spawn a circle element at the click point
+ * and let CSS animate it (see `.tab-ripple` + `@keyframes tab-ripple`
+ * in app.css). The DOM node cleans itself up on animationend so the
+ * ref of spans can't leak if the user hammer-taps.
+ */
+function spawnRipple(target: HTMLElement, clientX: number, clientY: number): void {
+  const rect = target.getBoundingClientRect();
+  const size = Math.max(rect.width, rect.height);
+  const ripple = document.createElement('span');
+  ripple.className = 'tab-ripple';
+  ripple.style.width = `${size}px`;
+  ripple.style.height = `${size}px`;
+  ripple.style.left = `${clientX - rect.left - size / 2}px`;
+  ripple.style.top = `${clientY - rect.top - size / 2}px`;
+  ripple.addEventListener('animationend', () => ripple.remove(), { once: true });
+  target.appendChild(ripple);
+}
 
 interface Tab {
   path: string;
@@ -93,19 +110,22 @@ function getActiveTabPath(pathname: string): string {
   return '/';
 }
 
-/** Bottom tab bar for native mobile. Hidden on web. */
+/**
+ * Bottom tab bar — shown on native always, and on mobile web widths.
+ * Hidden on desktop web via `md:hidden`, where the Navbar's horizontal
+ * nav links serve as the equivalent navigation surface.
+ */
 export function NativeTabBar(): React.JSX.Element | null {
-  const { isNative } = useNativePlatform();
   const location = useLocation();
-  const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
-
-  if (!isNative || !isAuthenticated) return null;
 
   const activeTabPath = getActiveTabPath(location.pathname);
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-[1100] bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 native-safe-bottom native-safe-x">
-      <div className="flex items-center justify-around h-14">
+    <nav
+      data-nav="tab"
+      className="lg:hidden fixed bottom-0 left-0 right-0 z-[1100] bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 native-safe-bottom native-safe-x"
+    >
+      <div className="flex items-center justify-around h-16">
         {TABS.map((tab) => {
           const isActive = tab.path === activeTabPath;
           return (
@@ -116,17 +136,23 @@ export function NativeTabBar(): React.JSX.Element | null {
               aria-current={isActive ? 'page' : undefined}
               onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
                 void triggerHaptic();
-                if (tab.path === activeTabPath) {
+                spawnRipple(e.currentTarget, e.clientX, e.clientY);
+                // Scroll-to-top only when already at the tab's own root
+                // (exact pathname match). When the tab is "active" via
+                // hierarchy match — e.g. /gift-card/:name highlights
+                // Home — tapping should navigate back to the hierarchy
+                // root, not scroll the detail page.
+                if (location.pathname === tab.path) {
                   e.preventDefault();
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }
               }}
-              className={`flex flex-col items-center justify-center flex-1 h-full transition-colors ${isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`}
+              className={`relative overflow-hidden flex flex-col items-center justify-center flex-1 h-full transition-colors ${isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`}
             >
               <span className="mb-0.5" aria-hidden="true">
                 <tab.Icon active={isActive} />
               </span>
-              <span className="text-[10px] font-medium">{tab.label}</span>
+              <span className="text-[11px] font-medium">{tab.label}</span>
             </Link>
           );
         })}

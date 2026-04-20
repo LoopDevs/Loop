@@ -1,0 +1,103 @@
+<!--
+  Variant D: per-letter "draw-in". Each letter starts as a zero-width
+  sliver at its own left edge (pivotX set per-letter in the vector)
+  and scales horizontally out to full width while its fill fades in.
+  Staggered 150ms apart so the wordmark appears to be written L → O
+  → O → P. Total runtime ~850ms, inside the 1000ms splash cap.
+
+  scaleX on the group + fillAlpha on the path means two targets per
+  letter. Linear interpolator on the alpha keeps ink appearing as the
+  letter expands (rather than popping in at end).
+-->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:drawable="@drawable/splash_icon_vector">
+    <!-- L -->
+    <target android:name="letter_l_g">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="scaleX"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="400"
+                android:startOffset="0"
+                android:interpolator="@android:interpolator/decelerate_cubic"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_l_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="400"
+                android:startOffset="0"/>
+        </aapt:attr>
+    </target>
+    <!-- O1 -->
+    <target android:name="letter_o1_g">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="scaleX"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="400"
+                android:startOffset="150"
+                android:interpolator="@android:interpolator/decelerate_cubic"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_o1_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="400"
+                android:startOffset="150"/>
+        </aapt:attr>
+    </target>
+    <!-- O2 -->
+    <target android:name="letter_o2_g">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="scaleX"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="400"
+                android:startOffset="300"
+                android:interpolator="@android:interpolator/decelerate_cubic"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_o2_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="400"
+                android:startOffset="300"/>
+        </aapt:attr>
+    </target>
+    <!-- P -->
+    <target android:name="letter_p_g">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="scaleX"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="400"
+                android:startOffset="450"
+                android:interpolator="@android:interpolator/decelerate_cubic"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_p_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="400"
+                android:startOffset="450"/>
+        </aapt:attr>
+    </target>
+</animated-vector>

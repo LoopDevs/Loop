@@ -21,3 +21,22 @@ export function formatMoney(amount: number, currency: string): string {
     return `${amount.toFixed(2)} ${currency}`;
   }
 }
+
+/**
+ * Short currency symbol for compact range / card displays (e.g. "£10–£250").
+ * Uses Intl.NumberFormat so we don't maintain a hand-rolled table — it
+ * returns "£" for GBP, "$" for USD, "€" for EUR, "CA$" for CAD, etc.
+ * Falls back to "$" on an unknown code so the string stays readable.
+ */
+export function currencySymbol(currency: string): string {
+  try {
+    const parts = new Intl.NumberFormat('en', {
+      style: 'currency',
+      currency,
+      currencyDisplay: 'narrowSymbol',
+    }).formatToParts(0);
+    return parts.find((p) => p.type === 'currency')?.value ?? '$';
+  } catch {
+    return '$';
+  }
+}

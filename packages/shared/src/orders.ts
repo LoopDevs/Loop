@@ -20,6 +20,10 @@ export interface Order {
   giftCardCode?: string;
   /** Gift card PIN — present for PIN-based cards. */
   giftCardPin?: string;
+  /** URL of an upstream-rendered barcode image — preferred over client-
+   *  side rendering when present, so the scanned format matches what
+   *  the merchant's POS actually expects (CODE128, CODE39, QR, etc.). */
+  barcodeImageUrl?: string;
   /** Redemption URL — present when redeemType is "url" and status is "completed". */
   redeemUrl?: string;
   /** Challenge code for the redemption page. */

@@ -1,0 +1,66 @@
+<!--
+  Variant A: whole-word scale-in + fade. Earlier 0.85→1.0 over 500ms
+  was too subtle to notice on a fast cold boot. Now 0.6→1.0 over 800ms
+  with a parallel fillAlpha fade on every letter path so the reveal
+  reads even if the scale itself completes before the splash is on
+  screen long enough. windowSplashScreenAnimationDuration in
+  styles.xml caps at 1000ms so this fits.
+-->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:drawable="@drawable/splash_icon_vector">
+    <target android:name="mark">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <objectAnimator
+                    android:propertyName="scaleX"
+                    android:valueFrom="0.6"
+                    android:valueTo="1.0"
+                    android:duration="800"
+                    android:interpolator="@android:interpolator/decelerate_quint"/>
+                <objectAnimator
+                    android:propertyName="scaleY"
+                    android:valueFrom="0.6"
+                    android:valueTo="1.0"
+                    android:duration="800"
+                    android:interpolator="@android:interpolator/decelerate_quint"/>
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_l_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="600"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_o1_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="600"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_o2_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="600"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_p_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="600"/>
+        </aapt:attr>
+    </target>
+</animated-vector>
