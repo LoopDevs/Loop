@@ -1,6 +1,32 @@
 import type { Context } from 'hono';
+import { z } from 'zod';
 import { foldForSearch } from '@loop/shared';
 import { getMerchants } from './sync.js';
+import { getUpstreamCircuit } from '../circuit-breaker.js';
+import { upstreamUrl } from '../upstream.js';
+import { logger } from '../logger.js';
+
+const log = logger.child({ handler: 'merchants' });
+
+/**
+ * Subset of CTX's `GET /merchants/:id` response we care about for
+ * enriching the merchant detail. `.passthrough()` keeps anything we
+ * don't know about so future CTX fields can be surfaced without a
+ * schema bump.
+ */
+const UpstreamMerchantDetailResponse = z
+  .object({
+    info: z
+      .object({
+        description: z.string().optional(),
+        longDescription: z.string().optional(),
+        intro: z.string().optional(),
+        instructions: z.string().optional(),
+        terms: z.string().optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -95,16 +121,71 @@ export function merchantBySlugHandler(c: Context): Response {
 
 /**
  * GET /api/merchants/:id
+ *
+ * Requires auth — we forward the user's bearer (+ X-Client-Id) to
+ * CTX's `GET /merchants/:id` to pull the long-form content (info.
+ * description, longDescription, terms, instructions) that the list
+ * endpoint doesn't populate. The cached list-sync merchant is the
+ * baseline; upstream info fields are merged over it.
+ *
+ * If the upstream call fails (network, shape drift, 404, timeout),
+ * we fall back to the cached merchant rather than 502ing the page —
+ * the user still sees the basics and we log the failure for
+ * diagnosis.
  */
-export function merchantDetailHandler(c: Context): Response {
+export async function merchantDetailHandler(c: Context): Promise<Response> {
   const id = c.req.param('id') ?? '';
-  const { merchantsById } = getMerchants();
 
-  const merchant = merchantsById.get(id);
-  if (merchant === undefined) {
+  if (!/^[\w-]+$/.test(id)) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'Invalid merchant ID' }, 400);
+  }
+
+  const { merchantsById } = getMerchants();
+  const cached = merchantsById.get(id);
+  if (cached === undefined) {
     return c.json({ code: 'NOT_FOUND', message: 'Merchant not found' }, 404);
   }
 
-  c.header('Cache-Control', 'public, max-age=300'); // 5 minute cache
+  const merchant = { ...cached };
+
+  try {
+    const bearer = c.get('bearerToken') as string | undefined;
+    const clientId = c.get('clientId') as string | undefined;
+    const headers: Record<string, string> = {};
+    if (bearer) headers['Authorization'] = `Bearer ${bearer}`;
+    if (clientId) headers['X-Client-Id'] = clientId;
+
+    const response = await getUpstreamCircuit('merchants').fetch(upstreamUrl(`/merchants/${id}`), {
+      headers,
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (response.ok) {
+      const raw = (await response.json().catch(() => null)) as unknown;
+      const parsed = UpstreamMerchantDetailResponse.safeParse(raw);
+      if (parsed.success && parsed.data.info) {
+        const { description, longDescription, terms, instructions } = parsed.data.info;
+        // longDescription wins when both are present — it's the
+        // full-length body copy, while `description` is often just a
+        // headline repeat. Fall back to `description` otherwise.
+        if (longDescription) merchant.description = longDescription;
+        else if (description) merchant.description = description;
+        if (terms) merchant.terms = terms;
+        if (instructions) merchant.instructions = instructions;
+      }
+    } else {
+      log.warn(
+        { id, status: response.status },
+        'Upstream /merchants/:id returned non-OK — serving cached',
+      );
+    }
+  } catch (err) {
+    log.warn(
+      { id, err: err instanceof Error ? err.message : String(err) },
+      'Upstream /merchants/:id errored — serving cached',
+    );
+  }
+
+  c.header('Cache-Control', 'private, max-age=300');
   return c.json({ merchant });
 }

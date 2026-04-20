@@ -1,0 +1,109 @@
+<!--
+  Variant F: per-letter clip-path wipe (no distortion).
+
+  Each letter_X_clip rectangle starts collapsed to zero width at the
+  letter's left edge and animates to its full bounding box, so the
+  letter is revealed left-to-right without any geometry scaling —
+  the glyph's proportions stay intact, it just uncovers as if being
+  drawn. Paired with fillAlpha fade so the ink seems to flow on.
+  Staggered 150ms between letters; total ~850ms under the 1000ms
+  splash cap. pathType interpolation requires matching command
+  structure (M L L L Z) between valueFrom/valueTo — the only
+  differences are the X coords of the right-edge vertices.
+-->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:drawable="@drawable/splash_icon_vector">
+    <!-- L -->
+    <target android:name="letter_l_clip">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="pathData"
+                android:valueFrom="M0,0 L0,0 L0,52 L0,52 Z"
+                android:valueTo="M0,0 L30,0 L30,52 L0,52 Z"
+                android:valueType="pathType"
+                android:duration="400"
+                android:startOffset="0"
+                android:interpolator="@android:interpolator/decelerate_cubic"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_l_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="400"
+                android:startOffset="0"/>
+        </aapt:attr>
+    </target>
+    <!-- O1 -->
+    <target android:name="letter_o1_clip">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="pathData"
+                android:valueFrom="M33,8 L33,8 L33,54 L33,54 Z"
+                android:valueTo="M33,8 L78,8 L78,54 L33,54 Z"
+                android:valueType="pathType"
+                android:duration="400"
+                android:startOffset="150"
+                android:interpolator="@android:interpolator/decelerate_cubic"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_o1_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="400"
+                android:startOffset="150"/>
+        </aapt:attr>
+    </target>
+    <!-- O2 -->
+    <target android:name="letter_o2_clip">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="pathData"
+                android:valueFrom="M80,8 L80,8 L80,54 L80,54 Z"
+                android:valueTo="M80,8 L125,8 L125,54 L80,54 Z"
+                android:valueType="pathType"
+                android:duration="400"
+                android:startOffset="300"
+                android:interpolator="@android:interpolator/decelerate_cubic"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_o2_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="400"
+                android:startOffset="300"/>
+        </aapt:attr>
+    </target>
+    <!-- P -->
+    <target android:name="letter_p_clip">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="pathData"
+                android:valueFrom="M127,8 L127,8 L127,71 L127,71 Z"
+                android:valueTo="M127,8 L173,8 L173,71 L127,71 Z"
+                android:valueType="pathType"
+                android:duration="400"
+                android:startOffset="450"
+                android:interpolator="@android:interpolator/decelerate_cubic"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_p_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="400"
+                android:startOffset="450"/>
+        </aapt:attr>
+    </target>
+</animated-vector>

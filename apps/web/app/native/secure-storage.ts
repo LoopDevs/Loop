@@ -34,14 +34,31 @@ type PreferencesModule = {
   remove: (opts: { key: string }) => Promise<void>;
 };
 
+// Capacitor plugin objects are Proxies that intercept every property
+// access and forward unknown calls to the native bridge. Returning one
+// directly from an `async` function triggers Promise thenable resolution,
+// which calls `.then(resolve, reject)` on the Proxy — the bridge then
+// treats that as a native method call named "then" and rejects with
+// `"SecureStorage.then()" is not implemented on android`. Wrap the
+// plugin in a plain façade so the Promise machinery sees a non-thenable.
 async function loadSecureStorage(): Promise<SecureStorageModule> {
   const mod = await import('@aparajita/capacitor-secure-storage');
-  return mod.SecureStorage as unknown as SecureStorageModule;
+  const impl = mod.SecureStorage as unknown as SecureStorageModule;
+  return {
+    get: (key) => impl.get(key),
+    set: (key, value) => impl.set(key, value),
+    remove: (key) => impl.remove(key),
+  };
 }
 
 async function loadPreferences(): Promise<PreferencesModule> {
   const mod = await import('@capacitor/preferences');
-  return mod.Preferences as unknown as PreferencesModule;
+  const impl = mod.Preferences as unknown as PreferencesModule;
+  return {
+    get: (opts) => impl.get(opts),
+    set: (opts) => impl.set(opts),
+    remove: (opts) => impl.remove(opts),
+  };
 }
 
 /**

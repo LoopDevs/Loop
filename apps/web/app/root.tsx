@@ -13,7 +13,6 @@ import * as Sentry from '@sentry/react';
 import type { Route } from './+types/root';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useSessionRestore } from '~/hooks/use-session-restore';
-import { NativeTabBar } from '~/components/features/NativeTabBar';
 import { setStatusBarOverlay, setStatusBarStyle } from '~/native/status-bar';
 import { registerBackButton } from '~/native/back-button';
 import { registerAppLockGuard } from '~/native/app-lock';
@@ -23,10 +22,12 @@ import { setKeyboardAccessoryBarVisible } from '~/native/keyboard';
 import { OfflineBanner } from '~/components/ui/OfflineBanner';
 import { NativeBackButton } from '~/components/features/NativeBackButton';
 import { ToastContainer } from '~/components/ui/ToastContainer';
-import { useAuthStore } from '~/stores/auth.store';
+import { useAuthStore, wasAuthedLastSession } from '~/stores/auth.store';
 import { useUiStore } from '~/stores/ui.store';
 import { buildSecurityHeaders } from '~/utils/security-headers';
 import { shouldRetry } from '~/hooks/query-retry';
+import { NativeTabBar } from '~/components/features/NativeTabBar';
+import { fetchAllMerchants } from '~/services/merchants';
 import './app.css';
 
 const AuthRoute = lazy(() => import('~/routes/auth'));
@@ -56,6 +57,67 @@ const queryClient = new QueryClient({
   },
 });
 
+// Merchant catalog cold-start cache. The app shell is on disk (no
+// network), but the catalog itself is fetched from api.loopfinance.io.
+// Persist the last-known response to localStorage so the home route
+// renders instantly on cold start with whatever we saw last, while a
+// background refetch updates the cache. Worst case on a brand-new
+// install is one network round-trip before home has data — same as
+// before this cache existed.
+const MERCHANTS_CACHE_KEY = 'loop_merchants_all_v1';
+const MERCHANTS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+interface MerchantsCacheEntry {
+  ts: number;
+  data: Awaited<ReturnType<typeof fetchAllMerchants>>;
+}
+if (typeof window !== 'undefined') {
+  // Seed queryClient from disk cache synchronously so the very first
+  // render of home has data. Mark the entry with an old
+  // `dataUpdatedAt` so it's treated as stale — the background
+  // prefetch below still fires to revalidate, and mounting
+  // useAllMerchants returns the cached data instantly. Quietly skip
+  // malformed entries.
+  try {
+    const raw = localStorage.getItem(MERCHANTS_CACHE_KEY);
+    if (raw !== null) {
+      const entry = JSON.parse(raw) as MerchantsCacheEntry;
+      if (
+        entry !== null &&
+        typeof entry === 'object' &&
+        typeof entry.ts === 'number' &&
+        Date.now() - entry.ts < MERCHANTS_CACHE_TTL_MS
+      ) {
+        queryClient.setQueryData(['merchants-all'], entry.data, {
+          // dataUpdatedAt in the past so TanStack considers the entry
+          // stale — triggers a background refetch while still
+          // returning cached data to subscribers.
+          updatedAt: entry.ts,
+        });
+      }
+    }
+  } catch {
+    /* corrupt or unavailable — ignore */
+  }
+
+  // Revalidate in the background. On a cache hit, home still shows
+  // instantly with the stale data; the cache update on success is
+  // picked up by subscribed useAllMerchants consumers.
+  void queryClient.prefetchQuery({
+    queryKey: ['merchants-all'],
+    queryFn: async () => {
+      const data = await fetchAllMerchants();
+      try {
+        const entry: MerchantsCacheEntry = { ts: Date.now(), data };
+        localStorage.setItem(MERCHANTS_CACHE_KEY, JSON.stringify(entry));
+      } catch {
+        /* quota or disabled — ignore */
+      }
+      return data;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function meta(): Route.MetaDescriptors {
   return [
     { title: 'Loop — Save money every time you shop' },
@@ -79,6 +141,33 @@ export const links: Route.LinksFunction = () => [
 ];
 
 export function Layout({ children }: { children: React.ReactNode }): React.JSX.Element {
+  // Re-apply the theme class after hydration. React 19's hydration can
+  // strip attributes that were added to <html> between SSR and client
+  // mount — in our case the inline `__html` script below adds a
+  // `dark` / `light` class before body paints, and React has been
+  // observed to remove it on hydration (visible as the page flashing
+  // from dark to unstyled). This effect runs once and asserts whatever
+  // class the user's stored preference resolves to. No-op when the
+  // class is already correct.
+  useEffect(() => {
+    const stored = (() => {
+      try {
+        return localStorage.getItem('theme');
+      } catch {
+        return null;
+      }
+    })();
+    const prefersDark =
+      typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const isDark = stored === 'dark' || (stored !== 'light' && prefersDark);
+    const next = isDark ? 'dark' : 'light';
+    const el = document.documentElement;
+    if (!el.classList.contains(next)) {
+      el.classList.remove('light', 'dark');
+      el.classList.add(next);
+    }
+  }, []);
+
   // Audit A-027 — CSP is emitted via <meta http-equiv> because RR v7 SPA
   // mode (our mobile static export) rejects a route-module `headers`
   // export and the build fails. HTTP headers that can't live in meta
@@ -144,6 +233,59 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
   const { isNative } = useNativePlatform();
   const location = useLocation();
 
+  // Drive `--status-bar-intensity` from scroll position. Consumed by
+  // the `html.native body::before` gradient in app.css to darken the
+  // top-of-page backdrop the further the user has scrolled — at rest
+  // the tint is subtle so the content behind peeks through, and once
+  // page chrome is gone (scrolled past the hero) the tint intensifies
+  // so status bar icons stay legible.
+  useEffect(() => {
+    const update = (): void => {
+      const progress = Math.min(1, Math.max(0, window.scrollY / 50));
+      document.documentElement.style.setProperty('--status-bar-intensity', String(progress));
+    };
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    return () => window.removeEventListener('scroll', update);
+  }, []);
+
+  // Measure the real Navbar + bottom TabBar heights and expose them as
+  // `--nav-height` / `--tab-height` so overlay UI (e.g. MapBottomSheet)
+  // can sit exactly between them on any device. Hard-coded rem values
+  // don't account for the iOS safe-area inset or dynamic layout
+  // changes (search open / closed). ResizeObserver fires whenever the
+  // observed element resizes for any reason — safe-area change,
+  // orientation flip, search expand, tab bar show/hide at lg.
+  //
+  // Both bars share `nav.fixed` as a selector, so we disambiguate on
+  // vertical position: the one at top-0 is the Navbar, the one at
+  // bottom-0 is the TabBar.
+  useEffect(() => {
+    const topNav = document.querySelector('nav[data-nav="top"]') as HTMLElement | null;
+    const bottomNav = document.querySelector('nav[data-nav="tab"]') as HTMLElement | null;
+    const root = document.documentElement;
+    const update = (): void => {
+      if (topNav !== null) {
+        root.style.setProperty('--nav-height', `${topNav.getBoundingClientRect().height}px`);
+      }
+      // Tab bar is display:none at lg — clientHeight is 0 then; callers
+      // can treat `--tab-height` as 0 in that case.
+      const tabH = bottomNav !== null ? bottomNav.getBoundingClientRect().height : 0;
+      root.style.setProperty('--tab-height', `${tabH}px`);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    if (topNav !== null) ro.observe(topNav);
+    if (bottomNav !== null) ro.observe(bottomNav);
+    // Also re-measure on viewport resize so the lg breakpoint flip
+    // (tab bar display:none ↔ flex) is reflected immediately.
+    window.addEventListener('resize', update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, []);
+
   useEffect(() => {
     if (isNative) {
       document.documentElement.classList.add('native');
@@ -206,7 +348,16 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
       <OfflineBanner />
       <NativeBackButton />
       <ToastContainer />
-      <div className={isNative ? 'native-safe-page native-tab-clearance' : ''}>
+      <div
+        className={
+          isNative
+            ? 'native-safe-page native-tab-clearance'
+            : // Web at mobile widths also renders the tab bar below,
+              // so reserve the same bottom space there too; lg+ hides
+              // the tab bar (CSS) and we drop the padding.
+              'lg:pb-0 pb-16'
+        }
+      >
         {isNative ? (
           <div key={location.pathname} className="route-enter">
             {children}
@@ -234,9 +385,18 @@ export default function App(): React.JSX.Element {
   const { isNative } = useNativePlatform();
   const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
 
-  // On native: gate the entire app behind auth
+  // On native: gate the entire app behind auth — but render
+  // optimistically. If the user had a session last launch
+  // (`wasAuthedLastSession`), skip the splash and go straight to home.
+  // The background `useSessionRestore` keeps refreshing the access
+  // token; queries that need auth coalesce on that refresh so they
+  // resolve as soon as it completes. If the refresh definitively fails,
+  // `clearSession()` fires — the hint clears, `isAuthenticated` stays
+  // false, and this branch falls through to AuthRoute on re-render.
   if (isNative) {
-    if (isRestoring) {
+    const hadPriorSession = wasAuthedLastSession();
+
+    if (isRestoring && !hadPriorSession) {
       return (
         <QueryClientProvider client={queryClient}>
           <NativeShell>
@@ -246,7 +406,7 @@ export default function App(): React.JSX.Element {
       );
     }
 
-    if (!isAuthenticated) {
+    if (!isAuthenticated && !hadPriorSession) {
       return (
         <QueryClientProvider client={queryClient}>
           <NativeShell>

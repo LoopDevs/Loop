@@ -270,7 +270,6 @@ export default function AuthRoute(): React.JSX.Element {
               value={email}
               onChange={(v) => setEmail(v)}
               required
-              autoFocus
               label="Email address"
             />
             {error !== null && <p className="text-red-500 text-sm">{error}</p>}

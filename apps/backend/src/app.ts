@@ -443,6 +443,11 @@ app.get('/api/merchants', merchantListHandler);
 // /all must come before /:id so that 'all' is not interpreted as an id.
 app.get('/api/merchants/all', merchantAllHandler);
 app.get('/api/merchants/by-slug/:slug', merchantBySlugHandler); // must be before /:id
+// Authenticated — the handler calls CTX /merchants/:id with the user's
+// bearer + X-Client-Id to enrich the cached merchant with long-form
+// content (description / longDescription / terms / instructions).
+// Unauthed callers still see the basic cached merchant via by-slug.
+app.use('/api/merchants/:id', requireAuth);
 app.get('/api/merchants/:id', merchantDetailHandler);
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────

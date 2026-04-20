@@ -1,8 +1,10 @@
-import { useRef, useState, useEffect, forwardRef } from 'react';
+import { useState, useEffect, forwardRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useAllMerchants } from '~/hooks/use-merchants';
 import { foldForSearch, merchantSlug } from '@loop/shared';
 import { useUiStore } from '~/stores/ui.store';
+import { useNativePlatform } from '~/hooks/use-native-platform';
 import { getImageProxyUrl } from '~/utils/image';
 
 interface NavbarProps {
@@ -31,7 +33,7 @@ function SearchDropdown({
     <div
       role="listbox"
       id="search-listbox"
-      className="absolute top-full left-0 right-0 mt-1 bg-gray-950 border border-gray-800 rounded-lg shadow-lg max-h-64 overflow-y-auto z-[999999]"
+      className="absolute top-full left-0 right-0 mt-1 bg-gray-950 border border-gray-800 rounded-lg shadow-lg z-[999999]"
     >
       {results.map((r, i) => (
         <button
@@ -82,6 +84,14 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
+  // Portalled overlay is client-only; gate on a mount flag so SSR and
+  // the first client render agree (both render no portal). The effect
+  // flips it true after hydration completes — past that point React
+  // has reconciled and we can safely render tree-external content.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   // Full catalog via /api/merchants/all (audit A-002). Paginated /api/merchants
   // silently truncated search to the first 100 merchants once the catalog grew
   // past that.
@@ -102,7 +112,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
     debouncedQuery.length > 1
       ? merchants
           .filter((m) => foldForSearch(m.name).includes(foldedQuery))
-          .slice(0, 8)
+          .slice(0, 6)
           .map((m) => ({
             id: m.id,
             name: m.name,
@@ -112,73 +122,93 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
       : [];
 
   return (
-    <div
-      className="relative"
-      role="combobox"
-      aria-expanded={open && results.length > 0}
-      aria-haspopup="listbox"
-      aria-owns="search-listbox"
-    >
-      <div className="relative">
-        <input
-          ref={ref}
-          type="text"
-          value={query}
-          placeholder="Search for gift cards"
-          aria-autocomplete="list"
-          aria-controls="search-listbox"
-          aria-activedescendant={selectedIndex >= 0 ? `search-option-${selectedIndex}` : undefined}
-          className="w-full px-3 py-2 pl-8 text-sm bg-white/10 text-white placeholder-white/70 rounded-lg border border-white/20 focus:outline-none focus:ring-2 focus:ring-white/30"
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setOpen(true);
-            setSelectedIndex(-1);
-          }}
-          onFocus={() => setOpen(true)}
-          onBlur={() => setTimeout(() => setOpen(false), 200)}
-          onKeyDown={(e) => {
-            if (!open || results.length === 0) return;
-            if (e.key === 'ArrowDown') {
-              e.preventDefault();
-              setSelectedIndex((i) => Math.min(i + 1, results.length - 1));
-            } else if (e.key === 'ArrowUp') {
-              e.preventDefault();
-              setSelectedIndex((i) => Math.max(i - 1, 0));
-            } else if (e.key === 'Enter' && selectedIndex >= 0) {
-              e.preventDefault();
-              const r = results[selectedIndex];
-              if (r !== undefined) {
-                onSelect(r);
-                setQuery('');
+    <>
+      {/* Dim backdrop behind the search dropdown. Portalled to
+          document.body because the navbar creates its own stacking
+          context (via its own z-index), which would otherwise trap
+          the overlay inside the navbar's paint area. Always mounted
+          so `transition-opacity` can animate in both directions —
+          conditional-render would snap the fade-out. pointer-events
+          stay off so the dim layer never swallows clicks. */}
+      {mounted &&
+        createPortal(
+          <div
+            className={`fixed inset-0 bg-black/40 z-[1050] pointer-events-none transition-opacity duration-200 ${open ? 'opacity-100' : 'opacity-0'}`}
+            aria-hidden="true"
+          />,
+          document.body,
+        )}
+      <div
+        className="relative"
+        role="combobox"
+        aria-expanded={open && results.length > 0}
+        aria-haspopup="listbox"
+        aria-owns="search-listbox"
+      >
+        <div className="relative">
+          <input
+            ref={ref}
+            type="text"
+            value={query}
+            placeholder="Search"
+            aria-autocomplete="list"
+            aria-controls="search-listbox"
+            aria-activedescendant={
+              selectedIndex >= 0 ? `search-option-${selectedIndex}` : undefined
+            }
+            className="w-full px-3 py-1.5 pl-8 text-sm text-white placeholder-white/70 rounded-lg border border-white/20 focus:outline-none focus:ring-2 focus:ring-white/60"
+            style={{ backgroundColor: 'rgba(0, 0, 0, 0.3)' }}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setOpen(true);
+              setSelectedIndex(-1);
+            }}
+            onFocus={() => setOpen(true)}
+            onBlur={() => setTimeout(() => setOpen(false), 200)}
+            onKeyDown={(e) => {
+              if (!open || results.length === 0) return;
+              if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setSelectedIndex((i) => Math.min(i + 1, results.length - 1));
+              } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setSelectedIndex((i) => Math.max(i - 1, 0));
+              } else if (e.key === 'Enter' && selectedIndex >= 0) {
+                e.preventDefault();
+                const r = results[selectedIndex];
+                if (r !== undefined) {
+                  onSelect(r);
+                  setQuery('');
+                  setOpen(false);
+                }
+              } else if (e.key === 'Escape') {
                 setOpen(false);
               }
-            } else if (e.key === 'Escape') {
+            }}
+          />
+          <svg
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/70"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.35-4.35" />
+          </svg>
+        </div>
+        {open && results.length > 0 && (
+          <SearchDropdown
+            results={results}
+            selectedIndex={selectedIndex}
+            onSelect={(r) => {
+              onSelect(r);
+              setQuery('');
               setOpen(false);
-            }
-          }}
-        />
-        <svg
-          className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/70"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <circle cx="11" cy="11" r="8" />
-          <path d="m21 21-4.35-4.35" />
-        </svg>
+            }}
+          />
+        )}
       </div>
-      {open && results.length > 0 && (
-        <SearchDropdown
-          results={results}
-          selectedIndex={selectedIndex}
-          onSelect={(r) => {
-            onSelect(r);
-            setQuery('');
-            setOpen(false);
-          }}
-        />
-      )}
-    </div>
+    </>
   );
 });
 
@@ -187,17 +217,11 @@ SearchBar.displayName = 'SearchBar';
 export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
-  const mobileSearchRef = useRef<HTMLInputElement>(null);
-  const [showMobileSearch, setShowMobileSearch] = useState(false);
-  const { theme, toggleTheme } = useUiStore();
-
-  useEffect(() => {
-    setShowMobileSearch(false);
-  }, [location.pathname]);
+  const { toggleTheme } = useUiStore();
+  const { isNative } = useNativePlatform();
 
   const handleSelect = (r: SearchResult): void => {
     void navigate(`/gift-card/${merchantSlug(r.name)}`);
-    setShowMobileSearch(false);
   };
 
   const navLinkClass = (path: string): string =>
@@ -205,28 +229,55 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
 
   return (
     <nav
+      data-nav="top"
       className="fixed top-0 left-0 right-0 z-[1100]"
       style={{
-        backgroundColor: 'rgb(3 7 18 / 80%)',
+        backgroundColor: 'rgb(3 7 18 / 50%)',
         backdropFilter: 'blur(12px)',
         borderBottom: '1px solid rgba(255,255,255,0.1)',
+        // calc(100vw - 100%) evaluates to the vertical scrollbar's
+        // width (0 when absent). Adding it as left padding nudges the
+        // nav's inner container right by exactly that amount, so the
+        // logo / links stay horizontally aligned with the page content
+        // whether or not a scrollbar is present — no layout shift
+        // when short vs long pages are compared side-by-side.
+        paddingLeft: 'calc(100vw - 100%)',
+        // Push content into the status-bar area slightly — at
+        // `var(--safe-top)` the search input ends up ~40px from the
+        // viewport top, which reads as "too much space" on narrow
+        // phones. Subtracting 0.75rem pulls it up into the lower
+        // portion of the status bar so the input visually sits
+        // alongside the clock / battery rather than below them. On
+        // web env() is 0 so this becomes slightly negative / clamped
+        // to 0 by the browser — no visible effect.
+        paddingTop: 'calc(var(--safe-top) - 0.75rem)',
+        minWidth: '320px',
       }}
     >
       <div className="container mx-auto">
-        <div className="flex items-center justify-between px-4 sm:px-6 py-2 sm:py-3">
-          <div className="flex items-center w-auto md:w-48">
-            <Link to="/">
-              <img src="/loop-logo-white.svg" alt="Loop" className="h-6 md:h-7" />
-            </Link>
-          </div>
-
-          <div className="hidden md:block flex-1">
-            <div className="max-w-md mx-auto">
-              <SearchBar onSelect={handleSelect} />
+        <div className="flex items-center gap-4 px-4 sm:px-6 py-1.5 sm:py-3">
+          {/* Logo — web only. Native users already see the Loop mark on
+              their launcher icon / splash so we don't want to retread
+              the brand inside the app chrome. */}
+          {!isNative && (
+            <div className="flex items-center flex-shrink-0 pr-2">
+              <Link to="/">
+                <img src="/loop-logo-white.svg" alt="Loop" className="h-6 md:h-7 mt-1.5" />
+              </Link>
             </div>
+          )}
+
+          {/* SearchBar — fills remaining width on mobile, fixed-size
+              sitting right next to the logo on desktop. Previously it
+              was centred via `flex-1 + max-w-md mx-auto`, which left a
+              lot of empty space between the logo and the search. */}
+          <div className="flex-1 md:flex-none md:w-[28rem]">
+            <SearchBar onSelect={handleSelect} />
           </div>
 
-          <div className="hidden md:flex items-center gap-1 w-48 justify-end">
+          {/* Desktop nav links + theme toggle — pushed to the right
+              edge via `ml-auto` now that the search is left-anchored. */}
+          <div className="hidden md:flex items-center gap-1 ml-auto">
             <Link to="/" className={navLinkClass('/')}>
               Directory
             </Link>
@@ -239,119 +290,60 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
             <button
               type="button"
               onClick={toggleTheme}
-              aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+              aria-label="Toggle theme"
               className="p-2 rounded-lg hover:bg-white/10 text-white/70 hover:text-white transition-colors"
             >
-              {theme === 'dark' ? (
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"
-                  />
-                </svg>
-              ) : (
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"
-                  />
-                </svg>
-              )}
-            </button>
-          </div>
-
-          <div className="flex items-center gap-1 md:hidden">
-            <Link
-              to="/"
-              className="transition-colors text-xs px-1.5 py-1 rounded-lg hover:bg-white/10 text-white/60 hover:text-white/80"
-            >
-              Directory
-            </Link>
-            <Link
-              to="/map"
-              className="transition-colors text-xs px-1.5 py-1 rounded-lg hover:bg-white/10 text-white/60 hover:text-white/80"
-            >
-              Map
-            </Link>
-            <Link
-              to="/orders"
-              className="transition-colors text-xs px-1.5 py-1 rounded-lg hover:bg-white/10 text-white/60 hover:text-white/80"
-            >
-              Orders
-            </Link>
-            <button
-              type="button"
-              onClick={() => {
-                setShowMobileSearch((v) => !v);
-                if (!showMobileSearch) setTimeout(() => mobileSearchRef.current?.focus(), 100);
-              }}
-              aria-label="Toggle search"
-              className="text-white hover:text-gray-300 p-1.5 rounded-lg hover:bg-white/10"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <circle cx="11" cy="11" r="8" />
-                <path d="m21 21-4.35-4.35" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={toggleTheme}
-              aria-label="Toggle theme"
-              className="p-1.5 rounded-lg hover:bg-white/10 text-white/70 hover:text-white"
-            >
-              {theme === 'dark' ? (
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"
-                  />
-                </svg>
-              ) : (
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"
-                  />
-                </svg>
-              )}
+              <ThemeIcons />
             </button>
           </div>
         </div>
-
-        {showMobileSearch && (
-          <div className="md:hidden px-4 sm:px-6 pb-2">
-            <SearchBar ref={mobileSearchRef} onSelect={handleSelect} />
-          </div>
-        )}
       </div>
     </nav>
+  );
+}
+
+/**
+ * Render both sun + moon icons and let CSS hide the wrong one via the
+ * `dark:` variant. The `html.dark` class is set synchronously by the
+ * inline theme script in `root.tsx` before React hydrates, so the
+ * server-rendered DOM and the client DOM are identical at hydration
+ * time — no mismatch warning. Previously the JS-gated conditional
+ * (`theme === 'dark' ? Sun : Moon`) produced different DOM between
+ * SSR (store default) and client (localStorage-restored theme).
+ */
+function ThemeIcons(): React.JSX.Element {
+  return (
+    <>
+      {/* Moon — shown in light mode (so the user can see "tap to go dark"). */}
+      <svg
+        className="w-5 h-5 dark:hidden"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+        strokeWidth={1.5}
+        aria-hidden="true"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"
+        />
+      </svg>
+      {/* Sun — shown in dark mode. */}
+      <svg
+        className="w-5 h-5 hidden dark:block"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+        strokeWidth={1.5}
+        aria-hidden="true"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"
+        />
+      </svg>
+    </>
   );
 }

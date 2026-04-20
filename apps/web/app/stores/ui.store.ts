@@ -86,8 +86,17 @@ export const useUiStore = create<UiState & UiActions>((set, get) => ({
   },
 
   toggleTheme: () => {
-    const current = get().theme;
-    const next = current === 'light' ? 'dark' : 'light';
+    // Read the actual html.dark class as source of truth rather than
+    // the store's `theme` state — if the inline theme script in
+    // root.tsx resolved the initial theme differently from the
+    // store's own loadPreference (e.g. a localStorage hiccup, a
+    // race during hydration), the two can disagree on first load,
+    // and a store-only toggle would re-assert what's already on the
+    // class, resulting in a "first click does nothing" UX. Reading
+    // the class is always in sync with what the user actually sees.
+    const hasDarkClass =
+      typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+    const next: ResolvedTheme = hasDarkClass ? 'light' : 'dark';
     get().setThemePreference(next);
   },
 

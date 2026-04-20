@@ -4,11 +4,17 @@ import { triggerHapticNotification } from '~/native/haptics';
 import { copyToClipboard } from '~/native/clipboard';
 import { enableScreenshotGuard } from '~/native/screenshot-guard';
 import { nativeShare } from '~/native/share';
+import { getImageProxyUrl } from '~/utils/image';
 
 interface PurchaseCompleteProps {
   merchantName: string;
   code: string;
   pin?: string | undefined;
+  /** Upstream-rendered barcode image URL. When present, we display it
+   *  instead of rendering our own CODE128 canvas — the merchant's POS
+   *  expects a specific format (CODE39, DataMatrix, QR, etc.) that we
+   *  can't reliably guess client-side. */
+  barcodeImageUrl?: string | undefined;
   onDone: () => void;
 }
 
@@ -19,10 +25,15 @@ export function PurchaseComplete({
   merchantName,
   code,
   pin,
+  barcodeImageUrl,
   onDone,
 }: PurchaseCompleteProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [copied, setCopied] = useState(false);
+  const [imageFailed, setImageFailed] = useState(false);
+  // Fall back to the client-rendered canvas if CTX didn't provide a
+  // barcode image URL or the image 404s / is blocked.
+  const useCanvas = barcodeImageUrl === undefined || imageFailed;
 
   const handleCopy = async (text: string): Promise<void> => {
     const ok = await copyToClipboard(text);
@@ -49,7 +60,10 @@ export function PurchaseComplete({
   }, []);
 
   useEffect(() => {
-    if (canvasRef.current === null) return;
+    // Only render the client-side CODE128 canvas when we don't have
+    // (or lost) the upstream image. Skipping the import cuts ~30KB of
+    // JS on the happy path.
+    if (!useCanvas || canvasRef.current === null) return;
     void (async () => {
       try {
         const JsBarcode = (await import('jsbarcode')).default;
@@ -63,7 +77,7 @@ export function PurchaseComplete({
         // Barcode generation failed — code is still shown as text
       }
     })();
-  }, [code]);
+  }, [code, useCanvas]);
 
   return (
     <div className="rounded-xl border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 p-6 text-center">
@@ -73,11 +87,25 @@ export function PurchaseComplete({
         Your {merchantName} gift card code:
       </p>
 
-      <canvas
-        ref={canvasRef}
-        className="mx-auto max-w-full mb-4"
-        aria-label={`Barcode for gift card code ${code}`}
-      />
+      {useCanvas ? (
+        <canvas
+          ref={canvasRef}
+          className="mx-auto max-w-full mb-4"
+          aria-label={`Barcode for gift card code ${code}`}
+        />
+      ) : (
+        // Route through the image proxy so the CTX-hosted barcode
+        // image is allowed by CSP (img-src 'self' + apiOrigin) and
+        // gets the proxy's allowlist/SSRF guarding. If the proxy
+        // rejects the host, the onError flips `imageFailed` and we
+        // fall back to the client-rendered canvas.
+        <img
+          src={getImageProxyUrl(barcodeImageUrl ?? '', 640)}
+          alt={`Barcode for gift card code ${code}`}
+          onError={() => setImageFailed(true)}
+          className="mx-auto max-w-full mb-4 bg-white p-2 rounded"
+        />
+      )}
 
       <div className="bg-white dark:bg-gray-900 rounded-lg p-3 font-mono text-lg font-bold tracking-widest text-gray-900 dark:text-white mb-2">
         {code}

@@ -48,6 +48,22 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
   // added in PR #55 surfaces the abort as a swallowed TIMEOUT-coded error.
   const fetchAbortRef = useRef<AbortController | null>(null);
   const [status, setStatus] = useState<string>('');
+  const [creditsOpen, setCreditsOpen] = useState(false);
+  // Track viewport width once, kept in a ref so the Leaflet marker
+  // click closures (which are attached once per marker) pick up the
+  // latest value. md: breakpoint in Tailwind = 768px.
+  const isMobileRef = useRef<boolean>(
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 767.98px)').matches,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const mq = window.matchMedia('(max-width: 767.98px)');
+    const handler = (e: MediaQueryListEvent): void => {
+      isMobileRef.current = e.matches;
+    };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
   // Full catalog via /api/merchants/all (audit A-002) — the paginated endpoint
   // would silently truncate past 100 merchants and popups would fall back to
   // showing the raw merchant id instead of the name.
@@ -79,11 +95,16 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
       const bounds = map.getBounds();
       const zoom = Math.round(map.getZoom());
 
+      // Clamp to valid lon/lat ranges. Leaflet's getBounds() can return
+      // values past the date line (e.g. west=-190) when the viewport is
+      // wider than the world at low zooms — the backend Zod schema
+      // rejects anything outside [-180,180] / [-85,85] with a 400, so
+      // no pins on first load. Clamp here before dispatching.
       const params: ClusterParams = {
-        west: bounds.getWest(),
-        south: bounds.getSouth(),
-        east: bounds.getEast(),
-        north: bounds.getNorth(),
+        west: Math.max(-180, bounds.getWest()),
+        south: Math.max(-85, bounds.getSouth()),
+        east: Math.min(180, bounds.getEast()),
+        north: Math.min(85, bounds.getNorth()),
         zoom,
       };
 
@@ -206,12 +227,33 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
           className: 'merchant-popup',
           closeButton: true,
         });
-        marker.bindPopup(popup);
+        // Only bind on desktop — on mobile the drawer is the single
+        // affordance, so we never want Leaflet's popup to open.
+        if (!isMobileRef.current) {
+          marker.bindPopup(popup);
+        }
 
         marker.on('click', () => {
+          onMerchantSelectRef.current?.(merchantId);
+
+          if (isMobileRef.current) {
+            // Pan the map so the tapped pin lands in the top third of
+            // the visible viewport, leaving the bottom two thirds free
+            // for the sheet that's about to slide up. Shift the pin
+            // point downward by 1/6 of the map height so the map
+            // centre moves below the pin and the pin renders higher.
+            const size = map.getSize();
+            const zoom = map.getZoom();
+            const pinPoint = map.project([lat, lng], zoom);
+            pinPoint.y += size.y / 6;
+            map.panTo(map.unproject(pinPoint, zoom), { animate: true });
+            return;
+          }
+
+          // Desktop: set popup content before Leaflet opens it via the
+          // bindPopup binding above.
           popup.setContent(popupContent);
           openPopupRef.current = { merchantId, lat, lng };
-          onMerchantSelectRef.current?.(merchantId);
         });
 
         popup.on('remove', () => {
@@ -225,7 +267,9 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
         });
 
         // Re-open popup if this marker matches the previously open one
+        // (desktop only — mobile never opens a Leaflet popup).
         if (
+          !isMobileRef.current &&
           openPopupRef.current !== null &&
           openPopupRef.current.merchantId === merchantId &&
           Math.abs(openPopupRef.current.lat - lat) < 0.0001 &&
@@ -268,7 +312,15 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
       const map = L.map(mapContainerRef.current, {
         center: [40, -98],
         zoom: 4,
-        zoomControl: true,
+        // Gestures (pinch / double-tap) are the primary zoom affordance
+        // on mobile; the +/- buttons duplicate that and take screen
+        // real estate. Web users can still pinch on a trackpad.
+        zoomControl: false,
+        // Default Leaflet attribution bar takes a visible strip along
+        // the bottom. Suppress it here; the license-required credits
+        // are still surfaced via the "ⓘ" button rendered below the map
+        // container, which opens a popover with the same links.
+        attributionControl: false,
       });
 
       const isDark =
@@ -284,16 +336,7 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
         ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
         : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
 
-      // Attribution links are external — open in a new tab so clicking
-      // the footer doesn't navigate the user away from the map, and
-      // pair with `rel="noopener noreferrer"` to block the classic
-      // reverse-tabnabbing vector (the opened tab could otherwise use
-      // `window.opener` to redirect the Loop tab to a phishing page).
-      const ATTRIBUTION_LINK_ATTRS = 'target="_blank" rel="noopener noreferrer"';
       const tileLayer = L.tileLayer(tileUrl, {
-        attribution:
-          `&copy; <a href="https://www.openstreetmap.org/copyright" ${ATTRIBUTION_LINK_ATTRS}>OpenStreetMap</a> contributors ` +
-          `&copy; <a href="https://carto.com/" ${ATTRIBUTION_LINK_ATTRS}>CARTO</a>`,
         maxZoom: 20,
         subdomains: 'abcd',
       }).addTo(map);
@@ -385,6 +428,46 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
       {status !== '' && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-sm pointer-events-none">
           {status}
+        </div>
+      )}
+      {/* License-required attribution for OpenStreetMap + CARTO, tucked
+          behind an info button so it doesn't permanently occupy the
+          corner. Same pattern Mapbox / Google Maps / Apple Maps use.
+          Links open in a new tab with noopener to avoid reverse
+          tabnabbing (PR #128). */}
+      <button
+        type="button"
+        aria-label={creditsOpen ? 'Hide map credits' : 'Show map credits'}
+        aria-expanded={creditsOpen}
+        onClick={() => setCreditsOpen((v) => !v)}
+        className="absolute bottom-3 right-3 h-7 w-7 rounded-full bg-white/85 dark:bg-gray-900/85 text-gray-700 dark:text-gray-200 shadow flex items-center justify-center text-xs font-semibold backdrop-blur-sm z-[400]"
+      >
+        i
+      </button>
+      {creditsOpen && (
+        <div
+          role="dialog"
+          aria-label="Map credits"
+          className="absolute bottom-12 right-3 max-w-[16rem] bg-white/95 dark:bg-gray-900/95 text-[11px] text-gray-700 dark:text-gray-300 px-3 py-2 rounded-md shadow backdrop-blur-sm z-[400]"
+        >
+          &copy;{' '}
+          <a
+            href="https://www.openstreetmap.org/copyright"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            OpenStreetMap
+          </a>{' '}
+          contributors &middot; &copy;{' '}
+          <a
+            href="https://carto.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            CARTO
+          </a>
         </div>
       )}
     </div>

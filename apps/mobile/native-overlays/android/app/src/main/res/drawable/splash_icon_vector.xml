@@ -1,0 +1,97 @@
+<!--
+  Loop wordmark VectorDrawable. Paths transcribed from
+  apps/web/public/loop-logo.svg (viewBox 172.22 x 71). Each letter lives
+  in its own named group + named path so AVD variants can animate them
+  individually (fillAlpha on paths, translate/scale on groups). The
+  outer `mark` group covers whole-word animations; the inner scaler
+  positions the wordmark inside the 72dp safe zone of the 108dp canvas.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:name="mark"
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="1"
+        android:scaleY="1">
+        <group
+            android:translateX="21.6"
+            android:translateY="40.65"
+            android:scaleX="0.376"
+            android:scaleY="0.376">
+            <!-- Each letter group sets pivotX to its own left edge so a
+                 scaleX animation reveals the letter from the left. pivotY
+                 sits roughly at vertical centre of the wordmark. scaleX/Y
+                 are declared so objectAnimator has a property to attach
+                 to; initial value is 1 so static renders stay correct. -->
+            <!-- Each letter group has a clip-path rectangle sized to
+                 its bounding box. The wipe/draw AVD animates each
+                 clip-path's pathData from a zero-width rect at the
+                 letter's left edge out to the full rect — revealing
+                 the letter left-to-right with no shape distortion. -->
+            <group
+                android:name="letter_l_g"
+                android:pivotX="0"
+                android:pivotY="26"
+                android:scaleX="1"
+                android:scaleY="1">
+                <clip-path
+                    android:name="letter_l_clip"
+                    android:pathData="M-16,26 C-16,8.8787 -2.1213,-5 15,-5 C32.1213,-5 46,8.8787 46,26 C46,43.1213 32.1213,57 15,57 C-2.1213,57 -16,43.1213 -16,26 Z"/>
+                <path
+                    android:name="letter_l_p"
+                    android:fillColor="#FFFFFF"
+                    android:fillAlpha="1"
+                    android:pathData="M0,52V0h10v43h20v9H0Z"/>
+            </group>
+            <group
+                android:name="letter_o1_g"
+                android:pivotX="33"
+                android:pivotY="31"
+                android:scaleX="1"
+                android:scaleY="1">
+                <clip-path
+                    android:name="letter_o1_clip"
+                    android:pathData="M22.5,31 C22.5,12.7741 37.2741,-2 55.5,-2 C73.7259,-2 88.5,12.7741 88.5,31 C88.5,49.2259 73.7259,64 55.5,64 C37.2741,64 22.5,49.2259 22.5,31 Z"/>
+                <path
+                    android:name="letter_o1_p"
+                    android:fillColor="#FFFFFF"
+                    android:fillAlpha="1"
+                    android:pathData="M70.06,46.56c-4.25,4.27-9.4,6.41-15.44,6.41s-11.2-2.14-15.44-6.41c-4.25-4.27-6.37-9.43-6.37-15.48s2.11-11.34,6.34-15.59c4.22-4.25,9.38-6.37,15.48-6.37s11.2,2.12,15.44,6.37,6.37,9.44,6.37,15.59-2.12,11.21-6.37,15.48ZM45.91,40.08c2.35,2.5,5.26,3.74,8.71,3.74s6.36-1.25,8.71-3.74c2.35-2.5,3.53-5.5,3.53-9s-1.18-6.64-3.53-9.11c-2.35-2.47-5.26-3.71-8.71-3.71s-6.36,1.24-8.71,3.71c-2.35,2.47-3.53,5.51-3.53,9.11s1.18,6.5,3.53,9Z"/>
+            </group>
+            <group
+                android:name="letter_o2_g"
+                android:pivotX="80"
+                android:pivotY="31"
+                android:scaleX="1"
+                android:scaleY="1">
+                <clip-path
+                    android:name="letter_o2_clip"
+                    android:pathData="M69.5,31 C69.5,12.7741 84.2741,-2 102.5,-2 C120.726,-2 135.5,12.7741 135.5,31 C135.5,49.2259 120.726,64 102.5,64 C84.2741,64 69.5,49.2259 69.5,31 Z"/>
+                <path
+                    android:name="letter_o2_p"
+                    android:fillColor="#FFFFFF"
+                    android:fillAlpha="1"
+                    android:pathData="M116.94,46.56c-4.25,4.27-9.4,6.41-15.44,6.41s-11.2-2.14-15.44-6.41c-4.25-4.27-6.37-9.43-6.37-15.48s2.11-11.34,6.34-15.59c4.22-4.25,9.38-6.37,15.48-6.37s11.2,2.12,15.44,6.37,6.37,9.44,6.37,15.59-2.12,11.21-6.37,15.48ZM92.78,40.08c2.35,2.5,5.26,3.74,8.71,3.74s6.36-1.25,8.71-3.74c2.35-2.5,3.53-5.5,3.53-9s-1.18-6.64-3.53-9.11c-2.35-2.47-5.26-3.71-8.71-3.71s-6.36,1.24-8.71,3.71c-2.35,2.47-3.53,5.51-3.53,9.11s1.18,6.5,3.53,9Z"/>
+            </group>
+            <group
+                android:name="letter_p_g"
+                android:pivotX="127"
+                android:pivotY="40"
+                android:scaleX="1"
+                android:scaleY="1">
+                <clip-path
+                    android:name="letter_p_clip"
+                    android:pathData="M110,39.5 C110,17.408 127.908,-0.5 150,-0.5 C172.092,-0.5 190,17.408 190,39.5 C190,61.592 172.092,79.5 150,79.5 C127.908,79.5 110,61.592 110,39.5 Z"/>
+                <path
+                    android:name="letter_p_p"
+                    android:fillColor="#FFFFFF"
+                    android:fillAlpha="1"
+                    android:pathData="M165.62,15.46c-4.4-4.21-9.74-6.32-16.01-6.32-4.75,0-8.96,1.19-12.61,3.58v-2.72h-10v61h10v-21.99c3.67,2.42,7.87,3.63,12.61,3.63,6.27,0,11.6-2.12,16.01-6.36,4.4-4.24,6.6-9.36,6.6-15.36s-2.2-11.25-6.6-15.46ZM157.88,40.08c-2.35,2.5-5.26,3.74-8.71,3.74s-6.36-1.25-8.71-3.74c-2.03-2.15-3.18-4.68-3.46-7.58v-2.87c.28-2.97,1.43-5.52,3.46-7.66,2.35-2.47,5.26-3.71,8.71-3.71s6.36,1.24,8.71,3.71c2.35,2.47,3.53,5.51,3.53,9.11s-1.18,6.5-3.53,9Z"/>
+            </group>
+        </group>
+    </group>
+</vector>

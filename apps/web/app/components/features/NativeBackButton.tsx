@@ -3,6 +3,12 @@ import { useNativePlatform } from '~/hooks/use-native-platform';
 
 const ROOT_PATHS = new Set(['/', '/map', '/orders', '/auth']);
 
+// Routes that render their own in-page back affordance. Listing them
+// here prevents the generic dark-bg NativeBackButton from overlapping
+// a nicer page-specific chevron (e.g. the merchant page's floating
+// translucent back-pill sitting over the hero image).
+const ROUTES_WITH_OWN_BACK = [/^\/gift-card\//];
+
 /** Shows a back button in the top-left on native for non-root routes. */
 export function NativeBackButton(): React.JSX.Element | null {
   const { isNative } = useNativePlatform();
@@ -10,6 +16,7 @@ export function NativeBackButton(): React.JSX.Element | null {
   const navigate = useNavigate();
 
   if (!isNative || ROOT_PATHS.has(location.pathname)) return null;
+  if (ROUTES_WITH_OWN_BACK.some((p) => p.test(location.pathname))) return null;
 
   return (
     <button

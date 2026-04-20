@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Base application theme. -->
+    <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+    </style>
+
+    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:background">@null</item>
+    </style>
+
+
+    <!--
+      Android 12+ applies a system-level splash before the Activity's
+      window is drawn. By default it shows the launcher icon on the
+      theme's windowBackground — which was white, making the dark Loop
+      mark appear in a jarring lighter circle. The attrs below align
+      the system splash with the Capacitor splash that follows it:
+      same #111111 background, same mark. `android:background` stays
+      for the Capacitor SplashScreen plugin, which draws
+      @drawable/splash on top after the Activity boots.
+    -->
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <item name="android:background">@drawable/splash</item>
+        <item name="windowSplashScreenBackground">@color/ic_launcher_background</item>
+        <!--
+          Using @drawable/splash_icon (single hi-res 1024x1024 PNG)
+          instead of @mipmap/ic_launcher_foreground. The mipmap asset
+          tops out at 432px (xxxhdpi), which Android had to upscale to
+          ~768px for the 192dp icon on 4x density devices — blurring
+          the mark. drawable/ lives without a density qualifier, so
+          Android scales the 1024px source down cleanly.
+        -->
+        <!--
+          Loop wordmark as an AnimatedVectorDrawable. Swap variants by
+          pointing this at another splash_icon_anim_*.xml:
+            @drawable/splash_icon_anim_scale  — whole-word scale-in
+            @drawable/splash_icon_anim_fade   — per-letter fade stagger
+            @drawable/splash_icon_anim_slide  — per-letter slide + fade
+            @drawable/splash_icon_anim_draw   — per-letter draw-in (scaleX reveal)
+            @drawable/splash_icon_anim_drop   — per-letter drop-in (from above + fade)
+            @drawable/splash_icon_anim_wipe   — per-letter clip-path wipe (no distortion)
+            @drawable/splash_icon_anim_bloom  — per-letter circle-bloom reveal (organic)
+          All reference the same underlying splash_icon_vector.
+        -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon_anim_bloom</item>
+        <item name="windowSplashScreenAnimationDuration">900</item>
+        <!--
+          Without this, Android 12+ paints a default (often lighter)
+          circle behind the icon that's visibly distinct from the
+          surrounding #111111 window background. Pinning it to the
+          same colour removes the edge.
+        -->
+        <item name="windowSplashScreenIconBackgroundColor">@color/ic_launcher_background</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
+    </style>
+</resources>

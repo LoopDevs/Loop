@@ -1,0 +1,45 @@
+<!-- Variant B: staggered letter fade-in (L, O, O, P typewriter). -->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:drawable="@drawable/splash_icon_vector">
+    <target android:name="letter_l_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="300"
+                android:startOffset="0"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_o1_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="300"
+                android:startOffset="100"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_o2_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="300"
+                android:startOffset="200"/>
+        </aapt:attr>
+    </target>
+    <target android:name="letter_p_p">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="fillAlpha"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:duration="300"
+                android:startOffset="300"/>
+        </aapt:attr>
+    </target>
+</animated-vector>

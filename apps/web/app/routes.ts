@@ -6,5 +6,6 @@ export default [
   route('gift-card/:name', 'routes/gift-card.$name.tsx'),
   route('auth', 'routes/auth.tsx'),
   route('orders', 'routes/orders.tsx'),
+  route('orders/:id', 'routes/orders.$id.tsx'),
   route('*', 'routes/not-found.tsx'),
 ] satisfies RouteConfig;

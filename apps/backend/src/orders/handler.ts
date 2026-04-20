@@ -479,6 +479,28 @@ export async function getOrderHandler(c: Context): Promise<Response> {
     const amount = parseMoney(validated.data.cardFiatAmount);
     const currency = validated.data.cardFiatCurrency ?? 'USD';
 
+    // Diagnostic: on every completed order, log the raw CTX response's
+    // key set + redeemType value so we can see what the upstream
+    // actually returns. PaymentStep only transitions out of "waiting"
+    // when it finds (a) redeemUrl + redeemChallengeCode, (b)
+    // giftCardCode, or (c) an error. If none of those are populated
+    // here, the user sees the "details unavailable" failure branch —
+    // these logs tell us which field mapping is missing. Dedup'd
+    // against `notifiedFulfilled` so we only log once per order.
+    if (status === 'completed' && !notifiedFulfilled.has(validated.data.id)) {
+      log.info(
+        {
+          orderId: validated.data.id,
+          rawKeys: Object.keys(validated.data),
+          redeemType: validated.data.redeemType,
+          hasRedeemUrl: validated.data.redeemUrl !== undefined,
+          hasRedeemUrlChallenge: validated.data.redeemUrlChallenge !== undefined,
+          ctxStatus: validated.data.status,
+        },
+        'Completed order — CTX response shape',
+      );
+    }
+
     const order: Record<string, unknown> = {
       id: validated.data.id,
       merchantId: validated.data.merchantId,
@@ -501,6 +523,47 @@ export async function getOrderHandler(c: Context): Promise<Response> {
     }
     if (validated.data.redeemScripts) {
       order.redeemScripts = validated.data.redeemScripts;
+    }
+
+    // Barcode-type fulfilled orders — extract the card `number` + `pin`
+    // directly from the `/gift-cards/:id` response. CTX populates
+    // these fields on the SAME response (via passthrough) once
+    // fulfilmentStatus flips to completed; no separate endpoint is
+    // required. Verified from the observed response keys on
+    // 2026-04-20: ["…","number","pin","barcodeType","barcodeUrl",…].
+    // ADR-005 §2 tracked this as Phase 2 — the frontend's
+    // PurchaseComplete component already renders the code + jsbarcode
+    // canvas whenever `giftCardCode` is present, so once we populate
+    // it here the barcode-merchant purchase flow completes end-to-end.
+    if (status === 'completed' && validated.data.redeemType === 'barcode') {
+      const extras = validated.data as unknown as Record<string, unknown>;
+      const pickString = (...keys: string[]): string | undefined => {
+        for (const key of keys) {
+          const v = extras[key];
+          if (typeof v === 'string' && v.length > 0) return v;
+        }
+        return undefined;
+      };
+
+      const code = pickString('number', 'code', 'cardNumber', 'giftCardCode');
+      const pin = pickString('pin', 'cardPin', 'giftCardPin');
+      const imageUrl = pickString('barcodeUrl', 'imageUrl', 'barcodeImageUrl', 'giftCardImageUrl');
+
+      if (code) order.giftCardCode = code;
+      if (pin) order.giftCardPin = pin;
+      if (imageUrl) order.barcodeImageUrl = imageUrl;
+
+      log.info(
+        {
+          orderId: validated.data.id,
+          extracted: {
+            hasCode: code !== undefined,
+            hasPin: pin !== undefined,
+            hasImageUrl: imageUrl !== undefined,
+          },
+        },
+        'Barcode gift card extracted from /gift-cards/:id response',
+      );
     }
 
     // Wire up the fulfilled-order Discord notification. This handler is

@@ -3,12 +3,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('~/services/config', () => ({ API_BASE: 'http://test-api' }));
 vi.mock('~/services/api-client', () => ({
   apiRequest: vi.fn(),
+  authenticatedRequest: vi.fn(),
 }));
 
 import { fetchMerchants, fetchMerchant, fetchMerchantBySlug } from '../merchants';
-import { apiRequest } from '../api-client';
+import { apiRequest, authenticatedRequest } from '../api-client';
 
 const mockApiRequest = vi.mocked(apiRequest);
+const mockAuthenticatedRequest = vi.mocked(authenticatedRequest);
 
 describe('merchants service', () => {
   beforeEach(() => {
@@ -55,21 +57,24 @@ describe('merchants service', () => {
   });
 
   describe('fetchMerchant', () => {
+    // fetchMerchant now hits the authenticated endpoint
+    // (`/api/merchants/:id` proxies upstream CTX for long-form content),
+    // so it goes through `authenticatedRequest`, not `apiRequest`.
     it('calls correct URL with merchant id', async () => {
-      mockApiRequest.mockResolvedValue({ merchant: { id: 'abc-123' } });
+      mockAuthenticatedRequest.mockResolvedValue({ merchant: { id: 'abc-123' } });
       await fetchMerchant('abc-123');
-      expect(mockApiRequest).toHaveBeenCalledWith('/api/merchants/abc-123');
+      expect(mockAuthenticatedRequest).toHaveBeenCalledWith('/api/merchants/abc-123');
     });
 
     it('encodes the merchant id', async () => {
-      mockApiRequest.mockResolvedValue({ merchant: { id: 'a/b' } });
+      mockAuthenticatedRequest.mockResolvedValue({ merchant: { id: 'a/b' } });
       await fetchMerchant('a/b');
-      expect(mockApiRequest).toHaveBeenCalledWith('/api/merchants/a%2Fb');
+      expect(mockAuthenticatedRequest).toHaveBeenCalledWith('/api/merchants/a%2Fb');
     });
 
     it('returns the API response', async () => {
       const response = { merchant: { id: '1', name: 'Test Merchant' } };
-      mockApiRequest.mockResolvedValue(response);
+      mockAuthenticatedRequest.mockResolvedValue(response);
       const result = await fetchMerchant('1');
       expect(result).toEqual(response);
     });

@@ -165,7 +165,13 @@ describe('GET /api/merchants/by-slug/:slug', () => {
 
 describe('GET /api/merchants/:id', () => {
   it('returns 404 for unknown id', async () => {
-    const res = await app.request('/api/merchants/unknown-id');
+    // Auth-gated: proxies CTX with the user's bearer to enrich the
+    // cached merchant with long-form content. Supply a dummy bearer
+    // so requireAuth passes; the handler's cached-not-found branch
+    // then returns 404 before any upstream call.
+    const res = await app.request('/api/merchants/unknown-id', {
+      headers: { Authorization: 'Bearer test-token' },
+    });
     expect(res.status).toBe(404);
   });
 });

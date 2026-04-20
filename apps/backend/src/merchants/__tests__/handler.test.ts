@@ -53,8 +53,14 @@ vi.mock('../../circuit-breaker.js', () => ({
     }
   },
   getAllCircuitStates: () => ({}),
+  // /api/merchants/:id proxies CTX for long-form content enrichment;
+  // in tests we short-circuit the upstream call so the handler falls
+  // through to the cached baseline. A real upstream fetch would
+  // actually hit http://test-upstream.local/ and hang.
   getUpstreamCircuit: () => ({
-    fetch: (...args: Parameters<typeof globalThis.fetch>) => globalThis.fetch(...args),
+    fetch: async () => {
+      throw new Error('upstream disabled in tests');
+    },
     getState: () => 'closed' as const,
     reset: () => {},
   }),
@@ -260,18 +266,27 @@ describe('GET /api/merchants/by-slug/:slug', () => {
 });
 
 describe('GET /api/merchants/:id', () => {
+  // `/api/merchants/:id` is gated by requireAuth — it proxies CTX with
+  // the user's bearer + X-Client-Id to enrich the detail with
+  // longDescription / terms / instructions. Tests supply a dummy
+  // bearer so the auth guard passes; upstream fetch falls through to
+  // the cached merchant when the mock upstream doesn't respond (the
+  // handler logs a warn and returns the cached baseline).
+  const AUTH_HEADER = { Authorization: 'Bearer test-token' };
+
   it('returns merchant when id matches', async () => {
     seed([merchant('m-1', 'Home Depot')]);
-    const res = await app.request('/api/merchants/m-1');
+    const res = await app.request('/api/merchants/m-1', { headers: AUTH_HEADER });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { merchant: Merchant };
     expect(body.merchant.id).toBe('m-1');
-    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
+    // Authenticated endpoint — never publicly cacheable.
+    expect(res.headers.get('Cache-Control')).toBe('private, max-age=300');
   });
 
   it('returns 404 when id unknown', async () => {
     seed([merchant('m-1', 'Home Depot')]);
-    const res = await app.request('/api/merchants/ghost');
+    const res = await app.request('/api/merchants/ghost', { headers: AUTH_HEADER });
     expect(res.status).toBe(404);
   });
 
@@ -281,11 +296,17 @@ describe('GET /api/merchants/:id', () => {
     // merchant whose id is "home-depot" and whose slug is also "home-depot",
     // both would resolve — so use distinct values.
     seed([merchant('unique-id', 'Home Depot')]);
-    const byId = await app.request('/api/merchants/unique-id');
+    const byId = await app.request('/api/merchants/unique-id', { headers: AUTH_HEADER });
     expect(byId.status).toBe(200);
     const bySlug = await app.request('/api/merchants/by-slug/home-depot');
     expect(bySlug.status).toBe(200);
     const slugBody = (await bySlug.json()) as { merchant: Merchant };
     expect(slugBody.merchant.id).toBe('unique-id');
+  });
+
+  it('401s without a Bearer token', async () => {
+    seed([merchant('m-1', 'Home Depot')]);
+    const res = await app.request('/api/merchants/m-1');
+    expect(res.status).toBe(401);
   });
 });
