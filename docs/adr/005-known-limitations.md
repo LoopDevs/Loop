@@ -147,14 +147,17 @@ and where the fix work would happen.
   test file (~100 ms startup) and pulls in a sizeable dependency.
 - **Status (resolved, partial)**: The "flip environment per file" escape
   hatch has landed. Purchase-flow components
-  (`AmountSelection`, `PaymentStep`, `PurchaseComplete`, `RedeemFlow`) and
-  several hooks (`use-auth`, `use-session-restore`,
-  `use-native-platform`, `query-retry`) now carry a
-  `// @vitest-environment jsdom` pragma in their test files and render
-  with `@testing-library/react`. The original "covered by e2e only" gap
-  is closed for those surfaces. Anything added beyond this set that
-  needs rendering or hooks should follow the same pragma pattern — no
-  global environment flip required.
+  (`AmountSelection`, `PaymentStep`, `PurchaseComplete`, `RedeemFlow`)
+  carry a `// @vitest-environment jsdom` pragma in their test files and
+  render with `@testing-library/react`. The hook tests
+  (`use-auth`, `use-session-restore`, `use-native-platform`,
+  `query-retry`) exercise store mutations and service functions directly
+  without going through `renderHook`, so they run fine in the default
+  `node` environment and deliberately do **not** opt into jsdom. The
+  original "covered by e2e only" gap is closed for the rendered-component
+  surfaces above. Anything added beyond this set that needs actual DOM
+  rendering or `renderHook` should follow the pragma pattern — no global
+  environment flip required.
 - **Remaining gap**: route-level components and the root layout still
   rely on Playwright e2e for coverage, which is why
   `apps/web/vitest.config.ts` excludes `app/routes/**` + `app/root.tsx`
