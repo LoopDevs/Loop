@@ -269,3 +269,120 @@ export const refreshTokens = pgTable(
     index('refresh_tokens_expires').on(t.expiresAt),
   ],
 );
+
+/**
+ * Loop-native orders (ADR 010).
+ *
+ * Under the principal switch Loop owns the order state machine:
+ *   pending_payment → paid → procuring → fulfilled
+ *                               └────▶ failed | expired
+ *
+ * Cashback percentages are **pinned** at order creation from the
+ * merchant's current `merchant_cashback_configs` row (ADR 011) so a
+ * later admin edit doesn't retroactively rewrite completed orders.
+ * We also pin the derived minor-unit amounts (wholesale / user
+ * cashback / Loop margin) so the ledger write on fulfillment doesn't
+ * have to redo the math against a possibly-different config.
+ *
+ * `ctx_order_id` + `ctx_operator_id` capture which CTX operator
+ * account procured the gift card post-payment, for the operational
+ * / audit trail (ADR 013 operator pool).
+ */
+export const orders = pgTable(
+  'orders',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    merchantId: text('merchant_id').notNull(),
+
+    // Face value the user sees on the gift card. Stored in minor
+    // units (pence, cents) as bigint to dodge any float drift.
+    faceValueMinor: bigint('face_value_minor', { mode: 'bigint' }).notNull(),
+    currency: char('currency', { length: 3 }).notNull(),
+
+    // Payment source:
+    //   - 'xlm'    → Stellar XLM to a Loop deposit address, `payment_memo` set
+    //   - 'usdc'   → USDC (Stellar) to the same address + memo
+    //   - 'credit' → debit from the user's Loop credit balance (ADR 009)
+    // ACH / Plaid lands later; enum is deliberately narrow for now so a
+    // new source is a migration (not a silent string on the wire).
+    paymentMethod: text('payment_method').notNull(),
+    paymentMemo: text('payment_memo'),
+    paymentReceivedAt: timestamp('payment_received_at', { withTimezone: true }),
+
+    // Pinned cashback split (ADR 011 snapshot at creation).
+    wholesalePct: numeric('wholesale_pct', { precision: 5, scale: 2 }).notNull(),
+    userCashbackPct: numeric('user_cashback_pct', { precision: 5, scale: 2 }).notNull(),
+    loopMarginPct: numeric('loop_margin_pct', { precision: 5, scale: 2 }).notNull(),
+    wholesaleMinor: bigint('wholesale_minor', { mode: 'bigint' }).notNull(),
+    userCashbackMinor: bigint('user_cashback_minor', { mode: 'bigint' }).notNull(),
+    loopMarginMinor: bigint('loop_margin_minor', { mode: 'bigint' }).notNull(),
+
+    // CTX-side procurement record. Null until state ≥ procuring.
+    ctxOrderId: text('ctx_order_id'),
+    ctxOperatorId: text('ctx_operator_id'),
+
+    // State machine. `check` constraint below enforces the enum.
+    state: text('state').notNull().default('pending_payment'),
+    failureReason: text('failure_reason'),
+
+    // Timestamps corresponding to each transition. Nulls are fine —
+    // they're set on the transition, never backfilled.
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    paidAt: timestamp('paid_at', { withTimezone: true }),
+    procuredAt: timestamp('procured_at', { withTimezone: true }),
+    fulfilledAt: timestamp('fulfilled_at', { withTimezone: true }),
+    failedAt: timestamp('failed_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('orders_user_created').on(t.userId, t.createdAt),
+    // Used by the payment-watcher job to find rows awaiting their
+    // on-chain deposit. Partial index: only pending rows are hot.
+    index('orders_pending_payment')
+      .on(t.state, t.createdAt)
+      .where(sql`${t.state} = 'pending_payment'`),
+    // Ops lookup — "did operator X place this order?" — from the
+    // admin pool-health surface (ADR 013).
+    index('orders_ctx_operator').on(t.ctxOperatorId),
+    check(
+      'orders_state_known',
+      sql`${t.state} IN ('pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired')`,
+    ),
+    check('orders_payment_method_known', sql`${t.paymentMethod} IN ('xlm', 'usdc', 'credit')`),
+    check(
+      'orders_percentages_sum',
+      sql`${t.wholesalePct} + ${t.userCashbackPct} + ${t.loopMarginPct} <= 100`,
+    ),
+    // Nonneg guards across all four minor-unit columns. A negative
+    // face value is a bug, and so is any split going the wrong way.
+    check(
+      'orders_minor_amounts_non_negative',
+      sql`
+        ${t.faceValueMinor} >= 0
+        AND ${t.wholesaleMinor} >= 0
+        AND ${t.userCashbackMinor} >= 0
+        AND ${t.loopMarginMinor} >= 0
+      `,
+    ),
+  ],
+);
+
+/**
+ * Exposed state enum — mirrors the `CHECK` above. Importing this
+ * everywhere keeps the source of truth (the migration) and the
+ * callers' type in sync.
+ */
+export const ORDER_STATES = [
+  'pending_payment',
+  'paid',
+  'procuring',
+  'fulfilled',
+  'failed',
+  'expired',
+] as const;
+export type OrderState = (typeof ORDER_STATES)[number];
+
+export const ORDER_PAYMENT_METHODS = ['xlm', 'usdc', 'credit'] as const;
+export type OrderPaymentMethod = (typeof ORDER_PAYMENT_METHODS)[number];
