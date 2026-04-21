@@ -12,12 +12,15 @@ vi.mock('../../logger.js', () => ({
 //   select(...).from(...).where(...)           → count rows
 //   update(...).set(...).where(...).returning() → updated user rows
 // Two separate chain objects so .where can be async on the select
-// chain and sync (non-terminal) on the update chain.
-const { selectChain, updateChain, dbState } = vi.hoisted(() => {
+// chain and sync (non-terminal) on the update chain. The `query`
+// surface fronts drizzle's relational builder — only userCredits is
+// exposed since that's what `toView` reaches for.
+const { selectChain, updateChain, queryObj, dbState } = vi.hoisted(() => {
   const state: {
     orderCount: string;
     updatedUser: unknown;
-  } = { orderCount: '0', updatedUser: null };
+    homeBalanceMinor: bigint | null;
+  } = { orderCount: '0', updatedUser: null, homeBalanceMinor: null };
   const sel: Record<string, ReturnType<typeof vi.fn>> = {};
   sel['from'] = vi.fn(() => sel);
   sel['where'] = vi.fn(async () => [{ n: state.orderCount }]);
@@ -25,7 +28,14 @@ const { selectChain, updateChain, dbState } = vi.hoisted(() => {
   upd['set'] = vi.fn(() => upd);
   upd['where'] = vi.fn(() => upd);
   upd['returning'] = vi.fn(async () => (state.updatedUser === null ? [] : [state.updatedUser]));
-  return { selectChain: sel, updateChain: upd, dbState: state };
+  const query = {
+    userCredits: {
+      findFirst: vi.fn(async () =>
+        state.homeBalanceMinor === null ? undefined : { balanceMinor: state.homeBalanceMinor },
+      ),
+    },
+  };
+  return { selectChain: sel, updateChain: upd, queryObj: query, dbState: state };
 });
 
 // Hoisted state the mocked user resolvers read from.
@@ -50,11 +60,13 @@ vi.mock('../../db/client.js', () => ({
   db: {
     select: vi.fn(() => selectChain),
     update: vi.fn(() => updateChain),
+    query: queryObj,
   },
 }));
 vi.mock('../../db/schema.js', () => ({
   orders: { userId: 'user_id' },
   users: { id: 'id' },
+  userCredits: { userId: 'user_id', currency: 'currency' },
   HOME_CURRENCIES: ['USD', 'GBP', 'EUR'] as const,
 }));
 
@@ -95,6 +107,7 @@ beforeEach(() => {
   jwtState.claims = null;
   dbState.orderCount = '0';
   dbState.updatedUser = null;
+  dbState.homeBalanceMinor = null;
 });
 
 describe('getMeHandler', () => {
@@ -130,6 +143,7 @@ describe('getMeHandler', () => {
       isAdmin: false,
       homeCurrency: 'GBP',
       stellarAddress: null,
+      homeCurrencyBalanceMinor: '0',
     });
   });
 
@@ -167,6 +181,7 @@ describe('getMeHandler', () => {
       isAdmin: true,
       homeCurrency: 'USD',
       stellarAddress: null,
+      homeCurrencyBalanceMinor: '0',
     });
     expect(userState.upsertCalls).toEqual([{ ctxUserId: 'ctx-123', email: 'ctx@example.com' }]);
   });
@@ -202,10 +217,31 @@ describe('getMeHandler', () => {
     expect(Object.keys(body).sort()).toEqual([
       'email',
       'homeCurrency',
+      'homeCurrencyBalanceMinor',
       'id',
       'isAdmin',
       'stellarAddress',
     ]);
+  });
+
+  it('surfaces homeCurrencyBalanceMinor as a bigint-string when the user has accrued cashback', async () => {
+    userState.byId = {
+      id: 'loop-user-1',
+      email: 'a@b.com',
+      isAdmin: false,
+      homeCurrency: 'GBP',
+      stellarAddress: null,
+      ctxUserId: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    dbState.homeBalanceMinor = 12345n;
+    const res = await getMeHandler(
+      makeCtx({ kind: 'loop', userId: 'loop-user-1', email: 'a@b.com', bearerToken: 't' }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['homeCurrencyBalanceMinor']).toBe('12345');
   });
 });
 

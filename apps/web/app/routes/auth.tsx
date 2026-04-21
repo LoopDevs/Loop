@@ -1,11 +1,13 @@
 import { useCallback, useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router';
+import { useQuery } from '@tanstack/react-query';
 import type { Route } from './+types/auth';
 import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAppConfig } from '~/hooks/use-app-config';
 import { useUiStore } from '~/stores/ui.store';
 import type { ThemePreference } from '~/stores/ui.store';
+import { shouldRetry } from '~/hooks/query-retry';
 import { Navbar } from '~/components/features/Navbar';
 import { PageHeader } from '~/components/ui/PageHeader';
 import { Button } from '~/components/ui/Button';
@@ -13,6 +15,7 @@ import { Input } from '~/components/ui/Input';
 import { GoogleSignInButton } from '~/components/features/auth/GoogleSignInButton';
 import { checkBiometrics, authenticateWithBiometrics } from '~/native/biometrics';
 import { isAppLockEnabled, setAppLockEnabled } from '~/native/app-lock';
+import { getMe, type UserMeView } from '~/services/user';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Sign in — Loop' }];
@@ -143,6 +146,57 @@ function BiometricLockRow(): React.JSX.Element | null {
   );
 }
 
+/**
+ * Formats a minor-units bigint-string into the account view's
+ * headline cashback balance. Falls back to `—` for parse errors so
+ * a bad server response degrades gracefully rather than crashing
+ * the Account screen.
+ */
+function formatCashbackBalance(minor: string, currency: 'USD' | 'GBP' | 'EUR'): string {
+  try {
+    const asCents = BigInt(minor);
+    const major = Number(asCents) / 100;
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: 2,
+    }).format(major);
+  } catch {
+    return '—';
+  }
+}
+
+/**
+ * `Your cashback` card on the Account screen. Shows the user's
+ * off-chain balance in their home currency (ADR 015). Zero-balance
+ * users still see the card so "you have 0.00 cashback" is a clear
+ * state rather than an empty container.
+ */
+function CashbackBalanceCard({
+  me,
+  isLoading,
+}: {
+  me: UserMeView | undefined;
+  isLoading: boolean;
+}): React.JSX.Element {
+  return (
+    <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4">
+      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        Your cashback
+      </p>
+      <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">
+        {isLoading || me === undefined
+          ? '—'
+          : formatCashbackBalance(me.homeCurrencyBalanceMinor, me.homeCurrency)}
+      </p>
+      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+        Earned on every Loop order.
+        {me?.stellarAddress === null ? ' Link a wallet to withdraw.' : ''}
+      </p>
+    </div>
+  );
+}
+
 export function ErrorBoundary(): React.JSX.Element {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
@@ -182,6 +236,18 @@ export default function AuthRoute(): React.JSX.Element {
   const [otp, setOtp] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Pull profile + home-currency balance for the Account view. Shared
+  // `['me']` cache key so /settings/wallet mutations refresh this
+  // card too. `enabled` gates on auth so the fetch doesn't fire on
+  // the unauthenticated marketing view.
+  const meQuery = useQuery({
+    queryKey: ['me'],
+    queryFn: getMe,
+    enabled: isAuthenticated,
+    retry: shouldRetry,
+    staleTime: 60_000,
+  });
 
   const handleGoogleCredential = useCallback(
     (idToken: string) => {
@@ -227,7 +293,8 @@ export default function AuthRoute(): React.JSX.Element {
               <span className="text-2xl">👤</span>
             </div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Your account</h1>
-            <p className="text-gray-500 dark:text-gray-400 mb-8">{userEmail}</p>
+            <p className="text-gray-500 dark:text-gray-400 mb-6">{userEmail}</p>
+            <CashbackBalanceCard me={meQuery.data} isLoading={meQuery.isLoading} />
             <div className="space-y-3">
               {isNative && <ThemeToggleRow />}
               {isNative && <BiometricLockRow />}

@@ -18,6 +18,7 @@ const { userMock, authMock } = vi.hoisted(() => ({
       isAdmin: false,
       homeCurrency: 'GBP' as const,
       stellarAddress: null as string | null,
+      homeCurrencyBalanceMinor: '0',
     },
     meError: null as unknown,
     setResult: null as unknown,
@@ -38,6 +39,7 @@ vi.mock('~/services/user', () => ({
       isAdmin: boolean;
       homeCurrency: 'USD' | 'GBP' | 'EUR';
       stellarAddress: string | null;
+      homeCurrencyBalanceMinor: string;
     }>,
   setStellarAddress: (addr: string | null) => userMock.setStellarAddress(addr),
 }));
@@ -78,6 +80,7 @@ beforeEach(() => {
     isAdmin: false,
     homeCurrency: 'GBP',
     stellarAddress: null,
+    homeCurrencyBalanceMinor: '0',
   };
   userMock.meError = null;
   userMock.setResult = null;

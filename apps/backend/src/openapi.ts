@@ -254,6 +254,10 @@ const UserMeView = registry.register(
       description:
         "User's linked Stellar wallet for on-chain payouts. Null = unlinked; cashback accrues off-chain only.",
     }),
+    homeCurrencyBalanceMinor: z.string().openapi({
+      description:
+        'Off-chain cashback balance in `homeCurrency` minor units (pence / cents), as a bigint-string so JSON round-trips don\'t truncate precision. `"0"` when the user has no ledger row yet (first-order users, pre-cashback).',
+    }),
   }),
 );
 

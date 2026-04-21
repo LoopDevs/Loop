@@ -17,9 +17,9 @@
  */
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { orders, users, HOME_CURRENCIES } from '../db/schema.js';
+import { orders, userCredits, users, HOME_CURRENCIES } from '../db/schema.js';
 import { decodeJwtPayload } from '../auth/jwt.js';
 import { upsertUserFromCtx, getUserById, type User } from '../db/users.js';
 import type { LoopAuthContext } from '../auth/handler.js';
@@ -35,15 +35,38 @@ export interface UserMeView {
   homeCurrency: string;
   /** ADR 015 — Stellar address for on-chain cashback payouts. Null when unlinked. */
   stellarAddress: string | null;
+  /**
+   * ADR 015 — off-chain cashback balance in `homeCurrency` minor units
+   * (pence / cents), returned as a bigint-string to survive JSON
+   * round-trips without precision loss. `"0"` when the user has no
+   * ledger row yet (first-order users, pre-cashback). Cross-currency
+   * balances from rare edge cases (support-mediated home-currency
+   * flips) are not exposed here — they're admin-only.
+   */
+  homeCurrencyBalanceMinor: string;
 }
 
-function toView(row: User): UserMeView {
+/**
+ * Looks up the user's off-chain cashback balance in their current
+ * home currency. Returns `0n` when there's no matching row — the
+ * normal state for anyone who hasn't earned cashback yet.
+ */
+async function resolveHomeCurrencyBalance(userId: string, homeCurrency: string): Promise<bigint> {
+  const row = await db.query.userCredits.findFirst({
+    where: and(eq(userCredits.userId, userId), eq(userCredits.currency, homeCurrency)),
+  });
+  return row?.balanceMinor ?? 0n;
+}
+
+async function toView(row: User): Promise<UserMeView> {
+  const balanceMinor = await resolveHomeCurrencyBalance(row.id, row.homeCurrency);
   return {
     id: row.id,
     email: row.email,
     isAdmin: row.isAdmin,
     homeCurrency: row.homeCurrency,
     stellarAddress: row.stellarAddress,
+    homeCurrencyBalanceMinor: balanceMinor.toString(),
   };
 }
 
@@ -78,7 +101,7 @@ export async function getMeHandler(c: Context): Promise<Response> {
   if (user === null) {
     return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
-  return c.json<UserMeView>(toView(user));
+  return c.json<UserMeView>(await toView(user));
 }
 
 const SetHomeCurrencyBody = z.object({
@@ -116,7 +139,7 @@ export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
   // currency. Lets the client call this endpoint unconditionally
   // from onboarding without first checking `GET /me`.
   if (user.homeCurrency === parsed.data.currency) {
-    return c.json<UserMeView>(toView(user));
+    return c.json<UserMeView>(await toView(user));
   }
 
   // Order guard — the ledger pins charge_currency at order creation
@@ -148,7 +171,7 @@ export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
     // account deletion, or a concurrent support-auth'd edit.
     return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
   }
-  return c.json<UserMeView>(toView(updated));
+  return c.json<UserMeView>(await toView(updated));
 }
 
 // Stellar ED25519 public keys: 56 uppercase base32 chars starting
@@ -192,7 +215,7 @@ export async function setStellarAddressHandler(c: Context): Promise<Response> {
     return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
   if (user.stellarAddress === parsed.data.address) {
-    return c.json<UserMeView>(toView(user));
+    return c.json<UserMeView>(await toView(user));
   }
   const [updated] = await db
     .update(users)
@@ -202,5 +225,5 @@ export async function setStellarAddressHandler(c: Context): Promise<Response> {
   if (updated === undefined) {
     return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
   }
-  return c.json<UserMeView>(toView(updated));
+  return c.json<UserMeView>(await toView(updated));
 }
