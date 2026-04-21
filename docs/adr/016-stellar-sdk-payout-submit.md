@@ -1,7 +1,8 @@
 # ADR 016: Stellar SDK for outbound payout submission
 
-Status: Proposed
+Status: Accepted
 Date: 2026-04-21
+Implemented: 2026-04-21 (payout-submit primitive + worker loop + memo-idempotency Horizon read, gated behind `LOOP_WORKERS_ENABLED` + `LOOP_STELLAR_OPERATOR_SECRET`)
 Related: ADR 015 (stablecoin topology), ADR 010 (principal switch)
 
 ## Context
@@ -233,23 +234,31 @@ at-least-once delivery without at-least-twice risk.
 
 ## Rollout checklist
 
-- [ ] `npm install @stellar/stellar-sdk` in `apps/backend/`.
-- [ ] Env var `LOOP_STELLAR_OPERATOR_SECRET` validated in `env.ts`
-      with a `^S[A-Z2-7]{55}$` regex. Absent → payout worker
+- [x] `npm install @stellar/stellar-sdk` in `apps/backend/` (#355).
+- [x] Env var `LOOP_STELLAR_OPERATOR_SECRET` validated in `env.ts`
+      with a `^S[A-Z2-7]{55}$` regex (#356). Absent → payout worker
       disabled (logged once at boot).
-- [ ] `payments/payout-submit.ts` — pure wrapper that takes a
-      `{ secret, horizonUrl, networkPassphrase, intent }` and
-      returns a tx hash or throws.
-- [ ] `payments/payout-worker.ts` — interval loop wiring + tick
-      function.
-- [ ] `index.ts` — start the worker at boot behind
-      `LOOP_WORKERS_ENABLED`, same feature-flag pattern as the
-      payment watcher + procurement worker.
-- [ ] Pino redaction — ensure `LOOP_STELLAR_OPERATOR_SECRET` is in
-      the redact allowlist.
-- [ ] Admin treasury `operatorAccount` card — surface the operator
-      pubkey + XLM reserve + configured-or-not for each LOOP asset
-      so ops sees at a glance whether the payout path is live.
+- [x] `payments/payout-submit.ts` (#355) — pure wrapper + classified
+      `PayoutSubmitError` with `transient_horizon` / `transient_rebuild`
+      / `terminal_no_trust` / `terminal_underfunded` / `terminal_bad_auth`
+      / `terminal_other` kinds.
+- [x] `payments/payout-worker.ts` (#356) — interval loop with
+      memo-idempotency pre-check via `findOutboundPaymentByMemo`
+      (#354), classified transient/terminal retry policy, bounded
+      attempts.
+- [x] `index.ts` wiring (#356) — starts the worker at boot behind
+      `LOOP_WORKERS_ENABLED`, matches the payment-watcher +
+      procurement-worker pattern.
+- [x] Pino redaction (#356) — `operatorSecret` + `LOOP_STELLAR_OPERATOR_SECRET{,_PREVIOUS}`
+      in the redact allowlist.
+- [x] Admin treasury surfacing for operator-account health —
+      liabilities card shows per-LOOP-asset issuer or "not
+      configured" (#358); assets card shows live USDC + XLM
+      stroops from Horizon (#343).
+- [x] Discord alerts — payout failed (#360) + USDC below floor
+      (#361). Pages the monitoring channel in real-time with the
+      classified `kind` so on-call can triage without opening the
+      admin UI first.
 
 ## Open questions
 
