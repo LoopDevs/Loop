@@ -88,28 +88,80 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 
 ---
 
-## Phase 2 — Stellar wallet & USDC cashback
+## Phase 2 — Stellar wallet & cashback
 
-### Stellar integration
+Phase 2 reshaped mid-flight into the **ADR 015 / 016 cashback-app
+switch** (Loop-as-merchant-of-record, CTX as supplier, LOOP-branded
+stablecoins, admin panel). That work is code-complete; what's
+below is either shipped or an explicit "not yet started".
 
-- [ ] On-device key generation using `@stellar/stellar-sdk` (never leaves device)
-- [ ] 2-of-3 multisig wallet setup (device key + server key + recovery key)
-- [ ] Biometric authentication for transaction signing (Face ID / Touch ID)
-- [ ] USDC cashback distribution after gift card purchase
-- [ ] Wallet balance display and transaction history
+### Cashback app switch — ADR 015/016 (shipped across #330 — #366)
+
+- [x] ~~Home-currency data model~~ — `users.home_currency` column (#331),
+      `user_credits` composite-key ready for multi-balance users.
+- [x] ~~Order creation FX-pin~~ — `charge_minor` + `charge_currency`
+      pinned via Frankfurter feed at creation (#336); cross-FX ledger
+      refactor so GBP users on USD catalog orders credit in GBP (#353).
+- [x] ~~LOOP-asset payout path~~ — `pending_payouts` table (#347),
+      fulfillment writes the payout intent (#348), `@stellar/stellar-sdk`
+      submit primitive (#355), worker loop with memo-idempotent
+      retry (#356).
+- [x] ~~Procurement USDC-default + XLM-floor fallback~~ — live Horizon
+      USDC balance read (#342) + floor-triggered break-glass (#340 /
+      #344) + Discord alert on below-floor (#361).
+- [x] ~~Watcher LOOP-asset allowlist~~ — USDLOOP / GBPLOOP / EURLOOP
+      accepted alongside USDC + XLM (#338).
+- [x] ~~Onboarding currency picker~~ — locale-guessed default, user
+      confirms (#357).
+- [x] ~~User wallet-link settings~~ — `/settings/wallet` page (#362),
+      discoverable from the Account page (#366).
+- [x] ~~Admin treasury view~~ — LOOP-asset liabilities, USDC + XLM
+      held assets, payout state counts with link-through to drilldown
+      (#337, #343, #349, #358, #364).
+- [x] ~~Admin payouts drilldown + retry~~ — filtered list (#350 / #359)
+      with per-row retry button wrapping `resetPayoutToPending` (#351).
+- [x] ~~Ops real-time observability~~ — Discord alert on payout failed
+      (#360) + below-floor (#361) with throttling + classified `kind`.
+- [x] ~~ADR status: Accepted~~ — rollout checklists all ticked (#365).
+
+### Deferred from ADR 015
+
+- [ ] Multi-home-currency per user — holding USDLOOP + GBPLOOP +
+      EURLOOP simultaneously. Schema supports it (composite key);
+      UX to pick-and-switch doesn't exist yet. Launch users hold
+      one home currency.
+- [ ] In-app LOOP-asset swap — UX layer over Stellar path-payment.
+      Out-of-scope for MVP; users who want it today withdraw +
+      swap on SDEX.
+- [ ] Self-serve home-currency change — currently support-mediated.
+- [ ] SEP-24 / off-platform withdrawal UX for LOOP assets.
+- [ ] Defindex deposit automation — currently manual ops top-up.
+- [ ] Trustline-probe before payout submit — MVP takes `op_no_trust`
+      as a terminal + admin-retry path (ADR 016 open question).
+- [ ] Hardware signing (HSM) for the operator secret — software
+      signing adequate for launch volume.
 
 ### Authentication upgrades
 
-- [ ] Social login (Apple Sign-In required for App Store, Google optional)
-- [x] ~~Login gate — require auth before any purchase~~ — `PurchaseContainer` renders the inline email/OTP flow when the store has no access token; remains open for wallet features once those ship in Phase 2.
+- [x] ~~Social login — Google + Apple~~ — ADR 014; shipped via
+      `/api/auth/social/google` and `/api/auth/social/apple`.
+- [x] ~~Loop-owned OTP auth~~ — ADR 013; backend mints its own
+      JWTs against the CTX operator pool when
+      `LOOP_AUTH_NATIVE_ENABLED=true`.
+- [x] ~~Login gate — require auth before any purchase~~ — `PurchaseContainer` renders the inline email/OTP flow when the store has no access token.
 - [x] ~~Session persistence across app restarts (refresh token flow)~~ — `use-session-restore` hook restores on mount by pulling the refresh token from secure storage (Keychain on iOS, EncryptedSharedPreferences on Android, sessionStorage on web) and calling `tryRefresh`. Audits A-008 / A-020 / A-024 and ADR-006 cover the storage and recovery paths.
 
-### Backend extensions
+### Backend extensions (original Phase 2)
 
-- [ ] Server-side co-signing endpoint for Stellar transactions
-- [ ] Cashback calculation and distribution service
-- [ ] Recovery key escrow with third-party custodian
-- [ ] Wallet balance and history endpoints
+- [x] ~~Cashback calculation + distribution service~~ — `user_credits`
+      ledger (ADR 009) + `pending_payouts` worker (ADR 016).
+- [ ] On-device Stellar wallet key generation — superseded by the
+      ADR 015 model where users link an external wallet rather
+      than Loop managing device keys. Revisit if we add a custodial
+      wallet product.
+- [ ] 2-of-3 multisig wallet — same; deferred with the custodial
+      wallet question.
+- [ ] Recovery key escrow — same.
 
 ### Mobile enhancements
 
