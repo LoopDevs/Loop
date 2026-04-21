@@ -12,7 +12,10 @@
  */
 import type { Context } from 'hono';
 import { PAYOUT_STATES } from '../db/schema.js';
-import { listPayoutsForAdmin } from '../credits/pending-payouts.js';
+import { listPayoutsForAdmin, resetPayoutToPending } from '../credits/pending-payouts.js';
+import { logger } from '../logger.js';
+
+const log = logger.child({ handler: 'admin-payouts' });
 
 export interface AdminPayoutView {
   id: string;
@@ -108,4 +111,33 @@ export async function adminListPayoutsHandler(c: Context): Promise<Response> {
     limit,
   });
   return c.json({ payouts: rows.map((r) => toView(r as PayoutRow)) });
+}
+
+/**
+ * POST /api/admin/payouts/:id/retry — flip a `failed` row back to
+ * `pending` so the submit worker picks it up on the next tick. Admin
+ * use only: unbounded-retry from the worker itself would mask real
+ * issues, so retry is a manual ops action with an audit trail via
+ * the admin user context (set by `requireAdmin`).
+ *
+ * Returns the updated row on success, 404 when the id doesn't match
+ * a `failed` row (either it doesn't exist or it's in a non-failed
+ * state — admin UI should refresh the list).
+ */
+export async function adminRetryPayoutHandler(c: Context): Promise<Response> {
+  const id = c.req.param('id');
+  if (id === undefined || id.length === 0) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'id is required' }, 400);
+  }
+  try {
+    const row = await resetPayoutToPending(id);
+    if (row === null) {
+      return c.json({ code: 'NOT_FOUND', message: 'Payout not found or not in failed state' }, 404);
+    }
+    log.info({ payoutId: id }, 'Payout reset to pending by admin retry');
+    return c.json<AdminPayoutView>(toView(row as PayoutRow));
+  } catch (err) {
+    log.error({ err, payoutId: id }, 'Admin retry failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to retry payout' }, 500);
+  }
 }
