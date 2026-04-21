@@ -5,6 +5,7 @@ import { logger } from '../logger.js';
 import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
 import { nativeRequestOtpHandler, nativeVerifyOtpHandler, nativeRefreshHandler } from './native.js';
+import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
 
 const log = logger.child({ handler: 'auth' });
 
@@ -303,9 +304,49 @@ export async function logoutHandler(c: Context): Promise<Response> {
 }
 
 /**
- * Middleware: extracts Bearer token from Authorization header.
- * Does not verify the token — upstream validates on each proxied call.
- * Sets c.set('bearerToken', token) for downstream handlers.
+ * Shape set on the Hono context by `requireAuth` — tells downstream
+ * handlers whether the user authenticated with a Loop-signed token
+ * or a legacy CTX-signed bearer.
+ *
+ * During the ADR 013 migration both are accepted. Handlers that need
+ * to decide whether to hit CTX directly with the bearer (legacy
+ * path) or route via the operator pool (Loop-native path) branch
+ * on `kind`.
+ */
+export type LoopAuthContext =
+  | {
+      kind: 'loop';
+      userId: string;
+      email: string;
+      /** Loop-signed access JWT. Not forwardable to CTX. */
+      bearerToken: string;
+    }
+  | {
+      kind: 'ctx';
+      /** Legacy CTX-signed bearer — forwarded upstream verbatim. */
+      bearerToken: string;
+    };
+
+/**
+ * Middleware: authenticates the request.
+ *
+ * During the ADR 013 migration this accepts either a Loop-signed
+ * access token (verified in-process against `LOOP_JWT_SIGNING_KEY`)
+ * or a legacy CTX-signed bearer (pass-through: CTX validates on
+ * each proxied call).
+ *
+ * On success:
+ *   - `c.set('auth', LoopAuthContext)` — full discriminated union,
+ *     the preferred API for new handlers.
+ *   - `c.set('bearerToken', token)` — raw bearer, preserved for
+ *     existing CTX-proxy handlers that forward it upstream.
+ *   - `c.set('clientId', platform)` when a trusted `X-Client-Id` is
+ *     present.
+ *
+ * A Loop token whose signature verifies but is expired / wrong-typ
+ * gets a specific 401. A string that's neither a valid Loop token
+ * nor a plausible CTX JWT still gets the same 401 — we don't leak
+ * which kind of auth is configured.
  */
 export async function requireAuth(c: Context, next: () => Promise<void>): Promise<Response | void> {
   const authHeader = c.req.header('Authorization');
@@ -315,6 +356,39 @@ export async function requireAuth(c: Context, next: () => Promise<void>): Promis
     return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
 
+  // Try Loop-signed JWT first — cheap in-process verify, no network.
+  // If the signing key isn't configured we can't accept Loop tokens,
+  // so the CTX pass-through is the only remaining path.
+  if (isLoopAuthConfigured()) {
+    const verified = verifyLoopToken(token, 'access');
+    if (verified.ok) {
+      const authCtx: LoopAuthContext = {
+        kind: 'loop',
+        userId: verified.claims.sub,
+        email: verified.claims.email,
+        bearerToken: token,
+      };
+      c.set('auth', authCtx);
+      c.set('bearerToken', token);
+      await next();
+      return;
+    }
+    // Differentiate "looks like a Loop token but expired / wrong-type"
+    // from "this isn't our JWT" — the latter falls through to the CTX
+    // path, the former rejects now. A bad signature that happens to
+    // parse as a CTX JWT later would be rejected upstream anyway.
+    if (verified.reason === 'expired' || verified.reason === 'wrong_type') {
+      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired token' }, 401);
+    }
+    // `malformed` / `bad_signature` fall through to the CTX pass-
+    // through below; a genuine CTX bearer is malformed as a Loop JWT.
+  }
+
+  // CTX pass-through path. We don't verify here — CTX validates on
+  // each proxied call. Preserved for the overlap window (ADR 013
+  // Phase A); removed in Phase C once all sessions have rotated.
+  const ctxAuth: LoopAuthContext = { kind: 'ctx', bearerToken: token };
+  c.set('auth', ctxAuth);
   c.set('bearerToken', token);
 
   // Forward X-Client-Id if present — CTX uses this to determine entity
