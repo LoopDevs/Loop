@@ -206,6 +206,8 @@ GET  /api/config                            — client feature flags (ADR 010 / 
 POST /api/auth/request-otp
 POST /api/auth/verify-otp
 POST /api/auth/refresh
+POST /api/auth/social/google                — ADR 014
+POST /api/auth/social/apple                 — ADR 014
 DELETE /api/auth/session
 POST /api/orders             [authenticated]
 POST /api/orders/loop        [authenticated — Loop-native flow, ADR 010]
