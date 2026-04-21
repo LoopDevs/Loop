@@ -6,10 +6,12 @@ import { ApiException } from '@loop/shared';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAuth } from '~/hooks/use-auth';
 import { useOrders } from '~/hooks/use-orders';
+import { useAppConfig } from '~/hooks/use-app-config';
 import { Navbar } from '~/components/features/Navbar';
 import { PageHeader } from '~/components/ui/PageHeader';
 import { OrderRowSkeleton } from '~/components/ui/Skeleton';
 import { Button } from '~/components/ui/Button';
+import { LoopOrdersList } from '~/components/features/orders/LoopOrdersList';
 import { friendlyError } from '~/utils/error-messages';
 import { formatMoney } from '~/utils/money';
 
@@ -99,6 +101,7 @@ function errorMessage(err: Error | null): string | null {
 export default function OrdersRoute(): React.JSX.Element {
   const { isNative } = useNativePlatform();
   const { isAuthenticated } = useAuth();
+  const { config } = useAppConfig();
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
 
@@ -130,6 +133,12 @@ export default function OrdersRoute(): React.JSX.Element {
           would double-count and push content ~50px too far down.
           Web: `pt-20` clears the fixed Navbar. */}
       <main className={`max-w-2xl mx-auto px-4 ${isNative ? 'pt-16 pb-4' : 'pt-20 pb-8'}`}>
+        {/* Loop-native orders (ADR 010). Rendered above the legacy
+            CTX-proxy list when the flag is live in this deployment.
+            Silent no-op when the flag is off or the user has no
+            Loop-native orders yet. */}
+        {isAuthenticated ? <LoopOrdersList enabled={config.loopOrdersEnabled} /> : null}
+
         {!isAuthenticated && (
           <div className="text-center py-12">
             <p className="text-gray-500 dark:text-gray-400 mb-4">
