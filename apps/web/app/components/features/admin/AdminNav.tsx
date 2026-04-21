@@ -117,6 +117,47 @@ function CtxStatusPill({ status }: { status: CtxStatus }): React.JSX.Element {
   );
 }
 
+/**
+ * Parses the bigint-as-string `payouts.failed` count into a number.
+ * Returns 0 for anything unparseable — the badge defaults to hidden,
+ * not a scary placeholder. Cap at 99+ so the pill stays compact when
+ * a backlog spirals.
+ */
+export function failedPayoutsCount(payouts: TreasurySnapshot['payouts'] | undefined): number {
+  if (payouts === undefined) return 0;
+  const n = Number(payouts.failed);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.floor(n);
+}
+
+function FailedPayoutsBadge({ count }: { count: number }): React.JSX.Element {
+  const label = count > 99 ? '99+' : String(count);
+  return (
+    <Link
+      to="/admin/payouts?state=failed"
+      title={`${count} pending payout${count === 1 ? '' : 's'} in the failed state. Click to review and retry.`}
+      aria-label={`${count} failed payouts — click to review`}
+      className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-medium text-red-800 transition-colors hover:opacity-90 dark:border-red-900/60 dark:bg-red-900/20 dark:text-red-300"
+    >
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2.5}
+        className="h-3 w-3"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M12 9v3.5M12 16h.01M4.93 19h14.14a2 2 0 001.74-3l-7.07-12a2 2 0 00-3.48 0L3.2 16a2 2 0 001.73 3z"
+        />
+      </svg>
+      {label} failed
+    </Link>
+  );
+}
+
 export function AdminNav(): React.JSX.Element {
   const { pathname } = useLocation();
   const { isAuthenticated } = useAuth();
@@ -140,6 +181,7 @@ export function AdminNav(): React.JSX.Element {
     snapshotQuery.error instanceof ApiException &&
     (snapshotQuery.error.status === 401 || snapshotQuery.error.status === 404);
   const status = denied ? null : operatorPoolStatus(snapshotQuery.data?.operatorPool);
+  const failedCount = denied ? 0 : failedPayoutsCount(snapshotQuery.data?.payouts);
 
   return (
     <nav
@@ -168,9 +210,14 @@ export function AdminNav(): React.JSX.Element {
           );
         })}
       </div>
-      {status !== null && (
-        <div className="pb-2">
-          <CtxStatusPill status={status} />
+      {(status !== null || failedCount > 0) && (
+        <div className="flex items-center gap-2 pb-2">
+          {/* Failed-payouts badge sits to the left of the CTX pill so
+              the user's eye lands on it first when a payout is stuck
+              — it's a direct ops-action trigger, whereas the CTX pill
+              is closer to a health indicator. */}
+          {failedCount > 0 && <FailedPayoutsBadge count={failedCount} />}
+          {status !== null && <CtxStatusPill status={status} />}
         </div>
       )}
     </nav>
