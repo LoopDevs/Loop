@@ -67,6 +67,15 @@ vi.mock('../payout-submit.js', () => ({
   PayoutSubmitError: PayoutSubmitErrorMock,
 }));
 
+const { discordMock } = vi.hoisted(() => ({
+  discordMock: {
+    notifyPayoutFailed: vi.fn<(args: unknown) => void>(() => undefined),
+  },
+}));
+vi.mock('../../discord.js', () => ({
+  notifyPayoutFailed: (args: unknown) => discordMock.notifyPayoutFailed(args),
+}));
+
 import { runPayoutTick } from '../payout-worker.js';
 
 const BASE_ARGS = {
@@ -111,6 +120,7 @@ beforeEach(() => {
   }));
   horizonMock.findOutboundPaymentByMemo.mockResolvedValue(null);
   sdkMock.submitPayout.mockResolvedValue({ txHash: 'tx-hash', ledger: 1 });
+  discordMock.notifyPayoutFailed.mockClear();
 });
 
 describe('runPayoutTick', () => {
@@ -209,6 +219,41 @@ describe('runPayoutTick', () => {
     expect(repoMocks.markPayoutFailed).toHaveBeenCalledWith(
       expect.objectContaining({ reason: 'socket hang up' }),
     );
+  });
+
+  it('fires the Discord alert on terminal failure with the classified kind', async () => {
+    repoMocks.listPendingPayouts.mockResolvedValue([makeRow({ attempts: 0 })]);
+    sdkMock.submitPayout.mockRejectedValue(
+      new PayoutSubmitErrorMock('terminal_no_trust', 'op_no_trust'),
+    );
+    await runPayoutTick(BASE_ARGS);
+    expect(discordMock.notifyPayoutFailed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payoutId: 'p-1',
+        kind: 'terminal_no_trust',
+        reason: 'op_no_trust',
+        attempts: 1,
+      }),
+    );
+  });
+
+  it('fires the Discord alert for unclassified throws with kind=unclassified', async () => {
+    repoMocks.listPendingPayouts.mockResolvedValue([makeRow()]);
+    sdkMock.submitPayout.mockRejectedValue(new Error('socket hang up'));
+    await runPayoutTick(BASE_ARGS);
+    expect(discordMock.notifyPayoutFailed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'unclassified',
+        reason: 'socket hang up',
+      }),
+    );
+  });
+
+  it('does not fire the Discord alert on transient-retry outcomes', async () => {
+    repoMocks.listPendingPayouts.mockResolvedValue([makeRow({ attempts: 1 })]);
+    sdkMock.submitPayout.mockRejectedValue(new PayoutSubmitErrorMock('transient_horizon', 'blip'));
+    await runPayoutTick({ ...BASE_ARGS, maxAttempts: 5 });
+    expect(discordMock.notifyPayoutFailed).not.toHaveBeenCalled();
   });
 
   it('pre-check throw does not block the submit — logs + proceeds', async () => {

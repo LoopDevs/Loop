@@ -38,6 +38,7 @@ import {
 } from '../credits/pending-payouts.js';
 import { findOutboundPaymentByMemo } from './horizon.js';
 import { submitPayout, PayoutSubmitError } from './payout-submit.js';
+import { notifyPayoutFailed } from '../discord.js';
 
 const log = logger.child({ area: 'payout-worker' });
 
@@ -183,12 +184,32 @@ async function handleSubmitError(
     // Terminal, or transient but out of retries.
     await markPayoutFailed({ id: row.id, reason: `[${err.kind}] ${reason}` });
     log.error({ payoutId: row.id, kind: err.kind, attempts: usedAttempts }, 'Payout marked failed');
+    notifyPayoutFailed({
+      payoutId: row.id,
+      userId: row.userId,
+      orderId: row.orderId,
+      assetCode: row.assetCode,
+      amount: row.amountStroops.toString(),
+      kind: err.kind,
+      reason,
+      attempts: usedAttempts,
+    });
     return 'failed';
   }
 
   // Unclassified throw — fail loud.
   await markPayoutFailed({ id: row.id, reason });
   log.error({ payoutId: row.id, err }, 'Payout failed with unclassified error');
+  notifyPayoutFailed({
+    payoutId: row.id,
+    userId: row.userId,
+    orderId: row.orderId,
+    assetCode: row.assetCode,
+    amount: row.amountStroops.toString(),
+    kind: 'unclassified',
+    reason,
+    attempts: usedAttempts,
+  });
   return 'failed';
 }
 
