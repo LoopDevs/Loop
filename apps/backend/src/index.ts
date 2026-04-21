@@ -5,6 +5,12 @@ import { logger } from './logger.js';
 import { app, stopCleanupInterval } from './app.js';
 import { startLocationRefresh, stopLocationRefresh } from './clustering/data-store.js';
 import { startMerchantRefresh, stopMerchantRefresh } from './merchants/sync.js';
+import { runMigrations, closeDb } from './db/client.js';
+
+// Apply any pending DB migrations before accepting traffic (ADR 012).
+// Awaited so `serve()` below only runs after the schema is up-to-date —
+// a partial-migration run-time is worse than a slightly-later boot.
+await runMigrations();
 
 // Merchants load first (startMerchantRefresh triggers initial refresh).
 // Locations start after a short delay to ensure merchant data is available
@@ -41,7 +47,7 @@ function shutdown(signal: string): void {
   stopLocationRefresh();
 
   server.close(() => {
-    void sentryFlush(5000).finally(() => {
+    void Promise.allSettled([sentryFlush(5000), closeDb()]).finally(() => {
       logger.info('Server closed, exiting');
       process.exit(0);
     });

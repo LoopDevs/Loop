@@ -1,0 +1,40 @@
+# Local dev database for the Loop backend (ADR 012).
+#
+# Brings up a Postgres 16 container with two databases:
+#   - loop (dev)  — used by `npm run dev:backend`
+#   - loop_test  — used by vitest suites that touch persistence
+#
+# Port 5433 (not the default 5432) so a host-installed Postgres
+# doesn't clash. Set DATABASE_URL in apps/backend/.env.local:
+#   DATABASE_URL=postgres://loop:loop@localhost:5433/loop
+#
+# Commands:
+#   docker compose up -d db       # start (daemonised)
+#   docker compose stop db        # stop (keep data)
+#   docker compose down -v        # stop + wipe the volume
+services:
+  db:
+    image: postgres:16
+    container_name: loop-postgres
+    restart: unless-stopped
+    ports:
+      - '5433:5432'
+    environment:
+      POSTGRES_USER: loop
+      POSTGRES_PASSWORD: loop
+      POSTGRES_DB: loop
+    volumes:
+      - loop-pgdata:/var/lib/postgresql/data
+      # Init script creates the second database on first boot. Idempotent —
+      # Postgres only runs /docker-entrypoint-initdb.d/* when the data
+      # directory is empty, so `docker compose up` on an existing volume
+      # is a no-op.
+      - ./scripts/postgres-init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U loop -d loop']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  loop-pgdata:

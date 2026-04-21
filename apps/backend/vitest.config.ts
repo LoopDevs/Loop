@@ -4,6 +4,10 @@ export default defineConfig({
   test: {
     globals: false,
     environment: 'node',
+    // Pre-imports — runs before any test file resolves a module, so
+    // `env.ts`'s validate-on-load doesn't crash when tests are run
+    // without a real .env on disk.
+    setupFiles: ['./src/__tests__/vitest-env-setup.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],

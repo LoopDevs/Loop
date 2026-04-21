@@ -7,5 +7,6 @@ export default [
   route('auth', 'routes/auth.tsx'),
   route('orders', 'routes/orders.tsx'),
   route('orders/:id', 'routes/orders.$id.tsx'),
+  route('admin/cashback', 'routes/admin.cashback.tsx'),
   route('*', 'routes/not-found.tsx'),
 ] satisfies RouteConfig;

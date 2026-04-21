@@ -12,7 +12,13 @@ vi.hoisted(() => {
 import { parseEnv } from '../env.js';
 
 // Minimum viable env — everything else is optional or has a default.
-const base = { GIFT_CARD_API_BASE_URL: 'https://upstream.example.com' };
+// `DATABASE_URL` is required (ADR 012) so every parse run needs it;
+// the value is a valid shape so the .url() + protocol check passes
+// without opening a real connection.
+const base = {
+  GIFT_CARD_API_BASE_URL: 'https://upstream.example.com',
+  DATABASE_URL: 'postgres://user:pass@localhost:5433/loop',
+};
 
 describe('parseEnv', () => {
   it('parses a minimal valid env with defaults', () => {
@@ -45,11 +51,11 @@ describe('parseEnv', () => {
   });
 
   it('accepts http and https for GIFT_CARD_API_BASE_URL', () => {
-    expect(parseEnv({ GIFT_CARD_API_BASE_URL: 'http://local.test' }).GIFT_CARD_API_BASE_URL).toBe(
-      'http://local.test',
-    );
     expect(
-      parseEnv({ GIFT_CARD_API_BASE_URL: 'https://spend.ctx.com' }).GIFT_CARD_API_BASE_URL,
+      parseEnv({ ...base, GIFT_CARD_API_BASE_URL: 'http://local.test' }).GIFT_CARD_API_BASE_URL,
+    ).toBe('http://local.test');
+    expect(
+      parseEnv({ ...base, GIFT_CARD_API_BASE_URL: 'https://spend.ctx.com' }).GIFT_CARD_API_BASE_URL,
     ).toBe('https://spend.ctx.com');
   });
 

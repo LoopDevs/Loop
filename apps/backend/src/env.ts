@@ -93,6 +93,25 @@ export const EnvSchema = z.object({
 
   // Error tracking (optional — get DSN from sentry.io)
   SENTRY_DSN: z.string().url().optional(),
+
+  // Database (ADR 012). Required — the credits ledger + admin panel
+  // can't start without it. Standard postgres URL; in dev points at
+  // the docker-compose Postgres on :5433.
+  DATABASE_URL: z
+    .string()
+    .url()
+    .refine((u) => u.startsWith('postgres://') || u.startsWith('postgresql://'), {
+      message: 'must be a postgres:// or postgresql:// URL',
+    }),
+  DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
+
+  // Comma-separated list of CTX user IDs granted admin privileges
+  // (ADR 011). Evaluated at user-upsert time to set `users.is_admin`.
+  // Matching by CTX sub (not email) keeps the upsert path synchronous
+  // against the JWT — we don't need to round-trip to CTX's `/me`
+  // endpoint on every admin request. Emails as an allowlist is a
+  // future refinement once the user-profile sync job lands.
+  ADMIN_CTX_USER_IDS: z.string().default(''),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

@@ -30,6 +30,8 @@ import {
 } from './auth/handler.js';
 import { createOrderHandler, listOrdersHandler, getOrderHandler } from './orders/handler.js';
 import { notifyHealthChange } from './discord.js';
+import { requireAdmin } from './auth/require-admin.js';
+import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
 
 export const app = new Hono();
 
@@ -514,6 +516,28 @@ app.use('/api/orders/*', requireAuth);
 app.post('/api/orders', rateLimit(10, 60_000), createOrderHandler);
 app.get('/api/orders', rateLimit(60, 60_000), listOrdersHandler);
 app.get('/api/orders/:id', rateLimit(120, 60_000), getOrderHandler);
+
+// ─── Admin (authenticated + admin-flagged) ──────────────────────────────────
+//
+// Cashback config CRUD (ADR 011). Layered middleware: requireAuth to
+// attach the bearer, then requireAdmin to upsert the Loop user row,
+// gate on is_admin, and set c.get('user'). Rate-limited same as the
+// other authenticated surfaces — an admin still hits the limiter,
+// but the limits are generous since it's a low-volume UI.
+app.use('/api/admin/*', requireAuth);
+app.use('/api/admin/*', requireAdmin);
+
+app.get('/api/admin/merchant-cashback-configs', rateLimit(120, 60_000), listConfigsHandler);
+app.put(
+  '/api/admin/merchant-cashback-configs/:merchantId',
+  rateLimit(60, 60_000),
+  upsertConfigHandler,
+);
+app.get(
+  '/api/admin/merchant-cashback-configs/:merchantId/history',
+  rateLimit(120, 60_000),
+  configHistoryHandler,
+);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 

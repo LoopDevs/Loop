@@ -209,6 +209,9 @@ DELETE /api/auth/session
 POST /api/orders             [authenticated]
 GET  /api/orders             [authenticated]
 GET  /api/orders/:id         [authenticated]
+GET  /api/admin/merchant-cashback-configs              [admin]
+PUT  /api/admin/merchant-cashback-configs/:merchantId  [admin]
+GET  /api/admin/merchant-cashback-configs/:merchantId/history  [admin]
 ```
 
 Full request/response shapes — including field types, pagination
