@@ -20,6 +20,11 @@ vi.mock('../horizon.js', async () => {
     listAccountPayments: (args: unknown) => listPaymentsMock(args),
   };
 });
+vi.mock('../price-feed.js', () => ({
+  // Fixed rate: 1 XLM = $0.10 → 10 cents → 10_000_000 / 10 = 1_000_000
+  // stroops per cent. Tests that want XLM acceptance to pass use this.
+  stroopsPerCent: async (): Promise<bigint> => 1_000_000n,
+}));
 vi.mock('../../orders/repo.js', () => ({
   findPendingOrderByMemo: (memo: string) => findOrderMock(memo),
 }));
@@ -135,41 +140,83 @@ describe('parseStroops', () => {
 });
 
 describe('isAmountSufficient', () => {
-  it('accepts a USDC payment ≥ face value (USD order)', () => {
+  it('accepts a USDC payment ≥ face value (USD order)', async () => {
     const p = usdcPayment('MEMO', '10.0000000');
+    expect(await isAmountSufficient(p, makeOrder() as never)).toBe(true);
+  });
+
+  it('accepts an exact-face-value USDC payment', async () => {
+    const p = usdcPayment('MEMO', '10.0000000');
+    expect(await isAmountSufficient(p, makeOrder({ faceValueMinor: 1_000n }) as never)).toBe(true);
+  });
+
+  it('rejects a USDC underpayment', async () => {
+    const p = usdcPayment('MEMO', '9.9999999');
+    expect(await isAmountSufficient(p, makeOrder({ faceValueMinor: 1_000n }) as never)).toBe(false);
+  });
+
+  it('rejects USDC payment against a non-USD order (FX not wired yet)', async () => {
+    const p = usdcPayment('MEMO', '100.0000000');
+    expect(await isAmountSufficient(p, makeOrder({ currency: 'GBP' }) as never)).toBe(false);
+  });
+
+  it('rejects credit-method orders — they are never watcher-transitioned', async () => {
+    const p = usdcPayment('MEMO', '10.0000000');
+    expect(await isAmountSufficient(p, makeOrder({ paymentMethod: 'credit' }) as never)).toBe(
+      false,
+    );
+  });
+
+  it('rejects an unparseable amount', async () => {
+    const p = { ...usdcPayment('MEMO', '10.0000000'), amount: 'not-a-number' };
+    expect(await isAmountSufficient(p, makeOrder() as never)).toBe(false);
+  });
+
+  it('accepts an XLM payment at the oracle rate', async () => {
+    // Mocked stroopsPerCent = 1_000_000 (≈$0.10/XLM).
+    // $10.00 order (1000 cents) needs 1_000_000_000 stroops = 100 XLM.
+    const p = {
+      ...usdcPayment('MEMO', '100.0000000'),
+      asset_type: 'native',
+      asset_code: undefined,
+      asset_issuer: undefined,
+    };
     expect(
-      isAmountSufficient(p, makeOrder() as unknown as Parameters<typeof isAmountSufficient>[1]),
+      await isAmountSufficient(
+        p as never,
+        makeOrder({ paymentMethod: 'xlm', faceValueMinor: 1_000n }) as never,
+      ),
     ).toBe(true);
   });
 
-  it('accepts an exact-face-value USDC payment', () => {
-    const p = usdcPayment('MEMO', '10.0000000');
-    expect(isAmountSufficient(p, makeOrder({ faceValueMinor: 1_000n }) as never)).toBe(true);
+  it('rejects an XLM payment below the oracle-implied requirement', async () => {
+    const p = {
+      ...usdcPayment('MEMO', '50.0000000'),
+      asset_type: 'native',
+      asset_code: undefined,
+      asset_issuer: undefined,
+    };
+    expect(
+      await isAmountSufficient(
+        p as never,
+        makeOrder({ paymentMethod: 'xlm', faceValueMinor: 1_000n }) as never,
+      ),
+    ).toBe(false);
   });
 
-  it('rejects a USDC underpayment', () => {
-    const p = usdcPayment('MEMO', '9.9999999');
-    expect(isAmountSufficient(p, makeOrder({ faceValueMinor: 1_000n }) as never)).toBe(false);
-  });
-
-  it('rejects USDC payment against a non-USD order (FX not wired yet)', () => {
-    const p = usdcPayment('MEMO', '100.0000000');
-    expect(isAmountSufficient(p, makeOrder({ currency: 'GBP' }) as never)).toBe(false);
-  });
-
-  it('rejects any XLM payment for now (FX oracle deferred)', () => {
-    const p = usdcPayment('MEMO', '10000.0000000');
-    expect(isAmountSufficient(p, makeOrder({ paymentMethod: 'xlm' }) as never)).toBe(false);
-  });
-
-  it('rejects credit-method orders — they are never watcher-transitioned', () => {
-    const p = usdcPayment('MEMO', '10.0000000');
-    expect(isAmountSufficient(p, makeOrder({ paymentMethod: 'credit' }) as never)).toBe(false);
-  });
-
-  it('rejects an unparseable amount', () => {
-    const p = { ...usdcPayment('MEMO', '10.0000000'), amount: 'not-a-number' };
-    expect(isAmountSufficient(p, makeOrder() as never)).toBe(false);
+  it('rejects XLM payment for a currency the oracle has no rate for', async () => {
+    const p = {
+      ...usdcPayment('MEMO', '1000.0000000'),
+      asset_type: 'native',
+      asset_code: undefined,
+      asset_issuer: undefined,
+    };
+    expect(
+      await isAmountSufficient(
+        p as never,
+        makeOrder({ paymentMethod: 'xlm', currency: 'JPY' }) as never,
+      ),
+    ).toBe(false);
   });
 });
 
