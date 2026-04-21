@@ -17,7 +17,7 @@
  * lands in Loop's margin — errs toward Loop, never toward a user
  * being owed an extra penny we haven't reserved.
  */
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { orders, merchantCashbackConfigs, type OrderPaymentMethod } from '../db/schema.js';
 
@@ -180,4 +180,21 @@ export async function createOrder(args: CreateOrderArgs): Promise<Order> {
     throw new Error('createOrder: no row returned');
   }
   return row;
+}
+
+/**
+ * Looks up the unique `pending_payment` order for a given payment
+ * memo. Used by the payment watcher to route an incoming on-chain
+ * deposit to the order it funds.
+ *
+ * Returns null when no matching live order exists — either the
+ * memo is unknown (wrong tx, replayed scan) or the order has
+ * already transitioned to `paid` or past. Both cases are no-ops
+ * for the watcher.
+ */
+export async function findPendingOrderByMemo(memo: string): Promise<Order | null> {
+  const row = await db.query.orders.findFirst({
+    where: and(eq(orders.paymentMemo, memo), eq(orders.state, 'pending_payment')),
+  });
+  return row ?? null;
 }
