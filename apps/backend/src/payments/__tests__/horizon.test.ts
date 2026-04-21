@@ -6,7 +6,12 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-import { listAccountPayments, isMatchingIncomingPayment, type HorizonPayment } from '../horizon.js';
+import {
+  listAccountPayments,
+  isMatchingIncomingPayment,
+  findOutboundPaymentByMemo,
+  type HorizonPayment,
+} from '../horizon.js';
 
 const ACCOUNT = 'GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGV';
 
@@ -216,5 +221,119 @@ describe('isMatchingIncomingPayment', () => {
 
   it('rejects a native payment when the caller expected USDC', () => {
     expect(isMatchingIncomingPayment(base, { account: ACCOUNT, assetCode: 'USDC' })).toBe(false);
+  });
+});
+
+describe('findOutboundPaymentByMemo', () => {
+  const TO = 'GDESTINATION';
+  const MEMO = 'order-abc';
+
+  function outboundPayment(overrides: Partial<HorizonPayment> = {}): HorizonPayment {
+    return {
+      id: 'p-1',
+      paging_token: 'pt-1',
+      type: 'payment',
+      from: ACCOUNT,
+      to: TO,
+      asset_type: 'credit_alphanum12',
+      asset_code: 'GBPLOOP',
+      asset_issuer: 'GISSUER',
+      amount: '5.0000000',
+      transaction_hash: 'tx-abc',
+      transaction_successful: true,
+      transaction: { memo: MEMO, memo_type: 'text', successful: true },
+      ...overrides,
+    };
+  }
+
+  it('returns the matching tx hash on page 1', async () => {
+    fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(paymentResponse([outboundPayment()]));
+    const hit = await findOutboundPaymentByMemo({ account: ACCOUNT, to: TO, memo: MEMO });
+    expect(hit).toEqual({ txHash: 'tx-abc', amount: '5.0000000', assetCode: 'GBPLOOP' });
+  });
+
+  it('returns null when no record matches the memo', async () => {
+    fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(
+        paymentResponse([outboundPayment({ transaction: { memo: 'other', memo_type: 'text' } })]),
+      );
+    const hit = await findOutboundPaymentByMemo({ account: ACCOUNT, to: TO, memo: MEMO });
+    expect(hit).toBeNull();
+  });
+
+  it('returns null when no record matches the destination', async () => {
+    fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(paymentResponse([outboundPayment({ to: 'GOTHER' })]));
+    const hit = await findOutboundPaymentByMemo({ account: ACCOUNT, to: TO, memo: MEMO });
+    expect(hit).toBeNull();
+  });
+
+  it('skips failed txs, incoming payments, and non-text memos', async () => {
+    fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      paymentResponse([
+        outboundPayment({ transaction_successful: false }), // failed
+        outboundPayment({ from: 'GSOMEONEELSE' }), // incoming to our account
+        outboundPayment({ transaction: { memo: MEMO, memo_type: 'hash' } }), // hash memo
+      ]),
+    );
+    const hit = await findOutboundPaymentByMemo({ account: ACCOUNT, to: TO, memo: MEMO });
+    expect(hit).toBeNull();
+  });
+
+  it('walks pages until the match is found (cap respects maxPages)', async () => {
+    const pageHrefs = { page2: 'https://horizon.stellar.org/acc/pmts?cursor=pt2' };
+    fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(
+        paymentResponse(
+          [outboundPayment({ transaction: { memo: 'wrong', memo_type: 'text' } })],
+          pageHrefs.page2,
+        ),
+      )
+      .mockResolvedValueOnce(paymentResponse([outboundPayment()]));
+    const hit = await findOutboundPaymentByMemo({ account: ACCOUNT, to: TO, memo: MEMO });
+    expect(hit?.txHash).toBe('tx-abc');
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns null after scanning maxPages without a match', async () => {
+    // Every page yields a non-matching record + a next cursor.
+    // Need a fresh Response on each call — Response.json() is single-use.
+    fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockImplementation(async () =>
+        paymentResponse(
+          [outboundPayment({ transaction: { memo: 'nope', memo_type: 'text' } })],
+          'https://horizon.stellar.org/acc/pmts?cursor=x',
+        ),
+      );
+    const hit = await findOutboundPaymentByMemo({
+      account: ACCOUNT,
+      to: TO,
+      memo: MEMO,
+      maxPages: 2,
+    });
+    expect(hit).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops early when a page has no records', async () => {
+    fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce(paymentResponse([]));
+    const hit = await findOutboundPaymentByMemo({ account: ACCOUNT, to: TO, memo: MEMO });
+    expect(hit).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws on non-2xx', async () => {
+    fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response('down', { status: 503 }));
+    await expect(
+      findOutboundPaymentByMemo({ account: ACCOUNT, to: TO, memo: MEMO }),
+    ).rejects.toThrow(/Horizon 503/);
   });
 });

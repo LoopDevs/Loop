@@ -136,6 +136,88 @@ function extractCursor(href: string): string | null {
 }
 
 /**
+ * Looks back through `account`'s payment history for an outbound
+ * payment matching `{ to, memo }`. Returns the first match (most
+ * recent when we scan `order=desc`) or null.
+ *
+ * Primary use: ADR 016 payout-submit idempotency — before
+ * re-submitting a `pending_payouts` row, we ask Horizon "have we
+ * already sent this memo to this address?". If yes, the prior
+ * submit landed async; we converge to `confirmed` without issuing
+ * a second tx.
+ *
+ * Scan strategy: walk pages newest-first, stop on the first match.
+ * For a just-submitted payout the match is typically on page 1.
+ * We cap the walk at `maxPages` (default 3 × 200 records =
+ * ~600 payments of lookback) — deeper history shouldn't be relevant
+ * for a payout submitted in the last few minutes. `null` when no
+ * match found within the scan window.
+ *
+ * Throws only on the initial Horizon error / schema drift —
+ * propagates up to the worker's try/catch, which classifies as
+ * transient and retries next tick.
+ */
+export async function findOutboundPaymentByMemo(args: {
+  account: string;
+  to: string;
+  memo: string;
+  /** Max pages to scan before giving up. Default 3, ~600 records. */
+  maxPages?: number;
+}): Promise<{ txHash: string; amount: string; assetCode: string | null } | null> {
+  const maxPages = args.maxPages ?? 3;
+  let cursor: string | undefined;
+  for (let page = 0; page < maxPages; page++) {
+    const url = new URL(`${horizonUrl()}/accounts/${args.account}/payments`);
+    url.searchParams.set('limit', '200');
+    // Walk newest-first so a fresh submit lands on page 1.
+    url.searchParams.set('order', 'desc');
+    url.searchParams.set('join', 'transactions');
+    if (cursor !== undefined) url.searchParams.set('cursor', cursor);
+
+    const res = await fetch(url, {
+      headers: { Accept: 'application/hal+json' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) {
+      log.error(
+        { status: res.status, url: url.toString() },
+        'Horizon findOutboundPaymentByMemo request failed',
+      );
+      throw new Error(`Horizon ${res.status} on ${url.pathname}`);
+    }
+    const raw = await res.json();
+    const parsed = HorizonPaymentsResponse.safeParse(raw);
+    if (!parsed.success) {
+      log.error(
+        { issues: parsed.error.issues },
+        'Horizon response failed schema validation (findOutboundPaymentByMemo)',
+      );
+      throw new Error('Horizon schema drift on /payments');
+    }
+    const records = parsed.data._embedded.records;
+    for (const p of records) {
+      if (p.type !== 'payment') continue;
+      if (p.transaction_successful === false) continue;
+      if (p.from !== args.account) continue;
+      if (p.to !== args.to) continue;
+      if (p.transaction?.memo_type !== 'text') continue;
+      if (p.transaction.memo !== args.memo) continue;
+      return {
+        txHash: p.transaction_hash,
+        amount: p.amount ?? '0',
+        assetCode: p.asset_code ?? null,
+      };
+    }
+    if (records.length === 0) return null;
+    const nextHref = parsed.data._links?.next?.href;
+    const nextCursor = nextHref !== undefined ? extractCursor(nextHref) : null;
+    if (nextCursor === null) return null;
+    cursor = nextCursor;
+  }
+  return null;
+}
+
+/**
  * Ergonomic guard: "is this payment a successful, incoming payment
  * to `account` of asset `assetCode` / `assetIssuer`, with a text
  * memo?". The watcher uses this before consulting the orders table.
