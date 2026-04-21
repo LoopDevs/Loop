@@ -17,8 +17,20 @@
  */
 import { and, eq, lt, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { orders, creditTransactions, userCredits } from '../db/schema.js';
+import {
+  orders,
+  creditTransactions,
+  userCredits,
+  users,
+  pendingPayouts,
+  HOME_CURRENCIES,
+  type HomeCurrency,
+} from '../db/schema.js';
+import { logger } from '../logger.js';
+import { buildPayoutIntent } from '../credits/payout-builder.js';
 import type { Order } from './repo.js';
+
+const log = logger.child({ area: 'order-transitions' });
 
 /**
  * Transition: `pending_payment` → `paid`. Called by the payment
@@ -141,9 +153,74 @@ export async function markOrderFulfilled(
             updatedAt: sql`NOW()`,
           },
         });
+
+      // ADR 015 — write a pending payout row for the Stellar-side
+      // emission, if the user has a linked wallet + a configured
+      // LOOP issuer for their home currency. The SDK submit worker
+      // reads pending rows and signs + submits each one. Building
+      // + inserting inside the same transaction as the ledger write
+      // means a crash mid-fulfillment either records both or
+      // neither — no orphaned payouts without a matching ledger
+      // entry, no ledger entries the payout worker never sees.
+      const [userRow] = await tx
+        .select({
+          stellarAddress: users.stellarAddress,
+          homeCurrency: users.homeCurrency,
+        })
+        .from(users)
+        .where(eq(users.id, order.userId));
+      if (userRow !== undefined && isHomeCurrency(userRow.homeCurrency)) {
+        // Only attempt a payout when the order's ledger currency
+        // matches the user's home currency — cross-currency orders
+        // need the ledger-to-home-currency refactor first, see
+        // ADR 015 rollout follow-ups. `order.currency` equals
+        // `charge_currency` in this path since the ledger was
+        // written in that denomination.
+        if (order.currency === userRow.homeCurrency) {
+          const decision = buildPayoutIntent({
+            stellarAddress: userRow.stellarAddress,
+            homeCurrency: userRow.homeCurrency,
+            userCashbackMinor: order.userCashbackMinor,
+            memoSeed: order.id,
+          });
+          if (decision.kind === 'pay') {
+            await tx
+              .insert(pendingPayouts)
+              .values({
+                userId: order.userId,
+                orderId: order.id,
+                assetCode: decision.intent.assetCode,
+                assetIssuer: decision.intent.assetIssuer,
+                toAddress: decision.intent.to,
+                amountStroops: decision.intent.amountStroops,
+                memoText: decision.intent.memoText,
+              })
+              .onConflictDoNothing({ target: pendingPayouts.orderId });
+          } else {
+            log.info(
+              { orderId: order.id, reason: decision.reason },
+              'Skipping on-chain cashback payout',
+            );
+          }
+        } else {
+          log.warn(
+            {
+              orderId: order.id,
+              orderCurrency: order.currency,
+              userHomeCurrency: userRow.homeCurrency,
+            },
+            'Order currency does not match user home currency — on-chain payout skipped',
+          );
+        }
+      }
     }
     return order;
   });
+}
+
+/** Narrows a DB-read string into the HomeCurrency union — same guard as loop-handler. */
+function isHomeCurrency(s: string): s is HomeCurrency {
+  return (HOME_CURRENCIES as ReadonlyArray<string>).includes(s);
 }
 
 /**

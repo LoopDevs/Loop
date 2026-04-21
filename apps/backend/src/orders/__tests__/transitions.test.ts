@@ -16,7 +16,10 @@ const { dbMock, state } = vi.hoisted(() => {
     updateWhereCount: number;
     insertCreditCalls: unknown[];
     upsertUserCreditsCalls: unknown[];
+    insertPendingPayoutCalls: unknown[];
     upsertSet: unknown;
+    // User-row lookup inside the fulfilled txn (ADR 015).
+    userLookupRows: unknown[];
   }
   const s: State = {
     returningRows: [],
@@ -24,7 +27,9 @@ const { dbMock, state } = vi.hoisted(() => {
     updateWhereCount: 0,
     insertCreditCalls: [],
     upsertUserCreditsCalls: [],
+    insertPendingPayoutCalls: [],
     upsertSet: undefined,
+    userLookupRows: [],
   };
 
   // Outer db chain — shared between the non-txn path and the tx
@@ -52,11 +57,35 @@ const { dbMock, state } = vi.hoisted(() => {
     const last = (chain as unknown as { _lastInsert: string | undefined })['_lastInsert'];
     if (last === 'creditTransactions') s.insertCreditCalls.push(v);
     else if (last === 'userCredits') s.upsertUserCreditsCalls.push(v);
+    else if (last === 'pendingPayouts') s.insertPendingPayoutCalls.push(v);
     return chain;
   });
   chain['onConflictDoUpdate'] = vi.fn((arg: { set: unknown }) => {
     s.upsertSet = arg.set;
     return chain;
+  });
+  // The pending_payouts insert calls onConflictDoNothing — a no-op on
+  // the mock chain; the insert gets captured upstream.
+  chain['onConflictDoNothing'] = vi.fn(() => chain);
+
+  // `select({ ... }).from(users).where(...)` path used by the
+  // fulfillment txn to look up the user's stellar_address +
+  // home_currency. Resolves to `state.userLookupRows` so tests
+  // control what the user row looks like (or is missing).
+  chain['select'] = vi.fn(() => chain);
+  chain['from'] = vi.fn(() => chain);
+  // .where is shared with the update path above; overwrite behaviour
+  // to still track updates AND resolve select(...).from(...).where(...)
+  // as a thenable returning the user rows.
+  const selectAwarePromise = {
+    then: (resolve: (rows: unknown[]) => unknown): unknown => resolve(s.userLookupRows),
+  };
+  (chain as unknown as { where: unknown })['where'] = vi.fn(() => {
+    s.updateWhereCount++;
+    // The caller either `.returning()`s (update path) or `await`s
+    // directly (select path). Returning a value that supports both
+    // keeps the chain happy for both callers.
+    return Object.assign(chain, selectAwarePromise);
   });
 
   // db.transaction(cb) just calls cb with the same chain — we want
@@ -99,6 +128,52 @@ vi.mock('../../db/schema.js', () => ({
     updatedAt: 'updated_at',
     __name: 'userCredits',
   },
+  users: {
+    id: 'id',
+    stellarAddress: 'stellar_address',
+    homeCurrency: 'home_currency',
+    __name: 'users',
+  },
+  pendingPayouts: {
+    orderId: 'order_id',
+    __name: 'pendingPayouts',
+  },
+  HOME_CURRENCIES: ['USD', 'GBP', 'EUR'] as const,
+}));
+vi.mock('../../logger.js', () => ({
+  logger: {
+    child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+  },
+}));
+// Payout-intent builder — default: "pay" when userCashbackMinor > 0,
+// with a fixed issuer/asset/address. Tests that need skip paths can
+// override via `payoutBuilderMock.decision = { kind: 'skip', reason: 'no_address' }`.
+const { payoutBuilderMock } = vi.hoisted(() => ({
+  payoutBuilderMock: {
+    decision: null as unknown,
+  },
+}));
+vi.mock('../../credits/payout-builder.js', () => ({
+  buildPayoutIntent: (args: {
+    userCashbackMinor: bigint;
+    stellarAddress: string | null;
+    homeCurrency: string;
+    memoSeed: string;
+  }) => {
+    if (payoutBuilderMock.decision !== null) return payoutBuilderMock.decision;
+    if (args.userCashbackMinor <= 0n) return { kind: 'skip', reason: 'no_cashback' };
+    if (args.stellarAddress === null) return { kind: 'skip', reason: 'no_address' };
+    return {
+      kind: 'pay',
+      intent: {
+        to: args.stellarAddress,
+        assetCode: `${args.homeCurrency}LOOP`,
+        assetIssuer: 'GISSUER',
+        amountStroops: args.userCashbackMinor * 100_000n,
+        memoText: args.memoSeed.slice(0, 28),
+      },
+    };
+  },
 }));
 
 import {
@@ -115,7 +190,10 @@ beforeEach(() => {
   state.updateWhereCount = 0;
   state.insertCreditCalls = [];
   state.upsertUserCreditsCalls = [];
+  state.insertPendingPayoutCalls = [];
   state.upsertSet = undefined;
+  state.userLookupRows = [];
+  payoutBuilderMock.decision = null;
   for (const fn of Object.values(dbMock)) {
     if (typeof fn === 'function' && 'mockClear' in fn) {
       (fn as unknown as { mockClear: () => void }).mockClear();
@@ -223,6 +301,54 @@ describe('markOrderFulfilled', () => {
     state.returningRows = [baseOrder];
     await markOrderFulfilled('o-1', { ctxOrderId: 'x' });
     expect(dbMock['transaction']!).toHaveBeenCalled();
+  });
+
+  // ─── ADR 015 — pending payout insert inside the fulfillment txn ───────────
+  it('inserts a pending_payouts row when the user qualifies (address + home-currency match)', async () => {
+    state.returningRows = [baseOrder];
+    state.userLookupRows = [{ stellarAddress: 'GDESTINATION', homeCurrency: 'GBP' }];
+    await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+    expect(state.insertPendingPayoutCalls).toHaveLength(1);
+    expect(state.insertPendingPayoutCalls[0]).toMatchObject({
+      userId: 'u-1',
+      orderId: 'o-1',
+      toAddress: 'GDESTINATION',
+      assetCode: 'GBPLOOP',
+      assetIssuer: 'GISSUER',
+      amountStroops: 50_000_000n, // 500 × 100_000
+    });
+  });
+
+  it('skips the payout when the user has no linked stellar address', async () => {
+    state.returningRows = [baseOrder];
+    state.userLookupRows = [{ stellarAddress: null, homeCurrency: 'GBP' }];
+    await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+    expect(state.insertPendingPayoutCalls).toHaveLength(0);
+  });
+
+  it('skips the payout when no user row is found', async () => {
+    state.returningRows = [baseOrder];
+    state.userLookupRows = [];
+    await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+    expect(state.insertPendingPayoutCalls).toHaveLength(0);
+  });
+
+  it('skips the payout when order.currency differs from user.home_currency (cross-FX)', async () => {
+    // Order is in USD, user is GBP — the ledger-to-home-currency
+    // refactor is pending, so we don't yet emit a Stellar payout for
+    // this case (would pay the wrong asset).
+    state.returningRows = [{ ...baseOrder, currency: 'USD' }];
+    state.userLookupRows = [{ stellarAddress: 'GDESTINATION', homeCurrency: 'GBP' }];
+    await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+    expect(state.insertPendingPayoutCalls).toHaveLength(0);
+  });
+
+  it('skips the payout when builder returns a skip decision (e.g. no_issuer)', async () => {
+    state.returningRows = [baseOrder];
+    state.userLookupRows = [{ stellarAddress: 'GDESTINATION', homeCurrency: 'GBP' }];
+    payoutBuilderMock.decision = { kind: 'skip', reason: 'no_issuer' };
+    await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+    expect(state.insertPendingPayoutCalls).toHaveLength(0);
   });
 });
 
