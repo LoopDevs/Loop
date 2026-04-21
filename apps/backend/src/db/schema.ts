@@ -502,3 +502,77 @@ export const userIdentities = pgTable(
 
 export const SOCIAL_PROVIDERS = ['google', 'apple'] as const;
 export type SocialProvider = (typeof SOCIAL_PROVIDERS)[number];
+
+/**
+ * Outbound Stellar cashback payouts (ADR 015 flow 2).
+ *
+ * Written at `markOrderFulfilled` when `buildPayoutIntent` returns
+ * `{ kind: 'pay', ... }`. A separate submit worker reads the
+ * `pending` rows, signs + submits a Stellar Payment via the
+ * @stellar/stellar-sdk (landing in a follow-up slice), and
+ * transitions each row through `pending → submitted → confirmed`
+ * (or `failed`).
+ *
+ * Why persist the intent rather than submitting inline:
+ *   - Retries — a transient Horizon 503 shouldn't lose the payout.
+ *   - Admin visibility — ops can see "3 payouts stuck in submitted"
+ *     at a glance and decide whether to resubmit / refund / escalate.
+ *   - Idempotency — the order → payout row is 1:1, so a re-enter of
+ *     markOrderFulfilled (shouldn't happen, but is defense-in-depth)
+ *     surfaces as a unique-violation on `order_id` rather than a
+ *     double-send.
+ */
+export const pendingPayouts = pgTable(
+  'pending_payouts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'restrict' }),
+    // The LOOP asset + issuer pinned at write-time. If an operator
+    // changes the issuer env var later, in-flight rows still reference
+    // the issuer at the time the intent was built — otherwise a rotate
+    // could retarget a mid-flight payment to a different asset.
+    assetCode: text('asset_code').notNull(),
+    assetIssuer: text('asset_issuer').notNull(),
+    // Destination + amount pinned at write-time. The user updating
+    // their `stellar_address` after the row lands shouldn't redirect
+    // the payment — the commitment was to the address they had when
+    // the order fulfilled.
+    toAddress: text('to_address').notNull(),
+    amountStroops: bigint('amount_stroops', { mode: 'bigint' }).notNull(),
+    memoText: text('memo_text').notNull(),
+
+    state: text('state').notNull().default('pending'),
+    /** Stellar transaction hash, set once submit() succeeds. */
+    txHash: text('tx_hash'),
+    /** Error message from the most recent failed submit attempt. Bounded. */
+    lastError: text('last_error'),
+    attempts: integer('attempts').notNull().default(0),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }),
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+    failedAt: timestamp('failed_at', { withTimezone: true }),
+  },
+  (t) => [
+    // One payout per order — the unique constraint is the idempotency
+    // guard for a re-run of markOrderFulfilled.
+    uniqueIndex('pending_payouts_order_unique').on(t.orderId),
+    // Worker picks up pending rows in FIFO order on each tick.
+    index('pending_payouts_state_created').on(t.state, t.createdAt),
+    index('pending_payouts_user').on(t.userId),
+    check(
+      'pending_payouts_state_known',
+      sql`${t.state} IN ('pending', 'submitted', 'confirmed', 'failed')`,
+    ),
+    check('pending_payouts_amount_positive', sql`${t.amountStroops} > 0`),
+    check('pending_payouts_attempts_non_negative', sql`${t.attempts} >= 0`),
+  ],
+);
+
+export const PAYOUT_STATES = ['pending', 'submitted', 'confirmed', 'failed'] as const;
+export type PayoutState = (typeof PAYOUT_STATES)[number];
