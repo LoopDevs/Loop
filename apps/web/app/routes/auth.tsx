@@ -6,6 +6,7 @@ import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useUiStore } from '~/stores/ui.store';
 import type { ThemePreference } from '~/stores/ui.store';
 import { Navbar } from '~/components/features/Navbar';
+import { PageHeader } from '~/components/ui/PageHeader';
 import { Button } from '~/components/ui/Button';
 import { Input } from '~/components/ui/Input';
 import { checkBiometrics, authenticateWithBiometrics } from '~/native/biometrics';
@@ -175,12 +176,27 @@ export default function AuthRoute(): React.JSX.Element {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // If authenticated, show account view
+  // If authenticated, show account view. The outer container fills
+  // the viewport as background (no forced `min-h-screen`/`min-h-[80vh]`
+  // stack that used to push content past the viewport and trigger
+  // vertical scrolling alongside the bottom tab bar), and the inner
+  // block centres with regular padding.
   if (isAuthenticated) {
+    // NOTE: intentionally no `min-h-screen` here. NativeShell wraps
+    // this route with `native-safe-page native-tab-clearance`, which
+    // already contributes ~150px of combined top + bottom padding on
+    // device. Adding `min-h-screen` on top forced the inner block to
+    // 100vh, so the outer tree ended up at 100vh + 150px — guaranteed
+    // vertical scroll. Letting the page size to its content keeps it
+    // inside the viewport; the body background handles the area below.
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+      <>
         {!isNative && <Navbar />}
-        <div className="flex items-center justify-center min-h-[80vh] px-4">
+        <PageHeader title="Account" fallbackHref="/" />
+        {/* Native only clears the PageHeader row (`h-14` = 3.5rem);
+            NativeShell's `native-safe-page` already adds the
+            safe-top padding. Web: `pt-20` clears the fixed Navbar. */}
+        <div className={`flex flex-col items-center px-4 pb-4 ${isNative ? 'pt-16' : 'pt-20'}`}>
           <div className="w-full max-w-sm text-center">
             <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
               <span className="text-2xl">👤</span>
@@ -205,7 +221,7 @@ export default function AuthRoute(): React.JSX.Element {
             </div>
           </div>
         </div>
-      </div>
+      </>
     );
   }
 

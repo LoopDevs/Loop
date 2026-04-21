@@ -9,11 +9,14 @@ import { useAuth } from '~/hooks/use-auth';
 import { fetchOrder } from '~/services/orders';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Navbar } from '~/components/features/Navbar';
+import { PageHeader } from '~/components/ui/PageHeader';
 import { Spinner } from '~/components/ui/Spinner';
 import { Button } from '~/components/ui/Button';
 import { PurchaseComplete } from '~/components/features/purchase/PurchaseComplete';
 import { formatMoney } from '~/utils/money';
 import { friendlyError } from '~/utils/error-messages';
+import { openWebView } from '~/native/webview';
+import { buildChallengeBarScript } from '~/utils/redeem-challenge-bar';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Order — Loop' }];
@@ -73,32 +76,42 @@ export default function OrderDetailRoute(): React.JSX.Element {
       : null;
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <>
       {!isNative && <Navbar />}
+      <PageHeader title="Order" fallbackHref="/orders" />
 
-      <main className="max-w-2xl mx-auto px-4 py-8 pt-20">
-        <button
-          type="button"
-          onClick={() => {
-            if (window.history.length > 1) void navigate(-1);
-            else void navigate('/orders');
-          }}
-          className="text-sm text-blue-600 dark:text-blue-400 mb-4 inline-flex items-center gap-1"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-4 w-4"
-            aria-hidden="true"
+      {/* Native only needs to clear the PageHeader row height
+          (`h-14` = 3.5rem); NativeShell already adds `var(--safe-top)`
+          padding. Web: `pt-20` clears the fixed Navbar. The tight
+          native top-pad (`pt-14`) keeps the order summary flush up
+          to the header rather than floating in its own white band. */}
+      <main className={`max-w-2xl mx-auto px-4 ${isNative ? 'pt-14 pb-4' : 'pt-20 pb-8'}`}>
+        {/* Web keeps the inline "All orders" breadcrumb since the
+            native back chevron lives in PageHeader instead. */}
+        {!isNative && (
+          <button
+            type="button"
+            onClick={() => {
+              if (window.history.length > 1) void navigate(-1);
+              else void navigate('/orders');
+            }}
+            className="text-sm text-blue-600 dark:text-blue-400 mb-4 inline-flex items-center gap-1"
           >
-            <path d="M15 18 9 12l6-6" />
-          </svg>
-          All orders
-        </button>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-4 w-4"
+              aria-hidden="true"
+            >
+              <path d="M15 18 9 12l6-6" />
+            </svg>
+            All orders
+          </button>
+        )}
 
         {!isAuthenticated && (
           <p className="text-center text-gray-500 dark:text-gray-400 py-12">
@@ -123,7 +136,7 @@ export default function OrderDetailRoute(): React.JSX.Element {
 
         {order !== undefined && <OrderDetailBody order={order} now={now} />}
       </main>
-    </div>
+    </>
   );
 }
 
@@ -142,20 +155,26 @@ function OrderDetailBody({ order, now }: { order: Order; now: number }): React.J
 
   return (
     <>
-      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 mb-6">
-        <h1 className="text-xl font-semibold text-gray-900 dark:text-white mb-1">
-          {order.merchantName}
-        </h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{createdLabel}</p>
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-gray-500 dark:text-gray-400">Amount</span>
-          <span className="font-semibold text-gray-900 dark:text-white">
-            {formatMoney(order.amount, order.currency)}
-          </span>
+      {/* Tight header — merchant + date on the left, amount on the
+          right. Status only surfaces when it's not 'completed'
+          (completed is implicit once we render the gift-card card
+          below, so repeating it as a badge is noise). */}
+      <div className="flex items-start justify-between gap-3 py-3 mb-4">
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
+            {order.merchantName}
+          </h1>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{createdLabel}</p>
         </div>
-        <div className="flex items-center justify-between text-sm mt-2">
-          <span className="text-gray-500 dark:text-gray-400">Status</span>
-          <StatusBadge status={order.status} />
+        <div className="text-right flex-shrink-0">
+          <div className="text-lg font-bold text-gray-900 dark:text-white tabular-nums">
+            {formatMoney(order.amount, order.currency)}
+          </div>
+          {order.status !== 'completed' && (
+            <div className="mt-1">
+              <StatusBadge status={order.status} />
+            </div>
+          )}
         </div>
       </div>
 
@@ -165,38 +184,13 @@ function OrderDetailBody({ order, now }: { order: Order; now: number }): React.J
           code={order.giftCardCode}
           pin={order.giftCardPin}
           barcodeImageUrl={order.barcodeImageUrl}
-          onDone={() => {
-            /* no-op: user is on the orders-detail page, no purchase
-               flow to reset */
-          }}
         />
       )}
 
       {order.status === 'completed' &&
         order.giftCardCode === undefined &&
         order.redeemUrl !== undefined && (
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">
-            <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
-              This gift card is redeemed on the merchant's site. Use the link below and, if
-              prompted, paste the challenge code.
-            </p>
-            {order.redeemChallengeCode !== undefined && (
-              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 mb-4">
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Challenge code</p>
-                <p className="font-mono text-sm text-gray-900 dark:text-gray-100">
-                  {order.redeemChallengeCode}
-                </p>
-              </div>
-            )}
-            <a
-              href={order.redeemUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block w-full text-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold"
-            >
-              Open redemption page
-            </a>
-          </div>
+          <RedemptionBlock redeemUrl={order.redeemUrl} challengeCode={order.redeemChallengeCode} />
         )}
 
       {order.status === 'pending' && (
@@ -238,5 +232,75 @@ function StatusBadge({ status }: { status: Order['status'] }): React.JSX.Element
     <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${cfg.className}`}>
       {cfg.label}
     </span>
+  );
+}
+
+/**
+ * Redeem-URL order presentation. Shows the challenge code (if any)
+ * with a copy affordance, and a button that opens the merchant's
+ * redemption page inside the in-app WebView with the challenge-code
+ * bar pre-injected — same behaviour as the in-purchase RedeemFlow
+ * so revisiting an old URL-redeem order doesn't regress to a bare
+ * `<a target="_blank">`.
+ *
+ * Kept local to this route module since it's not reused elsewhere;
+ * RedeemFlow owns the mid-purchase path with its own state (manual
+ * entry, postMessage capture, etc.) — here the order already
+ * exists and we're just re-opening the redemption page.
+ */
+function RedemptionBlock({
+  redeemUrl,
+  challengeCode,
+}: {
+  redeemUrl: string;
+  challengeCode?: string | undefined;
+}): React.JSX.Element {
+  const [opening, setOpening] = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
+
+  const handleOpen = async (): Promise<void> => {
+    setOpening(true);
+    setOpenError(null);
+    try {
+      // Only inject the bar when we actually have a challenge code —
+      // some URL-redeem merchants don't use one, and injecting an
+      // empty "CODE" bar would be confusing.
+      const scripts =
+        challengeCode !== undefined && challengeCode.length > 0
+          ? [buildChallengeBarScript(challengeCode)]
+          : [];
+      await openWebView({ url: redeemUrl, scripts });
+    } catch (err) {
+      setOpenError(
+        err instanceof Error && err.message.length > 0
+          ? err.message
+          : 'We could not open the redemption page.',
+      );
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  return (
+    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">
+      <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
+        This gift card is redeemed on the merchant&apos;s site. Open the page below and, if
+        prompted, paste the challenge code.
+      </p>
+      {challengeCode !== undefined && challengeCode.length > 0 && (
+        <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 mb-4">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Challenge code</p>
+          <p className="font-mono text-sm text-gray-900 dark:text-gray-100">{challengeCode}</p>
+        </div>
+      )}
+      {openError !== null && (
+        <p className="text-sm text-red-600 dark:text-red-400 mb-3" role="alert">
+          {openError}
+        </p>
+      )}
+      <Button className="w-full" onClick={() => void handleOpen()} disabled={opening}>
+        {opening ? 'Opening\u2026' : 'Open redemption page'}
+      </Button>
+    </div>
   );
 }

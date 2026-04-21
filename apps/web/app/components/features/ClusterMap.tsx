@@ -49,6 +49,13 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
   const fetchAbortRef = useRef<AbortController | null>(null);
   const [status, setStatus] = useState<string>('');
   const [creditsOpen, setCreditsOpen] = useState(false);
+  // Geolocation — one-shot "find me" that drops a marker + pans.
+  // Kept as refs (not state) because the marker and Leaflet module
+  // are imperative APIs; no render-side consumers care.
+  const leafletRef = useRef<typeof LeafletNamespace | null>(null);
+  const userMarkerRef = useRef<Layer | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [locateError, setLocateError] = useState<string | null>(null);
   // Track viewport width once, kept in a ref so the Leaflet marker
   // click closures (which are attached once per marker) pick up the
   // latest value. md: breakpoint in Tailwind = 768px.
@@ -150,8 +157,10 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
       }
       markersRef.current = [];
 
-      const total = data.locationPoints.length + data.clusterPoints.length;
-      setStatus(`${total} ${zoom >= 14 ? 'locations' : 'clusters'} • zoom ${zoom}`);
+      // Clear any previous error state now that we have fresh data.
+      // The success-path "N locations / clusters • zoom" readout was
+      // debug-only and flashed on every pan / zoom; dropped.
+      setStatus('');
 
       // Add cluster markers
       for (const cluster of data.clusterPoints) {
@@ -286,6 +295,71 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
     [],
   );
 
+  const handleLocate = useCallback(() => {
+    const map = mapRef.current;
+    const leaflet = leafletRef.current;
+    if (map === null || leaflet === null) return;
+    if (typeof navigator === 'undefined' || navigator.geolocation === undefined) {
+      setLocateError('Geolocation is not available on this device.');
+      return;
+    }
+    setLocating(true);
+    setLocateError(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        const L = leaflet;
+        // Remove the previous marker before creating a new one —
+        // otherwise repeat-locate drops a pile of blue dots on the
+        // same spot as accuracy drifts slightly.
+        if (userMarkerRef.current !== null) {
+          userMarkerRef.current.remove();
+          userMarkerRef.current = null;
+        }
+        // Custom blue-dot icon — matches the iOS/Google "you are
+        // here" style (solid blue disc with white ring + soft halo).
+        // Rendered as a `divIcon` so the pulsing halo is pure CSS
+        // and we don't need to ship a second image asset.
+        const icon = L.divIcon({
+          className: 'loop-user-location',
+          html: `
+            <div class="loop-user-location__halo"></div>
+            <div class="loop-user-location__dot"></div>
+          `,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
+        });
+        const marker = L.marker([latitude, longitude], {
+          icon,
+          // Sit the user marker under any merchant popups — the
+          // blue dot is orientation, not the content the user is
+          // trying to click through to.
+          zIndexOffset: -500,
+          keyboard: false,
+          interactive: false,
+        }).addTo(map);
+        userMarkerRef.current = marker;
+        // Keep their existing zoom if they've already zoomed in;
+        // otherwise jump to a city-level zoom so the dot and any
+        // nearby merchant clusters both read on screen.
+        const targetZoom = Math.max(map.getZoom(), 13);
+        map.flyTo([latitude, longitude], targetZoom, { duration: 0.7 });
+        setLocating(false);
+      },
+      (err) => {
+        setLocating(false);
+        setLocateError(
+          err.code === err.PERMISSION_DENIED
+            ? 'Location permission denied.'
+            : err.code === err.POSITION_UNAVAILABLE
+              ? 'Couldn\u2019t determine your location.'
+              : 'Timed out finding your location.',
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
+    );
+  }, []);
+
   useEffect(() => {
     if (mapContainerRef.current === null) return;
 
@@ -298,6 +372,10 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
         import('leaflet/dist/leaflet.css'),
       ]);
       const L = leafletModule.default;
+      // Stash the Leaflet module for the locate button's callback —
+      // it runs outside the init effect and needs `L.divIcon` /
+      // `L.marker` to plot the user's position.
+      leafletRef.current = L;
 
       if (!mounted || mapContainerRef.current === null) return;
 
@@ -428,6 +506,45 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
       {status !== '' && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-sm pointer-events-none">
           {status}
+        </div>
+      )}
+
+      {/* Locate-me button — floating pill, top-right. One-shot
+          geolocation: drops a user marker, flies the camera to it.
+          Error message surfaces below as a small toast; permission-
+          denied is the most common result on first tap. */}
+      <button
+        type="button"
+        onClick={handleLocate}
+        disabled={locating}
+        aria-label="Locate me"
+        className="absolute right-3 bottom-16 h-10 w-10 rounded-full bg-white/90 dark:bg-gray-900/90 text-gray-900 dark:text-white shadow-lg flex items-center justify-center backdrop-blur-sm z-[400] active:scale-[0.96] transition-transform disabled:opacity-50"
+      >
+        {locating ? (
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            className="animate-spin"
+            aria-hidden="true"
+          >
+            <path d="M21 12a9 9 0 11-9-9" />
+          </svg>
+        ) : (
+          // Material "near_me" — the conventional diagonal
+          // paper-plane glyph every map app uses for "locate me".
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M21 3L3 10.53v.98l6.84 2.65L12.48 21h.98L21 3z" />
+          </svg>
+        )}
+      </button>
+      {locateError !== null && (
+        <div className="absolute right-3 bottom-28 max-w-[16rem] bg-white/95 dark:bg-gray-900/95 text-[12px] text-gray-700 dark:text-gray-200 px-3 py-2 rounded-md shadow backdrop-blur-sm z-[400]">
+          {locateError}
         </div>
       )}
       {/* License-required attribution for OpenStreetMap + CARTO, tucked

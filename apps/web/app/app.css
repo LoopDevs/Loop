@@ -222,16 +222,29 @@ html.native body::before {
      `--status-bar-intensity` (0 → 1, driven by the scroll listener
      in root.tsx over the first 50px of scroll). So baseline (0 scroll)
      paints 50% of each stop and scrolling ramps it to 100%. */
+  /* Dark-by-default stops, driven by `--status-bar-stop` so the
+     light-theme override below can flip them to white with a single
+     variable swap rather than duplicating the whole gradient. */
+  --status-bar-stop: 0, 0, 0;
   background: linear-gradient(
     to bottom,
-    rgba(0, 0, 0, calc(0.8 * (0.5 + var(--status-bar-intensity, 0) * 0.5))) 0%,
-    rgba(0, 0, 0, calc(0.7 * (0.5 + var(--status-bar-intensity, 0) * 0.5))) 30%,
-    rgba(0, 0, 0, calc(0.4 * (0.5 + var(--status-bar-intensity, 0) * 0.5))) 60%,
-    rgba(0, 0, 0, calc(0.15 * (0.5 + var(--status-bar-intensity, 0) * 0.5))) 85%,
-    rgba(0, 0, 0, 0) 100%
+    rgba(var(--status-bar-stop), calc(0.8 * (0.5 + var(--status-bar-intensity, 0) * 0.5))) 0%,
+    rgba(var(--status-bar-stop), calc(0.7 * (0.5 + var(--status-bar-intensity, 0) * 0.5))) 30%,
+    rgba(var(--status-bar-stop), calc(0.4 * (0.5 + var(--status-bar-intensity, 0) * 0.5))) 60%,
+    rgba(var(--status-bar-stop), calc(0.15 * (0.5 + var(--status-bar-intensity, 0) * 0.5))) 85%,
+    rgba(var(--status-bar-stop), 0) 100%
   );
   pointer-events: none;
   z-index: 1050;
+}
+
+/* Light theme — paint the status-bar backdrop white instead of
+   black. Same alpha curve, just a white source colour, so the
+   gradient still fades smoothly into whatever's scrolling
+   underneath. `.dark` takes precedence because of the class
+   specificity in the inline theme script. */
+html.native.light body::before {
+  --status-bar-stop: 255, 255, 255;
 }
 
 .native-safe-x {
@@ -376,4 +389,44 @@ html.native .route-enter {
 
 .animate-slide-up {
   animation: slide-up 0.3s ease-out;
+}
+
+/* "You are here" marker — a solid blue disc with a white ring and a
+   pulsing halo, styled to match the convention iOS Maps / Google
+   Maps use so users recognise it instantly. Rendered by Leaflet
+   via a `divIcon` so we don't have to ship an image asset for the
+   animated halo. */
+.loop-user-location {
+  position: relative;
+  pointer-events: none;
+}
+.loop-user-location__halo {
+  position: absolute;
+  inset: -12px;
+  border-radius: 50%;
+  background: rgba(59, 130, 246, 0.25);
+  animation: loop-user-location-pulse 2s ease-out infinite;
+}
+.loop-user-location__dot {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #3b82f6;
+  box-shadow:
+    0 0 0 3px #fff,
+    0 2px 6px rgba(0, 0, 0, 0.3);
+}
+@keyframes loop-user-location-pulse {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+  70% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
 }
