@@ -208,6 +208,10 @@ export interface LoopOrderView {
   userCashbackMinor: string;
   /** CTX gift-card id, populated once procurement resolves. */
   ctxOrderId: string | null;
+  /** Redemption payload (ADR 010). Null fields when CTX didn't return them. */
+  redeemCode: string | null;
+  redeemPin: string | null;
+  redeemUrl: string | null;
   failureReason: string | null;
   createdAt: string;
   paidAt: string | null;
@@ -257,6 +261,9 @@ export async function loopGetOrderHandler(c: Context): Promise<Response> {
       row.paymentMethod === 'credit' ? null : (env.LOOP_STELLAR_DEPOSIT_ADDRESS ?? null),
     userCashbackMinor: row.userCashbackMinor.toString(),
     ctxOrderId: row.ctxOrderId,
+    redeemCode: row.redeemCode,
+    redeemPin: row.redeemPin,
+    redeemUrl: row.redeemUrl,
     failureReason: row.failureReason,
     createdAt: row.createdAt.toISOString(),
     paidAt: row.paidAt?.toISOString() ?? null,

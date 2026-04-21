@@ -86,6 +86,25 @@ function okCtxResponse(id: string): Response {
   });
 }
 
+function ctxDetailResponse(
+  fields: { redeemCode?: string; redeemPin?: string; redeemUrl?: string } = {},
+): Response {
+  return new Response(JSON.stringify(fields), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+/** Wires two CTX responses in order: POST /gift-cards, then GET /gift-cards/:id. */
+function mockProcureAndFetch(
+  id: string,
+  detail: Parameters<typeof ctxDetailResponse>[0] = {},
+): void {
+  operatorFetchMock
+    .mockResolvedValueOnce(okCtxResponse(id))
+    .mockResolvedValueOnce(ctxDetailResponse(detail));
+}
+
 beforeEach(() => {
   state.paid = [];
   markProcuringMock.mockReset();
@@ -110,22 +129,68 @@ describe('runProcurementTick', () => {
     expect(markProcuringMock).not.toHaveBeenCalled();
   });
 
-  it('happy path: paid → procuring → CTX POST → fulfilled', async () => {
+  it('happy path: paid → procuring → CTX POST → fetch detail → fulfilled', async () => {
     state.paid = [makeOrder({ id: 'o-1' })];
-    operatorFetchMock.mockResolvedValue(okCtxResponse('ctx-abc'));
+    mockProcureAndFetch('ctx-abc', {
+      redeemCode: 'ABC-123',
+      redeemPin: '4242',
+      redeemUrl: 'https://example.com/redeem/xyz',
+    });
     const r = await runProcurementTick();
     expect(r.picked).toBe(1);
     expect(r.fulfilled).toBe(1);
     expect(r.failed).toBe(0);
     expect(markProcuringMock).toHaveBeenCalledWith('o-1', { ctxOperatorId: 'pool' });
-    expect(markFulfilledMock).toHaveBeenCalledWith('o-1', { ctxOrderId: 'ctx-abc' });
+    expect(markFulfilledMock).toHaveBeenCalledWith('o-1', {
+      ctxOrderId: 'ctx-abc',
+      redemption: {
+        code: 'ABC-123',
+        pin: '4242',
+        url: 'https://example.com/redeem/xyz',
+      },
+    });
+    // Two operator calls: POST /gift-cards then GET /gift-cards/<id>.
+    expect(operatorFetchMock).toHaveBeenCalledTimes(2);
+    expect(operatorFetchMock.mock.calls[1]![0]).toMatch(/\/gift-cards\/ctx-abc$/);
+  });
+
+  it('fulfillment persists nulls when CTX detail fetch fails', async () => {
+    state.paid = [makeOrder({ id: 'o-1' })];
+    operatorFetchMock
+      .mockResolvedValueOnce(okCtxResponse('ctx-abc'))
+      .mockResolvedValueOnce(new Response('oops', { status: 500 }));
+    const r = await runProcurementTick();
+    expect(r.fulfilled).toBe(1);
+    expect(markFulfilledMock).toHaveBeenCalledWith('o-1', {
+      ctxOrderId: 'ctx-abc',
+      redemption: { code: null, pin: null, url: null },
+    });
+  });
+
+  it('accepts alternative CTX field aliases (code / pin / url)', async () => {
+    state.paid = [makeOrder({ id: 'o-1' })];
+    operatorFetchMock.mockResolvedValueOnce(okCtxResponse('ctx-abc')).mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: 'C', pin: 'P', url: 'https://x.example' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    await runProcurementTick();
+    expect(markFulfilledMock).toHaveBeenCalledWith('o-1', {
+      ctxOrderId: 'ctx-abc',
+      redemption: {
+        code: 'C',
+        pin: 'P',
+        url: 'https://x.example',
+      },
+    });
   });
 
   it('sends the expected CTX body (merchantId, fiatCurrency, fiatAmount as major-unit string)', async () => {
     state.paid = [
       makeOrder({ id: 'o-1', merchantId: 'target', currency: 'USD', faceValueMinor: 2_500n }),
     ];
-    operatorFetchMock.mockResolvedValue(okCtxResponse('ctx-1'));
+    mockProcureAndFetch('ctx-1');
     await runProcurementTick();
     expect(operatorFetchMock).toHaveBeenCalledWith(
       'https://ctx.example/gift-cards',
@@ -190,7 +255,7 @@ describe('runProcurementTick', () => {
 
   it('markOrderFulfilled returning null → outcome is skipped (race with another tick)', async () => {
     state.paid = [makeOrder({ id: 'o-1' })];
-    operatorFetchMock.mockResolvedValue(okCtxResponse('ctx-abc'));
+    mockProcureAndFetch('ctx-abc');
     markFulfilledMock.mockResolvedValue(null);
     const r = await runProcurementTick();
     expect(r.skipped).toBe(1);
@@ -199,12 +264,16 @@ describe('runProcurementTick', () => {
 
   it('processes multiple orders and aggregates counts', async () => {
     state.paid = [makeOrder({ id: 'o-1' }), makeOrder({ id: 'o-2' }), makeOrder({ id: 'o-3' })];
-    let call = 0;
-    operatorFetchMock.mockImplementation(async () => {
-      call++;
-      if (call === 2) return new Response('boom', { status: 502 });
-      return okCtxResponse(`ctx-${call}`);
-    });
+    // Each successful order makes 2 calls: POST then GET detail.
+    // Order 1: POST ok, GET ok → fulfilled.
+    // Order 2: POST fails with 502 → failed (no second call).
+    // Order 3: POST ok, GET ok → fulfilled.
+    operatorFetchMock
+      .mockResolvedValueOnce(okCtxResponse('ctx-1'))
+      .mockResolvedValueOnce(ctxDetailResponse())
+      .mockResolvedValueOnce(new Response('boom', { status: 502 }))
+      .mockResolvedValueOnce(okCtxResponse('ctx-3'))
+      .mockResolvedValueOnce(ctxDetailResponse());
     const r = await runProcurementTick();
     expect(r.picked).toBe(3);
     expect(r.fulfilled).toBe(2);

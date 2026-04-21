@@ -38,6 +38,60 @@ const CtxGiftCardResponse = z.object({
   id: z.string().min(1),
 });
 
+/**
+ * CTX response shape for GET /gift-cards/:id, narrowed to the
+ * redemption fields we surface to the user. All fields are optional
+ * — some merchant types redeem by URL + challenge, others by a
+ * static code with or without a PIN.
+ */
+const CtxGiftCardDetailResponse = z.object({
+  redeemCode: z.string().optional(),
+  redeemPin: z.string().optional(),
+  redeemUrl: z.string().url().optional(),
+  code: z.string().optional(),
+  pin: z.string().optional(),
+  url: z.string().url().optional(),
+});
+
+/**
+ * Fetches the gift-card detail from CTX and collapses its various
+ * field aliases into our internal `redeemCode / redeemPin / redeemUrl`
+ * shape. CTX has been seen to use both `redeemCode` / `code` in the
+ * wild depending on endpoint version; accept either.
+ */
+async function fetchRedemption(ctxOrderId: string): Promise<{
+  code: string | null;
+  pin: string | null;
+  url: string | null;
+}> {
+  const res = await operatorFetch(upstreamUrl(`/gift-cards/${encodeURIComponent(ctxOrderId)}`), {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) {
+    log.warn(
+      { ctxOrderId, status: res.status },
+      'CTX gift-card detail fetch returned non-ok; persisting order without redemption payload',
+    );
+    return { code: null, pin: null, url: null };
+  }
+  const raw = await res.json();
+  const parsed = CtxGiftCardDetailResponse.safeParse(raw);
+  if (!parsed.success) {
+    log.warn(
+      { ctxOrderId, issues: parsed.error.issues },
+      'CTX gift-card detail schema mismatch; persisting order without redemption payload',
+    );
+    return { code: null, pin: null, url: null };
+  }
+  return {
+    code: parsed.data.redeemCode ?? parsed.data.code ?? null,
+    pin: parsed.data.redeemPin ?? parsed.data.pin ?? null,
+    url: parsed.data.redeemUrl ?? parsed.data.url ?? null,
+  };
+}
+
 export interface ProcurementTickResult {
   picked: number;
   fulfilled: number;
@@ -96,7 +150,15 @@ async function procureOne(order: Order): Promise<'fulfilled' | 'failed' | 'skipp
       await markOrderFailed(order.id, 'CTX response schema drift');
       return 'failed';
     }
-    const fulfilled = await markOrderFulfilled(order.id, { ctxOrderId: parsed.data.id });
+    // Fetch the redemption payload before flipping to fulfilled so
+    // the user's "Ready" screen has the code/PIN ready to display on
+    // first render. A fetch failure doesn't block fulfillment — we
+    // still transition and log; a follow-up can backfill later.
+    const redemption = await fetchRedemption(parsed.data.id);
+    const fulfilled = await markOrderFulfilled(order.id, {
+      ctxOrderId: parsed.data.id,
+      redemption,
+    });
     if (fulfilled === null) {
       // Race — another tick fulfilled it before us. Treat as skipped
       // (the other tick did the ledger writes).

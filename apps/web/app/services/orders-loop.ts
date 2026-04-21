@@ -63,6 +63,9 @@ export interface LoopOrderView {
   stellarAddress: string | null;
   userCashbackMinor: string;
   ctxOrderId: string | null;
+  redeemCode: string | null;
+  redeemPin: string | null;
+  redeemUrl: string | null;
   failureReason: string | null;
   createdAt: string;
   paidAt: string | null;
