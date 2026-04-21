@@ -27,6 +27,7 @@ import { findPendingOrderByMemo, type Order } from '../orders/repo.js';
 import { markOrderPaid, sweepExpiredOrders } from '../orders/transitions.js';
 import { listAccountPayments, isMatchingIncomingPayment, type HorizonPayment } from './horizon.js';
 import { stroopsPerCent, usdcStroopsPerCent } from './price-feed.js';
+import { configuredLoopPayableAssets, type LoopAssetCode } from '../credits/payout-asset.js';
 
 const log = logger.child({ area: 'payment-watcher' });
 
@@ -66,7 +67,11 @@ export function parseStroops(amount: string): bigint {
  * order paid with 100 USDC would fail). Ops currently run Loop in
  * USD only; multi-currency fiat-FX for USDC is a separate slice.
  */
-export async function isAmountSufficient(payment: HorizonPayment, order: Order): Promise<boolean> {
+export async function isAmountSufficient(
+  payment: HorizonPayment,
+  order: Order,
+  loopAssetCode: LoopAssetCode | null = null,
+): Promise<boolean> {
   if (order.paymentMethod === 'credit') {
     // Credit-funded orders don't go through the watcher — they're
     // debited inline in the handler. Reaching this branch is a bug.
@@ -80,6 +85,31 @@ export async function isAmountSufficient(payment: HorizonPayment, order: Order):
     log.error({ amount: payment.amount, orderId: order.id }, 'Unparseable payment amount');
     return false;
   }
+
+  // LOOP-asset payment (ADR 015). The asset is 1:1 with its matching
+  // fiat at 7 decimals — USDLOOP:USD = GBPLOOP:GBP = EURLOOP:EUR,
+  // 100_000 stroops per minor unit — so the size check skips both
+  // the XLM oracle and the USD FX feed. Reject when the asset's
+  // currency doesn't match the order's charge currency: a user
+  // paying GBPLOOP for a USD-charged order is either confused or
+  // exploiting the 1:1 assumption cross-currency.
+  if (loopAssetCode !== null) {
+    const expectedCurrency = loopAssetCurrency(loopAssetCode);
+    if (order.chargeCurrency !== expectedCurrency) {
+      log.warn(
+        {
+          orderId: order.id,
+          chargeCurrency: order.chargeCurrency,
+          loopAssetCode,
+        },
+        'LOOP asset currency does not match order charge currency',
+      );
+      return false;
+    }
+    const requiredStroops = order.chargeMinor * 100_000n;
+    return receivedStroops >= requiredStroops;
+  }
+
   if (order.paymentMethod === 'usdc') {
     if (order.currency !== 'USD' && order.currency !== 'GBP' && order.currency !== 'EUR') {
       log.warn(
@@ -113,6 +143,18 @@ export async function isAmountSufficient(payment: HorizonPayment, order: Order):
   } catch (err) {
     log.warn({ err, orderId: order.id }, 'XLM price oracle unavailable — rejecting XLM payment');
     return false;
+  }
+}
+
+/** Fiat currency backing each LOOP-branded stablecoin (1:1 by design). */
+function loopAssetCurrency(code: LoopAssetCode): 'USD' | 'GBP' | 'EUR' {
+  switch (code) {
+    case 'USDLOOP':
+      return 'USD';
+    case 'GBPLOOP':
+      return 'GBP';
+    case 'EURLOOP':
+      return 'EUR';
   }
 }
 
@@ -178,6 +220,13 @@ export async function runPaymentWatcherTick(args: {
     unmatchedMemo: 0,
   };
 
+  // ADR 015 — extend the asset-match allowlist to cover every LOOP
+  // asset the operator has issued + configured. The allowlist is
+  // computed fresh every tick so an operator hot-adding an issuer
+  // env var + restarting takes effect at the next watcher tick,
+  // no redeploy dance.
+  const loopAssets = configuredLoopPayableAssets();
+
   for (const p of page.records) {
     // USDC path — preferred for launch. Falls back to XLM check for
     // a native-asset payment; the order-level isAmountSufficient
@@ -191,7 +240,24 @@ export async function runPaymentWatcherTick(args: {
       account: args.account,
       assetCode: null,
     });
-    if (!matchesUsdc && !matchesXlm) continue;
+    // A LOOP-asset match carries the code forward so the size check
+    // can apply the 1:1 fiat peg (no oracle round-trip). First match
+    // wins — `configuredLoopPayableAssets` enforces issuer pinning so
+    // two configured LOOP assets can't collide on an asset code.
+    let loopAssetCode: LoopAssetCode | null = null;
+    for (const la of loopAssets) {
+      if (
+        isMatchingIncomingPayment(p, {
+          account: args.account,
+          assetCode: la.code,
+          assetIssuer: la.issuer,
+        })
+      ) {
+        loopAssetCode = la.code;
+        break;
+      }
+    }
+    if (!matchesUsdc && !matchesXlm && loopAssetCode === null) continue;
     const memo = p.transaction?.memo;
     if (typeof memo !== 'string') continue;
 
@@ -202,13 +268,14 @@ export async function runPaymentWatcherTick(args: {
     }
     result.matched++;
 
-    if (!(await isAmountSufficient(p, order))) {
+    if (!(await isAmountSufficient(p, order, loopAssetCode))) {
       log.warn(
         {
           orderId: order.id,
           expected: order.faceValueMinor.toString(),
           paymentAmount: p.amount,
           paymentMethod: order.paymentMethod,
+          loopAssetCode,
         },
         'Payment amount does not cover order face value',
       );
