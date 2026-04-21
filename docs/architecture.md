@@ -209,6 +209,7 @@ POST /api/auth/refresh
 DELETE /api/auth/session
 POST /api/orders             [authenticated]
 POST /api/orders/loop        [authenticated — Loop-native flow, ADR 010]
+GET  /api/orders/loop        [authenticated — Loop-native list, ADR 010]
 GET  /api/orders/loop/:id    [authenticated — Loop-native flow, ADR 010]
 GET  /api/orders             [authenticated]
 GET  /api/orders/:id         [authenticated]

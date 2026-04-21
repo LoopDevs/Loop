@@ -220,6 +220,52 @@ export interface LoopOrderView {
 }
 
 /**
+ * Shapes a DB `orders` row into the BigInt-safe wire view. Shared by
+ * the single-get and list handlers so their response shapes match.
+ */
+function orderToView(row: {
+  id: string;
+  merchantId: string;
+  state: string;
+  faceValueMinor: bigint;
+  currency: string;
+  paymentMethod: string;
+  paymentMemo: string | null;
+  userCashbackMinor: bigint;
+  ctxOrderId: string | null;
+  redeemCode: string | null;
+  redeemPin: string | null;
+  redeemUrl: string | null;
+  failureReason: string | null;
+  createdAt: Date;
+  paidAt: Date | null;
+  fulfilledAt: Date | null;
+  failedAt: Date | null;
+}): LoopOrderView {
+  return {
+    id: row.id,
+    merchantId: row.merchantId,
+    state: row.state,
+    faceValueMinor: row.faceValueMinor.toString(),
+    currency: row.currency,
+    paymentMethod: row.paymentMethod as 'xlm' | 'usdc' | 'credit',
+    paymentMemo: row.paymentMemo,
+    stellarAddress:
+      row.paymentMethod === 'credit' ? null : (env.LOOP_STELLAR_DEPOSIT_ADDRESS ?? null),
+    userCashbackMinor: row.userCashbackMinor.toString(),
+    ctxOrderId: row.ctxOrderId,
+    redeemCode: row.redeemCode,
+    redeemPin: row.redeemPin,
+    redeemUrl: row.redeemUrl,
+    failureReason: row.failureReason,
+    createdAt: row.createdAt.toISOString(),
+    paidAt: row.paidAt?.toISOString() ?? null,
+    fulfilledAt: row.fulfilledAt?.toISOString() ?? null,
+    failedAt: row.failedAt?.toISOString() ?? null,
+  };
+}
+
+/**
  * GET /api/orders/loop/:id
  *
  * Returns the Loop-native order the caller owns. 404 on non-owner
@@ -249,26 +295,53 @@ export async function loopGetOrderHandler(c: Context): Promise<Response> {
     return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);
   }
 
-  const view: LoopOrderView = {
-    id: row.id,
-    merchantId: row.merchantId,
-    state: row.state,
-    faceValueMinor: row.faceValueMinor.toString(),
-    currency: row.currency,
-    paymentMethod: row.paymentMethod as 'xlm' | 'usdc' | 'credit',
-    paymentMemo: row.paymentMemo,
-    stellarAddress:
-      row.paymentMethod === 'credit' ? null : (env.LOOP_STELLAR_DEPOSIT_ADDRESS ?? null),
-    userCashbackMinor: row.userCashbackMinor.toString(),
-    ctxOrderId: row.ctxOrderId,
-    redeemCode: row.redeemCode,
-    redeemPin: row.redeemPin,
-    redeemUrl: row.redeemUrl,
-    failureReason: row.failureReason,
-    createdAt: row.createdAt.toISOString(),
-    paidAt: row.paidAt?.toISOString() ?? null,
-    fulfilledAt: row.fulfilledAt?.toISOString() ?? null,
-    failedAt: row.failedAt?.toISOString() ?? null,
-  };
-  return c.json(view);
+  return c.json(orderToView(row));
+}
+
+/**
+ * GET /api/orders/loop
+ *
+ * Owner-scoped list of the caller's Loop-native orders, newest first.
+ * Supports `?limit=<n>` (1–100, default 50). Pagination by
+ * `?before=<iso>` — the list is descending by `created_at`, so a
+ * client paging backwards passes the last row's createdAt.
+ *
+ * Returns `{ orders: LoopOrderView[] }`. An empty list is a valid
+ * response (fresh accounts / no Loop-native orders yet).
+ */
+export async function loopListOrdersHandler(c: Context): Promise<Response> {
+  if (!env.LOOP_AUTH_NATIVE_ENABLED) {
+    return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
+  }
+  const auth = c.get('auth') as LoopAuthContext | undefined;
+  if (auth === undefined || auth.kind !== 'loop') {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Loop-native authentication required' }, 401);
+  }
+
+  const limitRaw = c.req.query('limit');
+  const parsedLimit = Number.parseInt(limitRaw ?? '50', 10);
+  // Unparseable input → default (50); a parseable 0 or negative
+  // clamps to the floor (1); >100 clamps to the ceiling.
+  const limit = Math.min(Math.max(Number.isNaN(parsedLimit) ? 50 : parsedLimit, 1), 100);
+  const before = c.req.query('before');
+  const beforeDate = typeof before === 'string' && before.length > 0 ? new Date(before) : null;
+  if (beforeDate !== null && Number.isNaN(beforeDate.getTime())) {
+    return c.json(
+      { code: 'VALIDATION_ERROR', message: 'before must be an ISO-8601 timestamp' },
+      400,
+    );
+  }
+
+  const rows = await db
+    .select()
+    .from(orders)
+    .where(
+      beforeDate !== null
+        ? and(eq(orders.userId, auth.userId), sql`${orders.createdAt} < ${beforeDate}`)
+        : eq(orders.userId, auth.userId),
+    )
+    .orderBy(sql`${orders.createdAt} DESC`)
+    .limit(limit);
+
+  return c.json({ orders: rows.map(orderToView) });
 }
