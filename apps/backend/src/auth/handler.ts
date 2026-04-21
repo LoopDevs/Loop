@@ -4,6 +4,7 @@ import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
+import { nativeRequestOtpHandler } from './native.js';
 
 const log = logger.child({ handler: 'auth' });
 
@@ -48,9 +49,17 @@ const RefreshUpstreamResponse = z.object({
 
 /**
  * POST /api/auth/request-otp
- * Proxies to upstream POST /login.
+ *
+ * Proxies to upstream POST /login by default. When
+ * `LOOP_AUTH_NATIVE_ENABLED` is set (ADR 013), dispatches to the
+ * Loop-native handler which sends the email itself and writes an
+ * `otps` row — CTX is bypassed for user identity.
  */
 export async function requestOtpHandler(c: Context): Promise<Response> {
+  if (env.LOOP_AUTH_NATIVE_ENABLED) {
+    return nativeRequestOtpHandler(c);
+  }
+
   const parsed = RequestOtpBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'Valid email is required' }, 400);
