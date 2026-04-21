@@ -88,3 +88,47 @@ export async function getCashbackHistory(
     `/api/users/me/cashback-history${query.length > 0 ? `?${query}` : ''}`,
   );
 }
+
+export type UserPendingPayoutState = 'pending' | 'submitted' | 'confirmed' | 'failed';
+
+/** One row of the caller's on-chain payout backlog (ADR 015 / 016). */
+export interface UserPendingPayoutView {
+  id: string;
+  orderId: string;
+  /** LOOP asset code: USDLOOP / GBPLOOP / EURLOOP. */
+  assetCode: string;
+  assetIssuer: string;
+  /** Stroops (7 decimals); bigint-as-string. */
+  amountStroops: string;
+  state: UserPendingPayoutState;
+  /** Null until the payout confirms on Stellar. */
+  txHash: string | null;
+  attempts: number;
+  createdAt: string;
+  submittedAt: string | null;
+  confirmedAt: string | null;
+  failedAt: string | null;
+}
+
+export interface UserPendingPayoutsResponse {
+  payouts: UserPendingPayoutView[];
+}
+
+/**
+ * `GET /api/users/me/pending-payouts` — caller-scoped on-chain payout
+ * backlog. Mirrors the admin shape (state / before / limit) but
+ * filtered to `auth.userId` server-side. Rendered on /settings/cashback
+ * so the user can track each outbound LOOP-asset emission.
+ */
+export async function getUserPendingPayouts(
+  opts: { state?: UserPendingPayoutState; limit?: number; before?: string } = {},
+): Promise<UserPendingPayoutsResponse> {
+  const params = new URLSearchParams();
+  if (opts.state !== undefined) params.set('state', opts.state);
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  if (opts.before !== undefined) params.set('before', opts.before);
+  const query = params.toString();
+  return authenticatedRequest<UserPendingPayoutsResponse>(
+    `/api/users/me/pending-payouts${query.length > 0 ? `?${query}` : ''}`,
+  );
+}
