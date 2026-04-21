@@ -9,8 +9,12 @@ import { MobileHome } from '~/components/features/home/MobileHome';
 
 export function meta(): Route.MetaDescriptors {
   return [
-    { title: 'Loop — Save money every time you shop' },
-    { name: 'description', content: 'Buy discounted gift cards with XLM.' },
+    { title: 'Loop — Earn cashback on every gift card' },
+    {
+      name: 'description',
+      content:
+        'Buy gift cards from your favourite merchants and earn cashback back to your wallet — on-chain, every time.',
+    },
   ];
 }
 
@@ -22,10 +26,27 @@ function HomeContent(): React.JSX.Element {
   // page — the lookup below is O(1) per card, so both grids share it.
   const { lookup: lookupCashback } = useMerchantsCashbackRatesMap();
 
+  // Featured set — merchants with an active cashback config ranked
+  // by rate, falling back to upstream savings % when the rates map
+  // hasn't loaded yet (otherwise the featured strip would be empty
+  // on a cold page load). A merchant surfaces as long as it has
+  // either a cashback rate or a savings percentage.
   const featured = [...merchants]
-    .filter((m) => m.savingsPercentage !== undefined && m.savingsPercentage > 0)
-    .sort((a, b) => (b.savingsPercentage ?? 0) - (a.savingsPercentage ?? 0))
-    .slice(0, 6);
+    .map((m) => {
+      const pctStr = lookupCashback(m.id);
+      const cashbackPct = pctStr !== null ? Number(pctStr) : 0;
+      const savingsPct = m.savingsPercentage ?? 0;
+      return { m, cashbackPct, savingsPct };
+    })
+    .filter(({ cashbackPct, savingsPct }) => cashbackPct > 0 || savingsPct > 0)
+    .sort((a, b) => {
+      // Cashback rate dominates the sort; savings breaks ties so
+      // "5% cashback + 10% savings" beats "5% cashback + 2% savings".
+      if (b.cashbackPct !== a.cashbackPct) return b.cashbackPct - a.cashbackPct;
+      return b.savingsPct - a.savingsPct;
+    })
+    .slice(0, 6)
+    .map(({ m }) => m);
 
   return (
     <div>
@@ -54,7 +75,11 @@ function HomeContent(): React.JSX.Element {
             />
             <div className="absolute inset-0 bg-black/55" />
             <div className="relative z-0 text-center pt-16 pb-12 px-6 sm:pt-24 sm:pb-16 lg:pt-48 lg:pb-24">
-              <h1 className="text-5xl font-bold mb-4">Save money every time you shop</h1>
+              <h1 className="text-5xl font-bold mb-4">Earn cashback on every gift card</h1>
+              <p className="text-lg md:text-xl text-white/80 max-w-2xl mx-auto">
+                Buy from merchants you already shop at. Every order pays back to your Loop balance —
+                withdraw on-chain whenever you&rsquo;re ready.
+              </p>
               <div className="flex flex-row justify-center items-center gap-8 md:gap-16 mt-12 mb-12">
                 <Feature
                   icon={
@@ -99,7 +124,7 @@ function HomeContent(): React.JSX.Element {
                       />
                     </svg>
                   }
-                  label="Save up to 25%"
+                  label="Cashback on every order"
                 />
               </div>
             </div>
@@ -132,10 +157,10 @@ function HomeContent(): React.JSX.Element {
             <section className="mb-16">
               <div className="text-center mb-12">
                 <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
-                  Featured Merchants
+                  Top cashback rates
                 </h2>
                 <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
-                  Top-rated merchants with the highest savings
+                  Featured merchants with the highest cashback on Loop right now.
                 </p>
               </div>
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
