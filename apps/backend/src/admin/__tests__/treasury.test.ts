@@ -29,6 +29,16 @@ vi.mock('../../db/schema.js', () => ({
     type: 'type',
     amountMinor: 'amountMinor',
   },
+  HOME_CURRENCIES: ['USD', 'GBP', 'EUR'] as const,
+}));
+// Payout-asset resolver — returns the static code mapping; issuer
+// stays null so tests don't depend on env. Individual tests that
+// exercise the issuer-populated path override this mock locally.
+vi.mock('../../credits/payout-asset.js', () => ({
+  payoutAssetFor: (currency: 'USD' | 'GBP' | 'EUR') => ({
+    code: { USD: 'USDLOOP', GBP: 'GBPLOOP', EUR: 'EURLOOP' }[currency],
+    issuer: null,
+  }),
 }));
 vi.mock('../../ctx/operator-pool.js', () => ({
   getOperatorHealth: () => operatorHealthMock(),
@@ -108,6 +118,45 @@ describe('treasuryHandler', () => {
       GBP: { cashback: '1000', interest: '25' },
       USD: { cashback: '3200' },
     });
+  });
+
+  it('reframes outstanding balances as LOOP-asset liabilities (ADR 015)', async () => {
+    state.results.push(
+      [
+        { currency: 'GBP', total: '1500' },
+        { currency: 'USD', total: '4200' },
+      ],
+      [],
+    );
+    const { ctx } = makeCtx();
+    const res = await treasuryHandler(ctx);
+    const body = (await res.json()) as {
+      liabilities: Record<string, { outstandingMinor: string; issuer: string | null }>;
+    };
+    expect(body.liabilities).toEqual({
+      USDLOOP: { outstandingMinor: '4200', issuer: null },
+      GBPLOOP: { outstandingMinor: '1500', issuer: null },
+      EURLOOP: { outstandingMinor: '0', issuer: null },
+    });
+  });
+
+  it('always emits all three LOOP-asset slots so the UI shape is stable', async () => {
+    state.results.push([], []);
+    const { ctx } = makeCtx();
+    const res = await treasuryHandler(ctx);
+    const body = (await res.json()) as { liabilities: Record<string, unknown> };
+    expect(Object.keys(body.liabilities).sort()).toEqual(['EURLOOP', 'GBPLOOP', 'USDLOOP']);
+  });
+
+  it('surfaces USDC + XLM assets with null stroops until the Horizon-read slice lands', async () => {
+    state.results.push([], []);
+    const { ctx } = makeCtx();
+    const res = await treasuryHandler(ctx);
+    const body = (await res.json()) as {
+      assets: { USDC: { stroops: string | null }; XLM: { stroops: string | null } };
+    };
+    expect(body.assets.USDC.stroops).toBeNull();
+    expect(body.assets.XLM.stroops).toBeNull();
   });
 
   it('includes the operator-pool snapshot', async () => {
