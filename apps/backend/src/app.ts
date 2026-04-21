@@ -40,6 +40,7 @@ import { notifyHealthChange } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
 import { treasuryHandler } from './admin/treasury.js';
+import { getMeHandler } from './users/handler.js';
 
 export const app = new Hono();
 
@@ -552,6 +553,19 @@ app.get('/api/orders/loop', rateLimit(60, 60_000), loopListOrdersHandler);
 // generous. Owner-scoped: the handler 404s on a non-owner read so
 // existence isn't leaked.
 app.get('/api/orders/loop/:id', rateLimit(120, 60_000), loopGetOrderHandler);
+
+// ─── User profile ───────────────────────────────────────────────────────────
+//
+// `GET /api/users/me` returns the caller's profile: id, email, admin
+// flag, and home_currency (ADR 015). Works against both Loop-native
+// and legacy CTX bearers — CTX bearers upsert the Loop user row on
+// first touch, Loop bearers resolve by userId.
+app.use('/api/users/me', requireAuth);
+app.use('/api/users/me', async (c, next) => {
+  await next();
+  c.header('Cache-Control', 'private, no-store');
+});
+app.get('/api/users/me', rateLimit(60, 60_000), getMeHandler);
 
 // ─── Admin (authenticated + admin-flagged) ──────────────────────────────────
 //
