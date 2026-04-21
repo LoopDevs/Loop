@@ -1,40 +1,99 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
-import { AdminNav } from '../AdminNav';
+import { ApiException } from '@loop/shared';
+import type { TreasurySnapshot } from '~/services/admin';
+import type * as AdminModule from '~/services/admin';
+import { AdminNav, operatorPoolStatus } from '../AdminNav';
 
 afterEach(cleanup);
 
+const { adminMock, authMock } = vi.hoisted(() => ({
+  adminMock: {
+    getTreasurySnapshot: vi.fn(),
+  },
+  authMock: {
+    isAuthenticated: true,
+  },
+}));
+
+vi.mock('~/services/admin', async (importActual) => {
+  const actual = (await importActual()) as typeof AdminModule;
+  return {
+    ...actual,
+    getTreasurySnapshot: () => adminMock.getTreasurySnapshot(),
+  };
+});
+
+vi.mock('~/hooks/use-auth', () => ({
+  useAuth: () => ({ isAuthenticated: authMock.isAuthenticated }),
+}));
+
+vi.mock('~/hooks/query-retry', () => ({
+  shouldRetry: () => false,
+}));
+
+function baseSnapshot(overrides?: Partial<TreasurySnapshot['operatorPool']>): TreasurySnapshot {
+  return {
+    outstanding: {},
+    totals: {},
+    liabilities: {
+      USDLOOP: { outstandingMinor: '0', issuer: null },
+      GBPLOOP: { outstandingMinor: '0', issuer: null },
+      EURLOOP: { outstandingMinor: '0', issuer: null },
+    },
+    assets: { USDC: { stroops: null }, XLM: { stroops: null } },
+    payouts: { pending: '0', submitted: '0', confirmed: '0', failed: '0' },
+    operatorPool: {
+      size: 2,
+      operators: [
+        { id: 'op-1', state: 'closed' },
+        { id: 'op-2', state: 'closed' },
+      ],
+      ...(overrides ?? {}),
+    },
+  };
+}
+
 function renderAt(path: string): ReturnType<typeof render> {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <AdminNav />
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[path]}>
+        <AdminNav />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
-describe('AdminNav', () => {
+beforeEach(() => {
+  authMock.isAuthenticated = true;
+  adminMock.getTreasurySnapshot.mockReset();
+});
+
+describe('AdminNav — tabs', () => {
+  beforeEach(() => {
+    adminMock.getTreasurySnapshot.mockResolvedValue(baseSnapshot());
+  });
+
   it('renders one link per admin section with the correct hrefs', () => {
     renderAt('/admin/cashback');
-    const links = screen.getAllByRole('link');
-    const hrefs = links.map((l) => l.getAttribute('href'));
-    expect(hrefs).toEqual(['/admin/cashback', '/admin/treasury', '/admin/payouts']);
+    // Ignore the "CTX healthy" pill link; only the three tab links
+    // have href targeting admin sections.
+    const tabHrefs = ['/admin/cashback', '/admin/treasury', '/admin/payouts'];
+    for (const href of tabHrefs) {
+      expect(screen.getAllByRole('link').some((l) => l.getAttribute('href') === href)).toBe(true);
+    }
   });
 
   it('marks the Cashback tab as aria-current=page on /admin/cashback', () => {
     renderAt('/admin/cashback');
-    const active = screen.getByRole('link', { name: 'Cashback' });
-    expect(active.getAttribute('aria-current')).toBe('page');
-    const inactive = screen.getByRole('link', { name: 'Treasury' });
-    expect(inactive.getAttribute('aria-current')).toBeNull();
-  });
-
-  it('marks the Treasury tab as aria-current=page on /admin/treasury', () => {
-    renderAt('/admin/treasury');
-    expect(screen.getByRole('link', { name: 'Treasury' }).getAttribute('aria-current')).toBe(
+    expect(screen.getByRole('link', { name: 'Cashback' }).getAttribute('aria-current')).toBe(
       'page',
     );
+    expect(screen.getByRole('link', { name: 'Treasury' }).getAttribute('aria-current')).toBeNull();
   });
 
   it('marks the Payouts tab as active on nested paths like /admin/payouts/abc', () => {
@@ -42,11 +101,122 @@ describe('AdminNav', () => {
     expect(screen.getByRole('link', { name: 'Payouts' }).getAttribute('aria-current')).toBe('page');
   });
 
-  it('does not highlight any tab on unrelated admin-ish paths', () => {
-    // Defensive check: /admin (no subpath) shouldn't mark anything as current.
+  it('does not highlight any tab on /admin (no subpath)', () => {
     renderAt('/admin');
     for (const label of ['Cashback', 'Treasury', 'Payouts']) {
       expect(screen.getByRole('link', { name: label }).getAttribute('aria-current')).toBeNull();
     }
+  });
+});
+
+describe('AdminNav — CTX status pill', () => {
+  it('renders "CTX healthy" when every operator circuit is closed', async () => {
+    adminMock.getTreasurySnapshot.mockResolvedValue(baseSnapshot());
+    renderAt('/admin/cashback');
+    await waitFor(() => {
+      expect(screen.getByText(/CTX healthy/)).toBeDefined();
+    });
+  });
+
+  it('renders "CTX degraded" when any operator is half_open', async () => {
+    adminMock.getTreasurySnapshot.mockResolvedValue(
+      baseSnapshot({
+        operators: [
+          { id: 'op-1', state: 'closed' },
+          { id: 'op-2', state: 'half_open' },
+        ],
+      }),
+    );
+    renderAt('/admin/cashback');
+    await waitFor(() => {
+      expect(screen.getByText(/CTX degraded/)).toBeDefined();
+    });
+  });
+
+  it('renders "CTX unavailable" when any operator circuit is open', async () => {
+    adminMock.getTreasurySnapshot.mockResolvedValue(
+      baseSnapshot({
+        operators: [
+          { id: 'op-1', state: 'open' },
+          { id: 'op-2', state: 'closed' },
+        ],
+      }),
+    );
+    renderAt('/admin/cashback');
+    await waitFor(() => {
+      expect(screen.getByText(/CTX unavailable/)).toBeDefined();
+    });
+  });
+
+  it('renders "CTX unconfigured" when the pool is empty', async () => {
+    adminMock.getTreasurySnapshot.mockResolvedValue(baseSnapshot({ size: 0, operators: [] }));
+    renderAt('/admin/cashback');
+    await waitFor(() => {
+      expect(screen.getByText(/CTX unconfigured/)).toBeDefined();
+    });
+  });
+
+  it('hides the pill entirely for non-admin callers (401 response)', async () => {
+    adminMock.getTreasurySnapshot.mockRejectedValue(
+      new ApiException(401, { code: 'UNAUTHORIZED', message: 'nope' }),
+    );
+    renderAt('/admin/cashback');
+    // Wait until the error has propagated and the pill has unmounted.
+    // The initial render shows "CTX status loading"; after the rejection
+    // settles, `denied` becomes true and the pill is hidden entirely.
+    await waitFor(() => {
+      expect(screen.queryByText(/CTX /)).toBeNull();
+    });
+  });
+
+  it('links the pill to /admin/treasury for one-click drill-in', async () => {
+    adminMock.getTreasurySnapshot.mockResolvedValue(baseSnapshot());
+    renderAt('/admin/cashback');
+    await waitFor(() => {
+      const pill = screen.getByText(/CTX healthy/).closest('a');
+      expect(pill?.getAttribute('href')).toBe('/admin/treasury');
+    });
+  });
+});
+
+describe('operatorPoolStatus (pure)', () => {
+  it('returns unknown when the pool is undefined', () => {
+    expect(operatorPoolStatus(undefined)).toBe('unknown');
+  });
+  it('returns unconfigured when size is 0', () => {
+    expect(operatorPoolStatus({ size: 0, operators: [] })).toBe('unconfigured');
+  });
+  it('returns healthy when all operators are closed', () => {
+    expect(
+      operatorPoolStatus({
+        size: 2,
+        operators: [
+          { id: 'a', state: 'closed' },
+          { id: 'b', state: 'closed' },
+        ],
+      }),
+    ).toBe('healthy');
+  });
+  it('returns degraded when any operator is half_open', () => {
+    expect(
+      operatorPoolStatus({
+        size: 2,
+        operators: [
+          { id: 'a', state: 'closed' },
+          { id: 'b', state: 'half_open' },
+        ],
+      }),
+    ).toBe('degraded');
+  });
+  it('returns unavailable when any operator is open, overriding half_open', () => {
+    expect(
+      operatorPoolStatus({
+        size: 2,
+        operators: [
+          { id: 'a', state: 'open' },
+          { id: 'b', state: 'half_open' },
+        ],
+      }),
+    ).toBe('unavailable');
   });
 });
