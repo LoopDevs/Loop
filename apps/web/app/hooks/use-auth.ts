@@ -1,6 +1,12 @@
 import { ApiException } from '@loop/shared';
 import { useAuthStore } from '~/stores/auth.store';
-import { requestOtp, verifyOtp, logout } from '~/services/auth';
+import {
+  requestOtp,
+  verifyOtp,
+  socialLoginGoogle,
+  socialLoginApple,
+  logout,
+} from '~/services/auth';
 
 export interface UseAuthResult {
   email: string | null;
@@ -10,6 +16,10 @@ export interface UseAuthResult {
   requestOtp: (email: string) => Promise<void>;
   /** Verify an OTP. Stores tokens on success. Throws with user-facing message on failure. */
   verifyOtp: (email: string, otp: string) => Promise<void>;
+  /** Exchange a Google id_token for a Loop session. ADR 014. */
+  signInWithGoogle: (idToken: string) => Promise<void>;
+  /** Exchange an Apple id_token for a Loop session. ADR 014. */
+  signInWithApple: (idToken: string) => Promise<void>;
   /** Clears the local session. */
   logout: () => Promise<void>;
 }
@@ -50,6 +60,24 @@ export function useAuth(): UseAuthResult {
         store.setSession(email, accessToken, refreshToken ?? null);
       } catch (err) {
         throw new Error(authErrorMessage(err, 'Verification failed. Please try again.'));
+      }
+    },
+
+    signInWithGoogle: async (idToken: string) => {
+      try {
+        const pair = await socialLoginGoogle(idToken);
+        store.setSession(pair.email ?? '', pair.accessToken, pair.refreshToken);
+      } catch (err) {
+        throw new Error(authErrorMessage(err, 'Google sign-in failed. Please try again.'));
+      }
+    },
+
+    signInWithApple: async (idToken: string) => {
+      try {
+        const pair = await socialLoginApple(idToken);
+        store.setSession(pair.email ?? '', pair.accessToken, pair.refreshToken);
+      } catch (err) {
+        throw new Error(authErrorMessage(err, 'Apple sign-in failed. Please try again.'));
       }
     },
 

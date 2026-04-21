@@ -26,11 +26,13 @@ export async function verifyOtp(email: string, otp: string): Promise<VerifyOtpRe
 /**
  * Shape returned by the Loop-native auth endpoints. Social + OTP
  * converge on this — the client doesn't care which provider produced
- * the pair.
+ * the pair. Social responses include `email` because the client
+ * never typed it (OTP knows it from the form).
  */
 export interface LoopAuthPair {
   accessToken: string;
   refreshToken: string;
+  email?: string;
 }
 
 /**

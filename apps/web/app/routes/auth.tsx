@@ -1,14 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import type { Route } from './+types/auth';
 import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
+import { useAppConfig } from '~/hooks/use-app-config';
 import { useUiStore } from '~/stores/ui.store';
 import type { ThemePreference } from '~/stores/ui.store';
 import { Navbar } from '~/components/features/Navbar';
 import { PageHeader } from '~/components/ui/PageHeader';
 import { Button } from '~/components/ui/Button';
 import { Input } from '~/components/ui/Input';
+import { GoogleSignInButton } from '~/components/features/auth/GoogleSignInButton';
 import { checkBiometrics, authenticateWithBiometrics } from '~/native/biometrics';
 import { isAppLockEnabled, setAppLockEnabled } from '~/native/app-lock';
 
@@ -166,15 +168,38 @@ export default function AuthRoute(): React.JSX.Element {
     isAuthenticated,
     requestOtp,
     verifyOtp: verifyAndStore,
+    signInWithGoogle,
     logout,
   } = useAuth();
   const { isNative } = useNativePlatform();
+  const { config } = useAppConfig();
+  const googleClientId = isNative
+    ? (config.social.googleClientIdIos ?? config.social.googleClientIdAndroid)
+    : config.social.googleClientIdWeb;
 
   const [step, setStep] = useState<AuthStep>('email');
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleGoogleCredential = useCallback(
+    (idToken: string) => {
+      setError(null);
+      setIsLoading(true);
+      void signInWithGoogle(idToken)
+        .catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : 'Google sign-in failed.');
+        })
+        .finally(() => {
+          setIsLoading(false);
+        });
+    },
+    // signInWithGoogle identity is stable via useAuthStore; the
+    // setters from local useState are stable too.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   // If authenticated, show account view. The outer container fills
   // the viewport as background (no forced `min-h-screen`/`min-h-[80vh]`
@@ -274,25 +299,41 @@ export default function AuthRoute(): React.JSX.Element {
         </div>
 
         {step === 'email' ? (
-          <form
-            onSubmit={(e) => {
-              void handleEmailSubmit(e);
-            }}
-            className="space-y-4"
-          >
-            <Input
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(v) => setEmail(v)}
-              required
-              label="Email address"
-            />
-            {error !== null && <p className="text-red-500 text-sm">{error}</p>}
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? 'Sending…' : 'Send verification code'}
-            </Button>
-          </form>
+          <div className="space-y-4">
+            {googleClientId !== null && googleClientId.length > 0 ? (
+              <>
+                <GoogleSignInButton
+                  clientId={googleClientId}
+                  onCredential={handleGoogleCredential}
+                />
+                <div className="relative flex items-center justify-center my-2">
+                  <span className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-px bg-gray-200 dark:bg-gray-800" />
+                  <span className="relative bg-white dark:bg-gray-950 px-3 text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                    or
+                  </span>
+                </div>
+              </>
+            ) : null}
+            <form
+              onSubmit={(e) => {
+                void handleEmailSubmit(e);
+              }}
+              className="space-y-4"
+            >
+              <Input
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(v) => setEmail(v)}
+                required
+                label="Email address"
+              />
+              {error !== null && <p className="text-red-500 text-sm">{error}</p>}
+              <Button type="submit" className="w-full" disabled={isLoading}>
+                {isLoading ? 'Sending…' : 'Send verification code'}
+              </Button>
+            </form>
+          </div>
         ) : (
           <form
             onSubmit={(e) => {

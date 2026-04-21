@@ -168,7 +168,10 @@ export function makeSocialLoginHandler(config: SocialProviderConfig) {
         email,
       });
       const pair = await issueTokenPair({ id: user.id, email: user.email });
-      return c.json(pair);
+      // Include email so the client can persist the session without
+      // having to decode the Loop access JWT — mirrors what OTP users
+      // get back (they typed their email; social users never did).
+      return c.json({ ...pair, email: user.email });
     } catch (err) {
       log.error({ err, provider: config.provider }, 'Social login failed unexpectedly');
       return c.json({ code: 'INTERNAL_ERROR', message: 'Social sign-in failed' }, 500);
