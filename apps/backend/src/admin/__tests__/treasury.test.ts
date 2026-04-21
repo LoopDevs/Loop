@@ -29,7 +29,11 @@ vi.mock('../../db/schema.js', () => ({
     type: 'type',
     amountMinor: 'amountMinor',
   },
+  pendingPayouts: {
+    state: 'state',
+  },
   HOME_CURRENCIES: ['USD', 'GBP', 'EUR'] as const,
+  PAYOUT_STATES: ['pending', 'submitted', 'confirmed', 'failed'] as const,
 }));
 // Payout-asset resolver — returns the static code mapping; issuer
 // stays null so tests don't depend on env. Individual tests that
@@ -112,7 +116,7 @@ beforeEach(() => {
 
 describe('treasuryHandler', () => {
   it('returns an empty-shape snapshot when the ledger has no rows', async () => {
-    state.results.push([], []); // outstanding, totals
+    state.results.push([], [], []); // outstanding, totals
     const { ctx } = makeCtx();
     const res = await treasuryHandler(ctx);
     expect(res.status).toBe(200);
@@ -133,6 +137,7 @@ describe('treasuryHandler', () => {
         { currency: 'USD', total: '4200' },
       ],
       [],
+      [],
     );
     const { ctx } = makeCtx();
     const res = await treasuryHandler(ctx);
@@ -148,6 +153,7 @@ describe('treasuryHandler', () => {
         { currency: 'GBP', type: 'interest', total: '25' },
         { currency: 'USD', type: 'cashback', total: '3200' },
       ],
+      [],
     );
     const { ctx } = makeCtx();
     const res = await treasuryHandler(ctx);
@@ -165,6 +171,7 @@ describe('treasuryHandler', () => {
         { currency: 'USD', total: '4200' },
       ],
       [],
+      [],
     );
     const { ctx } = makeCtx();
     const res = await treasuryHandler(ctx);
@@ -179,7 +186,7 @@ describe('treasuryHandler', () => {
   });
 
   it('always emits all three LOOP-asset slots so the UI shape is stable', async () => {
-    state.results.push([], []);
+    state.results.push([], [], []);
     const { ctx } = makeCtx();
     const res = await treasuryHandler(ctx);
     const body = (await res.json()) as { liabilities: Record<string, unknown> };
@@ -187,7 +194,7 @@ describe('treasuryHandler', () => {
   });
 
   it('assets are null when LOOP_STELLAR_DEPOSIT_ADDRESS is unset (dev / pre-deploy)', async () => {
-    state.results.push([], []);
+    state.results.push([], [], []);
     const { ctx } = makeCtx();
     const res = await treasuryHandler(ctx);
     const body = (await res.json()) as {
@@ -198,7 +205,7 @@ describe('treasuryHandler', () => {
   });
 
   it('populates USDC + XLM stroops from Horizon when the deposit address is set', async () => {
-    state.results.push([], []);
+    state.results.push([], [], []);
     envState.LOOP_STELLAR_DEPOSIT_ADDRESS = 'GACCOUNT';
     envState.LOOP_STELLAR_USDC_ISSUER = 'GCENTRE';
     balancesState.snapshot = {
@@ -216,7 +223,7 @@ describe('treasuryHandler', () => {
   });
 
   it('preserves null stroops when the account has no trustline for USDC', async () => {
-    state.results.push([], []);
+    state.results.push([], [], []);
     envState.LOOP_STELLAR_DEPOSIT_ADDRESS = 'GACCOUNT';
     balancesState.snapshot = {
       xlmStroops: 10n,
@@ -233,7 +240,7 @@ describe('treasuryHandler', () => {
   });
 
   it('falls back to null assets when Horizon throws — does not 500 the handler', async () => {
-    state.results.push([], []);
+    state.results.push([], [], []);
     envState.LOOP_STELLAR_DEPOSIT_ADDRESS = 'GACCOUNT';
     balancesState.throwErr = new Error('Horizon 503');
     const { ctx } = makeCtx();
@@ -246,8 +253,57 @@ describe('treasuryHandler', () => {
     expect(body.assets.XLM.stroops).toBeNull();
   });
 
+  it('emits zero counts for every payout state when the table is empty (stable UI shape)', async () => {
+    state.results.push([], [], []);
+    const { ctx } = makeCtx();
+    const res = await treasuryHandler(ctx);
+    const body = (await res.json()) as { payouts: Record<string, string> };
+    expect(body.payouts).toEqual({
+      pending: '0',
+      submitted: '0',
+      confirmed: '0',
+      failed: '0',
+    });
+  });
+
+  it('populates payout counts from the groupBy result (ADR 015)', async () => {
+    state.results.push(
+      [],
+      [],
+      [
+        { state: 'pending', count: '5' },
+        { state: 'submitted', count: '2' },
+        { state: 'confirmed', count: '120' },
+        { state: 'failed', count: '1' },
+      ],
+    );
+    const { ctx } = makeCtx();
+    const res = await treasuryHandler(ctx);
+    const body = (await res.json()) as { payouts: Record<string, string> };
+    expect(body.payouts).toEqual({
+      pending: '5',
+      submitted: '2',
+      confirmed: '120',
+      failed: '1',
+    });
+  });
+
+  it('ignores unknown payout states from the DB (schema-drift defense)', async () => {
+    state.results.push([], [], [{ state: 'abducted_by_aliens', count: '99' }]);
+    const { ctx } = makeCtx();
+    const res = await treasuryHandler(ctx);
+    const body = (await res.json()) as { payouts: Record<string, string> };
+    // Unknown state doesn't pollute the output; enum states all stay at 0.
+    expect(body.payouts).toEqual({
+      pending: '0',
+      submitted: '0',
+      confirmed: '0',
+      failed: '0',
+    });
+  });
+
   it('includes the operator-pool snapshot', async () => {
-    state.results.push([], []);
+    state.results.push([], [], []);
     operatorSizeMock.mockReturnValue(2);
     operatorHealthMock.mockReturnValue([
       { id: 'primary', state: 'closed' },

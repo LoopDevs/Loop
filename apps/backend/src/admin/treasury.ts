@@ -28,7 +28,14 @@
 import type { Context } from 'hono';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { userCredits, creditTransactions, HOME_CURRENCIES } from '../db/schema.js';
+import {
+  userCredits,
+  creditTransactions,
+  pendingPayouts,
+  HOME_CURRENCIES,
+  PAYOUT_STATES,
+  type PayoutState,
+} from '../db/schema.js';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { getOperatorHealth, operatorPoolSize } from '../ctx/operator-pool.js';
@@ -63,6 +70,14 @@ export interface TreasurySnapshot {
     USDC: TreasuryHolding;
     XLM: TreasuryHolding;
   };
+  /**
+   * ADR 015 — outbound Stellar cashback payouts at each state.
+   * The admin UI renders this as a health card: any non-zero
+   * `failed` count should page ops; a growing `submitted` count
+   * without matching `confirmed` means the Horizon confirmation
+   * watcher is lagging.
+   */
+  payouts: Record<PayoutState, string>;
   operatorPool: {
     size: number;
     operators: Array<{ id: string; state: string }>;
@@ -105,12 +120,14 @@ export async function treasuryHandler(c: Context): Promise<Response> {
 
   const liabilities = buildLiabilities(outstanding);
   const assets = await buildAssets();
+  const payouts = await buildPayoutCounts();
 
   const snapshot: TreasurySnapshot = {
     outstanding,
     totals,
     liabilities,
     assets,
+    payouts,
     operatorPool: {
       size: operatorPoolSize(),
       operators: getOperatorHealth(),
@@ -118,6 +135,32 @@ export async function treasuryHandler(c: Context): Promise<Response> {
   };
 
   return c.json(snapshot);
+}
+
+/**
+ * Groups pending_payouts rows by state. Always returns entries for
+ * every state (zero when no rows match) so the UI shape is stable —
+ * a fresh install should render "0 pending / 0 submitted / 0
+ * confirmed / 0 failed", not an empty object.
+ */
+async function buildPayoutCounts(): Promise<Record<PayoutState, string>> {
+  const rows = await db
+    .select({
+      state: pendingPayouts.state,
+      count: sql<string>`COUNT(*)::text`,
+    })
+    .from(pendingPayouts)
+    .groupBy(pendingPayouts.state);
+  const out = {} as Record<PayoutState, string>;
+  for (const s of PAYOUT_STATES) {
+    out[s] = '0';
+  }
+  for (const row of rows) {
+    if ((PAYOUT_STATES as ReadonlyArray<string>).includes(row.state)) {
+      out[row.state as PayoutState] = row.count;
+    }
+  }
+  return out;
 }
 
 /**
