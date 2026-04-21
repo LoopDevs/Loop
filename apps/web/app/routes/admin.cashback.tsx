@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiException } from '@loop/shared';
@@ -6,9 +6,11 @@ import type { Route } from './+types/admin.cashback';
 import { useAllMerchants } from '~/hooks/use-merchants';
 import { useAuth } from '~/hooks/use-auth';
 import {
+  cashbackConfigHistory,
   listCashbackConfigs,
   upsertCashbackConfig,
   type MerchantCashbackConfig,
+  type MerchantCashbackConfigHistoryEntry,
 } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Button } from '~/components/ui/Button';
@@ -52,6 +54,20 @@ export default function AdminCashbackRoute(): React.JSX.Element {
 
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Expanded-row set for the inline history drawer (ADR 011). Each
+  // merchantId in the set renders an extra tbody row below its main
+  // row with the most-recent 50 audit snapshots. The drawer is a
+  // separate query keyed on the id — lazy-loaded so we don't fire N
+  // GETs on the initial page render.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpanded = (merchantId: string): void => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(merchantId)) next.delete(merchantId);
+      else next.add(merchantId);
+      return next;
+    });
+  };
 
   const configByMerchant = useMemo(() => {
     const map = new Map<string, MerchantCashbackConfig>();
@@ -171,54 +187,146 @@ export default function AdminCashbackRoute(): React.JSX.Element {
               const dirty = isDirty(cfg, m.id);
               const saving = saveMutation.isPending && saveMutation.variables?.merchantId === m.id;
               return (
-                <tr
-                  key={m.id}
-                  className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900/30"
-                >
-                  <td className="px-3 py-2 font-medium text-gray-900 dark:text-white">{m.name}</td>
-                  <td className="px-3 py-2">
-                    <PctInput
-                      value={draft.wholesalePct}
-                      onChange={(v) =>
-                        setDrafts((d) => ({ ...d, [m.id]: { ...draft, wholesalePct: v } }))
-                      }
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <PctInput
-                      value={draft.userCashbackPct}
-                      onChange={(v) =>
-                        setDrafts((d) => ({ ...d, [m.id]: { ...draft, userCashbackPct: v } }))
-                      }
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <PctInput
-                      value={draft.loopMarginPct}
-                      onChange={(v) =>
-                        setDrafts((d) => ({ ...d, [m.id]: { ...draft, loopMarginPct: v } }))
-                      }
-                    />
-                  </td>
-                  <td className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
-                    {cfg === undefined ? '—' : new Date(cfg.updatedAt).toLocaleDateString()}
-                  </td>
-                  <td className="px-3 py-2">
-                    <Button
-                      variant="secondary"
-                      disabled={!dirty || saving}
-                      onClick={() => saveMutation.mutate({ merchantId: m.id, draft })}
-                    >
-                      {saving ? 'Saving…' : 'Save'}
-                    </Button>
-                  </td>
-                </tr>
+                <Fragment key={m.id}>
+                  <tr className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900/30">
+                    <td className="px-3 py-2 font-medium text-gray-900 dark:text-white">
+                      {m.name}
+                    </td>
+                    <td className="px-3 py-2">
+                      <PctInput
+                        value={draft.wholesalePct}
+                        onChange={(v) =>
+                          setDrafts((d) => ({ ...d, [m.id]: { ...draft, wholesalePct: v } }))
+                        }
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <PctInput
+                        value={draft.userCashbackPct}
+                        onChange={(v) =>
+                          setDrafts((d) => ({ ...d, [m.id]: { ...draft, userCashbackPct: v } }))
+                        }
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <PctInput
+                        value={draft.loopMarginPct}
+                        onChange={(v) =>
+                          setDrafts((d) => ({ ...d, [m.id]: { ...draft, loopMarginPct: v } }))
+                        }
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                      {cfg === undefined ? '—' : new Date(cfg.updatedAt).toLocaleDateString()}
+                    </td>
+                    <td className="px-3 py-2 flex items-center gap-2">
+                      <Button
+                        variant="secondary"
+                        disabled={!dirty || saving}
+                        onClick={() => saveMutation.mutate({ merchantId: m.id, draft })}
+                      >
+                        {saving ? 'Saving…' : 'Save'}
+                      </Button>
+                      {/* Only expose the history button once a config
+                        has been written; there's no prior-row audit
+                        for an unconfigured merchant. */}
+                      {cfg !== undefined && (
+                        <button
+                          type="button"
+                          onClick={() => toggleExpanded(m.id)}
+                          aria-expanded={expanded.has(m.id)}
+                          aria-controls={`history-${m.id}`}
+                          className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                        >
+                          {expanded.has(m.id) ? 'Hide history' : 'History'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                  {cfg !== undefined && expanded.has(m.id) ? (
+                    <HistoryDrawerRow merchantId={m.id} />
+                  ) : null}
+                </Fragment>
               );
             })}
           </tbody>
         </table>
       </div>
     </div>
+  );
+}
+
+/**
+ * Inline history drawer for a single merchant cashback-config row
+ * (ADR 011). Lazy-loaded — rendered only when the user expands the
+ * row, so the initial /admin/cashback page load doesn't fire a GET
+ * per merchant. Uses its own `['admin-cashback-history', id]` cache
+ * key so two expand-cycles on the same row don't refetch.
+ *
+ * Renders the prior-row snapshots (not the current row) — each entry
+ * represents what the config looked like BEFORE the change at
+ * `changedAt` happened. `changedBy` is the admin user id that triggered
+ * the change.
+ */
+function HistoryDrawerRow({ merchantId }: { merchantId: string }): React.JSX.Element {
+  const query = useQuery({
+    queryKey: ['admin-cashback-history', merchantId],
+    queryFn: () => cashbackConfigHistory(merchantId),
+    retry: shouldRetry,
+    staleTime: 0,
+  });
+
+  return (
+    <tr id={`history-${merchantId}`} className="bg-gray-50 dark:bg-gray-900/30">
+      <td colSpan={6} className="px-3 py-3">
+        {query.isLoading ? (
+          <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+            <Spinner /> Loading audit trail…
+          </div>
+        ) : query.isError ? (
+          <p className="text-xs text-red-600 dark:text-red-400">
+            Couldn&rsquo;t load history. Try closing and reopening.
+          </p>
+        ) : (query.data?.history ?? []).length === 0 ? (
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            No prior snapshots — this merchant&rsquo;s config is the first recorded state.
+          </p>
+        ) : (
+          <HistoryTable rows={query.data?.history ?? []} />
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function HistoryTable({ rows }: { rows: MerchantCashbackConfigHistoryEntry[] }): React.JSX.Element {
+  return (
+    <table className="w-full text-xs">
+      <thead className="text-left text-gray-500 dark:text-gray-400">
+        <tr>
+          <th className="pb-1 font-medium">Changed</th>
+          <th className="pb-1 font-medium">By</th>
+          <th className="pb-1 font-medium">Wholesale</th>
+          <th className="pb-1 font-medium">User cashback</th>
+          <th className="pb-1 font-medium">Loop margin</th>
+          <th className="pb-1 font-medium">Active</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.id} className="text-gray-700 dark:text-gray-200">
+            <td className="py-1 pr-2 whitespace-nowrap">
+              {new Date(row.changedAt).toLocaleString()}
+            </td>
+            <td className="py-1 pr-2 font-mono text-[11px]">{row.changedBy}</td>
+            <td className="py-1 pr-2">{row.wholesalePct}%</td>
+            <td className="py-1 pr-2">{row.userCashbackPct}%</td>
+            <td className="py-1 pr-2">{row.loopMarginPct}%</td>
+            <td className="py-1 pr-2">{row.active ? 'Yes' : 'No'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
