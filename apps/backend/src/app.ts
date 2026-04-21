@@ -40,6 +40,7 @@ import { notifyHealthChange } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
 import { treasuryHandler } from './admin/treasury.js';
+import { adminListPayoutsHandler } from './admin/payouts.js';
 import { getMeHandler, setHomeCurrencyHandler, setStellarAddressHandler } from './users/handler.js';
 
 export const app = new Hono();
@@ -604,6 +605,10 @@ app.get(
   configHistoryHandler,
 );
 app.get('/api/admin/treasury', rateLimit(60, 60_000), treasuryHandler);
+// Pending-payouts backlog list (ADR 015). Admin UI's "payouts" page
+// drills into pending/submitted/confirmed/failed rows; counts for the
+// at-a-glance card come from the treasury snapshot above.
+app.get('/api/admin/payouts', rateLimit(60, 60_000), adminListPayoutsHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 
