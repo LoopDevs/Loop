@@ -22,7 +22,7 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { userCredits } from '../db/schema.js';
+import { orders, userCredits } from '../db/schema.js';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { getMerchants } from '../merchants/sync.js';
@@ -192,4 +192,76 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     log.error({ err, userId: auth.userId }, 'Loop-native order creation failed');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to create order' }, 500);
   }
+}
+
+export interface LoopOrderView {
+  id: string;
+  merchantId: string;
+  state: string;
+  faceValueMinor: string;
+  currency: string;
+  paymentMethod: 'xlm' | 'usdc' | 'credit';
+  /** Populated when state ≥ pending_payment and the method is on-chain. */
+  paymentMemo: string | null;
+  /** Loop's deposit address for the configured env. Always populated for on-chain orders. */
+  stellarAddress: string | null;
+  userCashbackMinor: string;
+  /** CTX gift-card id, populated once procurement resolves. */
+  ctxOrderId: string | null;
+  failureReason: string | null;
+  createdAt: string;
+  paidAt: string | null;
+  fulfilledAt: string | null;
+  failedAt: string | null;
+}
+
+/**
+ * GET /api/orders/loop/:id
+ *
+ * Returns the Loop-native order the caller owns. 404 on non-owner
+ * reads to avoid leaking existence — the order belongs to exactly
+ * one Loop user, keyed on the JWT `sub`.
+ *
+ * Response shape is BigInt-safe — all integer columns serialise as
+ * strings. Timestamps are ISO-8601.
+ */
+export async function loopGetOrderHandler(c: Context): Promise<Response> {
+  if (!env.LOOP_AUTH_NATIVE_ENABLED) {
+    return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
+  }
+  const auth = c.get('auth') as LoopAuthContext | undefined;
+  if (auth === undefined || auth.kind !== 'loop') {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Loop-native authentication required' }, 401);
+  }
+  const id = c.req.param('id');
+  if (id === undefined || id.length === 0) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'id is required' }, 400);
+  }
+
+  const row = await db.query.orders.findFirst({
+    where: and(eq(orders.id, id), eq(orders.userId, auth.userId)),
+  });
+  if (row === undefined || row === null) {
+    return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);
+  }
+
+  const view: LoopOrderView = {
+    id: row.id,
+    merchantId: row.merchantId,
+    state: row.state,
+    faceValueMinor: row.faceValueMinor.toString(),
+    currency: row.currency,
+    paymentMethod: row.paymentMethod as 'xlm' | 'usdc' | 'credit',
+    paymentMemo: row.paymentMemo,
+    stellarAddress:
+      row.paymentMethod === 'credit' ? null : (env.LOOP_STELLAR_DEPOSIT_ADDRESS ?? null),
+    userCashbackMinor: row.userCashbackMinor.toString(),
+    ctxOrderId: row.ctxOrderId,
+    failureReason: row.failureReason,
+    createdAt: row.createdAt.toISOString(),
+    paidAt: row.paidAt?.toISOString() ?? null,
+    fulfilledAt: row.fulfilledAt?.toISOString() ?? null,
+    failedAt: row.failedAt?.toISOString() ?? null,
+  };
+  return c.json(view);
 }
