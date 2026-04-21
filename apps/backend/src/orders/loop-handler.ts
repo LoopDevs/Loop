@@ -35,6 +35,7 @@ import {
 } from '../db/schema.js';
 import { getUserById } from '../db/users.js';
 import { convertMinorUnits } from '../payments/price-feed.js';
+import { payoutAssetFor } from '../credits/payout-asset.js';
 import { createOrder } from './repo.js';
 
 const log = logger.child({ handler: 'loop-orders' });
@@ -62,6 +63,16 @@ export interface OrderPaymentResponse {
         memo: string;
         amountMinor: string;
         currency: string;
+      }
+    | {
+        method: 'loop_asset';
+        stellarAddress: string;
+        memo: string;
+        amountMinor: string;
+        currency: string;
+        /** The LOOP asset code + issuer the user should send. Pinned to home_currency. */
+        assetCode: 'USDLOOP' | 'GBPLOOP' | 'EURLOOP';
+        assetIssuer: string;
       }
     | {
         method: 'credit';
@@ -229,6 +240,42 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
           // what the UI renders on the "confirm order" screen.
           amountMinor: order.chargeMinor.toString(),
           currency: order.chargeCurrency,
+        },
+      });
+    }
+    if (order.paymentMethod === 'loop_asset') {
+      // ADR 015 — user is paying with a LOOP-branded asset matching
+      // their home currency. Surface the asset code + issuer so the
+      // client's Stellar tx builder can construct the payment against
+      // the correct `{code, issuer}` pair.
+      const payoutAsset = payoutAssetFor(user.homeCurrency);
+      if (payoutAsset.issuer === null) {
+        // The issuer env isn't set for this currency. We already
+        // wrote the order row; roll back isn't worth the complexity
+        // here since the row will hit the 24h expiry sweep. Log and
+        // 503 so the client can retry later.
+        log.error(
+          { homeCurrency: user.homeCurrency, assetCode: payoutAsset.code },
+          'loop_asset order placed but matching issuer env var not set',
+        );
+        return c.json(
+          {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'LOOP asset not configured for your region',
+          },
+          503,
+        );
+      }
+      return c.json<OrderPaymentResponse>({
+        ...base,
+        payment: {
+          method: 'loop_asset',
+          stellarAddress: env.LOOP_STELLAR_DEPOSIT_ADDRESS!,
+          memo: order.paymentMemo ?? '',
+          amountMinor: order.chargeMinor.toString(),
+          currency: order.chargeCurrency,
+          assetCode: payoutAsset.code,
+          assetIssuer: payoutAsset.issuer,
         },
       });
     }

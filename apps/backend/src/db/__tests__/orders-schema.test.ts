@@ -31,12 +31,19 @@ describe('ORDER_STATES', () => {
 });
 
 describe('ORDER_PAYMENT_METHODS', () => {
-  it('covers xlm + usdc + credit (ADR 010 launch set)', () => {
-    expect(new Set(ORDER_PAYMENT_METHODS)).toEqual(new Set(['xlm', 'usdc', 'credit']));
+  it('covers xlm + usdc + credit + loop_asset (ADR 010 + ADR 015)', () => {
+    expect(new Set(ORDER_PAYMENT_METHODS)).toEqual(
+      new Set(['xlm', 'usdc', 'credit', 'loop_asset']),
+    );
   });
 
   it('exposes a union type usable as OrderPaymentMethod', () => {
     const sample: OrderPaymentMethod = 'credit';
+    expect(ORDER_PAYMENT_METHODS).toContain(sample);
+  });
+
+  it('loop_asset is a valid value (ADR 015 LOOP-branded payment)', () => {
+    const sample: OrderPaymentMethod = 'loop_asset';
     expect(ORDER_PAYMENT_METHODS).toContain(sample);
   });
 });

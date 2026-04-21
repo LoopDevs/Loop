@@ -74,6 +74,18 @@ vi.mock('../../db/schema.js', async () => {
 vi.mock('../../payments/price-feed.js', () => ({
   convertMinorUnits: vi.fn(async (amount: bigint) => amount),
 }));
+// Payout-asset resolver — loop_asset orders read issuer from here.
+const { payoutAssetState } = vi.hoisted(() => ({
+  payoutAssetState: {
+    issuer: null as string | null,
+  },
+}));
+vi.mock('../../credits/payout-asset.js', () => ({
+  payoutAssetFor: (currency: 'USD' | 'GBP' | 'EUR') => ({
+    code: { USD: 'USDLOOP', GBP: 'GBPLOOP', EUR: 'EURLOOP' }[currency],
+    issuer: payoutAssetState.issuer,
+  }),
+}));
 
 import { loopCreateOrderHandler } from '../loop-handler.js';
 
@@ -117,6 +129,7 @@ beforeEach(() => {
   createOrderMock.mockReset();
   getMerchantsMock.mockReset();
   balanceState.rows = [];
+  payoutAssetState.issuer = null;
   userState.user = {
     id: 'user-uuid',
     email: 'a@b.com',
@@ -375,6 +388,72 @@ describe('loopCreateOrderHandler', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { payment: { method: string } };
     expect(body.payment.method).toBe('credit');
+  });
+
+  it('loop_asset path — returns deposit address + memo + asset code + issuer', async () => {
+    const issuer = 'GB' + '2'.repeat(55);
+    payoutAssetState.issuer = issuer;
+    createOrderMock.mockResolvedValue({
+      id: 'order-uuid',
+      faceValueMinor: 10_000n,
+      currency: 'GBP',
+      chargeMinor: 10_000n,
+      chargeCurrency: 'GBP',
+      paymentMethod: 'loop_asset',
+      paymentMemo: 'MEMO-LOOP-123',
+    });
+    const { ctx } = makeCtx({
+      auth: LOOP_AUTH,
+      body: {
+        merchantId: 'm1',
+        amountMinor: 10_000,
+        currency: 'GBP',
+        paymentMethod: 'loop_asset',
+      },
+    });
+    const res = await loopCreateOrderHandler(ctx);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      payment: {
+        method: string;
+        stellarAddress: string;
+        memo: string;
+        amountMinor: string;
+        currency: string;
+        assetCode: string;
+        assetIssuer: string;
+      };
+    };
+    expect(body.payment.method).toBe('loop_asset');
+    expect(body.payment.assetCode).toBe('GBPLOOP');
+    expect(body.payment.assetIssuer).toBe(issuer);
+    expect(body.payment.memo).toBe('MEMO-LOOP-123');
+    expect(body.payment.amountMinor).toBe('10000');
+    expect(body.payment.currency).toBe('GBP');
+  });
+
+  it('loop_asset path — 503 when the matching issuer env var is not set', async () => {
+    payoutAssetState.issuer = null;
+    createOrderMock.mockResolvedValue({
+      id: 'order-uuid',
+      faceValueMinor: 10_000n,
+      currency: 'GBP',
+      chargeMinor: 10_000n,
+      chargeCurrency: 'GBP',
+      paymentMethod: 'loop_asset',
+      paymentMemo: 'MEMO',
+    });
+    const { ctx } = makeCtx({
+      auth: LOOP_AUTH,
+      body: {
+        merchantId: 'm1',
+        amountMinor: 10_000,
+        currency: 'GBP',
+        paymentMethod: 'loop_asset',
+      },
+    });
+    const res = await loopCreateOrderHandler(ctx);
+    expect(res.status).toBe(503);
   });
 });
 
