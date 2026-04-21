@@ -26,6 +26,7 @@ import { logger } from '../logger.js';
 import { findPendingOrderByMemo, type Order } from '../orders/repo.js';
 import { markOrderPaid, sweepExpiredOrders } from '../orders/transitions.js';
 import { listAccountPayments, isMatchingIncomingPayment, type HorizonPayment } from './horizon.js';
+import { stroopsPerCent } from './price-feed.js';
 
 const log = logger.child({ area: 'payment-watcher' });
 
@@ -58,17 +59,17 @@ export function parseStroops(amount: string): bigint {
 /**
  * Returns true when `payment.amount` covers the face value pinned on
  * the order. USDC is treated 1:1 with USD for MVP — a $100 order
- * needs ≥100 USDC. XLM is not yet supported by the watcher because
- * we don't run a price oracle; an XLM order created today stays
- * `pending_payment` until a follow-up slice wires FX.
+ * needs ≥100 USDC. XLM payments consult the price oracle
+ * (`stroopsPerCent`) to derive the required stroops dynamically;
+ * an oracle failure bubbles as a rejection so the watcher logs
+ * and retries on the next tick.
  *
  * For currencies other than USD, the 1:1 USDC peg means we under-
  * credit when the local currency is weaker than USD (e.g. a £100
  * order paid with 100 USDC would fail). Ops currently run Loop in
- * USD only; multi-currency requires an FX layer which is a
- * deferred item in the treasury roadmap.
+ * USD only; multi-currency fiat-FX for USDC is a separate slice.
  */
-export function isAmountSufficient(payment: HorizonPayment, order: Order): boolean {
+export async function isAmountSufficient(payment: HorizonPayment, order: Order): Promise<boolean> {
   if (order.paymentMethod === 'credit') {
     // Credit-funded orders don't go through the watcher — they're
     // debited inline in the handler. Reaching this branch is a bug.
@@ -88,8 +89,23 @@ export function isAmountSufficient(payment: HorizonPayment, order: Order): boole
     const requiredStroops = order.faceValueMinor * USDC_STROOPS_PER_CENT;
     return receivedStroops >= requiredStroops;
   }
-  // xlm — deferred until an FX source lands.
-  return false;
+  // xlm — query the oracle for the current rate, convert the
+  // order's minor-unit face value into stroops, compare.
+  if (order.currency !== 'USD' && order.currency !== 'GBP' && order.currency !== 'EUR') {
+    log.warn(
+      { orderId: order.id, currency: order.currency },
+      'XLM oracle has no rate for currency',
+    );
+    return false;
+  }
+  try {
+    const perCent = await stroopsPerCent(order.currency);
+    const requiredStroops = order.faceValueMinor * perCent;
+    return receivedStroops >= requiredStroops;
+  } catch (err) {
+    log.warn({ err, orderId: order.id }, 'XLM price oracle unavailable — rejecting XLM payment');
+    return false;
+  }
 }
 
 /**
@@ -178,7 +194,7 @@ export async function runPaymentWatcherTick(args: {
     }
     result.matched++;
 
-    if (!isAmountSufficient(p, order)) {
+    if (!(await isAmountSufficient(p, order))) {
       log.warn(
         {
           orderId: order.id,
