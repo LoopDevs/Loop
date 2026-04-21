@@ -222,6 +222,7 @@ GET  /api/admin/merchant-cashback-configs              [admin]
 PUT  /api/admin/merchant-cashback-configs/:merchantId  [admin]
 GET  /api/admin/merchant-cashback-configs/:merchantId/history  [admin]
 GET  /api/admin/treasury                               [admin]
+GET  /api/admin/payouts                                [admin — ADR 015 payout backlog]
 ```
 
 Full request/response shapes — including field types, pagination

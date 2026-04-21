@@ -61,6 +61,7 @@ vi.mock('../../db/client.js', () => ({
 import {
   insertPayout,
   listPendingPayouts,
+  listPayoutsForAdmin,
   markPayoutSubmitted,
   markPayoutConfirmed,
   markPayoutFailed,
@@ -129,6 +130,29 @@ describe('listPendingPayouts', () => {
     state.selectReturn = [];
     await listPendingPayouts();
     expect(selectChain['limit']!).toHaveBeenCalledWith(20);
+  });
+});
+
+describe('listPayoutsForAdmin', () => {
+  it('clamps limit to 1..100', async () => {
+    state.selectReturn = [];
+    await listPayoutsForAdmin({ limit: 999 });
+    expect(selectChain['limit']!).toHaveBeenLastCalledWith(100);
+
+    await listPayoutsForAdmin({ limit: 0 });
+    expect(selectChain['limit']!).toHaveBeenLastCalledWith(1);
+  });
+
+  it('defaults limit to 20 when omitted', async () => {
+    state.selectReturn = [];
+    await listPayoutsForAdmin({});
+    expect(selectChain['limit']!).toHaveBeenLastCalledWith(20);
+  });
+
+  it('passes through the row set unchanged', async () => {
+    state.selectReturn = [{ id: 'p-9', state: 'failed' }];
+    const rows = await listPayoutsForAdmin({ state: 'failed' });
+    expect(rows).toEqual([{ id: 'p-9', state: 'failed' }]);
   });
 });
 

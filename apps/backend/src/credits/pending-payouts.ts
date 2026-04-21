@@ -66,6 +66,28 @@ export async function listPendingPayouts(limit = 20): Promise<PendingPayout[]> {
 }
 
 /**
+ * Admin-facing list across any state + cursor pagination. Newest
+ * first (admin UI pattern — you want to see the most recent failures
+ * first when you open the page). `before` is the ISO `created_at` of
+ * the last row the client has rendered; next page fetches rows older
+ * than that. Limit clamps 1..100.
+ */
+export async function listPayoutsForAdmin(opts: {
+  state?: string;
+  before?: Date;
+  limit?: number;
+}): Promise<PendingPayout[]> {
+  const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100);
+  const conditions = [];
+  if (opts.state !== undefined) conditions.push(eq(pendingPayouts.state, opts.state));
+  if (opts.before !== undefined) conditions.push(sql`${pendingPayouts.createdAt} < ${opts.before}`);
+  const where = conditions.length === 0 ? undefined : and(...conditions);
+  const q = db.select().from(pendingPayouts);
+  const filtered = where === undefined ? q : q.where(where);
+  return filtered.orderBy(sql`${pendingPayouts.createdAt} DESC`).limit(limit);
+}
+
+/**
  * State-guarded transition: `pending → submitted`. Bumps `attempts`
  * and stamps `submitted_at`. Returns null when another worker beat us
  * to the row (idempotent).
