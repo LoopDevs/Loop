@@ -4,7 +4,7 @@ import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
-import { nativeRequestOtpHandler } from './native.js';
+import { nativeRequestOtpHandler, nativeVerifyOtpHandler, nativeRefreshHandler } from './native.js';
 
 const log = logger.child({ handler: 'auth' });
 
@@ -106,10 +106,17 @@ export async function requestOtpHandler(c: Context): Promise<Response> {
 
 /**
  * POST /api/auth/verify-otp
- * Proxies to upstream POST /verify-email.
- * Maps { email, otp } → { email, code } for upstream.
+ *
+ * Proxies to upstream POST /verify-email by default. With
+ * `LOOP_AUTH_NATIVE_ENABLED`, dispatches to the Loop-native handler
+ * which consumes a local OTP row, upserts the user, and mints a
+ * Loop-signed token pair.
  */
 export async function verifyOtpHandler(c: Context): Promise<Response> {
+  if (env.LOOP_AUTH_NATIVE_ENABLED) {
+    return nativeVerifyOtpHandler(c);
+  }
+
   const parsed = VerifyOtpBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'email and otp are required' }, 400);
@@ -170,9 +177,18 @@ export async function verifyOtpHandler(c: Context): Promise<Response> {
 
 /**
  * POST /api/auth/refresh
- * Proxies to upstream POST /refresh-token.
+ *
+ * Proxies to upstream POST /refresh-token by default. With
+ * `LOOP_AUTH_NATIVE_ENABLED`, dispatches to the Loop-native handler
+ * which verifies the Loop-signed refresh JWT, checks the
+ * `refresh_tokens` row is live + hash-matches, rotates, and returns
+ * a new Loop-signed pair.
  */
 export async function refreshHandler(c: Context): Promise<Response> {
+  if (env.LOOP_AUTH_NATIVE_ENABLED) {
+    return nativeRefreshHandler(c);
+  }
+
   const parsed = RefreshBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'refreshToken is required' }, 400);

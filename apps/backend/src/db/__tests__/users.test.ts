@@ -35,7 +35,7 @@ vi.mock('../schema.js', () => ({
   },
 }));
 
-import { upsertUserFromCtx, getUserById } from '../users.js';
+import { upsertUserFromCtx, getUserById, findOrCreateUserByEmail } from '../users.js';
 
 beforeEach(() => {
   for (const fn of Object.values(dbMock)) {
@@ -90,5 +90,49 @@ describe('getUserById', () => {
     returned.row = undefined;
     const row = await getUserById('missing');
     expect(row).toBeNull();
+  });
+});
+
+describe('findOrCreateUserByEmail', () => {
+  it('returns the existing row when the email is already known', async () => {
+    returned.row = {
+      id: 'uuid-e1',
+      ctxUserId: null,
+      email: 'a@b.com',
+      isAdmin: false,
+    };
+    const user = await findOrCreateUserByEmail('A@B.COM');
+    expect(user.id).toBe('uuid-e1');
+    // No insert path taken.
+    expect(dbMock['insert']!).not.toHaveBeenCalled();
+  });
+
+  it('inserts and returns a fresh row when the email is unknown', async () => {
+    // findFirst returns null → insert path. We flip returned.row to
+    // the inserted row for the .returning() await.
+    returned.row = null;
+    const inserted = {
+      id: 'uuid-e2',
+      ctxUserId: null,
+      email: 'new@b.com',
+      isAdmin: false,
+    };
+    // findFirst first (returns null), then returning() second. The
+    // hoisted mock uses returned.row for BOTH — swap it between the
+    // calls by relying on findFirst being awaited first.
+    returned.row = null;
+    // Hack: override returning() for this test to yield the inserted
+    // row regardless of state.
+    dbMock['returning']!.mockResolvedValueOnce([inserted]);
+    const user = await findOrCreateUserByEmail('new@B.com');
+    expect(user).toEqual(inserted);
+    // Insert saw the lower-cased email.
+    expect(dbMock['values']!).toHaveBeenCalledWith(expect.objectContaining({ email: 'new@b.com' }));
+  });
+
+  it('throws when the insert returns no row', async () => {
+    returned.row = null;
+    dbMock['returning']!.mockResolvedValueOnce([undefined]);
+    await expect(findOrCreateUserByEmail('x@y.com')).rejects.toThrow(/no row returned/);
   });
 });
