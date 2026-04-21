@@ -8,6 +8,26 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
+// DB mock — two distinct chains for the POST handler:
+//   select(...).from(...).where(...)           → count rows
+//   update(...).set(...).where(...).returning() → updated user rows
+// Two separate chain objects so .where can be async on the select
+// chain and sync (non-terminal) on the update chain.
+const { selectChain, updateChain, dbState } = vi.hoisted(() => {
+  const state: {
+    orderCount: string;
+    updatedUser: unknown;
+  } = { orderCount: '0', updatedUser: null };
+  const sel: Record<string, ReturnType<typeof vi.fn>> = {};
+  sel['from'] = vi.fn(() => sel);
+  sel['where'] = vi.fn(async () => [{ n: state.orderCount }]);
+  const upd: Record<string, ReturnType<typeof vi.fn>> = {};
+  upd['set'] = vi.fn(() => upd);
+  upd['where'] = vi.fn(() => upd);
+  upd['returning'] = vi.fn(async () => (state.updatedUser === null ? [] : [state.updatedUser]));
+  return { selectChain: sel, updateChain: upd, dbState: state };
+});
+
 // Hoisted state the mocked user resolvers read from.
 const { userState } = vi.hoisted(() => ({
   userState: {
@@ -26,6 +46,17 @@ vi.mock('../../db/users.js', () => ({
     return userState.upsertResult;
   }),
 }));
+vi.mock('../../db/client.js', () => ({
+  db: {
+    select: vi.fn(() => selectChain),
+    update: vi.fn(() => updateChain),
+  },
+}));
+vi.mock('../../db/schema.js', () => ({
+  orders: { userId: 'user_id' },
+  users: { id: 'id' },
+  HOME_CURRENCIES: ['USD', 'GBP', 'EUR'] as const,
+}));
 
 // The handler decodes CTX bearers via auth/jwt decodeJwtPayload —
 // stub it to return a preconfigured claim set.
@@ -38,15 +69,18 @@ vi.mock('../../auth/jwt.js', () => ({
   decodeJwtPayload: vi.fn(() => jwtState.claims),
 }));
 
-import { getMeHandler } from '../handler.js';
+import { getMeHandler, setHomeCurrencyHandler } from '../handler.js';
 
-function makeCtx(auth: LoopAuthContext | undefined): Context {
+function makeCtx(auth: LoopAuthContext | undefined, body?: unknown): Context {
   const store = new Map<string, unknown>();
   if (auth !== undefined) store.set('auth', auth);
   return {
+    req: {
+      json: async () => body,
+    },
     get: (k: string) => store.get(k),
-    json: (body: unknown, status?: number) =>
-      new Response(JSON.stringify(body), {
+    json: (responseBody: unknown, status?: number) =>
+      new Response(JSON.stringify(responseBody), {
         status: status ?? 200,
         headers: { 'content-type': 'application/json' },
       }),
@@ -59,6 +93,8 @@ beforeEach(() => {
   userState.upsertThrow = null;
   userState.upsertCalls = [];
   jwtState.claims = null;
+  dbState.orderCount = '0';
+  dbState.updatedUser = null;
 });
 
 describe('getMeHandler', () => {
@@ -159,5 +195,77 @@ describe('getMeHandler', () => {
     );
     const body = (await res.json()) as Record<string, unknown>;
     expect(Object.keys(body).sort()).toEqual(['email', 'homeCurrency', 'id', 'isAdmin']);
+  });
+});
+
+describe('setHomeCurrencyHandler', () => {
+  const LOOP_AUTH: LoopAuthContext = {
+    kind: 'loop',
+    userId: 'user-uuid',
+    email: 'a@b.com',
+    bearerToken: 'loop-jwt',
+  };
+  const baseUser = {
+    id: 'user-uuid',
+    email: 'a@b.com',
+    isAdmin: false,
+    homeCurrency: 'USD',
+    ctxUserId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  it('400 when body is malformed (no currency)', async () => {
+    const res = await setHomeCurrencyHandler(makeCtx(LOOP_AUTH, {}));
+    expect(res.status).toBe(400);
+  });
+
+  it('400 when currency is not in the enum', async () => {
+    const res = await setHomeCurrencyHandler(makeCtx(LOOP_AUTH, { currency: 'JPY' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('401 when no auth on the context', async () => {
+    const res = await setHomeCurrencyHandler(makeCtx(undefined, { currency: 'GBP' }));
+    expect(res.status).toBe(401);
+  });
+
+  it('happy path — order-less user gets home_currency written and returns the new view', async () => {
+    userState.byId = { ...baseUser, homeCurrency: 'USD' };
+    dbState.orderCount = '0';
+    dbState.updatedUser = { ...baseUser, homeCurrency: 'GBP' };
+    const res = await setHomeCurrencyHandler(makeCtx(LOOP_AUTH, { currency: 'GBP' }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['homeCurrency']).toBe('GBP');
+  });
+
+  it('409 HOME_CURRENCY_LOCKED when the user already has orders', async () => {
+    userState.byId = { ...baseUser, homeCurrency: 'USD' };
+    dbState.orderCount = '3';
+    const res = await setHomeCurrencyHandler(makeCtx(LOOP_AUTH, { currency: 'GBP' }));
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('HOME_CURRENCY_LOCKED');
+  });
+
+  it('short-circuits when the requested currency already matches (no update, no order-count scan of the actual row)', async () => {
+    userState.byId = { ...baseUser, homeCurrency: 'GBP' };
+    // If the handler fell through to the UPDATE path, .returning() would
+    // reject (updatedUser is null → empty array → 404). Instead the
+    // short-circuit returns the existing view as-is.
+    dbState.updatedUser = null;
+    const res = await setHomeCurrencyHandler(makeCtx(LOOP_AUTH, { currency: 'GBP' }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['homeCurrency']).toBe('GBP');
+  });
+
+  it('404 when the user row disappears between resolve and update (race)', async () => {
+    userState.byId = { ...baseUser, homeCurrency: 'USD' };
+    dbState.orderCount = '0';
+    dbState.updatedUser = null; // .returning() → empty array
+    const res = await setHomeCurrencyHandler(makeCtx(LOOP_AUTH, { currency: 'GBP' }));
+    expect(res.status).toBe(404);
   });
 });

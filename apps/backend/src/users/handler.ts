@@ -7,11 +7,19 @@
  * comes straight off the JWT) and legacy CTX bearers (user row is
  * resolved via the existing CTX-anchored upsert path).
  *
- * No write-side endpoint in this slice — changing `home_currency`
- * post-signup is support-mediated for MVP (ADR 015). A later PATCH
- * surface can land when self-serve is in scope.
+ * `POST /api/users/me/home-currency` — first-time-only write path.
+ * Onboarding UIs call this after OTP verify to set the user's
+ * region. Guarded on `user.order_count === 0` at the DB layer:
+ * once a user places their first order, pricing + cashback are
+ * pinned to that row's `charge_currency` and letting the user
+ * flip regions would misalign the ledger. Support has a separate
+ * path to correct regions for existing users (not in this slice).
  */
 import type { Context } from 'hono';
+import { z } from 'zod';
+import { eq, sql } from 'drizzle-orm';
+import { db } from '../db/client.js';
+import { orders, users, HOME_CURRENCIES } from '../db/schema.js';
 import { decodeJwtPayload } from '../auth/jwt.js';
 import { upsertUserFromCtx, getUserById, type User } from '../db/users.js';
 import type { LoopAuthContext } from '../auth/handler.js';
@@ -68,4 +76,74 @@ export async function getMeHandler(c: Context): Promise<Response> {
     return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
   return c.json<UserMeView>(toView(user));
+}
+
+const SetHomeCurrencyBody = z.object({
+  currency: z.enum(HOME_CURRENCIES),
+});
+
+/**
+ * POST /api/users/me/home-currency — onboarding-time picker.
+ * Succeeds when the caller has zero orders; returns 409 otherwise so
+ * the client can render a "contact support" path for existing users.
+ */
+export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
+  const parsed = SetHomeCurrencyBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json(
+      {
+        code: 'VALIDATION_ERROR',
+        message: 'currency must be USD, GBP, or EUR',
+      },
+      400,
+    );
+  }
+  let user: User | null;
+  try {
+    user = await resolveCallingUser(c);
+  } catch (err) {
+    log.error({ err }, 'Failed to resolve calling user');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+  }
+  if (user === null) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+
+  // Early-exit: no-op when the user is already on the requested
+  // currency. Lets the client call this endpoint unconditionally
+  // from onboarding without first checking `GET /me`.
+  if (user.homeCurrency === parsed.data.currency) {
+    return c.json<UserMeView>(toView(user));
+  }
+
+  // Order guard — the ledger pins charge_currency at order creation
+  // (ADR 015). Flipping home_currency after even one order would
+  // leave future orders denominated in a different currency from the
+  // user's balance. Support has a separate path to handle that.
+  const [orderCountRow] = await db
+    .select({ n: sql<string>`COUNT(*)::text` })
+    .from(orders)
+    .where(eq(orders.userId, user.id));
+  const orderCount = BigInt(orderCountRow?.n ?? '0');
+  if (orderCount > 0n) {
+    return c.json(
+      {
+        code: 'HOME_CURRENCY_LOCKED',
+        message: 'Home currency cannot be changed after placing an order',
+      },
+      409,
+    );
+  }
+
+  const [updated] = await db
+    .update(users)
+    .set({ homeCurrency: parsed.data.currency, updatedAt: sql`NOW()` })
+    .where(eq(users.id, user.id))
+    .returning();
+  if (updated === undefined) {
+    // User row disappeared between resolve and update — race with
+    // account deletion, or a concurrent support-auth'd edit.
+    return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
+  }
+  return c.json<UserMeView>(toView(updated));
 }
