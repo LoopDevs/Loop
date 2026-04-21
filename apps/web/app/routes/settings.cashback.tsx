@@ -20,8 +20,11 @@ import { Spinner } from '~/components/ui/Spinner';
 import { Button } from '~/components/ui/Button';
 import {
   getCashbackHistory,
+  getUserPendingPayouts,
   type CashbackHistoryEntry,
   type CashbackHistoryResponse,
+  type UserPendingPayoutState,
+  type UserPendingPayoutView,
 } from '~/services/user';
 
 export function meta(): Route.MetaDescriptors {
@@ -95,19 +98,30 @@ export default function SettingsCashbackRoute(): React.JSX.Element {
   }
 
   return (
-    <main className="max-w-2xl mx-auto px-6 py-12 space-y-6">
+    <main className="max-w-2xl mx-auto px-6 py-12 space-y-8">
       <header>
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Cashback history</h1>
         <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
           Every credit-ledger event on your account — newest first.
         </p>
       </header>
+
+      {/* On-chain payouts — rendered above the ledger so in-flight
+          Stellar emissions are immediately visible. The section hides
+          itself entirely when the user has never received a payout,
+          so new users don't see an empty card full of state terms
+          they haven't earned context for yet. */}
+      <PendingPayoutsSection />
+
       <section
         aria-labelledby="history-heading"
         className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-800"
       >
-        <h2 id="history-heading" className="sr-only">
-          Ledger events
+        <h2
+          id="history-heading"
+          className="px-5 pt-4 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400"
+        >
+          Off-chain ledger
         </h2>
         {cursors.map((cursor, idx) => (
           <HistoryPage
@@ -121,6 +135,137 @@ export default function SettingsCashbackRoute(): React.JSX.Element {
         ))}
       </section>
     </main>
+  );
+}
+
+const PAYOUT_STATE_UI: Record<UserPendingPayoutState, { label: string; classes: string }> = {
+  pending: {
+    label: 'Queued',
+    classes: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+  },
+  submitted: {
+    label: 'Submitting',
+    classes: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+  },
+  confirmed: {
+    label: 'Confirmed',
+    classes: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+  },
+  failed: {
+    label: 'Failed',
+    classes: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+  },
+};
+
+/**
+ * Formats a stroops string (bigint 7-decimal integer) into a
+ * human-readable asset-unit string: "1.2500000 GBPLOOP" →
+ * "1.25 GBPLOOP". Strips trailing zeros, keeps up to 7 decimal
+ * places, falls back to "—" on parse failure.
+ */
+function formatAssetAmount(stroopsStr: string, assetCode: string): string {
+  try {
+    const stroops = BigInt(stroopsStr);
+    const whole = stroops / 10_000_000n;
+    const fractionRaw = (stroops % 10_000_000n).toString().padStart(7, '0').replace(/0+$/, '');
+    const fraction = fractionRaw.length > 0 ? `.${fractionRaw}` : '';
+    return `${whole.toString()}${fraction} ${assetCode}`;
+  } catch {
+    return '—';
+  }
+}
+
+function PendingPayoutsSection(): React.JSX.Element | null {
+  const query = useQuery({
+    // Short staleTime + automatic refetchOnWindowFocus so the user
+    // sees state transitions (`submitted` → `confirmed`) without
+    // reloading the page — the submit worker's cadence is ~30s so
+    // polling at that rate is appropriate.
+    queryKey: ['me', 'pending-payouts'],
+    queryFn: () => getUserPendingPayouts({ limit: 25 }),
+    retry: shouldRetry,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+  });
+
+  if (query.isPending) {
+    return (
+      <section className="flex justify-center py-4">
+        <Spinner />
+      </section>
+    );
+  }
+
+  // Silent fail: if the endpoint is erroring, the ledger section
+  // below still shows the authoritative off-chain state. No point
+  // splashing a red banner at the top of the page.
+  if (query.isError) return null;
+
+  const payouts = query.data.payouts;
+  if (payouts.length === 0) return null;
+
+  return (
+    <section
+      aria-labelledby="payouts-heading"
+      className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900"
+    >
+      <h2
+        id="payouts-heading"
+        className="px-5 pt-4 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400"
+      >
+        On-chain payouts
+      </h2>
+      <ul role="list" className="divide-y divide-gray-200 dark:divide-gray-800">
+        {payouts.map((row) => (
+          <PendingPayoutRow key={row.id} row={row} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function PendingPayoutRow({ row }: { row: UserPendingPayoutView }): React.JSX.Element {
+  const ui = PAYOUT_STATE_UI[row.state];
+  // stellar.expert has the friendliest on-chain-explorer UX (shows
+  // memo, asset, matches Loop's issuer view). Only rendered for
+  // confirmed payouts — pre-confirm rows don't have a hash yet and
+  // `submitted` rows aren't discoverable until the network includes
+  // them.
+  const explorerHref =
+    row.txHash === null
+      ? null
+      : `https://stellar.expert/explorer/public/tx/${encodeURIComponent(row.txHash)}`;
+  // Render the most informative timestamp the row has reached, not
+  // just `createdAt` — once a payout confirms the user cares about
+  // WHEN it confirmed, not when it was queued.
+  const primaryTimestamp = row.confirmedAt ?? row.failedAt ?? row.submittedAt ?? row.createdAt;
+  return (
+    <li className="flex items-center justify-between gap-3 px-5 py-4">
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
+          {formatAssetAmount(row.amountStroops, row.assetCode)}
+        </p>
+        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+          {formatDate(primaryTimestamp)}
+          {explorerHref !== null && (
+            <>
+              {' · '}
+              <a
+                href={explorerHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline underline-offset-2 hover:text-gray-700 dark:hover:text-gray-200"
+              >
+                View tx
+              </a>
+            </>
+          )}
+        </p>
+      </div>
+      <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${ui.classes}`}>
+        {ui.label}
+      </span>
+    </li>
   );
 }
 

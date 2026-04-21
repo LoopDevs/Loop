@@ -7,6 +7,7 @@ import { MemoryRouter } from 'react-router';
 const { historyMock, authMock } = vi.hoisted(() => ({
   historyMock: {
     getCashbackHistory: vi.fn(),
+    getUserPendingPayouts: vi.fn(),
   },
   authMock: {
     isAuthenticated: true,
@@ -16,6 +17,8 @@ const { historyMock, authMock } = vi.hoisted(() => ({
 vi.mock('~/services/user', () => ({
   getCashbackHistory: (opts?: { limit?: number; before?: string }) =>
     historyMock.getCashbackHistory(opts),
+  getUserPendingPayouts: (opts?: { limit?: number; before?: string; state?: string }) =>
+    historyMock.getUserPendingPayouts(opts),
 }));
 
 vi.mock('~/hooks/use-auth', () => ({
@@ -70,6 +73,11 @@ function mkEntry(overrides: Partial<Entry> = {}): Entry {
 beforeEach(() => {
   authMock.isAuthenticated = true;
   historyMock.getCashbackHistory.mockReset();
+  // Every existing test expects the pending-payouts section to stay
+  // hidden; default the fetch to an empty list so we don't have to
+  // touch every case. Pending-payouts-specific tests below override.
+  historyMock.getUserPendingPayouts.mockReset();
+  historyMock.getUserPendingPayouts.mockResolvedValue({ payouts: [] });
 });
 
 afterEach(cleanup);
@@ -145,5 +153,104 @@ describe('SettingsCashbackRoute', () => {
     historyMock.getCashbackHistory.mockRejectedValue(new Error('network down'));
     renderPage();
     expect(await screen.findByText(/Couldn.+t load this page/i)).toBeTruthy();
+  });
+});
+
+describe('SettingsCashbackRoute — on-chain payouts section', () => {
+  it('does not render the section when the user has no payout rows', async () => {
+    historyMock.getCashbackHistory.mockResolvedValue({ entries: [] });
+    historyMock.getUserPendingPayouts.mockResolvedValue({ payouts: [] });
+    renderPage();
+    // Empty state of the ledger section still renders; the payouts
+    // section should simply be absent.
+    await screen.findByText(/No cashback activity yet/i);
+    expect(screen.queryByText(/On-chain payouts/i)).toBeNull();
+  });
+
+  it('renders the section with a state pill + asset amount when a row exists', async () => {
+    historyMock.getCashbackHistory.mockResolvedValue({ entries: [] });
+    historyMock.getUserPendingPayouts.mockResolvedValue({
+      payouts: [
+        {
+          id: 'p-1',
+          orderId: 'o-1',
+          assetCode: 'GBPLOOP',
+          assetIssuer: 'GISSUER',
+          amountStroops: '12500000',
+          state: 'confirmed',
+          txHash: 'abc123def456',
+          attempts: 1,
+          createdAt: '2026-04-20T10:00:00.000Z',
+          submittedAt: '2026-04-20T10:01:00.000Z',
+          confirmedAt: '2026-04-20T10:02:00.000Z',
+          failedAt: null,
+        },
+      ],
+    });
+    renderPage();
+    await screen.findByText(/On-chain payouts/i);
+    // 12,500,000 stroops = 1.25 GBPLOOP (7-decimal asset)
+    expect(screen.getByText(/1\.25 GBPLOOP/)).toBeDefined();
+    expect(screen.getByText(/Confirmed/)).toBeDefined();
+  });
+
+  it('links confirmed payouts to stellar.expert using the tx hash', async () => {
+    historyMock.getCashbackHistory.mockResolvedValue({ entries: [] });
+    historyMock.getUserPendingPayouts.mockResolvedValue({
+      payouts: [
+        {
+          id: 'p-1',
+          orderId: 'o-1',
+          assetCode: 'USDLOOP',
+          assetIssuer: 'GISSUER',
+          amountStroops: '10000000',
+          state: 'confirmed',
+          txHash: 'tx-hash-789',
+          attempts: 1,
+          createdAt: '2026-04-20T10:00:00.000Z',
+          submittedAt: '2026-04-20T10:01:00.000Z',
+          confirmedAt: '2026-04-20T10:02:00.000Z',
+          failedAt: null,
+        },
+      ],
+    });
+    renderPage();
+    const link = await screen.findByRole('link', { name: /View tx/i });
+    expect(link.getAttribute('href')).toBe('https://stellar.expert/explorer/public/tx/tx-hash-789');
+    expect(link.getAttribute('target')).toBe('_blank');
+  });
+
+  it('does not show a tx link on submitted rows (no hash yet)', async () => {
+    historyMock.getCashbackHistory.mockResolvedValue({ entries: [] });
+    historyMock.getUserPendingPayouts.mockResolvedValue({
+      payouts: [
+        {
+          id: 'p-1',
+          orderId: 'o-1',
+          assetCode: 'EURLOOP',
+          assetIssuer: 'GISSUER',
+          amountStroops: '5000000',
+          state: 'submitted',
+          txHash: null,
+          attempts: 1,
+          createdAt: '2026-04-20T10:00:00.000Z',
+          submittedAt: '2026-04-20T10:01:00.000Z',
+          confirmedAt: null,
+          failedAt: null,
+        },
+      ],
+    });
+    renderPage();
+    await screen.findByText(/Submitting/);
+    expect(screen.queryByRole('link', { name: /View tx/i })).toBeNull();
+  });
+
+  it('hides the section silently when the fetch errors (ledger stays authoritative)', async () => {
+    historyMock.getCashbackHistory.mockResolvedValue({ entries: [] });
+    historyMock.getUserPendingPayouts.mockRejectedValue(new Error('network down'));
+    renderPage();
+    // Ledger section still rendered.
+    await screen.findByText(/No cashback activity yet/i);
+    expect(screen.queryByText(/On-chain payouts/i)).toBeNull();
   });
 });
