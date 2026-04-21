@@ -41,6 +41,17 @@ vi.mock('../../orders/transitions.js', () => ({
   markOrderPaid: (id: string) => markPaidMock(id),
 }));
 
+// ADR 015 — mock the configured LOOP-asset allowlist. Tests that
+// exercise the LOOP-asset path override this per-test.
+const { loopAssetsState } = vi.hoisted(() => ({
+  loopAssetsState: {
+    assets: [] as Array<{ code: 'USDLOOP' | 'GBPLOOP' | 'EURLOOP'; issuer: string }>,
+  },
+}));
+vi.mock('../../credits/payout-asset.js', () => ({
+  configuredLoopPayableAssets: () => loopAssetsState.assets,
+}));
+
 // db mock — covers readCursor (findFirst) and writeCursor (upsert).
 const { dbMock, state } = vi.hoisted(() => {
   const s: {
@@ -110,6 +121,8 @@ interface FakeOrder {
   paymentMethod: 'xlm' | 'usdc' | 'credit';
   currency: string;
   faceValueMinor: bigint;
+  chargeMinor: bigint;
+  chargeCurrency: string;
 }
 
 function makeOrder(overrides: Partial<FakeOrder> = {}): FakeOrder {
@@ -118,6 +131,8 @@ function makeOrder(overrides: Partial<FakeOrder> = {}): FakeOrder {
     paymentMethod: 'usdc',
     currency: 'USD',
     faceValueMinor: 1_000n, // $10.00
+    chargeMinor: 1_000n,
+    chargeCurrency: 'USD',
     ...overrides,
   };
 }
@@ -128,6 +143,7 @@ beforeEach(() => {
   markPaidMock.mockReset();
   state.cursor = null;
   state.writtenCursors = [];
+  loopAssetsState.assets = [];
   for (const fn of Object.values(dbMock)) {
     if (typeof fn === 'function' && 'mockClear' in fn) {
       (fn as unknown as { mockClear: () => void }).mockClear();
@@ -321,5 +337,124 @@ describe('runPaymentWatcherTick', () => {
     listPaymentsMock.mockResolvedValue({ records: [], nextCursor: 'pt-next' });
     await runPaymentWatcherTick({ account: ACCOUNT });
     expect(state.writtenCursors).toEqual(['pt-next']);
+  });
+
+  // ─── ADR 015 — LOOP-asset acceptance ──────────────────────────────────────
+  const GBPLOOP_ISSUER = 'GB' + '2'.repeat(55);
+  const USDLOOP_ISSUER = 'GA' + '1'.repeat(55);
+
+  function loopAssetPayment(
+    memo: string,
+    amount: string,
+    code: 'USDLOOP' | 'GBPLOOP' | 'EURLOOP',
+    issuer: string,
+    pagingToken = 'pt-loop',
+  ): HorizonPayment {
+    return {
+      id: `id-${pagingToken}`,
+      paging_token: pagingToken,
+      type: 'payment',
+      from: 'GOTHER',
+      to: ACCOUNT,
+      asset_type: 'credit_alphanum12',
+      asset_code: code,
+      asset_issuer: issuer,
+      amount,
+      transaction_hash: `tx-${pagingToken}`,
+      transaction_successful: true,
+      transaction: { memo, memo_type: 'text', successful: true },
+    };
+  }
+
+  it('accepts a GBPLOOP payment for a GBP-charged order at 1:1 peg', async () => {
+    loopAssetsState.assets = [{ code: 'GBPLOOP', issuer: GBPLOOP_ISSUER }];
+    listPaymentsMock.mockResolvedValue({
+      // £10.00 = 1000 pence = 1000 × 100_000 stroops = 100_000_000
+      // stroops = "10.0000000" in GBPLOOP's 7-decimal Stellar units.
+      records: [loopAssetPayment('MEMO', '10.0000000', 'GBPLOOP', GBPLOOP_ISSUER)],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(
+      makeOrder({
+        paymentMethod: 'usdc',
+        currency: 'GBP',
+        faceValueMinor: 1_000n,
+        chargeMinor: 1_000n,
+        chargeCurrency: 'GBP',
+      }),
+    );
+    markPaidMock.mockResolvedValue({ id: 'order-1' });
+    const r = await runPaymentWatcherTick({ account: ACCOUNT });
+    expect(r.paid).toBe(1);
+    expect(r.skippedAmount).toBe(0);
+  });
+
+  it('rejects a LOOP-asset payment whose currency does not match the order charge currency', async () => {
+    // USDLOOP payment against a GBP-charged order — 1:1 assumption
+    // breaks across currencies, so reject.
+    loopAssetsState.assets = [{ code: 'USDLOOP', issuer: USDLOOP_ISSUER }];
+    listPaymentsMock.mockResolvedValue({
+      records: [loopAssetPayment('MEMO', '10.0000000', 'USDLOOP', USDLOOP_ISSUER)],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(
+      makeOrder({
+        paymentMethod: 'usdc',
+        currency: 'GBP',
+        chargeCurrency: 'GBP',
+        chargeMinor: 1_000n,
+      }),
+    );
+    const r = await runPaymentWatcherTick({ account: ACCOUNT });
+    expect(r.matched).toBe(1);
+    expect(r.paid).toBe(0);
+    expect(r.skippedAmount).toBe(1);
+  });
+
+  it('rejects an underpaid LOOP-asset payment', async () => {
+    loopAssetsState.assets = [{ code: 'GBPLOOP', issuer: GBPLOOP_ISSUER }];
+    listPaymentsMock.mockResolvedValue({
+      // Only 500 pence paid against a 1000 pence charge.
+      records: [loopAssetPayment('MEMO', '5.0000000', 'GBPLOOP', GBPLOOP_ISSUER)],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(
+      makeOrder({ chargeCurrency: 'GBP', chargeMinor: 1_000n, currency: 'GBP' }),
+    );
+    const r = await runPaymentWatcherTick({ account: ACCOUNT });
+    expect(r.paid).toBe(0);
+    expect(r.skippedAmount).toBe(1);
+  });
+
+  it('ignores a LOOP-asset payment whose issuer is not the configured one (spoof guard)', async () => {
+    // Allowlist has GBPLOOP at GBPLOOP_ISSUER, but an attacker issues
+    // their own "GBPLOOP" asset from a different account. The payment
+    // shouldn't match — isMatchingIncomingPayment keys on issuer.
+    loopAssetsState.assets = [{ code: 'GBPLOOP', issuer: GBPLOOP_ISSUER }];
+    const imposterIssuer = 'GI' + '3'.repeat(55);
+    listPaymentsMock.mockResolvedValue({
+      records: [loopAssetPayment('MEMO', '10.0000000', 'GBPLOOP', imposterIssuer)],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(makeOrder());
+    const r = await runPaymentWatcherTick({ account: ACCOUNT });
+    // Didn't match the allowlist, so `unmatchedMemo` wasn't incremented
+    // (we never even looked up the memo) and no order moved.
+    expect(r.matched).toBe(0);
+    expect(r.paid).toBe(0);
+  });
+
+  it('still accepts USDC alongside LOOP assets — allowlist is additive', async () => {
+    loopAssetsState.assets = [{ code: 'GBPLOOP', issuer: GBPLOOP_ISSUER }];
+    listPaymentsMock.mockResolvedValue({
+      records: [usdcPayment('MEMO', '10.0000000')],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(
+      makeOrder({ paymentMethod: 'usdc', currency: 'USD', faceValueMinor: 1_000n }),
+    );
+    markPaidMock.mockResolvedValue({ id: 'order-1' });
+    const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+    expect(r.paid).toBe(1);
   });
 });
