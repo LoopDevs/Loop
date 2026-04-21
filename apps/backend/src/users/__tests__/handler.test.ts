@@ -8,19 +8,38 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-// DB mock — two distinct chains for the POST handler:
-//   select(...).from(...).where(...)           → count rows
-//   update(...).set(...).where(...).returning() → updated user rows
-// Two separate chain objects so .where can be async on the select
-// chain and sync (non-terminal) on the update chain.
+// DB mocks:
+//   select(...).from(...).where(...)                      → count rows
+//     (setHomeCurrency path — awaits the where directly)
+//   select(...).from(...).where(...).orderBy(...).limit(N) → history rows
+//     (cashback-history path — chains a terminal .limit)
+//   update(...).set(...).where(...).returning()           → updated user rows
+// The select chain's `.where()` returns a shapeshifter leaf that's
+// thenable (so the first caller can `await` it and read the count
+// row) AND exposes `.orderBy` / `.limit` (so the second caller can
+// chain onto it and read the list). Drizzle's real query builder
+// behaves similarly — the chain is lazy until awaited.
 const { selectChain, updateChain, dbState } = vi.hoisted(() => {
   const state: {
     orderCount: string;
     updatedUser: unknown;
-  } = { orderCount: '0', updatedUser: null };
+    historyRows: unknown[];
+  } = { orderCount: '0', updatedUser: null, historyRows: [] };
   const sel: Record<string, ReturnType<typeof vi.fn>> = {};
   sel['from'] = vi.fn(() => sel);
-  sel['where'] = vi.fn(async () => [{ n: state.orderCount }]);
+  sel['where'] = vi.fn(() => {
+    const leaf: Record<string, unknown> = {};
+    leaf['then'] = (resolve: (v: Array<{ n: string }>) => void, reject: (err: unknown) => void) => {
+      try {
+        resolve([{ n: state.orderCount }]);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    leaf['orderBy'] = vi.fn(() => leaf);
+    leaf['limit'] = vi.fn(async () => state.historyRows);
+    return leaf;
+  });
   const upd: Record<string, ReturnType<typeof vi.fn>> = {};
   upd['set'] = vi.fn(() => upd);
   upd['where'] = vi.fn(() => upd);
@@ -55,6 +74,11 @@ vi.mock('../../db/client.js', () => ({
 vi.mock('../../db/schema.js', () => ({
   orders: { userId: 'user_id' },
   users: { id: 'id' },
+  creditTransactions: {
+    userId: 'user_id',
+    createdAt: 'created_at',
+    id: 'id',
+  },
   HOME_CURRENCIES: ['USD', 'GBP', 'EUR'] as const,
 }));
 
@@ -69,14 +93,24 @@ vi.mock('../../auth/jwt.js', () => ({
   decodeJwtPayload: vi.fn(() => jwtState.claims),
 }));
 
-import { getMeHandler, setHomeCurrencyHandler, setStellarAddressHandler } from '../handler.js';
+import {
+  getCashbackHistoryHandler,
+  getMeHandler,
+  setHomeCurrencyHandler,
+  setStellarAddressHandler,
+} from '../handler.js';
 
-function makeCtx(auth: LoopAuthContext | undefined, body?: unknown): Context {
+function makeCtx(
+  auth: LoopAuthContext | undefined,
+  body?: unknown,
+  query?: Record<string, string>,
+): Context {
   const store = new Map<string, unknown>();
   if (auth !== undefined) store.set('auth', auth);
   return {
     req: {
       json: async () => body,
+      query: (k: string) => query?.[k],
     },
     get: (k: string) => store.get(k),
     json: (responseBody: unknown, status?: number) =>
@@ -95,6 +129,7 @@ beforeEach(() => {
   jwtState.claims = null;
   dbState.orderCount = '0';
   dbState.updatedUser = null;
+  dbState.historyRows = [];
 });
 
 describe('getMeHandler', () => {
@@ -360,5 +395,100 @@ describe('setStellarAddressHandler', () => {
     dbState.updatedUser = null;
     const res = await setStellarAddressHandler(makeCtx(LOOP_AUTH, { address: VALID_ADDRESS }));
     expect(res.status).toBe(404);
+  });
+});
+
+describe('getCashbackHistoryHandler', () => {
+  const LOOP_AUTH: LoopAuthContext = {
+    kind: 'loop',
+    userId: 'user-uuid',
+    email: 'a@b.com',
+    bearerToken: 'loop-jwt',
+  };
+  const baseUser = {
+    id: 'user-uuid',
+    email: 'a@b.com',
+    isAdmin: false,
+    homeCurrency: 'USD',
+    stellarAddress: null,
+    ctxUserId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  const sampleRow = {
+    id: 'tx-1',
+    type: 'cashback',
+    amountMinor: 250n,
+    currency: 'USD',
+    referenceType: 'order',
+    referenceId: 'ord-1',
+    createdAt: new Date('2026-04-01T12:00:00Z'),
+  };
+
+  it('401 when no auth is on the context', async () => {
+    const res = await getCashbackHistoryHandler(makeCtx(undefined));
+    expect(res.status).toBe(401);
+  });
+
+  it('happy path — returns entries in response envelope with bigint amount as string', async () => {
+    userState.byId = baseUser;
+    dbState.historyRows = [sampleRow];
+    const res = await getCashbackHistoryHandler(makeCtx(LOOP_AUTH));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { entries: Array<Record<string, unknown>> };
+    expect(body.entries).toHaveLength(1);
+    expect(body.entries[0]).toEqual({
+      id: 'tx-1',
+      type: 'cashback',
+      amountMinor: '250',
+      currency: 'USD',
+      referenceType: 'order',
+      referenceId: 'ord-1',
+      createdAt: '2026-04-01T12:00:00.000Z',
+    });
+  });
+
+  it('returns an empty entries array when the user has no ledger rows', async () => {
+    userState.byId = baseUser;
+    dbState.historyRows = [];
+    const res = await getCashbackHistoryHandler(makeCtx(LOOP_AUTH));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { entries: unknown[] };
+    expect(body.entries).toEqual([]);
+  });
+
+  it('400 when ?before is not a parseable ISO-8601 timestamp', async () => {
+    userState.byId = baseUser;
+    const res = await getCashbackHistoryHandler(
+      makeCtx(LOOP_AUTH, undefined, { before: 'not-a-date' }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('accepts a valid ?before and still returns the rows', async () => {
+    userState.byId = baseUser;
+    dbState.historyRows = [sampleRow];
+    const res = await getCashbackHistoryHandler(
+      makeCtx(LOOP_AUTH, undefined, { before: '2026-04-15T00:00:00Z' }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('caps ?limit at 100 and floors at 1 — malformed values fall back to the default', async () => {
+    userState.byId = baseUser;
+    dbState.historyRows = [];
+    for (const limit of ['0', '-5', '9999', 'not-a-number']) {
+      const res = await getCashbackHistoryHandler(makeCtx(LOOP_AUTH, undefined, { limit }));
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it('500 when the CTX upsert throws', async () => {
+    jwtState.claims = { sub: 'ctx-err', email: 'e@x.com' };
+    userState.upsertThrow = new Error('db down');
+    const res = await getCashbackHistoryHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
+    expect(res.status).toBe(500);
   });
 });
