@@ -4,21 +4,27 @@
 
 ## Docs index
 
-| Doc                                               | Contents                                                      |
-| ------------------------------------------------- | ------------------------------------------------------------- |
-| `docs/architecture.md`                            | System design, data flows, component responsibilities         |
-| `docs/development.md`                             | Getting started, env vars, all dev commands                   |
-| `docs/deployment.md`                              | How to deploy backend, web, and mobile                        |
-| `docs/testing.md`                                 | Testing pyramid, when tests run, coverage requirements        |
-| `docs/standards.md`                               | Code style, commit format, branching, review rules            |
-| `docs/roadmap.md`                                 | What's left for Phase 1, Phase 2, Phase 3                     |
-| `docs/codebase-audit.md`                          | Audit program, scope, evidence model, exit criteria           |
-| `docs/audit-checklist.md`                         | Detailed audit checklist by workstream                        |
-| `docs/audit-tracker.md`                           | Working tracker for evidence, findings, and status            |
-| `docs/adr/`                                       | Architecture Decision Records                                 |
-| `docs/adr/005-known-limitations.md`               | Items we deliberately do NOT fix in Phase 1                   |
-| `docs/adr/006-keychain-backed-secure-storage.md`  | Keychain/EncryptedSharedPreferences for refresh tokens        |
-| `docs/adr/007-native-projects-source-of-truth.md` | Why native iOS/Android projects stay generated, not versioned |
+| Doc                                                         | Contents                                                      |
+| ----------------------------------------------------------- | ------------------------------------------------------------- |
+| `docs/architecture.md`                                      | System design, data flows, component responsibilities         |
+| `docs/development.md`                                       | Getting started, env vars, all dev commands                   |
+| `docs/deployment.md`                                        | How to deploy backend, web, and mobile                        |
+| `docs/testing.md`                                           | Testing pyramid, when tests run, coverage requirements        |
+| `docs/standards.md`                                         | Code style, commit format, branching, review rules            |
+| `docs/roadmap.md`                                           | What's left for Phase 1, Phase 2, Phase 3                     |
+| `docs/codebase-audit.md`                                    | Audit program, scope, evidence model, exit criteria           |
+| `docs/audit-checklist.md`                                   | Detailed audit checklist by workstream                        |
+| `docs/audit-tracker.md`                                     | Working tracker for evidence, findings, and status            |
+| `docs/adr/`                                                 | Architecture Decision Records                                 |
+| `docs/adr/005-known-limitations.md`                         | Items we deliberately do NOT fix in Phase 1                   |
+| `docs/adr/006-keychain-backed-secure-storage.md`            | Keychain/EncryptedSharedPreferences for refresh tokens        |
+| `docs/adr/007-native-projects-source-of-truth.md`           | Why native iOS/Android projects stay generated, not versioned |
+| `docs/adr/008-capacitor-filesystem-for-share.md`            | Why share-image writes go through Filesystem on Android       |
+| `docs/adr/009-credits-ledger-cashback-flow.md`              | Off-chain postgres ledger + cashback capture                  |
+| `docs/adr/010-principal-switch-payment-rails.md`            | Loop becomes merchant of record; payment rails                |
+| `docs/adr/011-admin-panel-cashback-configuration.md`        | Admin panel shape + cashback-config audit trail               |
+| `docs/adr/012-drizzle-orm-fly-postgres.md`                  | ORM + Postgres-on-Fly stack choice                            |
+| `docs/adr/013-loop-owned-auth-and-ctx-operator-accounts.md` | Loop owns user auth; CTX is a supplier pool                   |
 
 ---
 
@@ -147,6 +153,11 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # CTX_CLIENT_ID_WEB=loopweb
 # CTX_CLIENT_ID_IOS=loopios
 # CTX_CLIENT_ID_ANDROID=loopandroid
+
+# Loop-native auth (ADR 013). Absent → legacy CTX-proxy path only.
+# Min 32 chars; PREVIOUS is set during rotation windows.
+# LOOP_JWT_SIGNING_KEY=<at-least-32-char-random-secret>
+# LOOP_JWT_SIGNING_KEY_PREVIOUS=<prior-secret-during-rotation>
 
 # Dev mode: show disabled merchants
 # INCLUDE_DISABLED_MERCHANTS=true
