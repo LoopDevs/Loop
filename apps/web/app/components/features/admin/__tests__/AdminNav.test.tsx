@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { TreasurySnapshot } from '~/services/admin';
 import type * as AdminModule from '~/services/admin';
-import { AdminNav, operatorPoolStatus } from '../AdminNav';
+import { AdminNav, failedPayoutsCount, operatorPoolStatus } from '../AdminNav';
 
 afterEach(cleanup);
 
@@ -35,7 +35,10 @@ vi.mock('~/hooks/query-retry', () => ({
   shouldRetry: () => false,
 }));
 
-function baseSnapshot(overrides?: Partial<TreasurySnapshot['operatorPool']>): TreasurySnapshot {
+function baseSnapshot(
+  overrides?: Partial<TreasurySnapshot['operatorPool']>,
+  payoutOverrides?: Partial<TreasurySnapshot['payouts']>,
+): TreasurySnapshot {
   return {
     outstanding: {},
     totals: {},
@@ -45,7 +48,13 @@ function baseSnapshot(overrides?: Partial<TreasurySnapshot['operatorPool']>): Tr
       EURLOOP: { outstandingMinor: '0', issuer: null },
     },
     assets: { USDC: { stroops: null }, XLM: { stroops: null } },
-    payouts: { pending: '0', submitted: '0', confirmed: '0', failed: '0' },
+    payouts: {
+      pending: '0',
+      submitted: '0',
+      confirmed: '0',
+      failed: '0',
+      ...(payoutOverrides ?? {}),
+    },
     operatorPool: {
       size: 2,
       operators: [
@@ -176,6 +185,75 @@ describe('AdminNav — CTX status pill', () => {
       const pill = screen.getByText(/CTX healthy/).closest('a');
       expect(pill?.getAttribute('href')).toBe('/admin/treasury');
     });
+  });
+});
+
+describe('AdminNav — failed-payouts badge', () => {
+  it('does not render the badge when failed count is zero', async () => {
+    adminMock.getTreasurySnapshot.mockResolvedValue(baseSnapshot());
+    renderAt('/admin/cashback');
+    // Wait for the snapshot to resolve so we're not just seeing the
+    // pre-fetch render.
+    await waitFor(() => {
+      expect(screen.getByText(/CTX /)).toBeDefined();
+    });
+    expect(screen.queryByText(/failed$/i)).toBeNull();
+  });
+
+  it('renders a red badge with the failed count when > 0', async () => {
+    adminMock.getTreasurySnapshot.mockResolvedValue(baseSnapshot(undefined, { failed: '3' }));
+    renderAt('/admin/cashback');
+    await waitFor(() => {
+      expect(screen.getByText(/3 failed/)).toBeDefined();
+    });
+  });
+
+  it('caps the label at 99+ when the backlog spirals', async () => {
+    adminMock.getTreasurySnapshot.mockResolvedValue(baseSnapshot(undefined, { failed: '142' }));
+    renderAt('/admin/cashback');
+    await waitFor(() => {
+      expect(screen.getByText(/99\+ failed/)).toBeDefined();
+    });
+  });
+
+  it('links the badge to /admin/payouts?state=failed for drill-in', async () => {
+    adminMock.getTreasurySnapshot.mockResolvedValue(baseSnapshot(undefined, { failed: '7' }));
+    renderAt('/admin/cashback');
+    await waitFor(() => {
+      const badge = screen.getByText(/7 failed/).closest('a');
+      expect(badge?.getAttribute('href')).toBe('/admin/payouts?state=failed');
+    });
+  });
+
+  it('hides the badge for non-admin callers (401 response)', async () => {
+    adminMock.getTreasurySnapshot.mockRejectedValue(
+      new ApiException(401, { code: 'UNAUTHORIZED', message: 'nope' }),
+    );
+    renderAt('/admin/cashback');
+    await waitFor(() => {
+      expect(screen.queryByText(/failed/)).toBeNull();
+    });
+  });
+});
+
+describe('failedPayoutsCount (pure)', () => {
+  it('returns 0 when payouts is undefined', () => {
+    expect(failedPayoutsCount(undefined)).toBe(0);
+  });
+  it('parses a positive bigint-string', () => {
+    expect(failedPayoutsCount({ pending: '0', submitted: '0', confirmed: '0', failed: '17' })).toBe(
+      17,
+    );
+  });
+  it('clamps negatives to 0 (guards a buggy server)', () => {
+    expect(failedPayoutsCount({ pending: '0', submitted: '0', confirmed: '0', failed: '-4' })).toBe(
+      0,
+    );
+  });
+  it('returns 0 on unparseable strings', () => {
+    expect(
+      failedPayoutsCount({ pending: '0', submitted: '0', confirmed: '0', failed: 'nope' }),
+    ).toBe(0);
   });
 });
 
