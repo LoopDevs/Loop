@@ -217,3 +217,47 @@ export async function runPaymentWatcherTick(args: {
 
   return result;
 }
+
+/**
+ * Periodic loop wrapper around `runPaymentWatcherTick`. Swallows
+ * per-tick errors so a transient Horizon blip doesn't kill the
+ * interval — each tick is independent, and the next retry picks up
+ * from the last persisted cursor.
+ */
+let watcherTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startPaymentWatcher(args: {
+  account: string;
+  usdcIssuer?: string | undefined;
+  intervalMs: number;
+  limit?: number;
+}): void {
+  if (watcherTimer !== null) return;
+  log.info({ intervalMs: args.intervalMs }, 'Starting payment watcher');
+  const tick = async (): Promise<void> => {
+    try {
+      const r = await runPaymentWatcherTick({
+        account: args.account,
+        ...(args.usdcIssuer !== undefined ? { usdcIssuer: args.usdcIssuer } : {}),
+        ...(args.limit !== undefined ? { limit: args.limit } : {}),
+      });
+      if (r.scanned > 0 || r.paid > 0 || r.skippedAmount > 0) {
+        log.info(r, 'Payment watcher tick complete');
+      }
+    } catch (err) {
+      log.error({ err }, 'Payment watcher tick failed');
+    }
+  };
+  // Kick off an immediate first tick so restart latency doesn't leave
+  // fresh deposits unprocessed for a full interval.
+  void tick();
+  watcherTimer = setInterval(() => void tick(), args.intervalMs);
+  watcherTimer.unref();
+}
+
+export function stopPaymentWatcher(): void {
+  if (watcherTimer === null) return;
+  clearInterval(watcherTimer);
+  watcherTimer = null;
+  log.info('Payment watcher stopped');
+}

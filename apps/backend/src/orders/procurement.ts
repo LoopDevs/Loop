@@ -151,3 +151,35 @@ export async function runProcurementTick(
   }
   return result;
 }
+
+/**
+ * Periodic loop wrapper around `runProcurementTick`. Swallows per-
+ * tick errors so a transient DB / pool blip doesn't kill the interval
+ * — paid orders remain picked up on the next tick.
+ */
+let procurementTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startProcurementWorker(args: { intervalMs: number; limit?: number }): void {
+  if (procurementTimer !== null) return;
+  log.info({ intervalMs: args.intervalMs }, 'Starting procurement worker');
+  const tick = async (): Promise<void> => {
+    try {
+      const r = await runProcurementTick(args.limit !== undefined ? { limit: args.limit } : {});
+      if (r.picked > 0) {
+        log.info(r, 'Procurement tick complete');
+      }
+    } catch (err) {
+      log.error({ err }, 'Procurement tick failed');
+    }
+  };
+  void tick();
+  procurementTimer = setInterval(() => void tick(), args.intervalMs);
+  procurementTimer.unref();
+}
+
+export function stopProcurementWorker(): void {
+  if (procurementTimer === null) return;
+  clearInterval(procurementTimer);
+  procurementTimer = null;
+  log.info('Procurement worker stopped');
+}
