@@ -74,6 +74,31 @@ export interface MerchantCardProps {
   className?: string;
   /** When true, images load eagerly (use for above-the-fold cards). */
   eager?: boolean;
+  /**
+   * Active cashback % for this merchant (ADR 011 / 015), supplied from
+   * the bulk `/api/merchants/cashback-rates` map. Null hides the badge.
+   * Format matches the backend wire shape: numeric(5,2) as a string
+   * (e.g. `"2.50"`). Callers should read it via
+   * `useMerchantsCashbackRatesMap().lookup(merchant.id)`.
+   */
+  userCashbackPct?: string | null;
+}
+
+/**
+ * Formats the numeric-string pct for the card badge. Drops trailing
+ * zeros so whole-integer rates read as "5% cashback" rather than
+ * "5.00% cashback", while partial rates keep their precision ("2.5").
+ * Returns `null` when the input can't be made to render sensibly,
+ * which the caller should translate to "don't render the badge".
+ */
+function formatCashbackPct(pct: string | null | undefined): string | null {
+  if (pct === null || pct === undefined) return null;
+  const n = Number(pct);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  // One decimal place max — rates like 1.25% are rare and would clutter
+  // a small pill; we prefer the slightly-less-precise "1.3%" read.
+  const rounded = Math.round(n * 10) / 10;
+  return rounded.toFixed(1).replace(/\.0$/, '');
 }
 
 export function MerchantCard({
@@ -81,12 +106,14 @@ export function MerchantCard({
   displayIndex = 0,
   className = '',
   eager = false,
+  userCashbackPct = null,
 }: MerchantCardProps): React.JSX.Element {
   const slug = merchantSlug(merchant.name);
   const cardImgUrl =
     merchant.cardImageUrl !== undefined ? getImageProxyUrl(merchant.cardImageUrl, 640) : undefined;
   const logoImgUrl =
     merchant.logoUrl !== undefined ? getImageProxyUrl(merchant.logoUrl, 160) : undefined;
+  const cashbackLabel = formatCashbackPct(userCashbackPct);
 
   return (
     <Link
@@ -116,9 +143,27 @@ export function MerchantCard({
               <span className="text-white text-3xl font-bold">{merchant.name.charAt(0)}</span>
             </div>
           )}
+          {/* Savings + cashback badges stack in the top-right corner.
+              Savings is upstream-provided (the merchant's discount
+              vs face value); cashback is Loop-configured per merchant
+              (ADR 011 / 015). Both render when both exist, with
+              cashback taking the lower slot because it's the Loop-
+              specific value and reads like an addition on top of the
+              headline discount. */}
           {merchant.savingsPercentage !== undefined && merchant.savingsPercentage > 0 && (
             <span className="absolute top-2 right-2 text-xs font-semibold text-green-700 bg-green-100/95 dark:text-green-300 dark:bg-green-900/80 px-2 py-0.5 rounded-full shadow-sm backdrop-blur-sm">
               Save {merchant.savingsPercentage.toFixed(1)}%
+            </span>
+          )}
+          {cashbackLabel !== null && (
+            <span
+              className={`absolute right-2 text-xs font-semibold text-blue-700 bg-blue-100/95 dark:text-blue-300 dark:bg-blue-900/80 px-2 py-0.5 rounded-full shadow-sm backdrop-blur-sm ${
+                merchant.savingsPercentage !== undefined && merchant.savingsPercentage > 0
+                  ? 'top-9'
+                  : 'top-2'
+              }`}
+            >
+              {cashbackLabel}% cashback
             </span>
           )}
         </div>

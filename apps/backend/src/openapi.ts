@@ -724,6 +724,34 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/merchants/cashback-rates',
+  summary: 'Bulk cashback-rate map for the merchant catalog (ADR 011 / 015).',
+  description:
+    'Returns a `{ merchantId → userCashbackPct }` map of every merchant with an active cashback config. Lets catalog / list / map views render "X% cashback" badges per card without N+1-ing the per-merchant endpoint. Merchants without an active config are omitted — clients should treat missing keys as "no cashback" and hide the badge. Values are `numeric(5,2)` strings (e.g. `"2.50"`). 5-minute public cache matches the merchant-catalog endpoints.',
+  tags: ['Merchants'],
+  responses: {
+    200: {
+      description: 'Bulk rates map',
+      content: {
+        'application/json': {
+          schema: z.object({
+            rates: z.record(z.string(), CashbackPctString).openapi({
+              description:
+                'Object keyed by merchantId; present only for merchants with active configs.',
+            }),
+          }),
+        },
+      },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/merchants/{merchantId}/cashback-rate',
   summary: 'Cashback-rate preview for the gift-card detail page (ADR 011 / 015).',
   description:

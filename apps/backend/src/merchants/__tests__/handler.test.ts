@@ -46,12 +46,16 @@ vi.mock('../../clustering/handler.js', () => ({
 }));
 
 // Mock the db client. Handlers that historically don't touch the DB
-// are unaffected; the new /cashback-rate handler drives its lookups
-// through this stub. `findFirst` returns whatever the hoisted state
-// says — tests seed `dbState.cashbackConfig` before hitting the route.
+// are unaffected; the cashback-rate handlers drive their lookups
+// through this stub.
+//   - `findFirst` serves the per-merchant GET, returning
+//     `dbState.cashbackConfig` or undefined.
+//   - `select().from().where()` serves the bulk GET — resolves to
+//     an array of `dbState.bulkConfigs` rows.
 const { dbState } = vi.hoisted(() => ({
   dbState: {
     cashbackConfig: null as { userCashbackPct: string; active: boolean } | null,
+    bulkConfigs: [] as Array<{ merchantId: string; userCashbackPct: string }>,
     findFirstCalls: 0,
   },
 }));
@@ -65,6 +69,11 @@ vi.mock('../../db/client.js', () => ({
         }),
       },
     },
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(async () => dbState.bulkConfigs),
+      })),
+    })),
   },
 }));
 vi.mock('../../circuit-breaker.js', () => ({
@@ -107,6 +116,7 @@ beforeEach(() => {
   mockGetMerchants.mockReset();
   seed([]);
   dbState.cashbackConfig = null;
+  dbState.bulkConfigs = [];
   dbState.findFirstCalls = 0;
 });
 
@@ -332,6 +342,47 @@ describe('GET /api/merchants/:id', () => {
     seed([merchant('m-1', 'Home Depot')]);
     const res = await app.request('/api/merchants/m-1');
     expect(res.status).toBe(401);
+  });
+});
+
+describe('GET /api/merchants/cashback-rates (bulk)', () => {
+  it('returns a rates map keyed by merchantId with bigint-string pcts', async () => {
+    dbState.bulkConfigs = [
+      { merchantId: 'm-1', userCashbackPct: '2.50' },
+      { merchantId: 'm-2', userCashbackPct: '10.00' },
+    ];
+    const res = await app.request('/api/merchants/cashback-rates');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { rates: Record<string, string> };
+    expect(body.rates).toEqual({
+      'm-1': '2.50',
+      'm-2': '10.00',
+    });
+  });
+
+  it('returns an empty rates object when no active configs exist', async () => {
+    dbState.bulkConfigs = [];
+    const res = await app.request('/api/merchants/cashback-rates');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { rates: Record<string, string> };
+    expect(body.rates).toEqual({});
+  });
+
+  it('serves with public 5-min cache so CDN + browser can share', async () => {
+    dbState.bulkConfigs = [];
+    const res = await app.request('/api/merchants/cashback-rates');
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
+  });
+
+  it('literal "cashback-rates" does NOT route through the :merchantId handler', async () => {
+    // Router ordering regression guard. If "cashback-rates" were
+    // interpreted as a path parameter, `merchantCashbackRateHandler`
+    // would run instead — it would 404 on the unknown merchant and
+    // never hit the bulk SELECT.
+    dbState.bulkConfigs = [{ merchantId: 'm-1', userCashbackPct: '3.00' }];
+    const res = await app.request('/api/merchants/cashback-rates');
+    const body = (await res.json()) as { rates?: Record<string, string> };
+    expect(body.rates).toEqual({ 'm-1': '3.00' });
   });
 });
 

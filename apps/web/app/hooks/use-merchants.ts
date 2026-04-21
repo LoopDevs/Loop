@@ -6,7 +6,9 @@ import {
   fetchMerchantBySlug,
   fetchAllMerchants,
   fetchMerchantCashbackRate,
+  fetchMerchantsCashbackRates,
   type MerchantCashbackRateResponse,
+  type MerchantsCashbackRatesResponse,
 } from '~/services/merchants';
 import { shouldRetry } from './query-retry';
 
@@ -165,4 +167,27 @@ export function useMerchantCashbackRate(id: string): { userCashbackPct: string |
     retry: shouldRetry,
   });
   return { userCashbackPct: query.data?.userCashbackPct ?? null };
+}
+
+/**
+ * Bulk cashback-rate map for catalog views (ADR 011 / 015). One
+ * request covers every merchant with an active config; card-grid
+ * components use the returned `lookup` fn to paint "X% cashback"
+ * badges per row. Silent fallback — when the fetch is in-flight or
+ * fails, every lookup returns `null` so the badges simply don't
+ * render.
+ */
+export function useMerchantsCashbackRatesMap(): {
+  lookup: (merchantId: string) => string | null;
+} {
+  const query = useQuery<MerchantsCashbackRatesResponse, Error>({
+    queryKey: ['merchants-cashback-rates'],
+    queryFn: fetchMerchantsCashbackRates,
+    staleTime: 5 * 60 * 1000,
+    retry: shouldRetry,
+  });
+  const lookup = (merchantId: string): string | null => {
+    return query.data?.rates[merchantId] ?? null;
+  };
+  return { lookup };
 }

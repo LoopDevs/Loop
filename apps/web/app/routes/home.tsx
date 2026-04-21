@@ -1,5 +1,5 @@
 import type { Route } from './+types/home';
-import { useAllMerchants } from '~/hooks/use-merchants';
+import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
@@ -18,6 +18,9 @@ export function meta(): Route.MetaDescriptors {
 function HomeContent(): React.JSX.Element {
   const { isNative } = useNativePlatform();
   const { merchants, isLoading, isError } = useAllMerchants();
+  // Bulk cashback-rate map (ADR 011 / 015). One fetch for the whole
+  // page — the lookup below is O(1) per card, so both grids share it.
+  const { lookup: lookupCashback } = useMerchantsCashbackRatesMap();
 
   const featured = [...merchants]
     .filter((m) => m.savingsPercentage !== undefined && m.savingsPercentage > 0)
@@ -142,6 +145,7 @@ function HomeContent(): React.JSX.Element {
                     merchant={merchant}
                     displayIndex={i}
                     eager={i < 4}
+                    userCashbackPct={lookupCashback(merchant.id)}
                   />
                 ))}
               </div>
@@ -172,6 +176,7 @@ function HomeContent(): React.JSX.Element {
                     merchant={merchant}
                     displayIndex={i + 6}
                     eager={i < 4}
+                    userCashbackPct={lookupCashback(merchant.id)}
                   />
                 ))}
               </div>

@@ -194,6 +194,41 @@ export async function merchantDetailHandler(c: Context): Promise<Response> {
 }
 
 /**
+ * `GET /api/merchants/cashback-rates` — public bulk map of
+ * `{ merchantId → userCashbackPct }` for every active config
+ * (ADR 011 / 015). Lets catalog / list / map views render a
+ * cashback badge on each card without N+1-ing the per-merchant
+ * endpoint. Merchants without an active config are omitted (the
+ * client should treat a missing key as "no cashback" and hide the
+ * badge). Values are `numeric(5,2)` strings, same as the per-
+ * merchant endpoint.
+ *
+ * 5-minute public Cache-Control matches the merchant-catalog
+ * endpoints — admin cashback edits are rare and the stale window
+ * is acceptable.
+ */
+export async function merchantsCashbackRatesHandler(c: Context): Promise<Response> {
+  const rows = await db
+    .select({
+      merchantId: merchantCashbackConfigs.merchantId,
+      userCashbackPct: merchantCashbackConfigs.userCashbackPct,
+    })
+    .from(merchantCashbackConfigs)
+    .where(eq(merchantCashbackConfigs.active, true));
+
+  // Map-shaped response — the frontend converts to a `Map` once
+  // and does O(1) lookups per merchant card. Plain object (not
+  // a tuple array) so the JSON is human-readable in devtools.
+  const rates: Record<string, string> = {};
+  for (const row of rows) {
+    rates[row.merchantId] = row.userCashbackPct;
+  }
+
+  c.header('Cache-Control', 'public, max-age=300');
+  return c.json({ rates });
+}
+
+/**
  * `GET /api/merchants/:merchantId/cashback-rate` — public surface
  * for rendering "Earn X% cashback" on the gift-card detail page
  * before checkout (ADR 011 / 015). Reads the active `user_cashback_pct`
