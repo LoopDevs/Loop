@@ -24,7 +24,7 @@ import { db } from '../db/client.js';
 import { watcherCursors } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { findPendingOrderByMemo, type Order } from '../orders/repo.js';
-import { markOrderPaid } from '../orders/transitions.js';
+import { markOrderPaid, sweepExpiredOrders } from '../orders/transitions.js';
 import { listAccountPayments, isMatchingIncomingPayment, type HorizonPayment } from './horizon.js';
 
 const log = logger.child({ area: 'payment-watcher' });
@@ -225,6 +225,19 @@ export async function runPaymentWatcherTick(args: {
  * from the last persisted cursor.
  */
 let watcherTimer: ReturnType<typeof setInterval> | null = null;
+let expirySweepTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * How old a `pending_payment` order must be before the expiry sweep
+ * transitions it to `expired`. 24h is conservative — on-chain
+ * payments typically land in minutes, but a user who drafted an
+ * order and walked away should see "expired" the next day rather
+ * than a dead-looking row forever.
+ */
+const PAYMENT_EXPIRY_MS = 24 * 60 * 60 * 1000;
+
+/** How often the expiry sweep runs. 5 min is generous given 24h horizon. */
+const EXPIRY_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
 export function startPaymentWatcher(args: {
   account: string;
@@ -248,14 +261,32 @@ export function startPaymentWatcher(args: {
       log.error({ err }, 'Payment watcher tick failed');
     }
   };
+  const expirySweep = async (): Promise<void> => {
+    try {
+      const cutoff = new Date(Date.now() - PAYMENT_EXPIRY_MS);
+      const n = await sweepExpiredOrders(cutoff);
+      if (n > 0) {
+        log.info({ swept: n }, 'Marked abandoned pending_payment orders as expired');
+      }
+    } catch (err) {
+      log.error({ err }, 'Expiry sweep failed');
+    }
+  };
   // Kick off an immediate first tick so restart latency doesn't leave
   // fresh deposits unprocessed for a full interval.
   void tick();
+  void expirySweep();
   watcherTimer = setInterval(() => void tick(), args.intervalMs);
   watcherTimer.unref();
+  expirySweepTimer = setInterval(() => void expirySweep(), EXPIRY_SWEEP_INTERVAL_MS);
+  expirySweepTimer.unref();
 }
 
 export function stopPaymentWatcher(): void {
+  if (expirySweepTimer !== null) {
+    clearInterval(expirySweepTimer);
+    expirySweepTimer = null;
+  }
   if (watcherTimer === null) return;
   clearInterval(watcherTimer);
   watcherTimer = null;
