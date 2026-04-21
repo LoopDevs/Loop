@@ -190,14 +190,7 @@ async function refreshFx(): Promise<CachedFx> {
  */
 export async function usdcStroopsPerCent(currency: 'USD' | 'GBP' | 'EUR'): Promise<bigint> {
   if (currency === 'USD') return 100_000n;
-  const snap = cachedFx !== null && cachedFx.expiresAt > Date.now() ? cachedFx : await refreshFx();
-  const usdPerTarget = snap.minorPerUsdDollar[currency];
-  if (usdPerTarget === undefined) {
-    throw new Error(`FX feed has no rate for USD→${currency}`);
-  }
-  if (usdPerTarget <= 0) {
-    throw new Error(`FX feed returned non-positive rate for ${currency}: ${usdPerTarget}`);
-  }
+  const usdPerTarget = await usdRateFor(currency);
   // 1 USD = `usdPerTarget` target units (e.g. 0.78 GBP).
   // → 1 target unit = 1 / usdPerTarget USD.
   // → 1 target minor = (1 / usdPerTarget) / 100 USD = 1 / (usdPerTarget × 100) USD.
@@ -206,4 +199,83 @@ export async function usdcStroopsPerCent(currency: 'USD' | 'GBP' | 'EUR'): Promi
   //   10^7 / (usdPerTarget × 100) = 10^5 / usdPerTarget stroops-per-target-minor.
   // Ceiling so exact payments satisfy `>=`.
   return BigInt(Math.ceil(100_000 / usdPerTarget));
+}
+
+/**
+ * Reads the USD→`target` rate, ensuring the cache is fresh. Exposed
+ * so convertMinorUnits can share the same cache as the stroops-per-
+ * cent math — one upstream request feeds every FX consumer in the
+ * process.
+ */
+async function usdRateFor(target: 'GBP' | 'EUR'): Promise<number> {
+  const snap = cachedFx !== null && cachedFx.expiresAt > Date.now() ? cachedFx : await refreshFx();
+  const rate = snap.minorPerUsdDollar[target];
+  if (rate === undefined) {
+    throw new Error(`FX feed has no rate for USD→${target}`);
+  }
+  if (rate <= 0) {
+    throw new Error(`FX feed returned non-positive rate for ${target}: ${rate}`);
+  }
+  return rate;
+}
+
+/**
+ * Converts a minor-unit amount between two fiat currencies (ADR 015).
+ *
+ * The catalog → home-currency conversion at order creation is the
+ * primary user: a user with `home_currency = GBP` buying a $50 USD
+ * gift card has the charge pinned at `convertMinorUnits(5000, 'USD',
+ * 'GBP')` pence.
+ *
+ * Uses Frankfurter's USD-anchored rate table (same cache as the
+ * USDC stroops-per-cent math), so GBP↔EUR is a two-hop via USD.
+ * Rounds **up** (ceiling) so the user's charge covers the catalog
+ * price after sub-cent rounding — Loop absorbs the one-minor-unit
+ * rounding in the user's favour on the procurement side.
+ *
+ * Throws on an unreachable / schema-drifted feed (no stale fallback
+ * — a live rate is load-bearing for anything price-sensitive). The
+ * caller's try/catch decides whether to 503 or queue.
+ */
+export async function convertMinorUnits(
+  amount: bigint,
+  from: 'USD' | 'GBP' | 'EUR',
+  to: 'USD' | 'GBP' | 'EUR',
+): Promise<bigint> {
+  if (amount === 0n) return 0n;
+  if (amount < 0n) {
+    throw new Error(`convertMinorUnits: negative amount not supported (${amount})`);
+  }
+  if (from === to) return amount;
+  // Work in rationals with a fixed 1e9 scale to keep enough precision
+  // for any plausible Frankfurter rate (4-5 significant digits typical)
+  // without floating through JS numbers for the arithmetic.
+  const SCALE = 1_000_000_000n;
+  let amountAsUsdScaled: bigint;
+  if (from === 'USD') {
+    amountAsUsdScaled = amount * SCALE;
+  } else {
+    // amount in `from` minor → amount in USD minor = amount / rate.
+    const rate = await usdRateFor(from);
+    // rate is a JS number like 0.7831; scale to integer math with 1e9.
+    const rateScaled = BigInt(Math.round(rate * Number(SCALE)));
+    if (rateScaled === 0n) {
+      throw new Error(`convertMinorUnits: rate USD→${from} rounded to zero (${rate})`);
+    }
+    // amount / rate = amount * SCALE / rateScaled, but we want USD minor
+    // pre-SCALE (so the USD→to branch below can reapply SCALE cleanly).
+    // So: amountAsUsdScaled = (amount * SCALE * SCALE) / rateScaled.
+    amountAsUsdScaled = (amount * SCALE * SCALE) / rateScaled;
+  }
+  if (to === 'USD') {
+    // Ceiling divide by SCALE.
+    return (amountAsUsdScaled + SCALE - 1n) / SCALE;
+  }
+  const rate = await usdRateFor(to);
+  const rateScaled = BigInt(Math.round(rate * Number(SCALE)));
+  // usd * rate → target minor. amountAsUsdScaled is already × SCALE, so
+  // target = amountAsUsdScaled × rateScaled / (SCALE × SCALE). Ceiling.
+  const numerator = amountAsUsdScaled * rateScaled;
+  const denominator = SCALE * SCALE;
+  return (numerator + denominator - 1n) / denominator;
 }
