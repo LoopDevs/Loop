@@ -59,6 +59,10 @@ export async function markOrderProcuring(
     .set({
       state: 'procuring',
       ctxOperatorId: opts.ctxOperatorId,
+      // Key the recovery sweep on this timestamp — `paid_at` would
+      // include time spent waiting for the procurement worker's next
+      // tick, which would pessimistically age the row.
+      procuredAt: new Date(),
     })
     .where(and(eq(orders.id, orderId), eq(orders.state, 'paid')))
     .returning();
@@ -178,6 +182,37 @@ export async function markOrderFailed(orderId: string, reason: string): Promise<
  * because both UPDATEs target the same row and Postgres serialises
  * them.
  */
+/**
+ * Sweep: `procuring` orders whose `procured_at` is older than `cutoff`
+ * → `failed`. Called from a periodic recovery job for the case where
+ * the procurement worker crashed between `markOrderProcuring` and
+ * either `markOrderFulfilled` or `markOrderFailed`. Without this
+ * sweep the order sits in `procuring` forever and the user never
+ * gets a terminal state.
+ *
+ * Failure reason is set to `procurement_timeout` so a later audit
+ * can differentiate genuine CTX rejections from crashed-worker
+ * orphans. Returns the count swept.
+ *
+ * Safe against a live worker: the `state = 'procuring'` guard on the
+ * UPDATE means a tick that reaches `markOrderFulfilled` after this
+ * sweep sees the row already failed (null return → caller logs and
+ * moves on, no ledger write).
+ */
+export async function sweepStuckProcurement(cutoff: Date): Promise<number> {
+  const now = new Date();
+  const rows = await db
+    .update(orders)
+    .set({
+      state: 'failed',
+      failureReason: 'procurement_timeout',
+      failedAt: now,
+    })
+    .where(and(eq(orders.state, 'procuring'), lt(orders.procuredAt, cutoff)))
+    .returning({ id: orders.id });
+  return rows.length;
+}
+
 export async function sweepExpiredOrders(cutoff: Date): Promise<number> {
   const rows = await db
     .update(orders)
