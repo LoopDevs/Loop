@@ -41,7 +41,12 @@ import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
-import { getMeHandler, setHomeCurrencyHandler, setStellarAddressHandler } from './users/handler.js';
+import {
+  getCashbackHistoryHandler,
+  getMeHandler,
+  setHomeCurrencyHandler,
+  setStellarAddressHandler,
+} from './users/handler.js';
 
 export const app = new Hono();
 
@@ -582,6 +587,11 @@ app.post('/api/users/me/home-currency', rateLimit(10, 60_000), setHomeCurrencyHa
 // wallets is a low-volume action, 10/min is plenty without enabling
 // enumeration.
 app.put('/api/users/me/stellar-address', rateLimit(10, 60_000), setStellarAddressHandler);
+// GET /api/users/me/cashback-history — paginated credit-ledger events for
+// the caller (ADR 009 / 015). 60/min matches the profile GET cadence; the
+// Account page loads it alongside /me on mount, and TanStack Query invalidates
+// it after any ledger-touching admin action (support edits, payouts).
+app.get('/api/users/me/cashback-history', rateLimit(60, 60_000), getCashbackHistoryHandler);
 
 // ─── Admin (authenticated + admin-flagged) ──────────────────────────────────
 //
