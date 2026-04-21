@@ -71,6 +71,13 @@
       "when": 1777800000000,
       "tag": "0009_users_stellar_address",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1777900000000,
+      "tag": "0010_pending_payouts",
+      "breakpoints": true
     }
   ]
 }
