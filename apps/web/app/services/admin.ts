@@ -90,3 +90,50 @@ export interface TreasurySnapshot {
 export async function getTreasurySnapshot(): Promise<TreasurySnapshot> {
   return authenticatedRequest<TreasurySnapshot>('/api/admin/treasury');
 }
+
+export interface AdminPayoutView {
+  id: string;
+  userId: string;
+  orderId: string;
+  assetCode: string;
+  assetIssuer: string;
+  toAddress: string;
+  amountStroops: string;
+  memoText: string;
+  state: PayoutState;
+  txHash: string | null;
+  lastError: string | null;
+  attempts: number;
+  createdAt: string;
+  submittedAt: string | null;
+  confirmedAt: string | null;
+  failedAt: string | null;
+}
+
+/**
+ * `GET /api/admin/payouts` — paginated drilldown for the backlog
+ * list page. Server validates `state` against the enum, clamps
+ * `limit` to 1..100.
+ */
+export async function listPayouts(opts: {
+  state?: PayoutState;
+  limit?: number;
+  before?: string;
+}): Promise<{ payouts: AdminPayoutView[] }> {
+  const params = new URLSearchParams();
+  if (opts.state !== undefined) params.set('state', opts.state);
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  if (opts.before !== undefined) params.set('before', opts.before);
+  const qs = params.toString();
+  return authenticatedRequest<{ payouts: AdminPayoutView[] }>(
+    `/api/admin/payouts${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
+/** `POST /api/admin/payouts/:id/retry` — flips a failed row back to pending. */
+export async function retryPayout(id: string): Promise<AdminPayoutView> {
+  return authenticatedRequest<AdminPayoutView>(
+    `/api/admin/payouts/${encodeURIComponent(id)}/retry`,
+    { method: 'POST' },
+  );
+}
