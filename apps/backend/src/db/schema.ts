@@ -412,3 +412,44 @@ export const watcherCursors = pgTable('watcher_cursors', {
   cursor: text('cursor'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * External identity links for a Loop user (ADR 014 — social login).
+ *
+ * One row per provider identity per user. A user can link multiple
+ * providers over time (sign up via OTP, later also add Google); a
+ * provider's stable `sub` id resolves back to that same user.
+ *
+ * Deliberately distinct from `users.ctx_user_id` (ADR 013's
+ * transitional CTX link) — CTX isn't a social provider and its
+ * mapping follows a different legacy / migration path.
+ *
+ * `email_at_link` snapshots the email the provider reported when
+ * the link was first written. The authoritative email stays on
+ * `users.email`; this column exists so support / ops can tell
+ * which email a user supplied at which provider without forcing a
+ * JOIN with provider-specific user metadata.
+ */
+export const userIdentities = pgTable(
+  'user_identities',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(),
+    providerSub: text('provider_sub').notNull(),
+    emailAtLink: text('email_at_link').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // The same (provider, provider_sub) pair can only resolve to
+    // one Loop user — without this a second sign-in via the same
+    // Google account could spawn a duplicate user row.
+    uniqueIndex('user_identities_provider_sub').on(t.provider, t.providerSub),
+    index('user_identities_user').on(t.userId),
+  ],
+);
+
+export const SOCIAL_PROVIDERS = ['google', 'apple'] as const;
+export type SocialProvider = (typeof SOCIAL_PROVIDERS)[number];
