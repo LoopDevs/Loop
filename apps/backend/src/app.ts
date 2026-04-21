@@ -40,7 +40,7 @@ import { notifyHealthChange } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
 import { treasuryHandler } from './admin/treasury.js';
-import { getMeHandler } from './users/handler.js';
+import { getMeHandler, setHomeCurrencyHandler } from './users/handler.js';
 
 export const app = new Hono();
 
@@ -561,11 +561,20 @@ app.get('/api/orders/loop/:id', rateLimit(120, 60_000), loopGetOrderHandler);
 // and legacy CTX bearers — CTX bearers upsert the Loop user row on
 // first touch, Loop bearers resolve by userId.
 app.use('/api/users/me', requireAuth);
+app.use('/api/users/me/*', requireAuth);
 app.use('/api/users/me', async (c, next) => {
   await next();
   c.header('Cache-Control', 'private, no-store');
 });
+app.use('/api/users/me/*', async (c, next) => {
+  await next();
+  c.header('Cache-Control', 'private, no-store');
+});
 app.get('/api/users/me', rateLimit(60, 60_000), getMeHandler);
+// POST /api/users/me/home-currency — onboarding-time picker (ADR 015).
+// Rate limit lower than GET: users only hit this during signup, so 10/min
+// is plenty of headroom for a double-tap retry without enabling enumeration.
+app.post('/api/users/me/home-currency', rateLimit(10, 60_000), setHomeCurrencyHandler);
 
 // ─── Admin (authenticated + admin-flagged) ──────────────────────────────────
 //
