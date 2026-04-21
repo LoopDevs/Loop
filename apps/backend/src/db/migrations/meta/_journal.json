@@ -57,6 +57,13 @@
       "when": 1777600000000,
       "tag": "0007_orders_charge_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1777700000000,
+      "tag": "0008_orders_loop_asset_payment",
+      "breakpoints": true
     }
   ]
 }

@@ -399,7 +399,10 @@ export const orders = pgTable(
       'orders_state_known',
       sql`${t.state} IN ('pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired')`,
     ),
-    check('orders_payment_method_known', sql`${t.paymentMethod} IN ('xlm', 'usdc', 'credit')`),
+    check(
+      'orders_payment_method_known',
+      sql`${t.paymentMethod} IN ('xlm', 'usdc', 'credit', 'loop_asset')`,
+    ),
     check('orders_charge_currency_known', sql`${t.chargeCurrency} IN ('USD', 'GBP', 'EUR')`),
     check(
       'orders_percentages_sum',
@@ -435,7 +438,7 @@ export const ORDER_STATES = [
 ] as const;
 export type OrderState = (typeof ORDER_STATES)[number];
 
-export const ORDER_PAYMENT_METHODS = ['xlm', 'usdc', 'credit'] as const;
+export const ORDER_PAYMENT_METHODS = ['xlm', 'usdc', 'credit', 'loop_asset'] as const;
 export type OrderPaymentMethod = (typeof ORDER_PAYMENT_METHODS)[number];
 
 /**
