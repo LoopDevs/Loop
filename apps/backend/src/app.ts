@@ -29,6 +29,7 @@ import {
   requireAuth,
 } from './auth/handler.js';
 import { createOrderHandler, listOrdersHandler, getOrderHandler } from './orders/handler.js';
+import { loopCreateOrderHandler } from './orders/loop-handler.js';
 import { notifyHealthChange } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
@@ -517,6 +518,11 @@ app.use('/api/orders/*', requireAuth);
 app.post('/api/orders', rateLimit(10, 60_000), createOrderHandler);
 app.get('/api/orders', rateLimit(60, 60_000), listOrdersHandler);
 app.get('/api/orders/:id', rateLimit(120, 60_000), getOrderHandler);
+// Loop-native order creation (ADR 010). Lives at a distinct path so
+// the legacy CTX-proxy flow at POST /api/orders stays live during
+// the migration window. Gated inside the handler on
+// LOOP_AUTH_NATIVE_ENABLED — off → 404.
+app.post('/api/orders/loop', rateLimit(10, 60_000), loopCreateOrderHandler);
 
 // ─── Admin (authenticated + admin-flagged) ──────────────────────────────────
 //

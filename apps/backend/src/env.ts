@@ -137,6 +137,17 @@ export const EnvSchema = z.object({
   // path: Loop sends the OTP email and mints its own JWTs. Default
   // false → the legacy CTX-proxy auth path stays in place.
   LOOP_AUTH_NATIVE_ENABLED: envBoolean.default(false),
+
+  // Loop's Stellar deposit address for Loop-native orders (ADR 010).
+  // Users paying with XLM / USDC send to this address, encoding the
+  // order's payment memo in the transaction's memo_text so the
+  // watcher can match payment → order. Absent → /api/orders/loop
+  // returns 503 for xlm / usdc methods; credit-funded orders still
+  // work because they don't cross-chain.
+  LOOP_STELLAR_DEPOSIT_ADDRESS: z
+    .string()
+    .regex(/^G[A-Z2-7]{55}$/, { message: 'must be a valid Stellar public key (G...)' })
+    .optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
