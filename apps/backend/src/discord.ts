@@ -193,6 +193,36 @@ export function notifyPayoutFailed(args: {
   });
 }
 
+/**
+ * Notify: operator USDC balance has dropped below the configured
+ * floor (ADR 015). Procurement is now paying CTX in XLM until the
+ * reserve is topped up. Ops needs to know because XLM is the
+ * break-glass rail — we're burning the (smaller) XLM reserve to
+ * keep orders flowing and the USDC pile isn't earning defindex
+ * yield while it's empty.
+ *
+ * Throttled at the caller (once per `LOOP_BELOW_FLOOR_ALERT_INTERVAL_MS`
+ * per process) — this function itself fires every time.
+ */
+export function notifyUsdcBelowFloor(args: {
+  balanceStroops: string;
+  floorStroops: string;
+  account: string;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🟡 USDC Reserve Below Floor',
+    description: truncate(
+      `Procurement has fallen back to XLM. Top up ${escapeMarkdown(args.account)} with USDC to re-enable the yield-earning path.`,
+      DESCRIPTION_MAX,
+    ),
+    color: ORANGE,
+    fields: [
+      { name: 'Balance (stroops)', value: escapeMarkdown(args.balanceStroops), inline: true },
+      { name: 'Floor (stroops)', value: escapeMarkdown(args.floorStroops), inline: true },
+    ],
+  });
+}
+
 /** Notify: circuit breaker state change */
 export function notifyCircuitBreaker(
   state: 'open' | 'closed',

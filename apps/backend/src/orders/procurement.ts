@@ -32,6 +32,7 @@ import type { Order } from './repo.js';
 import { operatorFetch, OperatorPoolUnavailableError } from '../ctx/operator-pool.js';
 import { upstreamUrl } from '../upstream.js';
 import { getAccountBalances } from '../payments/horizon-balances.js';
+import { notifyUsdcBelowFloor } from '../discord.js';
 
 const log = logger.child({ area: 'procurement' });
 
@@ -104,6 +105,25 @@ export interface ProcurementTickResult {
   fulfilled: number;
   failed: number;
   skipped: number;
+}
+
+/**
+ * Throttles the Discord below-floor alert so a sustained outage
+ * doesn't spam the monitoring channel every tick. 15-minute window
+ * matches typical ops response time — ops acts on the first alert;
+ * the next alert after 15 min is a "still bad, check on this".
+ */
+const BELOW_FLOOR_ALERT_INTERVAL_MS = 15 * 60 * 1000;
+let lastBelowFloorAlertAt = 0;
+function shouldAlertBelowFloor(nowMs: number): boolean {
+  if (nowMs - lastBelowFloorAlertAt < BELOW_FLOOR_ALERT_INTERVAL_MS) return false;
+  lastBelowFloorAlertAt = nowMs;
+  return true;
+}
+
+/** Test seam — resets the below-floor alert throttle. */
+export function __resetBelowFloorAlertForTests(): void {
+  lastBelowFloorAlertAt = 0;
 }
 
 /**
@@ -199,6 +219,23 @@ async function procureOne(order: Order): Promise<'fulfilled' | 'failed' | 'skipp
       },
       'USDC reserve below configured floor — procurement falling back to XLM',
     );
+    // Discord alert throttled so a sustained below-floor condition
+    // doesn't spam the channel every tick. One alert per cooldown
+    // window is enough — ops acts on the first; subsequent orders
+    // just confirm it's still happening, which the treasury
+    // dashboard already shows.
+    if (
+      balanceStroops !== null &&
+      floorStroops !== null &&
+      env.LOOP_STELLAR_DEPOSIT_ADDRESS !== undefined &&
+      shouldAlertBelowFloor(Date.now())
+    ) {
+      notifyUsdcBelowFloor({
+        balanceStroops: balanceStroops.toString(),
+        floorStroops: floorStroops.toString(),
+        account: env.LOOP_STELLAR_DEPOSIT_ADDRESS,
+      });
+    }
   }
 
   try {
