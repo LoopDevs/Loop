@@ -200,6 +200,7 @@ GET  /api/merchants              ?page=&limit=&q=      — paginated, max 100 pe
 GET  /api/merchants/all                                 — full catalog in one response (audit A-002)
 GET  /api/merchants/by-slug/:slug
 GET  /api/merchants/:id
+GET  /api/merchants/:merchantId/cashback-rate   — public cashback-% preview (ADR 011/015)
 GET  /api/clusters           ?west=&south=&east=&north=&zoom=
 GET  /api/image              ?url=&width=&height=&quality=
 GET  /api/config                            — client feature flags (ADR 010 / 013)

@@ -723,6 +723,48 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'get',
+  path: '/api/merchants/{merchantId}/cashback-rate',
+  summary: 'Cashback-rate preview for the gift-card detail page (ADR 011 / 015).',
+  description:
+    "Public surface — no auth. Returns the merchant's active `user_cashback_pct` as a bigint-shaped `numeric(5,2)` string, or `null` when the merchant has no cashback config (or it's inactive). Clients should hide the cashback badge on `null`. 5-minute public cache matches the merchant-catalog endpoints.",
+  tags: ['Merchants'],
+  request: { params: z.object({ merchantId: z.string() }) },
+  responses: {
+    200: {
+      description: 'Cashback-rate preview',
+      content: {
+        'application/json': {
+          schema: z.object({
+            merchantId: z.string(),
+            userCashbackPct: z
+              .string()
+              .regex(/^\d{1,3}(?:\.\d{1,2})?$/)
+              .nullable()
+              .openapi({
+                description:
+                  'Percentage in [0, 100] with ≤2 decimals (e.g. `"2.50"`), or null when no active config exists.',
+              }),
+          }),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid merchant id (must match `[\\w-]+`).',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'Merchant not found',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
   method: 'post',
   path: '/api/orders',
   summary: 'Create a gift card order (authenticated).',

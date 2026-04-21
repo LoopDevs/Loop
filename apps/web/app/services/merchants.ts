@@ -48,3 +48,24 @@ export async function fetchMerchant(id: string): Promise<MerchantDetailResponse>
 export async function fetchMerchantBySlug(slug: string): Promise<MerchantDetailResponse> {
   return apiRequest<MerchantDetailResponse>(`/api/merchants/by-slug/${encodeURIComponent(slug)}`);
 }
+
+export interface MerchantCashbackRateResponse {
+  merchantId: string;
+  /**
+   * Numeric(5,2) as a string (e.g. `"2.50"`). Null when the merchant
+   * has no active cashback config (ADR 011 / 015) — the UI should hide
+   * the cashback badge rather than render "0% cashback".
+   */
+  userCashbackPct: string | null;
+}
+
+/**
+ * Cashback-rate preview for the gift-card detail page. Public — no
+ * auth required. Returns `userCashbackPct: null` for merchants that
+ * haven't been configured yet, letting the caller hide the badge.
+ */
+export async function fetchMerchantCashbackRate(id: string): Promise<MerchantCashbackRateResponse> {
+  return apiRequest<MerchantCashbackRateResponse>(
+    `/api/merchants/${encodeURIComponent(id)}/cashback-rate`,
+  );
+}

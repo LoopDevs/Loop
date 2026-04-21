@@ -45,6 +45,28 @@ vi.mock('../../clustering/handler.js', () => ({
   ),
 }));
 
+// Mock the db client. Handlers that historically don't touch the DB
+// are unaffected; the new /cashback-rate handler drives its lookups
+// through this stub. `findFirst` returns whatever the hoisted state
+// says — tests seed `dbState.cashbackConfig` before hitting the route.
+const { dbState } = vi.hoisted(() => ({
+  dbState: {
+    cashbackConfig: null as { userCashbackPct: string; active: boolean } | null,
+    findFirstCalls: 0,
+  },
+}));
+vi.mock('../../db/client.js', () => ({
+  db: {
+    query: {
+      merchantCashbackConfigs: {
+        findFirst: vi.fn(async () => {
+          dbState.findFirstCalls += 1;
+          return dbState.cashbackConfig ?? undefined;
+        }),
+      },
+    },
+  },
+}));
 vi.mock('../../circuit-breaker.js', () => ({
   CircuitOpenError: class CircuitOpenError extends Error {
     constructor() {
@@ -84,6 +106,8 @@ function seed(merchants: Merchant[]): void {
 beforeEach(() => {
   mockGetMerchants.mockReset();
   seed([]);
+  dbState.cashbackConfig = null;
+  dbState.findFirstCalls = 0;
 });
 
 describe('GET /api/merchants', () => {
@@ -308,5 +332,47 @@ describe('GET /api/merchants/:id', () => {
     seed([merchant('m-1', 'Home Depot')]);
     const res = await app.request('/api/merchants/m-1');
     expect(res.status).toBe(401);
+  });
+});
+
+describe('GET /api/merchants/:merchantId/cashback-rate', () => {
+  it('returns the active userCashbackPct when the merchant has a config', async () => {
+    seed([merchant('m-1', 'Home Depot')]);
+    dbState.cashbackConfig = { userCashbackPct: '2.50', active: true };
+    const res = await app.request('/api/merchants/m-1/cashback-rate');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { merchantId: string; userCashbackPct: string | null };
+    expect(body).toEqual({ merchantId: 'm-1', userCashbackPct: '2.50' });
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
+  });
+
+  it('returns null pct when the merchant has no config', async () => {
+    seed([merchant('m-1', 'Home Depot')]);
+    dbState.cashbackConfig = null;
+    const res = await app.request('/api/merchants/m-1/cashback-rate');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { userCashbackPct: string | null };
+    expect(body.userCashbackPct).toBeNull();
+  });
+
+  it('404s when the merchant id is unknown — no db lookup', async () => {
+    seed([merchant('m-1', 'Home Depot')]);
+    const res = await app.request('/api/merchants/ghost/cashback-rate');
+    expect(res.status).toBe(404);
+    // Guards against DB enumeration: no lookup fires for an unknown id.
+    expect(dbState.findFirstCalls).toBe(0);
+  });
+
+  it('400s on a malformed merchant id (anything outside [\\w-])', async () => {
+    seed([merchant('m-1', 'Home Depot')]);
+    const res = await app.request('/api/merchants/bad%20id/cashback-rate');
+    expect(res.status).toBe(400);
+  });
+
+  it('is reachable without a Bearer — cashback-rate previews are public', async () => {
+    seed([merchant('m-1', 'Home Depot')]);
+    dbState.cashbackConfig = { userCashbackPct: '1.00', active: true };
+    const res = await app.request('/api/merchants/m-1/cashback-rate');
+    expect(res.status).toBe(200);
   });
 });
