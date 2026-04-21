@@ -4,6 +4,7 @@ import type { Route } from './+types/admin.treasury';
 import { useAuth } from '~/hooks/use-auth';
 import { getTreasurySnapshot, type TreasurySnapshot } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
+import { AdminNav } from '~/components/features/admin/AdminNav';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -146,6 +147,7 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
 
   return (
     <main className="max-w-5xl mx-auto px-6 py-12 space-y-10">
+      <AdminNav />
       <header>
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Admin · Treasury</h1>
         <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">

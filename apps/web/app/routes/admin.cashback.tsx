@@ -13,6 +13,7 @@ import {
   type MerchantCashbackConfigHistoryEntry,
 } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
+import { AdminNav } from '~/components/features/admin/AdminNav';
 import { Button } from '~/components/ui/Button';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -154,6 +155,7 @@ export default function AdminCashbackRoute(): React.JSX.Element {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
+      <AdminNav />
       <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
         Cashback configuration
       </h1>
