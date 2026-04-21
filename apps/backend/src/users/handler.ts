@@ -19,7 +19,15 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { creditTransactions, orders, userCredits, users, HOME_CURRENCIES } from '../db/schema.js';
+import {
+  creditTransactions,
+  orders,
+  userCredits,
+  users,
+  HOME_CURRENCIES,
+  PAYOUT_STATES,
+} from '../db/schema.js';
+import { listPayoutsForUser } from '../credits/pending-payouts.js';
 import { decodeJwtPayload } from '../auth/jwt.js';
 import { upsertUserFromCtx, getUserById, type User } from '../db/users.js';
 import type { LoopAuthContext } from '../auth/handler.js';
@@ -303,6 +311,106 @@ export async function getCashbackHistoryHandler(c: Context): Promise<Response> {
       referenceType: row.referenceType,
       referenceId: row.referenceId,
       createdAt: row.createdAt.toISOString(),
+    })),
+  });
+}
+
+/**
+ * `GET /api/users/me/pending-payouts` — caller's on-chain payout
+ * rows (ADR 015 / 016). Each row tracks the lifecycle of one outbound
+ * LOOP-asset payment (pending → submitted → confirmed | failed) so
+ * the user can see "your £5 cashback is queued" or "payout confirmed
+ * — tx abc123" rather than just watching the off-chain balance
+ * change.
+ *
+ * Scoped to the authenticated caller — `userId` pinned from the
+ * bearer, no admin-privileged cross-user access from this endpoint.
+ * Same pagination shape as `/cashback-history`: `?state=`, `?before=`,
+ * `?limit=` (default 20, cap 100).
+ */
+export interface UserPendingPayoutView {
+  id: string;
+  orderId: string;
+  assetCode: string;
+  assetIssuer: string;
+  /** Stroops (7 decimals). BigInt as string — JSON-safe. */
+  amountStroops: string;
+  state: (typeof PAYOUT_STATES)[number];
+  /** Confirmed tx hash; null until the payout is confirmed on Stellar. */
+  txHash: string | null;
+  attempts: number;
+  createdAt: string;
+  submittedAt: string | null;
+  confirmedAt: string | null;
+  failedAt: string | null;
+}
+
+export interface UserPendingPayoutsResponse {
+  payouts: UserPendingPayoutView[];
+}
+
+export async function getUserPendingPayoutsHandler(c: Context): Promise<Response> {
+  // ?state filter — optional; reject unknowns rather than silently
+  // returning the unfiltered list. Mirrors the admin endpoint.
+  const stateRaw = c.req.query('state');
+  if (stateRaw !== undefined && !(PAYOUT_STATES as ReadonlyArray<string>).includes(stateRaw)) {
+    return c.json(
+      {
+        code: 'VALIDATION_ERROR',
+        message: `state must be one of: ${PAYOUT_STATES.join(', ')}`,
+      },
+      400,
+    );
+  }
+
+  const limitRaw = c.req.query('limit');
+  const parsedLimit = Number.parseInt(limitRaw ?? '20', 10);
+  const limit = Math.min(Math.max(Number.isNaN(parsedLimit) ? 20 : parsedLimit, 1), 100);
+
+  const beforeRaw = c.req.query('before');
+  let before: Date | undefined;
+  if (beforeRaw !== undefined && beforeRaw.length > 0) {
+    const d = new Date(beforeRaw);
+    if (Number.isNaN(d.getTime())) {
+      return c.json(
+        { code: 'VALIDATION_ERROR', message: 'before must be an ISO-8601 timestamp' },
+        400,
+      );
+    }
+    before = d;
+  }
+
+  let user: User | null;
+  try {
+    user = await resolveCallingUser(c);
+  } catch (err) {
+    log.error({ err }, 'Failed to resolve calling user');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+  }
+  if (user === null) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+
+  const rows = await listPayoutsForUser(user.id, {
+    ...(stateRaw !== undefined ? { state: stateRaw } : {}),
+    ...(before !== undefined ? { before } : {}),
+    limit,
+  });
+
+  return c.json<UserPendingPayoutsResponse>({
+    payouts: rows.map((row) => ({
+      id: row.id,
+      orderId: row.orderId,
+      assetCode: row.assetCode,
+      assetIssuer: row.assetIssuer,
+      amountStroops: row.amountStroops.toString(),
+      state: row.state as (typeof PAYOUT_STATES)[number],
+      txHash: row.txHash,
+      attempts: row.attempts,
+      createdAt: row.createdAt.toISOString(),
+      submittedAt: row.submittedAt?.toISOString() ?? null,
+      confirmedAt: row.confirmedAt?.toISOString() ?? null,
+      failedAt: row.failedAt?.toISOString() ?? null,
     })),
   });
 }

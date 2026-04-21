@@ -1053,6 +1053,94 @@ registry.registerPath({
   },
 });
 
+// ─── Users — pending-payouts view (ADR 015 / 016) ──────────────────────────
+//
+// Registered down here (outside the Users schema block) so the `PayoutState`
+// enum from the Admin section is available. The shape is a trimmed subset of
+// `AdminPayoutView` — no `userId`, `toAddress`, or `memoText` because the
+// user already knows they're looking at their own account, and surfacing the
+// destination wallet / memo would expose internals without adding value.
+
+const UserPendingPayoutView = registry.register(
+  'UserPendingPayoutView',
+  z.object({
+    id: z.string().uuid(),
+    orderId: z.string().uuid(),
+    assetCode: z
+      .string()
+      .openapi({ description: 'LOOP asset code — USDLOOP / GBPLOOP / EURLOOP.' }),
+    assetIssuer: z.string().openapi({ description: 'Stellar issuer account for this asset.' }),
+    amountStroops: z
+      .string()
+      .openapi({ description: 'Payout amount in stroops (7 decimals). BigInt as string.' }),
+    state: PayoutState,
+    txHash: z.string().nullable().openapi({
+      description: 'Confirmed Stellar tx hash — null until the payout is confirmed on-chain.',
+    }),
+    attempts: z.number().int(),
+    createdAt: z.string().datetime(),
+    submittedAt: z.string().datetime().nullable(),
+    confirmedAt: z.string().datetime().nullable(),
+    failedAt: z.string().datetime().nullable(),
+  }),
+);
+
+const UserPendingPayoutsResponse = registry.register(
+  'UserPendingPayoutsResponse',
+  z.object({ payouts: z.array(UserPendingPayoutView) }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/users/me/pending-payouts',
+  summary: "Caller's on-chain payout rows (ADR 015 / 016).",
+  description:
+    "Returns the user's own `pending_payouts` rows — one row per outbound LOOP-asset payment tracked through its lifecycle (`pending → submitted → confirmed | failed`). Mirrors the admin endpoint's query shape (`?state=`, `?before=`, `?limit=`) but is scoped to the authenticated caller by `userId` — no admin-privileged cross-user access. Clients poll this from the wallet / cashback settings views while a payout is in flight.",
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      state: PayoutState.optional().openapi({
+        description: 'Filter to a single lifecycle state. Omitted → all states.',
+      }),
+      before: z
+        .string()
+        .datetime()
+        .optional()
+        .openapi({ description: 'ISO-8601 timestamp — return rows strictly older than this.' }),
+      limit: z.coerce
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .openapi({ description: 'Page size. Default 20, hard-capped at 100.' }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Payout rows, newest first',
+      content: { 'application/json': { schema: UserPendingPayoutsResponse } },
+    },
+    400: {
+      description: 'Invalid state or before',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error resolving the user',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Admin — treasury + payouts (ADR 015) ───────────────────────────────────
 
 registry.registerPath({
