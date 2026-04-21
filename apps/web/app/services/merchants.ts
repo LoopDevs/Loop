@@ -69,3 +69,22 @@ export async function fetchMerchantCashbackRate(id: string): Promise<MerchantCas
     `/api/merchants/${encodeURIComponent(id)}/cashback-rate`,
   );
 }
+
+export interface MerchantsCashbackRatesResponse {
+  /**
+   * `merchantId` → `numeric(5,2)` pct string (e.g. `"2.50"`). Only
+   * merchants with an active config are present; hide the badge
+   * when a given id has no entry.
+   */
+  rates: Record<string, string>;
+}
+
+/**
+ * Bulk cashback-rate map for catalog / list views (ADR 011 / 015).
+ * One request covers every merchant with an active config, letting
+ * card-grid surfaces render "X% cashback" badges without N+1-ing the
+ * per-merchant endpoint. Public — no auth required.
+ */
+export async function fetchMerchantsCashbackRates(): Promise<MerchantsCashbackRatesResponse> {
+  return apiRequest<MerchantsCashbackRatesResponse>('/api/merchants/cashback-rates');
+}

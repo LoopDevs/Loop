@@ -21,6 +21,7 @@ import {
   merchantBySlugHandler,
   merchantCashbackRateHandler,
   merchantDetailHandler,
+  merchantsCashbackRatesHandler,
 } from './merchants/handler.js';
 import {
   requestOtpHandler,
@@ -470,6 +471,13 @@ app.get('/api/merchants', merchantListHandler);
 // /all must come before /:id so that 'all' is not interpreted as an id.
 app.get('/api/merchants/all', merchantAllHandler);
 app.get('/api/merchants/by-slug/:slug', merchantBySlugHandler); // must be before /:id
+// GET /api/merchants/cashback-rates — bulk map of active cashback
+// pcts across every merchant (ADR 011 / 015). Lets catalog / list /
+// map views render "X% cashback" badges without N+1-ing the
+// per-merchant endpoint. Static literal path — must come BEFORE the
+// `/:merchantId/cashback-rate` route so Hono's router matches the
+// literal instead of treating "cashback-rates" as a path param.
+app.get('/api/merchants/cashback-rates', rateLimit(120, 60_000), merchantsCashbackRatesHandler);
 // GET /api/merchants/:merchantId/cashback-rate — public cashback-rate
 // preview for rendering "Earn X% cashback" on the gift-card detail page
 // (ADR 011 / 015). Registered BEFORE the requireAuth gate on /:id so
