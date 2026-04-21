@@ -161,9 +161,18 @@ export interface CreateOrderArgs {
  * left null for `credit` — a balance debit doesn't cross the chain.
  */
 export async function createOrder(args: CreateOrderArgs): Promise<Order> {
+  // ADR 015 — pin the split in the user's home-currency terms
+  // (chargeMinor), so user_cashback_minor + loop_margin_minor land
+  // in the currency the ledger + balance are denominated in. The
+  // `wholesale_minor` field becomes an accounting approximation of
+  // what Loop pays CTX, derived at the same FX rate (via
+  // chargeMinor) — actual CTX settlement uses the catalog-currency
+  // face value at procurement time.
+  const chargeMinor = args.chargeMinor ?? args.faceValueMinor;
+  const chargeCurrency = args.chargeCurrency ?? args.currency;
   const split = await computeCashbackSplit({
     merchantId: args.merchantId,
-    faceValueMinor: args.faceValueMinor,
+    faceValueMinor: chargeMinor,
   });
   const paymentMemo =
     args.paymentMemo ?? (args.paymentMethod === 'credit' ? null : generatePaymentMemo());
@@ -174,8 +183,8 @@ export async function createOrder(args: CreateOrderArgs): Promise<Order> {
       merchantId: args.merchantId,
       faceValueMinor: args.faceValueMinor,
       currency: args.currency,
-      chargeMinor: args.chargeMinor ?? args.faceValueMinor,
-      chargeCurrency: args.chargeCurrency ?? args.currency,
+      chargeMinor,
+      chargeCurrency,
       paymentMethod: args.paymentMethod,
       paymentMemo,
       wholesalePct: split.wholesalePct,

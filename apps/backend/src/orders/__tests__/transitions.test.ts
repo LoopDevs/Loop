@@ -248,8 +248,10 @@ describe('markOrderFulfilled', () => {
     userId: 'u-1',
     merchantId: 'm-1',
     currency: 'GBP',
+    chargeCurrency: 'GBP',
     userCashbackMinor: 500n,
     faceValueMinor: 10_000n,
+    chargeMinor: 10_000n,
     state: 'fulfilled' as const,
   };
 
@@ -333,14 +335,30 @@ describe('markOrderFulfilled', () => {
     expect(state.insertPendingPayoutCalls).toHaveLength(0);
   });
 
-  it('skips the payout when order.currency differs from user.home_currency (cross-FX)', async () => {
-    // Order is in USD, user is GBP — the ledger-to-home-currency
-    // refactor is pending, so we don't yet emit a Stellar payout for
-    // this case (would pay the wrong asset).
-    state.returningRows = [{ ...baseOrder, currency: 'USD' }];
+  it('skips the payout when order.chargeCurrency diverges from user.home_currency', async () => {
+    // Happens only if the user's home currency was changed post-
+    // order by support. The ledger still wrote in charge_currency;
+    // paying out in a different LOOP asset would send the wrong
+    // denomination, so log + skip.
+    state.returningRows = [{ ...baseOrder, chargeCurrency: 'USD' }];
     state.userLookupRows = [{ stellarAddress: 'GDESTINATION', homeCurrency: 'GBP' }];
     await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
     expect(state.insertPendingPayoutCalls).toHaveLength(0);
+  });
+
+  it('pays out a cross-FX order where catalog currency differs from home (ledger is home-denominated)', async () => {
+    // USD catalog gift card, GBP user. order.currency='USD' but
+    // chargeCurrency='GBP' + userCashbackMinor is in GBP pence. The
+    // payout MUST fire in GBPLOOP — previously blocked by the
+    // `order.currency !== home` guard, now permitted because the
+    // ledger-in-home-currency refactor made it safe.
+    state.returningRows = [{ ...baseOrder, currency: 'USD', chargeCurrency: 'GBP' }];
+    state.userLookupRows = [{ stellarAddress: 'GDESTINATION', homeCurrency: 'GBP' }];
+    await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+    expect(state.insertPendingPayoutCalls).toHaveLength(1);
+    expect(state.insertPendingPayoutCalls[0]).toMatchObject({
+      assetCode: 'GBPLOOP',
+    });
   });
 
   it('skips the payout when builder returns a skip decision (e.g. no_issuer)', async () => {

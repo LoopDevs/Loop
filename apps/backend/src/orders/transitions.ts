@@ -128,11 +128,16 @@ export async function markOrderFulfilled(
     // `credit_transactions_amount_sign` CHECK (which requires
     // cashback > 0).
     if (order.userCashbackMinor > 0n) {
+      // ADR 015 — write the ledger in the user's home currency
+      // (charge_currency), not the catalog currency (currency).
+      // For same-currency orders this is a no-op (they're equal);
+      // for cross-FX orders this is the correct denomination since
+      // user_cashback_minor is now computed from chargeMinor.
       await tx.insert(creditTransactions).values({
         userId: order.userId,
         type: 'cashback',
         amountMinor: order.userCashbackMinor,
-        currency: order.currency,
+        currency: order.chargeCurrency,
         referenceType: 'order',
         referenceId: order.id,
       });
@@ -143,7 +148,7 @@ export async function markOrderFulfilled(
         .insert(userCredits)
         .values({
           userId: order.userId,
-          currency: order.currency,
+          currency: order.chargeCurrency,
           balanceMinor: order.userCashbackMinor,
         })
         .onConflictDoUpdate({
@@ -170,13 +175,21 @@ export async function markOrderFulfilled(
         .from(users)
         .where(eq(users.id, order.userId));
       if (userRow !== undefined && isHomeCurrency(userRow.homeCurrency)) {
-        // Only attempt a payout when the order's ledger currency
-        // matches the user's home currency — cross-currency orders
-        // need the ledger-to-home-currency refactor first, see
-        // ADR 015 rollout follow-ups. `order.currency` equals
-        // `charge_currency` in this path since the ledger was
-        // written in that denomination.
-        if (order.currency === userRow.homeCurrency) {
+        // order.chargeCurrency pins the ledger currency. An audit
+        // warning when it doesn't match the user's home currency —
+        // shouldn't happen (loop-handler pins both to home currency
+        // at order creation), but would indicate support-mediated
+        // home-currency change after an order was placed.
+        if (order.chargeCurrency !== userRow.homeCurrency) {
+          log.warn(
+            {
+              orderId: order.id,
+              chargeCurrency: order.chargeCurrency,
+              userHomeCurrency: userRow.homeCurrency,
+            },
+            'Order charge currency diverged from user home currency — on-chain payout skipped',
+          );
+        } else {
           const decision = buildPayoutIntent({
             stellarAddress: userRow.stellarAddress,
             homeCurrency: userRow.homeCurrency,
@@ -202,15 +215,6 @@ export async function markOrderFulfilled(
               'Skipping on-chain cashback payout',
             );
           }
-        } else {
-          log.warn(
-            {
-              orderId: order.id,
-              orderCurrency: order.currency,
-              userHomeCurrency: userRow.homeCurrency,
-            },
-            'Order currency does not match user home currency — on-chain payout skipped',
-          );
         }
       }
     }
