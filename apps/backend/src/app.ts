@@ -32,6 +32,7 @@ import { createOrderHandler, listOrdersHandler, getOrderHandler } from './orders
 import { notifyHealthChange } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
+import { treasuryHandler } from './admin/treasury.js';
 
 export const app = new Hono();
 
@@ -538,6 +539,7 @@ app.get(
   rateLimit(120, 60_000),
   configHistoryHandler,
 );
+app.get('/api/admin/treasury', rateLimit(60, 60_000), treasuryHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 
