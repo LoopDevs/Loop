@@ -271,33 +271,44 @@ function CashbackHistoryCard({
           No cashback yet — your first Loop order will land here.
         </p>
       ) : (
-        <ul className="mt-3 space-y-3">
-          {shown.map((entry) => (
-            <li key={entry.id} className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
-                  {LEDGER_LABELS[entry.type]}
+        <>
+          <ul className="mt-3 space-y-3">
+            {shown.map((entry) => (
+              <li key={entry.id} className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
+                    {LEDGER_LABELS[entry.type]}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {new Date(entry.createdAt).toLocaleDateString(undefined, {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </p>
+                </div>
+                <p
+                  className={`shrink-0 text-sm font-medium ${
+                    entry.amountMinor.startsWith('-')
+                      ? 'text-gray-500 dark:text-gray-400'
+                      : 'text-green-600 dark:text-green-500'
+                  }`}
+                >
+                  {formatLedgerAmount(entry.amountMinor, entry.currency)}
                 </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  {new Date(entry.createdAt).toLocaleDateString(undefined, {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                  })}
-                </p>
-              </div>
-              <p
-                className={`shrink-0 text-sm font-medium ${
-                  entry.amountMinor.startsWith('-')
-                    ? 'text-gray-500 dark:text-gray-400'
-                    : 'text-green-600 dark:text-green-500'
-                }`}
-              >
-                {formatLedgerAmount(entry.amountMinor, entry.currency)}
-              </p>
-            </li>
-          ))}
-        </ul>
+              </li>
+            ))}
+          </ul>
+          {/* Tap-through to the full paginated history (ADR 009 / 015 —
+              /settings/cashback). Only shown when there's history to
+              see; empty-state users stay on a single row of copy. */}
+          <Link
+            to="/settings/cashback"
+            className="mt-4 block text-center text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+          >
+            See all activity →
+          </Link>
+        </>
       )}
     </div>
   );
