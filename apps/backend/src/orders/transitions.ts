@@ -81,9 +81,15 @@ export async function markOrderProcuring(
  * Zero-cashback orders still transition cleanly — the capture block
  * skips the ledger writes but the order still moves to `fulfilled`.
  */
+export interface RedemptionPayload {
+  code?: string | null;
+  pin?: string | null;
+  url?: string | null;
+}
+
 export async function markOrderFulfilled(
   orderId: string,
-  opts: { ctxOrderId: string },
+  opts: { ctxOrderId: string; redemption?: RedemptionPayload },
 ): Promise<Order | null> {
   return db.transaction(async (tx) => {
     const updated = await tx
@@ -92,6 +98,9 @@ export async function markOrderFulfilled(
         state: 'fulfilled',
         ctxOrderId: opts.ctxOrderId,
         fulfilledAt: new Date(),
+        redeemCode: opts.redemption?.code ?? null,
+        redeemPin: opts.redemption?.pin ?? null,
+        redeemUrl: opts.redemption?.url ?? null,
       })
       .where(and(eq(orders.id, orderId), eq(orders.state, 'procuring')))
       .returning();

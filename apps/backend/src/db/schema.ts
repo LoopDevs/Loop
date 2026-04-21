@@ -324,6 +324,18 @@ export const orders = pgTable(
     ctxOrderId: text('ctx_order_id'),
     ctxOperatorId: text('ctx_operator_id'),
 
+    // Redemption payload (ADR 010). Populated at fulfillment from
+    // CTX's GET /gift-cards/:id. Nullable — some merchant types
+    // redeem by URL + challenge code (no static code/pin), and
+    // others by a code that may or may not carry a PIN.
+    //
+    // Sensitive: these fields ARE the gift card. Postgres-at-rest
+    // encryption on Fly volumes is the current defence; a future
+    // slice can wrap with a per-row envelope once we have KMS.
+    redeemCode: text('redeem_code'),
+    redeemPin: text('redeem_pin'),
+    redeemUrl: text('redeem_url'),
+
     // State machine. `check` constraint below enforces the enum.
     state: text('state').notNull().default('pending_payment'),
     failureReason: text('failure_reason'),
