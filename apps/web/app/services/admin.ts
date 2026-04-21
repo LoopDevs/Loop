@@ -91,8 +91,6 @@ export async function getTreasurySnapshot(): Promise<TreasurySnapshot> {
   return authenticatedRequest<TreasurySnapshot>('/api/admin/treasury');
 }
 
-export type PayoutState = 'pending' | 'submitted' | 'confirmed' | 'failed';
-
 export interface AdminPayoutView {
   id: string;
   userId: string;
