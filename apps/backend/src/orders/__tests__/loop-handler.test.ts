@@ -24,18 +24,37 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-// Mock the db client — the handler only uses it for the credit
-// balance lookup. Chain .select().from().where() resolves to the
-// rows we've stashed in `balanceState.rows` for the current test.
-const { dbChain, balanceState } = vi.hoisted(() => {
-  const state: { rows: unknown[] } = { rows: [] };
+// Mock the db client — the handler uses it for the credit balance
+// lookup (select/from/where) and the user lookup (query.users.findFirst,
+// via getUserById). Both resolve off hoisted state so individual tests
+// can stash rows / user profiles before calling the handler.
+const { dbChain, balanceState, userState } = vi.hoisted(() => {
+  const bState: { rows: unknown[] } = { rows: [] };
+  const uState: { user: unknown } = {
+    user: {
+      id: 'user-uuid',
+      email: 'a@b.com',
+      isAdmin: false,
+      homeCurrency: 'GBP',
+      ctxUserId: null,
+    },
+  };
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
   chain['select'] = vi.fn(() => chain);
   chain['from'] = vi.fn(() => chain);
-  chain['where'] = vi.fn(async () => state.rows);
-  return { dbChain: chain, balanceState: state };
+  chain['where'] = vi.fn(async () => bState.rows);
+  return { dbChain: chain, balanceState: bState, userState: uState };
 });
-vi.mock('../../db/client.js', () => ({ db: dbChain }));
+vi.mock('../../db/client.js', () => ({
+  db: {
+    ...dbChain,
+    query: {
+      users: {
+        findFirst: vi.fn(async () => userState.user),
+      },
+    },
+  },
+}));
 vi.mock('../../db/schema.js', async () => {
   const actual = await vi.importActual<typeof SchemaModule>('../../db/schema.js');
   return {
@@ -45,8 +64,16 @@ vi.mock('../../db/schema.js', async () => {
       currency: 'currency',
       balanceMinor: 'balanceMinor',
     },
+    users: { id: 'id' },
   };
 });
+// FX conversion — tests don't need a real rate feed; echo the input so
+// the handler path exercises the charge_minor = face_value case
+// (user.home_currency === request.currency). Tests that exercise
+// cross-currency FX mock this with a different implementation.
+vi.mock('../../payments/price-feed.js', () => ({
+  convertMinorUnits: vi.fn(async (amount: bigint) => amount),
+}));
 
 import { loopCreateOrderHandler } from '../loop-handler.js';
 
@@ -90,6 +117,13 @@ beforeEach(() => {
   createOrderMock.mockReset();
   getMerchantsMock.mockReset();
   balanceState.rows = [];
+  userState.user = {
+    id: 'user-uuid',
+    email: 'a@b.com',
+    isAdmin: false,
+    homeCurrency: 'GBP',
+    ctxUserId: null,
+  };
   for (const fn of Object.values(dbChain)) {
     if (typeof fn === 'function' && 'mockClear' in fn) {
       (fn as unknown as { mockClear: () => void }).mockClear();
@@ -104,6 +138,8 @@ beforeEach(() => {
     merchantId: 'm1',
     faceValueMinor: 10_000n,
     currency: 'GBP',
+    chargeMinor: 10_000n,
+    chargeCurrency: 'GBP',
     paymentMethod: 'xlm',
     paymentMemo: 'MEMO-ABCDEFGHIJKLMNOP',
   });
@@ -193,6 +229,8 @@ describe('loopCreateOrderHandler', () => {
       id: 'order-uuid',
       faceValueMinor: 10_000n,
       currency: 'GBP',
+      chargeMinor: 10_000n,
+      chargeCurrency: 'GBP',
       paymentMethod: 'credit',
       paymentMemo: null,
     });
@@ -212,12 +250,115 @@ describe('loopCreateOrderHandler', () => {
     expect(createOrderMock).not.toHaveBeenCalled();
   });
 
+  it('pins charge_minor via FX when user.home_currency differs from the request currency', async () => {
+    // User is a GBP account; they're buying a $50 USD gift card.
+    // convertMinorUnits stub returns amount × 0.78 to simulate USD→GBP.
+    const priceFeed = await import('../../payments/price-feed.js');
+    vi.mocked(priceFeed.convertMinorUnits).mockResolvedValueOnce(3900n); // 5000 × 0.78
+    userState.user = {
+      id: 'user-uuid',
+      email: 'a@b.com',
+      isAdmin: false,
+      homeCurrency: 'GBP',
+      ctxUserId: null,
+    };
+    createOrderMock.mockResolvedValue({
+      id: 'order-uuid',
+      faceValueMinor: 5_000n,
+      currency: 'USD',
+      chargeMinor: 3_900n,
+      chargeCurrency: 'GBP',
+      paymentMethod: 'xlm',
+      paymentMemo: 'MEMO-xyz',
+    });
+    const { ctx } = makeCtx({
+      auth: LOOP_AUTH,
+      body: {
+        merchantId: 'm1',
+        amountMinor: 5_000,
+        currency: 'USD',
+        paymentMethod: 'xlm',
+      },
+    });
+    const res = await loopCreateOrderHandler(ctx);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { payment: { amountMinor: string; currency: string } };
+    // The user sees their charge in pence of GBP, not the catalog USD.
+    expect(body.payment.amountMinor).toBe('3900');
+    expect(body.payment.currency).toBe('GBP');
+    expect(createOrderMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        faceValueMinor: 5_000n,
+        currency: 'USD',
+        chargeMinor: 3_900n,
+        chargeCurrency: 'GBP',
+      }),
+    );
+  });
+
+  it('rejects with 503 when the FX feed throws', async () => {
+    const priceFeed = await import('../../payments/price-feed.js');
+    vi.mocked(priceFeed.convertMinorUnits).mockRejectedValueOnce(new Error('feed 503'));
+    userState.user = {
+      id: 'user-uuid',
+      email: 'a@b.com',
+      isAdmin: false,
+      homeCurrency: 'GBP',
+      ctxUserId: null,
+    };
+    const { ctx } = makeCtx({
+      auth: LOOP_AUTH,
+      body: {
+        merchantId: 'm1',
+        amountMinor: 5_000,
+        currency: 'USD',
+        paymentMethod: 'xlm',
+      },
+    });
+    const res = await loopCreateOrderHandler(ctx);
+    expect(res.status).toBe(503);
+    expect(createOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects with 401 when the auth userId has no matching users row', async () => {
+    userState.user = undefined;
+    const { ctx } = makeCtx({
+      auth: LOOP_AUTH,
+      body: {
+        merchantId: 'm1',
+        amountMinor: 1_000,
+        currency: 'GBP',
+        paymentMethod: 'xlm',
+      },
+    });
+    const res = await loopCreateOrderHandler(ctx);
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects with 400 when the request currency is not a supported home currency', async () => {
+    const { ctx } = makeCtx({
+      auth: LOOP_AUTH,
+      body: {
+        merchantId: 'm1',
+        amountMinor: 10_000,
+        currency: 'JPY',
+        paymentMethod: 'xlm',
+      },
+    });
+    const res = await loopCreateOrderHandler(ctx);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { message: string };
+    expect(body.message).toMatch(/USD, GBP, or EUR/);
+  });
+
   it('credit path — creates order when balance covers the amount', async () => {
     balanceState.rows = [{ balance: '20000' }];
     createOrderMock.mockResolvedValue({
       id: 'order-uuid',
       faceValueMinor: 10_000n,
       currency: 'GBP',
+      chargeMinor: 10_000n,
+      chargeCurrency: 'GBP',
       paymentMethod: 'credit',
       paymentMemo: null,
     });

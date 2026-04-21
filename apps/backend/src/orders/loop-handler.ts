@@ -27,7 +27,14 @@ import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { getMerchants } from '../merchants/sync.js';
 import type { LoopAuthContext } from '../auth/handler.js';
-import { ORDER_PAYMENT_METHODS, type OrderPaymentMethod } from '../db/schema.js';
+import {
+  ORDER_PAYMENT_METHODS,
+  HOME_CURRENCIES,
+  type OrderPaymentMethod,
+  type HomeCurrency,
+} from '../db/schema.js';
+import { getUserById } from '../db/users.js';
+import { convertMinorUnits } from '../payments/price-feed.js';
 import { createOrder } from './repo.js';
 
 const log = logger.child({ handler: 'loop-orders' });
@@ -120,16 +127,61 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     return c.json({ code: 'VALIDATION_ERROR', message: 'Unknown or disabled merchant' }, 400);
   }
 
-  // Credit-funded orders need an upfront balance check. XLM / USDC
-  // orders are funded externally — the payment watcher performs the
-  // credit before transitioning to `paid`, so we don't need a
-  // balance check here.
-  if (parsed.data.paymentMethod === 'credit') {
-    const ok = await hasSufficientCredit(
-      auth.userId,
-      parsed.data.currency,
-      parsed.data.amountMinor,
+  // ADR 015: resolve the user's home currency so we can pin the
+  // charge alongside the gift-card value. Loop-native auth carries
+  // a resolved userId on the JWT, so this is a single-row lookup.
+  const user = await getUserById(auth.userId);
+  if (user === null) {
+    log.warn({ userId: auth.userId }, 'Loop-auth userId has no matching users row');
+    return c.json({ code: 'UNAUTHORIZED', message: 'User record not found' }, 401);
+  }
+  if (!isHomeCurrency(user.homeCurrency)) {
+    // users.home_currency has a CHECK constraint at the DB layer; hitting
+    // this means schema drift or a hand-edited row. Fail closed so a
+    // corrupt row doesn't silently skip FX pinning.
+    log.error(
+      { userId: user.id, homeCurrency: user.homeCurrency },
+      'User home_currency is not in the supported enum',
     );
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Invalid account currency' }, 500);
+  }
+  if (!isHomeCurrency(parsed.data.currency)) {
+    return c.json(
+      {
+        code: 'VALIDATION_ERROR',
+        message: 'currency must be USD, GBP, or EUR',
+      },
+      400,
+    );
+  }
+
+  // FX-pin the user's charge. Same-currency short-circuits (no feed
+  // hit); cross-currency calls through to the Frankfurter cache in
+  // price-feed.ts. A feed failure bubbles as a 503 rather than
+  // silently charging the wrong amount.
+  let chargeMinor: bigint;
+  try {
+    chargeMinor = await convertMinorUnits(
+      parsed.data.amountMinor,
+      parsed.data.currency,
+      user.homeCurrency,
+    );
+  } catch (err) {
+    log.error({ err, userId: auth.userId }, 'FX conversion failed at order creation');
+    return c.json(
+      {
+        code: 'SERVICE_UNAVAILABLE',
+        message: 'FX rate temporarily unavailable',
+      },
+      503,
+    );
+  }
+
+  // Credit-funded orders need an upfront balance check against the
+  // user's home-currency balance (the ledger is home-currency keyed,
+  // ADR 015). The actual debit happens on the `paid` transition.
+  if (parsed.data.paymentMethod === 'credit') {
+    const ok = await hasSufficientCredit(auth.userId, user.homeCurrency, chargeMinor);
     if (!ok) {
       return c.json(
         {
@@ -161,6 +213,8 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
       merchantId: parsed.data.merchantId,
       faceValueMinor: parsed.data.amountMinor,
       currency: parsed.data.currency,
+      chargeMinor,
+      chargeCurrency: user.homeCurrency,
       paymentMethod: parsed.data.paymentMethod,
     });
     const base = {
@@ -171,8 +225,10 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
         ...base,
         payment: {
           method: 'credit',
-          amountMinor: order.faceValueMinor.toString(),
-          currency: order.currency,
+          // Charge the user pays, in their home currency — matches
+          // what the UI renders on the "confirm order" screen.
+          amountMinor: order.chargeMinor.toString(),
+          currency: order.chargeCurrency,
         },
       });
     }
@@ -184,14 +240,23 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
         method: order.paymentMethod as 'xlm' | 'usdc',
         stellarAddress: env.LOOP_STELLAR_DEPOSIT_ADDRESS!,
         memo: order.paymentMemo ?? '',
-        amountMinor: order.faceValueMinor.toString(),
-        currency: order.currency,
+        amountMinor: order.chargeMinor.toString(),
+        currency: order.chargeCurrency,
       },
     });
   } catch (err) {
     log.error({ err, userId: auth.userId }, 'Loop-native order creation failed');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to create order' }, 500);
   }
+}
+
+/**
+ * Narrow a DB-read string into the `HomeCurrency` union. Guards the
+ * handler from a schema-drifted `users.home_currency` row sneaking
+ * past the convertMinorUnits typed parameter.
+ */
+function isHomeCurrency(s: string): s is HomeCurrency {
+  return (HOME_CURRENCIES as ReadonlyArray<string>).includes(s);
 }
 
 export interface LoopOrderView {
