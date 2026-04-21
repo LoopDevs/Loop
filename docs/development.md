@@ -103,6 +103,72 @@ LOCATION_REFRESH_INTERVAL_HOURS=24     # location data refresh
 
 # Error tracking (optional — get DSN from sentry.io)
 # SENTRY_DSN=https://xxx@yyy.ingest.sentry.io/zzz
+
+# Loop-native auth signing key (ADR 013). HS256 secret; ≥32 chars.
+# Absent → Loop-native auth endpoints are inert and CTX-proxy auth is
+# the only path. `_PREVIOUS` is only set during a rotation window so
+# in-flight access tokens signed with the old key still verify.
+# LOOP_JWT_SIGNING_KEY=...(≥32 chars)
+# LOOP_JWT_SIGNING_KEY_PREVIOUS=...(≥32 chars)
+
+# Loop-native auth feature flag (ADR 013). When true + the signing
+# key is set, /request-otp / /verify-otp / /refresh take the Loop-
+# native path (Loop sends the email, mints its own JWTs).
+# LOOP_AUTH_NATIVE_ENABLED=true
+
+# Social login (ADR 014). Verified server-side against Google /
+# Apple's issuer keys. Generate the Google IDs in Google Cloud
+# Console → Credentials; Apple Service ID / Bundle ID are assigned
+# in the Apple developer portal. Omit a platform to disable it.
+# GOOGLE_OAUTH_CLIENT_ID_WEB=...
+# GOOGLE_OAUTH_CLIENT_ID_IOS=...
+# GOOGLE_OAUTH_CLIENT_ID_ANDROID=...
+# APPLE_SIGN_IN_SERVICE_ID=...
+
+# Loop-native order rails — Stellar deposit + asset issuers (ADR 010 / 015).
+# Loop's Stellar deposit address (operator account) is where users send
+# XLM / USDC for Loop-native orders. The three LOOP-asset issuers back
+# the cashback payouts (USDLOOP / GBPLOOP / EURLOOP — one per home
+# currency). Omit an issuer → cashback for that currency stays off-chain
+# (ledger row written, Stellar side skipped).
+# LOOP_STELLAR_DEPOSIT_ADDRESS=G...(55 chars)
+# LOOP_STELLAR_USDC_ISSUER=GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
+# LOOP_STELLAR_USDLOOP_ISSUER=G...
+# LOOP_STELLAR_GBPLOOP_ISSUER=G...
+# LOOP_STELLAR_EURLOOP_ISSUER=G...
+
+# Procurement USDC-floor (ADR 015). Stroops (7 decimals; 10^7 = 1 USDC).
+# When the operator account's USDC balance dips below this many stroops,
+# procurement pays CTX in XLM instead — unblocks fulfillment during ops
+# top-ups. Absent → fallback disabled, procurement always pays USDC.
+# LOOP_STELLAR_USDC_FLOOR_STROOPS=50000000000   # 5,000 USDC
+
+# Payout signing (ADR 016). Operator secret signs outbound LOOP-asset
+# payments from the operator account to user wallets. Never logged
+# (pino redaction). Absent → the payout worker is inert; pending_payouts
+# stay `pending` until an operator ticks the worker. Use the PREVIOUS
+# slot during rotation windows only.
+# LOOP_STELLAR_OPERATOR_SECRET=S...(55 chars)
+# LOOP_STELLAR_OPERATOR_SECRET_PREVIOUS=S...
+
+# Payout worker pacing + bounded retry (ADR 016). 30s interval matches
+# the ledger-close cadence; a max-attempts of 5 promotes a transient
+# failure to terminal `failed` before the row starves the queue.
+# LOOP_PAYOUT_WORKER_INTERVAL_SECONDS=30
+# LOOP_PAYOUT_MAX_ATTEMPTS=5
+
+# Stellar network passphrase (ADR 016). Public mainnet is the default;
+# override with the Testnet string for staging.
+# LOOP_STELLAR_NETWORK_PASSPHRASE=Public Global Stellar Network ; September 2015
+
+# Worker feature flag + cadences (ADR 010 / 015). Default false — a
+# fresh clone doesn't auto-start Horizon + CTX polling. Set true once
+# the operator account + issuers are configured above. Watcher runs
+# every 10s (deposit latency), procurement every 5s (user-blocking
+# once an order is paid).
+# LOOP_WORKERS_ENABLED=true
+# LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS=10
+# LOOP_PROCUREMENT_INTERVAL_SECONDS=5
 ```
 
 ### Inheritance model
