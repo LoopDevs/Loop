@@ -59,6 +59,38 @@ vi.mock('../../db/schema.js', async () => {
   };
 });
 
+// Env + Horizon-balance mock — default: no floor configured so the
+// procurement tick skips the Horizon call entirely and defaults to
+// USDC. Tests that exercise the fallback override `envState.floor`
+// and `balancesState.usdc`.
+const { envState, balancesState, getBalancesMock } = vi.hoisted(() => {
+  const env = {
+    LOOP_STELLAR_DEPOSIT_ADDRESS: undefined as string | undefined,
+    LOOP_STELLAR_USDC_ISSUER: undefined as string | undefined,
+    LOOP_STELLAR_USDC_FLOOR_STROOPS: undefined as bigint | undefined,
+  };
+  const balances = {
+    usdc: null as bigint | null,
+    throwErr: null as Error | null,
+  };
+  return {
+    envState: env,
+    balancesState: balances,
+    getBalancesMock: vi.fn(async () => {
+      if (balances.throwErr !== null) throw balances.throwErr;
+      return { xlmStroops: null, usdcStroops: balances.usdc, asOfMs: Date.now() };
+    }),
+  };
+});
+vi.mock('../../env.js', () => ({
+  get env() {
+    return envState;
+  },
+}));
+vi.mock('../../payments/horizon-balances.js', () => ({
+  getAccountBalances: getBalancesMock,
+}));
+
 import { runProcurementTick, pickProcurementAsset } from '../procurement.js';
 import { OperatorPoolUnavailableError } from '../../ctx/operator-pool.js';
 
@@ -111,6 +143,12 @@ beforeEach(() => {
   markFulfilledMock.mockReset();
   markFailedMock.mockReset();
   operatorFetchMock.mockReset();
+  getBalancesMock.mockClear();
+  envState.LOOP_STELLAR_DEPOSIT_ADDRESS = undefined;
+  envState.LOOP_STELLAR_USDC_ISSUER = undefined;
+  envState.LOOP_STELLAR_USDC_FLOOR_STROOPS = undefined;
+  balancesState.usdc = null;
+  balancesState.throwErr = null;
   for (const fn of Object.values(dbMock)) {
     if (typeof fn === 'function' && 'mockClear' in fn) {
       (fn as unknown as { mockClear: () => void }).mockClear();
@@ -293,6 +331,59 @@ describe('runProcurementTick', () => {
     state.paid = [];
     await runProcurementTick();
     expect(dbMock['limit']!).toHaveBeenCalledWith(10);
+  });
+});
+
+describe('runProcurementTick — USDC floor / Horizon wiring', () => {
+  it('skips the Horizon read entirely when no floor is configured', async () => {
+    state.paid = [makeOrder({ id: 'o-1' })];
+    mockProcureAndFetch('ctx-a');
+    await runProcurementTick();
+    expect(getBalancesMock).not.toHaveBeenCalled();
+    const init = operatorFetchMock.mock.calls[0]![1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({ cryptoCurrency: 'USDC' });
+  });
+
+  it('skips the Horizon read when floor is set but deposit address is not (pre-deploy env)', async () => {
+    state.paid = [makeOrder({ id: 'o-1' })];
+    mockProcureAndFetch('ctx-a');
+    envState.LOOP_STELLAR_USDC_FLOOR_STROOPS = 10n ** 9n;
+    await runProcurementTick();
+    expect(getBalancesMock).not.toHaveBeenCalled();
+  });
+
+  it('reads balance + picks USDC when balance is above the floor', async () => {
+    state.paid = [makeOrder({ id: 'o-1' })];
+    mockProcureAndFetch('ctx-a');
+    envState.LOOP_STELLAR_DEPOSIT_ADDRESS = 'GACCOUNT';
+    envState.LOOP_STELLAR_USDC_FLOOR_STROOPS = 10n ** 9n; // 100 USDC
+    balancesState.usdc = 5n * 10n ** 9n; // 500 USDC — well above
+    await runProcurementTick();
+    expect(getBalancesMock).toHaveBeenCalledTimes(1);
+    const init = operatorFetchMock.mock.calls[0]![1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({ cryptoCurrency: 'USDC' });
+  });
+
+  it('falls back to XLM when USDC balance dips below the floor', async () => {
+    state.paid = [makeOrder({ id: 'o-1' })];
+    mockProcureAndFetch('ctx-a');
+    envState.LOOP_STELLAR_DEPOSIT_ADDRESS = 'GACCOUNT';
+    envState.LOOP_STELLAR_USDC_FLOOR_STROOPS = 10n ** 9n;
+    balancesState.usdc = 5n * 10n ** 8n; // 50 USDC — below 100-USDC floor
+    await runProcurementTick();
+    const init = operatorFetchMock.mock.calls[0]![1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({ cryptoCurrency: 'XLM' });
+  });
+
+  it('gracefully defaults to USDC when Horizon throws (no stalling procurement)', async () => {
+    state.paid = [makeOrder({ id: 'o-1' })];
+    mockProcureAndFetch('ctx-a');
+    envState.LOOP_STELLAR_DEPOSIT_ADDRESS = 'GACCOUNT';
+    envState.LOOP_STELLAR_USDC_FLOOR_STROOPS = 10n ** 9n;
+    balancesState.throwErr = new Error('Horizon 503');
+    await runProcurementTick();
+    const init = operatorFetchMock.mock.calls[0]![1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({ cryptoCurrency: 'USDC' });
   });
 });
 
