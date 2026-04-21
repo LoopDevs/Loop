@@ -201,6 +201,41 @@ export const EnvSchema = z.object({
   // sees them immediately (ADR 015 treasury strategy).
   LOOP_STELLAR_USDC_FLOOR_STROOPS: z.coerce.bigint().nonnegative().optional(),
 
+  // Operator Stellar secret key for outbound payouts (ADR 016).
+  // Signs LOOP-asset Payment ops from Loop's operator account to
+  // users' linked wallets. Never logged (pino redaction allowlist).
+  // Absent → payout worker is inert; pending_payouts rows stay
+  // pending until an operator sets this and ticks the worker.
+  // Rotation: move the active key to `_PREVIOUS` for the access-
+  // token TTL, then drop — mirrors the JWT key rotation pattern.
+  LOOP_STELLAR_OPERATOR_SECRET: z
+    .string()
+    .regex(/^S[A-Z2-7]{55}$/, { message: 'must be a valid Stellar secret key (S...)' })
+    .optional(),
+  LOOP_STELLAR_OPERATOR_SECRET_PREVIOUS: z
+    .string()
+    .regex(/^S[A-Z2-7]{55}$/, { message: 'must be a valid Stellar secret key (S...)' })
+    .optional(),
+
+  // Network passphrase for payout signing. PUBLIC mainnet is the
+  // default; operators override with TESTNET string for staging.
+  // Anything non-empty is accepted so a self-hosted network can
+  // set its own passphrase.
+  LOOP_STELLAR_NETWORK_PASSPHRASE: z
+    .string()
+    .default('Public Global Stellar Network ; September 2015'),
+
+  // Payout-worker tick interval (seconds). 30s matches ADR 016's
+  // recommended pacing — the worker is slower than the watcher
+  // (10s) or procurement (5s) because each payout is a Stellar
+  // submit + ledger-close (~5s) and parallelism on the operator
+  // account is unsafe (sequence numbers serialise).
+  LOOP_PAYOUT_WORKER_INTERVAL_SECONDS: z.coerce.number().int().positive().default(30),
+
+  // Max auto-retry attempts before a row promotes from transient
+  // failure to terminal `failed`. ADR 016 default 5.
+  LOOP_PAYOUT_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+
   // Feature flag for the Loop-native order workers (ADR 010). When
   // true at boot, the backend starts the payment watcher and
   // procurement worker intervals. Default false — workers are opt-in

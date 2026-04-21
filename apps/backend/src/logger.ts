@@ -67,6 +67,17 @@ export const REDACT_PATHS: readonly string[] = [
   '*.secretKey',
   '*.seedPhrase',
   '*.mnemonic',
+  // ADR 016 — operator Stellar secret passed as a typed field on
+  // `submitPayout({ secret, ... })` and on the worker tick args.
+  // The generic `secret` path above catches the argument field, but
+  // env-dumps include the full name — cover both so dumping the env
+  // object in a boot log can't leak the key.
+  'operatorSecret',
+  '*.operatorSecret',
+  'LOOP_STELLAR_OPERATOR_SECRET',
+  'LOOP_STELLAR_OPERATOR_SECRET_PREVIOUS',
+  '*.LOOP_STELLAR_OPERATOR_SECRET',
+  '*.LOOP_STELLAR_OPERATOR_SECRET_PREVIOUS',
 ];
 
 const basePinoOptions = {

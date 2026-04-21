@@ -8,6 +8,11 @@ import { startMerchantRefresh, stopMerchantRefresh } from './merchants/sync.js';
 import { runMigrations, closeDb } from './db/client.js';
 import { startPaymentWatcher, stopPaymentWatcher } from './payments/watcher.js';
 import { startProcurementWorker, stopProcurementWorker } from './orders/procurement.js';
+import {
+  startPayoutWorker,
+  stopPayoutWorker,
+  resolvePayoutConfig,
+} from './payments/payout-worker.js';
 
 // Apply any pending DB migrations before accepting traffic (ADR 012).
 // Awaited so `serve()` below only runs after the schema is up-to-date —
@@ -49,6 +54,17 @@ if (env.LOOP_WORKERS_ENABLED) {
   startProcurementWorker({
     intervalMs: env.LOOP_PROCUREMENT_INTERVAL_SECONDS * 1000,
   });
+  // Payout worker (ADR 016). Resolve reads LOOP_STELLAR_OPERATOR_SECRET
+  // + network passphrase; returns null when the secret is unset, in
+  // which case pending_payouts rows stay pending until ops plumbs it.
+  const payoutConfig = resolvePayoutConfig();
+  if (payoutConfig === null) {
+    logger.warn(
+      'LOOP_WORKERS_ENABLED=true but LOOP_STELLAR_OPERATOR_SECRET is unset — payout worker will not start; pending_payouts rows will queue until configured',
+    );
+  } else {
+    startPayoutWorker(payoutConfig);
+  }
 }
 
 logger.info({ port: env.PORT }, 'Loop backend starting');
@@ -78,6 +94,7 @@ function shutdown(signal: string): void {
   stopLocationRefresh();
   stopPaymentWatcher();
   stopProcurementWorker();
+  stopPayoutWorker();
 
   server.close(() => {
     void Promise.allSettled([sentryFlush(5000), closeDb()]).finally(() => {
