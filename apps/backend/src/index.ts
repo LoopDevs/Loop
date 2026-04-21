@@ -10,7 +10,12 @@ import { runMigrations, closeDb } from './db/client.js';
 // Apply any pending DB migrations before accepting traffic (ADR 012).
 // Awaited so `serve()` below only runs after the schema is up-to-date —
 // a partial-migration run-time is worse than a slightly-later boot.
-await runMigrations();
+// Skipped under NODE_ENV=test: the mocked e2e runner boots the backend
+// with a placeholder DATABASE_URL and no live Postgres, and the admin
+// endpoints that read/write the db are not exercised by that suite.
+if (env.NODE_ENV !== 'test') {
+  await runMigrations();
+}
 
 // Merchants load first (startMerchantRefresh triggers initial refresh).
 // Locations start after a short delay to ensure merchant data is available

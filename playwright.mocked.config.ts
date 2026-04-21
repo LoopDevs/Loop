@@ -63,6 +63,11 @@ export default defineConfig({
         GIFT_CARD_API_BASE_URL: 'http://localhost:9091',
         REFRESH_INTERVAL_HOURS: '6',
         LOCATION_REFRESH_INTERVAL_HOURS: '24',
+        // Placeholder — NODE_ENV=test skips runMigrations in index.ts
+        // and the mocked e2e doesn't exercise admin / credits endpoints,
+        // so no live connection is ever opened. The URL just has to
+        // satisfy env.ts's zod validator.
+        DATABASE_URL: 'postgres://placeholder:placeholder@localhost:5433/loop_test',
       },
     },
     {
