@@ -29,7 +29,11 @@ import {
   requireAuth,
 } from './auth/handler.js';
 import { createOrderHandler, listOrdersHandler, getOrderHandler } from './orders/handler.js';
-import { loopCreateOrderHandler, loopGetOrderHandler } from './orders/loop-handler.js';
+import {
+  loopCreateOrderHandler,
+  loopGetOrderHandler,
+  loopListOrdersHandler,
+} from './orders/loop-handler.js';
 import { configHandler } from './config/handler.js';
 import { notifyHealthChange } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
@@ -533,6 +537,10 @@ app.get('/api/orders/:id', rateLimit(120, 60_000), getOrderHandler);
 // the migration window. Gated inside the handler on
 // LOOP_AUTH_NATIVE_ENABLED — off → 404.
 app.post('/api/orders/loop', rateLimit(10, 60_000), loopCreateOrderHandler);
+// Loop-native orders list (ADR 010). Listed before :id so the path
+// param doesn't capture 'list' or similar; rate 60/min matches the
+// legacy /api/orders GET.
+app.get('/api/orders/loop', rateLimit(60, 60_000), loopListOrdersHandler);
 // Loop-native order GET. The UI polls this while an order is
 // pending_payment → paid → procuring → fulfilled, so the rate is
 // generous. Owner-scoped: the handler 404s on a non-owner read so

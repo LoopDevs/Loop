@@ -78,6 +78,24 @@ export async function getLoopOrder(id: string): Promise<LoopOrderView> {
   return authenticatedRequest<LoopOrderView>(`/api/orders/loop/${encodeURIComponent(id)}`);
 }
 
+/**
+ * GET /api/orders/loop — owner-scoped list of the caller's Loop-native
+ * orders, newest first. `limit` clamps 1–100 server-side (default 50).
+ * Pagination: pass the last row's `createdAt` as `before` on the next
+ * call.
+ */
+export async function listLoopOrders(
+  args: { limit?: number; before?: string } = {},
+): Promise<{ orders: LoopOrderView[] }> {
+  const params = new URLSearchParams();
+  if (args.limit !== undefined) params.set('limit', String(args.limit));
+  if (args.before !== undefined) params.set('before', args.before);
+  const qs = params.toString();
+  return authenticatedRequest<{ orders: LoopOrderView[] }>(
+    `/api/orders/loop${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
 /** Convenience: state labels for UI display. */
 export function loopOrderStateLabel(state: LoopOrderState): string {
   switch (state) {
