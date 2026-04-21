@@ -13,6 +13,7 @@ import { PageHeader } from '~/components/ui/PageHeader';
 import { Spinner } from '~/components/ui/Spinner';
 import { Button } from '~/components/ui/Button';
 import { PurchaseComplete } from '~/components/features/purchase/PurchaseComplete';
+import { EarnedCashbackCard } from '~/components/features/purchase/EarnedCashbackCard';
 import { formatMoney } from '~/utils/money';
 import { friendlyError } from '~/utils/error-messages';
 import { openWebView } from '~/native/webview';
@@ -179,12 +180,19 @@ function OrderDetailBody({ order, now }: { order: Order; now: number }): React.J
       </div>
 
       {order.status === 'completed' && order.giftCardCode !== undefined && (
-        <PurchaseComplete
-          merchantName={order.merchantName}
-          code={order.giftCardCode}
-          pin={order.giftCardPin}
-          barcodeImageUrl={order.barcodeImageUrl}
-        />
+        <div className="flex flex-col gap-3">
+          <EarnedCashbackCard
+            merchantId={order.merchantId}
+            amount={order.amount}
+            currency={order.currency}
+          />
+          <PurchaseComplete
+            merchantName={order.merchantName}
+            code={order.giftCardCode}
+            pin={order.giftCardPin}
+            barcodeImageUrl={order.barcodeImageUrl}
+          />
+        </div>
       )}
 
       {order.status === 'completed' &&
