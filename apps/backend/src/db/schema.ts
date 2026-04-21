@@ -58,6 +58,13 @@ export const users = pgTable(
     email: text('email').notNull(),
     isAdmin: boolean('is_admin').notNull().default(false),
     homeCurrency: char('home_currency', { length: 3 }).notNull().default('USD'),
+    // ADR 015 — Stellar address the user wants their cashback paid
+    // to (when on-chain payout is available for their home currency).
+    // Null = user hasn't linked one; cashback accrues off-chain only.
+    // Format: 56-char uppercase base32 starting with 'G' — validated
+    // at the API boundary; column is just `text` so ops can null it
+    // out with a simple UPDATE if needed.
+    stellarAddress: text('stellar_address'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

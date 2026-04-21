@@ -69,7 +69,7 @@ vi.mock('../../auth/jwt.js', () => ({
   decodeJwtPayload: vi.fn(() => jwtState.claims),
 }));
 
-import { getMeHandler, setHomeCurrencyHandler } from '../handler.js';
+import { getMeHandler, setHomeCurrencyHandler, setStellarAddressHandler } from '../handler.js';
 
 function makeCtx(auth: LoopAuthContext | undefined, body?: unknown): Context {
   const store = new Map<string, unknown>();
@@ -109,6 +109,7 @@ describe('getMeHandler', () => {
       email: 'a@b.com',
       isAdmin: false,
       homeCurrency: 'GBP',
+      stellarAddress: null,
       ctxUserId: null,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -128,6 +129,7 @@ describe('getMeHandler', () => {
       email: 'a@b.com',
       isAdmin: false,
       homeCurrency: 'GBP',
+      stellarAddress: null,
     });
   });
 
@@ -151,6 +153,7 @@ describe('getMeHandler', () => {
       email: 'ctx@example.com',
       isAdmin: true,
       homeCurrency: 'USD',
+      stellarAddress: null,
       ctxUserId: 'ctx-123',
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -163,6 +166,7 @@ describe('getMeHandler', () => {
       email: 'ctx@example.com',
       isAdmin: true,
       homeCurrency: 'USD',
+      stellarAddress: null,
     });
     expect(userState.upsertCalls).toEqual([{ ctxUserId: 'ctx-123', email: 'ctx@example.com' }]);
   });
@@ -186,6 +190,7 @@ describe('getMeHandler', () => {
       email: 'a@b.com',
       isAdmin: false,
       homeCurrency: 'EUR',
+      stellarAddress: null,
       ctxUserId: 'should-not-leak',
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -194,7 +199,13 @@ describe('getMeHandler', () => {
       makeCtx({ kind: 'loop', userId: 'u', email: 'a@b.com', bearerToken: 't' }),
     );
     const body = (await res.json()) as Record<string, unknown>;
-    expect(Object.keys(body).sort()).toEqual(['email', 'homeCurrency', 'id', 'isAdmin']);
+    expect(Object.keys(body).sort()).toEqual([
+      'email',
+      'homeCurrency',
+      'id',
+      'isAdmin',
+      'stellarAddress',
+    ]);
   });
 });
 
@@ -210,6 +221,7 @@ describe('setHomeCurrencyHandler', () => {
     email: 'a@b.com',
     isAdmin: false,
     homeCurrency: 'USD',
+    stellarAddress: null,
     ctxUserId: null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -266,6 +278,87 @@ describe('setHomeCurrencyHandler', () => {
     dbState.orderCount = '0';
     dbState.updatedUser = null; // .returning() → empty array
     const res = await setHomeCurrencyHandler(makeCtx(LOOP_AUTH, { currency: 'GBP' }));
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('setStellarAddressHandler', () => {
+  const LOOP_AUTH: LoopAuthContext = {
+    kind: 'loop',
+    userId: 'user-uuid',
+    email: 'a@b.com',
+    bearerToken: 'loop-jwt',
+  };
+  const baseUser = {
+    id: 'user-uuid',
+    email: 'a@b.com',
+    isAdmin: false,
+    homeCurrency: 'USD',
+    stellarAddress: null as string | null,
+    ctxUserId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  const VALID_ADDRESS = 'G' + 'A'.repeat(55);
+
+  it('400 when body is missing', async () => {
+    const res = await setStellarAddressHandler(makeCtx(LOOP_AUTH, {}));
+    expect(res.status).toBe(400);
+  });
+
+  it('400 when address is not a valid Stellar pubkey', async () => {
+    const res = await setStellarAddressHandler(makeCtx(LOOP_AUTH, { address: 'not-a-pubkey' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('401 when no auth on the context', async () => {
+    const res = await setStellarAddressHandler(makeCtx(undefined, { address: VALID_ADDRESS }));
+    expect(res.status).toBe(401);
+  });
+
+  it('happy path — writes the address and returns the updated view', async () => {
+    userState.byId = { ...baseUser };
+    dbState.updatedUser = { ...baseUser, stellarAddress: VALID_ADDRESS };
+    const res = await setStellarAddressHandler(makeCtx(LOOP_AUTH, { address: VALID_ADDRESS }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['stellarAddress']).toBe(VALID_ADDRESS);
+  });
+
+  it('accepts null explicitly — unlinks the address', async () => {
+    userState.byId = { ...baseUser, stellarAddress: VALID_ADDRESS };
+    dbState.updatedUser = { ...baseUser, stellarAddress: null };
+    const res = await setStellarAddressHandler(makeCtx(LOOP_AUTH, { address: null }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['stellarAddress']).toBeNull();
+  });
+
+  it('short-circuits when the address already matches — no-op update', async () => {
+    userState.byId = { ...baseUser, stellarAddress: VALID_ADDRESS };
+    // Updated user intentionally null — the short-circuit path returns
+    // the existing view before .returning() is consulted.
+    dbState.updatedUser = null;
+    const res = await setStellarAddressHandler(makeCtx(LOOP_AUTH, { address: VALID_ADDRESS }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['stellarAddress']).toBe(VALID_ADDRESS);
+  });
+
+  it('relinking to a different address is allowed (not order-locked like home currency)', async () => {
+    const prev = 'G' + 'B'.repeat(55);
+    userState.byId = { ...baseUser, stellarAddress: prev };
+    dbState.updatedUser = { ...baseUser, stellarAddress: VALID_ADDRESS };
+    const res = await setStellarAddressHandler(makeCtx(LOOP_AUTH, { address: VALID_ADDRESS }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['stellarAddress']).toBe(VALID_ADDRESS);
+  });
+
+  it('404 when the user row disappears between resolve and update (race)', async () => {
+    userState.byId = { ...baseUser };
+    dbState.updatedUser = null;
+    const res = await setStellarAddressHandler(makeCtx(LOOP_AUTH, { address: VALID_ADDRESS }));
     expect(res.status).toBe(404);
   });
 });
