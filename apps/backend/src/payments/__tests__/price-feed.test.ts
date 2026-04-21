@@ -9,6 +9,7 @@ vi.mock('../../logger.js', () => ({
 import {
   stroopsPerCent,
   usdcStroopsPerCent,
+  convertMinorUnits,
   __resetPriceFeedForTests,
   __resetFxFeedForTests,
 } from '../price-feed.js';
@@ -154,5 +155,67 @@ describe('usdcStroopsPerCent', () => {
   it('throws on a non-positive rate', async () => {
     fetchSpy = stubFeed({ base: 'USD', rates: { GBP: 0 } });
     await expect(usdcStroopsPerCent('GBP')).rejects.toThrow(/non-positive rate/);
+  });
+});
+
+describe('convertMinorUnits', () => {
+  it('passes through when from === to without touching the feed', async () => {
+    // No stub — feed access would throw. USD→USD short-circuits
+    // because the conversion is a no-op.
+    expect(await convertMinorUnits(5000n, 'USD', 'USD')).toBe(5000n);
+    expect(await convertMinorUnits(5000n, 'GBP', 'GBP')).toBe(5000n);
+    expect(await convertMinorUnits(5000n, 'EUR', 'EUR')).toBe(5000n);
+  });
+
+  it('passes through a zero amount without touching the feed', async () => {
+    expect(await convertMinorUnits(0n, 'USD', 'GBP')).toBe(0n);
+  });
+
+  it('rejects negative amounts — a negative charge is a bug', async () => {
+    await expect(convertMinorUnits(-1n, 'USD', 'GBP')).rejects.toThrow(/negative amount/);
+  });
+
+  it('converts USD cents to GBP pence (USD→GBP)', async () => {
+    // 5000 USD cents × 0.78 = 3900 GBP pence (exact).
+    fetchSpy = stubFeed({ base: 'USD', rates: { GBP: 0.78, EUR: 0.92 } });
+    expect(await convertMinorUnits(5000n, 'USD', 'GBP')).toBe(3900n);
+  });
+
+  it('rounds up so the charge covers the catalog price under sub-minor rounding', async () => {
+    // 5000 × 0.7831 = 3915.5 → ceiling = 3916.
+    fetchSpy = stubFeed({ base: 'USD', rates: { GBP: 0.7831 } });
+    expect(await convertMinorUnits(5000n, 'USD', 'GBP')).toBe(3916n);
+  });
+
+  it('converts GBP pence to USD cents (GBP→USD)', async () => {
+    // 3900 pence / 0.78 GBP-per-USD = $50.00 → 5000 cents (exact).
+    fetchSpy = stubFeed({ base: 'USD', rates: { GBP: 0.78 } });
+    expect(await convertMinorUnits(3900n, 'GBP', 'USD')).toBe(5000n);
+  });
+
+  it('two-hops GBP → EUR via USD', async () => {
+    // 3900 GBP pence → $50 → $50 × 0.92 = 4600 EUR cents (exact).
+    fetchSpy = stubFeed({ base: 'USD', rates: { GBP: 0.78, EUR: 0.92 } });
+    expect(await convertMinorUnits(3900n, 'GBP', 'EUR')).toBe(4600n);
+  });
+
+  it('shares the FX cache with usdcStroopsPerCent', async () => {
+    fetchSpy = stubFeed({ base: 'USD', rates: { GBP: 0.78, EUR: 0.92 } });
+    await usdcStroopsPerCent('GBP');
+    await convertMinorUnits(5000n, 'USD', 'GBP');
+    await convertMinorUnits(3900n, 'GBP', 'EUR');
+    // One upstream fetch for all three — if the cache wasn't shared
+    // we'd see 2 (or 3) hits.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws when the source rate is missing from the feed', async () => {
+    fetchSpy = stubFeed({ base: 'USD', rates: { EUR: 0.92 } });
+    await expect(convertMinorUnits(5000n, 'GBP', 'USD')).rejects.toThrow(/no rate for USD→GBP/);
+  });
+
+  it('throws when the destination rate is missing from the feed', async () => {
+    fetchSpy = stubFeed({ base: 'USD', rates: { GBP: 0.78 } });
+    await expect(convertMinorUnits(5000n, 'USD', 'EUR')).rejects.toThrow(/no rate for USD→EUR/);
   });
 });
