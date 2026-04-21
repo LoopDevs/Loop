@@ -45,6 +45,40 @@ vi.mock('../../ctx/operator-pool.js', () => ({
   operatorPoolSize: () => operatorSizeMock(),
 }));
 
+// Env + Horizon balance reader — each test controls what the admin
+// operator's on-chain balances look like + whether the env is wired
+// at all. Default: no deposit address configured → assets null.
+const { envState, balancesState } = vi.hoisted(() => ({
+  envState: {
+    LOOP_STELLAR_DEPOSIT_ADDRESS: undefined as string | undefined,
+    LOOP_STELLAR_USDC_ISSUER: undefined as string | undefined,
+  },
+  balancesState: {
+    snapshot: null as null | {
+      xlmStroops: bigint | null;
+      usdcStroops: bigint | null;
+      asOfMs: number;
+    },
+    throwErr: null as Error | null,
+  },
+}));
+vi.mock('../../env.js', () => ({
+  get env() {
+    return envState;
+  },
+}));
+vi.mock('../../payments/horizon-balances.js', () => ({
+  getAccountBalances: vi.fn(async () => {
+    if (balancesState.throwErr !== null) throw balancesState.throwErr;
+    return balancesState.snapshot ?? { xlmStroops: null, usdcStroops: null, asOfMs: Date.now() };
+  }),
+}));
+vi.mock('../../logger.js', () => ({
+  logger: {
+    child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+  },
+}));
+
 import { treasuryHandler } from '../treasury.js';
 
 function makeCtx(): { ctx: Context } {
@@ -63,6 +97,10 @@ beforeEach(() => {
   state.results.length = 0;
   operatorHealthMock.mockReset();
   operatorSizeMock.mockReset();
+  envState.LOOP_STELLAR_DEPOSIT_ADDRESS = undefined;
+  envState.LOOP_STELLAR_USDC_ISSUER = undefined;
+  balancesState.snapshot = null;
+  balancesState.throwErr = null;
   for (const fn of Object.values(dbMock)) {
     if (typeof fn === 'function' && 'mockClear' in fn) {
       (fn as unknown as { mockClear: () => void }).mockClear();
@@ -148,10 +186,59 @@ describe('treasuryHandler', () => {
     expect(Object.keys(body.liabilities).sort()).toEqual(['EURLOOP', 'GBPLOOP', 'USDLOOP']);
   });
 
-  it('surfaces USDC + XLM assets with null stroops until the Horizon-read slice lands', async () => {
+  it('assets are null when LOOP_STELLAR_DEPOSIT_ADDRESS is unset (dev / pre-deploy)', async () => {
     state.results.push([], []);
     const { ctx } = makeCtx();
     const res = await treasuryHandler(ctx);
+    const body = (await res.json()) as {
+      assets: { USDC: { stroops: string | null }; XLM: { stroops: string | null } };
+    };
+    expect(body.assets.USDC.stroops).toBeNull();
+    expect(body.assets.XLM.stroops).toBeNull();
+  });
+
+  it('populates USDC + XLM stroops from Horizon when the deposit address is set', async () => {
+    state.results.push([], []);
+    envState.LOOP_STELLAR_DEPOSIT_ADDRESS = 'GACCOUNT';
+    envState.LOOP_STELLAR_USDC_ISSUER = 'GCENTRE';
+    balancesState.snapshot = {
+      xlmStroops: 1_234_567_890n,
+      usdcStroops: 5_000_000_000n,
+      asOfMs: Date.now(),
+    };
+    const { ctx } = makeCtx();
+    const res = await treasuryHandler(ctx);
+    const body = (await res.json()) as {
+      assets: { USDC: { stroops: string }; XLM: { stroops: string } };
+    };
+    expect(body.assets.USDC.stroops).toBe('5000000000');
+    expect(body.assets.XLM.stroops).toBe('1234567890');
+  });
+
+  it('preserves null stroops when the account has no trustline for USDC', async () => {
+    state.results.push([], []);
+    envState.LOOP_STELLAR_DEPOSIT_ADDRESS = 'GACCOUNT';
+    balancesState.snapshot = {
+      xlmStroops: 10n,
+      usdcStroops: null,
+      asOfMs: Date.now(),
+    };
+    const { ctx } = makeCtx();
+    const res = await treasuryHandler(ctx);
+    const body = (await res.json()) as {
+      assets: { USDC: { stroops: string | null }; XLM: { stroops: string | null } };
+    };
+    expect(body.assets.USDC.stroops).toBeNull();
+    expect(body.assets.XLM.stroops).toBe('10');
+  });
+
+  it('falls back to null assets when Horizon throws — does not 500 the handler', async () => {
+    state.results.push([], []);
+    envState.LOOP_STELLAR_DEPOSIT_ADDRESS = 'GACCOUNT';
+    balancesState.throwErr = new Error('Horizon 503');
+    const { ctx } = makeCtx();
+    const res = await treasuryHandler(ctx);
+    expect(res.status).toBe(200);
     const body = (await res.json()) as {
       assets: { USDC: { stroops: string | null }; XLM: { stroops: string | null } };
     };
