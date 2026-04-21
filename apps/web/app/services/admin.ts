@@ -52,3 +52,20 @@ export async function cashbackConfigHistory(
     `/api/admin/merchant-cashback-configs/${encodeURIComponent(merchantId)}/history`,
   );
 }
+
+export interface TreasurySnapshot {
+  /** Outstanding credit (what Loop owes users), keyed by currency. Minor units, string. */
+  outstanding: Record<string, string>;
+  /** Ledger-by-type totals, keyed [currency][type]. Minor units, string. */
+  totals: Record<string, Record<string, string>>;
+  /** CTX operator pool snapshot — ADR 013. */
+  operatorPool: {
+    size: number;
+    operators: Array<{ id: string; state: string }>;
+  };
+}
+
+/** GET /api/admin/treasury */
+export async function getTreasurySnapshot(): Promise<TreasurySnapshot> {
+  return authenticatedRequest<TreasurySnapshot>('/api/admin/treasury');
+}

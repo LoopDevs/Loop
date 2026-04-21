@@ -212,6 +212,7 @@ GET  /api/orders/:id         [authenticated]
 GET  /api/admin/merchant-cashback-configs              [admin]
 PUT  /api/admin/merchant-cashback-configs/:merchantId  [admin]
 GET  /api/admin/merchant-cashback-configs/:merchantId/history  [admin]
+GET  /api/admin/treasury                               [admin]
 ```
 
 Full request/response shapes — including field types, pagination
