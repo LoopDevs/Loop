@@ -133,6 +133,24 @@ if [ -d "$ANDROID_DIR" ]; then
   done
   say "Copied AVD splash drawables"
 
+  # Location permissions — required for the "locate me" control on
+  # the map. `navigator.geolocation` inside the Capacitor WebView
+  # still goes through the Android runtime permission gate, and
+  # without these uses-permission entries the first getCurrentPosition
+  # call silently fails with PERMISSION_DENIED. Kept as separate
+  # lines so the regex guard stays simple + idempotent.
+  for PERM in ACCESS_COARSE_LOCATION ACCESS_FINE_LOCATION; do
+    if ! grep -q "android.permission.$PERM" "$ANDROID_MANIFEST"; then
+      say "Adding $PERM uses-permission to AndroidManifest.xml"
+      if sed --version >/dev/null 2>&1; then
+        sed -i "s|<uses-permission android:name=\"android.permission.INTERNET\" />|<uses-permission android:name=\"android.permission.INTERNET\" />\n    <uses-permission android:name=\"android.permission.$PERM\" />|" "$ANDROID_MANIFEST"
+      else
+        sed -i '' "s|<uses-permission android:name=\"android.permission.INTERNET\" />|<uses-permission android:name=\"android.permission.INTERNET\" />\\
+    <uses-permission android:name=\"android.permission.$PERM\" />|" "$ANDROID_MANIFEST"
+      fi
+    fi
+  done
+
   # Patch AndroidManifest.xml only if the attributes are missing, so a
   # hand-edited manifest is left alone.
   if ! grep -q 'android:fullBackupContent' "$ANDROID_MANIFEST"; then
@@ -165,6 +183,19 @@ if [ -f "$IOS_PLIST" ]; then
   else
     say "Adding $FACE_ID_KEY to Info.plist"
     /usr/libexec/PlistBuddy -c "Add :$FACE_ID_KEY string $FACE_ID_VALUE" "$IOS_PLIST"
+  fi
+
+  # Location when-in-use — required for `navigator.geolocation` in
+  # the WKWebView to resolve on iOS 14+ and for App Store review.
+  # When-in-use only (no always / background) — we only fetch a
+  # one-shot position when the user taps the map's locate button.
+  LOC_KEY="NSLocationWhenInUseUsageDescription"
+  LOC_VALUE="Loop uses your location to show nearby merchants on the map."
+  if /usr/libexec/PlistBuddy -c "Print :$LOC_KEY" "$IOS_PLIST" >/dev/null 2>&1; then
+    say "Info.plist already has $LOC_KEY, skipping"
+  else
+    say "Adding $LOC_KEY to Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :$LOC_KEY string $LOC_VALUE" "$IOS_PLIST"
   fi
 else
   say "iOS Info.plist not present at $IOS_PLIST — skipping (run \`npx cap add ios\` first)"

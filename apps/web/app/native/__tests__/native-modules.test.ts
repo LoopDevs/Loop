@@ -250,9 +250,13 @@ describe('back-button', () => {
     expect(() => registerBackButton()).not.toThrow();
   });
 
-  it('registerBackButton returns undefined', () => {
-    const result = registerBackButton();
-    expect(result).toBeUndefined();
+  it('registerBackButton returns a disposer on web (no-op function)', () => {
+    // Now returns a cleanup fn so callers can remove the Capacitor
+    // listener on unmount. On web (non-Capacitor) it's a no-op, but
+    // calling it must still be safe.
+    const dispose = registerBackButton();
+    expect(typeof dispose).toBe('function');
+    expect(() => dispose()).not.toThrow();
   });
 });
 

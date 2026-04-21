@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { useAllMerchants } from '~/hooks/use-merchants';
 import { foldForSearch, merchantSlug } from '@loop/shared';
 import { useUiStore } from '~/stores/ui.store';
+import { useAuthStore } from '~/stores/auth.store';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { getImageProxyUrl } from '~/utils/image';
 
@@ -33,7 +34,7 @@ function SearchDropdown({
     <div
       role="listbox"
       id="search-listbox"
-      className="absolute top-full left-0 right-0 mt-1 bg-gray-950 border border-gray-800 rounded-lg shadow-lg z-[999999]"
+      className="absolute top-full left-0 right-0 mt-1 rounded-lg shadow-lg z-[999999] bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800"
     >
       {results.map((r, i) => (
         <button
@@ -47,7 +48,9 @@ function SearchDropdown({
           role="option"
           aria-selected={i === selectedIndex}
           onClick={() => onSelect(r)}
-          className={`w-full px-4 py-3 text-left border-b border-gray-900 last:border-b-0 flex items-center gap-3 hover:bg-gray-900 cursor-pointer ${i === selectedIndex ? 'bg-gray-900' : ''}`}
+          className={`w-full px-4 py-3 text-left last:border-b-0 flex items-center gap-3 cursor-pointer border-b border-gray-100 dark:border-gray-900 hover:bg-gray-100 dark:hover:bg-gray-900 ${
+            i === selectedIndex ? 'bg-gray-100 dark:bg-gray-900' : ''
+          }`}
         >
           {r.logoUrl !== undefined ? (
             <img
@@ -61,7 +64,7 @@ function SearchDropdown({
             </div>
           )}
           <div>
-            <div className="font-medium text-gray-100">{r.name}</div>
+            <div className="font-medium text-gray-900 dark:text-gray-100">{r.name}</div>
             {r.savingsPercentage !== undefined && r.savingsPercentage > 0 && (
               <div className="text-xs text-green-400 font-medium">
                 {r.savingsPercentage.toFixed(1)}% savings
@@ -156,8 +159,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
             aria-activedescendant={
               selectedIndex >= 0 ? `search-option-${selectedIndex}` : undefined
             }
-            className="w-full px-3 py-1.5 pl-8 text-sm text-white placeholder-white/70 rounded-lg border border-white/20 focus:outline-none focus:ring-2 focus:ring-white/60"
-            style={{ backgroundColor: 'rgba(0, 0, 0, 0.3)' }}
+            className="w-full px-3 py-1.5 pl-8 text-sm rounded-lg border focus:outline-none focus:ring-2 bg-black/5 dark:bg-black/30 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-white/70 border-black/10 dark:border-white/20 focus:ring-gray-950/30 dark:focus:ring-white/60"
             onChange={(e) => {
               setQuery(e.target.value);
               setOpen(true);
@@ -187,7 +189,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
             }}
           />
           <svg
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/70"
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 dark:text-white/70"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -219,22 +221,27 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
   const navigate = useNavigate();
   const { toggleTheme } = useUiStore();
   const { isNative } = useNativePlatform();
+  const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
 
   const handleSelect = (r: SearchResult): void => {
     void navigate(`/gift-card/${merchantSlug(r.name)}`);
   };
 
   const navLinkClass = (path: string): string =>
-    `transition-colors text-sm px-3 py-2 rounded-lg hover:bg-white/10 ${location.pathname === path ? 'text-white' : 'text-white/60 hover:text-white/80'}`;
+    `transition-colors text-sm px-3 py-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 ${
+      location.pathname === path
+        ? 'text-gray-950 dark:text-white'
+        : 'text-gray-600 hover:text-gray-900 dark:text-white/60 dark:hover:text-white/80'
+    }`;
 
   return (
     <nav
       data-nav="top"
-      className="fixed top-0 left-0 right-0 z-[1100]"
+      // Theme-aware backdrop: translucent white in light theme,
+      // translucent ink in dark. `backdrop-blur` keeps the frosted
+      // effect in both. Border follows the theme on its alpha side.
+      className="fixed top-0 left-0 right-0 z-[1100] bg-white/70 dark:bg-gray-950/50 backdrop-blur-md border-b border-black/10 dark:border-white/10"
       style={{
-        backgroundColor: 'rgb(3 7 18 / 50%)',
-        backdropFilter: 'blur(12px)',
-        borderBottom: '1px solid rgba(255,255,255,0.1)',
         // calc(100vw - 100%) evaluates to the vertical scrollbar's
         // width (0 when absent). Adding it as left padding nudges the
         // nav's inner container right by exactly that amount, so the
@@ -262,7 +269,15 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
           {!isNative && (
             <div className="flex items-center flex-shrink-0 pr-2">
               <Link to="/">
-                <img src="/loop-logo-white.svg" alt="Loop" className="h-6 md:h-7 mt-1.5" />
+                {/* Both logos shipped; Tailwind's dark: variant hides
+                    the wrong one so SSR/hydration match (inline theme
+                    script sets html.dark before React paints). */}
+                <img src="/loop-logo.svg" alt="Loop" className="h-6 md:h-7 mt-1.5 dark:hidden" />
+                <img
+                  src="/loop-logo-white.svg"
+                  alt="Loop"
+                  className="h-6 md:h-7 mt-1.5 hidden dark:block"
+                />
               </Link>
             </div>
           )}
@@ -274,6 +289,20 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
           <div className="flex-1 md:flex-none md:w-[28rem]">
             <SearchBar onSelect={handleSelect} />
           </div>
+
+          {/* Mobile-only Sign up pill — entry point into the
+              six-screen onboarding flow at `/onboarding`. Hidden on
+              desktop (the desktop nav doesn't need a standalone CTA,
+              and we gate this on unauthed so returning users don't
+              see the prompt). */}
+          {!isAuthenticated && !isNative && (
+            <Link
+              to="/onboarding"
+              className="md:hidden flex-shrink-0 text-sm font-semibold px-3.5 py-1.5 rounded-full transition-colors bg-gray-950 text-white hover:bg-gray-800 dark:bg-white dark:text-gray-950 dark:hover:bg-white/90"
+            >
+              Sign up
+            </Link>
+          )}
 
           {/* Desktop nav links + theme toggle — pushed to the right
               edge via `ml-auto` now that the search is left-anchored. */}
@@ -291,7 +320,7 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
               type="button"
               onClick={toggleTheme}
               aria-label="Toggle theme"
-              className="p-2 rounded-lg hover:bg-white/10 text-white/70 hover:text-white transition-colors"
+              className="p-2 rounded-lg transition-colors hover:bg-black/5 dark:hover:bg-white/10 text-gray-600 hover:text-gray-900 dark:text-white/70 dark:hover:text-white"
             >
               <ThemeIcons />
             </button>

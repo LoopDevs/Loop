@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Merchant } from '@loop/shared';
 import { Button } from '~/components/ui/Button';
 import { Input } from '~/components/ui/Input';
+import { currencySymbol } from '~/utils/money';
 
 interface AmountSelectionProps {
   merchant: Merchant;
@@ -16,6 +17,11 @@ export function AmountSelection({
   isLoading = false,
 }: AmountSelectionProps): React.JSX.Element {
   const denominations = merchant.denominations;
+  // Currency symbol — £ for GBP, € for EUR, $ for USD / CAD. Shared
+  // helper picks from Intl.NumberFormat so we don't maintain a
+  // table. Falls back to `$` when the merchant's currency is
+  // missing or unknown, matching the legacy behaviour.
+  const symbol = currencySymbol(denominations?.currency ?? 'USD');
   const [customAmount, setCustomAmount] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -50,7 +56,9 @@ export function AmountSelection({
     }
 
     if (amount < BACKEND_MIN || amount > BACKEND_MAX) {
-      setValidationError(`Amount must be between $${BACKEND_MIN} and $${BACKEND_MAX}.`);
+      setValidationError(
+        `Amount must be between ${symbol}${BACKEND_MIN} and ${symbol}${BACKEND_MAX}.`,
+      );
       return;
     }
 
@@ -58,7 +66,7 @@ export function AmountSelection({
       const min = denominations.min ?? BACKEND_MIN;
       const max = denominations.max ?? BACKEND_MAX;
       if (amount < min || amount > max) {
-        setValidationError(`Amount must be between $${min} and $${max}.`);
+        setValidationError(`Amount must be between ${symbol}${min} and ${symbol}${max}.`);
         return;
       }
     }
@@ -84,7 +92,8 @@ export function AmountSelection({
               }}
               className={`py-3 px-4 min-h-[44px] rounded-lg border text-sm font-semibold transition-colors ${selected === d ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'border-gray-200 dark:border-gray-700 hover:border-blue-400'}`}
             >
-              ${d}
+              {symbol}
+              {d}
             </button>
           ))}
         </div>
@@ -95,7 +104,8 @@ export function AmountSelection({
           loading={isLoading}
           disabled={selected === null || isLoading}
         >
-          Buy ${selected ?? '—'} gift card
+          Buy {symbol}
+          {selected ?? '—'} gift card
         </Button>
       </div>
     );
@@ -110,13 +120,20 @@ export function AmountSelection({
       <Input
         type="number"
         label={`Amount (${currency})`}
-        placeholder={min !== undefined && max !== undefined ? `$${min} – $${max}` : 'Enter amount'}
+        // Placeholder carries the range in the merchant's currency
+        // (£, €, $…). The standalone "Min X, max Y" hint below was
+        // redundant with the placeholder and read as clutter on
+        // GBP / EUR merchants — dropped intentionally.
+        placeholder={
+          min !== undefined && max !== undefined
+            ? `${symbol}${min} – ${symbol}${max}`
+            : 'Enter amount'
+        }
         value={customAmount}
         onChange={(v) => {
           setCustomAmount(v);
           setValidationError(null);
         }}
-        hint={min !== undefined && max !== undefined ? `Min $${min}, max $${max}` : undefined}
         error={validationError ?? undefined}
         min={min}
         max={max}

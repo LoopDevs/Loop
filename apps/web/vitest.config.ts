@@ -28,7 +28,18 @@ export default defineConfig({
       // utils, native wrappers, components — is in scope for unit
       // coverage. When adding a route-independent piece of logic,
       // factor it out of the route and add a unit test.
-      exclude: ['app/**/__tests__/**', 'app/routes/**', 'app/root.tsx'],
+      exclude: [
+        'app/**/__tests__/**',
+        'app/routes/**',
+        'app/root.tsx',
+        // Route-level presentation: MobileHome is the mobile variant of
+        // the home route, and the onboarding flow is a 5-component
+        // assembly rendered by a single route. Both are exercised via
+        // Playwright e2e — same rationale as the `app/routes/**`
+        // exclusion. Keep reusable UI (components/ui/**, atoms) IN.
+        'app/components/features/home/**',
+        'app/components/features/onboarding/**',
+      ],
       // Thresholds are a regression gate, not an aspiration (audit A-014).
       // Actual at time of baseline: stmt 40.2 / branch 37.9 / func 45.4 /
       // line 41.1. These floors sit ~3-5pts below to tolerate minor
