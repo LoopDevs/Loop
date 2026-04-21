@@ -12,10 +12,32 @@ src/
 ├── logger.ts           ← Pino logger
 ├── upstream.ts         ← upstreamUrl() helper
 ├── circuit-breaker.ts  ← Shared circuit breaker for upstream calls
-├── discord.ts          ← Webhook senders (order created/fulfilled, health, circuit)
+├── discord.ts          ← Webhook senders (orders, health, circuit, payout-failed, below-floor)
 ├── openapi.ts          ← OpenAPI 3.1 spec (every new handler registers its path + status codes)
-├── auth/handler.ts     ← Auth proxy (request-otp, verify-otp, refresh, logout → upstream CTX)
-├── orders/handler.ts   ← Order proxy (create, list, get → upstream CTX)
+├── auth/handler.ts     ← Auth proxy + Loop-native OTP (ADR 013 + ADR 014 social login)
+├── admin/
+│   ├── handler.ts      ← Cashback-config CRUD (ADR 011)
+│   ├── treasury.ts     ← Admin treasury snapshot (ledger + LOOP liabilities + assets + payout counts, ADR 015)
+│   └── payouts.ts      ← Admin payout list + per-row retry (ADR 015/016)
+├── ctx/                ← CTX operator-pool client (ADR 013)
+├── credits/
+│   ├── payout-asset.ts ← home-currency → LOOP asset code + issuer lookup (ADR 015)
+│   ├── payout-builder.ts ← Pure payout-intent decision (pay vs skip) for markOrderFulfilled (ADR 015)
+│   ├── pending-payouts.ts ← Pending-payout repo (insert / list / state transitions) (ADR 015/016)
+│   └── accrue-interest.ts ← Daily APY accrual primitive on user_credits
+├── orders/
+│   ├── handler.ts      ← Legacy CTX-proxy order creation
+│   ├── loop-handler.ts ← Loop-native order creation with FX-pin (ADR 010 + 015)
+│   ├── repo.ts         ← Order INSERT + cashback-split computation
+│   ├── transitions.ts  ← markOrderPaid / markOrderProcuring / markOrderFulfilled (writes ledger + pending_payouts inside one txn)
+│   └── procurement.ts  ← paid → procuring → fulfilled worker (USDC-default, XLM-floor fallback, ADR 015)
+├── payments/
+│   ├── watcher.ts      ← Horizon payment watcher (matches inbound deposits, accepts USDC/XLM/LOOP assets)
+│   ├── horizon.ts      ← Horizon read client (listAccountPayments, findOutboundPaymentByMemo)
+│   ├── horizon-balances.ts ← Horizon /accounts balance reader with 30s cache
+│   ├── price-feed.ts   ← XLM + USDC stroops-per-cent + convertMinorUnits FX
+│   ├── payout-submit.ts ← @stellar/stellar-sdk sign+submit wrapper with classified error kinds (ADR 016)
+│   └── payout-worker.ts ← Outbound LOOP-asset payout worker with memo-idempotent retry (ADR 016)
 ├── merchants/
 │   ├── sync.ts         ← Background sync from upstream /merchants
 │   └── handler.ts      ← GET /api/merchants endpoints (from in-memory cache)
@@ -23,6 +45,8 @@ src/
 │   ├── data-store.ts   ← Background sync from upstream /locations
 │   ├── algorithm.ts    ← Grid-based clustering (pure function, no I/O)
 │   └── handler.ts      ← GET /api/clusters (protobuf + JSON)
+├── users/handler.ts    ← GET /me + POST /me/home-currency + PUT /me/stellar-address (ADR 015)
+├── db/                 ← Drizzle schema + migrations + pool client (ADR 012)
 └── images/proxy.ts     ← Image resize proxy with LRU cache + SSRF protection
 ```
 
