@@ -13,6 +13,13 @@ export interface UserMeView {
   isAdmin: boolean;
   homeCurrency: 'USD' | 'GBP' | 'EUR';
   stellarAddress: string | null;
+  /**
+   * Off-chain cashback balance in `homeCurrency` minor units (pence /
+   * cents). Returned as a string so the bigint round-trips through JSON
+   * without precision loss. `"0"` when the user hasn't earned any
+   * cashback yet.
+   */
+  homeCurrencyBalanceMinor: string;
 }
 
 /**
