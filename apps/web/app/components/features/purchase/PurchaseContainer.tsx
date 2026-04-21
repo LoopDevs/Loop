@@ -8,6 +8,7 @@ import { requestOtp, verifyOtp } from '~/services/auth';
 import { useAppConfig } from '~/hooks/use-app-config';
 import { useMerchantCashbackRate } from '~/hooks/use-merchants';
 import { AmountSelection } from './AmountSelection';
+import { EarnedCashbackCard } from './EarnedCashbackCard';
 import { LoopPaymentStep } from './LoopPaymentStep';
 import { PaymentStep } from './PaymentStep';
 import { PurchaseComplete } from './PurchaseComplete';
@@ -97,12 +98,25 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
   // Completed states (redeem, complete)
   if (isCurrentMerchant && store.step === 'complete' && store.giftCardCode !== null) {
     return (
-      <PurchaseComplete
-        merchantName={merchant.name}
-        code={store.giftCardCode}
-        pin={store.giftCardPin ?? undefined}
-        barcodeImageUrl={store.barcodeImageUrl ?? undefined}
-      />
+      <div className="flex flex-col gap-3">
+        {/* Cashback-credit confirmation ties the reward back to the
+            specific purchase. Falls through invisibly when the
+            merchant has no active cashback config or the rate is
+            zero — no "$0 cashback" noise. */}
+        {store.amount !== null && (
+          <EarnedCashbackCard
+            merchantId={merchant.id}
+            amount={store.amount}
+            currency={merchant.denominations?.currency ?? 'USD'}
+          />
+        )}
+        <PurchaseComplete
+          merchantName={merchant.name}
+          code={store.giftCardCode}
+          pin={store.giftCardPin ?? undefined}
+          barcodeImageUrl={store.barcodeImageUrl ?? undefined}
+        />
+      </div>
     );
   }
 
