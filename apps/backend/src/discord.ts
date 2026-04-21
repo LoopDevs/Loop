@@ -153,6 +153,46 @@ export function notifyHealthChange(status: 'healthy' | 'degraded', details: stri
   });
 }
 
+/**
+ * Notify: an outbound Stellar payout has transitioned to `failed`
+ * (ADR 015/016). Pages the monitoring channel so ops sees it
+ * real-time rather than discovering failed rows on the next
+ * admin-treasury refresh. The `kind` (from PayoutSubmitError) tells
+ * ops whether it's an ops-actionable issue (op_no_trust,
+ * op_underfunded) or a retry-exhausted transient — the former
+ * often needs the user to add a trustline, the latter is a cue to
+ * check Horizon / operator reserves.
+ */
+export function notifyPayoutFailed(args: {
+  payoutId: string;
+  userId: string;
+  orderId: string;
+  assetCode: string;
+  amount: string;
+  kind: string;
+  reason: string;
+  attempts: number;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🔴 Stellar Payout Failed',
+    color: RED,
+    fields: [
+      { name: 'Kind', value: `\`${escapeMarkdown(args.kind)}\``, inline: true },
+      { name: 'Asset', value: escapeMarkdown(args.assetCode), inline: true },
+      { name: 'Amount', value: escapeMarkdown(args.amount), inline: true },
+      { name: 'Attempts', value: String(args.attempts), inline: true },
+      { name: 'User', value: `\`${escapeMarkdown(args.userId)}\``, inline: true },
+      { name: 'Order', value: `\`${escapeMarkdown(args.orderId)}\``, inline: true },
+      { name: 'Payout ID', value: `\`${escapeMarkdown(args.payoutId)}\``, inline: false },
+      {
+        name: 'Reason',
+        value: truncate(escapeMarkdown(args.reason), FIELD_VALUE_MAX),
+        inline: false,
+      },
+    ],
+  });
+}
+
 /** Notify: circuit breaker state change */
 export function notifyCircuitBreaker(
   state: 'open' | 'closed',
