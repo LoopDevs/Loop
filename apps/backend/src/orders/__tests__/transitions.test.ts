@@ -244,6 +244,40 @@ describe('markOrderFailed', () => {
   });
 });
 
+describe('markOrderProcuring — procured_at pin', () => {
+  it('sets procured_at alongside state=procuring', async () => {
+    state.returningRows = [{ id: 'o-1', state: 'procuring' }];
+    const { markOrderProcuring } = await import('../transitions.js');
+    await markOrderProcuring('o-1', { ctxOperatorId: 'pool' });
+    expect(state.updateSet).toMatchObject({
+      state: 'procuring',
+      ctxOperatorId: 'pool',
+      procuredAt: expect.any(Date),
+    });
+  });
+});
+
+describe('sweepStuckProcurement', () => {
+  it('returns the number of rows swept', async () => {
+    state.returningRows = [{ id: 'a' }, { id: 'b' }];
+    const { sweepStuckProcurement } = await import('../transitions.js');
+    const cutoff = new Date(Date.now() - 15 * 60 * 1000);
+    const n = await sweepStuckProcurement(cutoff);
+    expect(n).toBe(2);
+    expect(state.updateSet).toMatchObject({
+      state: 'failed',
+      failureReason: 'procurement_timeout',
+    });
+  });
+
+  it('returns 0 when nothing is stuck', async () => {
+    state.returningRows = [];
+    const { sweepStuckProcurement } = await import('../transitions.js');
+    const n = await sweepStuckProcurement(new Date());
+    expect(n).toBe(0);
+  });
+});
+
 describe('sweepExpiredOrders', () => {
   it('returns the count of rows transitioned', async () => {
     state.returningRows = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
