@@ -5,6 +5,7 @@ import type { Route } from './+types/admin.payouts';
 import { useAuth } from '~/hooks/use-auth';
 import { listPayouts, retryPayout, type AdminPayoutView, type PayoutState } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
+import { AdminNav } from '~/components/features/admin/AdminNav';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -123,6 +124,7 @@ export default function AdminPayoutsRoute(): React.JSX.Element {
 
   return (
     <main className="max-w-6xl mx-auto px-6 py-12 space-y-6">
+      <AdminNav />
       <header>
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Admin · Payouts</h1>
         <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
