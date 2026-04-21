@@ -98,6 +98,29 @@ vi.mock('../../db/schema.js', () => ({
     id: 'id',
   },
   HOME_CURRENCIES: ['USD', 'GBP', 'EUR'] as const,
+  PAYOUT_STATES: ['pending', 'submitted', 'confirmed', 'failed'] as const,
+}));
+
+// Pending-payouts repo mock — the user-scoped handler calls into
+// `listPayoutsForUser`, so we stub it directly rather than stretch
+// the drizzle select chain to cover another shape. Tests drive
+// behaviour via `payoutState.rows` / `payoutState.calls`.
+const { payoutState } = vi.hoisted(() => ({
+  payoutState: {
+    rows: [] as unknown[],
+    calls: [] as Array<{
+      userId: string;
+      state?: string;
+      before?: Date;
+      limit?: number;
+    }>,
+  },
+}));
+vi.mock('../../credits/pending-payouts.js', () => ({
+  listPayoutsForUser: vi.fn(async (userId: string, opts: Record<string, unknown> = {}) => {
+    payoutState.calls.push({ userId, ...opts });
+    return payoutState.rows;
+  }),
 }));
 
 // The handler decodes CTX bearers via auth/jwt decodeJwtPayload —
@@ -114,6 +137,7 @@ vi.mock('../../auth/jwt.js', () => ({
 import {
   getCashbackHistoryHandler,
   getMeHandler,
+  getUserPendingPayoutsHandler,
   setHomeCurrencyHandler,
   setStellarAddressHandler,
 } from '../handler.js';
@@ -149,6 +173,8 @@ beforeEach(() => {
   dbState.updatedUser = null;
   dbState.historyRows = [];
   dbState.homeBalanceMinor = null;
+  payoutState.rows = [];
+  payoutState.calls = [];
 });
 
 describe('getMeHandler', () => {
@@ -531,6 +557,108 @@ describe('getCashbackHistoryHandler', () => {
     jwtState.claims = { sub: 'ctx-err', email: 'e@x.com' };
     userState.upsertThrow = new Error('db down');
     const res = await getCashbackHistoryHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('getUserPendingPayoutsHandler', () => {
+  const LOOP_AUTH: LoopAuthContext = {
+    kind: 'loop',
+    userId: 'user-uuid',
+    email: 'a@b.com',
+    bearerToken: 'loop-jwt',
+  };
+  const baseUser = {
+    id: 'user-uuid',
+    email: 'a@b.com',
+    isAdmin: false,
+    homeCurrency: 'GBP',
+    stellarAddress: null,
+    ctxUserId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  const sampleRow = {
+    id: 'pay-1',
+    userId: 'user-uuid',
+    orderId: 'ord-1',
+    assetCode: 'GBPLOOP',
+    assetIssuer: 'GISSUER',
+    amountStroops: 12345n,
+    state: 'submitted',
+    txHash: null,
+    attempts: 1,
+    createdAt: new Date('2026-04-20T10:00:00Z'),
+    submittedAt: new Date('2026-04-20T10:01:00Z'),
+    confirmedAt: null,
+    failedAt: null,
+  };
+
+  it('401 when no auth is on the context', async () => {
+    const res = await getUserPendingPayoutsHandler(makeCtx(undefined));
+    expect(res.status).toBe(401);
+  });
+
+  it('happy path — forwards userId to the repo and shapes rows to JSON', async () => {
+    userState.byId = baseUser;
+    payoutState.rows = [sampleRow];
+    const res = await getUserPendingPayoutsHandler(makeCtx(LOOP_AUTH));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { payouts: Array<Record<string, unknown>> };
+    expect(body.payouts).toHaveLength(1);
+    expect(body.payouts[0]).toEqual({
+      id: 'pay-1',
+      orderId: 'ord-1',
+      assetCode: 'GBPLOOP',
+      assetIssuer: 'GISSUER',
+      amountStroops: '12345',
+      state: 'submitted',
+      txHash: null,
+      attempts: 1,
+      createdAt: '2026-04-20T10:00:00.000Z',
+      submittedAt: '2026-04-20T10:01:00.000Z',
+      confirmedAt: null,
+      failedAt: null,
+    });
+    // userId is scoped to the authenticated caller — no cross-user leakage.
+    expect(payoutState.calls[0]?.userId).toBe('user-uuid');
+  });
+
+  it('rejects an unknown ?state with 400', async () => {
+    userState.byId = baseUser;
+    const res = await getUserPendingPayoutsHandler(
+      makeCtx(LOOP_AUTH, undefined, { state: 'bogus' }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('forwards a valid ?state filter to the repo', async () => {
+    userState.byId = baseUser;
+    await getUserPendingPayoutsHandler(makeCtx(LOOP_AUTH, undefined, { state: 'failed' }));
+    expect(payoutState.calls[0]?.state).toBe('failed');
+  });
+
+  it('rejects an invalid ?before timestamp with 400', async () => {
+    userState.byId = baseUser;
+    const res = await getUserPendingPayoutsHandler(
+      makeCtx(LOOP_AUTH, undefined, { before: 'not-a-date' }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('clamps ?limit — malformed values fall back, huge values cap at 100', async () => {
+    userState.byId = baseUser;
+    await getUserPendingPayoutsHandler(makeCtx(LOOP_AUTH, undefined, { limit: 'nope' }));
+    expect(payoutState.calls[0]?.limit).toBe(20);
+    payoutState.calls = [];
+    await getUserPendingPayoutsHandler(makeCtx(LOOP_AUTH, undefined, { limit: '9999' }));
+    expect(payoutState.calls[0]?.limit).toBe(100);
+  });
+
+  it('500 when CTX upsert throws', async () => {
+    jwtState.claims = { sub: 'ctx-err', email: 'e@x.com' };
+    userState.upsertThrow = new Error('db down');
+    const res = await getUserPendingPayoutsHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
     expect(res.status).toBe(500);
   });
 });

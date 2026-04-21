@@ -88,6 +88,33 @@ export async function listPayoutsForAdmin(opts: {
 }
 
 /**
+ * User-scoped variant — returns only rows owned by `userId`. Same
+ * cursor pagination as the admin list (newest createdAt first). Used
+ * by `GET /api/users/me/pending-payouts` so each user can see their
+ * own queued / submitted / confirmed / failed on-chain payouts, not
+ * just the off-chain ledger entries (ADR 015).
+ */
+export async function listPayoutsForUser(
+  userId: string,
+  opts: {
+    state?: string;
+    before?: Date;
+    limit?: number;
+  } = {},
+): Promise<PendingPayout[]> {
+  const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100);
+  const conditions = [eq(pendingPayouts.userId, userId)];
+  if (opts.state !== undefined) conditions.push(eq(pendingPayouts.state, opts.state));
+  if (opts.before !== undefined) conditions.push(sql`${pendingPayouts.createdAt} < ${opts.before}`);
+  return db
+    .select()
+    .from(pendingPayouts)
+    .where(and(...conditions))
+    .orderBy(sql`${pendingPayouts.createdAt} DESC`)
+    .limit(limit);
+}
+
+/**
  * State-guarded transition: `pending → submitted`. Bumps `attempts`
  * and stamps `submitted_at`. Returns null when another worker beat us
  * to the row (idempotent).

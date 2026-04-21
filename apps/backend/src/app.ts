@@ -46,6 +46,7 @@ import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payout
 import {
   getCashbackHistoryHandler,
   getMeHandler,
+  getUserPendingPayoutsHandler,
   setHomeCurrencyHandler,
   setStellarAddressHandler,
 } from './users/handler.js';
@@ -612,6 +613,11 @@ app.put('/api/users/me/stellar-address', rateLimit(10, 60_000), setStellarAddres
 // Account page loads it alongside /me on mount, and TanStack Query invalidates
 // it after any ledger-touching admin action (support edits, payouts).
 app.get('/api/users/me/cashback-history', rateLimit(60, 60_000), getCashbackHistoryHandler);
+// GET /api/users/me/pending-payouts — caller-scoped on-chain payout
+// rows (ADR 015 / 016). 60/min matches the history endpoint; clients
+// typically poll this from /settings/cashback while a payout is in
+// flight. State + before + limit query shape mirrors the admin endpoint.
+app.get('/api/users/me/pending-payouts', rateLimit(60, 60_000), getUserPendingPayoutsHandler);
 
 // ─── Admin (authenticated + admin-flagged) ──────────────────────────────────
 //
