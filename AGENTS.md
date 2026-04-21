@@ -154,6 +154,11 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # CTX_CLIENT_ID_IOS=loopios
 # CTX_CLIENT_ID_ANDROID=loopandroid
 
+# Loop-native auth (ADR 013). Absent → legacy CTX-proxy path only.
+# Min 32 chars; PREVIOUS is set during rotation windows.
+# LOOP_JWT_SIGNING_KEY=<at-least-32-char-random-secret>
+# LOOP_JWT_SIGNING_KEY_PREVIOUS=<prior-secret-during-rotation>
+
 # Dev mode: show disabled merchants
 # INCLUDE_DISABLED_MERCHANTS=true
 
