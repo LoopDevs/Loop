@@ -113,11 +113,29 @@ export const EnvSchema = z.object({
   // future refinement once the user-profile sync job lands.
   ADMIN_CTX_USER_IDS: z.string().default(''),
 
+  // Loop-signed JWT secret (ADR 013). Used to sign and verify access
+  // + refresh tokens minted by Loop's own auth path. Required in
+  // production; absent in development / test the backend skips
+  // Loop-native auth (CTX proxy remains in place).
+  //
+  // HS256 is a symmetric secret — minimum 32 bytes of entropy.
+  // Rotation: set LOOP_JWT_SIGNING_KEY to the new value and
+  // LOOP_JWT_SIGNING_KEY_PREVIOUS to the old one for the access-token
+  // TTL window; the verifier accepts either, the signer always uses
+  // the current. Drop PREVIOUS after the TTL elapses.
+  LOOP_JWT_SIGNING_KEY: z
+    .string()
+    .min(32, { message: 'LOOP_JWT_SIGNING_KEY must be at least 32 characters' })
+    .optional(),
+  LOOP_JWT_SIGNING_KEY_PREVIOUS: z
+    .string()
+    .min(32, { message: 'LOOP_JWT_SIGNING_KEY_PREVIOUS must be at least 32 characters' })
+    .optional(),
+
   // Loop-native auth feature flag (ADR 013). When true, /request-otp
-  // and /verify-otp take the Loop-native path (Loop sends the email,
-  // Loop mints the JWTs). When false (the default during rollout),
-  // the legacy CTX-proxy path is used. Flipped per-environment once
-  // email delivery is verified.
+  // (and, as they ship, /verify-otp + /refresh) take the Loop-native
+  // path: Loop sends the OTP email and mints its own JWTs. Default
+  // false → the legacy CTX-proxy auth path stays in place.
   LOOP_AUTH_NATIVE_ENABLED: envBoolean.default(false),
 });
 
