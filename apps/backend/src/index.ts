@@ -6,6 +6,8 @@ import { app, stopCleanupInterval } from './app.js';
 import { startLocationRefresh, stopLocationRefresh } from './clustering/data-store.js';
 import { startMerchantRefresh, stopMerchantRefresh } from './merchants/sync.js';
 import { runMigrations, closeDb } from './db/client.js';
+import { startPaymentWatcher, stopPaymentWatcher } from './payments/watcher.js';
+import { startProcurementWorker, stopProcurementWorker } from './orders/procurement.js';
 
 // Apply any pending DB migrations before accepting traffic (ADR 012).
 // Awaited so `serve()` below only runs after the schema is up-to-date —
@@ -24,6 +26,30 @@ startMerchantRefresh();
 const locationStartTimer = setTimeout(() => {
   startLocationRefresh();
 }, 3000);
+
+// Loop-native order workers (ADR 010). Gated behind LOOP_WORKERS_ENABLED
+// so a fresh checkout doesn't start hammering Horizon / CTX before an
+// operator has configured the Stellar deposit address + operator pool.
+// Missing LOOP_STELLAR_DEPOSIT_ADDRESS with the flag on is a config
+// error — log loudly but don't crash, so operators can still hit /health.
+if (env.LOOP_WORKERS_ENABLED) {
+  if (env.LOOP_STELLAR_DEPOSIT_ADDRESS === undefined) {
+    logger.error(
+      'LOOP_WORKERS_ENABLED=true but LOOP_STELLAR_DEPOSIT_ADDRESS is unset — payment watcher will not start',
+    );
+  } else {
+    startPaymentWatcher({
+      account: env.LOOP_STELLAR_DEPOSIT_ADDRESS,
+      ...(env.LOOP_STELLAR_USDC_ISSUER !== undefined
+        ? { usdcIssuer: env.LOOP_STELLAR_USDC_ISSUER }
+        : {}),
+      intervalMs: env.LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS * 1000,
+    });
+  }
+  startProcurementWorker({
+    intervalMs: env.LOOP_PROCUREMENT_INTERVAL_SECONDS * 1000,
+  });
+}
 
 logger.info({ port: env.PORT }, 'Loop backend starting');
 
@@ -50,6 +76,8 @@ function shutdown(signal: string): void {
   stopCleanupInterval();
   stopMerchantRefresh();
   stopLocationRefresh();
+  stopPaymentWatcher();
+  stopProcurementWorker();
 
   server.close(() => {
     void Promise.allSettled([sentryFlush(5000), closeDb()]).finally(() => {

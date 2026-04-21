@@ -148,6 +148,29 @@ export const EnvSchema = z.object({
     .string()
     .regex(/^G[A-Z2-7]{55}$/, { message: 'must be a valid Stellar public key (G...)' })
     .optional(),
+
+  // USDC issuer account for the watcher's asset-match guard. Centre
+  // on mainnet: GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN.
+  // Defaults to undefined → watcher accepts any USDC issuer (MVP
+  // leniency; tighten once operators have verified the deployment).
+  LOOP_STELLAR_USDC_ISSUER: z
+    .string()
+    .regex(/^G[A-Z2-7]{55}$/, { message: 'must be a valid Stellar public key (G...)' })
+    .optional(),
+
+  // Feature flag for the Loop-native order workers (ADR 010). When
+  // true at boot, the backend starts the payment watcher and
+  // procurement worker intervals. Default false — workers are opt-in
+  // per deployment so a fresh clone doesn't start hitting Horizon /
+  // CTX pre-configuration.
+  LOOP_WORKERS_ENABLED: envBoolean.default(false),
+
+  // Worker tick intervals (seconds). Defaults tuned for a moderate
+  // order volume: watcher every 10s to keep deposit latency low;
+  // procurement every 5s since a paid order is user-blocking until
+  // the gift card arrives.
+  LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS: z.coerce.number().int().positive().default(10),
+  LOOP_PROCUREMENT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(5),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
