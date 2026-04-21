@@ -6,16 +6,24 @@ vi.mock('../../db/schema.js', () => ({
 }));
 
 const listMock = vi.fn();
+const resetMock = vi.fn();
 vi.mock('../../credits/pending-payouts.js', () => ({
   listPayoutsForAdmin: (opts: unknown) => listMock(opts),
+  resetPayoutToPending: (id: string) => resetMock(id),
+}));
+vi.mock('../../logger.js', () => ({
+  logger: {
+    child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+  },
 }));
 
-import { adminListPayoutsHandler } from '../payouts.js';
+import { adminListPayoutsHandler, adminRetryPayoutHandler } from '../payouts.js';
 
-function makeCtx(query: Record<string, string> = {}): Context {
+function makeCtx(query: Record<string, string> = {}, params: Record<string, string> = {}): Context {
   return {
     req: {
       query: (k: string) => query[k],
+      param: (k: string) => params[k],
     },
     json: (body: unknown, status?: number) =>
       new Response(JSON.stringify(body), {
@@ -47,6 +55,7 @@ const baseRow = {
 beforeEach(() => {
   listMock.mockReset();
   listMock.mockResolvedValue([baseRow]);
+  resetMock.mockReset();
 });
 
 describe('adminListPayoutsHandler', () => {
@@ -115,5 +124,35 @@ describe('adminListPayoutsHandler', () => {
     expect(body.payouts[0]!['confirmedAt']).toBe('2026-04-21T13:05:00.000Z');
     expect(body.payouts[0]!['failedAt']).toBeNull();
     expect(body.payouts[0]!['txHash']).toBe('abc');
+  });
+});
+
+describe('adminRetryPayoutHandler', () => {
+  it('400 when id param is missing', async () => {
+    const res = await adminRetryPayoutHandler(makeCtx({}, {}));
+    expect(res.status).toBe(400);
+    expect(resetMock).not.toHaveBeenCalled();
+  });
+
+  it('resets the payout to pending and returns the updated view', async () => {
+    resetMock.mockResolvedValue({ ...baseRow, state: 'pending', lastError: null });
+    const res = await adminRetryPayoutHandler(makeCtx({}, { id: 'p-1' }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['id']).toBe('p-1');
+    expect(body['state']).toBe('pending');
+    expect(resetMock).toHaveBeenCalledWith('p-1');
+  });
+
+  it('404 when the row is not in failed state (or doesnt exist)', async () => {
+    resetMock.mockResolvedValue(null);
+    const res = await adminRetryPayoutHandler(makeCtx({}, { id: 'p-1' }));
+    expect(res.status).toBe(404);
+  });
+
+  it('500 when the repo throws', async () => {
+    resetMock.mockRejectedValue(new Error('db exploded'));
+    const res = await adminRetryPayoutHandler(makeCtx({}, { id: 'p-1' }));
+    expect(res.status).toBe(500);
   });
 });
