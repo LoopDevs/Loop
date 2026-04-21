@@ -5,6 +5,8 @@ import {
   fetchMerchant,
   fetchMerchantBySlug,
   fetchAllMerchants,
+  fetchMerchantCashbackRate,
+  type MerchantCashbackRateResponse,
 } from '~/services/merchants';
 import { shouldRetry } from './query-retry';
 
@@ -138,4 +140,29 @@ export function useMerchant(
     isError: query.isError,
     error: query.error,
   };
+}
+
+/**
+ * Public cashback-rate preview for the gift-card detail page
+ * (ADR 011 / 015). Returns `null` on:
+ *  - missing id (query disabled),
+ *  - the server replying with `userCashbackPct: null` (no active
+ *    config for the merchant),
+ *  - a network / server error — the badge is purely additive, so
+ *    failing quietly is better than blocking the detail render.
+ *
+ * The response is cached 5 min on both the server (HTTP) and the
+ * client (`staleTime`) since admin cashback edits are rare.
+ */
+export function useMerchantCashbackRate(id: string): { userCashbackPct: string | null } {
+  const normalized = id.trim();
+  const enabled = normalized.length > 0;
+  const query = useQuery<MerchantCashbackRateResponse, Error>({
+    queryKey: ['merchant-cashback-rate', normalized],
+    queryFn: () => fetchMerchantCashbackRate(normalized),
+    staleTime: 5 * 60 * 1000,
+    enabled,
+    retry: shouldRetry,
+  });
+  return { userCashbackPct: query.data?.userCashbackPct ?? null };
 }

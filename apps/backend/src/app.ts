@@ -19,6 +19,7 @@ import {
   merchantListHandler,
   merchantAllHandler,
   merchantBySlugHandler,
+  merchantCashbackRateHandler,
   merchantDetailHandler,
 } from './merchants/handler.js';
 import {
@@ -469,6 +470,17 @@ app.get('/api/merchants', merchantListHandler);
 // /all must come before /:id so that 'all' is not interpreted as an id.
 app.get('/api/merchants/all', merchantAllHandler);
 app.get('/api/merchants/by-slug/:slug', merchantBySlugHandler); // must be before /:id
+// GET /api/merchants/:merchantId/cashback-rate — public cashback-rate
+// preview for rendering "Earn X% cashback" on the gift-card detail page
+// (ADR 011 / 015). Registered BEFORE the requireAuth gate on /:id so
+// the checkout page can query it without a bearer. Own rate limit
+// since the gift-card detail page fires it alongside the merchant
+// detail fetch; 120/min per IP matches the other merchant reads.
+app.get(
+  '/api/merchants/:merchantId/cashback-rate',
+  rateLimit(120, 60_000),
+  merchantCashbackRateHandler,
+);
 // Authenticated — the handler calls CTX /merchants/:id with the user's
 // bearer + X-Client-Id to enrich the cached merchant with long-form
 // content (description / longDescription / terms / instructions).

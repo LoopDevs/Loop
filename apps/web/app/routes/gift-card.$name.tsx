@@ -1,6 +1,6 @@
 import { useParams, Link, useNavigate } from 'react-router';
 import type { Route } from './+types/gift-card.$name';
-import { useMerchantBySlug, useMerchant } from '~/hooks/use-merchants';
+import { useMerchantBySlug, useMerchant, useMerchantCashbackRate } from '~/hooks/use-merchants';
 import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { Navbar } from '~/components/features/Navbar';
@@ -57,6 +57,13 @@ export default function GiftCardRoute(): React.JSX.Element {
   });
   const merchant = enrichedMerchant ?? cachedMerchant;
 
+  // Cashback-rate preview (ADR 011 / 015). Hook must sit at the top
+  // of the component so Rules-of-Hooks isn't broken by the early
+  // returns below; pass the resolved id through, or an empty string
+  // when the merchant hasn't loaded yet — the hook's internal
+  // `enabled` guard skips the fetch in that case.
+  const { userCashbackPct } = useMerchantCashbackRate(merchant?.id ?? '');
+
   const handleBack = (): void => {
     if (window.history.length > 1) {
       void navigate(-1);
@@ -90,6 +97,16 @@ export default function GiftCardRoute(): React.JSX.Element {
   const cardUrl = merchant.cardImageUrl ? getImageProxyUrl(merchant.cardImageUrl, 640) : undefined;
   const logoUrl = merchant.logoUrl ? getImageProxyUrl(merchant.logoUrl, 160) : undefined;
   const savings = merchant.savingsPercentage;
+  // Numeric(5,2) string from /cashback-rate (e.g. "2.50"). Parse for
+  // the display formatter only — never coerce back to Number for
+  // arithmetic; the contract is bigint-string-shape. Null when the
+  // merchant has no active cashback config; the tile simply won't
+  // render in that case.
+  const cashbackPctNum = userCashbackPct !== null ? Number(userCashbackPct) : null;
+  const cashbackPctShown =
+    cashbackPctNum !== null && Number.isFinite(cashbackPctNum) && cashbackPctNum > 0
+      ? cashbackPctNum
+      : null;
 
   return (
     <div>
@@ -241,11 +258,20 @@ export default function GiftCardRoute(): React.JSX.Element {
                 </div>
               </div>
 
-              {/* Features — third tile (savings %) drops out when the
-                  merchant has no savings, collapsing the grid to 2
-                  columns so the remaining tiles stay centred. */}
+              {/* Features — extra tiles (savings %, cashback %) render
+                  only when the merchant has values for them. The grid
+                  always stays centred; with 2–4 tiles that works out
+                  of the box with `grid-cols-<n>`. Cashback tile is an
+                  ADR 011 / 015 surface — when an admin configures a
+                  merchant cashback-rate, users see it here before
+                  committing to a purchase. */}
               <div
-                className={`grid gap-4 text-center px-4 ${savings !== undefined && savings > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}
+                className={`grid gap-4 text-center px-4 ${
+                  ['grid-cols-2', 'grid-cols-3', 'grid-cols-4'][
+                    (savings !== undefined && savings > 0 ? 1 : 0) +
+                      (cashbackPctShown !== null ? 1 : 0)
+                  ]
+                }`}
               >
                 <div className="flex flex-col items-center">
                   <svg
@@ -298,6 +324,26 @@ export default function GiftCardRoute(): React.JSX.Element {
                     </svg>
                     <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
                       {savings.toFixed(1)}% Savings
+                    </span>
+                  </div>
+                )}
+                {cashbackPctShown !== null && (
+                  <div className="flex flex-col items-center">
+                    <svg
+                      className="w-6 h-6 text-green-600 dark:text-green-500 mb-2"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      strokeWidth={2}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M10 21l2-9 9-2-11-10v21z"
+                      />
+                    </svg>
+                    <span className="text-xs font-medium text-green-700 dark:text-green-400">
+                      {cashbackPctShown.toFixed(2).replace(/\.0+$/, '')}% Cashback
                     </span>
                   </div>
                 )}
