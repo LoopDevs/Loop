@@ -118,6 +118,12 @@ function getActiveTabPath(pathname: string): string {
 export function NativeTabBar(): React.JSX.Element | null {
   const location = useLocation();
 
+  // Hide on the onboarding flow only — it renders its own footer
+  // CTA at `bottom-0` and the tab bar would stack over it. The
+  // `/auth` account page keeps the tab bar so authed users can
+  // navigate away without the chrome disappearing on them.
+  if (location.pathname === '/onboarding') return null;
+
   const activeTabPath = getActiveTabPath(location.pathname);
 
   return (

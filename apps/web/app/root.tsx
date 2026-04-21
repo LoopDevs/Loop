@@ -1,4 +1,4 @@
-import { useEffect, lazy, Suspense } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import {
   isRouteErrorResponse,
   Links,
@@ -22,7 +22,7 @@ import { setKeyboardAccessoryBarVisible } from '~/native/keyboard';
 import { OfflineBanner } from '~/components/ui/OfflineBanner';
 import { NativeBackButton } from '~/components/features/NativeBackButton';
 import { ToastContainer } from '~/components/ui/ToastContainer';
-import { useAuthStore, wasAuthedLastSession } from '~/stores/auth.store';
+import { useAuthStore } from '~/stores/auth.store';
 import { useUiStore } from '~/stores/ui.store';
 import { buildSecurityHeaders } from '~/utils/security-headers';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -30,7 +30,9 @@ import { NativeTabBar } from '~/components/features/NativeTabBar';
 import { fetchAllMerchants } from '~/services/merchants';
 import './app.css';
 
-const AuthRoute = lazy(() => import('~/routes/auth'));
+const Onboarding = lazy(() =>
+  import('~/components/features/onboarding/Onboarding').then((m) => ({ default: m.Onboarding })),
+);
 
 // Initialize Sentry on client side
 if (typeof window !== 'undefined' && import.meta.env.VITE_SENTRY_DSN) {
@@ -287,24 +289,34 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
   }, []);
 
   useEffect(() => {
-    if (isNative) {
-      document.documentElement.classList.add('native');
-      void setStatusBarOverlay();
-      // Match status bar to current theme
-      const isDark = document.documentElement.classList.contains('dark');
-      void setStatusBarStyle(isDark ? 'dark' : 'light');
-      registerBackButton();
+    if (!isNative) return;
+    document.documentElement.classList.add('native');
+    void setStatusBarOverlay();
+    // Match status bar to current theme
+    const isDark = document.documentElement.classList.contains('dark');
+    void setStatusBarStyle(isDark ? 'dark' : 'light');
 
-      // iOS: enable keyboard accessory bar (Done/Previous/Next). Wrapper
-      // lives in app/native/ so the @capacitor/keyboard import does not
-      // sit in root.tsx (audit A-005 — Capacitor boundary compliance).
-      void setKeyboardAccessoryBarVisible(true);
+    // Android back button — returns a disposer we MUST call on
+    // unmount. Without it, every NativeShell re-mount (sign-out /
+    // sign-in, onboarding ↔ home) stacks another listener and a
+    // single back gesture fires all of them, popping multiple
+    // history entries at once (i.e. /gift-card → /orders/:id
+    // instead of /gift-card → /).
+    const cleanupBackButton = registerBackButton();
 
-      // Android: set up notification channels
-      if (getPlatform() === 'android') {
-        void setupNotificationChannels();
-      }
+    // iOS: enable keyboard accessory bar (Done/Previous/Next). Wrapper
+    // lives in app/native/ so the @capacitor/keyboard import does not
+    // sit in root.tsx (audit A-005 — Capacitor boundary compliance).
+    void setKeyboardAccessoryBarVisible(true);
+
+    // Android: set up notification channels
+    if (getPlatform() === 'android') {
+      void setupNotificationChannels();
     }
+
+    return () => {
+      cleanupBackButton();
+    };
   }, [isNative]);
 
   // Register biometric app lock guard on native
@@ -384,19 +396,34 @@ export default function App(): React.JSX.Element {
   const { isRestoring } = useSessionRestore();
   const { isNative } = useNativePlatform();
   const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
+  // Pins the onboarding UI once we enter it so a mid-flow
+  // `setSession` (fired by the OTP-verify step) doesn't flip the
+  // outer gate and yank the user past the welcome-in payoff. Unpins
+  // only when the user taps "Open Loop" (`onComplete`).
+  const [onboardingInFlight, setOnboardingInFlight] = useState(false);
 
-  // On native: gate the entire app behind auth — but render
-  // optimistically. If the user had a session last launch
-  // (`wasAuthedLastSession`), skip the splash and go straight to home.
-  // The background `useSessionRestore` keeps refreshing the access
-  // token; queries that need auth coalesce on that refresh so they
-  // resolve as soon as it completes. If the refresh definitively fails,
-  // `clearSession()` fires — the hint clears, `isAuthenticated` stays
-  // false, and this branch falls through to AuthRoute on re-render.
+  // Any native user without a session lands in onboarding. Entering is
+  // the signal — the pin then keeps the flow mounted until explicit
+  // completion. If the user signs out later, isAuthenticated flips,
+  // this effect fires, and onboarding re-enters.
+  useEffect(() => {
+    if (isNative && !isAuthenticated && !isRestoring && !onboardingInFlight) {
+      setOnboardingInFlight(true);
+    }
+  }, [isNative, isAuthenticated, isRestoring, onboardingInFlight]);
+
+  // On native: strict auth gate. Previous behaviour was optimistic
+  // — if the user had a prior-session hint, we'd render home while
+  // the background refresh raced to validate the token. A user
+  // with an expired refresh token could browse unauthenticated for
+  // the duration of the refresh, then get kicked to onboarding
+  // mid-task. Now: splash while restoring, onboarding immediately
+  // if the refresh determines unauth. Trade-off is a ~0.5-1s
+  // splash on cold start (the refresh is kicked off at module-
+  // load so the wall-clock is short), but no browse-before-kick
+  // window.
   if (isNative) {
-    const hadPriorSession = wasAuthedLastSession();
-
-    if (isRestoring && !hadPriorSession) {
+    if (isRestoring) {
       return (
         <QueryClientProvider client={queryClient}>
           <NativeShell>
@@ -406,14 +433,17 @@ export default function App(): React.JSX.Element {
       );
     }
 
-    if (!isAuthenticated && !hadPriorSession) {
+    // Render onboarding whenever we're unauthenticated OR we're
+    // still pinned mid-flow. `onboardingInFlight` stays true across
+    // the OTP-success render so the user sees the welcome-in payoff
+    // before the shell takes over — without it, `isAuthenticated`
+    // would flip true and yank them to home mid-screen.
+    if (!isAuthenticated || onboardingInFlight) {
       return (
         <QueryClientProvider client={queryClient}>
-          <NativeShell>
-            <Suspense fallback={<NativeSplash />}>
-              <AuthRoute />
-            </Suspense>
-          </NativeShell>
+          <Suspense fallback={<NativeSplash />}>
+            <Onboarding onComplete={() => setOnboardingInFlight(false)} />
+          </Suspense>
         </QueryClientProvider>
       );
     }

@@ -90,9 +90,12 @@ describe('AmountSelection — free amount (min-max)', () => {
     return screen.getByRole('spinbutton') as HTMLInputElement;
   }
 
-  it('renders a numeric input with the min/max hint', () => {
+  it('renders a numeric input with the min/max shown as a placeholder range', () => {
     render(<AmountSelection merchant={minMaxMerchant} onConfirm={vi.fn()} />);
-    expect(screen.getByText('Min $5, max $500')).toBeDefined();
+    // The standalone "Min X, max Y" hint was removed as redundant
+    // with the placeholder. The input itself still carries the
+    // range as a currency-prefixed placeholder.
+    expect(getInput().placeholder).toBe('$5 – $500');
     expect(getInput().type).toBe('number');
   });
 

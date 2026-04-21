@@ -63,7 +63,6 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
         code={store.giftCardCode}
         pin={store.giftCardPin ?? undefined}
         barcodeImageUrl={store.barcodeImageUrl ?? undefined}
-        onDone={store.reset}
       />
     );
   }
