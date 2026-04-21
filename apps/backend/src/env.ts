@@ -112,6 +112,13 @@ export const EnvSchema = z.object({
   // endpoint on every admin request. Emails as an allowlist is a
   // future refinement once the user-profile sync job lands.
   ADMIN_CTX_USER_IDS: z.string().default(''),
+
+  // Loop-native auth feature flag (ADR 013). When true, /request-otp
+  // and /verify-otp take the Loop-native path (Loop sends the email,
+  // Loop mints the JWTs). When false (the default during rollout),
+  // the legacy CTX-proxy path is used. Flipped per-environment once
+  // email delivery is verified.
+  LOOP_AUTH_NATIVE_ENABLED: envBoolean.default(false),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
