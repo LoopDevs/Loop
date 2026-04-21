@@ -313,10 +313,31 @@ export const orders = pgTable(
       .references(() => users.id, { onDelete: 'restrict' }),
     merchantId: text('merchant_id').notNull(),
 
-    // Face value the user sees on the gift card. Stored in minor
-    // units (pence, cents) as bigint to dodge any float drift.
+    // Face value printed on the gift card, in the **catalog**
+    // currency (ADR 015). This is what CTX procures, what the
+    // cashback split math keys off, and what the user will eventually
+    // redeem — independent of the currency the user was charged in.
+    //
+    // For launch, most orders have `currency === charge_currency`
+    // (the user's home currency); the pair diverges when a user
+    // buys a gift card from a non-home region (e.g. GBP user buys
+    // a $50 USD Amazon US card — face_value_minor=5000, currency=USD,
+    // charge_minor=3900 pence, charge_currency=GBP).
     faceValueMinor: bigint('face_value_minor', { mode: 'bigint' }).notNull(),
     currency: char('currency', { length: 3 }).notNull(),
+
+    // What the **user** was charged, in their home currency at the
+    // time of order creation (ADR 015). Pinned via a one-shot FX
+    // conversion against the gift-card face value + currency, and is
+    // the amount the payment watcher size-checks incoming Stellar
+    // payments against.
+    //
+    // Legacy rows (pre-ADR-015) backfill with charge_minor =
+    // face_value_minor and charge_currency = currency via the
+    // migration's UPDATE — true when the user bought in their own
+    // region, which was every order before home-currency landed.
+    chargeMinor: bigint('charge_minor', { mode: 'bigint' }).notNull(),
+    chargeCurrency: char('charge_currency', { length: 3 }).notNull(),
 
     // Payment source:
     //   - 'xlm'    → Stellar XLM to a Loop deposit address, `payment_memo` set
@@ -379,16 +400,18 @@ export const orders = pgTable(
       sql`${t.state} IN ('pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired')`,
     ),
     check('orders_payment_method_known', sql`${t.paymentMethod} IN ('xlm', 'usdc', 'credit')`),
+    check('orders_charge_currency_known', sql`${t.chargeCurrency} IN ('USD', 'GBP', 'EUR')`),
     check(
       'orders_percentages_sum',
       sql`${t.wholesalePct} + ${t.userCashbackPct} + ${t.loopMarginPct} <= 100`,
     ),
-    // Nonneg guards across all four minor-unit columns. A negative
-    // face value is a bug, and so is any split going the wrong way.
+    // Nonneg guards across the minor-unit columns. A negative face
+    // value or charge is a bug; so is any split going the wrong way.
     check(
       'orders_minor_amounts_non_negative',
       sql`
         ${t.faceValueMinor} >= 0
+        AND ${t.chargeMinor} >= 0
         AND ${t.wholesaleMinor} >= 0
         AND ${t.userCashbackMinor} >= 0
         AND ${t.loopMarginMinor} >= 0

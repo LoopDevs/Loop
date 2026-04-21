@@ -86,6 +86,8 @@ function makeRow(overrides: Record<string, unknown> = {}): Record<string, unknow
     merchantId: 'm1',
     faceValueMinor: 1_000n,
     currency: 'USD',
+    chargeMinor: 1_000n,
+    chargeCurrency: 'USD',
     paymentMethod: 'usdc',
     paymentMemo: 'MEMO',
     userCashbackMinor: 50n,
