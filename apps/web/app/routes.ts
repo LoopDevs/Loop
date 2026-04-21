@@ -8,6 +8,7 @@ export default [
   route('onboarding', 'routes/onboarding.tsx'),
   route('orders', 'routes/orders.tsx'),
   route('orders/:id', 'routes/orders.$id.tsx'),
+  route('settings/wallet', 'routes/settings.wallet.tsx'),
   route('admin/cashback', 'routes/admin.cashback.tsx'),
   route('admin/treasury', 'routes/admin.treasury.tsx'),
   route('admin/payouts', 'routes/admin.payouts.tsx'),

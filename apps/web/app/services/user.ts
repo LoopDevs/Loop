@@ -29,3 +29,21 @@ export async function setHomeCurrency(code: 'USD' | 'GBP' | 'EUR'): Promise<User
     body: { currency: code },
   });
 }
+
+/** `GET /api/users/me` — full profile. Used by settings pages. */
+export async function getMe(): Promise<UserMeView> {
+  return authenticatedRequest<UserMeView>('/api/users/me');
+}
+
+/**
+ * `PUT /api/users/me/stellar-address` — link or unlink the user's
+ * Stellar wallet (ADR 015). `null` unlinks. Server validates the
+ * address against Stellar's pubkey format and returns 400 on
+ * malformed input.
+ */
+export async function setStellarAddress(address: string | null): Promise<UserMeView> {
+  return authenticatedRequest<UserMeView>('/api/users/me/stellar-address', {
+    method: 'PUT',
+    body: { address },
+  });
+}
