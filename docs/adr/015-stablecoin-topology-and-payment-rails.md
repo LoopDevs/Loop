@@ -284,7 +284,7 @@ Engineering work this ADR unblocks:
       via the Frankfurter FX feed (#328). Receipt, watcher size
       check, and cashback math all key off this pinned value.
 - [ ] `credits/payout-asset.ts` — static `homeCurrency →
-  loopAssetCode` mapping + issuer addresses (env-configured).
+loopAssetCode` mapping + issuer addresses (env-configured).
 - [ ] Extend `markOrderFulfilled` (or a payout worker adjacent to
       it) to emit a Stellar payment of the matching LOOP asset to
       the user's linked Stellar address, if one is on file.
