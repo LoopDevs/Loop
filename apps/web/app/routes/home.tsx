@@ -28,18 +28,12 @@ function HomeContent(): React.JSX.Element {
     <div>
       {!isNative && <Navbar />}
 
-      {/* Mobile + native: the new dashboard+directory layout. Web
-          renders it at `<md` widths alongside the Navbar; native
-          has no Navbar so it's the whole chrome. Desktop (md+)
-          still sees the original hero + featured + grid below. */}
-      <div className={isNative ? '' : 'md:hidden'}>
-        <MobileHome />
-      </div>
-
       {/* Desktop hero + directory, hidden on mobile widths. Skipped
           on native regardless — mobile widths always get
           MobileHome, and desktop layouts aren't applicable inside a
-          phone webview. */}
+          phone webview. Rendered first so Playwright selectors that
+          do `a[href^="/gift-card/"].first()` pick the visible
+          desktop link, not the hidden mobile one sitting in the DOM. */}
       <div className={isNative ? 'hidden' : 'hidden md:block'}>
         {/* Hero — skipped on native where the app goes straight to the merchant
             grid. The pitch section is for web visitors who need convincing; on
@@ -186,6 +180,15 @@ function HomeContent(): React.JSX.Element {
         </div>
 
         {!isNative && <Footer />}
+      </div>
+
+      {/* Mobile + native: the new dashboard+directory layout. Web
+          renders it at `<md` widths alongside the Navbar; native
+          has no Navbar so it's the whole chrome. Desktop (md+)
+          hides it via the wrapper class; placed after the desktop
+          tree so Playwright selectors pick the visible variant. */}
+      <div className={isNative ? '' : 'md:hidden'}>
+        <MobileHome />
       </div>
     </div>
   );
