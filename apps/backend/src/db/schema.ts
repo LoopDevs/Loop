@@ -38,6 +38,14 @@ import { sql } from 'drizzle-orm';
  * `is_admin` is derived from the `ADMIN_CTX_USER_IDS` env allowlist
  * at upsert time; persisting it means authz checks don't scan env
  * on every request.
+ *
+ * `home_currency` is the fiat the user's account is denominated in
+ * (ADR 015). Every order they place is priced in this currency
+ * regardless of the gift card's region, and cashback lands in the
+ * matching LOOP-branded asset. MVP: support-mediated changes only.
+ * Defaults to USD so the column is NOT NULL without requiring an
+ * onboarding-picker round-trip on legacy CTX-anchored rows that
+ * predate the column.
  */
 export const users = pgTable(
   'users',
@@ -49,6 +57,7 @@ export const users = pgTable(
     ctxUserId: text('ctx_user_id'),
     email: text('email').notNull(),
     isAdmin: boolean('is_admin').notNull().default(false),
+    homeCurrency: char('home_currency', { length: 3 }).notNull().default('USD'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -57,8 +66,15 @@ export const users = pgTable(
       .on(t.ctxUserId)
       .where(sql`${t.ctxUserId} IS NOT NULL`),
     index('users_email').on(t.email),
+    // CHECK gates the enum at the DB boundary; the TypeScript union
+    // (HOME_CURRENCIES) gates it in-app. Both agree — either layer
+    // catching a bad write is a tripwire on the other layer drifting.
+    check('users_home_currency_known', sql`${t.homeCurrency} IN ('USD', 'GBP', 'EUR')`),
   ],
 );
+
+export const HOME_CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
+export type HomeCurrency = (typeof HOME_CURRENCIES)[number];
 
 /**
  * Per-user credit balance in a specific regional currency. One row per
