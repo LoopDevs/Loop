@@ -140,6 +140,14 @@ export interface CreateOrderArgs {
   faceValueMinor: bigint;
   currency: string;
   paymentMethod: OrderPaymentMethod;
+  /**
+   * What the user was charged, in their home currency at order
+   * creation (ADR 015). Defaults to `{ faceValueMinor, currency }`
+   * — correct when the user's home currency matches the gift-card
+   * currency, which is every order until the FX-pin slice lands.
+   */
+  chargeMinor?: bigint;
+  chargeCurrency?: string;
   /** Override for tests; production leaves this undefined and the repo generates it. */
   paymentMemo?: string;
 }
@@ -166,6 +174,8 @@ export async function createOrder(args: CreateOrderArgs): Promise<Order> {
       merchantId: args.merchantId,
       faceValueMinor: args.faceValueMinor,
       currency: args.currency,
+      chargeMinor: args.chargeMinor ?? args.faceValueMinor,
+      chargeCurrency: args.chargeCurrency ?? args.currency,
       paymentMethod: args.paymentMethod,
       paymentMemo,
       wholesalePct: split.wholesalePct,

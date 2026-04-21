@@ -50,6 +50,13 @@
       "when": 1777500000000,
       "tag": "0006_users_home_currency",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1777600000000,
+      "tag": "0007_orders_charge_columns",
+      "breakpoints": true
     }
   ]
 }

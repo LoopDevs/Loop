@@ -198,8 +198,17 @@ export interface LoopOrderView {
   id: string;
   merchantId: string;
   state: string;
+  /** Gift-card face value, in the catalog currency (ADR 015). */
   faceValueMinor: string;
+  /** Catalog currency the gift card is denominated in. */
   currency: string;
+  /**
+   * What the user was charged, in their home currency. For orders
+   * where home_currency === catalog currency (every pre-ADR-015
+   * order), this mirrors `faceValueMinor` + `currency`.
+   */
+  chargeMinor: string;
+  chargeCurrency: string;
   paymentMethod: 'xlm' | 'usdc' | 'credit';
   /** Populated when state ≥ pending_payment and the method is on-chain. */
   paymentMemo: string | null;
@@ -229,6 +238,8 @@ function orderToView(row: {
   state: string;
   faceValueMinor: bigint;
   currency: string;
+  chargeMinor: bigint;
+  chargeCurrency: string;
   paymentMethod: string;
   paymentMemo: string | null;
   userCashbackMinor: bigint;
@@ -248,6 +259,8 @@ function orderToView(row: {
     state: row.state,
     faceValueMinor: row.faceValueMinor.toString(),
     currency: row.currency,
+    chargeMinor: row.chargeMinor.toString(),
+    chargeCurrency: row.chargeCurrency,
     paymentMethod: row.paymentMethod as 'xlm' | 'usdc' | 'credit',
     paymentMemo: row.paymentMemo,
     stellarAddress:
