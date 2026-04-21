@@ -405,6 +405,81 @@ const AdminPayoutListResponse = registry.register(
   z.object({ payouts: z.array(AdminPayoutView) }),
 );
 
+// ─── Admin — cashback-config (ADR 011) ──────────────────────────────────────
+//
+// Percentages are stored as `numeric(5,2)` and round-trip as strings
+// through postgres-js (`"80.00"`). The schema mirrors that wire shape
+// so clients don't silently coerce to JS numbers and drift.
+
+const CashbackPctString = z
+  .string()
+  .regex(/^\d{1,3}(?:\.\d{1,2})?$/)
+  .openapi({
+    description:
+      'Percentage in the range [0, 100] with ≤2 decimal places, serialised as a string to match the Postgres numeric(5,2) wire shape (e.g. `"80.00"`).',
+  });
+
+const AdminCashbackConfig = registry.register(
+  'AdminCashbackConfig',
+  z.object({
+    merchantId: z.string(),
+    wholesalePct: CashbackPctString,
+    userCashbackPct: CashbackPctString,
+    loopMarginPct: CashbackPctString,
+    active: z.boolean(),
+    updatedBy: z.string().openapi({
+      description: 'Admin user id that performed the most recent upsert.',
+    }),
+    updatedAt: z.string().datetime(),
+  }),
+);
+
+const AdminCashbackConfigListResponse = registry.register(
+  'AdminCashbackConfigListResponse',
+  z.object({ configs: z.array(AdminCashbackConfig) }),
+);
+
+const AdminCashbackConfigDetailResponse = registry.register(
+  'AdminCashbackConfigDetailResponse',
+  z.object({ config: AdminCashbackConfig }),
+);
+
+const UpsertCashbackConfigBody = registry.register(
+  'UpsertCashbackConfigBody',
+  z
+    .object({
+      wholesalePct: z.coerce.number().min(0).max(100),
+      userCashbackPct: z.coerce.number().min(0).max(100),
+      loopMarginPct: z.coerce.number().min(0).max(100),
+      active: z.boolean().optional(),
+    })
+    .openapi({
+      description:
+        'The three split percentages are coerced from number-or-numeric-string and must sum to ≤100. `active` defaults to true on initial insert.',
+    }),
+);
+
+const AdminCashbackConfigHistoryRow = registry.register(
+  'AdminCashbackConfigHistoryRow',
+  z.object({
+    id: z.string().uuid(),
+    merchantId: z.string(),
+    wholesalePct: CashbackPctString,
+    userCashbackPct: CashbackPctString,
+    loopMarginPct: CashbackPctString,
+    active: z.boolean(),
+    changedBy: z.string().openapi({
+      description: 'Admin user id that triggered the prior-row snapshot.',
+    }),
+    changedAt: z.string().datetime(),
+  }),
+);
+
+const AdminCashbackConfigHistoryResponse = registry.register(
+  'AdminCashbackConfigHistoryResponse',
+  z.object({ history: z.array(AdminCashbackConfigHistoryRow) }),
+);
+
 // ─── Clustering ─────────────────────────────────────────────────────────────
 
 const ClusterBounds = z.object({
@@ -1028,6 +1103,107 @@ registry.registerPath({
   },
 });
 
+// ─── Admin — cashback-config CRUD (ADR 011) ─────────────────────────────────
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/merchant-cashback-configs',
+  summary: 'List every merchant cashback-split config (ADR 011).',
+  description:
+    'Returns one row per configured merchant with the three split percentages + active flag + last-updated-by. Rows are ordered by merchantId so the admin UI renders a stable list across reloads.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Cashback configs',
+      content: { 'application/json': { schema: AdminCashbackConfigListResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'put',
+  path: '/api/admin/merchant-cashback-configs/{merchantId}',
+  summary: 'Upsert a merchant cashback-split config (ADR 011).',
+  description:
+    'INSERT on first touch, UPDATE otherwise. Either way a Postgres trigger appends the pre-edit values to `merchant_cashback_config_history` so every change is auditable by `admin_user_id` + timestamp. The response echoes the latest row — the frontend uses it to refresh the list without a second round-trip.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ merchantId: z.string() }),
+    body: { content: { 'application/json': { schema: UpsertCashbackConfigBody } } },
+  },
+  responses: {
+    200: {
+      description: 'Updated row',
+      content: { 'application/json': { schema: AdminCashbackConfigDetailResponse } },
+    },
+    400: {
+      description: 'Invalid body — percentages out of range, sum > 100, or missing merchantId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/merchant-cashback-configs/{merchantId}/history',
+  summary: 'Audit-log history for one merchant cashback config (ADR 011).',
+  description:
+    'Up to 50 most-recent prior-state snapshots for a single merchant, newest first. Each row captures the exact values at the time of the change and who made it.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ merchantId: z.string() }),
+  },
+  responses: {
+    200: {
+      description: 'History rows (bounded to 50)',
+      content: { 'application/json': { schema: AdminCashbackConfigHistoryResponse } },
+    },
+    400: {
+      description: 'Missing merchantId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 registry.registerPath({
   method: 'get',
   path: '/api/clusters',
@@ -1141,7 +1317,7 @@ export function generateOpenApiSpec(): ReturnType<typeof generator.generateDocum
       {
         name: 'Admin',
         description:
-          'Admin-only surfaces: treasury snapshot + pending-payouts backlog (ADR 015). All routes require both `requireAuth` and `requireAdmin`.',
+          'Admin-only surfaces: treasury snapshot + pending-payouts backlog (ADR 015), merchant cashback-split config CRUD + history (ADR 011). All routes require both `requireAuth` and `requireAdmin`.',
       },
       { name: 'Clustering', description: 'Map cluster / location points.' },
       { name: 'Images', description: 'Image proxy + resize.' },
