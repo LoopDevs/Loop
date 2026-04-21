@@ -6,7 +6,8 @@ const { dbMock, state } = vi.hoisted(() => {
     config: unknown;
     insertedRow: unknown;
     insertValues: unknown[];
-  } = { config: undefined, insertedRow: null, insertValues: [] };
+    orderByMemo: unknown;
+  } = { config: undefined, insertedRow: null, insertValues: [], orderByMemo: undefined };
   const m: Record<string, ReturnType<typeof vi.fn>> = {};
   m['insert'] = vi.fn(() => m);
   m['values'] = vi.fn((v: unknown) => {
@@ -24,6 +25,9 @@ vi.mock('../../db/client.js', () => ({
       merchantCashbackConfigs: {
         findFirst: vi.fn(async () => state.config),
       },
+      orders: {
+        findFirst: vi.fn(async () => state.orderByMemo),
+      },
     },
   },
 }));
@@ -38,6 +42,7 @@ vi.mock('../../db/schema.js', async () => {
       currency: 'currency',
       paymentMethod: 'paymentMethod',
       paymentMemo: 'paymentMemo',
+      state: 'state',
     },
     merchantCashbackConfigs: {
       merchantId: 'merchantId',
@@ -45,12 +50,18 @@ vi.mock('../../db/schema.js', async () => {
   };
 });
 
-import { computeCashbackSplit, createOrder, generatePaymentMemo } from '../repo.js';
+import {
+  computeCashbackSplit,
+  createOrder,
+  findPendingOrderByMemo,
+  generatePaymentMemo,
+} from '../repo.js';
 
 beforeEach(() => {
   state.config = undefined;
   state.insertedRow = null;
   state.insertValues = [];
+  state.orderByMemo = undefined;
   for (const fn of Object.values(dbMock)) {
     if (typeof fn === 'function' && 'mockClear' in fn) {
       (fn as unknown as { mockClear: () => void }).mockClear();
@@ -258,5 +269,20 @@ describe('createOrder', () => {
         paymentMethod: 'xlm',
       }),
     ).rejects.toThrow(/no row returned/);
+  });
+});
+
+describe('findPendingOrderByMemo', () => {
+  it('returns the row when a live pending_payment order matches the memo', async () => {
+    const row = { id: 'o-1', paymentMemo: 'MEMO-ABC', state: 'pending_payment' };
+    state.orderByMemo = row;
+    const out = await findPendingOrderByMemo('MEMO-ABC');
+    expect(out).toBe(row);
+  });
+
+  it('returns null when nothing matches', async () => {
+    state.orderByMemo = undefined;
+    const out = await findPendingOrderByMemo('missing');
+    expect(out).toBeNull();
   });
 });
