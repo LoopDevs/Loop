@@ -15,7 +15,12 @@ import { Input } from '~/components/ui/Input';
 import { GoogleSignInButton } from '~/components/features/auth/GoogleSignInButton';
 import { checkBiometrics, authenticateWithBiometrics } from '~/native/biometrics';
 import { isAppLockEnabled, setAppLockEnabled } from '~/native/app-lock';
-import { getMe, type UserMeView } from '~/services/user';
+import {
+  getMe,
+  getCashbackHistory,
+  type CashbackHistoryEntry,
+  type UserMeView,
+} from '~/services/user';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Sign in — Loop' }];
@@ -197,6 +202,107 @@ function CashbackBalanceCard({
   );
 }
 
+/**
+ * Formats a ledger row's bigint-minor amount into the caller's
+ * locale currency. Entries carry their own `currency` (USD / GBP /
+ * EUR) — we honour it per-row in case a support edit introduces a
+ * cross-currency row against the user's home currency.
+ */
+function formatLedgerAmount(minor: string, currency: string): string {
+  try {
+    const asCents = BigInt(minor);
+    const major = Number(asCents) / 100;
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: 2,
+      // Keep the +/- sign so credits and debits read at a glance.
+      signDisplay: 'always',
+    }).format(major);
+  } catch {
+    return '—';
+  }
+}
+
+/**
+ * Maps a ledger `type` to the human-readable label the Account card
+ * renders. Keeps the card compact — the full detail (referenceId
+ * etc.) lives in a follow-up dedicated page.
+ */
+const LEDGER_LABELS: Record<CashbackHistoryEntry['type'], string> = {
+  cashback: 'Cashback',
+  interest: 'Interest',
+  spend: 'Spend',
+  withdrawal: 'Withdrawal',
+  refund: 'Refund',
+  adjustment: 'Adjustment',
+};
+
+/**
+ * Recent-cashback card on the Account screen. Renders up to 5 of
+ * the caller's newest credit-ledger events. Hidden for unauthenticated
+ * users (the parent already gates on `isAuthenticated`). Zero-row
+ * state renders a "no cashback yet" hint so new users see what the
+ * card is going to show once they place an order.
+ */
+function CashbackHistoryCard({
+  entries,
+  isLoading,
+  isError,
+}: {
+  entries: CashbackHistoryEntry[] | undefined;
+  isLoading: boolean;
+  isError: boolean;
+}): React.JSX.Element | null {
+  // Swallow the error state entirely rather than surfacing a red banner
+  // to the user — the history card is supplementary to the balance,
+  // which is the source of truth. The next `['me']` refetch will retry.
+  if (isError) return null;
+  const shown = entries?.slice(0, 5) ?? [];
+  return (
+    <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4 text-left">
+      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        Recent activity
+      </p>
+      {isLoading ? (
+        <p className="mt-3 text-sm text-gray-400 dark:text-gray-500">Loading…</p>
+      ) : shown.length === 0 ? (
+        <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
+          No cashback yet — your first Loop order will land here.
+        </p>
+      ) : (
+        <ul className="mt-3 space-y-3">
+          {shown.map((entry) => (
+            <li key={entry.id} className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
+                  {LEDGER_LABELS[entry.type]}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {new Date(entry.createdAt).toLocaleDateString(undefined, {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })}
+                </p>
+              </div>
+              <p
+                className={`shrink-0 text-sm font-medium ${
+                  entry.amountMinor.startsWith('-')
+                    ? 'text-gray-500 dark:text-gray-400'
+                    : 'text-green-600 dark:text-green-500'
+                }`}
+              >
+                {formatLedgerAmount(entry.amountMinor, entry.currency)}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function ErrorBoundary(): React.JSX.Element {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
@@ -249,6 +355,20 @@ export default function AuthRoute(): React.JSX.Element {
     staleTime: 60_000,
   });
 
+  // Recent credit-ledger events for the "Recent activity" card. Cap
+  // the page size at 5 — the card only renders that many; the full
+  // list will live on a follow-up dedicated page. Separate cache key
+  // from `['me']` because balance and history invalidate on different
+  // triggers (a support adjustment writes both; a refund write might
+  // only refresh the history).
+  const historyQuery = useQuery({
+    queryKey: ['me', 'cashback-history'],
+    queryFn: () => getCashbackHistory({ limit: 5 }),
+    enabled: isAuthenticated,
+    retry: shouldRetry,
+    staleTime: 60_000,
+  });
+
   const handleGoogleCredential = useCallback(
     (idToken: string) => {
       setError(null);
@@ -295,6 +415,11 @@ export default function AuthRoute(): React.JSX.Element {
             <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Your account</h1>
             <p className="text-gray-500 dark:text-gray-400 mb-6">{userEmail}</p>
             <CashbackBalanceCard me={meQuery.data} isLoading={meQuery.isLoading} />
+            <CashbackHistoryCard
+              entries={historyQuery.data?.entries}
+              isLoading={historyQuery.isLoading}
+              isError={historyQuery.isError}
+            />
             <div className="space-y-3">
               {isNative && <ThemeToggleRow />}
               {isNative && <BiometricLockRow />}
