@@ -6,6 +6,7 @@ import { createOrder } from '~/services/orders';
 import { createLoopOrder, type CreateLoopOrderResponse } from '~/services/orders-loop';
 import { requestOtp, verifyOtp } from '~/services/auth';
 import { useAppConfig } from '~/hooks/use-app-config';
+import { useMerchantCashbackRate } from '~/hooks/use-merchants';
 import { AmountSelection } from './AmountSelection';
 import { LoopPaymentStep } from './LoopPaymentStep';
 import { PaymentStep } from './PaymentStep';
@@ -39,6 +40,11 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
   // onto the Loop response. Keep the store as the legacy path's
   // contract until ADR 013 Phase C retires it.
   const [loopCreate, setLoopCreate] = useState<CreateLoopOrderResponse | null>(null);
+
+  // Cashback-rate preview (ADR 011 / 015). Null when the merchant
+  // has no active config or the fetch fails — in both cases we just
+  // don't surface the estimate, which is safer than showing $0.
+  const { userCashbackPct } = useMerchantCashbackRate(merchant.id);
 
   // Inline auth state
   const [authStep, setAuthStep] = useState<AuthStep>('email');
@@ -322,6 +328,7 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
 
       <AmountSelection
         merchant={merchant}
+        userCashbackPct={userCashbackPct}
         onConfirm={(amount) => {
           void handlePurchase(amount);
         }}

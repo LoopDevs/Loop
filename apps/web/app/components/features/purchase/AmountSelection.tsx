@@ -8,6 +8,43 @@ interface AmountSelectionProps {
   merchant: Merchant;
   onConfirm: (amount: number) => void;
   isLoading?: boolean;
+  /**
+   * Active cashback % for this merchant (ADR 011 / 015), as the
+   * numeric(5,2) string the backend returns (e.g. `"2.50"`). Null when
+   * the merchant has no active cashback config — the estimate row
+   * is then omitted.
+   */
+  userCashbackPct?: string | null;
+}
+
+/**
+ * Formats `amount × pct / 100` for the cashback-estimate row. Takes
+ * the amount as a parsed-float and the pct as the server-shaped
+ * numeric string; `null` on either input returns `null` so the caller
+ * can skip rendering rather than show a dash.
+ */
+function estimateCashback(
+  amount: number | null,
+  userCashbackPct: string | null | undefined,
+  symbol: string,
+): string | null {
+  if (
+    amount === null ||
+    !Number.isFinite(amount) ||
+    amount <= 0 ||
+    userCashbackPct === null ||
+    userCashbackPct === undefined
+  ) {
+    return null;
+  }
+  const pct = Number(userCashbackPct);
+  if (!Number.isFinite(pct) || pct <= 0) return null;
+  const estimate = (amount * pct) / 100;
+  // Two decimals, but drop a trailing `.00` so "$2.50 cashback"
+  // renders cleanly and "$5 cashback" doesn't drag a bare zero.
+  const rounded = Math.round(estimate * 100) / 100;
+  const formatted = rounded.toFixed(2).replace(/\.00$/, '');
+  return `${symbol}${formatted}`;
 }
 
 /** Renders fixed denomination buttons or a free-amount input based on merchant config. */
@@ -15,6 +52,7 @@ export function AmountSelection({
   merchant,
   onConfirm,
   isLoading = false,
+  userCashbackPct = null,
 }: AmountSelectionProps): React.JSX.Element {
   const denominations = merchant.denominations;
   // Currency symbol — £ for GBP, € for EUR, $ for USD / CAD. Shared
@@ -75,6 +113,18 @@ export function AmountSelection({
     onConfirm(amount);
   };
 
+  // Parse the current candidate amount for the cashback-estimate row.
+  // Fixed-denomination path: use the selected chip. Custom-amount path:
+  // use the raw input. Either way the estimate is purely visual —
+  // the actual cashback is computed server-side at order-fulfillment
+  // time.
+  const candidateAmount = selected !== null ? parseFloat(selected) : parseFloat(customAmount);
+  const cashbackEstimate = estimateCashback(
+    Number.isFinite(candidateAmount) ? candidateAmount : null,
+    userCashbackPct,
+    symbol,
+  );
+
   if (denominations?.type === 'fixed' && denominations.denominations.length > 0) {
     return (
       <div>
@@ -97,6 +147,11 @@ export function AmountSelection({
             </button>
           ))}
         </div>
+        {cashbackEstimate !== null && (
+          <p className="mb-3 text-sm font-medium text-green-700 dark:text-green-400">
+            You&rsquo;ll earn {cashbackEstimate} cashback
+          </p>
+        )}
         {validationError !== null && <p className="text-sm text-red-600 mb-3">{validationError}</p>}
         <Button
           className="w-full"
@@ -139,6 +194,11 @@ export function AmountSelection({
         max={max}
         step="0.01"
       />
+      {cashbackEstimate !== null && (
+        <p className="mt-3 text-sm font-medium text-green-700 dark:text-green-400">
+          You&rsquo;ll earn {cashbackEstimate} cashback
+        </p>
+      )}
       <Button
         className="w-full mt-4"
         onClick={handleConfirm}

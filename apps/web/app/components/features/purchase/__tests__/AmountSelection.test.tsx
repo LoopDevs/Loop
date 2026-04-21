@@ -209,3 +209,59 @@ describe('AmountSelection — no denomination config', () => {
     expect(screen.getByText(/Amount \(USD\)/)).toBeDefined();
   });
 });
+
+describe('AmountSelection — cashback estimate (ADR 011 / 015)', () => {
+  const fixedMerchant = merchant({
+    denominations: {
+      type: 'fixed',
+      denominations: ['10', '25', '50'],
+      currency: 'USD',
+    },
+  });
+
+  it("doesn't render the estimate when userCashbackPct is null", () => {
+    render(<AmountSelection merchant={fixedMerchant} onConfirm={vi.fn()} userCashbackPct={null} />);
+    fireEvent.click(screen.getByRole('button', { name: '$25' }));
+    expect(screen.queryByText(/cashback/i)).toBeNull();
+  });
+
+  it('renders the estimate once a denomination is selected and a pct is present', () => {
+    render(<AmountSelection merchant={fixedMerchant} onConfirm={vi.fn()} userCashbackPct="2.50" />);
+    // Before any selection, no estimate — we don't assume a default.
+    expect(screen.queryByText(/cashback/i)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '$50' }));
+    // 50 * 2.50% = $1.25
+    expect(screen.getByText(/You.+ll earn \$1\.25 cashback/)).toBeDefined();
+  });
+
+  it('drops the trailing .00 from whole-dollar estimates', () => {
+    render(
+      <AmountSelection merchant={fixedMerchant} onConfirm={vi.fn()} userCashbackPct="10.00" />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '$50' }));
+    // 50 * 10% = $5, not $5.00
+    expect(screen.getByText(/You.+ll earn \$5 cashback/)).toBeDefined();
+  });
+
+  it('renders the estimate live as the user types a custom amount', () => {
+    render(
+      <AmountSelection
+        merchant={merchant({
+          denominations: { type: 'min-max', min: 5, max: 200, currency: 'USD', denominations: [] },
+        })}
+        onConfirm={vi.fn()}
+        userCashbackPct="3"
+      />,
+    );
+    const input = screen.getByRole('spinbutton') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '100' } });
+    // 100 * 3% = $3
+    expect(screen.getByText(/You.+ll earn \$3 cashback/)).toBeDefined();
+  });
+
+  it('skips the estimate when pct parses to 0 or negative', () => {
+    render(<AmountSelection merchant={fixedMerchant} onConfirm={vi.fn()} userCashbackPct="0" />);
+    fireEvent.click(screen.getByRole('button', { name: '$25' }));
+    expect(screen.queryByText(/cashback/i)).toBeNull();
+  });
+});
