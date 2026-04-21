@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import type { Merchant } from '@loop/shared';
 import { foldForSearch, merchantSlug } from '@loop/shared';
-import { useAllMerchants } from '~/hooks/use-merchants';
+import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
 import { useOrders } from '~/hooks/use-orders';
 import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
@@ -31,6 +31,10 @@ import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
  */
 export function MobileHome(): React.JSX.Element {
   const { merchants, isLoading: merchantsLoading } = useAllMerchants();
+  // Bulk cashback-rate map (ADR 011 / 015). One fetch covers every
+  // cell in the directory grid; each DirectoryCell then does an O(1)
+  // lookup. Mirrors the desktop home grid wiring in routes/home.tsx.
+  const { lookup: lookupCashback } = useMerchantsCashbackRatesMap();
   const { email, isAuthenticated } = useAuth();
   const { orders } = useOrders(1, isAuthenticated);
   const navigate = useNavigate();
@@ -256,7 +260,9 @@ export function MobileHome(): React.JSX.Element {
         {merchantsLoading && grid.length === 0 ? (
           Array.from({ length: 6 }).map((_, i) => <MerchantCardSkeleton key={i} />)
         ) : grid.length > 0 ? (
-          grid.map((m) => <DirectoryCell key={m.id} merchant={m} />)
+          grid.map((m) => (
+            <DirectoryCell key={m.id} merchant={m} userCashbackPct={lookupCashback(m.id)} />
+          ))
         ) : (
           <div className="col-span-2 text-center py-10 text-sm text-gray-500 dark:text-gray-400">
             No brands match &ldquo;{query}&rdquo;
@@ -406,24 +412,72 @@ function BrandTile({
   );
 }
 
-function PctPill({ children }: { children: React.ReactNode }): React.JSX.Element {
+function PctPill({
+  children,
+  variant = 'savings',
+}: {
+  children: React.ReactNode;
+  /** `savings` is the upstream discount; `cashback` is Loop's ADR-011 user split. */
+  variant?: 'savings' | 'cashback';
+}): React.JSX.Element {
+  const palette =
+    variant === 'cashback'
+      ? 'text-blue-700 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30'
+      : 'text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30';
   return (
-    <span className="inline-flex items-center text-[10px] font-bold text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-1.5 py-0.5 rounded-full leading-none">
+    <span
+      className={`inline-flex items-center text-[10px] font-bold ${palette} px-1.5 py-0.5 rounded-full leading-none`}
+    >
       {children}
     </span>
   );
 }
 
-function DirectoryCell({ merchant }: { merchant: Merchant }): React.JSX.Element {
+/**
+ * Formats the numeric(5,2) cashback string into the compact pill
+ * label. Drops a trailing `.0` so integer rates read as "5%" rather
+ * than "5.0%" on the small pill. Returns `null` when the rate parses
+ * to 0 / negative / unparseable — the caller hides the pill.
+ */
+function formatCashbackPct(pct: string | null | undefined): string | null {
+  if (pct === null || pct === undefined) return null;
+  const n = Number(pct);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const rounded = Math.round(n * 10) / 10;
+  return rounded.toFixed(1).replace(/\.0$/, '');
+}
+
+function DirectoryCell({
+  merchant,
+  userCashbackPct = null,
+}: {
+  merchant: Merchant;
+  /** Numeric(5,2) wire shape (e.g. `"2.50"`). Null → no pill. */
+  userCashbackPct?: string | null;
+}): React.JSX.Element {
+  const cashbackLabel = formatCashbackPct(userCashbackPct);
+  const hasSavings =
+    typeof merchant.savingsPercentage === 'number' && merchant.savingsPercentage > 0;
   return (
     <Link
       to={`/gift-card/${merchantSlug(merchant.name)}`}
       className="rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 p-3 flex flex-col gap-2 active:scale-[0.98] transition-transform"
     >
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-2">
         <BrandTile merchant={merchant} size={44} />
-        {typeof merchant.savingsPercentage === 'number' && merchant.savingsPercentage > 0 && (
-          <PctPill>{`${merchant.savingsPercentage.toFixed(1)}%`}</PctPill>
+        {/* Stack pills vertically in the top-right; savings first,
+            cashback below. Two side-by-side pills clip too aggressively
+            on narrow screens (iPhone SE). Either pill can independently
+            be absent. */}
+        {(hasSavings || cashbackLabel !== null) && (
+          <div className="flex flex-col items-end gap-1">
+            {hasSavings && (
+              <PctPill>{`${(merchant.savingsPercentage as number).toFixed(1)}%`}</PctPill>
+            )}
+            {cashbackLabel !== null && (
+              <PctPill variant="cashback">{`${cashbackLabel}% back`}</PctPill>
+            )}
+          </div>
         )}
       </div>
       <div className="text-[14px] font-semibold text-gray-900 dark:text-white truncate">
