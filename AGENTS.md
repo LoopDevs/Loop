@@ -25,6 +25,7 @@
 | `docs/adr/011-admin-panel-cashback-configuration.md`        | Admin panel shape + cashback-config audit trail               |
 | `docs/adr/012-drizzle-orm-fly-postgres.md`                  | ORM + Postgres-on-Fly stack choice                            |
 | `docs/adr/013-loop-owned-auth-and-ctx-operator-accounts.md` | Loop owns user auth; CTX is a supplier pool                   |
+| `docs/adr/014-social-login-google-apple.md`                 | Google + Apple social login, verified server-side             |
 
 ---
 
