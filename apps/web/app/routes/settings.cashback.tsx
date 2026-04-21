@@ -23,6 +23,7 @@ import {
   type CashbackHistoryEntry,
   type CashbackHistoryResponse,
 } from '~/services/user';
+import { formatMinorAmount } from '@loop/shared';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Cashback history — Loop' }];
@@ -38,20 +39,6 @@ const LEDGER_LABELS: Record<CashbackHistoryEntry['type'], string> = {
   refund: 'Refund',
   adjustment: 'Adjustment',
 };
-
-function formatAmount(minor: string, currency: string): string {
-  try {
-    const major = Number(BigInt(minor)) / 100;
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 2,
-      signDisplay: 'always',
-    }).format(major);
-  } catch {
-    return '—';
-  }
-}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -206,7 +193,7 @@ function HistoryPage({
                   : 'text-green-600 dark:text-green-500'
               }`}
             >
-              {formatAmount(entry.amountMinor, entry.currency)}
+              {formatMinorAmount(entry.amountMinor, entry.currency, { signed: true })}
             </p>
           </li>
         ))}

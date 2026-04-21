@@ -21,6 +21,7 @@ import {
   type CashbackHistoryEntry,
   type UserMeView,
 } from '~/services/user';
+import { formatMinorAmount } from '@loop/shared';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Sign in — Loop' }];
@@ -152,26 +153,6 @@ function BiometricLockRow(): React.JSX.Element | null {
 }
 
 /**
- * Formats a minor-units bigint-string into the account view's
- * headline cashback balance. Falls back to `—` for parse errors so
- * a bad server response degrades gracefully rather than crashing
- * the Account screen.
- */
-function formatCashbackBalance(minor: string, currency: 'USD' | 'GBP' | 'EUR'): string {
-  try {
-    const asCents = BigInt(minor);
-    const major = Number(asCents) / 100;
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 2,
-    }).format(major);
-  } catch {
-    return '—';
-  }
-}
-
-/**
  * `Your cashback` card on the Account screen. Shows the user's
  * off-chain balance in their home currency (ADR 015). Zero-balance
  * users still see the card so "you have 0.00 cashback" is a clear
@@ -192,7 +173,7 @@ function CashbackBalanceCard({
       <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">
         {isLoading || me === undefined
           ? '—'
-          : formatCashbackBalance(me.homeCurrencyBalanceMinor, me.homeCurrency)}
+          : formatMinorAmount(me.homeCurrencyBalanceMinor, me.homeCurrency)}
       </p>
       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
         Earned on every Loop order.
@@ -200,28 +181,6 @@ function CashbackBalanceCard({
       </p>
     </div>
   );
-}
-
-/**
- * Formats a ledger row's bigint-minor amount into the caller's
- * locale currency. Entries carry their own `currency` (USD / GBP /
- * EUR) — we honour it per-row in case a support edit introduces a
- * cross-currency row against the user's home currency.
- */
-function formatLedgerAmount(minor: string, currency: string): string {
-  try {
-    const asCents = BigInt(minor);
-    const major = Number(asCents) / 100;
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 2,
-      // Keep the +/- sign so credits and debits read at a glance.
-      signDisplay: 'always',
-    }).format(major);
-  } catch {
-    return '—';
-  }
 }
 
 /**
@@ -294,7 +253,7 @@ function CashbackHistoryCard({
                       : 'text-green-600 dark:text-green-500'
                   }`}
                 >
-                  {formatLedgerAmount(entry.amountMinor, entry.currency)}
+                  {formatMinorAmount(entry.amountMinor, entry.currency, { signed: true })}
                 </p>
               </li>
             ))}
