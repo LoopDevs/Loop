@@ -28,6 +28,50 @@ function fmtMinor(minor: string, currency: string): string {
   return `${sign}${symbol}${Number(whole).toLocaleString('en-US')}.${fraction} ${currency}`;
 }
 
+/**
+ * Stroops → human Stellar amount string. 7-decimal asset precision,
+ * trims trailing zeros for readability (e.g. "1,234.56 USDC" not
+ * "1,234.5600000").
+ */
+function fmtStroops(stroops: string | null, code: string): string {
+  if (stroops === null) return '—';
+  const negative = stroops.startsWith('-');
+  const digits = negative ? stroops.slice(1) : stroops;
+  const padded = digits.padStart(8, '0');
+  const whole = padded.slice(0, -7);
+  const fractionRaw = padded.slice(-7).replace(/0+$/, '');
+  const fraction = fractionRaw.length > 0 ? `.${fractionRaw}` : '';
+  const sign = negative ? '-' : '';
+  return `${sign}${Number(whole).toLocaleString('en-US')}${fraction} ${code}`;
+}
+
+const LOOP_LIABILITY_CODES = ['USDLOOP', 'GBPLOOP', 'EURLOOP'] as const;
+const PAYOUT_STATES = ['pending', 'submitted', 'confirmed', 'failed'] as const;
+
+/** Abbreviated Stellar pubkey for UI display — G...xyz. */
+function truncPubkey(pk: string): string {
+  if (pk.length <= 12) return pk;
+  return `${pk.slice(0, 6)}…${pk.slice(-4)}`;
+}
+
+/**
+ * Pill colour for a payout state count. Failed > 0 turns red
+ * (page ops); submitted growing without matching confirmed is
+ * yellow; confirmed is blue (informational); pending neutral.
+ */
+function payoutPillClass(state: string, count: string): string {
+  if (state === 'failed' && count !== '0') {
+    return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
+  }
+  if (state === 'submitted' && count !== '0') {
+    return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
+  }
+  if (state === 'confirmed') {
+    return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
+  }
+  return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
+}
+
 const KNOWN_TYPES = ['cashback', 'interest', 'refund', 'spend', 'withdrawal', 'adjustment'];
 
 /**
@@ -186,6 +230,103 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
               )}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+          LOOP-asset liabilities
+        </h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Outstanding user claims on Loop&rsquo;s fiat reserves, by issued stablecoin.
+          &ldquo;Issuer&rdquo; is the Stellar account that mints this asset — a missing issuer means
+          the operator hasn&rsquo;t wired the env var for that LOOP asset yet, so on-chain cashback
+          is off for that currency.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {LOOP_LIABILITY_CODES.map((code) => {
+            const row = snapshot.liabilities?.[code] ?? { outstandingMinor: '0', issuer: null };
+            const fiat = code.slice(0, 3); // USDLOOP → USD
+            return (
+              <div
+                key={code}
+                className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white dark:bg-gray-900"
+              >
+                <div className="flex items-baseline justify-between">
+                  <div className="text-xs font-medium text-gray-500 dark:text-gray-400">{code}</div>
+                  {row.issuer === null ? (
+                    <span className="text-[10px] uppercase tracking-wide font-semibold text-amber-700 dark:text-amber-400">
+                      not configured
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-mono text-gray-500 dark:text-gray-400">
+                      {truncPubkey(row.issuer)}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1 text-xl font-semibold text-gray-900 dark:text-white tabular-nums">
+                  {fmtMinor(row.outstandingMinor, fiat)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+          Loop-held assets
+        </h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          The yield-earning pile (ADR 015). USDC is what Loop wants to hold for defindex yield; XLM
+          funds base reserves + is the procurement break-glass.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white dark:bg-gray-900">
+            <div className="text-xs font-medium text-gray-500 dark:text-gray-400">USDC</div>
+            <div className="mt-1 text-xl font-semibold text-gray-900 dark:text-white tabular-nums">
+              {fmtStroops(snapshot.assets?.USDC?.stroops ?? null, 'USDC')}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white dark:bg-gray-900">
+            <div className="text-xs font-medium text-gray-500 dark:text-gray-400">XLM</div>
+            <div className="mt-1 text-xl font-semibold text-gray-900 dark:text-white tabular-nums">
+              {fmtStroops(snapshot.assets?.XLM?.stroops ?? null, 'XLM')}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+          Stellar payouts
+        </h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Outbound LOOP-asset cashback (ADR 015/016). Non-zero{' '}
+          <code className="text-xs">failed</code> means ops intervention needed — review each row in
+          the payouts list and retry, or investigate the classification.
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {PAYOUT_STATES.map((state) => {
+            const count = snapshot.payouts?.[state] ?? '0';
+            return (
+              <div
+                key={state}
+                className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white dark:bg-gray-900"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-medium text-gray-500 dark:text-gray-400 capitalize">
+                    {state}
+                  </div>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${payoutPillClass(state, count)}`}
+                  >
+                    {count}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </section>
 

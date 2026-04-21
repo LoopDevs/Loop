@@ -53,11 +53,32 @@ export async function cashbackConfigHistory(
   );
 }
 
+export type LoopAssetCode = 'USDLOOP' | 'GBPLOOP' | 'EURLOOP';
+export type PayoutState = 'pending' | 'submitted' | 'confirmed' | 'failed';
+
+export interface LoopLiability {
+  outstandingMinor: string;
+  issuer: string | null;
+}
+
+export interface TreasuryHolding {
+  stroops: string | null;
+}
+
 export interface TreasurySnapshot {
   /** Outstanding credit (what Loop owes users), keyed by currency. Minor units, string. */
   outstanding: Record<string, string>;
   /** Ledger-by-type totals, keyed [currency][type]. Minor units, string. */
   totals: Record<string, Record<string, string>>;
+  /** ADR 015 — per LOOP asset, outstanding + configured issuer. */
+  liabilities: Record<LoopAssetCode, LoopLiability>;
+  /** ADR 015 — Loop's yield-earning pile (USDC + XLM operator holdings). */
+  assets: {
+    USDC: TreasuryHolding;
+    XLM: TreasuryHolding;
+  };
+  /** ADR 015 — outbound Stellar cashback payouts at each state. */
+  payouts: Record<PayoutState, string>;
   /** CTX operator pool snapshot — ADR 013. */
   operatorPool: {
     size: number;
