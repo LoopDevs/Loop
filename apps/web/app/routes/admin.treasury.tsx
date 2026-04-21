@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import type { Route } from './+types/admin.treasury';
 import { useAuth } from '~/hooks/use-auth';
 import { getTreasurySnapshot, type TreasurySnapshot } from '~/services/admin';
@@ -298,21 +298,28 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
       </section>
 
       <section>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
-          Stellar payouts
-        </h2>
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Stellar payouts</h2>
+          <Link
+            to="/admin/payouts"
+            className="text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+          >
+            See all →
+          </Link>
+        </div>
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
           Outbound LOOP-asset cashback (ADR 015/016). Non-zero{' '}
-          <code className="text-xs">failed</code> means ops intervention needed — review each row in
-          the payouts list and retry, or investigate the classification.
+          <code className="text-xs">failed</code> means ops intervention needed — click through to
+          review each row and retry, or investigate the classification.
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {PAYOUT_STATES.map((state) => {
             const count = snapshot.payouts?.[state] ?? '0';
             return (
-              <div
+              <Link
                 key={state}
-                className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white dark:bg-gray-900"
+                to={`/admin/payouts?state=${state}`}
+                className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white dark:bg-gray-900 hover:border-gray-400 dark:hover:border-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-medium text-gray-500 dark:text-gray-400 capitalize">
@@ -324,7 +331,7 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
                     {count}
                   </span>
                 </div>
-              </div>
+              </Link>
             );
           })}
         </div>
