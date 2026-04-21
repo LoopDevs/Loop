@@ -281,6 +281,33 @@ const SetStellarAddressBody = registry.register(
   }),
 );
 
+const CashbackHistoryEntry = registry.register(
+  'CashbackHistoryEntry',
+  z.object({
+    id: z.string().uuid(),
+    type: z
+      .enum(['cashback', 'interest', 'spend', 'withdrawal', 'refund', 'adjustment'])
+      .openapi({ description: 'Ledger event kind — see `credit_transactions.type` (ADR 009).' }),
+    amountMinor: z.string().openapi({
+      description:
+        'Pence / cents in `currency`, as a bigint-string. Positive for cashback / interest / refund, negative for spend / withdrawal, either for adjustment.',
+    }),
+    currency: z.string().length(3),
+    referenceType: z.string().nullable().openapi({
+      description: "Source tag, e.g. `'order'`. Null when support-adjusted directly.",
+    }),
+    referenceId: z.string().nullable().openapi({
+      description: 'Matching reference id (e.g. order UUID).',
+    }),
+    createdAt: z.string().datetime(),
+  }),
+);
+
+const CashbackHistoryResponse = registry.register(
+  'CashbackHistoryResponse',
+  z.object({ entries: z.array(CashbackHistoryEntry) }),
+);
+
 // ─── Admin (ADR 015 — treasury + payouts) ───────────────────────────────────
 
 const LoopAssetCode = z
@@ -824,6 +851,54 @@ registry.registerPath({
     },
     429: {
       description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error resolving the user',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/users/me/cashback-history',
+  summary: 'Recent credit-ledger events for the caller (ADR 009 / 015).',
+  description:
+    "Paginated cashback / interest / spend / withdrawal / refund / adjustment rows for the authenticated user. Page older rows with `?before=<iso-8601>`; cap the page size with `?limit=` (default 20, hard-capped at 100). Always scoped to the caller — admins use the separate `/api/admin/*` surfaces to inspect other users' ledgers.",
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      limit: z.coerce
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .openapi({ description: 'Page size. Default 20, hard-capped at 100.' }),
+      before: z
+        .string()
+        .datetime()
+        .optional()
+        .openapi({ description: 'ISO-8601 timestamp — return rows strictly older than this.' }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Ledger entries, newest first',
+      content: { 'application/json': { schema: CashbackHistoryResponse } },
+    },
+    400: {
+      description: 'Invalid before timestamp',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
       content: { 'application/json': { schema: ErrorResponse } },
     },
     500: {

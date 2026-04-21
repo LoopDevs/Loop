@@ -17,9 +17,9 @@
  */
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { orders, userCredits, users, HOME_CURRENCIES } from '../db/schema.js';
+import { creditTransactions, orders, userCredits, users, HOME_CURRENCIES } from '../db/schema.js';
 import { decodeJwtPayload } from '../auth/jwt.js';
 import { upsertUserFromCtx, getUserById, type User } from '../db/users.js';
 import type { LoopAuthContext } from '../auth/handler.js';
@@ -226,4 +226,83 @@ export async function setStellarAddressHandler(c: Context): Promise<Response> {
     return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
   }
   return c.json<UserMeView>(await toView(updated));
+}
+
+/**
+ * `GET /api/users/me/cashback-history` — recent credit-ledger events
+ * for the caller (ADR 009 / 015). Pages by `?before=<iso>` +
+ * `?limit=N` (default 20, hard-capped at 100). Returns the
+ * `credit_transactions` rows as-is so the client can render cashback
+ * earnings, interest accrual, and withdrawals on the Account view.
+ *
+ * Scoped to the caller — no admin-privileged view into other users'
+ * ledger from this endpoint (admins use `/api/admin/*` for that).
+ */
+export interface CashbackHistoryEntry {
+  id: string;
+  type: string;
+  /** bigint as string — pence/cents in `currency`. Positive for cashback/interest/refund, negative for spend/withdrawal. */
+  amountMinor: string;
+  currency: string;
+  /** Ledger-source tag, e.g. `'order'` for per-order cashback. Null when adjusted directly by support. */
+  referenceType: string | null;
+  /** Matching reference id (e.g. order UUID). Null when referenceType is null. */
+  referenceId: string | null;
+  createdAt: string;
+}
+
+export interface CashbackHistoryResponse {
+  entries: CashbackHistoryEntry[];
+}
+
+export async function getCashbackHistoryHandler(c: Context): Promise<Response> {
+  const limitRaw = c.req.query('limit');
+  const parsedLimit = Number.parseInt(limitRaw ?? '20', 10);
+  const limit = Math.min(Math.max(Number.isNaN(parsedLimit) ? 20 : parsedLimit, 1), 100);
+
+  const beforeRaw = c.req.query('before');
+  let before: Date | undefined;
+  if (beforeRaw !== undefined && beforeRaw.length > 0) {
+    const d = new Date(beforeRaw);
+    if (Number.isNaN(d.getTime())) {
+      return c.json(
+        { code: 'VALIDATION_ERROR', message: 'before must be an ISO-8601 timestamp' },
+        400,
+      );
+    }
+    before = d;
+  }
+
+  let user: User | null;
+  try {
+    user = await resolveCallingUser(c);
+  } catch (err) {
+    log.error({ err }, 'Failed to resolve calling user');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+  }
+  if (user === null) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+
+  const predicate =
+    before === undefined
+      ? eq(creditTransactions.userId, user.id)
+      : and(eq(creditTransactions.userId, user.id), lt(creditTransactions.createdAt, before));
+  const rows = await db
+    .select()
+    .from(creditTransactions)
+    .where(predicate)
+    .orderBy(desc(creditTransactions.createdAt))
+    .limit(limit);
+  return c.json<CashbackHistoryResponse>({
+    entries: rows.map((row) => ({
+      id: row.id,
+      type: row.type,
+      amountMinor: row.amountMinor.toString(),
+      currency: row.currency,
+      referenceType: row.referenceType,
+      referenceId: row.referenceId,
+      createdAt: row.createdAt.toISOString(),
+    })),
+  });
 }

@@ -54,3 +54,37 @@ export async function setStellarAddress(address: string | null): Promise<UserMeV
     body: { address },
   });
 }
+
+/** One row of the credit-ledger history (ADR 009 / 015). */
+export interface CashbackHistoryEntry {
+  id: string;
+  type: 'cashback' | 'interest' | 'spend' | 'withdrawal' | 'refund' | 'adjustment';
+  /** Pence / cents in `currency`, as a bigint-string. */
+  amountMinor: string;
+  currency: string;
+  /** Ledger-source tag (e.g. `'order'`), null when support-adjusted. */
+  referenceType: string | null;
+  referenceId: string | null;
+  createdAt: string;
+}
+
+export interface CashbackHistoryResponse {
+  entries: CashbackHistoryEntry[];
+}
+
+/**
+ * `GET /api/users/me/cashback-history` — caller's recent ledger
+ * events, newest first. Pass `before` (ISO timestamp) + `limit` for
+ * pagination; both are optional.
+ */
+export async function getCashbackHistory(
+  opts: { limit?: number; before?: string } = {},
+): Promise<CashbackHistoryResponse> {
+  const params = new URLSearchParams();
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  if (opts.before !== undefined) params.set('before', opts.before);
+  const query = params.toString();
+  return authenticatedRequest<CashbackHistoryResponse>(
+    `/api/users/me/cashback-history${query.length > 0 ? `?${query}` : ''}`,
+  );
+}
