@@ -2,10 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { checkBiometrics } from '~/native/biometrics';
 import type { BiometricResult } from '~/native/biometrics';
+import { setHomeCurrency } from '~/services/user';
+import { ApiException } from '@loop/shared';
 import { Dots } from './atoms';
 import { TrustWelcome, TrustHowItWorks, TrustMerchants } from './screens-trust';
 import { EmailEntry, OtpEntry, WelcomeIn, useOnboardingAuth } from './signup-tail';
 import { BiometricSetup } from './screen-biometric';
+import { CurrencyPickerScreen, guessHomeCurrency, type HomeCurrency } from './screen-currency';
 
 interface ScreenCopy {
   eyebrow?: string;
@@ -19,7 +22,7 @@ interface ScreenCopy {
 // we end on Welcome-in right after OTP verify. Step 6 is an
 // optional biometric-enable step between OTP and Welcome-in; it
 // self-skips on devices without biometrics.
-const COPY: Record<1 | 2 | 3 | 4 | 5 | 6 | 7, ScreenCopy> = {
+const COPY: Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8, ScreenCopy> = {
   1: {
     eyebrow: 'Welcome to Loop',
     title: 'Shop. Save.\nRepeat.',
@@ -41,16 +44,21 @@ const COPY: Record<1 | 2 | 3 | 4 | 5 | 6 | 7, ScreenCopy> = {
   },
   5: { title: 'Check your inbox', sub: 'We sent a 6-digit code to' },
   6: {
+    eyebrow: 'Your region',
+    title: 'Pick your currency.',
+    sub: 'Prices, purchases and cashback all land in this currency. You can change it later with our support team.',
+  },
+  7: {
     title: 'One-tap sign in',
     sub: 'Use biometrics to unlock Loop and confirm purchases. Your biometric data never leaves the device.',
   },
-  7: {
+  8: {
     title: 'You\u2019re in.',
     sub: 'Your Loop account is ready. Start earning on your first purchase.',
   },
 };
 
-const TOTAL_STEPS = 7;
+const TOTAL_STEPS = 8;
 
 /**
  * First-launch onboarding flow. Six screens:
@@ -111,6 +119,15 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
 
   const { sendingOtp, verifyingOtp, emailError, otpError, sendOtp, verify, clearErrors } =
     useOnboardingAuth();
+
+  // Currency step (ADR 015). Default from the browser locale, but
+  // the user picks explicitly before the CTA fires. `savingCurrency`
+  // drives the CTA label; `currencyError` renders inline.
+  const [currency, setCurrency] = useState<HomeCurrency>(() =>
+    guessHomeCurrency(typeof navigator !== 'undefined' ? navigator.language : undefined),
+  );
+  const [savingCurrency, setSavingCurrency] = useState(false);
+  const [currencyError, setCurrencyError] = useState<string | null>(null);
 
   const next = useCallback(() => setStep((s) => Math.min(TOTAL_STEPS - 1, s + 1)), []);
   const back = useCallback(() => setStep((s) => Math.max(0, s - 1)), []);
@@ -180,6 +197,24 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
     void sendOtp(email);
   };
 
+  const handleCurrencyCta = async (): Promise<void> => {
+    if (savingCurrency) return;
+    setSavingCurrency(true);
+    setCurrencyError(null);
+    try {
+      await setHomeCurrency(currency);
+      next();
+    } catch (err) {
+      const message =
+        err instanceof ApiException
+          ? err.message
+          : "Couldn't save your currency — check your connection and try again.";
+      setCurrencyError(message);
+    } finally {
+      setSavingCurrency(false);
+    }
+  };
+
   const handleFinish = (): void => {
     if (onComplete !== undefined) {
       onComplete();
@@ -226,6 +261,11 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
       enabled: otpValid && !verifyingOtp,
     },
     {
+      label: savingCurrency ? 'Saving…' : 'Continue',
+      act: () => void handleCurrencyCta(),
+      enabled: !savingCurrency,
+    },
+    {
       label: biometricCtaLabel,
       // When biometrics are available, hand off to the screen's
       // registered trigger (which fires the real prompt). When
@@ -249,6 +289,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
   // re-entered the step via Back.
   useEffect(() => {
     if (step !== 3 && step !== 4) clearErrors();
+    if (step !== 5) setCurrencyError(null);
   }, [step, clearErrors]);
 
   const currentCta = stepCta[step]!;
@@ -283,15 +324,25 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
       );
     if (idx === 5)
       return (
-        <BiometricSetup
+        <CurrencyPickerScreen
           active={active}
           copy={COPY[6]}
+          selected={currency}
+          onSelect={setCurrency}
+          error={currencyError}
+        />
+      );
+    if (idx === 6)
+      return (
+        <BiometricSetup
+          active={active}
+          copy={COPY[7]}
           available={biometricsChecked ? biometrics.available : null}
           onEnabled={next}
           triggerRef={biometricTriggerRef}
         />
       );
-    if (idx === 6) return <WelcomeIn active={active} copy={COPY[7]} />;
+    if (idx === 7) return <WelcomeIn active={active} copy={COPY[8]} />;
     return null;
   };
 
