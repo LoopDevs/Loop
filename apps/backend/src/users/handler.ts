@@ -33,6 +33,8 @@ export interface UserMeView {
   isAdmin: boolean;
   /** ADR 015 — USD / GBP / EUR. Drives order denomination + cashback asset. */
   homeCurrency: string;
+  /** ADR 015 — Stellar address for on-chain cashback payouts. Null when unlinked. */
+  stellarAddress: string | null;
 }
 
 function toView(row: User): UserMeView {
@@ -41,6 +43,7 @@ function toView(row: User): UserMeView {
     email: row.email,
     isAdmin: row.isAdmin,
     homeCurrency: row.homeCurrency,
+    stellarAddress: row.stellarAddress,
   };
 }
 
@@ -143,6 +146,60 @@ export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
   if (updated === undefined) {
     // User row disappeared between resolve and update — race with
     // account deletion, or a concurrent support-auth'd edit.
+    return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
+  }
+  return c.json<UserMeView>(toView(updated));
+}
+
+// Stellar ED25519 public keys: 56 uppercase base32 chars starting
+// with 'G'. Validated here rather than at the column level (which is
+// just `text`) so the backend can null-out bad data via SQL in a
+// pinch.
+const STELLAR_PUBKEY_REGEX = /^G[A-Z2-7]{55}$/;
+const SetStellarAddressBody = z.object({
+  /** Null explicitly unlinks the address; any string is validated against the pubkey regex. */
+  address: z.union([z.string().regex(STELLAR_PUBKEY_REGEX), z.null()]),
+});
+
+/**
+ * PUT /api/users/me/stellar-address — user opts into on-chain
+ * cashback payouts by linking a Stellar address. Re-linking (changing
+ * the address) is allowed because the column is a routing hint, not a
+ * ledger-pinned value — subsequent payouts just go to the new target.
+ * Passing `address: null` unlinks, returning the user to off-chain-
+ * only cashback accrual.
+ */
+export async function setStellarAddressHandler(c: Context): Promise<Response> {
+  const parsed = SetStellarAddressBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json(
+      {
+        code: 'VALIDATION_ERROR',
+        message:
+          parsed.error.issues[0]?.message ?? 'address must be a Stellar public key (G...) or null',
+      },
+      400,
+    );
+  }
+  let user: User | null;
+  try {
+    user = await resolveCallingUser(c);
+  } catch (err) {
+    log.error({ err }, 'Failed to resolve calling user');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+  }
+  if (user === null) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+  if (user.stellarAddress === parsed.data.address) {
+    return c.json<UserMeView>(toView(user));
+  }
+  const [updated] = await db
+    .update(users)
+    .set({ stellarAddress: parsed.data.address, updatedAt: sql`NOW()` })
+    .where(eq(users.id, user.id))
+    .returning();
+  if (updated === undefined) {
     return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
   }
   return c.json<UserMeView>(toView(updated));

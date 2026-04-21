@@ -64,6 +64,13 @@
       "when": 1777700000000,
       "tag": "0008_orders_loop_asset_payment",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1777800000000,
+      "tag": "0009_users_stellar_address",
+      "breakpoints": true
     }
   ]
 }

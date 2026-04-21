@@ -40,7 +40,7 @@ import { notifyHealthChange } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
 import { treasuryHandler } from './admin/treasury.js';
-import { getMeHandler, setHomeCurrencyHandler } from './users/handler.js';
+import { getMeHandler, setHomeCurrencyHandler, setStellarAddressHandler } from './users/handler.js';
 
 export const app = new Hono();
 
@@ -575,6 +575,12 @@ app.get('/api/users/me', rateLimit(60, 60_000), getMeHandler);
 // Rate limit lower than GET: users only hit this during signup, so 10/min
 // is plenty of headroom for a double-tap retry without enabling enumeration.
 app.post('/api/users/me/home-currency', rateLimit(10, 60_000), setHomeCurrencyHandler);
+// PUT /api/users/me/stellar-address — opt in / out of on-chain cashback
+// payouts by linking a Stellar address (ADR 015). Null body unlinks.
+// Rate-limited same cadence as other profile writes — a user changing
+// wallets is a low-volume action, 10/min is plenty without enabling
+// enumeration.
+app.put('/api/users/me/stellar-address', rateLimit(10, 60_000), setStellarAddressHandler);
 
 // ─── Admin (authenticated + admin-flagged) ──────────────────────────────────
 //
