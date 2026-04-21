@@ -29,8 +29,13 @@ import type { Context } from 'hono';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { userCredits, creditTransactions, HOME_CURRENCIES } from '../db/schema.js';
+import { env } from '../env.js';
+import { logger } from '../logger.js';
 import { getOperatorHealth, operatorPoolSize } from '../ctx/operator-pool.js';
 import { payoutAssetFor, type LoopAssetCode } from '../credits/payout-asset.js';
+import { getAccountBalances } from '../payments/horizon-balances.js';
+
+const log = logger.child({ handler: 'treasury' });
 
 export interface LoopLiability {
   /** Outstanding claim in the matching fiat's minor units (pence, cents). */
@@ -99,18 +104,13 @@ export async function treasuryHandler(c: Context): Promise<Response> {
   }
 
   const liabilities = buildLiabilities(outstanding);
+  const assets = await buildAssets();
 
   const snapshot: TreasurySnapshot = {
     outstanding,
     totals,
     liabilities,
-    // Live Stellar-side holdings land in a follow-up slice once the
-    // operator account(s) are configured + Horizon reads are wired.
-    // Null today so the UI can render "—" rather than a misleading 0.
-    assets: {
-      USDC: { stroops: null },
-      XLM: { stroops: null },
-    },
+    assets,
     operatorPool: {
       size: operatorPoolSize(),
       operators: getOperatorHealth(),
@@ -118,6 +118,36 @@ export async function treasuryHandler(c: Context): Promise<Response> {
   };
 
   return c.json(snapshot);
+}
+
+/**
+ * Reads the live USDC + XLM balances on Loop's operator account
+ * (currently the same as `LOOP_STELLAR_DEPOSIT_ADDRESS`). A Horizon
+ * failure does NOT 500 the treasury handler — this surface is the
+ * admin's primary view into financial state, and we'd rather render
+ * "—" next to a best-effort stale everything-else than lose the
+ * whole page to a transient upstream blip. The 30s cache in
+ * getAccountBalances already handles the hot path.
+ *
+ * When `LOOP_STELLAR_DEPOSIT_ADDRESS` is unset, we return null stroops
+ * — a dev / pre-deploy environment with no Stellar wiring shouldn't
+ * show misleading zeros to the operator.
+ */
+async function buildAssets(): Promise<TreasurySnapshot['assets']> {
+  const account = env.LOOP_STELLAR_DEPOSIT_ADDRESS;
+  if (account === undefined) {
+    return { USDC: { stroops: null }, XLM: { stroops: null } };
+  }
+  try {
+    const snap = await getAccountBalances(account, env.LOOP_STELLAR_USDC_ISSUER ?? null);
+    return {
+      USDC: { stroops: snap.usdcStroops?.toString() ?? null },
+      XLM: { stroops: snap.xlmStroops?.toString() ?? null },
+    };
+  } catch (err) {
+    log.warn({ err, account }, 'Horizon balance read failed — treasury assets unavailable');
+    return { USDC: { stroops: null }, XLM: { stroops: null } };
+  }
 }
 
 /**
