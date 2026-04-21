@@ -238,6 +238,45 @@ const OrderListResponse = registry.register(
 // envelope instead of trying to unmarshal the raw Order type.
 const OrderDetailResponse = registry.register('OrderDetailResponse', z.object({ order: Order }));
 
+// ─── Users ──────────────────────────────────────────────────────────────────
+
+const UserMeView = registry.register(
+  'UserMeView',
+  z.object({
+    id: z.string().uuid(),
+    email: z.string().email(),
+    isAdmin: z.boolean(),
+    homeCurrency: z.enum(['USD', 'GBP', 'EUR']).openapi({
+      description:
+        'Fiat the account is denominated in (ADR 015). Drives order pricing + the LOOP-asset cashback payout.',
+    }),
+    stellarAddress: z.string().nullable().openapi({
+      description:
+        "User's linked Stellar wallet for on-chain payouts. Null = unlinked; cashback accrues off-chain only.",
+    }),
+  }),
+);
+
+const SetHomeCurrencyBody = registry.register(
+  'SetHomeCurrencyBody',
+  z.object({
+    currency: z.enum(['USD', 'GBP', 'EUR']),
+  }),
+);
+
+const SetStellarAddressBody = registry.register(
+  'SetStellarAddressBody',
+  z.object({
+    address: z
+      .string()
+      .regex(/^G[A-Z2-7]{55}$/)
+      .nullable()
+      .openapi({
+        description: 'Stellar public key (G…). Passing null unlinks the current wallet.',
+      }),
+  }),
+);
+
 // ─── Clustering ─────────────────────────────────────────────────────────────
 
 const ClusterBounds = z.object({
@@ -588,6 +627,111 @@ registry.registerPath({
   },
 });
 
+// ─── User profile (ADR 015) ──────────────────────────────────────────────────
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/users/me',
+  summary: 'Current user profile (ADR 015).',
+  description:
+    'Returns id / email / admin flag / home currency / linked Stellar address. Home currency drives order denomination + cashback-asset selection; the linked address is the destination for on-chain LOOP-asset payouts (null = off-chain accrual only).',
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: { description: 'Profile', content: { 'application/json': { schema: UserMeView } } },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error resolving the user',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/api/users/me/home-currency',
+  summary: "Set the user's home currency (ADR 015).",
+  description:
+    'Onboarding-time picker. Writes `users.home_currency` when the user has zero orders. After the first order lands, the ledger is pinned to that currency and the endpoint returns 409 `HOME_CURRENCY_LOCKED` — support has a separate path to correct it.',
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  request: { body: { content: { 'application/json': { schema: SetHomeCurrencyBody } } } },
+  responses: {
+    200: {
+      description: 'Updated profile',
+      content: { 'application/json': { schema: UserMeView } },
+    },
+    400: {
+      description: 'Validation error',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'User row disappeared between resolve + update',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    409: {
+      description: 'HOME_CURRENCY_LOCKED — user has already placed orders',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error resolving the user',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'put',
+  path: '/api/users/me/stellar-address',
+  summary: "Link or unlink the user's Stellar wallet (ADR 015).",
+  description:
+    'Pass a Stellar public key (G…) to opt into on-chain cashback payouts; pass `null` to unlink. Relinking is allowed at any time — the column is a routing hint, not a ledger-pinned value.',
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  request: { body: { content: { 'application/json': { schema: SetStellarAddressBody } } } },
+  responses: {
+    200: {
+      description: 'Updated profile',
+      content: { 'application/json': { schema: UserMeView } },
+    },
+    400: {
+      description: 'Malformed Stellar pubkey',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'User row disappeared between resolve + update',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error resolving the user',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 registry.registerPath({
   method: 'get',
   path: '/api/clusters',
@@ -693,6 +837,11 @@ export function generateOpenApiSpec(): ReturnType<typeof generator.generateDocum
       { name: 'Auth', description: 'OTP request / verify / refresh (proxied to upstream).' },
       { name: 'Merchants', description: 'Merchant catalog, cached from upstream.' },
       { name: 'Orders', description: 'Gift card orders.' },
+      {
+        name: 'Users',
+        description:
+          'User profile: home currency + linked Stellar wallet (ADR 015). Called during onboarding and from the wallet-settings screen.',
+      },
       { name: 'Clustering', description: 'Map cluster / location points.' },
       { name: 'Images', description: 'Image proxy + resize.' },
     ],
