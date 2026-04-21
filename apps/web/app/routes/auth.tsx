@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import type { Route } from './+types/auth';
 import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
@@ -231,6 +231,18 @@ export default function AuthRoute(): React.JSX.Element {
             <div className="space-y-3">
               {isNative && <ThemeToggleRow />}
               {isNative && <BiometricLockRow />}
+              <Link
+                to="/settings/wallet"
+                className="block w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 text-left text-gray-900 dark:text-white hover:border-gray-400 dark:hover:border-gray-600 transition-colors"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">Wallet</span>
+                  <span className="text-gray-400 dark:text-gray-500">›</span>
+                </div>
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  Link a Stellar address to receive on-chain cashback.
+                </p>
+              </Link>
               <Button
                 variant="secondary"
                 className="w-full"
