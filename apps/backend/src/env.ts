@@ -138,6 +138,19 @@ export const EnvSchema = z.object({
   // false → the legacy CTX-proxy auth path stays in place.
   LOOP_AUTH_NATIVE_ENABLED: envBoolean.default(false),
 
+  // Social login — Google (ADR 014). One client id per platform;
+  // at least one must be set to activate the Google endpoint. The
+  // id_token's `aud` must match one of these values. Generate in
+  // Google Cloud Console → APIs & Services → Credentials.
+  GOOGLE_OAUTH_CLIENT_ID_WEB: z.string().optional(),
+  GOOGLE_OAUTH_CLIENT_ID_IOS: z.string().optional(),
+  GOOGLE_OAUTH_CLIENT_ID_ANDROID: z.string().optional(),
+
+  // Social login — Apple (ADR 014). The service id (web) / bundle id
+  // (native). Apple's id_token `aud` must match this. Absent →
+  // /api/auth/social/apple returns 404.
+  APPLE_SIGN_IN_SERVICE_ID: z.string().optional(),
+
   // Loop's Stellar deposit address for Loop-native orders (ADR 010).
   // Users paying with XLM / USDC send to this address, encoding the
   // order's payment memo in the transaction's memo_text so the

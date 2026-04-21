@@ -35,6 +35,7 @@ import {
   loopListOrdersHandler,
 } from './orders/loop-handler.js';
 import { configHandler } from './config/handler.js';
+import { googleSocialLoginHandler, appleSocialLoginHandler } from './auth/social.js';
 import { notifyHealthChange } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
@@ -487,6 +488,11 @@ app.post('/api/auth/verify-otp', rateLimit(10, 60_000), verifyOtpHandler);
 // Refresh abuse defense: legit clients refresh once per access-token lifetime,
 // so 30/min per IP leaves plenty of headroom without enabling spray attacks.
 app.post('/api/auth/refresh', rateLimit(30, 60_000), refreshHandler);
+// Social login (ADR 014). Same 10/min cap as verify-otp — both
+// are unauthenticated entry points and both resolve to a minted
+// Loop JWT pair on success.
+app.post('/api/auth/social/google', rateLimit(10, 60_000), googleSocialLoginHandler);
+app.post('/api/auth/social/apple', rateLimit(10, 60_000), appleSocialLoginHandler);
 // Logout: 20/min per IP. The handler fans out to an upstream revoke, so
 // without a limit an attacker could cheaply spam arbitrary refresh tokens
 // at CTX through us.
