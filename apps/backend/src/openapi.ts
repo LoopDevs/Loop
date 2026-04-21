@@ -277,6 +277,103 @@ const SetStellarAddressBody = registry.register(
   }),
 );
 
+// ─── Admin (ADR 015 — treasury + payouts) ───────────────────────────────────
+
+const LoopAssetCode = z
+  .enum(['USDLOOP', 'GBPLOOP', 'EURLOOP'])
+  .openapi({ description: 'LOOP-branded fiat stablecoin code (ADR 015).' });
+
+const PayoutState = z
+  .enum(['pending', 'submitted', 'confirmed', 'failed'])
+  .openapi({ description: 'pending_payouts row lifecycle (ADR 015/016).' });
+
+const LoopLiability = z.object({
+  outstandingMinor: z.string().openapi({
+    description:
+      'Outstanding claim in the matching fiat minor units (cents / pence). BigInt as string.',
+  }),
+  issuer: z.string().nullable().openapi({
+    description: 'Stellar issuer account pinned by env for this asset; null when unconfigured.',
+  }),
+});
+
+const TreasuryHolding = z.object({
+  stroops: z.string().nullable().openapi({
+    description:
+      'Live on-chain balance in stroops (7 decimals). Null when the operator account is unset or Horizon is temporarily unreachable.',
+  }),
+});
+
+const OperatorHealthEntry = z.object({
+  id: z.string(),
+  state: z.string().openapi({
+    description: 'Circuit state for this operator (closed / half_open / open).',
+  }),
+});
+
+const TreasurySnapshot = registry.register(
+  'TreasurySnapshot',
+  z.object({
+    outstanding: z.record(z.string(), z.string()).openapi({
+      description: 'Sum of user_credits.balance_minor per currency, as bigint-strings.',
+    }),
+    totals: z.record(z.string(), z.record(z.string(), z.string())).openapi({
+      description: 'Sum of credit_transactions.amount_minor grouped by (currency, type).',
+    }),
+    liabilities: z.record(LoopAssetCode, LoopLiability).openapi({
+      description:
+        'ADR 015 — per LOOP asset, the outstanding user claim + the configured issuer. Stable shape across all three codes.',
+    }),
+    assets: z.object({
+      USDC: TreasuryHolding,
+      XLM: TreasuryHolding,
+    }),
+    payouts: z.record(PayoutState, z.string()).openapi({
+      description:
+        'ADR 015 — pending_payouts row counts per state. Always returns an entry for each state (zero when empty).',
+    }),
+    operatorPool: z.object({
+      size: z.number().int(),
+      operators: z.array(OperatorHealthEntry),
+    }),
+  }),
+);
+
+const AdminPayoutView = registry.register(
+  'AdminPayoutView',
+  z.object({
+    id: z.string().uuid(),
+    userId: z.string().uuid(),
+    orderId: z.string().uuid(),
+    assetCode: z
+      .string()
+      .openapi({ description: 'LOOP asset code — USDLOOP / GBPLOOP / EURLOOP.' }),
+    assetIssuer: z.string().openapi({ description: 'Stellar issuer account for this asset.' }),
+    toAddress: z.string().openapi({ description: 'Destination Stellar address (user wallet).' }),
+    amountStroops: z
+      .string()
+      .openapi({ description: 'Payout amount in stroops. BigInt as string.' }),
+    memoText: z.string().openapi({
+      description: 'Memo that memo-idempotency pre-check searches for on retry (ADR 016).',
+    }),
+    state: PayoutState,
+    txHash: z.string().nullable(),
+    lastError: z.string().nullable().openapi({
+      description: 'Most recent submit error (classified kind from payout-submit).',
+    }),
+    attempts: z.number().int(),
+    createdAt: z.string(),
+    submittedAt: z.string().nullable(),
+    confirmedAt: z.string().nullable(),
+    failedAt: z.string().nullable(),
+  }),
+);
+
+const AdminPayoutListResponse = registry.register(
+  'AdminPayoutListResponse',
+  z.object({ payouts: z.array(AdminPayoutView) }),
+);
+
 // ─── Clustering ─────────────────────────────────────────────────────────────
 
 const ClusterBounds = z.object({
@@ -732,6 +829,126 @@ registry.registerPath({
   },
 });
 
+// ─── Admin — treasury + payouts (ADR 015) ───────────────────────────────────
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/treasury',
+  summary: 'Admin treasury snapshot (ADR 009 / 011 / 015).',
+  description:
+    "Single read-optimised aggregate the admin UI renders without running its own SQL. Covers the credit-ledger outstanding + totals (ADR 009), LOOP-asset liabilities keyed by asset code (ADR 015), Loop's own USDC / XLM holdings, pending-payouts counts per state, and the CTX operator-pool health snapshot (ADR 013). Horizon failures don't 500 this surface — liability counts are authoritative from Postgres; assets fall back to null-stroops when the balance read fails.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Snapshot',
+      content: { 'application/json': { schema: TreasurySnapshot } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/payouts',
+  summary: 'Paginated pending-payouts backlog (ADR 015).',
+  description:
+    'Admin drills into the payouts page from the treasury snapshot state counts. Filter with `?state=failed` (or pending / submitted / confirmed), page older rows with `?before=<iso-8601>`, cap with `?limit=` (default 20, max 100).',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      state: PayoutState.optional().openapi({
+        description: 'Filter to a single lifecycle state. Omitted → all states.',
+      }),
+      before: z
+        .string()
+        .datetime()
+        .optional()
+        .openapi({ description: 'ISO-8601 — return rows strictly older than this createdAt.' }),
+      limit: z.coerce.number().int().min(1).max(100).optional().openapi({
+        description: 'Page size. Default 20, hard-capped at 100.',
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Payout rows',
+      content: { 'application/json': { schema: AdminPayoutListResponse } },
+    },
+    400: {
+      description: 'Invalid state or before',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/api/admin/payouts/{id}/retry',
+  summary: 'Flip a failed payout back to pending (ADR 015 / 016).',
+  description:
+    'Admin-only manual retry: resets a `failed` pending_payouts row to `pending` so the submit worker picks it up on the next tick. 404 when the id matches nothing or the row is in a non-failed state — the admin UI should refresh the list. The worker enforces memo-idempotency on re-submit (ADR 016) so double-retry never double-pays.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ id: z.string().uuid() }),
+  },
+  responses: {
+    200: {
+      description: 'Updated payout row',
+      content: { 'application/json': { schema: AdminPayoutView } },
+    },
+    400: {
+      description: 'Missing or malformed id',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'Payout not found or not in failed state',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (20/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error resetting the row',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 registry.registerPath({
   method: 'get',
   path: '/api/clusters',
@@ -841,6 +1058,11 @@ export function generateOpenApiSpec(): ReturnType<typeof generator.generateDocum
         name: 'Users',
         description:
           'User profile: home currency + linked Stellar wallet (ADR 015). Called during onboarding and from the wallet-settings screen.',
+      },
+      {
+        name: 'Admin',
+        description:
+          'Admin-only surfaces: treasury snapshot + pending-payouts backlog (ADR 015). All routes require both `requireAuth` and `requireAdmin`.',
       },
       { name: 'Clustering', description: 'Map cluster / location points.' },
       { name: 'Images', description: 'Image proxy + resize.' },
