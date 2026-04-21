@@ -289,7 +289,7 @@ accrues cashback off-chain.
       Cross-FX refactor (#353) lets cross-region orders pay out
       on-chain in the user's home currency.
 - [x] `credits/payout-asset.ts` (#332) — static `homeCurrency →
-    loopAssetCode` map + issuer lookup via env.
+loopAssetCode` map + issuer lookup via env.
 - [x] Outbound payout worker (#347 schema + #348 fulfillment write +
       #355 SDK + #356 worker loop) — signs + submits Stellar
       Payments on each fulfillment; memo-idempotent retry with
