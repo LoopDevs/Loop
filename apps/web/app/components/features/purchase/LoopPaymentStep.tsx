@@ -69,7 +69,9 @@ export function LoopPaymentStep({ create, onTerminal }: LoopPaymentStepProps): R
         <h2 className="text-2xl font-semibold text-gray-900 dark:text-white">{stateLabel}</h2>
       </header>
 
-      {create.payment.method === 'credit' ? (
+      {orderQuery.data?.state === 'fulfilled' ? (
+        <RedemptionBody order={orderQuery.data} />
+      ) : create.payment.method === 'credit' ? (
         <CreditPaymentBody order={orderQuery.data} />
       ) : (
         <StellarPaymentBody
@@ -88,6 +90,60 @@ export function LoopPaymentStep({ create, onTerminal }: LoopPaymentStepProps): R
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * Displayed once the order reaches `fulfilled`. Shows whichever of
+ * code / PIN / redeem URL CTX returned — merchant types vary in
+ * which fields they use. Copy buttons on the static values; a
+ * launch button on the URL.
+ *
+ * All-null redemption (CTX detail fetch failed at procurement time)
+ * is surfaced as a "Check your email" fallback — the operator can
+ * backfill later, and the user's order history retains the entry.
+ */
+function RedemptionBody({ order }: { order: LoopOrderView }): React.JSX.Element {
+  const hasCode = order.redeemCode !== null && order.redeemCode.length > 0;
+  const hasPin = order.redeemPin !== null && order.redeemPin.length > 0;
+  const hasUrl = order.redeemUrl !== null && order.redeemUrl.length > 0;
+
+  if (!hasCode && !hasPin && !hasUrl) {
+    return (
+      <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 text-center">
+        <p className="text-sm text-gray-700 dark:text-gray-300">
+          Your gift card is ready. Redemption details are still coming through — check back in a
+          moment, or look at your email.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-green-200 dark:border-green-900/40 bg-green-50/50 dark:bg-green-900/10 p-4 space-y-3">
+      {hasCode ? <Row label="Gift card code" value={order.redeemCode!} copyable mono /> : null}
+      {hasPin ? <Row label="PIN" value={order.redeemPin!} copyable mono /> : null}
+      {hasUrl ? (
+        <div>
+          <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+            Redeem online
+          </div>
+          <a
+            href={order.redeemUrl!}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center w-full rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2"
+          >
+            Open redemption link
+          </a>
+        </div>
+      ) : null}
+      {order.userCashbackMinor !== '0' ? (
+        <p className="text-xs text-green-700 dark:text-green-300 text-center pt-2 border-t border-green-200 dark:border-green-900/40">
+          {formatMinor(order.userCashbackMinor)} {order.currency} cashback credited.
+        </p>
+      ) : null}
+    </div>
   );
 }
 

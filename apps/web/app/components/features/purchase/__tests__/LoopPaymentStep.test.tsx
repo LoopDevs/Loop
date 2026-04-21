@@ -134,6 +134,87 @@ describe('LoopPaymentStep — stellar (xlm/usdc)', () => {
   });
 });
 
+describe('LoopPaymentStep — fulfilled redemption', () => {
+  it('shows the code + PIN with copy buttons when both are present', async () => {
+    getLoopOrderMock.mockResolvedValue(
+      mkOrder({
+        state: 'fulfilled',
+        redeemCode: 'CARD-123-XYZ',
+        redeemPin: '4242',
+        ctxOrderId: 'ctx-abc',
+        fulfilledAt: new Date().toISOString(),
+      }),
+    );
+    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    await waitFor(() => screen.getByText('CARD-123-XYZ'));
+    expect(screen.getByText('4242')).toBeDefined();
+    // Two copy buttons (code + PIN)
+    expect(screen.getAllByRole('button', { name: /Copy/i }).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('shows a "Open redemption link" anchor when redeemUrl is present', async () => {
+    getLoopOrderMock.mockResolvedValue(
+      mkOrder({
+        state: 'fulfilled',
+        redeemCode: null,
+        redeemPin: null,
+        redeemUrl: 'https://redeem.example.com/abc',
+        ctxOrderId: 'ctx-abc',
+        fulfilledAt: new Date().toISOString(),
+      }),
+    );
+    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    const link = await waitFor(() => screen.getByRole('link', { name: /Open redemption link/i }));
+    expect(link.getAttribute('href')).toBe('https://redeem.example.com/abc');
+    expect(link.getAttribute('rel')).toMatch(/noopener/);
+  });
+
+  it('renders a fallback banner when all redemption fields are null', async () => {
+    getLoopOrderMock.mockResolvedValue(
+      mkOrder({
+        state: 'fulfilled',
+        redeemCode: null,
+        redeemPin: null,
+        redeemUrl: null,
+        ctxOrderId: 'ctx-abc',
+        fulfilledAt: new Date().toISOString(),
+      }),
+    );
+    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    await waitFor(() => screen.getByText(/still coming through/i));
+  });
+
+  it('surfaces the cashback credited line when userCashbackMinor > 0', async () => {
+    getLoopOrderMock.mockResolvedValue(
+      mkOrder({
+        state: 'fulfilled',
+        redeemCode: 'CODE',
+        userCashbackMinor: '500', // $5.00
+        currency: 'USD',
+        ctxOrderId: 'ctx-abc',
+        fulfilledAt: new Date().toISOString(),
+      }),
+    );
+    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    await waitFor(() => screen.getByText(/5\.00 USD cashback/i));
+  });
+
+  it('omits the cashback line when userCashbackMinor is 0', async () => {
+    getLoopOrderMock.mockResolvedValue(
+      mkOrder({
+        state: 'fulfilled',
+        redeemCode: 'CODE',
+        userCashbackMinor: '0',
+        ctxOrderId: 'ctx-abc',
+        fulfilledAt: new Date().toISOString(),
+      }),
+    );
+    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+    await waitFor(() => screen.getByText('CODE'));
+    expect(screen.queryByText(/cashback credited/i)).toBeNull();
+  });
+});
+
 describe('LoopPaymentStep — credit', () => {
   it('shows a "no action needed" body and spinner while in flight', async () => {
     getLoopOrderMock.mockResolvedValue(
