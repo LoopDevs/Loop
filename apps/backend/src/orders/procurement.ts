@@ -20,6 +20,7 @@ import { asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '../db/client.js';
 import { orders } from '../db/schema.js';
+import { env } from '../env.js';
 import { logger } from '../logger.js';
 import {
   markOrderProcuring,
@@ -105,6 +106,35 @@ export interface ProcurementTickResult {
 }
 
 /**
+ * Selects the crypto currency to pay CTX in (ADR 015 flow 3).
+ *
+ * Defaults to USDC — Loop wants to hold USDC for defindex yield,
+ * but we can't pay CTX in USDC if the operator account's USDC
+ * balance has dropped below the operator-configured floor. In
+ * that case we burn XLM instead so procurement isn't blocked on
+ * an ops top-up.
+ *
+ * Pure: no I/O. The caller provides the balance (from a future
+ * Horizon read) and the floor (from env); this decides which
+ * asset to request. Keeping this testable in isolation means the
+ * policy is easy to adjust without re-exercising the whole tick.
+ *
+ * `balanceStroops === null` means we haven't read a balance yet
+ * (Horizon integration is deferred) — default to USDC so the MVP
+ * procurement path is unchanged. `floorStroops === null` means
+ * the operator hasn't set a floor — fallback is disabled.
+ */
+export function pickProcurementAsset(args: {
+  balanceStroops: bigint | null;
+  floorStroops: bigint | null;
+}): 'USDC' | 'XLM' {
+  if (args.floorStroops === null || args.balanceStroops === null) {
+    return 'USDC';
+  }
+  return args.balanceStroops < args.floorStroops ? 'XLM' : 'USDC';
+}
+
+/**
  * Attempts procurement on a single order. Returns the outcome label
  * so callers can increment their batch counters.
  */
@@ -125,12 +155,21 @@ async function procureOne(order: Order): Promise<'fulfilled' | 'failed' | 'skipp
     return 'skipped';
   }
 
+  // ADR 015 — USDC is the default CTX-payment rail; XLM is the
+  // break-glass path when our operator USDC balance dips below the
+  // configured floor. Live Horizon balance is a follow-up slice, so
+  // for now `balanceStroops: null` always resolves to USDC.
+  const cryptoCurrency = pickProcurementAsset({
+    balanceStroops: null,
+    floorStroops: env.LOOP_STELLAR_USDC_FLOOR_STROOPS ?? null,
+  });
+
   try {
     const res = await operatorFetch(upstreamUrl('/gift-cards'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        cryptoCurrency: 'XLM',
+        cryptoCurrency,
         fiatCurrency: order.currency,
         // CTX expects fiatAmount as a decimal string in the major unit.
         fiatAmount: (Number(order.faceValueMinor) / 100).toFixed(2),
