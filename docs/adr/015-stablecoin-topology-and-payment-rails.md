@@ -1,8 +1,9 @@
 # ADR 015: Stablecoin topology and payment rails
 
-Status: Proposed
+Status: Accepted
 Date: 2026-04-21
-Related: ADR 009 (credits ledger), ADR 010 (principal switch), ADR 011 (admin panel), ADR 013 (Loop-owned auth + CTX operator pool)
+Implemented: 2026-04-21 (backend data layer + admin UI + onboarding picker + wallet settings; gated behind `LOOP_WORKERS_ENABLED` + issuer env vars — see rollout checklist at the bottom)
+Related: ADR 009 (credits ledger), ADR 010 (principal switch), ADR 011 (admin panel), ADR 013 (Loop-owned auth + CTX operator pool), ADR 016 (Stellar SDK for outbound payouts)
 
 ## Context
 
@@ -269,46 +270,53 @@ going through it.
 
 ## Rollout checklist
 
-Engineering work this ADR unblocks:
+Engineering work this ADR unblocks — all items below landed on
+main. The runtime stays gated behind `LOOP_WORKERS_ENABLED` +
+the per-asset issuer env vars, so a deployment without those
+set is a zero-cost no-op at the Stellar side; the ledger still
+accrues cashback off-chain.
 
-- [ ] `users.home_currency` column — `text NOT NULL`, check
-      constraint `IN ('USD','GBP','EUR')`, defaulted by a migration
-      off existing country signal (or `USD` if unknown) for pre-
-      existing rows. Schema lives in `apps/backend/src/db/schema.ts`.
-- [ ] `user_credits` keyed by `(user_id, currency)` — primary key
-      (or unique constraint) on the pair, not just `user_id`. MVP
-      writes one row per user; the composite key is pure future-
-      proofing for multi-balance users (see "Future" section).
-- [ ] Order creation — denominate the order's pinned
-      `face_value_minor` + `currency` in the user's home currency
-      via the Frankfurter FX feed (#328). Receipt, watcher size
-      check, and cashback math all key off this pinned value.
-- [ ] `credits/payout-asset.ts` — static `homeCurrency →
-loopAssetCode` mapping + issuer addresses (env-configured).
-- [ ] Extend `markOrderFulfilled` (or a payout worker adjacent to
-      it) to emit a Stellar payment of the matching LOOP asset to
-      the user's linked Stellar address, if one is on file.
-- [ ] Onboarding UX — an explicit "pick your home currency" step
-      (or inference from locale + confirmation), stored on the
-      user row before first order creation.
-- [ ] Watcher: extend `isMatchingIncomingPayment` allowlist to
-      include the three LOOP asset codes + their Loop-issuer account
-      (user paying us in their own currency via LOOP asset).
-- [ ] Procurement worker: default CTX payment to USDC; fall back
-      to XLM only when the USDC operator balance is below a
-      configurable floor (future env var).
-- [ ] Admin treasury: split the outstanding-balance card into
-      "Loop liabilities (LOOP assets outstanding)" vs.
-      "Loop assets (USDC held, XLM held)" so the operator sees
-      the yield-earning pile distinctly. Break liabilities down
-      by asset (USDLOOP / GBPLOOP / EURLOOP) to mirror the
-      per-currency reserve accounts.
-- [ ] Env vars:
+- [x] `users.home_currency` column (#331) — `char(3) NOT NULL DEFAULT 'USD'`,
+      `CHECK IN ('USD','GBP','EUR')`. Existing rows default to USD;
+      support corrects the region on a case-by-case basis before
+      the user's first order.
+- [x] `user_credits` keyed by `(user_id, currency)` — unique index
+      already in place since ADR 009's initial schema; the composite
+      key unblocks future multi-balance users without a migration.
+- [x] Order creation FX-pin (#336) — `chargeMinor` + `chargeCurrency`
+      pinned via Frankfurter at creation; the watcher size-checks
+      against charge_minor, the ledger writes in charge_currency.
+      Cross-FX refactor (#353) lets cross-region orders pay out
+      on-chain in the user's home currency.
+- [x] `credits/payout-asset.ts` (#332) — static `homeCurrency →
+    loopAssetCode` map + issuer lookup via env.
+- [x] Outbound payout worker (#347 schema + #348 fulfillment write +
+      #355 SDK + #356 worker loop) — signs + submits Stellar
+      Payments on each fulfillment; memo-idempotent retry with
+      classified transient / terminal error policy (ADR 016).
+- [x] Onboarding UX (#357) — currency picker between OTP and
+      biometric; default from `navigator.language`.
+- [x] Watcher LOOP-asset allowlist (#338) — `isMatchingIncomingPayment`
+      accepts USDLOOP / GBPLOOP / EURLOOP alongside USDC + XLM,
+      with 1:1 fiat peg size check.
+- [x] Procurement USDC-default + XLM-fallback (#340 + #344) —
+      pure picker + live Horizon balance read + floor env var.
+- [x] Admin treasury UI (#337 + #343 + #349 + #358) — liabilities
+      card per LOOP asset (outstanding + issuer), assets card
+      (USDC + XLM stroops from live Horizon), payout counts card
+      with link-through to the drilldown.
+- [x] Admin payout drilldown (#350 list endpoint + #351 retry
+      endpoint + #359 web page + #364 link-through from treasury).
+- [x] Env vars registered + documented:
       `LOOP_STELLAR_USDLOOP_ISSUER`,
       `LOOP_STELLAR_GBPLOOP_ISSUER`,
       `LOOP_STELLAR_EURLOOP_ISSUER`,
-      `LOOP_STELLAR_USDC_FLOOR_STROOPS` (operator-pool USDC
-      reserve below which procurement falls back to XLM).
+      `LOOP_STELLAR_USDC_FLOOR_STROOPS`,
+      `LOOP_STELLAR_OPERATOR_SECRET` (ADR 016).
+- [x] Ops observability (#360 + #361) — Discord alerts on payout
+      failed + USDC reserve below floor.
+- [x] User-facing wallet-link settings (#362) — `/settings/wallet`
+      page to paste a Stellar pubkey + unlink.
 
 ## Open questions
 
