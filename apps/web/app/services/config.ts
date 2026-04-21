@@ -15,3 +15,24 @@
  */
 export const API_BASE =
   import.meta.env['VITE_API_URL'] ?? (import.meta.env.PROD ? 'https://api.loopfinance.io' : '');
+
+/**
+ * Feature-flag snapshot from the backend (`GET /api/config`). These
+ * gate the Loop-native code paths so the web app doesn't try to call
+ * an endpoint that isn't active in the current deployment.
+ */
+export interface AppConfig {
+  loopAuthNativeEnabled: boolean;
+  loopOrdersEnabled: boolean;
+}
+
+/** Fetches the public app config. No auth required. */
+export async function fetchAppConfig(): Promise<AppConfig> {
+  const res = await fetch(`${API_BASE}/api/config`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    throw new Error(`/api/config returned ${res.status}`);
+  }
+  return (await res.json()) as AppConfig;
+}

@@ -30,6 +30,7 @@ import {
 } from './auth/handler.js';
 import { createOrderHandler, listOrdersHandler, getOrderHandler } from './orders/handler.js';
 import { loopCreateOrderHandler, loopGetOrderHandler } from './orders/loop-handler.js';
+import { configHandler } from './config/handler.js';
 import { notifyHealthChange } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
@@ -435,6 +436,15 @@ app.get('/health', async (c) => {
 // ClusterMap so 60/min leaves them plenty of headroom while stopping a bot
 // from spamming varied bounds/zoom to pressure the backend.
 app.get('/api/clusters', rateLimit(60, 60_000), clustersHandler);
+
+// ─── Public client config ────────────────────────────────────────────────────
+
+// ADR 010 / ADR 013. Small object of feature flags the web client
+// needs to decide which code paths to take. Unauthenticated — the
+// client needs this before login. Rate-limited generously; the
+// response is Cache-Control: max-age=600 so a healthy client hits
+// it rarely.
+app.get('/api/config', rateLimit(120, 60_000), configHandler);
 
 // ─── Image proxy ──────────────────────────────────────────────────────────────
 

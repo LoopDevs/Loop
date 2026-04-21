@@ -202,6 +202,7 @@ GET  /api/merchants/by-slug/:slug
 GET  /api/merchants/:id
 GET  /api/clusters           ?west=&south=&east=&north=&zoom=
 GET  /api/image              ?url=&width=&height=&quality=
+GET  /api/config                            — client feature flags (ADR 010 / 013)
 POST /api/auth/request-otp
 POST /api/auth/verify-otp
 POST /api/auth/refresh
