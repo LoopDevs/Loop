@@ -171,6 +171,27 @@ export const EnvSchema = z.object({
     .regex(/^G[A-Z2-7]{55}$/, { message: 'must be a valid Stellar public key (G...)' })
     .optional(),
 
+  // Issuer accounts for the three LOOP-branded Stellar assets (ADR 015).
+  // Loop issues USDLOOP / GBPLOOP / EURLOOP 1:1-backed against fiat
+  // reserves in regulated bank accounts, and pays cashback in the
+  // asset matching the user's home currency. Absent → the payout
+  // worker treats cashback as off-chain-only for that currency
+  // (ledger row written, Stellar side skipped) so a partially-
+  // configured deployment doesn't block fulfillment of orders from
+  // users whose currency is wired up.
+  LOOP_STELLAR_USDLOOP_ISSUER: z
+    .string()
+    .regex(/^G[A-Z2-7]{55}$/, { message: 'must be a valid Stellar public key (G...)' })
+    .optional(),
+  LOOP_STELLAR_GBPLOOP_ISSUER: z
+    .string()
+    .regex(/^G[A-Z2-7]{55}$/, { message: 'must be a valid Stellar public key (G...)' })
+    .optional(),
+  LOOP_STELLAR_EURLOOP_ISSUER: z
+    .string()
+    .regex(/^G[A-Z2-7]{55}$/, { message: 'must be a valid Stellar public key (G...)' })
+    .optional(),
+
   // Feature flag for the Loop-native order workers (ADR 010). When
   // true at boot, the backend starts the payment watcher and
   // procurement worker intervals. Default false — workers are opt-in
