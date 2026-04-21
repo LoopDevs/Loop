@@ -59,7 +59,7 @@ vi.mock('../../db/schema.js', async () => {
   };
 });
 
-import { runProcurementTick } from '../procurement.js';
+import { runProcurementTick, pickProcurementAsset } from '../procurement.js';
 import { OperatorPoolUnavailableError } from '../../ctx/operator-pool.js';
 
 type AnyOrder = {
@@ -199,7 +199,10 @@ describe('runProcurementTick', () => {
     const init = operatorFetchMock.mock.calls[0]![1] as RequestInit;
     const body = JSON.parse(String(init.body));
     expect(body).toEqual({
-      cryptoCurrency: 'XLM',
+      // ADR 015 — procurement defaults to USDC. Without a configured
+      // USDC floor + a below-floor balance read, there's nothing to
+      // trigger the XLM fallback.
+      cryptoCurrency: 'USDC',
       fiatCurrency: 'USD',
       fiatAmount: '25.00',
       merchantId: 'target',
@@ -290,5 +293,28 @@ describe('runProcurementTick', () => {
     state.paid = [];
     await runProcurementTick();
     expect(dbMock['limit']!).toHaveBeenCalledWith(10);
+  });
+});
+
+describe('pickProcurementAsset', () => {
+  it('defaults to USDC when no floor is configured', () => {
+    expect(pickProcurementAsset({ balanceStroops: 0n, floorStroops: null })).toBe('USDC');
+    expect(pickProcurementAsset({ balanceStroops: null, floorStroops: null })).toBe('USDC');
+  });
+
+  it('defaults to USDC when no balance has been read (live Horizon integration pending)', () => {
+    expect(pickProcurementAsset({ balanceStroops: null, floorStroops: 10n ** 9n })).toBe('USDC');
+  });
+
+  it('picks USDC when balance is at or above the floor', () => {
+    const floor = 10n ** 9n; // 100 USDC in stroops
+    expect(pickProcurementAsset({ balanceStroops: floor, floorStroops: floor })).toBe('USDC');
+    expect(pickProcurementAsset({ balanceStroops: floor + 1n, floorStroops: floor })).toBe('USDC');
+  });
+
+  it('falls back to XLM when balance is below the floor', () => {
+    const floor = 10n ** 9n;
+    expect(pickProcurementAsset({ balanceStroops: floor - 1n, floorStroops: floor })).toBe('XLM');
+    expect(pickProcurementAsset({ balanceStroops: 0n, floorStroops: floor })).toBe('XLM');
   });
 });

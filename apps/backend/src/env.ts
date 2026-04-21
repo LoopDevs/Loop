@@ -192,6 +192,15 @@ export const EnvSchema = z.object({
     .regex(/^G[A-Z2-7]{55}$/, { message: 'must be a valid Stellar public key (G...)' })
     .optional(),
 
+  // Procurement USDC-reserve floor (ADR 015). When the operator account's
+  // USDC balance drops below this many stroops (7 decimals; 10^7 = 1 USDC),
+  // procurement falls back to paying CTX in XLM instead — trades a small
+  // XLM burn for unblocking fulfillment while the ops top-up is in flight.
+  // Absent → the fallback is disabled and procurement always uses USDC.
+  // Below-floor events are ops-flagged in admin/treasury so the operator
+  // sees them immediately (ADR 015 treasury strategy).
+  LOOP_STELLAR_USDC_FLOOR_STROOPS: z.coerce.bigint().nonnegative().optional(),
+
   // Feature flag for the Loop-native order workers (ADR 010). When
   // true at boot, the backend starts the payment watcher and
   // procurement worker intervals. Default false — workers are opt-in
