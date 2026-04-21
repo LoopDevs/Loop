@@ -46,10 +46,41 @@ describe('configHandler', () => {
     const body = (await res.json()) as {
       loopAuthNativeEnabled: boolean;
       loopOrdersEnabled: boolean;
+      social: {
+        googleClientIdWeb: string | null;
+        googleClientIdIos: string | null;
+        googleClientIdAndroid: string | null;
+        appleServiceId: string | null;
+      };
     };
     expect(body.loopAuthNativeEnabled).toBe(false);
     expect(body.loopOrdersEnabled).toBe(false);
+    expect(body.social).toEqual({
+      googleClientIdWeb: null,
+      googleClientIdIos: null,
+      googleClientIdAndroid: null,
+      appleServiceId: null,
+    });
     expect(headers['Cache-Control']).toMatch(/max-age=600/);
+  });
+
+  it('surfaces configured social client ids', async () => {
+    process.env['GOOGLE_OAUTH_CLIENT_ID_WEB'] = 'web-client.apps.googleusercontent.com';
+    process.env['APPLE_SIGN_IN_SERVICE_ID'] = 'io.loopfinance.app';
+    const { configHandler } = await import('../handler.js');
+    const { ctx } = makeCtx();
+    const body = (await configHandler(ctx).json()) as {
+      social: {
+        googleClientIdWeb: string | null;
+        googleClientIdIos: string | null;
+        appleServiceId: string | null;
+      };
+    };
+    expect(body.social.googleClientIdWeb).toBe('web-client.apps.googleusercontent.com');
+    expect(body.social.googleClientIdIos).toBeNull();
+    expect(body.social.appleServiceId).toBe('io.loopfinance.app');
+    delete process.env['GOOGLE_OAUTH_CLIENT_ID_WEB'];
+    delete process.env['APPLE_SIGN_IN_SERVICE_ID'];
   });
 
   it('reflects LOOP_AUTH_NATIVE_ENABLED independently', async () => {

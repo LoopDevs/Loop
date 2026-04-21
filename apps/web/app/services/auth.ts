@@ -24,6 +24,42 @@ export async function verifyOtp(email: string, otp: string): Promise<VerifyOtpRe
 }
 
 /**
+ * Shape returned by the Loop-native auth endpoints. Social + OTP
+ * converge on this — the client doesn't care which provider produced
+ * the pair.
+ */
+export interface LoopAuthPair {
+  accessToken: string;
+  refreshToken: string;
+}
+
+/**
+ * Exchanges a Google id_token (obtained on-device via the Google
+ * Identity Services SDK) for a Loop access + refresh pair. The
+ * backend verifies the id_token against Google's JWKS, enforces
+ * audience + email_verified, then resolves or creates the Loop user
+ * (ADR 014). See `/api/auth/social/google`.
+ */
+export async function socialLoginGoogle(idToken: string): Promise<LoopAuthPair> {
+  return apiRequest<LoopAuthPair>('/api/auth/social/google', {
+    method: 'POST',
+    body: { idToken, platform: getPlatform() },
+  });
+}
+
+/**
+ * Exchanges an Apple id_token for a Loop access + refresh pair.
+ * Same flow as Google; Apple's JWKS + issuer is checked on the
+ * backend. See `/api/auth/social/apple`.
+ */
+export async function socialLoginApple(idToken: string): Promise<LoopAuthPair> {
+  return apiRequest<LoopAuthPair>('/api/auth/social/apple', {
+    method: 'POST',
+    body: { idToken, platform: getPlatform() },
+  });
+}
+
+/**
  * Signals logout to the server so it can revoke the refresh token upstream.
  * The caller is responsible for clearing local state regardless of whether
  * this call succeeds — if the backend can't reach CTX, we still want the

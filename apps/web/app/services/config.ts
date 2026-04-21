@@ -24,6 +24,13 @@ export const API_BASE =
 export interface AppConfig {
   loopAuthNativeEnabled: boolean;
   loopOrdersEnabled: boolean;
+  /** ADR 014 social-login client identifiers (public, per-platform). */
+  social: {
+    googleClientIdWeb: string | null;
+    googleClientIdIos: string | null;
+    googleClientIdAndroid: string | null;
+    appleServiceId: string | null;
+  };
 }
 
 /** Fetches the public app config. No auth required. */

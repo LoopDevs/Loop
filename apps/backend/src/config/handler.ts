@@ -17,6 +17,18 @@ export interface AppConfig {
   loopAuthNativeEnabled: boolean;
   /** ADR 010: the order workers are running and Loop-native orders can be placed. */
   loopOrdersEnabled: boolean;
+  /**
+   * ADR 014 social-login client identifiers. Public on purpose: the web /
+   * mobile bundle includes these to initialise the Google / Apple SDKs.
+   * Per-platform — the client picks the id matching its own platform
+   * (the backend accepts any of them as audience).
+   */
+  social: {
+    googleClientIdWeb: string | null;
+    googleClientIdIos: string | null;
+    googleClientIdAndroid: string | null;
+    appleServiceId: string | null;
+  };
 }
 
 export function configHandler(c: Context): Response {
@@ -29,6 +41,12 @@ export function configHandler(c: Context): Response {
       env.LOOP_AUTH_NATIVE_ENABLED &&
       env.LOOP_WORKERS_ENABLED &&
       env.LOOP_STELLAR_DEPOSIT_ADDRESS !== undefined,
+    social: {
+      googleClientIdWeb: env.GOOGLE_OAUTH_CLIENT_ID_WEB ?? null,
+      googleClientIdIos: env.GOOGLE_OAUTH_CLIENT_ID_IOS ?? null,
+      googleClientIdAndroid: env.GOOGLE_OAUTH_CLIENT_ID_ANDROID ?? null,
+      appleServiceId: env.APPLE_SIGN_IN_SERVICE_ID ?? null,
+    },
   };
   // 10-minute client cache is generous but safe — the operator
   // flipping a flag is not a rapid-iteration loop, and caching keeps
