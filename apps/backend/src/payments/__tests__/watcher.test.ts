@@ -24,6 +24,15 @@ vi.mock('../price-feed.js', () => ({
   // Fixed rate: 1 XLM = $0.10 → 10 cents → 10_000_000 / 10 = 1_000_000
   // stroops per cent. Tests that want XLM acceptance to pass use this.
   stroopsPerCent: async (): Promise<bigint> => 1_000_000n,
+  // Fixed fiat FX: USD → 100_000 stroops/cent (1:1); GBP → 128_206
+  // (roughly 0.78 USD/GBP, so £1 ≈ $1.282 ≈ 1.282 USDC = 12_820_513
+  // stroops, per-penny = 128_206); EUR → 108_696 (roughly 0.92 USD/EUR).
+  usdcStroopsPerCent: async (currency: string): Promise<bigint> => {
+    if (currency === 'USD') return 100_000n;
+    if (currency === 'GBP') return 128_206n;
+    if (currency === 'EUR') return 108_696n;
+    throw new Error(`no rate for ${currency}`);
+  },
 }));
 vi.mock('../../orders/repo.js', () => ({
   findPendingOrderByMemo: (memo: string) => findOrderMock(memo),
@@ -155,9 +164,23 @@ describe('isAmountSufficient', () => {
     expect(await isAmountSufficient(p, makeOrder({ faceValueMinor: 1_000n }) as never)).toBe(false);
   });
 
-  it('rejects USDC payment against a non-USD order (FX not wired yet)', async () => {
-    const p = usdcPayment('MEMO', '100.0000000');
+  it('accepts a USDC payment against a GBP order via fiat FX', async () => {
+    // £10.00 order (1000 pence). Mocked FX: 128_206 stroops/pence.
+    // Required: 128_206_000 stroops = 12.8206 USDC. A payment of 13 USDC
+    // (130_000_000 stroops) comfortably clears.
+    const p = usdcPayment('MEMO', '13.0000000');
+    expect(await isAmountSufficient(p, makeOrder({ currency: 'GBP' }) as never)).toBe(true);
+  });
+
+  it('rejects a USDC underpayment against a GBP order', async () => {
+    // £10.00 order requires ~12.82 USDC. 10 USDC (100_000_000 stroops) falls short.
+    const p = usdcPayment('MEMO', '10.0000000');
     expect(await isAmountSufficient(p, makeOrder({ currency: 'GBP' }) as never)).toBe(false);
+  });
+
+  it('rejects USDC payment for a currency the FX oracle has no rate for', async () => {
+    const p = usdcPayment('MEMO', '100.0000000');
+    expect(await isAmountSufficient(p, makeOrder({ currency: 'JPY' }) as never)).toBe(false);
   });
 
   it('rejects credit-method orders — they are never watcher-transitioned', async () => {

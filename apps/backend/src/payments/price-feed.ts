@@ -111,8 +111,99 @@ export async function stroopsPerCent(currency: 'USD' | 'GBP' | 'EUR'): Promise<b
   }
   // 1 XLM = `minor` minor units. 1 XLM = 10^7 stroops.
   // So 1 minor unit = 10^7 / minor stroops.
-  // And we want stroops PER one minor unit, flooring so the
-  // required-stroops math rejects underpayments — a user sending
-  // exactly the computed amount always satisfies `>= required`.
+  // Ceiling so the required-stroops math rejects underpayments — a
+  // user sending exactly the computed amount always satisfies `>=`.
   return BigInt(Math.ceil(10_000_000 / minor));
+}
+
+// ─── Fiat FX (USDC against non-USD orders) ───────────────────────────────────
+
+/**
+ * Response shape for Frankfurter's /latest endpoint:
+ *   `{ "amount": 1, "base": "USD", "date": "...", "rates": { "GBP": 0.78, ... } }`
+ * Other self-hosted FX feeds are expected to match this shape; an
+ * adapter shim is the path of least resistance for a different API.
+ */
+const FxFeedResponse = z.object({
+  base: z.string(),
+  rates: z.record(z.string(), z.number()),
+});
+
+interface CachedFx {
+  /** How many `{code}` minor units per 100 USD minor units (cents). */
+  minorPerUsdDollar: Partial<Record<'GBP' | 'EUR', number>>;
+  expiresAt: number;
+}
+
+let cachedFx: CachedFx | null = null;
+
+/** Test seam — forgets the fiat FX cache. */
+export function __resetFxFeedForTests(): void {
+  cachedFx = null;
+}
+
+function fxFeedUrl(): string {
+  const override = process.env['LOOP_FX_FEED_URL'];
+  if (typeof override === 'string' && override.length > 0) return override;
+  return 'https://api.frankfurter.app/latest?from=USD&to=GBP,EUR';
+}
+
+async function refreshFx(): Promise<CachedFx> {
+  const url = fxFeedUrl();
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) {
+    throw new Error(`FX feed ${res.status} from ${url}`);
+  }
+  const raw = await res.json();
+  const parsed = FxFeedResponse.safeParse(raw);
+  if (!parsed.success) {
+    log.error({ issues: parsed.error.issues, url }, 'FX feed schema drift');
+    throw new Error('FX feed schema drift');
+  }
+  if (parsed.data.base !== 'USD') {
+    throw new Error(`FX feed base is ${parsed.data.base}, expected USD`);
+  }
+  const rates = parsed.data.rates;
+  const minorPerUsdDollar: CachedFx['minorPerUsdDollar'] = {};
+  if (typeof rates['GBP'] === 'number') minorPerUsdDollar.GBP = rates['GBP'];
+  if (typeof rates['EUR'] === 'number') minorPerUsdDollar.EUR = rates['EUR'];
+  cachedFx = {
+    minorPerUsdDollar,
+    expiresAt: Date.now() + CACHE_TTL_MS,
+  };
+  return cachedFx;
+}
+
+/**
+ * Returns how many USDC stroops (7 decimals, 1 USDC = 1 USD) equal
+ * one minor unit of `currency`. For USD this is the static
+ * `USDC_STROOPS_PER_CENT = 100_000`. For GBP / EUR it consults the
+ * fiat FX feed and scales.
+ *
+ * Example: USD/GBP rate 0.78 means £1 = $1.282..., so £1 (100p) =
+ * $1.282 = ~128 USDC cents = 12_820_512 stroops, giving ~128_205
+ * stroops per pence. The watcher multiplies this by the order's
+ * `face_value_minor` to compute the required stroops.
+ */
+export async function usdcStroopsPerCent(currency: 'USD' | 'GBP' | 'EUR'): Promise<bigint> {
+  if (currency === 'USD') return 100_000n;
+  const snap = cachedFx !== null && cachedFx.expiresAt > Date.now() ? cachedFx : await refreshFx();
+  const usdPerTarget = snap.minorPerUsdDollar[currency];
+  if (usdPerTarget === undefined) {
+    throw new Error(`FX feed has no rate for USD→${currency}`);
+  }
+  if (usdPerTarget <= 0) {
+    throw new Error(`FX feed returned non-positive rate for ${currency}: ${usdPerTarget}`);
+  }
+  // 1 USD = `usdPerTarget` target units (e.g. 0.78 GBP).
+  // → 1 target unit = 1 / usdPerTarget USD.
+  // → 1 target minor = (1 / usdPerTarget) / 100 USD = 1 / (usdPerTarget × 100) USD.
+  // USDC is 1:1 with USD at 7 decimals:
+  //   1 USD = 10^7 stroops → target-minor → stroops is
+  //   10^7 / (usdPerTarget × 100) = 10^5 / usdPerTarget stroops-per-target-minor.
+  // Ceiling so exact payments satisfy `>=`.
+  return BigInt(Math.ceil(100_000 / usdPerTarget));
 }

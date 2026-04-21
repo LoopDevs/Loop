@@ -26,15 +26,12 @@ import { logger } from '../logger.js';
 import { findPendingOrderByMemo, type Order } from '../orders/repo.js';
 import { markOrderPaid, sweepExpiredOrders } from '../orders/transitions.js';
 import { listAccountPayments, isMatchingIncomingPayment, type HorizonPayment } from './horizon.js';
-import { stroopsPerCent } from './price-feed.js';
+import { stroopsPerCent, usdcStroopsPerCent } from './price-feed.js';
 
 const log = logger.child({ area: 'payment-watcher' });
 
 /** Opaque name the cursor is persisted under. Stable across deploys. */
 const WATCHER_NAME = 'stellar-deposits';
-
-/** USDC on Stellar uses 7 decimals. 1 USDC = 10^7 stroops; 1 cent = 10^5 stroops. */
-const USDC_STROOPS_PER_CENT = 100_000n;
 
 /**
  * Parses a Horizon payment amount ("10.0000000") into BigInt stroops.
@@ -84,10 +81,21 @@ export async function isAmountSufficient(payment: HorizonPayment, order: Order):
     return false;
   }
   if (order.paymentMethod === 'usdc') {
-    // Only USD-denominated orders can be paid in USDC at 1:1 MVP.
-    if (order.currency !== 'USD') return false;
-    const requiredStroops = order.faceValueMinor * USDC_STROOPS_PER_CENT;
-    return receivedStroops >= requiredStroops;
+    if (order.currency !== 'USD' && order.currency !== 'GBP' && order.currency !== 'EUR') {
+      log.warn(
+        { orderId: order.id, currency: order.currency },
+        'USDC path has no FX rate for currency',
+      );
+      return false;
+    }
+    try {
+      const perCent = await usdcStroopsPerCent(order.currency);
+      const requiredStroops = order.faceValueMinor * perCent;
+      return receivedStroops >= requiredStroops;
+    } catch (err) {
+      log.warn({ err, orderId: order.id }, 'USDC FX oracle unavailable — rejecting USDC payment');
+      return false;
+    }
   }
   // xlm — query the oracle for the current rate, convert the
   // order's minor-unit face value into stroops, compare.
