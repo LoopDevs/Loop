@@ -5,6 +5,7 @@ import { copyToClipboard } from '~/native/clipboard';
 import { triggerHaptic, triggerHapticNotification } from '~/native/haptics';
 import { openWebView } from '~/native/webview';
 import { Input } from '~/components/ui/Input';
+import { buildChallengeBarScript } from '~/utils/redeem-challenge-bar';
 
 interface RedeemFlowProps {
   merchantName: string;
@@ -56,8 +57,14 @@ export function RedeemFlow({
     // without a reload.
     setOpenError(null);
 
-    // Build scripts to inject
-    const injectScripts: string[] = [];
+    // Build scripts to inject. Order matters:
+    //   1. Challenge-code banner — a small top-docked bar showing the
+    //      code + a Copy button, so the user doesn't have to flip
+    //      back to our app to grab it. First so it's the one
+    //      visible chrome change before any merchant script runs.
+    //   2. Provider-supplied injectChallenge (auto-fill if possible).
+    //   3. Provider-supplied scrapeResult (capture code + postMessage).
+    const injectScripts: string[] = [buildChallengeBarScript(challengeCode)];
     if (scripts?.injectChallenge) {
       injectScripts.push(scripts.injectChallenge);
     }

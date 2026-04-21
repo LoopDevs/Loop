@@ -7,6 +7,7 @@ import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAuth } from '~/hooks/use-auth';
 import { useOrders } from '~/hooks/use-orders';
 import { Navbar } from '~/components/features/Navbar';
+import { PageHeader } from '~/components/ui/PageHeader';
 import { OrderRowSkeleton } from '~/components/ui/Skeleton';
 import { Button } from '~/components/ui/Button';
 import { friendlyError } from '~/utils/error-messages';
@@ -101,16 +102,34 @@ export default function OrdersRoute(): React.JSX.Element {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
 
-  const { orders, hasNext, hasPrev, isLoading, error, refetch } = useOrders(page, isAuthenticated);
+  const {
+    orders: allOrders,
+    hasNext,
+    hasPrev,
+    isLoading,
+    error,
+    refetch,
+  } = useOrders(page, isAuthenticated);
+  // Pending orders are intentionally hidden from the list: for the
+  // user they read as "something I haven't paid for yet" and surface
+  // as blank-ish rows with no gift-card to redeem. They're still
+  // reachable by direct `/orders/:id` URL (the purchase flow links
+  // to the pending order mid-payment) — we just don't advertise them
+  // on the overview.
+  const orders = allOrders.filter((o) => o.status !== 'pending');
   const errorText = errorMessage(error);
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <>
       {!isNative && <Navbar />}
+      <PageHeader title="Orders" fallbackHref="/" />
 
-      <main className="max-w-2xl mx-auto px-4 py-8 pt-20">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Your orders</h1>
-
+      {/* Native: NativeShell's `native-safe-page` already pads by
+          `var(--safe-top)`, so we only need to clear the PageHeader
+          row height (`h-14` = 3.5rem) — adding another safe-top here
+          would double-count and push content ~50px too far down.
+          Web: `pt-20` clears the fixed Navbar. */}
+      <main className={`max-w-2xl mx-auto px-4 ${isNative ? 'pt-16 pb-4' : 'pt-20 pb-8'}`}>
         {!isAuthenticated && (
           <div className="text-center py-12">
             <p className="text-gray-500 dark:text-gray-400 mb-4">
@@ -192,6 +211,6 @@ export default function OrdersRoute(): React.JSX.Element {
           </>
         )}
       </main>
-    </div>
+    </>
   );
 }

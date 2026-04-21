@@ -22,6 +22,24 @@ export async function setAppLockEnabled(enabled: boolean): Promise<void> {
   await Preferences.set({ key: APP_LOCK_KEY, value: String(enabled) });
 }
 
+// In-memory "skip the next lock check" flag. Set by onboarding right
+// after the user authenticates with biometrics to enable app-lock,
+// so the immediately-mounting NativeShell doesn't re-prompt in the
+// same session (the user just authenticated — re-prompting seconds
+// later feels broken). Cleared by `runLockCheck` on the first call,
+// and naturally dies on process restart so the next real cold boot
+// still gates correctly.
+let skipNextLockCheck = false;
+
+/**
+ * Called from the onboarding biometric step after a successful
+ * enable. Suppresses the very next lock-guard prompt so the user
+ * isn't asked to authenticate twice in a single session.
+ */
+export function markAppLockJustVerified(): void {
+  skipNextLockCheck = true;
+}
+
 /**
  * Prompts for biometrics once on cold start when app-lock is enabled.
  * Returns a cleanup function.
@@ -104,6 +122,15 @@ export function registerAppLockGuard(): () => void {
   const runLockCheck = async (): Promise<void> => {
     const enabled = await isAppLockEnabled();
     if (cancelled || !enabled) return;
+    // Consume the "just-verified" flag — set by onboarding so the
+    // biometric-enable step doesn't immediately trigger a second
+    // prompt when NativeShell mounts post-flow. Clearing it here
+    // means only the very next check is suppressed; any subsequent
+    // cold boot still gates normally.
+    if (skipNextLockCheck) {
+      skipNextLockCheck = false;
+      return;
+    }
     const { available } = await checkBiometrics();
     if (cancelled || !available) return;
     showLockScreen();
