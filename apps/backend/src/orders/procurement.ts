@@ -31,6 +31,7 @@ import {
 import type { Order } from './repo.js';
 import { operatorFetch, OperatorPoolUnavailableError } from '../ctx/operator-pool.js';
 import { upstreamUrl } from '../upstream.js';
+import { getAccountBalances } from '../payments/horizon-balances.js';
 
 const log = logger.child({ area: 'procurement' });
 
@@ -106,6 +107,24 @@ export interface ProcurementTickResult {
 }
 
 /**
+ * Horizon USDC balance read, wrapped so a transient failure doesn't
+ * stall procurement. A null return is the signal to the picker that
+ * "we don't know the balance — default to USDC".
+ */
+async function readUsdcBalanceSafely(account: string): Promise<bigint | null> {
+  try {
+    const snap = await getAccountBalances(account, env.LOOP_STELLAR_USDC_ISSUER ?? null);
+    return snap.usdcStroops;
+  } catch (err) {
+    log.warn(
+      { err, account },
+      'Horizon USDC balance read failed — procurement proceeding with USDC',
+    );
+    return null;
+  }
+}
+
+/**
  * Selects the crypto currency to pay CTX in (ADR 015 flow 3).
  *
  * Defaults to USDC — Loop wants to hold USDC for defindex yield,
@@ -157,12 +176,30 @@ async function procureOne(order: Order): Promise<'fulfilled' | 'failed' | 'skipp
 
   // ADR 015 — USDC is the default CTX-payment rail; XLM is the
   // break-glass path when our operator USDC balance dips below the
-  // configured floor. Live Horizon balance is a follow-up slice, so
-  // for now `balanceStroops: null` always resolves to USDC.
+  // configured floor. Read the live USDC balance off Horizon only
+  // when a floor is configured (no point hitting Horizon otherwise).
+  // A Horizon failure resolves to `balanceStroops: null` and the
+  // picker gracefully falls back to USDC — we'd rather risk an
+  // over-drained USDC reserve than stall procurement entirely.
+  const floorStroops = env.LOOP_STELLAR_USDC_FLOOR_STROOPS ?? null;
+  const balanceStroops =
+    floorStroops !== null && env.LOOP_STELLAR_DEPOSIT_ADDRESS !== undefined
+      ? await readUsdcBalanceSafely(env.LOOP_STELLAR_DEPOSIT_ADDRESS)
+      : null;
   const cryptoCurrency = pickProcurementAsset({
-    balanceStroops: null,
-    floorStroops: env.LOOP_STELLAR_USDC_FLOOR_STROOPS ?? null,
+    balanceStroops,
+    floorStroops,
   });
+  if (cryptoCurrency === 'XLM') {
+    log.warn(
+      {
+        orderId: order.id,
+        balanceStroops: balanceStroops?.toString(),
+        floorStroops: floorStroops?.toString(),
+      },
+      'USDC reserve below configured floor — procurement falling back to XLM',
+    );
+  }
 
   try {
     const res = await operatorFetch(upstreamUrl('/gift-cards'), {
