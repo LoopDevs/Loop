@@ -91,7 +91,20 @@ vi.mock('../../payments/horizon-balances.js', () => ({
   getAccountBalances: getBalancesMock,
 }));
 
-import { runProcurementTick, pickProcurementAsset } from '../procurement.js';
+const { discordMock } = vi.hoisted(() => ({
+  discordMock: {
+    notifyUsdcBelowFloor: vi.fn<(args: unknown) => void>(() => undefined),
+  },
+}));
+vi.mock('../../discord.js', () => ({
+  notifyUsdcBelowFloor: (args: unknown) => discordMock.notifyUsdcBelowFloor(args),
+}));
+
+import {
+  runProcurementTick,
+  pickProcurementAsset,
+  __resetBelowFloorAlertForTests,
+} from '../procurement.js';
 import { OperatorPoolUnavailableError } from '../../ctx/operator-pool.js';
 
 type AnyOrder = {
@@ -144,6 +157,8 @@ beforeEach(() => {
   markFailedMock.mockReset();
   operatorFetchMock.mockReset();
   getBalancesMock.mockClear();
+  discordMock.notifyUsdcBelowFloor.mockClear();
+  __resetBelowFloorAlertForTests();
   envState.LOOP_STELLAR_DEPOSIT_ADDRESS = undefined;
   envState.LOOP_STELLAR_USDC_ISSUER = undefined;
   envState.LOOP_STELLAR_USDC_FLOOR_STROOPS = undefined;
@@ -384,6 +399,46 @@ describe('runProcurementTick — USDC floor / Horizon wiring', () => {
     await runProcurementTick();
     const init = operatorFetchMock.mock.calls[0]![1] as RequestInit;
     expect(JSON.parse(String(init.body))).toMatchObject({ cryptoCurrency: 'USDC' });
+  });
+
+  it('fires the Discord alert on first below-floor tick', async () => {
+    state.paid = [makeOrder({ id: 'o-1' })];
+    mockProcureAndFetch('ctx-a');
+    envState.LOOP_STELLAR_DEPOSIT_ADDRESS = 'GACCOUNT';
+    envState.LOOP_STELLAR_USDC_FLOOR_STROOPS = 10n ** 9n;
+    balancesState.usdc = 5n * 10n ** 8n;
+    await runProcurementTick();
+    expect(discordMock.notifyUsdcBelowFloor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        balanceStroops: '500000000',
+        floorStroops: '1000000000',
+        account: 'GACCOUNT',
+      }),
+    );
+  });
+
+  it('throttles the Discord alert — does not spam on back-to-back below-floor ticks', async () => {
+    state.paid = [makeOrder({ id: 'o-1' })];
+    mockProcureAndFetch('ctx-1');
+    envState.LOOP_STELLAR_DEPOSIT_ADDRESS = 'GACCOUNT';
+    envState.LOOP_STELLAR_USDC_FLOOR_STROOPS = 10n ** 9n;
+    balancesState.usdc = 5n * 10n ** 8n;
+    await runProcurementTick();
+    // Second tick, same condition: no additional alert.
+    state.paid = [makeOrder({ id: 'o-2' })];
+    mockProcureAndFetch('ctx-2');
+    await runProcurementTick();
+    expect(discordMock.notifyUsdcBelowFloor).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fire the Discord alert when USDC path is taken', async () => {
+    state.paid = [makeOrder({ id: 'o-1' })];
+    mockProcureAndFetch('ctx-a');
+    envState.LOOP_STELLAR_DEPOSIT_ADDRESS = 'GACCOUNT';
+    envState.LOOP_STELLAR_USDC_FLOOR_STROOPS = 10n ** 9n;
+    balancesState.usdc = 5n * 10n ** 9n; // well above floor
+    await runProcurementTick();
+    expect(discordMock.notifyUsdcBelowFloor).not.toHaveBeenCalled();
   });
 });
 
