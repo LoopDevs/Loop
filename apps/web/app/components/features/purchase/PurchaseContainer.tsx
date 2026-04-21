@@ -3,8 +3,11 @@ import type { Merchant } from '@loop/shared';
 import { useAuthStore } from '~/stores/auth.store';
 import { usePurchaseStore } from '~/stores/purchase.store';
 import { createOrder } from '~/services/orders';
+import { createLoopOrder, type CreateLoopOrderResponse } from '~/services/orders-loop';
 import { requestOtp, verifyOtp } from '~/services/auth';
+import { useAppConfig } from '~/hooks/use-app-config';
 import { AmountSelection } from './AmountSelection';
+import { LoopPaymentStep } from './LoopPaymentStep';
 import { PaymentStep } from './PaymentStep';
 import { PurchaseComplete } from './PurchaseComplete';
 import { RedeemFlow } from './RedeemFlow';
@@ -27,8 +30,15 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
   const email = useAuthStore((s) => s.email);
   const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
   const store = usePurchaseStore();
+  const { config } = useAppConfig();
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
+  // Local state for the Loop-native flow — we deliberately don't
+  // push this into the purchase store because the CTX-shaped fields
+  // (paymentAddress / xlmAmount / memo / expiresAt) don't map 1:1
+  // onto the Loop response. Keep the store as the legacy path's
+  // contract until ADR 013 Phase C retires it.
+  const [loopCreate, setLoopCreate] = useState<CreateLoopOrderResponse | null>(null);
 
   // Inline auth state
   const [authStep, setAuthStep] = useState<AuthStep>('email');
@@ -48,12 +58,35 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
   useEffect(() => {
     if (store.merchantId !== null && store.merchantId !== merchant.id) {
       store.reset();
+      setLoopCreate(null);
     }
     return () => {
       store.reset();
+      setLoopCreate(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [merchant.id]);
+
+  // Loop-native payment screen (ADR 010). Takes precedence over the
+  // CTX-proxy payment screen so a user mid-flow doesn't see two at
+  // once. The loopCreate gets cleared on reset so a new merchant
+  // starts clean.
+  if (isCurrentMerchant && loopCreate !== null) {
+    return (
+      <LoopPaymentStep
+        create={loopCreate}
+        onTerminal={(order) => {
+          if (order.state === 'failed' || order.state === 'expired') {
+            setLoopCreate(null);
+            setOrderError(order.failureReason ?? `Order ${order.state}`);
+          }
+          // On fulfilled we leave the LoopPaymentStep visible showing
+          // "Ready" — the user's redemption payload is served via the
+          // existing orders API which is its own follow-up slice.
+        }}
+      />
+    );
+  }
 
   // Completed states (redeem, complete)
   if (isCurrentMerchant && store.step === 'complete' && store.giftCardCode !== null) {
@@ -233,7 +266,9 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
     );
   }
 
-  // Amount selection + order creation (authenticated)
+  // Amount selection + order creation (authenticated). Two paths:
+  //   - config.loopOrdersEnabled → Loop-native (POST /api/orders/loop)
+  //   - otherwise → legacy CTX proxy (POST /api/orders)
   const handlePurchase = async (amount: number): Promise<void> => {
     if (email === null) return;
     setIsCreatingOrder(true);
@@ -241,6 +276,17 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
     void triggerHaptic();
 
     try {
+      if (config.loopOrdersEnabled) {
+        const result = await createLoopOrder({
+          merchantId: merchant.id,
+          amountMinor: Math.round(amount * 100),
+          currency: merchant.denominations?.currency ?? 'USD',
+          paymentMethod: 'usdc',
+        });
+        setLoopCreate(result);
+        void triggerHapticNotification('success');
+        return;
+      }
       const result = await createOrder({ merchantId: merchant.id, amount });
       store.startPurchase(merchant.id, merchant.name);
       store.setAmount(amount);
