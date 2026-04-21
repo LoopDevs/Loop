@@ -37,15 +37,20 @@ export function buildSecurityHeaders(options: SecurityHeadersOptions = {}): Reco
   const apiOrigin = options.apiOrigin ?? 'https://api.loopfinance.io';
   const csp = [
     "default-src 'self'",
-    `script-src 'self' 'unsafe-inline'`,
-    `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com`,
+    // accounts.google.com/gsi/client: Google Identity Services SDK
+    // loaded on demand when the sign-in route mounts and the
+    // deployment has a Google client id configured (ADR 014).
+    `script-src 'self' 'unsafe-inline' https://accounts.google.com`,
+    `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com`,
     `font-src 'self' https://fonts.gstatic.com`,
     // `https://basemaps.cartocdn.com` only matches that exact hostname;
     // Leaflet's tile URLs substitute `{s}` with `a`/`b`/`c`/`d` and fetch
     // from `a.basemaps.cartocdn.com` etc., so the bare-domain entry would
     // block every tile load. Use the wildcard form for both CARTO and OSM.
-    `img-src 'self' data: blob: ${apiOrigin} https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org`,
-    `connect-src 'self' ${apiOrigin} https://*.ingest.sentry.io https://*.ingest.de.sentry.io`,
+    `img-src 'self' data: blob: ${apiOrigin} https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://*.googleusercontent.com`,
+    `connect-src 'self' ${apiOrigin} https://*.ingest.sentry.io https://*.ingest.de.sentry.io https://accounts.google.com`,
+    // Google renders its sign-in button inside an iframe it owns.
+    `frame-src https://accounts.google.com`,
     "frame-ancestors 'none'",
     "base-uri 'none'",
     "form-action 'self'",
