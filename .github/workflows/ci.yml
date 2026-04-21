@@ -218,6 +218,10 @@ jobs:
           NODE_ENV: test
           GIFT_CARD_API_BASE_URL: https://spend.ctx.com
           INCLUDE_DISABLED_MERCHANTS: 'true'
+          # Required by env.ts zod validator but never connected to —
+          # NODE_ENV=test skips runMigrations and the e2e suite does
+          # not exercise db-backed admin/credits endpoints.
+          DATABASE_URL: postgres://placeholder:placeholder@localhost:5433/loop_test
       - name: Wait for backend
         run: npx wait-on http://localhost:8080/health --timeout 30000
       - name: Run e2e tests (real CTX)
