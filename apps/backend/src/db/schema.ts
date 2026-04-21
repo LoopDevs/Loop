@@ -386,3 +386,17 @@ export type OrderState = (typeof ORDER_STATES)[number];
 
 export const ORDER_PAYMENT_METHODS = ['xlm', 'usdc', 'credit'] as const;
 export type OrderPaymentMethod = (typeof ORDER_PAYMENT_METHODS)[number];
+
+/**
+ * Cursor persistence for long-running background watchers (ADR 010
+ * payment watcher is the first user). One row per watcher; the
+ * watcher reads its cursor at tick start and writes the new cursor
+ * at tick end. A crashed tick keeps the prior cursor so the next
+ * tick reprocesses any unconsumed records — safe because every
+ * transition is idempotent.
+ */
+export const watcherCursors = pgTable('watcher_cursors', {
+  name: text('name').primaryKey(),
+  cursor: text('cursor'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
