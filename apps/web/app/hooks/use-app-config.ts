@@ -13,6 +13,12 @@ import { fetchAppConfig, type AppConfig } from '~/services/config';
 const DEFAULT_CONFIG: AppConfig = {
   loopAuthNativeEnabled: false,
   loopOrdersEnabled: false,
+  social: {
+    googleClientIdWeb: null,
+    googleClientIdIos: null,
+    googleClientIdAndroid: null,
+    appleServiceId: null,
+  },
 };
 
 export function useAppConfig(): { config: AppConfig; isLoading: boolean } {
