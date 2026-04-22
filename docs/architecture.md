@@ -229,6 +229,7 @@ GET  /api/admin/treasury                               [admin]
 GET  /api/admin/payouts                                [admin — ADR 015 payout backlog]
 POST /api/admin/payouts/:id/retry                      [admin — reset failed payout to pending]
 GET  /api/admin/orders                                  [admin — Loop-native orders drill-down, ADR 011/015]
+GET  /api/admin/users/:userId/credit-transactions.csv   [admin — Tier 3 per-user ledger CSV, ADR 009/019]
 ```
 
 Full request/response shapes — including field types, pagination

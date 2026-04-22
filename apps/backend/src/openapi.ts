@@ -1173,6 +1173,51 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/users/{userId}/credit-transactions.csv',
+  summary: 'Tier 3 per-user credit-transactions CSV (ADR 009 / 019).',
+  description:
+    "Admin-side export of one user's full `credit_transactions` ledger. Support pulls a ledger statement on a user's behalf. Columns: Transaction ID, Created at (UTC), Type, Amount (minor, bigint-safe), Currency, Reference type, Reference ID. Newest-first, 10 000-row cap with `__TRUNCATED__` sentinel + `log.warn`. `Cache-Control: private, no-store` — contains the user's id + reference ids. 400 on non-UUID userId.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ userId: z.string().uuid() }),
+  },
+  responses: {
+    200: {
+      description: 'CSV body',
+      content: {
+        'text/csv': {
+          schema: z.string().openapi({
+            description: 'RFC 4180 CSV; first line is the header, trailing CRLF.',
+          }),
+        },
+      },
+    },
+    400: {
+      description: 'Missing or non-UUID userId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (20/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error exporting the CSV',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/payouts',
   summary: 'Paginated pending-payouts backlog (ADR 015).',
   description:
