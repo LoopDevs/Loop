@@ -19,6 +19,11 @@ const DEFAULT_CONFIG: AppConfig = {
     googleClientIdAndroid: null,
     appleServiceId: null,
   },
+  loopAssetIssuers: {
+    USDLOOP: null,
+    GBPLOOP: null,
+    EURLOOP: null,
+  },
 };
 
 export function useAppConfig(): { config: AppConfig; isLoading: boolean } {

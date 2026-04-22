@@ -28,12 +28,18 @@ beforeEach(() => {
   delete process.env['LOOP_AUTH_NATIVE_ENABLED'];
   delete process.env['LOOP_WORKERS_ENABLED'];
   delete process.env['LOOP_STELLAR_DEPOSIT_ADDRESS'];
+  delete process.env['LOOP_STELLAR_USDLOOP_ISSUER'];
+  delete process.env['LOOP_STELLAR_GBPLOOP_ISSUER'];
+  delete process.env['LOOP_STELLAR_EURLOOP_ISSUER'];
 });
 
 afterEach(() => {
   delete process.env['LOOP_AUTH_NATIVE_ENABLED'];
   delete process.env['LOOP_WORKERS_ENABLED'];
   delete process.env['LOOP_STELLAR_DEPOSIT_ADDRESS'];
+  delete process.env['LOOP_STELLAR_USDLOOP_ISSUER'];
+  delete process.env['LOOP_STELLAR_GBPLOOP_ISSUER'];
+  delete process.env['LOOP_STELLAR_EURLOOP_ISSUER'];
   vi.resetModules();
 });
 
@@ -115,5 +121,28 @@ describe('configHandler', () => {
     const { ctx } = makeCtx();
     const body = (await configHandler(ctx).json()) as { loopOrdersEnabled: boolean };
     expect(body.loopOrdersEnabled).toBe(false);
+  });
+
+  it('defaults every loopAssetIssuer to null when unconfigured', async () => {
+    const { configHandler } = await import('../handler.js');
+    const { ctx } = makeCtx();
+    const body = (await configHandler(ctx).json()) as {
+      loopAssetIssuers: { USDLOOP: string | null; GBPLOOP: string | null; EURLOOP: string | null };
+    };
+    expect(body.loopAssetIssuers).toEqual({ USDLOOP: null, GBPLOOP: null, EURLOOP: null });
+  });
+
+  it('surfaces configured LOOP-asset issuer addresses per currency', async () => {
+    const usd = 'GUSD' + 'A'.repeat(52);
+    const gbp = 'GGBP' + 'A'.repeat(52);
+    process.env['LOOP_STELLAR_USDLOOP_ISSUER'] = usd;
+    process.env['LOOP_STELLAR_GBPLOOP_ISSUER'] = gbp;
+    const { configHandler } = await import('../handler.js');
+    const { ctx } = makeCtx();
+    const body = (await configHandler(ctx).json()) as {
+      loopAssetIssuers: { USDLOOP: string | null; GBPLOOP: string | null; EURLOOP: string | null };
+    };
+    // EUR stays null because it's unconfigured — partial deployments are supported.
+    expect(body.loopAssetIssuers).toEqual({ USDLOOP: usd, GBPLOOP: gbp, EURLOOP: null });
   });
 });

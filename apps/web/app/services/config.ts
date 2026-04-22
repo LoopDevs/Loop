@@ -31,6 +31,16 @@ export interface AppConfig {
     googleClientIdAndroid: string | null;
     appleServiceId: string | null;
   };
+  /**
+   * ADR 015 LOOP-asset issuer accounts. Null per-asset when the
+   * operator hasn't configured that issuer yet — the wallet page
+   * hides the trustline prompt for any null code.
+   */
+  loopAssetIssuers: {
+    USDLOOP: string | null;
+    GBPLOOP: string | null;
+    EURLOOP: string | null;
+  };
 }
 
 /** Fetches the public app config. No auth required. */

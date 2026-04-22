@@ -4,9 +4,11 @@ import { useNavigate } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/settings.wallet';
 import { useAuth } from '~/hooks/use-auth';
+import { useAppConfig } from '~/hooks/use-app-config';
 import { getMe, setStellarAddress, type UserMeView } from '~/services/user';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { copyToClipboard } from '~/native/clipboard';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Wallet — Loop' }];
@@ -47,6 +49,12 @@ export default function SettingsWalletRoute(): React.JSX.Element {
     retry: shouldRetry,
     staleTime: 60_000,
   });
+  // Issuer addresses for the trustline prompt come from /api/config,
+  // cached 10 min alongside every other flag. Null per-asset when the
+  // operator hasn't configured that issuer yet — the UI hides the
+  // trustline prompt for null entries rather than showing guidance
+  // the user can't act on.
+  const { config } = useAppConfig();
 
   const [draftAddress, setDraftAddress] = useState<string>('');
   const [formError, setFormError] = useState<string | null>(null);
@@ -158,6 +166,13 @@ export default function SettingsWalletRoute(): React.JSX.Element {
         )}
       </section>
 
+      {linked && (
+        <TrustlineCard
+          assetCode={assetCode}
+          issuer={config.loopAssetIssuers[assetCode as 'USDLOOP' | 'GBPLOOP' | 'EURLOOP'] ?? null}
+        />
+      )}
+
       <section
         aria-labelledby="link-heading"
         className="rounded-xl border border-gray-200 dark:border-gray-800 p-5 bg-white dark:bg-gray-900 space-y-4"
@@ -206,5 +221,108 @@ export default function SettingsWalletRoute(): React.JSX.Element {
         </button>
       </section>
     </main>
+  );
+}
+
+/**
+ * Trustline guidance card (ADR 015). A Stellar wallet that hasn't
+ * added a trustline to the LOOP-asset issuer can't receive the
+ * payout — the Stellar transaction fails with `op_no_trust`. Loop
+ * can't add the trustline for the user (they control the wallet
+ * keypair), so we surface the asset code + issuer here and let them
+ * paste the values into Freighter, Lobstr, or a signing tool.
+ *
+ * Hidden when:
+ *   - The backend hasn't configured an issuer for the user's home
+ *     currency (`null` in `config.loopAssetIssuers`). Guidance a user
+ *     can't act on is worse than silence.
+ *   - The user hasn't linked a wallet. Handled by the parent gate.
+ */
+function TrustlineCard({
+  assetCode,
+  issuer,
+}: {
+  assetCode: string;
+  issuer: string | null;
+}): React.JSX.Element | null {
+  const [copied, setCopied] = useState<'code' | 'issuer' | null>(null);
+  if (issuer === null) return null;
+
+  const copy = (text: string, which: 'code' | 'issuer'): void => {
+    void (async () => {
+      const ok = await copyToClipboard(text);
+      if (ok) {
+        setCopied(which);
+        setTimeout(() => setCopied(null), 2000);
+      }
+    })();
+  };
+
+  return (
+    <section
+      aria-labelledby="trustline-heading"
+      className="rounded-xl border border-amber-200 bg-amber-50 p-5 space-y-3 dark:border-amber-900/50 dark:bg-amber-900/10"
+    >
+      <div className="flex items-center gap-2">
+        <svg
+          className="h-5 w-5 text-amber-700 dark:text-amber-400"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 9v3.5M12 16h.01M4.93 19h14.14a2 2 0 001.74-3l-7.07-12a2 2 0 00-3.48 0L3.2 16a2 2 0 001.73 3z"
+          />
+        </svg>
+        <h2
+          id="trustline-heading"
+          className="text-base font-semibold text-amber-900 dark:text-amber-200"
+        >
+          Add a trustline before your next payout
+        </h2>
+      </div>
+      <p className="text-sm text-amber-800 dark:text-amber-300">
+        Stellar wallets need a trustline to hold each LOOP asset. Without one, Loop&rsquo;s payout
+        transaction fails with <code>op_no_trust</code>. Open your wallet (Freighter, Lobstr, or any
+        Stellar-compatible wallet) and add a trustline using the asset code and issuer below.
+      </p>
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-2 text-sm">
+        <dt className="font-medium text-amber-900 dark:text-amber-200">Asset code</dt>
+        <dd className="flex items-center justify-between gap-2">
+          <code className="font-mono font-semibold text-amber-900 dark:text-amber-200">
+            {assetCode}
+          </code>
+          <button
+            type="button"
+            onClick={() => copy(assetCode, 'code')}
+            aria-label="Copy asset code"
+            className="rounded-md border border-amber-300 bg-white px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-gray-900 dark:text-amber-300 dark:hover:bg-amber-900/30"
+          >
+            {copied === 'code' ? 'Copied' : 'Copy'}
+          </button>
+        </dd>
+        <dt className="font-medium text-amber-900 dark:text-amber-200">Issuer</dt>
+        <dd className="min-w-0 flex items-center justify-between gap-2">
+          <code
+            className="truncate font-mono text-xs text-amber-900 dark:text-amber-200"
+            title={issuer}
+          >
+            {issuer}
+          </code>
+          <button
+            type="button"
+            onClick={() => copy(issuer, 'issuer')}
+            aria-label="Copy issuer address"
+            className="shrink-0 rounded-md border border-amber-300 bg-white px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-gray-900 dark:text-amber-300 dark:hover:bg-amber-900/30"
+          >
+            {copied === 'issuer' ? 'Copied' : 'Copy'}
+          </button>
+        </dd>
+      </dl>
+    </section>
   );
 }

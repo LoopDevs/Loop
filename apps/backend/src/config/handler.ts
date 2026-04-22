@@ -29,6 +29,20 @@ export interface AppConfig {
     googleClientIdAndroid: string | null;
     appleServiceId: string | null;
   };
+  /**
+   * ADR 015 LOOP-asset issuer accounts per supported home currency.
+   * Public on purpose: the wallet-linking page surfaces these so
+   * users can add a trustline in their own wallet (Freighter /
+   * Lobstr) before receiving cashback payouts. An OPEN circuit
+   * issuer address is a Stellar `G...` pubkey — not a secret.
+   * Null when the operator hasn't configured the issuer yet; the
+   * UI hides the trustline prompt for that code.
+   */
+  loopAssetIssuers: {
+    USDLOOP: string | null;
+    GBPLOOP: string | null;
+    EURLOOP: string | null;
+  };
 }
 
 export function configHandler(c: Context): Response {
@@ -46,6 +60,11 @@ export function configHandler(c: Context): Response {
       googleClientIdIos: env.GOOGLE_OAUTH_CLIENT_ID_IOS ?? null,
       googleClientIdAndroid: env.GOOGLE_OAUTH_CLIENT_ID_ANDROID ?? null,
       appleServiceId: env.APPLE_SIGN_IN_SERVICE_ID ?? null,
+    },
+    loopAssetIssuers: {
+      USDLOOP: env.LOOP_STELLAR_USDLOOP_ISSUER ?? null,
+      GBPLOOP: env.LOOP_STELLAR_GBPLOOP_ISSUER ?? null,
+      EURLOOP: env.LOOP_STELLAR_EURLOOP_ISSUER ?? null,
     },
   };
   // 10-minute client cache is generous but safe — the operator

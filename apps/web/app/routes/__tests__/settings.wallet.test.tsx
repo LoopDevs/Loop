@@ -48,6 +48,35 @@ vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: authMock.isAuthenticated }),
 }));
 
+// Default config — trustline issuers null so the existing tests
+// don't see the new TrustlineCard. Trustline-specific tests override.
+const { configMock } = vi.hoisted(() => ({
+  configMock: {
+    config: {
+      loopAuthNativeEnabled: false,
+      loopOrdersEnabled: false,
+      social: {
+        googleClientIdWeb: null,
+        googleClientIdIos: null,
+        googleClientIdAndroid: null,
+        appleServiceId: null,
+      },
+      loopAssetIssuers: {
+        USDLOOP: null as string | null,
+        GBPLOOP: null as string | null,
+        EURLOOP: null as string | null,
+      },
+    },
+  },
+}));
+vi.mock('~/hooks/use-app-config', () => ({
+  useAppConfig: () => ({ config: configMock.config, isLoading: false }),
+}));
+
+vi.mock('~/native/clipboard', () => ({
+  copyToClipboard: vi.fn(async () => true),
+}));
+
 vi.mock('~/hooks/query-retry', () => ({
   shouldRetry: () => false,
 }));
@@ -98,6 +127,8 @@ beforeEach(() => {
     userMock.me = next as typeof userMock.me;
     return next;
   });
+  // Reset issuer map to null for each test — trustline tests opt in.
+  configMock.config.loopAssetIssuers = { USDLOOP: null, GBPLOOP: null, EURLOOP: null };
 });
 
 afterEach(cleanup);
@@ -196,5 +227,59 @@ describe('SettingsWalletRoute', () => {
       fireEvent.click(screen.getByRole('button', { name: /Link wallet/i }));
     });
     await waitFor(() => expect(userMock.setStellarAddress).toHaveBeenCalledWith(VALID_ADDRESS));
+  });
+});
+
+describe('SettingsWalletRoute — trustline card', () => {
+  const GBP_ISSUER = 'G' + 'B'.repeat(55);
+
+  it('does not render the trustline card when no wallet is linked', async () => {
+    configMock.config.loopAssetIssuers.GBPLOOP = GBP_ISSUER;
+    // Default userMock.me has no stellarAddress.
+    renderPage();
+    expect(await screen.findByText(/No wallet linked/i)).toBeTruthy();
+    expect(screen.queryByText(/Add a trustline/i)).toBeNull();
+  });
+
+  it('does not render the trustline card when the issuer for the user\u2019s currency is unconfigured', async () => {
+    userMock.me = { ...userMock.me, stellarAddress: VALID_ADDRESS };
+    configMock.config.loopAssetIssuers = {
+      USDLOOP: 'G' + 'A'.repeat(55),
+      GBPLOOP: null, // user is on GBP — GBPLOOP issuer missing
+      EURLOOP: 'G' + 'C'.repeat(55),
+    };
+    renderPage();
+    await screen.findByText(VALID_ADDRESS);
+    expect(screen.queryByText(/Add a trustline/i)).toBeNull();
+  });
+
+  it('renders the trustline card with asset code + issuer when wallet is linked and issuer is known', async () => {
+    userMock.me = { ...userMock.me, stellarAddress: VALID_ADDRESS };
+    configMock.config.loopAssetIssuers.GBPLOOP = GBP_ISSUER;
+    renderPage();
+    // Wait for the card to appear — there's exactly one heading with
+    // this prefix inside the trustline card.
+    const headings = await screen.findAllByText(/Add a trustline/i);
+    expect(headings.length).toBeGreaterThan(0);
+    // Issuer address is rendered inside the card too. One exact
+    // match; asset code (GBPLOOP) also appears in the form helper
+    // text so findAllByText is more robust than getByText here.
+    expect(screen.getByText(GBP_ISSUER)).toBeTruthy();
+    expect(screen.getAllByText(/GBPLOOP/).length).toBeGreaterThan(0);
+  });
+
+  it('copies the issuer address to the clipboard when the Copy button is clicked', async () => {
+    const clipboardModule = (await import('~/native/clipboard')) as unknown as {
+      copyToClipboard: ReturnType<typeof vi.fn>;
+    };
+    clipboardModule.copyToClipboard.mockClear();
+    userMock.me = { ...userMock.me, stellarAddress: VALID_ADDRESS };
+    configMock.config.loopAssetIssuers.GBPLOOP = GBP_ISSUER;
+    renderPage();
+    const button = await screen.findByRole('button', { name: /Copy issuer address/i });
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(clipboardModule.copyToClipboard).toHaveBeenCalledWith(GBP_ISSUER);
   });
 });
