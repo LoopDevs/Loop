@@ -102,11 +102,17 @@ export function UserOrdersTable({ userId }: Props): React.JSX.Element {
                   {row.id.slice(0, 8)}
                 </Link>
               </td>
-              <td
-                className="px-3 py-2 font-mono text-xs text-gray-700 dark:text-gray-300"
-                title={row.merchantId}
-              >
-                {row.merchantId}
+              <td className="px-3 py-2 font-mono text-xs" title={row.merchantId}>
+                {/* Drill into the merchant detail page (#621).
+                    Gives ops a one-click path from "this user bought
+                    from X" to "everything about X" without leaving
+                    the user drill. */}
+                <Link
+                  to={`/admin/merchants/${encodeURIComponent(row.merchantId)}`}
+                  className="text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  {row.merchantId}
+                </Link>
               </td>
               <td className="px-3 py-2">
                 <span
