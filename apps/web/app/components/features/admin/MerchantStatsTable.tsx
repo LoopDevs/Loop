@@ -97,8 +97,15 @@ export function MerchantStatsTable(): React.JSX.Element {
                 className="px-3 py-2 font-mono text-xs text-gray-700 dark:text-gray-300"
                 title={r.merchantId}
               >
+                {/* Deep-links to the merchant drill-down (#621). The
+                    drill page shows current config + audit trail +
+                    recent orders — one-stop for "everything about
+                    this merchant". Previously this went straight to
+                    the filtered orders list; that surface still
+                    reachable via the "See all orders" link on the
+                    drill page. */}
                 <Link
-                  to={`/admin/orders?merchantId=${encodeURIComponent(r.merchantId)}`}
+                  to={`/admin/merchants/${encodeURIComponent(r.merchantId)}`}
                   className="text-blue-600 hover:underline dark:text-blue-400"
                 >
                   {r.merchantId}
