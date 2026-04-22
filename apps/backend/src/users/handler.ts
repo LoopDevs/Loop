@@ -18,6 +18,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { and, desc, eq, lt, sql } from 'drizzle-orm';
+import { STELLAR_PUBKEY_REGEX } from '@loop/shared';
 import { db } from '../db/client.js';
 import {
   creditTransactions,
@@ -183,10 +184,8 @@ export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
 }
 
 // Stellar ED25519 public keys: 56 uppercase base32 chars starting
-// with 'G'. Validated here rather than at the column level (which is
-// just `text`) so the backend can null-out bad data via SQL in a
-// pinch.
-const STELLAR_PUBKEY_REGEX = /^G[A-Z2-7]{55}$/;
+// with 'G'. Shared regex — see `@loop/shared/stellar` for the
+// single source of truth across backend + web + env validation.
 const SetStellarAddressBody = z.object({
   /** Null explicitly unlinks the address; any string is validated against the pubkey regex. */
   address: z.union([z.string().regex(STELLAR_PUBKEY_REGEX), z.null()]),
