@@ -1329,6 +1329,63 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/merchant-cashback-configs/history',
+  summary: 'Global recent cashback-config history feed (ADR 011).',
+  description:
+    'Newest-first view of every cashback-config edit across every merchant. Companion to the per-merchant `/:merchantId/history` endpoint — use this one for "what\'s changed recently?" scans without picking a merchant first. Merchant name resolves from the in-memory catalog with fallback to merchantId (admin-surface convention). `?limit=` default 50, clamped [1, 200].',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      limit: z.coerce.number().int().min(1).max(200).optional().openapi({
+        description: 'Page size. Default 50, hard-capped at 200.',
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Recent history rows, newest first',
+      content: {
+        'application/json': {
+          schema: z.object({
+            history: z.array(
+              z.object({
+                id: z.string().uuid(),
+                merchantId: z.string(),
+                merchantName: z.string(),
+                wholesalePct: z.string(),
+                userCashbackPct: z.string(),
+                loopMarginPct: z.string(),
+                active: z.boolean(),
+                changedBy: z.string(),
+                changedAt: z.string().datetime(),
+              }),
+            ),
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading the history feed',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/merchant-cashback-configs/{merchantId}/history',
   summary: 'Audit-log history for one merchant cashback config (ADR 011).',
   description:

@@ -41,6 +41,7 @@ import { googleSocialLoginHandler, appleSocialLoginHandler } from './auth/social
 import { notifyHealthChange } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
+import { adminConfigsRecentHistoryHandler } from './admin/configs-recent-history.js';
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
@@ -640,6 +641,14 @@ app.get(
   '/api/admin/merchant-cashback-configs/:merchantId/history',
   rateLimit(120, 60_000),
   configHistoryHandler,
+);
+// Global history feed — "what's changed across all merchants?" — the
+// companion to the per-merchant history above. Different URL depth
+// (one segment vs two), so no router conflict with :merchantId.
+app.get(
+  '/api/admin/merchant-cashback-configs/history',
+  rateLimit(120, 60_000),
+  adminConfigsRecentHistoryHandler,
 );
 app.get('/api/admin/treasury', rateLimit(60, 60_000), treasuryHandler);
 // Pending-payouts backlog list (ADR 015). Admin UI's "payouts" page

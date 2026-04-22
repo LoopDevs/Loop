@@ -225,6 +225,7 @@ GET  /api/users/me/pending-payouts  [authenticated — caller's on-chain payout 
 GET  /api/admin/merchant-cashback-configs              [admin]
 PUT  /api/admin/merchant-cashback-configs/:merchantId  [admin]
 GET  /api/admin/merchant-cashback-configs/:merchantId/history  [admin]
+GET  /api/admin/merchant-cashback-configs/history      [admin — global recent-history feed, ADR 011]
 GET  /api/admin/treasury                               [admin]
 GET  /api/admin/payouts                                [admin — ADR 015 payout backlog]
 POST /api/admin/payouts/:id/retry                      [admin — reset failed payout to pending]
