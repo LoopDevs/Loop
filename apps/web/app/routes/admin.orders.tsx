@@ -13,7 +13,7 @@
  */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.orders';
 import { useAuth } from '~/hooks/use-auth';
@@ -81,6 +81,8 @@ function formatMinor(minor: string, currency: string): string {
 export default function AdminOrdersRoute(): React.JSX.Element {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const merchantIdFilter = searchParams.get('merchantId') ?? undefined;
   const [stateFilter, setStateFilter] = useState<AdminOrderState | 'all'>('all');
   // Cursor list — each Load more pushes the last row's `createdAt`
   // so pages stay stable across refetches (offset pagination would
@@ -144,11 +146,41 @@ export default function AdminOrdersRoute(): React.JSX.Element {
         ))}
       </div>
 
+      {/* Active merchant filter — sourced from `?merchantId=` so the
+          drill-down from /admin/cashback is linkable + bookmarkable.
+          The "clear" button strips the param (and resets the cursor
+          so page 1 of the unfiltered list renders). */}
+      {merchantIdFilter !== undefined ? (
+        <div
+          role="status"
+          className="flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200"
+        >
+          <span>
+            Filtered to merchant <code className="font-mono text-xs">{merchantIdFilter}</code>
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                next.delete('merchantId');
+                return next;
+              });
+              setCursors([undefined]);
+            }}
+            className="text-xs font-medium underline hover:no-underline"
+          >
+            Clear
+          </button>
+        </div>
+      ) : null}
+
       <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
         {cursors.map((cursor, idx) => (
           <OrdersPage
             key={cursor ?? 'head'}
             state={stateFilter}
+            merchantId={merchantIdFilter}
             cursor={cursor}
             isLastPage={idx === cursors.length - 1}
             onLoadMore={(nextCursor) => {
@@ -163,21 +195,24 @@ export default function AdminOrdersRoute(): React.JSX.Element {
 
 function OrdersPage({
   state,
+  merchantId,
   cursor,
   isLastPage,
   onLoadMore,
 }: {
   state: AdminOrderState | 'all';
+  merchantId: string | undefined;
   cursor: string | undefined;
   isLastPage: boolean;
   onLoadMore: (nextCursor: string) => void;
 }): React.JSX.Element {
   const query = useQuery({
-    queryKey: ['admin-orders', state, cursor ?? null, PAGE_SIZE],
+    queryKey: ['admin-orders', state, merchantId ?? null, cursor ?? null, PAGE_SIZE],
     queryFn: () =>
       listAdminOrders({
         limit: PAGE_SIZE,
         ...(state !== 'all' ? { state } : {}),
+        ...(merchantId !== undefined ? { merchantId } : {}),
         ...(cursor !== undefined ? { before: cursor } : {}),
       }),
     retry: shouldRetry,
