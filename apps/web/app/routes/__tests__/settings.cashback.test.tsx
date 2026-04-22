@@ -9,6 +9,7 @@ const { historyMock, authMock } = vi.hoisted(() => ({
     getCashbackHistory: vi.fn(),
     getUserPendingPayouts: vi.fn(),
     getMyCredits: vi.fn(),
+    getMe: vi.fn(),
   },
   authMock: {
     isAuthenticated: true,
@@ -21,6 +22,7 @@ vi.mock('~/services/user', () => ({
   getUserPendingPayouts: (opts?: { limit?: number; before?: string; state?: string }) =>
     historyMock.getUserPendingPayouts(opts),
   getMyCredits: () => historyMock.getMyCredits(),
+  getMe: () => historyMock.getMe(),
 }));
 
 vi.mock('~/hooks/use-auth', () => ({
@@ -85,6 +87,18 @@ beforeEach(() => {
   // that don't care about the card don't need to stub it.
   historyMock.getMyCredits.mockReset();
   historyMock.getMyCredits.mockResolvedValue({ credits: [] });
+  // Default to a user with a linked wallet so the LinkWalletNudge
+  // hides itself — existing tests don't care about the nudge.
+  // Nudge-specific tests below can override.
+  historyMock.getMe.mockReset();
+  historyMock.getMe.mockResolvedValue({
+    id: 'u1',
+    email: 'u@loop.test',
+    isAdmin: false,
+    homeCurrency: 'GBP',
+    stellarAddress: 'GABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGH',
+    homeCurrencyBalanceMinor: '0',
+  });
 });
 
 afterEach(cleanup);
