@@ -6,6 +6,7 @@ import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { getAdminUser, getAdminUserCredits, type AdminUserCreditRow } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { AdminUserFlywheelChip } from '~/components/features/admin/AdminUserFlywheelChip';
 import { CashbackSummaryChip } from '~/components/features/admin/CashbackSummaryChip';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { CreditAdjustmentForm } from '~/components/features/admin/CreditAdjustmentForm';
@@ -150,8 +151,13 @@ export default function AdminUserDetailRoute(): React.JSX.Element {
               "£0 lifetime" pill. Renders in the user-detail block so
               operators see it adjacent to the identity / home-currency
               facts rather than buried next to the credits table. */}
-          <div className="mt-3">
+          <div className="mt-3 flex flex-wrap items-center gap-3">
             <CashbackSummaryChip userId={userQuery.data.id} />
+            {/* Flywheel chip — recycled-vs-total counts. Unlike the
+                cashback chip it renders even for zero-recycled users
+                (as a muted line) so an operator can tell "nothing
+                yet" apart from "the chip crashed". */}
+            <AdminUserFlywheelChip userId={userQuery.data.id} />
           </div>
           <dl className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 text-sm">
             <div>

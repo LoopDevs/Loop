@@ -889,6 +889,30 @@ export async function getAdminUserCashbackSummary(
 }
 
 /**
+ * Admin per-user flywheel scalar (#600). Mirrors the user-facing
+ * `/flywheel-stats` endpoint shape. Scoped to the target user's
+ * current home_currency (numerator + denominator share a
+ * denomination).
+ */
+export interface AdminUserFlywheelStats {
+  userId: string;
+  currency: string;
+  recycledOrderCount: number;
+  /** SUM(charge_minor) over loop_asset orders. bigint-as-string. */
+  recycledChargeMinor: string;
+  totalFulfilledCount: number;
+  /** SUM(charge_minor) over every fulfilled order in home_currency. bigint-as-string. */
+  totalFulfilledChargeMinor: string;
+}
+
+/** `GET /api/admin/users/:userId/flywheel-stats` — per-user recycled-vs-total. */
+export async function getAdminUserFlywheelStats(userId: string): Promise<AdminUserFlywheelStats> {
+  return authenticatedRequest<AdminUserFlywheelStats>(
+    `/api/admin/users/${encodeURIComponent(userId)}/flywheel-stats`,
+  );
+}
+
+/**
  * Fleet-wide cashback-monthly entry (#592). Identical shape to the
  * user-facing `CashbackMonthlyEntry` by design — the admin chart
  * re-uses the same bar-rendering helpers. One entry per
