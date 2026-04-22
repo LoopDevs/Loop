@@ -1185,6 +1185,32 @@ export async function getAdminUserCashbackMonthly(
 }
 
 /**
+ * Per-merchant cashback-monthly response (#635). Same entry
+ * shape as the per-user and fleet variants; `currency` here is
+ * the order's `charge_currency` (the user's home_currency at
+ * order-creation time).
+ */
+export interface AdminMerchantCashbackMonthlyEntry {
+  month: string;
+  currency: string;
+  cashbackMinor: string;
+}
+
+export interface AdminMerchantCashbackMonthlyResponse {
+  merchantId: string;
+  entries: AdminMerchantCashbackMonthlyEntry[];
+}
+
+/** `GET /api/admin/merchants/:merchantId/cashback-monthly` — 12-month trend for one merchant. */
+export async function getAdminMerchantCashbackMonthly(
+  merchantId: string,
+): Promise<AdminMerchantCashbackMonthlyResponse> {
+  return authenticatedRequest<AdminMerchantCashbackMonthlyResponse>(
+    `/api/admin/merchants/${encodeURIComponent(merchantId)}/cashback-monthly`,
+  );
+}
+
+/**
  * Admin payment-method activity day (#594). One row per UTC day in
  * the requested window (default 30, cap 90), with fulfilled-order
  * counts per rail. Every rail is always present — the backend pre-

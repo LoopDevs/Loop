@@ -34,6 +34,7 @@ import {
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CopyButton } from '~/components/features/admin/CopyButton';
+import { MerchantCashbackMonthlyChart } from '~/components/features/admin/MerchantCashbackMonthlyChart';
 import { MerchantCashbackPaidCard } from '~/components/features/admin/MerchantCashbackPaidCard';
 import { MerchantFlywheelChip } from '~/components/features/admin/MerchantFlywheelChip';
 import { MerchantRailMixCard } from '~/components/features/admin/MerchantRailMixCard';
@@ -196,6 +197,27 @@ export default function AdminMerchantDetailRoute(): React.JSX.Element {
           "what's the rule?"; this one answers "what has the rule
           cost us so far?". */}
       <MerchantCashbackPaidCard merchantId={merchantId} />
+
+      {/* Monthly cashback trend (#635). 12-month emission series
+          scoped to this merchant — time-series companion to the
+          scalar cashback-paid-out card above. Same visual
+          primitives as the fleet + per-user charts. */}
+      <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+        <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
+          <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+            Monthly cashback (last 12 months)
+          </h2>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            User cashback minted on fulfilled orders at this merchant per month, per charge
+            currency. Same pinned <code>user_cashback_minor</code> data as the card above, bucketed
+            on fulfilment date — answers &ldquo;is cashback emission trending up at this
+            merchant?&rdquo; rather than &ldquo;how much in total?&rdquo;.
+          </p>
+        </header>
+        <div className="px-6 py-5">
+          <MerchantCashbackMonthlyChart merchantId={merchantId} />
+        </div>
+      </section>
 
       {/* Rail mix (#627). Per-merchant payment-method share —
           how users are paying for fulfilled orders at this one
