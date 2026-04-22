@@ -336,6 +336,15 @@ export default function AdminCashbackRoute(): React.JSX.Element {
               deep-links to the underlying order list.
             </p>
           </div>
+          {/* Tier-3 CSV export (#613). Finance-grade snapshot of the
+              ranking — matches the per-merchant stats CSV below
+              section-wise, so ops can pair them in the same
+              spreadsheet workbook. */}
+          <CsvDownloadButton
+            path="/api/admin/merchants/flywheel-share.csv"
+            filename={`merchants-flywheel-share-${new Date().toISOString().slice(0, 10)}.csv`}
+            label="Flywheel CSV"
+          />
         </header>
         <div className="px-6 py-5">
           <MerchantsFlywheelShareCard />
