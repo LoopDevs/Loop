@@ -1687,6 +1687,10 @@ registry.registerPath({
       state: PayoutState.optional().openapi({
         description: 'Filter to a single lifecycle state. Omitted → all states.',
       }),
+      userId: z.string().uuid().optional().openapi({
+        description:
+          'Filter to a single user. Powers the user-detail payouts section — without this ops would have to grep through the full list for a user.',
+      }),
       before: z
         .string()
         .datetime()

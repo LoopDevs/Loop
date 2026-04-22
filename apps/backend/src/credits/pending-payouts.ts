@@ -74,12 +74,14 @@ export async function listPendingPayouts(limit = 20): Promise<PendingPayout[]> {
  */
 export async function listPayoutsForAdmin(opts: {
   state?: string;
+  userId?: string;
   before?: Date;
   limit?: number;
 }): Promise<PendingPayout[]> {
   const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100);
   const conditions = [];
   if (opts.state !== undefined) conditions.push(eq(pendingPayouts.state, opts.state));
+  if (opts.userId !== undefined) conditions.push(eq(pendingPayouts.userId, opts.userId));
   if (opts.before !== undefined) conditions.push(sql`${pendingPayouts.createdAt} < ${opts.before}`);
   const where = conditions.length === 0 ? undefined : and(...conditions);
   const q = db.select().from(pendingPayouts);

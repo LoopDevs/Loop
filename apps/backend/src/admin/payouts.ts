@@ -123,8 +123,14 @@ export async function adminListPayoutsHandler(c: Context): Promise<Response> {
     before = d;
   }
 
+  const userIdParam = c.req.query('userId');
+  if (userIdParam !== undefined && !UUID_RE.test(userIdParam)) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
+  }
+
   const rows = await listPayoutsForAdmin({
     ...(stateParam !== undefined ? { state: stateParam } : {}),
+    ...(userIdParam !== undefined ? { userId: userIdParam } : {}),
     ...(before !== undefined ? { before } : {}),
     limit,
   });
