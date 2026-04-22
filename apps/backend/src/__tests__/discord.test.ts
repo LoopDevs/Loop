@@ -29,6 +29,7 @@ import {
   notifyOrderFulfilled,
   notifyHealthChange,
   notifyCircuitBreaker,
+  notifyPayoutRetried,
 } from '../discord.js';
 
 const mockFetch = vi.fn();
@@ -105,6 +106,43 @@ describe('notifyOrderFulfilled', () => {
     const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
     const amount = embed.fields.find((f) => f.name === 'Amount');
     expect(amount?.value).toBe('25.00 NOK');
+  });
+});
+
+describe('notifyPayoutRetried', () => {
+  it('fires to the monitoring webhook with admin + prior attempts + payout id', async () => {
+    notifyPayoutRetried({
+      payoutId: 'payout-abcdef-1234',
+      adminId: 'admin-12345678-9999',
+      previousAttempts: 3,
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://discord.test/monitoring-hook');
+    const body = JSON.parse(init.body as string) as {
+      embeds: Array<{ title: string; fields: Array<{ name: string; value: string }> }>;
+    };
+    const embed = body.embeds[0]!;
+    expect(embed.title).toMatch(/Stellar Payout Retried/);
+    const admin = embed.fields.find((f) => f.name === 'Admin')?.value;
+    expect(admin).toBe('`admin-12…`');
+    const attempts = embed.fields.find((f) => f.name === 'Prior attempts')?.value;
+    expect(attempts).toBe('3');
+    const payoutId = embed.fields.find((f) => f.name === 'Payout ID')?.value;
+    expect(payoutId).toBe('`payout-abcdef-1234`');
+  });
+
+  it('escapes markdown in payout id so an unusual upstream id cannot break the embed', async () => {
+    notifyPayoutRetried({
+      payoutId: 'weird`id*with_md',
+      adminId: 'admin-x',
+      previousAttempts: 0,
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    const body = lastBody();
+    const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
+    const payoutId = embed.fields.find((f) => f.name === 'Payout ID')?.value;
+    expect(payoutId).toBe('`weird\\`id\\*with\\_md`');
   });
 });
 

@@ -13,6 +13,8 @@
 import type { Context } from 'hono';
 import { PAYOUT_STATES } from '../db/schema.js';
 import { listPayoutsForAdmin, resetPayoutToPending } from '../credits/pending-payouts.js';
+import type { User } from '../db/users.js';
+import { notifyPayoutRetried } from '../discord.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-payouts' });
@@ -134,7 +136,21 @@ export async function adminRetryPayoutHandler(c: Context): Promise<Response> {
     if (row === null) {
       return c.json({ code: 'NOT_FOUND', message: 'Payout not found or not in failed state' }, 404);
     }
-    log.info({ payoutId: id }, 'Payout reset to pending by admin retry');
+    const admin = c.get('user') as User | undefined;
+    log.info(
+      { payoutId: id, adminId: admin?.id, priorAttempts: row.attempts },
+      'Payout reset to pending by admin retry',
+    );
+    // Fire the audit signal after the DB write commits. The original
+    // `notifyPayoutFailed` embed pointed ops at this row; pairing the
+    // 🔄 retry signal means the full remediation is on one channel.
+    // `admin?.id ?? 'unknown'` guards the test path where no auth is
+    // on the context — the middleware stack gates prod.
+    notifyPayoutRetried({
+      payoutId: id,
+      adminId: admin?.id ?? 'unknown',
+      previousAttempts: row.attempts,
+    });
     return c.json<AdminPayoutView>(toView(row as PayoutRow));
   } catch (err) {
     log.error({ err, payoutId: id }, 'Admin retry failed');

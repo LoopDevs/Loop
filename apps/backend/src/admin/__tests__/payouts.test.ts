@@ -17,14 +17,29 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
+// Audit signal — hoisted so the mock below picks up the same ref.
+const { mockNotifyRetried } = vi.hoisted(() => ({
+  mockNotifyRetried: vi.fn(),
+}));
+vi.mock('../../discord.js', () => ({
+  notifyPayoutRetried: mockNotifyRetried,
+}));
+
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from '../payouts.js';
 
-function makeCtx(query: Record<string, string> = {}, params: Record<string, string> = {}): Context {
+function makeCtx(
+  query: Record<string, string> = {},
+  params: Record<string, string> = {},
+  admin?: { id: string },
+): Context {
+  const store = new Map<string, unknown>();
+  if (admin !== undefined) store.set('user', admin);
   return {
     req: {
       query: (k: string) => query[k],
       param: (k: string) => params[k],
     },
+    get: (k: string) => store.get(k),
     json: (body: unknown, status?: number) =>
       new Response(JSON.stringify(body), {
         status: status ?? 200,
@@ -56,6 +71,7 @@ beforeEach(() => {
   listMock.mockReset();
   listMock.mockResolvedValue([baseRow]);
   resetMock.mockReset();
+  mockNotifyRetried.mockReset();
 });
 
 describe('adminListPayoutsHandler', () => {
@@ -154,5 +170,46 @@ describe('adminRetryPayoutHandler', () => {
     resetMock.mockRejectedValue(new Error('db exploded'));
     const res = await adminRetryPayoutHandler(makeCtx({}, { id: 'p-1' }));
     expect(res.status).toBe(500);
+  });
+
+  it('fires notifyPayoutRetried after a successful reset with the admin id + prior attempts', async () => {
+    resetMock.mockResolvedValue({
+      ...baseRow,
+      state: 'pending',
+      lastError: null,
+      attempts: 5,
+    });
+    const res = await adminRetryPayoutHandler(makeCtx({}, { id: 'p-1' }, { id: 'admin-uuid' }));
+    expect(res.status).toBe(200);
+    expect(mockNotifyRetried).toHaveBeenCalledTimes(1);
+    const [args] = mockNotifyRetried.mock.calls[0] as [
+      { payoutId: string; adminId: string; previousAttempts: number },
+    ];
+    expect(args).toEqual({
+      payoutId: 'p-1',
+      adminId: 'admin-uuid',
+      previousAttempts: 5,
+    });
+  });
+
+  it('does NOT fire the signal on 404 (row not in failed state)', async () => {
+    resetMock.mockResolvedValue(null);
+    const res = await adminRetryPayoutHandler(makeCtx({}, { id: 'p-1' }));
+    expect(res.status).toBe(404);
+    expect(mockNotifyRetried).not.toHaveBeenCalled();
+  });
+
+  it('does NOT fire the signal on 500 (repo threw)', async () => {
+    resetMock.mockRejectedValue(new Error('db exploded'));
+    const res = await adminRetryPayoutHandler(makeCtx({}, { id: 'p-1' }));
+    expect(res.status).toBe(500);
+    expect(mockNotifyRetried).not.toHaveBeenCalled();
+  });
+
+  it('falls back to adminId=unknown when no admin is on the context (test / probe path)', async () => {
+    resetMock.mockResolvedValue({ ...baseRow, state: 'pending', attempts: 2 });
+    await adminRetryPayoutHandler(makeCtx({}, { id: 'p-1' }));
+    const [args] = mockNotifyRetried.mock.calls[0] as [{ adminId: string }];
+    expect(args.adminId).toBe('unknown');
   });
 });

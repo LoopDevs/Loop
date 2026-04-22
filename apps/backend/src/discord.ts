@@ -144,6 +144,39 @@ export function notifyOrderFulfilled(
   });
 }
 
+/**
+ * Notify: an admin manually re-queued a failed Stellar payout
+ * (ADR 015 / 016). Pairs with `notifyPayoutFailed` — when ops sees
+ * the 🔴 failed embed, investigates, and hits the retry button, this
+ * 🔄 embed confirms the action landed in the channel so the full
+ * remediation story is on one thread. Monitoring channel (operational
+ * audit), not the orders channel — retry is an internal action, not
+ * a customer-facing money movement.
+ */
+export function notifyPayoutRetried(args: {
+  payoutId: string;
+  adminId: string;
+  previousAttempts: number;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🔄 Stellar Payout Retried',
+    color: BLUE,
+    fields: [
+      {
+        name: 'Admin',
+        value: `\`${escapeMarkdown(args.adminId.slice(0, 8))}…\``,
+        inline: true,
+      },
+      {
+        name: 'Prior attempts',
+        value: String(args.previousAttempts),
+        inline: true,
+      },
+      { name: 'Payout ID', value: `\`${escapeMarkdown(args.payoutId)}\``, inline: false },
+    ],
+  });
+}
+
 /** Notify: health status changed */
 export function notifyHealthChange(status: 'healthy' | 'degraded', details: string): void {
   void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
