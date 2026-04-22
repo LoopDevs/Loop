@@ -153,6 +153,43 @@ export async function getSupplierSpend(
 }
 
 /**
+ * Per-operator order-count / success-count / failure-count breakdown
+ * (ADR 013). Complements `SupplierSpendRow` — spend is "what did we
+ * pay CTX this window", operator-stats is "which CTX operator actually
+ * carried it". `lastOrderAt` is the newest `createdAt` attributed to
+ * this operator in the window.
+ */
+export interface OperatorStatsRow {
+  operatorId: string;
+  orderCount: number;
+  fulfilledCount: number;
+  failedCount: number;
+  lastOrderAt: string;
+}
+
+export interface OperatorStatsResponse {
+  since: string;
+  rows: OperatorStatsRow[];
+}
+
+/**
+ * `GET /api/admin/operator-stats` — per-operator aggregate keyed on
+ * `orders.ctxOperatorId`. Rows where the operator is still null (pre-
+ * procurement) are skipped server-side. Default window 24h; server
+ * clamps `?since=` to 366d.
+ */
+export async function getOperatorStats(
+  opts: { since?: string } = {},
+): Promise<OperatorStatsResponse> {
+  const params = new URLSearchParams();
+  if (opts.since !== undefined) params.set('since', opts.since);
+  const qs = params.toString();
+  return authenticatedRequest<OperatorStatsResponse>(
+    `/api/admin/operator-stats${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
+/**
  * One row from the admin audit tail (ADR 017 / 018). Mirrors the
  * Discord audit message: who did what, when, status. Response body
  * is intentionally omitted — audit is "activity happened" not

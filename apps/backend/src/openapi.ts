@@ -723,6 +723,27 @@ const AdminSupplierSpendResponse = registry.register(
   }),
 );
 
+// ─── Admin — operator stats (ADR 013) ──────────────────────────────────────
+
+const AdminOperatorStatsRow = registry.register(
+  'AdminOperatorStatsRow',
+  z.object({
+    operatorId: z.string(),
+    orderCount: z.number().int().min(0),
+    fulfilledCount: z.number().int().min(0),
+    failedCount: z.number().int().min(0),
+    lastOrderAt: z.string().datetime(),
+  }),
+);
+
+const AdminOperatorStatsResponse = registry.register(
+  'AdminOperatorStatsResponse',
+  z.object({
+    since: z.string().datetime(),
+    rows: z.array(AdminOperatorStatsRow),
+  }),
+);
+
 // ─── Admin — user detail ────────────────────────────────────────────────────
 
 const AdminUserView = registry.register(
@@ -2110,6 +2131,51 @@ registry.registerPath({
     200: {
       description: 'Per-currency supplier-spend rows',
       content: { 'application/json': { schema: AdminSupplierSpendResponse } },
+    },
+    400: {
+      description: 'Invalid `since`',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the aggregate',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/operator-stats',
+  summary: 'Per-operator order volume + success rate (ADR 013).',
+  description:
+    "Groups orders in the window by `ctx_operator_id`, skipping pre-procurement rows where the operator is still null. Each row carries the total order count, fulfilled count, failed count, and the most-recent createdAt attributed to that operator. Ordered by order_count descending so the top-traffic account surfaces first. Complements `/api/admin/supplier-spend` — that one answers 'what did we pay CTX', this one answers 'which operator actually did the work'. Default window 24h, capped at 366 days.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      since: z
+        .string()
+        .datetime()
+        .optional()
+        .openapi({ description: 'ISO-8601 — lower bound on createdAt. Defaults to 24h ago.' }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Per-operator stats rows',
+      content: { 'application/json': { schema: AdminOperatorStatsResponse } },
     },
     400: {
       description: 'Invalid `since`',

@@ -7,6 +7,7 @@ import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { PayoutsByAssetTable } from '~/components/features/admin/PayoutsByAssetTable';
 import { SupplierSpendCard } from '~/components/features/admin/SupplierSpendCard';
+import { OperatorStatsCard } from '~/components/features/admin/OperatorStatsCard';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -368,6 +369,20 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
           value column within the CTX discount.
         </p>
         <SupplierSpendCard />
+      </section>
+
+      <section>
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Operator traffic (24h)
+          </h2>
+        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Per-operator breakdown of the orders each CTX service account carried (ADR 013). A non-
+          zero failed count or a sharply-skewed traffic distribution is usually an incident signal —
+          click any operator to see the orders behind the number.
+        </p>
+        <OperatorStatsCard />
       </section>
 
       <section>
