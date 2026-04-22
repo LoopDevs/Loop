@@ -1815,18 +1815,23 @@ registry.registerPath({
   path: '/api/admin/audit-tail',
   summary: 'Newest-first admin write-audit tail (ADR 017 / 018).',
   description:
-    "Returns the most recent rows from `admin_idempotency_keys` — the persistent mirror of every admin write. Admin dashboard surfaces this as a 'Recent admin activity' card so ops can review without scrolling the Discord channel. Response body is deliberately stripped (method / path / status / timestamp / actor only) — the audit story is 'who did what, when' not 'here's the stored snapshot'. `?limit=` clamps 1..100, default 25.",
+    "Returns the most recent rows from `admin_idempotency_keys` — the persistent mirror of every admin write. Admin dashboard surfaces this as a 'Recent admin activity' card so ops can review without scrolling the Discord channel. Response body is deliberately stripped (method / path / status / timestamp / actor only) — the audit story is 'who did what, when' not 'here's the stored snapshot'. `?limit=` clamps 1..100, default 25. `?before=<iso>` paginates older rows by `createdAt`.",
   tags: ['Admin'],
   security: [{ bearerAuth: [] }],
   request: {
     query: z.object({
       limit: z.coerce.number().int().min(1).max(100).optional(),
+      before: z.string().datetime().optional(),
     }),
   },
   responses: {
     200: {
       description: 'Audit rows, newest first',
       content: { 'application/json': { schema: AdminAuditTailResponse } },
+    },
+    400: {
+      description: '`before` is not a valid ISO-8601 timestamp',
+      content: { 'application/json': { schema: ErrorResponse } },
     },
     401: {
       description: 'Missing or invalid bearer',
