@@ -88,6 +88,19 @@ export async function adminListPayoutsHandler(c: Context): Promise<Response> {
     );
   }
 
+  // Cross-link from /admin/orders: clicking a row's userId jumps
+  // here with the filter pre-applied. Validate UUID shape so a
+  // malformed link doesn't drag the whole list into a Postgres cast
+  // error; matches the same regex `/admin/orders` uses on its own
+  // userId filter.
+  const userIdParam = c.req.query('userId');
+  if (
+    userIdParam !== undefined &&
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userIdParam)
+  ) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a UUID' }, 400);
+  }
+
   const limitRaw = c.req.query('limit');
   const parsedLimit = Number.parseInt(limitRaw ?? '20', 10);
   const limit = Math.min(Math.max(Number.isNaN(parsedLimit) ? 20 : parsedLimit, 1), 100);
@@ -107,6 +120,7 @@ export async function adminListPayoutsHandler(c: Context): Promise<Response> {
 
   const rows = await listPayoutsForAdmin({
     ...(stateParam !== undefined ? { state: stateParam } : {}),
+    ...(userIdParam !== undefined ? { userId: userIdParam } : {}),
     ...(before !== undefined ? { before } : {}),
     limit,
   });

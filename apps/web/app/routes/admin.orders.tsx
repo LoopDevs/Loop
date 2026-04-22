@@ -13,7 +13,7 @@
  */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.orders';
 import { useAuth } from '~/hooks/use-auth';
@@ -291,12 +291,17 @@ function OrderRow({ row }: { row: AdminOrderView }): React.JSX.Element {
         </p>
       </div>
       <div className="min-w-0">
-        <p
-          className="font-mono text-xs text-gray-700 dark:text-gray-300 truncate"
-          title={row.userId}
+        {/* Cross-link: jumps to /admin/payouts?userId=<uuid> so ops
+            can see every on-chain payout for this user without
+            retyping the uuid. The payouts page validates the UUID
+            and surfaces a clear-filter chip at the top. */}
+        <Link
+          to={`/admin/payouts?userId=${encodeURIComponent(row.userId)}`}
+          className="font-mono text-xs text-blue-700 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 underline underline-offset-2 truncate block"
+          title={`View payouts for ${row.userId}`}
         >
           {row.userId.slice(0, 8)}
-        </p>
+        </Link>
         <p className="text-[11px] text-gray-500 dark:text-gray-400">{row.paymentMethod}</p>
       </div>
       <div className="text-right">

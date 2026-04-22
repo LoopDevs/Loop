@@ -62,12 +62,25 @@ export default function AdminPayoutsRoute(): React.JSX.Element {
   const activeState = STATES.includes(stateParam as PayoutState | 'all')
     ? (stateParam as PayoutState | 'all')
     : 'all';
+  // `?userId=<uuid>` narrows the list to one user's payouts —
+  // cross-link target from `/admin/orders`. Validated here with the
+  // same regex the backend uses so an in-page link change takes
+  // effect immediately; a malformed param is treated as absent so
+  // the list stays usable rather than 400-ing the whole page.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const userIdParamRaw = searchParams.get('userId');
+  const activeUserId =
+    userIdParamRaw !== null && UUID_RE.test(userIdParamRaw) ? userIdParamRaw : null;
 
   const queryClient = useQueryClient();
   const query = useQuery({
-    queryKey: ['admin-payouts', activeState],
+    queryKey: ['admin-payouts', activeState, activeUserId],
     queryFn: () =>
-      listPayouts(activeState === 'all' ? { limit: 50 } : { state: activeState, limit: 50 }),
+      listPayouts({
+        limit: 50,
+        ...(activeState === 'all' ? {} : { state: activeState }),
+        ...(activeUserId !== null ? { userId: activeUserId } : {}),
+      }),
     enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 10_000,
@@ -102,6 +115,13 @@ export default function AdminPayoutsRoute(): React.JSX.Element {
     });
   };
 
+  const clearUserFilter = (): void => {
+    setSearchParams((params) => {
+      params.delete('userId');
+      return params;
+    });
+  };
+
   if (!isAuthenticated) {
     return (
       <main className="max-w-3xl mx-auto px-6 py-12">
@@ -132,6 +152,24 @@ export default function AdminPayoutsRoute(): React.JSX.Element {
           button at the row level.
         </p>
       </header>
+
+      {activeUserId !== null && (
+        // Cross-link indicator — tells the admin this list is narrowed
+        // to one user and gives them a one-click out. Rendered above
+        // the state pills so it reads first when the filter is active.
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 dark:border-blue-900/50 dark:bg-blue-900/10">
+          <p className="text-sm text-blue-800 dark:text-blue-300">
+            Filtered to user <code className="font-mono text-xs">{activeUserId.slice(0, 8)}</code>
+          </p>
+          <button
+            type="button"
+            onClick={clearUserFilter}
+            className="text-xs font-medium text-blue-700 hover:text-blue-800 underline underline-offset-2 dark:text-blue-300 dark:hover:text-blue-200"
+          >
+            Clear user filter
+          </button>
+        </div>
+      )}
 
       <nav className="flex flex-wrap gap-2" aria-label="Payout state filter">
         {STATES.map((s) => (

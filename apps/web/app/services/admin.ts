@@ -117,11 +117,14 @@ export interface AdminPayoutView {
  */
 export async function listPayouts(opts: {
   state?: PayoutState;
+  /** UUID — narrows the list to one user's payouts (cross-link from /admin/orders). */
+  userId?: string;
   limit?: number;
   before?: string;
 }): Promise<{ payouts: AdminPayoutView[] }> {
   const params = new URLSearchParams();
   if (opts.state !== undefined) params.set('state', opts.state);
+  if (opts.userId !== undefined) params.set('userId', opts.userId);
   if (opts.limit !== undefined) params.set('limit', String(opts.limit));
   if (opts.before !== undefined) params.set('before', opts.before);
   const qs = params.toString();
