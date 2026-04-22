@@ -73,6 +73,7 @@ import { adminGetUserHandler } from './admin/user-detail.js';
 import { adminUserByEmailHandler } from './admin/user-by-email.js';
 import { adminListUsersHandler } from './admin/users-list.js';
 import { adminMerchantsResyncHandler } from './admin/merchants-resync.js';
+import { adminDiscordNotifiersHandler } from './admin/discord-notifiers.js';
 import { adminCreditAdjustmentHandler } from './admin/credit-adjustments.js';
 import { publicCashbackStatsHandler } from './public/cashback-stats.js';
 import { publicTopCashbackMerchantsHandler } from './public/top-cashback-merchants.js';
@@ -874,6 +875,10 @@ app.post(
 // within seconds. 2/min rate limit — every hit goes to CTX, this
 // is a manual override not a polled surface.
 app.post('/api/admin/merchants/resync', rateLimit(2, 60_000), adminMerchantsResyncHandler);
+// Discord notifier catalog (ADR 018). Static read of the
+// DISCORD_NOTIFIERS const — the admin UI renders "what signals can
+// this system send us?" from this list. No DB, no secrets.
+app.get('/api/admin/discord/notifiers', rateLimit(60, 60_000), adminDiscordNotifiersHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 

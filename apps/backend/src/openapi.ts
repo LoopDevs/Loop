@@ -2677,6 +2677,46 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/discord/notifiers',
+  summary: 'Static catalog of Discord notifiers (ADR 018).',
+  description:
+    'Zero-DB read of the `DISCORD_NOTIFIERS` const in `apps/backend/src/discord.ts`. Powers the admin UI surface that renders "what signals can this system send us?" without rebuilding the list from ADR prose. No secrets — `channel` is the symbolic name (`orders`, `monitoring`, `admin-audit`), not the webhook URL. A new notifier lands with its catalog entry in the same PR, so this response is always in lockstep with the code.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Frozen catalog of notifiers',
+      content: {
+        'application/json': {
+          schema: z.object({
+            notifiers: z.array(
+              z.object({
+                name: z.string(),
+                channel: z.enum(['orders', 'monitoring', 'admin-audit']),
+                description: z.string(),
+              }),
+            ),
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/payouts.csv',
   summary: 'CSV export of pending_payouts (ADR 015).',
   description:

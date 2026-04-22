@@ -294,3 +294,83 @@ export function notifyCircuitBreaker(
     color: state === 'open' ? RED : GREEN,
   });
 }
+
+/**
+ * Discord channels the backend posts to. Mirrors the three
+ * `DISCORD_WEBHOOK_*` env vars — keeping this as a closed union
+ * means adding a new channel is a type-level change that forces
+ * every catalog entry to declare which channel it posts to.
+ */
+export type DiscordChannel = 'orders' | 'monitoring' | 'admin-audit';
+
+/**
+ * One catalogued notifier — the function name, the channel it posts
+ * to, and a one-line description of when it fires. Catalog is an
+ * `Object.freeze`d const so runtime mutation throws (the admin
+ * endpoint surfaces this read-only; nobody should be rewriting it).
+ */
+export interface DiscordNotifier {
+  name: string;
+  channel: DiscordChannel;
+  description: string;
+}
+
+/**
+ * Static catalog of the Discord notifiers the backend can emit
+ * (ADR 018 operational-visibility surface).
+ *
+ * Keeping the list in code rather than in prose makes it:
+ *
+ * - **ADR-drift-resistant** — ADR 018 names the taxonomy; a new
+ *   notifier landing without updating this const would be caught in
+ *   review because the admin UI's surface would silently omit it.
+ * - **Zero-DB** — admin handler reads this directly, no round trip.
+ * - **Safe for UI** — `channel` is the enum, not the webhook URL, so
+ *   no secrets leak through the catalog surface.
+ *
+ * Keep the entries sorted by channel first, then by function name so
+ * the admin-rendered table is stable and diff-friendly.
+ */
+export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
+  {
+    name: 'notifyAdminAudit',
+    channel: 'admin-audit',
+    description:
+      'Every successful admin write (ADR 017). One line per mutation with the actor, method, path, status, and replay flag.',
+  },
+  {
+    name: 'notifyOrderCreated',
+    channel: 'orders',
+    description: 'Fires on every new loop-native order (ADR 010). Embed lists merchant + amount.',
+  },
+  {
+    name: 'notifyOrderFulfilled',
+    channel: 'orders',
+    description:
+      'Fires when an order transitions to `fulfilled` — the user got their gift card. Complement to the orders-created signal above.',
+  },
+  {
+    name: 'notifyCircuitBreaker',
+    channel: 'monitoring',
+    description:
+      'Fires when the upstream-CTX circuit breaker transitions open or closed (ADR 013 pool health).',
+  },
+  {
+    name: 'notifyHealthChange',
+    channel: 'monitoring',
+    description:
+      'Fires on the /health probe cache transitioning healthy ↔ degraded. Paging-grade for the on-call lookup.',
+  },
+  {
+    name: 'notifyPayoutFailed',
+    channel: 'monitoring',
+    description:
+      'Fires when a pending_payouts row flips to `failed` (ADR 015/016). Embed carries asset code + user id + lastError preview.',
+  },
+  {
+    name: 'notifyUsdcBelowFloor',
+    channel: 'monitoring',
+    description:
+      "Fires when Loop's USDC operator balance drops below the alerting floor — time to fund the treasury account before payouts can't clear (ADR 015).",
+  },
+]);
