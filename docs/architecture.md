@@ -244,7 +244,7 @@ GET  /api/admin/audit-tail                              [admin — newest-first 
 GET  /api/admin/audit-tail.csv                          [admin — finance/legal CSV export of admin write-audit, ADR 017/018]
 POST /api/admin/users/:userId/credit-adjustments        [admin — signed credit adjustment, ADR 017]
 GET  /api/admin/payouts.csv                            [admin — finance-ready CSV export, ADR 015]
-GET  /api/admin/orders                                  [admin — Loop-native orders drill-down + ?state/?userId/?merchantId/?chargeCurrency/?ctxOperatorId filters, ADR 011/013/015]
+GET  /api/admin/orders                                  [admin — Loop-native orders drill-down + ?state/?userId/?merchantId/?chargeCurrency/?paymentMethod/?ctxOperatorId filters, ADR 011/013/015]
 GET  /api/admin/operator-stats                          [admin — per-operator order volume + success rate, ADR 013]
 GET  /api/admin/orders/activity                         [admin — N-day created/fulfilled sparkline, ADR 010]
 GET  /api/admin/orders.csv                              [admin — finance-ready CSV export, ADR 011/015]

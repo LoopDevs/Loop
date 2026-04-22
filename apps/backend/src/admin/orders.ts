@@ -15,6 +15,7 @@
  */
 import type { Context } from 'hono';
 import { and, eq, lt, sql } from 'drizzle-orm';
+import { ORDER_PAYMENT_METHODS } from '@loop/shared';
 import { db } from '../db/client.js';
 import { orders } from '../db/schema.js';
 import { logger } from '../logger.js';
@@ -179,6 +180,25 @@ export async function adminListOrdersHandler(c: Context): Promise<Response> {
     );
   }
 
+  // `orders.payment_method` has a CHECK constraint pinning it to the
+  // ORDER_PAYMENT_METHODS enum. Enum-validate up front so the query
+  // never issues a cast that would 500 on an unknown value — and so
+  // the filter is symmetric with /api/admin/orders/payment-method-share,
+  // which is the natural upstream drill-down into this list.
+  const paymentMethodRaw = c.req.query('paymentMethod');
+  if (
+    paymentMethodRaw !== undefined &&
+    !(ORDER_PAYMENT_METHODS as ReadonlyArray<string>).includes(paymentMethodRaw)
+  ) {
+    return c.json(
+      {
+        code: 'VALIDATION_ERROR',
+        message: `paymentMethod must be one of: ${ORDER_PAYMENT_METHODS.join(', ')}`,
+      },
+      400,
+    );
+  }
+
   // `orders.ctx_operator_id` is a free-form text column (operator ids
   // are opaque strings configured in CTX_OPERATOR_POOL — ADR 013).
   // Enforce shape-only checks: non-empty, length ≤ 128, safe id chars.
@@ -216,6 +236,7 @@ export async function adminListOrdersHandler(c: Context): Promise<Response> {
     if (merchantIdRaw !== undefined) conditions.push(eq(orders.merchantId, merchantIdRaw));
     if (chargeCurrencyRaw !== undefined)
       conditions.push(eq(orders.chargeCurrency, chargeCurrencyRaw));
+    if (paymentMethodRaw !== undefined) conditions.push(eq(orders.paymentMethod, paymentMethodRaw));
     if (ctxOperatorIdRaw !== undefined) conditions.push(eq(orders.ctxOperatorId, ctxOperatorIdRaw));
     if (before !== undefined) conditions.push(lt(orders.createdAt, before));
     const where = conditions.length === 0 ? undefined : and(...conditions);
