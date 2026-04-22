@@ -21,28 +21,21 @@
  */
 import type { Context } from 'hono';
 import { desc, eq } from 'drizzle-orm';
+// Response shape lives in `@loop/shared` alongside the web's consumer
+// (ADR 019 single-source rule). Re-exported below for existing backend
+// callers that import the symbol relative to this module.
+import type { PublicTopCashbackMerchantsResponse, TopCashbackMerchant } from '@loop/shared';
 import { db } from '../db/client.js';
 import { merchantCashbackConfigs } from '../db/schema.js';
 import { getMerchants } from '../merchants/sync.js';
 import { logger } from '../logger.js';
 
+export type { PublicTopCashbackMerchantsResponse, TopCashbackMerchant };
+
 const log = logger.child({ handler: 'public-top-cashback-merchants' });
 
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 50;
-
-export interface TopCashbackMerchant {
-  id: string;
-  name: string;
-  logoUrl: string | null;
-  /** numeric(5,2) as string, e.g. `"15.00"`. */
-  userCashbackPct: string;
-}
-
-export interface PublicTopCashbackMerchantsResponse {
-  merchants: TopCashbackMerchant[];
-  asOf: string;
-}
 
 interface ConfigRow {
   merchantId: string;
