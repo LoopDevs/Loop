@@ -44,6 +44,7 @@ import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '.
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
+import { adminCreditAdjustmentHandler } from './admin/credit-adjustments.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -653,6 +654,14 @@ app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayout
 // by state and userId. Ops uses this to triage stuck orders + audit
 // the cashback split + correlate with operator-pool health.
 app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+// Credit-adjustment write (ADR 017). Lower rate limit than reads —
+// it's an explicit ops action, not a polled surface. Idempotency-Key
+// header required; missing header is a 400 at the handler edge.
+app.post(
+  '/api/admin/users/:userId/credit-adjustments',
+  rateLimit(20, 60_000),
+  adminCreditAdjustmentHandler,
+);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 

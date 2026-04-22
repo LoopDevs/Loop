@@ -229,6 +229,7 @@ GET  /api/admin/treasury                               [admin]
 GET  /api/admin/payouts                                [admin — ADR 015 payout backlog]
 POST /api/admin/payouts/:id/retry                      [admin — reset failed payout to pending]
 GET  /api/admin/orders                                  [admin — Loop-native orders drill-down, ADR 011/015]
+POST /api/admin/users/:userId/credit-adjustments        [admin — signed credit adjustment, ADR 017]
 ```
 
 Full request/response shapes — including field types, pagination

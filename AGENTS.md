@@ -178,6 +178,7 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # SENTRY_DSN=<dsn>
 # DISCORD_WEBHOOK_ORDERS=<url>
 # DISCORD_WEBHOOK_MONITORING=<url>
+# DISCORD_WEBHOOK_ADMIN_AUDIT=<url>  — ADR 017: admin-write audit fanout
 ```
 
 Full env var docs → `docs/development.md`.

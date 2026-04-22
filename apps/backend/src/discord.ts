@@ -223,6 +223,62 @@ export function notifyUsdcBelowFloor(args: {
   });
 }
 
+/**
+ * Notify: admin write action (ADR 017/018). Called fire-and-forget
+ * AFTER the DB commit of every admin mutation. Actor id truncated to
+ * the last 8 chars so the embed doesn't expose a full uuid; full id
+ * is still in the ledger for audit.
+ */
+export function notifyAdminAudit(args: {
+  actorUserId: string;
+  actorEmail: string;
+  endpoint: string;
+  targetUserId?: string;
+  amountMinor?: string;
+  currency?: string;
+  reason: string;
+  idempotencyKey: string;
+  replayed: boolean;
+}): void {
+  const actorTail = args.actorUserId.slice(-8);
+  const fields: Array<{ name: string; value: string; inline?: boolean }> = [
+    { name: 'Actor', value: `\`${actorTail}\` ${escapeMarkdown(args.actorEmail)}`, inline: true },
+    { name: 'Endpoint', value: `\`${escapeMarkdown(args.endpoint)}\``, inline: true },
+  ];
+  if (args.targetUserId !== undefined) {
+    fields.push({
+      name: 'Target user',
+      value: `\`${args.targetUserId.slice(-8)}\``,
+      inline: true,
+    });
+  }
+  if (args.amountMinor !== undefined && args.currency !== undefined) {
+    fields.push({
+      name: 'Amount (minor)',
+      value: `${escapeMarkdown(args.amountMinor)} ${escapeMarkdown(args.currency)}`,
+      inline: true,
+    });
+  }
+  fields.push({
+    name: 'Reason',
+    value: truncate(escapeMarkdown(args.reason), FIELD_VALUE_MAX),
+    inline: false,
+  });
+  fields.push({
+    name: 'Idempotency-Key',
+    value: `\`${escapeMarkdown(args.idempotencyKey).slice(0, 32)}\``,
+    inline: true,
+  });
+  if (args.replayed) {
+    fields.push({ name: 'Replayed', value: 'yes', inline: true });
+  }
+  void sendWebhook(env.DISCORD_WEBHOOK_ADMIN_AUDIT, {
+    title: args.replayed ? '🔁 Admin write (replayed)' : '🛠️ Admin write',
+    color: args.replayed ? BLUE : GREEN,
+    fields,
+  });
+}
+
 /** Notify: circuit breaker state change */
 export function notifyCircuitBreaker(
   state: 'open' | 'closed',
