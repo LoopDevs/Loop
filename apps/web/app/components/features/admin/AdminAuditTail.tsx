@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { getAdminAuditTail, type AdminAuditTailRow } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -6,6 +7,26 @@ import { Spinner } from '~/components/ui/Spinner';
 
 const DEFAULT_LIMIT = 25;
 const EXPANDED_LIMIT = 100;
+
+/**
+ * Resolves the in-app route an admin-write endpoint affected. Null
+ * when the path doesn't match a known resource pattern — the audit
+ * row then renders the path as plain text. The value is intentionally
+ * scoped: we only link to pages ops has elsewhere — guessing a
+ * route from an unknown admin-write would silently 404.
+ */
+export function auditRowLink(method: string, path: string): string | null {
+  // /api/admin/users/:userId/credit-adjustments (POST)
+  const credit = /^\/api\/admin\/users\/([0-9a-f-]{36})\/credit-adjustments$/i.exec(path);
+  if (credit !== null && method === 'POST') return `/admin/users/${credit[1]}`;
+  // /api/admin/payouts/:id/retry (POST)
+  const retry = /^\/api\/admin\/payouts\/([0-9a-f-]{36})\/retry$/i.exec(path);
+  if (retry !== null && method === 'POST') return `/admin/payouts/${retry[1]}`;
+  // /api/admin/merchant-cashback-configs/:merchantId (PUT)
+  const cfg = /^\/api\/admin\/merchant-cashback-configs\/([^/]+)$/.exec(path);
+  if (cfg !== null && method === 'PUT') return '/admin/cashback';
+  return null;
+}
 
 /**
  * Formats an audit row's `createdAt` as a short relative-time string
@@ -88,9 +109,22 @@ export function AdminAuditTail(): React.JSX.Element {
               <span className="font-mono text-xs text-gray-500 dark:text-gray-400 tabular-nums">
                 {row.method}
               </span>
-              <span className="font-mono text-xs text-gray-700 dark:text-gray-300 flex-1 truncate">
-                {row.path}
-              </span>
+              {(() => {
+                const to = auditRowLink(row.method, row.path);
+                return to !== null ? (
+                  <Link
+                    to={to}
+                    className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400 flex-1 truncate"
+                    title={row.path}
+                  >
+                    {row.path}
+                  </Link>
+                ) : (
+                  <span className="font-mono text-xs text-gray-700 dark:text-gray-300 flex-1 truncate">
+                    {row.path}
+                  </span>
+                );
+              })()}
               <span className="text-xs text-gray-600 dark:text-gray-400 truncate max-w-[12rem]">
                 {row.actorEmail}
               </span>
