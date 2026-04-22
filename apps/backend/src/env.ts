@@ -1,5 +1,7 @@
 import { z } from 'zod';
-import { DEFAULT_CLIENT_IDS } from '@loop/shared';
+import { DEFAULT_CLIENT_IDS, STELLAR_PUBKEY_REGEX } from '@loop/shared';
+
+const STELLAR_ADDRESS_MESSAGE = 'must be a valid Stellar public key (G...)';
 
 /**
  * Parses a process.env boolean the way operators actually write them.
@@ -164,7 +166,7 @@ export const EnvSchema = z.object({
   // work because they don't cross-chain.
   LOOP_STELLAR_DEPOSIT_ADDRESS: z
     .string()
-    .regex(/^G[A-Z2-7]{55}$/, { message: 'must be a valid Stellar public key (G...)' })
+    .regex(STELLAR_PUBKEY_REGEX, { message: STELLAR_ADDRESS_MESSAGE })
     .optional(),
 
   // USDC issuer account for the watcher's asset-match guard. Centre
@@ -173,7 +175,7 @@ export const EnvSchema = z.object({
   // leniency; tighten once operators have verified the deployment).
   LOOP_STELLAR_USDC_ISSUER: z
     .string()
-    .regex(/^G[A-Z2-7]{55}$/, { message: 'must be a valid Stellar public key (G...)' })
+    .regex(STELLAR_PUBKEY_REGEX, { message: STELLAR_ADDRESS_MESSAGE })
     .optional(),
 
   // Issuer accounts for the three LOOP-branded Stellar assets (ADR 015).
@@ -186,15 +188,15 @@ export const EnvSchema = z.object({
   // users whose currency is wired up.
   LOOP_STELLAR_USDLOOP_ISSUER: z
     .string()
-    .regex(/^G[A-Z2-7]{55}$/, { message: 'must be a valid Stellar public key (G...)' })
+    .regex(STELLAR_PUBKEY_REGEX, { message: STELLAR_ADDRESS_MESSAGE })
     .optional(),
   LOOP_STELLAR_GBPLOOP_ISSUER: z
     .string()
-    .regex(/^G[A-Z2-7]{55}$/, { message: 'must be a valid Stellar public key (G...)' })
+    .regex(STELLAR_PUBKEY_REGEX, { message: STELLAR_ADDRESS_MESSAGE })
     .optional(),
   LOOP_STELLAR_EURLOOP_ISSUER: z
     .string()
-    .regex(/^G[A-Z2-7]{55}$/, { message: 'must be a valid Stellar public key (G...)' })
+    .regex(STELLAR_PUBKEY_REGEX, { message: STELLAR_ADDRESS_MESSAGE })
     .optional(),
 
   // Procurement USDC-reserve floor (ADR 015). When the operator account's

@@ -19,6 +19,7 @@ import {
   extendZodWithOpenApi,
 } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
+import { STELLAR_PUBKEY_REGEX } from '@loop/shared';
 
 extendZodWithOpenApi(z);
 
@@ -271,13 +272,9 @@ const SetHomeCurrencyBody = registry.register(
 const SetStellarAddressBody = registry.register(
   'SetStellarAddressBody',
   z.object({
-    address: z
-      .string()
-      .regex(/^G[A-Z2-7]{55}$/)
-      .nullable()
-      .openapi({
-        description: 'Stellar public key (G…). Passing null unlinks the current wallet.',
-      }),
+    address: z.string().regex(STELLAR_PUBKEY_REGEX).nullable().openapi({
+      description: 'Stellar public key (G…). Passing null unlinks the current wallet.',
+    }),
   }),
 );
 

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
-import { ApiException } from '@loop/shared';
+import { ApiException, STELLAR_PUBKEY_REGEX } from '@loop/shared';
 import type { Route } from './+types/settings.wallet';
 import { useAuth } from '~/hooks/use-auth';
 import { getMe, setStellarAddress, type UserMeView } from '~/services/user';
@@ -11,8 +11,6 @@ import { Spinner } from '~/components/ui/Spinner';
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Wallet — Loop' }];
 }
-
-const STELLAR_PUBKEY_REGEX = /^G[A-Z2-7]{55}$/;
 
 /**
  * Picks the LOOP-asset code the user will receive on-chain, based
