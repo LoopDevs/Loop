@@ -130,11 +130,46 @@ export async function listPayouts(opts: {
   );
 }
 
-/** `POST /api/admin/payouts/:id/retry` — flips a failed row back to pending. */
-export async function retryPayout(id: string): Promise<AdminPayoutView> {
-  return authenticatedRequest<AdminPayoutView>(
-    `/api/admin/payouts/${encodeURIComponent(id)}/retry`,
-    { method: 'POST' },
+/**
+ * ADR 017 admin-write response envelope. Every admin mutation returns
+ * `{ result, audit }`; `audit.replayed: true` means the backend found a
+ * prior snapshot for the `Idempotency-Key` and returned the stored
+ * response verbatim.
+ */
+export interface AdminWriteAudit {
+  actorUserId: string;
+  actorEmail: string;
+  idempotencyKey: string;
+  appliedAt: string;
+  replayed: boolean;
+}
+
+export interface AdminWriteEnvelope<T> {
+  result: T;
+  audit: AdminWriteAudit;
+}
+
+/**
+ * `POST /api/admin/payouts/:id/retry` — flips a failed row back to
+ * pending. ADR 017 compliant: caller must supply a reason, and the
+ * service generates a per-click `Idempotency-Key` so a double-click
+ * produces at most one state transition.
+ */
+export async function retryPayout(args: {
+  id: string;
+  reason: string;
+}): Promise<AdminWriteEnvelope<AdminPayoutView>> {
+  const idempotencyKey =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID().replace(/-/g, '')
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  return authenticatedRequest<AdminWriteEnvelope<AdminPayoutView>>(
+    `/api/admin/payouts/${encodeURIComponent(args.id)}/retry`,
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: { reason: args.reason },
+    },
   );
 }
 
