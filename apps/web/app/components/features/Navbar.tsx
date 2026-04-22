@@ -313,6 +313,16 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
             <Link to="/map" className={navLinkClass('/map')}>
               Map
             </Link>
+            {/* Public cashback rates index (#649). Always visible —
+                the main acquisition funnel for unauthenticated
+                visitors and a quick rate-check for signed-in users.
+                Matches the dedicated navbar path for "Cashback"
+                (below, authenticated) so the two surfaces read as
+                related (rates list / your balance) rather than
+                unrelated side trips. */}
+            <Link to="/cashback" className={navLinkClass('/cashback')}>
+              Rates
+            </Link>
             <Link to="/orders" className={navLinkClass('/orders')}>
               Orders
             </Link>
