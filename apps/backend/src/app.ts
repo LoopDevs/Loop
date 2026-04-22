@@ -67,6 +67,7 @@ import { adminStuckPayoutsHandler } from './admin/stuck-payouts.js';
 import { adminCashbackActivityHandler } from './admin/cashback-activity.js';
 import { adminCashbackActivityCsvHandler } from './admin/cashback-activity-csv.js';
 import { adminCashbackMonthlyHandler } from './admin/cashback-monthly.js';
+import { adminPayoutsMonthlyHandler } from './admin/payouts-monthly.js';
 import { adminMerchantStatsHandler } from './admin/merchant-stats.js';
 import { adminMerchantStatsCsvHandler } from './admin/merchant-stats-csv.js';
 import { adminMerchantsFlywheelShareHandler } from './admin/merchants-flywheel-share.js';
@@ -863,6 +864,13 @@ app.get('/api/admin/cashback-activity.csv', rateLimit(10, 60_000), adminCashback
 // facing /api/users/me/cashback-monthly shape so the same chart
 // component can render either. Single aggregate query.
 app.get('/api/admin/cashback-monthly', rateLimit(60, 60_000), adminCashbackMonthlyHandler);
+// Monthly confirmed-payout totals (#631) — settlement-side
+// counterpart to cashback-monthly. Cashback-monthly measures
+// liability creation (credits minted); this measures liability
+// settlement (confirmed on-chain payouts). Pairing the two
+// answers "is outstanding liability growing or shrinking this
+// month?". Same 12-month window + oldest-first ordering.
+app.get('/api/admin/payouts-monthly', rateLimit(60, 60_000), adminPayoutsMonthlyHandler);
 // Per-merchant cashback stats — which merchants drive volume /
 // cashback outlay / margin. Distinct from supplier-spend (currency
 // grouped) — this one groups by merchant.
