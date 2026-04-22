@@ -18,7 +18,7 @@ vi.mock('~/services/admin', async (importActual) => {
   const actual = (await importActual()) as typeof AdminModule;
   return {
     ...actual,
-    getTopUsers: () => adminMock.getTopUsers(),
+    getTopUsers: (opts?: { since?: string; limit?: number }) => adminMock.getTopUsers(opts),
   };
 });
 
@@ -100,6 +100,21 @@ describe('<TopUsersTable />', () => {
     renderComponent();
     await waitFor(() => {
       expect(screen.getByText(/Failed to load top users/)).toBeDefined();
+    });
+  });
+
+  it('re-fetches with a different since when the window toggle switches', async () => {
+    adminMock.getTopUsers.mockResolvedValue({ since: '', rows: [] });
+    renderComponent();
+    await waitFor(() => {
+      expect(adminMock.getTopUsers).toHaveBeenCalled();
+    });
+    const initialSince = adminMock.getTopUsers.mock.calls[0]?.[0]?.since;
+    const { fireEvent } = await import('@testing-library/react');
+    fireEvent.click(screen.getByRole('button', { name: '7d' }));
+    await waitFor(() => {
+      const latest = adminMock.getTopUsers.mock.calls.at(-1)?.[0]?.since;
+      expect(latest).not.toBe(initialSince);
     });
   });
 });
