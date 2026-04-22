@@ -51,6 +51,7 @@ import {
 import { adminPayoutsCsvHandler } from './admin/payouts-csv.js';
 import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js';
 import { adminOrdersCsvHandler } from './admin/orders-csv.js';
+import { adminStuckOrdersHandler } from './admin/stuck-orders.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
 import { adminUserCreditTransactionsHandler } from './admin/user-credit-transactions.js';
@@ -696,6 +697,10 @@ app.get('/api/admin/orders/:orderId', rateLimit(120, 60_000), adminGetOrderHandl
 // cadence as other Tier-3 exports — ops runs it manually at month-end,
 // not on-click from the UI.
 app.get('/api/admin/orders.csv', rateLimit(10, 60_000), adminOrdersCsvHandler);
+// Stuck-orders triage. Dashboard pings this every 30-60s — higher
+// rate limit because the admin UI polls it on a loop to surface
+// an SLO red-flag card.
+app.get('/api/admin/stuck-orders', rateLimit(120, 60_000), adminStuckOrdersHandler);
 // Given an order id, return the single pending_payouts row for it.
 // Nested under /orders/:orderId so the UI can link from the order
 // drill-down straight to the payout state without a separate fetch.

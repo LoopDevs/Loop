@@ -234,6 +234,7 @@ POST /api/admin/payouts/:id/retry                      [admin — reset failed p
 GET  /api/admin/payouts.csv                            [admin — finance-ready CSV export, ADR 015]
 GET  /api/admin/orders                                  [admin — Loop-native orders drill-down, ADR 011/015]
 GET  /api/admin/orders.csv                              [admin — finance-ready CSV export, ADR 011/015]
+GET  /api/admin/stuck-orders                            [admin — SLO stuck-in-paid/procuring triage, ADR 011/013]
 GET  /api/admin/orders/:orderId                         [admin — single order detail, ADR 011/015]
 GET  /api/admin/orders/:orderId/payout                  [admin — payout row for a given order]
 GET  /api/admin/supplier-spend                          [admin — per-currency supplier spend, ADR 013/015]
