@@ -270,6 +270,7 @@ GET  /api/admin/users                                   [admin — paginated use
 GET  /api/admin/users/by-email?email=                   [admin — exact-match user lookup for support-ticket workflow]
 GET  /api/admin/users/top-by-pending-payout             [admin — ops funding prioritisation leaderboard, ADR 015/016]
 GET  /api/admin/users/recycling-activity                 [admin — 90-day list of users recycling LOOP-asset cashback, ADR 015]
+GET  /api/admin/users/recycling-activity.csv             [admin — Tier-3 CSV export of the user recycling leaderboard, ADR 015/018]
 GET  /api/admin/users/:userId                           [admin — single-user detail]
 GET  /api/admin/users/:userId/credits                   [admin — per-user credit balance, ADR 009]
 GET  /api/admin/users/:userId/cashback-by-merchant       [admin — per-user cashback-by-merchant support triage, ADR 009/015]

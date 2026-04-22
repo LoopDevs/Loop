@@ -54,6 +54,7 @@ import { adminPayoutsByAssetHandler } from './admin/payouts-by-asset.js';
 import { adminTopUsersHandler } from './admin/top-users.js';
 import { adminTopUsersByPendingPayoutHandler } from './admin/top-users-by-pending-payout.js';
 import { adminUsersRecyclingActivityHandler } from './admin/users-recycling-activity.js';
+import { adminUsersRecyclingActivityCsvHandler } from './admin/users-recycling-activity-csv.js';
 import { adminAuditTailHandler } from './admin/audit-tail.js';
 import { adminAuditTailCsvHandler } from './admin/audit-tail-csv.js';
 import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js';
@@ -941,6 +942,16 @@ app.get(
   '/api/admin/users/recycling-activity',
   rateLimit(60, 60_000),
   adminUsersRecyclingActivityHandler,
+);
+// Tier-3 CSV snapshot of the user recycling leaderboard —
+// finance-grade export for ops. Registered before /:userId (same
+// literal-vs-uuid routing constraint as the JSON sibling) and
+// follows the ADR-018 CSV conventions (10/min rate limit, 10k row
+// cap with `__TRUNCATED__` sentinel, attachment disposition).
+app.get(
+  '/api/admin/users/recycling-activity.csv',
+  rateLimit(10, 60_000),
+  adminUsersRecyclingActivityCsvHandler,
 );
 // Admin user-detail drill. Entry point for the admin panel's user
 // page — subsequent drills (credits, credit-transactions, orders)
