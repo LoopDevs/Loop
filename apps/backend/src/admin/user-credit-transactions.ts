@@ -17,6 +17,7 @@
  */
 import type { Context } from 'hono';
 import { and, desc, eq, sql } from 'drizzle-orm';
+import { CREDIT_TRANSACTION_TYPES } from '@loop/shared';
 import { db } from '../db/client.js';
 import { creditTransactions } from '../db/schema.js';
 import { logger } from '../logger.js';
@@ -24,19 +25,6 @@ import { logger } from '../logger.js';
 const log = logger.child({ handler: 'admin-user-credit-transactions' });
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-// Mirrors the CHECK constraint on credit_transactions.type. Kept
-// local because the shared @loop/shared enum extraction hasn't
-// landed on main yet (#456 on branch); this handler doesn't need
-// to drift from that on merge.
-const CREDIT_TRANSACTION_TYPES = [
-  'cashback',
-  'interest',
-  'spend',
-  'withdrawal',
-  'refund',
-  'adjustment',
-] as const;
 
 export interface AdminCreditTransactionView {
   id: string;
