@@ -44,6 +44,7 @@ import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '.
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
+import { publicTopCashbackMerchantsHandler } from './public/top-cashback-merchants.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -497,6 +498,15 @@ app.get(
 // Unauthed callers still see the basic cached merchant via by-slug.
 app.use('/api/merchants/:id', requireAuth);
 app.get('/api/merchants/:id', merchantDetailHandler);
+
+// Public, unauthenticated, CDN-friendly "best cashback" list for the
+// landing page. Same never-500 + Cache-Control discipline as the
+// cashback-stats endpoint (ADR 020).
+app.get(
+  '/api/public/top-cashback-merchants',
+  rateLimit(60, 60_000),
+  publicTopCashbackMerchantsHandler,
+);
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 

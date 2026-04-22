@@ -308,6 +308,52 @@ const CashbackHistoryResponse = registry.register(
   z.object({ entries: z.array(CashbackHistoryEntry) }),
 );
 
+// ─── Public — top cashback merchants (ADR 011 / 020) ───────────────────────
+
+const TopCashbackMerchant = registry.register(
+  'TopCashbackMerchant',
+  z.object({
+    id: z.string(),
+    name: z.string(),
+    logoUrl: z.string().nullable(),
+    userCashbackPct: z.string().openapi({
+      description: 'numeric(5,2) as string, e.g. "15.00".',
+    }),
+  }),
+);
+
+const PublicTopCashbackMerchantsResponse = registry.register(
+  'PublicTopCashbackMerchantsResponse',
+  z.object({
+    merchants: z.array(TopCashbackMerchant),
+    asOf: z.string().datetime(),
+  }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/public/top-cashback-merchants',
+  summary: 'Top-N merchants by active cashback rate (ADR 011 / 020).',
+  description:
+    'Unauthenticated, CDN-friendly. Landing-page "best cashback" band. `?limit=` clamped 1..50 (default 10). Merchants whose row has been evicted from the in-memory catalog (ADR 021 Rule B) are dropped from the response so the list never links to about-to-vanish merchants. `Cache-Control: public, max-age=300` on the happy path; `max-age=60` on the fallback path. Never 500.',
+  tags: ['Public'],
+  request: {
+    query: z.object({
+      limit: z.coerce.number().int().min(1).max(50).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Top merchants by user_cashback_pct, descending',
+      content: { 'application/json': { schema: PublicTopCashbackMerchantsResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Admin (ADR 015 — treasury + payouts) ───────────────────────────────────
 
 const LoopAssetCode = z
