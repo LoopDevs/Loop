@@ -36,6 +36,7 @@ import {
 import { getUserById } from '../db/users.js';
 import { convertMinorUnits } from '../payments/price-feed.js';
 import { payoutAssetFor } from '../credits/payout-asset.js';
+import { notifyCashbackRecycled } from '../discord.js';
 import { createOrder } from './repo.js';
 
 const log = logger.child({ handler: 'loop-orders' });
@@ -266,6 +267,19 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
           503,
         );
       }
+      // ADR 015 flywheel signal — a user is paying with LOOP asset
+      // cashback they previously earned. Co-located with the response
+      // rather than post-fulfillment because the signal is about
+      // intent (user opted into the rail) not outcome (order cleared);
+      // a failed loop_asset order still demonstrates flywheel intent
+      // and ops wants to see that in #loop-orders. Fire-and-forget.
+      notifyCashbackRecycled({
+        orderId: order.id,
+        merchantName: merchant.name,
+        amount: Number(order.faceValueMinor) / 100,
+        currency: order.currency,
+        assetCode: payoutAsset.code,
+      });
       return c.json<OrderPaymentResponse>({
         ...base,
         payment: {

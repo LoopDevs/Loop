@@ -29,6 +29,7 @@ import {
   notifyOrderFulfilled,
   notifyHealthChange,
   notifyCircuitBreaker,
+  notifyCashbackRecycled,
 } from '../discord.js';
 
 const mockFetch = vi.fn();
@@ -38,6 +39,11 @@ beforeEach(() => {
   mockFetch.mockReset();
   mockLog.warn.mockReset();
   mockFetch.mockResolvedValue(new Response(null, { status: 204 }));
+  // Reset env to the default configured state. Individual tests may
+  // override (e.g. `''` for the "skips silently when not configured"
+  // branch); this resets so later siblings start clean regardless.
+  mockEnv.DISCORD_WEBHOOK_ORDERS = 'https://discord.test/orders-hook';
+  mockEnv.DISCORD_WEBHOOK_MONITORING = 'https://discord.test/monitoring-hook';
 });
 
 function lastBody(): { embeds: Array<Record<string, unknown>> } {
@@ -105,6 +111,45 @@ describe('notifyOrderFulfilled', () => {
     const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
     const amount = embed.fields.find((f) => f.name === 'Amount');
     expect(amount?.value).toBe('25.00 NOK');
+  });
+});
+
+describe('notifyCashbackRecycled', () => {
+  it('posts to the orders webhook with merchant / amount / asset / order id', async () => {
+    notifyCashbackRecycled({
+      orderId: 'o-123',
+      merchantName: 'Acme',
+      amount: 25,
+      currency: 'GBP',
+      assetCode: 'GBPLOOP',
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://discord.test/orders-hook');
+    const body = JSON.parse(init.body as string) as { embeds: Array<Record<string, unknown>> };
+    const embed = body.embeds[0] as {
+      title: string;
+      fields: Array<{ name: string; value: string }>;
+    };
+    expect(embed.title).toBe('♻️ Cashback Recycled');
+    expect(embed.fields.find((f) => f.name === 'Merchant')?.value).toBe('Acme');
+    expect(embed.fields.find((f) => f.name === 'Amount')?.value).toBe('£25.00 GBP');
+    expect(embed.fields.find((f) => f.name === 'Asset')?.value).toBe('GBPLOOP');
+    expect(embed.fields.find((f) => f.name === 'Order ID')?.value).toBe('`o-123`');
+  });
+
+  it('skips silently when the orders webhook is not configured', async () => {
+    mockEnv.DISCORD_WEBHOOK_ORDERS = '';
+    notifyCashbackRecycled({
+      orderId: 'o-1',
+      merchantName: 'Acme',
+      amount: 10,
+      currency: 'USD',
+      assetCode: 'USDLOOP',
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });
 

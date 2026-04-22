@@ -116,6 +116,50 @@ export function notifyOrderCreated(
   });
 }
 
+/**
+ * Notify: a new order has been placed paying with a LOOP-branded
+ * stablecoin — the user is recycling cashback they previously
+ * earned into a new gift card purchase (ADR 015 flywheel).
+ *
+ * Distinct signal from `notifyOrderCreated`: that one fires for
+ * every order; this one flags the subset that closes the cashback
+ * loop. Ops watches it to see the flywheel light up in real time,
+ * separately from fleet volume. Channel: `orders` (same as the
+ * generic order signal — co-located so the flywheel subset reads
+ * as a qualifier on the normal feed rather than a wholly separate
+ * channel to monitor).
+ */
+export function notifyCashbackRecycled(args: {
+  orderId: string;
+  merchantName: string;
+  /** Face-value amount for the gift card, in the catalog currency. */
+  amount: number;
+  currency: string;
+  /** LOOP asset code: USDLOOP / GBPLOOP / EURLOOP. */
+  assetCode: string;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_ORDERS, {
+    title: '♻️ Cashback Recycled',
+    description:
+      'A user is paying for a new order with LOOP-asset cashback they previously earned.',
+    color: GREEN,
+    fields: [
+      {
+        name: 'Merchant',
+        value: truncate(escapeMarkdown(args.merchantName), FIELD_VALUE_MAX),
+        inline: true,
+      },
+      { name: 'Amount', value: formatAmount(args.amount, args.currency), inline: true },
+      {
+        name: 'Asset',
+        value: truncate(escapeMarkdown(args.assetCode), FIELD_VALUE_MAX),
+        inline: true,
+      },
+      { name: 'Order ID', value: `\`${escapeMarkdown(args.orderId)}\``, inline: false },
+    ],
+  });
+}
+
 /** Notify: order fulfilled (gift card ready) */
 export function notifyOrderFulfilled(
   orderId: string,
@@ -460,6 +504,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     channel: 'admin-audit',
     description:
       'Fires on merchant cashback-config create / update (ADR 011). Embeds the old→new pct diff so the commercial impact of the edit is legible in the channel without drilling to the admin UI.',
+  },
+  {
+    name: 'notifyCashbackRecycled',
+    channel: 'orders',
+    description:
+      'Fires when a new loop-native order is paid with LOOP-asset cashback the user earned earlier (ADR 015 flywheel). Subset qualifier on notifyOrderCreated — same channel so ops reads volume + flywheel-close together.',
   },
   {
     name: 'notifyOrderCreated',
