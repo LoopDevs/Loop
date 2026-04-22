@@ -414,3 +414,74 @@ export async function getUserPendingPayoutsHandler(c: Context): Promise<Response
     })),
   });
 }
+
+/**
+ * `GET /api/users/me/cashback-monthly` — per-month cashback totals
+ * for the authenticated user (ADR 009 / 015), grouped by
+ * (month, currency). Drives the monthly-cashback bar chart on
+ * `/settings/cashback` — users care about "how did this month compare
+ * to last month?" more than they care about the raw ledger scroll.
+ *
+ * Window is fixed at the last 12 calendar months (UTC). Only `cashback`
+ * rows count — adjustments / spend / withdrawal move the balance but
+ * aren't what the user *earned*. Results are oldest-first so the chart
+ * renders left-to-right without a client-side reverse.
+ */
+export interface CashbackMonthlyEntry {
+  /** YYYY-MM in UTC. */
+  month: string;
+  currency: string;
+  /** Total cashback minor units for that (month, currency). bigint-safe string. */
+  cashbackMinor: string;
+}
+
+export interface CashbackMonthlyResponse {
+  entries: CashbackMonthlyEntry[];
+}
+
+interface CashbackMonthlyRow extends Record<string, unknown> {
+  month: string | Date;
+  currency: string;
+  cashbackMinor: string | null;
+}
+
+export async function getCashbackMonthlyHandler(c: Context): Promise<Response> {
+  let user: User | null;
+  try {
+    user = await resolveCallingUser(c);
+  } catch (err) {
+    log.error({ err }, 'Failed to resolve calling user');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+  }
+  if (user === null) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+
+  try {
+    const result = await db.execute<CashbackMonthlyRow>(sql`
+      SELECT
+        TO_CHAR(DATE_TRUNC('month', ${creditTransactions.createdAt}) AT TIME ZONE 'UTC', 'YYYY-MM') AS month,
+        ${creditTransactions.currency} AS currency,
+        COALESCE(SUM(${creditTransactions.amountMinor}), 0)::bigint AS "cashbackMinor"
+      FROM ${creditTransactions}
+      WHERE ${creditTransactions.userId} = ${user.id}
+        AND ${creditTransactions.type} = 'cashback'
+        AND ${creditTransactions.createdAt} >= DATE_TRUNC('month', NOW() AT TIME ZONE 'UTC') - INTERVAL '11 months'
+      GROUP BY month, ${creditTransactions.currency}
+      ORDER BY month ASC
+    `);
+    const rows: CashbackMonthlyRow[] = Array.isArray(result)
+      ? (result as CashbackMonthlyRow[])
+      : ((result as { rows?: CashbackMonthlyRow[] }).rows ?? []);
+
+    const entries: CashbackMonthlyEntry[] = rows.map((row) => ({
+      month: typeof row.month === 'string' ? row.month : row.month.toISOString().slice(0, 7),
+      currency: row.currency,
+      cashbackMinor: (row.cashbackMinor ?? '0').toString(),
+    }));
+    return c.json<CashbackMonthlyResponse>({ entries });
+  } catch (err) {
+    log.error({ err }, 'Cashback-monthly query failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load monthly cashback' }, 500);
+  }
+}

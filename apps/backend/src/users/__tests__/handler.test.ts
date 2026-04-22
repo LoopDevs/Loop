@@ -28,11 +28,15 @@ const { selectChain, updateChain, queryObj, dbState } = vi.hoisted(() => {
     updatedUser: unknown;
     historyRows: unknown[];
     homeBalanceMinor: bigint | null;
+    executeRows: unknown;
+    executeThrow: Error | null;
   } = {
     orderCount: '0',
     updatedUser: null,
     historyRows: [],
     homeBalanceMinor: null,
+    executeRows: [],
+    executeThrow: null,
   };
   const sel: Record<string, ReturnType<typeof vi.fn>> = {};
   sel['from'] = vi.fn(() => sel);
@@ -86,6 +90,10 @@ vi.mock('../../db/client.js', () => ({
     select: vi.fn(() => selectChain),
     update: vi.fn(() => updateChain),
     query: queryObj,
+    execute: vi.fn(async () => {
+      if (dbState.executeThrow !== null) throw dbState.executeThrow;
+      return dbState.executeRows;
+    }),
   },
 }));
 vi.mock('../../db/schema.js', () => ({
@@ -96,6 +104,9 @@ vi.mock('../../db/schema.js', () => ({
     userId: 'user_id',
     createdAt: 'created_at',
     id: 'id',
+    currency: 'currency',
+    amountMinor: 'amount_minor',
+    type: 'type',
   },
   HOME_CURRENCIES: ['USD', 'GBP', 'EUR'] as const,
   PAYOUT_STATES: ['pending', 'submitted', 'confirmed', 'failed'] as const,
@@ -136,6 +147,7 @@ vi.mock('../../auth/jwt.js', () => ({
 
 import {
   getCashbackHistoryHandler,
+  getCashbackMonthlyHandler,
   getMeHandler,
   getUserPendingPayoutsHandler,
   setHomeCurrencyHandler,
@@ -175,6 +187,8 @@ beforeEach(() => {
   dbState.homeBalanceMinor = null;
   payoutState.rows = [];
   payoutState.calls = [];
+  dbState.executeRows = [];
+  dbState.executeThrow = null;
 });
 
 describe('getMeHandler', () => {
@@ -659,6 +673,101 @@ describe('getUserPendingPayoutsHandler', () => {
     jwtState.claims = { sub: 'ctx-err', email: 'e@x.com' };
     userState.upsertThrow = new Error('db down');
     const res = await getUserPendingPayoutsHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('getCashbackMonthlyHandler', () => {
+  const LOOP_AUTH: LoopAuthContext = {
+    kind: 'loop',
+    userId: 'user-uuid',
+    email: 'a@b.com',
+    bearerToken: 'loop-jwt',
+  };
+  const baseUser = {
+    id: 'user-uuid',
+    email: 'a@b.com',
+    isAdmin: false,
+    homeCurrency: 'GBP',
+    stellarAddress: null,
+    ctxUserId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  it('401 when no auth is on the context', async () => {
+    const res = await getCashbackMonthlyHandler(makeCtx(undefined));
+    expect(res.status).toBe(401);
+  });
+
+  it('returns per-month cashback totals as bigint-safe strings', async () => {
+    userState.byId = baseUser;
+    dbState.executeRows = [
+      { month: '2026-02', currency: 'GBP', cashbackMinor: 2500n },
+      { month: '2026-03', currency: 'GBP', cashbackMinor: 1800n },
+      { month: '2026-04', currency: 'GBP', cashbackMinor: 900n },
+    ];
+    const res = await getCashbackMonthlyHandler(makeCtx(LOOP_AUTH));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      entries: Array<{ month: string; currency: string; cashbackMinor: string }>;
+    };
+    expect(body.entries).toHaveLength(3);
+    expect(body.entries[0]).toEqual({ month: '2026-02', currency: 'GBP', cashbackMinor: '2500' });
+    expect(body.entries[2]?.month).toBe('2026-04');
+  });
+
+  it('handles Date-typed month values (slices to YYYY-MM)', async () => {
+    userState.byId = baseUser;
+    dbState.executeRows = [
+      {
+        month: new Date('2026-03-01T00:00:00Z'),
+        currency: 'EUR',
+        cashbackMinor: 1000n,
+      },
+    ];
+    const res = await getCashbackMonthlyHandler(makeCtx(LOOP_AUTH));
+    const body = (await res.json()) as { entries: Array<{ month: string }> };
+    expect(body.entries[0]?.month).toBe('2026-03');
+  });
+
+  it('splits multi-currency months into separate entries', async () => {
+    userState.byId = baseUser;
+    dbState.executeRows = [
+      { month: '2026-04', currency: 'GBP', cashbackMinor: 500n },
+      { month: '2026-04', currency: 'USD', cashbackMinor: 300n },
+    ];
+    const res = await getCashbackMonthlyHandler(makeCtx(LOOP_AUTH));
+    const body = (await res.json()) as {
+      entries: Array<{ month: string; currency: string; cashbackMinor: string }>;
+    };
+    expect(body.entries).toHaveLength(2);
+    expect(body.entries.map((e) => e.currency).sort()).toEqual(['GBP', 'USD']);
+  });
+
+  it('returns empty list when the user has no cashback yet', async () => {
+    userState.byId = baseUser;
+    dbState.executeRows = [];
+    const res = await getCashbackMonthlyHandler(makeCtx(LOOP_AUTH));
+    const body = (await res.json()) as { entries: unknown[] };
+    expect(body.entries).toEqual([]);
+  });
+
+  it('handles the {rows: [...]} drizzle result shape', async () => {
+    userState.byId = baseUser;
+    dbState.executeRows = {
+      rows: [{ month: '2026-04', currency: 'GBP', cashbackMinor: 100n }],
+    };
+    const res = await getCashbackMonthlyHandler(makeCtx(LOOP_AUTH));
+    const body = (await res.json()) as { entries: Array<{ cashbackMinor: string }> };
+    expect(body.entries).toHaveLength(1);
+    expect(body.entries[0]?.cashbackMinor).toBe('100');
+  });
+
+  it('500 when the db read throws', async () => {
+    userState.byId = baseUser;
+    dbState.executeThrow = new Error('db exploded');
+    const res = await getCashbackMonthlyHandler(makeCtx(LOOP_AUTH));
     expect(res.status).toBe(500);
   });
 });

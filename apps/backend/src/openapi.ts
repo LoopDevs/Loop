@@ -308,6 +308,25 @@ const CashbackHistoryResponse = registry.register(
   z.object({ entries: z.array(CashbackHistoryEntry) }),
 );
 
+const CashbackMonthlyEntry = registry.register(
+  'CashbackMonthlyEntry',
+  z.object({
+    month: z
+      .string()
+      .regex(/^\d{4}-\d{2}$/)
+      .openapi({ description: "YYYY-MM in UTC (e.g. '2026-04')." }),
+    currency: z.string().length(3),
+    cashbackMinor: z.string().regex(/^\d+$/).openapi({
+      description: 'Sum of cashback minor units for that (month, currency). Bigint-safe.',
+    }),
+  }),
+);
+
+const CashbackMonthlyResponse = registry.register(
+  'CashbackMonthlyResponse',
+  z.object({ entries: z.array(CashbackMonthlyEntry) }),
+);
+
 // ─── Admin (ADR 015 — treasury + payouts) ───────────────────────────────────
 
 const LoopAssetCode = z
@@ -1048,6 +1067,34 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error resolving the user',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/users/me/cashback-monthly',
+  summary: 'Last 12 calendar months of cashback totals for the caller (ADR 009 / 015).',
+  description:
+    "Single GROUP BY over `credit_transactions` filtered to `type=cashback`, bucketed by `DATE_TRUNC('month', created_at)` in UTC and `currency`. Window is fixed at the current UTC month + the previous 11. Only `cashback` rows count — spend / adjustment / withdrawal move the balance but aren't what the user *earned*. Entries are oldest-first so the chart renders left-to-right without a client-side reverse.",
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Monthly cashback totals, oldest first',
+      content: { 'application/json': { schema: CashbackMonthlyResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing monthly aggregates',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
