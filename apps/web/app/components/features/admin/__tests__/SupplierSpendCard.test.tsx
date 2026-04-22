@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router';
 import type * as AdminModule from '~/services/admin';
 import { SupplierSpendCard, fmtMinor } from '../SupplierSpendCard';
 
@@ -29,7 +30,9 @@ function renderCard(): void {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={qc}>
-      <SupplierSpendCard />
+      <MemoryRouter>
+        <SupplierSpendCard />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -66,6 +69,9 @@ describe('<SupplierSpendCard />', () => {
     expect(screen.getByText('42')).toBeDefined();
     // Wholesale and face-value rendered via fmtMinor.
     expect(screen.getAllByText(/\d+\.00/).length).toBeGreaterThan(0);
+    // Home-currency currency cells become drill-down links.
+    const drillLink = screen.getByRole('link', { name: 'GBP' });
+    expect(drillLink.getAttribute('href')).toBe('/admin/orders?chargeCurrency=GBP');
   });
 
   it('renders an empty-state when no fulfilled orders in window', async () => {
