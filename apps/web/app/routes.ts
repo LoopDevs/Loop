@@ -17,6 +17,7 @@ export default [
   route('admin/payouts/:id', 'routes/admin.payouts.$id.tsx'),
   route('admin/orders', 'routes/admin.orders.tsx'),
   route('admin/orders/:orderId', 'routes/admin.orders.$orderId.tsx'),
+  route('admin/stuck-orders', 'routes/admin.stuck-orders.tsx'),
   route('admin/users', 'routes/admin.users.tsx'),
   route('admin/users/:userId', 'routes/admin.users.$userId.tsx'),
   route('*', 'routes/not-found.tsx'),
