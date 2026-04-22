@@ -7,6 +7,7 @@ import { shouldRetry } from '~/hooks/query-retry';
 import { getAdminUser, getAdminUserCredits, type AdminUserCreditRow } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CreditAdjustmentForm } from '~/components/features/admin/CreditAdjustmentForm';
+import { CreditTransactionsTable } from '~/components/features/admin/CreditTransactionsTable';
 import { Spinner } from '~/components/ui/Spinner';
 
 const HOME_CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
@@ -244,6 +245,22 @@ export default function AdminUserDetailRoute(): React.JSX.Element {
                 isHomeCurrency(userQuery.data.homeCurrency) ? userQuery.data.homeCurrency : 'USD'
               }
             />
+          </div>
+        </section>
+      ) : null}
+
+      {userId !== undefined && !userNotFound ? (
+        <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+          <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
+            <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+              Credit transactions
+            </h2>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Append-only ledger (ADR 009). Filter by type; page with the buttons below.
+            </p>
+          </header>
+          <div className="px-6 py-5">
+            <CreditTransactionsTable userId={userId} />
           </div>
         </section>
       ) : null}
