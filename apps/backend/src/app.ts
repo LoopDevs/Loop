@@ -41,6 +41,7 @@ import { googleSocialLoginHandler, appleSocialLoginHandler } from './auth/social
 import { notifyHealthChange } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
+import { adminConfigsHistoryHandler } from './admin/configs-history.js';
 import { treasuryHandler } from './admin/treasury.js';
 import {
   adminGetPayoutHandler,
@@ -722,6 +723,14 @@ app.get(
   '/api/admin/merchant-cashback-configs.csv',
   rateLimit(10, 60_000),
   adminCashbackConfigsCsvHandler,
+);
+// Fleet-wide history feed — "the last N config changes across every
+// merchant". Registered before /:merchantId/history so the literal
+// `history` segment isn't captured as a merchantId. ADR 011 / 018.
+app.get(
+  '/api/admin/merchant-cashback-configs/history',
+  rateLimit(120, 60_000),
+  adminConfigsHistoryHandler,
 );
 app.put(
   '/api/admin/merchant-cashback-configs/:merchantId',

@@ -230,6 +230,7 @@ GET  /api/users/me/cashback-monthly [authenticated — last 12 months of cashbac
 GET  /api/public/cashback-stats    [public — landing-page aggregates, never-500, ADR 009/015/020]
 GET  /api/public/top-cashback-merchants [public — landing-page "best cashback" list, never-500, ADR 011/020]
 GET  /api/admin/merchant-cashback-configs              [admin]
+GET  /api/admin/merchant-cashback-configs/history      [admin — fleet-wide config-edit audit feed, ADR 011/018]
 PUT  /api/admin/merchant-cashback-configs/:merchantId  [admin]
 GET  /api/admin/merchant-cashback-configs/:merchantId/history  [admin]
 GET  /api/admin/treasury                               [admin]

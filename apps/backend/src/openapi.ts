@@ -3177,6 +3177,61 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'get',
+  path: '/api/admin/merchant-cashback-configs/history',
+  summary: 'Fleet-wide cashback-config history feed (ADR 011 / 018).',
+  description:
+    "Newest-first view of every cashback-config edit across every merchant — the 'recent config changes' strip on the admin dashboard. Complement to the per-merchant drill (`/:merchantId/history`); this one doesn't require picking a merchant first. Merchant names enrich from the catalog and fall back to `merchantId` for evicted rows (ADR 021 Rule A). `?limit=` defaults 50, clamped [1, 200].",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      limit: z.coerce.number().int().min(1).max(200).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Newest-first audit rows across all merchants',
+      content: {
+        'application/json': {
+          schema: z.object({
+            history: z.array(
+              z.object({
+                id: z.string().uuid(),
+                merchantId: z.string(),
+                merchantName: z.string(),
+                wholesalePct: z.string(),
+                userCashbackPct: z.string(),
+                loopMarginPct: z.string(),
+                active: z.boolean(),
+                changedBy: z.string(),
+                changedAt: z.string().datetime(),
+              }),
+            ),
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading history',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
   method: 'put',
   path: '/api/admin/merchant-cashback-configs/{merchantId}',
   summary: 'Upsert a merchant cashback-split config (ADR 011).',
