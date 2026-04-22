@@ -270,6 +270,7 @@ GET  /api/admin/users/:userId                           [admin — single-user d
 GET  /api/admin/users/:userId/credits                   [admin — per-user credit balance, ADR 009]
 GET  /api/admin/users/:userId/cashback-by-merchant       [admin — per-user cashback-by-merchant support triage, ADR 009/015]
 GET  /api/admin/users/:userId/cashback-summary           [admin — scalar lifetime + this-month cashback headline, ADR 009/015]
+GET  /api/admin/users/:userId/flywheel-stats             [admin — scalar recycled-vs-total per-user flywheel mirror, ADR 015]
 GET  /api/admin/users/:userId/credit-transactions       [admin — per-user credit-ledger log, ADR 009]
 GET  /api/admin/users/:userId/credit-transactions.csv   [admin — per-user credit-ledger CSV for compliance / SAR, ADR 009/015]
 POST /api/admin/merchants/resync                        [admin — force an immediate CTX merchant-catalog sweep, ADR 011]
