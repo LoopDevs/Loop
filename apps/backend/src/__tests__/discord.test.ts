@@ -30,6 +30,7 @@ import {
   notifyHealthChange,
   notifyCircuitBreaker,
   notifyCashbackRecycled,
+  notifyFirstCashbackRecycled,
 } from '../discord.js';
 
 const mockFetch = vi.fn();
@@ -143,6 +144,51 @@ describe('notifyCashbackRecycled', () => {
     mockEnv.DISCORD_WEBHOOK_ORDERS = '';
     notifyCashbackRecycled({
       orderId: 'o-1',
+      merchantName: 'Acme',
+      amount: 10,
+      currency: 'USD',
+      assetCode: 'USDLOOP',
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('notifyFirstCashbackRecycled', () => {
+  it('posts the milestone embed with user email + order + asset', async () => {
+    notifyFirstCashbackRecycled({
+      orderId: 'o-555',
+      userId: 'u-123',
+      userEmail: 'alice@example.com',
+      merchantName: 'Starbucks',
+      amount: 15,
+      currency: 'GBP',
+      assetCode: 'GBPLOOP',
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const body = lastBody();
+    const embed = body.embeds[0] as {
+      title: string;
+      description: string;
+      fields: Array<{ name: string; value: string }>;
+    };
+    expect(embed.title).toBe('🎉 First Cashback Recycled');
+    expect(embed.description).toMatch(/graduated/i);
+    expect(embed.fields.find((f) => f.name === 'User')?.value).toBe('alice@example.com');
+    expect(embed.fields.find((f) => f.name === 'Merchant')?.value).toBe('Starbucks');
+    expect(embed.fields.find((f) => f.name === 'Amount')?.value).toBe('£15.00 GBP');
+    expect(embed.fields.find((f) => f.name === 'Asset')?.value).toBe('GBPLOOP');
+    expect(embed.fields.find((f) => f.name === 'User ID')?.value).toBe('`u-123`');
+    expect(embed.fields.find((f) => f.name === 'Order ID')?.value).toBe('`o-555`');
+  });
+
+  it('skips silently when the orders webhook is not configured', async () => {
+    mockEnv.DISCORD_WEBHOOK_ORDERS = '';
+    notifyFirstCashbackRecycled({
+      orderId: 'o-1',
+      userId: 'u-1',
+      userEmail: 'a@b.com',
       merchantName: 'Acme',
       amount: 10,
       currency: 'USD',
