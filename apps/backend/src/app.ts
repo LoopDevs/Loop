@@ -69,6 +69,7 @@ import { adminCashbackMonthlyHandler } from './admin/cashback-monthly.js';
 import { adminMerchantStatsHandler } from './admin/merchant-stats.js';
 import { adminMerchantStatsCsvHandler } from './admin/merchant-stats-csv.js';
 import { adminMerchantsFlywheelShareHandler } from './admin/merchants-flywheel-share.js';
+import { adminMerchantsFlywheelShareCsvHandler } from './admin/merchants-flywheel-share-csv.js';
 import { adminCashbackConfigsCsvHandler } from './admin/cashback-configs-csv.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
@@ -873,6 +874,15 @@ app.get(
   '/api/admin/merchants/flywheel-share',
   rateLimit(60, 60_000),
   adminMerchantsFlywheelShareHandler,
+);
+// Tier-3 CSV snapshot of the merchant flywheel leaderboard —
+// finance / CTX-negotiation export. Same aggregate as the JSON,
+// flattened for spreadsheet consumption. 10/min rate limit matches
+// every other admin CSV.
+app.get(
+  '/api/admin/merchants/flywheel-share.csv',
+  rateLimit(10, 60_000),
+  adminMerchantsFlywheelShareCsvHandler,
 );
 // Given an order id, return the single pending_payouts row for it.
 // Nested under /orders/:orderId so the UI can link from the order

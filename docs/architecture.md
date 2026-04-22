@@ -259,6 +259,7 @@ GET  /api/admin/cashback-monthly                        [admin — 12-month flee
 GET  /api/admin/merchant-stats                          [admin — per-merchant cashback stats, ADR 011/015]
 GET  /api/admin/merchant-stats.csv                      [admin — per-merchant CSV for CTX negotiation, ADR 011/015/018]
 GET  /api/admin/merchants/flywheel-share                [admin — per-merchant loop_asset recycled leaderboard, ADR 011/015]
+GET  /api/admin/merchants/flywheel-share.csv            [admin — Tier-3 CSV export of the flywheel leaderboard, ADR 011/015/018]
 GET  /api/admin/merchant-cashback-configs.csv           [admin — snapshot CSV of commercial terms, ADR 011/018]
 GET  /api/admin/orders/:orderId                         [admin — single order detail, ADR 011/015]
 GET  /api/admin/orders/:orderId/payout                  [admin — payout row for a given order]
