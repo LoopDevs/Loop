@@ -1173,6 +1173,64 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/payouts/by-asset',
+  summary: 'Per-asset × per-state payout breakdown (ADR 015 / 016 / 019 Tier 1).',
+  description:
+    'Single GROUP BY over `pending_payouts.(asset_code, state)`. Pivots the payouts queue on asset so ops can see USDLOOP vs GBPLOOP vs EURLOOP exposure at a glance. Complements `/api/admin/payouts/summary` which aggregates across assets. Zero-fills every state per asset for stable UI layout. All stroop amounts are bigint-safe strings.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Per-asset totals',
+      content: {
+        'application/json': {
+          schema: z.object({
+            byAsset: z.record(
+              z.string(),
+              z.object({
+                pending: z.object({
+                  count: z.number().int().nonnegative(),
+                  stroops: z.string().regex(/^\d+$/),
+                }),
+                submitted: z.object({
+                  count: z.number().int().nonnegative(),
+                  stroops: z.string().regex(/^\d+$/),
+                }),
+                confirmed: z.object({
+                  count: z.number().int().nonnegative(),
+                  stroops: z.string().regex(/^\d+$/),
+                }),
+                failed: z.object({
+                  count: z.number().int().nonnegative(),
+                  stroops: z.string().regex(/^\d+$/),
+                }),
+              }),
+            ),
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading the breakdown',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/payouts',
   summary: 'Paginated pending-payouts backlog (ADR 015).',
   description:
