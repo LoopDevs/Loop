@@ -210,3 +210,21 @@ export async function getPayoutForAdmin(id: string): Promise<PendingPayout | nul
   const [row] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, id)).limit(1);
   return row ?? null;
 }
+
+/**
+ * Order-id lookup. `pending_payouts.order_id` is UNIQUE, so at most
+ * one row matches. Returns null when the order has no payout row yet
+ * (e.g. cashback hasn't been issued, the order is still pending, or
+ * the payout builder deliberately skipped this order).
+ *
+ * Ops uses this to jump from an order-support ticket straight to the
+ * payout state instead of fishing for the payout id in the list.
+ */
+export async function getPayoutByOrderId(orderId: string): Promise<PendingPayout | null> {
+  const [row] = await db
+    .select()
+    .from(pendingPayouts)
+    .where(eq(pendingPayouts.orderId, orderId))
+    .limit(1);
+  return row ?? null;
+}
