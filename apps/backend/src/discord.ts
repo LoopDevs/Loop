@@ -160,6 +160,58 @@ export function notifyCashbackRecycled(args: {
   });
 }
 
+/**
+ * Notify: a user's FIRST loop_asset order — the flywheel-onboarding
+ * milestone (ADR 015). Subset-of-subset relative to
+ * notifyCashbackRecycled: recycled fires every time; this fires
+ * exactly once per user, on the order that graduates them from
+ * "earns cashback" to "spends cashback on new orders."
+ *
+ * Caller confirms first-ness (cheap pre-insert count) — the Discord
+ * layer doesn't own the invariant. Silent no-op when the orders
+ * webhook isn't configured. Channel: orders (same as
+ * notifyCashbackRecycled / notifyOrderCreated) so ops reads
+ * volume → recycling → milestones in one feed.
+ */
+export function notifyFirstCashbackRecycled(args: {
+  orderId: string;
+  userId: string;
+  userEmail: string;
+  merchantName: string;
+  /** Face-value amount for the gift card, in the catalog currency. */
+  amount: number;
+  currency: string;
+  /** LOOP asset code: USDLOOP / GBPLOOP / EURLOOP. */
+  assetCode: string;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_ORDERS, {
+    title: '🎉 First Cashback Recycled',
+    description:
+      'A user just graduated from earning cashback to spending it — their first `loop_asset` order has landed.',
+    color: GREEN,
+    fields: [
+      {
+        name: 'User',
+        value: truncate(escapeMarkdown(args.userEmail), FIELD_VALUE_MAX),
+        inline: true,
+      },
+      {
+        name: 'Merchant',
+        value: truncate(escapeMarkdown(args.merchantName), FIELD_VALUE_MAX),
+        inline: true,
+      },
+      { name: 'Amount', value: formatAmount(args.amount, args.currency), inline: true },
+      {
+        name: 'Asset',
+        value: truncate(escapeMarkdown(args.assetCode), FIELD_VALUE_MAX),
+        inline: true,
+      },
+      { name: 'User ID', value: `\`${escapeMarkdown(args.userId)}\``, inline: false },
+      { name: 'Order ID', value: `\`${escapeMarkdown(args.orderId)}\``, inline: false },
+    ],
+  });
+}
+
 /** Notify: order fulfilled (gift card ready) */
 export function notifyOrderFulfilled(
   orderId: string,
@@ -510,6 +562,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     channel: 'orders',
     description:
       'Fires when a new loop-native order is paid with LOOP-asset cashback the user earned earlier (ADR 015 flywheel). Subset qualifier on notifyOrderCreated — same channel so ops reads volume + flywheel-close together.',
+  },
+  {
+    name: 'notifyFirstCashbackRecycled',
+    channel: 'orders',
+    description:
+      "Fires once per user, on their FIRST loop_asset order — the flywheel-onboarding milestone (ADR 015). Subset of notifyCashbackRecycled; same channel so ops sees the user's graduation from earning → recycling alongside the continuing-recycle signal.",
   },
   {
     name: 'notifyOrderCreated',

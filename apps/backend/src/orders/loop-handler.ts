@@ -36,7 +36,7 @@ import {
 import { getUserById } from '../db/users.js';
 import { convertMinorUnits } from '../payments/price-feed.js';
 import { payoutAssetFor } from '../credits/payout-asset.js';
-import { notifyCashbackRecycled } from '../discord.js';
+import { notifyCashbackRecycled, notifyFirstCashbackRecycled } from '../discord.js';
 import { createOrder } from './repo.js';
 
 const log = logger.child({ handler: 'loop-orders' });
@@ -100,6 +100,22 @@ async function hasSufficientCredit(
     .where(and(eq(userCredits.userId, userId), eq(userCredits.currency, currency)));
   const balanceStr = row[0]?.balance ?? '0';
   return BigInt(balanceStr) >= amountMinor;
+}
+
+/**
+ * True when the user has zero prior loop_asset orders (any state).
+ * Used to distinguish the first-recycle milestone from ongoing
+ * recycling, so `notifyFirstCashbackRecycled` only fires once per
+ * user. LIMIT 1 so the query is constant-time regardless of how
+ * much loop_asset volume the user has accumulated.
+ */
+async function isFirstLoopAssetOrder(userId: string): Promise<boolean> {
+  const row = await db
+    .select({ id: orders.id })
+    .from(orders)
+    .where(and(eq(orders.userId, userId), eq(orders.paymentMethod, 'loop_asset')))
+    .limit(1);
+  return row.length === 0;
 }
 
 export async function loopCreateOrderHandler(c: Context): Promise<Response> {
@@ -219,6 +235,16 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     );
   }
 
+  // Compute the "is this user's first loop_asset order?" flag
+  // BEFORE the insert — querying post-insert would always see the
+  // just-created row and never be true. A race with a concurrent
+  // loop_asset insert would fire two "first" notifications; the
+  // signal is a flywheel-milestone celebration rather than a hard
+  // constraint, so a rare double-fire is tolerable. No-op for
+  // non-loop_asset payment methods.
+  const firstLoopAsset =
+    parsed.data.paymentMethod === 'loop_asset' ? await isFirstLoopAssetOrder(auth.userId) : false;
+
   try {
     const order = await createOrder({
       userId: auth.userId,
@@ -280,6 +306,20 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
         currency: order.currency,
         assetCode: payoutAsset.code,
       });
+      if (firstLoopAsset) {
+        // Milestone alert: this user has just graduated from
+        // earning cashback to spending it. Fire-and-forget;
+        // catalog entry in DISCORD_NOTIFIERS.
+        notifyFirstCashbackRecycled({
+          orderId: order.id,
+          userId: user.id,
+          userEmail: user.email,
+          merchantName: merchant.name,
+          amount: Number(order.faceValueMinor) / 100,
+          currency: order.currency,
+          assetCode: payoutAsset.code,
+        });
+      }
       return c.json<OrderPaymentResponse>({
         ...base,
         payment: {

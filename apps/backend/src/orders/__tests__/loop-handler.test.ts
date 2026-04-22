@@ -42,7 +42,18 @@ const { dbChain, balanceState, userState } = vi.hoisted(() => {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
   chain['select'] = vi.fn(() => chain);
   chain['from'] = vi.fn(() => chain);
-  chain['where'] = vi.fn(async () => bState.rows);
+  // `.where(...)` both resolves to rows (legacy call sites that await
+  // it directly — e.g. `hasSufficientCredit`) AND returns a handle
+  // with `.limit(...)` (the first-loop-asset check). Drizzle's real
+  // API is a thenable builder that has `.limit()` on it until awaited.
+  // Construct the thenable on every `.where` call so tests that
+  // mutate `bState.rows` between requests see the fresh value.
+  chain['where'] = vi.fn(() => {
+    const p = Promise.resolve(bState.rows);
+    return Object.assign(p, {
+      limit: vi.fn(async () => bState.rows),
+    });
+  });
   return { dbChain: chain, balanceState: bState, userState: uState };
 });
 vi.mock('../../db/client.js', () => ({
