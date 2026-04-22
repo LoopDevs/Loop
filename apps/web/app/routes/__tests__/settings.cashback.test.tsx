@@ -23,6 +23,10 @@ vi.mock('~/services/user', () => ({
     historyMock.getUserPendingPayouts(opts),
   getMyCredits: () => historyMock.getMyCredits(),
   getMe: () => historyMock.getMe(),
+  // Monthly bar chart (#576 / #577) self-hides on reject; returning
+  // a rejected promise here keeps the pre-existing tests focused on
+  // the history + payouts sections without mocking a new shape.
+  getCashbackMonthly: () => Promise.reject(new Error('chart not mocked in this suite')),
 }));
 
 vi.mock('~/hooks/use-auth', () => ({

@@ -208,3 +208,25 @@ export async function getCashbackByMerchant(
     `/api/users/me/cashback-by-merchant${qs.length > 0 ? `?${qs}` : ''}`,
   );
 }
+
+/** One month × currency aggregate from GET /api/users/me/cashback-monthly. */
+export interface CashbackMonthlyEntry {
+  /** "YYYY-MM" in UTC. */
+  month: string;
+  currency: string;
+  /** bigint-as-string, minor units. */
+  cashbackMinor: string;
+}
+
+export interface CashbackMonthlyResponse {
+  entries: CashbackMonthlyEntry[];
+}
+
+/**
+ * `GET /api/users/me/cashback-monthly` — last 12 calendar months of
+ * cashback totals grouped by (month, currency). Drives the monthly
+ * bar chart on /settings/cashback.
+ */
+export async function getCashbackMonthly(): Promise<CashbackMonthlyResponse> {
+  return authenticatedRequest<CashbackMonthlyResponse>('/api/users/me/cashback-monthly');
+}
