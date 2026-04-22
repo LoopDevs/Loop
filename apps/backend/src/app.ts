@@ -75,6 +75,7 @@ import { adminUserCreditTransactionsHandler } from './admin/user-credit-transact
 import { adminUserCreditTransactionsCsvHandler } from './admin/user-credit-transactions-csv.js';
 import { adminUserCashbackByMerchantHandler } from './admin/user-cashback-by-merchant.js';
 import { adminUserCashbackSummaryHandler } from './admin/user-cashback-summary.js';
+import { adminUserFlywheelStatsHandler } from './admin/user-flywheel-stats.js';
 import { adminGetUserHandler } from './admin/user-detail.js';
 import { adminUserByEmailHandler } from './admin/user-by-email.js';
 import { adminListUsersHandler } from './admin/users-list.js';
@@ -930,6 +931,15 @@ app.get(
   '/api/admin/users/:userId/cashback-summary',
   rateLimit(120, 60_000),
   adminUserCashbackSummaryHandler,
+);
+// Per-user flywheel scalar — admin mirror of /api/users/me/flywheel-
+// stats. Supports triage questions like "is this user part of the
+// recycling loop or just top-ups?". Single LEFT JOIN; 404 on unknown
+// userId, zero counts on an existing user with no fulfilled orders.
+app.get(
+  '/api/admin/users/:userId/flywheel-stats',
+  rateLimit(120, 60_000),
+  adminUserFlywheelStatsHandler,
 );
 // Credit-transaction log for a user (ADR 009). Drill-down from the
 // balance endpoint — shows how the balance got there (cashback,
