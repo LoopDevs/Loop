@@ -223,6 +223,37 @@ export function notifyUsdcBelowFloor(args: {
   });
 }
 
+/**
+ * Admin-initiated webhook ping. Fires a benign "connection test" embed
+ * to one of the two configured channels so an operator can verify that
+ * the webhook URL is still live after a redeploy or env-var change,
+ * without waiting for a real event to prove the pipe end-to-end.
+ *
+ * Returns `true` when the target channel's webhook env is set (we
+ * *attempted* delivery — `sendWebhook` still fails silently on network
+ * errors, per its fire-and-forget contract). Returns `false` when the
+ * env var is unset, so the admin endpoint can 409 instead of silently
+ * succeeding.
+ */
+export function notifyWebhookPing(channel: 'orders' | 'monitoring', actorId: string): boolean {
+  const url = channel === 'orders' ? env.DISCORD_WEBHOOK_ORDERS : env.DISCORD_WEBHOOK_MONITORING;
+  if (url === undefined || url.length === 0) return false;
+  void sendWebhook(url, {
+    title: '🔔 Webhook Ping',
+    description: `Manual test ping from the admin panel. If you see this, the \`${channel}\` webhook is wired up correctly.`,
+    color: BLUE,
+    fields: [
+      {
+        // 8-char truncation matches the ADR 018 actor-id convention.
+        name: 'Triggered by',
+        value: `\`${escapeMarkdown(actorId.slice(0, 8))}\``,
+        inline: true,
+      },
+    ],
+  });
+  return true;
+}
+
 /** Notify: circuit breaker state change */
 export function notifyCircuitBreaker(
   state: 'open' | 'closed',

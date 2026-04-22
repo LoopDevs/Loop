@@ -44,6 +44,7 @@ import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '.
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
+import { adminDiscordTestHandler } from './admin/discord-test.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -653,6 +654,9 @@ app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayout
 // by state and userId. Ops uses this to triage stuck orders + audit
 // the cashback split + correlate with operator-pool health.
 app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+// Discord webhook test-ping — ops verification after env-var rotations
+// or redeploys. 10/min is plenty; a test shouldn't be hammered.
+app.post('/api/admin/discord/test', rateLimit(10, 60_000), adminDiscordTestHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 

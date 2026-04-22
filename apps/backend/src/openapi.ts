@@ -1172,6 +1172,57 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'post',
+  path: '/api/admin/discord/test',
+  summary: 'Fire a test ping to a Discord webhook (ADR 018).',
+  description:
+    'Ops verification: after rotating `DISCORD_WEBHOOK_ORDERS` or `DISCORD_WEBHOOK_MONITORING`, the admin panel can POST here to confirm the pipe is live without waiting for a real event. Returns 200 when the target channel has a URL configured (delivery attempted — webhook delivery itself is fire-and-forget per ADR 018). Returns 409 when the env var is unset, so the UI can surface "webhook not configured" instead of a silent success. Rate-limited 10/min — this is a manual ops action, not a polling endpoint.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: z.object({
+            channel: z.enum(['orders', 'monitoring']),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Delivery attempted',
+      content: {
+        'application/json': {
+          schema: z.object({ ok: z.literal(true), channel: z.enum(['orders', 'monitoring']) }),
+        },
+      },
+    },
+    400: {
+      description: 'Missing or invalid channel',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    409: {
+      description: 'The requested channel has no webhook URL configured',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
   method: 'get',
   path: '/api/admin/payouts',
   summary: 'Paginated pending-payouts backlog (ADR 015).',
