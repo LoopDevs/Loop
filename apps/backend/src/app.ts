@@ -46,6 +46,7 @@ import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payout
 import { adminListOrdersHandler } from './admin/orders.js';
 import {
   getCashbackHistoryHandler,
+  getCashbackSummaryHandler,
   getMeHandler,
   getUserPendingPayoutsHandler,
   setHomeCurrencyHandler,
@@ -619,6 +620,10 @@ app.get('/api/users/me/cashback-history', rateLimit(60, 60_000), getCashbackHist
 // typically poll this from /settings/cashback while a payout is in
 // flight. State + before + limit query shape mirrors the admin endpoint.
 app.get('/api/users/me/pending-payouts', rateLimit(60, 60_000), getUserPendingPayoutsHandler);
+// GET /api/users/me/cashback-summary — compact { lifetime, thisMonth }
+// totals for the /settings/cashback header. Single query, two
+// conditional SUMs. 60/min matches the rest of the user cashback surface.
+app.get('/api/users/me/cashback-summary', rateLimit(60, 60_000), getCashbackSummaryHandler);
 
 // ─── Admin (authenticated + admin-flagged) ──────────────────────────────────
 //

@@ -308,6 +308,21 @@ const CashbackHistoryResponse = registry.register(
   z.object({ entries: z.array(CashbackHistoryEntry) }),
 );
 
+const UserCashbackSummary = registry.register(
+  'UserCashbackSummary',
+  z.object({
+    currency: z.string().length(3),
+    lifetimeMinor: z
+      .string()
+      .regex(/^\d+$/)
+      .openapi({ description: 'All-time cashback in `currency`, bigint-safe string.' }),
+    thisMonthMinor: z.string().regex(/^\d+$/).openapi({
+      description:
+        'Cashback earned since `DATE_TRUNC(month, NOW() AT TIME ZONE UTC)`. Resets at 00:00 UTC on the 1st.',
+    }),
+  }),
+);
+
 // ─── Admin (ADR 015 — treasury + payouts) ───────────────────────────────────
 
 const LoopAssetCode = z
@@ -1048,6 +1063,34 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error resolving the user',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/users/me/cashback-summary',
+  summary: 'Compact cashback totals for the caller (ADR 009 / 015).',
+  description:
+    'Two-number summary (`lifetimeMinor`, `thisMonthMinor`) keyed to the user\'s current `home_currency`. Drives the `/settings/cashback` page header so the client can render "£42 lifetime · £3.20 this month" without paging the full ledger. Single query, two conditional SUMs. Users who have moved home regions (rare, support-mediated) see only home-currency earnings here; admin ledger endpoints have the cross-currency detail.',
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Summary snapshot',
+      content: { 'application/json': { schema: UserCashbackSummary } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the summary',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },

@@ -28,11 +28,15 @@ const { selectChain, updateChain, queryObj, dbState } = vi.hoisted(() => {
     updatedUser: unknown;
     historyRows: unknown[];
     homeBalanceMinor: bigint | null;
+    executeRows: unknown;
+    executeThrow: Error | null;
   } = {
     orderCount: '0',
     updatedUser: null,
     historyRows: [],
     homeBalanceMinor: null,
+    executeRows: [],
+    executeThrow: null,
   };
   const sel: Record<string, ReturnType<typeof vi.fn>> = {};
   sel['from'] = vi.fn(() => sel);
@@ -86,6 +90,10 @@ vi.mock('../../db/client.js', () => ({
     select: vi.fn(() => selectChain),
     update: vi.fn(() => updateChain),
     query: queryObj,
+    execute: vi.fn(async () => {
+      if (dbState.executeThrow !== null) throw dbState.executeThrow;
+      return dbState.executeRows;
+    }),
   },
 }));
 vi.mock('../../db/schema.js', () => ({
@@ -96,6 +104,9 @@ vi.mock('../../db/schema.js', () => ({
     userId: 'user_id',
     createdAt: 'created_at',
     id: 'id',
+    type: 'type',
+    currency: 'currency',
+    amountMinor: 'amount_minor',
   },
   HOME_CURRENCIES: ['USD', 'GBP', 'EUR'] as const,
   PAYOUT_STATES: ['pending', 'submitted', 'confirmed', 'failed'] as const,
@@ -136,6 +147,7 @@ vi.mock('../../auth/jwt.js', () => ({
 
 import {
   getCashbackHistoryHandler,
+  getCashbackSummaryHandler,
   getMeHandler,
   getUserPendingPayoutsHandler,
   setHomeCurrencyHandler,
@@ -175,6 +187,8 @@ beforeEach(() => {
   dbState.homeBalanceMinor = null;
   payoutState.rows = [];
   payoutState.calls = [];
+  dbState.executeRows = [];
+  dbState.executeThrow = null;
 });
 
 describe('getMeHandler', () => {
@@ -659,6 +673,86 @@ describe('getUserPendingPayoutsHandler', () => {
     jwtState.claims = { sub: 'ctx-err', email: 'e@x.com' };
     userState.upsertThrow = new Error('db down');
     const res = await getUserPendingPayoutsHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('getCashbackSummaryHandler', () => {
+  const LOOP_AUTH: LoopAuthContext = {
+    kind: 'loop',
+    userId: 'user-uuid',
+    email: 'a@b.com',
+    bearerToken: 'loop-jwt',
+  };
+  const baseUser = {
+    id: 'user-uuid',
+    email: 'a@b.com',
+    isAdmin: false,
+    homeCurrency: 'GBP',
+    stellarAddress: null,
+    ctxUserId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  it('401 when no auth is on the context', async () => {
+    const res = await getCashbackSummaryHandler(makeCtx(undefined));
+    expect(res.status).toBe(401);
+  });
+
+  it('returns lifetime + thisMonth totals in the user home currency', async () => {
+    userState.byId = baseUser;
+    dbState.executeRows = [{ lifetimeMinor: 4200n, thisMonthMinor: 320n }];
+    const res = await getCashbackSummaryHandler(makeCtx(LOOP_AUTH));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      currency: string;
+      lifetimeMinor: string;
+      thisMonthMinor: string;
+    };
+    expect(body).toEqual({
+      currency: 'GBP',
+      lifetimeMinor: '4200',
+      thisMonthMinor: '320',
+    });
+  });
+
+  it('returns zero totals when the user has no cashback yet', async () => {
+    userState.byId = baseUser;
+    // SUM over zero rows → null from Postgres; handler COALESCEs, but
+    // when the result row itself is undefined (empty result) we fall
+    // through to the "0" defaults.
+    dbState.executeRows = [];
+    const res = await getCashbackSummaryHandler(makeCtx(LOOP_AUTH));
+    const body = (await res.json()) as { lifetimeMinor: string; thisMonthMinor: string };
+    expect(body.lifetimeMinor).toBe('0');
+    expect(body.thisMonthMinor).toBe('0');
+  });
+
+  it('handles null aggregates from the driver', async () => {
+    userState.byId = baseUser;
+    dbState.executeRows = [{ lifetimeMinor: null, thisMonthMinor: null }];
+    const res = await getCashbackSummaryHandler(makeCtx(LOOP_AUTH));
+    const body = (await res.json()) as { lifetimeMinor: string; thisMonthMinor: string };
+    expect(body.lifetimeMinor).toBe('0');
+    expect(body.thisMonthMinor).toBe('0');
+  });
+
+  it('handles the {rows: [...]} drizzle result shape', async () => {
+    userState.byId = baseUser;
+    dbState.executeRows = {
+      rows: [{ lifetimeMinor: 100n, thisMonthMinor: 50n }],
+    };
+    const res = await getCashbackSummaryHandler(makeCtx(LOOP_AUTH));
+    const body = (await res.json()) as { lifetimeMinor: string; thisMonthMinor: string };
+    expect(body.lifetimeMinor).toBe('100');
+    expect(body.thisMonthMinor).toBe('50');
+  });
+
+  it('500 when the db read throws', async () => {
+    userState.byId = baseUser;
+    dbState.executeThrow = new Error('db exploded');
+    const res = await getCashbackSummaryHandler(makeCtx(LOOP_AUTH));
     expect(res.status).toBe(500);
   });
 });
