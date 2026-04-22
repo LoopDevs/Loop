@@ -316,6 +316,57 @@ export interface DiscordNotifier {
 }
 
 /**
+ * Resolves the raw webhook URL for a given channel. Centralised so
+ * the test-ping handler + the catalog stay in lockstep — one place
+ * in this module maps channel → env var.
+ */
+function webhookUrlFor(channel: DiscordChannel): string | undefined {
+  switch (channel) {
+    case 'orders':
+      return env.DISCORD_WEBHOOK_ORDERS;
+    case 'monitoring':
+      return env.DISCORD_WEBHOOK_MONITORING;
+    case 'admin-audit':
+      return env.DISCORD_WEBHOOK_ADMIN_AUDIT;
+  }
+}
+
+/**
+ * True when the given channel's webhook env var is set. Admin
+ * test-ping uses this to distinguish "we tried to deliver" from
+ * "URL was never configured, delivery was a silent no-op". Without
+ * the check, a freshly-deployed backend with a missing env var
+ * would swallow every message indistinguishably from success.
+ */
+export function hasWebhookConfigured(channel: DiscordChannel): boolean {
+  const url = webhookUrlFor(channel);
+  return url !== undefined && url.length > 0;
+}
+
+/**
+ * Fires a benign test ping on a channel so an admin can verify
+ * webhook wiring after rotating env vars or redeploying. `actorId`
+ * is truncated to 8 chars in the embed so the audit trail can
+ * correlate the ping to the admin who triggered it without leaking
+ * the full uuid to the channel.
+ *
+ * Fire-and-forget like every other notifier — the caller should
+ * already have checked `hasWebhookConfigured(channel)` before
+ * invoking this (the admin handler maps an unconfigured channel to
+ * a 409 so the UI shows "webhook not configured" instead of a
+ * silent 200).
+ */
+export function notifyWebhookPing(channel: DiscordChannel, actorId: string): void {
+  const url = webhookUrlFor(channel);
+  const shortActor = actorId.length > 8 ? actorId.slice(0, 8) : actorId;
+  void sendWebhook(url, {
+    title: '🧪 Test ping',
+    description: `Manual test ping from admin \`${escapeMarkdown(shortActor)}\` — delivery proves the webhook URL for the \`${channel}\` channel is wired up.`,
+    color: BLUE,
+  });
+}
+
+/**
  * Static catalog of the Discord notifiers the backend can emit
  * (ADR 018 operational-visibility surface).
  *
@@ -372,5 +423,11 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     channel: 'monitoring',
     description:
       "Fires when Loop's USDC operator balance drops below the alerting floor — time to fund the treasury account before payouts can't clear (ADR 015).",
+  },
+  {
+    name: 'notifyWebhookPing',
+    channel: 'monitoring',
+    description:
+      'Manual test ping from an admin — proves a channel is wired up after rotating the webhook env var. Sent on demand from /api/admin/discord/test; never fires automatically.',
   },
 ]);
