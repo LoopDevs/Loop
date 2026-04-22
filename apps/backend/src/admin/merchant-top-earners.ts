@@ -68,7 +68,7 @@ export interface MerchantTopEarnersResponse {
   rows: MerchantTopEarnerRow[];
 }
 
-interface AggRow {
+interface AggRow extends Record<string, unknown> {
   user_id: string;
   email: string;
   currency: string;
