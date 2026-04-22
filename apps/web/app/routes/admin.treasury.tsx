@@ -11,6 +11,7 @@ import { SupplierSpendCard } from '~/components/features/admin/SupplierSpendCard
 import { OperatorStatsCard } from '~/components/features/admin/OperatorStatsCard';
 import { TopUsersByPendingPayoutCard } from '~/components/features/admin/TopUsersByPendingPayoutCard';
 import { DiscordNotifiersCard } from '~/components/features/admin/DiscordNotifiersCard';
+import { PaymentMethodShareCard } from '~/components/features/admin/PaymentMethodShareCard';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -374,6 +375,23 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
           list (ADR 015/016).
         </p>
         <TopUsersByPendingPayoutCard />
+      </section>
+
+      <section>
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Payment-method mix (fulfilled orders)
+          </h2>
+        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          The cashback-flywheel metric (ADR 010/015). A rising{' '}
+          <span className="text-green-700 dark:text-green-400">LOOP asset</span> share means users
+          are recycling on-ledger cashback into more orders — the feedback loop the pivot is
+          optimising for. Other rails (<code className="text-xs">xlm</code>,{' '}
+          <code className="text-xs">usdc</code>, <code className="text-xs">credit</code>) read as
+          first-order top-ups.
+        </p>
+        <PaymentMethodShareCard />
       </section>
 
       <section>

@@ -98,6 +98,55 @@ export async function getAdminConfigsHistory(
   );
 }
 
+/**
+ * Payment-method share response (#585). One entry per
+ * `ORDER_PAYMENT_METHODS` value, zero-filled by the backend so the
+ * UI layout is stable.
+ */
+export interface PaymentMethodShareBucket {
+  orderCount: number;
+  /** Sum of charge_minor for this (state, method) bucket, bigint-as-string. */
+  chargeMinor: string;
+}
+
+export type AdminPaymentMethod = 'xlm' | 'usdc' | 'credit' | 'loop_asset';
+
+// NOTE: `AdminOrderState` is also declared further down this file
+// (for the /admin/orders response type). Forward-referencing it
+// here via `import type` on the same module isn't possible, so the
+// shape repeats itself — but both declarations must agree. If you
+// edit one, edit the other.
+type AdminOrderStateLocal =
+  | 'pending_payment'
+  | 'paid'
+  | 'procuring'
+  | 'fulfilled'
+  | 'failed'
+  | 'expired';
+
+export interface PaymentMethodShareResponse {
+  state: AdminOrderStateLocal;
+  totalOrders: number;
+  byMethod: Record<AdminPaymentMethod, PaymentMethodShareBucket>;
+}
+
+/**
+ * `GET /api/admin/orders/payment-method-share` — cashback-flywheel
+ * metric. Tracks which rails users actually pay with; a rising
+ * `loop_asset` share is the signal ADR 015's pivot is working.
+ * Default `?state=fulfilled`.
+ */
+export async function getPaymentMethodShare(
+  opts: { state?: AdminOrderStateLocal } = {},
+): Promise<PaymentMethodShareResponse> {
+  const params = new URLSearchParams();
+  if (opts.state !== undefined) params.set('state', opts.state);
+  const qs = params.toString();
+  return authenticatedRequest<PaymentMethodShareResponse>(
+    `/api/admin/orders/payment-method-share${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
 // (LoopAssetCode re-exported from `@loop/shared` at the top of this file.)
 export type PayoutState = 'pending' | 'submitted' | 'confirmed' | 'failed';
 
