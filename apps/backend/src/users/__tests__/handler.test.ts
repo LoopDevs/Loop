@@ -135,6 +135,7 @@ vi.mock('../../auth/jwt.js', () => ({
 }));
 
 import {
+  getCashbackHistoryCsvHandler,
   getCashbackHistoryHandler,
   getMeHandler,
   getUserPendingPayoutsHandler,
@@ -146,9 +147,10 @@ function makeCtx(
   auth: LoopAuthContext | undefined,
   body?: unknown,
   query?: Record<string, string>,
-): Context {
+): Context & { __headers: Record<string, string> } {
   const store = new Map<string, unknown>();
   if (auth !== undefined) store.set('auth', auth);
+  const headers: Record<string, string> = {};
   return {
     req: {
       json: async () => body,
@@ -160,7 +162,16 @@ function makeCtx(
         status: status ?? 200,
         headers: { 'content-type': 'application/json' },
       }),
-  } as unknown as Context;
+    header: (k: string, v: string) => {
+      headers[k] = v;
+    },
+    body: (textBody: string) =>
+      new Response(textBody, {
+        status: 200,
+        headers: { ...headers },
+      }),
+    __headers: headers,
+  } as unknown as Context & { __headers: Record<string, string> };
 }
 
 beforeEach(() => {
@@ -660,5 +671,128 @@ describe('getUserPendingPayoutsHandler', () => {
     userState.upsertThrow = new Error('db down');
     const res = await getUserPendingPayoutsHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
     expect(res.status).toBe(500);
+  });
+});
+
+describe('getCashbackHistoryCsvHandler', () => {
+  const LOOP_AUTH: LoopAuthContext = {
+    kind: 'loop',
+    userId: 'csv-user',
+    email: 'a@b.com',
+    bearerToken: 'loop-jwt',
+  };
+  const baseUser = {
+    id: 'csv-user',
+    email: 'a@b.com',
+    isAdmin: false,
+    homeCurrency: 'GBP',
+    stellarAddress: null,
+    ctxUserId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  it('401 when no auth is on the context', async () => {
+    const res = await getCashbackHistoryCsvHandler(makeCtx(undefined));
+    expect(res.status).toBe(401);
+  });
+
+  it('returns just the header row when the ledger is empty', async () => {
+    userState.byId = baseUser;
+    dbState.historyRows = [];
+    const ctx = makeCtx(LOOP_AUTH);
+    const res = await getCashbackHistoryCsvHandler(ctx);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toBe('Created (UTC),Type,Amount (minor),Currency,Reference type,Reference ID\r\n');
+    expect(ctx.__headers['Content-Type']).toMatch(/text\/csv/);
+    expect(ctx.__headers['Content-Disposition']).toContain('attachment');
+    expect(ctx.__headers['Content-Disposition']).toContain('loop-cashback-history.csv');
+    expect(ctx.__headers['Cache-Control']).toBe('private, no-store');
+    expect(ctx.__headers['X-Result-Count']).toBe('0');
+  });
+
+  it('emits one CSV row per ledger entry with ISO timestamp + bigint-string amount', async () => {
+    userState.byId = baseUser;
+    dbState.historyRows = [
+      {
+        id: 'tx-1',
+        type: 'cashback',
+        amountMinor: 250n,
+        currency: 'GBP',
+        referenceType: 'order',
+        referenceId: 'ord-1',
+        createdAt: new Date('2026-04-22T10:00:00.000Z'),
+      },
+      {
+        id: 'tx-2',
+        type: 'adjustment',
+        amountMinor: -500n,
+        currency: 'GBP',
+        referenceType: 'admin_adjustment',
+        referenceId: 'admin-1',
+        createdAt: new Date('2026-04-21T09:30:00.000Z'),
+      },
+    ];
+    const ctx = makeCtx(LOOP_AUTH);
+    const res = await getCashbackHistoryCsvHandler(ctx);
+    const body = await res.text();
+    const lines = body.split('\r\n');
+    expect(lines[0]).toBe('Created (UTC),Type,Amount (minor),Currency,Reference type,Reference ID');
+    expect(lines[1]).toBe('2026-04-22T10:00:00.000Z,cashback,250,GBP,order,ord-1');
+    expect(lines[2]).toBe('2026-04-21T09:30:00.000Z,adjustment,-500,GBP,admin_adjustment,admin-1');
+    expect(ctx.__headers['X-Result-Count']).toBe('2');
+  });
+
+  it('empty string for null reference_type / reference_id (interest rows etc.)', async () => {
+    userState.byId = baseUser;
+    dbState.historyRows = [
+      {
+        id: 'tx-int',
+        type: 'interest',
+        amountMinor: 12n,
+        currency: 'GBP',
+        referenceType: null,
+        referenceId: null,
+        createdAt: new Date('2026-04-20T00:00:00.000Z'),
+      },
+    ];
+    const ctx = makeCtx(LOOP_AUTH);
+    const res = await getCashbackHistoryCsvHandler(ctx);
+    const body = await res.text();
+    expect(body).toContain('2026-04-20T00:00:00.000Z,interest,12,GBP,,');
+  });
+
+  it('RFC 4180-quotes fields containing commas / quotes / newlines', async () => {
+    userState.byId = baseUser;
+    dbState.historyRows = [
+      {
+        id: 'tx-x',
+        type: 'adjustment',
+        amountMinor: 100n,
+        currency: 'GBP',
+        referenceType: 'admin_adjustment',
+        // An admin id containing a comma would be a bug, but an
+        // operator note in a future `note` column could legitimately
+        // contain punctuation — exercise the escape here so the CSV
+        // stays valid when that lands.
+        referenceId: 'admin, with comma',
+        createdAt: new Date('2026-04-22T10:00:00.000Z'),
+      },
+      {
+        id: 'tx-y',
+        type: 'adjustment',
+        amountMinor: 200n,
+        currency: 'GBP',
+        referenceType: 'admin_adjustment',
+        referenceId: 'admin "quoted" id',
+        createdAt: new Date('2026-04-22T11:00:00.000Z'),
+      },
+    ];
+    const ctx = makeCtx(LOOP_AUTH);
+    const res = await getCashbackHistoryCsvHandler(ctx);
+    const body = await res.text();
+    expect(body).toContain('"admin, with comma"');
+    expect(body).toContain('"admin ""quoted"" id"');
   });
 });

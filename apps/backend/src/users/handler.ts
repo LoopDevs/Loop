@@ -316,6 +316,87 @@ export async function getCashbackHistoryHandler(c: Context): Promise<Response> {
 }
 
 /**
+ * `GET /api/users/me/cashback-history.csv` — full credit-ledger
+ * stream for the caller as a downloadable CSV. Unlike the paginated
+ * JSON sibling, this is a one-shot dump intended for user-initiated
+ * exports (tax records, personal bookkeeping, support chat
+ * attachments). Caps at `CSV_EXPORT_ROW_LIMIT` rows so a
+ * pathologically-active user can't wedge the handler.
+ *
+ * Why a dedicated endpoint (vs. paging the JSON endpoint in the
+ * client and stitching): a browser download must be served in one
+ * Response with `Content-Disposition: attachment` — the web client
+ * can't fabricate that from multiple JSON pages without also
+ * generating the CSV itself. Keeping formatting server-side also
+ * means a future "weekly email export" feature reuses the same
+ * code path without duplicating the escape logic.
+ */
+const CSV_EXPORT_ROW_LIMIT = 10_000;
+
+export async function getCashbackHistoryCsvHandler(c: Context): Promise<Response> {
+  let user: User | null;
+  try {
+    user = await resolveCallingUser(c);
+  } catch (err) {
+    log.error({ err }, 'Failed to resolve calling user');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+  }
+  if (user === null) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+
+  const rows = await db
+    .select()
+    .from(creditTransactions)
+    .where(eq(creditTransactions.userId, user.id))
+    .orderBy(desc(creditTransactions.createdAt))
+    .limit(CSV_EXPORT_ROW_LIMIT);
+
+  if (rows.length >= CSV_EXPORT_ROW_LIMIT) {
+    log.warn(
+      { userId: user.id, limit: CSV_EXPORT_ROW_LIMIT },
+      'Cashback CSV export hit the row cap — user has more history than the dump captures',
+    );
+  }
+
+  // Build the CSV as a single string. For 10k rows this is a few MB
+  // — small enough to stay in memory; the client downloads in one go.
+  const header = 'Created (UTC),Type,Amount (minor),Currency,Reference type,Reference ID\r\n';
+  const body = rows
+    .map((r) => {
+      const cols = [
+        r.createdAt.toISOString(),
+        r.type,
+        r.amountMinor.toString(),
+        r.currency,
+        r.referenceType ?? '',
+        r.referenceId ?? '',
+      ];
+      return cols.map(csvField).join(',');
+    })
+    .join('\r\n');
+
+  c.header('Content-Type', 'text/csv; charset=utf-8');
+  c.header('Content-Disposition', 'attachment; filename="loop-cashback-history.csv"');
+  c.header('Cache-Control', 'private, no-store');
+  c.header('X-Result-Count', String(rows.length));
+  return c.body(header + body);
+}
+
+/**
+ * RFC 4180 CSV field encoder. Wraps in double quotes + doubles internal
+ * quotes when the value contains any of: comma, double quote, CR, LF.
+ * Otherwise returns the raw string — a bare UUID or a plain "cashback"
+ * shouldn't acquire decorative quoting.
+ */
+function csvField(value: string): string {
+  if (/[",\r\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+/**
  * `GET /api/users/me/pending-payouts` — caller's on-chain payout
  * rows (ADR 015 / 016). Each row tracks the lifecycle of one outbound
  * LOOP-asset payment (pending → submitted → confirmed | failed) so

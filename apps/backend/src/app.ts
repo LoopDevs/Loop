@@ -45,6 +45,7 @@ import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
 import {
+  getCashbackHistoryCsvHandler,
   getCashbackHistoryHandler,
   getMeHandler,
   getUserPendingPayoutsHandler,
@@ -614,6 +615,11 @@ app.put('/api/users/me/stellar-address', rateLimit(10, 60_000), setStellarAddres
 // Account page loads it alongside /me on mount, and TanStack Query invalidates
 // it after any ledger-touching admin action (support edits, payouts).
 app.get('/api/users/me/cashback-history', rateLimit(60, 60_000), getCashbackHistoryHandler);
+// Full-history CSV dump — tighter rate limit (6/min) because the
+// query returns up to 10k rows, heavier than the paginated JSON sibling.
+// Private-no-store cache headers are set on the handler so a CDN in
+// front doesn't share one user's export with another.
+app.get('/api/users/me/cashback-history.csv', rateLimit(6, 60_000), getCashbackHistoryCsvHandler);
 // GET /api/users/me/pending-payouts — caller-scoped on-chain payout
 // rows (ADR 015 / 016). 60/min matches the history endpoint; clients
 // typically poll this from /settings/cashback while a payout is in

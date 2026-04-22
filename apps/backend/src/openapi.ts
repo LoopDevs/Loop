@@ -1053,6 +1053,41 @@ registry.registerPath({
   },
 });
 
+registry.registerPath({
+  method: 'get',
+  path: '/api/users/me/cashback-history.csv',
+  summary: 'Full credit-ledger dump for the caller as a CSV download (ADR 009 / 015).',
+  description:
+    "One-shot dump of the authenticated user's entire `credit_transactions` stream as text/csv with `Content-Disposition: attachment`. Capped at 10,000 rows — a user above that limit sees a truncation log on the server and the most-recent 10k rows in the CSV. Rate-limited more tightly than the JSON sibling (6/min) because the query is unbounded in size.",
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'CSV dump',
+      content: {
+        'text/csv': {
+          schema: z.string().openapi({
+            description:
+              'CSV with header: Created (UTC),Type,Amount (minor),Currency,Reference type,Reference ID',
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (6/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error resolving the user',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Users — pending-payouts view (ADR 015 / 016) ──────────────────────────
 //
 // Registered down here (outside the Users schema block) so the `PayoutState`
