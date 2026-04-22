@@ -53,6 +53,7 @@ import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js'
 import { adminOrdersCsvHandler } from './admin/orders-csv.js';
 import { adminStuckOrdersHandler } from './admin/stuck-orders.js';
 import { adminCashbackActivityHandler } from './admin/cashback-activity.js';
+import { adminMerchantStatsHandler } from './admin/merchant-stats.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
 import { adminUserCreditTransactionsHandler } from './admin/user-credit-transactions.js';
@@ -722,6 +723,10 @@ app.get('/api/admin/stuck-orders', rateLimit(120, 60_000), adminStuckOrdersHandl
 // Cheap read — single generate_series + LEFT JOIN, bounded at 180
 // days so the payload can't explode.
 app.get('/api/admin/cashback-activity', rateLimit(60, 60_000), adminCashbackActivityHandler);
+// Per-merchant cashback stats — which merchants drive volume /
+// cashback outlay / margin. Distinct from supplier-spend (currency
+// grouped) — this one groups by merchant.
+app.get('/api/admin/merchant-stats', rateLimit(60, 60_000), adminMerchantStatsHandler);
 // Given an order id, return the single pending_payouts row for it.
 // Nested under /orders/:orderId so the UI can link from the order
 // drill-down straight to the payout state without a separate fetch.
