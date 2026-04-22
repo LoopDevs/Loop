@@ -34,6 +34,7 @@ import {
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CopyButton } from '~/components/features/admin/CopyButton';
+import { MerchantCashbackPaidCard } from '~/components/features/admin/MerchantCashbackPaidCard';
 import { MerchantFlywheelChip } from '~/components/features/admin/MerchantFlywheelChip';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -186,6 +187,14 @@ export default function AdminMerchantDetailRoute(): React.JSX.Element {
           )}
         </div>
       </section>
+
+      {/* Cashback paid out (#625). Per-currency lifetime
+          user_cashback_minor on fulfilled orders. Sits between the
+          current-config card (what the split *is*) and the audit
+          trail (how the split got there) — those two answer
+          "what's the rule?"; this one answers "what has the rule
+          cost us so far?". */}
+      <MerchantCashbackPaidCard merchantId={merchantId} />
 
       {/* Config audit trail (ADR 011). Newest first, last 50 rows
           by backend default. Silent-hide on error — the current-
