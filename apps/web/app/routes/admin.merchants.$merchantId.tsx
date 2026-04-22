@@ -34,6 +34,7 @@ import {
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CopyButton } from '~/components/features/admin/CopyButton';
+import { MerchantFlywheelChip } from '~/components/features/admin/MerchantFlywheelChip';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -136,6 +137,14 @@ export default function AdminMerchantDetailRoute(): React.JSX.Element {
             orders still render below.
           </p>
         ) : null}
+        {/* Flywheel chip — recycled-vs-total over the last 31 days,
+            backed by /api/admin/merchants/:id/flywheel-stats (#623).
+            Gives ops a one-glance answer to "how much of this
+            merchant's volume is coming through the cashback rail?"
+            without leaving the drill-down. */}
+        <div className="mt-4">
+          <MerchantFlywheelChip merchantId={merchantId} />
+        </div>
       </section>
 
       {/* Current cashback config — small card. Shows the three
