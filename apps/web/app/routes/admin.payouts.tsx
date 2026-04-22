@@ -88,10 +88,21 @@ export default function AdminPayoutsRoute(): React.JSX.Element {
     onSettled: () => setRetryingId(null),
   });
 
+  // ADR 017 requires a reason (2..500 chars) on every admin write. The
+  // admin UI prompts for it here so the Discord audit entry has real
+  // context — "ops retry" is a weak reason, "operator funding top-up
+  // complete, retrying failed payouts" is the target.
   const handleRetry = (id: string): void => {
+    const reason = window.prompt('Reason for retrying this payout? (2–500 chars, logged in audit)');
+    if (reason === null) return;
+    const trimmed = reason.trim();
+    if (trimmed.length < 2 || trimmed.length > 500) {
+      setRetryError('Reason must be 2–500 characters');
+      return;
+    }
     setRetryingId(id);
     setRetryError(null);
-    retryMutation.mutate(id);
+    retryMutation.mutate({ id, reason: trimmed });
   };
 
   const setState = (next: PayoutState | 'all'): void => {

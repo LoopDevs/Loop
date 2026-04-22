@@ -1819,24 +1819,48 @@ registry.registerPath({
   },
 });
 
+const PayoutRetryBody = registry.register(
+  'PayoutRetryBody',
+  z.object({
+    reason: z.string().min(2).max(500),
+  }),
+);
+
+const PayoutRetryEnvelope = registry.register(
+  'PayoutRetryEnvelope',
+  z.object({
+    result: AdminPayoutView,
+    audit: AdminWriteAudit,
+  }),
+);
+
 registry.registerPath({
   method: 'post',
   path: '/api/admin/payouts/{id}/retry',
-  summary: 'Flip a failed payout back to pending (ADR 015 / 016).',
+  summary: 'Flip a failed payout back to pending (ADR 015 / 016 / 017).',
   description:
-    'Admin-only manual retry: resets a `failed` pending_payouts row to `pending` so the submit worker picks it up on the next tick. 404 when the id matches nothing or the row is in a non-failed state — the admin UI should refresh the list. The worker enforces memo-idempotency on re-submit (ADR 016) so double-retry never double-pays.',
+    'Admin-only manual retry: resets a `failed` pending_payouts row to `pending` so the submit worker picks it up on the next tick. 404 when the id matches nothing or the row is in a non-failed state. ADR 017 compliant: `Idempotency-Key` header + `reason` body required; a repeat call returns the stored snapshot with `audit.replayed: true`. Worker enforces memo-idempotency on re-submit (ADR 016) so double-retry never double-pays.',
   tags: ['Admin'],
   security: [{ bearerAuth: [] }],
   request: {
     params: z.object({ id: z.string().uuid() }),
+    headers: z.object({
+      'idempotency-key': z.string().min(16).max(128).openapi({
+        description:
+          'Required. Scoped to (admin_user_id, key); repeats replay the stored snapshot.',
+      }),
+    }),
+    body: {
+      content: { 'application/json': { schema: PayoutRetryBody } },
+    },
   },
   responses: {
     200: {
-      description: 'Updated payout row',
-      content: { 'application/json': { schema: AdminPayoutView } },
+      description: 'Retry applied (or replayed from snapshot)',
+      content: { 'application/json': { schema: PayoutRetryEnvelope } },
     },
     400: {
-      description: 'Missing or malformed id',
+      description: 'Missing idempotency key, invalid reason, or malformed id',
       content: { 'application/json': { schema: ErrorResponse } },
     },
     401: {
