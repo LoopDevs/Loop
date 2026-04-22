@@ -1261,6 +1261,55 @@ registry.registerPath({
   },
 });
 
+// ─── Admin — orders CSV export (ADR 011 / 017) ──────────────────────────────
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/orders.csv',
+  summary: 'Admin orders CSV dump (ADR 011 / 017).',
+  description:
+    'Full orders table as a downloadable CSV attachment. Optional `?state=` filter to narrow to a single lifecycle bucket. Capped at 10,000 rows; ops needing finer slicing should use the paginated `/api/admin/orders` JSON endpoint. `Cache-Control: private, no-store` — the dump contains wholesale + user data, no CDN caching under any circumstance.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      state: z
+        .enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired'])
+        .optional()
+        .openapi({ description: 'Filter to a single order state.' }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'CSV dump',
+      content: {
+        'text/csv': {
+          schema: z.string().openapi({
+            description:
+              'CSV. Header: Created (UTC),State,User ID,Merchant ID,Currency,Face value (minor),Charge currency,Charge (minor),Payment method,Wholesale (minor),User cashback (minor),Loop margin (minor),CTX order ID,CTX operator,Failure reason,Paid at,Procured at,Fulfilled at,Failed at',
+          }),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid state filter',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (6/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Admin — cashback-config CRUD (ADR 011) ─────────────────────────────────
 
 registry.registerPath({

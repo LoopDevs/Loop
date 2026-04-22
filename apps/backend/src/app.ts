@@ -44,6 +44,7 @@ import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '.
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
+import { adminOrdersCsvHandler } from './admin/orders-csv.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -653,6 +654,11 @@ app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayout
 // by state and userId. Ops uses this to triage stuck orders + audit
 // the cashback split + correlate with operator-pool health.
 app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+// Full-orders CSV dump (ADR 011 / 017). Tighter rate limit (6/min)
+// because the query can return up to 10k rows; ops should download
+// the bulk export sparingly. private,no-store on the response so a
+// CDN can't share one admin's dump with another.
+app.get('/api/admin/orders.csv', rateLimit(6, 60_000), adminOrdersCsvHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 
