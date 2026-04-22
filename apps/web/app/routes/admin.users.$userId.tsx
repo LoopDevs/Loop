@@ -6,6 +6,7 @@ import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { getAdminUser, getAdminUserCredits, type AdminUserCreditRow } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { CashbackSummaryChip } from '~/components/features/admin/CashbackSummaryChip';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { CreditAdjustmentForm } from '~/components/features/admin/CreditAdjustmentForm';
 import { CreditTransactionsTable } from '~/components/features/admin/CreditTransactionsTable';
@@ -144,6 +145,14 @@ export default function AdminUserDetailRoute(): React.JSX.Element {
               </span>
             ) : null}
           </header>
+          {/* Scalar cashback headline — self-hides for zero-earnings
+              users so brand-new accounts aren't framed around an empty
+              "£0 lifetime" pill. Renders in the user-detail block so
+              operators see it adjacent to the identity / home-currency
+              facts rather than buried next to the credits table. */}
+          <div className="mt-3">
+            <CashbackSummaryChip userId={userQuery.data.id} />
+          </div>
           <dl className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 text-sm">
             <div>
               <dt className="text-gray-500 dark:text-gray-400">Home currency</dt>

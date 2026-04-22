@@ -866,6 +866,29 @@ export async function getAdminUserCredits(userId: string): Promise<AdminUserCred
 }
 
 /**
+ * Admin per-user cashback scalar (ADR 009 / 015). Admin-facing mirror
+ * of `/api/users/me/cashback-summary` — lifetime + this-month cashback
+ * earned, scoped to the user's current `home_currency`. Drives the
+ * compact "£42 lifetime · £3.20 this month" chip on the admin drill-
+ * down.
+ */
+export interface AdminUserCashbackSummary {
+  userId: string;
+  currency: string;
+  lifetimeMinor: string;
+  thisMonthMinor: string;
+}
+
+/** `GET /api/admin/users/:userId/cashback-summary` — scalar headline. */
+export async function getAdminUserCashbackSummary(
+  userId: string,
+): Promise<AdminUserCashbackSummary> {
+  return authenticatedRequest<AdminUserCashbackSummary>(
+    `/api/admin/users/${encodeURIComponent(userId)}/cashback-summary`,
+  );
+}
+
+/**
  * One row of an admin per-user cashback-by-merchant breakdown.
  * Admin-facing equivalent of the user's own card — same join on
  * `credit_transactions.reference_id::uuid = orders.id`, same
