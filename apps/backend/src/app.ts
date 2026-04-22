@@ -52,6 +52,7 @@ import { adminPayoutsCsvHandler } from './admin/payouts-csv.js';
 import { adminPayoutsByAssetHandler } from './admin/payouts-by-asset.js';
 import { adminTopUsersHandler } from './admin/top-users.js';
 import { adminAuditTailHandler } from './admin/audit-tail.js';
+import { adminAuditTailCsvHandler } from './admin/audit-tail-csv.js';
 import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js';
 import { adminOrdersActivityHandler } from './admin/orders-activity.js';
 import { adminOrdersCsvHandler } from './admin/orders-csv.js';
@@ -768,6 +769,12 @@ app.get('/api/admin/top-users', rateLimit(60, 60_000), adminTopUsersHandler);
 // as the Discord audit fanout but persistent + queryable. Actor
 // email joined in so the UI doesn't need a follow-up lookup.
 app.get('/api/admin/audit-tail', rateLimit(60, 60_000), adminAuditTailHandler);
+// Finance / legal CSV export of the admin write-audit trail
+// (ADR 017 / 018). SOC-2 and finance audits want a month of
+// rows exportable in a neutral format. 10/min rate-limit mirrors
+// the other Tier-3 CSV exports — ops runs this manually at
+// month-end, not on-click from the UI.
+app.get('/api/admin/audit-tail.csv', rateLimit(10, 60_000), adminAuditTailCsvHandler);
 // Paginated user directory — browse + search for the admin panel.
 // Complements the exact-by-id drill at /api/admin/users/:userId.
 app.get('/api/admin/users', rateLimit(60, 60_000), adminListUsersHandler);
