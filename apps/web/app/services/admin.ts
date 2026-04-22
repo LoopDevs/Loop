@@ -59,6 +59,45 @@ export async function cashbackConfigHistory(
   );
 }
 
+/**
+ * One row from the fleet-wide config-history feed (#580). Extends
+ * the per-merchant history row with a resolved display name — the
+ * backend joins against the catalog so the admin UI doesn't re-fetch
+ * every merchant to render the strip.
+ */
+export interface AdminConfigHistoryEntry {
+  id: string;
+  merchantId: string;
+  merchantName: string;
+  wholesalePct: string;
+  userCashbackPct: string;
+  loopMarginPct: string;
+  active: boolean;
+  changedBy: string;
+  changedAt: string;
+}
+
+export interface AdminConfigHistoryResponse {
+  history: AdminConfigHistoryEntry[];
+}
+
+/**
+ * `GET /api/admin/merchant-cashback-configs/history` — newest-first
+ * fleet-wide feed of cashback-config edits. Drives the "recent config
+ * changes" card on the admin dashboard; complements the per-merchant
+ * `cashbackConfigHistory(merchantId)` drill.
+ */
+export async function getAdminConfigsHistory(
+  opts: { limit?: number } = {},
+): Promise<AdminConfigHistoryResponse> {
+  const params = new URLSearchParams();
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return authenticatedRequest<AdminConfigHistoryResponse>(
+    `/api/admin/merchant-cashback-configs/history${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
 // (LoopAssetCode re-exported from `@loop/shared` at the top of this file.)
 export type PayoutState = 'pending' | 'submitted' | 'confirmed' | 'failed';
 
