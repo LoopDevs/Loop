@@ -50,6 +50,7 @@ import {
 } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
+import { adminUserCreditsHandler } from './admin/user-credits.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -672,6 +673,10 @@ app.get('/api/admin/orders/:orderId/payout', rateLimit(120, 60_000), adminPayout
 // renders this on the treasury page as the "supplier" card next to
 // outstanding liabilities.
 app.get('/api/admin/supplier-spend', rateLimit(60, 60_000), adminSupplierSpendHandler);
+// Per-user credit-balance drill-down (ADR 009). Ops opens this from
+// a support ticket; complements the treasury aggregate which only
+// gives fleet-wide outstanding.
+app.get('/api/admin/users/:userId/credits', rateLimit(120, 60_000), adminUserCreditsHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 
