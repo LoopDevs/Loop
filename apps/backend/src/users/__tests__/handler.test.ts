@@ -28,11 +28,13 @@ const { selectChain, updateChain, queryObj, dbState } = vi.hoisted(() => {
     updatedUser: unknown;
     historyRows: unknown[];
     homeBalanceMinor: bigint | null;
+    creditsRows: unknown[];
   } = {
     orderCount: '0',
     updatedUser: null,
     historyRows: [],
     homeBalanceMinor: null,
+    creditsRows: [],
   };
   const sel: Record<string, ReturnType<typeof vi.fn>> = {};
   sel['from'] = vi.fn(() => sel);
@@ -45,7 +47,22 @@ const { selectChain, updateChain, queryObj, dbState } = vi.hoisted(() => {
         reject(err);
       }
     };
-    leaf['orderBy'] = vi.fn(() => leaf);
+    // getUserCreditsHandler ends its chain on `.orderBy(...)` (no
+    // `.limit`). Return an awaitable that resolves to `creditsRows`
+    // for that path; the cashback-history path still chains to
+    // `.limit()` which returns `historyRows`.
+    leaf['orderBy'] = vi.fn(() => {
+      const orderByLeaf: Record<string, unknown> = {};
+      orderByLeaf['then'] = (resolve: (v: unknown[]) => void, reject: (err: unknown) => void) => {
+        try {
+          resolve(state.creditsRows);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      orderByLeaf['limit'] = vi.fn(async () => state.historyRows);
+      return orderByLeaf;
+    });
     leaf['limit'] = vi.fn(async () => state.historyRows);
     return leaf;
   });
@@ -91,7 +108,12 @@ vi.mock('../../db/client.js', () => ({
 vi.mock('../../db/schema.js', () => ({
   orders: { userId: 'user_id' },
   users: { id: 'id' },
-  userCredits: { userId: 'user_id', currency: 'currency' },
+  userCredits: {
+    userId: 'user_id',
+    currency: 'currency',
+    balanceMinor: 'balance_minor',
+    updatedAt: 'updated_at',
+  },
   creditTransactions: {
     userId: 'user_id',
     createdAt: 'created_at',
@@ -137,6 +159,7 @@ vi.mock('../../auth/jwt.js', () => ({
 import {
   getCashbackHistoryHandler,
   getMeHandler,
+  getUserCreditsHandler,
   getUserPendingPayoutsHandler,
   setHomeCurrencyHandler,
   setStellarAddressHandler,
@@ -659,6 +682,77 @@ describe('getUserPendingPayoutsHandler', () => {
     jwtState.claims = { sub: 'ctx-err', email: 'e@x.com' };
     userState.upsertThrow = new Error('db down');
     const res = await getUserPendingPayoutsHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('getUserCreditsHandler', () => {
+  const LOOP_AUTH: LoopAuthContext = {
+    kind: 'loop',
+    userId: 'user-uuid',
+    email: 'a@b.com',
+    bearerToken: 'loop-jwt',
+  };
+  const baseUser = {
+    id: 'user-uuid',
+    email: 'a@b.com',
+    isAdmin: false,
+    homeCurrency: 'GBP',
+    stellarAddress: null,
+    ctxUserId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  beforeEach(() => {
+    userState.byId = baseUser;
+    userState.upsertThrow = null;
+    dbState.creditsRows = [];
+  });
+
+  it('401 when there is no auth context', async () => {
+    const res = await getUserCreditsHandler(makeCtx(undefined));
+    expect(res.status).toBe(401);
+  });
+
+  it('returns an empty list when the user has no ledger entries', async () => {
+    const res = await getUserCreditsHandler(makeCtx(LOOP_AUTH));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { credits: unknown[] };
+    expect(body.credits).toEqual([]);
+  });
+
+  it('serialises bigint balances and Date timestamps', async () => {
+    dbState.creditsRows = [
+      {
+        currency: 'EUR',
+        balanceMinor: 12_345n,
+        updatedAt: new Date('2026-04-10T09:00:00Z'),
+      },
+      {
+        currency: 'GBP',
+        balanceMinor: 890_000n,
+        updatedAt: new Date('2026-04-20T14:00:00Z'),
+      },
+    ];
+    const res = await getUserCreditsHandler(makeCtx(LOOP_AUTH));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      credits: Array<Record<string, unknown>>;
+    };
+    expect(body.credits).toHaveLength(2);
+    expect(body.credits[0]).toEqual({
+      currency: 'EUR',
+      balanceMinor: '12345',
+      updatedAt: '2026-04-10T09:00:00.000Z',
+    });
+    expect(body.credits[1]!['balanceMinor']).toBe('890000');
+  });
+
+  it('500 when the CTX upsert throws', async () => {
+    jwtState.claims = { sub: 'ctx-err', email: 'e@x.com' };
+    userState.upsertThrow = new Error('db down');
+    const res = await getUserCreditsHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
     expect(res.status).toBe(500);
   });
 });

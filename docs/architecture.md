@@ -221,6 +221,7 @@ GET  /api/users/me           [authenticated — profile + home_currency, ADR 015
 POST /api/users/me/home-currency   [authenticated — first-time-set (order-less), ADR 015]
 PUT  /api/users/me/stellar-address [authenticated — link/unlink Stellar wallet for payouts, ADR 015]
 GET  /api/users/me/cashback-history [authenticated — recent credit-ledger events, ADR 009/015]
+GET  /api/users/me/credits         [authenticated — per-currency balance list, ADR 009/015]
 GET  /api/users/me/pending-payouts  [authenticated — caller's on-chain payout rows, ADR 015/016]
 GET  /api/admin/merchant-cashback-configs              [admin]
 PUT  /api/admin/merchant-cashback-configs/:merchantId  [admin]

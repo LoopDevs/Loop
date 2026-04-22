@@ -308,6 +308,24 @@ const CashbackHistoryResponse = registry.register(
   z.object({ entries: z.array(CashbackHistoryEntry) }),
 );
 
+// ─── Users — credit balances (ADR 009 / 015) ────────────────────────────────
+
+const UserCreditRow = registry.register(
+  'UserCreditRow',
+  z.object({
+    currency: z.string().length(3),
+    balanceMinor: z.string().openapi({
+      description: 'bigint-as-string. Minor units (pence / cents).',
+    }),
+    updatedAt: z.string().datetime(),
+  }),
+);
+
+const UserCreditsResponse = registry.register(
+  'UserCreditsResponse',
+  z.object({ credits: z.array(UserCreditRow) }),
+);
+
 // ─── Admin (ADR 015 — treasury + payouts) ───────────────────────────────────
 
 const LoopAssetCode = z
@@ -1144,6 +1162,34 @@ registry.registerPath({
     400: {
       description: 'Invalid before timestamp',
       content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error resolving the user',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/users/me/credits',
+  summary: 'Caller per-currency credit balance (ADR 009 / 015).',
+  description:
+    'Multi-currency complement to `/api/users/me`, which exposes only the home-currency scalar. Returns one row per non-zero `user_credits` currency — useful after a home-currency flip leaves a residual balance, or when support credits a user in a non-home currency. Empty `credits` when the user has never earned / has fully redeemed.',
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Per-currency balances',
+      content: { 'application/json': { schema: UserCreditsResponse } },
     },
     401: {
       description: 'Missing or invalid bearer',

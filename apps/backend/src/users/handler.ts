@@ -316,6 +316,62 @@ export async function getCashbackHistoryHandler(c: Context): Promise<Response> {
 }
 
 /**
+ * `GET /api/users/me/credits` — caller's off-chain cashback balance
+ * per currency (ADR 009 / 015).
+ *
+ * `GET /api/users/me` already surfaces a single scalar in the user's
+ * current `home_currency`. This endpoint is the multi-currency
+ * complement — useful when a user has flipped home currency (a
+ * support-mediated flip leaves a non-zero balance in the old
+ * currency) or was credited in a non-home currency via ops adjustment.
+ *
+ * Scoped to the authenticated caller — no admin-privileged
+ * cross-user access from this endpoint.
+ */
+export interface UserCreditRow {
+  currency: string;
+  /** bigint-as-string in minor units (pence / cents). */
+  balanceMinor: string;
+  /** ISO-8601 timestamp of the last ledger movement that wrote to this row. */
+  updatedAt: string;
+}
+
+export interface UserCreditsResponse {
+  credits: UserCreditRow[];
+}
+
+export async function getUserCreditsHandler(c: Context): Promise<Response> {
+  let user: User | null;
+  try {
+    user = await resolveCallingUser(c);
+  } catch (err) {
+    log.error({ err }, 'Failed to resolve calling user');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+  }
+  if (user === null) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+
+  const rows = await db
+    .select({
+      currency: userCredits.currency,
+      balanceMinor: userCredits.balanceMinor,
+      updatedAt: userCredits.updatedAt,
+    })
+    .from(userCredits)
+    .where(eq(userCredits.userId, user.id))
+    .orderBy(userCredits.currency);
+
+  return c.json<UserCreditsResponse>({
+    credits: rows.map((r) => ({
+      currency: r.currency,
+      balanceMinor: r.balanceMinor.toString(),
+      updatedAt: r.updatedAt.toISOString(),
+    })),
+  });
+}
+
+/**
  * `GET /api/users/me/pending-payouts` — caller's on-chain payout
  * rows (ADR 015 / 016). Each row tracks the lifecycle of one outbound
  * LOOP-asset payment (pending → submitted → confirmed | failed) so
