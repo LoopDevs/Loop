@@ -42,3 +42,33 @@ export async function getPublicTopCashbackMerchants(
     `/api/public/top-cashback-merchants${qs.length > 0 ? `?${qs}` : ''}`,
   );
 }
+
+/**
+ * One configured LOOP asset from `/api/public/loop-assets` (#596).
+ * `code` is the Stellar asset code; `issuer` is the G-account that
+ * mints it. Both are public — the endpoint is an intentional
+ * transparency surface so third-party wallets can add trustlines
+ * against a verified issuer (ADR 015 anti-spoofing).
+ *
+ * The shape repeats what the backend exports locally rather than
+ * pulling through `@loop/shared`. ADR 019 says to consolidate once
+ * we have a second consumer; today the web side is the first.
+ */
+export interface PublicLoopAsset {
+  code: 'USDLOOP' | 'GBPLOOP' | 'EURLOOP';
+  issuer: string;
+}
+
+export interface PublicLoopAssetsResponse {
+  assets: PublicLoopAsset[];
+}
+
+/**
+ * `GET /api/public/loop-assets` (ADR 015 / 020) — unauthenticated list
+ * of configured LOOP stablecoin (code, issuer) pairs. Never-500;
+ * empty list is a valid response for a deployment without issuers
+ * configured. 5-minute Cache-Control on the happy path.
+ */
+export async function getPublicLoopAssets(): Promise<PublicLoopAssetsResponse> {
+  return apiRequest<PublicLoopAssetsResponse>('/api/public/loop-assets');
+}
