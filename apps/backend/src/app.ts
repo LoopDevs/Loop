@@ -78,6 +78,7 @@ import { adminMerchantFlywheelStatsHandler } from './admin/merchant-flywheel-sta
 import { adminMerchantCashbackSummaryHandler } from './admin/merchant-cashback-summary.js';
 import { adminMerchantPaymentMethodShareHandler } from './admin/merchant-payment-method-share.js';
 import { adminMerchantCashbackMonthlyHandler } from './admin/merchant-cashback-monthly.js';
+import { adminMerchantFlywheelActivityHandler } from './admin/merchant-flywheel-activity.js';
 import { adminCashbackConfigsCsvHandler } from './admin/cashback-configs-csv.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
@@ -953,6 +954,17 @@ app.get(
   '/api/admin/merchants/:merchantId/cashback-monthly',
   rateLimit(120, 60_000),
   adminMerchantCashbackMonthlyHandler,
+);
+// Per-merchant flywheel-activity time-series (#641) — daily
+// recycled-vs-total fulfilled-order counts. Time-axis companion
+// to the scalar /flywheel-stats endpoint from #623; drives the
+// forthcoming sparkline on /admin/merchants/:merchantId so ops
+// can see whether LOOP-asset adoption at a merchant is rising
+// or plateaued over time.
+app.get(
+  '/api/admin/merchants/:merchantId/flywheel-activity',
+  rateLimit(120, 60_000),
+  adminMerchantFlywheelActivityHandler,
 );
 // Given an order id, return the single pending_payouts row for it.
 // Nested under /orders/:orderId so the UI can link from the order

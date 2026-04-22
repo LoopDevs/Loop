@@ -267,6 +267,7 @@ GET  /api/admin/merchants/:merchantId/flywheel-stats    [admin — per-merchant 
 GET  /api/admin/merchants/:merchantId/cashback-summary  [admin — per-currency lifetime cashback paid out on fulfilled orders, ADR 009/011/015]
 GET  /api/admin/merchants/:merchantId/payment-method-share [admin — rail mix for one merchant, sibling of fleet-wide share, ADR 010/015]
 GET  /api/admin/merchants/:merchantId/cashback-monthly  [admin — 12-month per-merchant cashback emission trend, ADR 009/011/015]
+GET  /api/admin/merchants/:merchantId/flywheel-activity [admin — daily per-merchant recycled-vs-total fulfilled-order series (1-180d), ADR 011/015]
 GET  /api/admin/merchant-cashback-configs.csv           [admin — snapshot CSV of commercial terms, ADR 011/018]
 GET  /api/admin/orders/:orderId                         [admin — single order detail, ADR 011/015]
 GET  /api/admin/orders/:orderId/payout                  [admin — payout row for a given order]
