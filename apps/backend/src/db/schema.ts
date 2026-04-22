@@ -500,8 +500,9 @@ export const userIdentities = pgTable(
   ],
 );
 
-export const SOCIAL_PROVIDERS = ['google', 'apple'] as const;
-export type SocialProvider = (typeof SOCIAL_PROVIDERS)[number];
+// Re-exported from @loop/shared so backend consumers keep importing
+// from schema.ts (same pattern as HOME_CURRENCIES / ORDER_STATES).
+export { SOCIAL_PROVIDERS, type SocialProvider } from '@loop/shared';
 
 /**
  * Outbound Stellar cashback payouts (ADR 015 flow 2).
