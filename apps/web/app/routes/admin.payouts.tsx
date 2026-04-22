@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import type { Route } from './+types/admin.payouts';
 import { useAuth } from '~/hooks/use-auth';
 import { listPayouts, retryPayout, type AdminPayoutView, type PayoutState } from '~/services/admin';
@@ -203,10 +203,15 @@ export default function AdminPayoutsRoute(): React.JSX.Element {
               {query.data.payouts.map((p: AdminPayoutView) => (
                 <tr key={p.id}>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-700 dark:text-gray-300">
-                    {new Date(p.createdAt).toLocaleString('en-US', {
-                      dateStyle: 'short',
-                      timeStyle: 'short',
-                    })}
+                    <Link
+                      to={`/admin/payouts/${p.id}`}
+                      className="hover:underline text-blue-600 dark:text-blue-400"
+                    >
+                      {new Date(p.createdAt).toLocaleString('en-US', {
+                        dateStyle: 'short',
+                        timeStyle: 'short',
+                      })}
+                    </Link>
                   </td>
                   <td className="px-3 py-2">
                     <span
