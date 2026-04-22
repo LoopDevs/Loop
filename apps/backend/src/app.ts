@@ -53,6 +53,7 @@ import { adminPayoutsCsvHandler } from './admin/payouts-csv.js';
 import { adminPayoutsByAssetHandler } from './admin/payouts-by-asset.js';
 import { adminTopUsersHandler } from './admin/top-users.js';
 import { adminTopUsersByPendingPayoutHandler } from './admin/top-users-by-pending-payout.js';
+import { adminUsersRecyclingActivityHandler } from './admin/users-recycling-activity.js';
 import { adminAuditTailHandler } from './admin/audit-tail.js';
 import { adminAuditTailCsvHandler } from './admin/audit-tail-csv.js';
 import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js';
@@ -920,6 +921,16 @@ app.get(
   '/api/admin/users/top-by-pending-payout',
   rateLimit(60, 60_000),
   adminTopUsersByPendingPayoutHandler,
+);
+// "Who's recycling right now?" — 90-day list of users with at least
+// one loop_asset order, ranked by most-recent recycle. Complement to
+// /top-users (by cashback earned) and /top-by-pending-payout (by
+// backlog). Registered before /:userId so the literal segment is
+// not captured as a uuid.
+app.get(
+  '/api/admin/users/recycling-activity',
+  rateLimit(60, 60_000),
+  adminUsersRecyclingActivityHandler,
 );
 // Admin user-detail drill. Entry point for the admin panel's user
 // page — subsequent drills (credits, credit-transactions, orders)
