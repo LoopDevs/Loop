@@ -14,6 +14,7 @@ import { AdminAuditTail } from '~/components/features/admin/AdminAuditTail';
 import { CashbackSparkline } from '~/components/features/admin/CashbackSparkline';
 import { OrdersSparkline } from '~/components/features/admin/OrdersSparkline';
 import { StuckOrdersCard } from '~/components/features/admin/StuckOrdersCard';
+import { StuckPayoutsCard } from '~/components/features/admin/StuckPayoutsCard';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -134,7 +135,7 @@ export default function AdminIndexRoute(): React.JSX.Element {
           Failed to load the treasury snapshot.
         </section>
       ) : (
-        <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <Link
             to="/admin/treasury"
             className="rounded-xl border border-gray-200 bg-white p-4 hover:border-gray-400 dark:border-gray-800 dark:bg-gray-900 dark:hover:border-gray-600"
@@ -164,6 +165,7 @@ export default function AdminIndexRoute(): React.JSX.Element {
             </div>
           </Link>
           <StuckOrdersCard />
+          <StuckPayoutsCard />
         </section>
       )}
 
