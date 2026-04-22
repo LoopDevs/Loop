@@ -50,6 +50,7 @@ import {
 } from './admin/payouts.js';
 import { adminPayoutsCsvHandler } from './admin/payouts-csv.js';
 import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js';
+import { adminOrdersCsvHandler } from './admin/orders-csv.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
 import { adminUserCreditTransactionsHandler } from './admin/user-credit-transactions.js';
@@ -682,6 +683,10 @@ app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
 // ticket or incident note. Higher rate-limit than the list because
 // the admin UI re-fetches detail on every navigation.
 app.get('/api/admin/orders/:orderId', rateLimit(120, 60_000), adminGetOrderHandler);
+// Finance-ready CSV export of Loop-native orders. Same rate-limit
+// cadence as other Tier-3 exports — ops runs it manually at month-end,
+// not on-click from the UI.
+app.get('/api/admin/orders.csv', rateLimit(10, 60_000), adminOrdersCsvHandler);
 // Given an order id, return the single pending_payouts row for it.
 // Nested under /orders/:orderId so the UI can link from the order
 // drill-down straight to the payout state without a separate fetch.
