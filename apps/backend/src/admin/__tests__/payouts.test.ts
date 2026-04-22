@@ -3,6 +3,11 @@ import type { Context } from 'hono';
 
 vi.mock('../../db/schema.js', () => ({
   PAYOUT_STATES: ['pending', 'submitted', 'confirmed', 'failed'] as const,
+  pendingPayouts: {
+    state: 'state',
+    createdAt: 'created_at',
+    amountStroops: 'amount_stroops',
+  },
 }));
 
 const listMock = vi.fn();
@@ -17,7 +22,23 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-import { adminListPayoutsHandler, adminRetryPayoutHandler } from '../payouts.js';
+const { execState } = vi.hoisted(() => ({
+  execState: { rows: [] as unknown[], throw: false },
+}));
+vi.mock('../../db/client.js', () => ({
+  db: {
+    execute: vi.fn(async () => {
+      if (execState.throw) throw new Error('db exploded');
+      return execState.rows;
+    }),
+  },
+}));
+
+import {
+  adminListPayoutsHandler,
+  adminPayoutsSummaryHandler,
+  adminRetryPayoutHandler,
+} from '../payouts.js';
 
 function makeCtx(query: Record<string, string> = {}, params: Record<string, string> = {}): Context {
   return {
@@ -56,6 +77,8 @@ beforeEach(() => {
   listMock.mockReset();
   listMock.mockResolvedValue([baseRow]);
   resetMock.mockReset();
+  execState.rows = [];
+  execState.throw = false;
 });
 
 describe('adminListPayoutsHandler', () => {
@@ -153,6 +176,108 @@ describe('adminRetryPayoutHandler', () => {
   it('500 when the repo throws', async () => {
     resetMock.mockRejectedValue(new Error('db exploded'));
     const res = await adminRetryPayoutHandler(makeCtx({}, { id: 'p-1' }));
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('adminPayoutsSummaryHandler', () => {
+  it('rolls counts, zero-fills missing states, echoes oldest + total stroops', async () => {
+    execState.rows = [
+      {
+        state: 'pending',
+        n: 3,
+        oldest: new Date('2026-04-20T09:00:00Z'),
+        totalStroops: 150_000_000n,
+      },
+      {
+        state: 'submitted',
+        n: 1,
+        oldest: new Date('2026-04-21T11:00:00Z'),
+        totalStroops: 50_000_000n,
+      },
+      {
+        state: 'confirmed',
+        n: 42,
+        oldest: new Date('2026-04-01T00:00:00Z'),
+        totalStroops: 2_000_000_000n,
+      },
+    ];
+    const res = await adminPayoutsSummaryHandler(makeCtx());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      counts: Record<string, number>;
+      oldestPendingAt: string | null;
+      oldestSubmittedAt: string | null;
+      pendingStroops: string;
+    };
+    expect(body.counts).toEqual({ pending: 3, submitted: 1, confirmed: 42, failed: 0 });
+    expect(body.oldestPendingAt).toBe('2026-04-20T09:00:00.000Z');
+    expect(body.oldestSubmittedAt).toBe('2026-04-21T11:00:00.000Z');
+    expect(body.pendingStroops).toBe('150000000');
+  });
+
+  it('returns all-zeros + null timestamps on an empty table', async () => {
+    execState.rows = [];
+    const res = await adminPayoutsSummaryHandler(makeCtx());
+    const body = (await res.json()) as {
+      counts: Record<string, number>;
+      oldestPendingAt: string | null;
+      oldestSubmittedAt: string | null;
+      pendingStroops: string;
+    };
+    expect(body.counts).toEqual({ pending: 0, submitted: 0, confirmed: 0, failed: 0 });
+    expect(body.oldestPendingAt).toBeNull();
+    expect(body.oldestSubmittedAt).toBeNull();
+    expect(body.pendingStroops).toBe('0');
+  });
+
+  it('handles ISO-string oldest values (some pg drivers skip Date coercion)', async () => {
+    execState.rows = [
+      {
+        state: 'pending',
+        n: 1,
+        oldest: '2026-04-20T09:00:00Z',
+        totalStroops: 1000n,
+      },
+    ];
+    const res = await adminPayoutsSummaryHandler(makeCtx());
+    const body = (await res.json()) as { oldestPendingAt: string | null };
+    expect(body.oldestPendingAt).toBe('2026-04-20T09:00:00.000Z');
+  });
+
+  it('handles the {rows: [...]} drizzle result shape', async () => {
+    execState.rows = {
+      rows: [
+        {
+          state: 'failed',
+          n: 2,
+          oldest: new Date('2026-04-10T00:00:00Z'),
+          totalStroops: 0n,
+        },
+      ],
+    } as unknown as unknown[];
+    const res = await adminPayoutsSummaryHandler(makeCtx());
+    const body = (await res.json()) as { counts: Record<string, number> };
+    expect(body.counts.failed).toBe(2);
+  });
+
+  it('ignores unknown state values', async () => {
+    execState.rows = [
+      {
+        state: 'ghost',
+        n: 99,
+        oldest: new Date('2026-04-20T09:00:00Z'),
+        totalStroops: 0n,
+      },
+    ];
+    const res = await adminPayoutsSummaryHandler(makeCtx());
+    const body = (await res.json()) as { counts: Record<string, number> };
+    expect(Object.values(body.counts).reduce((a, b) => a + b, 0)).toBe(0);
+  });
+
+  it('500 when the db read throws', async () => {
+    execState.throw = true;
+    const res = await adminPayoutsSummaryHandler(makeCtx());
     expect(res.status).toBe(500);
   });
 });

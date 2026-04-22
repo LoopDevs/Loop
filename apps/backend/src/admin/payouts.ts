@@ -11,7 +11,9 @@
  * in each bucket.
  */
 import type { Context } from 'hono';
-import { PAYOUT_STATES } from '../db/schema.js';
+import { sql } from 'drizzle-orm';
+import { db } from '../db/client.js';
+import { PAYOUT_STATES, pendingPayouts } from '../db/schema.js';
 import { listPayoutsForAdmin, resetPayoutToPending } from '../credits/pending-payouts.js';
 import { logger } from '../logger.js';
 
@@ -111,6 +113,99 @@ export async function adminListPayoutsHandler(c: Context): Promise<Response> {
     limit,
   });
   return c.json({ payouts: rows.map((r) => toView(r as PayoutRow)) });
+}
+
+export interface AdminPayoutsSummaryResponse {
+  /** Per-state row counts — every state present in PAYOUT_STATES, zero-filled. */
+  counts: Record<(typeof PAYOUT_STATES)[number], number>;
+  /**
+   * ISO-8601 timestamp of the oldest `pending` row still waiting for
+   * the submit worker. Null when the pending queue is empty — the
+   * normal steady state. Drives the "oldest queued payout is Nm old"
+   * badge on the admin dashboard.
+   */
+  oldestPendingAt: string | null;
+  /**
+   * Same for `submitted` — rows awaiting Horizon confirmation. Staleness
+   * here points at a stuck transaction or a stalled confirm worker.
+   */
+  oldestSubmittedAt: string | null;
+  /** Total stroops currently queued as `pending` across all LoopAssets. */
+  pendingStroops: string;
+}
+
+interface PayoutSummaryRow extends Record<string, unknown> {
+  state: string;
+  n: string | number;
+  oldest: string | Date | null;
+  totalStroops: string | null;
+}
+
+/**
+ * GET /api/admin/payouts/summary
+ *
+ * One GROUP BY gives ops the chip strip at the top of /admin/payouts:
+ * per-state counts, oldest queued-at for pending + submitted, and the
+ * total stroops currently queued (so the treasury card and the payouts
+ * card agree on outstanding exposure without two round-trips).
+ */
+export async function adminPayoutsSummaryHandler(c: Context): Promise<Response> {
+  try {
+    const result = await db.execute<PayoutSummaryRow>(sql`
+      SELECT
+        ${pendingPayouts.state} AS state,
+        COUNT(*)::bigint AS n,
+        MIN(${pendingPayouts.createdAt}) AS oldest,
+        COALESCE(SUM(${pendingPayouts.amountStroops}), 0)::bigint AS "totalStroops"
+      FROM ${pendingPayouts}
+      GROUP BY ${pendingPayouts.state}
+    `);
+    const rows: PayoutSummaryRow[] = Array.isArray(result)
+      ? (result as PayoutSummaryRow[])
+      : ((result as { rows?: PayoutSummaryRow[] }).rows ?? []);
+
+    const counts = Object.fromEntries(PAYOUT_STATES.map((s) => [s, 0])) as Record<
+      (typeof PAYOUT_STATES)[number],
+      number
+    >;
+    let oldestPendingAt: string | null = null;
+    let oldestSubmittedAt: string | null = null;
+    let pendingStroops = 0n;
+
+    for (const row of rows) {
+      const state = row.state as (typeof PAYOUT_STATES)[number];
+      if ((PAYOUT_STATES as ReadonlyArray<string>).includes(state)) {
+        counts[state] = Number(row.n);
+      }
+      if (state === 'pending') {
+        pendingStroops = BigInt(row.totalStroops ?? '0');
+        if (row.oldest !== null && row.oldest !== undefined) {
+          oldestPendingAt =
+            row.oldest instanceof Date
+              ? row.oldest.toISOString()
+              : new Date(row.oldest).toISOString();
+        }
+      }
+      if (state === 'submitted') {
+        if (row.oldest !== null && row.oldest !== undefined) {
+          oldestSubmittedAt =
+            row.oldest instanceof Date
+              ? row.oldest.toISOString()
+              : new Date(row.oldest).toISOString();
+        }
+      }
+    }
+
+    return c.json<AdminPayoutsSummaryResponse>({
+      counts,
+      oldestPendingAt,
+      oldestSubmittedAt,
+      pendingStroops: pendingStroops.toString(),
+    });
+  } catch (err) {
+    log.error({ err }, 'Admin payouts summary failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load payouts summary' }, 500);
+  }
 }
 
 /**

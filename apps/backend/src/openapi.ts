@@ -405,6 +405,30 @@ const AdminPayoutListResponse = registry.register(
   z.object({ payouts: z.array(AdminPayoutView) }),
 );
 
+const AdminPayoutsSummaryResponse = registry.register(
+  'AdminPayoutsSummaryResponse',
+  z.object({
+    counts: z.object({
+      pending: z.number().int().nonnegative(),
+      submitted: z.number().int().nonnegative(),
+      confirmed: z.number().int().nonnegative(),
+      failed: z.number().int().nonnegative(),
+    }),
+    oldestPendingAt: z.string().datetime().nullable().openapi({
+      description:
+        "Oldest `pending` row's created_at. Null when the pending queue is empty — the normal steady state.",
+    }),
+    oldestSubmittedAt: z.string().datetime().nullable().openapi({
+      description:
+        "Oldest `submitted` row's created_at. Null when nothing is currently awaiting Horizon confirmation.",
+    }),
+    pendingStroops: z.string().regex(/^\d+$/).openapi({
+      description:
+        'Total stroops currently queued as `pending` across all LoopAssets (bigint-safe).',
+    }),
+  }),
+);
+
 // ─── Admin — cashback-config (ADR 011) ──────────────────────────────────────
 //
 // Percentages are stored as `numeric(5,2)` and round-trip as strings
@@ -1213,6 +1237,38 @@ registry.registerPath({
     },
     429: {
       description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/payouts/summary',
+  summary: 'Payouts summary — state counts + oldest-queued timestamps (ADR 015).',
+  description:
+    'Single GROUP BY chip-strip view for the admin /payouts page. `counts` is zero-filled to every state so the UI renders a stable layout. `oldestPendingAt` + `oldestSubmittedAt` drive the "oldest queued payout is Xm old" badge — staleness here points at a stuck submit worker (pending backlog) or a stalled Horizon confirm (submitted backlog). `pendingStroops` is the total outstanding LoopAsset exposure, bigint-safe.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Summary snapshot',
+      content: { 'application/json': { schema: AdminPayoutsSummaryResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading the summary',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
