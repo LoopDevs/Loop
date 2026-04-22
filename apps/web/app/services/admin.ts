@@ -209,6 +209,31 @@ export interface AdminOrderView {
   failedAt: string | null;
 }
 
+/** Row shape from `/api/admin/users` (admin directory). */
+export interface AdminUserRow {
+  id: string;
+  email: string;
+  isAdmin: boolean;
+  homeCurrency: string;
+  createdAt: string;
+}
+
+/** `GET /api/admin/users` — paginated admin directory with email search. */
+export async function listAdminUsers(opts: {
+  q?: string;
+  limit?: number;
+  before?: string;
+}): Promise<{ users: AdminUserRow[] }> {
+  const params = new URLSearchParams();
+  if (opts.q !== undefined && opts.q.length > 0) params.set('q', opts.q);
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  if (opts.before !== undefined) params.set('before', opts.before);
+  const qs = params.toString();
+  return authenticatedRequest<{ users: AdminUserRow[] }>(
+    `/api/admin/users${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
 /** `GET /api/admin/orders` — paginated, filterable admin view. */
 export async function listAdminOrders(opts: {
   state?: AdminOrderState;
