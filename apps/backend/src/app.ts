@@ -57,6 +57,7 @@ import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js'
 import { adminOrdersActivityHandler } from './admin/orders-activity.js';
 import { adminOrdersCsvHandler } from './admin/orders-csv.js';
 import { adminStuckOrdersHandler } from './admin/stuck-orders.js';
+import { adminStuckPayoutsHandler } from './admin/stuck-payouts.js';
 import { adminCashbackActivityHandler } from './admin/cashback-activity.js';
 import { adminMerchantStatsHandler } from './admin/merchant-stats.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
@@ -744,6 +745,11 @@ app.get('/api/admin/orders.csv', rateLimit(10, 60_000), adminOrdersCsvHandler);
 // rate limit because the admin UI polls it on a loop to surface
 // an SLO red-flag card.
 app.get('/api/admin/stuck-orders', rateLimit(120, 60_000), adminStuckOrdersHandler);
+// Stuck-payouts triage — pending_payouts rows in pending/submitted
+// past the SLO threshold (ADR 015/016). Same 120/min polling budget
+// as stuck-orders since both feed the same dashboard card and often
+// refetch together.
+app.get('/api/admin/stuck-payouts', rateLimit(120, 60_000), adminStuckPayoutsHandler);
 // Daily cashback-accrual time-series for the dashboard sparkline.
 // Cheap read — single generate_series + LEFT JOIN, bounded at 180
 // days so the payload can't explode.
