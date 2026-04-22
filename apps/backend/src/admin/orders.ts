@@ -168,6 +168,17 @@ export async function adminListOrdersHandler(c: Context): Promise<Response> {
     return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
   }
 
+  // `orders.charge_currency` is CHAR(3) with a CHECK pinning it to
+  // USD / GBP / EUR (the home currencies today). Reject anything else
+  // up front so the pg round-trip never sees an impossible value.
+  const chargeCurrencyRaw = c.req.query('chargeCurrency');
+  if (chargeCurrencyRaw !== undefined && !['USD', 'GBP', 'EUR'].includes(chargeCurrencyRaw)) {
+    return c.json(
+      { code: 'VALIDATION_ERROR', message: 'chargeCurrency must be USD, GBP, or EUR' },
+      400,
+    );
+  }
+
   const limitRaw = c.req.query('limit');
   const parsedLimit = Number.parseInt(limitRaw ?? '20', 10);
   const limit = Math.min(Math.max(Number.isNaN(parsedLimit) ? 20 : parsedLimit, 1), 100);
@@ -190,6 +201,8 @@ export async function adminListOrdersHandler(c: Context): Promise<Response> {
     if (stateRaw !== undefined) conditions.push(eq(orders.state, stateRaw));
     if (userIdRaw !== undefined) conditions.push(eq(orders.userId, userIdRaw));
     if (merchantIdRaw !== undefined) conditions.push(eq(orders.merchantId, merchantIdRaw));
+    if (chargeCurrencyRaw !== undefined)
+      conditions.push(eq(orders.chargeCurrency, chargeCurrencyRaw));
     if (before !== undefined) conditions.push(lt(orders.createdAt, before));
     const where = conditions.length === 0 ? undefined : and(...conditions);
     const q = db.select().from(orders);

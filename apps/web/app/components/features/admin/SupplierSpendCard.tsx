@@ -1,7 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router';
 import { getSupplierSpend, type SupplierSpendRow } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+
+const HOME_CURRENCIES: ReadonlySet<string> = new Set(['USD', 'GBP', 'EUR']);
 
 const WINDOW_HOURS = 24;
 
@@ -84,7 +87,16 @@ export function SupplierSpendCard(): React.JSX.Element {
           {query.data.rows.map((row: SupplierSpendRow) => (
             <tr key={row.currency}>
               <td className="px-3 py-2 font-medium text-gray-900 dark:text-white">
-                {row.currency}
+                {HOME_CURRENCIES.has(row.currency) ? (
+                  <Link
+                    to={`/admin/orders?chargeCurrency=${row.currency}`}
+                    className="text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    {row.currency}
+                  </Link>
+                ) : (
+                  row.currency
+                )}
               </td>
               <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
                 {row.count.toLocaleString('en-US')}

@@ -212,6 +212,23 @@ describe('adminListOrdersHandler', () => {
     expect(dbState.whereCalls).toHaveLength(1);
   });
 
+  it('rejects an unknown ?chargeCurrency with 400', async () => {
+    const res = await adminListOrdersHandler(makeCtx({ chargeCurrency: 'JPY' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a lowercase ?chargeCurrency with 400', async () => {
+    const res = await adminListOrdersHandler(makeCtx({ chargeCurrency: 'usd' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('accepts a home-currency ?chargeCurrency filter', async () => {
+    dbState.rows = [makeRow({ chargeCurrency: 'GBP' })];
+    const res = await adminListOrdersHandler(makeCtx({ chargeCurrency: 'GBP' }));
+    expect(res.status).toBe(200);
+    expect(dbState.whereCalls).toHaveLength(1);
+  });
+
   it('rejects an invalid ?before timestamp with 400', async () => {
     const res = await adminListOrdersHandler(makeCtx({ before: 'not-a-date' }));
     expect(res.status).toBe(400);

@@ -667,6 +667,7 @@ export async function listAdminOrders(opts: {
   state?: AdminOrderState;
   userId?: string;
   merchantId?: string;
+  chargeCurrency?: string;
   limit?: number;
   before?: string;
 }): Promise<{ orders: AdminOrderView[] }> {
@@ -674,6 +675,7 @@ export async function listAdminOrders(opts: {
   if (opts.state !== undefined) params.set('state', opts.state);
   if (opts.userId !== undefined) params.set('userId', opts.userId);
   if (opts.merchantId !== undefined) params.set('merchantId', opts.merchantId);
+  if (opts.chargeCurrency !== undefined) params.set('chargeCurrency', opts.chargeCurrency);
   if (opts.limit !== undefined) params.set('limit', String(opts.limit));
   if (opts.before !== undefined) params.set('before', opts.before);
   const qs = params.toString();

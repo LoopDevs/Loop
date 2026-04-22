@@ -83,6 +83,13 @@ export default function AdminOrdersRoute(): React.JSX.Element {
   const { isAuthenticated } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const merchantIdFilter = searchParams.get('merchantId') ?? undefined;
+  const chargeCurrencyRaw = searchParams.get('chargeCurrency');
+  // Only honour USD/GBP/EUR — anything else silently drops instead of
+  // letting the backend 400 on a typo that would blank the table.
+  const chargeCurrencyFilter =
+    chargeCurrencyRaw !== null && ['USD', 'GBP', 'EUR'].includes(chargeCurrencyRaw)
+      ? chargeCurrencyRaw
+      : undefined;
   const [stateFilter, setStateFilter] = useState<AdminOrderState | 'all'>('all');
   // Cursor list — each Load more pushes the last row's `createdAt`
   // so pages stay stable across refetches (offset pagination would
@@ -175,12 +182,42 @@ export default function AdminOrdersRoute(): React.JSX.Element {
         </div>
       ) : null}
 
+      {/* Active charge-currency filter — sourced from `?chargeCurrency=`
+          so the drill-down from /admin/treasury supplier-spend rows is
+          linkable. Same dismiss-banner pattern as the merchant filter
+          above so the two behave consistently. */}
+      {chargeCurrencyFilter !== undefined ? (
+        <div
+          role="status"
+          className="flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200"
+        >
+          <span>
+            Charged in <code className="font-mono text-xs">{chargeCurrencyFilter}</code>
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                next.delete('chargeCurrency');
+                return next;
+              });
+              setCursors([undefined]);
+            }}
+            className="text-xs font-medium underline hover:no-underline"
+          >
+            Clear
+          </button>
+        </div>
+      ) : null}
+
       <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
         {cursors.map((cursor, idx) => (
           <OrdersPage
             key={cursor ?? 'head'}
             state={stateFilter}
             merchantId={merchantIdFilter}
+            chargeCurrency={chargeCurrencyFilter}
             cursor={cursor}
             isLastPage={idx === cursors.length - 1}
             onLoadMore={(nextCursor) => {
@@ -196,23 +233,33 @@ export default function AdminOrdersRoute(): React.JSX.Element {
 function OrdersPage({
   state,
   merchantId,
+  chargeCurrency,
   cursor,
   isLastPage,
   onLoadMore,
 }: {
   state: AdminOrderState | 'all';
   merchantId: string | undefined;
+  chargeCurrency: string | undefined;
   cursor: string | undefined;
   isLastPage: boolean;
   onLoadMore: (nextCursor: string) => void;
 }): React.JSX.Element {
   const query = useQuery({
-    queryKey: ['admin-orders', state, merchantId ?? null, cursor ?? null, PAGE_SIZE],
+    queryKey: [
+      'admin-orders',
+      state,
+      merchantId ?? null,
+      chargeCurrency ?? null,
+      cursor ?? null,
+      PAGE_SIZE,
+    ],
     queryFn: () =>
       listAdminOrders({
         limit: PAGE_SIZE,
         ...(state !== 'all' ? { state } : {}),
         ...(merchantId !== undefined ? { merchantId } : {}),
+        ...(chargeCurrency !== undefined ? { chargeCurrency } : {}),
         ...(cursor !== undefined ? { before: cursor } : {}),
       }),
     retry: shouldRetry,
