@@ -26,6 +26,7 @@ import {
   type UserPendingPayoutState,
   type UserPendingPayoutView,
 } from '~/services/user';
+import { CashbackBalanceCard } from '~/components/features/cashback/CashbackBalanceCard';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Cashback history — Loop' }];
@@ -105,6 +106,12 @@ export default function SettingsCashbackRoute(): React.JSX.Element {
           Every credit-ledger event on your account — newest first.
         </p>
       </header>
+
+      {/* Current balance card — the user's first question is "how
+          much do I have?". Rendered above everything else so the
+          number is the first thing on the page. Multi-currency users
+          get one tile per currency; most users see a single tile. */}
+      <CashbackBalanceCard />
 
       {/* On-chain payouts — rendered above the ledger so in-flight
           Stellar emissions are immediately visible. The section hides
