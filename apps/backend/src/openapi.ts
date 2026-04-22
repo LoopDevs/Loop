@@ -368,6 +368,42 @@ const PublicTopCashbackMerchantsResponse = registry.register(
   }),
 );
 
+const PublicLoopAsset = registry.register(
+  'PublicLoopAsset',
+  z.object({
+    code: z.enum(['USDLOOP', 'GBPLOOP', 'EURLOOP']).openapi({
+      description: 'LOOP-branded fiat stablecoin code (ADR 015).',
+    }),
+    issuer: z.string().openapi({
+      description: 'Stellar G-account that mints the asset. Pinned by env at boot.',
+    }),
+  }),
+);
+
+const PublicLoopAssetsResponse = registry.register(
+  'PublicLoopAssetsResponse',
+  z.object({ assets: z.array(PublicLoopAsset) }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/public/loop-assets',
+  summary: 'Configured LOOP-asset (code, issuer) pairs (ADR 015 / 020).',
+  description:
+    'Public transparency surface. Lists the LOOP-branded Stellar assets Loop pays cashback in, with their issuer public keys, so third-party wallets + users adding trustlines can verify the asset list without guessing from on-chain traffic. Only issuer-configured pairs appear — publishing an unconfigured code would risk users opening a trustline to a spoofed issuer. `Cache-Control: public, max-age=300` on the happy path, `max-age=60` on the empty-list fallback. Never 500.',
+  tags: ['Public'],
+  responses: {
+    200: {
+      description: 'Configured LOOP-asset pairs (possibly empty).',
+      content: { 'application/json': { schema: PublicLoopAssetsResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 registry.registerPath({
   method: 'get',
   path: '/api/public/top-cashback-merchants',
