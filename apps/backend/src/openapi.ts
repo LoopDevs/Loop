@@ -405,6 +405,24 @@ const AdminPayoutListResponse = registry.register(
   z.object({ payouts: z.array(AdminPayoutView) }),
 );
 
+// ─── Admin — user directory ─────────────────────────────────────────────────
+
+const AdminUserListRow = registry.register(
+  'AdminUserListRow',
+  z.object({
+    id: z.string().uuid(),
+    email: z.string().email(),
+    isAdmin: z.boolean(),
+    homeCurrency: z.string().length(3),
+    createdAt: z.string().datetime(),
+  }),
+);
+
+const AdminUserListResponse = registry.register(
+  'AdminUserListResponse',
+  z.object({ users: z.array(AdminUserListRow) }),
+);
+
 // ─── Admin — cashback-config (ADR 011) ──────────────────────────────────────
 //
 // Percentages are stored as `numeric(5,2)` and round-trip as strings
@@ -1256,6 +1274,49 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error resetting the row',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users',
+  summary: 'Paginated user directory.',
+  description:
+    'Newest-first paginated list of Loop users. Optional `?q=` filters emails with a case-insensitive `ILIKE` fragment match (LIKE metacharacters escaped). Cursor pagination via `?before=<iso-8601>` on `createdAt`. Cap via `?limit=` (default 20, max 100). Complements the exact-by-id drill at `/api/admin/users/:userId`.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      q: z.string().max(254).optional(),
+      before: z.string().datetime().optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'User rows (newest first)',
+      content: { 'application/json': { schema: AdminUserListResponse } },
+    },
+    400: {
+      description: 'Invalid q / before / limit',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading the table',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
