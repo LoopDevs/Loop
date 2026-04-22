@@ -1,9 +1,15 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router';
+import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.users';
 import { useAuth } from '~/hooks/use-auth';
-import { listAdminUsers, type AdminUserRow } from '~/services/admin';
+import {
+  listAdminUsers,
+  getAdminUserByEmail,
+  type AdminUserRow,
+  type AdminUserDetail,
+} from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { TopUsersTable } from '~/components/features/admin/TopUsersTable';
@@ -37,6 +43,22 @@ export default function AdminUsersRoute(): React.JSX.Element {
   const q = searchParams.get('q') ?? '';
   const before = searchParams.get('before') ?? undefined;
   const [qDraft, setQDraft] = useState(q);
+  const [emailDraft, setEmailDraft] = useState('');
+  const [byEmailError, setByEmailError] = useState<string | null>(null);
+  const byEmailMutation = useMutation<AdminUserDetail, unknown, string>({
+    mutationFn: (email: string) => getAdminUserByEmail(email),
+    onSuccess: (user) => {
+      setByEmailError(null);
+      void navigate(`/admin/users/${user.id}`);
+    },
+    onError: (err) => {
+      if (err instanceof ApiException && err.status === 404) {
+        setByEmailError('No user with that email.');
+        return;
+      }
+      setByEmailError(err instanceof ApiException ? err.message : 'Lookup failed.');
+    },
+  });
 
   const query = useQuery({
     queryKey: ['admin-users', q, before ?? null],
@@ -113,10 +135,49 @@ export default function AdminUsersRoute(): React.JSX.Element {
       <header>
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Admin · Users</h1>
         <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-          Paginated user directory. Email search is a case-insensitive contains match. Row click
-          opens the user detail (landing in a follow-up).
+          Paginated user directory. The fragment search below is a case-insensitive contains match;
+          the <em>Find by exact email</em> input above is a direct jump when you have the full
+          address from a support ticket.
         </p>
       </header>
+
+      {/* Exact-match by-email lookup. Distinct from the fragment search
+          below — this one takes the full address and navigates straight
+          to the detail page on hit. Backend normalises to lowercase, so
+          pasting mixed-case from a ticket doesn't miss the row. */}
+      <form
+        className="flex flex-wrap gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const trimmed = emailDraft.trim();
+          if (trimmed.length === 0 || byEmailMutation.isPending) return;
+          setByEmailError(null);
+          byEmailMutation.mutate(trimmed);
+        }}
+      >
+        <input
+          type="email"
+          value={emailDraft}
+          onChange={(e) => setEmailDraft(e.target.value)}
+          placeholder="Find by exact email (e.g. alice@example.com)"
+          aria-label="Find user by exact email"
+          autoComplete="off"
+          spellCheck={false}
+          className="flex-1 min-w-[280px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:placeholder-gray-500"
+        />
+        <button
+          type="submit"
+          disabled={emailDraft.trim().length === 0 || byEmailMutation.isPending}
+          className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+        >
+          {byEmailMutation.isPending ? 'Looking up…' : 'Find by email'}
+        </button>
+      </form>
+      {byEmailError !== null ? (
+        <p role="alert" className="text-sm text-red-600 dark:text-red-400 -mt-3">
+          {byEmailError}
+        </p>
+      ) : null}
 
       <form
         className="flex gap-2"

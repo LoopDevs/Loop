@@ -639,6 +639,21 @@ export async function getAdminUser(userId: string): Promise<AdminUserDetail> {
   return authenticatedRequest<AdminUserDetail>(`/api/admin/users/${encodeURIComponent(userId)}`);
 }
 
+/**
+ * `GET /api/admin/users/by-email?email=` — exact-match lookup. Support
+ * pastes the full email address and gets the user row in one request.
+ * Complements the fragment search on `/api/admin/users?q=` (ILIKE-based,
+ * paginated) — this one does exact equality against a lowercase-normalised
+ * form so `Alice@Example.COM` matches `alice@example.com`. Throws on 404 /
+ * 500 via the shared ApiException path; handlers render "no user with that
+ * email" for 404.
+ */
+export async function getAdminUserByEmail(email: string): Promise<AdminUserDetail> {
+  return authenticatedRequest<AdminUserDetail>(
+    `/api/admin/users/by-email?email=${encodeURIComponent(email)}`,
+  );
+}
+
 /** One credit-balance row per (user, currency) from `/api/admin/users/:userId/credits`. */
 export interface AdminUserCreditRow {
   currency: string;
