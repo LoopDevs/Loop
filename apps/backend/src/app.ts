@@ -52,6 +52,7 @@ import { adminPayoutsCsvHandler } from './admin/payouts-csv.js';
 import { adminPayoutsByAssetHandler } from './admin/payouts-by-asset.js';
 import { adminTopUsersHandler } from './admin/top-users.js';
 import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js';
+import { adminOrdersActivityHandler } from './admin/orders-activity.js';
 import { adminOrdersCsvHandler } from './admin/orders-csv.js';
 import { adminStuckOrdersHandler } from './admin/stuck-orders.js';
 import { adminCashbackActivityHandler } from './admin/cashback-activity.js';
@@ -715,6 +716,12 @@ app.get('/api/admin/payouts.csv', rateLimit(10, 60_000), adminPayoutsCsvHandler)
 // by state and userId. Ops uses this to triage stuck orders + audit
 // the cashback split + correlate with operator-pool health.
 app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+// 7-day (or N-day, clamped 1-90) order-activity sparkline. Drives the
+// admin dashboard's "created vs fulfilled per day" chart. Single
+// generate_series + LEFT JOIN; every day in the window appears with
+// zero-filled counts when no orders crossed. Registered before
+// `/:orderId` so the literal `/activity` matches first.
+app.get('/api/admin/orders/activity', rateLimit(60, 60_000), adminOrdersActivityHandler);
 // Single-order drill-down (ADR 011 / 015). Permalink for an ops
 // ticket or incident note. Higher rate-limit than the list because
 // the admin UI re-fetches detail on every navigation.
