@@ -6,6 +6,7 @@ import { Footer } from '~/components/features/Footer';
 import { MerchantCard } from '~/components/features/MerchantCard';
 import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
 import { MobileHome } from '~/components/features/home/MobileHome';
+import { PublicStatsBanner } from '~/components/features/home/PublicStatsBanner';
 
 export function meta(): Route.MetaDescriptors {
   return [
@@ -151,6 +152,8 @@ function HomeContent(): React.JSX.Element {
               Failed to load merchants. Please try again.
             </p>
           )}
+
+          <PublicStatsBanner />
 
           {/* Featured */}
           {featured.length > 0 && (
