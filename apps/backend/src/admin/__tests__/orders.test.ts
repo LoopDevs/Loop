@@ -50,6 +50,7 @@ vi.mock('../../db/schema.js', () => ({
     id: 'id',
     userId: 'user_id',
     state: 'state',
+    paymentMethod: 'payment_method',
     createdAt: 'created_at',
   },
 }));
@@ -227,6 +228,26 @@ describe('adminListOrdersHandler', () => {
     const res = await adminListOrdersHandler(makeCtx({ chargeCurrency: 'GBP' }));
     expect(res.status).toBe(200);
     expect(dbState.whereCalls).toHaveLength(1);
+  });
+
+  it('rejects an unknown ?paymentMethod with 400', async () => {
+    const res = await adminListOrdersHandler(makeCtx({ paymentMethod: 'bitcoin' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects an uppercase ?paymentMethod with 400 (enum is lowercase)', async () => {
+    const res = await adminListOrdersHandler(makeCtx({ paymentMethod: 'XLM' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('accepts every known ?paymentMethod enum value', async () => {
+    for (const pm of ['xlm', 'usdc', 'credit', 'loop_asset']) {
+      dbState.whereCalls = [];
+      dbState.rows = [];
+      const res = await adminListOrdersHandler(makeCtx({ paymentMethod: pm }));
+      expect(res.status).toBe(200);
+      expect(dbState.whereCalls).toHaveLength(1);
+    }
   });
 
   it('rejects a malformed ?ctxOperatorId with 400', async () => {
