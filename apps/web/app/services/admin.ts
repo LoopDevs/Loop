@@ -916,6 +916,41 @@ export async function getAdminCashbackMonthly(): Promise<AdminCashbackMonthlyRes
 }
 
 /**
+ * Admin payment-method activity day (#594). One row per UTC day in
+ * the requested window (default 30, cap 90), with fulfilled-order
+ * counts per rail. Every rail is always present — the backend pre-
+ * seeds zero buckets — so the chart component doesn't gap-fill.
+ */
+export interface PaymentMethodActivityDay {
+  /** YYYY-MM-DD (UTC). */
+  day: string;
+  byMethod: Record<AdminPaymentMethod, number>;
+}
+
+export interface AdminPaymentMethodActivityResponse {
+  /** Oldest-first so the chart renders left-to-right. */
+  days: PaymentMethodActivityDay[];
+  windowDays: number;
+}
+
+/**
+ * `GET /api/admin/orders/payment-method-activity` — daily payment-
+ * method time-series. Trend complement to the scalar share card:
+ * share answers "where are we now", this one answers "where are we
+ * going".
+ */
+export async function getAdminPaymentMethodActivity(
+  opts: { days?: number } = {},
+): Promise<AdminPaymentMethodActivityResponse> {
+  const params = new URLSearchParams();
+  if (opts.days !== undefined) params.set('days', String(opts.days));
+  const qs = params.toString();
+  return authenticatedRequest<AdminPaymentMethodActivityResponse>(
+    `/api/admin/orders/payment-method-activity${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
+/**
  * One row of an admin per-user cashback-by-merchant breakdown.
  * Admin-facing equivalent of the user's own card — same join on
  * `credit_transactions.reference_id::uuid = orders.id`, same

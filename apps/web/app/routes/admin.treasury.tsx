@@ -12,6 +12,7 @@ import { OperatorStatsCard } from '~/components/features/admin/OperatorStatsCard
 import { TopUsersByPendingPayoutCard } from '~/components/features/admin/TopUsersByPendingPayoutCard';
 import { AdminMonthlyCashbackChart } from '~/components/features/admin/AdminMonthlyCashbackChart';
 import { DiscordNotifiersCard } from '~/components/features/admin/DiscordNotifiersCard';
+import { PaymentMethodActivityChart } from '~/components/features/admin/PaymentMethodActivityChart';
 import { PaymentMethodShareCard } from '~/components/features/admin/PaymentMethodShareCard';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -393,6 +394,12 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
           first-order top-ups.
         </p>
         <PaymentMethodShareCard />
+        <div className="mt-5">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            30-day trend
+          </p>
+          <PaymentMethodActivityChart />
+        </div>
       </section>
 
       <section>
