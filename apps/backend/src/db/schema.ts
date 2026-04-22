@@ -80,8 +80,11 @@ export const users = pgTable(
   ],
 );
 
-export const HOME_CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
-export type HomeCurrency = (typeof HOME_CURRENCIES)[number];
+// Home-currency enum + type live in `@loop/shared/loop-asset` alongside
+// the LOOP asset codes they map to. Re-exported here for the many
+// `db/schema.ts` callers that import both from one module (drizzle
+// tables + the currency union).
+export { HOME_CURRENCIES, type HomeCurrency } from '@loop/shared';
 
 /**
  * Per-user credit balance in a specific regional currency. One row per

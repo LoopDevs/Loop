@@ -1,4 +1,10 @@
+import type { LoopAssetCode } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
+
+// Re-export so existing `import { LoopAssetCode } from
+// '~/services/admin'` callers keep working without every consumer
+// learning the `@loop/shared` path. Shared is the source of truth.
+export type { LoopAssetCode };
 
 export interface MerchantCashbackConfig {
   merchantId: string;
@@ -53,7 +59,7 @@ export async function cashbackConfigHistory(
   );
 }
 
-export type LoopAssetCode = 'USDLOOP' | 'GBPLOOP' | 'EURLOOP';
+// (LoopAssetCode re-exported from `@loop/shared` at the top of this file.)
 export type PayoutState = 'pending' | 'submitted' | 'confirmed' | 'failed';
 
 export interface LoopLiability {
