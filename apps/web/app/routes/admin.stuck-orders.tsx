@@ -104,7 +104,7 @@ export default function AdminStuckOrdersRoute(): React.JSX.Element {
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800 text-sm">
             <thead className="bg-gray-50 dark:bg-gray-900/50">
               <tr>
-                {['Order', 'User', 'Merchant', 'State', 'Age', 'CTX order'].map((h) => (
+                {['Order', 'User', 'Merchant', 'State', 'Rail', 'Age', 'CTX order'].map((h) => (
                   <th
                     key={h}
                     className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400"
@@ -144,6 +144,21 @@ export default function AdminStuckOrdersRoute(): React.JSX.Element {
                   <td className="px-3 py-2">
                     <span className="rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-300">
                       {row.state}
+                    </span>
+                  </td>
+                  {/* Payment rail — triage signal. A stuck loop_asset
+                      order is a flywheel-path incident (different
+                      debug trail than a stuck xlm/usdc/credit). The
+                      pill mirrors the styling on /admin/orders. */}
+                  <td className="px-3 py-2">
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                        row.paymentMethod === 'loop_asset'
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                          : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                      }`}
+                    >
+                      {row.paymentMethod}
                     </span>
                   </td>
                   <td className="px-3 py-2">

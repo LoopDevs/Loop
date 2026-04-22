@@ -27,6 +27,7 @@ vi.mock('../../db/schema.js', () => ({
     userId: 'orders.user_id',
     merchantId: 'orders.merchant_id',
     state: 'orders.state',
+    paymentMethod: 'orders.payment_method',
     createdAt: 'orders.created_at',
     paidAt: 'orders.paid_at',
     procuredAt: 'orders.procured_at',
@@ -96,6 +97,7 @@ describe('adminStuckOrdersHandler', () => {
         userId: 'u-1',
         merchantId: 'm-1',
         state: 'paid',
+        paymentMethod: 'xlm',
         createdAt: new Date(Date.now() - 15 * 60_000),
         paidAt: tenMinAgo,
         procuredAt: null,
@@ -123,6 +125,7 @@ describe('adminStuckOrdersHandler', () => {
         userId: 'u-2',
         merchantId: 'm-2',
         state: 'procuring',
+        paymentMethod: 'loop_asset',
         createdAt: new Date(Date.now() - 20 * 60_000),
         paidAt: new Date(Date.now() - 15 * 60_000),
         procuredAt: eightMinAgo,
@@ -146,6 +149,7 @@ describe('adminStuckOrdersHandler', () => {
         userId: 'u-3',
         merchantId: 'm-3',
         state: 'procuring',
+        paymentMethod: 'usdc',
         createdAt: twelveMinAgo,
         paidAt: null, // unusual but handled
         procuredAt: null,
@@ -187,5 +191,39 @@ describe('adminStuckOrdersHandler', () => {
     state.throwErr = new Error('db exploded');
     const res = await adminStuckOrdersHandler(makeCtx());
     expect(res.status).toBe(500);
+  });
+
+  it('surfaces paymentMethod on each row (ADR-015 triage signal)', async () => {
+    const tenMinAgo = new Date(Date.now() - 10 * 60_000);
+    state.rows = [
+      {
+        id: 'o-xlm',
+        userId: 'u-1',
+        merchantId: 'm-1',
+        state: 'paid',
+        paymentMethod: 'xlm',
+        createdAt: tenMinAgo,
+        paidAt: tenMinAgo,
+        procuredAt: null,
+        ctxOrderId: null,
+        ctxOperatorId: null,
+      },
+      {
+        id: 'o-loop',
+        userId: 'u-2',
+        merchantId: 'm-2',
+        state: 'procuring',
+        paymentMethod: 'loop_asset',
+        createdAt: tenMinAgo,
+        paidAt: tenMinAgo,
+        procuredAt: tenMinAgo,
+        ctxOrderId: 'ctx-1',
+        ctxOperatorId: 'op-1',
+      },
+    ];
+    const res = await adminStuckOrdersHandler(makeCtx());
+    const body = (await res.json()) as { rows: Array<{ id: string; paymentMethod: string }> };
+    expect(body.rows.find((r) => r.id === 'o-xlm')?.paymentMethod).toBe('xlm');
+    expect(body.rows.find((r) => r.id === 'o-loop')?.paymentMethod).toBe('loop_asset');
   });
 });
