@@ -4,7 +4,13 @@ import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.orders.$orderId';
 import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
-import { getAdminOrder, type AdminOrderState, type AdminOrderView } from '~/services/admin';
+import {
+  getAdminOrder,
+  getAdminPayoutByOrder,
+  type AdminOrderState,
+  type AdminOrderView,
+  type AdminPayoutView,
+} from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -118,9 +124,90 @@ export default function AdminOrderDetailRoute(): React.JSX.Element {
           Failed to load order. You may not be an admin.
         </p>
       ) : (
-        <Detail row={query.data} />
+        <>
+          <Detail row={query.data} />
+          {orderId !== undefined ? <OrderPayoutSection orderId={orderId} /> : null}
+        </>
       )}
     </main>
+  );
+}
+
+/**
+ * Shows the on-chain payout emitted for this order, if any. Hides
+ * itself silently on 404 with a gentle "no payout yet" line —
+ * payout-builder skips under several expected conditions (no linked
+ * wallet, cashback=0, Loop-margin-only merchants), none of which
+ * warrant a red banner.
+ */
+function OrderPayoutSection({ orderId }: { orderId: string }): React.JSX.Element {
+  const query = useQuery({
+    queryKey: ['admin-order-payout', orderId],
+    queryFn: () => getAdminPayoutByOrder(orderId),
+    retry: shouldRetry,
+    staleTime: 30_000,
+  });
+
+  if (query.isPending) {
+    return (
+      <section className="flex justify-center py-4">
+        <Spinner />
+      </section>
+    );
+  }
+
+  const notFound = query.error instanceof ApiException && query.error.status === 404;
+  if (query.isError && notFound) {
+    return (
+      <section className="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          On-chain payout
+        </h2>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+          No payout row for this order yet. If the user hasn&rsquo;t linked a Stellar wallet, or the
+          cashback share rounds to zero, the payout builder skips the emission.
+        </p>
+      </section>
+    );
+  }
+
+  if (query.isError) {
+    return (
+      <section className="rounded-xl border border-red-200 bg-red-50 px-6 py-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+        Failed to load on-chain payout.
+      </section>
+    );
+  }
+
+  const payout: AdminPayoutView = query.data;
+  return (
+    <section className="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
+      <header className="flex items-start justify-between gap-4">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          On-chain payout
+        </h2>
+        <Link
+          to={`/admin/payouts/${payout.id}`}
+          className="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+        >
+          See full payout →
+        </Link>
+      </header>
+      <dl className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3 text-sm">
+        <div>
+          <dt className="text-gray-500 dark:text-gray-400">State</dt>
+          <dd className="text-gray-900 dark:text-white">{payout.state}</dd>
+        </div>
+        <div>
+          <dt className="text-gray-500 dark:text-gray-400">Asset</dt>
+          <dd className="text-gray-900 dark:text-white font-mono text-xs">{payout.assetCode}</dd>
+        </div>
+        <div>
+          <dt className="text-gray-500 dark:text-gray-400">Attempts</dt>
+          <dd className="text-gray-900 dark:text-white tabular-nums">{payout.attempts}</dd>
+        </div>
+      </dl>
+    </section>
   );
 }
 

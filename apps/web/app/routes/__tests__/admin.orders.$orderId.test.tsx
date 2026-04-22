@@ -12,6 +12,7 @@ afterEach(cleanup);
 const { adminMock, authMock } = vi.hoisted(() => ({
   adminMock: {
     getAdminOrder: vi.fn(),
+    getAdminPayoutByOrder: vi.fn(),
   },
   authMock: {
     isAuthenticated: true,
@@ -23,6 +24,7 @@ vi.mock('~/services/admin', async (importActual) => {
   return {
     ...actual,
     getAdminOrder: (id: string) => adminMock.getAdminOrder(id),
+    getAdminPayoutByOrder: (id: string) => adminMock.getAdminPayoutByOrder(id),
     getTreasurySnapshot: vi.fn().mockResolvedValue({
       outstanding: {},
       totals: {},
@@ -134,6 +136,46 @@ describe('<AdminOrderDetailRoute />', () => {
     renderAt();
     await waitFor(() => {
       expect(screen.getByText(/Failed to load order/)).toBeDefined();
+    });
+  });
+
+  it('renders a payout card when an on-chain payout exists for the order', async () => {
+    adminMock.getAdminOrder.mockResolvedValue(baseRow);
+    adminMock.getAdminPayoutByOrder.mockResolvedValue({
+      id: 'payout-9999',
+      userId: baseRow.userId,
+      orderId: baseRow.id,
+      assetCode: 'GBPLOOP',
+      assetIssuer: 'GISSUER',
+      toAddress: 'GDEST',
+      amountStroops: '10000000',
+      memoText: 'memo',
+      state: 'confirmed',
+      txHash: 'tx',
+      lastError: null,
+      attempts: 1,
+      createdAt: '2026-04-20T10:00:00.000Z',
+      submittedAt: '2026-04-20T10:01:00.000Z',
+      confirmedAt: '2026-04-20T10:02:00.000Z',
+      failedAt: null,
+    });
+    renderAt();
+    await waitFor(() => {
+      expect(screen.getByText(/On-chain payout/)).toBeDefined();
+    });
+    const fullLink = screen.getByRole('link', { name: /See full payout/ });
+    expect(fullLink.getAttribute('href')).toBe('/admin/payouts/payout-9999');
+    expect(screen.getByText(/GBPLOOP/)).toBeDefined();
+  });
+
+  it('renders the "no payout yet" body when the endpoint 404s', async () => {
+    adminMock.getAdminOrder.mockResolvedValue(baseRow);
+    adminMock.getAdminPayoutByOrder.mockRejectedValue(
+      new ApiException(404, { code: 'NOT_FOUND', message: 'Not found' }),
+    );
+    renderAt();
+    await waitFor(() => {
+      expect(screen.getByText(/No payout row for this order yet/)).toBeDefined();
     });
   });
 });
