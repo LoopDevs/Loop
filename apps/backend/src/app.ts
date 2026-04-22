@@ -79,6 +79,7 @@ import { adminMerchantCashbackSummaryHandler } from './admin/merchant-cashback-s
 import { adminMerchantPaymentMethodShareHandler } from './admin/merchant-payment-method-share.js';
 import { adminMerchantCashbackMonthlyHandler } from './admin/merchant-cashback-monthly.js';
 import { adminMerchantFlywheelActivityHandler } from './admin/merchant-flywheel-activity.js';
+import { adminMerchantFlywheelActivityCsvHandler } from './admin/merchant-flywheel-activity-csv.js';
 import { adminCashbackConfigsCsvHandler } from './admin/cashback-configs-csv.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
@@ -977,6 +978,16 @@ app.get(
   '/api/admin/merchants/:merchantId/flywheel-activity',
   rateLimit(120, 60_000),
   adminMerchantFlywheelActivityHandler,
+);
+// Tier-3 CSV export of the same per-merchant flywheel-activity
+// aggregate (#645). Finance / BD runs this when prepping a
+// commercial conversation with a merchant or negotiating
+// cashback-rate changes against observed recycling behaviour.
+// Rate-limited 10/min per ADR 018.
+app.get(
+  '/api/admin/merchants/:merchantId/flywheel-activity.csv',
+  rateLimit(10, 60_000),
+  adminMerchantFlywheelActivityCsvHandler,
 );
 // Given an order id, return the single pending_payouts row for it.
 // Nested under /orders/:orderId so the UI can link from the order
