@@ -2408,6 +2408,57 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/users/top-by-pending-payout',
+  summary: 'Top users by outstanding on-chain payout obligation.',
+  description:
+    "Ranked by current unfilled payout debt. Grouped by `(user, asset)` so funding decisions stay per-asset — a user owed both USDLOOP and GBPLOOP appears twice, once per asset. Includes only rows in `state IN ('pending', 'submitted')`; `failed` rows aren't counted (triage them at `/admin/payouts?state=failed` — retrying them transitions them back to `pending` and rejoins this leaderboard). Complements `/api/admin/top-users` (lifetime earnings); this one ranks by *current debt*. `?limit=` clamped 1..100, default 20.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Ranked (user, asset) entries',
+      content: {
+        'application/json': {
+          schema: z.object({
+            entries: z.array(
+              z.object({
+                userId: z.string().uuid(),
+                email: z.string().email(),
+                assetCode: z.string(),
+                totalStroops: z.string(),
+                payoutCount: z.number().int().min(0),
+              }),
+            ),
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the leaderboard',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/users/{userId}',
   summary: 'Single-user detail for the admin panel.',
   description:

@@ -51,6 +51,7 @@ import {
 import { adminPayoutsCsvHandler } from './admin/payouts-csv.js';
 import { adminPayoutsByAssetHandler } from './admin/payouts-by-asset.js';
 import { adminTopUsersHandler } from './admin/top-users.js';
+import { adminTopUsersByPendingPayoutHandler } from './admin/top-users-by-pending-payout.js';
 import { adminAuditTailHandler } from './admin/audit-tail.js';
 import { adminAuditTailCsvHandler } from './admin/audit-tail-csv.js';
 import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js';
@@ -815,6 +816,16 @@ app.get('/api/admin/users', rateLimit(60, 60_000), adminListUsersHandler);
 // /:userId so the literal 'by-email' segment isn't captured as a
 // uuid param.
 app.get('/api/admin/users/by-email', rateLimit(60, 60_000), adminUserByEmailHandler);
+// Ops funding prioritisation — "who's owed the most USDLOOP right
+// now?". Grouped by (user, asset) over pending + submitted payout
+// rows; complements /api/admin/top-users (which ranks by lifetime
+// earnings). Registered before /:userId so the literal
+// 'top-by-pending-payout' segment isn't treated as a uuid param.
+app.get(
+  '/api/admin/users/top-by-pending-payout',
+  rateLimit(60, 60_000),
+  adminTopUsersByPendingPayoutHandler,
+);
 // Admin user-detail drill. Entry point for the admin panel's user
 // page — subsequent drills (credits, credit-transactions, orders)
 // all key off the id this endpoint returns.
