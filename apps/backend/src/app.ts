@@ -44,6 +44,7 @@ import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '.
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
+import { adminUserByEmailHandler } from './admin/user-by-email.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -653,6 +654,9 @@ app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayout
 // by state and userId. Ops uses this to triage stuck orders + audit
 // the cashback split + correlate with operator-pool health.
 app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+// Exact-email user lookup — support pastes the full address from a
+// ticket and gets the user row back. Complements /users/search (fragment).
+app.get('/api/admin/users/by-email', rateLimit(60, 60_000), adminUserByEmailHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 

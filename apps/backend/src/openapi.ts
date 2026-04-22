@@ -1173,6 +1173,66 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/users/by-email',
+  summary: 'Exact-email user lookup (ADR 011 / 013).',
+  description:
+    "Support workflow: paste a full email address from a customer ticket, get the user id + profile back in one request. Email is normalised to lowercase before the DB lookup so case mismatches don't miss the row. Complements `/api/admin/users/search?q=` (fragment match). 400 on missing / malformed / absurdly-long email; 404 on no match.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      email: z.string().email().max(254),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'The matching user row',
+      content: {
+        'application/json': {
+          schema: z.object({
+            user: z.object({
+              id: z.string().uuid(),
+              email: z.string().email(),
+              isAdmin: z.boolean(),
+              homeCurrency: z.string().length(3),
+              stellarAddress: z.string().nullable(),
+              ctxUserId: z.string().nullable(),
+              createdAt: z.string().datetime(),
+              updatedAt: z.string().datetime(),
+            }),
+          }),
+        },
+      },
+    },
+    400: {
+      description: 'Missing / malformed / overlong email',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'No user matches that email',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error during lookup',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/payouts',
   summary: 'Paginated pending-payouts backlog (ADR 015).',
   description:
