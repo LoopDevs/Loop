@@ -6,7 +6,15 @@ import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { getAdminUser, getAdminUserCredits, type AdminUserCreditRow } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { CreditAdjustmentForm } from '~/components/features/admin/CreditAdjustmentForm';
 import { Spinner } from '~/components/ui/Spinner';
+
+const HOME_CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
+type HomeCurrency = (typeof HOME_CURRENCIES)[number];
+
+function isHomeCurrency(s: string): s is HomeCurrency {
+  return (HOME_CURRENCIES as readonly string[]).includes(s);
+}
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · User — Loop' }];
@@ -163,9 +171,9 @@ export default function AdminUserDetailRoute(): React.JSX.Element {
         <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
           <h2 className="text-base font-semibold text-gray-900 dark:text-white">Credit balances</h2>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            Off-chain ledger balances per currency (ADR 009 / 015). Adjustments land via{' '}
-            <code className="font-mono">POST /api/admin/users/:id/credit-adjustments</code>; UI form
-            in a follow-up.
+            Off-chain ledger balances per currency (ADR 009 / 015). Adjustments are applied via the
+            form below and land as signed <code className="font-mono">credit_transactions</code>{' '}
+            rows.
           </p>
         </header>
         {creditsQuery.isPending ? (
@@ -215,6 +223,30 @@ export default function AdminUserDetailRoute(): React.JSX.Element {
           </table>
         )}
       </section>
+
+      {userQuery.data !== undefined && !userNotFound && userId !== undefined ? (
+        <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+          <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
+            <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+              Apply adjustment (ADR 017)
+            </h2>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Positive amount credits the user; negative amount debits. A debit that would drive the
+              balance below zero returns <code className="font-mono">409</code> —
+              InsufficientBalanceError. Every submission is idempotent on the browser-generated key
+              and fires a Discord audit after commit.
+            </p>
+          </header>
+          <div className="px-6 py-5">
+            <CreditAdjustmentForm
+              userId={userId}
+              defaultCurrency={
+                isHomeCurrency(userQuery.data.homeCurrency) ? userQuery.data.homeCurrency : 'USD'
+              }
+            />
+          </div>
+        </section>
+      ) : null}
     </main>
   );
 }
