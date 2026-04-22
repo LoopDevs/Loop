@@ -992,6 +992,35 @@ export async function getAdminUserFlywheelStats(userId: string): Promise<AdminUs
 }
 
 /**
+ * Admin per-merchant flywheel scalar (#623). Sibling of the per-user
+ * variant above, but scoped to a merchant's 31-day fulfilled volume.
+ *
+ * No `currency` field — per-merchant volume can span multiple user
+ * home_currencies, so charges are summed without a common
+ * denomination. The chip renders by count + percentage only.
+ */
+export interface AdminMerchantFlywheelStats {
+  merchantId: string;
+  /** ISO-8601 start of the 31-day window. */
+  since: string;
+  totalFulfilledCount: number;
+  recycledOrderCount: number;
+  /** SUM(charge_minor) over loop_asset orders. bigint-as-string. */
+  recycledChargeMinor: string;
+  /** SUM(charge_minor) over every fulfilled order. bigint-as-string. */
+  totalChargeMinor: string;
+}
+
+/** `GET /api/admin/merchants/:merchantId/flywheel-stats` — per-merchant recycled-vs-total. */
+export async function getAdminMerchantFlywheelStats(
+  merchantId: string,
+): Promise<AdminMerchantFlywheelStats> {
+  return authenticatedRequest<AdminMerchantFlywheelStats>(
+    `/api/admin/merchants/${encodeURIComponent(merchantId)}/flywheel-stats`,
+  );
+}
+
+/**
  * Fleet-wide cashback-monthly entry (#592). Identical shape to the
  * user-facing `CashbackMonthlyEntry` by design — the admin chart
  * re-uses the same bar-rendering helpers. One entry per
