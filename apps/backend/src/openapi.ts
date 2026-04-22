@@ -480,6 +480,26 @@ const AdminCashbackConfigHistoryResponse = registry.register(
   z.object({ history: z.array(AdminCashbackConfigHistoryRow) }),
 );
 
+const AdminTopUserEntry = registry.register(
+  'AdminTopUserEntry',
+  z.object({
+    userId: z.string().uuid(),
+    email: z.string().email(),
+    currency: z.string().length(3),
+    cashbackMinor: z.string().regex(/^\d+$/).openapi({
+      description: 'Lifetime cashback minor units in that currency, bigint-safe string.',
+    }),
+    cashbackEvents: z.number().int().nonnegative().openapi({
+      description: 'Count of individual cashback ledger events that fed the sum.',
+    }),
+  }),
+);
+
+const AdminTopUsersResponse = registry.register(
+  'AdminTopUsersResponse',
+  z.object({ entries: z.array(AdminTopUserEntry) }),
+);
+
 // ─── Clustering ─────────────────────────────────────────────────────────────
 
 const ClusterBounds = z.object({
@@ -1357,6 +1377,45 @@ registry.registerPath({
     },
     429: {
       description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users/top-by-cashback',
+  summary: 'Top-N users by lifetime cashback (ADR 009 / 015).',
+  description:
+    "Single GROUP BY over `credit_transactions` filtered to `type='cashback'` and joined to `users` for email. Grouped by (user_id, currency) so multi-region users don't get their balances silently summed across currencies they never see together. Highest-cashback first. Drives the 'power users' tile on the admin dashboard — useful for referral-candidate shortlisting and validating real payout scale.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      limit: z.coerce.number().int().min(1).max(100).optional().openapi({
+        description: 'Page size. Default 20, floor 1, hard-capped at 100.',
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Ranked top-N users',
+      content: { 'application/json': { schema: AdminTopUsersResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the leaderboard',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },

@@ -229,6 +229,7 @@ GET  /api/admin/treasury                               [admin]
 GET  /api/admin/payouts                                [admin — ADR 015 payout backlog]
 POST /api/admin/payouts/:id/retry                      [admin — reset failed payout to pending]
 GET  /api/admin/orders                                  [admin — Loop-native orders drill-down, ADR 011/015]
+GET  /api/admin/users/top-by-cashback                   [admin — top-N users by lifetime cashback, ADR 009/015]
 ```
 
 Full request/response shapes — including field types, pagination
