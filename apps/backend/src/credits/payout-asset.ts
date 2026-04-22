@@ -21,22 +21,18 @@
  * fulfill orders for users whose currency IS configured.
  */
 import { env } from '../env.js';
-import { HOME_CURRENCIES, type HomeCurrency } from '../db/schema.js';
+import {
+  CURRENCY_TO_ASSET_CODE,
+  HOME_CURRENCIES,
+  LOOP_ASSET_CODES,
+  type HomeCurrency,
+  type LoopAssetCode,
+} from '@loop/shared';
 
-/**
- * The four-letter LOOP asset codes. Kept as a `const` union rather
- * than a Zod enum because Stellar's asset-code format is trivially
- * fixed (4-12 alphanumeric chars) and the three codes are exhaustive
- * — exported for tests and the watcher's asset-match allowlist.
- */
-export const LOOP_ASSET_CODES = ['USDLOOP', 'GBPLOOP', 'EURLOOP'] as const;
-export type LoopAssetCode = (typeof LOOP_ASSET_CODES)[number];
-
-const CURRENCY_TO_ASSET_CODE: Record<HomeCurrency, LoopAssetCode> = {
-  USD: 'USDLOOP',
-  GBP: 'GBPLOOP',
-  EUR: 'EURLOOP',
-};
+// Re-export the type + codes so existing backend imports (`from
+// '../credits/payout-asset.js'`) keep resolving. Shared module is
+// the new source of truth.
+export { LOOP_ASSET_CODES, type LoopAssetCode };
 
 /**
  * Resolved payout asset — the code is always present (the map is

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
-import { ApiException, STELLAR_PUBKEY_REGEX } from '@loop/shared';
+import { ApiException, STELLAR_PUBKEY_REGEX, loopAssetForCurrency } from '@loop/shared';
 import type { Route } from './+types/settings.wallet';
 import { useAuth } from '~/hooks/use-auth';
 import { getMe, setStellarAddress, type UserMeView } from '~/services/user';
@@ -12,16 +12,11 @@ export function meta(): Route.MetaDescriptors {
   return [{ title: 'Wallet — Loop' }];
 }
 
-/**
- * Picks the LOOP-asset code the user will receive on-chain, based
- * on their home currency. Mirrors `payoutAssetFor` on the backend.
- */
-function loopAssetForCurrency(code: string): string {
-  if (code === 'USD') return 'USDLOOP';
-  if (code === 'GBP') return 'GBPLOOP';
-  if (code === 'EUR') return 'EURLOOP';
-  return `${code}LOOP`;
-}
+// `STELLAR_PUBKEY_REGEX` (ADR 015/016) + `loopAssetForCurrency`
+// (ADR 015) both come from `@loop/shared` — one source of truth
+// for the home-currency ↔ LOOP-asset mapping and the Stellar
+// address format, shared between backend zod schemas and this
+// UI form. See packages/shared/src/stellar.ts + loop-asset.ts.
 
 /**
  * `/settings/wallet` — opt in / out of on-chain cashback payouts

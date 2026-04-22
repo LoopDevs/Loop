@@ -1,15 +1,10 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router';
+import { isLoopAssetCode } from '@loop/shared';
 import type { Route } from './+types/admin.payouts';
 import { useAuth } from '~/hooks/use-auth';
-import {
-  listPayouts,
-  retryPayout,
-  type AdminPayoutView,
-  type LoopAssetCode,
-  type PayoutState,
-} from '~/services/admin';
+import { listPayouts, retryPayout, type AdminPayoutView, type PayoutState } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
@@ -27,10 +22,10 @@ const STATES: readonly (PayoutState | 'all')[] = [
   'failed',
 ];
 
-const LOOP_ASSET_CODES: ReadonlyArray<LoopAssetCode> = ['USDLOOP', 'GBPLOOP', 'EURLOOP'];
-function isLoopAssetCode(v: string | null): v is LoopAssetCode {
-  return v !== null && (LOOP_ASSET_CODES as ReadonlyArray<string>).includes(v);
-}
+// LOOP_ASSET_CODES + isLoopAssetCode come from `@loop/shared` —
+// see imports at top of file. Kept the narrowing function name in
+// scope via the import so the `?assetCode=` URL-param check below
+// reads the same as before.
 
 function fmtStroops(stroops: string, code: string): string {
   const negative = stroops.startsWith('-');
@@ -78,7 +73,8 @@ export default function AdminPayoutsRoute(): React.JSX.Element {
   // PayoutsByAssetTable. Silently drop typos — prefer a visibly
   // unfiltered list to a 400 the user can't debug from the URL.
   const assetCodeParam = searchParams.get('assetCode');
-  const assetCodeFilter = isLoopAssetCode(assetCodeParam) ? assetCodeParam : undefined;
+  const assetCodeFilter =
+    assetCodeParam !== null && isLoopAssetCode(assetCodeParam) ? assetCodeParam : undefined;
 
   const queryClient = useQueryClient();
   const query = useQuery({
