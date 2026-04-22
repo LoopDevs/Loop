@@ -1081,6 +1081,31 @@ export async function getAdminMerchantPaymentMethodShare(
 }
 
 /**
+ * Admin per-user payment-method share (#629). User-scoped third
+ * sibling of the fleet + per-merchant rail-mix shapes. Same
+ * `byMethod` record + zero-filled buckets.
+ */
+export interface AdminUserPaymentMethodShareResponse {
+  userId: string;
+  state: AdminOrderStateLocal;
+  totalOrders: number;
+  byMethod: Record<AdminPaymentMethod, PaymentMethodShareBucket>;
+}
+
+/** `GET /api/admin/users/:userId/payment-method-share` — rail mix for one user. */
+export async function getAdminUserPaymentMethodShare(
+  userId: string,
+  opts: { state?: AdminOrderStateLocal } = {},
+): Promise<AdminUserPaymentMethodShareResponse> {
+  const params = new URLSearchParams();
+  if (opts.state !== undefined) params.set('state', opts.state);
+  const qs = params.toString();
+  return authenticatedRequest<AdminUserPaymentMethodShareResponse>(
+    `/api/admin/users/${encodeURIComponent(userId)}/payment-method-share${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
+/**
  * Fleet-wide cashback-monthly entry (#592). Identical shape to the
  * user-facing `CashbackMonthlyEntry` by design — the admin chart
  * re-uses the same bar-rendering helpers. One entry per
