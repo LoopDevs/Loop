@@ -1173,6 +1173,88 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/orders/stuck',
+  summary: 'Orders stuck in `paid` state without a CTX procurement record (ADR 011 / 015).',
+  description:
+    "Triage endpoint for ops. Returns orders in state `paid` with `ctx_order_id IS NULL` and `paid_at` older than `?minutes=<N>` (default 30, clamped to [1, 1440]). Oldest-first ordering matches the mental model of 'what's been stuck longest?'. An empty list is the normal steady state — procurement usually completes in seconds. Non-empty rows suggest operator-pool exhaustion, a CTX outage, or the procurement worker wedging.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      minutes: z.coerce.number().int().min(1).max(1440).optional().openapi({
+        description: 'Stuck-threshold in minutes. Default 30, clamped to [1, 1440].',
+      }),
+      limit: z.coerce.number().int().min(1).max(200).optional().openapi({
+        description: 'Page size. Default 50, hard-capped at 200.',
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Stuck orders + echoed threshold',
+      content: {
+        'application/json': {
+          schema: z.object({
+            thresholdMinutes: z.number().int().min(1).max(1440),
+            orders: z.array(
+              z.object({
+                id: z.string().uuid(),
+                userId: z.string().uuid(),
+                merchantId: z.string(),
+                state: z.enum([
+                  'pending_payment',
+                  'paid',
+                  'procuring',
+                  'fulfilled',
+                  'failed',
+                  'expired',
+                ]),
+                currency: z.string(),
+                faceValueMinor: z.string(),
+                chargeCurrency: z.string(),
+                chargeMinor: z.string(),
+                paymentMethod: z.enum(['xlm', 'usdc', 'credit', 'loop_asset']),
+                wholesalePct: z.string(),
+                userCashbackPct: z.string(),
+                loopMarginPct: z.string(),
+                wholesaleMinor: z.string(),
+                userCashbackMinor: z.string(),
+                loopMarginMinor: z.string(),
+                ctxOrderId: z.string().nullable(),
+                ctxOperatorId: z.string().nullable(),
+                failureReason: z.string().nullable(),
+                createdAt: z.string().datetime(),
+                paidAt: z.string().datetime().nullable(),
+                procuredAt: z.string().datetime().nullable(),
+                fulfilledAt: z.string().datetime().nullable(),
+                failedAt: z.string().datetime().nullable(),
+              }),
+            ),
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading stuck orders',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/payouts',
   summary: 'Paginated pending-payouts backlog (ADR 015).',
   description:

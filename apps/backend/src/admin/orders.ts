@@ -14,7 +14,7 @@
  * mounted in app.ts.
  */
 import type { Context } from 'hono';
-import { and, eq, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, lt, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { orders } from '../db/schema.js';
 import { logger } from '../logger.js';
@@ -154,5 +154,57 @@ export async function adminListOrdersHandler(c: Context): Promise<Response> {
   } catch (err) {
     log.error({ err }, 'Admin orders list failed');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to list orders' }, 500);
+  }
+}
+
+export interface AdminStuckOrdersResponse {
+  /**
+   * The threshold (in minutes) this response was computed against —
+   * echoed so clients can reuse the response in UI without re-parsing
+   * the query string.
+   */
+  thresholdMinutes: number;
+  /** Oldest-paidAt-first. Empty when nothing is stuck. */
+  orders: AdminOrderView[];
+}
+
+/**
+ * GET /api/admin/orders/stuck?minutes=30
+ *
+ * Triage tool: orders that have been sitting in `paid` state without a
+ * CTX procurement record for longer than the threshold. The normal
+ * state is <1 minute — operator-pool exhaustion, CTX outage, or the
+ * procurement worker wedging are the scenarios that put rows here.
+ *
+ * Oldest-first ordering matches ops intuition ("what's been stuck the
+ * longest?"). `paidAt` is the anchor because `createdAt` would include
+ * pending_payment rows still waiting on the user.
+ */
+export async function adminStuckOrdersHandler(c: Context): Promise<Response> {
+  const minutesRaw = c.req.query('minutes');
+  const parsedMinutes = Number.parseInt(minutesRaw ?? '30', 10);
+  // Floor at 1 (anything below is noise), cap at 1440 (24h — beyond
+  // that it's no longer "stuck", it's abandoned).
+  const minutes = Math.min(Math.max(Number.isNaN(parsedMinutes) ? 30 : parsedMinutes, 1), 1440);
+
+  const limitRaw = c.req.query('limit');
+  const parsedLimit = Number.parseInt(limitRaw ?? '50', 10);
+  const limit = Math.min(Math.max(Number.isNaN(parsedLimit) ? 50 : parsedLimit, 1), 200);
+
+  try {
+    const cutoff = new Date(Date.now() - minutes * 60_000);
+    const rows = await db
+      .select()
+      .from(orders)
+      .where(and(eq(orders.state, 'paid'), isNull(orders.ctxOrderId), lt(orders.paidAt, cutoff)))
+      .orderBy(asc(orders.paidAt))
+      .limit(limit);
+    return c.json<AdminStuckOrdersResponse>({
+      thresholdMinutes: minutes,
+      orders: rows.map(rowToView),
+    });
+  } catch (err) {
+    log.error({ err }, 'Admin stuck-orders query failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load stuck orders' }, 500);
   }
 }

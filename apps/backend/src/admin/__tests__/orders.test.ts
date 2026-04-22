@@ -50,10 +50,12 @@ vi.mock('../../db/schema.js', () => ({
     userId: 'user_id',
     state: 'state',
     createdAt: 'created_at',
+    paidAt: 'paid_at',
+    ctxOrderId: 'ctx_order_id',
   },
 }));
 
-import { adminListOrdersHandler } from '../orders.js';
+import { adminListOrdersHandler, adminStuckOrdersHandler } from '../orders.js';
 
 function makeCtx(query: Record<string, string> = {}): Context {
   return {
@@ -217,6 +219,69 @@ describe('adminListOrdersHandler', () => {
   it('500s when the db read throws', async () => {
     dbState.throwOnLimit = true;
     const res = await adminListOrdersHandler(makeCtx());
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('adminStuckOrdersHandler', () => {
+  it('happy path — returns rows + echoes thresholdMinutes default 30', async () => {
+    dbState.rows = [makeRow({ id: 'stuck-1', state: 'paid', ctxOrderId: null })];
+    const res = await adminStuckOrdersHandler(makeCtx());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      thresholdMinutes: number;
+      orders: Array<Record<string, unknown>>;
+    };
+    expect(body.thresholdMinutes).toBe(30);
+    expect(body.orders).toHaveLength(1);
+    expect(body.orders[0]).toMatchObject({ id: 'stuck-1', state: 'paid', ctxOrderId: null });
+  });
+
+  it('accepts a valid ?minutes override', async () => {
+    dbState.rows = [];
+    const res = await adminStuckOrdersHandler(makeCtx({ minutes: '120' }));
+    const body = (await res.json()) as { thresholdMinutes: number };
+    expect(body.thresholdMinutes).toBe(120);
+  });
+
+  it('clamps ?minutes — huge values cap at 1440, malformed falls back to default', async () => {
+    dbState.rows = [];
+    await adminStuckOrdersHandler(makeCtx({ minutes: '9999' }));
+    let body = await (await adminStuckOrdersHandler(makeCtx({ minutes: '9999' }))).json();
+    expect((body as { thresholdMinutes: number }).thresholdMinutes).toBe(1440);
+    body = await (await adminStuckOrdersHandler(makeCtx({ minutes: 'nope' }))).json();
+    expect((body as { thresholdMinutes: number }).thresholdMinutes).toBe(30);
+    // Also floors at 1 — `0` and negatives would be noise.
+    body = await (await adminStuckOrdersHandler(makeCtx({ minutes: '0' }))).json();
+    expect((body as { thresholdMinutes: number }).thresholdMinutes).toBe(1);
+  });
+
+  it('builds the WHERE predicate (state paid + ctxOrderId null + paidAt < cutoff)', async () => {
+    dbState.rows = [];
+    await adminStuckOrdersHandler(makeCtx());
+    // Exactly one composed WHERE — the three conditions get AND'd together.
+    expect(dbState.whereCalls).toHaveLength(1);
+  });
+
+  it('clamps ?limit — default 50, caps at 200', async () => {
+    dbState.rows = [];
+    await adminStuckOrdersHandler(makeCtx());
+    expect(dbState.limitCalls[0]).toBe(50);
+    dbState.limitCalls = [];
+    await adminStuckOrdersHandler(makeCtx({ limit: '9999' }));
+    expect(dbState.limitCalls[0]).toBe(200);
+  });
+
+  it('returns an empty list when nothing is stuck', async () => {
+    dbState.rows = [];
+    const res = await adminStuckOrdersHandler(makeCtx());
+    const body = (await res.json()) as { orders: unknown[] };
+    expect(body.orders).toEqual([]);
+  });
+
+  it('500s when the db read throws', async () => {
+    dbState.throwOnLimit = true;
+    const res = await adminStuckOrdersHandler(makeCtx());
     expect(res.status).toBe(500);
   });
 });
