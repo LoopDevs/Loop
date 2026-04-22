@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router';
 import { getMerchantStats, type MerchantStatsRow } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
@@ -95,7 +96,12 @@ export function MerchantStatsTable(): React.JSX.Element {
                 className="px-3 py-2 font-mono text-xs text-gray-700 dark:text-gray-300"
                 title={r.merchantId}
               >
-                {r.merchantId}
+                <Link
+                  to={`/admin/orders?merchantId=${encodeURIComponent(r.merchantId)}`}
+                  className="text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  {r.merchantId}
+                </Link>
               </td>
               <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
                 {r.orderCount.toLocaleString('en-US')}

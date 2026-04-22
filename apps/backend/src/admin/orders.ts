@@ -155,6 +155,19 @@ export async function adminListOrdersHandler(c: Context): Promise<Response> {
     return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a UUID' }, 400);
   }
 
+  // `orders.merchantId` is a catalog slug, not a uuid (upstream CTX
+  // owns the id space). Allow common catalog-id chars but cap at 128
+  // to guard against pathological inputs.
+  const merchantIdRaw = c.req.query('merchantId');
+  if (
+    merchantIdRaw !== undefined &&
+    (merchantIdRaw.length === 0 ||
+      merchantIdRaw.length > 128 ||
+      !/^[A-Za-z0-9._-]+$/.test(merchantIdRaw))
+  ) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
+  }
+
   const limitRaw = c.req.query('limit');
   const parsedLimit = Number.parseInt(limitRaw ?? '20', 10);
   const limit = Math.min(Math.max(Number.isNaN(parsedLimit) ? 20 : parsedLimit, 1), 100);
@@ -176,6 +189,7 @@ export async function adminListOrdersHandler(c: Context): Promise<Response> {
     const conditions = [];
     if (stateRaw !== undefined) conditions.push(eq(orders.state, stateRaw));
     if (userIdRaw !== undefined) conditions.push(eq(orders.userId, userIdRaw));
+    if (merchantIdRaw !== undefined) conditions.push(eq(orders.merchantId, merchantIdRaw));
     if (before !== undefined) conditions.push(lt(orders.createdAt, before));
     const where = conditions.length === 0 ? undefined : and(...conditions);
     const q = db.select().from(orders);

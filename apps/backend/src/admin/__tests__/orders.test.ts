@@ -195,6 +195,23 @@ describe('adminListOrdersHandler', () => {
     expect(dbState.whereCalls).toHaveLength(1);
   });
 
+  it('rejects a malformed ?merchantId with 400', async () => {
+    const res = await adminListOrdersHandler(makeCtx({ merchantId: 'has spaces' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects an empty ?merchantId with 400', async () => {
+    const res = await adminListOrdersHandler(makeCtx({ merchantId: '' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('accepts a catalog-slug ?merchantId filter', async () => {
+    dbState.rows = [makeRow({ merchantId: 'amazon_us' })];
+    const res = await adminListOrdersHandler(makeCtx({ merchantId: 'amazon_us' }));
+    expect(res.status).toBe(200);
+    expect(dbState.whereCalls).toHaveLength(1);
+  });
+
   it('rejects an invalid ?before timestamp with 400', async () => {
     const res = await adminListOrdersHandler(makeCtx({ before: 'not-a-date' }));
     expect(res.status).toBe(400);

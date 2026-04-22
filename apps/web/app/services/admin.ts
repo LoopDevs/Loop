@@ -666,12 +666,14 @@ export async function getAdminOrder(orderId: string): Promise<AdminOrderView> {
 export async function listAdminOrders(opts: {
   state?: AdminOrderState;
   userId?: string;
+  merchantId?: string;
   limit?: number;
   before?: string;
 }): Promise<{ orders: AdminOrderView[] }> {
   const params = new URLSearchParams();
   if (opts.state !== undefined) params.set('state', opts.state);
   if (opts.userId !== undefined) params.set('userId', opts.userId);
+  if (opts.merchantId !== undefined) params.set('merchantId', opts.merchantId);
   if (opts.limit !== undefined) params.set('limit', String(opts.limit));
   if (opts.before !== undefined) params.set('before', opts.before);
   const qs = params.toString();
