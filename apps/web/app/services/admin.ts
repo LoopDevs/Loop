@@ -238,6 +238,8 @@ export async function getAdminAuditTail(
 export interface MerchantStatsRow {
   merchantId: string;
   orderCount: number;
+  /** Distinct users who earned from this merchant in the window. */
+  uniqueUserCount: number;
   faceValueMinor: string;
   wholesaleMinor: string;
   userCashbackMinor: string;

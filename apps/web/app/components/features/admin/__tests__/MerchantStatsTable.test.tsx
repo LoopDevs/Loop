@@ -55,6 +55,7 @@ describe('<MerchantStatsTable />', () => {
         {
           merchantId: 'mer-123',
           orderCount: 42,
+          uniqueUserCount: 18,
           faceValueMinor: '420000',
           wholesaleMinor: '336000',
           userCashbackMinor: '42000',
@@ -69,6 +70,10 @@ describe('<MerchantStatsTable />', () => {
       expect(screen.getByText('mer-123')).toBeDefined();
     });
     expect(screen.getByText('42')).toBeDefined();
+    // Unique-user column surfaces the cohort count separately from
+    // orderCount so "42 orders from 18 users" reads distinctly from
+    // "42 orders from 3 power users".
+    expect(screen.getByText('18')).toBeDefined();
     // Face value £4,200.00 and wholesale / margin values all share the
     // minor-unit format; any match confirms fmtMinor wired through.
     expect(screen.getAllByText(/\d+\.00/).length).toBeGreaterThan(0);

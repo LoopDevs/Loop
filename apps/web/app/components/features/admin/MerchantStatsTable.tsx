@@ -74,6 +74,7 @@ export function MerchantStatsTable(): React.JSX.Element {
             {[
               'Merchant',
               'Orders',
+              'Users',
               'Face value',
               'Wholesale (ours)',
               'Cashback (theirs)',
@@ -105,6 +106,12 @@ export function MerchantStatsTable(): React.JSX.Element {
               </td>
               <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
                 {r.orderCount.toLocaleString('en-US')}
+              </td>
+              <td
+                className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300"
+                title="Distinct users who earned cashback from this merchant in the window"
+              >
+                {r.uniqueUserCount.toLocaleString('en-US')}
               </td>
               <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
                 {fmtMinor(r.faceValueMinor, r.currency)}
