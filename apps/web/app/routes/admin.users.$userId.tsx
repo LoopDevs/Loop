@@ -14,6 +14,7 @@ import { CreditTransactionsTable } from '~/components/features/admin/CreditTrans
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { UserCashbackByMerchantTable } from '~/components/features/admin/UserCashbackByMerchantTable';
 import { UserOrdersTable } from '~/components/features/admin/UserOrdersTable';
+import { UserRailMixCard } from '~/components/features/admin/UserRailMixCard';
 import { UserPayoutsTable } from '~/components/features/admin/UserPayoutsTable';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -284,6 +285,13 @@ export default function AdminUserDetailRoute(): React.JSX.Element {
           </div>
         </section>
       ) : null}
+
+      {/* Rail mix (#629) — per-user payment-method share.
+          Summary view of the orders table above; a rising LOOP-asset
+          share means this user is recycling cashback rather than
+          topping up fresh XLM. Drill links filter the admin orders
+          list to this user + rail + fulfilled. */}
+      {userId !== undefined && !userNotFound ? <UserRailMixCard userId={userId} /> : null}
 
       {userId !== undefined && !userNotFound ? (
         <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
