@@ -510,6 +510,29 @@ const AdminPayoutListResponse = registry.register(
   z.object({ payouts: z.array(AdminPayoutView) }),
 );
 
+// ─── Admin — top users (ADR 009 / 015) ─────────────────────────────────────
+
+const TopUserRow = registry.register(
+  'TopUserRow',
+  z.object({
+    userId: z.string().uuid(),
+    email: z.string().email(),
+    currency: z.string().length(3),
+    count: z.number().int().min(0),
+    amountMinor: z.string().openapi({
+      description: 'bigint-as-string. Minor units (pence / cents).',
+    }),
+  }),
+);
+
+const TopUsersResponse = registry.register(
+  'TopUsersResponse',
+  z.object({
+    since: z.string().datetime(),
+    rows: z.array(TopUserRow),
+  }),
+);
+
 // ─── Admin — payouts-by-asset breakdown (ADR 015 / 016) ────────────────────
 
 const PerStateBreakdown = registry.register(
@@ -1724,6 +1747,48 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/top-users',
+  summary: 'Top users by cashback earned (ADR 009 / 015).',
+  description:
+    "Ranked list of users with the highest `cashback`-type credit_transactions in the window. Groups by `(user, currency)` — fleet-wide totals across currencies aren't meaningful. Two shoulders use this: ops recognition ('top earners this month') and concentration-risk signal ('one user accounts for 70% — why?'). Default window 30 days, capped at 366. `?limit=` clamped 1..100, default 20.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      since: z.string().datetime().optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Ranked rows, highest amountMinor first',
+      content: { 'application/json': { schema: TopUsersResponse } },
+    },
+    400: {
+      description: 'Invalid `since` or window over 366 days',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the ranking',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/payouts-by-asset',
   summary: 'Per-asset × per-state payout breakdown (ADR 015 / 016).',
   description:
@@ -1792,6 +1857,58 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error resetting the row',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/orders/activity',
+  summary: 'Per-day orders created/fulfilled sparkline (ADR 010 / 019 Tier 1).',
+  description:
+    "Last `?days=<N>` (default 7, clamped [1, 90]) of orders created vs fulfilled, UTC-bucketed. Uses `generate_series` + LEFT JOIN so every day in the window appears with zero-filled counts even when no orders crossed on that day — the UI doesn't gap-fill. Oldest-first so a bar chart renders left-to-right without a client-side reverse.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(90).optional().openapi({
+        description: 'Window size in calendar days. Default 7, clamped [1, 90].',
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Activity series',
+      content: {
+        'application/json': {
+          schema: z.object({
+            windowDays: z.number().int().min(1).max(90),
+            days: z.array(
+              z.object({
+                day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+                created: z.number().int().nonnegative(),
+                fulfilled: z.number().int().nonnegative(),
+              }),
+            ),
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading activity',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
