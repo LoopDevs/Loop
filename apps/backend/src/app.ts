@@ -83,6 +83,7 @@ import { adminUserCreditTransactionsCsvHandler } from './admin/user-credit-trans
 import { adminUserCashbackByMerchantHandler } from './admin/user-cashback-by-merchant.js';
 import { adminUserCashbackSummaryHandler } from './admin/user-cashback-summary.js';
 import { adminUserFlywheelStatsHandler } from './admin/user-flywheel-stats.js';
+import { adminUserPaymentMethodShareHandler } from './admin/user-payment-method-share.js';
 import { adminGetUserHandler } from './admin/user-detail.js';
 import { adminUserByEmailHandler } from './admin/user-by-email.js';
 import { adminListUsersHandler } from './admin/users-list.js';
@@ -1022,6 +1023,16 @@ app.get(
   '/api/admin/users/:userId/flywheel-stats',
   rateLimit(120, 60_000),
   adminUserFlywheelStatsHandler,
+);
+// Per-user payment-method share (#628 follow-up) — user-scoped
+// rail-mix mirror of the fleet + per-merchant siblings. Drives a
+// "rail mix" card on the user drill alongside the flywheel chip
+// + cashback-summary. Same zero-fill + state-default conventions
+// as the other share endpoints.
+app.get(
+  '/api/admin/users/:userId/payment-method-share',
+  rateLimit(120, 60_000),
+  adminUserPaymentMethodShareHandler,
 );
 // Credit-transaction log for a user (ADR 009). Drill-down from the
 // balance endpoint — shows how the balance got there (cashback,
