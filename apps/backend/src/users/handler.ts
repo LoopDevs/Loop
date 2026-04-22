@@ -28,6 +28,8 @@ import {
   PAYOUT_STATES,
 } from '../db/schema.js';
 import { listPayoutsForUser } from '../credits/pending-payouts.js';
+import { payoutAssetFor } from '../credits/payout-asset.js';
+import { checkTrustline, type TrustlineStatus } from '../payments/horizon-trustline.js';
 import { decodeJwtPayload } from '../auth/jwt.js';
 import { upsertUserFromCtx, getUserById, type User } from '../db/users.js';
 import type { LoopAuthContext } from '../auth/handler.js';
@@ -412,5 +414,77 @@ export async function getUserPendingPayoutsHandler(c: Context): Promise<Response
       confirmedAt: row.confirmedAt?.toISOString() ?? null,
       failedAt: row.failedAt?.toISOString() ?? null,
     })),
+  });
+}
+
+/**
+ * `GET /api/users/me/trustline-status` — hits Horizon to check
+ * whether the caller's linked Stellar wallet has an established
+ * trustline to the LOOP asset matching their home currency (ADR 015).
+ *
+ * The settings/wallet page uses this to hide the amber "Add a
+ * trustline" prompt once the user has actually added the trustline
+ * in their wallet. Returns a discriminated status so the client can
+ * render different copy per state:
+ *   - `active`: trustline is set. Hide the prompt, show "ready".
+ *   - `missing`: account exists, trustline absent. Show amber prompt.
+ *   - `account_not_found`: wallet pubkey has no Stellar account.
+ *     The user needs to fund it first; amber prompt can point at that.
+ *   - `unavailable`: Horizon failed — we don't know. Fall back to
+ *     amber as a safe default rather than claim "active" wrongly.
+ *   - `no_wallet_linked`: pre-flight — user hasn't linked. Client
+ *     just hides the card (it's handled elsewhere).
+ *   - `no_issuer_configured`: operator hasn't set the LOOP-asset
+ *     issuer env var for this currency. Client hides the prompt —
+ *     the backend can't emit anyway.
+ */
+export type UserTrustlineStatus = TrustlineStatus | 'no_wallet_linked' | 'no_issuer_configured';
+
+export interface UserTrustlineStatusResponse {
+  status: UserTrustlineStatus;
+  /** The asset this check targeted, or null when the check didn't run. */
+  assetCode: string | null;
+  /** The issuer the check targeted, or null when the check didn't run. */
+  assetIssuer: string | null;
+}
+
+export async function getUserTrustlineStatusHandler(c: Context): Promise<Response> {
+  let user: User | null;
+  try {
+    user = await resolveCallingUser(c);
+  } catch (err) {
+    log.error({ err }, 'Failed to resolve calling user');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+  }
+  if (user === null) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+
+  if (user.stellarAddress === null) {
+    return c.json<UserTrustlineStatusResponse>({
+      status: 'no_wallet_linked',
+      assetCode: null,
+      assetIssuer: null,
+    });
+  }
+
+  // HomeCurrency is USD / GBP / EUR — the schema enum pins it. Cast
+  // is safe because the DB column has the same narrow check
+  // constraint as the TS union.
+  const currency = user.homeCurrency as (typeof HOME_CURRENCIES)[number];
+  const { code, issuer } = payoutAssetFor(currency);
+  if (issuer === null) {
+    return c.json<UserTrustlineStatusResponse>({
+      status: 'no_issuer_configured',
+      assetCode: code,
+      assetIssuer: null,
+    });
+  }
+
+  const result = await checkTrustline(user.stellarAddress, code, issuer);
+  return c.json<UserTrustlineStatusResponse>({
+    status: result.status,
+    assetCode: code,
+    assetIssuer: issuer,
   });
 }

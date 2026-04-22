@@ -5,7 +5,13 @@ import { ApiException } from '@loop/shared';
 import type { Route } from './+types/settings.wallet';
 import { useAuth } from '~/hooks/use-auth';
 import { useAppConfig } from '~/hooks/use-app-config';
-import { getMe, setStellarAddress, type UserMeView } from '~/services/user';
+import {
+  getMe,
+  getUserTrustlineStatus,
+  setStellarAddress,
+  type UserMeView,
+  type UserTrustlineStatus,
+} from '~/services/user';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { copyToClipboard } from '~/native/clipboard';
@@ -55,6 +61,19 @@ export default function SettingsWalletRoute(): React.JSX.Element {
   // trustline prompt for null entries rather than showing guidance
   // the user can't act on.
   const { config } = useAppConfig();
+  // Live trustline check — fires a Horizon lookup on the backend. Only
+  // enabled once `meQuery` has resolved to a user with a linked
+  // wallet, so we don't burn a 401 when the page mounts
+  // unauthenticated or a no-op call on a user who hasn't linked yet.
+  const trustlineQuery = useQuery({
+    queryKey: ['me', 'trustline-status'],
+    queryFn: getUserTrustlineStatus,
+    enabled: isAuthenticated && (meQuery.data?.stellarAddress ?? null) !== null,
+    retry: shouldRetry,
+    // Backend caches 30s — match on the client so repeated renders
+    // don't re-fire a fresh query each time.
+    staleTime: 30_000,
+  });
 
   const [draftAddress, setDraftAddress] = useState<string>('');
   const [formError, setFormError] = useState<string | null>(null);
@@ -170,6 +189,7 @@ export default function SettingsWalletRoute(): React.JSX.Element {
         <TrustlineCard
           assetCode={assetCode}
           issuer={config.loopAssetIssuers[assetCode as 'USDLOOP' | 'GBPLOOP' | 'EURLOOP'] ?? null}
+          status={trustlineQuery.data?.status ?? null}
         />
       )}
 
@@ -241,12 +261,49 @@ export default function SettingsWalletRoute(): React.JSX.Element {
 function TrustlineCard({
   assetCode,
   issuer,
+  status,
 }: {
   assetCode: string;
   issuer: string | null;
+  /**
+   * Null while the Horizon check is in flight — we render nothing so
+   * the page doesn't flash amber-then-green on a user who already
+   * has the trustline. A fresh link typically resolves in <1s.
+   */
+  status: UserTrustlineStatus | null;
 }): React.JSX.Element | null {
   const [copied, setCopied] = useState<'code' | 'issuer' | null>(null);
   if (issuer === null) return null;
+  // Render nothing while the check is pending — see the prop doc.
+  if (status === null) return null;
+  // Short-circuit suppression cases (handled elsewhere or not
+  // actionable here).
+  if (status === 'no_wallet_linked' || status === 'no_issuer_configured') return null;
+  // Happy path — trustline is set. Render the compact confirmation
+  // chip instead of the full amber guidance card.
+  if (status === 'active') {
+    return (
+      <section
+        aria-label="Trustline active"
+        className="rounded-xl border border-green-200 bg-green-50 px-5 py-3 flex items-center gap-2 dark:border-green-900/50 dark:bg-green-900/10"
+      >
+        <svg
+          className="h-5 w-5 text-green-700 dark:text-green-400 shrink-0"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+        <p className="text-sm text-green-900 dark:text-green-200">
+          Trustline to <strong>{assetCode}</strong> is active — your wallet is ready to receive
+          cashback payouts.
+        </p>
+      </section>
+    );
+  }
 
   const copy = (text: string, which: 'code' | 'issuer'): void => {
     void (async () => {
@@ -286,9 +343,20 @@ function TrustlineCard({
         </h2>
       </div>
       <p className="text-sm text-amber-800 dark:text-amber-300">
-        Stellar wallets need a trustline to hold each LOOP asset. Without one, Loop&rsquo;s payout
-        transaction fails with <code>op_no_trust</code>. Open your wallet (Freighter, Lobstr, or any
-        Stellar-compatible wallet) and add a trustline using the asset code and issuer below.
+        {status === 'account_not_found'
+          ? // Account needs funding before it can hold a trustline.
+            "We couldn't find this wallet on Stellar yet — fund it with at least 2 XLM in your wallet app, then add a trustline to the asset below. Without it, Loop's payout transaction fails with "
+          : status === 'unavailable'
+            ? // We don't know — keep the action prompt without claiming the wallet is broken.
+              "We couldn't reach Stellar just now, so this status is a safety fallback. If you've already added the trustline you can ignore this card — it'll clear the next time we check. Otherwise, open your wallet (Freighter, Lobstr, or any Stellar-compatible wallet) and add a trustline using the asset code and issuer below. Without it, Loop's payout transaction fails with "
+            : // Default: trustline genuinely missing.
+              "Stellar wallets need a trustline to hold each LOOP asset. Without one, Loop's payout transaction fails with "}
+        <code>op_no_trust</code>
+        {status === 'account_not_found'
+          ? '.'
+          : status === 'unavailable'
+            ? '.'
+            : '. Open your wallet (Freighter, Lobstr, or any Stellar-compatible wallet) and add a trustline using the asset code and issuer below.'}
       </p>
       <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-2 text-sm">
         <dt className="font-medium text-amber-900 dark:text-amber-200">Asset code</dt>

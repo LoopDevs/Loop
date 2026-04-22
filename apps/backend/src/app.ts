@@ -47,6 +47,7 @@ import {
   getCashbackHistoryHandler,
   getMeHandler,
   getUserPendingPayoutsHandler,
+  getUserTrustlineStatusHandler,
   setHomeCurrencyHandler,
   setStellarAddressHandler,
 } from './users/handler.js';
@@ -618,6 +619,12 @@ app.get('/api/users/me/cashback-history', rateLimit(60, 60_000), getCashbackHist
 // typically poll this from /settings/cashback while a payout is in
 // flight. State + before + limit query shape mirrors the admin endpoint.
 app.get('/api/users/me/pending-payouts', rateLimit(60, 60_000), getUserPendingPayoutsHandler);
+// GET /api/users/me/trustline-status — Horizon trustline check for
+// the caller's linked wallet vs. their home-currency LOOP asset
+// (ADR 015). 30/min rate-limited — this fires every page-load of
+// /settings/wallet, and the backend cache is 30s so aggressive
+// client polling is naturally absorbed.
+app.get('/api/users/me/trustline-status', rateLimit(30, 60_000), getUserTrustlineStatusHandler);
 
 // ─── Admin (authenticated + admin-flagged) ──────────────────────────────────
 //

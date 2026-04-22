@@ -23,8 +23,23 @@ const { userMock, authMock } = vi.hoisted(() => ({
     meError: null as unknown,
     setResult: null as unknown,
     setError: null as unknown,
+    // Default: report `missing` so the amber card keeps showing in
+    // existing tests that don't override. Trustline-specific tests
+    // below override via `trustlineResult`.
+    trustlineResult: {
+      status: 'missing' as
+        | 'active'
+        | 'missing'
+        | 'account_not_found'
+        | 'unavailable'
+        | 'no_wallet_linked'
+        | 'no_issuer_configured',
+      assetCode: 'GBPLOOP' as string | null,
+      assetIssuer: null as string | null,
+    },
     getMe: vi.fn(),
     setStellarAddress: vi.fn(),
+    getUserTrustlineStatus: vi.fn(),
   },
   authMock: {
     isAuthenticated: true,
@@ -42,6 +57,7 @@ vi.mock('~/services/user', () => ({
       homeCurrencyBalanceMinor: string;
     }>,
   setStellarAddress: (addr: string | null) => userMock.setStellarAddress(addr),
+  getUserTrustlineStatus: () => userMock.getUserTrustlineStatus(),
 }));
 
 vi.mock('~/hooks/use-auth', () => ({
@@ -117,6 +133,7 @@ beforeEach(() => {
   authMock.isAuthenticated = true;
   userMock.getMe.mockReset();
   userMock.setStellarAddress.mockReset();
+  userMock.getUserTrustlineStatus.mockReset();
   userMock.getMe.mockImplementation(async () => {
     if (userMock.meError !== null) throw userMock.meError;
     return userMock.me;
@@ -127,6 +144,12 @@ beforeEach(() => {
     userMock.me = next as typeof userMock.me;
     return next;
   });
+  userMock.trustlineResult = {
+    status: 'missing',
+    assetCode: 'GBPLOOP',
+    assetIssuer: null,
+  };
+  userMock.getUserTrustlineStatus.mockImplementation(async () => userMock.trustlineResult);
   // Reset issuer map to null for each test — trustline tests opt in.
   configMock.config.loopAssetIssuers = { USDLOOP: null, GBPLOOP: null, EURLOOP: null };
 });
@@ -281,5 +304,46 @@ describe('SettingsWalletRoute — trustline card', () => {
       fireEvent.click(button);
     });
     expect(clipboardModule.copyToClipboard).toHaveBeenCalledWith(GBP_ISSUER);
+  });
+
+  it('renders the green "Trustline active" chip when Horizon reports active', async () => {
+    userMock.me = { ...userMock.me, stellarAddress: VALID_ADDRESS };
+    configMock.config.loopAssetIssuers.GBPLOOP = GBP_ISSUER;
+    userMock.trustlineResult = {
+      status: 'active',
+      assetCode: 'GBPLOOP',
+      assetIssuer: GBP_ISSUER,
+    };
+    renderPage();
+    expect(await screen.findByText(/Trustline to/)).toBeTruthy();
+    // Amber heading absent — no action required.
+    expect(screen.queryByText(/Add a trustline/)).toBeNull();
+  });
+
+  it('keeps the amber prompt up when Horizon reports unavailable (safety fallback)', async () => {
+    userMock.me = { ...userMock.me, stellarAddress: VALID_ADDRESS };
+    configMock.config.loopAssetIssuers.GBPLOOP = GBP_ISSUER;
+    userMock.trustlineResult = {
+      status: 'unavailable',
+      assetCode: 'GBPLOOP',
+      assetIssuer: GBP_ISSUER,
+    };
+    renderPage();
+    const headings = await screen.findAllByText(/Add a trustline/i);
+    expect(headings.length).toBeGreaterThan(0);
+    // Copy shifts to the "we couldn't reach Stellar" variant.
+    expect(screen.getByText(/couldn.+t reach Stellar/i)).toBeTruthy();
+  });
+
+  it('shows the "fund your wallet" copy when the account is not found on Stellar', async () => {
+    userMock.me = { ...userMock.me, stellarAddress: VALID_ADDRESS };
+    configMock.config.loopAssetIssuers.GBPLOOP = GBP_ISSUER;
+    userMock.trustlineResult = {
+      status: 'account_not_found',
+      assetCode: 'GBPLOOP',
+      assetIssuer: GBP_ISSUER,
+    };
+    renderPage();
+    expect(await screen.findByText(/fund it with at least 2 XLM/i)).toBeTruthy();
   });
 });

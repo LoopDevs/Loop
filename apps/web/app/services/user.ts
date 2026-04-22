@@ -132,3 +132,33 @@ export async function getUserPendingPayouts(
     `/api/users/me/pending-payouts${query.length > 0 ? `?${query}` : ''}`,
   );
 }
+
+/**
+ * Trustline status from /api/users/me/trustline-status (ADR 015).
+ * Drives the settings/wallet trustline card:
+ *   - `active`: hide the amber "Add a trustline" prompt, show the
+ *     green "Trustline active" chip instead.
+ *   - `missing` / `account_not_found`: show amber prompt.
+ *   - `unavailable`: Horizon failed — fall back to amber rather than
+ *     wrongly claiming the trustline is set.
+ *   - `no_wallet_linked` / `no_issuer_configured`: the card is
+ *     suppressed anyway (handled by the outer linked-wallet gate +
+ *     the config-driven issuer check).
+ */
+export type UserTrustlineStatus =
+  | 'active'
+  | 'missing'
+  | 'account_not_found'
+  | 'unavailable'
+  | 'no_wallet_linked'
+  | 'no_issuer_configured';
+
+export interface UserTrustlineStatusResponse {
+  status: UserTrustlineStatus;
+  assetCode: string | null;
+  assetIssuer: string | null;
+}
+
+export async function getUserTrustlineStatus(): Promise<UserTrustlineStatusResponse> {
+  return authenticatedRequest<UserTrustlineStatusResponse>('/api/users/me/trustline-status');
+}

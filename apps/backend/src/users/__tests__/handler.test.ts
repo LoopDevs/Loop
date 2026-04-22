@@ -123,6 +123,33 @@ vi.mock('../../credits/pending-payouts.js', () => ({
   }),
 }));
 
+// payoutAssetFor is a pure function that reads LOOP_STELLAR_*_ISSUER
+// env vars — mock it so we can assert handler behaviour without
+// threading env-var resets through each test.
+const { assetState } = vi.hoisted(() => ({
+  assetState: {
+    code: 'GBPLOOP' as string,
+    issuer: null as string | null,
+  },
+}));
+vi.mock('../../credits/payout-asset.js', () => ({
+  payoutAssetFor: vi.fn(() => ({ code: assetState.code, issuer: assetState.issuer })),
+}));
+
+// Horizon trustline check — stubbed to avoid outbound fetches in tests.
+const { trustlineState } = vi.hoisted(() => ({
+  trustlineState: {
+    status: 'missing' as 'active' | 'missing' | 'account_not_found' | 'unavailable',
+    calls: [] as Array<{ account: string; code: string; issuer: string }>,
+  },
+}));
+vi.mock('../../payments/horizon-trustline.js', () => ({
+  checkTrustline: vi.fn(async (account: string, code: string, issuer: string) => {
+    trustlineState.calls.push({ account, code, issuer });
+    return { status: trustlineState.status, asOfMs: Date.now() };
+  }),
+}));
+
 // The handler decodes CTX bearers via auth/jwt decodeJwtPayload —
 // stub it to return a preconfigured claim set.
 const { jwtState } = vi.hoisted(() => ({
@@ -138,6 +165,7 @@ import {
   getCashbackHistoryHandler,
   getMeHandler,
   getUserPendingPayoutsHandler,
+  getUserTrustlineStatusHandler,
   setHomeCurrencyHandler,
   setStellarAddressHandler,
 } from '../handler.js';
@@ -175,6 +203,10 @@ beforeEach(() => {
   dbState.homeBalanceMinor = null;
   payoutState.rows = [];
   payoutState.calls = [];
+  assetState.code = 'GBPLOOP';
+  assetState.issuer = null;
+  trustlineState.status = 'missing';
+  trustlineState.calls = [];
 });
 
 describe('getMeHandler', () => {
@@ -659,6 +691,105 @@ describe('getUserPendingPayoutsHandler', () => {
     jwtState.claims = { sub: 'ctx-err', email: 'e@x.com' };
     userState.upsertThrow = new Error('db down');
     const res = await getUserPendingPayoutsHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('getUserTrustlineStatusHandler', () => {
+  const LOOP_AUTH: LoopAuthContext = {
+    kind: 'loop',
+    userId: 'user-uuid',
+    email: 'a@b.com',
+    bearerToken: 'loop-jwt',
+  };
+  const linkedUser = {
+    id: 'user-uuid',
+    email: 'a@b.com',
+    isAdmin: false,
+    homeCurrency: 'GBP',
+    stellarAddress: 'G' + 'A'.repeat(55),
+    ctxUserId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  it('401 when no auth is on the context', async () => {
+    const res = await getUserTrustlineStatusHandler(makeCtx(undefined));
+    expect(res.status).toBe(401);
+  });
+
+  it('returns no_wallet_linked when the user has no Stellar address', async () => {
+    userState.byId = { ...linkedUser, stellarAddress: null };
+    const res = await getUserTrustlineStatusHandler(makeCtx(LOOP_AUTH));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status: string };
+    expect(body.status).toBe('no_wallet_linked');
+    // Short-circuits — never calls Horizon.
+    expect(trustlineState.calls).toHaveLength(0);
+  });
+
+  it('returns no_issuer_configured when the home-currency LOOP issuer is unset', async () => {
+    userState.byId = linkedUser;
+    assetState.code = 'GBPLOOP';
+    assetState.issuer = null;
+    const res = await getUserTrustlineStatusHandler(makeCtx(LOOP_AUTH));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      status: string;
+      assetCode: string | null;
+      assetIssuer: string | null;
+    };
+    expect(body.status).toBe('no_issuer_configured');
+    expect(body.assetCode).toBe('GBPLOOP');
+    expect(body.assetIssuer).toBeNull();
+    expect(trustlineState.calls).toHaveLength(0);
+  });
+
+  it('calls Horizon and reports active when the trustline is set', async () => {
+    userState.byId = linkedUser;
+    assetState.issuer = 'GISSUER' + 'A'.repeat(48);
+    trustlineState.status = 'active';
+    const res = await getUserTrustlineStatusHandler(makeCtx(LOOP_AUTH));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status: string; assetCode: string; assetIssuer: string };
+    expect(body.status).toBe('active');
+    expect(body.assetCode).toBe('GBPLOOP');
+    expect(body.assetIssuer).toBe(assetState.issuer);
+    expect(trustlineState.calls[0]).toEqual({
+      account: linkedUser.stellarAddress,
+      code: 'GBPLOOP',
+      issuer: assetState.issuer,
+    });
+  });
+
+  it('reports missing when Horizon returns no matching trustline', async () => {
+    userState.byId = linkedUser;
+    assetState.issuer = 'G' + 'B'.repeat(55);
+    trustlineState.status = 'missing';
+    const res = await getUserTrustlineStatusHandler(makeCtx(LOOP_AUTH));
+    expect(((await res.json()) as { status: string }).status).toBe('missing');
+  });
+
+  it('reports account_not_found when Horizon returns 404', async () => {
+    userState.byId = linkedUser;
+    assetState.issuer = 'G' + 'B'.repeat(55);
+    trustlineState.status = 'account_not_found';
+    const res = await getUserTrustlineStatusHandler(makeCtx(LOOP_AUTH));
+    expect(((await res.json()) as { status: string }).status).toBe('account_not_found');
+  });
+
+  it('reports unavailable when Horizon errors (UI falls back to amber)', async () => {
+    userState.byId = linkedUser;
+    assetState.issuer = 'G' + 'B'.repeat(55);
+    trustlineState.status = 'unavailable';
+    const res = await getUserTrustlineStatusHandler(makeCtx(LOOP_AUTH));
+    expect(((await res.json()) as { status: string }).status).toBe('unavailable');
+  });
+
+  it('500 when the CTX upsert throws', async () => {
+    jwtState.claims = { sub: 'ctx-err', email: 'e@x.com' };
+    userState.upsertThrow = new Error('db down');
+    const res = await getUserTrustlineStatusHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
     expect(res.status).toBe(500);
   });
 });
