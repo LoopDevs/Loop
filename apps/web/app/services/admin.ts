@@ -889,6 +889,33 @@ export async function getAdminUserCashbackSummary(
 }
 
 /**
+ * Fleet-wide cashback-monthly entry (#592). Identical shape to the
+ * user-facing `CashbackMonthlyEntry` by design — the admin chart
+ * re-uses the same bar-rendering helpers. One entry per
+ * (month, currency) pair; oldest-first ordering.
+ */
+export interface AdminCashbackMonthlyEntry {
+  /** "YYYY-MM" in UTC. */
+  month: string;
+  currency: string;
+  /** bigint-as-string, minor units. */
+  cashbackMinor: string;
+}
+
+export interface AdminCashbackMonthlyResponse {
+  entries: AdminCashbackMonthlyEntry[];
+}
+
+/**
+ * `GET /api/admin/cashback-monthly` — 12-month fleet-wide cashback
+ * emissions grouped by (month, currency). Drives the monthly bar
+ * chart on `/admin/treasury`.
+ */
+export async function getAdminCashbackMonthly(): Promise<AdminCashbackMonthlyResponse> {
+  return authenticatedRequest<AdminCashbackMonthlyResponse>('/api/admin/cashback-monthly');
+}
+
+/**
  * One row of an admin per-user cashback-by-merchant breakdown.
  * Admin-facing equivalent of the user's own card — same join on
  * `credit_transactions.reference_id::uuid = orders.id`, same

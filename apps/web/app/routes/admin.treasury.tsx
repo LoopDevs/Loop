@@ -10,6 +10,7 @@ import { PayoutsByAssetTable } from '~/components/features/admin/PayoutsByAssetT
 import { SupplierSpendCard } from '~/components/features/admin/SupplierSpendCard';
 import { OperatorStatsCard } from '~/components/features/admin/OperatorStatsCard';
 import { TopUsersByPendingPayoutCard } from '~/components/features/admin/TopUsersByPendingPayoutCard';
+import { AdminMonthlyCashbackChart } from '~/components/features/admin/AdminMonthlyCashbackChart';
 import { DiscordNotifiersCard } from '~/components/features/admin/DiscordNotifiersCard';
 import { PaymentMethodShareCard } from '~/components/features/admin/PaymentMethodShareCard';
 import { Spinner } from '~/components/ui/Spinner';
@@ -392,6 +393,21 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
           first-order top-ups.
         </p>
         <PaymentMethodShareCard />
+      </section>
+
+      <section>
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Monthly cashback emissions (last 12 months)
+          </h2>
+        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Per-currency cashback Loop has credited to users per calendar month (ADR 009/015). The
+          complement to the payment-method mix above: that one asks "how are users paying us?", this
+          one asks "how much are we paying back?". A rising bar is a prerequisite for the flywheel —
+          if we're not emitting cashback, users have nothing to recycle into the LOOP-asset rail.
+        </p>
+        <AdminMonthlyCashbackChart />
       </section>
 
       <section>
