@@ -1838,6 +1838,54 @@ registry.registerPath({
   },
 });
 
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/orders.csv',
+  summary: 'CSV export of Loop-native orders (ADR 011 / 015).',
+  description:
+    'Finance-ready CSV of `orders` rows in a time window. Month-end reconciliation: face-value totals against the CTX invoice, user-cashback totals against the ledger accrual feed, loop-margin totals against P&L. Default window 31 days, capped at 366 days. Row cap 10 000 — past that, a `__TRUNCATED__` sentinel row trails the output and the handler log-warns the real rowCount. Gift-card fields (redeem_code / redeem_pin / redeem_url) are omitted — this export is for reconciliation, not redemption.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      since: z.string().datetime().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'RFC 4180 CSV body',
+      content: {
+        'text/csv': {
+          schema: z.string().openapi({
+            description:
+              'CRLF-terminated lines. Header row lists every exposed orders column; each subsequent row emits RFC 4180-escaped values. bigint-as-string for all `*_minor` columns; ISO-8601 for all timestamps.',
+          }),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid `since` or window over 366 days',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error building the export',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Admin — cashback-config CRUD (ADR 011) ─────────────────────────────────
 
 registry.registerPath({
