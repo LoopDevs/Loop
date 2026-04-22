@@ -445,6 +445,22 @@ const AdminSupplierSpendResponse = registry.register(
   }),
 );
 
+// ─── Admin — user detail ────────────────────────────────────────────────────
+
+const AdminUserView = registry.register(
+  'AdminUserView',
+  z.object({
+    id: z.string().uuid(),
+    email: z.string().email(),
+    isAdmin: z.boolean(),
+    homeCurrency: z.string().length(3),
+    stellarAddress: z.string().nullable(),
+    ctxUserId: z.string().nullable(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+  }),
+);
+
 // ─── Admin — per-user credit balance (ADR 009) ──────────────────────────────
 
 const AdminUserCreditRow = registry.register(
@@ -529,7 +545,6 @@ const AdminOrderView = registry.register(
     failedAt: z.string().datetime().nullable(),
   }),
 );
-
 // ─── Admin — cashback-config (ADR 011) ──────────────────────────────────────
 //
 // Percentages are stored as `numeric(5,2)` and round-trip as strings
@@ -1583,6 +1598,49 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error computing the aggregate',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users/{userId}',
+  summary: 'Single-user detail for the admin panel.',
+  description:
+    "Entry point for the admin panel's user-detail page. Returns the full user row — email, home currency, admin flag, Stellar address, CTX linkage, created/updated timestamps. Subsequent per-user drills (credits, credit-transactions, orders) key off the id this endpoint returns.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ userId: z.string().uuid() }),
+  },
+  responses: {
+    200: {
+      description: 'User row',
+      content: { 'application/json': { schema: AdminUserView } },
+    },
+    400: {
+      description: 'Missing or malformed userId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'User not found',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading the row',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
