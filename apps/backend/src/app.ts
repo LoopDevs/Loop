@@ -88,6 +88,7 @@ import {
   setStellarAddressHandler,
 } from './users/handler.js';
 import { getCashbackByMerchantHandler } from './users/cashback-by-merchant.js';
+import { getCashbackMonthlyHandler } from './users/cashback-monthly.js';
 
 export const app = new Hono();
 
@@ -693,6 +694,11 @@ app.get('/api/users/me/cashback-summary', rateLimit(60, 60_000), getCashbackSumm
 // on /settings/cashback so users see which merchants drive their
 // cashback accrual without scrolling the full ledger (ADR 009/015).
 app.get('/api/users/me/cashback-by-merchant', rateLimit(60, 60_000), getCashbackByMerchantHandler);
+// Last-12-months cashback totals for the caller, grouped by (month,
+// currency). Drives the monthly bar chart on /settings/cashback —
+// answers "how did this month compare to last?" without hitting the
+// full ledger endpoint on the client (ADR 009/015).
+app.get('/api/users/me/cashback-monthly', rateLimit(60, 60_000), getCashbackMonthlyHandler);
 
 // ─── Admin (authenticated + admin-flagged) ──────────────────────────────────
 //
