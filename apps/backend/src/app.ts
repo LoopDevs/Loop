@@ -41,6 +41,7 @@ import { googleSocialLoginHandler, appleSocialLoginHandler } from './auth/social
 import { notifyHealthChange } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
+import { adminConfigsCsvHandler } from './admin/configs-csv.js';
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
@@ -631,6 +632,9 @@ app.use('/api/admin/*', requireAuth);
 app.use('/api/admin/*', requireAdmin);
 
 app.get('/api/admin/merchant-cashback-configs', rateLimit(120, 60_000), listConfigsHandler);
+// Tier 3 CSV export — bulk audit of the full configs table in a
+// spreadsheet (ADR 019 / 011). 20/min matches other admin exports.
+app.get('/api/admin/merchant-cashback-configs.csv', rateLimit(20, 60_000), adminConfigsCsvHandler);
 app.put(
   '/api/admin/merchant-cashback-configs/:merchantId',
   rateLimit(60, 60_000),

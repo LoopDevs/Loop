@@ -223,6 +223,7 @@ PUT  /api/users/me/stellar-address [authenticated — link/unlink Stellar wallet
 GET  /api/users/me/cashback-history [authenticated — recent credit-ledger events, ADR 009/015]
 GET  /api/users/me/pending-payouts  [authenticated — caller's on-chain payout rows, ADR 015/016]
 GET  /api/admin/merchant-cashback-configs              [admin]
+GET  /api/admin/merchant-cashback-configs.csv          [admin — Tier 3 export, ADR 011 / 019]
 PUT  /api/admin/merchant-cashback-configs/:merchantId  [admin]
 GET  /api/admin/merchant-cashback-configs/:merchantId/history  [admin]
 GET  /api/admin/treasury                               [admin]
