@@ -8,10 +8,12 @@ vi.mock('../../db/schema.js', () => ({
 const listMock = vi.fn();
 const resetMock = vi.fn();
 const getMock = vi.fn();
+const byOrderMock = vi.fn();
 vi.mock('../../credits/pending-payouts.js', () => ({
   listPayoutsForAdmin: (opts: unknown) => listMock(opts),
   resetPayoutToPending: (id: string) => resetMock(id),
   getPayoutForAdmin: (id: string) => getMock(id),
+  getPayoutByOrderId: (orderId: string) => byOrderMock(orderId),
 }));
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -22,6 +24,7 @@ vi.mock('../../logger.js', () => ({
 import {
   adminGetPayoutHandler,
   adminListPayoutsHandler,
+  adminPayoutByOrderHandler,
   adminRetryPayoutHandler,
 } from '../payouts.js';
 
@@ -63,6 +66,7 @@ beforeEach(() => {
   listMock.mockResolvedValue([baseRow]);
   resetMock.mockReset();
   getMock.mockReset();
+  byOrderMock.mockReset();
 });
 
 describe('adminListPayoutsHandler', () => {
@@ -181,6 +185,53 @@ describe('adminGetPayoutHandler', () => {
   it('500 when the repo throws', async () => {
     getMock.mockRejectedValue(new Error('db exploded'));
     const res = await adminGetPayoutHandler(makeCtx({}, { id: validId }));
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('adminPayoutByOrderHandler', () => {
+  const validOrderId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+
+  it('400 when orderId param is missing', async () => {
+    const res = await adminPayoutByOrderHandler(makeCtx({}, {}));
+    expect(res.status).toBe(400);
+    expect(byOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('400 when orderId is not a uuid', async () => {
+    const res = await adminPayoutByOrderHandler(makeCtx({}, { orderId: 'not-a-uuid' }));
+    expect(res.status).toBe(400);
+    expect(byOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('404 when the order has no payout row', async () => {
+    byOrderMock.mockResolvedValue(null);
+    const res = await adminPayoutByOrderHandler(makeCtx({}, { orderId: validOrderId }));
+    expect(res.status).toBe(404);
+    expect(byOrderMock).toHaveBeenCalledWith(validOrderId);
+  });
+
+  it('returns the BigInt-safe view on hit', async () => {
+    byOrderMock.mockResolvedValue({
+      ...baseRow,
+      orderId: validOrderId,
+      state: 'submitted',
+      submittedAt: new Date('2026-04-21T13:00:00Z'),
+    });
+    const res = await adminPayoutByOrderHandler(makeCtx({}, { orderId: validOrderId }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      orderId: validOrderId,
+      state: 'submitted',
+      amountStroops: '50000000',
+      submittedAt: '2026-04-21T13:00:00.000Z',
+    });
+  });
+
+  it('500 when the repo throws', async () => {
+    byOrderMock.mockRejectedValue(new Error('db exploded'));
+    const res = await adminPayoutByOrderHandler(makeCtx({}, { orderId: validOrderId }));
     expect(res.status).toBe(500);
   });
 });

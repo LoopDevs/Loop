@@ -230,6 +230,7 @@ GET  /api/admin/payouts                                [admin — ADR 015 payout
 GET  /api/admin/payouts/:id                            [admin — single pending-payout drill-down]
 POST /api/admin/payouts/:id/retry                      [admin — reset failed payout to pending]
 GET  /api/admin/orders                                  [admin — Loop-native orders drill-down, ADR 011/015]
+GET  /api/admin/orders/:orderId/payout                  [admin — payout row for a given order]
 ```
 
 Full request/response shapes — including field types, pagination

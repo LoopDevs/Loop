@@ -13,6 +13,7 @@
 import type { Context } from 'hono';
 import { PAYOUT_STATES } from '../db/schema.js';
 import {
+  getPayoutByOrderId,
   getPayoutForAdmin,
   listPayoutsForAdmin,
   resetPayoutToPending,
@@ -146,6 +147,37 @@ export async function adminGetPayoutHandler(c: Context): Promise<Response> {
     return c.json<AdminPayoutView>(toView(row as PayoutRow));
   } catch (err) {
     log.error({ err, payoutId: id }, 'Admin payout detail failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch payout' }, 500);
+  }
+}
+
+/**
+ * GET /api/admin/orders/:orderId/payout — given an order id, return
+ * the single pending_payouts row associated with it (UNIQUE on
+ * order_id). Ops hits this when a user raises a support ticket
+ * quoting an order id — saves them fishing through the payout list
+ * for the matching row.
+ *
+ * 400 on missing / non-uuid order id, 404 when the order has no
+ * payout row yet (common — the payout builder only runs once
+ * cashback is due). 500 on repo throw.
+ */
+export async function adminPayoutByOrderHandler(c: Context): Promise<Response> {
+  const orderId = c.req.param('orderId');
+  if (orderId === undefined || orderId.length === 0) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'orderId is required' }, 400);
+  }
+  if (!UUID_RE.test(orderId)) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'orderId must be a uuid' }, 400);
+  }
+  try {
+    const row = await getPayoutByOrderId(orderId);
+    if (row === null) {
+      return c.json({ code: 'NOT_FOUND', message: 'No payout for this order' }, 404);
+    }
+    return c.json<AdminPayoutView>(toView(row as PayoutRow));
+  } catch (err) {
+    log.error({ err, orderId }, 'Admin payout-by-order lookup failed');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch payout' }, 500);
   }
 }

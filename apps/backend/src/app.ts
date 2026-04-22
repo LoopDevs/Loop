@@ -45,6 +45,7 @@ import { treasuryHandler } from './admin/treasury.js';
 import {
   adminGetPayoutHandler,
   adminListPayoutsHandler,
+  adminPayoutByOrderHandler,
   adminRetryPayoutHandler,
 } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
@@ -661,6 +662,10 @@ app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayout
 // by state and userId. Ops uses this to triage stuck orders + audit
 // the cashback split + correlate with operator-pool health.
 app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+// Given an order id, return the single pending_payouts row for it.
+// Nested under /orders/:orderId so the UI can link from the order
+// drill-down straight to the payout state without a separate fetch.
+app.get('/api/admin/orders/:orderId/payout', rateLimit(120, 60_000), adminPayoutByOrderHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 
