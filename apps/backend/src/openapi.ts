@@ -1786,6 +1786,45 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/users/me/orders/summary',
+  summary: "Compact 5-number summary of the caller's orders (ADR 010 / 015).",
+  description:
+    "Single query with FILTER-ed COUNT + SUM so the /orders page header renders without hitting the list endpoint. `pendingCount` groups `pending_payment` + `paid` + `procuring` — all 'in flight' from the user's perspective. `failedCount` groups `failed` + `expired`. `totalSpentMinor` is `SUM(charge_minor)` over `state = 'fulfilled'` only so pending / failed orders don't inflate lifetime spend. Home-currency locked — cross-currency detail stays admin-only.",
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: '5-number summary',
+      content: {
+        'application/json': {
+          schema: z.object({
+            currency: z.string().length(3),
+            totalOrders: z.number().int().min(0),
+            fulfilledCount: z.number().int().min(0),
+            pendingCount: z.number().int().min(0),
+            failedCount: z.number().int().min(0),
+            totalSpentMinor: z.string(),
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the summary',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/users/me/pending-payouts/{id}',
   summary: 'Caller-scoped single payout detail (ADR 015 / 016).',
   description:

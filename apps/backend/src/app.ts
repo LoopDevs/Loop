@@ -92,6 +92,7 @@ import {
 } from './users/handler.js';
 import { getCashbackByMerchantHandler } from './users/cashback-by-merchant.js';
 import { getCashbackMonthlyHandler } from './users/cashback-monthly.js';
+import { getUserOrdersSummaryHandler } from './users/orders-summary.js';
 
 export const app = new Hono();
 
@@ -702,6 +703,11 @@ app.get('/api/users/me/cashback-by-merchant', rateLimit(60, 60_000), getCashback
 // answers "how did this month compare to last?" without hitting the
 // full ledger endpoint on the client (ADR 009/015).
 app.get('/api/users/me/cashback-monthly', rateLimit(60, 60_000), getCashbackMonthlyHandler);
+// 5-number summary header for /orders: total, fulfilled, pending,
+// failed, lifetime spend. Companion to /cashback-summary; single
+// query with FILTER-ed COUNT/SUM so the /orders page doesn't hit
+// the list endpoint just to render a header (ADR 010).
+app.get('/api/users/me/orders/summary', rateLimit(60, 60_000), getUserOrdersSummaryHandler);
 
 // ─── Admin (authenticated + admin-flagged) ──────────────────────────────────
 //
