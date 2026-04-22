@@ -32,6 +32,7 @@
 | `docs/adr/018-admin-panel-architecture.md`                  | Admin drill-down / triage / CSV compliance pattern                |
 | `docs/adr/019-shared-package-policy.md`                     | `@loop/shared` — three-part test, re-export rule, phased adoption |
 | `docs/adr/020-public-api-surface.md`                        | `/api/public/*` — never-500, Cache-Control, no-PII conventions    |
+| `docs/adr/021-merchant-catalog-eviction-policy.md`          | Merchant-catalog eviction — admin fall-back / public drop / pin   |
 
 ---
 
