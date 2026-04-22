@@ -504,7 +504,31 @@ function OrderRow({ row }: { row: AdminOrderView }): React.JSX.Element {
         >
           {row.userId.slice(0, 8)}
         </p>
-        <p className="text-[11px] text-gray-500 dark:text-gray-400">{row.paymentMethod}</p>
+        {/* Payment rail — same visual language as the admin single-
+            order detail, stuck-orders triage, and user-facing
+            LoopOrdersList. Green "♻️" pill for loop_asset
+            (flywheel-closing), neutral grey for the other rails.
+            The pill Link-drills into the filtered orders list so
+            one click surfaces every order on that rail. */}
+        {row.paymentMethod === 'loop_asset' ? (
+          <Link
+            to={`/admin/orders?paymentMethod=${encodeURIComponent(row.paymentMethod)}`}
+            className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-green-100 px-1.5 py-0 text-[11px] font-medium text-green-800 hover:ring-1 hover:ring-green-300 dark:bg-green-900/30 dark:text-green-300 dark:hover:ring-green-700"
+            aria-label="Paid with recycled cashback"
+            title="The user paid for this order with LOOP-asset cashback they earned on earlier orders."
+          >
+            <span aria-hidden="true">♻️</span>
+            {row.paymentMethod}
+          </Link>
+        ) : (
+          <Link
+            to={`/admin/orders?paymentMethod=${encodeURIComponent(row.paymentMethod)}`}
+            className="mt-0.5 inline-block rounded-full bg-gray-100 px-1.5 py-0 text-[11px] font-medium text-gray-700 hover:ring-1 hover:ring-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:hover:ring-gray-600"
+            aria-label={`Filter to ${row.paymentMethod} orders`}
+          >
+            {row.paymentMethod}
+          </Link>
+        )}
       </div>
       <div className="text-right">
         <span
