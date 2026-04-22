@@ -225,6 +225,7 @@ GET  /api/users/me/credits         [authenticated — per-currency balance list,
 GET  /api/users/me/pending-payouts  [authenticated — caller's on-chain payout rows, ADR 015/016]
 GET  /api/users/me/pending-payouts/:id [authenticated — single payout detail, ADR 015/016]
 GET  /api/public/cashback-stats    [public — landing-page aggregates, never-500, ADR 009/015/020]
+GET  /api/public/top-cashback-merchants [public — landing-page "best cashback" list, never-500, ADR 011/020]
 GET  /api/admin/merchant-cashback-configs              [admin]
 PUT  /api/admin/merchant-cashback-configs/:merchantId  [admin]
 GET  /api/admin/merchant-cashback-configs/:merchantId/history  [admin]

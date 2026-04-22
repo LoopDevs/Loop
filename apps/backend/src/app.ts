@@ -59,6 +59,7 @@ import { adminUserCreditTransactionsHandler } from './admin/user-credit-transact
 import { adminGetUserHandler } from './admin/user-detail.js';
 import { adminListUsersHandler } from './admin/users-list.js';
 import { publicCashbackStatsHandler } from './public/cashback-stats.js';
+import { publicTopCashbackMerchantsHandler } from './public/top-cashback-merchants.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -520,6 +521,14 @@ app.get('/api/merchants/:id', merchantDetailHandler);
 // per visit; edge-cache respects the handler's Cache-Control so real
 // origin load will be much lower.
 app.get('/api/public/cashback-stats', rateLimit(60, 60_000), publicCashbackStatsHandler);
+// Public, unauthenticated, CDN-friendly "best cashback" list for the
+// landing page. Same never-500 + Cache-Control discipline as the
+// cashback-stats endpoint (ADR 020).
+app.get(
+  '/api/public/top-cashback-merchants',
+  rateLimit(60, 60_000),
+  publicTopCashbackMerchantsHandler,
+);
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
