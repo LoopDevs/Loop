@@ -96,11 +96,44 @@ export function getMerchants(): MerchantStore {
 let isMerchantRefreshing = false;
 
 /**
+ * Outcome of a forced admin-triggered merchant refresh.
+ *
+ * - `triggered: true`  — this call acquired the lock and the store
+ *   advanced (or the upstream failed, in which case `triggered` is
+ *   still true but the thrown error is the signal).
+ * - `triggered: false` — another refresh was already in flight, so
+ *   this call coalesced into it. The admin sees the post-sync
+ *   `loadedAt` regardless. (Two admins clicking the button at the
+ *   same moment produce one upstream sweep.)
+ */
+export interface RefreshOutcome {
+  triggered: boolean;
+}
+
+/**
  * Fetches all merchant pages from the upstream API and atomically replaces
- * the in-memory store.
+ * the in-memory store. Fire-and-forget — catches and logs any error,
+ * then returns without signalling the caller. The background timer uses
+ * this form; admin handlers call `forceRefreshMerchants()` to get the
+ * outcome + a rethrown error on failure.
  */
 export async function refreshMerchants(): Promise<void> {
-  if (isMerchantRefreshing) return;
+  await refreshMerchantsInternal();
+}
+
+/**
+ * Admin-triggered variant. Returns `{ triggered }` so the caller can
+ * tell a real sweep from a coalesced short-circuit, and rethrows any
+ * upstream error so the handler can map it to a 502 response. Keeps
+ * the background timer's swallow-and-log semantics intact on
+ * `refreshMerchants()`.
+ */
+export async function forceRefreshMerchants(): Promise<RefreshOutcome> {
+  return refreshMerchantsInternal({ rethrow: true });
+}
+
+async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promise<RefreshOutcome> {
+  if (isMerchantRefreshing) return { triggered: false };
   isMerchantRefreshing = true;
   const log = logger.child({ module: 'merchants-sync' });
   log.info('Refreshing merchant data from upstream API');
@@ -181,9 +214,11 @@ export async function refreshMerchants(): Promise<void> {
     log.info({ count: merchants.length }, 'Merchant data refreshed');
   } catch (err) {
     log.error({ err }, 'Failed to refresh merchant data — retaining previous data');
+    if (opts.rethrow === true) throw err;
   } finally {
     isMerchantRefreshing = false;
   }
+  return { triggered: true };
 }
 
 let refreshInterval: NodeJS.Timeout | null = null;

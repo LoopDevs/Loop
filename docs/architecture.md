@@ -262,6 +262,7 @@ GET  /api/admin/users/:userId/credits                   [admin — per-user cred
 GET  /api/admin/users/:userId/cashback-by-merchant       [admin — per-user cashback-by-merchant support triage, ADR 009/015]
 GET  /api/admin/users/:userId/credit-transactions       [admin — per-user credit-ledger log, ADR 009]
 GET  /api/admin/users/:userId/credit-transactions.csv   [admin — per-user credit-ledger CSV for compliance / SAR, ADR 009/015]
+POST /api/admin/merchants/resync                        [admin — force an immediate CTX merchant-catalog sweep, ADR 011]
 ```
 
 Full request/response shapes — including field types, pagination
