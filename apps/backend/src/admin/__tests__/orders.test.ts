@@ -50,6 +50,7 @@ vi.mock('../../db/schema.js', () => ({
     userId: 'user_id',
     state: 'state',
     createdAt: 'created_at',
+    merchantId: 'merchant_id',
   },
 }));
 
@@ -211,6 +212,25 @@ describe('adminListOrdersHandler', () => {
     await adminListOrdersHandler(
       makeCtx({ state: 'paid', userId: uuid, before: '2026-04-20T12:00:00Z' }),
     );
+    expect(dbState.whereCalls).toHaveLength(1);
+  });
+
+  it('accepts a well-formed ?merchantId filter', async () => {
+    dbState.rows = [makeRow({ merchantId: 'm-amazon' })];
+    const res = await adminListOrdersHandler(makeCtx({ merchantId: 'm-amazon' }));
+    expect(res.status).toBe(200);
+    expect(dbState.whereCalls).toHaveLength(1);
+  });
+
+  it('rejects an empty or whitespace-containing ?merchantId with 400', async () => {
+    for (const merchantId of ['', 'has space', 'a'.repeat(129)]) {
+      const res = await adminListOrdersHandler(makeCtx({ merchantId }));
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it('stacks merchantId alongside other filters into a single WHERE', async () => {
+    await adminListOrdersHandler(makeCtx({ state: 'paid', merchantId: 'm-amazon' }));
     expect(dbState.whereCalls).toHaveLength(1);
   });
 
