@@ -6,6 +6,7 @@ export default [
   route('gift-card/:name', 'routes/gift-card.$name.tsx'),
   route('cashback', 'routes/cashback.tsx'),
   route('cashback/:slug', 'routes/cashback.$slug.tsx'),
+  route('sitemap.xml', 'routes/sitemap.tsx'),
   route('auth', 'routes/auth.tsx'),
   route('onboarding', 'routes/onboarding.tsx'),
   route('orders', 'routes/orders.tsx'),
