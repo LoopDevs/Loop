@@ -252,6 +252,7 @@ GET  /api/admin/stuck-orders                            [admin — SLO stuck-in-
 GET  /api/admin/stuck-payouts                           [admin — SLO stuck-in-pending/submitted payouts, ADR 015/016]
 GET  /api/admin/cashback-activity                       [admin — daily cashback-accrual sparkline, ADR 009/015]
 GET  /api/admin/cashback-activity.csv                   [admin — finance CSV export of daily × per-currency accrual, ADR 009/015/018]
+GET  /api/admin/cashback-monthly                        [admin — 12-month fleet-wide per-(month,currency) cashback emissions, ADR 009/015]
 GET  /api/admin/merchant-stats                          [admin — per-merchant cashback stats, ADR 011/015]
 GET  /api/admin/merchant-stats.csv                      [admin — per-merchant CSV for CTX negotiation, ADR 011/015/018]
 GET  /api/admin/merchant-cashback-configs.csv           [admin — snapshot CSV of commercial terms, ADR 011/018]
