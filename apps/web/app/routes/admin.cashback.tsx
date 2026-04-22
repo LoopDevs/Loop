@@ -17,6 +17,7 @@ import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { MerchantResyncButton } from '~/components/features/admin/MerchantResyncButton';
 import { MerchantStatsTable } from '~/components/features/admin/MerchantStatsTable';
+import { MerchantsFlywheelShareCard } from '~/components/features/admin/MerchantsFlywheelShareCard';
 import { Button } from '~/components/ui/Button';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -313,6 +314,31 @@ export default function AdminCashbackRoute(): React.JSX.Element {
         </header>
         <div className="px-6 py-5">
           <MerchantStatsTable />
+        </div>
+      </section>
+
+      {/* Per-merchant flywheel leaderboard (#602). Complement to the
+          stats table above: that table answers "which merchants
+          drive volume / cashback outlay / margin", this leaderboard
+          answers "which merchants see recycled cashback (LOOP-asset
+          paid orders)". The two together triangulate where the
+          flywheel is taking hold. Self-hides on empty/error —
+          first-order volume needs to land before the list is
+          meaningful. */}
+      <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+        <header className="flex flex-wrap items-start justify-between gap-3 px-6 py-4 border-b border-gray-200 dark:border-gray-800">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+              Flywheel leaderboard
+            </h2>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Merchants ranked by recycled-cashback order volume in the last 31 days. Each row
+              deep-links to the underlying order list.
+            </p>
+          </div>
+        </header>
+        <div className="px-6 py-5">
+          <MerchantsFlywheelShareCard />
         </div>
       </section>
     </div>
