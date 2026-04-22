@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ApiException } from '@loop/shared';
 import { getAdminUserFlywheelStats } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
-import { formatMinor, pctBigint } from '~/components/features/cashback/FlywheelChip';
+import { formatMinorCurrency, pctBigint } from '@loop/shared';
 import { Spinner } from '~/components/ui/Spinner';
 
 /**
@@ -84,7 +84,7 @@ export function AdminUserFlywheelChip({ userId }: { userId: string }): React.JSX
       aria-label="Flywheel stats"
     >
       <span className="font-semibold text-green-900 dark:text-green-200">
-        {formatMinor(recycled, stats.currency)}
+        {formatMinorCurrency(recycled, stats.currency)}
       </span>
       <span className="text-xs text-green-800 dark:text-green-300">
         recycled · {stats.recycledOrderCount} {stats.recycledOrderCount === 1 ? 'order' : 'orders'}

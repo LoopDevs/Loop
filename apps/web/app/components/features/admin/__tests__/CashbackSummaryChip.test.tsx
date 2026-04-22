@@ -4,7 +4,8 @@ import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiException } from '@loop/shared';
 import type * as AdminModule from '~/services/admin';
-import { CashbackSummaryChip, formatMinor } from '../CashbackSummaryChip';
+import { formatMinorCurrency as formatMinor } from '@loop/shared';
+import { CashbackSummaryChip } from '../CashbackSummaryChip';
 
 afterEach(cleanup);
 

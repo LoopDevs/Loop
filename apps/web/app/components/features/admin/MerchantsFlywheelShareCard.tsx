@@ -2,7 +2,7 @@ import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { getAdminMerchantsFlywheelShare, type MerchantFlywheelShareRow } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
-import { pctBigint } from '~/components/features/cashback/FlywheelChip';
+import { pctBigint } from '@loop/shared';
 import { Spinner } from '~/components/ui/Spinner';
 
 /**
