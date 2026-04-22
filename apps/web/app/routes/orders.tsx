@@ -12,6 +12,7 @@ import { PageHeader } from '~/components/ui/PageHeader';
 import { OrderRowSkeleton } from '~/components/ui/Skeleton';
 import { Button } from '~/components/ui/Button';
 import { LoopOrdersList } from '~/components/features/orders/LoopOrdersList';
+import { CashbackEarningsHeadline } from '~/components/features/cashback/CashbackEarningsHeadline';
 import { friendlyError } from '~/utils/error-messages';
 import { formatMoney } from '~/utils/money';
 
@@ -133,6 +134,15 @@ export default function OrdersRoute(): React.JSX.Element {
           would double-count and push content ~50px too far down.
           Web: `pt-20` clears the fixed Navbar. */}
       <main className={`max-w-2xl mx-auto px-4 ${isNative ? 'pt-16 pb-4' : 'pt-20 pb-8'}`}>
+        {/* Lifetime cashback headline — silent no-op for zero-earnings
+            users and for anyone who isn't signed in. Sits above the
+            orders list so "earned with Loop" frames the content. */}
+        {isAuthenticated ? (
+          <div className="mb-4">
+            <CashbackEarningsHeadline />
+          </div>
+        ) : null}
+
         {/* Loop-native orders (ADR 010). Rendered above the legacy
             CTX-proxy list when the flag is live in this deployment.
             Silent no-op when the flag is off or the user has no
