@@ -415,6 +415,19 @@ export async function getAdminPayout(id: string): Promise<AdminPayoutView> {
 }
 
 /**
+ * `GET /api/admin/orders/:orderId/payout` — payout associated with an
+ * order. 404 when no payout row exists (cashback hasn't emitted yet,
+ * or the payout builder skipped this order). The order detail page
+ * uses this to surface "where did the on-chain cashback land?"
+ * without making ops search the payouts list.
+ */
+export async function getAdminPayoutByOrder(orderId: string): Promise<AdminPayoutView> {
+  return authenticatedRequest<AdminPayoutView>(
+    `/api/admin/orders/${encodeURIComponent(orderId)}/payout`,
+  );
+}
+
+/**
  * ADR 017 admin-write response envelope. Every admin mutation returns
  * `{ result, audit }`; `audit.replayed: true` means the backend found a
  * prior snapshot for the `Idempotency-Key` and returned the stored
