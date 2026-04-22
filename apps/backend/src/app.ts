@@ -85,6 +85,7 @@ import { adminDiscordNotifiersHandler } from './admin/discord-notifiers.js';
 import { adminDiscordTestHandler } from './admin/discord-test.js';
 import { adminCreditAdjustmentHandler } from './admin/credit-adjustments.js';
 import { publicCashbackStatsHandler } from './public/cashback-stats.js';
+import { publicFlywheelStatsHandler } from './public/flywheel-stats.js';
 import { publicLoopAssetsHandler } from './public/loop-assets.js';
 import { publicTopCashbackMerchantsHandler } from './public/top-cashback-merchants.js';
 import {
@@ -566,6 +567,11 @@ app.get(
 // add trustlines to the verified issuer accounts without guessing
 // from on-chain traffic.
 app.get('/api/public/loop-assets', rateLimit(60, 60_000), publicLoopAssetsHandler);
+// Marketing flywheel scalar — % of fulfilled orders in the last 30
+// days paid via LOOP-asset cashback. Complement to
+// /api/public/cashback-stats (emission) with the recycle side of
+// the story. Never-500; 300s cache on happy path, 60s on fallback.
+app.get('/api/public/flywheel-stats', rateLimit(60, 60_000), publicFlywheelStatsHandler);
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
