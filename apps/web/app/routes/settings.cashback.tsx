@@ -12,7 +12,7 @@
  */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import type { Route } from './+types/settings.cashback';
 import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -353,8 +353,19 @@ function HistoryPage({
                 {entry.referenceType !== null ? (
                   <>
                     {' · '}
-                    <span className="capitalize">{entry.referenceType}</span>
-                    {entry.referenceId !== null ? ` ${entry.referenceId.slice(0, 8)}` : ''}
+                    {entry.referenceType === 'order' && entry.referenceId !== null ? (
+                      <Link
+                        to={`/orders/${entry.referenceId}`}
+                        className="capitalize text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        Order {entry.referenceId.slice(0, 8)}
+                      </Link>
+                    ) : (
+                      <>
+                        <span className="capitalize">{entry.referenceType}</span>
+                        {entry.referenceId !== null ? ` ${entry.referenceId.slice(0, 8)}` : ''}
+                      </>
+                    )}
                   </>
                 ) : null}
               </p>
