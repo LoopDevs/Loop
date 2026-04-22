@@ -9,6 +9,7 @@ import { AdminNav } from '~/components/features/admin/AdminNav';
 import { PayoutsByAssetTable } from '~/components/features/admin/PayoutsByAssetTable';
 import { SupplierSpendCard } from '~/components/features/admin/SupplierSpendCard';
 import { OperatorStatsCard } from '~/components/features/admin/OperatorStatsCard';
+import { TopUsersByPendingPayoutCard } from '~/components/features/admin/TopUsersByPendingPayoutCard';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -357,6 +358,21 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
           filtered to that state.
         </p>
         <PayoutsByAssetTable />
+      </section>
+
+      <section>
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Top users by in-flight payout
+          </h2>
+        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Funding prioritisation leaderboard — users owed the most on-chain payout right now,
+          grouped by (user, asset) so a USDLOOP top-up decision stays independent of the GBPLOOP
+          picture. Email opens the user detail; the payout count drills to that asset's in-flight
+          list (ADR 015/016).
+        </p>
+        <TopUsersByPendingPayoutCard />
       </section>
 
       <section>

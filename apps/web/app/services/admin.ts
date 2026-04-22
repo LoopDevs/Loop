@@ -654,6 +654,40 @@ export async function getAdminUserByEmail(email: string): Promise<AdminUserDetai
   );
 }
 
+/** One entry in the top-users-by-pending-payout leaderboard. */
+export interface TopUserByPendingPayoutEntry {
+  userId: string;
+  email: string;
+  /** LOOP asset code (USDLOOP / GBPLOOP / EURLOOP). */
+  assetCode: string;
+  /** Summed in-flight payout amount, stroops as bigint-string. */
+  totalStroops: string;
+  /** Number of payout rows contributing to totalStroops. */
+  payoutCount: number;
+}
+
+export interface TopUsersByPendingPayoutResponse {
+  entries: TopUserByPendingPayoutEntry[];
+}
+
+/**
+ * `GET /api/admin/users/top-by-pending-payout?limit=` — ranked users
+ * with the most in-flight (pending + submitted) on-chain payout debt,
+ * grouped by (user, asset). Drives ops funding prioritisation on the
+ * treasury page: "who's owed the most USDLOOP right now?" is the first
+ * question before topping up an operator reserve.
+ */
+export async function getTopUsersByPendingPayout(
+  opts: { limit?: number } = {},
+): Promise<TopUsersByPendingPayoutResponse> {
+  const params = new URLSearchParams();
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return authenticatedRequest<TopUsersByPendingPayoutResponse>(
+    `/api/admin/users/top-by-pending-payout${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
 /** One credit-balance row per (user, currency) from `/api/admin/users/:userId/credits`. */
 export interface AdminUserCreditRow {
   currency: string;
