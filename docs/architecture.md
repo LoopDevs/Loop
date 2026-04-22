@@ -254,6 +254,7 @@ GET  /api/admin/supplier-spend                          [admin — per-currency 
 GET  /api/admin/users                                   [admin — paginated user directory w/ email fragment filter]
 GET  /api/admin/users/:userId                           [admin — single-user detail]
 GET  /api/admin/users/:userId/credits                   [admin — per-user credit balance, ADR 009]
+GET  /api/admin/users/:userId/cashback-by-merchant       [admin — per-user cashback-by-merchant support triage, ADR 009/015]
 GET  /api/admin/users/:userId/credit-transactions       [admin — per-user credit-ledger log, ADR 009]
 ```
 

@@ -64,6 +64,7 @@ import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
 import { adminUserCreditTransactionsHandler } from './admin/user-credit-transactions.js';
+import { adminUserCashbackByMerchantHandler } from './admin/user-cashback-by-merchant.js';
 import { adminGetUserHandler } from './admin/user-detail.js';
 import { adminListUsersHandler } from './admin/users-list.js';
 import { adminCreditAdjustmentHandler } from './admin/credit-adjustments.js';
@@ -798,6 +799,15 @@ app.get('/api/admin/users/:userId', rateLimit(120, 60_000), adminGetUserHandler)
 // a support ticket; complements the treasury aggregate which only
 // gives fleet-wide outstanding.
 app.get('/api/admin/users/:userId/credits', rateLimit(120, 60_000), adminUserCreditsHandler);
+// Per-user cashback-by-merchant breakdown — support triage. Answers
+// "user asks why they haven't earned cashback on merchant X" by
+// grouping their cashback ledger rows by source-order merchant.
+// Default window 180d, cap 366d; default limit 25, cap 100.
+app.get(
+  '/api/admin/users/:userId/cashback-by-merchant',
+  rateLimit(120, 60_000),
+  adminUserCashbackByMerchantHandler,
+);
 // Credit-transaction log for a user (ADR 009). Drill-down from the
 // balance endpoint — shows how the balance got there (cashback,
 // withdrawals, refunds, adjustments).

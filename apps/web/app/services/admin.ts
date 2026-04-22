@@ -650,6 +650,46 @@ export async function getAdminUserCredits(userId: string): Promise<AdminUserCred
   );
 }
 
+/**
+ * One row of an admin per-user cashback-by-merchant breakdown.
+ * Admin-facing equivalent of the user's own card — same join on
+ * `credit_transactions.reference_id::uuid = orders.id`, same
+ * ordering, but with the caller resolved from the URL userId.
+ */
+export interface AdminUserCashbackByMerchantRow {
+  merchantId: string;
+  cashbackMinor: string;
+  orderCount: number;
+  lastEarnedAt: string;
+}
+
+export interface AdminUserCashbackByMerchantResponse {
+  userId: string;
+  currency: string;
+  since: string;
+  rows: AdminUserCashbackByMerchantRow[];
+}
+
+/**
+ * `GET /api/admin/users/:userId/cashback-by-merchant` — support
+ * triage breakdown. Default window 180d (cap 366d); default limit
+ * 25 (cap 100).
+ */
+export async function getAdminUserCashbackByMerchant(
+  userId: string,
+  opts: { since?: string; limit?: number } = {},
+): Promise<AdminUserCashbackByMerchantResponse> {
+  const params = new URLSearchParams();
+  if (opts.since !== undefined) params.set('since', opts.since);
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return authenticatedRequest<AdminUserCashbackByMerchantResponse>(
+    `/api/admin/users/${encodeURIComponent(userId)}/cashback-by-merchant${
+      qs.length > 0 ? `?${qs}` : ''
+    }`,
+  );
+}
+
 /** Result shape from a successful credit-adjustment write (ADR 017). */
 export interface CreditAdjustmentResult {
   id: string;
