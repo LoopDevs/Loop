@@ -13,7 +13,7 @@
  * path with the original Idempotency-Key.
  */
 import type { Context } from 'hono';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { adminIdempotencyKeys, users } from '../db/schema.js';
 import { logger } from '../logger.js';
@@ -47,8 +47,21 @@ export async function adminAuditTailHandler(c: Context): Promise<Response> {
   const parsed = Number.parseInt(limitRaw ?? '25', 10);
   const limit = Math.min(Math.max(Number.isNaN(parsed) ? 25 : parsed, 1), 100);
 
+  const beforeRaw = c.req.query('before');
+  let before: Date | undefined;
+  if (beforeRaw !== undefined && beforeRaw.length > 0) {
+    const d = new Date(beforeRaw);
+    if (Number.isNaN(d.getTime())) {
+      return c.json(
+        { code: 'VALIDATION_ERROR', message: 'before must be an ISO-8601 timestamp' },
+        400,
+      );
+    }
+    before = d;
+  }
+
   try {
-    const rows = (await db
+    const base = db
       .select({
         adminUserId: adminIdempotencyKeys.adminUserId,
         method: adminIdempotencyKeys.method,
@@ -58,7 +71,10 @@ export async function adminAuditTailHandler(c: Context): Promise<Response> {
         actorEmail: users.email,
       })
       .from(adminIdempotencyKeys)
-      .innerJoin(users, eq(adminIdempotencyKeys.adminUserId, users.id))
+      .innerJoin(users, eq(adminIdempotencyKeys.adminUserId, users.id));
+    const filtered =
+      before === undefined ? base : base.where(sql`${adminIdempotencyKeys.createdAt} < ${before}`);
+    const rows = (await filtered
       .orderBy(desc(adminIdempotencyKeys.createdAt))
       .limit(limit)) as DbRow[];
 

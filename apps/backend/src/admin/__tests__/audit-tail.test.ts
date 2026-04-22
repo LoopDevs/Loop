@@ -5,6 +5,7 @@ const state = vi.hoisted(() => ({
   rows: [] as Array<Record<string, unknown>>,
   throwErr: null as Error | null,
   limitArg: null as null | number,
+  whereCalled: false,
 }));
 
 vi.mock('../../db/client.js', () => {
@@ -14,6 +15,10 @@ vi.mock('../../db/client.js', () => {
       select: () => api,
       from: () => api,
       innerJoin: () => api,
+      where: () => {
+        state.whereCalled = true;
+        return api;
+      },
       orderBy: () => api,
       limit: (n: unknown) => {
         state.limitArg = typeof n === 'number' ? n : null;
@@ -46,6 +51,10 @@ vi.mock('drizzle-orm', async () => {
     ...actual,
     desc: (v: unknown) => v,
     eq: (_a: unknown, _b: unknown) => true,
+    sql: Object.assign(
+      (strings: TemplateStringsArray, ..._values: unknown[]) => ({ sql: strings.join('?') }),
+      {},
+    ),
   };
 });
 
@@ -74,6 +83,7 @@ beforeEach(() => {
   state.rows = [];
   state.throwErr = null;
   state.limitArg = null;
+  state.whereCalled = false;
 });
 
 describe('adminAuditTailHandler', () => {
@@ -119,5 +129,24 @@ describe('adminAuditTailHandler', () => {
     state.throwErr = new Error('db down');
     const res = await adminAuditTailHandler(makeCtx());
     expect(res.status).toBe(500);
+  });
+
+  it('skips the where() clause when no before cursor is given', async () => {
+    await adminAuditTailHandler(makeCtx());
+    expect(state.whereCalled).toBe(false);
+  });
+
+  it('applies a where() clause when before is a valid ISO timestamp', async () => {
+    const res = await adminAuditTailHandler(makeCtx({ before: '2026-04-22T12:00:00Z' }));
+    expect(res.status).toBe(200);
+    expect(state.whereCalled).toBe(true);
+  });
+
+  it('400s when before is not a parseable timestamp', async () => {
+    const res = await adminAuditTailHandler(makeCtx({ before: 'not-a-date' }));
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(state.whereCalled).toBe(false);
   });
 });
