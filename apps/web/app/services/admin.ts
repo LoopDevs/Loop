@@ -115,6 +115,38 @@ export interface PayoutsByAssetRow {
  * `(asset_code, state)`. Answers "which LOOP assets are affected
  * when I see N failed payouts?" at a glance.
  */
+/** Per-currency minor-unit amount on a single day. */
+export interface PerCurrencyAmount {
+  currency: string;
+  amountMinor: string;
+}
+
+/**
+ * One day of cashback accrual — count of `cashback`-type transactions
+ * plus per-currency minor sums. `byCurrency` is empty on zero-activity
+ * days so the UI can render a gap without an extra branch on count.
+ */
+export interface CashbackActivityDay {
+  day: string;
+  count: number;
+  byCurrency: PerCurrencyAmount[];
+}
+
+export interface CashbackActivityResponse {
+  days: number;
+  rows: CashbackActivityDay[];
+}
+
+/**
+ * `GET /api/admin/cashback-activity` — oldest-first N-day series of
+ * cashback-type `credit_transactions` accrual. Default 30 days; caller
+ * passes `?days=<N>` to override (server clamps [1, 180]).
+ */
+export async function getCashbackActivity(days?: number): Promise<CashbackActivityResponse> {
+  const qs = days !== undefined ? `?days=${days}` : '';
+  return authenticatedRequest<CashbackActivityResponse>(`/api/admin/cashback-activity${qs}`);
+}
+
 export async function getPayoutsByAsset(): Promise<{ rows: PayoutsByAssetRow[] }> {
   return authenticatedRequest<{ rows: PayoutsByAssetRow[] }>('/api/admin/payouts-by-asset');
 }

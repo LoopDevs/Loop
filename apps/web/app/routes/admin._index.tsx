@@ -10,6 +10,7 @@ import {
   failedPayoutsCount,
   operatorPoolStatus,
 } from '~/components/features/admin/AdminNav';
+import { CashbackSparkline } from '~/components/features/admin/CashbackSparkline';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -166,6 +167,8 @@ export default function AdminIndexRoute(): React.JSX.Element {
           </Link>
         </section>
       )}
+
+      {denied ? null : <CashbackSparkline />}
 
       <section className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {CARDS.map((card) => (
