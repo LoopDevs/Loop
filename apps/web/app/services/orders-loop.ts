@@ -16,7 +16,7 @@ export type LoopOrderState =
   | 'failed'
   | 'expired';
 
-export type LoopOrderPaymentMethod = 'xlm' | 'usdc' | 'credit';
+export type LoopOrderPaymentMethod = 'xlm' | 'usdc' | 'credit' | 'loop_asset';
 
 export interface CreateLoopOrderBody {
   merchantId: string;

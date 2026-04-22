@@ -75,6 +75,12 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
   // the backend recorded zero (e.g. a margin-only merchant or a
   // pre-ADR-011 order) rather than printing "+0.00 cashback".
   const hasEarnedCashback = isFulfilled && order.userCashbackMinor !== '0';
+  // ADR 015 — flag orders paid with LOOP-asset cashback the user
+  // earned earlier. The "♻️ Recycled" pill sits next to the state
+  // pill so scanning the list makes it obvious which rows closed
+  // the flywheel loop. Always shown regardless of state — a failed
+  // or pending loop_asset order still demonstrates intent.
+  const isRecycled = order.paymentMethod === 'loop_asset';
 
   return (
     <li>
@@ -99,6 +105,7 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
               </div>
             ) : null}
           </div>
+          {isRecycled ? <RecycledPill /> : null}
           <StatePill state={order.state} />
         </div>
       </button>
@@ -141,6 +148,26 @@ function StatePill({ state }: { state: LoopOrderView['state'] }): React.JSX.Elem
   return (
     <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${color}`}>
       {loopOrderStateLabel(state)}
+    </span>
+  );
+}
+
+/**
+ * Inline "♻️ Recycled" pill for orders paid with LOOP-asset
+ * cashback the user earned earlier. Semantic: "this purchase
+ * closed the flywheel loop". Sits beside the state pill; green
+ * regardless of order state — intent-based signal, not
+ * outcome-based.
+ */
+function RecycledPill(): React.JSX.Element {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-300"
+      aria-label="Paid with recycled cashback"
+      title="You paid for this order with LOOP-asset cashback you earned on earlier orders."
+    >
+      <span aria-hidden="true">♻️</span>
+      Recycled
     </span>
   );
 }
