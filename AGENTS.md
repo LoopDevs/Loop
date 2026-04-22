@@ -29,6 +29,7 @@
 | `docs/adr/015-stablecoin-topology-and-payment-rails.md`     | USDLOOP/GBPLOOP/EURLOOP + USDC + XLM asset flows              |
 | `docs/adr/016-stellar-sdk-payout-submit.md`                 | Stellar SDK for outbound payout submit + retry + idempotency  |
 | `docs/adr/017-admin-credit-primitives.md`                   | Admin-write invariants: actor, idempotency, reason, audit     |
+| `docs/adr/018-admin-panel-architecture.md`                  | Admin drill-down / triage / CSV compliance pattern            |
 
 ---
 
