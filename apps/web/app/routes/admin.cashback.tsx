@@ -269,13 +269,24 @@ export default function AdminCashbackRoute(): React.JSX.Element {
               on a high-volume merchant outweigh big tweaks on the long tail.
             </p>
           </div>
-          {/* Finance export — daily × per-currency cashback accrual
-              over the last 31 days. Matches the month-end reconciliation
-              cadence ops runs manually at close. */}
-          <CsvDownloadButton
-            path="/api/admin/cashback-activity.csv"
-            filename={`cashback-activity-${new Date().toISOString().slice(0, 10)}.csv`}
-          />
+          {/* Two exports — both live on this section since it's the
+              page's finance-/ops-export row. Activity = daily × per-
+              currency accrual (month-end reconciliation), merchant-
+              stats = flat per-merchant ranking (CTX negotiation deck).
+              The buttons each carry their own label so ops doesn't
+              click the wrong one. */}
+          <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+            <CsvDownloadButton
+              path="/api/admin/cashback-activity.csv"
+              filename={`cashback-activity-${new Date().toISOString().slice(0, 10)}.csv`}
+              label="Daily accrual CSV"
+            />
+            <CsvDownloadButton
+              path="/api/admin/merchant-stats.csv"
+              filename={`merchant-stats-${new Date().toISOString().slice(0, 10)}.csv`}
+              label="Per-merchant CSV"
+            />
+          </div>
         </header>
         <div className="px-6 py-5">
           <MerchantStatsTable />

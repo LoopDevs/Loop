@@ -61,6 +61,7 @@ import { adminStuckPayoutsHandler } from './admin/stuck-payouts.js';
 import { adminCashbackActivityHandler } from './admin/cashback-activity.js';
 import { adminCashbackActivityCsvHandler } from './admin/cashback-activity-csv.js';
 import { adminMerchantStatsHandler } from './admin/merchant-stats.js';
+import { adminMerchantStatsCsvHandler } from './admin/merchant-stats-csv.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
@@ -771,6 +772,10 @@ app.get('/api/admin/cashback-activity.csv', rateLimit(10, 60_000), adminCashback
 // cashback outlay / margin. Distinct from supplier-spend (currency
 // grouped) — this one groups by merchant.
 app.get('/api/admin/merchant-stats', rateLimit(60, 60_000), adminMerchantStatsHandler);
+// Finance / negotiation CSV — flattened per-merchant stats for
+// the CTX rate-deck spreadsheet. Tier-3 rate limit matches the
+// other admin CSV exports.
+app.get('/api/admin/merchant-stats.csv', rateLimit(10, 60_000), adminMerchantStatsCsvHandler);
 // Given an order id, return the single pending_payouts row for it.
 // Nested under /orders/:orderId so the UI can link from the order
 // drill-down straight to the payout state without a separate fetch.
