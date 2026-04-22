@@ -475,6 +475,43 @@ const AdminCreditTransactionListResponse = registry.register(
   z.object({ transactions: z.array(AdminCreditTransactionView) }),
 );
 
+// ─── Admin — Loop-native order view (ADR 011 / 015) ─────────────────────────
+
+const AdminOrderState = z
+  .enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired'])
+  .openapi({ description: 'Mirrors the CHECK constraint on orders.state.' });
+
+const AdminOrderPaymentMethod = z.enum(['xlm', 'usdc', 'credit', 'loop_asset']);
+
+const AdminOrderView = registry.register(
+  'AdminOrderView',
+  z.object({
+    id: z.string().uuid(),
+    userId: z.string().uuid(),
+    merchantId: z.string(),
+    state: AdminOrderState,
+    currency: z.string().length(3),
+    faceValueMinor: z.string(),
+    chargeCurrency: z.string().length(3),
+    chargeMinor: z.string(),
+    paymentMethod: AdminOrderPaymentMethod,
+    wholesalePct: z.string(),
+    userCashbackPct: z.string(),
+    loopMarginPct: z.string(),
+    wholesaleMinor: z.string(),
+    userCashbackMinor: z.string(),
+    loopMarginMinor: z.string(),
+    ctxOrderId: z.string().nullable(),
+    ctxOperatorId: z.string().nullable(),
+    failureReason: z.string().nullable(),
+    createdAt: z.string().datetime(),
+    paidAt: z.string().datetime().nullable(),
+    procuredAt: z.string().datetime().nullable(),
+    fulfilledAt: z.string().datetime().nullable(),
+    failedAt: z.string().datetime().nullable(),
+  }),
+);
+
 // ─── Admin — cashback-config (ADR 011) ──────────────────────────────────────
 //
 // Percentages are stored as `numeric(5,2)` and round-trip as strings
@@ -1369,6 +1406,49 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error resetting the row',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/orders/{orderId}',
+  summary: 'Single Loop-native order drill-down (ADR 011 / 015).',
+  description:
+    'Permalink view for one `orders` row. Admin UI deep-links each row from the list page to this endpoint so ops can quote an order id in a ticket or incident note. Gift-card fields (redeem_code / redeem_pin) are omitted — the admin view is for diagnosis, not redemption.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ orderId: z.string().uuid() }),
+  },
+  responses: {
+    200: {
+      description: 'Order row',
+      content: { 'application/json': { schema: AdminOrderView } },
+    },
+    400: {
+      description: 'Missing or malformed orderId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'Order not found',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading the row',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },

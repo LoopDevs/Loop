@@ -47,18 +47,20 @@ vi.mock('../../db/client.js', () => {
 });
 vi.mock('../../db/schema.js', () => ({
   orders: {
+    id: 'id',
     userId: 'user_id',
     state: 'state',
     createdAt: 'created_at',
   },
 }));
 
-import { adminListOrdersHandler } from '../orders.js';
+import { adminGetOrderHandler, adminListOrdersHandler } from '../orders.js';
 
-function makeCtx(query: Record<string, string> = {}): Context {
+function makeCtx(query: Record<string, string> = {}, params: Record<string, string> = {}): Context {
   return {
     req: {
       query: (k: string) => query[k],
+      param: (k: string) => params[k],
     },
     json: (body: unknown, status?: number) =>
       new Response(JSON.stringify(body), {
@@ -217,6 +219,47 @@ describe('adminListOrdersHandler', () => {
   it('500s when the db read throws', async () => {
     dbState.throwOnLimit = true;
     const res = await adminListOrdersHandler(makeCtx());
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('adminGetOrderHandler', () => {
+  const validId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+
+  it('400 when orderId is missing', async () => {
+    const res = await adminGetOrderHandler(makeCtx({}, {}));
+    expect(res.status).toBe(400);
+  });
+
+  it('400 when orderId is not a uuid', async () => {
+    const res = await adminGetOrderHandler(makeCtx({}, { orderId: 'not-a-uuid' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('404 when the row is not found', async () => {
+    dbState.rows = [];
+    const res = await adminGetOrderHandler(makeCtx({}, { orderId: validId }));
+    expect(res.status).toBe(404);
+  });
+
+  it('returns the admin-shaped view on hit', async () => {
+    dbState.rows = [makeRow({ id: validId, state: 'fulfilled' })];
+    const res = await adminGetOrderHandler(makeCtx({}, { orderId: validId }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      id: validId,
+      state: 'fulfilled',
+      faceValueMinor: '5000',
+      wholesaleMinor: '3200',
+      userCashbackMinor: '600',
+      loopMarginMinor: '200',
+    });
+  });
+
+  it('500 when the db read throws', async () => {
+    dbState.throwOnLimit = true;
+    const res = await adminGetOrderHandler(makeCtx({}, { orderId: validId }));
     expect(res.status).toBe(500);
   });
 });

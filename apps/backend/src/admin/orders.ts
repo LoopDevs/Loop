@@ -102,6 +102,37 @@ function rowToView(row: typeof orders.$inferSelect): AdminOrderView {
   };
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Single-order drill-down. The admin UI links each row in the
+ * list view at `/api/admin/orders` to this permalink so ops can
+ * quote one id in a ticket or incident note. Also the entry point
+ * when the operator starts from a user-reported order id.
+ *
+ * 400 on missing / non-uuid id, 404 when the row doesn't exist,
+ * 500 on repo throw.
+ */
+export async function adminGetOrderHandler(c: Context): Promise<Response> {
+  const orderId = c.req.param('orderId');
+  if (orderId === undefined || orderId.length === 0) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'orderId is required' }, 400);
+  }
+  if (!UUID_RE.test(orderId)) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'orderId must be a uuid' }, 400);
+  }
+  try {
+    const [row] = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
+    if (row === undefined) {
+      return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);
+    }
+    return c.json<AdminOrderView>(rowToView(row));
+  } catch (err) {
+    log.error({ err, orderId }, 'Admin order detail failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch order' }, 500);
+  }
+}
+
 export async function adminListOrdersHandler(c: Context): Promise<Response> {
   const stateRaw = c.req.query('state');
   if (stateRaw !== undefined && !(ORDER_STATES as ReadonlyArray<string>).includes(stateRaw)) {
