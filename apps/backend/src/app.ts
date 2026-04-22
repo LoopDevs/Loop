@@ -67,6 +67,7 @@ import { adminCashbackActivityCsvHandler } from './admin/cashback-activity-csv.j
 import { adminCashbackMonthlyHandler } from './admin/cashback-monthly.js';
 import { adminMerchantStatsHandler } from './admin/merchant-stats.js';
 import { adminMerchantStatsCsvHandler } from './admin/merchant-stats-csv.js';
+import { adminMerchantsFlywheelShareHandler } from './admin/merchants-flywheel-share.js';
 import { adminCashbackConfigsCsvHandler } from './admin/cashback-configs-csv.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
@@ -857,6 +858,15 @@ app.get('/api/admin/merchant-stats', rateLimit(60, 60_000), adminMerchantStatsHa
 // the CTX rate-deck spreadsheet. Tier-3 rate limit matches the
 // other admin CSV exports.
 app.get('/api/admin/merchant-stats.csv', rateLimit(10, 60_000), adminMerchantStatsCsvHandler);
+// Per-merchant flywheel leaderboard — which merchants see the most
+// recycled-cashback traffic. Merchant-axis cousin of /orders/payment-
+// method-share (fleet) + /orders/payment-method-activity (time).
+// Zero-recycle merchants filtered out; sorted by recycled-count desc.
+app.get(
+  '/api/admin/merchants/flywheel-share',
+  rateLimit(60, 60_000),
+  adminMerchantsFlywheelShareHandler,
+);
 // Given an order id, return the single pending_payouts row for it.
 // Nested under /orders/:orderId so the UI can link from the order
 // drill-down straight to the payout state without a separate fetch.
