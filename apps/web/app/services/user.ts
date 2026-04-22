@@ -154,3 +154,21 @@ export interface UserCreditsResponse {
 export async function getMyCredits(): Promise<UserCreditsResponse> {
   return authenticatedRequest<UserCreditsResponse>('/api/users/me/credits');
 }
+
+/**
+ * Compact cashback summary — all-time + this-month totals in the
+ * caller's home currency. Powers the mobile home headline
+ * ("£42 lifetime · £3.20 this month") without paging the ledger.
+ * Both totals are `type='cashback'` rows only, so spend /
+ * withdrawal / adjustment don't muddy the earnings number.
+ */
+export interface UserCashbackSummary {
+  currency: string;
+  lifetimeMinor: string;
+  thisMonthMinor: string;
+}
+
+/** `GET /api/users/me/cashback-summary` */
+export async function getCashbackSummary(): Promise<UserCashbackSummary> {
+  return authenticatedRequest<UserCashbackSummary>('/api/users/me/cashback-summary');
+}
