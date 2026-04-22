@@ -256,6 +256,7 @@ GET  /api/admin/orders/:orderId/payout                  [admin — payout row fo
 GET  /api/admin/supplier-spend                          [admin — per-currency supplier spend, ADR 013/015]
 GET  /api/admin/users                                   [admin — paginated user directory w/ email fragment filter]
 GET  /api/admin/users/by-email?email=                   [admin — exact-match user lookup for support-ticket workflow]
+GET  /api/admin/users/top-by-pending-payout             [admin — ops funding prioritisation leaderboard, ADR 015/016]
 GET  /api/admin/users/:userId                           [admin — single-user detail]
 GET  /api/admin/users/:userId/credits                   [admin — per-user credit balance, ADR 009]
 GET  /api/admin/users/:userId/cashback-by-merchant       [admin — per-user cashback-by-merchant support triage, ADR 009/015]
