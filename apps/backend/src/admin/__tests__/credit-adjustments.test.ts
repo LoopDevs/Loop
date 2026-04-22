@@ -7,6 +7,16 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
+// Capture the Discord audit signal so tests can assert on it without
+// wiring a real webhook mock. Hoisted so the module-level vi.mock
+// below picks up the same reference.
+const { mockNotifyAdmin } = vi.hoisted(() => ({
+  mockNotifyAdmin: vi.fn(),
+}));
+vi.mock('../../discord.js', () => ({
+  notifyAdminCreditAdjustment: mockNotifyAdmin,
+}));
+
 /**
  * Drizzle chain mock driven by the table name passed to `.from(table)`.
  * Each table has its own FIFO of rows dequeued on either `.limit(N)`
@@ -145,6 +155,7 @@ beforeEach(() => {
   txnState.insertReturn.clear();
   txnState.onInsert = null;
   txnState.onUpdate = null;
+  mockNotifyAdmin.mockReset();
 });
 
 const VALID_UUID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -300,5 +311,77 @@ describe('adminCreditAdjustmentHandler', () => {
     expect(res.status).toBe(409);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('INSUFFICIENT_BALANCE');
+  });
+
+  it('fires notifyAdminCreditAdjustment after a successful write with the final shape', async () => {
+    enqueue('users', [{ id: VALID_UUID, homeCurrency: 'GBP' }]);
+    enqueue('userCredits', [{ balanceMinor: 1000n }]);
+    txnState.insertReturn.set('creditTransactions', [
+      {
+        id: 'ledger-n',
+        userId: VALID_UUID,
+        type: 'adjustment',
+        amountMinor: 500n,
+        currency: 'GBP',
+        referenceType: 'admin_adjustment',
+        referenceId: ADMIN_UUID,
+        note: 'notify-fires test',
+        createdAt: new Date('2026-04-22T10:00:00.000Z'),
+      },
+    ]);
+    const res = await adminCreditAdjustmentHandler(
+      makeCtx({
+        userId: VALID_UUID,
+        body: { amountMinor: '500', currency: 'GBP', note: 'notify-fires test' },
+        admin: { id: ADMIN_UUID },
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(mockNotifyAdmin).toHaveBeenCalledTimes(1);
+    const [args] = mockNotifyAdmin.mock.calls[0] as [
+      {
+        targetUserId: string;
+        adminId: string;
+        currency: string;
+        amountMinor: string;
+        newBalanceMinor: string;
+        note: string;
+      },
+    ];
+    expect(args).toEqual({
+      targetUserId: VALID_UUID,
+      adminId: ADMIN_UUID,
+      currency: 'GBP',
+      amountMinor: '500',
+      newBalanceMinor: '1500',
+      note: 'notify-fires test',
+    });
+  });
+
+  it('does NOT fire notifyAdminCreditAdjustment when the write fails (409 insufficient balance)', async () => {
+    enqueue('users', [{ id: VALID_UUID, homeCurrency: 'GBP' }]);
+    enqueue('userCredits', [{ balanceMinor: 100n }]);
+    const res = await adminCreditAdjustmentHandler(
+      makeCtx({
+        userId: VALID_UUID,
+        body: { amountMinor: '-500', currency: 'GBP', note: 'overdraft' },
+        admin: { id: ADMIN_UUID },
+      }),
+    );
+    expect(res.status).toBe(409);
+    expect(mockNotifyAdmin).not.toHaveBeenCalled();
+  });
+
+  it('does NOT fire notifyAdminCreditAdjustment when validation fails (currency mismatch)', async () => {
+    enqueue('users', [{ id: VALID_UUID, homeCurrency: 'GBP' }]);
+    const res = await adminCreditAdjustmentHandler(
+      makeCtx({
+        userId: VALID_UUID,
+        body: { amountMinor: '100', currency: 'USD', note: 'mismatch' },
+        admin: { id: ADMIN_UUID },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockNotifyAdmin).not.toHaveBeenCalled();
   });
 });

@@ -29,6 +29,7 @@ import { z } from 'zod';
 import { and, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { users, userCredits, creditTransactions, HOME_CURRENCIES } from '../db/schema.js';
+import { notifyAdminCreditAdjustment } from '../discord.js';
 import type { User } from '../db/users.js';
 import { logger } from '../logger.js';
 
@@ -208,6 +209,20 @@ export async function adminCreditAdjustmentHandler(c: Context): Promise<Response
       currency: balance.currency,
       balanceMinor: balance.balanceMinor.toString(),
     };
+
+    // Fire the audit webhook after the txn commits so a flaky
+    // Discord / network hop doesn't stretch the DB lock. sendWebhook
+    // is itself fire-and-forget — a failure inside it logs a warn
+    // but never throws back into the response path.
+    notifyAdminCreditAdjustment({
+      targetUserId: userId,
+      adminId: admin.id,
+      currency: parsed.data.currency,
+      amountMinor: entryView.amountMinor,
+      newBalanceMinor: balanceView.balanceMinor,
+      note: parsed.data.note,
+    });
+
     return c.json({ entry: entryView, balance: balanceView }, 201);
   } catch (err) {
     if (err instanceof InsufficientBalanceError) {

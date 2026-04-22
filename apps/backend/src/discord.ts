@@ -92,6 +92,26 @@ function formatAmount(amount: number, currency: string): string {
   return symbol !== undefined ? `${symbol}${body} ${code}` : `${body} ${code}`;
 }
 
+/**
+ * Minor-unit bigint-string → human currency string. Bigint-safe so
+ * a cashback of 250000 on a GBP order renders as £2,500.00 without
+ * float drift. Negative values keep their sign; unknown currencies
+ * fall back to "<amount> <code>" without a symbol.
+ */
+function formatMinorAmount(minorStr: string, currency: string): string {
+  const negative = minorStr.startsWith('-');
+  const digits = negative ? minorStr.slice(1) : minorStr;
+  const padded = digits.padStart(3, '0');
+  const whole = padded.slice(0, -2);
+  const fraction = padded.slice(-2);
+  const sign = negative ? '-' : '';
+  const code = currency.toUpperCase();
+  const symbol = CURRENCY_SYMBOLS[code];
+  const wholeWithSeparators = Number(whole).toLocaleString('en-US');
+  const body = `${wholeWithSeparators}.${fraction}`;
+  return symbol !== undefined ? `${sign}${symbol}${body} ${code}` : `${sign}${body} ${code}`;
+}
+
 /** Notify: new order created */
 export function notifyOrderCreated(
   orderId: string,
@@ -219,6 +239,60 @@ export function notifyUsdcBelowFloor(args: {
     fields: [
       { name: 'Balance (stroops)', value: escapeMarkdown(args.balanceStroops), inline: true },
       { name: 'Floor (stroops)', value: escapeMarkdown(args.floorStroops), inline: true },
+    ],
+  });
+}
+
+/**
+ * Notify: an admin wrote a manual credit adjustment (ADR 017).
+ * Fires to the monitoring channel so every support-initiated ledger
+ * write is visible real-time, not buried in structured logs. The
+ * signal is operational audit — "who changed what, for whom, when"
+ * — not a user-facing event; the orders channel is wrong because
+ * these aren't customer transactions.
+ *
+ * `amountMinor` is the signed bigint-string (positive credit,
+ * negative debit); `newBalanceMinor` is the user's balance after
+ * the write, so ops can sanity-check without clicking through.
+ */
+export function notifyAdminCreditAdjustment(args: {
+  targetUserId: string;
+  adminId: string;
+  currency: string;
+  amountMinor: string;
+  newBalanceMinor: string;
+  note: string;
+}): void {
+  const isDebit = args.amountMinor.startsWith('-');
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: isDebit ? '🟠 Admin Credit Debit' : '🟢 Admin Credit',
+    color: isDebit ? ORANGE : GREEN,
+    fields: [
+      {
+        name: 'Admin',
+        value: `\`${escapeMarkdown(args.adminId.slice(0, 8))}…\``,
+        inline: true,
+      },
+      {
+        name: 'Target user',
+        value: `\`${escapeMarkdown(args.targetUserId.slice(0, 8))}…\``,
+        inline: true,
+      },
+      {
+        name: 'Amount',
+        value: formatMinorAmount(args.amountMinor, args.currency),
+        inline: true,
+      },
+      {
+        name: 'New balance',
+        value: formatMinorAmount(args.newBalanceMinor, args.currency),
+        inline: true,
+      },
+      {
+        name: 'Note',
+        value: truncate(escapeMarkdown(args.note), FIELD_VALUE_MAX),
+        inline: false,
+      },
     ],
   });
 }
