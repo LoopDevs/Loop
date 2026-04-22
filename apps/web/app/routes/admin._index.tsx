@@ -11,6 +11,7 @@ import {
   operatorPoolStatus,
 } from '~/components/features/admin/AdminNav';
 import { CashbackSparkline } from '~/components/features/admin/CashbackSparkline';
+import { StuckOrdersCard } from '~/components/features/admin/StuckOrdersCard';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -154,17 +155,7 @@ export default function AdminIndexRoute(): React.JSX.Element {
               {failed}
             </div>
           </Link>
-          <Link
-            to="/admin/treasury"
-            className="rounded-xl border border-gray-200 bg-white p-4 hover:border-gray-400 dark:border-gray-800 dark:bg-gray-900 dark:hover:border-gray-600"
-          >
-            <div className="text-xs font-medium text-gray-500 dark:text-gray-400">
-              Outstanding currencies
-            </div>
-            <div className="mt-1 text-base font-semibold text-gray-900 dark:text-white tabular-nums">
-              {Object.keys(snapshotQuery.data.outstanding).length}
-            </div>
-          </Link>
+          <StuckOrdersCard />
         </section>
       )}
 
