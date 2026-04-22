@@ -115,6 +115,7 @@ import { getCashbackByMerchantHandler } from './users/cashback-by-merchant.js';
 import { getCashbackMonthlyHandler } from './users/cashback-monthly.js';
 import { getUserOrdersSummaryHandler } from './users/orders-summary.js';
 import { getUserFlywheelStatsHandler } from './users/flywheel-stats.js';
+import { getUserPaymentMethodShareHandler } from './users/payment-method-share.js';
 
 export const app = new Hono();
 
@@ -746,6 +747,17 @@ app.get('/api/users/me/orders/summary', rateLimit(60, 60_000), getUserOrdersSumm
 // /orders: "You've recycled £X of cashback across Y orders". User-
 // side mirror of /api/admin/orders/payment-method-share. One query.
 app.get('/api/users/me/flywheel-stats', rateLimit(60, 60_000), getUserFlywheelStatsHandler);
+// User-facing rail mix (#643) — self-view of the caller's own
+// orders-by-payment-method, home-currency locked. Drives a
+// forthcoming "your rail mix" card on /settings/cashback so
+// users can see their own LOOP-asset share and the app can
+// nudge toward LOOP for compounding cashback. Same zero-fill +
+// default ?state=fulfilled as the admin siblings.
+app.get(
+  '/api/users/me/payment-method-share',
+  rateLimit(60, 60_000),
+  getUserPaymentMethodShareHandler,
+);
 
 // ─── Admin (authenticated + admin-flagged) ──────────────────────────────────
 //
