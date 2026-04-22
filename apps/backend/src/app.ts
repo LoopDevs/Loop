@@ -37,6 +37,7 @@ import {
   loopListOrdersHandler,
 } from './orders/loop-handler.js';
 import { configHandler } from './config/handler.js';
+import { publicStatsHandler } from './public/stats.js';
 import { googleSocialLoginHandler, appleSocialLoginHandler } from './auth/social.js';
 import { notifyHealthChange } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
@@ -461,6 +462,12 @@ app.get('/api/clusters', rateLimit(60, 60_000), clustersHandler);
 // response is Cache-Control: max-age=600 so a healthy client hits
 // it rarely.
 app.get('/api/config', rateLimit(120, 60_000), configHandler);
+
+// Public marketing aggregates (ADR 009 surface). Unauthenticated and
+// aggressively cached (Cache-Control: max-age=3600) — a campaign
+// landing page should serve from CDN, not the backend. Rate limit
+// lower than /api/config: this is a heavier query, lighter cadence.
+app.get('/api/public/stats', rateLimit(60, 60_000), publicStatsHandler);
 
 // ─── Image proxy ──────────────────────────────────────────────────────────────
 

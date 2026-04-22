@@ -503,6 +503,42 @@ const ClusterResponse = registry.register(
   }),
 );
 
+// ─── Public marketing aggregates (ADR 009) ──────────────────────────────────
+
+const PublicStatsResponse = registry.register(
+  'PublicStatsResponse',
+  z.object({
+    paidCashbackMinor: z.record(z.string(), z.string()).openapi({
+      description:
+        'Lifetime cashback paid, keyed by currency. Minor units, bigint-string. Excludes negative-sign rows.',
+    }),
+    paidUserCount: z.string().openapi({
+      description: 'Distinct users with at least one cashback credit. BigInt-string count.',
+    }),
+    merchantsWithOrders: z.string().openapi({
+      description: 'Distinct merchants with at least one fulfilled order. BigInt-string count.',
+    }),
+    fulfilledOrderCount: z.string().openapi({
+      description: 'Total fulfilled orders lifetime. BigInt-string count.',
+    }),
+  }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/public/stats',
+  summary: 'Marketing-surface aggregates (lifetime cashback / user / merchant / order counts).',
+  description:
+    "Unauthenticated. Cached one hour (`Cache-Control: public, max-age=3600`). Response degrades to zero-shape with a short cache on a DB failure so the marketing home can't 500.",
+  tags: ['Public'],
+  responses: {
+    200: {
+      description: 'Aggregates',
+      content: { 'application/json': { schema: PublicStatsResponse } },
+    },
+  },
+});
+
 // ─── Health / metrics ───────────────────────────────────────────────────────
 
 const HealthResponse = registry.register(
