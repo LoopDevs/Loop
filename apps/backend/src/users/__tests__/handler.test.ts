@@ -114,12 +114,18 @@ const { payoutState } = vi.hoisted(() => ({
       before?: Date;
       limit?: number;
     }>,
+    singleRow: null as unknown,
+    singleCalls: [] as Array<{ id: string; userId: string }>,
   },
 }));
 vi.mock('../../credits/pending-payouts.js', () => ({
   listPayoutsForUser: vi.fn(async (userId: string, opts: Record<string, unknown> = {}) => {
     payoutState.calls.push({ userId, ...opts });
     return payoutState.rows;
+  }),
+  getPayoutForUser: vi.fn(async (id: string, userId: string) => {
+    payoutState.singleCalls.push({ id, userId });
+    return payoutState.singleRow;
   }),
 }));
 
@@ -137,6 +143,7 @@ vi.mock('../../auth/jwt.js', () => ({
 import {
   getCashbackHistoryHandler,
   getMeHandler,
+  getUserPendingPayoutDetailHandler,
   getUserPendingPayoutsHandler,
   setHomeCurrencyHandler,
   setStellarAddressHandler,
@@ -146,6 +153,7 @@ function makeCtx(
   auth: LoopAuthContext | undefined,
   body?: unknown,
   query?: Record<string, string>,
+  params?: Record<string, string>,
 ): Context {
   const store = new Map<string, unknown>();
   if (auth !== undefined) store.set('auth', auth);
@@ -153,6 +161,7 @@ function makeCtx(
     req: {
       json: async () => body,
       query: (k: string) => query?.[k],
+      param: (k: string) => params?.[k],
     },
     get: (k: string) => store.get(k),
     json: (responseBody: unknown, status?: number) =>
@@ -175,6 +184,8 @@ beforeEach(() => {
   dbState.homeBalanceMinor = null;
   payoutState.rows = [];
   payoutState.calls = [];
+  payoutState.singleRow = null;
+  payoutState.singleCalls = [];
 });
 
 describe('getMeHandler', () => {
@@ -659,6 +670,103 @@ describe('getUserPendingPayoutsHandler', () => {
     jwtState.claims = { sub: 'ctx-err', email: 'e@x.com' };
     userState.upsertThrow = new Error('db down');
     const res = await getUserPendingPayoutsHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('getUserPendingPayoutDetailHandler', () => {
+  const LOOP_AUTH: LoopAuthContext = {
+    kind: 'loop',
+    userId: 'user-uuid',
+    email: 'a@b.com',
+    bearerToken: 'loop-jwt',
+  };
+  const validId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const baseUser = {
+    id: 'user-uuid',
+    email: 'a@b.com',
+    isAdmin: false,
+    homeCurrency: 'GBP',
+    stellarAddress: null,
+    ctxUserId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  const sampleRow = {
+    id: validId,
+    userId: 'user-uuid',
+    orderId: 'ord-1',
+    assetCode: 'GBPLOOP',
+    assetIssuer: 'GISSUER',
+    amountStroops: 12_345n,
+    state: 'submitted',
+    txHash: null,
+    attempts: 1,
+    createdAt: new Date('2026-04-20T10:00:00Z'),
+    submittedAt: new Date('2026-04-20T10:01:00Z'),
+    confirmedAt: null,
+    failedAt: null,
+  };
+
+  beforeEach(() => {
+    userState.byId = baseUser;
+  });
+
+  it('400 when id is missing', async () => {
+    const res = await getUserPendingPayoutDetailHandler(
+      makeCtx(LOOP_AUTH, undefined, undefined, {}),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('400 when id is not a uuid', async () => {
+    const res = await getUserPendingPayoutDetailHandler(
+      makeCtx(LOOP_AUTH, undefined, undefined, { id: 'not-a-uuid' }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('401 when no auth is on the context', async () => {
+    const res = await getUserPendingPayoutDetailHandler(
+      makeCtx(undefined, undefined, undefined, { id: validId }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('404 when the row is not owned by the caller', async () => {
+    payoutState.singleRow = null;
+    const res = await getUserPendingPayoutDetailHandler(
+      makeCtx(LOOP_AUTH, undefined, undefined, { id: validId }),
+    );
+    expect(res.status).toBe(404);
+    // The repo helper was called with both id and userId — that's
+    // how scoping is enforced.
+    expect(payoutState.singleCalls[0]).toEqual({ id: validId, userId: 'user-uuid' });
+  });
+
+  it('returns the view on hit', async () => {
+    payoutState.singleRow = sampleRow;
+    const res = await getUserPendingPayoutDetailHandler(
+      makeCtx(LOOP_AUTH, undefined, undefined, { id: validId }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      id: validId,
+      orderId: 'ord-1',
+      amountStroops: '12345',
+      state: 'submitted',
+      submittedAt: '2026-04-20T10:01:00.000Z',
+      confirmedAt: null,
+    });
+  });
+
+  it('500 when CTX upsert throws', async () => {
+    jwtState.claims = { sub: 'ctx-err', email: 'e@x.com' };
+    userState.upsertThrow = new Error('db down');
+    const res = await getUserPendingPayoutDetailHandler(
+      makeCtx({ kind: 'ctx', bearerToken: 't' }, undefined, undefined, { id: validId }),
+    );
     expect(res.status).toBe(500);
   });
 });

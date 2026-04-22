@@ -200,3 +200,18 @@ export async function resetPayoutToPending(id: string): Promise<PendingPayout | 
     .returning();
   return row ?? null;
 }
+
+/**
+ * User-scoped single-row lookup for the caller's drill-down. The
+ * `(id, userId)` predicate guarantees the row belongs to the caller
+ * — a mismatch returns null rather than revealing the row's
+ * existence, which the handler turns into a 404.
+ */
+export async function getPayoutForUser(id: string, userId: string): Promise<PendingPayout | null> {
+  const [row] = await db
+    .select()
+    .from(pendingPayouts)
+    .where(and(eq(pendingPayouts.id, id), eq(pendingPayouts.userId, userId)))
+    .limit(1);
+  return row ?? null;
+}

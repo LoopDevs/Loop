@@ -1141,6 +1141,45 @@ registry.registerPath({
   },
 });
 
+registry.registerPath({
+  method: 'get',
+  path: '/api/users/me/pending-payouts/{id}',
+  summary: 'Caller-scoped single payout detail (ADR 015 / 016).',
+  description:
+    "Permalink for one of the caller's `pending_payouts` rows. The settings/cashback page deep-links each row so the user can share the URL with support when asking about a stuck payout. Cross-user access returns 404 (not 403) so payout ids aren't enumerable.",
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ id: z.string().uuid() }),
+  },
+  responses: {
+    200: {
+      description: 'Payout row',
+      content: { 'application/json': { schema: UserPendingPayoutView } },
+    },
+    400: {
+      description: 'Missing or malformed id',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'Payout not found (or owned by a different user)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error resolving the user',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Admin — treasury + payouts (ADR 015) ───────────────────────────────────
 
 registry.registerPath({
