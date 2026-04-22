@@ -1,3 +1,4 @@
+import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import {
   getPaymentMethodShare,
@@ -108,14 +109,21 @@ export function PaymentMethodShareCard(): React.JSX.Element {
         <tbody className="divide-y divide-gray-100 dark:divide-gray-900 bg-white dark:bg-gray-900">
           {METHOD_ORDER.map((m) => {
             const bucket = snapshot.byMethod[m];
+            // Drill-in: /admin/orders?paymentMethod=<m>&state=fulfilled.
+            // The card is fixed to state=fulfilled, so the deep-link
+            // preserves that framing rather than landing the operator
+            // in an unfiltered list that mixes in pending / failed.
+            const drillHref = `/admin/orders?paymentMethod=${encodeURIComponent(m)}&state=fulfilled`;
             return (
               <tr key={m}>
                 <td className="px-3 py-2">
-                  <span
-                    className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${METHOD_CLASSES[m]}`}
+                  <Link
+                    to={drillHref}
+                    className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium hover:ring-1 hover:ring-gray-300 dark:hover:ring-gray-600 ${METHOD_CLASSES[m]}`}
+                    aria-label={`Filter orders by ${METHOD_LABELS[m]}`}
                   >
                     {METHOD_LABELS[m]}
-                  </span>
+                  </Link>
                 </td>
                 <td className="px-3 py-2 tabular-nums text-gray-900 dark:text-white">
                   {bucket.orderCount.toLocaleString('en-US')}

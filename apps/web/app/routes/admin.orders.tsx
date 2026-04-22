@@ -17,7 +17,12 @@ import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.orders';
 import { useAuth } from '~/hooks/use-auth';
-import { listAdminOrders, type AdminOrderState, type AdminOrderView } from '~/services/admin';
+import {
+  listAdminOrders,
+  type AdminOrderState,
+  type AdminOrderView,
+  type AdminPaymentMethod,
+} from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
@@ -47,6 +52,8 @@ const STATE_CLASSES: Record<AdminOrderState, string> = {
   failed: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
   expired: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
 };
+
+const PAYMENT_METHODS: ReadonlyArray<AdminPaymentMethod> = ['xlm', 'usdc', 'credit', 'loop_asset'];
 
 const PAGE_SIZE = 50;
 
@@ -89,6 +96,15 @@ export default function AdminOrdersRoute(): React.JSX.Element {
   const chargeCurrencyFilter =
     chargeCurrencyRaw !== null && ['USD', 'GBP', 'EUR'].includes(chargeCurrencyRaw)
       ? chargeCurrencyRaw
+      : undefined;
+  const paymentMethodRaw = searchParams.get('paymentMethod');
+  // Mirror the backend enum — an unknown value silently drops to an
+  // unfiltered list rather than 400ing on a shared permalink that
+  // happens to have a typo.
+  const paymentMethodFilter: AdminPaymentMethod | undefined =
+    paymentMethodRaw !== null &&
+    (PAYMENT_METHODS as ReadonlyArray<string>).includes(paymentMethodRaw)
+      ? (paymentMethodRaw as AdminPaymentMethod)
       : undefined;
   const ctxOperatorIdRaw = searchParams.get('ctxOperatorId');
   // Operator ids are free-form opaque strings (ADR 013). Mirror the
@@ -223,6 +239,36 @@ export default function AdminOrdersRoute(): React.JSX.Element {
         </div>
       ) : null}
 
+      {/* Active payment-method filter — sourced from `?paymentMethod=`.
+          Drill-in target from the treasury PaymentMethodShareCard
+          (ADR 010 / 015): the share card says "x% of fulfilled charge
+          came via loop_asset" and each rail deep-links here so ops
+          can see the underlying orders without a hand-crafted URL. */}
+      {paymentMethodFilter !== undefined ? (
+        <div
+          role="status"
+          className="flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200"
+        >
+          <span>
+            Paid with <code className="font-mono text-xs">{paymentMethodFilter}</code>
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                next.delete('paymentMethod');
+                return next;
+              });
+              setCursors([undefined]);
+            }}
+            className="text-xs font-medium underline hover:no-underline"
+          >
+            Clear
+          </button>
+        </div>
+      ) : null}
+
       {/* Active ctx-operator filter — sourced from `?ctxOperatorId=`.
           Drill-in target from the treasury operator-pool list + the
           row-level operator pill below. ADR-013 framing: an operator
@@ -262,6 +308,7 @@ export default function AdminOrdersRoute(): React.JSX.Element {
             state={stateFilter}
             merchantId={merchantIdFilter}
             chargeCurrency={chargeCurrencyFilter}
+            paymentMethod={paymentMethodFilter}
             ctxOperatorId={ctxOperatorIdFilter}
             cursor={cursor}
             isLastPage={idx === cursors.length - 1}
@@ -279,6 +326,7 @@ function OrdersPage({
   state,
   merchantId,
   chargeCurrency,
+  paymentMethod,
   ctxOperatorId,
   cursor,
   isLastPage,
@@ -287,6 +335,7 @@ function OrdersPage({
   state: AdminOrderState | 'all';
   merchantId: string | undefined;
   chargeCurrency: string | undefined;
+  paymentMethod: AdminPaymentMethod | undefined;
   ctxOperatorId: string | undefined;
   cursor: string | undefined;
   isLastPage: boolean;
@@ -298,6 +347,7 @@ function OrdersPage({
       state,
       merchantId ?? null,
       chargeCurrency ?? null,
+      paymentMethod ?? null,
       ctxOperatorId ?? null,
       cursor ?? null,
       PAGE_SIZE,
@@ -308,6 +358,7 @@ function OrdersPage({
         ...(state !== 'all' ? { state } : {}),
         ...(merchantId !== undefined ? { merchantId } : {}),
         ...(chargeCurrency !== undefined ? { chargeCurrency } : {}),
+        ...(paymentMethod !== undefined ? { paymentMethod } : {}),
         ...(ctxOperatorId !== undefined ? { ctxOperatorId } : {}),
         ...(cursor !== undefined ? { before: cursor } : {}),
       }),
