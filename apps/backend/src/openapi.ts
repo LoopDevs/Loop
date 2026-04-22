@@ -340,6 +340,19 @@ const OperatorHealthEntry = z.object({
   state: z.string().openapi({
     description: 'Circuit state for this operator (closed / half_open / open).',
   }),
+  consecutiveFailures: z.number().int().openapi({
+    description: 'Consecutive failure count since the last success. 0 when healthy.',
+  }),
+  openedAt: z.number().nullable().openapi({
+    description: 'Unix ms when the circuit last tripped to OPEN. Null when never tripped.',
+  }),
+  lastSuccessAt: z.number().nullable().openapi({
+    description: 'Unix ms of the most recent success. Null when the operator has never succeeded.',
+  }),
+  lastFailureAt: z.number().nullable().openapi({
+    description:
+      'Unix ms of the most recent 5xx / network error. Null when the operator has never failed.',
+  }),
 });
 
 const TreasurySnapshot = registry.register(

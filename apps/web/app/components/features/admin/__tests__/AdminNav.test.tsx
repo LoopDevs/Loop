@@ -35,6 +35,18 @@ vi.mock('~/hooks/query-retry', () => ({
   shouldRetry: () => false,
 }));
 
+/** Helper — full operator-health row with zero telemetry by default. */
+function makeOp(id: string, state: string): TreasurySnapshot['operatorPool']['operators'][number] {
+  return {
+    id,
+    state,
+    consecutiveFailures: 0,
+    openedAt: null,
+    lastSuccessAt: null,
+    lastFailureAt: null,
+  };
+}
+
 function baseSnapshot(
   overrides?: Partial<TreasurySnapshot['operatorPool']>,
   payoutOverrides?: Partial<TreasurySnapshot['payouts']>,
@@ -57,10 +69,7 @@ function baseSnapshot(
     },
     operatorPool: {
       size: 2,
-      operators: [
-        { id: 'op-1', state: 'closed' },
-        { id: 'op-2', state: 'closed' },
-      ],
+      operators: [makeOp('op-1', 'closed'), makeOp('op-2', 'closed')],
       ...(overrides ?? {}),
     },
   };
@@ -130,10 +139,7 @@ describe('AdminNav — CTX status pill', () => {
   it('renders "CTX degraded" when any operator is half_open', async () => {
     adminMock.getTreasurySnapshot.mockResolvedValue(
       baseSnapshot({
-        operators: [
-          { id: 'op-1', state: 'closed' },
-          { id: 'op-2', state: 'half_open' },
-        ],
+        operators: [makeOp('op-1', 'closed'), makeOp('op-2', 'half_open')],
       }),
     );
     renderAt('/admin/cashback');
@@ -145,10 +151,7 @@ describe('AdminNav — CTX status pill', () => {
   it('renders "CTX unavailable" when any operator circuit is open', async () => {
     adminMock.getTreasurySnapshot.mockResolvedValue(
       baseSnapshot({
-        operators: [
-          { id: 'op-1', state: 'open' },
-          { id: 'op-2', state: 'closed' },
-        ],
+        operators: [makeOp('op-1', 'open'), makeOp('op-2', 'closed')],
       }),
     );
     renderAt('/admin/cashback');
@@ -268,10 +271,7 @@ describe('operatorPoolStatus (pure)', () => {
     expect(
       operatorPoolStatus({
         size: 2,
-        operators: [
-          { id: 'a', state: 'closed' },
-          { id: 'b', state: 'closed' },
-        ],
+        operators: [makeOp('a', 'closed'), makeOp('b', 'closed')],
       }),
     ).toBe('healthy');
   });
@@ -279,10 +279,7 @@ describe('operatorPoolStatus (pure)', () => {
     expect(
       operatorPoolStatus({
         size: 2,
-        operators: [
-          { id: 'a', state: 'closed' },
-          { id: 'b', state: 'half_open' },
-        ],
+        operators: [makeOp('a', 'closed'), makeOp('b', 'half_open')],
       }),
     ).toBe('degraded');
   });
@@ -290,10 +287,7 @@ describe('operatorPoolStatus (pure)', () => {
     expect(
       operatorPoolStatus({
         size: 2,
-        operators: [
-          { id: 'a', state: 'open' },
-          { id: 'b', state: 'half_open' },
-        ],
+        operators: [makeOp('a', 'open'), makeOp('b', 'half_open')],
       }),
     ).toBe('unavailable');
   });

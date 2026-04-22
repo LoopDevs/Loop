@@ -80,7 +80,20 @@ export interface TreasurySnapshot {
   payouts: Record<PayoutState, string>;
   operatorPool: {
     size: number;
-    operators: Array<{ id: string; state: string }>;
+    /**
+     * Per-operator snapshot. Richer than the list returned by the
+     * getOperatorHealth() helper — the admin treasury view renders
+     * "last OK 2m ago" / "last fail 14s ago" chips off these
+     * timestamps (ADR 013 observability).
+     */
+    operators: Array<{
+      id: string;
+      state: string;
+      consecutiveFailures: number;
+      openedAt: number | null;
+      lastSuccessAt: number | null;
+      lastFailureAt: number | null;
+    }>;
   };
 }
 

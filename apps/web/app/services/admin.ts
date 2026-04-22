@@ -82,7 +82,18 @@ export interface TreasurySnapshot {
   /** CTX operator pool snapshot — ADR 013. */
   operatorPool: {
     size: number;
-    operators: Array<{ id: string; state: string }>;
+    operators: Array<{
+      id: string;
+      state: string;
+      /** Consecutive failures since last success. */
+      consecutiveFailures: number;
+      /** When the operator's breaker last tripped to OPEN (unix ms, null = never). */
+      openedAt: number | null;
+      /** When this operator last saw success (unix ms, null = never). */
+      lastSuccessAt: number | null;
+      /** When this operator last saw 5xx / network error (unix ms, null = never). */
+      lastFailureAt: number | null;
+    }>;
   };
 }
 

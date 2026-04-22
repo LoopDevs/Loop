@@ -353,10 +353,31 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
         ) : (
           <ul className="divide-y divide-gray-100 dark:divide-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
             {snapshot.operatorPool.operators.map((op) => (
-              <li key={op.id} className="flex items-center justify-between px-4 py-3 text-sm">
-                <span className="font-medium text-gray-900 dark:text-white">{op.id}</span>
+              <li key={op.id} className="flex items-start justify-between px-4 py-3 text-sm gap-3">
+                <div className="min-w-0 flex-1 space-y-1">
+                  <span className="font-medium text-gray-900 dark:text-white">{op.id}</span>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+                    {op.lastSuccessAt !== null ? (
+                      <span>
+                        <span className="text-green-700 dark:text-green-400">✓ OK</span>{' '}
+                        {relativeTime(op.lastSuccessAt)}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400 dark:text-gray-600">no success yet</span>
+                    )}
+                    {op.lastFailureAt !== null ? (
+                      <span>
+                        <span className="text-red-700 dark:text-red-400">✗ fail</span>{' '}
+                        {relativeTime(op.lastFailureAt)}
+                      </span>
+                    ) : null}
+                    {op.consecutiveFailures > 0 ? (
+                      <span className="font-mono">streak {op.consecutiveFailures}</span>
+                    ) : null}
+                  </div>
+                </div>
                 <span
-                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium shrink-0 ${
                     op.state === 'closed'
                       ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
                       : op.state === 'half_open'
@@ -372,5 +393,27 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
         )}
       </section>
     </main>
+  );
+}
+
+/**
+ * Unix-ms timestamp → "14s ago" / "3m ago" / "2h ago" / "yesterday" /
+ * "3d ago". Intentionally terse — the operator-pool list is dense and
+ * the full ISO timestamp lives on the title attribute for hover.
+ */
+function relativeTime(ms: number): React.JSX.Element {
+  const deltaSec = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  const human =
+    deltaSec < 60
+      ? `${deltaSec}s ago`
+      : deltaSec < 3600
+        ? `${Math.floor(deltaSec / 60)}m ago`
+        : deltaSec < 86400
+          ? `${Math.floor(deltaSec / 3600)}h ago`
+          : `${Math.floor(deltaSec / 86400)}d ago`;
+  return (
+    <time dateTime={new Date(ms).toISOString()} title={new Date(ms).toLocaleString()}>
+      {human}
+    </time>
   );
 }

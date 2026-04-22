@@ -302,20 +302,55 @@ describe('treasuryHandler', () => {
     });
   });
 
-  it('includes the operator-pool snapshot', async () => {
+  it('includes the operator-pool snapshot with failure/success telemetry', async () => {
     state.results.push([], [], []);
     operatorSizeMock.mockReturnValue(2);
     operatorHealthMock.mockReturnValue([
-      { id: 'primary', state: 'closed' },
-      { id: 'backup-1', state: 'open' },
+      {
+        id: 'primary',
+        state: 'closed',
+        consecutiveFailures: 0,
+        openedAt: null,
+        lastSuccessAt: 1776800000000,
+        lastFailureAt: null,
+      },
+      {
+        id: 'backup-1',
+        state: 'open',
+        consecutiveFailures: 5,
+        openedAt: 1776810000000,
+        lastSuccessAt: 1776780000000,
+        lastFailureAt: 1776810000000,
+      },
     ]);
     const { ctx } = makeCtx();
     const res = await treasuryHandler(ctx);
-    const body = (await res.json()) as { operatorPool: { size: number; operators: unknown[] } };
+    const body = (await res.json()) as {
+      operatorPool: {
+        size: number;
+        operators: Array<{
+          id: string;
+          state: string;
+          consecutiveFailures: number;
+          openedAt: number | null;
+          lastSuccessAt: number | null;
+          lastFailureAt: number | null;
+        }>;
+      };
+    };
     expect(body.operatorPool.size).toBe(2);
-    expect(body.operatorPool.operators).toEqual([
-      { id: 'primary', state: 'closed' },
-      { id: 'backup-1', state: 'open' },
-    ]);
+    expect(body.operatorPool.operators[0]).toMatchObject({
+      id: 'primary',
+      state: 'closed',
+      consecutiveFailures: 0,
+      lastSuccessAt: 1776800000000,
+    });
+    expect(body.operatorPool.operators[1]).toMatchObject({
+      id: 'backup-1',
+      state: 'open',
+      consecutiveFailures: 5,
+      openedAt: 1776810000000,
+      lastFailureAt: 1776810000000,
+    });
   });
 });

@@ -19,11 +19,31 @@ interface CircuitBreakerOptions {
   probeTimeoutMs?: number;
 }
 
+/**
+ * Telemetry snapshot for an individual breaker — surfaced on the
+ * admin treasury view so ops can triage which supplier account is
+ * actually sick (ADR 013 observability). Timestamps are unix ms,
+ * null when the breaker has never seen that event yet.
+ */
+export interface CircuitBreakerStats {
+  state: CircuitState;
+  /** Consecutive failure count since the last success. Resets to 0 on success. */
+  consecutiveFailures: number;
+  /** When the breaker most recently transitioned to OPEN. Null when never tripped. */
+  openedAt: number | null;
+  /** When the breaker last saw a non-5xx response (unix ms). Null when never succeeded. */
+  lastSuccessAt: number | null;
+  /** When the breaker last saw a 5xx / network error (unix ms). Null when never failed. */
+  lastFailureAt: number | null;
+}
+
 interface CircuitBreaker {
   /** Drop-in replacement for global `fetch` that respects circuit state. */
   fetch: (url: string | URL, init?: RequestInit) => Promise<Response>;
   /** Returns the current circuit state. */
   getState: () => CircuitState;
+  /** Returns a richer telemetry snapshot — used by the admin pool view. */
+  getStats: () => CircuitBreakerStats;
   /** Resets the circuit to CLOSED (useful for testing). */
   reset: () => void;
 }
@@ -45,6 +65,11 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
   let state: CircuitState = 'closed';
   let consecutiveFailures = 0;
   let openedAt = 0;
+  // Nullable timestamps — the breaker has never seen the matching
+  // event until the first success/failure. Distinguishing "never
+  // failed" from "failed at epoch 0" matters for the admin UI copy.
+  let lastSuccessAt: number | null = null;
+  let lastFailureAt: number | null = null;
   let halfOpenInFlight = false;
   let probeTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -83,6 +108,7 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
   function onSuccess(): void {
     const wasHalfOpen = state === 'half_open';
     consecutiveFailures = 0;
+    lastSuccessAt = Date.now();
     halfOpenInFlight = false;
     clearProbeTimer();
     transitionTo('closed');
@@ -93,6 +119,7 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
 
   function onFailure(): void {
     consecutiveFailures++;
+    lastFailureAt = Date.now();
     halfOpenInFlight = false;
     clearProbeTimer();
     // Only transition (and notify) if we are not already OPEN. When many
@@ -151,15 +178,27 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
     return state;
   }
 
+  function getStats(): CircuitBreakerStats {
+    return {
+      state,
+      consecutiveFailures,
+      openedAt: openedAt === 0 ? null : openedAt,
+      lastSuccessAt,
+      lastFailureAt,
+    };
+  }
+
   function reset(): void {
     state = 'closed';
     consecutiveFailures = 0;
     openedAt = 0;
+    lastSuccessAt = null;
+    lastFailureAt = null;
     halfOpenInFlight = false;
     clearProbeTimer();
   }
 
-  return { fetch: wrappedFetch, getState, reset };
+  return { fetch: wrappedFetch, getState, getStats, reset };
 }
 
 /**

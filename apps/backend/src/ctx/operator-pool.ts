@@ -20,7 +20,11 @@
  * `CTX_OPERATOR_POOL` unset is the expected state today.
  */
 import { z } from 'zod';
-import { createCircuitBreaker, CircuitOpenError } from '../circuit-breaker.js';
+import {
+  createCircuitBreaker,
+  CircuitOpenError,
+  type CircuitBreakerStats,
+} from '../circuit-breaker.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ area: 'operator-pool' });
@@ -176,11 +180,35 @@ export async function operatorFetch(url: string | URL, init?: RequestInit): Prom
   );
 }
 
+/** Per-operator telemetry returned by `getOperatorHealth`. */
+export interface OperatorHealth {
+  id: string;
+  state: string;
+  /** Consecutive failures since the last successful request. */
+  consecutiveFailures: number;
+  /** When this operator's circuit last tripped to OPEN (unix ms, null = never). */
+  openedAt: number | null;
+  /** When this operator last returned 2xx/3xx/4xx (unix ms, null = never). */
+  lastSuccessAt: number | null;
+  /** When this operator last returned 5xx / threw (unix ms, null = never). */
+  lastFailureAt: number | null;
+}
+
 /**
- * Snapshot of per-operator circuit state — for the `/metrics` + admin
- * "pool health" view (ADR 013 observability bullet).
+ * Snapshot of per-operator circuit state + telemetry — for the
+ * `/metrics` + admin "pool health" view (ADR 013 observability).
  */
-export function getOperatorHealth(): Array<{ id: string; state: string }> {
+export function getOperatorHealth(): OperatorHealth[] {
   ensureInitialised();
-  return operators.map((o) => ({ id: o.id, state: o.breaker.getState() }));
+  return operators.map((o) => {
+    const stats: CircuitBreakerStats = o.breaker.getStats();
+    return {
+      id: o.id,
+      state: stats.state,
+      consecutiveFailures: stats.consecutiveFailures,
+      openedAt: stats.openedAt,
+      lastSuccessAt: stats.lastSuccessAt,
+      lastFailureAt: stats.lastFailureAt,
+    };
+  });
 }

@@ -353,3 +353,68 @@ describe('notification behavior', () => {
     expect(mockNotify).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('createCircuitBreaker — getStats', () => {
+  it('returns null timestamps + zero failures on a fresh breaker', () => {
+    const cb = createCircuitBreaker();
+    expect(cb.getStats()).toEqual({
+      state: 'closed',
+      consecutiveFailures: 0,
+      openedAt: null,
+      lastSuccessAt: null,
+      lastFailureAt: null,
+    });
+  });
+
+  it('records lastSuccessAt on a 200 response', async () => {
+    const cb = createCircuitBreaker();
+    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+    const before = Date.now();
+    await cb.fetch('http://x');
+    const after = Date.now();
+    const stats = cb.getStats();
+    expect(stats.lastSuccessAt).not.toBeNull();
+    expect(stats.lastSuccessAt!).toBeGreaterThanOrEqual(before);
+    expect(stats.lastSuccessAt!).toBeLessThanOrEqual(after);
+    expect(stats.lastFailureAt).toBeNull();
+    expect(stats.consecutiveFailures).toBe(0);
+  });
+
+  it('records lastFailureAt + bumps consecutiveFailures on a 500 response', async () => {
+    const cb = createCircuitBreaker({ failureThreshold: 10 });
+    mockFetch.mockResolvedValueOnce(new Response('err', { status: 500 }));
+    mockFetch.mockResolvedValueOnce(new Response('err', { status: 500 }));
+    await cb.fetch('http://x');
+    await cb.fetch('http://x');
+    const stats = cb.getStats();
+    expect(stats.consecutiveFailures).toBe(2);
+    expect(stats.lastFailureAt).not.toBeNull();
+    expect(stats.lastSuccessAt).toBeNull();
+    expect(stats.openedAt).toBeNull(); // threshold not hit yet
+  });
+
+  it('sets openedAt when the circuit trips to OPEN', async () => {
+    const cb = createCircuitBreaker({ failureThreshold: 2 });
+    mockFetch.mockResolvedValueOnce(new Response('err', { status: 500 }));
+    mockFetch.mockResolvedValueOnce(new Response('err', { status: 500 }));
+    await cb.fetch('http://x');
+    await cb.fetch('http://x');
+    const stats = cb.getStats();
+    expect(stats.state).toBe('open');
+    expect(stats.openedAt).not.toBeNull();
+  });
+
+  it('resets consecutiveFailures to 0 on a success, preserving lastFailureAt', async () => {
+    const cb = createCircuitBreaker({ failureThreshold: 10 });
+    mockFetch.mockResolvedValueOnce(new Response('err', { status: 500 }));
+    await cb.fetch('http://x');
+    const firstFailAt = cb.getStats().lastFailureAt;
+    expect(firstFailAt).not.toBeNull();
+    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+    await cb.fetch('http://x');
+    const stats = cb.getStats();
+    expect(stats.consecutiveFailures).toBe(0);
+    expect(stats.lastFailureAt).toBe(firstFailAt); // preserved
+    expect(stats.lastSuccessAt).not.toBeNull();
+  });
+});
