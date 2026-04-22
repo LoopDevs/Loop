@@ -22,6 +22,8 @@ const { dbState } = vi.hoisted(() => ({
     whereCalls: [] as unknown[],
     limitCalls: [] as number[],
     throwOnLimit: false,
+    executeRows: [] as unknown[],
+    throwOnExecute: false,
   },
 }));
 vi.mock('../../db/client.js', () => {
@@ -42,6 +44,10 @@ vi.mock('../../db/client.js', () => {
       select: vi.fn(() => ({
         from: vi.fn(() => leaf),
       })),
+      execute: vi.fn(async () => {
+        if (dbState.throwOnExecute) throw new Error('db exploded');
+        return dbState.executeRows;
+      }),
     },
   };
 });
@@ -50,10 +56,15 @@ vi.mock('../../db/schema.js', () => ({
     userId: 'user_id',
     state: 'state',
     createdAt: 'created_at',
+    chargeCurrency: 'charge_currency',
+    faceValueMinor: 'face_value_minor',
+    chargeMinor: 'charge_minor',
+    userCashbackMinor: 'user_cashback_minor',
+    loopMarginMinor: 'loop_margin_minor',
   },
 }));
 
-import { adminListOrdersHandler } from '../orders.js';
+import { adminListOrdersHandler, adminOrdersSummaryHandler } from '../orders.js';
 
 function makeCtx(query: Record<string, string> = {}): Context {
   return {
@@ -128,6 +139,8 @@ beforeEach(() => {
   dbState.whereCalls = [];
   dbState.limitCalls = [];
   dbState.throwOnLimit = false;
+  dbState.executeRows = [];
+  dbState.throwOnExecute = false;
 });
 
 describe('adminListOrdersHandler', () => {
@@ -217,6 +230,157 @@ describe('adminListOrdersHandler', () => {
   it('500s when the db read throws', async () => {
     dbState.throwOnLimit = true;
     const res = await adminListOrdersHandler(makeCtx());
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('adminOrdersSummaryHandler', () => {
+  it('happy path — rolls state counts, fulfilled totals, outstanding totals', async () => {
+    dbState.executeRows = [
+      {
+        state: 'fulfilled',
+        chargeCurrency: 'GBP',
+        n: 3,
+        faceSum: 15000n,
+        chargeSum: 12000n,
+        cashbackSum: 1800n,
+        marginSum: 600n,
+      },
+      {
+        state: 'fulfilled',
+        chargeCurrency: 'USD',
+        n: 1,
+        faceSum: 5000n,
+        chargeSum: 4000n,
+        cashbackSum: 600n,
+        marginSum: 200n,
+      },
+      {
+        state: 'paid',
+        chargeCurrency: 'GBP',
+        n: 2,
+        faceSum: 0n,
+        chargeSum: 8000n,
+        cashbackSum: 0n,
+        marginSum: 0n,
+      },
+      {
+        state: 'procuring',
+        chargeCurrency: 'GBP',
+        n: 1,
+        faceSum: 0n,
+        chargeSum: 4000n,
+        cashbackSum: 0n,
+        marginSum: 0n,
+      },
+      {
+        state: 'failed',
+        chargeCurrency: 'USD',
+        n: 2,
+        faceSum: 0n,
+        chargeSum: 0n,
+        cashbackSum: 0n,
+        marginSum: 0n,
+      },
+    ];
+    const res = await adminOrdersSummaryHandler(makeCtx());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      counts: Record<string, number>;
+      fulfilledTotals: Record<string, Record<string, unknown>>;
+      outstandingTotals: Record<string, Record<string, unknown>>;
+    };
+    expect(body.counts).toEqual({
+      pending_payment: 0,
+      paid: 2,
+      procuring: 1,
+      fulfilled: 4,
+      failed: 2,
+      expired: 0,
+    });
+    expect(body.fulfilledTotals.GBP).toEqual({
+      orderCount: 3,
+      faceMinor: '15000',
+      chargeMinor: '12000',
+      userCashbackMinor: '1800',
+      loopMarginMinor: '600',
+    });
+    expect(body.fulfilledTotals.USD).toEqual({
+      orderCount: 1,
+      faceMinor: '5000',
+      chargeMinor: '4000',
+      userCashbackMinor: '600',
+      loopMarginMinor: '200',
+    });
+    // Paid (8000) + procuring (4000) fold together into GBP outstanding.
+    expect(body.outstandingTotals.GBP).toEqual({ orderCount: 3, chargeMinor: '12000' });
+    expect(body.outstandingTotals.USD).toBeUndefined();
+  });
+
+  it('returns zeroed counts + empty totals when the table is empty', async () => {
+    dbState.executeRows = [];
+    const res = await adminOrdersSummaryHandler(makeCtx());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      counts: Record<string, number>;
+      fulfilledTotals: Record<string, unknown>;
+      outstandingTotals: Record<string, unknown>;
+    };
+    expect(body.counts.fulfilled).toBe(0);
+    expect(body.counts.paid).toBe(0);
+    expect(body.fulfilledTotals).toEqual({});
+    expect(body.outstandingTotals).toEqual({});
+  });
+
+  it('handles the {rows: [...]} result shape from drizzle', async () => {
+    // Some drizzle drivers return { rows: [...] } instead of a raw array.
+    dbState.executeRows = {
+      rows: [
+        {
+          state: 'fulfilled',
+          chargeCurrency: 'EUR',
+          n: 1,
+          faceSum: 1000n,
+          chargeSum: 800n,
+          cashbackSum: 120n,
+          marginSum: 40n,
+        },
+      ],
+    } as unknown as unknown[];
+    const res = await adminOrdersSummaryHandler(makeCtx());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      counts: Record<string, number>;
+      fulfilledTotals: Record<string, Record<string, unknown>>;
+    };
+    expect(body.counts.fulfilled).toBe(1);
+    expect(body.fulfilledTotals.EUR).toMatchObject({
+      orderCount: 1,
+      chargeMinor: '800',
+    });
+  });
+
+  it('ignores unknown state values rather than crashing', async () => {
+    dbState.executeRows = [
+      {
+        state: 'mystery',
+        chargeCurrency: 'GBP',
+        n: 99,
+        faceSum: 0n,
+        chargeSum: 0n,
+        cashbackSum: 0n,
+        marginSum: 0n,
+      },
+    ];
+    const res = await adminOrdersSummaryHandler(makeCtx());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { counts: Record<string, number> };
+    expect(Object.values(body.counts).reduce((a, b) => a + b, 0)).toBe(0);
+  });
+
+  it('500s when the db read throws', async () => {
+    dbState.throwOnExecute = true;
+    const res = await adminOrdersSummaryHandler(makeCtx());
     expect(res.status).toBe(500);
   });
 });

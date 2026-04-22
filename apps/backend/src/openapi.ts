@@ -405,6 +405,57 @@ const AdminPayoutListResponse = registry.register(
   z.object({ payouts: z.array(AdminPayoutView) }),
 );
 
+// ─── Admin — orders summary (ADR 011 / 015) ─────────────────────────────────
+
+const AdminOrdersSummaryCounts = registry.register(
+  'AdminOrdersSummaryCounts',
+  z.object({
+    pending_payment: z.number().int().nonnegative(),
+    paid: z.number().int().nonnegative(),
+    procuring: z.number().int().nonnegative(),
+    fulfilled: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+    expired: z.number().int().nonnegative(),
+  }),
+);
+
+const MinorAmountString = z.string().regex(/^\d+$/).openapi({
+  description: 'Non-negative minor-unit integer serialised as a string (bigint-safe).',
+});
+
+const AdminOrdersSummaryFulfilledEntry = registry.register(
+  'AdminOrdersSummaryFulfilledEntry',
+  z.object({
+    orderCount: z.number().int().nonnegative(),
+    faceMinor: MinorAmountString,
+    chargeMinor: MinorAmountString,
+    userCashbackMinor: MinorAmountString,
+    loopMarginMinor: MinorAmountString,
+  }),
+);
+
+const AdminOrdersSummaryOutstandingEntry = registry.register(
+  'AdminOrdersSummaryOutstandingEntry',
+  z.object({
+    orderCount: z.number().int().nonnegative(),
+    chargeMinor: MinorAmountString,
+  }),
+);
+
+const AdminOrdersSummaryResponse = registry.register(
+  'AdminOrdersSummaryResponse',
+  z.object({
+    counts: AdminOrdersSummaryCounts,
+    fulfilledTotals: z.record(z.string(), AdminOrdersSummaryFulfilledEntry).openapi({
+      description: 'Lifetime fulfilled volume keyed by ISO-4217 chargeCurrency.',
+    }),
+    outstandingTotals: z.record(z.string(), AdminOrdersSummaryOutstandingEntry).openapi({
+      description:
+        'Paid + procuring totals (capital committed but not yet fulfilled) keyed by chargeCurrency. An empty object means nothing is outstanding in any currency.',
+    }),
+  }),
+);
+
 // ─── Admin — cashback-config (ADR 011) ──────────────────────────────────────
 //
 // Percentages are stored as `numeric(5,2)` and round-trip as strings
@@ -1166,6 +1217,38 @@ registry.registerPath({
     },
     429: {
       description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/orders/summary',
+  summary: 'Orders summary — state counts + per-currency totals (ADR 011 / 015).',
+  description:
+    'Single GROUP BY over (state, chargeCurrency). `counts` folds every chargeCurrency into the per-state total — the "how many orders are in each lifecycle bucket right now" view. `fulfilledTotals` is lifetime fulfilled volume per chargeCurrency. `outstandingTotals` is paid + procuring totals per chargeCurrency — capital committed but not yet fulfilled, the Loop treasury exposure that has not cleared. All minor-unit amounts are bigint-safe strings.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Summary snapshot',
+      content: { 'application/json': { schema: AdminOrdersSummaryResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading the summary',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },

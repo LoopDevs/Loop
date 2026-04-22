@@ -43,7 +43,7 @@ import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
-import { adminListOrdersHandler } from './admin/orders.js';
+import { adminListOrdersHandler, adminOrdersSummaryHandler } from './admin/orders.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -653,6 +653,8 @@ app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayout
 // by state and userId. Ops uses this to triage stuck orders + audit
 // the cashback split + correlate with operator-pool health.
 app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+// Orders summary chip strip — single GROUP BY, one round-trip.
+app.get('/api/admin/orders/summary', rateLimit(60, 60_000), adminOrdersSummaryHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 

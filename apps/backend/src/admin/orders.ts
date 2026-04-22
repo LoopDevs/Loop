@@ -102,6 +102,111 @@ function rowToView(row: typeof orders.$inferSelect): AdminOrderView {
   };
 }
 
+export interface AdminOrdersSummaryResponse {
+  /** Orders-in-flight counts per state (all currencies combined). */
+  counts: Record<OrderState, number>;
+  /** Lifetime fulfilled volume per chargeCurrency. */
+  fulfilledTotals: Record<
+    string,
+    {
+      orderCount: number;
+      faceMinor: string;
+      chargeMinor: string;
+      userCashbackMinor: string;
+      loopMarginMinor: string;
+    }
+  >;
+  /** Paid + procuring (capital committed but not yet fulfilled) per chargeCurrency. */
+  outstandingTotals: Record<string, { orderCount: number; chargeMinor: string }>;
+}
+
+interface SummaryRow extends Record<string, unknown> {
+  state: string;
+  chargeCurrency: string;
+  n: string | number;
+  faceSum: string | null;
+  chargeSum: string | null;
+  cashbackSum: string | null;
+  marginSum: string | null;
+}
+
+/**
+ * GET /api/admin/orders/summary
+ *
+ * Single GROUP BY over (state, chargeCurrency) — one round-trip gives
+ * us state counts, per-currency fulfilled volume, and per-currency
+ * outstanding commitments. Intended to render the chip strip at the
+ * top of /admin/orders without requiring a CSV dump.
+ */
+export async function adminOrdersSummaryHandler(c: Context): Promise<Response> {
+  try {
+    const result = await db.execute<SummaryRow>(sql`
+      SELECT
+        ${orders.state} AS state,
+        ${orders.chargeCurrency} AS "chargeCurrency",
+        COUNT(*)::bigint AS n,
+        COALESCE(SUM(${orders.faceValueMinor}), 0)::bigint AS "faceSum",
+        COALESCE(SUM(${orders.chargeMinor}), 0)::bigint AS "chargeSum",
+        COALESCE(SUM(${orders.userCashbackMinor}), 0)::bigint AS "cashbackSum",
+        COALESCE(SUM(${orders.loopMarginMinor}), 0)::bigint AS "marginSum"
+      FROM ${orders}
+      GROUP BY ${orders.state}, ${orders.chargeCurrency}
+    `);
+
+    const rows: SummaryRow[] = Array.isArray(result)
+      ? (result as SummaryRow[])
+      : ((result as { rows?: SummaryRow[] }).rows ?? []);
+
+    const counts: Record<OrderState, number> = {
+      pending_payment: 0,
+      paid: 0,
+      procuring: 0,
+      fulfilled: 0,
+      failed: 0,
+      expired: 0,
+    };
+    const fulfilledTotals: AdminOrdersSummaryResponse['fulfilledTotals'] = {};
+    const outstandingTotals: AdminOrdersSummaryResponse['outstandingTotals'] = {};
+
+    for (const row of rows) {
+      const n = Number(row.n);
+      const state = row.state as OrderState;
+      if ((ORDER_STATES as ReadonlyArray<string>).includes(state)) {
+        counts[state] += n;
+      }
+      if (state === 'fulfilled') {
+        fulfilledTotals[row.chargeCurrency] = {
+          orderCount: n,
+          faceMinor: (row.faceSum ?? '0').toString(),
+          chargeMinor: (row.chargeSum ?? '0').toString(),
+          userCashbackMinor: (row.cashbackSum ?? '0').toString(),
+          loopMarginMinor: (row.marginSum ?? '0').toString(),
+        };
+      }
+      if (state === 'paid' || state === 'procuring') {
+        const existing = outstandingTotals[row.chargeCurrency];
+        const addChargeMinor = BigInt(row.chargeSum ?? '0');
+        if (existing === undefined) {
+          outstandingTotals[row.chargeCurrency] = {
+            orderCount: n,
+            chargeMinor: addChargeMinor.toString(),
+          };
+        } else {
+          outstandingTotals[row.chargeCurrency] = {
+            orderCount: existing.orderCount + n,
+            chargeMinor: (BigInt(existing.chargeMinor) + addChargeMinor).toString(),
+          };
+        }
+      }
+    }
+
+    return c.json<AdminOrdersSummaryResponse>({ counts, fulfilledTotals, outstandingTotals });
+  } catch (err) {
+    log.error({ err }, 'Admin orders summary failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load orders summary' }, 500);
+  }
+}
+
 export async function adminListOrdersHandler(c: Context): Promise<Response> {
   const stateRaw = c.req.query('state');
   if (stateRaw !== undefined && !(ORDER_STATES as ReadonlyArray<string>).includes(stateRaw)) {
