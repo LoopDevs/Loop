@@ -31,6 +31,13 @@ const MAX_WINDOW_MS = 366 * 24 * 60 * 60 * 1000;
 export interface MerchantStatsRow {
   merchantId: string;
   orderCount: number;
+  /**
+   * Distinct users who earned cashback from this merchant in the
+   * window. A cohort-health signal ops reads alongside `orderCount` —
+   * "100 orders from 3 power users" vs "100 orders from 80 distinct
+   * users" describe very different merchant profiles.
+   */
+  uniqueUserCount: number;
   faceValueMinor: string;
   wholesaleMinor: string;
   userCashbackMinor: string;
@@ -54,6 +61,7 @@ interface AggRow {
   merchant_id: string;
   currency: string;
   order_count: string | number;
+  unique_user_count: string | number;
   face_value_minor: string | number | bigint;
   wholesale_minor: string | number | bigint;
   user_cashback_minor: string | number | bigint;
@@ -112,6 +120,7 @@ export async function adminMerchantStatsHandler(c: Context): Promise<Response> {
         ${orders.merchantId} AS merchant_id,
         ${orders.currency}    AS currency,
         COUNT(*)::bigint      AS order_count,
+        COUNT(DISTINCT ${orders.userId})::bigint AS unique_user_count,
         COALESCE(SUM(${orders.faceValueMinor}), 0)::bigint    AS face_value_minor,
         COALESCE(SUM(${orders.wholesaleMinor}), 0)::bigint    AS wholesale_minor,
         COALESCE(SUM(${orders.userCashbackMinor}), 0)::bigint AS user_cashback_minor,
@@ -137,6 +146,7 @@ export async function adminMerchantStatsHandler(c: Context): Promise<Response> {
         merchantId: r.merchant_id,
         currency: r.currency,
         orderCount: toNumber(r.order_count),
+        uniqueUserCount: toNumber(r.unique_user_count),
         faceValueMinor: toStringBigint(r.face_value_minor),
         wholesaleMinor: toStringBigint(r.wholesale_minor),
         userCashbackMinor: toStringBigint(r.user_cashback_minor),

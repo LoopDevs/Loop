@@ -81,6 +81,7 @@ describe('adminMerchantStatsHandler', () => {
         merchant_id: 'argos',
         currency: 'GBP',
         order_count: '3',
+        unique_user_count: '2',
         face_value_minor: 15_000n,
         wholesale_minor: '12000',
         user_cashback_minor: 1800,
@@ -91,6 +92,7 @@ describe('adminMerchantStatsHandler', () => {
         merchant_id: 'tesco',
         currency: 'GBP',
         order_count: 1,
+        unique_user_count: 1,
         face_value_minor: '5000',
         wholesale_minor: '4000',
         user_cashback_minor: '600',
@@ -107,12 +109,14 @@ describe('adminMerchantStatsHandler', () => {
       merchantId: 'argos',
       currency: 'GBP',
       orderCount: 3,
+      uniqueUserCount: 2,
       faceValueMinor: '15000',
       wholesaleMinor: '12000',
       userCashbackMinor: '1800',
       loopMarginMinor: '1200',
       lastFulfilledAt: '2026-04-20T10:00:00.000Z',
     });
+    expect(body.rows[1]!['uniqueUserCount']).toBe(1);
     expect(body.rows[1]!['lastFulfilledAt']).toBe('2026-04-18T14:00:00.000Z');
   });
 
