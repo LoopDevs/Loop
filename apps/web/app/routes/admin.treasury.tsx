@@ -6,6 +6,7 @@ import { useAuth } from '~/hooks/use-auth';
 import { getTreasurySnapshot, type TreasurySnapshot } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { PayoutsByAssetTable } from '~/components/features/admin/PayoutsByAssetTable';
 import { SupplierSpendCard } from '~/components/features/admin/SupplierSpendCard';
 import { OperatorStatsCard } from '~/components/features/admin/OperatorStatsCard';
@@ -381,10 +382,19 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
       </section>
 
       <section>
-        <div className="flex items-baseline justify-between mb-3">
+        <div className="flex items-baseline justify-between mb-3 gap-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
             Recycling activity (90 days)
           </h2>
+          {/* Tier-3 CSV export (#615). Pairs with the merchants
+              flywheel-share CSV on /admin/cashback so ops can pull
+              both axes of the recycling story into one spreadsheet
+              workbook. */}
+          <CsvDownloadButton
+            path="/api/admin/users/recycling-activity.csv"
+            filename={`users-recycling-activity-${new Date().toISOString().slice(0, 10)}.csv`}
+            label="Recycling CSV"
+          />
         </div>
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
           Who's closing the flywheel loop right now — users with at least one LOOP-asset paid order
