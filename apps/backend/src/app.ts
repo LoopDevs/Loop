@@ -49,6 +49,7 @@ import {
   adminRetryPayoutHandler,
 } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
+import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -666,6 +667,11 @@ app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
 // Nested under /orders/:orderId so the UI can link from the order
 // drill-down straight to the payout state without a separate fetch.
 app.get('/api/admin/orders/:orderId/payout', rateLimit(120, 60_000), adminPayoutByOrderHandler);
+// Supplier-spend snapshot (ADR 013 / 015): per-currency aggregate of
+// what Loop paid CTX across fulfilled orders in the window. Admin UI
+// renders this on the treasury page as the "supplier" card next to
+// outstanding liabilities.
+app.get('/api/admin/supplier-spend', rateLimit(60, 60_000), adminSupplierSpendHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 
