@@ -1240,6 +1240,40 @@ export async function getAdminMerchantCashbackMonthly(
 }
 
 /**
+ * One day of merchant flywheel activity (#641). Time-axis
+ * companion to the scalar `AdminMerchantFlywheelStats` — same
+ * merchant, same 31-day window (or whatever `?days` asked for),
+ * but one row per day so the UI can render a trajectory.
+ */
+export interface MerchantFlywheelActivityDay {
+  /** YYYY-MM-DD (UTC). */
+  day: string;
+  recycledCount: number;
+  totalCount: number;
+  /** bigint-as-string. */
+  recycledChargeMinor: string;
+  /** bigint-as-string. */
+  totalChargeMinor: string;
+}
+
+export interface AdminMerchantFlywheelActivityResponse {
+  merchantId: string;
+  days: number;
+  rows: MerchantFlywheelActivityDay[];
+}
+
+/** `GET /api/admin/merchants/:merchantId/flywheel-activity` — daily flywheel timeseries. */
+export async function getAdminMerchantFlywheelActivity(
+  merchantId: string,
+  days?: number,
+): Promise<AdminMerchantFlywheelActivityResponse> {
+  const qs = days !== undefined ? `?days=${days}` : '';
+  return authenticatedRequest<AdminMerchantFlywheelActivityResponse>(
+    `/api/admin/merchants/${encodeURIComponent(merchantId)}/flywheel-activity${qs}`,
+  );
+}
+
+/**
  * Admin payment-method activity day (#594). One row per UTC day in
  * the requested window (default 30, cap 90), with fulfilled-order
  * counts per rail. Every rail is always present — the backend pre-
