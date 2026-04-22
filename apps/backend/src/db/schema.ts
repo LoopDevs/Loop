@@ -433,23 +433,17 @@ export const orders = pgTable(
   ],
 );
 
-/**
- * Exposed state enum — mirrors the `CHECK` above. Importing this
- * everywhere keeps the source of truth (the migration) and the
- * callers' type in sync.
- */
-export const ORDER_STATES = [
-  'pending_payment',
-  'paid',
-  'procuring',
-  'fulfilled',
-  'failed',
-  'expired',
-] as const;
-export type OrderState = (typeof ORDER_STATES)[number];
-
-export const ORDER_PAYMENT_METHODS = ['xlm', 'usdc', 'credit', 'loop_asset'] as const;
-export type OrderPaymentMethod = (typeof ORDER_PAYMENT_METHODS)[number];
+// Order state + payment-method enums live in `@loop/shared` (ADR 019)
+// — the CHECK literal above and the UI filter chips on `/admin/orders`
+// read from the same tuple. Re-exported here so existing backend
+// imports (`from '../db/schema.js'`) keep resolving during the
+// transition window.
+export {
+  ORDER_STATES,
+  type OrderState,
+  ORDER_PAYMENT_METHODS,
+  type OrderPaymentMethod,
+} from '@loop/shared';
 
 /**
  * Cursor persistence for long-running background watchers (ADR 010
@@ -577,8 +571,11 @@ export const pendingPayouts = pgTable(
   ],
 );
 
-export const PAYOUT_STATES = ['pending', 'submitted', 'confirmed', 'failed'] as const;
-export type PayoutState = (typeof PAYOUT_STATES)[number];
+// Payout state enum lives in `@loop/shared` (ADR 019) — the CHECK
+// literal above and the filter chips on `/admin/payouts` + state pill
+// on `/settings/cashback` all read from the same tuple. Re-exported
+// here for import-graph stability.
+export { PAYOUT_STATES, type PayoutState } from '@loop/shared';
 
 /**
  * Admin idempotency store (ADR 017). Each row is the snapshot of a
