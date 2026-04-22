@@ -7,6 +7,7 @@ import { MerchantCard } from '~/components/features/MerchantCard';
 import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
 import { MobileHome } from '~/components/features/home/MobileHome';
 import { CashbackStatsBand } from '~/components/features/home/CashbackStatsBand';
+import { FlywheelStatsBand } from '~/components/features/home/FlywheelStatsBand';
 
 export function meta(): Route.MetaDescriptors {
   return [
@@ -153,8 +154,13 @@ function HomeContent(): React.JSX.Element {
             </p>
           )}
 
-          <div className="mb-12">
+          <div className="mb-12 space-y-3">
             <CashbackStatsBand />
+            {/* Flywheel band (#609): "X% of recent orders paid with
+                recycled cashback". Forward-looking pitch below the
+                emission totals. Self-hides at recycledOrders=0 so
+                the pre-flywheel state doesn't render a 0% banner. */}
+            <FlywheelStatsBand />
           </div>
 
           {/* Featured */}

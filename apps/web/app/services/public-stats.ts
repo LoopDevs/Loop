@@ -72,3 +72,28 @@ export interface PublicLoopAssetsResponse {
 export async function getPublicLoopAssets(): Promise<PublicLoopAssetsResponse> {
   return apiRequest<PublicLoopAssetsResponse>('/api/public/loop-assets');
 }
+
+/**
+ * Public flywheel-stats response (#609). 30-day scalar of the
+ * cashback-recycling signal — the forward-looking counterpart to
+ * `PublicCashbackStats` (which only shows emission). Shape repeats
+ * the backend export rather than pulling through `@loop/shared` —
+ * ADR 019 consolidates when there's a second consumer; today the
+ * web side is the first.
+ */
+export interface PublicFlywheelStats {
+  windowDays: number;
+  fulfilledOrders: number;
+  recycledOrders: number;
+  /** One-decimal percentage string, e.g. `"12.3"`. `"0.0"` when denom is zero. */
+  pctRecycled: string;
+}
+
+/**
+ * `GET /api/public/flywheel-stats` (ADR 015 / 020) — 30-day fleet-
+ * wide flywheel scalar. Never-500: serves last-known-good snapshot
+ * on DB trouble, zeros on bootstrap.
+ */
+export async function getPublicFlywheelStats(): Promise<PublicFlywheelStats> {
+  return apiRequest<PublicFlywheelStats>('/api/public/flywheel-stats');
+}
