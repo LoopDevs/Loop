@@ -45,6 +45,7 @@ import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
 import {
+  getCashbackByMerchantHandler,
   getCashbackHistoryHandler,
   getMeHandler,
   getUserPendingPayoutsHandler,
@@ -619,6 +620,11 @@ app.get('/api/users/me/cashback-history', rateLimit(60, 60_000), getCashbackHist
 // typically poll this from /settings/cashback while a payout is in
 // flight. State + before + limit query shape mirrors the admin endpoint.
 app.get('/api/users/me/pending-payouts', rateLimit(60, 60_000), getUserPendingPayoutsHandler);
+// GET /api/users/me/cashback-by-merchant — top-N per-merchant cashback
+// leaderboard for the caller (ADR 009 / 015). Single GROUP BY, merchant
+// names resolved from the in-memory catalog. 60/min to match the history
+// endpoint — both are consumed together on /settings/cashback.
+app.get('/api/users/me/cashback-by-merchant', rateLimit(60, 60_000), getCashbackByMerchantHandler);
 
 // ─── Admin (authenticated + admin-flagged) ──────────────────────────────────
 //

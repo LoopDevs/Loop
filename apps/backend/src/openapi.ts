@@ -308,6 +308,30 @@ const CashbackHistoryResponse = registry.register(
   z.object({ entries: z.array(CashbackHistoryEntry) }),
 );
 
+const CashbackByMerchantEntry = registry.register(
+  'CashbackByMerchantEntry',
+  z.object({
+    merchantId: z.string(),
+    merchantName: z.string().openapi({
+      description:
+        'Resolved via the in-memory merchant cache at response time. Falls back to `merchantId` when the catalog has evicted a merchant the user still has history for.',
+    }),
+    chargeCurrency: z.string().length(3),
+    orderCount: z.number().int().nonnegative(),
+    cashbackMinor: z.string().regex(/^\d+$/).openapi({
+      description: 'Total user-cashback minor-unit integer (bigint-safe string).',
+    }),
+    chargeMinor: z.string().regex(/^\d+$/).openapi({
+      description: 'Total amount charged across those orders, minor units (bigint-safe string).',
+    }),
+  }),
+);
+
+const CashbackByMerchantResponse = registry.register(
+  'CashbackByMerchantResponse',
+  z.object({ entries: z.array(CashbackByMerchantEntry) }),
+);
+
 // ─── Admin (ADR 015 — treasury + payouts) ───────────────────────────────────
 
 const LoopAssetCode = z
@@ -1048,6 +1072,45 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error resolving the user',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/users/me/cashback-by-merchant',
+  summary: 'Top-N per-merchant cashback leaderboard for the caller (ADR 009 / 015).',
+  description:
+    'Single GROUP BY over the caller\'s fulfilled orders — returns the merchants that earned them the most cashback, keyed by `(merchantId, chargeCurrency)`. Drives the "where is your cashback coming from?" panel on the cashback settings page. Merchant names are resolved from the in-memory catalog on read; a merchant evicted from upstream between the order and this call shows its id as the name. Cap the result with `?limit=` (default 10, hard-capped at 50).',
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      limit: z.coerce
+        .number()
+        .int()
+        .min(1)
+        .max(50)
+        .optional()
+        .openapi({ description: 'Page size. Default 10, hard-capped at 50.' }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Top-N merchants, highest cashback first',
+      content: { 'application/json': { schema: CashbackByMerchantResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the leaderboard',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },

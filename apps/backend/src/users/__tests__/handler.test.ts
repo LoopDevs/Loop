@@ -28,11 +28,15 @@ const { selectChain, updateChain, queryObj, dbState } = vi.hoisted(() => {
     updatedUser: unknown;
     historyRows: unknown[];
     homeBalanceMinor: bigint | null;
+    executeRows: unknown;
+    executeThrow: Error | null;
   } = {
     orderCount: '0',
     updatedUser: null,
     historyRows: [],
     homeBalanceMinor: null,
+    executeRows: [],
+    executeThrow: null,
   };
   const sel: Record<string, ReturnType<typeof vi.fn>> = {};
   sel['from'] = vi.fn(() => sel);
@@ -86,10 +90,21 @@ vi.mock('../../db/client.js', () => ({
     select: vi.fn(() => selectChain),
     update: vi.fn(() => updateChain),
     query: queryObj,
+    execute: vi.fn(async () => {
+      if (dbState.executeThrow !== null) throw dbState.executeThrow;
+      return dbState.executeRows;
+    }),
   },
 }));
 vi.mock('../../db/schema.js', () => ({
-  orders: { userId: 'user_id' },
+  orders: {
+    userId: 'user_id',
+    merchantId: 'merchant_id',
+    state: 'state',
+    chargeCurrency: 'charge_currency',
+    chargeMinor: 'charge_minor',
+    userCashbackMinor: 'user_cashback_minor',
+  },
   users: { id: 'id' },
   userCredits: { userId: 'user_id', currency: 'currency' },
   creditTransactions: {
@@ -123,6 +138,14 @@ vi.mock('../../credits/pending-payouts.js', () => ({
   }),
 }));
 
+// Merchants store mock for cashback-by-merchant name resolution.
+const { merchantState } = vi.hoisted(() => ({
+  merchantState: { byId: new Map<string, { name: string }>() },
+}));
+vi.mock('../../merchants/sync.js', () => ({
+  getMerchants: vi.fn(() => ({ merchantsById: merchantState.byId })),
+}));
+
 // The handler decodes CTX bearers via auth/jwt decodeJwtPayload —
 // stub it to return a preconfigured claim set.
 const { jwtState } = vi.hoisted(() => ({
@@ -135,6 +158,7 @@ vi.mock('../../auth/jwt.js', () => ({
 }));
 
 import {
+  getCashbackByMerchantHandler,
   getCashbackHistoryHandler,
   getMeHandler,
   getUserPendingPayoutsHandler,
@@ -175,6 +199,9 @@ beforeEach(() => {
   dbState.homeBalanceMinor = null;
   payoutState.rows = [];
   payoutState.calls = [];
+  dbState.executeRows = [];
+  dbState.executeThrow = null;
+  merchantState.byId = new Map<string, { name: string }>();
 });
 
 describe('getMeHandler', () => {
@@ -659,6 +686,120 @@ describe('getUserPendingPayoutsHandler', () => {
     jwtState.claims = { sub: 'ctx-err', email: 'e@x.com' };
     userState.upsertThrow = new Error('db down');
     const res = await getUserPendingPayoutsHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('getCashbackByMerchantHandler', () => {
+  const LOOP_AUTH: LoopAuthContext = {
+    kind: 'loop',
+    userId: 'user-uuid',
+    email: 'a@b.com',
+    bearerToken: 'loop-jwt',
+  };
+  const baseUser = {
+    id: 'user-uuid',
+    email: 'a@b.com',
+    isAdmin: false,
+    homeCurrency: 'GBP',
+    stellarAddress: null,
+    ctxUserId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  it('401 when no auth is on the context', async () => {
+    const res = await getCashbackByMerchantHandler(makeCtx(undefined));
+    expect(res.status).toBe(401);
+  });
+
+  it('returns merchant leaderboard with names resolved from the catalog', async () => {
+    userState.byId = baseUser;
+    merchantState.byId = new Map([
+      ['m-amazon', { name: 'Amazon' }],
+      ['m-apple', { name: 'Apple' }],
+    ]);
+    dbState.executeRows = [
+      {
+        merchantId: 'm-amazon',
+        chargeCurrency: 'GBP',
+        orderCount: 5,
+        cashbackMinor: 1500n,
+        chargeMinor: 10000n,
+      },
+      {
+        merchantId: 'm-apple',
+        chargeCurrency: 'GBP',
+        orderCount: 2,
+        cashbackMinor: 400n,
+        chargeMinor: 4000n,
+      },
+    ];
+    const res = await getCashbackByMerchantHandler(makeCtx(LOOP_AUTH));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      entries: Array<Record<string, unknown>>;
+    };
+    expect(body.entries).toHaveLength(2);
+    expect(body.entries[0]).toEqual({
+      merchantId: 'm-amazon',
+      merchantName: 'Amazon',
+      chargeCurrency: 'GBP',
+      orderCount: 5,
+      cashbackMinor: '1500',
+      chargeMinor: '10000',
+    });
+    expect(body.entries[1]?.merchantName).toBe('Apple');
+  });
+
+  it('falls back to the merchantId when the catalog is missing the row', async () => {
+    userState.byId = baseUser;
+    // Empty catalog — merchantsById.get(id) returns undefined.
+    dbState.executeRows = [
+      {
+        merchantId: 'm-ghost',
+        chargeCurrency: 'USD',
+        orderCount: 1,
+        cashbackMinor: 100n,
+        chargeMinor: 1000n,
+      },
+    ];
+    const res = await getCashbackByMerchantHandler(makeCtx(LOOP_AUTH));
+    const body = (await res.json()) as { entries: Array<Record<string, unknown>> };
+    expect(body.entries[0]?.merchantName).toBe('m-ghost');
+  });
+
+  it('returns empty list when the user has no fulfilled orders', async () => {
+    userState.byId = baseUser;
+    dbState.executeRows = [];
+    const res = await getCashbackByMerchantHandler(makeCtx(LOOP_AUTH));
+    const body = (await res.json()) as { entries: unknown[] };
+    expect(body.entries).toEqual([]);
+  });
+
+  it('handles the {rows: [...]} result shape', async () => {
+    userState.byId = baseUser;
+    dbState.executeRows = {
+      rows: [
+        {
+          merchantId: 'm-x',
+          chargeCurrency: 'EUR',
+          orderCount: 1,
+          cashbackMinor: 50n,
+          chargeMinor: 500n,
+        },
+      ],
+    };
+    const res = await getCashbackByMerchantHandler(makeCtx(LOOP_AUTH));
+    const body = (await res.json()) as { entries: Array<Record<string, unknown>> };
+    expect(body.entries).toHaveLength(1);
+    expect(body.entries[0]?.chargeCurrency).toBe('EUR');
+  });
+
+  it('500 when the db read throws', async () => {
+    userState.byId = baseUser;
+    dbState.executeThrow = new Error('db exploded');
+    const res = await getCashbackByMerchantHandler(makeCtx(LOOP_AUTH));
     expect(res.status).toBe(500);
   });
 });

@@ -28,6 +28,7 @@ import {
   PAYOUT_STATES,
 } from '../db/schema.js';
 import { listPayoutsForUser } from '../credits/pending-payouts.js';
+import { getMerchants } from '../merchants/sync.js';
 import { decodeJwtPayload } from '../auth/jwt.js';
 import { upsertUserFromCtx, getUserById, type User } from '../db/users.js';
 import type { LoopAuthContext } from '../auth/handler.js';
@@ -413,4 +414,94 @@ export async function getUserPendingPayoutsHandler(c: Context): Promise<Response
       failedAt: row.failedAt?.toISOString() ?? null,
     })),
   });
+}
+
+/**
+ * `GET /api/users/me/cashback-by-merchant` — per-merchant cashback
+ * leaderboard for the caller. Top N merchants by lifetime
+ * user-cashback earned on fulfilled orders, grouped by chargeCurrency
+ * (users who have moved home regions see rows per (merchant, currency)
+ * pair so the ledger still totals correctly). Drives the
+ * "where's your cashback coming from?" panel on the cashback settings
+ * page — users care about this more than the ordered ledger when
+ * choosing which merchants to spend with next.
+ *
+ * Single GROUP BY — one round-trip. Merchant names are resolved from
+ * the in-memory catalog (never a DB join), falling back to the id
+ * when the upstream catalog has evicted a merchant we still have
+ * history for.
+ */
+export interface CashbackByMerchantEntry {
+  merchantId: string;
+  /** Resolved via the in-memory merchant cache — falls back to merchantId. */
+  merchantName: string;
+  chargeCurrency: string;
+  orderCount: number;
+  /** Total user-cashback minor units earned from this (merchant, currency). */
+  cashbackMinor: string;
+  /** Total amount charged across those orders, minor units. */
+  chargeMinor: string;
+}
+
+export interface CashbackByMerchantResponse {
+  entries: CashbackByMerchantEntry[];
+}
+
+interface CashbackByMerchantRow extends Record<string, unknown> {
+  merchantId: string;
+  chargeCurrency: string;
+  orderCount: string | number;
+  cashbackMinor: string | null;
+  chargeMinor: string | null;
+}
+
+export async function getCashbackByMerchantHandler(c: Context): Promise<Response> {
+  const limitRaw = c.req.query('limit');
+  const parsedLimit = Number.parseInt(limitRaw ?? '10', 10);
+  const limit = Math.min(Math.max(Number.isNaN(parsedLimit) ? 10 : parsedLimit, 1), 50);
+
+  let user: User | null;
+  try {
+    user = await resolveCallingUser(c);
+  } catch (err) {
+    log.error({ err }, 'Failed to resolve calling user');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+  }
+  if (user === null) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+
+  try {
+    const result = await db.execute<CashbackByMerchantRow>(sql`
+      SELECT
+        ${orders.merchantId} AS "merchantId",
+        ${orders.chargeCurrency} AS "chargeCurrency",
+        COUNT(*)::bigint AS "orderCount",
+        COALESCE(SUM(${orders.userCashbackMinor}), 0)::bigint AS "cashbackMinor",
+        COALESCE(SUM(${orders.chargeMinor}), 0)::bigint AS "chargeMinor"
+      FROM ${orders}
+      WHERE ${orders.userId} = ${user.id}
+        AND ${orders.state} = 'fulfilled'
+      GROUP BY ${orders.merchantId}, ${orders.chargeCurrency}
+      ORDER BY COALESCE(SUM(${orders.userCashbackMinor}), 0) DESC
+      LIMIT ${limit}
+    `);
+    const rows: CashbackByMerchantRow[] = Array.isArray(result)
+      ? (result as CashbackByMerchantRow[])
+      : ((result as { rows?: CashbackByMerchantRow[] }).rows ?? []);
+
+    const { merchantsById } = getMerchants();
+    const entries: CashbackByMerchantEntry[] = rows.map((row) => ({
+      merchantId: row.merchantId,
+      merchantName: merchantsById.get(row.merchantId)?.name ?? row.merchantId,
+      chargeCurrency: row.chargeCurrency,
+      orderCount: Number(row.orderCount),
+      cashbackMinor: (row.cashbackMinor ?? '0').toString(),
+      chargeMinor: (row.chargeMinor ?? '0').toString(),
+    }));
+    return c.json<CashbackByMerchantResponse>({ entries });
+  } catch (err) {
+    log.error({ err }, 'Cashback-by-merchant query failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load cashback breakdown' }, 500);
+  }
 }
