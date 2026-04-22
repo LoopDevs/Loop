@@ -63,6 +63,7 @@ import { adminCashbackActivityHandler } from './admin/cashback-activity.js';
 import { adminCashbackActivityCsvHandler } from './admin/cashback-activity-csv.js';
 import { adminMerchantStatsHandler } from './admin/merchant-stats.js';
 import { adminMerchantStatsCsvHandler } from './admin/merchant-stats-csv.js';
+import { adminCashbackConfigsCsvHandler } from './admin/cashback-configs-csv.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
@@ -712,6 +713,16 @@ app.use('/api/admin/*', requireAuth);
 app.use('/api/admin/*', requireAdmin);
 
 app.get('/api/admin/merchant-cashback-configs', rateLimit(120, 60_000), listConfigsHandler);
+// CSV export of merchant_cashback_configs — Tier-3 bulk per ADR 018.
+// 10/min rate-limit matches the other admin CSVs; ops runs this at
+// audit cadence, not on-click from the UI. Registered before the
+// :merchantId routes below so the literal `.csv` segment isn't
+// treated as a merchantId.
+app.get(
+  '/api/admin/merchant-cashback-configs.csv',
+  rateLimit(10, 60_000),
+  adminCashbackConfigsCsvHandler,
+);
 app.put(
   '/api/admin/merchant-cashback-configs/:merchantId',
   rateLimit(60, 60_000),
