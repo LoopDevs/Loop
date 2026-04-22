@@ -234,6 +234,42 @@ export async function listAdminUsers(opts: {
   );
 }
 
+/** Full user detail shape from `/api/admin/users/:userId`. */
+export interface AdminUserDetail {
+  id: string;
+  email: string;
+  isAdmin: boolean;
+  homeCurrency: string;
+  stellarAddress: string | null;
+  ctxUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** `GET /api/admin/users/:userId` — single user drill-down. */
+export async function getAdminUser(userId: string): Promise<AdminUserDetail> {
+  return authenticatedRequest<AdminUserDetail>(`/api/admin/users/${encodeURIComponent(userId)}`);
+}
+
+/** One credit-balance row per (user, currency) from `/api/admin/users/:userId/credits`. */
+export interface AdminUserCreditRow {
+  currency: string;
+  balanceMinor: string;
+  updatedAt: string;
+}
+
+export interface AdminUserCreditsResponse {
+  userId: string;
+  rows: AdminUserCreditRow[];
+}
+
+/** `GET /api/admin/users/:userId/credits` — multi-currency balance drill. */
+export async function getAdminUserCredits(userId: string): Promise<AdminUserCreditsResponse> {
+  return authenticatedRequest<AdminUserCreditsResponse>(
+    `/api/admin/users/${encodeURIComponent(userId)}/credits`,
+  );
+}
+
 /** `GET /api/admin/orders` — paginated, filterable admin view. */
 export async function listAdminOrders(opts: {
   state?: AdminOrderState;
