@@ -27,6 +27,7 @@ import {
   type UserPendingPayoutView,
 } from '~/services/user';
 import { CashbackBalanceCard } from '~/components/features/cashback/CashbackBalanceCard';
+import { CashbackByMerchantCard } from '~/components/features/cashback/CashbackByMerchantCard';
 import { LinkWalletNudge } from '~/components/features/cashback/LinkWalletNudge';
 
 export function meta(): Route.MetaDescriptors {
@@ -127,6 +128,12 @@ export default function SettingsCashbackRoute(): React.JSX.Element {
           so new users don't see an empty card full of state terms
           they haven't earned context for yet. */}
       <PendingPayoutsSection />
+
+      {/* Top merchants the user has earned cashback from — same
+          180-day window the backend defaults to. Self-hiding for
+          users with no cashback (the ledger section tells the
+          empty-state story) and on fetch error. */}
+      <CashbackByMerchantCard />
 
       <section
         aria-labelledby="history-heading"

@@ -1688,6 +1688,65 @@ registry.registerPath({
   },
 });
 
+const UserCashbackByMerchantRow = registry.register(
+  'UserCashbackByMerchantRow',
+  z.object({
+    merchantId: z.string(),
+    cashbackMinor: z.string(),
+    orderCount: z.number().int().nonnegative(),
+    lastEarnedAt: z.string().datetime(),
+  }),
+);
+
+const UserCashbackByMerchantResponse = registry.register(
+  'UserCashbackByMerchantResponse',
+  z.object({
+    currency: z.string().length(3),
+    since: z.string().datetime(),
+    rows: z.array(UserCashbackByMerchantRow),
+  }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/users/me/cashback-by-merchant',
+  summary: 'Top cashback-earning merchants for the caller (ADR 009 / 015).',
+  description:
+    "Groups the caller's `credit_transactions` (type='cashback', filtered to `home_currency`) by the source order's `merchant_id`. Each row carries earned cashback (bigint-minor as string), distinct order count, and the most-recent ledger-row timestamp. Default window 180 days; server clamps `?since=` to 366d and `?limit=` to 50. Sorted cashback DESC, ties break on lastEarnedAt DESC. `merchantId` is the catalog slug — clients resolve display name via the merchant catalog rather than paying for another round-trip here.",
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      since: z.string().datetime().optional().openapi({
+        description: 'ISO-8601 lower bound on `created_at`. Defaults to 180d ago; capped at 366d.',
+      }),
+      limit: z.coerce.number().int().min(1).max(50).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Top-N rows in the window, ordered by cashback DESC',
+      content: { 'application/json': { schema: UserCashbackByMerchantResponse } },
+    },
+    400: {
+      description: 'Invalid `since` (or window over 366d)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the aggregate',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 registry.registerPath({
   method: 'get',
   path: '/api/users/me/pending-payouts/{id}',
