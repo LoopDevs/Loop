@@ -1626,6 +1626,43 @@ registry.registerPath({
   },
 });
 
+const UserCashbackSummary = registry.register(
+  'UserCashbackSummary',
+  z.object({
+    currency: z.string().length(3),
+    lifetimeMinor: z.string(),
+    thisMonthMinor: z.string(),
+  }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/users/me/cashback-summary',
+  summary: 'Compact lifetime + this-month cashback totals (ADR 009 / 015).',
+  description:
+    "Two-number headline the home / cashback pages render: `lifetimeMinor` is all-time cashback earned, `thisMonthMinor` resets at 00:00 UTC on the 1st. Both filter to `type='cashback'` in the user's current `home_currency` — no cross-currency sum (rare multi-currency users see only their home-currency earnings; admin ledger has cross-currency detail). `bigint`-minor units as strings.",
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Cashback summary',
+      content: { 'application/json': { schema: UserCashbackSummary } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the summary',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 registry.registerPath({
   method: 'get',
   path: '/api/users/me/pending-payouts/{id}',

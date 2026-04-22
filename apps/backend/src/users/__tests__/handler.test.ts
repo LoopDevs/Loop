@@ -90,6 +90,13 @@ const { userState } = vi.hoisted(() => ({
   },
 }));
 
+const { summaryState } = vi.hoisted(() => ({
+  summaryState: {
+    rows: [] as unknown[],
+    throwErr: null as Error | null,
+  },
+}));
+
 vi.mock('../../db/users.js', () => ({
   getUserById: vi.fn(async () => userState.byId),
   upsertUserFromCtx: vi.fn(async (args: { ctxUserId: string; email: string | undefined }) => {
@@ -98,11 +105,18 @@ vi.mock('../../db/users.js', () => ({
     return userState.upsertResult;
   }),
 }));
+// Cashback-summary handler runs a raw `db.execute(sql\`...\`)` so the
+// select/update chains aren't enough. Tests drive it via
+// `summaryState.rows` / `summaryState.throwErr`.
 vi.mock('../../db/client.js', () => ({
   db: {
     select: vi.fn(() => selectChain),
     update: vi.fn(() => updateChain),
     query: queryObj,
+    execute: vi.fn(async () => {
+      if (summaryState.throwErr !== null) throw summaryState.throwErr;
+      return summaryState.rows;
+    }),
   },
 }));
 vi.mock('../../db/schema.js', () => ({
@@ -164,6 +178,7 @@ vi.mock('../../auth/jwt.js', () => ({
 
 import {
   getCashbackHistoryHandler,
+  getCashbackSummaryHandler,
   getMeHandler,
   getUserCreditsHandler,
   getUserPendingPayoutDetailHandler,
@@ -859,6 +874,71 @@ describe('getUserPendingPayoutDetailHandler', () => {
     const res = await getUserPendingPayoutDetailHandler(
       makeCtx({ kind: 'ctx', bearerToken: 't' }, undefined, undefined, { id: validId }),
     );
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('getCashbackSummaryHandler', () => {
+  const LOOP_AUTH: LoopAuthContext = {
+    kind: 'loop',
+    userId: 'user-uuid',
+    email: 'a@b.com',
+    bearerToken: 'loop-jwt',
+  };
+  const baseUser = {
+    id: 'user-uuid',
+    email: 'a@b.com',
+    isAdmin: false,
+    homeCurrency: 'GBP',
+    stellarAddress: null,
+    ctxUserId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  beforeEach(() => {
+    userState.byId = baseUser;
+    userState.upsertThrow = null;
+    summaryState.rows = [];
+    summaryState.throwErr = null;
+  });
+
+  it('401 when there is no auth context', async () => {
+    const res = await getCashbackSummaryHandler(makeCtx(undefined));
+    expect(res.status).toBe(401);
+  });
+
+  it('returns zeroed totals when the user has no cashback ledger rows', async () => {
+    summaryState.rows = [];
+    const res = await getCashbackSummaryHandler(makeCtx(LOOP_AUTH));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({ currency: 'GBP', lifetimeMinor: '0', thisMonthMinor: '0' });
+  });
+
+  it('normalises bigint / string / number aggregates into bigint-safe strings', async () => {
+    summaryState.rows = [{ lifetimeMinor: '123450', thisMonthMinor: 5000n }];
+    const res = await getCashbackSummaryHandler(makeCtx(LOOP_AUTH));
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({
+      currency: 'GBP',
+      lifetimeMinor: '123450',
+      thisMonthMinor: '5000',
+    });
+  });
+
+  it('accepts the `{ rows }` envelope that node-postgres returns', async () => {
+    summaryState.rows = {
+      rows: [{ lifetimeMinor: '777', thisMonthMinor: '0' }],
+    } as unknown as unknown[];
+    const res = await getCashbackSummaryHandler(makeCtx(LOOP_AUTH));
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['lifetimeMinor']).toBe('777');
+  });
+
+  it('500 when the aggregate query throws', async () => {
+    summaryState.throwErr = new Error('db exploded');
+    const res = await getCashbackSummaryHandler(makeCtx(LOOP_AUTH));
     expect(res.status).toBe(500);
   });
 });

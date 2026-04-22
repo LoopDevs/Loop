@@ -70,6 +70,7 @@ import { publicCashbackStatsHandler } from './public/cashback-stats.js';
 import { publicTopCashbackMerchantsHandler } from './public/top-cashback-merchants.js';
 import {
   getCashbackHistoryHandler,
+  getCashbackSummaryHandler,
   getMeHandler,
   getUserCreditsHandler,
   getUserPendingPayoutDetailHandler,
@@ -672,6 +673,11 @@ app.get(
   rateLimit(120, 60_000),
   getUserPendingPayoutDetailHandler,
 );
+// GET /api/users/me/cashback-summary — compact lifetime + this-month
+// cashback totals in the user's home currency. Powers the home-page
+// headline ("£42 earned · £3.20 this month") without paging the
+// whole credit_transactions ledger.
+app.get('/api/users/me/cashback-summary', rateLimit(60, 60_000), getCashbackSummaryHandler);
 
 // ─── Admin (authenticated + admin-flagged) ──────────────────────────────────
 //

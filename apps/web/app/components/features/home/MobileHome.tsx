@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router';
 import type { Merchant } from '@loop/shared';
 import { foldForSearch, merchantSlug } from '@loop/shared';
@@ -6,6 +7,8 @@ import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merch
 import { useOrders } from '~/hooks/use-orders';
 import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
+import { shouldRetry } from '~/hooks/query-retry';
+import { getCashbackSummary } from '~/services/user';
 import { getImageProxyUrl } from '~/utils/image';
 import { formatMoney } from '~/utils/money';
 import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
@@ -50,23 +53,44 @@ export function MobileHome(): React.JSX.Element {
   }, [email]);
   const avatarInitial = greetingName.charAt(0).toUpperCase();
 
-  // Cashback aggregate — best-effort, client-side. Completed orders
-  // only; multiplies purchase amount by the merchant's
-  // savingsPercentage at view time (a future backend field would be
-  // more accurate since savingsPercentage can drift).
-  const { cashbackCents, ordersCount } = useMemo(() => {
+  // Authoritative cashback total — `credit_transactions.amount_minor`
+  // where type='cashback' in the user's home currency. Prefer this
+  // over the client-side savingsPercentage estimate below once it
+  // loads, since the estimate drifts as CTX tunes savings on its
+  // end (the ledger is what we actually credited). 60s stale matches
+  // the cashback-balance card on /settings/cashback.
+  const summaryQuery = useQuery({
+    queryKey: ['me', 'cashback-summary'],
+    queryFn: getCashbackSummary,
+    enabled: isAuthenticated,
+    retry: shouldRetry,
+    staleTime: 60_000,
+  });
+
+  // Fallback: best-effort, client-side. Completed orders only;
+  // multiplies purchase amount by the merchant's savingsPercentage
+  // at view time. Used while the backend query is pending or has
+  // errored so the hero doesn't flash "$0.00" on a cold load.
+  const { fallbackCents, ordersCount } = useMemo(() => {
     const completed = orders.filter((o) => o.status === 'completed');
     const byId = new Map(merchants.map((m) => [m.id, m]));
     let total = 0;
     for (const o of completed) {
       const pct = byId.get(o.merchantId)?.savingsPercentage;
       if (pct === undefined || pct <= 0) continue;
-      // order.amount is a number in the display currency; store the
-      // back-estimate in cents to avoid float drift when summing.
       total += Math.round(o.amount * 100 * (pct / 100));
     }
-    return { cashbackCents: total, ordersCount: completed.length };
+    return { fallbackCents: total, ordersCount: completed.length };
   }, [orders, merchants]);
+
+  // `lifetimeMinor` is already pence / cents (bigint-as-string).
+  // Coerce through Number — ledger totals fit into safe-integer
+  // range well before they'd print usefully in this tile (a £900T
+  // lifetime would overflow, which isn't a realistic concern).
+  const backendCents =
+    summaryQuery.data !== undefined ? Number(summaryQuery.data.lifetimeMinor) : null;
+  const cashbackCents =
+    backendCents !== null && Number.isFinite(backendCents) ? backendCents : fallbackCents;
 
   // Quick buy — top 6 by savings, only those with logos so the tile
   // row reads as populated.
