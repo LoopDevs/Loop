@@ -44,6 +44,7 @@ import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '.
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
+import { adminMerchantStatsHandler } from './admin/merchant-stats.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -653,6 +654,10 @@ app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayout
 // by state and userId. Ops uses this to triage stuck orders + audit
 // the cashback split + correlate with operator-pool health.
 app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+// Per-merchant cashback stats — which merchants drive volume /
+// cashback outlay / margin. Distinct from supplier-spend (currency
+// grouped) — this one groups by merchant.
+app.get('/api/admin/merchant-stats', rateLimit(60, 60_000), adminMerchantStatsHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 
