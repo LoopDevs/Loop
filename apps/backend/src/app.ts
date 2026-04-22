@@ -43,6 +43,7 @@ import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
+import { adminPayoutsCsvHandler } from './admin/payouts-csv.js';
 import { adminListOrdersHandler } from './admin/orders.js';
 import {
   getCashbackHistoryHandler,
@@ -646,6 +647,10 @@ app.get('/api/admin/treasury', rateLimit(60, 60_000), treasuryHandler);
 // drills into pending/submitted/confirmed/failed rows; counts for the
 // at-a-glance card come from the treasury snapshot above.
 app.get('/api/admin/payouts', rateLimit(60, 60_000), adminListPayoutsHandler);
+// Finance-ready CSV export of pending_payouts rows. Lower rate
+// limit than the JSON list because exports scan rows 500× the
+// size of a pagination fetch.
+app.get('/api/admin/payouts.csv', rateLimit(10, 60_000), adminPayoutsCsvHandler);
 // POST /api/admin/payouts/:id/retry — flip a failed row back to pending.
 // Lower rate limit: retries should be rare, one-at-a-time ops actions.
 app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayoutHandler);
