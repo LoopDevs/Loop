@@ -36,6 +36,7 @@ import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { MerchantCashbackPaidCard } from '~/components/features/admin/MerchantCashbackPaidCard';
 import { MerchantFlywheelChip } from '~/components/features/admin/MerchantFlywheelChip';
+import { MerchantRailMixCard } from '~/components/features/admin/MerchantRailMixCard';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -195,6 +196,12 @@ export default function AdminMerchantDetailRoute(): React.JSX.Element {
           "what's the rule?"; this one answers "what has the rule
           cost us so far?". */}
       <MerchantCashbackPaidCard merchantId={merchantId} />
+
+      {/* Rail mix (#627). Per-merchant payment-method share —
+          how users are paying for fulfilled orders at this one
+          merchant. A rising LOOP-asset share is the per-merchant
+          version of the fleet flywheel signal. */}
+      <MerchantRailMixCard merchantId={merchantId} />
 
       {/* Config audit trail (ADR 011). Newest first, last 50 rows
           by backend default. Silent-hide on error — the current-

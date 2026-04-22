@@ -1056,6 +1056,31 @@ export async function getAdminMerchantCashbackSummary(
 }
 
 /**
+ * Admin per-merchant payment-method share (#627). Merchant-scoped
+ * mirror of `PaymentMethodShareResponse` — same `byMethod` shape,
+ * filtered via `WHERE merchant_id = :merchantId`.
+ */
+export interface AdminMerchantPaymentMethodShareResponse {
+  merchantId: string;
+  state: AdminOrderStateLocal;
+  totalOrders: number;
+  byMethod: Record<AdminPaymentMethod, PaymentMethodShareBucket>;
+}
+
+/** `GET /api/admin/merchants/:merchantId/payment-method-share` — rail mix for one merchant. */
+export async function getAdminMerchantPaymentMethodShare(
+  merchantId: string,
+  opts: { state?: AdminOrderStateLocal } = {},
+): Promise<AdminMerchantPaymentMethodShareResponse> {
+  const params = new URLSearchParams();
+  if (opts.state !== undefined) params.set('state', opts.state);
+  const qs = params.toString();
+  return authenticatedRequest<AdminMerchantPaymentMethodShareResponse>(
+    `/api/admin/merchants/${encodeURIComponent(merchantId)}/payment-method-share${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
+/**
  * Fleet-wide cashback-monthly entry (#592). Identical shape to the
  * user-facing `CashbackMonthlyEntry` by design — the admin chart
  * re-uses the same bar-rendering helpers. One entry per
