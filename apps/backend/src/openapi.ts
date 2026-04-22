@@ -1436,6 +1436,84 @@ registry.registerPath({
   },
 });
 
+// ─── Admin — per-user credit history (ADR 009 / 011) ───────────────────────
+
+const AdminCreditLedgerEntry = registry.register(
+  'AdminCreditLedgerEntry',
+  z.object({
+    id: z.string().uuid(),
+    userId: z.string().uuid(),
+    type: z.string().openapi({
+      description:
+        "credit_transactions.type — one of 'cashback' / 'interest' / 'spend' / 'withdrawal' / 'refund' / 'adjustment'.",
+    }),
+    amountMinor: z.string().openapi({
+      description: 'Signed bigint-string — positive for credits, negative for debits.',
+    }),
+    currency: z.string(),
+    referenceType: z.string().nullable(),
+    referenceId: z.string().nullable().openapi({
+      description:
+        "Matching reference, e.g. order id for cashback, admin id for 'adjustment'. Null when unscoped.",
+    }),
+    note: z.string().nullable().openapi({
+      description:
+        "Free-text reason. Populated on type='adjustment' rows (migration 0011); null for every other type.",
+    }),
+    createdAt: z.string().datetime(),
+  }),
+);
+
+const AdminCreditHistoryResponse = registry.register(
+  'AdminCreditHistoryResponse',
+  z.object({ entries: z.array(AdminCreditLedgerEntry) }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users/{userId}/credit-history',
+  summary: 'Paginated credit-ledger view for a single user (ADR 009 / 011).',
+  description:
+    'Admin-scoped equivalent of /api/users/me/cashback-history. Includes the `note` field so support-initiated adjustments are visible. Paginate with `?before=<iso>`, cap with `?limit=` (default 20, max 100).',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ userId: z.string().uuid() }),
+    query: z.object({
+      before: z
+        .string()
+        .datetime()
+        .optional()
+        .openapi({ description: 'ISO-8601 — return rows strictly older than this createdAt.' }),
+      limit: z.coerce.number().int().min(1).max(100).optional().openapi({
+        description: 'Page size. Default 20, hard-capped at 100.',
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Ledger entries (newest first)',
+      content: { 'application/json': { schema: AdminCreditHistoryResponse } },
+    },
+    400: {
+      description: 'userId not a UUID or before malformed',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Admin — cashback-config CRUD (ADR 011) ─────────────────────────────────
 
 registry.registerPath({

@@ -46,6 +46,7 @@ import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payout
 import { adminListOrdersHandler } from './admin/orders.js';
 import { adminGetUserHandler } from './admin/users.js';
 import { adminCreditAdjustmentHandler } from './admin/credit-adjustments.js';
+import { adminCreditHistoryHandler } from './admin/credit-history.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -666,6 +667,13 @@ app.post(
   '/api/admin/users/:userId/credit-adjustments',
   rateLimit(30, 60_000),
   adminCreditAdjustmentHandler,
+);
+// Per-user ledger drill-down — same shape as /api/users/me/cashback-history
+// but scoped to any user and including the adjustment note (ADR 011).
+app.get(
+  '/api/admin/users/:userId/credit-history',
+  rateLimit(120, 60_000),
+  adminCreditHistoryHandler,
 );
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────

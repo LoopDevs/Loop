@@ -4,7 +4,12 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.users.$userId';
 import { useAuth } from '~/hooks/use-auth';
-import { createCreditAdjustment, getAdminUser, type AdminUserView } from '~/services/admin';
+import {
+  createCreditAdjustment,
+  getAdminUser,
+  getAdminUserCreditHistory,
+  type AdminUserView,
+} from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { Button } from '~/components/ui/Button';
@@ -90,6 +95,18 @@ export default function AdminUserRoute(): React.JSX.Element {
     staleTime: 10_000,
   });
 
+  // Head-only ledger (20 most-recent entries). Pagination via
+  // `?before=<iso>` is wired on the backend + service; the UI here
+  // keeps the first cut simple — a follow-up adds the "Load more"
+  // button once we've seen how deep support typically scrolls.
+  const historyQuery = useQuery({
+    queryKey: ['admin-user-credit-history', userId],
+    queryFn: () => getAdminUserCreditHistory(userId, { limit: 20 }),
+    enabled: isAuthenticated && userId.length > 0,
+    retry: shouldRetry,
+    staleTime: 10_000,
+  });
+
   const [amountInput, setAmountInput] = useState('');
   const [noteInput, setNoteInput] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
@@ -109,6 +126,8 @@ export default function AdminUserRoute(): React.JSX.Element {
         `${res.entry.amountMinor.startsWith('-') ? 'Debited' : 'Credited'} ${res.entry.amountMinor} minor ${res.entry.currency} · new balance ${res.balance.balanceMinor}`,
       );
       void queryClient.invalidateQueries({ queryKey: ['admin-user', userId] });
+      // Ledger table below should now show the new adjustment row.
+      void queryClient.invalidateQueries({ queryKey: ['admin-user-credit-history', userId] });
       // Invalidate the treasury snapshot too — outstanding credit moves.
       void queryClient.invalidateQueries({ queryKey: ['admin-treasury'] });
     },
@@ -340,6 +359,99 @@ export default function AdminUserRoute(): React.JSX.Element {
           </div>
         </form>
       </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Recent ledger</h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          The last 20 credit-transactions for this user — cashback, interest, withdrawals, and
+          support adjustments. Notes on <code className="text-xs">adjustment</code> rows are visible
+          only to admins.
+        </p>
+        {historyQuery.isPending ? (
+          <div className="flex justify-center py-6">
+            <Spinner />
+          </div>
+        ) : historyQuery.isError ? (
+          <p className="text-sm text-red-600 dark:text-red-400">Failed to load ledger.</p>
+        ) : historyQuery.data.entries.length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">No ledger activity yet.</p>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800 text-sm">
+              <thead className="bg-gray-50 dark:bg-gray-900/50">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400">
+                    When
+                  </th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400">
+                    Type
+                  </th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+                    Amount
+                  </th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400">
+                    Reference / note
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-900 bg-white dark:bg-gray-900">
+                {historyQuery.data.entries.map((e) => (
+                  <tr key={e.id}>
+                    <td className="px-3 py-2 text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                      {new Date(e.createdAt).toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${ledgerTypeClass(e.type)}`}
+                      >
+                        {e.type}
+                      </span>
+                    </td>
+                    <td
+                      className={`px-3 py-2 text-right tabular-nums ${e.amountMinor.startsWith('-') ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}
+                    >
+                      {fmtMinor(e.amountMinor, e.currency)}
+                    </td>
+                    <td className="px-3 py-2 text-gray-700 dark:text-gray-300">
+                      {e.note !== null ? (
+                        <span className="italic">{e.note}</span>
+                      ) : e.referenceType !== null ? (
+                        <span className="font-mono text-xs text-gray-500 dark:text-gray-400">
+                          {e.referenceType}
+                          {e.referenceId !== null ? ` · ${e.referenceId.slice(0, 8)}…` : ''}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400 dark:text-gray-600">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </main>
   );
+}
+
+/**
+ * Pill colour per ledger type. Cashback/interest/refund earn green;
+ * spend/withdrawal red; adjustment yellow (operator touched this row);
+ * unknown falls back to neutral.
+ */
+function ledgerTypeClass(type: string): string {
+  switch (type) {
+    case 'cashback':
+    case 'interest':
+    case 'refund':
+      return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
+    case 'spend':
+    case 'withdrawal':
+      return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
+    case 'adjustment':
+      return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
+    default:
+      return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
+  }
 }

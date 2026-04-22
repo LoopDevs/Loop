@@ -261,3 +261,38 @@ export async function createCreditAdjustment(
     { method: 'POST', body },
   );
 }
+
+/**
+ * Admin-scoped credit-ledger row. Same shape as the user-facing
+ * cashback-history row plus `userId` + `note` — ops needs both for
+ * cross-user triage and audit-trail visibility on adjustments.
+ */
+export interface AdminCreditLedgerEntry {
+  id: string;
+  userId: string;
+  type: string;
+  amountMinor: string;
+  currency: string;
+  referenceType: string | null;
+  referenceId: string | null;
+  note: string | null;
+  createdAt: string;
+}
+
+/**
+ * `GET /api/admin/users/:userId/credit-history` — paginated ledger
+ * for a single user. Pass `before` (ISO timestamp) + `limit` for
+ * cursor pagination; both optional.
+ */
+export async function getAdminUserCreditHistory(
+  userId: string,
+  opts: { before?: string; limit?: number } = {},
+): Promise<{ entries: AdminCreditLedgerEntry[] }> {
+  const params = new URLSearchParams();
+  if (opts.before !== undefined) params.set('before', opts.before);
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return authenticatedRequest<{ entries: AdminCreditLedgerEntry[] }>(
+    `/api/admin/users/${encodeURIComponent(userId)}/credit-history${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
