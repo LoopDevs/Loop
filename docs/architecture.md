@@ -233,6 +233,7 @@ GET  /api/admin/orders                                  [admin — Loop-native o
 GET  /api/admin/orders/:orderId/payout                  [admin — payout row for a given order]
 GET  /api/admin/supplier-spend                          [admin — per-currency supplier spend, ADR 013/015]
 GET  /api/admin/users/:userId/credits                   [admin — per-user credit balance, ADR 009]
+GET  /api/admin/users/:userId/credit-transactions       [admin — per-user credit-ledger log, ADR 009]
 ```
 
 Full request/response shapes — including field types, pagination

@@ -448,6 +448,33 @@ const AdminUserCreditsResponse = registry.register(
   }),
 );
 
+// ─── Admin — per-user credit transactions (ADR 009) ─────────────────────────
+
+const CreditTransactionType = z
+  .enum(['cashback', 'interest', 'spend', 'withdrawal', 'refund', 'adjustment'])
+  .openapi({ description: 'Mirrors the CHECK constraint on credit_transactions.type.' });
+
+const AdminCreditTransactionView = registry.register(
+  'AdminCreditTransactionView',
+  z.object({
+    id: z.string().uuid(),
+    type: CreditTransactionType,
+    amountMinor: z.string().openapi({
+      description:
+        'bigint-as-string, signed. Positive for cashback/interest/refund, negative for spend/withdrawal; adjustment can be either.',
+    }),
+    currency: z.string().length(3),
+    referenceType: z.string().nullable(),
+    referenceId: z.string().nullable(),
+    createdAt: z.string().datetime(),
+  }),
+);
+
+const AdminCreditTransactionListResponse = registry.register(
+  'AdminCreditTransactionListResponse',
+  z.object({ transactions: z.array(AdminCreditTransactionView) }),
+);
+
 // ─── Admin — cashback-config (ADR 011) ──────────────────────────────────────
 //
 // Percentages are stored as `numeric(5,2)` and round-trip as strings
@@ -1453,6 +1480,50 @@ registry.registerPath({
     },
     400: {
       description: 'Missing or malformed userId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading the ledger',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users/{userId}/credit-transactions',
+  summary: 'Per-user credit-transaction log (ADR 009).',
+  description:
+    'Newest-first paginated list of `credit_transactions` rows for the user. The balance drill-down at `/api/admin/users/:userId/credits` answers "what is owed"; this endpoint answers "how did the balance get there?". Cursor pagination via `?before=<iso-8601>`; cap with `?limit=` (default 20, max 100); filter to a single kind with `?type=`.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ userId: z.string().uuid() }),
+    query: z.object({
+      type: CreditTransactionType.optional(),
+      before: z.string().datetime().optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Credit-transaction rows (newest first)',
+      content: { 'application/json': { schema: AdminCreditTransactionListResponse } },
+    },
+    400: {
+      description: 'Invalid userId / type / before / limit',
       content: { 'application/json': { schema: ErrorResponse } },
     },
     401: {
