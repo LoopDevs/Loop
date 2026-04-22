@@ -230,3 +230,25 @@ export interface CashbackMonthlyResponse {
 export async function getCashbackMonthly(): Promise<CashbackMonthlyResponse> {
   return authenticatedRequest<CashbackMonthlyResponse>('/api/users/me/cashback-monthly');
 }
+
+/** 5-number summary from GET /api/users/me/orders/summary (ADR 010 / 015). */
+export interface UserOrdersSummary {
+  currency: string;
+  totalOrders: number;
+  fulfilledCount: number;
+  /** pending_payment + paid + procuring — all "in flight" states. */
+  pendingCount: number;
+  /** failed + expired — both "didn't succeed". */
+  failedCount: number;
+  /** SUM(charge_minor) over state='fulfilled' only — bigint-as-string. */
+  totalSpentMinor: string;
+}
+
+/**
+ * `GET /api/users/me/orders/summary` — compact 5-number header for
+ * the /orders page. One round-trip: totals across states + lifetime
+ * spend in the user's home currency.
+ */
+export async function getUserOrdersSummary(): Promise<UserOrdersSummary> {
+  return authenticatedRequest<UserOrdersSummary>('/api/users/me/orders/summary');
+}

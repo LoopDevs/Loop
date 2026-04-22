@@ -12,6 +12,7 @@ import { PageHeader } from '~/components/ui/PageHeader';
 import { OrderRowSkeleton } from '~/components/ui/Skeleton';
 import { Button } from '~/components/ui/Button';
 import { LoopOrdersList } from '~/components/features/orders/LoopOrdersList';
+import { OrdersSummaryHeader } from '~/components/features/orders/OrdersSummaryHeader';
 import { CashbackEarningsHeadline } from '~/components/features/cashback/CashbackEarningsHeadline';
 import { friendlyError } from '~/utils/error-messages';
 import { formatMoney } from '~/utils/money';
@@ -140,6 +141,17 @@ export default function OrdersRoute(): React.JSX.Element {
         {isAuthenticated ? (
           <div className="mb-4">
             <CashbackEarningsHeadline />
+          </div>
+        ) : null}
+
+        {/* 5-number orders summary (ADR 010 / 015 / #584). Complement
+            to the cashback headline above: cashback answers "what did
+            I get", this answers "what did I buy". Self-hides for
+            zero-activity users so new accounts aren't framed around
+            empty numbers. */}
+        {isAuthenticated ? (
+          <div className="mb-4">
+            <OrdersSummaryHeader />
           </div>
         ) : null}
 
