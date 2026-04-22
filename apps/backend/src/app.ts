@@ -51,6 +51,7 @@ import {
 import { adminPayoutsCsvHandler } from './admin/payouts-csv.js';
 import { adminPayoutsByAssetHandler } from './admin/payouts-by-asset.js';
 import { adminTopUsersHandler } from './admin/top-users.js';
+import { adminAuditTailHandler } from './admin/audit-tail.js';
 import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js';
 import { adminOrdersActivityHandler } from './admin/orders-activity.js';
 import { adminOrdersCsvHandler } from './admin/orders-csv.js';
@@ -755,6 +756,11 @@ app.get('/api/admin/supplier-spend', rateLimit(60, 60_000), adminSupplierSpendHa
 // Top users by cashback earned — recognition + concentration-risk
 // view for ops. Ranked, window-bounded; not a drill path.
 app.get('/api/admin/top-users', rateLimit(60, 60_000), adminTopUsersHandler);
+// Newest-first tail of admin_idempotency_keys (ADR 017/018). Powers
+// the "recent admin activity" card on the /admin landing. Same row
+// as the Discord audit fanout but persistent + queryable. Actor
+// email joined in so the UI doesn't need a follow-up lookup.
+app.get('/api/admin/audit-tail', rateLimit(60, 60_000), adminAuditTailHandler);
 // Paginated user directory — browse + search for the admin panel.
 // Complements the exact-by-id drill at /api/admin/users/:userId.
 app.get('/api/admin/users', rateLimit(60, 60_000), adminListUsersHandler);

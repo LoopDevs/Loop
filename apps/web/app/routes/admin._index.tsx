@@ -10,6 +10,7 @@ import {
   failedPayoutsCount,
   operatorPoolStatus,
 } from '~/components/features/admin/AdminNav';
+import { AdminAuditTail } from '~/components/features/admin/AdminAuditTail';
 import { CashbackSparkline } from '~/components/features/admin/CashbackSparkline';
 import { StuckOrdersCard } from '~/components/features/admin/StuckOrdersCard';
 import { Spinner } from '~/components/ui/Spinner';
@@ -160,6 +161,8 @@ export default function AdminIndexRoute(): React.JSX.Element {
       )}
 
       {denied ? null : <CashbackSparkline />}
+
+      {denied ? null : <AdminAuditTail />}
 
       <section className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {CARDS.map((card) => (
