@@ -72,6 +72,7 @@ import { adminUserCreditsHandler } from './admin/user-credits.js';
 import { adminUserCreditTransactionsHandler } from './admin/user-credit-transactions.js';
 import { adminUserCreditTransactionsCsvHandler } from './admin/user-credit-transactions-csv.js';
 import { adminUserCashbackByMerchantHandler } from './admin/user-cashback-by-merchant.js';
+import { adminUserCashbackSummaryHandler } from './admin/user-cashback-summary.js';
 import { adminGetUserHandler } from './admin/user-detail.js';
 import { adminUserByEmailHandler } from './admin/user-by-email.js';
 import { adminListUsersHandler } from './admin/users-list.js';
@@ -889,6 +890,16 @@ app.get(
   '/api/admin/users/:userId/cashback-by-merchant',
   rateLimit(120, 60_000),
   adminUserCashbackByMerchantHandler,
+);
+// Scalar cashback headline for a user — mirrors the user-facing
+// /api/users/me/cashback-summary but admin-scoped to any userId.
+// Powers the "£42 lifetime · £3.20 this month" chip on the admin
+// user drill-down. Single query; 404 when the user id doesn't
+// exist (LEFT JOIN returns no rows in that case).
+app.get(
+  '/api/admin/users/:userId/cashback-summary',
+  rateLimit(120, 60_000),
+  adminUserCashbackSummaryHandler,
 );
 // Credit-transaction log for a user (ADR 009). Drill-down from the
 // balance endpoint — shows how the balance got there (cashback,
