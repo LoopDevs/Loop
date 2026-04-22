@@ -312,6 +312,48 @@ export async function applyCreditAdjustment(args: {
   );
 }
 
+export type CreditTransactionType =
+  | 'cashback'
+  | 'interest'
+  | 'spend'
+  | 'withdrawal'
+  | 'refund'
+  | 'adjustment';
+
+/** Row shape from `/api/admin/users/:userId/credit-transactions` (ADR 009). */
+export interface AdminCreditTransactionView {
+  id: string;
+  type: CreditTransactionType;
+  amountMinor: string;
+  currency: string;
+  referenceType: string | null;
+  referenceId: string | null;
+  createdAt: string;
+}
+
+/**
+ * `GET /api/admin/users/:userId/credit-transactions` — newest-first
+ * paginated ledger drill. Cursor via `before=<iso>`; `limit` clamped
+ * 1..100 server-side (default 20). Optional `type` filter.
+ */
+export async function listAdminUserCreditTransactions(opts: {
+  userId: string;
+  type?: CreditTransactionType;
+  before?: string;
+  limit?: number;
+}): Promise<{ transactions: AdminCreditTransactionView[] }> {
+  const params = new URLSearchParams();
+  if (opts.type !== undefined) params.set('type', opts.type);
+  if (opts.before !== undefined) params.set('before', opts.before);
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return authenticatedRequest<{ transactions: AdminCreditTransactionView[] }>(
+    `/api/admin/users/${encodeURIComponent(opts.userId)}/credit-transactions${
+      qs.length > 0 ? `?${qs}` : ''
+    }`,
+  );
+}
+
 /** `GET /api/admin/orders` — paginated, filterable admin view. */
 export async function listAdminOrders(opts: {
   state?: AdminOrderState;
