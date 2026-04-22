@@ -235,8 +235,9 @@ function Detail({ row }: { row: AdminOrderView }): React.JSX.Element {
       <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 text-sm">
         <div>
           <dt className="text-gray-500 dark:text-gray-400">Merchant</dt>
-          <dd className="font-mono text-xs text-gray-700 dark:text-gray-300 break-all">
+          <dd className="font-mono text-xs text-gray-700 dark:text-gray-300 break-all inline-flex items-center gap-1">
             {row.merchantId}
+            <CopyButton text={row.merchantId} label="Copy merchant id" />
           </dd>
         </div>
         <div>
@@ -264,8 +265,11 @@ function Detail({ row }: { row: AdminOrderView }): React.JSX.Element {
         </div>
         <div>
           <dt className="text-gray-500 dark:text-gray-400">CTX order</dt>
-          <dd className="font-mono text-xs text-gray-700 dark:text-gray-300 break-all">
+          <dd className="font-mono text-xs text-gray-700 dark:text-gray-300 break-all inline-flex items-center gap-1">
             {row.ctxOrderId ?? '—'}
+            {row.ctxOrderId !== null && row.ctxOrderId !== undefined ? (
+              <CopyButton text={row.ctxOrderId} label="Copy CTX order id" />
+            ) : null}
           </dd>
         </div>
       </dl>
