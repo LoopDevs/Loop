@@ -405,6 +405,28 @@ const AdminPayoutListResponse = registry.register(
   z.object({ payouts: z.array(AdminPayoutView) }),
 );
 
+// ─── Admin — orders-activity time-series (ADR 011 / 015) ───────────────────
+
+const OrdersActivityDay = registry.register(
+  'OrdersActivityDay',
+  z.object({
+    day: z.string().openapi({ description: 'YYYY-MM-DD (UTC).' }),
+    count: z.number().int().min(0),
+    faceValueMinor: z.string(),
+    wholesaleMinor: z.string(),
+    userCashbackMinor: z.string(),
+    loopMarginMinor: z.string(),
+  }),
+);
+
+const OrdersActivityResponse = registry.register(
+  'OrdersActivityResponse',
+  z.object({
+    days: z.number().int().min(1).max(180),
+    rows: z.array(OrdersActivityDay),
+  }),
+);
+
 // ─── Admin — cashback-config (ADR 011) ──────────────────────────────────────
 //
 // Percentages are stored as `numeric(5,2)` and round-trip as strings
@@ -1256,6 +1278,43 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error resetting the row',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/orders-activity',
+  summary: 'Daily fulfilled-orders time-series (ADR 011 / 015).',
+  description:
+    'Dense day-by-day counts + `*_minor` sums of fulfilled orders. Companion to `/api/admin/cashback-activity` — the two series read side-by-side on the dashboard (did cashback track order volume?). Every day has a row including zero-activity days so the chart renders without gappy ticks. Default 30 days, clamped 1..180.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(180).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Daily rows (oldest → newest)',
+      content: { 'application/json': { schema: OrdersActivityResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the series',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
