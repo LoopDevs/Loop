@@ -83,6 +83,7 @@ import { adminDiscordNotifiersHandler } from './admin/discord-notifiers.js';
 import { adminDiscordTestHandler } from './admin/discord-test.js';
 import { adminCreditAdjustmentHandler } from './admin/credit-adjustments.js';
 import { publicCashbackStatsHandler } from './public/cashback-stats.js';
+import { publicLoopAssetsHandler } from './public/loop-assets.js';
 import { publicTopCashbackMerchantsHandler } from './public/top-cashback-merchants.js';
 import {
   getCashbackHistoryHandler,
@@ -557,6 +558,11 @@ app.get(
   rateLimit(60, 60_000),
   publicTopCashbackMerchantsHandler,
 );
+// LOOP-asset transparency surface (ADR 015 / 020). Public list of
+// configured (code, issuer) pairs so third-party wallets + users can
+// add trustlines to the verified issuer accounts without guessing
+// from on-chain traffic.
+app.get('/api/public/loop-assets', rateLimit(60, 60_000), publicLoopAssetsHandler);
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
