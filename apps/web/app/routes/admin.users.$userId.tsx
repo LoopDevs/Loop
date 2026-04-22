@@ -13,6 +13,7 @@ import { CreditAdjustmentForm } from '~/components/features/admin/CreditAdjustme
 import { CreditTransactionsTable } from '~/components/features/admin/CreditTransactionsTable';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { UserCashbackByMerchantTable } from '~/components/features/admin/UserCashbackByMerchantTable';
+import { UserCashbackMonthlyChart } from '~/components/features/admin/UserCashbackMonthlyChart';
 import { UserOrdersTable } from '~/components/features/admin/UserOrdersTable';
 import { UserRailMixCard } from '~/components/features/admin/UserRailMixCard';
 import { UserPayoutsTable } from '~/components/features/admin/UserPayoutsTable';
@@ -306,6 +307,29 @@ export default function AdminUserDetailRoute(): React.JSX.Element {
           </header>
           <div className="px-6 py-5">
             <UserPayoutsTable userId={userId} />
+          </div>
+        </section>
+      ) : null}
+
+      {/* Monthly cashback trend (#633) — 12-month time-series of
+          the user's cashback emissions. Answers "is this user
+          earning more cashback month-over-month?". Reuses the
+          fleet `AdminMonthlyCashbackChart` visual primitives for
+          identical bar rendering; entries are user-scoped via the
+          admin cashback-monthly endpoint. */}
+      {userId !== undefined && !userNotFound ? (
+        <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+          <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
+            <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+              Monthly cashback (last 12 months)
+            </h2>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Cashback emitted to this user per calendar month, per currency (ADR 009/015). The
+              time-series companion to the cashback-summary chip above — same data, different axis.
+            </p>
+          </header>
+          <div className="px-6 py-5">
+            <UserCashbackMonthlyChart userId={userId} />
           </div>
         </section>
       ) : null}
