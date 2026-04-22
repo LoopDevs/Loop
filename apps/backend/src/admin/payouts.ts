@@ -13,6 +13,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { PAYOUT_STATES } from '../db/schema.js';
+import { LOOP_ASSET_CODES } from '../credits/payout-asset.js';
 import {
   getPayoutByOrderId,
   getPayoutForAdmin,
@@ -128,9 +129,27 @@ export async function adminListPayoutsHandler(c: Context): Promise<Response> {
     return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
   }
 
+  // Pin to the enumerated LOOP_ASSET_CODES — lets a malformed asset
+  // 400 up front rather than returning an empty page, which ops might
+  // misread as "no stuck payouts for this asset".
+  const assetCodeParam = c.req.query('assetCode');
+  if (
+    assetCodeParam !== undefined &&
+    !(LOOP_ASSET_CODES as ReadonlyArray<string>).includes(assetCodeParam)
+  ) {
+    return c.json(
+      {
+        code: 'VALIDATION_ERROR',
+        message: `assetCode must be one of: ${LOOP_ASSET_CODES.join(', ')}`,
+      },
+      400,
+    );
+  }
+
   const rows = await listPayoutsForAdmin({
     ...(stateParam !== undefined ? { state: stateParam } : {}),
     ...(userIdParam !== undefined ? { userId: userIdParam } : {}),
+    ...(assetCodeParam !== undefined ? { assetCode: assetCodeParam } : {}),
     ...(before !== undefined ? { before } : {}),
     limit,
   });

@@ -96,7 +96,13 @@ export function PayoutsByAssetTable(): React.JSX.Element {
           {query.data.rows.map((row: PayoutsByAssetRow) => (
             <tr key={row.assetCode}>
               <td className="px-3 py-3 font-medium text-gray-900 dark:text-white">
-                {row.assetCode}
+                <Link
+                  to={`/admin/payouts?assetCode=${row.assetCode}`}
+                  className="text-blue-600 hover:underline dark:text-blue-400"
+                  aria-label={`Show all ${row.assetCode} payouts`}
+                >
+                  {row.assetCode}
+                </Link>
               </td>
               <td className="px-3 py-3">
                 <StateCell value={row.pending} assetCode={row.assetCode} />
@@ -110,7 +116,7 @@ export function PayoutsByAssetTable(): React.JSX.Element {
               <td className="px-3 py-3">
                 {row.failed.count > 0 ? (
                   <Link
-                    to="/admin/payouts?state=failed"
+                    to={`/admin/payouts?state=failed&assetCode=${row.assetCode}`}
                     className="hover:underline"
                     aria-label={`Review ${row.failed.count} failed ${row.assetCode} payouts`}
                   >
