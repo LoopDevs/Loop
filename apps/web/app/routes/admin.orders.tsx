@@ -13,7 +13,7 @@
  */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.orders';
 import { useAuth } from '~/hooks/use-auth';
@@ -250,7 +250,12 @@ function OrderRow({ row }: { row: AdminOrderView }): React.JSX.Element {
     <li className="grid grid-cols-[minmax(0,1.5fr)_minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.5fr)_minmax(0,1fr)] gap-3 px-5 py-3 items-start border-b border-gray-100 dark:border-gray-900 last:border-0 text-sm">
       <div className="min-w-0">
         <p className="font-mono text-xs text-gray-900 dark:text-white truncate" title={row.id}>
-          {row.id.slice(0, 8)}
+          <Link
+            to={`/admin/orders/${row.id}`}
+            className="text-blue-600 hover:underline dark:text-blue-400"
+          >
+            {row.id.slice(0, 8)}
+          </Link>
         </p>
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
           {formatMinor(row.chargeMinor, row.chargeCurrency)}
