@@ -1261,6 +1261,83 @@ registry.registerPath({
   },
 });
 
+// ─── Admin — refund on failed order (ADR 009 / 011) ─────────────────────────
+
+const OrderRefundEntry = registry.register(
+  'OrderRefundEntry',
+  z.object({
+    id: z.string().uuid(),
+    userId: z.string().uuid(),
+    orderId: z.string().uuid(),
+    amountMinor: z.string().openapi({
+      description:
+        "Refunded amount in the order's charge currency minor units (cents / pence). Always positive.",
+    }),
+    currency: z.string(),
+    createdAt: z.string().datetime(),
+  }),
+);
+
+const OrderRefundResponse = registry.register(
+  'OrderRefundResponse',
+  z.object({
+    entry: OrderRefundEntry,
+    balance: z.object({
+      currency: z.string(),
+      balanceMinor: z.string().openapi({
+        description: 'New user_credits.balance_minor for the charge currency. BigInt-string.',
+      }),
+    }),
+  }),
+);
+
+registry.registerPath({
+  method: 'post',
+  path: '/api/admin/orders/{orderId}/refund',
+  summary: 'Refund a failed order (ADR 009 / 011).',
+  description:
+    "Writes a `type='refund'` ledger entry at `orders.charge_minor` and bumps the user's credit balance atomically. Only orders in `state='failed'` are eligible; any other state returns 409. Idempotent — a second hit on the same order returns `ALREADY_REFUNDED` rather than double-paying.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ orderId: z.string().uuid() }),
+  },
+  responses: {
+    201: {
+      description: 'Refund written',
+      content: { 'application/json': { schema: OrderRefundResponse } },
+    },
+    400: {
+      description: 'orderId not a UUID',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'Order not found',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    409: {
+      description: 'Order is not failed, or a refund already exists',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (20/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error writing the refund',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Admin — cashback-config CRUD (ADR 011) ─────────────────────────────────
 
 registry.registerPath({

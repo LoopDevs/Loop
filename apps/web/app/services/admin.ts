@@ -191,3 +191,34 @@ export async function listAdminOrders(opts: {
     `/api/admin/orders${qs.length > 0 ? `?${qs}` : ''}`,
   );
 }
+
+/**
+ * Receipt of an admin-initiated refund on a failed order.
+ * `entry.amountMinor` is positive (a credit); `balance.balanceMinor`
+ * is the updated user_credits balance after the write.
+ */
+export interface OrderRefundEntry {
+  id: string;
+  userId: string;
+  orderId: string;
+  amountMinor: string;
+  currency: string;
+  createdAt: string;
+}
+
+export interface OrderRefundResponse {
+  entry: OrderRefundEntry;
+  balance: { currency: string; balanceMinor: string };
+}
+
+/**
+ * `POST /api/admin/orders/:orderId/refund` — writes a refund credit
+ * for a failed order and bumps the user's balance. Returns 409 if
+ * the order isn't refundable (wrong state) or already has a refund.
+ */
+export async function refundOrder(orderId: string): Promise<OrderRefundResponse> {
+  return authenticatedRequest<OrderRefundResponse>(
+    `/api/admin/orders/${encodeURIComponent(orderId)}/refund`,
+    { method: 'POST' },
+  );
+}

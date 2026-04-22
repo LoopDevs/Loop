@@ -12,12 +12,17 @@
  * a future slice can expand to a per-order detail drawer.
  */
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.orders';
 import { useAuth } from '~/hooks/use-auth';
-import { listAdminOrders, type AdminOrderState, type AdminOrderView } from '~/services/admin';
+import {
+  listAdminOrders,
+  refundOrder,
+  type AdminOrderState,
+  type AdminOrderView,
+} from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { Spinner } from '~/components/ui/Spinner';
@@ -313,7 +318,57 @@ function OrderRow({ row }: { row: AdminOrderView }): React.JSX.Element {
             {row.failureReason}
           </p>
         )}
+        {row.state === 'failed' ? <RefundButton orderId={row.id} /> : null}
       </div>
     </li>
+  );
+}
+
+/**
+ * Per-row refund control on failed orders. Keeps its own mutation +
+ * status state so a click on one row doesn't freeze others. On success,
+ * invalidates the orders list (so the admin can retry confidently — a
+ * second click surfaces as 409 ALREADY_REFUNDED) and the treasury
+ * snapshot (outstanding credit just jumped).
+ */
+function RefundButton({ orderId }: { orderId: string }): React.JSX.Element {
+  const queryClient = useQueryClient();
+  const [status, setStatus] = useState<'idle' | 'ok' | { error: string }>('idle');
+  const mutation = useMutation({
+    mutationFn: () => refundOrder(orderId),
+    onSuccess: () => {
+      setStatus('ok');
+      void queryClient.invalidateQueries({ queryKey: ['admin-orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin-treasury'] });
+    },
+    onError: (err) => {
+      const message =
+        err instanceof ApiException ? err.message : err instanceof Error ? err.message : 'Failed';
+      setStatus({ error: message });
+    },
+  });
+
+  if (status === 'ok') {
+    return <p className="mt-1 text-[11px] text-green-700 dark:text-green-400">Refunded</p>;
+  }
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => mutation.mutate()}
+        disabled={mutation.isPending}
+        className="mt-1 text-[11px] font-medium text-blue-600 hover:underline dark:text-blue-400 disabled:opacity-50"
+      >
+        {mutation.isPending ? 'Refunding…' : 'Refund'}
+      </button>
+      {typeof status === 'object' ? (
+        <p
+          className="mt-0.5 text-[11px] text-red-600 dark:text-red-400 truncate"
+          title={status.error}
+        >
+          {status.error}
+        </p>
+      ) : null}
+    </>
   );
 }
