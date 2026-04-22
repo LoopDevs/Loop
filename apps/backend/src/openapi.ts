@@ -405,6 +405,29 @@ const AdminPayoutListResponse = registry.register(
   z.object({ payouts: z.array(AdminPayoutView) }),
 );
 
+// ─── Admin — top users (ADR 009 / 015) ─────────────────────────────────────
+
+const TopUserRow = registry.register(
+  'TopUserRow',
+  z.object({
+    userId: z.string().uuid(),
+    email: z.string().email(),
+    currency: z.string().length(3),
+    count: z.number().int().min(0),
+    amountMinor: z.string().openapi({
+      description: 'bigint-as-string. Minor units (pence / cents).',
+    }),
+  }),
+);
+
+const TopUsersResponse = registry.register(
+  'TopUsersResponse',
+  z.object({
+    since: z.string().datetime(),
+    rows: z.array(TopUserRow),
+  }),
+);
+
 // ─── Admin — cashback-config (ADR 011) ──────────────────────────────────────
 //
 // Percentages are stored as `numeric(5,2)` and round-trip as strings
@@ -1256,6 +1279,48 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error resetting the row',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/top-users',
+  summary: 'Top users by cashback earned (ADR 009 / 015).',
+  description:
+    "Ranked list of users with the highest `cashback`-type credit_transactions in the window. Groups by `(user, currency)` — fleet-wide totals across currencies aren't meaningful. Two shoulders use this: ops recognition ('top earners this month') and concentration-risk signal ('one user accounts for 70% — why?'). Default window 30 days, capped at 366. `?limit=` clamped 1..100, default 20.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      since: z.string().datetime().optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Ranked rows, highest amountMinor first',
+      content: { 'application/json': { schema: TopUsersResponse } },
+    },
+    400: {
+      description: 'Invalid `since` or window over 366 days',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the ranking',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },

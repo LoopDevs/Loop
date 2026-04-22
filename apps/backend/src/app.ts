@@ -44,6 +44,7 @@ import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '.
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
+import { adminTopUsersHandler } from './admin/top-users.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -653,6 +654,9 @@ app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayout
 // by state and userId. Ops uses this to triage stuck orders + audit
 // the cashback split + correlate with operator-pool health.
 app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+// Top users by cashback earned — recognition + concentration-risk
+// view for ops. Ranked, window-bounded; not a drill path.
+app.get('/api/admin/top-users', rateLimit(60, 60_000), adminTopUsersHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 
