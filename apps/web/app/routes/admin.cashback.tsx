@@ -170,11 +170,23 @@ export default function AdminCashbackRoute(): React.JSX.Element {
             split.
           </p>
         </div>
-        {/* Manual CTX catalog resync (ADR 011). Natural home here — the
-            page edits configs keyed on merchant id, so after a new
-            merchant lands upstream the admin wants to see it appear in
-            this table without waiting 6h for the scheduled sweep. */}
-        <MerchantResyncButton />
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          {/* Manual CTX catalog resync (ADR 011). Natural home here —
+              the page edits configs keyed on merchant id, so after a
+              new merchant lands upstream the admin wants to see it
+              appear in this table without waiting 6h for the scheduled
+              sweep. */}
+          <MerchantResyncButton />
+          {/* Tier-3 CSV snapshot of current commercial terms
+              (ADR 011 / 018 / #579). Ops pulls this for finance /
+              audit reviews — the JSON list above is the live view,
+              this is the spreadsheet-friendly snapshot. */}
+          <CsvDownloadButton
+            path="/api/admin/merchant-cashback-configs.csv"
+            filename={`cashback-configs-${new Date().toISOString().slice(0, 10)}.csv`}
+            label="Configs CSV"
+          />
+        </div>
       </div>
 
       {saveError !== null && (
