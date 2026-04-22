@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type * as AdminModule from '~/services/admin';
 import { PaymentMethodShareCard, fmtPct, fmtPctBigint } from '../PaymentMethodShareCard';
@@ -26,9 +27,11 @@ vi.mock('~/hooks/query-retry', () => ({ shouldRetry: () => false }));
 function renderCard(): void {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
-    <QueryClientProvider client={qc}>
-      <PaymentMethodShareCard />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={qc}>
+        <PaymentMethodShareCard />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -112,5 +115,25 @@ describe('<PaymentMethodShareCard />', () => {
     expect(screen.getAllByText('87.1%').length).toBeGreaterThanOrEqual(1);
     // xlm's 50/448 orders and 50000/448000 charge both read as 11.2%.
     expect(screen.getAllByText('11.2%').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('deep-links each rail to /admin/orders with paymentMethod + state=fulfilled', async () => {
+    adminMock.getPaymentMethodShare.mockResolvedValue({
+      state: 'fulfilled',
+      totalOrders: 100,
+      byMethod: {
+        xlm: { orderCount: 10, chargeMinor: '1000' },
+        usdc: { orderCount: 20, chargeMinor: '2000' },
+        credit: { orderCount: 30, chargeMinor: '3000' },
+        loop_asset: { orderCount: 40, chargeMinor: '4000' },
+      },
+    });
+    renderCard();
+    const loopLink = (await screen.findByText(/LOOP asset/)).closest('a');
+    expect(loopLink?.getAttribute('href')).toBe(
+      '/admin/orders?paymentMethod=loop_asset&state=fulfilled',
+    );
+    const xlmLink = screen.getByText('XLM').closest('a');
+    expect(xlmLink?.getAttribute('href')).toBe('/admin/orders?paymentMethod=xlm&state=fulfilled');
   });
 });

@@ -1004,6 +1004,7 @@ export async function listAdminOrders(opts: {
   userId?: string;
   merchantId?: string;
   chargeCurrency?: string;
+  paymentMethod?: AdminPaymentMethod;
   ctxOperatorId?: string;
   limit?: number;
   before?: string;
@@ -1013,6 +1014,7 @@ export async function listAdminOrders(opts: {
   if (opts.userId !== undefined) params.set('userId', opts.userId);
   if (opts.merchantId !== undefined) params.set('merchantId', opts.merchantId);
   if (opts.chargeCurrency !== undefined) params.set('chargeCurrency', opts.chargeCurrency);
+  if (opts.paymentMethod !== undefined) params.set('paymentMethod', opts.paymentMethod);
   if (opts.ctxOperatorId !== undefined) params.set('ctxOperatorId', opts.ctxOperatorId);
   if (opts.limit !== undefined) params.set('limit', String(opts.limit));
   if (opts.before !== undefined) params.set('before', opts.before);
