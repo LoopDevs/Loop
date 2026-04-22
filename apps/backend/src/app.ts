@@ -62,6 +62,7 @@ import { adminUserCreditsHandler } from './admin/user-credits.js';
 import { adminUserCreditTransactionsHandler } from './admin/user-credit-transactions.js';
 import { adminGetUserHandler } from './admin/user-detail.js';
 import { adminListUsersHandler } from './admin/users-list.js';
+import { adminCreditAdjustmentHandler } from './admin/credit-adjustments.js';
 import { publicCashbackStatsHandler } from './public/cashback-stats.js';
 import { publicTopCashbackMerchantsHandler } from './public/top-cashback-merchants.js';
 import {
@@ -772,6 +773,14 @@ app.get(
   '/api/admin/users/:userId/credit-transactions',
   rateLimit(120, 60_000),
   adminUserCreditTransactionsHandler,
+);
+// Credit-adjustment write (ADR 017). Lower rate limit than reads —
+// it's an explicit ops action, not a polled surface. Idempotency-Key
+// header required; missing header is a 400 at the handler edge.
+app.post(
+  '/api/admin/users/:userId/credit-adjustments',
+  rateLimit(20, 60_000),
+  adminCreditAdjustmentHandler,
 );
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────

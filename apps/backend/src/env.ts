@@ -90,6 +90,11 @@ export const EnvSchema = z.object({
   // Discord webhooks (optional — for notifications)
   DISCORD_WEBHOOK_ORDERS: z.string().url().optional(),
   DISCORD_WEBHOOK_MONITORING: z.string().url().optional(),
+  // Admin audit fanout (ADR 017 / 018). Every successful admin write
+  // posts here fire-and-forget AFTER the DB commit. Unset in dev;
+  // set in production so a leaked admin token produces visible
+  // Discord noise rather than silent ledger drift.
+  DISCORD_WEBHOOK_ADMIN_AUDIT: z.string().url().optional(),
 
   // Error tracking (optional — get DSN from sentry.io)
   SENTRY_DSN: z.string().url().optional(),

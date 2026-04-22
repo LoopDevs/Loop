@@ -235,6 +235,7 @@ GET  /api/admin/payouts/:id                            [admin — single pending
 POST /api/admin/payouts/:id/retry                      [admin — reset failed payout to pending]
 GET  /api/admin/payouts-by-asset                       [admin — per-asset × per-state payout breakdown, ADR 015/016]
 GET  /api/admin/top-users                               [admin — ranked top users by cashback, ADR 009/015]
+POST /api/admin/users/:userId/credit-adjustments        [admin — signed credit adjustment, ADR 017]
 GET  /api/admin/payouts.csv                            [admin — finance-ready CSV export, ADR 015]
 GET  /api/admin/orders                                  [admin — Loop-native orders drill-down, ADR 011/015]
 GET  /api/admin/orders/activity                         [admin — N-day created/fulfilled sparkline, ADR 010]

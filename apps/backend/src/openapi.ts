@@ -559,6 +559,52 @@ const PayoutsByAssetResponse = registry.register(
   z.object({ rows: z.array(PayoutsByAssetRow) }),
 );
 
+// ─── Admin — credit-adjustment write (ADR 017) ─────────────────────────────
+
+const AdminWriteAudit = registry.register(
+  'AdminWriteAudit',
+  z.object({
+    actorUserId: z.string().uuid(),
+    actorEmail: z.string().email(),
+    idempotencyKey: z.string(),
+    appliedAt: z.string().datetime(),
+    replayed: z.boolean(),
+  }),
+);
+
+const CreditAdjustmentBody = registry.register(
+  'CreditAdjustmentBody',
+  z.object({
+    amountMinor: z.string().openapi({
+      description:
+        'Signed integer-as-string. Non-zero, within ±10_000_000 minor units. Positive = credit, negative = debit.',
+    }),
+    currency: z.enum(['USD', 'GBP', 'EUR']),
+    reason: z.string().min(2).max(500),
+  }),
+);
+
+const CreditAdjustmentResult = registry.register(
+  'CreditAdjustmentResult',
+  z.object({
+    id: z.string().uuid(),
+    userId: z.string().uuid(),
+    currency: z.string().length(3),
+    amountMinor: z.string(),
+    priorBalanceMinor: z.string(),
+    newBalanceMinor: z.string(),
+    createdAt: z.string().datetime(),
+  }),
+);
+
+const CreditAdjustmentEnvelope = registry.register(
+  'CreditAdjustmentEnvelope',
+  z.object({
+    result: CreditAdjustmentResult,
+    audit: AdminWriteAudit,
+  }),
+);
+
 // ─── Admin — per-merchant cashback stats (ADR 011 / 015) ───────────────────
 
 const MerchantStatsRow = registry.register(
@@ -2163,6 +2209,58 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error reading the ledger',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/api/admin/users/{userId}/credit-adjustments',
+  summary: 'Apply a signed admin credit adjustment (ADR 017).',
+  description:
+    "Writes a signed `credit_transactions` row (`type='adjustment'`) and atomically bumps `user_credits.balance_minor`. All five ADR-017 invariants enforced: actor from `requireAdmin`, `Idempotency-Key` header required, `reason` body field (2..500 chars), append-only ledger, Discord audit fanout AFTER commit. Response envelope is uniform across admin writes: `{ result, audit }`, where `audit.replayed: true` indicates a snapshot replay.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ userId: z.string().uuid() }),
+    headers: z.object({
+      'idempotency-key': z.string().min(16).max(128).openapi({
+        description:
+          'Required. Scoped to (admin_user_id, key); repeats replay the stored snapshot.',
+      }),
+    }),
+    body: {
+      content: { 'application/json': { schema: CreditAdjustmentBody } },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Adjustment applied (or replayed from idempotency snapshot)',
+      content: { 'application/json': { schema: CreditAdjustmentEnvelope } },
+    },
+    400: {
+      description: 'Missing idempotency key, invalid body, or non-uuid userId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    409: {
+      description: 'Debit would drive the balance below zero (INSUFFICIENT_BALANCE)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (20/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error applying the adjustment',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
