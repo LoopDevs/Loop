@@ -270,6 +270,48 @@ export async function getAdminUserCredits(userId: string): Promise<AdminUserCred
   );
 }
 
+/** Result shape from a successful credit-adjustment write (ADR 017). */
+export interface CreditAdjustmentResult {
+  id: string;
+  userId: string;
+  currency: string;
+  amountMinor: string;
+  priorBalanceMinor: string;
+  newBalanceMinor: string;
+  createdAt: string;
+}
+
+/**
+ * `POST /api/admin/users/:userId/credit-adjustments` — ADR 017
+ * admin-write. Caller supplies a signed integer minor amount
+ * (positive = credit, negative = debit), one of the home currencies
+ * (USD/GBP/EUR), and a 2..500 char reason. The service generates the
+ * Idempotency-Key so a double-submit of the form can't double-credit.
+ */
+export async function applyCreditAdjustment(args: {
+  userId: string;
+  amountMinor: string;
+  currency: 'USD' | 'GBP' | 'EUR';
+  reason: string;
+}): Promise<AdminWriteEnvelope<CreditAdjustmentResult>> {
+  const idempotencyKey =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID().replace(/-/g, '')
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  return authenticatedRequest<AdminWriteEnvelope<CreditAdjustmentResult>>(
+    `/api/admin/users/${encodeURIComponent(args.userId)}/credit-adjustments`,
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: {
+        amountMinor: args.amountMinor,
+        currency: args.currency,
+        reason: args.reason,
+      },
+    },
+  );
+}
+
 /** `GET /api/admin/orders` — paginated, filterable admin view. */
 export async function listAdminOrders(opts: {
   state?: AdminOrderState;
