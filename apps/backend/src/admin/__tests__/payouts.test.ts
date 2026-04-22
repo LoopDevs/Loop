@@ -152,6 +152,23 @@ describe('adminListPayoutsHandler', () => {
     expect(listMock).not.toHaveBeenCalled();
   });
 
+  it('forwards a valid assetCode to the repo', async () => {
+    await adminListPayoutsHandler(makeCtx({ assetCode: 'GBPLOOP' }));
+    expect(listMock).toHaveBeenCalledWith(expect.objectContaining({ assetCode: 'GBPLOOP' }));
+  });
+
+  it('400 on unknown assetCode', async () => {
+    const res = await adminListPayoutsHandler(makeCtx({ assetCode: 'BOGUSLOOP' }));
+    expect(res.status).toBe(400);
+    expect(listMock).not.toHaveBeenCalled();
+  });
+
+  it('400 on lowercase assetCode (strict uppercase per schema)', async () => {
+    const res = await adminListPayoutsHandler(makeCtx({ assetCode: 'gbploop' }));
+    expect(res.status).toBe(400);
+    expect(listMock).not.toHaveBeenCalled();
+  });
+
   it('serialises nullable timestamps as null, populated as ISO strings', async () => {
     listMock.mockResolvedValue([
       {

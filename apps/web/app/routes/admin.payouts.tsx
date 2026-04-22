@@ -3,7 +3,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import type { Route } from './+types/admin.payouts';
 import { useAuth } from '~/hooks/use-auth';
-import { listPayouts, retryPayout, type AdminPayoutView, type PayoutState } from '~/services/admin';
+import {
+  listPayouts,
+  retryPayout,
+  type AdminPayoutView,
+  type LoopAssetCode,
+  type PayoutState,
+} from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
@@ -20,6 +26,11 @@ const STATES: readonly (PayoutState | 'all')[] = [
   'confirmed',
   'failed',
 ];
+
+const LOOP_ASSET_CODES: ReadonlyArray<LoopAssetCode> = ['USDLOOP', 'GBPLOOP', 'EURLOOP'];
+function isLoopAssetCode(v: string | null): v is LoopAssetCode {
+  return v !== null && (LOOP_ASSET_CODES as ReadonlyArray<string>).includes(v);
+}
 
 function fmtStroops(stroops: string, code: string): string {
   const negative = stroops.startsWith('-');
@@ -63,12 +74,21 @@ export default function AdminPayoutsRoute(): React.JSX.Element {
   const activeState = STATES.includes(stateParam as PayoutState | 'all')
     ? (stateParam as PayoutState | 'all')
     : 'all';
+  // `?assetCode=<code>` drill-down target from /admin/treasury
+  // PayoutsByAssetTable. Silently drop typos — prefer a visibly
+  // unfiltered list to a 400 the user can't debug from the URL.
+  const assetCodeParam = searchParams.get('assetCode');
+  const assetCodeFilter = isLoopAssetCode(assetCodeParam) ? assetCodeParam : undefined;
 
   const queryClient = useQueryClient();
   const query = useQuery({
-    queryKey: ['admin-payouts', activeState],
+    queryKey: ['admin-payouts', activeState, assetCodeFilter ?? null],
     queryFn: () =>
-      listPayouts(activeState === 'all' ? { limit: 50 } : { state: activeState, limit: 50 }),
+      listPayouts({
+        limit: 50,
+        ...(activeState !== 'all' ? { state: activeState } : {}),
+        ...(assetCodeFilter !== undefined ? { assetCode: assetCodeFilter } : {}),
+      }),
     enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 10_000,
@@ -167,6 +187,30 @@ export default function AdminPayoutsRoute(): React.JSX.Element {
           </button>
         ))}
       </nav>
+
+      {assetCodeFilter !== undefined ? (
+        <div
+          role="status"
+          className="flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200"
+        >
+          <span>
+            Filtered to asset <code className="font-mono text-xs">{assetCodeFilter}</code>
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                next.delete('assetCode');
+                return next;
+              });
+            }}
+            className="text-xs font-medium underline hover:no-underline"
+          >
+            Clear
+          </button>
+        </div>
+      ) : null}
 
       {retryError !== null ? (
         <div
