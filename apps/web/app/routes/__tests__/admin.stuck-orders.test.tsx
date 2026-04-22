@@ -61,6 +61,7 @@ function row(overrides: Partial<StuckOrderRow> = {}): StuckOrderRow {
     userId: overrides.userId ?? 'bbbbbbbb',
     merchantId: overrides.merchantId ?? 'mer-stuck',
     state: overrides.state ?? 'paid',
+    paymentMethod: overrides.paymentMethod ?? 'xlm',
     stuckSince: overrides.stuckSince ?? new Date().toISOString(),
     ageMinutes: overrides.ageMinutes ?? 20,
     ctxOrderId: overrides.ctxOrderId ?? null,

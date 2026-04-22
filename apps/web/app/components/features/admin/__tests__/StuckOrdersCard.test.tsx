@@ -44,6 +44,7 @@ function row(ageMinutes: number, state = 'paid'): StuckOrderRow {
     userId: 'u',
     merchantId: 'm',
     state,
+    paymentMethod: 'xlm',
     stuckSince: new Date().toISOString(),
     ageMinutes,
     ctxOrderId: null,

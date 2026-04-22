@@ -35,6 +35,11 @@ export interface StuckOrderRow {
   userId: string;
   merchantId: string;
   state: string;
+  /** The rail the user paid with (ADR 015). Matters for triage — a
+   * stuck loop_asset order is a flywheel-path incident; a stuck xlm
+   * / usdc order is a Stellar-watcher incident; a stuck credit order
+   * is an off-ledger state-machine bug. */
+  paymentMethod: string;
   /** The ISO timestamp that keyed this row as stuck (paid_at or procured_at depending on state). */
   stuckSince: string;
   /** Minutes elapsed since stuckSince, as a number — for convenient UI rendering. */
@@ -53,6 +58,7 @@ interface DbRow {
   userId: string;
   merchantId: string;
   state: string;
+  paymentMethod: string;
   createdAt: Date;
   paidAt: Date | null;
   procuredAt: Date | null;
@@ -89,6 +95,7 @@ export async function adminStuckOrdersHandler(c: Context): Promise<Response> {
         userId: orders.userId,
         merchantId: orders.merchantId,
         state: orders.state,
+        paymentMethod: orders.paymentMethod,
         createdAt: orders.createdAt,
         paidAt: orders.paidAt,
         procuredAt: orders.procuredAt,
@@ -119,6 +126,7 @@ export async function adminStuckOrdersHandler(c: Context): Promise<Response> {
           userId: r.userId,
           merchantId: r.merchantId,
           state: r.state,
+          paymentMethod: r.paymentMethod,
           stuckSince: anchor.toISOString(),
           ageMinutes,
           ctxOrderId: r.ctxOrderId,

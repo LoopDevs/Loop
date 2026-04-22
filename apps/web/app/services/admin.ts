@@ -405,6 +405,11 @@ export interface StuckOrderRow {
   userId: string;
   merchantId: string;
   state: string;
+  /** Payment rail the user chose (ADR 015). Matters for triage — a
+   * stuck loop_asset order is a flywheel-path incident; a stuck
+   * xlm/usdc is a Stellar-watcher incident; a stuck credit is an
+   * off-ledger state-machine bug. */
+  paymentMethod: string;
   /** ISO timestamp keyed by paid_at or procured_at depending on state. */
   stuckSince: string;
   /** Elapsed minutes since stuckSince. */
