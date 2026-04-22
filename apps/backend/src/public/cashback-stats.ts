@@ -24,24 +24,16 @@
  */
 import type { Context } from 'hono';
 import { sql } from 'drizzle-orm';
+// Response shape lives in `@loop/shared` alongside the web's consumer
+// (ADR 019 single-source rule). Re-exported below for existing backend
+// imports that reference the symbol relative to this module.
+import type { PerCurrencyCashback, PublicCashbackStats } from '@loop/shared';
 import { db } from '../db/client.js';
 import { logger } from '../logger.js';
 
+export type { PerCurrencyCashback, PublicCashbackStats };
+
 const log = logger.child({ handler: 'public-cashback-stats' });
-
-export interface PerCurrencyCashback {
-  currency: string;
-  /** bigint-as-string, minor units. */
-  amountMinor: string;
-}
-
-export interface PublicCashbackStats {
-  totalUsersWithCashback: number;
-  totalCashbackByCurrency: PerCurrencyCashback[];
-  fulfilledOrders: number;
-  /** ISO-8601 timestamp of when this snapshot was computed. */
-  asOf: string;
-}
 
 // In-memory last-known-good snapshot. The tier that makes this
 // "never 500" — if the DB read throws, we serve this instead.
