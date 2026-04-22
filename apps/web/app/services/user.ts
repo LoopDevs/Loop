@@ -89,6 +89,37 @@ export async function getCashbackHistory(
   );
 }
 
+/**
+ * Fetches the full cashback-history CSV and triggers a browser
+ * download. Uses `authenticatedRequest` with `binary: true` so the
+ * response is returned as an ArrayBuffer — the api-client's default
+ * JSON parse would choke on CSV content, and `binary` skips the
+ * parse entirely.
+ *
+ * The DOM dance (create anchor, click, revoke URL) only runs in the
+ * browser; guarded against SSR so the build doesn't crash if this
+ * gets accidentally called from a loader.
+ */
+export async function downloadCashbackHistoryCsv(): Promise<void> {
+  const buffer = await authenticatedRequest<ArrayBuffer>('/api/users/me/cashback-history.csv', {
+    binary: true,
+    headers: { Accept: 'text/csv' },
+  });
+  if (typeof document === 'undefined') return;
+  const blob = new Blob([buffer], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = 'loop-cashback-history.csv';
+  // Firefox needs the anchor in the document tree to honour `click()`.
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  // Free the blob URL on the next tick — Safari holds the reference
+  // briefly after click() returns.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 export type UserPendingPayoutState = 'pending' | 'submitted' | 'confirmed' | 'failed';
 
 /** One row of the caller's on-chain payout backlog (ADR 015 / 016). */

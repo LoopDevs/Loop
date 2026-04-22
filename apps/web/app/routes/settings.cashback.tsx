@@ -19,6 +19,7 @@ import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { Button } from '~/components/ui/Button';
 import {
+  downloadCashbackHistoryCsv,
   getCashbackHistory,
   getUserPendingPayouts,
   type CashbackHistoryEntry,
@@ -99,11 +100,14 @@ export default function SettingsCashbackRoute(): React.JSX.Element {
 
   return (
     <main className="max-w-2xl mx-auto px-6 py-12 space-y-8">
-      <header>
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Cashback history</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-          Every credit-ledger event on your account — newest first.
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Cashback history</h1>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+            Every credit-ledger event on your account — newest first.
+          </p>
+        </div>
+        <CsvExportButton />
       </header>
 
       {/* On-chain payouts — rendered above the ledger so in-flight
@@ -369,5 +373,42 @@ function HistoryPage({
         </div>
       ) : null}
     </>
+  );
+}
+
+/**
+ * "Export CSV" button in the page header. Fetches the whole ledger
+ * via `downloadCashbackHistoryCsv()` and triggers a browser download.
+ * Renders a per-button status line on error so a 429 / 500 is visible
+ * to the user without a toast system.
+ */
+function CsvExportButton(): React.JSX.Element {
+  const [status, setStatus] = useState<'idle' | 'downloading' | { error: string }>('idle');
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <Button
+        variant="secondary"
+        onClick={() => {
+          setStatus('downloading');
+          void downloadCashbackHistoryCsv()
+            .then(() => setStatus('idle'))
+            .catch((err: unknown) => {
+              const message = err instanceof Error ? err.message : 'Failed to download';
+              setStatus({ error: message });
+            });
+        }}
+        disabled={status === 'downloading'}
+      >
+        {status === 'downloading' ? 'Downloading…' : 'Export CSV'}
+      </Button>
+      {typeof status === 'object' ? (
+        <span
+          className="text-[11px] text-red-600 dark:text-red-400 max-w-[160px] text-right"
+          title={status.error}
+        >
+          {status.error}
+        </span>
+      ) : null}
+    </div>
   );
 }
