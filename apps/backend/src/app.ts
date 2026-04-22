@@ -73,6 +73,7 @@ import { adminMerchantsFlywheelShareHandler } from './admin/merchants-flywheel-s
 import { adminMerchantsFlywheelShareCsvHandler } from './admin/merchants-flywheel-share-csv.js';
 import { adminMerchantFlywheelStatsHandler } from './admin/merchant-flywheel-stats.js';
 import { adminMerchantCashbackSummaryHandler } from './admin/merchant-cashback-summary.js';
+import { adminMerchantPaymentMethodShareHandler } from './admin/merchant-payment-method-share.js';
 import { adminCashbackConfigsCsvHandler } from './admin/cashback-configs-csv.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
@@ -906,6 +907,17 @@ app.get(
   '/api/admin/merchants/:merchantId/cashback-summary',
   rateLimit(120, 60_000),
   adminMerchantCashbackSummaryHandler,
+);
+// Per-merchant payment-method share (#627) — rail mix on one
+// merchant. Sibling of `/api/admin/orders/payment-method-share`,
+// scoped via WHERE merchant_id = :merchantId. Drives a small
+// "rail mix" card on the merchant drill alongside flywheel +
+// cashback-paid. Default ?state=fulfilled, zero-filled across
+// every known payment method for stable layout.
+app.get(
+  '/api/admin/merchants/:merchantId/payment-method-share',
+  rateLimit(120, 60_000),
+  adminMerchantPaymentMethodShareHandler,
 );
 // Given an order id, return the single pending_payouts row for it.
 // Nested under /orders/:orderId so the UI can link from the order
