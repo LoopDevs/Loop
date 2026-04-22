@@ -72,6 +72,7 @@ import { adminUserCashbackByMerchantHandler } from './admin/user-cashback-by-mer
 import { adminGetUserHandler } from './admin/user-detail.js';
 import { adminUserByEmailHandler } from './admin/user-by-email.js';
 import { adminListUsersHandler } from './admin/users-list.js';
+import { adminMerchantsResyncHandler } from './admin/merchants-resync.js';
 import { adminCreditAdjustmentHandler } from './admin/credit-adjustments.js';
 import { publicCashbackStatsHandler } from './public/cashback-stats.js';
 import { publicTopCashbackMerchantsHandler } from './public/top-cashback-merchants.js';
@@ -868,6 +869,11 @@ app.post(
   rateLimit(20, 60_000),
   adminCreditAdjustmentHandler,
 );
+// Manual merchant-catalog resync (ADR 011). Bypasses the 6h
+// scheduled refresh so ops can apply an upstream catalog change
+// within seconds. 2/min rate limit — every hit goes to CTX, this
+// is a manual override not a polled surface.
+app.post('/api/admin/merchants/resync', rateLimit(2, 60_000), adminMerchantsResyncHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 

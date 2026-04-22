@@ -2636,6 +2636,46 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'post',
+  path: '/api/admin/merchants/resync',
+  summary: 'Force an immediate merchant-catalog sweep of the upstream CTX API.',
+  description:
+    'Ops override for the 6-hour scheduled `refreshMerchants` timer (ADR 011). Runs the same paginated sweep on-demand and atomically replaces the in-memory merchant cache once the new snapshot is fully built. Two admins clicking simultaneously coalesce into one upstream sweep via the existing refresh mutex: one response sees `triggered: true`, the other `triggered: false` with the same post-sync `loadedAt`. 502 on upstream failure, not 500 — the cached snapshot is retained so `/api/merchants` keeps serving prior data. Tight 2/min rate limit because every hit goes to CTX.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Post-sync snapshot summary',
+      content: {
+        'application/json': {
+          schema: z.object({
+            merchantCount: z.number().int().min(0),
+            loadedAt: z.string().datetime(),
+            triggered: z.boolean(),
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (2/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    502: {
+      description: 'Upstream CTX catalog fetch failed — cached snapshot retained',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
   method: 'get',
   path: '/api/admin/payouts.csv',
   summary: 'CSV export of pending_payouts (ADR 015).',
