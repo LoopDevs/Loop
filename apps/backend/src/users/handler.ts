@@ -27,7 +27,7 @@ import {
   HOME_CURRENCIES,
   PAYOUT_STATES,
 } from '../db/schema.js';
-import { listPayoutsForUser } from '../credits/pending-payouts.js';
+import { getPayoutForUser, listPayoutsForUser } from '../credits/pending-payouts.js';
 import { decodeJwtPayload } from '../auth/jwt.js';
 import { upsertUserFromCtx, getUserById, type User } from '../db/users.js';
 import type { LoopAuthContext } from '../auth/handler.js';
@@ -468,5 +468,58 @@ export async function getUserPendingPayoutsHandler(c: Context): Promise<Response
       confirmedAt: row.confirmedAt?.toISOString() ?? null,
       failedAt: row.failedAt?.toISOString() ?? null,
     })),
+  });
+}
+
+const PENDING_PAYOUT_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * `GET /api/users/me/pending-payouts/:id` — caller-scoped single
+ * payout drill-down (ADR 015 / 016). Permalink for a stuck
+ * payout row: the /settings/cashback detail view deep-links each
+ * list row to this endpoint so the user can bookmark / share a
+ * link with support when asking why a cashback payout is stuck.
+ *
+ * Cross-user access returns 404 (not 403) — enumerating other
+ * users' payout ids should be indistinguishable from a genuine miss.
+ */
+export async function getUserPendingPayoutDetailHandler(c: Context): Promise<Response> {
+  const id = c.req.param('id');
+  if (id === undefined || id.length === 0) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'id is required' }, 400);
+  }
+  if (!PENDING_PAYOUT_UUID_RE.test(id)) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'id must be a uuid' }, 400);
+  }
+
+  let user: User | null;
+  try {
+    user = await resolveCallingUser(c);
+  } catch (err) {
+    log.error({ err }, 'Failed to resolve calling user');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+  }
+  if (user === null) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+
+  const row = await getPayoutForUser(id, user.id);
+  if (row === null) {
+    return c.json({ code: 'NOT_FOUND', message: 'Payout not found' }, 404);
+  }
+
+  return c.json<UserPendingPayoutView>({
+    id: row.id,
+    orderId: row.orderId,
+    assetCode: row.assetCode,
+    assetIssuer: row.assetIssuer,
+    amountStroops: row.amountStroops.toString(),
+    state: row.state as (typeof PAYOUT_STATES)[number],
+    txHash: row.txHash,
+    attempts: row.attempts,
+    createdAt: row.createdAt.toISOString(),
+    submittedAt: row.submittedAt?.toISOString() ?? null,
+    confirmedAt: row.confirmedAt?.toISOString() ?? null,
+    failedAt: row.failedAt?.toISOString() ?? null,
   });
 }
