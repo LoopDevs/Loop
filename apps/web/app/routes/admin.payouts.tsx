@@ -6,6 +6,7 @@ import { useAuth } from '~/hooks/use-auth';
 import { listPayouts, retryPayout, type AdminPayoutView, type PayoutState } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -136,12 +137,18 @@ export default function AdminPayoutsRoute(): React.JSX.Element {
   return (
     <main className="max-w-6xl mx-auto px-6 py-12 space-y-6">
       <AdminNav />
-      <header>
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Admin · Payouts</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-          Stellar cashback emissions (ADR 015/016). Filter by state; retry failed rows with the
-          button at the row level.
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Admin · Payouts</h1>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+            Stellar cashback emissions (ADR 015/016). Filter by state; retry failed rows with the
+            button at the row level.
+          </p>
+        </div>
+        <CsvDownloadButton
+          path="/api/admin/payouts.csv"
+          filename={`loop-payouts-${new Date().toISOString().slice(0, 10)}.csv`}
+        />
       </header>
 
       <nav className="flex flex-wrap gap-2" aria-label="Payout state filter">

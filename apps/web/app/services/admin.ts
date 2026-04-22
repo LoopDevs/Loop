@@ -92,6 +92,31 @@ export async function getTreasurySnapshot(): Promise<TreasurySnapshot> {
 }
 
 /**
+ * Downloads an admin CSV endpoint by fetching with the bearer token
+ * in binary mode, then synthesising a click on a temporary anchor
+ * with a Blob URL. Works around the fact that a plain `<a href>`
+ * can't attach the Authorization header that admin CSV endpoints
+ * require.
+ */
+export async function downloadAdminCsv(path: string, filename: string): Promise<void> {
+  const buf = await authenticatedRequest<ArrayBuffer>(path, { binary: true });
+  const blob = new Blob([buf], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    // Release the blob URL — Firefox leaks memory without this, and
+    // Chromium's GC is slow enough that rapid downloads stack up.
+    URL.revokeObjectURL(url);
+  }
+}
+
+/**
  * Per-currency supplier-spend aggregate (ADR 013 / 015). One row per
  * charge currency in the window; `wholesaleMinor` is what Loop owes
  * CTX, `userCashbackMinor` + `loopMarginMinor` are the counts on the
