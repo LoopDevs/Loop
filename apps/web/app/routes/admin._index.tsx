@@ -11,6 +11,7 @@ import {
   operatorPoolStatus,
 } from '~/components/features/admin/AdminNav';
 import { AdminAuditTail } from '~/components/features/admin/AdminAuditTail';
+import { ConfigsHistoryCard } from '~/components/features/admin/ConfigsHistoryCard';
 import { CashbackSparkline } from '~/components/features/admin/CashbackSparkline';
 import { OrdersSparkline } from '~/components/features/admin/OrdersSparkline';
 import { StuckOrdersCard } from '~/components/features/admin/StuckOrdersCard';
@@ -174,6 +175,8 @@ export default function AdminIndexRoute(): React.JSX.Element {
       {denied ? null : <OrdersSparkline />}
 
       {denied ? null : <AdminAuditTail />}
+
+      {denied ? null : <ConfigsHistoryCard />}
 
       <section className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {CARDS.map((card) => (
