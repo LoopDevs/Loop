@@ -7,6 +7,7 @@ import { useAuth } from '~/hooks/use-auth';
 import { getMe, setStellarAddress, type UserMeView } from '~/services/user';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { PendingPayoutsCard } from '~/components/features/cashback/PendingPayoutsCard';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Wallet — Loop' }];
@@ -150,6 +151,13 @@ export default function SettingsWalletRoute(): React.JSX.Element {
           </p>
         )}
       </section>
+
+      {/* In-flight on-chain payouts. Hides itself when the user has
+          no payout history yet, so the first-link flow stays clean;
+          appears automatically after the next fulfilled order so the
+          user can watch a payout transition pending → submitted →
+          confirmed without reloading. */}
+      {linked ? <PendingPayoutsCard /> : null}
 
       <section
         aria-labelledby="link-heading"
