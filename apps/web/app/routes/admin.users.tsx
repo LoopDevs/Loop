@@ -6,6 +6,7 @@ import { useAuth } from '~/hooks/use-auth';
 import { listAdminUsers, type AdminUserRow } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { TopUsersTable } from '~/components/features/admin/TopUsersTable';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -234,6 +235,22 @@ export default function AdminUsersRoute(): React.JSX.Element {
           Older →
         </button>
       </nav>
+
+      <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+        <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
+          <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+            Top earners (30d)
+          </h2>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Ranked by cashback-type credit_transactions accrued in the last 30 days (ADR 009/015).
+            Useful for both recognition and concentration-risk — a single user accounting for a
+            large share is worth a closer look.
+          </p>
+        </header>
+        <div className="px-6 py-5">
+          <TopUsersTable />
+        </div>
+      </section>
     </main>
   );
 }

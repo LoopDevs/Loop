@@ -146,6 +146,41 @@ export async function getOrdersActivity(days?: number): Promise<OrdersActivityRe
 }
 
 /**
+ * Top earners ranking (ADR 009 / 015). Grouped by `(user, currency)` —
+ * summing across currencies is meaningless. `amountMinor` is the
+ * positive cashback sum in the window as a bigint-as-string.
+ */
+export interface TopUserRow {
+  userId: string;
+  email: string;
+  currency: string;
+  count: number;
+  amountMinor: string;
+}
+
+export interface TopUsersResponse {
+  since: string;
+  rows: TopUserRow[];
+}
+
+/**
+ * `GET /api/admin/top-users` — ranked list of users by cashback
+ * earned in the window. Default window 30d; clamped [1, 366].
+ * Default limit 20; clamped [1, 100].
+ */
+export async function getTopUsers(
+  opts: { since?: string; limit?: number } = {},
+): Promise<TopUsersResponse> {
+  const params = new URLSearchParams();
+  if (opts.since !== undefined) params.set('since', opts.since);
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return authenticatedRequest<TopUsersResponse>(
+    `/api/admin/top-users${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
+/**
  * Per-state counts + stroop sums for a single `asset_code` bucket in
  * `pending_payouts`. Zero-counts are surfaced so the admin UI can
  * show an explicit "0 failed" rather than a missing row.
