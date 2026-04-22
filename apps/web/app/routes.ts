@@ -4,6 +4,7 @@ export default [
   index('routes/home.tsx'),
   route('map', 'routes/map.tsx'),
   route('gift-card/:name', 'routes/gift-card.$name.tsx'),
+  route('cashback', 'routes/cashback.tsx'),
   route('cashback/:slug', 'routes/cashback.$slug.tsx'),
   route('auth', 'routes/auth.tsx'),
   route('onboarding', 'routes/onboarding.tsx'),
