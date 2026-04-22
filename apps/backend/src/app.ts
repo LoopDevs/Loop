@@ -57,6 +57,7 @@ import { adminAuditTailHandler } from './admin/audit-tail.js';
 import { adminAuditTailCsvHandler } from './admin/audit-tail-csv.js';
 import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js';
 import { adminOrdersActivityHandler } from './admin/orders-activity.js';
+import { adminPaymentMethodShareHandler } from './admin/payment-method-share.js';
 import { adminOrdersCsvHandler } from './admin/orders-csv.js';
 import { adminStuckOrdersHandler } from './admin/stuck-orders.js';
 import { adminStuckPayoutsHandler } from './admin/stuck-payouts.js';
@@ -774,6 +775,17 @@ app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
 // zero-filled counts when no orders crossed. Registered before
 // `/:orderId` so the literal `/activity` matches first.
 app.get('/api/admin/orders/activity', rateLimit(60, 60_000), adminOrdersActivityHandler);
+// Payment-method share aggregate — the cashback-flywheel metric.
+// Tracks the proportion of orders paid with each rail (xlm / usdc /
+// credit / loop_asset). ADR 010 / 015's strategy assumes a rising
+// loop_asset share once users have cashback to recycle; this is how
+// ops reads that. Registered before /:orderId so the literal
+// 'payment-method-share' doesn't get captured as an orderId.
+app.get(
+  '/api/admin/orders/payment-method-share',
+  rateLimit(60, 60_000),
+  adminPaymentMethodShareHandler,
+);
 // Single-order drill-down (ADR 011 / 015). Permalink for an ops
 // ticket or incident note. Higher rate-limit than the list because
 // the admin UI re-fetches detail on every navigation.

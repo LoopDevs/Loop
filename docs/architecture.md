@@ -256,6 +256,7 @@ GET  /api/admin/merchant-stats.csv                      [admin — per-merchant 
 GET  /api/admin/merchant-cashback-configs.csv           [admin — snapshot CSV of commercial terms, ADR 011/018]
 GET  /api/admin/orders/:orderId                         [admin — single order detail, ADR 011/015]
 GET  /api/admin/orders/:orderId/payout                  [admin — payout row for a given order]
+GET  /api/admin/orders/payment-method-share             [admin — cashback-flywheel metric: xlm/usdc/credit/loop_asset share, ADR 010/015]
 GET  /api/admin/supplier-spend                          [admin — per-currency supplier spend, ADR 013/015]
 GET  /api/admin/users                                   [admin — paginated user directory w/ email fragment filter]
 GET  /api/admin/users/by-email?email=                   [admin — exact-match user lookup for support-ticket workflow]

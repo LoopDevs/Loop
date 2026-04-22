@@ -2184,6 +2184,70 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/orders/payment-method-share',
+  summary: 'Payment-method share across orders (ADR 010 / 015).',
+  description:
+    "The cashback-flywheel metric. Single GROUP BY over `orders.payment_method`, zero-filled across every `ORDER_PAYMENT_METHODS` value so a method with no rows still renders as `{ orderCount: 0, chargeMinor: '0' }`. Default `?state=fulfilled` so in-flight orders don't skew the mix while users are still on the checkout page; pass any other `OrderState` to track a different bucket. `totalOrders` is echoed so the UI can render shares without re-summing. A rising `loop_asset` share is the signal ADR 015's cashback-recycle flywheel is working.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      state: z
+        .enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired'])
+        .optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Payment-method share snapshot',
+      content: {
+        'application/json': {
+          schema: z.object({
+            state: z.enum([
+              'pending_payment',
+              'paid',
+              'procuring',
+              'fulfilled',
+              'failed',
+              'expired',
+            ]),
+            totalOrders: z.number().int().min(0),
+            byMethod: z.record(
+              z.enum(['xlm', 'usdc', 'credit', 'loop_asset']),
+              z.object({
+                orderCount: z.number().int().min(0),
+                chargeMinor: z.string(),
+              }),
+            ),
+          }),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid state',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the share',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/orders/{orderId}',
   summary: 'Single Loop-native order drill-down (ADR 011 / 015).',
   description:
