@@ -262,6 +262,7 @@ GET  /api/admin/merchants/flywheel-share                [admin — per-merchant 
 GET  /api/admin/merchants/flywheel-share.csv            [admin — Tier-3 CSV export of the flywheel leaderboard, ADR 011/015/018]
 GET  /api/admin/merchants/:merchantId/flywheel-stats    [admin — per-merchant scalar flywheel stats for the drill page, ADR 011/015]
 GET  /api/admin/merchants/:merchantId/cashback-summary  [admin — per-currency lifetime cashback paid out on fulfilled orders, ADR 009/011/015]
+GET  /api/admin/merchants/:merchantId/payment-method-share [admin — rail mix for one merchant, sibling of fleet-wide share, ADR 010/015]
 GET  /api/admin/merchant-cashback-configs.csv           [admin — snapshot CSV of commercial terms, ADR 011/018]
 GET  /api/admin/orders/:orderId                         [admin — single order detail, ADR 011/015]
 GET  /api/admin/orders/:orderId/payout                  [admin — payout row for a given order]
