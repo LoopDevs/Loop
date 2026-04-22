@@ -91,6 +91,34 @@ export async function getTreasurySnapshot(): Promise<TreasurySnapshot> {
   return authenticatedRequest<TreasurySnapshot>('/api/admin/treasury');
 }
 
+/** Single stuck-order row from `/api/admin/stuck-orders` (ADR 011/013). */
+export interface StuckOrderRow {
+  id: string;
+  userId: string;
+  merchantId: string;
+  state: string;
+  /** ISO timestamp keyed by paid_at or procured_at depending on state. */
+  stuckSince: string;
+  /** Elapsed minutes since stuckSince. */
+  ageMinutes: number;
+  ctxOrderId: string | null;
+  ctxOperatorId: string | null;
+}
+
+export interface StuckOrdersResponse {
+  thresholdMinutes: number;
+  rows: StuckOrderRow[];
+}
+
+/**
+ * `GET /api/admin/stuck-orders` — orders sitting past the SLO in
+ * `paid` or `procuring` states. Admin dashboard polls this to flag
+ * potential supplier incidents before users notice.
+ */
+export async function getStuckOrders(): Promise<StuckOrdersResponse> {
+  return authenticatedRequest<StuckOrdersResponse>('/api/admin/stuck-orders');
+}
+
 /**
  * Per-state counts + stroop sums for a single `asset_code` bucket in
  * `pending_payouts`. Zero-counts are surfaced so the admin UI can
