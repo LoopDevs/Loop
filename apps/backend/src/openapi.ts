@@ -1746,6 +1746,46 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/users/me/cashback-monthly',
+  summary: 'Last 12 months of cashback totals grouped by (month, currency).',
+  description:
+    "Time-axis aggregate of the caller's cashback ledger. `DATE_TRUNC('month', created_at AT TIME ZONE 'UTC')` → `(month, currency)` with `SUM(amount_minor)` filtered to `type='cashback'`. Fixed 12-month window (current UTC month + previous 11). Oldest-first so the bar chart renders left-to-right without a client reverse. Multi-currency safe — a user who moved regions gets both currency entries per month. `cashbackMinor` is bigint-as-string so fleet-wide sums don't truncate.",
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Monthly entries, oldest first',
+      content: {
+        'application/json': {
+          schema: z.object({
+            entries: z.array(
+              z.object({
+                month: z.string().regex(/^\d{4}-\d{2}$/),
+                currency: z.string().length(3),
+                cashbackMinor: z.string(),
+              }),
+            ),
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the aggregate',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/users/me/pending-payouts/{id}',
   summary: 'Caller-scoped single payout detail (ADR 015 / 016).',
   description:

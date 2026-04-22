@@ -226,6 +226,7 @@ GET  /api/users/me/pending-payouts  [authenticated — caller's on-chain payout 
 GET  /api/users/me/pending-payouts/:id [authenticated — single payout detail, ADR 015/016]
 GET  /api/users/me/cashback-summary [authenticated — compact { lifetime, thisMonth } totals, ADR 009/015]
 GET  /api/users/me/cashback-by-merchant [authenticated — top cashback-earning merchants in window, ADR 009/015]
+GET  /api/users/me/cashback-monthly [authenticated — last 12 months of cashback totals by (month,currency), ADR 009/015]
 GET  /api/public/cashback-stats    [public — landing-page aggregates, never-500, ADR 009/015/020]
 GET  /api/public/top-cashback-merchants [public — landing-page "best cashback" list, never-500, ADR 011/020]
 GET  /api/admin/merchant-cashback-configs              [admin]
