@@ -53,6 +53,12 @@ const CARDS: ReadonlyArray<CardLink> = [
     title: 'Users',
     description: 'Paginated user directory with email search + credit drill-down (ADR 009/017).',
   },
+  {
+    href: '/admin/stuck-orders',
+    title: 'Stuck orders',
+    description:
+      'SLO-triage list for orders sitting past threshold in paid / procuring (ADR 011/013).',
+  },
 ];
 
 /**
