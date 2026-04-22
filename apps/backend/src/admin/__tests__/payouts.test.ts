@@ -140,6 +140,18 @@ describe('adminListPayoutsHandler', () => {
     expect(listMock).not.toHaveBeenCalled();
   });
 
+  it('forwards a valid userId to the repo', async () => {
+    const uuid = '11111111-1111-1111-1111-111111111111';
+    await adminListPayoutsHandler(makeCtx({ userId: uuid }));
+    expect(listMock).toHaveBeenCalledWith(expect.objectContaining({ userId: uuid }));
+  });
+
+  it('400 on malformed userId', async () => {
+    const res = await adminListPayoutsHandler(makeCtx({ userId: 'not-a-uuid' }));
+    expect(res.status).toBe(400);
+    expect(listMock).not.toHaveBeenCalled();
+  });
+
   it('serialises nullable timestamps as null, populated as ISO strings', async () => {
     listMock.mockResolvedValue([
       {
