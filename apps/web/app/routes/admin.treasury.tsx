@@ -10,6 +10,7 @@ import { PayoutsByAssetTable } from '~/components/features/admin/PayoutsByAssetT
 import { SupplierSpendCard } from '~/components/features/admin/SupplierSpendCard';
 import { OperatorStatsCard } from '~/components/features/admin/OperatorStatsCard';
 import { TopUsersByPendingPayoutCard } from '~/components/features/admin/TopUsersByPendingPayoutCard';
+import { DiscordNotifiersCard } from '~/components/features/admin/DiscordNotifiersCard';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -442,6 +443,19 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
             ))}
           </ul>
         )}
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+          Discord notifiers
+        </h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Catalog of signals this backend emits to Discord (ADR 018). Sourced from the{' '}
+          <code className="text-xs">DISCORD_NOTIFIERS</code> const — a catalog-invariant test makes
+          sure a new <code className="text-xs">notify*</code> function can&rsquo;t land without its
+          description, so this list is always in lockstep with the code.
+        </p>
+        <DiscordNotifiersCard />
       </section>
     </main>
   );
