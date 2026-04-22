@@ -12,6 +12,7 @@ import {
 } from '~/components/features/admin/AdminNav';
 import { AdminAuditTail } from '~/components/features/admin/AdminAuditTail';
 import { CashbackSparkline } from '~/components/features/admin/CashbackSparkline';
+import { OrdersSparkline } from '~/components/features/admin/OrdersSparkline';
 import { StuckOrdersCard } from '~/components/features/admin/StuckOrdersCard';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -161,6 +162,8 @@ export default function AdminIndexRoute(): React.JSX.Element {
       )}
 
       {denied ? null : <CashbackSparkline />}
+
+      {denied ? null : <OrdersSparkline />}
 
       {denied ? null : <AdminAuditTail />}
 
