@@ -14,6 +14,7 @@ import { Button } from '~/components/ui/Button';
 import { LoopOrdersList } from '~/components/features/orders/LoopOrdersList';
 import { OrdersSummaryHeader } from '~/components/features/orders/OrdersSummaryHeader';
 import { CashbackEarningsHeadline } from '~/components/features/cashback/CashbackEarningsHeadline';
+import { FlywheelChip } from '~/components/features/cashback/FlywheelChip';
 import { friendlyError } from '~/utils/error-messages';
 import { formatMoney } from '~/utils/money';
 
@@ -141,6 +142,17 @@ export default function OrdersRoute(): React.JSX.Element {
         {isAuthenticated ? (
           <div className="mb-4">
             <CashbackEarningsHeadline />
+          </div>
+        ) : null}
+
+        {/* Personal flywheel chip (ADR 015). Self-hides for users
+            with no recycled orders; sits below the lifetime headline
+            because it depends on "you earned cashback + spent it
+            again" — an intrinsically later milestone than "you
+            earned cashback at all". */}
+        {isAuthenticated ? (
+          <div className="mb-4">
+            <FlywheelChip />
           </div>
         ) : null}
 

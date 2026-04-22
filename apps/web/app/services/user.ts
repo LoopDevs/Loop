@@ -252,3 +252,25 @@ export interface UserOrdersSummary {
 export async function getUserOrdersSummary(): Promise<UserOrdersSummary> {
   return authenticatedRequest<UserOrdersSummary>('/api/users/me/orders/summary');
 }
+
+/**
+ * Personal flywheel scalar (ADR 015). How many of the caller's
+ * fulfilled orders were paid with a LOOP asset (recycled cashback),
+ * vs the total-fulfilled denominator in the same home currency.
+ * Powers a motivational chip on /orders — user-side mirror of the
+ * admin `payment-method-share` signal.
+ */
+export interface UserFlywheelStats {
+  currency: string;
+  recycledOrderCount: number;
+  /** SUM(charge_minor) over loop_asset orders. bigint-as-string. */
+  recycledChargeMinor: string;
+  totalFulfilledCount: number;
+  /** SUM(charge_minor) over every fulfilled order in home_currency. bigint-as-string. */
+  totalFulfilledChargeMinor: string;
+}
+
+/** `GET /api/users/me/flywheel-stats` — scalar recycled-vs-total snapshot. */
+export async function getUserFlywheelStats(): Promise<UserFlywheelStats> {
+  return authenticatedRequest<UserFlywheelStats>('/api/users/me/flywheel-stats');
+}
