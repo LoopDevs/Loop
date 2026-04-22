@@ -48,6 +48,7 @@ import {
   adminPayoutByOrderHandler,
   adminRetryPayoutHandler,
 } from './admin/payouts.js';
+import { adminPayoutsCsvHandler } from './admin/payouts-csv.js';
 import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
@@ -669,6 +670,10 @@ app.get('/api/admin/payouts/:id', rateLimit(120, 60_000), adminGetPayoutHandler)
 // POST /api/admin/payouts/:id/retry — flip a failed row back to pending.
 // Lower rate limit: retries should be rare, one-at-a-time ops actions.
 app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayoutHandler);
+// Finance-ready CSV export of pending_payouts rows. Lower rate
+// limit than the JSON list because exports scan rows 500× the
+// size of a pagination fetch.
+app.get('/api/admin/payouts.csv', rateLimit(10, 60_000), adminPayoutsCsvHandler);
 // Loop-native orders drill-down (ADR 011 / 015). Paginated, filterable
 // by state and userId. Ops uses this to triage stuck orders + audit
 // the cashback split + correlate with operator-pool health.
