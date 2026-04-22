@@ -91,6 +91,34 @@ export async function getTreasurySnapshot(): Promise<TreasurySnapshot> {
   return authenticatedRequest<TreasurySnapshot>('/api/admin/treasury');
 }
 
+/**
+ * Per-state counts + stroop sums for a single `asset_code` bucket in
+ * `pending_payouts`. Zero-counts are surfaced so the admin UI can
+ * show an explicit "0 failed" rather than a missing row.
+ */
+export interface PerStateBreakdown {
+  count: number;
+  stroops: string;
+}
+
+export interface PayoutsByAssetRow {
+  assetCode: string;
+  pending: PerStateBreakdown;
+  submitted: PerStateBreakdown;
+  confirmed: PerStateBreakdown;
+  failed: PerStateBreakdown;
+}
+
+/**
+ * `GET /api/admin/payouts-by-asset` (ADR 015 / 016) — crossed
+ * incident-triage view of `pending_payouts` keyed by
+ * `(asset_code, state)`. Answers "which LOOP assets are affected
+ * when I see N failed payouts?" at a glance.
+ */
+export async function getPayoutsByAsset(): Promise<{ rows: PayoutsByAssetRow[] }> {
+  return authenticatedRequest<{ rows: PayoutsByAssetRow[] }>('/api/admin/payouts-by-asset');
+}
+
 export interface AdminPayoutView {
   id: string;
   userId: string;
