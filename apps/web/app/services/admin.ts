@@ -191,3 +191,40 @@ export async function listAdminOrders(opts: {
     `/api/admin/orders${qs.length > 0 ? `?${qs}` : ''}`,
   );
 }
+
+/**
+ * Fetches the admin orders CSV and triggers a browser download. The
+ * endpoint (#417) returns a ready-made attachment — we just need to
+ * turn the ArrayBuffer into a Blob + anchor-click.
+ *
+ * `binary: true` skips api-client's default JSON parse, which would
+ * otherwise choke on CSV content. SSR-guarded (`typeof document`) so
+ * a stray server-side call can't crash a loader.
+ *
+ * Filename is server-set via `Content-Disposition`; we pass a sane
+ * fallback to the anchor in case the browser ignores the header
+ * (some older Safari builds drop it on cross-origin fetch responses).
+ */
+export async function downloadAdminOrdersCsv(
+  opts: { state?: AdminOrderState } = {},
+): Promise<void> {
+  const params = new URLSearchParams();
+  if (opts.state !== undefined) params.set('state', opts.state);
+  const qs = params.toString();
+  const path = `/api/admin/orders.csv${qs.length > 0 ? `?${qs}` : ''}`;
+  const buffer = await authenticatedRequest<ArrayBuffer>(path, {
+    binary: true,
+    headers: { Accept: 'text/csv' },
+  });
+  if (typeof document === 'undefined') return;
+  const blob = new Blob([buffer], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download =
+    opts.state !== undefined ? `loop-admin-orders-${opts.state}.csv` : 'loop-admin-orders.csv';
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}

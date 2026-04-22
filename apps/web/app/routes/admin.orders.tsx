@@ -17,7 +17,12 @@ import { useNavigate } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.orders';
 import { useAuth } from '~/hooks/use-auth';
-import { listAdminOrders, type AdminOrderState, type AdminOrderView } from '~/services/admin';
+import {
+  downloadAdminOrdersCsv,
+  listAdminOrders,
+  type AdminOrderState,
+  type AdminOrderView,
+} from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { Spinner } from '~/components/ui/Spinner';
@@ -101,12 +106,15 @@ export default function AdminOrdersRoute(): React.JSX.Element {
   return (
     <main className="max-w-6xl mx-auto px-6 py-12 space-y-6">
       <AdminNav />
-      <header>
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Admin · Orders</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-          Loop-native orders across every user, newest first. Filter by state to triage stuck rows;
-          each row shows the ADR-015 cashback split + CTX procurement metadata.
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Admin · Orders</h1>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+            Loop-native orders across every user, newest first. Filter by state to triage stuck
+            rows; each row shows the ADR-015 cashback split + CTX procurement metadata.
+          </p>
+        </div>
+        <CsvExportButton stateFilter={stateFilter} />
       </header>
 
       {/* Filters — intentionally rendered above the table so the
@@ -315,5 +323,53 @@ function OrderRow({ row }: { row: AdminOrderView }): React.JSX.Element {
         )}
       </div>
     </li>
+  );
+}
+
+/**
+ * Admin CSV download button — passes the current state filter through
+ * to `/api/admin/orders.csv` so the download matches what's on screen.
+ * Per-button status so an error surfaces inline without needing a
+ * toast system; a successful download returns the button to idle.
+ */
+function CsvExportButton({
+  stateFilter,
+}: {
+  stateFilter: AdminOrderState | 'all';
+}): React.JSX.Element {
+  const [status, setStatus] = useState<'idle' | 'downloading' | { error: string }>('idle');
+  return (
+    <div className="flex flex-col items-end gap-1 shrink-0">
+      <Button
+        variant="secondary"
+        onClick={() => {
+          setStatus('downloading');
+          void downloadAdminOrdersCsv({
+            ...(stateFilter !== 'all' ? { state: stateFilter } : {}),
+          })
+            .then(() => setStatus('idle'))
+            .catch((err: unknown) => {
+              const message =
+                err instanceof ApiException
+                  ? err.message
+                  : err instanceof Error
+                    ? err.message
+                    : 'Failed to download';
+              setStatus({ error: message });
+            });
+        }}
+        disabled={status === 'downloading'}
+      >
+        {status === 'downloading' ? 'Downloading…' : 'Export CSV'}
+      </Button>
+      {typeof status === 'object' ? (
+        <span
+          className="text-[11px] text-red-600 dark:text-red-400 max-w-[180px] text-right"
+          title={status.error}
+        >
+          {status.error}
+        </span>
+      ) : null}
+    </div>
   );
 }
