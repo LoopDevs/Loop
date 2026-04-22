@@ -32,7 +32,8 @@ import type { Order } from './repo.js';
 import { operatorFetch, OperatorPoolUnavailableError } from '../ctx/operator-pool.js';
 import { upstreamUrl } from '../upstream.js';
 import { getAccountBalances } from '../payments/horizon-balances.js';
-import { notifyUsdcBelowFloor } from '../discord.js';
+import { notifyCashbackCredited, notifyUsdcBelowFloor } from '../discord.js';
+import { getMerchants } from '../merchants/sync.js';
 
 const log = logger.child({ area: 'procurement' });
 
@@ -283,6 +284,23 @@ async function procureOne(order: Order): Promise<'fulfilled' | 'failed' | 'skipp
       return 'skipped';
     }
     log.info({ orderId: order.id, ctxOrderId: parsed.data.id }, 'Order fulfilled');
+
+    // Fire the Discord "cashback credited" signal *after* the txn
+    // commits — a webhook inside the transaction would stretch the DB
+    // lock across the network hop. `userCashbackMinor=0` fulfillments
+    // still transition cleanly on the DB side but don't earn the user
+    // anything, so skip the notification too.
+    if (fulfilled.userCashbackMinor > 0n) {
+      const merchantName =
+        getMerchants().merchantsById.get(fulfilled.merchantId)?.name ?? fulfilled.merchantId;
+      notifyCashbackCredited({
+        orderId: fulfilled.id,
+        merchantName,
+        amountMinor: fulfilled.userCashbackMinor.toString(),
+        currency: fulfilled.chargeCurrency,
+        userId: fulfilled.userId,
+      });
+    }
     return 'fulfilled';
   } catch (err) {
     if (err instanceof OperatorPoolUnavailableError) {
