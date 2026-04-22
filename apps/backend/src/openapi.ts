@@ -510,6 +510,30 @@ const AdminPayoutListResponse = registry.register(
   z.object({ payouts: z.array(AdminPayoutView) }),
 );
 
+// ─── Admin — per-merchant cashback stats (ADR 011 / 015) ───────────────────
+
+const MerchantStatsRow = registry.register(
+  'MerchantStatsRow',
+  z.object({
+    merchantId: z.string(),
+    currency: z.string().length(3),
+    orderCount: z.number().int().min(0),
+    faceValueMinor: z.string(),
+    wholesaleMinor: z.string(),
+    userCashbackMinor: z.string(),
+    loopMarginMinor: z.string(),
+    lastFulfilledAt: z.string().datetime(),
+  }),
+);
+
+const MerchantStatsResponse = registry.register(
+  'MerchantStatsResponse',
+  z.object({
+    since: z.string().datetime(),
+    rows: z.array(MerchantStatsRow),
+  }),
+);
+
 // ─── Admin — cashback-activity time-series (ADR 009 / 015) ─────────────────
 
 const AdminActivityPerCurrency = registry.register(
@@ -2135,6 +2159,47 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error computing the series',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/merchant-stats',
+  summary: 'Per-merchant cashback stats (ADR 011 / 015).',
+  description:
+    "Groups fulfilled orders in the window by (merchant, currency). Each row carries order count, face-value total, wholesale cost, user cashback, loop margin, and the most-recent fulfilled timestamp. Sorted by `user_cashback_minor` descending — highest-cashback merchants surface first. Default window 31 days, capped at 366. Distinct from `/api/admin/supplier-spend`, which groups by currency only; this one is the 'which merchants drive the business' view.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      since: z.string().datetime().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Per-merchant rows, highest cashback first',
+      content: { 'application/json': { schema: MerchantStatsResponse } },
+    },
+    400: {
+      description: 'Invalid `since` or window over 366 days',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the aggregate',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
