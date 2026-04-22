@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type * as CircuitBreakerModule from '../../circuit-breaker.js';
 
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -6,11 +7,54 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
+// The pool fires a Discord alert on exhaustion. Mock the module so
+// tests assert on the spy without actually reaching fetch(). Keeping
+// the mock here (not in a separate file) keeps the test-scope narrow.
+const { mockNotifyExhausted } = vi.hoisted(() => ({
+  mockNotifyExhausted: vi.fn(),
+}));
+vi.mock('../../discord.js', () => ({
+  notifyOperatorPoolExhausted: mockNotifyExhausted,
+}));
+
+/**
+ * The breaker mock lets tests force "every operator is open" without
+ * spamming fetch to trip real breakers. Default factory returns a
+ * closed breaker that passes fetches through; tests that need
+ * exhaustion flip `breakerFactoryState.forceOpen = true` BEFORE
+ * the pool inits.
+ */
+const { breakerFactoryState } = vi.hoisted(() => ({
+  breakerFactoryState: { forceOpen: false },
+}));
+vi.mock('../../circuit-breaker.js', async (importActual) => {
+  const actual = (await importActual()) as typeof CircuitBreakerModule;
+  return {
+    ...actual,
+    createCircuitBreaker: () => ({
+      // Returning 'open' short-circuits pickHealthyOperator — it skips
+      // every operator and returns null, tripping the exhausted path.
+      getState: () => (breakerFactoryState.forceOpen ? 'open' : 'closed'),
+      getStats: () => ({
+        state: breakerFactoryState.forceOpen ? 'open' : 'closed',
+        consecutiveFailures: 0,
+        openedAt: null,
+        lastSuccessAt: null,
+        lastFailureAt: null,
+      }),
+      fetch: (url: string | URL, init?: RequestInit) => fetch(url, init),
+      reset: () => {},
+    }),
+    CircuitOpenError: actual.CircuitOpenError,
+  };
+});
+
 import {
   operatorFetch,
   operatorPoolSize,
   getOperatorHealth,
   __resetOperatorPoolForTests,
+  __resetPoolExhaustedAlertForTests,
   OperatorPoolUnavailableError,
 } from '../operator-pool.js';
 
@@ -18,11 +62,15 @@ import {
 // between tests makes the suite order-independent.
 beforeEach(() => {
   __resetOperatorPoolForTests();
+  __resetPoolExhaustedAlertForTests();
+  mockNotifyExhausted.mockReset();
+  breakerFactoryState.forceOpen = false;
   delete process.env['CTX_OPERATOR_POOL'];
 });
 
 afterEach(() => {
   __resetOperatorPoolForTests();
+  __resetPoolExhaustedAlertForTests();
   delete process.env['CTX_OPERATOR_POOL'];
 });
 
@@ -137,5 +185,59 @@ describe('getOperatorHealth', () => {
     expect(health).toHaveLength(2);
     expect(health[0]!.state).toBe('closed');
     expect(health[1]!.state).toBe('closed');
+  });
+});
+
+describe('operatorFetch — pool-exhausted Discord alert', () => {
+  it('fires notifyOperatorPoolExhausted once when every operator is OPEN', async () => {
+    validPool();
+    operatorPoolSize(); // force init while breakers are still closed
+    breakerFactoryState.forceOpen = true;
+
+    await expect(operatorFetch('https://example.local/x')).rejects.toBeInstanceOf(
+      OperatorPoolUnavailableError,
+    );
+
+    expect(mockNotifyExhausted).toHaveBeenCalledTimes(1);
+    const [args] = mockNotifyExhausted.mock.calls[0] as [{ poolSize: number; reason: string }];
+    expect(args.poolSize).toBe(2);
+    expect(args.reason).toBe('All operators unhealthy');
+  });
+
+  it('throttles the alert within the 15-minute window (only one fire across consecutive failures)', async () => {
+    validPool();
+    operatorPoolSize();
+    breakerFactoryState.forceOpen = true;
+
+    await expect(operatorFetch('https://example.local/x')).rejects.toBeInstanceOf(
+      OperatorPoolUnavailableError,
+    );
+    await expect(operatorFetch('https://example.local/x')).rejects.toBeInstanceOf(
+      OperatorPoolUnavailableError,
+    );
+    await expect(operatorFetch('https://example.local/x')).rejects.toBeInstanceOf(
+      OperatorPoolUnavailableError,
+    );
+
+    expect(mockNotifyExhausted).toHaveBeenCalledTimes(1);
+  });
+
+  it('fires again after the throttle window is reset (simulating the ~15-min cadence)', async () => {
+    validPool();
+    operatorPoolSize();
+    breakerFactoryState.forceOpen = true;
+
+    await expect(operatorFetch('https://example.local/x')).rejects.toBeInstanceOf(
+      OperatorPoolUnavailableError,
+    );
+    expect(mockNotifyExhausted).toHaveBeenCalledTimes(1);
+
+    // Simulate the 15-minute window elapsing.
+    __resetPoolExhaustedAlertForTests();
+
+    await expect(operatorFetch('https://example.local/x')).rejects.toBeInstanceOf(
+      OperatorPoolUnavailableError,
+    );
+    expect(mockNotifyExhausted).toHaveBeenCalledTimes(2);
   });
 });

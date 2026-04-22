@@ -21,6 +21,7 @@
  */
 import { z } from 'zod';
 import { createCircuitBreaker, CircuitOpenError } from '../circuit-breaker.js';
+import { notifyOperatorPoolExhausted } from '../discord.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ area: 'operator-pool' });
@@ -50,6 +51,21 @@ export class OperatorPoolUnavailableError extends Error {
 let operators: Operator[] = [];
 let nextIndex = 0;
 let initialised = false;
+
+/**
+ * Throttle for the pool-exhausted Discord alert. A sustained outage
+ * would otherwise spam the monitoring channel every request. Matches
+ * the 15-minute cadence used by `notifyUsdcBelowFloor` in procurement —
+ * long enough to avoid noise, short enough that a "still bad" signal
+ * fires within the first ops rotation.
+ */
+const POOL_EXHAUSTED_ALERT_INTERVAL_MS = 15 * 60 * 1000;
+let lastExhaustedAlertAt = 0;
+
+/** Test seam — resets the Discord-alert throttle between cases. */
+export function __resetPoolExhaustedAlertForTests(): void {
+  lastExhaustedAlertAt = 0;
+}
 
 /**
  * Parses `CTX_OPERATOR_POOL` once and constructs a per-operator
@@ -170,10 +186,18 @@ export async function operatorFetch(url: string | URL, init?: RequestInit): Prom
       throw err;
     }
   }
-  log.warn('Operator pool exhausted — all operators unhealthy');
-  throw new OperatorPoolUnavailableError(
-    lastErr instanceof Error ? lastErr.message : 'All operators unhealthy',
-  );
+  const reason = lastErr instanceof Error ? lastErr.message : 'All operators unhealthy';
+  log.warn({ reason }, 'Operator pool exhausted — all operators unhealthy');
+  // Fire the monitoring-channel alert at most once per throttle window
+  // so a sustained outage doesn't produce a webhook per pool access.
+  // The first request after a healthy window always pages; subsequent
+  // requests within 15 minutes stay silent on Discord but still log.
+  const now = Date.now();
+  if (now - lastExhaustedAlertAt >= POOL_EXHAUSTED_ALERT_INTERVAL_MS) {
+    lastExhaustedAlertAt = now;
+    notifyOperatorPoolExhausted({ poolSize: operators.length, reason });
+  }
+  throw new OperatorPoolUnavailableError(reason);
 }
 
 /**

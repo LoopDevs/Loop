@@ -2122,7 +2122,8 @@ registry.registerPath({
   security: [{ bearerAuth: [] }],
   responses: {
     200: {
-      description: 'CSV attachment — Content-Disposition: attachment; filename="loop-cashback-history.csv".',
+      description:
+        'CSV attachment — Content-Disposition: attachment; filename="loop-cashback-history.csv".',
       content: { 'text/csv': { schema: z.string() } },
     },
     401: {
