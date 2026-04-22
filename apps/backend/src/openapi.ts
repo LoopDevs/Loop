@@ -2471,6 +2471,54 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/audit-tail.csv',
+  summary: 'CSV export of admin write-audit trail (ADR 017 / 018).',
+  description:
+    'Finance / legal CSV of `admin_idempotency_keys` rows in a time window, joined to `users` for the actor email. SOC-2 / compliance export: a neutral-format dump of "who did what, when" that ops can hand to auditors without exposing the stored response bodies. Default window 31 days, capped at 366. Row cap 10 000 — past the cap, a trailing `__TRUNCATED__` sentinel row signals the window needs narrowing (and the handler log-warns the real rowCount). `Cache-Control: private, no-store` + `Content-Disposition: attachment`.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      since: z.string().datetime().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'RFC 4180 CSV body',
+      content: {
+        'text/csv': {
+          schema: z.string().openapi({
+            description:
+              'CRLF-terminated lines. Header row: actor_user_id, actor_email, method, path, status, idempotency_key, created_at. ISO-8601 for the timestamp; response bodies intentionally omitted.',
+          }),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid `since` or window over 366 days',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error building the export',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/orders.csv',
   summary: 'CSV export of Loop-native orders (ADR 011 / 015).',
   description:

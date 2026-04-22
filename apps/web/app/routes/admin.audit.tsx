@@ -21,6 +21,7 @@ import { shouldRetry } from '~/hooks/query-retry';
 import { getAdminAuditTail, type AdminAuditTailRow } from '~/services/admin';
 import { auditRowLink, fmtRelative } from '~/components/features/admin/AdminAuditTail';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { Spinner } from '~/components/ui/Spinner';
 import { Button } from '~/components/ui/Button';
 
@@ -62,13 +63,23 @@ export default function AdminAuditRoute(): React.JSX.Element {
   return (
     <main className="max-w-5xl mx-auto px-6 py-12 space-y-6">
       <AdminNav />
-      <header>
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Admin · Audit</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-          Every admin write, newest first, from the ADR-017{' '}
-          <code className="font-mono">admin_idempotency_keys</code> store. Same rows as the Discord
-          audit channel — this is the durable mirror.
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Admin · Audit</h1>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+            Every admin write, newest first, from the ADR-017{' '}
+            <code className="font-mono">admin_idempotency_keys</code> store. Same rows as the
+            Discord audit channel — this is the durable mirror.
+          </p>
+        </div>
+        {/* Finance / legal CSV export — ops hands this to SOC-2 auditors
+            or packages it into a compliance report. Default window is
+            the last 31 days; the filename carries the since-date so
+            multiple exports don't overwrite each other. */}
+        <CsvDownloadButton
+          path="/api/admin/audit-tail.csv"
+          filename={`admin-audit-${new Date().toISOString().slice(0, 10)}.csv`}
+        />
       </header>
 
       <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
