@@ -6,6 +6,7 @@ export * from './order-state.js';
 export * from './orders.js';
 export * from './payout-state.js';
 export * from './public-cashback-stats.js';
+export * from './public-top-cashback-merchants.js';
 export * from './search.js';
 export * from './slugs.js';
 export * from './stellar.js';
