@@ -48,7 +48,7 @@ import {
   adminPayoutByOrderHandler,
   adminRetryPayoutHandler,
 } from './admin/payouts.js';
-import { adminListOrdersHandler } from './admin/orders.js';
+import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
 import { adminUserCreditTransactionsHandler } from './admin/user-credit-transactions.js';
@@ -665,6 +665,10 @@ app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayout
 // by state and userId. Ops uses this to triage stuck orders + audit
 // the cashback split + correlate with operator-pool health.
 app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+// Single-order drill-down (ADR 011 / 015). Permalink for an ops
+// ticket or incident note. Higher rate-limit than the list because
+// the admin UI re-fetches detail on every navigation.
+app.get('/api/admin/orders/:orderId', rateLimit(120, 60_000), adminGetOrderHandler);
 // Given an order id, return the single pending_payouts row for it.
 // Nested under /orders/:orderId so the UI can link from the order
 // drill-down straight to the payout state without a separate fetch.
