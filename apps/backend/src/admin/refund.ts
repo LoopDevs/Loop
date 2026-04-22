@@ -24,6 +24,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { creditTransactions, orders, userCredits } from '../db/schema.js';
 import type { User } from '../db/users.js';
+import { notifyOrderRefunded } from '../discord.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-order-refund' });
@@ -175,6 +176,19 @@ export async function adminRefundOrderHandler(c: Context): Promise<Response> {
       currency: entry.currency,
       createdAt: entry.createdAt.toISOString(),
     };
+
+    // Fire the orders-channel webhook AFTER the txn commits so a
+    // flaky Discord hop can't stretch the DB lock. sendWebhook is
+    // fire-and-forget — a failure inside it logs a warn but never
+    // rolls back the already-committed refund.
+    notifyOrderRefunded({
+      orderId,
+      targetUserId: order.userId,
+      adminId: admin.id,
+      amountMinor: entryView.amountMinor,
+      currency: entryView.currency,
+    });
+
     return c.json<OrderRefundResponse>(
       {
         entry: entryView,

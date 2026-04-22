@@ -92,6 +92,26 @@ function formatAmount(amount: number, currency: string): string {
   return symbol !== undefined ? `${symbol}${body} ${code}` : `${body} ${code}`;
 }
 
+/**
+ * Minor-unit bigint-string → human currency string. Bigint-safe: a
+ * refund of 2500000 minor units on a GBP order renders as £25,000.00
+ * without float drift. Unknown currency codes fall back to
+ * "<amount> <code>" without a symbol.
+ */
+function formatMinorAmount(minorStr: string, currency: string): string {
+  const negative = minorStr.startsWith('-');
+  const digits = negative ? minorStr.slice(1) : minorStr;
+  const padded = digits.padStart(3, '0');
+  const whole = padded.slice(0, -2);
+  const fraction = padded.slice(-2);
+  const sign = negative ? '-' : '';
+  const code = currency.toUpperCase();
+  const symbol = CURRENCY_SYMBOLS[code];
+  const wholeWithSeparators = Number(whole).toLocaleString('en-US');
+  const body = `${wholeWithSeparators}.${fraction}`;
+  return symbol !== undefined ? `${sign}${symbol}${body} ${code}` : `${sign}${body} ${code}`;
+}
+
 /** Notify: new order created */
 export function notifyOrderCreated(
   orderId: string,
@@ -140,6 +160,47 @@ export function notifyOrderFulfilled(
         inline: true,
       },
       { name: 'Order ID', value: `\`${escapeMarkdown(orderId)}\``, inline: false },
+    ],
+  });
+}
+
+/**
+ * Notify: an admin refunded a failed order (ADR 009 / 017). Goes to
+ * the ORDERS channel (customer-facing money movement), not monitoring
+ * — this is "a customer just got their payment back", matching the
+ * channel that already carries new-order + fulfilled signals.
+ *
+ * `amountMinor` is the positive bigint-string refund amount in
+ * `currency`. The admin id is truncated for log-friendly display;
+ * the full id lives on the ledger row anyway.
+ */
+export function notifyOrderRefunded(args: {
+  orderId: string;
+  targetUserId: string;
+  adminId: string;
+  amountMinor: string;
+  currency: string;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_ORDERS, {
+    title: '↩️ Order Refunded',
+    color: ORANGE,
+    fields: [
+      {
+        name: 'Amount',
+        value: formatMinorAmount(args.amountMinor, args.currency),
+        inline: true,
+      },
+      {
+        name: 'User',
+        value: `\`${escapeMarkdown(args.targetUserId.slice(0, 8))}…\``,
+        inline: true,
+      },
+      {
+        name: 'Admin',
+        value: `\`${escapeMarkdown(args.adminId.slice(0, 8))}…\``,
+        inline: true,
+      },
+      { name: 'Order ID', value: `\`${escapeMarkdown(args.orderId)}\``, inline: false },
     ],
   });
 }
