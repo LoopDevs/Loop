@@ -9,6 +9,7 @@ import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { CreditAdjustmentForm } from '~/components/features/admin/CreditAdjustmentForm';
 import { CreditTransactionsTable } from '~/components/features/admin/CreditTransactionsTable';
+import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { UserCashbackByMerchantTable } from '~/components/features/admin/UserCashbackByMerchantTable';
 import { UserOrdersTable } from '~/components/features/admin/UserOrdersTable';
 import { UserPayoutsTable } from '~/components/features/admin/UserPayoutsTable';
@@ -307,13 +308,20 @@ export default function AdminUserDetailRoute(): React.JSX.Element {
 
       {userId !== undefined && !userNotFound ? (
         <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-          <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
-            <h2 className="text-base font-semibold text-gray-900 dark:text-white">
-              Credit transactions
-            </h2>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Append-only ledger (ADR 009). Filter by type; page with the buttons below.
-            </p>
+          <header className="flex items-start justify-between gap-4 border-b border-gray-200 px-6 py-4 dark:border-gray-800">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+                Credit transactions
+              </h2>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Append-only ledger (ADR 009). Filter by type; page with the buttons below. Use the
+                CSV download for a compliance / subject-access export of the last 366 days.
+              </p>
+            </div>
+            <CsvDownloadButton
+              path={`/api/admin/users/${encodeURIComponent(userId)}/credit-transactions.csv`}
+              filename={`credit-transactions-${userId.slice(0, 8)}-${new Date().toISOString().slice(0, 10)}.csv`}
+            />
           </header>
           <div className="px-6 py-5">
             <CreditTransactionsTable userId={userId} />

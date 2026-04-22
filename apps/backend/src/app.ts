@@ -64,6 +64,7 @@ import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
 import { adminUserCreditTransactionsHandler } from './admin/user-credit-transactions.js';
+import { adminUserCreditTransactionsCsvHandler } from './admin/user-credit-transactions-csv.js';
 import { adminUserCashbackByMerchantHandler } from './admin/user-cashback-by-merchant.js';
 import { adminGetUserHandler } from './admin/user-detail.js';
 import { adminListUsersHandler } from './admin/users-list.js';
@@ -821,6 +822,15 @@ app.get(
   '/api/admin/users/:userId/credit-transactions',
   rateLimit(120, 60_000),
   adminUserCreditTransactionsHandler,
+);
+// Finance / compliance / support CSV of one user's credit-ledger
+// history. Same Tier-3 rate-limit cadence as the other CSV
+// exports — runs at ticket-resolution speed, not on-click from
+// the admin UI.
+app.get(
+  '/api/admin/users/:userId/credit-transactions.csv',
+  rateLimit(10, 60_000),
+  adminUserCreditTransactionsCsvHandler,
 );
 // Credit-adjustment write (ADR 017). Lower rate limit than reads —
 // it's an explicit ops action, not a polled surface. Idempotency-Key

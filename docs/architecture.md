@@ -257,6 +257,7 @@ GET  /api/admin/users/:userId                           [admin — single-user d
 GET  /api/admin/users/:userId/credits                   [admin — per-user credit balance, ADR 009]
 GET  /api/admin/users/:userId/cashback-by-merchant       [admin — per-user cashback-by-merchant support triage, ADR 009/015]
 GET  /api/admin/users/:userId/credit-transactions       [admin — per-user credit-ledger log, ADR 009]
+GET  /api/admin/users/:userId/credit-transactions.csv   [admin — per-user credit-ledger CSV for compliance / SAR, ADR 009/015]
 ```
 
 Full request/response shapes — including field types, pagination
