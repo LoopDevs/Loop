@@ -510,6 +510,32 @@ const AdminPayoutListResponse = registry.register(
   z.object({ payouts: z.array(AdminPayoutView) }),
 );
 
+// ─── Admin — payouts-by-asset breakdown (ADR 015 / 016) ────────────────────
+
+const PerStateBreakdown = registry.register(
+  'PerStateBreakdown',
+  z.object({
+    count: z.number().int().min(0),
+    stroops: z.string().openapi({ description: 'Sum of amount_stroops; bigint-as-string.' }),
+  }),
+);
+
+const PayoutsByAssetRow = registry.register(
+  'PayoutsByAssetRow',
+  z.object({
+    assetCode: z.string(),
+    pending: PerStateBreakdown,
+    submitted: PerStateBreakdown,
+    confirmed: PerStateBreakdown,
+    failed: PerStateBreakdown,
+  }),
+);
+
+const PayoutsByAssetResponse = registry.register(
+  'PayoutsByAssetResponse',
+  z.object({ rows: z.array(PayoutsByAssetRow) }),
+);
+
 // ─── Admin — per-merchant cashback stats (ADR 011 / 015) ───────────────────
 
 const MerchantStatsRow = registry.register(
@@ -1645,6 +1671,38 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error reading the row',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/payouts-by-asset',
+  summary: 'Per-asset × per-state payout breakdown (ADR 015 / 016).',
+  description:
+    "Crosses `pending_payouts` by `(asset_code, state)`. The treasury snapshot gives per-state counts and per-asset outstanding liability separately; this endpoint answers the crossed question ops asks during an incident — 'I see N failed payouts, which LOOP assets are affected?'. All amounts in stroops, bigint-as-string.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'One row per asset_code present in pending_payouts',
+      content: { 'application/json': { schema: PayoutsByAssetResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the breakdown',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
