@@ -34,6 +34,7 @@ import {
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CopyButton } from '~/components/features/admin/CopyButton';
+import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { MerchantCashbackMonthlyChart } from '~/components/features/admin/MerchantCashbackMonthlyChart';
 import { MerchantCashbackPaidCard } from '~/components/features/admin/MerchantCashbackPaidCard';
 import { MerchantFlywheelActivityChart } from '~/components/features/admin/MerchantFlywheelActivityChart';
@@ -156,6 +157,18 @@ export default function AdminMerchantDetailRoute(): React.JSX.Element {
             line is the shape of pivot success at this merchant. */}
         <div className="mt-4">
           <MerchantFlywheelActivityChart merchantId={merchantId} />
+        </div>
+        {/* Tier-3 CSV export (#645). Day-by-day flywheel series
+            pulled as a year-long spreadsheet for BD / commercial
+            prep — the long-form companion to the scalar chip and
+            the 30-day sparkline. Appends ?days=366 for a full-
+            year pull in one go. */}
+        <div className="mt-4">
+          <CsvDownloadButton
+            path={`/api/admin/merchants/${encodeURIComponent(merchantId)}/flywheel-activity.csv?days=366`}
+            filename={`${merchantId}-flywheel-activity-${new Date().toISOString().slice(0, 10)}.csv`}
+            label="Flywheel CSV (1y)"
+          />
         </div>
       </section>
 
