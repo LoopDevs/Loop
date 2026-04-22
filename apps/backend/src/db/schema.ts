@@ -576,3 +576,30 @@ export const pendingPayouts = pgTable(
 
 export const PAYOUT_STATES = ['pending', 'submitted', 'confirmed', 'failed'] as const;
 export type PayoutState = (typeof PAYOUT_STATES)[number];
+
+/**
+ * Admin idempotency store (ADR 017). Each row is the snapshot of a
+ * completed admin write, replayed on retry with the same
+ * (admin_user_id, key) pair so a double-click can't produce a double
+ * side-effect. 24h TTL enforced by a nightly cleanup sweep.
+ */
+export const adminIdempotencyKeys = pgTable(
+  'admin_idempotency_keys',
+  {
+    adminUserId: uuid('admin_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    key: text('key').notNull(),
+    method: text('method').notNull(),
+    path: text('path').notNull(),
+    status: integer('status').notNull(),
+    responseBody: text('response_body').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('admin_idempotency_keys_pk_idx').on(t.adminUserId, t.key),
+    index('admin_idempotency_keys_created_at').on(t.createdAt),
+    check('admin_idempotency_keys_key_length', sql`char_length(${t.key}) BETWEEN 16 AND 128`),
+    check('admin_idempotency_keys_status_valid', sql`${t.status} >= 100 AND ${t.status} < 600`),
+  ],
+);

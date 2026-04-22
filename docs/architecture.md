@@ -234,6 +234,7 @@ GET  /api/admin/payouts                                [admin — ADR 015 payout
 GET  /api/admin/payouts/:id                            [admin — single pending-payout drill-down]
 POST /api/admin/payouts/:id/retry                      [admin — reset failed payout to pending]
 GET  /api/admin/payouts-by-asset                       [admin — per-asset × per-state payout breakdown, ADR 015/016]
+POST /api/admin/users/:userId/credit-adjustments        [admin — signed credit adjustment, ADR 017]
 GET  /api/admin/payouts.csv                            [admin — finance-ready CSV export, ADR 015]
 GET  /api/admin/orders                                  [admin — Loop-native orders drill-down, ADR 011/015]
 GET  /api/admin/orders.csv                              [admin — finance-ready CSV export, ADR 011/015]
