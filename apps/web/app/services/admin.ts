@@ -137,3 +137,57 @@ export async function retryPayout(id: string): Promise<AdminPayoutView> {
     { method: 'POST' },
   );
 }
+
+export type AdminOrderState =
+  | 'pending_payment'
+  | 'paid'
+  | 'procuring'
+  | 'fulfilled'
+  | 'failed'
+  | 'expired';
+
+/** Admin-shaped row from `/api/admin/orders` (ADR 011 / 015). */
+export interface AdminOrderView {
+  id: string;
+  userId: string;
+  merchantId: string;
+  state: AdminOrderState;
+  currency: string;
+  faceValueMinor: string;
+  chargeCurrency: string;
+  chargeMinor: string;
+  paymentMethod: 'xlm' | 'usdc' | 'credit' | 'loop_asset';
+  /** `numeric(5,2)` as string (e.g. `"80.00"`). */
+  wholesalePct: string;
+  userCashbackPct: string;
+  loopMarginPct: string;
+  wholesaleMinor: string;
+  userCashbackMinor: string;
+  loopMarginMinor: string;
+  ctxOrderId: string | null;
+  ctxOperatorId: string | null;
+  failureReason: string | null;
+  createdAt: string;
+  paidAt: string | null;
+  procuredAt: string | null;
+  fulfilledAt: string | null;
+  failedAt: string | null;
+}
+
+/** `GET /api/admin/orders` — paginated, filterable admin view. */
+export async function listAdminOrders(opts: {
+  state?: AdminOrderState;
+  userId?: string;
+  limit?: number;
+  before?: string;
+}): Promise<{ orders: AdminOrderView[] }> {
+  const params = new URLSearchParams();
+  if (opts.state !== undefined) params.set('state', opts.state);
+  if (opts.userId !== undefined) params.set('userId', opts.userId);
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  if (opts.before !== undefined) params.set('before', opts.before);
+  const qs = params.toString();
+  return authenticatedRequest<{ orders: AdminOrderView[] }>(
+    `/api/admin/orders${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}

@@ -13,5 +13,6 @@ export default [
   route('admin/cashback', 'routes/admin.cashback.tsx'),
   route('admin/treasury', 'routes/admin.treasury.tsx'),
   route('admin/payouts', 'routes/admin.payouts.tsx'),
+  route('admin/orders', 'routes/admin.orders.tsx'),
   route('*', 'routes/not-found.tsx'),
 ] satisfies RouteConfig;
