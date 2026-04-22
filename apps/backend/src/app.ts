@@ -98,6 +98,7 @@ import {
 import { getCashbackByMerchantHandler } from './users/cashback-by-merchant.js';
 import { getCashbackMonthlyHandler } from './users/cashback-monthly.js';
 import { getUserOrdersSummaryHandler } from './users/orders-summary.js';
+import { getUserFlywheelStatsHandler } from './users/flywheel-stats.js';
 
 export const app = new Hono();
 
@@ -718,6 +719,12 @@ app.get('/api/users/me/cashback-monthly', rateLimit(60, 60_000), getCashbackMont
 // query with FILTER-ed COUNT/SUM so the /orders page doesn't hit
 // the list endpoint just to render a header (ADR 010).
 app.get('/api/users/me/orders/summary', rateLimit(60, 60_000), getUserOrdersSummaryHandler);
+// Personal flywheel stats — how many of the caller's fulfilled
+// orders they paid for with LOOP asset (recycled cashback), vs
+// the total fulfilled denominator. Powers a motivational chip on
+// /orders: "You've recycled £X of cashback across Y orders". User-
+// side mirror of /api/admin/orders/payment-method-share. One query.
+app.get('/api/users/me/flywheel-stats', rateLimit(60, 60_000), getUserFlywheelStatsHandler);
 
 // ─── Admin (authenticated + admin-flagged) ──────────────────────────────────
 //
