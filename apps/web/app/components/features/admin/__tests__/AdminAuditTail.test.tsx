@@ -4,7 +4,7 @@ import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import type * as AdminModule from '~/services/admin';
-import { AdminAuditTail, fmtRelative } from '../AdminAuditTail';
+import { AdminAuditTail, auditRowLink, fmtRelative } from '../AdminAuditTail';
 
 afterEach(cleanup);
 
@@ -59,6 +59,34 @@ describe('fmtRelative', () => {
 
   it('returns em-dash for non-finite input', () => {
     expect(fmtRelative('not-a-date')).toBe('—');
+  });
+});
+
+describe('auditRowLink', () => {
+  const uuid = '11111111-1111-1111-1111-111111111111';
+
+  it('links POST credit-adjustments to the user detail', () => {
+    expect(auditRowLink('POST', `/api/admin/users/${uuid}/credit-adjustments`)).toBe(
+      `/admin/users/${uuid}`,
+    );
+  });
+
+  it('links POST payout retry to the payout detail', () => {
+    expect(auditRowLink('POST', `/api/admin/payouts/${uuid}/retry`)).toBe(`/admin/payouts/${uuid}`);
+  });
+
+  it('links PUT cashback-config to the cashback page', () => {
+    expect(auditRowLink('PUT', '/api/admin/merchant-cashback-configs/mer-123')).toBe(
+      '/admin/cashback',
+    );
+  });
+
+  it('returns null for unknown paths', () => {
+    expect(auditRowLink('POST', '/api/admin/something-new')).toBeNull();
+  });
+
+  it('returns null when the method does not match the pattern', () => {
+    expect(auditRowLink('DELETE', `/api/admin/payouts/${uuid}/retry`)).toBeNull();
   });
 });
 
