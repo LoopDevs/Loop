@@ -44,6 +44,7 @@ import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '.
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
+import { adminOrdersActivityHandler } from './admin/orders-activity.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -653,6 +654,12 @@ app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayout
 // by state and userId. Ops uses this to triage stuck orders + audit
 // the cashback split + correlate with operator-pool health.
 app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+// 7-day (or N-day, clamped 1-90) order-activity sparkline. Drives the
+// admin dashboard's "created vs fulfilled per day" chart. Single
+// generate_series + LEFT JOIN; every day in the window appears with
+// zero-filled counts when no orders crossed. Registered before any
+// /:orderId route so the literal /activity matches first.
+app.get('/api/admin/orders/activity', rateLimit(60, 60_000), adminOrdersActivityHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 

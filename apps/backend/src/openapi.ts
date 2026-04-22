@@ -1173,6 +1173,58 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/orders/activity',
+  summary: 'Per-day orders created/fulfilled sparkline (ADR 010 / 019 Tier 1).',
+  description:
+    "Last `?days=<N>` (default 7, clamped [1, 90]) of orders created vs fulfilled, UTC-bucketed. Uses `generate_series` + LEFT JOIN so every day in the window appears with zero-filled counts even when no orders crossed on that day — the UI doesn't gap-fill. Oldest-first so a bar chart renders left-to-right without a client-side reverse.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(90).optional().openapi({
+        description: 'Window size in calendar days. Default 7, clamped [1, 90].',
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Activity series',
+      content: {
+        'application/json': {
+          schema: z.object({
+            windowDays: z.number().int().min(1).max(90),
+            days: z.array(
+              z.object({
+                day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+                created: z.number().int().nonnegative(),
+                fulfilled: z.number().int().nonnegative(),
+              }),
+            ),
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading activity',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/payouts',
   summary: 'Paginated pending-payouts backlog (ADR 015).',
   description:
