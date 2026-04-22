@@ -68,6 +68,7 @@ import { adminCashbackActivityHandler } from './admin/cashback-activity.js';
 import { adminCashbackActivityCsvHandler } from './admin/cashback-activity-csv.js';
 import { adminCashbackMonthlyHandler } from './admin/cashback-monthly.js';
 import { adminPayoutsMonthlyHandler } from './admin/payouts-monthly.js';
+import { adminPayoutsActivityHandler } from './admin/payouts-activity.js';
 import { adminMerchantStatsHandler } from './admin/merchant-stats.js';
 import { adminMerchantStatsCsvHandler } from './admin/merchant-stats-csv.js';
 import { adminMerchantsFlywheelShareHandler } from './admin/merchants-flywheel-share.js';
@@ -873,6 +874,12 @@ app.get('/api/admin/cashback-monthly', rateLimit(60, 60_000), adminCashbackMonth
 // answers "is outstanding liability growing or shrinking this
 // month?". Same 12-month window + oldest-first ordering.
 app.get('/api/admin/payouts-monthly', rateLimit(60, 60_000), adminPayoutsMonthlyHandler);
+// Daily payouts-activity (#637) — settlement-side sparkline
+// counterpart to cashback-activity. Same ?days window (default
+// 30, max 180), LEFT-JOIN generate_series so zero-days render
+// as empty byAsset[]. Drives the payout-trend sparkline on
+// /admin/treasury.
+app.get('/api/admin/payouts-activity', rateLimit(60, 60_000), adminPayoutsActivityHandler);
 // Per-merchant cashback stats — which merchants drive volume /
 // cashback outlay / margin. Distinct from supplier-spend (currency
 // grouped) — this one groups by merchant.
