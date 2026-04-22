@@ -272,6 +272,7 @@ GET  /api/admin/merchants/:merchantId/cashback-monthly  [admin — 12-month per-
 GET  /api/admin/merchants/:merchantId/flywheel-activity [admin — daily per-merchant recycled-vs-total fulfilled-order series (1-180d), ADR 011/015]
 GET  /api/admin/merchants/:merchantId/flywheel-activity.csv [admin — Tier-3 CSV of per-merchant flywheel-activity for BD / commercial prep, ADR 011/015/018]
 GET  /api/admin/merchant-cashback-configs.csv           [admin — snapshot CSV of commercial terms, ADR 011/018]
+GET  /api/admin/merchants-catalog.csv                   [admin — full catalog + joined cashback config state as CSV for finance/BD, ADR 011/018]
 GET  /api/admin/orders/:orderId                         [admin — single order detail, ADR 011/015]
 GET  /api/admin/orders/:orderId/payout                  [admin — payout row for a given order]
 GET  /api/admin/orders/payment-method-share             [admin — cashback-flywheel metric: xlm/usdc/credit/loop_asset share, ADR 010/015]

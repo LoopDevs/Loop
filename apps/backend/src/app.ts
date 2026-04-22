@@ -81,6 +81,7 @@ import { adminMerchantCashbackMonthlyHandler } from './admin/merchant-cashback-m
 import { adminMerchantFlywheelActivityHandler } from './admin/merchant-flywheel-activity.js';
 import { adminMerchantFlywheelActivityCsvHandler } from './admin/merchant-flywheel-activity-csv.js';
 import { adminCashbackConfigsCsvHandler } from './admin/cashback-configs-csv.js';
+import { adminMerchantsCatalogCsvHandler } from './admin/merchants-catalog-csv.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
@@ -788,6 +789,12 @@ app.get(
   rateLimit(10, 60_000),
   adminCashbackConfigsCsvHandler,
 );
+// Tier-3 CSV export of the full merchant catalog + joined
+// cashback-config state (#653). Finance / BD runs this to see
+// every merchant + current commercial terms in one spreadsheet.
+// Catalog is the source of truth — evicted merchants drop out,
+// stale config rows are filtered out by the join.
+app.get('/api/admin/merchants-catalog.csv', rateLimit(10, 60_000), adminMerchantsCatalogCsvHandler);
 // Fleet-wide history feed — "the last N config changes across every
 // merchant". Registered before /:merchantId/history so the literal
 // `history` segment isn't captured as a merchantId. ADR 011 / 018.

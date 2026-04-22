@@ -8,6 +8,7 @@ import { useAllMerchants } from '~/hooks/use-merchants';
 import { shouldRetry } from '~/hooks/query-retry';
 import { listCashbackConfigs, type MerchantCashbackConfig } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -99,14 +100,21 @@ export default function AdminMerchantsRoute(): React.JSX.Element {
         </p>
       </header>
 
-      <input
-        type="search"
-        placeholder="Search by name"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        aria-label="Filter merchants"
-        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-      />
+      <div className="flex items-center gap-3 flex-wrap">
+        <input
+          type="search"
+          placeholder="Search by name"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          aria-label="Filter merchants"
+          className="flex-1 min-w-[16rem] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+        />
+        <CsvDownloadButton
+          path="/api/admin/merchants-catalog.csv"
+          filename={`merchants-catalog-${new Date().toISOString().slice(0, 10)}.csv`}
+          label="Catalog CSV"
+        />
+      </div>
 
       {merchantsLoading ? (
         <div className="flex justify-center py-8">
