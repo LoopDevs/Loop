@@ -8,9 +8,11 @@ import { useAuth } from '~/hooks/use-auth';
 import {
   cashbackConfigHistory,
   listCashbackConfigs,
+  listMerchantFlows,
   upsertCashbackConfig,
   type MerchantCashbackConfig,
   type MerchantCashbackConfigHistoryEntry,
+  type MerchantFlow,
 } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
@@ -56,6 +58,30 @@ export default function AdminCashbackRoute(): React.JSX.Element {
     retry: shouldRetry,
     staleTime: 0,
   });
+
+  // Per-merchant fulfilled-order flow. Loaded in parallel with
+  // configs; the row join is best-effort so a 403 on this query
+  // (admin not authorised, or endpoint not deployed yet) doesn't
+  // block the configs list from rendering.
+  const flowsQuery = useQuery({
+    queryKey: ['admin-merchant-flows'],
+    queryFn: listMerchantFlows,
+    enabled: isAuthenticated,
+    retry: shouldRetry,
+    staleTime: 30_000,
+  });
+  const flowsByMerchant = useMemo(() => {
+    const map = new Map<string, MerchantFlow[]>();
+    for (const f of flowsQuery.data?.flows ?? []) {
+      let bucket = map.get(f.merchantId);
+      if (bucket === undefined) {
+        bucket = [];
+        map.set(f.merchantId, bucket);
+      }
+      bucket.push(f);
+    }
+    return map;
+  }, [flowsQuery.data]);
 
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -214,11 +240,19 @@ export default function AdminCashbackRoute(): React.JSX.Element {
               const draft = getDraft(cfg, m.id);
               const dirty = isDirty(cfg, m.id);
               const saving = saveMutation.isPending && saveMutation.variables?.merchantId === m.id;
+              const flows = flowsByMerchant.get(m.id) ?? [];
               return (
                 <Fragment key={m.id}>
                   <tr className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900/30">
                     <td className="px-3 py-2 font-medium text-gray-900 dark:text-white">
-                      {m.name}
+                      <div>{m.name}</div>
+                      {flows.length > 0 ? (
+                        <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] font-normal text-gray-500 dark:text-gray-400">
+                          {flows.map((f) => (
+                            <MerchantFlowSummary key={f.currency} flow={f} />
+                          ))}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="px-3 py-2">
                       <PctInput
@@ -446,5 +480,42 @@ function PctInput({
       onChange={(e) => onChange(e.target.value)}
       className="w-24 px-2 py-1 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white"
     />
+  );
+}
+
+/**
+ * Bigint-minor → localised currency string. Inlined here (not imported
+ * from `@loop/shared`) so this route doesn't depend on PR #390's
+ * formatter before it merges — a copy-drift follow-up swaps to the
+ * shared helper.
+ */
+function fmtMinor(minor: string, currency: string): string {
+  try {
+    const major = Number(BigInt(minor)) / 100;
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: 2,
+    }).format(major);
+  } catch {
+    return '—';
+  }
+}
+
+/**
+ * One-line summary of a (merchant, currency) flow bucket. Rendered
+ * under the merchant name on /admin/cashback so ops can eyeball the
+ * actual supplier split beside each merchant's configured split.
+ * Hidden when the merchant has no fulfilled orders yet.
+ */
+function MerchantFlowSummary({ flow }: { flow: MerchantFlow }): React.JSX.Element {
+  return (
+    <span
+      title={`${flow.count} fulfilled ${flow.currency} orders — face ${fmtMinor(flow.faceValueMinor, flow.currency)}`}
+    >
+      {flow.count} {flow.currency} · CTX {fmtMinor(flow.wholesaleMinor, flow.currency)} · cashback{' '}
+      {fmtMinor(flow.userCashbackMinor, flow.currency)} · margin{' '}
+      {fmtMinor(flow.loopMarginMinor, flow.currency)}
+    </span>
   );
 }
