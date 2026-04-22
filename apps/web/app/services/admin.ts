@@ -345,6 +345,15 @@ export async function listPayouts(opts: {
 }
 
 /**
+ * `GET /api/admin/payouts/:id` — single payout drill-down (ADR 015/016).
+ * Permalink for an ops ticket; returns the same `AdminPayoutView`
+ * shape as a single row from the list endpoint.
+ */
+export async function getAdminPayout(id: string): Promise<AdminPayoutView> {
+  return authenticatedRequest<AdminPayoutView>(`/api/admin/payouts/${encodeURIComponent(id)}`);
+}
+
+/**
  * ADR 017 admin-write response envelope. Every admin mutation returns
  * `{ result, audit }`; `audit.replayed: true` means the backend found a
  * prior snapshot for the `Idempotency-Key` and returned the stored

@@ -14,6 +14,7 @@ export default [
   route('admin/cashback', 'routes/admin.cashback.tsx'),
   route('admin/treasury', 'routes/admin.treasury.tsx'),
   route('admin/payouts', 'routes/admin.payouts.tsx'),
+  route('admin/payouts/:id', 'routes/admin.payouts.$id.tsx'),
   route('admin/orders', 'routes/admin.orders.tsx'),
   route('admin/users', 'routes/admin.users.tsx'),
   route('admin/users/:userId', 'routes/admin.users.$userId.tsx'),
