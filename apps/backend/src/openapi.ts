@@ -1173,6 +1173,59 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/users/top-by-pending-payout',
+  summary: 'Users ranked by currently-owed stroops (ADR 015 / 016).',
+  description:
+    "Single GROUP BY over `pending_payouts` filtered to `state IN ('pending', 'submitted')`, joined to `users` for email, grouped by `(user_id, email, asset_code)`. Drives ops funding prioritisation: who's owed the most USDLOOP / GBPLOOP / EURLOOP right now? Companion to `/api/admin/users/top-by-cashback` which ranks by lifetime earnings rather than current debt.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      limit: z.coerce.number().int().min(1).max(100).optional().openapi({
+        description: 'Page size. Default 20, clamped [1, 100].',
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Ranked list, highest-owed first',
+      content: {
+        'application/json': {
+          schema: z.object({
+            entries: z.array(
+              z.object({
+                userId: z.string().uuid(),
+                email: z.string().email(),
+                assetCode: z.string(),
+                totalStroops: z.string().regex(/^\d+$/),
+                payoutCount: z.number().int().nonnegative(),
+              }),
+            ),
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the ranking',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/payouts',
   summary: 'Paginated pending-payouts backlog (ADR 015).',
   description:
