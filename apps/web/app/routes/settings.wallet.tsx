@@ -8,6 +8,7 @@ import { getMe, setStellarAddress, type UserMeView } from '~/services/user';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { PendingPayoutsCard } from '~/components/features/cashback/PendingPayoutsCard';
+import { copyToClipboard } from '~/native/clipboard';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Wallet — Loop' }];
@@ -44,6 +45,7 @@ export default function SettingsWalletRoute(): React.JSX.Element {
 
   const [draftAddress, setDraftAddress] = useState<string>('');
   const [formError, setFormError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const linkMutation = useMutation({
     mutationFn: (addr: string | null) => setStellarAddress(addr),
     onSuccess: (view: UserMeView) => {
@@ -109,6 +111,14 @@ export default function SettingsWalletRoute(): React.JSX.Element {
     setFormError(null);
     linkMutation.mutate(null);
   };
+  const handleCopy = async (): Promise<void> => {
+    if (user.stellarAddress === null) return;
+    const ok = await copyToClipboard(user.stellarAddress);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   return (
     <main className="max-w-2xl mx-auto px-6 py-12 space-y-8">
@@ -136,14 +146,26 @@ export default function SettingsWalletRoute(): React.JSX.Element {
             >
               {user.stellarAddress}
             </p>
-            <button
-              type="button"
-              onClick={handleUnlink}
-              disabled={linkMutation.isPending}
-              className="rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:bg-gray-900 dark:text-red-400 dark:hover:bg-red-900/20"
-            >
-              {linkMutation.isPending ? 'Saving…' : 'Unlink wallet'}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  void handleCopy();
+                }}
+                aria-live="polite"
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                {copied ? 'Copied' : 'Copy address'}
+              </button>
+              <button
+                type="button"
+                onClick={handleUnlink}
+                disabled={linkMutation.isPending}
+                className="rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:bg-gray-900 dark:text-red-400 dark:hover:bg-red-900/20"
+              >
+                {linkMutation.isPending ? 'Saving…' : 'Unlink wallet'}
+              </button>
+            </div>
           </>
         ) : (
           <p className="text-sm text-gray-600 dark:text-gray-400">
