@@ -22,6 +22,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import { HOME_CURRENCIES, type HomeCurrency } from '@loop/shared';
 
 /**
  * Loop users. For the current CTX-anchored identity, populated lazily
@@ -80,8 +81,11 @@ export const users = pgTable(
   ],
 );
 
-export const HOME_CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
-export type HomeCurrency = (typeof HOME_CURRENCIES)[number];
+// Re-exported from @loop/shared so consumers of `./schema.ts` don't
+// need a separate import path. The list itself lives in shared (one
+// source of truth for both the DB CHECK constraint and the web
+// currency picker).
+export { HOME_CURRENCIES, type HomeCurrency };
 
 /**
  * Per-user credit balance in a specific regional currency. One row per
