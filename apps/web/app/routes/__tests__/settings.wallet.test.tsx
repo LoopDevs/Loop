@@ -25,6 +25,8 @@ const { userMock, authMock } = vi.hoisted(() => ({
     setError: null as unknown,
     getMe: vi.fn(),
     setStellarAddress: vi.fn(),
+    setHomeCurrency: vi.fn(),
+    currencyError: null as unknown,
   },
   authMock: {
     isAuthenticated: true,
@@ -42,6 +44,7 @@ vi.mock('~/services/user', () => ({
       homeCurrencyBalanceMinor: string;
     }>,
   setStellarAddress: (addr: string | null) => userMock.setStellarAddress(addr),
+  setHomeCurrency: (code: 'USD' | 'GBP' | 'EUR') => userMock.setHomeCurrency(code),
 }));
 
 vi.mock('~/hooks/use-auth', () => ({
@@ -105,6 +108,14 @@ beforeEach(() => {
   userMock.setStellarAddress.mockImplementation(async (addr: string | null) => {
     if (userMock.setError !== null) throw userMock.setError;
     const next = userMock.setResult ?? { ...userMock.me, stellarAddress: addr };
+    userMock.me = next as typeof userMock.me;
+    return next;
+  });
+  userMock.setHomeCurrency.mockReset();
+  userMock.currencyError = null;
+  userMock.setHomeCurrency.mockImplementation(async (code: 'USD' | 'GBP' | 'EUR') => {
+    if (userMock.currencyError !== null) throw userMock.currencyError;
+    const next = { ...userMock.me, homeCurrency: code };
     userMock.me = next as typeof userMock.me;
     return next;
   });
@@ -241,5 +252,36 @@ describe('SettingsWalletRoute', () => {
       fireEvent.click(screen.getByRole('button', { name: /Link wallet/i }));
     });
     await waitFor(() => expect(userMock.setStellarAddress).toHaveBeenCalledWith(VALID_ADDRESS));
+  });
+
+  it('switches home currency via the picker and reflects the new asset in the header', async () => {
+    renderPage();
+    // Wait for the initial GBP render so the radio buttons are mounted.
+    await screen.findByRole('radio', { name: /GBP/i });
+    const usdButton = screen.getByRole('radio', { name: /USD/i });
+    await act(async () => {
+      fireEvent.click(usdButton);
+    });
+    await waitFor(() => expect(userMock.setHomeCurrency).toHaveBeenCalledWith('USD'));
+    // Header reflects the new asset code after the mutation succeeds.
+    await waitFor(() => {
+      expect(screen.getAllByText((t) => t.includes('USDLOOP')).length).toBeGreaterThan(0);
+    });
+  });
+
+  it('renders a locked-state callout when the backend returns 409', async () => {
+    userMock.currencyError = new ApiException(409, {
+      code: 'HOME_CURRENCY_LOCKED',
+      message: 'Home currency cannot be changed after placing an order',
+    });
+    renderPage();
+    await screen.findByRole('radio', { name: /GBP/i });
+    const eurButton = screen.getByRole('radio', { name: /EUR/i });
+    await act(async () => {
+      fireEvent.click(eurButton);
+    });
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/already placed an order/i);
+    expect(alert.textContent).toMatch(/Contact support/i);
   });
 });

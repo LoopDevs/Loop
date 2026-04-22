@@ -1,10 +1,16 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
-import { ApiException, STELLAR_PUBKEY_REGEX, loopAssetForCurrency } from '@loop/shared';
+import {
+  ApiException,
+  HOME_CURRENCIES,
+  STELLAR_PUBKEY_REGEX,
+  loopAssetForCurrency,
+  type HomeCurrency,
+} from '@loop/shared';
 import type { Route } from './+types/settings.wallet';
 import { useAuth } from '~/hooks/use-auth';
-import { getMe, setStellarAddress, type UserMeView } from '~/services/user';
+import { getMe, setHomeCurrency, setStellarAddress, type UserMeView } from '~/services/user';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { PendingPayoutsCard } from '~/components/features/cashback/PendingPayoutsCard';
@@ -46,6 +52,7 @@ export default function SettingsWalletRoute(): React.JSX.Element {
   const [draftAddress, setDraftAddress] = useState<string>('');
   const [formError, setFormError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [currencyError, setCurrencyError] = useState<string | null>(null);
   const linkMutation = useMutation({
     mutationFn: (addr: string | null) => setStellarAddress(addr),
     onSuccess: (view: UserMeView) => {
@@ -57,6 +64,22 @@ export default function SettingsWalletRoute(): React.JSX.Element {
       setFormError(
         err instanceof ApiException ? err.message : "Couldn't save — check the address and retry.",
       );
+    },
+  });
+  const currencyMutation = useMutation({
+    mutationFn: (code: HomeCurrency) => setHomeCurrency(code),
+    onSuccess: (view: UserMeView) => {
+      queryClient.setQueryData(['me'], view);
+      setCurrencyError(null);
+    },
+    onError: (err) => {
+      if (err instanceof ApiException && err.status === 409) {
+        setCurrencyError(
+          "You've already placed an order, so your home currency is locked. Contact support to change it.",
+        );
+        return;
+      }
+      setCurrencyError(err instanceof ApiException ? err.message : "Couldn't change currency.");
     },
   });
 
@@ -119,6 +142,11 @@ export default function SettingsWalletRoute(): React.JSX.Element {
       setTimeout(() => setCopied(false), 2000);
     }
   };
+  const handleCurrencyChange = (code: HomeCurrency): void => {
+    if (currencyMutation.isPending || code === user.homeCurrency) return;
+    setCurrencyError(null);
+    currencyMutation.mutate(code);
+  };
 
   return (
     <main className="max-w-2xl mx-auto px-6 py-12 space-y-8">
@@ -130,6 +158,56 @@ export default function SettingsWalletRoute(): React.JSX.Element {
           of Loop until you link one.
         </p>
       </header>
+
+      {/* Home-currency picker. The backend locks the column once the
+          user has placed an order (409 HOME_CURRENCY_LOCKED), so the
+          first-order-onwards flow is a one-way gate — the button click
+          optimistically fires the PUT, the 409 branch falls through to
+          an inline "contact support" callout. Keeping this a card
+          (not buried in a /settings index) so users who land here to
+          link a wallet see the asset-code consequence immediately. */}
+      <section
+        aria-labelledby="home-currency-heading"
+        className="rounded-xl border border-gray-200 dark:border-gray-800 p-5 bg-white dark:bg-gray-900 space-y-4"
+      >
+        <h2
+          id="home-currency-heading"
+          className="text-base font-semibold text-gray-900 dark:text-white"
+        >
+          Home currency
+        </h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          Determines which LOOP asset your cashback lands in on-chain. Your current currency is{' '}
+          <strong>{user.homeCurrency}</strong>, so payouts arrive as <strong>{assetCode}</strong>.
+        </p>
+        <div role="radiogroup" aria-label="Home currency" className="flex flex-wrap gap-2">
+          {HOME_CURRENCIES.map((code) => {
+            const active = code === user.homeCurrency;
+            return (
+              <button
+                key={code}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => handleCurrencyChange(code)}
+                disabled={currencyMutation.isPending || active}
+                className={`rounded-lg border px-4 py-2 text-sm font-medium disabled:cursor-not-allowed ${
+                  active
+                    ? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800'
+                }`}
+              >
+                {code} → {loopAssetForCurrency(code)}
+              </button>
+            );
+          })}
+        </div>
+        {currencyError !== null ? (
+          <p role="alert" className="text-sm text-amber-700 dark:text-amber-400">
+            {currencyError}
+          </p>
+        ) : null}
+      </section>
 
       <section
         aria-labelledby="linked-heading"
