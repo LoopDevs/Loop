@@ -5,6 +5,12 @@ vi.mock('../../db/schema.js', () => ({
   PAYOUT_STATES: ['pending', 'submitted', 'confirmed', 'failed'] as const,
 }));
 
+const idempotencyState = vi.hoisted(() => ({
+  priorSnapshot: null as null | { status: number; body: Record<string, unknown>; createdAt: Date },
+  storedSnapshot: null as null | Record<string, unknown>,
+  discordCalls: [] as Array<Record<string, unknown>>,
+}));
+
 const listMock = vi.fn();
 const resetMock = vi.fn();
 const getMock = vi.fn();
@@ -14,6 +20,21 @@ vi.mock('../../credits/pending-payouts.js', () => ({
   resetPayoutToPending: (id: string) => resetMock(id),
   getPayoutForAdmin: (id: string) => getMock(id),
   getPayoutByOrderId: (orderId: string) => byOrderMock(orderId),
+}));
+vi.mock('../idempotency.js', () => ({
+  IDEMPOTENCY_KEY_MIN: 16,
+  IDEMPOTENCY_KEY_MAX: 128,
+  validateIdempotencyKey: (k: string | undefined): k is string =>
+    k !== undefined && k.length >= 16 && k.length <= 128,
+  lookupIdempotencyKey: vi.fn(async () => idempotencyState.priorSnapshot),
+  storeIdempotencyKey: vi.fn(async (args: Record<string, unknown>) => {
+    idempotencyState.storedSnapshot = args;
+  }),
+}));
+vi.mock('../../discord.js', () => ({
+  notifyAdminAudit: vi.fn((args: Record<string, unknown>) => {
+    idempotencyState.discordCalls.push(args);
+  }),
 }));
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -236,32 +257,191 @@ describe('adminPayoutByOrderHandler', () => {
   });
 });
 
-describe('adminRetryPayoutHandler', () => {
-  it('400 when id param is missing', async () => {
-    const res = await adminRetryPayoutHandler(makeCtx({}, {}));
+describe('adminRetryPayoutHandler (ADR 017)', () => {
+  const admin = {
+    id: '11111111-1111-1111-1111-111111111111',
+    email: 'admin@loop.test',
+    isAdmin: true,
+    homeCurrency: 'GBP',
+    stellarAddress: null,
+    ctxUserId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  const payoutId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  const validKey = 'k'.repeat(32);
+  const resetRow = {
+    ...baseRow,
+    id: payoutId,
+    userId: 'uuuuuuuu-1111-2222-3333-444444444444',
+    state: 'pending',
+    lastError: null,
+  };
+
+  function makeRetryCtx(args: {
+    id?: string;
+    headers?: Record<string, string>;
+    body?: unknown;
+    user?: typeof admin | null;
+  }): Context {
+    const resolved = args.user === null ? undefined : (args.user ?? admin);
+    const store = new Map<string, unknown>();
+    if (resolved !== undefined) store.set('user', resolved);
+    return {
+      req: {
+        param: (k: string) => (k === 'id' ? (args.id ?? payoutId) : undefined),
+        header: (k: string) => args.headers?.[k.toLowerCase()],
+        json: async () => {
+          if (args.body === undefined) throw new Error('no body');
+          return args.body;
+        },
+      },
+      get: (k: string) => store.get(k),
+      json: (body: unknown, status?: number) =>
+        new Response(JSON.stringify(body), {
+          status: status ?? 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    } as unknown as Context;
+  }
+
+  beforeEach(() => {
+    idempotencyState.priorSnapshot = null;
+    idempotencyState.storedSnapshot = null;
+    idempotencyState.discordCalls = [];
+    resetMock.mockResolvedValue(resetRow);
+  });
+
+  it('400 when id is not a uuid', async () => {
+    const res = await adminRetryPayoutHandler(
+      makeRetryCtx({
+        id: 'not-a-uuid',
+        headers: { 'idempotency-key': validKey },
+        body: { reason: 'r' },
+      }),
+    );
     expect(res.status).toBe(400);
     expect(resetMock).not.toHaveBeenCalled();
   });
 
-  it('resets the payout to pending and returns the updated view', async () => {
-    resetMock.mockResolvedValue({ ...baseRow, state: 'pending', lastError: null });
-    const res = await adminRetryPayoutHandler(makeCtx({}, { id: 'p-1' }));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body['id']).toBe('p-1');
-    expect(body['state']).toBe('pending');
-    expect(resetMock).toHaveBeenCalledWith('p-1');
+  it('400 when Idempotency-Key header is missing', async () => {
+    const res = await adminRetryPayoutHandler(
+      makeRetryCtx({ headers: {}, body: { reason: 'retry now' } }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: string };
+    expect(body.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+    expect(resetMock).not.toHaveBeenCalled();
   });
 
-  it('404 when the row is not in failed state (or doesnt exist)', async () => {
+  it('400 when Idempotency-Key is shorter than min', async () => {
+    const res = await adminRetryPayoutHandler(
+      makeRetryCtx({ headers: { 'idempotency-key': 'short' }, body: { reason: 'ok' } }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('400 when body is not valid JSON', async () => {
+    const res = await adminRetryPayoutHandler(
+      makeRetryCtx({ headers: { 'idempotency-key': validKey } }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('400 when reason is empty', async () => {
+    const res = await adminRetryPayoutHandler(
+      makeRetryCtx({ headers: { 'idempotency-key': validKey }, body: { reason: '' } }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('401 when admin context is missing', async () => {
+    const res = await adminRetryPayoutHandler(
+      makeRetryCtx({
+        headers: { 'idempotency-key': validKey },
+        body: { reason: 'retry please' },
+        user: null,
+      }),
+    );
+    expect(res.status).toBe(401);
+    expect(resetMock).not.toHaveBeenCalled();
+  });
+
+  it('happy path returns { result, audit } envelope + stores snapshot + fires Discord', async () => {
+    const res = await adminRetryPayoutHandler(
+      makeRetryCtx({
+        headers: { 'idempotency-key': validKey },
+        body: { reason: 'stuck since tuesday' },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      result: { id: string; state: string; userId: string };
+      audit: { actorUserId: string; idempotencyKey: string; replayed: boolean };
+    };
+    expect(body.result.id).toBe(payoutId);
+    expect(body.result.state).toBe('pending');
+    expect(body.audit.actorUserId).toBe(admin.id);
+    expect(body.audit.idempotencyKey).toBe(validKey);
+    expect(body.audit.replayed).toBe(false);
+    expect(resetMock).toHaveBeenCalledWith(payoutId);
+    expect(idempotencyState.storedSnapshot).not.toBeNull();
+    expect(idempotencyState.discordCalls).toHaveLength(1);
+    expect(idempotencyState.discordCalls[0]).toMatchObject({
+      actorUserId: admin.id,
+      reason: 'stuck since tuesday',
+      replayed: false,
+    });
+  });
+
+  it('404 when the row is not in failed state (not snapshot-stored)', async () => {
     resetMock.mockResolvedValue(null);
-    const res = await adminRetryPayoutHandler(makeCtx({}, { id: 'p-1' }));
+    const res = await adminRetryPayoutHandler(
+      makeRetryCtx({
+        headers: { 'idempotency-key': validKey },
+        body: { reason: 'trying' },
+      }),
+    );
     expect(res.status).toBe(404);
+    expect(idempotencyState.storedSnapshot).toBeNull();
+    expect(idempotencyState.discordCalls).toHaveLength(0);
   });
 
   it('500 when the repo throws', async () => {
     resetMock.mockRejectedValue(new Error('db exploded'));
-    const res = await adminRetryPayoutHandler(makeCtx({}, { id: 'p-1' }));
+    const res = await adminRetryPayoutHandler(
+      makeRetryCtx({
+        headers: { 'idempotency-key': validKey },
+        body: { reason: 'trying' },
+      }),
+    );
     expect(res.status).toBe(500);
+  });
+
+  it('replay path returns stored snapshot, fires Discord replayed, skips apply', async () => {
+    idempotencyState.priorSnapshot = {
+      status: 200,
+      body: {
+        result: { id: payoutId, userId: resetRow.userId, state: 'pending' },
+        audit: {
+          actorUserId: admin.id,
+          actorEmail: admin.email,
+          idempotencyKey: validKey,
+          appliedAt: new Date().toISOString(),
+          replayed: false,
+        },
+      },
+      createdAt: new Date(),
+    };
+    const res = await adminRetryPayoutHandler(
+      makeRetryCtx({
+        headers: { 'idempotency-key': validKey },
+        body: { reason: 'second click' },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(resetMock).not.toHaveBeenCalled();
+    expect(idempotencyState.discordCalls).toHaveLength(1);
+    expect(idempotencyState.discordCalls[0]?.['replayed']).toBe(true);
   });
 });

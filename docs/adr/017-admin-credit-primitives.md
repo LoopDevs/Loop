@@ -124,6 +124,10 @@ applied" confirmation without branching on the endpoint.
 envelope, same headers, same Discord fanout — as a non-breaking
 additive change (the current 200 body becomes the `result` field).
 
+**Status:** Landed. Retry endpoint now requires `Idempotency-Key`
+header + `reason` body, returns `{ result, audit }`, and fires the
+Discord audit. Admin UI clients must send both on every retry click.
+
 ## Consequences
 
 **Good.** Every future admin write inherits idempotency,
