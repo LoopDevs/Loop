@@ -20,6 +20,12 @@ export interface UserMeView {
    * cashback yet.
    */
   homeCurrencyBalanceMinor: string;
+  /**
+   * Lifetime sum of cashback credits (not balance — withdrawals don't
+   * decrement). Scoped to the user's home currency. Bigint-as-string,
+   * `"0"` when the user hasn't earned any cashback yet.
+   */
+  lifetimeCashbackEarnedMinor: string;
 }
 
 /**

@@ -258,6 +258,10 @@ const UserMeView = registry.register(
       description:
         'Off-chain cashback balance in `homeCurrency` minor units (pence / cents), as a bigint-string so JSON round-trips don\'t truncate precision. `"0"` when the user has no ledger row yet (first-order users, pre-cashback).',
     }),
+    lifetimeCashbackEarnedMinor: z.string().openapi({
+      description:
+        'Lifetime sum of positive cashback credits in `homeCurrency` minor units. Unlike the balance, this never decreases on withdrawal — the UI renders it as an "earned since joining" motivator. Bigint-as-string, `"0"` when the user hasn\'t earned any cashback yet.',
+    }),
   }),
 );
 

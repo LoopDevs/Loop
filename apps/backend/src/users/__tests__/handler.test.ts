@@ -28,19 +28,30 @@ const { selectChain, updateChain, queryObj, dbState } = vi.hoisted(() => {
     updatedUser: unknown;
     historyRows: unknown[];
     homeBalanceMinor: bigint | null;
+    // SUM of credit_transactions.amount_minor for type='cashback' —
+    // my new `resolveLifetimeCashbackEarned` query reads this.
+    lifetimeEarnedMinor: string;
   } = {
     orderCount: '0',
     updatedUser: null,
     historyRows: [],
     homeBalanceMinor: null,
+    lifetimeEarnedMinor: '0',
   };
   const sel: Record<string, ReturnType<typeof vi.fn>> = {};
   sel['from'] = vi.fn(() => sel);
   sel['where'] = vi.fn(() => {
     const leaf: Record<string, unknown> = {};
-    leaf['then'] = (resolve: (v: Array<{ n: string }>) => void, reject: (err: unknown) => void) => {
+    // Carry both `n` (order count) and `total` (lifetime sum) fields
+    // in the thenable payload. Each handler reads the field it asked
+    // for; the extras are ignored. Saves us from discriminating on
+    // the column shape.
+    leaf['then'] = (
+      resolve: (v: Array<{ n: string; total: string }>) => void,
+      reject: (err: unknown) => void,
+    ) => {
       try {
-        resolve([{ n: state.orderCount }]);
+        resolve([{ n: state.orderCount, total: state.lifetimeEarnedMinor }]);
       } catch (err) {
         reject(err);
       }
@@ -173,6 +184,7 @@ beforeEach(() => {
   dbState.updatedUser = null;
   dbState.historyRows = [];
   dbState.homeBalanceMinor = null;
+  dbState.lifetimeEarnedMinor = '0';
   payoutState.rows = [];
   payoutState.calls = [];
 });
@@ -211,6 +223,7 @@ describe('getMeHandler', () => {
       homeCurrency: 'GBP',
       stellarAddress: null,
       homeCurrencyBalanceMinor: '0',
+      lifetimeCashbackEarnedMinor: '0',
     });
   });
 
@@ -249,6 +262,7 @@ describe('getMeHandler', () => {
       homeCurrency: 'USD',
       stellarAddress: null,
       homeCurrencyBalanceMinor: '0',
+      lifetimeCashbackEarnedMinor: '0',
     });
     expect(userState.upsertCalls).toEqual([{ ctxUserId: 'ctx-123', email: 'ctx@example.com' }]);
   });
@@ -287,6 +301,7 @@ describe('getMeHandler', () => {
       'homeCurrencyBalanceMinor',
       'id',
       'isAdmin',
+      'lifetimeCashbackEarnedMinor',
       'stellarAddress',
     ]);
   });
@@ -309,6 +324,31 @@ describe('getMeHandler', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body['homeCurrencyBalanceMinor']).toBe('12345');
+  });
+
+  it('surfaces lifetimeCashbackEarnedMinor independently of the balance', async () => {
+    userState.byId = {
+      id: 'loop-user-1',
+      email: 'a@b.com',
+      isAdmin: false,
+      homeCurrency: 'GBP',
+      stellarAddress: null,
+      ctxUserId: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    // Current balance is 500 (user has withdrawn on-chain at some
+    // point), but lifetime earned is 3200 — the UI reads both
+    // independently so this is the case that exercises the distinction.
+    dbState.homeBalanceMinor = 500n;
+    dbState.lifetimeEarnedMinor = '3200';
+    const res = await getMeHandler(
+      makeCtx({ kind: 'loop', userId: 'loop-user-1', email: 'a@b.com', bearerToken: 't' }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['homeCurrencyBalanceMinor']).toBe('500');
+    expect(body['lifetimeCashbackEarnedMinor']).toBe('3200');
   });
 });
 

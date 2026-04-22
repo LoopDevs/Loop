@@ -52,6 +52,17 @@ export interface UserMeView {
    * flips) are not exposed here — they're admin-only.
    */
   homeCurrencyBalanceMinor: string;
+  /**
+   * ADR 015 — lifetime sum of cashback credits (not balance). Unlike
+   * the balance, this never decreases when payouts are withdrawn —
+   * the UI uses it to render a motivating "£X earned since joining"
+   * headline that the running balance can't tell on its own.
+   *
+   * Scoped to `homeCurrency` + `type='cashback'` + `amount > 0`
+   * (the `amount > 0` guard excludes adjustments). Bigint-string to
+   * mirror the balance field's precision contract.
+   */
+  lifetimeCashbackEarnedMinor: string;
 }
 
 /**
@@ -66,8 +77,45 @@ async function resolveHomeCurrencyBalance(userId: string, homeCurrency: string):
   return row?.balanceMinor ?? 0n;
 }
 
+/**
+ * Sums every positive cashback credit_transaction in the user's
+ * home currency. Used for the "X earned since joining" headline —
+ * unlike the balance, withdrawals don't decrement this.
+ *
+ * `COALESCE(SUM(...), 0)::text` ensures a bigint-string round-trip
+ * even when there are zero rows. `amount > 0` guards against a
+ * buggy adjustment row sneaking a negative in under the 'cashback'
+ * type (the CHECK constraint on credit_transactions forbids it
+ * already, but the guard makes the intent explicit).
+ */
+async function resolveLifetimeCashbackEarned(
+  userId: string,
+  homeCurrency: string,
+): Promise<bigint> {
+  const [row] = await db
+    .select({
+      total: sql<string>`COALESCE(SUM(${creditTransactions.amountMinor}), 0)::text`,
+    })
+    .from(creditTransactions)
+    .where(
+      and(
+        eq(creditTransactions.userId, userId),
+        eq(creditTransactions.currency, homeCurrency),
+        eq(creditTransactions.type, 'cashback'),
+        sql`${creditTransactions.amountMinor} > 0`,
+      ),
+    );
+  return BigInt(row?.total ?? '0');
+}
+
 async function toView(row: User): Promise<UserMeView> {
-  const balanceMinor = await resolveHomeCurrencyBalance(row.id, row.homeCurrency);
+  // Both reads are user-scoped and the second can't deadlock with
+  // the first — issue them in parallel to trim one round-trip off
+  // the /me hot path.
+  const [balanceMinor, lifetimeEarnedMinor] = await Promise.all([
+    resolveHomeCurrencyBalance(row.id, row.homeCurrency),
+    resolveLifetimeCashbackEarned(row.id, row.homeCurrency),
+  ]);
   return {
     id: row.id,
     email: row.email,
@@ -75,6 +123,7 @@ async function toView(row: User): Promise<UserMeView> {
     homeCurrency: row.homeCurrency,
     stellarAddress: row.stellarAddress,
     homeCurrencyBalanceMinor: balanceMinor.toString(),
+    lifetimeCashbackEarnedMinor: lifetimeEarnedMinor.toString(),
   };
 }
 

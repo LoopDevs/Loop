@@ -184,6 +184,13 @@ function CashbackBalanceCard({
   me: UserMeView | undefined;
   isLoading: boolean;
 }): React.JSX.Element {
+  // Lifetime is a motivational counter — zero users see just the
+  // balance so the card isn't cluttered before they've earned
+  // anything. First non-zero lifetime credit shows the full stack.
+  const lifetimeZero =
+    me === undefined ||
+    me.lifetimeCashbackEarnedMinor === '0' ||
+    me.lifetimeCashbackEarnedMinor === '';
   return (
     <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4">
       <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -194,6 +201,12 @@ function CashbackBalanceCard({
           ? '—'
           : formatCashbackBalance(me.homeCurrencyBalanceMinor, me.homeCurrency)}
       </p>
+      {!lifetimeZero && me !== undefined && (
+        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+          {formatCashbackBalance(me.lifetimeCashbackEarnedMinor, me.homeCurrency)} earned since
+          joining
+        </p>
+      )}
       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
         Earned on every Loop order.
         {me?.stellarAddress === null ? ' Link a wallet to withdraw.' : ''}
