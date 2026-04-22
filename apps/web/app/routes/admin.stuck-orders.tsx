@@ -135,11 +135,17 @@ export default function AdminStuckOrdersRoute(): React.JSX.Element {
                       {row.userId.slice(0, 8)}
                     </Link>
                   </td>
-                  <td
-                    className="px-3 py-2 font-mono text-xs text-gray-700 dark:text-gray-300"
-                    title={row.merchantId}
-                  >
-                    {row.merchantId}
+                  <td className="px-3 py-2 font-mono text-xs" title={row.merchantId}>
+                    {/* Drill into the merchant detail page (#621) —
+                        stuck-order triage often benefits from a quick
+                        look at the merchant's config + recent orders
+                        without hand-crafting a URL. */}
+                    <Link
+                      to={`/admin/merchants/${encodeURIComponent(row.merchantId)}`}
+                      className="text-blue-600 hover:underline dark:text-blue-400"
+                    >
+                      {row.merchantId}
+                    </Link>
                   </td>
                   <td className="px-3 py-2">
                     <span className="rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-300">
