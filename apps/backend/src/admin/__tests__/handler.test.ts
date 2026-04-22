@@ -8,21 +8,22 @@ const { dbMock, insertedRow, preEditRow, notifyMock } = vi.hoisted(() => {
   const preEdit = { value: undefined as unknown };
   // Chainable query-builder mock — each method returns `this` so
   // the handler's fluent chains resolve without touching a real pg.
-  const m: Record<string, ReturnType<typeof vi.fn> | unknown> = {};
-  (m as Record<string, ReturnType<typeof vi.fn>>)['select'] = vi.fn(() => m);
-  (m as Record<string, ReturnType<typeof vi.fn>>)['from'] = vi.fn(() => m);
-  (m as Record<string, ReturnType<typeof vi.fn>>)['where'] = vi.fn(() => m);
-  (m as Record<string, ReturnType<typeof vi.fn>>)['orderBy'] = vi.fn(() => m);
-  (m as Record<string, ReturnType<typeof vi.fn>>)['limit'] = vi.fn(async () => [] as unknown[]);
-  (m as Record<string, ReturnType<typeof vi.fn>>)['insert'] = vi.fn(() => m);
-  (m as Record<string, ReturnType<typeof vi.fn>>)['values'] = vi.fn(() => m);
-  (m as Record<string, ReturnType<typeof vi.fn>>)['onConflictDoUpdate'] = vi.fn(() => m);
-  (m as Record<string, ReturnType<typeof vi.fn>>)['returning'] = vi.fn(async () => [state.out]);
+  const m: Record<string, ReturnType<typeof vi.fn>> = {};
+  m['select'] = vi.fn(() => m);
+  m['from'] = vi.fn(() => m);
+  m['where'] = vi.fn(() => m);
+  m['orderBy'] = vi.fn(() => m);
+  m['limit'] = vi.fn(async () => [] as unknown[]);
+  m['insert'] = vi.fn(() => m);
+  m['values'] = vi.fn(() => m);
+  m['onConflictDoUpdate'] = vi.fn(() => m);
+  m['returning'] = vi.fn(async () => [state.out]);
   // db.query.merchantCashbackConfigs.findFirst — pre-edit snapshot
-  // read for the Discord audit diff. Returns `preEdit.value` so
-  // tests can toggle between "first-time create" (undefined) and
-  // "update over existing config" (a row).
-  m['query'] = {
+  // read for the Discord audit diff. Attached as a non-fn entry on
+  // the same object; the test harness reaches it via `dbMock.query`.
+  // Cast through `unknown` so the sibling-fn record type stays
+  // tight for `mockClear` / `mockImplementationOnce` callers below.
+  (m as unknown as Record<string, unknown>)['query'] = {
     merchantCashbackConfigs: {
       findFirst: vi.fn(async () => preEdit.value),
     },
