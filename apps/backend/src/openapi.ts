@@ -1173,6 +1173,75 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/orders/payment-method-share',
+  summary: 'Per-method order share for the cashback flywheel metric (ADR 010 / 015).',
+  description:
+    "Single GROUP BY over `orders.payment_method`. Tracks stablecoin-vs-XLM adoption: the cashback flywheel assumes users will pay with `loop_asset` (their on-ledger credit balance) once they've earned some, rather than topping up fresh XLM every time. A rising `loop_asset` share is the signal that cashback is being recycled. `byMethod` is zero-filled across every known method for stable UI layout. Defaults `?state=fulfilled` so in-flight rows don't skew the metric; admins tracking the in-flight mix can flip to `paid` or `procuring`.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      state: z
+        .enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired'])
+        .optional()
+        .openapi({ description: "Order state to filter on. Default 'fulfilled'." }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Per-method share + totals for the selected state',
+      content: {
+        'application/json': {
+          schema: z.object({
+            state: z.string(),
+            totalOrders: z.number().int().nonnegative(),
+            byMethod: z.object({
+              xlm: z.object({
+                orderCount: z.number().int().nonnegative(),
+                chargeMinor: z.string().regex(/^\d+$/),
+              }),
+              usdc: z.object({
+                orderCount: z.number().int().nonnegative(),
+                chargeMinor: z.string().regex(/^\d+$/),
+              }),
+              credit: z.object({
+                orderCount: z.number().int().nonnegative(),
+                chargeMinor: z.string().regex(/^\d+$/),
+              }),
+              loop_asset: z.object({
+                orderCount: z.number().int().nonnegative(),
+                chargeMinor: z.string().regex(/^\d+$/),
+              }),
+            }),
+          }),
+        },
+      },
+    },
+    400: {
+      description: 'Unknown state',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading the share',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/payouts',
   summary: 'Paginated pending-payouts backlog (ADR 015).',
   description:
