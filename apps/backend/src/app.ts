@@ -57,6 +57,7 @@ import { adminUserCreditsHandler } from './admin/user-credits.js';
 import { adminUserCreditTransactionsHandler } from './admin/user-credit-transactions.js';
 import { adminGetUserHandler } from './admin/user-detail.js';
 import { adminListUsersHandler } from './admin/users-list.js';
+import { publicCashbackStatsHandler } from './public/cashback-stats.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -512,6 +513,12 @@ app.get(
 // Unauthed callers still see the basic cached merchant via by-slug.
 app.use('/api/merchants/:id', requireAuth);
 app.get('/api/merchants/:id', merchantDetailHandler);
+
+// Public, unauthenticated, marketing-facing cashback totals. 60/min
+// per IP is generous for a landing-page widget that renders once
+// per visit; edge-cache respects the handler's Cache-Control so real
+// origin load will be much lower.
+app.get('/api/public/cashback-stats', rateLimit(60, 60_000), publicCashbackStatsHandler);
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 

@@ -308,6 +308,47 @@ const CashbackHistoryResponse = registry.register(
   z.object({ entries: z.array(CashbackHistoryEntry) }),
 );
 
+// ─── Public — landing-page aggregates (ADR 009 / 015 / 020) ────────────────
+
+const PerCurrencyCashback = registry.register(
+  'PerCurrencyCashback',
+  z.object({
+    currency: z.string().length(3),
+    amountMinor: z.string().openapi({
+      description: 'bigint-as-string. Minor units (pence / cents).',
+    }),
+  }),
+);
+
+const PublicCashbackStats = registry.register(
+  'PublicCashbackStats',
+  z.object({
+    totalUsersWithCashback: z.number().int().min(0),
+    totalCashbackByCurrency: z.array(PerCurrencyCashback),
+    fulfilledOrders: z.number().int().min(0),
+    asOf: z.string().datetime(),
+  }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/public/cashback-stats',
+  summary: 'Fleet-wide cashback aggregates for the landing page.',
+  description:
+    'Unauthenticated, CDN-friendly. Returns the user count with any earned cashback, per-currency cashback totals, and fulfilled order count. `Cache-Control: public, max-age=300` on the happy path; `max-age=60` on the fallback path if the backend is serving a last-known-good snapshot or zeros. Never 500 — a DB outage degrades to stale/zero rather than propagating to unauthenticated visitors.',
+  tags: ['Public'],
+  responses: {
+    200: {
+      description: 'Cashback stats snapshot',
+      content: { 'application/json': { schema: PublicCashbackStats } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Users — credit balances (ADR 009 / 015) ────────────────────────────────
 
 const UserCreditRow = registry.register(
