@@ -734,6 +734,30 @@ export async function getAdminDiscordNotifiers(): Promise<AdminDiscordNotifiersR
   return authenticatedRequest<AdminDiscordNotifiersResponse>('/api/admin/discord/notifiers');
 }
 
+/** Channel enum for the test-ping endpoint. Same union as AdminDiscordNotifier.channel. */
+export type AdminDiscordChannel = AdminDiscordNotifier['channel'];
+
+export interface AdminDiscordTestResponse {
+  status: 'delivered';
+  channel: AdminDiscordChannel;
+}
+
+/**
+ * `POST /api/admin/discord/test` — fires a benign test ping at the
+ * chosen channel's webhook. Ops uses this after rotating env vars or
+ * redeploying to prove end-to-end wiring without waiting for a real
+ * event. 409 WEBHOOK_NOT_CONFIGURED when the channel's env var is
+ * unset; the UI surfaces that distinctly from a silent success.
+ */
+export async function testDiscordChannel(
+  channel: AdminDiscordChannel,
+): Promise<AdminDiscordTestResponse> {
+  return authenticatedRequest<AdminDiscordTestResponse>('/api/admin/discord/test', {
+    method: 'POST',
+    body: { channel },
+  });
+}
+
 /** One credit-balance row per (user, currency) from `/api/admin/users/:userId/credits`. */
 export interface AdminUserCreditRow {
   currency: string;
