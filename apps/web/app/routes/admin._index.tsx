@@ -13,6 +13,7 @@ import {
 import { AdminAuditTail } from '~/components/features/admin/AdminAuditTail';
 import { ConfigsHistoryCard } from '~/components/features/admin/ConfigsHistoryCard';
 import { CashbackSparkline } from '~/components/features/admin/CashbackSparkline';
+import { FleetFlywheelHeadline } from '~/components/features/admin/FleetFlywheelHeadline';
 import { OrdersSparkline } from '~/components/features/admin/OrdersSparkline';
 import { StuckOrdersCard } from '~/components/features/admin/StuckOrdersCard';
 import { StuckPayoutsCard } from '~/components/features/admin/StuckPayoutsCard';
@@ -169,6 +170,15 @@ export default function AdminIndexRoute(): React.JSX.Element {
           <StuckPayoutsCard />
         </section>
       )}
+
+      {/* Fleet-wide flywheel headline — "X% of recent fulfilled
+          orders used recycled cashback". Mounted above the
+          sparklines so the first thing an operator sees on /admin
+          is the ADR-015 pivot indicator. Self-hides on error /
+          loading / fleet-empty; renders a muted "not yet" banner
+          when loop_asset share is zero so ops can distinguish "0"
+          from "component crashed". */}
+      {denied ? null : <FleetFlywheelHeadline />}
 
       {denied ? null : <CashbackSparkline />}
 
