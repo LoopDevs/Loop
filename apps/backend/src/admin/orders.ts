@@ -179,6 +179,19 @@ export async function adminListOrdersHandler(c: Context): Promise<Response> {
     );
   }
 
+  // `orders.ctx_operator_id` is a free-form text column (operator ids
+  // are opaque strings configured in CTX_OPERATOR_POOL — ADR 013).
+  // Enforce shape-only checks: non-empty, length ≤ 128, safe id chars.
+  const ctxOperatorIdRaw = c.req.query('ctxOperatorId');
+  if (
+    ctxOperatorIdRaw !== undefined &&
+    (ctxOperatorIdRaw.length === 0 ||
+      ctxOperatorIdRaw.length > 128 ||
+      !/^[A-Za-z0-9._-]+$/.test(ctxOperatorIdRaw))
+  ) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'ctxOperatorId is malformed' }, 400);
+  }
+
   const limitRaw = c.req.query('limit');
   const parsedLimit = Number.parseInt(limitRaw ?? '20', 10);
   const limit = Math.min(Math.max(Number.isNaN(parsedLimit) ? 20 : parsedLimit, 1), 100);
@@ -203,6 +216,7 @@ export async function adminListOrdersHandler(c: Context): Promise<Response> {
     if (merchantIdRaw !== undefined) conditions.push(eq(orders.merchantId, merchantIdRaw));
     if (chargeCurrencyRaw !== undefined)
       conditions.push(eq(orders.chargeCurrency, chargeCurrencyRaw));
+    if (ctxOperatorIdRaw !== undefined) conditions.push(eq(orders.ctxOperatorId, ctxOperatorIdRaw));
     if (before !== undefined) conditions.push(lt(orders.createdAt, before));
     const where = conditions.length === 0 ? undefined : and(...conditions);
     const q = db.select().from(orders);

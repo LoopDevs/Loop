@@ -229,6 +229,23 @@ describe('adminListOrdersHandler', () => {
     expect(dbState.whereCalls).toHaveLength(1);
   });
 
+  it('rejects a malformed ?ctxOperatorId with 400', async () => {
+    const res = await adminListOrdersHandler(makeCtx({ ctxOperatorId: 'has spaces' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects an empty ?ctxOperatorId with 400', async () => {
+    const res = await adminListOrdersHandler(makeCtx({ ctxOperatorId: '' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('accepts an opaque-id ?ctxOperatorId filter', async () => {
+    dbState.rows = [makeRow({ ctxOperatorId: 'op-alpha-01' })];
+    const res = await adminListOrdersHandler(makeCtx({ ctxOperatorId: 'op-alpha-01' }));
+    expect(res.status).toBe(200);
+    expect(dbState.whereCalls).toHaveLength(1);
+  });
+
   it('rejects an invalid ?before timestamp with 400', async () => {
     const res = await adminListOrdersHandler(makeCtx({ before: 'not-a-date' }));
     expect(res.status).toBe(400);

@@ -385,7 +385,13 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
           <ul className="divide-y divide-gray-100 dark:divide-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
             {snapshot.operatorPool.operators.map((op) => (
               <li key={op.id} className="flex items-center justify-between px-4 py-3 text-sm">
-                <span className="font-medium text-gray-900 dark:text-white">{op.id}</span>
+                <Link
+                  to={`/admin/orders?ctxOperatorId=${encodeURIComponent(op.id)}`}
+                  className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+                  aria-label={`Show orders carried by CTX operator ${op.id}`}
+                >
+                  {op.id}
+                </Link>
                 <span
                   className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
                     op.state === 'closed'
