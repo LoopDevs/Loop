@@ -533,6 +533,25 @@ const TopUsersResponse = registry.register(
   }),
 );
 
+// ─── Admin — audit tail (ADR 017 / 018) ────────────────────────────────────
+
+const AdminAuditTailRow = registry.register(
+  'AdminAuditTailRow',
+  z.object({
+    actorUserId: z.string().uuid(),
+    actorEmail: z.string().email(),
+    method: z.string(),
+    path: z.string(),
+    status: z.number().int(),
+    createdAt: z.string().datetime(),
+  }),
+);
+
+const AdminAuditTailResponse = registry.register(
+  'AdminAuditTailResponse',
+  z.object({ rows: z.array(AdminAuditTailRow) }),
+);
+
 // ─── Admin — payouts-by-asset breakdown (ADR 015 / 016) ────────────────────
 
 const PerStateBreakdown = registry.register(
@@ -1782,6 +1801,43 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error computing the ranking',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/audit-tail',
+  summary: 'Newest-first admin write-audit tail (ADR 017 / 018).',
+  description:
+    "Returns the most recent rows from `admin_idempotency_keys` — the persistent mirror of every admin write. Admin dashboard surfaces this as a 'Recent admin activity' card so ops can review without scrolling the Discord channel. Response body is deliberately stripped (method / path / status / timestamp / actor only) — the audit story is 'who did what, when' not 'here's the stored snapshot'. `?limit=` clamps 1..100, default 25.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Audit rows, newest first',
+      content: { 'application/json': { schema: AdminAuditTailResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading the audit tail',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },

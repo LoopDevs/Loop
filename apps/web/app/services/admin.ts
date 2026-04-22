@@ -92,6 +92,35 @@ export async function getTreasurySnapshot(): Promise<TreasurySnapshot> {
 }
 
 /**
+ * One row from the admin audit tail (ADR 017 / 018). Mirrors the
+ * Discord audit message: who did what, when, status. Response body
+ * is intentionally omitted — audit is "activity happened" not
+ * "here's the prior payload".
+ */
+export interface AdminAuditTailRow {
+  actorUserId: string;
+  actorEmail: string;
+  method: string;
+  path: string;
+  status: number;
+  createdAt: string;
+}
+
+export interface AdminAuditTailResponse {
+  rows: AdminAuditTailRow[];
+}
+
+/**
+ * `GET /api/admin/audit-tail` — newest-first tail of
+ * `admin_idempotency_keys`. Admin landing surfaces this as a
+ * "recent admin activity" card.
+ */
+export async function getAdminAuditTail(limit?: number): Promise<AdminAuditTailResponse> {
+  const qs = limit !== undefined ? `?limit=${limit}` : '';
+  return authenticatedRequest<AdminAuditTailResponse>(`/api/admin/audit-tail${qs}`);
+}
+
+/**
  * Per-merchant aggregate stats (ADR 011 / 015). Each row sums fulfilled
  * orders for a single merchant in the window; `currency` is the
  * dominant catalog currency for that merchant's volume.
