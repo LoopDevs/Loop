@@ -44,6 +44,7 @@ import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '.
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
+import { adminMerchantsResyncHandler } from './admin/merchants-resync.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -653,6 +654,10 @@ app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayout
 // by state and userId. Ops uses this to triage stuck orders + audit
 // the cashback split + correlate with operator-pool health.
 app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+// Manual merchant-catalog resync (ADR 011). Low rate limit since
+// every call hits CTX upstream; ops uses this when a catalog change
+// needs to apply before the next scheduled refresh.
+app.post('/api/admin/merchants/resync', rateLimit(2, 60_000), adminMerchantsResyncHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 

@@ -1261,6 +1261,52 @@ registry.registerPath({
   },
 });
 
+// ─── Admin — merchant-cache resync (ADR 011) ────────────────────────────────
+
+const AdminMerchantResyncResponse = registry.register(
+  'AdminMerchantResyncResponse',
+  z.object({
+    merchantCount: z.number().int(),
+    loadedAt: z.string().datetime(),
+    triggered: z.boolean().openapi({
+      description:
+        'True when this call advanced the store; false when it coalesced with an in-flight sync.',
+    }),
+  }),
+);
+
+registry.registerPath({
+  method: 'post',
+  path: '/api/admin/merchants/resync',
+  summary: 'Force an immediate merchant-catalog refresh (ADR 011).',
+  description:
+    "Manual override for the 6h-cadence background merchant sync. Used when CTX has pushed a catalog change and ops needs it live within seconds rather than waiting for the next scheduled refresh. The underlying refresh is mutex-guarded: concurrent admins coalesce into a single upstream sweep, and the response's `triggered` flag reports whether this call was the primary or a coalesced follower.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Resync complete',
+      content: { 'application/json': { schema: AdminMerchantResyncResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (2/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    502: {
+      description: 'Upstream sweep failed',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Admin — cashback-config CRUD (ADR 011) ─────────────────────────────────
 
 registry.registerPath({
