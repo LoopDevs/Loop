@@ -6,6 +6,7 @@ import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { getAdminUser, getAdminUserCredits, type AdminUserCreditRow } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { CopyButton } from '~/components/features/admin/CopyButton';
 import { CreditAdjustmentForm } from '~/components/features/admin/CreditAdjustmentForm';
 import { CreditTransactionsTable } from '~/components/features/admin/CreditTransactionsTable';
 import { UserOrdersTable } from '~/components/features/admin/UserOrdersTable';
@@ -129,8 +130,9 @@ export default function AdminUserDetailRoute(): React.JSX.Element {
               <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
                 {userQuery.data.email}
               </h1>
-              <p className="mt-1 text-xs font-mono text-gray-500 dark:text-gray-400">
+              <p className="mt-1 text-xs font-mono text-gray-500 dark:text-gray-400 inline-flex items-center gap-1">
                 {userQuery.data.id}
+                <CopyButton text={userQuery.data.id} label="Copy user id" />
               </p>
             </div>
             {userQuery.data.isAdmin ? (

@@ -12,6 +12,7 @@ import {
   type AdminPayoutView,
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { CopyButton } from '~/components/features/admin/CopyButton';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -219,8 +220,9 @@ function Detail({ row }: { row: AdminOrderView }): React.JSX.Element {
           <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
             {fmtMinor(row.faceValueMinor, row.currency)}
           </h1>
-          <p className="mt-1 text-xs font-mono text-gray-500 dark:text-gray-400 break-all">
+          <p className="mt-1 text-xs font-mono text-gray-500 dark:text-gray-400 break-all inline-flex items-center gap-1">
             {row.id}
+            <CopyButton text={row.id} label="Copy order id" />
           </p>
         </div>
         <span
