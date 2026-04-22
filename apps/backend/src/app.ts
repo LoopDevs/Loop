@@ -75,6 +75,7 @@ import { adminMerchantsFlywheelShareCsvHandler } from './admin/merchants-flywhee
 import { adminMerchantFlywheelStatsHandler } from './admin/merchant-flywheel-stats.js';
 import { adminMerchantCashbackSummaryHandler } from './admin/merchant-cashback-summary.js';
 import { adminMerchantPaymentMethodShareHandler } from './admin/merchant-payment-method-share.js';
+import { adminMerchantCashbackMonthlyHandler } from './admin/merchant-cashback-monthly.js';
 import { adminCashbackConfigsCsvHandler } from './admin/cashback-configs-csv.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
@@ -928,6 +929,17 @@ app.get(
   '/api/admin/merchants/:merchantId/payment-method-share',
   rateLimit(120, 60_000),
   adminMerchantPaymentMethodShareHandler,
+);
+// Per-merchant cashback-monthly (#635) — 12-month per-(month,
+// currency) user_cashback_minor emission trend for one merchant.
+// Sibling of /api/admin/cashback-monthly (fleet) and
+// /api/admin/users/:userId/cashback-monthly (#633). Drives the
+// forthcoming `MerchantCashbackMonthlyChart` on the merchant
+// drill alongside the scalar cashback-paid-out card.
+app.get(
+  '/api/admin/merchants/:merchantId/cashback-monthly',
+  rateLimit(120, 60_000),
+  adminMerchantCashbackMonthlyHandler,
 );
 // Given an order id, return the single pending_payouts row for it.
 // Nested under /orders/:orderId so the UI can link from the order
