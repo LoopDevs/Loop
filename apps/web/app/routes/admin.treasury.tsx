@@ -460,6 +460,36 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
         <TreasuryReconciliationChart />
       </section>
 
+      {/* Finance-exports row (#640). Daily granularity CSVs for
+          both sides of the reconciliation above, for month-end
+          close. Cashback side was Tier-3 CSV since #615; payouts
+          side shipped in #639. Placed directly under the
+          reconciliation chart so finance pulls both files in one
+          visit — less context-switching than finding two separate
+          CSV buttons scattered across the page. */}
+      <section>
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Finance exports</h2>
+        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Daily-granularity CSVs for both sides of the reconciliation above (ADR 018 Tier-3).
+          Finance runs these at month-end to tie the ledger to the on-chain Stellar record. Default
+          window is the last 31 days; append <code>?days=366</code> for a full-year pull.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <CsvDownloadButton
+            path="/api/admin/cashback-activity.csv"
+            filename={`cashback-activity-${new Date().toISOString().slice(0, 10)}.csv`}
+            label="Cashback activity CSV"
+          />
+          <CsvDownloadButton
+            path="/api/admin/payouts-activity.csv"
+            filename={`payouts-activity-${new Date().toISOString().slice(0, 10)}.csv`}
+            label="Payouts activity CSV"
+          />
+        </div>
+      </section>
+
       <section>
         <div className="flex items-baseline justify-between mb-3">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
