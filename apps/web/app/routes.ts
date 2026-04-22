@@ -28,6 +28,7 @@ export default [
   route('admin/orders', 'routes/admin.orders.tsx'),
   route('admin/orders/:orderId', 'routes/admin.orders.$orderId.tsx'),
   route('admin/stuck-orders', 'routes/admin.stuck-orders.tsx'),
+  route('admin/merchants', 'routes/admin.merchants.tsx'),
   route('admin/merchants/:merchantId', 'routes/admin.merchants.$merchantId.tsx'),
   route('admin/users', 'routes/admin.users.tsx'),
   route('admin/users/:userId', 'routes/admin.users.$userId.tsx'),
