@@ -44,6 +44,7 @@ import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '.
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
+import { adminStuckOrdersHandler } from './admin/stuck-orders.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -653,6 +654,10 @@ app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayout
 // by state and userId. Ops uses this to triage stuck orders + audit
 // the cashback split + correlate with operator-pool health.
 app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+// Stuck-orders triage. Dashboard pings this every 30-60s — higher
+// rate limit because the admin UI polls it on a loop to surface
+// an SLO red-flag card.
+app.get('/api/admin/stuck-orders', rateLimit(120, 60_000), adminStuckOrdersHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 

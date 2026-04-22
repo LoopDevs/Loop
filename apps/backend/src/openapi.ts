@@ -405,6 +405,30 @@ const AdminPayoutListResponse = registry.register(
   z.object({ payouts: z.array(AdminPayoutView) }),
 );
 
+// ─── Admin — stuck-orders triage ───────────────────────────────────────────
+
+const StuckOrderRow = registry.register(
+  'StuckOrderRow',
+  z.object({
+    id: z.string().uuid(),
+    userId: z.string().uuid(),
+    merchantId: z.string(),
+    state: z.enum(['paid', 'procuring']),
+    stuckSince: z.string().datetime(),
+    ageMinutes: z.number().int().min(0),
+    ctxOrderId: z.string().nullable(),
+    ctxOperatorId: z.string().nullable(),
+  }),
+);
+
+const StuckOrdersResponse = registry.register(
+  'StuckOrdersResponse',
+  z.object({
+    thresholdMinutes: z.number().int().min(1),
+    rows: z.array(StuckOrderRow),
+  }),
+);
+
 // ─── Admin — cashback-config (ADR 011) ──────────────────────────────────────
 //
 // Percentages are stored as `numeric(5,2)` and round-trip as strings
@@ -1256,6 +1280,44 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error resetting the row',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/stuck-orders',
+  summary: 'Orders stuck in paid/procuring past a threshold (ADR 011 / 013).',
+  description:
+    'Returns non-terminal orders (state `paid` or `procuring`) older than `?thresholdMinutes=` (default 5, max 10 080). Admin dashboard polls this as its SLO red-flag card — any row landing here means the CTX procurement worker is lagging or an upstream call is hung. Fulfilled / failed / expired rows are terminal and never appear.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      thresholdMinutes: z.coerce.number().int().min(1).max(10_080).optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Stuck rows (oldest first) plus the threshold used',
+      content: { 'application/json': { schema: StuckOrdersResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading the table',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
