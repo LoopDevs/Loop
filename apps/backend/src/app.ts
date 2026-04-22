@@ -64,6 +64,7 @@ import { adminAuditTailHandler } from './admin/audit-tail.js';
 import { adminAuditTailCsvHandler } from './admin/audit-tail-csv.js';
 import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js';
 import { adminMerchantFlowsHandler } from './admin/merchant-flows.js';
+import { adminDiscordConfigHandler } from './admin/discord-config.js';
 import { adminOrdersActivityHandler } from './admin/orders-activity.js';
 import { adminPaymentMethodShareHandler } from './admin/payment-method-share.js';
 import { adminPaymentMethodActivityHandler } from './admin/payment-method-activity.js';
@@ -942,6 +943,10 @@ app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
 // the per-row "actual split" display on /admin/cashback next to each
 // merchant's configured split.
 app.get('/api/admin/merchant-flows', rateLimit(60, 60_000), adminMerchantFlowsHandler);
+// Webhook configuration status — read-only companion to the ping
+// endpoint. Admin panel polls this to render a "configured"/"missing"
+// badge next to each channel without POSTing.
+app.get('/api/admin/discord/config', rateLimit(60, 60_000), adminDiscordConfigHandler);
 // 7-day (or N-day, clamped 1-90) order-activity sparkline. Drives the
 // admin dashboard's "created vs fulfilled per day" chart. Single
 // generate_series + LEFT JOIN; every day in the window appears with
