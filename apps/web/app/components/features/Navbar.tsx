@@ -316,6 +316,11 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
             <Link to="/orders" className={navLinkClass('/orders')}>
               Orders
             </Link>
+            {isAuthenticated ? (
+              <Link to="/settings/cashback" className={navLinkClass('/settings/cashback')}>
+                Cashback
+              </Link>
+            ) : null}
             <button
               type="button"
               onClick={toggleTheme}
