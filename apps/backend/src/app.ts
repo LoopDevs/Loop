@@ -42,7 +42,11 @@ import { notifyHealthChange } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
 import { treasuryHandler } from './admin/treasury.js';
-import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
+import {
+  adminGetPayoutHandler,
+  adminListPayoutsHandler,
+  adminRetryPayoutHandler,
+} from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
 import {
   getCashbackHistoryHandler,
@@ -646,6 +650,10 @@ app.get('/api/admin/treasury', rateLimit(60, 60_000), treasuryHandler);
 // drills into pending/submitted/confirmed/failed rows; counts for the
 // at-a-glance card come from the treasury snapshot above.
 app.get('/api/admin/payouts', rateLimit(60, 60_000), adminListPayoutsHandler);
+// GET /api/admin/payouts/:id — single-row drill-down (permalink for
+// an ops ticket / incident note). Higher rate limit than the list
+// because the admin UI deep-links individual rows on every navigation.
+app.get('/api/admin/payouts/:id', rateLimit(120, 60_000), adminGetPayoutHandler);
 // POST /api/admin/payouts/:id/retry — flip a failed row back to pending.
 // Lower rate limit: retries should be rare, one-at-a-time ops actions.
 app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayoutHandler);
