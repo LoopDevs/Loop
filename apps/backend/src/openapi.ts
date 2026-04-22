@@ -1173,6 +1173,63 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/cashback/activity',
+  summary: 'Per-day cashback-paid sparkline by currency (ADR 009 / 019 Tier 1).',
+  description:
+    "Last `?days=<N>` (default 7, clamped [1, 90]) of cashback paid to users, bucketed by currency. Uses `generate_series` + LEFT JOIN on `credit_transactions` filtered to `type='cashback'` so every day appears with zero-filled entries. A day with zero activity has `byCurrency: {}`. Paired with `/api/admin/orders/activity` — order volume + cashback-paid are the two halves of the cashback-flywheel health check.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(90).optional().openapi({
+        description: 'Window size in calendar days. Default 7, clamped [1, 90].',
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Cashback activity series',
+      content: {
+        'application/json': {
+          schema: z.object({
+            windowDays: z.number().int().min(1).max(90),
+            days: z.array(
+              z.object({
+                day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+                byCurrency: z.record(
+                  z.string().length(3),
+                  z.object({
+                    cashbackMinor: z.string().regex(/^\d+$/),
+                    events: z.number().int().nonnegative(),
+                  }),
+                ),
+              }),
+            ),
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading activity',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/payouts',
   summary: 'Paginated pending-payouts backlog (ADR 015).',
   description:
