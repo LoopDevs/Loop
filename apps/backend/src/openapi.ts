@@ -1173,6 +1173,46 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/discord/notifiers',
+  summary: 'Static catalog of registered Discord notifiers (ADR 018).',
+  description:
+    'Returns the `DISCORD_NOTIFIERS` list from `discord.ts` — one entry per registered notifier with `name`, `channel`, and a short `description`. Drives the admin-UI "available signals" surface and gives ops the full taxonomy at a glance without grepping code or the ADR. Zero DB touch, no secrets echoed.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Notifier catalog',
+      content: {
+        'application/json': {
+          schema: z.object({
+            notifiers: z.array(
+              z.object({
+                name: z.string(),
+                channel: z.enum(['orders', 'monitoring']),
+                description: z.string(),
+              }),
+            ),
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/payouts',
   summary: 'Paginated pending-payouts backlog (ADR 015).',
   description:

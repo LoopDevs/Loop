@@ -44,6 +44,7 @@ import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '.
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
+import { adminDiscordNotifiersHandler } from './admin/discord-notifiers.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -653,6 +654,10 @@ app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayout
 // by state and userId. Ops uses this to triage stuck orders + audit
 // the cashback split + correlate with operator-pool health.
 app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+// Static catalog of Discord notifiers — "what signals can this system
+// send us?" Zero DB touch, rate-limited conservatively since the UI
+// only needs it once per page load.
+app.get('/api/admin/discord/notifiers', rateLimit(60, 60_000), adminDiscordNotifiersHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 

@@ -223,6 +223,57 @@ export function notifyUsdcBelowFloor(args: {
   });
 }
 
+/**
+ * Static catalog of every registered Discord notifier (ADR 018). Each
+ * entry names the emitting function, the target channel, and a short
+ * human description. Exposed through the admin API so ops can see the
+ * full taxonomy at a glance without grepping the code or the ADR.
+ *
+ * When a new notifier lands, add a row here in the same PR — the
+ * admin-UI "available signals" surface reads from this list.
+ */
+export const DISCORD_NOTIFIERS: ReadonlyArray<{
+  name: string;
+  channel: 'orders' | 'monitoring';
+  description: string;
+}> = Object.freeze([
+  {
+    name: 'notifyOrderCreated',
+    channel: 'orders',
+    description: 'Fired when a new Loop order enters pending_payment.',
+  },
+  {
+    name: 'notifyOrderFulfilled',
+    channel: 'orders',
+    description:
+      'Fired when an order completes the procure→fulfilled transition (redeem info is available).',
+  },
+  {
+    name: 'notifyHealthChange',
+    channel: 'monitoring',
+    description:
+      'Fired on healthy↔degraded transitions of the /health upstream-probe. Ops paging signal.',
+  },
+  {
+    name: 'notifyPayoutFailed',
+    channel: 'monitoring',
+    description:
+      'Fired when a Stellar payout transitions to failed. `kind` is the PayoutSubmitError (op_no_trust, op_underfunded, ...).',
+  },
+  {
+    name: 'notifyUsdcBelowFloor',
+    channel: 'monitoring',
+    description:
+      'Fired when operator USDC balance drops below the configured floor — procurement fell back to XLM (ADR 015).',
+  },
+  {
+    name: 'notifyCircuitBreaker',
+    channel: 'monitoring',
+    description:
+      'Fired on circuit-breaker state transitions (open/closed) for any upstream endpoint.',
+  },
+]);
+
 /** Notify: circuit breaker state change */
 export function notifyCircuitBreaker(
   state: 'open' | 'closed',
