@@ -63,6 +63,7 @@ import { adminStuckOrdersHandler } from './admin/stuck-orders.js';
 import { adminStuckPayoutsHandler } from './admin/stuck-payouts.js';
 import { adminCashbackActivityHandler } from './admin/cashback-activity.js';
 import { adminCashbackActivityCsvHandler } from './admin/cashback-activity-csv.js';
+import { adminCashbackMonthlyHandler } from './admin/cashback-monthly.js';
 import { adminMerchantStatsHandler } from './admin/merchant-stats.js';
 import { adminMerchantStatsCsvHandler } from './admin/merchant-stats-csv.js';
 import { adminCashbackConfigsCsvHandler } from './admin/cashback-configs-csv.js';
@@ -818,6 +819,11 @@ app.get('/api/admin/cashback-activity', rateLimit(60, 60_000), adminCashbackActi
 // aggregate as the JSON surface, flattened for spreadsheet use.
 // Tier-3 rate limit — month-end finance use, not polling.
 app.get('/api/admin/cashback-activity.csv', rateLimit(10, 60_000), adminCashbackActivityCsvHandler);
+// Fleet-wide monthly-cashback bar chart — per-(month, currency)
+// emission totals over a fixed 12-month window. Mirrors the user-
+// facing /api/users/me/cashback-monthly shape so the same chart
+// component can render either. Single aggregate query.
+app.get('/api/admin/cashback-monthly', rateLimit(60, 60_000), adminCashbackMonthlyHandler);
 // Per-merchant cashback stats — which merchants drive volume /
 // cashback outlay / margin. Distinct from supplier-spend (currency
 // grouped) — this one groups by merchant.
