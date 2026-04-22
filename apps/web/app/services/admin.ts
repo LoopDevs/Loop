@@ -191,3 +191,35 @@ export async function listAdminOrders(opts: {
     `/api/admin/orders${qs.length > 0 ? `?${qs}` : ''}`,
   );
 }
+
+/**
+ * Admin one-shot user summary (ADR 011 / 015). The admin UI clicks
+ * a userId from /admin/orders or /admin/payouts and lands on
+ * /admin/users/:userId — this fetch powers that page's top card.
+ * Paginated order + payout lists are still queried separately via
+ * the existing `/api/admin/orders?userId=` and `/api/admin/payouts?userId=`
+ * endpoints so this call stays fast.
+ */
+export interface AdminUserView {
+  id: string;
+  email: string;
+  isAdmin: boolean;
+  homeCurrency: 'USD' | 'GBP' | 'EUR';
+  stellarAddress: string | null;
+  createdAt: string;
+  /** Off-chain balance in home-currency minor units. BigInt-string. */
+  balanceMinor: string;
+  /** Lifetime sum of cashback credits. Excludes withdrawals; BigInt-string. */
+  lifetimeCashbackEarnedMinor: string;
+  /** Total orders across every state. BigInt-string count. */
+  orderCount: string;
+  /** pending_payouts rows in pending or submitted state. BigInt-string. */
+  pendingPayoutCount: string;
+}
+
+/** `GET /api/admin/users/:userId` — admin user drill-down summary. */
+export async function getAdminUser(userId: string): Promise<{ user: AdminUserView }> {
+  return authenticatedRequest<{ user: AdminUserView }>(
+    `/api/admin/users/${encodeURIComponent(userId)}`,
+  );
+}

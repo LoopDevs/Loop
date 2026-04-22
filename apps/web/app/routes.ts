@@ -14,5 +14,6 @@ export default [
   route('admin/treasury', 'routes/admin.treasury.tsx'),
   route('admin/payouts', 'routes/admin.payouts.tsx'),
   route('admin/orders', 'routes/admin.orders.tsx'),
+  route('admin/users/:userId', 'routes/admin.users.$userId.tsx'),
   route('*', 'routes/not-found.tsx'),
 ] satisfies RouteConfig;

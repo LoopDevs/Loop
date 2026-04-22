@@ -1261,6 +1261,77 @@ registry.registerPath({
   },
 });
 
+// ─── Admin — user drill-down (ADR 011 / 015) ────────────────────────────────
+
+const AdminUserView = registry.register(
+  'AdminUserView',
+  z.object({
+    id: z.string().uuid(),
+    email: z.string().email(),
+    isAdmin: z.boolean(),
+    homeCurrency: z.enum(['USD', 'GBP', 'EUR']),
+    stellarAddress: z.string().nullable().openapi({
+      description: "User's linked Stellar address; null when unlinked (ADR 015).",
+    }),
+    createdAt: z.string().datetime(),
+    balanceMinor: z.string().openapi({
+      description:
+        'Current off-chain balance in home-currency minor units (cents / pence). BigInt-string, zero when the user has no activity.',
+    }),
+    lifetimeCashbackEarnedMinor: z.string().openapi({
+      description:
+        "Lifetime sum of positive 'cashback' credit_transactions in the user's home currency. Excludes withdrawals — tracks total earned, not current balance. BigInt-string.",
+    }),
+    orderCount: z.string().openapi({
+      description: 'Total orders across every state. BigInt-string count.',
+    }),
+    pendingPayoutCount: z.string().openapi({
+      description: 'pending_payouts rows still open (state pending or submitted). BigInt-string.',
+    }),
+  }),
+);
+
+const AdminUserResponse = registry.register('AdminUserResponse', z.object({ user: AdminUserView }));
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users/{userId}',
+  summary: 'Admin user drill-down summary (ADR 011 / 015).',
+  description:
+    'One-shot view for the admin user-detail page: identity + home-currency balance + lifetime cashback earned + counts of orders and open payouts. Inline detail lists live on /api/admin/orders?userId= and /api/admin/payouts?userId=.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ userId: z.string().uuid() }),
+  },
+  responses: {
+    200: {
+      description: 'User summary',
+      content: { 'application/json': { schema: AdminUserResponse } },
+    },
+    400: {
+      description: 'userId not a UUID',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'User not found',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Admin — cashback-config CRUD (ADR 011) ─────────────────────────────────
 
 registry.registerPath({
