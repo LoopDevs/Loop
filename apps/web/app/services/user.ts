@@ -274,3 +274,47 @@ export interface UserFlywheelStats {
 export async function getUserFlywheelStats(): Promise<UserFlywheelStats> {
   return authenticatedRequest<UserFlywheelStats>('/api/users/me/flywheel-stats');
 }
+
+/**
+ * Personal rail-mix snapshot (#643). Caller's own
+ * orders-by-payment-method for their home currency. Drives the
+ * "your rail mix" card on /settings/cashback — a user who sees
+ * their own LOOP share at 0% gets the clearest app-facing
+ * nudge toward ADR 015's compounding flywheel.
+ *
+ * Same shape as the admin + fleet rail-mix siblings, keyed on
+ * the auth context rather than a URL param.
+ */
+export type UserPaymentMethod = 'xlm' | 'usdc' | 'credit' | 'loop_asset';
+export type UserOrderState =
+  | 'pending_payment'
+  | 'paid'
+  | 'procuring'
+  | 'fulfilled'
+  | 'failed'
+  | 'expired';
+
+export interface UserPaymentMethodBucket {
+  orderCount: number;
+  /** SUM(charge_minor) for this (state, method) bucket. bigint-as-string. */
+  chargeMinor: string;
+}
+
+export interface UserPaymentMethodShareResponse {
+  currency: string;
+  state: UserOrderState;
+  totalOrders: number;
+  byMethod: Record<UserPaymentMethod, UserPaymentMethodBucket>;
+}
+
+/** `GET /api/users/me/payment-method-share` — caller's own rail mix. */
+export async function getUserPaymentMethodShare(
+  opts: { state?: UserOrderState } = {},
+): Promise<UserPaymentMethodShareResponse> {
+  const params = new URLSearchParams();
+  if (opts.state !== undefined) params.set('state', opts.state);
+  const qs = params.toString();
+  return authenticatedRequest<UserPaymentMethodShareResponse>(
+    `/api/users/me/payment-method-share${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}

@@ -28,6 +28,7 @@ import { FlywheelChip } from '~/components/features/cashback/FlywheelChip';
 import { CashbackByMerchantCard } from '~/components/features/cashback/CashbackByMerchantCard';
 import { LinkWalletNudge } from '~/components/features/cashback/LinkWalletNudge';
 import { MonthlyCashbackChart } from '~/components/features/cashback/MonthlyCashbackChart';
+import { RailMixCard } from '~/components/features/cashback/RailMixCard';
 import { PendingPayoutsCard } from '~/components/features/cashback/PendingPayoutsCard';
 
 export function meta(): Route.MetaDescriptors {
@@ -120,6 +121,14 @@ export default function SettingsCashbackRoute(): React.JSX.Element {
           recycled orders so brand-new accounts see the balance +
           history flow without a premature milestone pill. */}
       <FlywheelChip />
+
+      {/* Rail mix (#643) — breakdown of how the user has paid,
+          per rail. Answers the follow-up question to the chip
+          above: if you've recycled 0%, here's where your spend
+          went instead. Self-hides on zero-orders / error so new
+          accounts don't see an empty table; motivational framing
+          lives in FlywheelChip. */}
+      <RailMixCard />
 
       {/* Nudge users with positive balance + no linked wallet to
           connect one. Hides itself when either condition isn't met
