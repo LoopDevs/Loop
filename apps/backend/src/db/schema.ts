@@ -435,18 +435,14 @@ export const orders = pgTable(
  * everywhere keeps the source of truth (the migration) and the
  * callers' type in sync.
  */
-export const ORDER_STATES = [
-  'pending_payment',
-  'paid',
-  'procuring',
-  'fulfilled',
-  'failed',
-  'expired',
-] as const;
-export type OrderState = (typeof ORDER_STATES)[number];
-
-export const ORDER_PAYMENT_METHODS = ['xlm', 'usdc', 'credit', 'loop_asset'] as const;
-export type OrderPaymentMethod = (typeof ORDER_PAYMENT_METHODS)[number];
+// Re-exported from @loop/shared so backend consumers keep importing
+// from schema.ts — the actual list lives in shared for web parity.
+export {
+  ORDER_STATES,
+  ORDER_PAYMENT_METHODS,
+  type OrderState,
+  type OrderPaymentMethod,
+} from '@loop/shared';
 
 /**
  * Cursor persistence for long-running background watchers (ADR 010
@@ -574,5 +570,7 @@ export const pendingPayouts = pgTable(
   ],
 );
 
-export const PAYOUT_STATES = ['pending', 'submitted', 'confirmed', 'failed'] as const;
-export type PayoutState = (typeof PAYOUT_STATES)[number];
+// Re-exported from @loop/shared (see ORDER_STATES above — same
+// pattern: list lives in shared for web parity, schema.ts stays
+// the import path for backend consumers).
+export { PAYOUT_STATES, type PayoutState } from '@loop/shared';

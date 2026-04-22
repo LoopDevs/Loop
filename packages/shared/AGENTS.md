@@ -12,6 +12,7 @@
 | `src/orders.ts`    | `Order`, `OrderStatus`, `CreateOrderRequest`, `CreateOrderResponse`, `OrderListResponse`                                                                                                                   |
 | `src/search.ts`    | `foldForSearch()` — NFD normalise + strip diacritics + lowercase; used by backend `/api/merchants?q=` and the navbar client-side filter so both paths return the same results for the same query (PR #142) |
 | `src/slugs.ts`     | `merchantSlug()` — URL-safe slug from merchant name                                                                                                                                                        |
+| `src/states.ts`    | `ORDER_STATES`, `ORDER_PAYMENT_METHODS`, `PAYOUT_STATES` + types + narrowing helpers — mirrors the DB CHECK constraints; shared with web admin filter chips                                                |
 | `src/proto/`       | Generated protobuf types (run `npm run proto:generate` from root)                                                                                                                                          |
 
 ## Rules
