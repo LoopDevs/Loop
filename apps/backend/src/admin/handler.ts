@@ -4,6 +4,8 @@ import { desc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { merchantCashbackConfigs, merchantCashbackConfigHistory } from '../db/schema.js';
 import type { User } from '../db/users.js';
+import { getMerchants } from '../merchants/sync.js';
+import { notifyCashbackConfigChanged } from '../discord.js';
 
 /**
  * Admin — cashback config endpoints (ADR 011). All routes expect
@@ -62,6 +64,15 @@ export async function upsertConfigHandler(c: Context): Promise<Response> {
     active: parsed.data.active ?? true,
     updatedBy: admin.id,
   };
+  // Read the pre-state before upserting so the Discord audit message
+  // can diff old → new percentages (ADR 018). One extra SELECT per
+  // admin edit is cheap; the config table is tiny and edits are rare.
+  // Null on insert paths — the notifier renders a "created" message
+  // rather than a diff.
+  const previous = await db.query.merchantCashbackConfigs.findFirst({
+    where: eq(merchantCashbackConfigs.merchantId, merchantId),
+  });
+
   const [row] = await db
     .insert(merchantCashbackConfigs)
     .values(values)
@@ -77,6 +88,33 @@ export async function upsertConfigHandler(c: Context): Promise<Response> {
       },
     })
     .returning();
+
+  // Fire-and-forget after the upsert commits (ADR 018): Discord
+  // delivery failures must not revert a successful config write.
+  // Merchant name comes from the in-memory catalog; fall back to the
+  // id so audit messages never become "unknown merchant updated".
+  const merchantName = getMerchants().merchantsById.get(merchantId)?.name ?? merchantId;
+  notifyCashbackConfigChanged({
+    merchantId,
+    merchantName,
+    adminId: admin.id,
+    previous:
+      previous === undefined
+        ? null
+        : {
+            wholesalePct: previous.wholesalePct,
+            userCashbackPct: previous.userCashbackPct,
+            loopMarginPct: previous.loopMarginPct,
+            active: previous.active,
+          },
+    next: {
+      wholesalePct: values.wholesalePct,
+      userCashbackPct: values.userCashbackPct,
+      loopMarginPct: values.loopMarginPct,
+      active: values.active,
+    },
+  });
+
   return c.json({ config: row }, 200);
 }
 

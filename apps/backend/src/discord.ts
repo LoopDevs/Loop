@@ -223,6 +223,81 @@ export function notifyUsdcBelowFloor(args: {
   });
 }
 
+/**
+ * Notify: an admin created or edited a merchant cashback config
+ * (ADR 011 / 018). Fires into the MONITORING (admin-audit) channel —
+ * config changes have material revenue effect and ops wants the trail
+ * alongside refund / adjustment / payout-retry audit messages.
+ *
+ * `previous` is null for a first-time config (INSERT); populated for
+ * edits (UPDATE). Percentages come through as strings because that's
+ * what the `numeric(5,2)` column round-trips as.
+ */
+export function notifyCashbackConfigChanged(args: {
+  merchantId: string;
+  merchantName: string;
+  adminId: string;
+  previous: {
+    wholesalePct: string;
+    userCashbackPct: string;
+    loopMarginPct: string;
+    active: boolean;
+  } | null;
+  next: {
+    wholesalePct: string;
+    userCashbackPct: string;
+    loopMarginPct: string;
+    active: boolean;
+  };
+}): void {
+  const verb = args.previous === null ? 'created' : 'updated';
+  const icon = args.previous === null ? '🟢' : '🔧';
+  const fmtRow = (v: {
+    wholesalePct: string;
+    userCashbackPct: string;
+    loopMarginPct: string;
+    active: boolean;
+  }): string =>
+    `wholesale ${escapeMarkdown(v.wholesalePct)}% · cashback ${escapeMarkdown(
+      v.userCashbackPct,
+    )}% · margin ${escapeMarkdown(v.loopMarginPct)}% · ${v.active ? 'active' : 'paused'}`;
+
+  const fields: Array<{ name: string; value: string; inline?: boolean }> = [
+    {
+      name: 'Merchant',
+      value: truncate(escapeMarkdown(args.merchantName), FIELD_VALUE_MAX),
+      inline: true,
+    },
+    {
+      name: 'Admin',
+      // Truncate the admin UUID to 8 chars to match the actor-id
+      // convention from ADR 018 — full ids live in logs / the audit
+      // trail, the Discord surface only needs enough to recognise
+      // "the usual admin" vs "someone else".
+      value: `\`${escapeMarkdown(args.adminId.slice(0, 8))}\``,
+      inline: true,
+    },
+    {
+      name: 'New',
+      value: truncate(fmtRow(args.next), FIELD_VALUE_MAX),
+      inline: false,
+    },
+  ];
+  if (args.previous !== null) {
+    fields.push({
+      name: 'Previous',
+      value: truncate(fmtRow(args.previous), FIELD_VALUE_MAX),
+      inline: false,
+    });
+  }
+
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: `${icon} Cashback config ${verb}`,
+    color: BLUE,
+    fields,
+  });
+}
+
 /** Notify: circuit breaker state change */
 export function notifyCircuitBreaker(
   state: 'open' | 'closed',

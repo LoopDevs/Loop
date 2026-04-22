@@ -3,8 +3,9 @@ import type { Context } from 'hono';
 
 // vi.mock is hoisted above imports, so anything referenced inside
 // the factory must come from vi.hoisted or be inlined.
-const { dbMock, insertedRow } = vi.hoisted(() => {
+const { dbMock, insertedRow, findFirstState } = vi.hoisted(() => {
   const state = { out: null as unknown };
+  const findFirst = { result: undefined as unknown };
   // Chainable query-builder mock — each method returns `this` so
   // the handler's fluent chains resolve without touching a real pg.
   const m: Record<string, ReturnType<typeof vi.fn>> = {};
@@ -17,16 +18,36 @@ const { dbMock, insertedRow } = vi.hoisted(() => {
   m['values'] = vi.fn(() => m);
   m['onConflictDoUpdate'] = vi.fn(() => m);
   m['returning'] = vi.fn(async () => [state.out]);
-  return { dbMock: m, insertedRow: state };
+  return { dbMock: m, insertedRow: state, findFirstState: findFirst };
 });
 
-vi.mock('../../db/client.js', () => ({ db: dbMock }));
+vi.mock('../../db/client.js', () => ({
+  db: {
+    ...dbMock,
+    query: {
+      merchantCashbackConfigs: {
+        findFirst: vi.fn(async () => findFirstState.result),
+      },
+    },
+  },
+}));
 vi.mock('../../db/schema.js', () => ({
   merchantCashbackConfigs: { merchantId: 'merchantId' },
   merchantCashbackConfigHistory: {
     merchantId: 'merchantId',
     changedAt: 'changedAt',
   },
+}));
+
+const { merchantState, discordMock } = vi.hoisted(() => ({
+  merchantState: { byId: new Map<string, { name: string }>() },
+  discordMock: { notifyCashbackConfigChanged: vi.fn() },
+}));
+vi.mock('../../merchants/sync.js', () => ({
+  getMerchants: vi.fn(() => ({ merchantsById: merchantState.byId })),
+}));
+vi.mock('../../discord.js', () => ({
+  notifyCashbackConfigChanged: discordMock.notifyCashbackConfigChanged,
 }));
 
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '../handler.js';
@@ -74,6 +95,9 @@ beforeEach(() => {
     if (typeof fn === 'function' && 'mockClear' in fn) fn.mockClear();
   }
   insertedRow.out = null;
+  findFirstState.result = undefined;
+  merchantState.byId = new Map();
+  discordMock.notifyCashbackConfigChanged.mockClear();
 });
 
 describe('listConfigsHandler', () => {
@@ -165,6 +189,83 @@ describe('upsertConfigHandler', () => {
     });
     await upsertConfigHandler(ctx);
     expect(dbMock['values']!).toHaveBeenCalledWith(expect.objectContaining({ active: true }));
+  });
+
+  it('fires Discord signal with previous=null on first-time insert', async () => {
+    insertedRow.out = { merchantId: 'm-new' };
+    findFirstState.result = undefined;
+    merchantState.byId = new Map([['m-new', { name: 'NewMerchant' }]]);
+    const { ctx } = makeCtx({
+      param: { merchantId: 'm-new' },
+      body: { wholesalePct: 80, userCashbackPct: 15, loopMarginPct: 5 },
+      user: { id: 'admin-uuid-1' },
+    });
+    await upsertConfigHandler(ctx);
+    expect(discordMock.notifyCashbackConfigChanged).toHaveBeenCalledTimes(1);
+    expect(discordMock.notifyCashbackConfigChanged).toHaveBeenCalledWith(
+      expect.objectContaining({
+        merchantId: 'm-new',
+        merchantName: 'NewMerchant',
+        adminId: 'admin-uuid-1',
+        previous: null,
+        next: {
+          wholesalePct: '80.00',
+          userCashbackPct: '15.00',
+          loopMarginPct: '5.00',
+          active: true,
+        },
+      }),
+    );
+  });
+
+  it('fires Discord signal with previous diff on update', async () => {
+    insertedRow.out = { merchantId: 'm-exists' };
+    findFirstState.result = {
+      merchantId: 'm-exists',
+      wholesalePct: '70.00',
+      userCashbackPct: '20.00',
+      loopMarginPct: '10.00',
+      active: true,
+    };
+    merchantState.byId = new Map([['m-exists', { name: 'Amazon' }]]);
+    const { ctx } = makeCtx({
+      param: { merchantId: 'm-exists' },
+      body: { wholesalePct: 75, userCashbackPct: 18, loopMarginPct: 7 },
+      user: { id: 'admin-uuid-2' },
+    });
+    await upsertConfigHandler(ctx);
+    expect(discordMock.notifyCashbackConfigChanged).toHaveBeenCalledWith(
+      expect.objectContaining({
+        merchantName: 'Amazon',
+        previous: {
+          wholesalePct: '70.00',
+          userCashbackPct: '20.00',
+          loopMarginPct: '10.00',
+          active: true,
+        },
+        next: {
+          wholesalePct: '75.00',
+          userCashbackPct: '18.00',
+          loopMarginPct: '7.00',
+          active: true,
+        },
+      }),
+    );
+  });
+
+  it('falls back to merchantId when the catalog is missing the entry', async () => {
+    insertedRow.out = { merchantId: 'm-ghost' };
+    findFirstState.result = undefined;
+    merchantState.byId = new Map(); // empty catalog
+    const { ctx } = makeCtx({
+      param: { merchantId: 'm-ghost' },
+      body: { wholesalePct: 50, userCashbackPct: 10, loopMarginPct: 10 },
+      user: { id: 'admin-uuid' },
+    });
+    await upsertConfigHandler(ctx);
+    expect(discordMock.notifyCashbackConfigChanged).toHaveBeenCalledWith(
+      expect.objectContaining({ merchantName: 'm-ghost' }),
+    );
   });
 });
 
