@@ -1,0 +1,244 @@
+import { useQuery } from '@tanstack/react-query';
+import { Link, useNavigate, useParams } from 'react-router';
+import { ApiException } from '@loop/shared';
+import type { Route } from './+types/admin.orders.$orderId';
+import { useAuth } from '~/hooks/use-auth';
+import { shouldRetry } from '~/hooks/query-retry';
+import { getAdminOrder, type AdminOrderState, type AdminOrderView } from '~/services/admin';
+import { AdminNav } from '~/components/features/admin/AdminNav';
+import { Spinner } from '~/components/ui/Spinner';
+
+export function meta(): Route.MetaDescriptors {
+  return [{ title: 'Admin · Order — Loop' }];
+}
+
+const STATE_CLASSES: Record<AdminOrderState, string> = {
+  pending_payment: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+  paid: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+  procuring: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+  fulfilled: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+  failed: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+  expired: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
+};
+
+/**
+ * Formats a minor-unit (pence/cent) bigint-string as localised
+ * currency. Falls back to em-dash on bad input.
+ */
+export function fmtMinor(minor: string, currency: string): string {
+  try {
+    const major = Number(BigInt(minor)) / 100;
+    if (!Number.isFinite(major)) return '—';
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(major);
+  } catch {
+    return '—';
+  }
+}
+
+function TimelineRow({ label, iso }: { label: string; iso: string | null }): React.JSX.Element {
+  return (
+    <div className="flex items-baseline gap-3 py-1.5 text-sm">
+      <span className="w-24 shrink-0 text-gray-500 dark:text-gray-400">{label}</span>
+      {iso !== null ? (
+        <span title={iso} className="text-gray-900 dark:text-white tabular-nums">
+          {new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}
+        </span>
+      ) : (
+        <span className="text-gray-400 dark:text-gray-600">—</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * `/admin/orders/:orderId` — drill-down view for a Loop-native
+ * order (ADR 011/015). Ops needs to quote a specific order in a
+ * ticket or correlate a stuck row with a payout; this is the
+ * permalink target. Shows state, the full cashback split, CTX
+ * procurement metadata, state timeline, and any failure transcript.
+ */
+export default function AdminOrderDetailRoute(): React.JSX.Element {
+  const navigate = useNavigate();
+  const { orderId } = useParams<{ orderId: string }>();
+  const { isAuthenticated } = useAuth();
+
+  const query = useQuery({
+    queryKey: ['admin-order', orderId ?? null],
+    queryFn: () => getAdminOrder(orderId ?? ''),
+    enabled: isAuthenticated && orderId !== undefined && orderId.length > 0,
+    retry: shouldRetry,
+    staleTime: 10_000,
+  });
+
+  if (!isAuthenticated) {
+    return (
+      <main className="max-w-3xl mx-auto px-6 py-12">
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">Admin · Order</h1>
+        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in with an admin account.</p>
+        <button
+          type="button"
+          className="text-blue-600 underline"
+          onClick={() => {
+            void navigate('/auth');
+          }}
+        >
+          Go to sign-in
+        </button>
+      </main>
+    );
+  }
+
+  const notFound = query.error instanceof ApiException && query.error.status === 404;
+
+  return (
+    <main className="max-w-3xl mx-auto px-6 py-12 space-y-6">
+      <AdminNav />
+      <nav aria-label="Back to orders list">
+        <Link
+          to="/admin/orders"
+          className="text-sm text-gray-600 hover:underline dark:text-gray-400"
+        >
+          ← All orders
+        </Link>
+      </nav>
+
+      {query.isPending ? (
+        <div className="flex justify-center py-12">
+          <Spinner />
+        </div>
+      ) : notFound ? (
+        <section className="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Order not found</h1>
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+            No order with id <code className="font-mono text-xs">{orderId}</code>.
+          </p>
+        </section>
+      ) : query.isError ? (
+        <p className="text-red-600 dark:text-red-400 py-6">
+          Failed to load order. You may not be an admin.
+        </p>
+      ) : (
+        <Detail row={query.data} />
+      )}
+    </main>
+  );
+}
+
+function Detail({ row }: { row: AdminOrderView }): React.JSX.Element {
+  return (
+    <section className="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900 space-y-6">
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
+            {fmtMinor(row.faceValueMinor, row.currency)}
+          </h1>
+          <p className="mt-1 text-xs font-mono text-gray-500 dark:text-gray-400 break-all">
+            {row.id}
+          </p>
+        </div>
+        <span
+          className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATE_CLASSES[row.state]}`}
+        >
+          {row.state.replace('_', ' ')}
+        </span>
+      </header>
+
+      <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 text-sm">
+        <div>
+          <dt className="text-gray-500 dark:text-gray-400">Merchant</dt>
+          <dd className="font-mono text-xs text-gray-700 dark:text-gray-300 break-all">
+            {row.merchantId}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-gray-500 dark:text-gray-400">User</dt>
+          <dd>
+            <Link
+              to={`/admin/users/${row.userId}`}
+              className="text-blue-600 hover:underline dark:text-blue-400 font-mono text-xs break-all"
+            >
+              {row.userId}
+            </Link>
+          </dd>
+        </div>
+        <div>
+          <dt className="text-gray-500 dark:text-gray-400">Charge</dt>
+          <dd className="text-gray-900 dark:text-white">
+            {fmtMinor(row.chargeMinor, row.chargeCurrency)} via {row.paymentMethod}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-gray-500 dark:text-gray-400">CTX operator</dt>
+          <dd className="font-mono text-xs text-gray-700 dark:text-gray-300 break-all">
+            {row.ctxOperatorId ?? '—'}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-gray-500 dark:text-gray-400">CTX order</dt>
+          <dd className="font-mono text-xs text-gray-700 dark:text-gray-300 break-all">
+            {row.ctxOrderId ?? '—'}
+          </dd>
+        </div>
+      </dl>
+
+      <section>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          Cashback split (ADR 011)
+        </h2>
+        <dl className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+          <div>
+            <dt className="text-gray-500 dark:text-gray-400">Wholesale (ours)</dt>
+            <dd className="tabular-nums text-gray-900 dark:text-white">
+              {fmtMinor(row.wholesaleMinor, row.chargeCurrency)}{' '}
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                ({row.wholesalePct}%)
+              </span>
+            </dd>
+          </div>
+          <div>
+            <dt className="text-gray-500 dark:text-gray-400">Cashback (theirs)</dt>
+            <dd className="tabular-nums text-gray-900 dark:text-white">
+              {fmtMinor(row.userCashbackMinor, row.chargeCurrency)}{' '}
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                ({row.userCashbackPct}%)
+              </span>
+            </dd>
+          </div>
+          <div>
+            <dt className="text-gray-500 dark:text-gray-400">Loop margin</dt>
+            <dd className="tabular-nums font-medium text-gray-900 dark:text-white">
+              {fmtMinor(row.loopMarginMinor, row.chargeCurrency)}{' '}
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                ({row.loopMarginPct}%)
+              </span>
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <section>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          Timeline
+        </h2>
+        <div className="mt-2 divide-y divide-gray-100 dark:divide-gray-900">
+          <TimelineRow label="Created" iso={row.createdAt} />
+          <TimelineRow label="Paid" iso={row.paidAt} />
+          <TimelineRow label="Procured" iso={row.procuredAt} />
+          <TimelineRow label="Fulfilled" iso={row.fulfilledAt} />
+          <TimelineRow label="Failed" iso={row.failedAt} />
+        </div>
+      </section>
+
+      {row.failureReason !== null ? (
+        <section>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-red-600 dark:text-red-400">
+            Failure reason
+          </h2>
+          <pre className="mt-2 rounded-lg bg-red-50 dark:bg-red-900/20 px-3 py-2 text-xs text-red-800 dark:text-red-300 whitespace-pre-wrap break-words">
+            {row.failureReason}
+          </pre>
+        </section>
+      ) : null}
+    </section>
+  );
+}

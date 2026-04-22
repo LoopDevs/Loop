@@ -577,6 +577,15 @@ export async function listAdminUserCreditTransactions(opts: {
   );
 }
 
+/**
+ * `GET /api/admin/orders/:orderId` — single Loop-native order
+ * drill-down (ADR 011 / 015). Returns the same shape as a single
+ * row from the list endpoint; 404 when the id doesn't match.
+ */
+export async function getAdminOrder(orderId: string): Promise<AdminOrderView> {
+  return authenticatedRequest<AdminOrderView>(`/api/admin/orders/${encodeURIComponent(orderId)}`);
+}
+
 /** `GET /api/admin/orders` — paginated, filterable admin view. */
 export async function listAdminOrders(opts: {
   state?: AdminOrderState;
