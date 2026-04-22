@@ -9,6 +9,7 @@ import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { CreditAdjustmentForm } from '~/components/features/admin/CreditAdjustmentForm';
 import { CreditTransactionsTable } from '~/components/features/admin/CreditTransactionsTable';
+import { UserCashbackByMerchantTable } from '~/components/features/admin/UserCashbackByMerchantTable';
 import { UserOrdersTable } from '~/components/features/admin/UserOrdersTable';
 import { UserPayoutsTable } from '~/components/features/admin/UserPayoutsTable';
 import { Spinner } from '~/components/ui/Spinner';
@@ -281,6 +282,25 @@ export default function AdminUserDetailRoute(): React.JSX.Element {
           </header>
           <div className="px-6 py-5">
             <UserPayoutsTable userId={userId} />
+          </div>
+        </section>
+      ) : null}
+
+      {userId !== undefined && !userNotFound ? (
+        <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+          <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
+            <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+              Cashback by merchant
+            </h2>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Which merchants this user has earned cashback from in the last 180 days (ADR 009/015).
+              Support triage: answers &ldquo;why haven&rsquo;t I earned on merchant X?&rdquo; with
+              the authoritative ledger view. Clicking a merchant deep-links to the orders list
+              scoped to that user + merchant.
+            </p>
+          </header>
+          <div className="px-6 py-5">
+            <UserCashbackByMerchantTable userId={userId} />
           </div>
         </section>
       ) : null}
