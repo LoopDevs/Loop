@@ -132,3 +132,25 @@ export async function getUserPendingPayouts(
     `/api/users/me/pending-payouts${query.length > 0 ? `?${query}` : ''}`,
   );
 }
+
+/**
+ * One row of the caller's off-chain credit balance (ADR 009 / 015).
+ * Most users only ever have a single row in their home currency;
+ * multi-currency users exist when an admin adjustment has been
+ * applied in a non-home currency, or when the user has flipped
+ * their home currency and the old bucket hasn't zeroed out yet.
+ */
+export interface UserCreditRow {
+  currency: string;
+  balanceMinor: string;
+  updatedAt: string;
+}
+
+export interface UserCreditsResponse {
+  credits: UserCreditRow[];
+}
+
+/** `GET /api/users/me/credits` — per-currency credit balances. */
+export async function getMyCredits(): Promise<UserCreditsResponse> {
+  return authenticatedRequest<UserCreditsResponse>('/api/users/me/credits');
+}

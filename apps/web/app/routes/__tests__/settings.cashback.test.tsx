@@ -8,6 +8,7 @@ const { historyMock, authMock } = vi.hoisted(() => ({
   historyMock: {
     getCashbackHistory: vi.fn(),
     getUserPendingPayouts: vi.fn(),
+    getMyCredits: vi.fn(),
   },
   authMock: {
     isAuthenticated: true,
@@ -19,6 +20,7 @@ vi.mock('~/services/user', () => ({
     historyMock.getCashbackHistory(opts),
   getUserPendingPayouts: (opts?: { limit?: number; before?: string; state?: string }) =>
     historyMock.getUserPendingPayouts(opts),
+  getMyCredits: () => historyMock.getMyCredits(),
 }));
 
 vi.mock('~/hooks/use-auth', () => ({
@@ -78,6 +80,11 @@ beforeEach(() => {
   // touch every case. Pending-payouts-specific tests below override.
   historyMock.getUserPendingPayouts.mockReset();
   historyMock.getUserPendingPayouts.mockResolvedValue({ payouts: [] });
+  // Default balance-card fetch to an empty-rows snapshot so the
+  // card renders its "no cashback yet" copy and existing tests
+  // that don't care about the card don't need to stub it.
+  historyMock.getMyCredits.mockReset();
+  historyMock.getMyCredits.mockResolvedValue({ credits: [] });
 });
 
 afterEach(cleanup);
