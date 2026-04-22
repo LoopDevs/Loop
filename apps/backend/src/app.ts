@@ -43,6 +43,7 @@ import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
+import { adminPayoutsByAssetHandler } from './admin/payouts-by-asset.js';
 import { adminListOrdersHandler } from './admin/orders.js';
 import {
   getCashbackHistoryHandler,
@@ -646,6 +647,9 @@ app.get('/api/admin/treasury', rateLimit(60, 60_000), treasuryHandler);
 // drills into pending/submitted/confirmed/failed rows; counts for the
 // at-a-glance card come from the treasury snapshot above.
 app.get('/api/admin/payouts', rateLimit(60, 60_000), adminListPayoutsHandler);
+// Per-asset payout breakdown — crosses asset_code × state for the
+// LOOP stablecoin triage view (ADR 015/016).
+app.get('/api/admin/payouts-by-asset', rateLimit(60, 60_000), adminPayoutsByAssetHandler);
 // POST /api/admin/payouts/:id/retry — flip a failed row back to pending.
 // Lower rate limit: retries should be rare, one-at-a-time ops actions.
 app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayoutHandler);
