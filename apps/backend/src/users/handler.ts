@@ -27,6 +27,7 @@ import {
   HOME_CURRENCIES,
   PAYOUT_STATES,
 } from '../db/schema.js';
+import { STELLAR_PUBKEY_REGEX } from '@loop/shared';
 import { listPayoutsForUser } from '../credits/pending-payouts.js';
 import { decodeJwtPayload } from '../auth/jwt.js';
 import { upsertUserFromCtx, getUserById, type User } from '../db/users.js';
@@ -182,11 +183,9 @@ export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
   return c.json<UserMeView>(await toView(updated));
 }
 
-// Stellar ED25519 public keys: 56 uppercase base32 chars starting
-// with 'G'. Validated here rather than at the column level (which is
-// just `text`) so the backend can null-out bad data via SQL in a
-// pinch.
-const STELLAR_PUBKEY_REGEX = /^G[A-Z2-7]{55}$/;
+// Stellar ED25519 public key regex moved to @loop/shared so the web
+// wallet-linking form can validate inline without round-tripping.
+// Imported at the top of this file.
 const SetStellarAddressBody = z.object({
   /** Null explicitly unlinks the address; any string is validated against the pubkey regex. */
   address: z.union([z.string().regex(STELLAR_PUBKEY_REGEX), z.null()]),
