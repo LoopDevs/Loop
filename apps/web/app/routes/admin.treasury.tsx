@@ -10,6 +10,7 @@ import { PayoutsByAssetTable } from '~/components/features/admin/PayoutsByAssetT
 import { SupplierSpendCard } from '~/components/features/admin/SupplierSpendCard';
 import { OperatorStatsCard } from '~/components/features/admin/OperatorStatsCard';
 import { TopUsersByPendingPayoutCard } from '~/components/features/admin/TopUsersByPendingPayoutCard';
+import { UsersRecyclingActivityCard } from '~/components/features/admin/UsersRecyclingActivityCard';
 import { AdminMonthlyCashbackChart } from '~/components/features/admin/AdminMonthlyCashbackChart';
 import { DiscordNotifiersCard } from '~/components/features/admin/DiscordNotifiersCard';
 import { PaymentMethodActivityChart } from '~/components/features/admin/PaymentMethodActivityChart';
@@ -377,6 +378,20 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
           list (ADR 015/016).
         </p>
         <TopUsersByPendingPayoutCard />
+      </section>
+
+      <section>
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Recycling activity (90 days)
+          </h2>
+        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Who's closing the flywheel loop right now — users with at least one LOOP-asset paid order
+          in the last 90 days, ranked by most-recent recycle. Complement to the top-users
+          leaderboard above: that one ranks by earnings, this one ranks by recycling.
+        </p>
+        <UsersRecyclingActivityCard />
       </section>
 
       <section>

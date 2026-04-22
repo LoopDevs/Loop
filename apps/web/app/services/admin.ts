@@ -813,6 +813,43 @@ export async function getTopUsersByPendingPayout(
   );
 }
 
+/**
+ * One row of the 90-day users-recycling-activity leaderboard (#611).
+ * Ranked by most-recent loop_asset order; zero-recycle users are
+ * omitted server-side. `recycledChargeMinor` is bigint-as-string
+ * (fleet-wide precision can push past 2^53).
+ */
+export interface UserRecyclingActivityRow {
+  userId: string;
+  email: string;
+  lastRecycledAt: string;
+  recycledOrderCount: number;
+  recycledChargeMinor: string;
+  currency: string;
+}
+
+export interface UsersRecyclingActivityResponse {
+  since: string;
+  rows: UserRecyclingActivityRow[];
+}
+
+/**
+ * `GET /api/admin/users/recycling-activity?limit=` — 90-day list of
+ * users with at least one loop_asset order, sorted by most-recent
+ * recycle. Complements `/top-users` (by cashback earned) and
+ * `/top-by-pending-payout` (by backlog).
+ */
+export async function getAdminUsersRecyclingActivity(
+  opts: { limit?: number } = {},
+): Promise<UsersRecyclingActivityResponse> {
+  const params = new URLSearchParams();
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return authenticatedRequest<UsersRecyclingActivityResponse>(
+    `/api/admin/users/recycling-activity${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
 /** Response shape from POST /api/admin/merchants/resync. */
 export interface AdminMerchantResyncResponse {
   /** Merchant count after the sweep (not delta vs. pre-sync). */
