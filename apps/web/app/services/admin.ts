@@ -92,6 +92,42 @@ export async function getTreasurySnapshot(): Promise<TreasurySnapshot> {
 }
 
 /**
+ * Per-currency supplier-spend aggregate (ADR 013 / 015). One row per
+ * charge currency in the window; `wholesaleMinor` is what Loop owes
+ * CTX, `userCashbackMinor` + `loopMarginMinor` are the counts on the
+ * other side of the split that fell out of those orders.
+ */
+export interface SupplierSpendRow {
+  currency: string;
+  count: number;
+  faceValueMinor: string;
+  wholesaleMinor: string;
+  userCashbackMinor: string;
+  loopMarginMinor: string;
+}
+
+export interface SupplierSpendResponse {
+  since: string;
+  rows: SupplierSpendRow[];
+}
+
+/**
+ * `GET /api/admin/supplier-spend` — per-currency aggregate of what
+ * Loop has spent with CTX in the window. Default window 24h;
+ * caller passes `?since=<iso>` to override (server clamps to 366d).
+ */
+export async function getSupplierSpend(
+  opts: { since?: string } = {},
+): Promise<SupplierSpendResponse> {
+  const params = new URLSearchParams();
+  if (opts.since !== undefined) params.set('since', opts.since);
+  const qs = params.toString();
+  return authenticatedRequest<SupplierSpendResponse>(
+    `/api/admin/supplier-spend${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
+/**
  * One row from the admin audit tail (ADR 017 / 018). Mirrors the
  * Discord audit message: who did what, when, status. Response body
  * is intentionally omitted — audit is "activity happened" not

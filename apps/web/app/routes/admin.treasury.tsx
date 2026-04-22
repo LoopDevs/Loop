@@ -6,6 +6,7 @@ import { getTreasurySnapshot, type TreasurySnapshot } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { PayoutsByAssetTable } from '~/components/features/admin/PayoutsByAssetTable';
+import { SupplierSpendCard } from '~/components/features/admin/SupplierSpendCard';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -351,6 +352,22 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
           filtered to that state.
         </p>
         <PayoutsByAssetTable />
+      </section>
+
+      <section>
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Supplier spend (24h)
+          </h2>
+        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          What Loop owes CTX for the goods shipped in the last 24 hours (ADR 013/015). The{' '}
+          <span className="text-green-700 dark:text-green-400">cashback</span> and{' '}
+          <span className="text-blue-700 dark:text-blue-400">margin</span> columns are the
+          consequences of those same orders — together with wholesale they should sum to the face
+          value column within the CTX discount.
+        </p>
+        <SupplierSpendCard />
       </section>
 
       <section>
