@@ -480,6 +480,38 @@ const AdminCashbackConfigHistoryResponse = registry.register(
   z.object({ history: z.array(AdminCashbackConfigHistoryRow) }),
 );
 
+const MerchantStatsMinorString = z.string().regex(/^\d+$/).openapi({
+  description: 'Non-negative minor-unit integer serialised as a string (bigint-safe).',
+});
+
+const MerchantStatsPerCurrency = registry.register(
+  'MerchantStatsPerCurrency',
+  z.object({
+    orderCount: z.number().int().nonnegative(),
+    faceMinor: MerchantStatsMinorString,
+    chargeMinor: MerchantStatsMinorString,
+    userCashbackMinor: MerchantStatsMinorString,
+    loopMarginMinor: MerchantStatsMinorString,
+    wholesaleMinor: MerchantStatsMinorString,
+  }),
+);
+
+const AdminMerchantStatsResponse = registry.register(
+  'AdminMerchantStatsResponse',
+  z.object({
+    merchantId: z.string(),
+    merchantName: z.string().openapi({
+      description:
+        'Resolved from the in-memory merchant catalog; falls back to merchantId when upstream has evicted the row.',
+    }),
+    fulfilled: z.record(z.string(), MerchantStatsPerCurrency).openapi({
+      description:
+        'Aggregates keyed by ISO-4217 chargeCurrency. Empty object when the merchant has no fulfilled orders yet.',
+    }),
+    lastFulfilledAt: z.string().datetime().nullable(),
+  }),
+);
+
 // ─── Clustering ─────────────────────────────────────────────────────────────
 
 const ClusterBounds = z.object({
@@ -1357,6 +1389,45 @@ registry.registerPath({
     },
     429: {
       description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/merchants/{merchantId}/stats',
+  summary: 'Per-merchant fulfilled-order aggregates (ADR 011 / 015).',
+  description:
+    "Single GROUP BY over fulfilled orders for one merchant, grouped by chargeCurrency. Drives the cashback-config tuning page: admins see 'we paid £Y of cashback on £X of Amazon fulfilments; current margin is £Z' and decide whether to raise the margin or the user split. `lastFulfilledAt` is the most recent `fulfilled_at` across all currencies — drives the 'last sold 4 days ago' hint next to the configure form.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ merchantId: z.string() }),
+  },
+  responses: {
+    200: {
+      description: 'Aggregates + last fulfillment timestamp',
+      content: { 'application/json': { schema: AdminMerchantStatsResponse } },
+    },
+    400: {
+      description: 'Missing merchantId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading merchant stats',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
