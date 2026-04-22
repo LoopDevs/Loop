@@ -151,6 +151,36 @@ describe('LoopOrdersList', () => {
     expect(screen.queryByText(/\+2\.50 cashback/)).toBeNull();
   });
 
+  it('shows the "Recycled" pill when paymentMethod is loop_asset', async () => {
+    listMock.mockResolvedValue({
+      orders: [mkOrder({ paymentMethod: 'loop_asset' })],
+    });
+    render(wrap(<LoopOrdersList enabled={true} />));
+    await waitFor(() => screen.getByText('Target'));
+    expect(screen.getByLabelText(/Paid with recycled cashback/i)).toBeDefined();
+    expect(screen.getByText(/Recycled/)).toBeDefined();
+  });
+
+  it('renders the Recycled pill regardless of order state (intent signal, not outcome)', async () => {
+    // A pending loop_asset order — user has declared intent to
+    // recycle even if the order hasn't settled yet.
+    listMock.mockResolvedValue({
+      orders: [mkOrder({ paymentMethod: 'loop_asset', state: 'pending_payment' })],
+    });
+    render(wrap(<LoopOrdersList enabled={true} />));
+    await waitFor(() => screen.getByText('Target'));
+    expect(screen.getByLabelText(/Paid with recycled cashback/i)).toBeDefined();
+  });
+
+  it('hides the "Recycled" pill for non-loop_asset orders', async () => {
+    listMock.mockResolvedValue({
+      orders: [mkOrder({ paymentMethod: 'usdc' })],
+    });
+    render(wrap(<LoopOrdersList enabled={true} />));
+    await waitFor(() => screen.getByText('Target'));
+    expect(screen.queryByLabelText(/Paid with recycled cashback/i)).toBeNull();
+  });
+
   it('shows the redeem URL anchor with noopener when present', async () => {
     listMock.mockResolvedValue({
       orders: [
