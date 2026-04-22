@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import type { Route } from './+types/admin.users';
 import { useAuth } from '~/hooks/use-auth';
 import { listAdminUsers, type AdminUserRow } from '~/services/admin';
@@ -185,7 +185,14 @@ export default function AdminUsersRoute(): React.JSX.Element {
                       timeStyle: 'short',
                     })}
                   </td>
-                  <td className="px-3 py-2 font-medium text-gray-900 dark:text-white">{u.email}</td>
+                  <td className="px-3 py-2 font-medium text-gray-900 dark:text-white">
+                    <Link
+                      to={`/admin/users/${u.id}`}
+                      className="hover:underline text-blue-600 dark:text-blue-400"
+                    >
+                      {u.email}
+                    </Link>
+                  </td>
                   <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{u.homeCurrency}</td>
                   <td className="px-3 py-2">
                     {u.isAdmin ? (
