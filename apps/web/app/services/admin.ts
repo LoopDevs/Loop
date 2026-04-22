@@ -92,6 +92,32 @@ export async function getTreasurySnapshot(): Promise<TreasurySnapshot> {
 }
 
 /**
+ * One day of order activity — counts of rows created vs fulfilled
+ * bucketed to the UTC day. Returned oldest-first so a bar chart
+ * renders left-to-right.
+ */
+export interface OrdersActivityDay {
+  day: string;
+  created: number;
+  fulfilled: number;
+}
+
+export interface OrdersActivityResponse {
+  days: OrdersActivityDay[];
+  windowDays: number;
+}
+
+/**
+ * `GET /api/admin/orders/activity?days=N` — per-day created/fulfilled
+ * orders series for the admin dashboard sparkline. Server clamps
+ * N to [1, 90]; default 7.
+ */
+export async function getOrdersActivity(days?: number): Promise<OrdersActivityResponse> {
+  const qs = days !== undefined ? `?days=${days}` : '';
+  return authenticatedRequest<OrdersActivityResponse>(`/api/admin/orders/activity${qs}`);
+}
+
+/**
  * Per-state counts + stroop sums for a single `asset_code` bucket in
  * `pending_payouts`. Zero-counts are surfaced so the admin UI can
  * show an explicit "0 failed" rather than a missing row.

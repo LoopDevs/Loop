@@ -20,6 +20,7 @@ import { useAuth } from '~/hooks/use-auth';
 import { listAdminOrders, type AdminOrderState, type AdminOrderView } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { OrdersSparkline } from '~/components/features/admin/OrdersSparkline';
 import { Spinner } from '~/components/ui/Spinner';
 import { Button } from '~/components/ui/Button';
 
@@ -108,6 +109,8 @@ export default function AdminOrdersRoute(): React.JSX.Element {
           each row shows the ADR-015 cashback split + CTX procurement metadata.
         </p>
       </header>
+
+      <OrdersSparkline />
 
       {/* Filters — intentionally rendered above the table so the
           state change is visible to screen readers right before the
