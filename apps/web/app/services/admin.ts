@@ -1133,6 +1133,33 @@ export async function getAdminCashbackMonthly(): Promise<AdminCashbackMonthlyRes
 }
 
 /**
+ * Settlement-side sibling of `AdminCashbackMonthlyEntry` (#631).
+ * Confirmed on-chain payouts grouped by (month, assetCode).
+ * Stroops rather than fiat minor units because `pending_payouts`
+ * pins the Stellar-native amount — the UI converts via the
+ * `stroops / 1e5 = minor` factor pinned in `credits/payout-
+ * builder.ts`.
+ */
+export interface AdminPayoutsMonthlyEntry {
+  /** "YYYY-MM" in UTC. */
+  month: string;
+  /** LOOP asset code — USDLOOP / GBPLOOP / EURLOOP. */
+  assetCode: string;
+  /** SUM(amount_stroops) of confirmed payouts. bigint-as-string. */
+  paidStroops: string;
+  payoutCount: number;
+}
+
+export interface AdminPayoutsMonthlyResponse {
+  entries: AdminPayoutsMonthlyEntry[];
+}
+
+/** `GET /api/admin/payouts-monthly` — 12-month fleet-wide confirmed payouts by (month, assetCode). */
+export async function getAdminPayoutsMonthly(): Promise<AdminPayoutsMonthlyResponse> {
+  return authenticatedRequest<AdminPayoutsMonthlyResponse>('/api/admin/payouts-monthly');
+}
+
+/**
  * Admin payment-method activity day (#594). One row per UTC day in
  * the requested window (default 30, cap 90), with fulfilled-order
  * counts per rail. Every rail is always present — the backend pre-

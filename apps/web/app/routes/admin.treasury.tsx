@@ -13,6 +13,7 @@ import { OperatorStatsCard } from '~/components/features/admin/OperatorStatsCard
 import { TopUsersByPendingPayoutCard } from '~/components/features/admin/TopUsersByPendingPayoutCard';
 import { UsersRecyclingActivityCard } from '~/components/features/admin/UsersRecyclingActivityCard';
 import { AdminMonthlyCashbackChart } from '~/components/features/admin/AdminMonthlyCashbackChart';
+import { TreasuryReconciliationChart } from '~/components/features/admin/TreasuryReconciliationChart';
 import { DiscordNotifiersCard } from '~/components/features/admin/DiscordNotifiersCard';
 import { PaymentMethodActivityChart } from '~/components/features/admin/PaymentMethodActivityChart';
 import { PaymentMethodShareCard } from '~/components/features/admin/PaymentMethodShareCard';
@@ -440,6 +441,23 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
           if we're not emitting cashback, users have nothing to recycle into the LOOP-asset rail.
         </p>
         <AdminMonthlyCashbackChart />
+      </section>
+
+      <section>
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Liability reconciliation (last 12 months)
+          </h2>
+        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Cashback minted vs. on-chain payouts settled per month (ADR 015/016). Minted is the
+          liability we create when we credit a user; settled is the liability we extinguish when a
+          LOOP-asset payout confirms on Stellar. The{' '}
+          <span className="text-orange-700 dark:text-orange-300">net column</span> is the change in
+          outstanding liability that month — positive means Loop&rsquo;s obligations grew, negative
+          means they shrank.
+        </p>
+        <TreasuryReconciliationChart />
       </section>
 
       <section>
