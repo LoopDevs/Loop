@@ -168,6 +168,40 @@ describe('<AdminOrderDetailRoute />', () => {
     expect(screen.getByText(/GBPLOOP/)).toBeDefined();
   });
 
+  it('renders the green "♻️ Recycled" pill when paymentMethod is loop_asset', async () => {
+    adminMock.getAdminOrder.mockResolvedValue({
+      ...baseRow,
+      paymentMethod: 'loop_asset' as const,
+    });
+    adminMock.getAdminPayoutByOrder.mockRejectedValue(
+      new ApiException(404, { code: 'NOT_FOUND', message: 'Not found' }),
+    );
+    renderAt();
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Paid with recycled cashback/i)).toBeDefined();
+    });
+    // The pill contains the raw payment-method text so ops can
+    // still grep the page for 'loop_asset'.
+    const pill = screen.getByLabelText(/Paid with recycled cashback/i);
+    expect(pill.textContent).toMatch(/loop_asset/);
+  });
+
+  it('renders a neutral pill for non-recycled payment methods', async () => {
+    adminMock.getAdminOrder.mockResolvedValue({
+      ...baseRow,
+      paymentMethod: 'xlm' as const,
+    });
+    adminMock.getAdminPayoutByOrder.mockRejectedValue(
+      new ApiException(404, { code: 'NOT_FOUND', message: 'Not found' }),
+    );
+    renderAt();
+    await waitFor(() => {
+      expect(screen.getByText('xlm')).toBeDefined();
+    });
+    // No recycled-cashback label anywhere for non-loop_asset orders.
+    expect(screen.queryByLabelText(/Paid with recycled cashback/i)).toBeNull();
+  });
+
   it('renders the "no payout yet" body when the endpoint 404s', async () => {
     adminMock.getAdminOrder.mockResolvedValue(baseRow);
     adminMock.getAdminPayoutByOrder.mockRejectedValue(

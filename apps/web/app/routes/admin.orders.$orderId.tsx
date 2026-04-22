@@ -253,8 +253,28 @@ function Detail({ row }: { row: AdminOrderView }): React.JSX.Element {
         </div>
         <div>
           <dt className="text-gray-500 dark:text-gray-400">Charge</dt>
-          <dd className="text-gray-900 dark:text-white">
-            {fmtMinor(row.chargeMinor, row.chargeCurrency)} via {row.paymentMethod}
+          <dd className="text-gray-900 dark:text-white inline-flex items-center gap-2 flex-wrap">
+            <span>{fmtMinor(row.chargeMinor, row.chargeCurrency)}</span>
+            <span className="text-gray-500 dark:text-gray-400">via</span>
+            {row.paymentMethod === 'loop_asset' ? (
+              // Cross-surface consistency: same green "Recycled" pill
+              // treatment as /admin/stuck-orders, /admin/orders (list),
+              // and the user-facing LoopOrdersList row. Makes a
+              // flywheel-closing order immediately legible regardless
+              // of which admin surface an operator comes in through.
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                aria-label="Paid with recycled cashback"
+                title="The user paid for this order with LOOP-asset cashback they earned on earlier orders."
+              >
+                <span aria-hidden="true">♻️</span>
+                {row.paymentMethod}
+              </span>
+            ) : (
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                {row.paymentMethod}
+              </span>
+            )}
           </dd>
         </div>
         <div>
