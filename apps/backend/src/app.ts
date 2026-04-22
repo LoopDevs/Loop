@@ -69,6 +69,7 @@ import { adminCashbackActivityCsvHandler } from './admin/cashback-activity-csv.j
 import { adminCashbackMonthlyHandler } from './admin/cashback-monthly.js';
 import { adminPayoutsMonthlyHandler } from './admin/payouts-monthly.js';
 import { adminPayoutsActivityHandler } from './admin/payouts-activity.js';
+import { adminPayoutsActivityCsvHandler } from './admin/payouts-activity-csv.js';
 import { adminMerchantStatsHandler } from './admin/merchant-stats.js';
 import { adminMerchantStatsCsvHandler } from './admin/merchant-stats-csv.js';
 import { adminMerchantsFlywheelShareHandler } from './admin/merchants-flywheel-share.js';
@@ -880,6 +881,11 @@ app.get('/api/admin/payouts-monthly', rateLimit(60, 60_000), adminPayoutsMonthly
 // as empty byAsset[]. Drives the payout-trend sparkline on
 // /admin/treasury.
 app.get('/api/admin/payouts-activity', rateLimit(60, 60_000), adminPayoutsActivityHandler);
+// Tier-3 CSV export of the same aggregate (#638) — finance runs
+// this alongside /api/admin/cashback-activity.csv at month-end
+// to reconcile liability creation vs. settlement. Rate-limited
+// 10/min per ADR 018.
+app.get('/api/admin/payouts-activity.csv', rateLimit(10, 60_000), adminPayoutsActivityCsvHandler);
 // Per-merchant cashback stats — which merchants drive volume /
 // cashback outlay / margin. Distinct from supplier-spend (currency
 // grouped) — this one groups by merchant.
