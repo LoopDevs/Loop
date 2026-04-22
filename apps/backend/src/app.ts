@@ -85,6 +85,7 @@ import { adminUserCashbackByMerchantHandler } from './admin/user-cashback-by-mer
 import { adminUserCashbackSummaryHandler } from './admin/user-cashback-summary.js';
 import { adminUserFlywheelStatsHandler } from './admin/user-flywheel-stats.js';
 import { adminUserPaymentMethodShareHandler } from './admin/user-payment-method-share.js';
+import { adminUserCashbackMonthlyHandler } from './admin/user-cashback-monthly.js';
 import { adminGetUserHandler } from './admin/user-detail.js';
 import { adminUserByEmailHandler } from './admin/user-by-email.js';
 import { adminListUsersHandler } from './admin/users-list.js';
@@ -1041,6 +1042,18 @@ app.get(
   '/api/admin/users/:userId/payment-method-share',
   rateLimit(120, 60_000),
   adminUserPaymentMethodShareHandler,
+);
+// Per-user cashback-monthly (#633) — 12-month emission trend for
+// one user. Sibling of /api/admin/cashback-monthly and
+// /api/users/me/cashback-monthly. Drives the forthcoming
+// `UserCashbackMonthlyChart` on the user drill — same visual
+// primitives as the fleet chart, scoped to one user. 404 on
+// unknown userId; zero entries for an existing user with no
+// cashback in the window.
+app.get(
+  '/api/admin/users/:userId/cashback-monthly',
+  rateLimit(120, 60_000),
+  adminUserCashbackMonthlyHandler,
 );
 // Credit-transaction log for a user (ADR 009). Drill-down from the
 // balance endpoint — shows how the balance got there (cashback,

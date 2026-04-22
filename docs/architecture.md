@@ -280,6 +280,7 @@ GET  /api/admin/users/:userId/credits                   [admin — per-user cred
 GET  /api/admin/users/:userId/cashback-by-merchant       [admin — per-user cashback-by-merchant support triage, ADR 009/015]
 GET  /api/admin/users/:userId/cashback-summary           [admin — scalar lifetime + this-month cashback headline, ADR 009/015]
 GET  /api/admin/users/:userId/flywheel-stats             [admin — scalar recycled-vs-total per-user flywheel mirror, ADR 015]
+GET  /api/admin/users/:userId/cashback-monthly           [admin — 12-month per-user cashback emission trend, ADR 009/015]
 GET  /api/admin/users/:userId/payment-method-share       [admin — per-user rail mix, sibling of fleet + per-merchant share, ADR 010/015]
 GET  /api/admin/users/:userId/credit-transactions       [admin — per-user credit-ledger log, ADR 009]
 GET  /api/admin/users/:userId/credit-transactions.csv   [admin — per-user credit-ledger CSV for compliance / SAR, ADR 009/015]
