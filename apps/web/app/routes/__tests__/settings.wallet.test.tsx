@@ -56,6 +56,16 @@ vi.mock('~/components/ui/Spinner', () => ({
   Spinner: () => <div data-testid="spinner" />,
 }));
 
+const { clipboardMock } = vi.hoisted(() => ({
+  clipboardMock: {
+    copyToClipboard: vi.fn(async (_: string) => true),
+  },
+}));
+
+vi.mock('~/native/clipboard', () => ({
+  copyToClipboard: (text: string) => clipboardMock.copyToClipboard(text),
+}));
+
 import SettingsWalletRoute from '../settings.wallet';
 
 const VALID_ADDRESS = 'G' + 'A'.repeat(55);
@@ -98,6 +108,8 @@ beforeEach(() => {
     userMock.me = next as typeof userMock.me;
     return next;
   });
+  clipboardMock.copyToClipboard.mockReset();
+  clipboardMock.copyToClipboard.mockResolvedValue(true);
 });
 
 afterEach(cleanup);
@@ -151,6 +163,39 @@ describe('SettingsWalletRoute', () => {
     await waitFor(() => expect(userMock.setStellarAddress).toHaveBeenCalledWith(VALID_ADDRESS));
     await screen.findByText(VALID_ADDRESS);
     expect(screen.getByText(/Unlink wallet/i)).toBeTruthy();
+  });
+
+  it('copies the linked address to the clipboard and flips the button label', async () => {
+    userMock.me = {
+      ...userMock.me,
+      stellarAddress: VALID_ADDRESS,
+    };
+    renderPage();
+    await screen.findByText(VALID_ADDRESS);
+    const button = screen.getByRole('button', { name: /Copy address/i });
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    await waitFor(() => expect(clipboardMock.copyToClipboard).toHaveBeenCalledWith(VALID_ADDRESS));
+    expect(screen.getByRole('button', { name: /Copied/i })).toBeTruthy();
+  });
+
+  it('leaves the button label alone when the clipboard write fails', async () => {
+    clipboardMock.copyToClipboard.mockResolvedValueOnce(false);
+    userMock.me = {
+      ...userMock.me,
+      stellarAddress: VALID_ADDRESS,
+    };
+    renderPage();
+    await screen.findByText(VALID_ADDRESS);
+    const button = screen.getByRole('button', { name: /Copy address/i });
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    await waitFor(() => expect(clipboardMock.copyToClipboard).toHaveBeenCalled());
+    // No switch to 'Copied' — the user sees the original label so
+    // they know the gesture didn't land.
+    expect(screen.getByRole('button', { name: /Copy address/i })).toBeTruthy();
   });
 
   it('unlinks when the user clicks the unlink button', async () => {
