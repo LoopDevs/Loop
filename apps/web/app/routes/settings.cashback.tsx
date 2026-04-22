@@ -24,6 +24,7 @@ import {
   type CashbackHistoryResponse,
 } from '~/services/user';
 import { CashbackBalanceCard } from '~/components/features/cashback/CashbackBalanceCard';
+import { FlywheelChip } from '~/components/features/cashback/FlywheelChip';
 import { CashbackByMerchantCard } from '~/components/features/cashback/CashbackByMerchantCard';
 import { LinkWalletNudge } from '~/components/features/cashback/LinkWalletNudge';
 import { MonthlyCashbackChart } from '~/components/features/cashback/MonthlyCashbackChart';
@@ -113,6 +114,12 @@ export default function SettingsCashbackRoute(): React.JSX.Element {
           number is the first thing on the page. Multi-currency users
           get one tile per currency; most users see a single tile. */}
       <CashbackBalanceCard />
+
+      {/* Flywheel chip — "£X recycled across N orders". Mirrors the
+          placement on /orders. Self-hides for users with zero
+          recycled orders so brand-new accounts see the balance +
+          history flow without a premature milestone pill. */}
+      <FlywheelChip />
 
       {/* Nudge users with positive balance + no linked wallet to
           connect one. Hides itself when either condition isn't met

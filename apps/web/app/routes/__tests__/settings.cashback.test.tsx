@@ -27,6 +27,8 @@ vi.mock('~/services/user', () => ({
   // a rejected promise here keeps the pre-existing tests focused on
   // the history + payouts sections without mocking a new shape.
   getCashbackMonthly: () => Promise.reject(new Error('chart not mocked in this suite')),
+  // FlywheelChip (#599) — same silent-hide-on-reject pattern.
+  getUserFlywheelStats: () => Promise.reject(new Error('chip not mocked in this suite')),
 }));
 
 vi.mock('~/hooks/use-auth', () => ({

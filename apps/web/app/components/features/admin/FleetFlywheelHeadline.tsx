@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
+import { pctBigint } from '@loop/shared';
 import { getPaymentMethodShare, type AdminPaymentMethod } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
-import { pctBigint } from '~/components/features/cashback/FlywheelChip';
 import { Spinner } from '~/components/ui/Spinner';
 
 /**
