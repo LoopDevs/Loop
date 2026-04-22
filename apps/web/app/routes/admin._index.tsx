@@ -58,6 +58,12 @@ const CARDS: ReadonlyArray<CardLink> = [
     description: 'Paginated user directory with email search + credit drill-down (ADR 009/017).',
   },
   {
+    href: '/admin/merchants',
+    title: 'Merchants',
+    description:
+      'Searchable catalog index with cashback-config state per merchant. Exports the catalog as CSV for BD / finance.',
+  },
+  {
     href: '/admin/stuck-orders',
     title: 'Stuck orders',
     description:
