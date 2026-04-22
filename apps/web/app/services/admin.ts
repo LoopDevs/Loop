@@ -91,6 +91,42 @@ export async function getTreasurySnapshot(): Promise<TreasurySnapshot> {
   return authenticatedRequest<TreasurySnapshot>('/api/admin/treasury');
 }
 
+/**
+ * Per-merchant aggregate stats (ADR 011 / 015). Each row sums fulfilled
+ * orders for a single merchant in the window; `currency` is the
+ * dominant catalog currency for that merchant's volume.
+ */
+export interface MerchantStatsRow {
+  merchantId: string;
+  orderCount: number;
+  faceValueMinor: string;
+  wholesaleMinor: string;
+  userCashbackMinor: string;
+  loopMarginMinor: string;
+  lastFulfilledAt: string;
+  currency: string;
+}
+
+export interface MerchantStatsResponse {
+  since: string;
+  rows: MerchantStatsRow[];
+}
+
+/**
+ * `GET /api/admin/merchant-stats` — per-merchant stats ranked by
+ * Loop-margin-minor descending. Default window 31d; clamped [1, 366].
+ */
+export async function getMerchantStats(
+  opts: { since?: string } = {},
+): Promise<MerchantStatsResponse> {
+  const params = new URLSearchParams();
+  if (opts.since !== undefined) params.set('since', opts.since);
+  const qs = params.toString();
+  return authenticatedRequest<MerchantStatsResponse>(
+    `/api/admin/merchant-stats${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
 /** Single stuck-order row from `/api/admin/stuck-orders` (ADR 011/013). */
 export interface StuckOrderRow {
   id: string;
