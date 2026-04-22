@@ -405,6 +405,28 @@ const AdminPayoutListResponse = registry.register(
   z.object({ payouts: z.array(AdminPayoutView) }),
 );
 
+// ─── Admin — supplier spend (ADR 013 / 015) ────────────────────────────────
+
+const AdminSupplierSpendRow = registry.register(
+  'AdminSupplierSpendRow',
+  z.object({
+    currency: z.string().length(3),
+    count: z.number().int().min(0),
+    faceValueMinor: z.string(),
+    wholesaleMinor: z.string(),
+    userCashbackMinor: z.string(),
+    loopMarginMinor: z.string(),
+  }),
+);
+
+const AdminSupplierSpendResponse = registry.register(
+  'AdminSupplierSpendResponse',
+  z.object({
+    since: z.string().datetime(),
+    rows: z.array(AdminSupplierSpendRow),
+  }),
+);
+
 // ─── Admin — cashback-config (ADR 011) ──────────────────────────────────────
 //
 // Percentages are stored as `numeric(5,2)` and round-trip as strings
@@ -1342,6 +1364,51 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error reading the row',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/supplier-spend',
+  summary: 'Per-currency supplier-spend snapshot (ADR 013 / 015).',
+  description:
+    'Aggregates fulfilled orders in the window by catalog currency. Each row exposes count, total face value, wholesale cost billed by CTX, user cashback, and loop margin retained — all `bigint`-minor as strings. Default window is the last 24h; pass `?since=<iso-8601>` to walk back. Capped at 366 days to keep the postgres aggregate cheap.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      since: z
+        .string()
+        .datetime()
+        .optional()
+        .openapi({ description: 'ISO-8601 — lower bound on fulfilledAt. Defaults to 24h ago.' }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Per-currency supplier-spend rows',
+      content: { 'application/json': { schema: AdminSupplierSpendResponse } },
+    },
+    400: {
+      description: 'Invalid `since`',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the aggregate',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },

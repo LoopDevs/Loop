@@ -1,0 +1,133 @@
+/**
+ * Admin supplier-spend snapshot (ADR 013 / 015).
+ *
+ * `GET /api/admin/supplier-spend` — per-currency aggregate of what
+ * Loop has paid CTX (the gift-card supplier) across fulfilled orders
+ * in a rolling window. Keyed on `orders.currency` (the gift card's
+ * catalog currency) because wholesale cost is denominated in what
+ * CTX invoices us, which matches the card's face-value currency —
+ * not the user's home currency they were charged in.
+ *
+ * For each currency the snapshot surfaces:
+ *   - count           — fulfilled orders in the window
+ *   - faceValueMinor  — gift card face value Loop ships to users
+ *   - wholesaleMinor  — what CTX billed Loop (supplier cost)
+ *   - userCashbackMinor — cashback Loop owes / paid the users
+ *   - loopMarginMinor — net kept by Loop after cashback + supplier
+ *
+ * This is the "CTX-as-supplier" counterpart to `/api/admin/treasury`,
+ * which only sees the on-chain liability side. Ops uses this to
+ * reconcile monthly invoices against CTX and to spot per-currency
+ * margin drift (e.g. GBP cards turn unprofitable while USD holds).
+ *
+ * Window: `?since=<iso-8601>` (default 24h ago). No upper bound — the
+ * admin UI can walk back day-by-day by re-requesting with an earlier
+ * `since`. bigint-as-string on the wire.
+ */
+import type { Context } from 'hono';
+import { sql } from 'drizzle-orm';
+import { db } from '../db/client.js';
+import { orders } from '../db/schema.js';
+import { logger } from '../logger.js';
+
+const log = logger.child({ handler: 'admin-supplier-spend' });
+
+export interface SupplierSpendRow {
+  currency: string;
+  count: number;
+  faceValueMinor: string;
+  wholesaleMinor: string;
+  userCashbackMinor: string;
+  loopMarginMinor: string;
+}
+
+export interface SupplierSpendResponse {
+  since: string;
+  rows: SupplierSpendRow[];
+}
+
+const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const MAX_WINDOW_MS = 366 * 24 * 60 * 60 * 1000;
+
+interface AggRow {
+  currency: string;
+  count: string | number;
+  face_value_minor: string | number;
+  wholesale_minor: string | number;
+  user_cashback_minor: string | number;
+  loop_margin_minor: string | number;
+}
+
+function toStringBigint(value: string | number | bigint): string {
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'number') return Math.trunc(value).toString();
+  return value;
+}
+
+export async function adminSupplierSpendHandler(c: Context): Promise<Response> {
+  const sinceRaw = c.req.query('since');
+  let since: Date;
+  if (sinceRaw !== undefined && sinceRaw.length > 0) {
+    const d = new Date(sinceRaw);
+    if (Number.isNaN(d.getTime())) {
+      return c.json(
+        { code: 'VALIDATION_ERROR', message: 'since must be an ISO-8601 timestamp' },
+        400,
+      );
+    }
+    since = d;
+  } else {
+    since = new Date(Date.now() - DEFAULT_WINDOW_MS);
+  }
+
+  // Cap the window to 1 year — a pg aggregate over the full fulfilled
+  // history would scan the whole orders table with no covering index,
+  // which is a foot-gun for whoever leaves this endpoint open in a
+  // browser tab.
+  const windowMs = Date.now() - since.getTime();
+  if (windowMs > MAX_WINDOW_MS) {
+    return c.json(
+      { code: 'VALIDATION_ERROR', message: 'since cannot be more than 366 days ago' },
+      400,
+    );
+  }
+
+  try {
+    const result = await db.execute(sql`
+      SELECT
+        ${orders.currency} AS currency,
+        COUNT(*)::bigint AS count,
+        COALESCE(SUM(${orders.faceValueMinor}), 0)::bigint AS face_value_minor,
+        COALESCE(SUM(${orders.wholesaleMinor}), 0)::bigint AS wholesale_minor,
+        COALESCE(SUM(${orders.userCashbackMinor}), 0)::bigint AS user_cashback_minor,
+        COALESCE(SUM(${orders.loopMarginMinor}), 0)::bigint AS loop_margin_minor
+      FROM ${orders}
+      WHERE ${orders.state} = 'fulfilled'
+        AND ${orders.fulfilledAt} IS NOT NULL
+        AND ${orders.fulfilledAt} >= ${since}
+      GROUP BY ${orders.currency}
+      ORDER BY ${orders.currency} ASC
+    `);
+
+    const raw = (
+      Array.isArray(result)
+        ? (result as unknown as AggRow[])
+        : ((result as unknown as { rows?: AggRow[] }).rows ?? [])
+    ) as AggRow[];
+
+    const rows: SupplierSpendRow[] = raw.map((r) => ({
+      currency: r.currency,
+      count: Number(r.count),
+      faceValueMinor: toStringBigint(r.face_value_minor),
+      wholesaleMinor: toStringBigint(r.wholesale_minor),
+      userCashbackMinor: toStringBigint(r.user_cashback_minor),
+      loopMarginMinor: toStringBigint(r.loop_margin_minor),
+    }));
+
+    const body: SupplierSpendResponse = { since: since.toISOString(), rows };
+    return c.json(body);
+  } catch (err) {
+    log.error({ err }, 'Supplier-spend aggregate failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute supplier spend' }, 500);
+  }
+}
