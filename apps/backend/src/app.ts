@@ -44,6 +44,7 @@ import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '.
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
+import { adminCashbackActivityHandler } from './admin/cashback-activity.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -653,6 +654,10 @@ app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayout
 // by state and userId. Ops uses this to triage stuck orders + audit
 // the cashback split + correlate with operator-pool health.
 app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+// Daily cashback-accrual time-series for the dashboard sparkline.
+// Cheap read — single generate_series + LEFT JOIN, bounded at 180
+// days so the payload can't explode.
+app.get('/api/admin/cashback-activity', rateLimit(60, 60_000), adminCashbackActivityHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 

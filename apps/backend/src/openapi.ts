@@ -405,6 +405,35 @@ const AdminPayoutListResponse = registry.register(
   z.object({ payouts: z.array(AdminPayoutView) }),
 );
 
+// ─── Admin — cashback-activity time-series (ADR 009 / 015) ─────────────────
+
+const AdminActivityPerCurrency = registry.register(
+  'AdminActivityPerCurrency',
+  z.object({
+    currency: z.string().length(3),
+    amountMinor: z.string().openapi({
+      description: 'bigint-as-string. Minor units (pence / cents).',
+    }),
+  }),
+);
+
+const CashbackActivityDay = registry.register(
+  'CashbackActivityDay',
+  z.object({
+    day: z.string().openapi({ description: 'YYYY-MM-DD (UTC).' }),
+    count: z.number().int().min(0),
+    byCurrency: z.array(AdminActivityPerCurrency),
+  }),
+);
+
+const CashbackActivityResponse = registry.register(
+  'CashbackActivityResponse',
+  z.object({
+    days: z.number().int().min(1).max(180),
+    rows: z.array(CashbackActivityDay),
+  }),
+);
+
 // ─── Admin — cashback-config (ADR 011) ──────────────────────────────────────
 //
 // Percentages are stored as `numeric(5,2)` and round-trip as strings
@@ -1256,6 +1285,43 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error resetting the row',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/cashback-activity',
+  summary: 'Daily cashback-accrual time-series (ADR 009 / 015).',
+  description:
+    'Dense day-by-day series of cashback credit_transactions for the admin dashboard sparkline. Every day in the window has a row (zero-activity days emit `count: 0, byCurrency: []`). `?days=` overrides the default 30-day window, clamped 1..180.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(180).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Daily rows (oldest → newest)',
+      content: { 'application/json': { schema: CashbackActivityResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the series',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
