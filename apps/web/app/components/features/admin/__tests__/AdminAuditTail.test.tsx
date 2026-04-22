@@ -100,4 +100,48 @@ describe('<AdminAuditTail />', () => {
       expect(screen.getByText(/Failed to load the audit tail/)).toBeDefined();
     });
   });
+
+  it('hides the Show 100 button when the first page is not full', async () => {
+    adminMock.getAdminAuditTail.mockResolvedValue({
+      rows: [
+        {
+          actorUserId: '11111111-1111-1111-1111-111111111111',
+          actorEmail: 'a@loop.test',
+          method: 'POST',
+          path: '/api/admin/x',
+          status: 200,
+          createdAt: new Date(Date.now() - 60_000).toISOString(),
+        },
+      ],
+    });
+    renderComponent();
+    await waitFor(() => {
+      expect(screen.getByText('POST')).toBeDefined();
+    });
+    expect(screen.queryByRole('button', { name: /Show 100/ })).toBeNull();
+  });
+
+  it('renders Show 100 when the first page fills the default limit, and refetches with the bigger limit', async () => {
+    const fullPage = Array.from({ length: 25 }, (_, i) => ({
+      actorUserId: `aaaaaaaa-0000-0000-0000-${String(i).padStart(12, '0')}`,
+      actorEmail: `a${i}@loop.test`,
+      method: 'POST',
+      path: `/api/admin/x${i}`,
+      status: 200,
+      createdAt: new Date(Date.now() - (i + 1) * 60_000).toISOString(),
+    }));
+    adminMock.getAdminAuditTail.mockResolvedValue({ rows: fullPage });
+    renderComponent();
+    const toggle = await waitFor(() => screen.getByRole('button', { name: /Show 100/ }));
+    expect(adminMock.getAdminAuditTail).toHaveBeenLastCalledWith(25);
+    // Expand — should trigger a new fetch with limit=100.
+    const { fireEvent } = await import('@testing-library/react');
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(adminMock.getAdminAuditTail).toHaveBeenLastCalledWith(100);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Collapse/ })).toBeDefined();
+    });
+  });
 });

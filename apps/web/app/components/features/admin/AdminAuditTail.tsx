@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getAdminAuditTail, type AdminAuditTailRow } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 
-const LIMIT = 25;
+const DEFAULT_LIMIT = 25;
+const EXPANDED_LIMIT = 100;
 
 /**
  * Formats an audit row's `createdAt` as a short relative-time string
@@ -39,9 +41,11 @@ function statusColor(status: number): string {
  * the Discord channel or tailing server logs.
  */
 export function AdminAuditTail(): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  const limit = expanded ? EXPANDED_LIMIT : DEFAULT_LIMIT;
   const query = useQuery({
-    queryKey: ['admin-audit-tail', LIMIT],
-    queryFn: () => getAdminAuditTail(LIMIT),
+    queryKey: ['admin-audit-tail', limit],
+    queryFn: () => getAdminAuditTail(limit),
     retry: shouldRetry,
     staleTime: 30_000,
   });
@@ -100,6 +104,23 @@ export function AdminAuditTail(): React.JSX.Element {
           ))}
         </ul>
       )}
+
+      {/* Show/collapse toggle — the default 25-row view keeps the
+          landing dense; expanding hits the endpoint's ?limit=100
+          cap so a day's worth of writes is usually reachable
+          without leaving the dashboard. */}
+      {!query.isPending && !query.isError && query.data.rows.length >= DEFAULT_LIMIT ? (
+        <footer className="border-t border-gray-200 dark:border-gray-800 px-6 py-2 text-right">
+          <button
+            type="button"
+            onClick={() => setExpanded((prev) => !prev)}
+            className="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+            aria-expanded={expanded}
+          >
+            {expanded ? 'Collapse' : `Show ${EXPANDED_LIMIT}`}
+          </button>
+        </footer>
+      ) : null}
     </section>
   );
 }
