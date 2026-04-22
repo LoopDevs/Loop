@@ -1021,6 +1021,41 @@ export async function getAdminMerchantFlywheelStats(
 }
 
 /**
+ * Admin per-merchant cashback-summary (#625). Per-currency
+ * breakdown of `user_cashback_minor` summed over the merchant's
+ * fulfilled orders.
+ *
+ * Per-currency instead of one total because a merchant's volume
+ * spans user home_currencies, so there's no coherent denomination
+ * for a rolled-up aggregate. Each bucket carries context for
+ * "cashback as % of spend" (`lifetimeChargeMinor`).
+ */
+export interface AdminMerchantCashbackCurrencyBucket {
+  currency: string;
+  fulfilledCount: number;
+  /** SUM(user_cashback_minor) over fulfilled orders in this currency. bigint-as-string. */
+  lifetimeCashbackMinor: string;
+  /** SUM(charge_minor) in this currency — "cashback as % of spend" denominator. */
+  lifetimeChargeMinor: string;
+}
+
+export interface AdminMerchantCashbackSummary {
+  merchantId: string;
+  totalFulfilledCount: number;
+  /** Sorted desc by fulfilledCount. Empty for zero-volume merchants (not 404). */
+  currencies: AdminMerchantCashbackCurrencyBucket[];
+}
+
+/** `GET /api/admin/merchants/:merchantId/cashback-summary` — per-currency cashback paid out. */
+export async function getAdminMerchantCashbackSummary(
+  merchantId: string,
+): Promise<AdminMerchantCashbackSummary> {
+  return authenticatedRequest<AdminMerchantCashbackSummary>(
+    `/api/admin/merchants/${encodeURIComponent(merchantId)}/cashback-summary`,
+  );
+}
+
+/**
  * Fleet-wide cashback-monthly entry (#592). Identical shape to the
  * user-facing `CashbackMonthlyEntry` by design — the admin chart
  * re-uses the same bar-rendering helpers. One entry per
