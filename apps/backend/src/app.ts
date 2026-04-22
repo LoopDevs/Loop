@@ -53,6 +53,7 @@ import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
 import { adminUserCreditTransactionsHandler } from './admin/user-credit-transactions.js';
 import { adminGetUserHandler } from './admin/user-detail.js';
+import { adminListUsersHandler } from './admin/users-list.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -685,6 +686,9 @@ app.get('/api/admin/orders/:orderId/payout', rateLimit(120, 60_000), adminPayout
 // renders this on the treasury page as the "supplier" card next to
 // outstanding liabilities.
 app.get('/api/admin/supplier-spend', rateLimit(60, 60_000), adminSupplierSpendHandler);
+// Paginated user directory — browse + search for the admin panel.
+// Complements the exact-by-id drill at /api/admin/users/:userId.
+app.get('/api/admin/users', rateLimit(60, 60_000), adminListUsersHandler);
 // Admin user-detail drill. Entry point for the admin panel's user
 // page — subsequent drills (credits, credit-transactions, orders)
 // all key off the id this endpoint returns.
