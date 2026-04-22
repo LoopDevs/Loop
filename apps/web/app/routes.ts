@@ -1,11 +1,19 @@
 import { type RouteConfig, index, route } from '@react-router/dev/routes';
 
+// The sitemap is an SSR-only resource route — it exports a `loader`,
+// which SPA mode (mobile static export) rejects. Skip it at build
+// time when BUILD_TARGET=mobile. Mobile doesn't serve HTTP, so it
+// has no use for a sitemap anyway.
+const sitemapRoutes =
+  process.env.BUILD_TARGET === 'mobile' ? [] : [route('sitemap.xml', 'routes/sitemap.tsx')];
+
 export default [
   index('routes/home.tsx'),
   route('map', 'routes/map.tsx'),
   route('gift-card/:name', 'routes/gift-card.$name.tsx'),
   route('cashback', 'routes/cashback.tsx'),
   route('cashback/:slug', 'routes/cashback.$slug.tsx'),
+  ...sitemapRoutes,
   route('auth', 'routes/auth.tsx'),
   route('onboarding', 'routes/onboarding.tsx'),
   route('orders', 'routes/orders.tsx'),
