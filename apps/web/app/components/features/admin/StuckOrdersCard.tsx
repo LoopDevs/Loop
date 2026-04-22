@@ -19,9 +19,8 @@ export function maxAgeMinutes(rows: StuckOrderRow[]): number {
  * Stuck-orders card for the /admin landing. Polls the dashboard
  * endpoint every 60s (matches the admin-treasury cadence) and shows
  * the count + the age of the oldest stuck row. Clicks through to
- * the `/admin/orders?state=paid` list because "paid" is the most
- * common stuck state — the SLO watcher also covers `procuring` but
- * the list page filters per state.
+ * `/admin/stuck-orders` — the dedicated triage list that shows
+ * every stuck row regardless of state (paid vs procuring).
  */
 export function StuckOrdersCard(): React.JSX.Element {
   const query = useQuery({
@@ -53,7 +52,7 @@ export function StuckOrdersCard(): React.JSX.Element {
 
   return (
     <Link
-      to="/admin/orders?state=paid"
+      to="/admin/stuck-orders"
       className={`rounded-xl border p-4 ${
         count > 0
           ? 'border-orange-200 bg-orange-50 hover:border-orange-400 dark:border-orange-900/60 dark:bg-orange-900/20 dark:hover:border-orange-700'
