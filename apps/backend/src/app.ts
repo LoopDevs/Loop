@@ -55,6 +55,7 @@ import { adminUserCreditTransactionsHandler } from './admin/user-credit-transact
 import {
   getCashbackHistoryHandler,
   getMeHandler,
+  getUserCreditsHandler,
   getUserPendingPayoutsHandler,
   setHomeCurrencyHandler,
   setStellarAddressHandler,
@@ -622,6 +623,11 @@ app.put('/api/users/me/stellar-address', rateLimit(10, 60_000), setStellarAddres
 // Account page loads it alongside /me on mount, and TanStack Query invalidates
 // it after any ledger-touching admin action (support edits, payouts).
 app.get('/api/users/me/cashback-history', rateLimit(60, 60_000), getCashbackHistoryHandler);
+// GET /api/users/me/credits — caller's off-chain cashback balance per
+// currency (ADR 009 / 015). /me surfaces a single scalar in the user's
+// home currency; this is the multi-currency complement for users who
+// have flipped home currency or received a non-home adjustment.
+app.get('/api/users/me/credits', rateLimit(60, 60_000), getUserCreditsHandler);
 // GET /api/users/me/pending-payouts — caller-scoped on-chain payout
 // rows (ADR 015 / 016). 60/min matches the history endpoint; clients
 // typically poll this from /settings/cashback while a payout is in
