@@ -26,6 +26,7 @@ import {
 import { CashbackBalanceCard } from '~/components/features/cashback/CashbackBalanceCard';
 import { CashbackByMerchantCard } from '~/components/features/cashback/CashbackByMerchantCard';
 import { LinkWalletNudge } from '~/components/features/cashback/LinkWalletNudge';
+import { MonthlyCashbackChart } from '~/components/features/cashback/MonthlyCashbackChart';
 import { PendingPayoutsCard } from '~/components/features/cashback/PendingPayoutsCard';
 
 export function meta(): Route.MetaDescriptors {
@@ -127,6 +128,13 @@ export default function SettingsCashbackRoute(): React.JSX.Element {
           they haven't earned context for yet. Shared with the wallet
           settings page so the same live status lands in both spots. */}
       <PendingPayoutsCard />
+
+      {/* Last-12-months bar chart (ADR 009 / #576). Renders one
+          bar per (month, currency) pair; multi-currency users see
+          one chart per currency stacked. Self-hiding on empty /
+          error so the card doesn't clutter the page before the user
+          has earned anything. */}
+      <MonthlyCashbackChart />
 
       {/* Top merchants the user has earned cashback from — same
           180-day window the backend defaults to. Self-hiding for
