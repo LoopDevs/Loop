@@ -69,6 +69,7 @@ import { adminUserCreditTransactionsHandler } from './admin/user-credit-transact
 import { adminUserCreditTransactionsCsvHandler } from './admin/user-credit-transactions-csv.js';
 import { adminUserCashbackByMerchantHandler } from './admin/user-cashback-by-merchant.js';
 import { adminGetUserHandler } from './admin/user-detail.js';
+import { adminUserByEmailHandler } from './admin/user-by-email.js';
 import { adminListUsersHandler } from './admin/users-list.js';
 import { adminCreditAdjustmentHandler } from './admin/credit-adjustments.js';
 import { publicCashbackStatsHandler } from './public/cashback-stats.js';
@@ -808,6 +809,12 @@ app.get('/api/admin/audit-tail.csv', rateLimit(10, 60_000), adminAuditTailCsvHan
 // Paginated user directory — browse + search for the admin panel.
 // Complements the exact-by-id drill at /api/admin/users/:userId.
 app.get('/api/admin/users', rateLimit(60, 60_000), adminListUsersHandler);
+// Exact-match email lookup — support pastes the full address from a
+// ticket, gets the user id back in one request. Different lookup
+// mode from the fragment search above; registered before
+// /:userId so the literal 'by-email' segment isn't captured as a
+// uuid param.
+app.get('/api/admin/users/by-email', rateLimit(60, 60_000), adminUserByEmailHandler);
 // Admin user-detail drill. Entry point for the admin panel's user
 // page — subsequent drills (credits, credit-transactions, orders)
 // all key off the id this endpoint returns.

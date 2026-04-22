@@ -2363,6 +2363,51 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/users/by-email',
+  summary: 'Exact-match user lookup by email.',
+  description:
+    "Support pastes the full email address from a customer ticket and gets the user row back in one request. Exact equality against a lowercase-normalised form — `Alice@Example.COM` matches `alice@example.com`. Distinct from `/api/admin/users?q=` which is the ILIKE-fragment browse surface; this one is the 'I have the address, give me the user' lookup. 404 on miss (no row exists for that normalised email).",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      email: z.string().min(1).max(254),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'User row',
+      content: { 'application/json': { schema: AdminUserView } },
+    },
+    400: {
+      description: 'Missing, malformed, or overlong email',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'No user with that email',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading the row',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/users/{userId}',
   summary: 'Single-user detail for the admin panel.',
   description:
