@@ -138,6 +138,10 @@ export const creditTransactions = pgTable(
     currency: char('currency', { length: 3 }).notNull(),
     referenceType: text('reference_type'),
     referenceId: text('reference_id'),
+    // Free-text note populated on admin / support credit-adjustment
+    // writes (ADR 009 / 011). NULL for all other transaction types —
+    // their context is fully captured by reference_type + reference_id.
+    note: text('note'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

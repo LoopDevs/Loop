@@ -45,6 +45,7 @@ import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
 import { adminGetUserHandler } from './admin/users.js';
+import { adminCreditAdjustmentHandler } from './admin/credit-adjustments.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -658,6 +659,14 @@ app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
 // balance + lifetime cashback + order/payout counts. Narrow surface
 // so the admin "user detail" page renders in one request.
 app.get('/api/admin/users/:userId', rateLimit(120, 60_000), adminGetUserHandler);
+// Support-initiated credit adjustment (ADR 009 / 011). Lower rate
+// limit than read endpoints since it's a write and every call leaves
+// an audit row; 30/min/IP is enough headroom for multi-row ops work.
+app.post(
+  '/api/admin/users/:userId/credit-adjustments',
+  rateLimit(30, 60_000),
+  adminCreditAdjustmentHandler,
+);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 

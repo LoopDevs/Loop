@@ -1,10 +1,13 @@
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
+import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.users.$userId';
 import { useAuth } from '~/hooks/use-auth';
-import { getAdminUser, type AdminUserView } from '~/services/admin';
+import { createCreditAdjustment, getAdminUser, type AdminUserView } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { Button } from '~/components/ui/Button';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -36,6 +39,31 @@ function truncPubkey(pk: string): string {
 }
 
 /**
+ * Parses a signed decimal input ("5.00", "-10.5", "3") into a minor-unit
+ * bigint-string. Returns null on malformed input so the caller can
+ * surface a validation error rather than silently converting garbage.
+ * Two decimal places max — matches every home-currency we support;
+ * inputs with more precision are rejected outright.
+ */
+function decimalToMinor(input: string): string | null {
+  const trimmed = input.trim();
+  if (trimmed.length === 0) return null;
+  const match = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(trimmed);
+  if (match === null) return null;
+  const sign = match[1] === '-' ? '-' : '';
+  const whole = match[2] ?? '0';
+  const fraction = (match[3] ?? '').padEnd(2, '0');
+  // Drop any leading zeros on the whole portion so bigint parse is clean.
+  const combined = `${whole}${fraction}`.replace(/^0+(?=\d)/, '');
+  if (combined === '' || combined === '0') return '0';
+  try {
+    return BigInt(`${sign}${combined}`).toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
  * `/admin/users/:userId` — admin user drill-down (ADR 011 / 015).
  *
  * Renders the one-shot summary from `GET /api/admin/users/:userId`
@@ -52,6 +80,7 @@ export default function AdminUserRoute(): React.JSX.Element {
   const { isAuthenticated } = useAuth();
   const params = useParams();
   const userId = params['userId'] ?? '';
+  const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: ['admin-user', userId],
@@ -59,6 +88,40 @@ export default function AdminUserRoute(): React.JSX.Element {
     enabled: isAuthenticated && userId.length > 0,
     retry: shouldRetry,
     staleTime: 10_000,
+  });
+
+  const [amountInput, setAmountInput] = useState('');
+  const [noteInput, setNoteInput] = useState('');
+  const [formError, setFormError] = useState<string | null>(null);
+  const [successSummary, setSuccessSummary] = useState<string | null>(null);
+
+  const adjustMutation = useMutation({
+    mutationFn: async (input: {
+      amountMinor: string;
+      currency: 'USD' | 'GBP' | 'EUR';
+      note: string;
+    }) => createCreditAdjustment(userId, input),
+    onSuccess: (res) => {
+      setAmountInput('');
+      setNoteInput('');
+      setFormError(null);
+      setSuccessSummary(
+        `${res.entry.amountMinor.startsWith('-') ? 'Debited' : 'Credited'} ${res.entry.amountMinor} minor ${res.entry.currency} · new balance ${res.balance.balanceMinor}`,
+      );
+      void queryClient.invalidateQueries({ queryKey: ['admin-user', userId] });
+      // Invalidate the treasury snapshot too — outstanding credit moves.
+      void queryClient.invalidateQueries({ queryKey: ['admin-treasury'] });
+    },
+    onError: (err) => {
+      setSuccessSummary(null);
+      if (err instanceof ApiException) {
+        setFormError(err.message);
+      } else if (err instanceof Error) {
+        setFormError(err.message);
+      } else {
+        setFormError('Failed to write adjustment');
+      }
+    },
   });
 
   if (!isAuthenticated) {
@@ -195,6 +258,87 @@ export default function AdminUserRoute(): React.JSX.Element {
             <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">See all payouts →</div>
           </Link>
         </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+          Credit adjustment
+        </h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Support-initiated write to this user&apos;s balance (ADR 009 / 011). Positive credits,
+          negative debits. Every adjustment is logged with your admin id and the note below.
+        </p>
+        <form
+          className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setFormError(null);
+            setSuccessSummary(null);
+            const minor = decimalToMinor(amountInput);
+            if (minor === null) {
+              setFormError('Enter a signed decimal like 5.00 or -10.50');
+              return;
+            }
+            if (minor === '0') {
+              setFormError('Amount must be non-zero');
+              return;
+            }
+            const trimmedNote = noteInput.trim();
+            if (trimmedNote.length < 3) {
+              setFormError('Note must be at least 3 characters');
+              return;
+            }
+            adjustMutation.mutate({
+              amountMinor: minor,
+              currency: user.homeCurrency,
+              note: trimmedNote,
+            });
+          }}
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-[160px_1fr] gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                Amount ({user.homeCurrency})
+              </span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={amountInput}
+                onChange={(e) => setAmountInput(e.target.value)}
+                placeholder="e.g. 5.00"
+                className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm text-gray-900 dark:text-white tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500"
+                aria-label="Adjustment amount"
+                disabled={adjustMutation.isPending}
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                Note (audit trail)
+              </span>
+              <textarea
+                value={noteInput}
+                onChange={(e) => setNoteInput(e.target.value)}
+                placeholder="e.g. Goodwill credit — support chat #1234"
+                rows={2}
+                className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                aria-label="Adjustment note"
+                disabled={adjustMutation.isPending}
+                maxLength={500}
+              />
+            </label>
+          </div>
+          {formError !== null ? (
+            <p className="text-sm text-red-600 dark:text-red-400">{formError}</p>
+          ) : null}
+          {successSummary !== null ? (
+            <p className="text-sm text-green-700 dark:text-green-400">{successSummary}</p>
+          ) : null}
+          <div className="flex items-center justify-end">
+            <Button type="submit" disabled={adjustMutation.isPending}>
+              {adjustMutation.isPending ? 'Writing…' : 'Write adjustment'}
+            </Button>
+          </div>
+        </form>
       </section>
     </main>
   );

@@ -1332,6 +1332,110 @@ registry.registerPath({
   },
 });
 
+// ─── Admin — credit adjustment (ADR 009 / 011) ──────────────────────────────
+
+const CreditAdjustmentBody = registry.register(
+  'CreditAdjustmentBody',
+  z.object({
+    amountMinor: z.string().min(1).max(32).openapi({
+      description:
+        "Signed bigint-string in the target currency's minor units. Positive credits the user; negative debits. Zero is rejected as a noop.",
+    }),
+    currency: z.enum(['USD', 'GBP', 'EUR']).openapi({
+      description: "Must match the user's home currency — cross-currency writes are rejected.",
+    }),
+    note: z.string().min(3).max(500).openapi({
+      description:
+        'Operator explanation, persisted on the credit_transactions row as the audit trail.',
+    }),
+  }),
+);
+
+const CreditAdjustmentEntry = registry.register(
+  'CreditAdjustmentEntry',
+  z.object({
+    id: z.string().uuid(),
+    userId: z.string().uuid(),
+    type: z.literal('adjustment'),
+    amountMinor: z.string().openapi({
+      description: 'Signed bigint-string — same value written to credit_transactions.amount_minor.',
+    }),
+    currency: z.string(),
+    referenceType: z.string().nullable(),
+    referenceId: z.string().nullable().openapi({
+      description: "Admin's user id (ADR 013 audit trail).",
+    }),
+    note: z.string().nullable(),
+    createdAt: z.string().datetime(),
+  }),
+);
+
+const UserCreditsRow = registry.register(
+  'UserCreditsRow',
+  z.object({
+    currency: z.string(),
+    balanceMinor: z.string().openapi({
+      description: 'New balance in minor units (bigint-string) after the adjustment.',
+    }),
+  }),
+);
+
+const CreditAdjustmentResponse = registry.register(
+  'CreditAdjustmentResponse',
+  z.object({ entry: CreditAdjustmentEntry, balance: UserCreditsRow }),
+);
+
+registry.registerPath({
+  method: 'post',
+  path: '/api/admin/users/{userId}/credit-adjustments',
+  summary: 'Write a signed credit adjustment to a user (ADR 009 / 011).',
+  description:
+    "Support-initiated ledger write. Creates a credit_transactions row with type='adjustment' and atomically updates user_credits.balance_minor. Positive = credit, negative = debit. Pushing balance < 0 is rejected with 409.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ userId: z.string().uuid() }),
+    body: {
+      required: true,
+      content: { 'application/json': { schema: CreditAdjustmentBody } },
+    },
+  },
+  responses: {
+    201: {
+      description: 'Adjustment written',
+      content: { 'application/json': { schema: CreditAdjustmentResponse } },
+    },
+    400: {
+      description: 'Validation error or currency mismatch',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'User not found',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    409: {
+      description: 'Adjustment would push balance below zero',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (30/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error writing the transaction',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Admin — cashback-config CRUD (ADR 011) ─────────────────────────────────
 
 registry.registerPath({

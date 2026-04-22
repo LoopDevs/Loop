@@ -223,3 +223,41 @@ export async function getAdminUser(userId: string): Promise<{ user: AdminUserVie
     `/api/admin/users/${encodeURIComponent(userId)}`,
   );
 }
+
+/**
+ * Audit view of a support-initiated credit adjustment (ADR 009 / 011).
+ * Signed `amountMinor` — positive credit, negative debit.
+ */
+export interface CreditAdjustmentEntry {
+  id: string;
+  userId: string;
+  type: 'adjustment';
+  amountMinor: string;
+  currency: string;
+  referenceType: string | null;
+  /** The admin's user id — audit trail. */
+  referenceId: string | null;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface CreditAdjustmentResponse {
+  entry: CreditAdjustmentEntry;
+  balance: { currency: string; balanceMinor: string };
+}
+
+/**
+ * `POST /api/admin/users/:userId/credit-adjustments` — support action
+ * that writes a signed adjustment to the ledger and updates
+ * `user_credits.balance_minor` atomically. Rejected when the debit
+ * would push the balance below zero (409 INSUFFICIENT_BALANCE).
+ */
+export async function createCreditAdjustment(
+  userId: string,
+  body: { amountMinor: string; currency: 'USD' | 'GBP' | 'EUR'; note: string },
+): Promise<CreditAdjustmentResponse> {
+  return authenticatedRequest<CreditAdjustmentResponse>(
+    `/api/admin/users/${encodeURIComponent(userId)}/credit-adjustments`,
+    { method: 'POST', body },
+  );
+}
