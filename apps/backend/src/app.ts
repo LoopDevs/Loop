@@ -71,6 +71,7 @@ import { adminMerchantStatsHandler } from './admin/merchant-stats.js';
 import { adminMerchantStatsCsvHandler } from './admin/merchant-stats-csv.js';
 import { adminMerchantsFlywheelShareHandler } from './admin/merchants-flywheel-share.js';
 import { adminMerchantsFlywheelShareCsvHandler } from './admin/merchants-flywheel-share-csv.js';
+import { adminMerchantFlywheelStatsHandler } from './admin/merchant-flywheel-stats.js';
 import { adminCashbackConfigsCsvHandler } from './admin/cashback-configs-csv.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
@@ -884,6 +885,16 @@ app.get(
   '/api/admin/merchants/flywheel-share.csv',
   rateLimit(10, 60_000),
   adminMerchantsFlywheelShareCsvHandler,
+);
+// Per-merchant scalar flywheel stats — the single-merchant drill
+// mirror of the fleet leaderboard. Drives a chip on the
+// /admin/merchants/:merchantId page. Registered after the literal
+// `/flywheel-share` + `.csv` paths so Hono's matcher resolves
+// static > dynamic correctly.
+app.get(
+  '/api/admin/merchants/:merchantId/flywheel-stats',
+  rateLimit(120, 60_000),
+  adminMerchantFlywheelStatsHandler,
 );
 // Given an order id, return the single pending_payouts row for it.
 // Nested under /orders/:orderId so the UI can link from the order
