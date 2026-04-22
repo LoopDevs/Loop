@@ -8,6 +8,7 @@ import { getAdminUser, getAdminUserCredits, type AdminUserCreditRow } from '~/se
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CreditAdjustmentForm } from '~/components/features/admin/CreditAdjustmentForm';
 import { CreditTransactionsTable } from '~/components/features/admin/CreditTransactionsTable';
+import { UserOrdersTable } from '~/components/features/admin/UserOrdersTable';
 import { Spinner } from '~/components/ui/Spinner';
 
 const HOME_CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
@@ -245,6 +246,21 @@ export default function AdminUserDetailRoute(): React.JSX.Element {
                 isHomeCurrency(userQuery.data.homeCurrency) ? userQuery.data.homeCurrency : 'USD'
               }
             />
+          </div>
+        </section>
+      ) : null}
+
+      {userId !== undefined && !userNotFound ? (
+        <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+          <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
+            <h2 className="text-base font-semibold text-gray-900 dark:text-white">Recent orders</h2>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              The user&rsquo;s last 25 Loop-native orders (ADR 011/015). Click an id for the full
+              state + cashback-split + timeline drill-down.
+            </p>
+          </header>
+          <div className="px-6 py-5">
+            <UserOrdersTable userId={userId} />
           </div>
         </section>
       ) : null}
