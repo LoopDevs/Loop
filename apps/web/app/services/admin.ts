@@ -1160,6 +1160,31 @@ export async function getAdminPayoutsMonthly(): Promise<AdminPayoutsMonthlyRespo
 }
 
 /**
+ * Per-user cashback-monthly response (#633). Same entry shape as
+ * the fleet-wide `AdminCashbackMonthlyEntry` — the chart primitive
+ * in `MonthlyCashbackChart` accepts either.
+ */
+export interface AdminUserCashbackMonthlyEntry {
+  month: string;
+  currency: string;
+  cashbackMinor: string;
+}
+
+export interface AdminUserCashbackMonthlyResponse {
+  userId: string;
+  entries: AdminUserCashbackMonthlyEntry[];
+}
+
+/** `GET /api/admin/users/:userId/cashback-monthly` — 12-month trend for one user. */
+export async function getAdminUserCashbackMonthly(
+  userId: string,
+): Promise<AdminUserCashbackMonthlyResponse> {
+  return authenticatedRequest<AdminUserCashbackMonthlyResponse>(
+    `/api/admin/users/${encodeURIComponent(userId)}/cashback-monthly`,
+  );
+}
+
+/**
  * Admin payment-method activity day (#594). One row per UTC day in
  * the requested window (default 30, cap 90), with fulfilled-order
  * counts per rail. Every rail is always present — the backend pre-
