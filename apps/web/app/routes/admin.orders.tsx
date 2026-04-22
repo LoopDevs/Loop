@@ -20,6 +20,7 @@ import { useAuth } from '~/hooks/use-auth';
 import { listAdminOrders, type AdminOrderState, type AdminOrderView } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { OrdersSparkline } from '~/components/features/admin/OrdersSparkline';
 import { Spinner } from '~/components/ui/Spinner';
 import { Button } from '~/components/ui/Button';
@@ -102,12 +103,18 @@ export default function AdminOrdersRoute(): React.JSX.Element {
   return (
     <main className="max-w-6xl mx-auto px-6 py-12 space-y-6">
       <AdminNav />
-      <header>
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Admin · Orders</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-          Loop-native orders across every user, newest first. Filter by state to triage stuck rows;
-          each row shows the ADR-015 cashback split + CTX procurement metadata.
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Admin · Orders</h1>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+            Loop-native orders across every user, newest first. Filter by state to triage stuck
+            rows; each row shows the ADR-015 cashback split + CTX procurement metadata.
+          </p>
+        </div>
+        <CsvDownloadButton
+          path="/api/admin/orders.csv"
+          filename={`loop-orders-${new Date().toISOString().slice(0, 10)}.csv`}
+        />
       </header>
 
       <OrdersSparkline />
