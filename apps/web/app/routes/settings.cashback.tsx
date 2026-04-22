@@ -27,6 +27,7 @@ import {
   type UserPendingPayoutView,
 } from '~/services/user';
 import { CashbackBalanceCard } from '~/components/features/cashback/CashbackBalanceCard';
+import { LinkWalletNudge } from '~/components/features/cashback/LinkWalletNudge';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Cashback history — Loop' }];
@@ -112,6 +113,13 @@ export default function SettingsCashbackRoute(): React.JSX.Element {
           number is the first thing on the page. Multi-currency users
           get one tile per currency; most users see a single tile. */}
       <CashbackBalanceCard />
+
+      {/* Nudge users with positive balance + no linked wallet to
+          connect one. Hides itself when either condition isn't met
+          so returning users with a linked wallet don't see the
+          prompt, and new users with no cashback yet aren't asked
+          to hand over wallet info before earning anything. */}
+      <LinkWalletNudge />
 
       {/* On-chain payouts — rendered above the ledger so in-flight
           Stellar emissions are immediately visible. The section hides
