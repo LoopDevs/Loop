@@ -53,12 +53,13 @@ vi.mock('../../db/schema.js', () => ({
   },
 }));
 
-import { adminListOrdersHandler } from '../orders.js';
+import { adminGetOrderHandler, adminListOrdersHandler } from '../orders.js';
 
-function makeCtx(query: Record<string, string> = {}): Context {
+function makeCtx(query: Record<string, string> = {}, params: Record<string, string> = {}): Context {
   return {
     req: {
       query: (k: string) => query[k],
+      param: (k: string) => params[k],
     },
     json: (body: unknown, status?: number) =>
       new Response(JSON.stringify(body), {
@@ -217,6 +218,46 @@ describe('adminListOrdersHandler', () => {
   it('500s when the db read throws', async () => {
     dbState.throwOnLimit = true;
     const res = await adminListOrdersHandler(makeCtx());
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('adminGetOrderHandler', () => {
+  const VALID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+  it('400s when orderId is missing', async () => {
+    const res = await adminGetOrderHandler(makeCtx({}, {}));
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('400s when orderId is not a UUID', async () => {
+    const res = await adminGetOrderHandler(makeCtx({}, { orderId: 'not-a-uuid' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('404s when no row matches the id', async () => {
+    dbState.rows = [];
+    const res = await adminGetOrderHandler(makeCtx({}, { orderId: VALID }));
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('NOT_FOUND');
+  });
+
+  it('returns a single AdminOrderView on a matching row', async () => {
+    dbState.rows = [makeRow({ id: VALID, state: 'fulfilled' })];
+    const res = await adminGetOrderHandler(makeCtx({}, { orderId: VALID }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { order: { id: string; state: string } };
+    expect(body.order.id).toBe(VALID);
+    expect(body.order.state).toBe('fulfilled');
+  });
+
+  it('500s when the db read throws', async () => {
+    dbState.rows = [];
+    dbState.throwOnLimit = true;
+    const res = await adminGetOrderHandler(makeCtx({}, { orderId: VALID }));
     expect(res.status).toBe(500);
   });
 });

@@ -156,3 +156,34 @@ export async function adminListOrdersHandler(c: Context): Promise<Response> {
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to list orders' }, 500);
   }
 }
+
+/**
+ * GET /api/admin/orders/:orderId — single-row drill-down. Returns the
+ * same AdminOrderView shape as the list endpoint, scoped to one order
+ * id. UUID param validation + 404 on missing. Complements the list
+ * + CSV endpoints with direct id lookup: ops pasting an order id from
+ * a support ticket can land directly on the row instead of filtering
+ * by userId and scrolling.
+ *
+ * Deliberately returns the same shape as list items so the web can
+ * reuse the row-rendering component it already has.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function adminGetOrderHandler(c: Context): Promise<Response> {
+  const orderId = c.req.param('orderId');
+  if (orderId === undefined || !UUID_RE.test(orderId)) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'orderId must be a UUID' }, 400);
+  }
+
+  try {
+    const [row] = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
+    if (row === undefined) {
+      return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);
+    }
+    return c.json<{ order: AdminOrderView }>({ order: rowToView(row) });
+  } catch (err) {
+    log.error({ err, orderId }, 'Admin order detail failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load order' }, 500);
+  }
+}

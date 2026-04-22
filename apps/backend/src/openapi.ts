@@ -1261,6 +1261,88 @@ registry.registerPath({
   },
 });
 
+// ─── Admin — single order detail (ADR 011 / 017) ────────────────────────────
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/orders/{orderId}',
+  summary: 'Single-order admin drill-down (ADR 011 / 017).',
+  description:
+    'Complement to the paginated `/api/admin/orders` list. Lets ops paste an order id from a support ticket and land directly on the row without filtering. Returns the same `AdminOrderView` shape as the list, wrapped in `{ order }`.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ orderId: z.string().uuid() }),
+  },
+  responses: {
+    200: {
+      description: 'Order row',
+      content: {
+        'application/json': {
+          schema: z.object({
+            order: z.object({
+              id: z.string().uuid(),
+              userId: z.string().uuid(),
+              merchantId: z.string(),
+              state: z.enum([
+                'pending_payment',
+                'paid',
+                'procuring',
+                'fulfilled',
+                'failed',
+                'expired',
+              ]),
+              currency: z.string(),
+              faceValueMinor: z.string(),
+              chargeCurrency: z.string(),
+              chargeMinor: z.string(),
+              paymentMethod: z.enum(['xlm', 'usdc', 'credit', 'loop_asset']),
+              wholesalePct: z.string(),
+              userCashbackPct: z.string(),
+              loopMarginPct: z.string(),
+              wholesaleMinor: z.string(),
+              userCashbackMinor: z.string(),
+              loopMarginMinor: z.string(),
+              ctxOrderId: z.string().nullable(),
+              ctxOperatorId: z.string().nullable(),
+              failureReason: z.string().nullable(),
+              createdAt: z.string().datetime(),
+              paidAt: z.string().datetime().nullable(),
+              procuredAt: z.string().datetime().nullable(),
+              fulfilledAt: z.string().datetime().nullable(),
+              failedAt: z.string().datetime().nullable(),
+            }),
+          }),
+        },
+      },
+    },
+    400: {
+      description: 'orderId not a UUID',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'Order not found',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error loading the order',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Admin — cashback-config CRUD (ADR 011) ─────────────────────────────────
 
 registry.registerPath({
