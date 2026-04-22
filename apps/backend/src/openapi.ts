@@ -1053,6 +1053,45 @@ registry.registerPath({
   },
 });
 
+registry.registerPath({
+  method: 'get',
+  path: '/api/users/me/orders/summary',
+  summary: 'Compact orders totals for the caller (ADR 010).',
+  description:
+    "Five-number summary — `totalOrders`, `fulfilledCount`, `pendingCount` (pre-fulfil / pre-fail), `failedCount` (including `expired`), and `totalSpentMinor` (fulfilled-only). Drives the `/orders` page header so the client doesn't paginate the full orders list just to render a tally. Home-currency-locked; cross-currency detail stays out of this endpoint.",
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Summary snapshot',
+      content: {
+        'application/json': {
+          schema: z.object({
+            currency: z.string().length(3),
+            totalOrders: z.number().int().nonnegative(),
+            fulfilledCount: z.number().int().nonnegative(),
+            pendingCount: z.number().int().nonnegative(),
+            failedCount: z.number().int().nonnegative(),
+            totalSpentMinor: z.string().regex(/^\d+$/),
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the summary',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Users — pending-payouts view (ADR 015 / 016) ──────────────────────────
 //
 // Registered down here (outside the Users schema block) so the `PayoutState`

@@ -414,3 +414,81 @@ export async function getUserPendingPayoutsHandler(c: Context): Promise<Response
     })),
   });
 }
+
+/**
+ * `GET /api/users/me/orders/summary` — compact lifetime-orders
+ * snapshot for the `/orders` page header. Companion to
+ * `/cashback-summary`. Keyed to the user's current
+ * `home_currency` so `totalSpentMinor` aggregates only charges
+ * denominated in their home currency.
+ *
+ * Single query, several conditional SUMs. Defaults on empty are
+ * zeroes so the UI can always render numbers.
+ */
+export interface UserOrdersSummary {
+  currency: string;
+  totalOrders: number;
+  fulfilledCount: number;
+  pendingCount: number;
+  failedCount: number;
+  /** Sum of `charge_minor` for fulfilled orders, bigint-safe string. */
+  totalSpentMinor: string;
+}
+
+interface OrdersSummaryRow extends Record<string, unknown> {
+  totalOrders: string | number;
+  fulfilledCount: string | number;
+  pendingCount: string | number;
+  failedCount: string | number;
+  totalSpentMinor: string | null;
+}
+
+export async function getOrdersSummaryHandler(c: Context): Promise<Response> {
+  let user: User | null;
+  try {
+    user = await resolveCallingUser(c);
+  } catch (err) {
+    log.error({ err }, 'Failed to resolve calling user');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+  }
+  if (user === null) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+
+  try {
+    // Pending = anything pre-fulfilled, pre-failed. Matches the
+    // mental model on the UI "spinner" chip.
+    const result = await db.execute<OrdersSummaryRow>(sql`
+      SELECT
+        COUNT(*)::bigint AS "totalOrders",
+        COUNT(*) FILTER (WHERE ${orders.state} = 'fulfilled')::bigint AS "fulfilledCount",
+        COUNT(*) FILTER (
+          WHERE ${orders.state} IN ('pending_payment', 'paid', 'procuring')
+        )::bigint AS "pendingCount",
+        COUNT(*) FILTER (WHERE ${orders.state} IN ('failed', 'expired'))::bigint AS "failedCount",
+        COALESCE(
+          SUM(${orders.chargeMinor}) FILTER (WHERE ${orders.state} = 'fulfilled'),
+          0
+        )::bigint AS "totalSpentMinor"
+      FROM ${orders}
+      WHERE ${orders.userId} = ${user.id}
+        AND ${orders.chargeCurrency} = ${user.homeCurrency}
+    `);
+    const rows: OrdersSummaryRow[] = Array.isArray(result)
+      ? (result as OrdersSummaryRow[])
+      : ((result as { rows?: OrdersSummaryRow[] }).rows ?? []);
+    const row = rows[0];
+
+    return c.json<UserOrdersSummary>({
+      currency: user.homeCurrency,
+      totalOrders: Number(row?.totalOrders ?? 0),
+      fulfilledCount: Number(row?.fulfilledCount ?? 0),
+      pendingCount: Number(row?.pendingCount ?? 0),
+      failedCount: Number(row?.failedCount ?? 0),
+      totalSpentMinor: (row?.totalSpentMinor ?? '0').toString(),
+    });
+  } catch (err) {
+    log.error({ err }, 'Orders-summary query failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load orders summary' }, 500);
+  }
+}
