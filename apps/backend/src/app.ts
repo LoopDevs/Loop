@@ -79,6 +79,7 @@ import {
   setHomeCurrencyHandler,
   setStellarAddressHandler,
 } from './users/handler.js';
+import { getCashbackByMerchantHandler } from './users/cashback-by-merchant.js';
 
 export const app = new Hono();
 
@@ -679,6 +680,11 @@ app.get(
 // headline ("£42 earned · £3.20 this month") without paging the
 // whole credit_transactions ledger.
 app.get('/api/users/me/cashback-summary', rateLimit(60, 60_000), getCashbackSummaryHandler);
+// GET /api/users/me/cashback-by-merchant — user's top cashback-earning
+// merchants in a rolling window. Powers the "earned by merchant" card
+// on /settings/cashback so users see which merchants drive their
+// cashback accrual without scrolling the full ledger (ADR 009/015).
+app.get('/api/users/me/cashback-by-merchant', rateLimit(60, 60_000), getCashbackByMerchantHandler);
 
 // ─── Admin (authenticated + admin-flagged) ──────────────────────────────────
 //

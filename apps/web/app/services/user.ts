@@ -172,3 +172,39 @@ export interface UserCashbackSummary {
 export async function getCashbackSummary(): Promise<UserCashbackSummary> {
   return authenticatedRequest<UserCashbackSummary>('/api/users/me/cashback-summary');
 }
+
+/**
+ * One row of the caller's cashback-by-merchant breakdown (ADR 009 / 015).
+ * `merchantId` is the catalog slug — the client resolves display
+ * name via the in-memory merchant catalog instead of round-tripping
+ * another lookup per row.
+ */
+export interface CashbackByMerchantRow {
+  merchantId: string;
+  cashbackMinor: string;
+  orderCount: number;
+  lastEarnedAt: string;
+}
+
+export interface CashbackByMerchantResponse {
+  currency: string;
+  since: string;
+  rows: CashbackByMerchantRow[];
+}
+
+/**
+ * `GET /api/users/me/cashback-by-merchant` — top merchants by cashback
+ * earned in a rolling window. Default 180d window; server clamps
+ * `?since=` to 366d and `?limit=` to 50.
+ */
+export async function getCashbackByMerchant(
+  opts: { since?: string; limit?: number } = {},
+): Promise<CashbackByMerchantResponse> {
+  const params = new URLSearchParams();
+  if (opts.since !== undefined) params.set('since', opts.since);
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return authenticatedRequest<CashbackByMerchantResponse>(
+    `/api/users/me/cashback-by-merchant${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
