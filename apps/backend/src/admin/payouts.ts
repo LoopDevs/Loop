@@ -12,8 +12,14 @@
  */
 import type { Context } from 'hono';
 import { PAYOUT_STATES } from '../db/schema.js';
-import { listPayoutsForAdmin, resetPayoutToPending } from '../credits/pending-payouts.js';
+import {
+  getPayoutForAdmin,
+  listPayoutsForAdmin,
+  resetPayoutToPending,
+} from '../credits/pending-payouts.js';
 import { logger } from '../logger.js';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const log = logger.child({ handler: 'admin-payouts' });
 
@@ -111,6 +117,37 @@ export async function adminListPayoutsHandler(c: Context): Promise<Response> {
     limit,
   });
   return c.json({ payouts: rows.map((r) => toView(r as PayoutRow)) });
+}
+
+/**
+ * GET /api/admin/payouts/:id — single-row drill-down. The list
+ * endpoint at `/api/admin/payouts` truncates the admin UI at 100 rows
+ * and has no per-row permalink; this endpoint is what the admin table
+ * links each row to so ops can deep-link a specific stuck payout into
+ * a ticket / incident note without hunting for the row in the list.
+ *
+ * 400 on missing / malformed id (must be a uuid — the column is a uuid
+ * pk, so anything else is guaranteed to miss). 404 when the row
+ * doesn't exist. 500 on repo throw.
+ */
+export async function adminGetPayoutHandler(c: Context): Promise<Response> {
+  const id = c.req.param('id');
+  if (id === undefined || id.length === 0) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'id is required' }, 400);
+  }
+  if (!UUID_RE.test(id)) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'id must be a uuid' }, 400);
+  }
+  try {
+    const row = await getPayoutForAdmin(id);
+    if (row === null) {
+      return c.json({ code: 'NOT_FOUND', message: 'Payout not found' }, 404);
+    }
+    return c.json<AdminPayoutView>(toView(row as PayoutRow));
+  } catch (err) {
+    log.error({ err, payoutId: id }, 'Admin payout detail failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch payout' }, 500);
+  }
 }
 
 /**

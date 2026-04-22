@@ -7,9 +7,11 @@ vi.mock('../../db/schema.js', () => ({
 
 const listMock = vi.fn();
 const resetMock = vi.fn();
+const getMock = vi.fn();
 vi.mock('../../credits/pending-payouts.js', () => ({
   listPayoutsForAdmin: (opts: unknown) => listMock(opts),
   resetPayoutToPending: (id: string) => resetMock(id),
+  getPayoutForAdmin: (id: string) => getMock(id),
 }));
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -17,7 +19,11 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-import { adminListPayoutsHandler, adminRetryPayoutHandler } from '../payouts.js';
+import {
+  adminGetPayoutHandler,
+  adminListPayoutsHandler,
+  adminRetryPayoutHandler,
+} from '../payouts.js';
 
 function makeCtx(query: Record<string, string> = {}, params: Record<string, string> = {}): Context {
   return {
@@ -56,6 +62,7 @@ beforeEach(() => {
   listMock.mockReset();
   listMock.mockResolvedValue([baseRow]);
   resetMock.mockReset();
+  getMock.mockReset();
 });
 
 describe('adminListPayoutsHandler', () => {
@@ -124,6 +131,57 @@ describe('adminListPayoutsHandler', () => {
     expect(body.payouts[0]!['confirmedAt']).toBe('2026-04-21T13:05:00.000Z');
     expect(body.payouts[0]!['failedAt']).toBeNull();
     expect(body.payouts[0]!['txHash']).toBe('abc');
+  });
+});
+
+describe('adminGetPayoutHandler', () => {
+  const validId = '11111111-2222-3333-4444-555555555555';
+
+  it('400 when id param is missing', async () => {
+    const res = await adminGetPayoutHandler(makeCtx({}, {}));
+    expect(res.status).toBe(400);
+    expect(getMock).not.toHaveBeenCalled();
+  });
+
+  it('400 when id is not a uuid', async () => {
+    const res = await adminGetPayoutHandler(makeCtx({}, { id: 'not-a-uuid' }));
+    expect(res.status).toBe(400);
+    expect(getMock).not.toHaveBeenCalled();
+  });
+
+  it('404 when the row is not found', async () => {
+    getMock.mockResolvedValue(null);
+    const res = await adminGetPayoutHandler(makeCtx({}, { id: validId }));
+    expect(res.status).toBe(404);
+    expect(getMock).toHaveBeenCalledWith(validId);
+  });
+
+  it('returns the BigInt-safe view on hit', async () => {
+    getMock.mockResolvedValue({
+      ...baseRow,
+      id: validId,
+      state: 'confirmed',
+      submittedAt: new Date('2026-04-21T13:00:00Z'),
+      confirmedAt: new Date('2026-04-21T13:05:00Z'),
+      txHash: 'abc',
+    });
+    const res = await adminGetPayoutHandler(makeCtx({}, { id: validId }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      id: validId,
+      state: 'confirmed',
+      amountStroops: '50000000',
+      submittedAt: '2026-04-21T13:00:00.000Z',
+      confirmedAt: '2026-04-21T13:05:00.000Z',
+      txHash: 'abc',
+    });
+  });
+
+  it('500 when the repo throws', async () => {
+    getMock.mockRejectedValue(new Error('db exploded'));
+    const res = await adminGetPayoutHandler(makeCtx({}, { id: validId }));
+    expect(res.status).toBe(500);
   });
 });
 

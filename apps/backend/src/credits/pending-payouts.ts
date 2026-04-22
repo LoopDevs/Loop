@@ -200,3 +200,13 @@ export async function resetPayoutToPending(id: string): Promise<PendingPayout | 
     .returning();
   return row ?? null;
 }
+
+/**
+ * Single-row lookup for the admin drill-down (complement to the list
+ * at `listPayoutsForAdmin`). Returns null when the id matches nothing;
+ * the handler turns that into a 404.
+ */
+export async function getPayoutForAdmin(id: string): Promise<PendingPayout | null> {
+  const [row] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, id)).limit(1);
+  return row ?? null;
+}
