@@ -118,7 +118,9 @@ describe('<AdminPayoutDetailRoute />', () => {
   });
 
   it('renders a 404 body when the payout is not found', async () => {
-    adminMock.getAdminPayout.mockRejectedValue(new ApiException(404, 'Not found'));
+    adminMock.getAdminPayout.mockRejectedValue(
+      new ApiException(404, { code: 'NOT_FOUND', message: 'Not found' }),
+    );
     renderAt();
     await waitFor(() => {
       expect(screen.getByText(/Payout not found/)).toBeDefined();
