@@ -18,65 +18,23 @@
  * being owed an extra penny we haven't reserved.
  */
 import { and, eq } from 'drizzle-orm';
+import { FALLBACK_CASHBACK_SPLIT, splitCashbackFaceValue, type CashbackSplit } from '@loop/shared';
 import { db } from '../db/client.js';
 import { orders, merchantCashbackConfigs, type OrderPaymentMethod } from '../db/schema.js';
 
 export type Order = typeof orders.$inferSelect;
-
-export interface CashbackSplit {
-  wholesalePct: string;
-  userCashbackPct: string;
-  loopMarginPct: string;
-  wholesaleMinor: bigint;
-  userCashbackMinor: bigint;
-  loopMarginMinor: bigint;
-}
-
-/**
- * Default split applied when no `merchant_cashback_configs` row
- * exists for a merchant. All three pcts are zero — Loop hasn't set
- * commercial terms for this merchant yet, so we take nothing, give
- * nothing back, and wholesale = face value (Loop pays CTX full-price
- * for the card). Admin must configure the merchant before any margin
- * or cashback can accrue.
- */
-const FALLBACK_SPLIT: CashbackSplit = {
-  wholesalePct: '100.00',
-  userCashbackPct: '0.00',
-  loopMarginPct: '0.00',
-  wholesaleMinor: 0n,
-  userCashbackMinor: 0n,
-  loopMarginMinor: 0n,
-};
-
-/**
- * Multiplies a minor-unit amount by a NUMERIC(5,2)-typed pct string,
- * flooring. "10.00" → 1000 hundredths-of-a-percent, "7.5" → 750,
- * "7" → 700. Integer path exists for the edge case where postgres /
- * drizzle might hand us a bare integer; normal writes go through a
- * NUMERIC(5,2) column which round-trips as "X.YY".
- */
-function applyPct(faceValueMinor: bigint, pctAsString: string): bigint {
-  const dotIndex = pctAsString.indexOf('.');
-  let hundredths: bigint;
-  if (dotIndex === -1) {
-    hundredths = BigInt(pctAsString) * 100n;
-  } else {
-    const integerPart = pctAsString.slice(0, dotIndex);
-    const decimalPart = pctAsString
-      .slice(dotIndex + 1)
-      .padEnd(2, '0')
-      .slice(0, 2);
-    hundredths = BigInt(integerPart) * 100n + BigInt(decimalPart);
-  }
-  // value × pct/100 = value × hundredths / 10_000.
-  return (faceValueMinor * hundredths) / 10_000n;
-}
+export type { CashbackSplit };
 
 /**
  * Reads the current cashback config for a merchant and derives the
- * split for `faceValueMinor`. Falls back to a zero-split if the
- * merchant has no configured row (admin hasn't onboarded them).
+ * split for `faceValueMinor`. Falls back to a zero-split (wholesale =
+ * face value) if the merchant has no configured row or the row is
+ * inactive — admin hasn't onboarded them yet.
+ *
+ * The math itself lives in `@loop/shared/cashback` so the web side
+ * can show live previews ("you'll earn £0.42 on this £25 card")
+ * without a round-trip. This wrapper owns the DB read + the fallback
+ * policy; the split arithmetic is pure.
  *
  * Returns numbers ready to INSERT straight into the `orders` row —
  * pcts as strings (matching the `numeric(5,2)` column type) and
@@ -91,24 +49,16 @@ export async function computeCashbackSplit(args: {
   });
   if (config === undefined || config === null || !config.active) {
     return {
-      ...FALLBACK_SPLIT,
+      ...FALLBACK_CASHBACK_SPLIT,
       wholesaleMinor: args.faceValueMinor,
     };
   }
-  const userCashbackMinor = applyPct(args.faceValueMinor, config.userCashbackPct);
-  const loopMarginMinor = applyPct(args.faceValueMinor, config.loopMarginPct);
-  // Wholesale = face value - cashback - margin. Residual from the
-  // flooring lands in wholesale; Loop overpays CTX by a few minor
-  // units in the worst case, never the other way around.
-  const wholesaleMinor = args.faceValueMinor - userCashbackMinor - loopMarginMinor;
-  return {
+  return splitCashbackFaceValue({
+    faceValueMinor: args.faceValueMinor,
     wholesalePct: config.wholesalePct,
     userCashbackPct: config.userCashbackPct,
     loopMarginPct: config.loopMarginPct,
-    wholesaleMinor,
-    userCashbackMinor,
-    loopMarginMinor,
-  };
+  });
 }
 
 /**
