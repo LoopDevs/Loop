@@ -264,6 +264,7 @@ GET  /api/admin/users/:userId/credit-transactions       [admin — per-user cred
 GET  /api/admin/users/:userId/credit-transactions.csv   [admin — per-user credit-ledger CSV for compliance / SAR, ADR 009/015]
 POST /api/admin/merchants/resync                        [admin — force an immediate CTX merchant-catalog sweep, ADR 011]
 GET  /api/admin/discord/notifiers                       [admin — static catalog of Discord notifiers, ADR 018]
+POST /api/admin/discord/test                            [admin — fire a benign test ping at a Discord channel, ADR 018]
 ```
 
 Full request/response shapes — including field types, pagination

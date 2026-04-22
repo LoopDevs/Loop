@@ -74,6 +74,7 @@ import { adminUserByEmailHandler } from './admin/user-by-email.js';
 import { adminListUsersHandler } from './admin/users-list.js';
 import { adminMerchantsResyncHandler } from './admin/merchants-resync.js';
 import { adminDiscordNotifiersHandler } from './admin/discord-notifiers.js';
+import { adminDiscordTestHandler } from './admin/discord-test.js';
 import { adminCreditAdjustmentHandler } from './admin/credit-adjustments.js';
 import { publicCashbackStatsHandler } from './public/cashback-stats.js';
 import { publicTopCashbackMerchantsHandler } from './public/top-cashback-merchants.js';
@@ -879,6 +880,11 @@ app.post('/api/admin/merchants/resync', rateLimit(2, 60_000), adminMerchantsResy
 // DISCORD_NOTIFIERS const — the admin UI renders "what signals can
 // this system send us?" from this list. No DB, no secrets.
 app.get('/api/admin/discord/notifiers', rateLimit(60, 60_000), adminDiscordNotifiersHandler);
+// Manual Discord test ping. Admin picks a channel, backend fires a
+// benign embed at the configured webhook so ops can verify wiring
+// after rotating env vars. 10/min — this is a manual ops primitive,
+// spamming looks like webhook enumeration.
+app.post('/api/admin/discord/test', rateLimit(10, 60_000), adminDiscordTestHandler);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 

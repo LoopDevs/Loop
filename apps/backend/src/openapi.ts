@@ -2716,6 +2716,60 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'post',
+  path: '/api/admin/discord/test',
+  summary: 'Fire a benign test ping at a Discord webhook (ADR 018).',
+  description:
+    "Manual ops primitive — admin picks one of the three channels (`orders`, `monitoring`, `admin-audit`), backend posts a test embed at the corresponding webhook URL. A 200 means delivery was attempted (webhook sends are fire-and-forget per ADR 018); a 409 `WEBHOOK_NOT_CONFIGURED` means the channel's env var is unset, so the UI can show 'webhook not configured' instead of a silent success. Tight 10/min rate limit because this is a manual primitive and spamming would be indistinguishable from webhook-URL enumeration.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: z.object({
+            channel: z.enum(['orders', 'monitoring', 'admin-audit']),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Delivery attempted; ping sent to the channel',
+      content: {
+        'application/json': {
+          schema: z.object({
+            status: z.literal('delivered'),
+            channel: z.enum(['orders', 'monitoring', 'admin-audit']),
+          }),
+        },
+      },
+    },
+    400: {
+      description: 'Body missing or channel unknown',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    409: {
+      description: "The channel's webhook env var is unset (WEBHOOK_NOT_CONFIGURED)",
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
   method: 'get',
   path: '/api/admin/payouts.csv',
   summary: 'CSV export of pending_payouts (ADR 015).',
