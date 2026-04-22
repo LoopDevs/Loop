@@ -14,6 +14,7 @@ import { getMe, setHomeCurrency, setStellarAddress, type UserMeView } from '~/se
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { PendingPayoutsCard } from '~/components/features/cashback/PendingPayoutsCard';
+import { TrustlineSetupCard } from '~/components/features/wallet/TrustlineSetupCard';
 import { copyToClipboard } from '~/native/clipboard';
 
 export function meta(): Route.MetaDescriptors {
@@ -258,6 +259,13 @@ export default function SettingsWalletRoute(): React.JSX.Element {
           user can watch a payout transition pending → submitted →
           confirmed without reloading. */}
       {linked ? <PendingPayoutsCard /> : null}
+
+      {/* Trustline setup helper — self-hides on error / empty-list /
+          unconfigured deployments. Shown to every visitor (linked or
+          not) because opening a trustline is a wallet-side action
+          that happens before the user sees their first payout, so
+          the card should be visible up-front on first arrival. */}
+      <TrustlineSetupCard />
 
       <section
         aria-labelledby="link-heading"
