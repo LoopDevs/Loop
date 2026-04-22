@@ -28,6 +28,7 @@
 | `docs/adr/014-social-login-google-apple.md`                 | Google + Apple social login, verified server-side             |
 | `docs/adr/015-stablecoin-topology-and-payment-rails.md`     | USDLOOP/GBPLOOP/EURLOOP + USDC + XLM asset flows              |
 | `docs/adr/016-stellar-sdk-payout-submit.md`                 | Stellar SDK for outbound payout submit + retry + idempotency  |
+| `docs/adr/017-admin-credit-primitives.md`                   | Admin adjustment / refund / credit-history ledger writes      |
 
 ---
 
