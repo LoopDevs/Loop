@@ -688,6 +688,31 @@ export async function getTopUsersByPendingPayout(
   );
 }
 
+/** Response shape from POST /api/admin/merchants/resync. */
+export interface AdminMerchantResyncResponse {
+  /** Merchant count after the sweep (not delta vs. pre-sync). */
+  merchantCount: number;
+  /** ISO-8601 of the currently-loaded snapshot. */
+  loadedAt: string;
+  /** Whether THIS call advanced the store (vs. coalesced with an in-flight sweep). */
+  triggered: boolean;
+}
+
+/**
+ * `POST /api/admin/merchants/resync` — force an immediate CTX catalog
+ * sweep (ADR 011). Bypasses the 6h scheduled refresh so a merchant
+ * change lands within seconds. Two admins clicking simultaneously
+ * coalesce into one upstream sweep via the backend mutex (one
+ * response carries `triggered: true`, the other `triggered: false`
+ * with the same post-sync `loadedAt`). 502 on upstream failure;
+ * cached snapshot is retained.
+ */
+export async function resyncMerchants(): Promise<AdminMerchantResyncResponse> {
+  return authenticatedRequest<AdminMerchantResyncResponse>('/api/admin/merchants/resync', {
+    method: 'POST',
+  });
+}
+
 /** One credit-balance row per (user, currency) from `/api/admin/users/:userId/credits`. */
 export interface AdminUserCreditRow {
   currency: string;

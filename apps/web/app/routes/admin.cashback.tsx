@@ -15,6 +15,7 @@ import {
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
+import { MerchantResyncButton } from '~/components/features/admin/MerchantResyncButton';
 import { MerchantStatsTable } from '~/components/features/admin/MerchantStatsTable';
 import { Button } from '~/components/ui/Button';
 import { Spinner } from '~/components/ui/Spinner';
@@ -158,13 +159,23 @@ export default function AdminCashbackRoute(): React.JSX.Element {
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
       <AdminNav />
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
-        Cashback configuration
-      </h1>
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-        Three percentages per merchant. Must sum to at most the CTX discount for that merchant (100%
-        cap enforced). Edits apply to new orders; in-flight orders keep their pinned split.
-      </p>
+      <div className="flex items-start justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
+            Cashback configuration
+          </h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Three percentages per merchant. Must sum to at most the CTX discount for that merchant
+            (100% cap enforced). Edits apply to new orders; in-flight orders keep their pinned
+            split.
+          </p>
+        </div>
+        {/* Manual CTX catalog resync (ADR 011). Natural home here — the
+            page edits configs keyed on merchant id, so after a new
+            merchant lands upstream the admin wants to see it appear in
+            this table without waiting 6h for the scheduled sweep. */}
+        <MerchantResyncButton />
+      </div>
 
       {saveError !== null && (
         <div className="mb-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-700 dark:text-red-300">
