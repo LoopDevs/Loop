@@ -713,6 +713,27 @@ export async function resyncMerchants(): Promise<AdminMerchantResyncResponse> {
   });
 }
 
+/** One notifier in the Discord catalog (ADR 018 / #572). */
+export interface AdminDiscordNotifier {
+  name: string;
+  channel: 'orders' | 'monitoring' | 'admin-audit';
+  description: string;
+}
+
+export interface AdminDiscordNotifiersResponse {
+  notifiers: AdminDiscordNotifier[];
+}
+
+/**
+ * `GET /api/admin/discord/notifiers` — static read of the backend's
+ * `DISCORD_NOTIFIERS` const. Zero DB, no secrets (`channel` is the
+ * symbolic name, not the webhook URL). Admin UI renders "what
+ * signals can this system send us?" from this list.
+ */
+export async function getAdminDiscordNotifiers(): Promise<AdminDiscordNotifiersResponse> {
+  return authenticatedRequest<AdminDiscordNotifiersResponse>('/api/admin/discord/notifiers');
+}
+
 /** One credit-balance row per (user, currency) from `/api/admin/users/:userId/credits`. */
 export interface AdminUserCreditRow {
   currency: string;
