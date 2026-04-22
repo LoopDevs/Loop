@@ -20,5 +20,6 @@ export default [
   route('admin/stuck-orders', 'routes/admin.stuck-orders.tsx'),
   route('admin/users', 'routes/admin.users.tsx'),
   route('admin/users/:userId', 'routes/admin.users.$userId.tsx'),
+  route('admin/audit', 'routes/admin.audit.tsx'),
   route('*', 'routes/not-found.tsx'),
 ] satisfies RouteConfig;
