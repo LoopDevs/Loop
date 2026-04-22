@@ -49,6 +49,7 @@ import {
   adminRetryPayoutHandler,
 } from './admin/payouts.js';
 import { adminPayoutsCsvHandler } from './admin/payouts-csv.js';
+import { adminPayoutsByAssetHandler } from './admin/payouts-by-asset.js';
 import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js';
 import { adminOrdersCsvHandler } from './admin/orders-csv.js';
 import { adminStuckOrdersHandler } from './admin/stuck-orders.js';
@@ -696,6 +697,12 @@ app.get('/api/admin/payouts', rateLimit(60, 60_000), adminListPayoutsHandler);
 // an ops ticket / incident note). Higher rate limit than the list
 // because the admin UI deep-links individual rows on every navigation.
 app.get('/api/admin/payouts/:id', rateLimit(120, 60_000), adminGetPayoutHandler);
+// Per-asset payout breakdown — crosses asset_code × state for the
+// LOOP stablecoin triage view (ADR 015/016). Admin UI renders this
+// on the treasury page as a per-asset table next to the flat payout
+// list, so an incident in one asset doesn't get lost in the volume
+// of another.
+app.get('/api/admin/payouts-by-asset', rateLimit(60, 60_000), adminPayoutsByAssetHandler);
 // POST /api/admin/payouts/:id/retry — flip a failed row back to pending.
 // Lower rate limit: retries should be rare, one-at-a-time ops actions.
 app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayoutHandler);
