@@ -174,11 +174,23 @@ export interface AdminAuditTailResponse {
 /**
  * `GET /api/admin/audit-tail` — newest-first tail of
  * `admin_idempotency_keys`. Admin landing surfaces this as a
- * "recent admin activity" card.
+ * "recent admin activity" card; the standalone `/admin/audit` page
+ * passes `before` to page older rows past the endpoint's 100-row
+ * cap.
  */
-export async function getAdminAuditTail(limit?: number): Promise<AdminAuditTailResponse> {
-  const qs = limit !== undefined ? `?limit=${limit}` : '';
-  return authenticatedRequest<AdminAuditTailResponse>(`/api/admin/audit-tail${qs}`);
+export async function getAdminAuditTail(
+  opts: { limit?: number; before?: string } | number = {},
+): Promise<AdminAuditTailResponse> {
+  // Back-compat: callers passing a raw number (the original signature,
+  // still used by AdminAuditTail on the landing page) keep working.
+  const resolved = typeof opts === 'number' ? { limit: opts } : opts;
+  const params = new URLSearchParams();
+  if (resolved.limit !== undefined) params.set('limit', String(resolved.limit));
+  if (resolved.before !== undefined) params.set('before', resolved.before);
+  const qs = params.toString();
+  return authenticatedRequest<AdminAuditTailResponse>(
+    `/api/admin/audit-tail${qs.length > 0 ? `?${qs}` : ''}`,
+  );
 }
 
 /**

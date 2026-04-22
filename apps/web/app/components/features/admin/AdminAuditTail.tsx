@@ -73,14 +73,22 @@ export function AdminAuditTail(): React.JSX.Element {
 
   return (
     <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-      <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
-        <h2 className="text-base font-semibold text-gray-900 dark:text-white">
-          Recent admin activity
-        </h2>
-        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          Newest first, from the ADR 017 <code className="font-mono">admin_idempotency_keys</code>{' '}
-          store (same rows as the Discord audit channel).
-        </p>
+      <header className="flex items-start justify-between gap-4 border-b border-gray-200 px-6 py-4 dark:border-gray-800">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+            Recent admin activity
+          </h2>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Newest first, from the ADR 017 <code className="font-mono">admin_idempotency_keys</code>{' '}
+            store (same rows as the Discord audit channel).
+          </p>
+        </div>
+        <Link
+          to="/admin/audit"
+          className="shrink-0 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+        >
+          Full audit →
+        </Link>
       </header>
 
       {query.isPending ? (
