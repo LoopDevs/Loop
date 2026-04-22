@@ -1397,6 +1397,43 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/public/cashback-stats',
+  summary: 'Marketing headline — cashback aggregate numbers (ADR 011 / 015).',
+  description:
+    'Unauthenticated aggregate over `merchant_cashback_configs` filtered to `active=true` and `user_cashback_pct > 0`. Drives the loopfinance.io hero ("N brands · avg X% · up to Y%"). Never 500s — a db failure returns the zero shape with a shorter 60s cache so the landing page always renders. Successful responses cache for 300s.',
+  tags: ['Public'],
+  responses: {
+    200: {
+      description: 'Aggregate numbers (or zero shape when nothing matches)',
+      content: {
+        'application/json': {
+          schema: z.object({
+            merchantsWithCashback: z.number().int().nonnegative(),
+            averageCashbackPct: z
+              .string()
+              .regex(/^\d{1,3}\.\d{2}$/)
+              .openapi({
+                description: '2-decimal percent as string, e.g. "12.35".',
+              }),
+            topCashbackPct: z
+              .string()
+              .regex(/^\d{1,3}\.\d{2}$/)
+              .openapi({
+                description: 'Max user_cashback_pct across active rows, same 2-decimal form.',
+              }),
+          }),
+        },
+      },
+    },
+    429: {
+      description: 'Rate limit exceeded (300/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/image',
   summary: 'Fetch, resize, and re-encode a remote image (SSRF-validated).',
   tags: ['Images'],
