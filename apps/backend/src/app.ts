@@ -58,6 +58,7 @@ import { adminAuditTailCsvHandler } from './admin/audit-tail-csv.js';
 import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js';
 import { adminOrdersActivityHandler } from './admin/orders-activity.js';
 import { adminPaymentMethodShareHandler } from './admin/payment-method-share.js';
+import { adminPaymentMethodActivityHandler } from './admin/payment-method-activity.js';
 import { adminOrdersCsvHandler } from './admin/orders-csv.js';
 import { adminStuckOrdersHandler } from './admin/stuck-orders.js';
 import { adminStuckPayoutsHandler } from './admin/stuck-payouts.js';
@@ -793,6 +794,16 @@ app.get(
   '/api/admin/orders/payment-method-share',
   rateLimit(60, 60_000),
   adminPaymentMethodShareHandler,
+);
+// Time-series complement to /payment-method-share. Same four-rail
+// shape but bucketed per UTC day, capped at 90d, so the trend side
+// of the flywheel signal is observable — share is "where are we
+// now", activity is "where are we going". Registered before
+// /:orderId for the same literal-vs-param reason as its sibling.
+app.get(
+  '/api/admin/orders/payment-method-activity',
+  rateLimit(60, 60_000),
+  adminPaymentMethodActivityHandler,
 );
 // Single-order drill-down (ADR 011 / 015). Permalink for an ops
 // ticket or incident note. Higher rate-limit than the list because
