@@ -41,6 +41,7 @@ import { googleSocialLoginHandler, appleSocialLoginHandler } from './auth/social
 import { notifyHealthChange } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
+import { adminConfigsHistoryCsvHandler } from './admin/configs-history-csv.js';
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
@@ -640,6 +641,14 @@ app.get(
   '/api/admin/merchant-cashback-configs/:merchantId/history',
   rateLimit(120, 60_000),
   configHistoryHandler,
+);
+// Tier 3 CSV companion to the /:merchantId/history JSON feed — across
+// all merchants. One segment after configs (same depth as .csv) so
+// no conflict with the two-segment /:merchantId/history above.
+app.get(
+  '/api/admin/merchant-cashback-configs/history.csv',
+  rateLimit(20, 60_000),
+  adminConfigsHistoryCsvHandler,
 );
 app.get('/api/admin/treasury', rateLimit(60, 60_000), treasuryHandler);
 // Pending-payouts backlog list (ADR 015). Admin UI's "payouts" page

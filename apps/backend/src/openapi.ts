@@ -1329,6 +1329,44 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/merchant-cashback-configs/history.csv',
+  summary: 'Tier 3 CSV export of cashback-config history across all merchants (ADR 011 / 019).',
+  description:
+    'Companion to the JSON global history feed. Streams `text/csv` with the same field set — `id`, `changed_at` (UTC ISO), `merchant_id`, `merchant_name` (falls back to id per ADR 021 Rule A), the three pct columns, `active`, and `changed_by`. Newest-first ordering, 10 000-row cap with `__TRUNCATED__` sentinel + `log.warn` on hit. `Cache-Control: private, no-store` since `changed_by` is admin-identifying.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'CSV body',
+      content: {
+        'text/csv': {
+          schema: z.string().openapi({
+            description: 'RFC 4180 CSV; first line is the header, trailing CRLF.',
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (20/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error exporting the CSV',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/merchant-cashback-configs/{merchantId}/history',
   summary: 'Audit-log history for one merchant cashback config (ADR 011).',
   description:
