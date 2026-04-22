@@ -59,6 +59,7 @@ import { adminStuckOrdersHandler } from './admin/stuck-orders.js';
 import { adminCashbackActivityHandler } from './admin/cashback-activity.js';
 import { adminMerchantStatsHandler } from './admin/merchant-stats.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
+import { adminOperatorStatsHandler } from './admin/operator-stats.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
 import { adminUserCreditTransactionsHandler } from './admin/user-credit-transactions.js';
 import { adminGetUserHandler } from './admin/user-detail.js';
@@ -753,6 +754,12 @@ app.get('/api/admin/orders/:orderId/payout', rateLimit(120, 60_000), adminPayout
 // renders this on the treasury page as the "supplier" card next to
 // outstanding liabilities.
 app.get('/api/admin/supplier-spend', rateLimit(60, 60_000), adminSupplierSpendHandler);
+// Per-operator breakdown of which CTX service account carried which
+// orders (ADR 013). Complements supplier-spend: spend is *what* Loop
+// paid CTX per currency, operator-stats is *which operator* carried
+// the traffic — the two answer different questions during an
+// incident so they live side-by-side on the treasury page.
+app.get('/api/admin/operator-stats', rateLimit(60, 60_000), adminOperatorStatsHandler);
 // Top users by cashback earned — recognition + concentration-risk
 // view for ops. Ranked, window-bounded; not a drill path.
 app.get('/api/admin/top-users', rateLimit(60, 60_000), adminTopUsersHandler);
