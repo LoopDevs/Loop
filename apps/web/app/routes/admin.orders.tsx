@@ -90,6 +90,18 @@ export default function AdminOrdersRoute(): React.JSX.Element {
     chargeCurrencyRaw !== null && ['USD', 'GBP', 'EUR'].includes(chargeCurrencyRaw)
       ? chargeCurrencyRaw
       : undefined;
+  const ctxOperatorIdRaw = searchParams.get('ctxOperatorId');
+  // Operator ids are free-form opaque strings (ADR 013). Mirror the
+  // backend shape check here so a pasted id with whitespace silently
+  // surfaces an unfiltered list instead of a 400 the user can't debug
+  // from the URL.
+  const ctxOperatorIdFilter =
+    ctxOperatorIdRaw !== null &&
+    ctxOperatorIdRaw.length > 0 &&
+    ctxOperatorIdRaw.length <= 128 &&
+    /^[A-Za-z0-9._-]+$/.test(ctxOperatorIdRaw)
+      ? ctxOperatorIdRaw
+      : undefined;
   const [stateFilter, setStateFilter] = useState<AdminOrderState | 'all'>('all');
   // Cursor list — each Load more pushes the last row's `createdAt`
   // so pages stay stable across refetches (offset pagination would
@@ -211,6 +223,38 @@ export default function AdminOrdersRoute(): React.JSX.Element {
         </div>
       ) : null}
 
+      {/* Active ctx-operator filter — sourced from `?ctxOperatorId=`.
+          Drill-in target from the treasury operator-pool list + the
+          row-level operator pill below. ADR-013 framing: an operator
+          id is which CTX service account carried this order, so the
+          per-operator slice is the natural "which operator is flaky"
+          question ops reaches for during an incident. */}
+      {ctxOperatorIdFilter !== undefined ? (
+        <div
+          role="status"
+          className="flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200"
+        >
+          <span>
+            Filtered to CTX operator{' '}
+            <code className="font-mono text-xs">{ctxOperatorIdFilter}</code>
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                next.delete('ctxOperatorId');
+                return next;
+              });
+              setCursors([undefined]);
+            }}
+            className="text-xs font-medium underline hover:no-underline"
+          >
+            Clear
+          </button>
+        </div>
+      ) : null}
+
       <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
         {cursors.map((cursor, idx) => (
           <OrdersPage
@@ -218,6 +262,7 @@ export default function AdminOrdersRoute(): React.JSX.Element {
             state={stateFilter}
             merchantId={merchantIdFilter}
             chargeCurrency={chargeCurrencyFilter}
+            ctxOperatorId={ctxOperatorIdFilter}
             cursor={cursor}
             isLastPage={idx === cursors.length - 1}
             onLoadMore={(nextCursor) => {
@@ -234,6 +279,7 @@ function OrdersPage({
   state,
   merchantId,
   chargeCurrency,
+  ctxOperatorId,
   cursor,
   isLastPage,
   onLoadMore,
@@ -241,6 +287,7 @@ function OrdersPage({
   state: AdminOrderState | 'all';
   merchantId: string | undefined;
   chargeCurrency: string | undefined;
+  ctxOperatorId: string | undefined;
   cursor: string | undefined;
   isLastPage: boolean;
   onLoadMore: (nextCursor: string) => void;
@@ -251,6 +298,7 @@ function OrdersPage({
       state,
       merchantId ?? null,
       chargeCurrency ?? null,
+      ctxOperatorId ?? null,
       cursor ?? null,
       PAGE_SIZE,
     ],
@@ -260,6 +308,7 @@ function OrdersPage({
         ...(state !== 'all' ? { state } : {}),
         ...(merchantId !== undefined ? { merchantId } : {}),
         ...(chargeCurrency !== undefined ? { chargeCurrency } : {}),
+        ...(ctxOperatorId !== undefined ? { ctxOperatorId } : {}),
         ...(cursor !== undefined ? { before: cursor } : {}),
       }),
     retry: shouldRetry,
@@ -384,7 +433,17 @@ function OrderRow({ row }: { row: AdminOrderView }): React.JSX.Element {
           className="text-[11px] text-gray-500 dark:text-gray-400 truncate"
           title={row.ctxOperatorId ?? ''}
         >
-          {row.ctxOperatorId !== null ? `op ${row.ctxOperatorId.slice(0, 10)}` : 'no operator'}
+          {row.ctxOperatorId !== null ? (
+            <Link
+              to={`/admin/orders?ctxOperatorId=${encodeURIComponent(row.ctxOperatorId)}`}
+              className="text-blue-600 hover:underline dark:text-blue-400"
+              aria-label={`Show all orders carried by operator ${row.ctxOperatorId}`}
+            >
+              op {row.ctxOperatorId.slice(0, 10)}
+            </Link>
+          ) : (
+            'no operator'
+          )}
         </p>
       </div>
       <div className="min-w-0">
