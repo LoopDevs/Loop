@@ -70,6 +70,11 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
     (order.redeemCode !== null && order.redeemCode.length > 0) ||
     (order.redeemPin !== null && order.redeemPin.length > 0) ||
     (order.redeemUrl !== null && order.redeemUrl.length > 0);
+  // Surface earned cashback on the row's always-visible line so the
+  // user doesn't have to expand to see what they earned. Hide when
+  // the backend recorded zero (e.g. a margin-only merchant or a
+  // pre-ADR-011 order) rather than printing "+0.00 cashback".
+  const hasEarnedCashback = isFulfilled && order.userCashbackMinor !== '0';
 
   return (
     <li>
@@ -84,9 +89,16 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
           <div className="text-xs text-gray-500 dark:text-gray-400">{date}</div>
         </div>
         <div className="flex items-center gap-3 ml-4">
-          <span className="text-sm font-semibold text-gray-900 dark:text-white tabular-nums">
-            {amount} {order.currency}
-          </span>
+          <div className="text-right">
+            <div className="text-sm font-semibold text-gray-900 dark:text-white tabular-nums">
+              {amount} {order.currency}
+            </div>
+            {hasEarnedCashback ? (
+              <div className="mt-0.5 text-[11px] font-medium text-green-700 dark:text-green-400 tabular-nums">
+                +{formatMinor(order.userCashbackMinor)} cashback
+              </div>
+            ) : null}
+          </div>
           <StatePill state={order.state} />
         </div>
       </button>
