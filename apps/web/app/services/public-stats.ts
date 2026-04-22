@@ -1,6 +1,7 @@
 import type {
   PerCurrencyCashback,
   PublicCashbackStats,
+  PublicMerchantDetail,
   PublicTopCashbackMerchantsResponse,
   TopCashbackMerchant,
 } from '@loop/shared';
@@ -13,6 +14,7 @@ import { apiRequest } from './api-client';
 export type {
   PerCurrencyCashback,
   PublicCashbackStats,
+  PublicMerchantDetail,
   PublicTopCashbackMerchantsResponse,
   TopCashbackMerchant,
 };
@@ -41,6 +43,17 @@ export async function getPublicTopCashbackMerchants(
   return apiRequest<PublicTopCashbackMerchantsResponse>(
     `/api/public/top-cashback-merchants${qs.length > 0 ? `?${qs}` : ''}`,
   );
+}
+
+/**
+ * `GET /api/public/merchants/:id` (#647) — unauthenticated single-
+ * merchant detail for the SEO landing page. Accepts id or slug.
+ * Never-500 on DB trouble (last-known-good fallback). 404 for
+ * unknown id/slug — callers should handle that as the
+ * "merchant-not-in-catalog" page.
+ */
+export async function getPublicMerchant(idOrSlug: string): Promise<PublicMerchantDetail> {
+  return apiRequest<PublicMerchantDetail>(`/api/public/merchants/${encodeURIComponent(idOrSlug)}`);
 }
 
 /**
