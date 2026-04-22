@@ -159,6 +159,20 @@ export interface TreasuryHolding {
   stroops: string | null;
 }
 
+/**
+ * ADR 015 — per charge-currency flow of fulfilled orders. Each row
+ * sums how much Loop paid CTX (wholesale), credited users (cashback),
+ * and kept (margin), alongside the face value and order count.
+ * BigInt-as-string for precision across currencies.
+ */
+export interface TreasuryOrderFlow {
+  count: string;
+  faceValueMinor: string;
+  wholesaleMinor: string;
+  userCashbackMinor: string;
+  loopMarginMinor: string;
+}
+
 export interface TreasurySnapshot {
   /** Outstanding credit (what Loop owes users), keyed by currency. Minor units, string. */
   outstanding: Record<string, string>;
@@ -173,6 +187,8 @@ export interface TreasurySnapshot {
   };
   /** ADR 015 — outbound Stellar cashback payouts at each state. */
   payouts: Record<PayoutState, string>;
+  /** ADR 015 — fulfilled-order flows per charge currency (CTX supplier P&L). */
+  orderFlows: Record<string, TreasuryOrderFlow>;
   /** CTX operator pool snapshot — ADR 013. */
   operatorPool: {
     size: number;

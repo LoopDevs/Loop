@@ -48,6 +48,7 @@ function baseSnapshot(
       EURLOOP: { outstandingMinor: '0', issuer: null },
     },
     assets: { USDC: { stroops: null }, XLM: { stroops: null } },
+    orderFlows: {},
     payouts: {
       pending: '0',
       submitted: '0',
