@@ -122,6 +122,35 @@ describe('LoopOrdersList', () => {
     expect(screen.getByText('CTX returned 500')).toBeDefined();
   });
 
+  it('surfaces earned cashback on the always-visible row for fulfilled orders', async () => {
+    listMock.mockResolvedValue({
+      orders: [mkOrder({ userCashbackMinor: '250', currency: 'GBP' })],
+    });
+    render(wrap(<LoopOrdersList enabled={true} />));
+    await waitFor(() => screen.getByText('Target'));
+    // `250` minor = `2.50` major — rendered with a leading `+` so it
+    // reads as a credit, not as noise next to the face-value amount.
+    expect(screen.getByText('+2.50 cashback')).toBeDefined();
+  });
+
+  it('hides the cashback pill when userCashbackMinor is zero', async () => {
+    listMock.mockResolvedValue({
+      orders: [mkOrder({ userCashbackMinor: '0' })],
+    });
+    render(wrap(<LoopOrdersList enabled={true} />));
+    await waitFor(() => screen.getByText('Target'));
+    expect(screen.queryByText(/cashback$/i)).toBeNull();
+  });
+
+  it('hides the cashback pill on an unfulfilled order even if minor is non-zero', async () => {
+    listMock.mockResolvedValue({
+      orders: [mkOrder({ state: 'pending_payment', userCashbackMinor: '250' })],
+    });
+    render(wrap(<LoopOrdersList enabled={true} />));
+    await waitFor(() => screen.getByText('Target'));
+    expect(screen.queryByText(/\+2\.50 cashback/)).toBeNull();
+  });
+
   it('shows the redeem URL anchor with noopener when present', async () => {
     listMock.mockResolvedValue({
       orders: [
