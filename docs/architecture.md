@@ -222,6 +222,7 @@ POST /api/users/me/home-currency   [authenticated — first-time-set (order-less
 PUT  /api/users/me/stellar-address [authenticated — link/unlink Stellar wallet for payouts, ADR 015]
 GET  /api/users/me/stellar-trustlines [authenticated — per-LOOP-asset trustline status for caller's linked Stellar address; Horizon-backed 30s cache, ADR 015]
 GET  /api/users/me/cashback-history [authenticated — recent credit-ledger events, ADR 009/015]
+GET  /api/users/me/cashback-history.csv [authenticated — full credit-ledger CSV dump, ADR 009]
 GET  /api/users/me/credits         [authenticated — per-currency balance list, ADR 009/015]
 GET  /api/users/me/pending-payouts  [authenticated — caller's on-chain payout rows, ADR 015/016]
 GET  /api/users/me/pending-payouts/summary [authenticated — aggregate view of in-flight payouts, bucketed by (asset, state), ADR 015/016]
