@@ -36,6 +36,7 @@ import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { MerchantCashbackMonthlyChart } from '~/components/features/admin/MerchantCashbackMonthlyChart';
 import { MerchantCashbackPaidCard } from '~/components/features/admin/MerchantCashbackPaidCard';
+import { MerchantFlywheelActivityChart } from '~/components/features/admin/MerchantFlywheelActivityChart';
 import { MerchantFlywheelChip } from '~/components/features/admin/MerchantFlywheelChip';
 import { MerchantRailMixCard } from '~/components/features/admin/MerchantRailMixCard';
 import { Spinner } from '~/components/ui/Spinner';
@@ -147,6 +148,14 @@ export default function AdminMerchantDetailRoute(): React.JSX.Element {
             without leaving the drill-down. */}
         <div className="mt-4">
           <MerchantFlywheelChip merchantId={merchantId} />
+        </div>
+        {/* Flywheel trajectory sparkline (#641). The scalar chip
+            above says "12% over 31d"; this sparkline says "and
+            here's how that 12% got there, day by day". Green
+            recycled line diverging upward from the blue total
+            line is the shape of pivot success at this merchant. */}
+        <div className="mt-4">
+          <MerchantFlywheelActivityChart merchantId={merchantId} />
         </div>
       </section>
 
