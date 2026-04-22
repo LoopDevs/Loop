@@ -5,6 +5,7 @@ import { useAuth } from '~/hooks/use-auth';
 import { getTreasurySnapshot, type TreasurySnapshot } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { PayoutsByAssetTable } from '~/components/features/admin/PayoutsByAssetTable';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -337,6 +338,19 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
             );
           })}
         </div>
+      </section>
+
+      <section>
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Payouts by asset</h2>
+        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Per-asset × per-state breakdown of <code className="text-xs">pending_payouts</code> (ADR
+          015/016). The flat counts above answer <em>how many</em>; this table answers{' '}
+          <em>which LOOP asset</em> is affected — a failed-row click drills to the payout list
+          filtered to that state.
+        </p>
+        <PayoutsByAssetTable />
       </section>
 
       <section>
