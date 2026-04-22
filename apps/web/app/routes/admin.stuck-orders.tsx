@@ -3,7 +3,12 @@ import { Link, useNavigate } from 'react-router';
 import type { Route } from './+types/admin.stuck-orders';
 import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
-import { getStuckOrders, type StuckOrderRow } from '~/services/admin';
+import {
+  getStuckOrders,
+  getStuckPayouts,
+  type StuckOrderRow,
+  type StuckPayoutRow,
+} from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -160,6 +165,149 @@ export default function AdminStuckOrdersRoute(): React.JSX.Element {
           </table>
         </div>
       )}
+
+      <StuckPayoutsSection />
     </main>
+  );
+}
+
+/**
+ * Stroops-as-string → compact major-unit string ("1.25 GBPLOOP").
+ * Shared with /admin/payouts; inlined here to avoid cross-page
+ * helper drift while the pattern stabilises.
+ */
+function fmtStroops(stroops: string, code: string): string {
+  const negative = stroops.startsWith('-');
+  const digits = negative ? stroops.slice(1) : stroops;
+  if (!/^\d+$/.test(digits)) return '—';
+  const padded = digits.padStart(8, '0');
+  const whole = padded.slice(0, -7);
+  const fractionRaw = padded.slice(-7).replace(/0+$/, '');
+  const fraction = fractionRaw.length > 0 ? `.${fractionRaw}` : '';
+  const sign = negative ? '-' : '';
+  return `${sign}${Number(whole).toLocaleString('en-US')}${fraction} ${code}`;
+}
+
+/**
+ * Parallel triage panel — pending_payouts rows in pending /
+ * submitted past the SLO. Sits below the orders table so ops has
+ * both backlogs visible on one refresh cycle. Poll cadence + age
+ * colour scheme match the orders section for consistency.
+ */
+function StuckPayoutsSection(): React.JSX.Element {
+  const query = useQuery({
+    queryKey: ['admin-stuck-payouts'],
+    queryFn: getStuckPayouts,
+    retry: shouldRetry,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+  });
+
+  return (
+    <section className="space-y-3">
+      <header>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Stuck payouts</h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+          Pending-payouts rows in <code className="font-mono text-xs">pending</code> or{' '}
+          <code className="font-mono text-xs">submitted</code> past the SLO (ADR 015/016). A stuck
+          <code className="font-mono text-xs"> submitted </code>row usually means the Horizon
+          confirmation watcher hasn&rsquo;t seen the tx land yet — check operator funding + asset
+          issuer before retrying.
+        </p>
+      </header>
+
+      {query.isPending ? (
+        <div className="flex justify-center py-6">
+          <Spinner />
+        </div>
+      ) : query.isError ? (
+        <p className="text-red-600 dark:text-red-400 py-4 text-sm">Failed to load stuck payouts.</p>
+      ) : query.data.rows.length === 0 ? (
+        <div className="rounded-xl border border-green-200 bg-green-50 px-6 py-6 text-center text-sm text-green-800 dark:border-green-900/60 dark:bg-green-900/20 dark:text-green-300">
+          No stuck payouts — inside the {query.data.thresholdMinutes}-minute SLO.
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800 text-sm">
+            <thead className="bg-gray-50 dark:bg-gray-900/50">
+              <tr>
+                {['Payout', 'Order', 'User', 'Asset', 'Amount', 'State', 'Age', 'Attempts'].map(
+                  (h) => (
+                    <th
+                      key={h}
+                      className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400"
+                    >
+                      {h}
+                    </th>
+                  ),
+                )}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-900 bg-white dark:bg-gray-900">
+              {query.data.rows.map((row: StuckPayoutRow) => (
+                <tr key={row.id}>
+                  <td className="px-3 py-2">
+                    <Link
+                      to={`/admin/payouts/${row.id}`}
+                      className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
+                      title={row.id}
+                    >
+                      {row.id.slice(0, 8)}
+                    </Link>
+                  </td>
+                  <td className="px-3 py-2">
+                    <Link
+                      to={`/admin/orders/${row.orderId}`}
+                      className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
+                      title={row.orderId}
+                    >
+                      {row.orderId.slice(0, 8)}
+                    </Link>
+                  </td>
+                  <td className="px-3 py-2">
+                    <Link
+                      to={`/admin/users/${row.userId}`}
+                      className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
+                      title={row.userId}
+                    >
+                      {row.userId.slice(0, 8)}
+                    </Link>
+                  </td>
+                  <td className="px-3 py-2 font-medium text-gray-900 dark:text-white">
+                    <Link
+                      to={`/admin/payouts?assetCode=${row.assetCode}`}
+                      className="text-blue-600 hover:underline dark:text-blue-400"
+                    >
+                      {row.assetCode}
+                    </Link>
+                  </td>
+                  <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
+                    {fmtStroops(row.amountStroops, row.assetCode)}
+                  </td>
+                  <td className="px-3 py-2">
+                    <span className="rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-300">
+                      {row.state}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${ageClass(
+                        row.ageMinutes,
+                        query.data.thresholdMinutes,
+                      )}`}
+                    >
+                      {row.ageMinutes}m
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
+                    {row.attempts}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }

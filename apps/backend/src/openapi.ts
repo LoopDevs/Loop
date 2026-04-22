@@ -701,6 +701,31 @@ const StuckOrdersResponse = registry.register(
   }),
 );
 
+// ─── Admin — stuck payouts (ADR 015 / 016) ─────────────────────────────────
+
+const StuckPayoutRow = registry.register(
+  'StuckPayoutRow',
+  z.object({
+    id: z.string().uuid(),
+    userId: z.string().uuid(),
+    orderId: z.string().uuid(),
+    assetCode: z.string(),
+    amountStroops: z.string(),
+    state: z.string(),
+    stuckSince: z.string().datetime(),
+    ageMinutes: z.number().int().nonnegative(),
+    attempts: z.number().int().nonnegative(),
+  }),
+);
+
+const StuckPayoutsResponse = registry.register(
+  'StuckPayoutsResponse',
+  z.object({
+    thresholdMinutes: z.number().int().min(1),
+    rows: z.array(StuckPayoutRow),
+  }),
+);
+
 // ─── Admin — supplier spend (ADR 013 / 015) ────────────────────────────────
 
 const AdminSupplierSpendRow = registry.register(
@@ -2535,6 +2560,44 @@ registry.registerPath({
     200: {
       description: 'Stuck rows (oldest first) plus the threshold used',
       content: { 'application/json': { schema: StuckOrdersResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading the table',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/stuck-payouts',
+  summary: 'Payouts stuck in pending/submitted past a threshold (ADR 015 / 016).',
+  description:
+    "Parallel to `/api/admin/stuck-orders`: returns `pending_payouts` rows in non-terminal state (`pending` or `submitted`) older than `?thresholdMinutes=` (default 5, max 10 080). Ops dashboards poll this alongside stuck-orders — a stuck `submitted` row usually means the Horizon confirmation watcher hasn't seen the tx land. Failed rows are deliberately excluded (they're terminal; review at `/api/admin/payouts?state=failed`).",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      thresholdMinutes: z.coerce.number().int().min(1).max(10_080).optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Stuck rows (oldest first) plus the threshold used',
+      content: { 'application/json': { schema: StuckPayoutsResponse } },
     },
     401: {
       description: 'Missing or invalid bearer',

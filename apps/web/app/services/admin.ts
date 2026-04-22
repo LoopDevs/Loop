@@ -294,6 +294,36 @@ export async function getStuckOrders(): Promise<StuckOrdersResponse> {
   return authenticatedRequest<StuckOrdersResponse>('/api/admin/stuck-orders');
 }
 
+/** Single stuck-payout row from `/api/admin/stuck-payouts` (ADR 015/016). */
+export interface StuckPayoutRow {
+  id: string;
+  userId: string;
+  orderId: string;
+  assetCode: string;
+  /** Bigint-as-string stroops (7 decimals). */
+  amountStroops: string;
+  state: string;
+  /** ISO timestamp keyed by submitted_at (submitted) or created_at (pending). */
+  stuckSince: string;
+  ageMinutes: number;
+  attempts: number;
+}
+
+export interface StuckPayoutsResponse {
+  thresholdMinutes: number;
+  rows: StuckPayoutRow[];
+}
+
+/**
+ * `GET /api/admin/stuck-payouts` — pending_payouts rows in
+ * pending/submitted past the SLO. Complements `getStuckOrders`:
+ * orders stuck in CTX procurement, payouts stuck in Stellar
+ * submission. Same dashboard poll cadence.
+ */
+export async function getStuckPayouts(): Promise<StuckPayoutsResponse> {
+  return authenticatedRequest<StuckPayoutsResponse>('/api/admin/stuck-payouts');
+}
+
 /**
  * One day of order activity — counts of rows created vs fulfilled
  * bucketed to the UTC day. Returned oldest-first so a bar chart
