@@ -427,6 +427,27 @@ const AdminSupplierSpendResponse = registry.register(
   }),
 );
 
+// ─── Admin — per-user credit balance (ADR 009) ──────────────────────────────
+
+const AdminUserCreditRow = registry.register(
+  'AdminUserCreditRow',
+  z.object({
+    currency: z.string().length(3),
+    balanceMinor: z.string().openapi({
+      description: 'bigint-as-string. Minor units of the currency (cents, pence).',
+    }),
+    updatedAt: z.string().datetime(),
+  }),
+);
+
+const AdminUserCreditsResponse = registry.register(
+  'AdminUserCreditsResponse',
+  z.object({
+    userId: z.string().uuid(),
+    rows: z.array(AdminUserCreditRow),
+  }),
+);
+
 // ─── Admin — cashback-config (ADR 011) ──────────────────────────────────────
 //
 // Percentages are stored as `numeric(5,2)` and round-trip as strings
@@ -1409,6 +1430,45 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error computing the aggregate',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users/{userId}/credits',
+  summary: 'Per-user credit balance drill-down (ADR 009).',
+  description:
+    'Returns every `user_credits` row for the given user. Ops opens this from a support ticket — complements the fleet-wide treasury aggregate by answering "what does Loop owe *this* user?". Empty `rows` is a valid response (user has never earned cashback or has fully redeemed).',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ userId: z.string().uuid() }),
+  },
+  responses: {
+    200: {
+      description: 'Per-currency balances for the user',
+      content: { 'application/json': { schema: AdminUserCreditsResponse } },
+    },
+    400: {
+      description: 'Missing or malformed userId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading the ledger',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
