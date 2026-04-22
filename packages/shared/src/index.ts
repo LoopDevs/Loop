@@ -2,6 +2,7 @@ export * from './api.js';
 export * from './credit-transaction-type.js';
 export * from './loop-asset.js';
 export * from './merchants.js';
+export * from './money-format.js';
 export * from './order-state.js';
 export * from './orders.js';
 export * from './payout-state.js';

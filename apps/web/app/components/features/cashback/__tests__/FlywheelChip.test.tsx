@@ -3,7 +3,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type * as UserModule from '~/services/user';
-import { FlywheelChip, formatMinor, pctBigint } from '../FlywheelChip';
+import { formatMinorCurrency as formatMinor, pctBigint } from '@loop/shared';
+import { FlywheelChip } from '../FlywheelChip';
 
 afterEach(cleanup);
 

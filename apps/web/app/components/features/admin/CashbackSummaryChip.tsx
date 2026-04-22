@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { ApiException } from '@loop/shared';
+import { ApiException, formatMinorCurrency } from '@loop/shared';
 import { getAdminUserCashbackSummary } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
@@ -71,41 +71,16 @@ export function CashbackSummaryChip({ userId }: { userId: string }): React.JSX.E
       aria-label="Cashback earned"
     >
       <span className="font-semibold text-green-900 dark:text-green-200">
-        {formatMinor(lifetime, s.currency)}
+        {formatMinorCurrency(lifetime, s.currency)}
       </span>
       <span className="text-xs text-green-800 dark:text-green-300">lifetime</span>
       <span aria-hidden="true" className="text-green-300 dark:text-green-800">
         ·
       </span>
       <span className="font-semibold text-green-900 dark:text-green-200">
-        {formatMinor(thisMonth, s.currency)}
+        {formatMinorCurrency(thisMonth, s.currency)}
       </span>
       <span className="text-xs text-green-800 dark:text-green-300">this month</span>
     </div>
   );
-}
-
-/**
- * Bigint minor-units → localised currency string. Separate from the
- * `fmtMinor` in `admin.users.$userId.tsx` because that one takes a
- * `string` input and divides via `Number` — fine for per-user
- * balances, but cashback totals can push past 2^53 once the fleet
- * aggregates. Keeps precision via bigint arithmetic.
- */
-export function formatMinor(minor: bigint, currency: string): string {
-  const neg = minor < 0n;
-  const abs = neg ? -minor : minor;
-  const major = Number(abs / 100n);
-  const frac = Number(abs % 100n) / 100;
-  const total = (neg ? -1 : 1) * (major + frac);
-  try {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(total);
-  } catch {
-    return `${total.toFixed(2)} ${currency}`;
-  }
 }

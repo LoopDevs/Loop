@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { formatMinorCurrency, pctBigint } from '@loop/shared';
 import { getUserFlywheelStats } from '~/services/user';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
@@ -66,8 +67,8 @@ export function FlywheelChip(): React.JSX.Element | null {
     >
       <p className="font-medium">
         You&rsquo;ve recycled{' '}
-        <span className="font-semibold">{formatMinor(recycled, stats.currency)}</span> of cashback
-        across{' '}
+        <span className="font-semibold">{formatMinorCurrency(recycled, stats.currency)}</span> of
+        cashback across{' '}
         <span className="font-semibold">
           {stats.recycledOrderCount} {stats.recycledOrderCount === 1 ? 'order' : 'orders'}
         </span>
@@ -80,42 +81,4 @@ export function FlywheelChip(): React.JSX.Element | null {
       ) : null}
     </div>
   );
-}
-
-/**
- * Bigint minor-units → localised currency string. Separate from the
- * chart-side formatter because this component is rendered as part of
- * a prose sentence — we want the compact two-decimal shape rather
- * than abbreviated. Duplicated tightly rather than exported from
- * another component; ADR 019 consolidation waits for a third caller.
- */
-export function formatMinor(minor: bigint, currency: string): string {
-  const neg = minor < 0n;
-  const abs = neg ? -minor : minor;
-  const major = Number(abs / 100n);
-  const frac = Number(abs % 100n) / 100;
-  const total = (neg ? -1 : 1) * (major + frac);
-  try {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(total);
-  } catch {
-    return `${total.toFixed(2)} ${currency}`;
-  }
-}
-
-/**
- * Percent of total as a compact string, bigint-safe. Returns null
- * when the denominator is zero (avoid "NaN%" when the row exists but
- * totals are zero — shouldn't happen given the endpoint's scoping,
- * but guards the render).
- */
-export function pctBigint(numerator: bigint, denominator: bigint): string | null {
-  if (denominator <= 0n) return null;
-  const bp = (numerator * 10000n) / denominator;
-  const pct = Number(bp) / 100;
-  return `${pct.toFixed(1)}%`;
 }
