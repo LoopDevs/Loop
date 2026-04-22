@@ -59,6 +59,7 @@ import { adminOrdersCsvHandler } from './admin/orders-csv.js';
 import { adminStuckOrdersHandler } from './admin/stuck-orders.js';
 import { adminStuckPayoutsHandler } from './admin/stuck-payouts.js';
 import { adminCashbackActivityHandler } from './admin/cashback-activity.js';
+import { adminCashbackActivityCsvHandler } from './admin/cashback-activity-csv.js';
 import { adminMerchantStatsHandler } from './admin/merchant-stats.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
@@ -762,6 +763,10 @@ app.get('/api/admin/stuck-payouts', rateLimit(120, 60_000), adminStuckPayoutsHan
 // Cheap read — single generate_series + LEFT JOIN, bounded at 180
 // days so the payload can't explode.
 app.get('/api/admin/cashback-activity', rateLimit(60, 60_000), adminCashbackActivityHandler);
+// Finance-ready CSV: daily × per-currency cashback accrual. Same
+// aggregate as the JSON surface, flattened for spreadsheet use.
+// Tier-3 rate limit — month-end finance use, not polling.
+app.get('/api/admin/cashback-activity.csv', rateLimit(10, 60_000), adminCashbackActivityCsvHandler);
 // Per-merchant cashback stats — which merchants drive volume /
 // cashback outlay / margin. Distinct from supplier-spend (currency
 // grouped) — this one groups by merchant.

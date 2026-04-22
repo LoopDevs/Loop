@@ -248,6 +248,7 @@ GET  /api/admin/orders.csv                              [admin — finance-ready
 GET  /api/admin/stuck-orders                            [admin — SLO stuck-in-paid/procuring triage, ADR 011/013]
 GET  /api/admin/stuck-payouts                           [admin — SLO stuck-in-pending/submitted payouts, ADR 015/016]
 GET  /api/admin/cashback-activity                       [admin — daily cashback-accrual sparkline, ADR 009/015]
+GET  /api/admin/cashback-activity.csv                   [admin — finance CSV export of daily × per-currency accrual, ADR 009/015/018]
 GET  /api/admin/merchant-stats                          [admin — per-merchant cashback stats, ADR 011/015]
 GET  /api/admin/orders/:orderId                         [admin — single order detail, ADR 011/015]
 GET  /api/admin/orders/:orderId/payout                  [admin — payout row for a given order]
