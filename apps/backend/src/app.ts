@@ -50,6 +50,7 @@ import {
 } from './admin/payouts.js';
 import { adminPayoutsCsvHandler } from './admin/payouts-csv.js';
 import { adminPayoutsByAssetHandler } from './admin/payouts-by-asset.js';
+import { adminTopUsersHandler } from './admin/top-users.js';
 import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js';
 import { adminOrdersCsvHandler } from './admin/orders-csv.js';
 import { adminStuckOrdersHandler } from './admin/stuck-orders.js';
@@ -743,6 +744,9 @@ app.get('/api/admin/orders/:orderId/payout', rateLimit(120, 60_000), adminPayout
 // renders this on the treasury page as the "supplier" card next to
 // outstanding liabilities.
 app.get('/api/admin/supplier-spend', rateLimit(60, 60_000), adminSupplierSpendHandler);
+// Top users by cashback earned — recognition + concentration-risk
+// view for ops. Ranked, window-bounded; not a drill path.
+app.get('/api/admin/top-users', rateLimit(60, 60_000), adminTopUsersHandler);
 // Paginated user directory — browse + search for the admin panel.
 // Complements the exact-by-id drill at /api/admin/users/:userId.
 app.get('/api/admin/users', rateLimit(60, 60_000), adminListUsersHandler);
