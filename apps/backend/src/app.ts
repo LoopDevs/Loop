@@ -72,6 +72,7 @@ import { adminMerchantStatsCsvHandler } from './admin/merchant-stats-csv.js';
 import { adminMerchantsFlywheelShareHandler } from './admin/merchants-flywheel-share.js';
 import { adminMerchantsFlywheelShareCsvHandler } from './admin/merchants-flywheel-share-csv.js';
 import { adminMerchantFlywheelStatsHandler } from './admin/merchant-flywheel-stats.js';
+import { adminMerchantCashbackSummaryHandler } from './admin/merchant-cashback-summary.js';
 import { adminCashbackConfigsCsvHandler } from './admin/cashback-configs-csv.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
@@ -895,6 +896,16 @@ app.get(
   '/api/admin/merchants/:merchantId/flywheel-stats',
   rateLimit(120, 60_000),
   adminMerchantFlywheelStatsHandler,
+);
+// Per-merchant cashback-summary (#625) — per-currency lifetime
+// user_cashback_minor on fulfilled orders. Sibling of the per-user
+// variant; drives the "cashback paid out" card on the merchant
+// drill-down. Registered after the literal `/flywheel-share` +
+// `.csv` paths so Hono resolves static > dynamic.
+app.get(
+  '/api/admin/merchants/:merchantId/cashback-summary',
+  rateLimit(120, 60_000),
+  adminMerchantCashbackSummaryHandler,
 );
 // Given an order id, return the single pending_payouts row for it.
 // Nested under /orders/:orderId so the UI can link from the order
