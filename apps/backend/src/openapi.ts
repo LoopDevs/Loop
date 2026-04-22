@@ -1397,6 +1397,55 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/public/top-cashback-merchants',
+  summary: 'Marketing headline — top merchants by active user cashback % (ADR 011 / 015).',
+  description:
+    'Unauthenticated. Drives the loopfinance.io hero strip ("Best cashback deals: Amazon 18%, ASOS 14%, ...") and the same block on mobile onboarding. Source of truth is `merchant_cashback_configs.active=true` + `user_cashback_pct > 0`; merchant name + logo come from the in-memory upstream catalog. Rows whose merchant has been evicted upstream are dropped rather than surfaced as bare ids — unlike admin-facing endpoints, this is a marketing surface where partial data is worse than none. Response is `Cache-Control: public, max-age=300` — cashback configs change rarely.',
+  tags: ['Public'],
+  request: {
+    query: z.object({
+      limit: z.coerce.number().int().min(1).max(50).optional().openapi({
+        description: 'Page size. Default 10, hard-capped at 50.',
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Top-cashback merchants, highest rate first',
+      content: {
+        'application/json': {
+          schema: z.object({
+            merchants: z.array(
+              z.object({
+                merchantId: z.string(),
+                merchantName: z.string(),
+                logoUrl: z.string().url().optional(),
+                userCashbackPct: z
+                  .string()
+                  .regex(/^\d{1,3}(?:\.\d{1,2})?$/)
+                  .openapi({
+                    description:
+                      'Postgres numeric(5,2) as string — e.g. "18.00". Percent units, not a fraction.',
+                  }),
+              }),
+            ),
+          }),
+        },
+      },
+    },
+    429: {
+      description: 'Rate limit exceeded (300/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading the cashback-config table',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/image',
   summary: 'Fetch, resize, and re-encode a remote image (SSRF-validated).',
   tags: ['Images'],

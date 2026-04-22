@@ -44,6 +44,7 @@ import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '.
 import { treasuryHandler } from './admin/treasury.js';
 import { adminListPayoutsHandler, adminRetryPayoutHandler } from './admin/payouts.js';
 import { adminListOrdersHandler } from './admin/orders.js';
+import { topCashbackMerchantsHandler } from './public/top-cashback-merchants.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -461,6 +462,10 @@ app.get('/api/clusters', rateLimit(60, 60_000), clustersHandler);
 // response is Cache-Control: max-age=600 so a healthy client hits
 // it rarely.
 app.get('/api/config', rateLimit(120, 60_000), configHandler);
+// Public "top cashback" marketing list (ADR 011 / 015) — unauthenticated
+// headline for loopfinance.io. 300/min matches /api/image since both
+// load on cold page visits; handler emits Cache-Control: max-age=300.
+app.get('/api/public/top-cashback-merchants', rateLimit(300, 60_000), topCashbackMerchantsHandler);
 
 // ─── Image proxy ──────────────────────────────────────────────────────────────
 

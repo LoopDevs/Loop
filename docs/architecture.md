@@ -205,6 +205,7 @@ GET  /api/merchants/:merchantId/cashback-rate   — public cashback-% preview (A
 GET  /api/clusters           ?west=&south=&east=&north=&zoom=
 GET  /api/image              ?url=&width=&height=&quality=
 GET  /api/config                            — client feature flags (ADR 010 / 013)
+GET  /api/public/top-cashback-merchants     — marketing headline (ADR 011 / 015)
 POST /api/auth/request-otp
 POST /api/auth/verify-otp
 POST /api/auth/refresh
