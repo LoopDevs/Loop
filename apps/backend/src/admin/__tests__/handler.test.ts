@@ -3,8 +3,9 @@ import type { Context } from 'hono';
 
 // vi.mock is hoisted above imports, so anything referenced inside
 // the factory must come from vi.hoisted or be inlined.
-const { dbMock, insertedRow } = vi.hoisted(() => {
+const { dbMock, insertedRow, preEditRow, notifyMock } = vi.hoisted(() => {
   const state = { out: null as unknown };
+  const preEdit = { value: undefined as unknown };
   // Chainable query-builder mock — each method returns `this` so
   // the handler's fluent chains resolve without touching a real pg.
   const m: Record<string, ReturnType<typeof vi.fn>> = {};
@@ -17,7 +18,22 @@ const { dbMock, insertedRow } = vi.hoisted(() => {
   m['values'] = vi.fn(() => m);
   m['onConflictDoUpdate'] = vi.fn(() => m);
   m['returning'] = vi.fn(async () => [state.out]);
-  return { dbMock: m, insertedRow: state };
+  // db.query.merchantCashbackConfigs.findFirst — pre-edit snapshot
+  // read for the Discord audit diff. Attached as a non-fn entry on
+  // the same object; the test harness reaches it via `dbMock.query`.
+  // Cast through `unknown` so the sibling-fn record type stays
+  // tight for `mockClear` / `mockImplementationOnce` callers below.
+  (m as unknown as Record<string, unknown>)['query'] = {
+    merchantCashbackConfigs: {
+      findFirst: vi.fn(async () => preEdit.value),
+    },
+  };
+  return {
+    dbMock: m,
+    insertedRow: state,
+    preEditRow: preEdit,
+    notifyMock: vi.fn(),
+  };
 });
 
 vi.mock('../../db/client.js', () => ({ db: dbMock }));
@@ -27,6 +43,24 @@ vi.mock('../../db/schema.js', () => ({
     merchantId: 'merchantId',
     changedAt: 'changedAt',
   },
+}));
+
+vi.mock('drizzle-orm', async () => {
+  const actual = (await vi.importActual('drizzle-orm')) as Record<string, unknown>;
+  return {
+    ...actual,
+    eq: (col: unknown, value: unknown) => ({ __eq: true, col, value }),
+  };
+});
+
+vi.mock('../../discord.js', () => ({
+  notifyCashbackConfigChanged: (args: unknown) => notifyMock(args),
+}));
+
+vi.mock('../../merchants/sync.js', () => ({
+  getMerchants: () => ({
+    merchantsById: new Map([['m-1', { id: 'm-1', name: 'Test Merchant' }]]),
+  }),
 }));
 
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '../handler.js';
@@ -74,6 +108,8 @@ beforeEach(() => {
     if (typeof fn === 'function' && 'mockClear' in fn) fn.mockClear();
   }
   insertedRow.out = null;
+  preEditRow.value = undefined;
+  notifyMock.mockClear();
 });
 
 describe('listConfigsHandler', () => {
@@ -164,7 +200,97 @@ describe('upsertConfigHandler', () => {
       user: { id: 'admin-uuid' },
     });
     await upsertConfigHandler(ctx);
-    expect(dbMock['values']!).toHaveBeenCalledWith(expect.objectContaining({ active: true }));
+    expect((dbMock['values'] as ReturnType<typeof vi.fn>)!).toHaveBeenCalledWith(
+      expect.objectContaining({ active: true }),
+    );
+  });
+
+  it('fires notifyCashbackConfigChanged with previous=null on first-time create', async () => {
+    preEditRow.value = undefined;
+    insertedRow.out = {
+      merchantId: 'm-1',
+      wholesalePct: '70.00',
+      userCashbackPct: '25.00',
+      loopMarginPct: '5.00',
+      active: true,
+    };
+    const { ctx } = makeCtx({
+      param: { merchantId: 'm-1' },
+      body: { wholesalePct: 70, userCashbackPct: 25, loopMarginPct: 5 },
+      user: { id: 'admin-uuid' },
+    });
+    await upsertConfigHandler(ctx);
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(notifyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        merchantId: 'm-1',
+        merchantName: 'Test Merchant',
+        actorUserId: 'admin-uuid',
+        previous: null,
+        next: expect.objectContaining({
+          wholesalePct: '70.00',
+          userCashbackPct: '25.00',
+          loopMarginPct: '5.00',
+          active: true,
+        }),
+      }),
+    );
+  });
+
+  it('fires notifyCashbackConfigChanged with an old → new diff on update', async () => {
+    preEditRow.value = {
+      merchantId: 'm-1',
+      wholesalePct: '80.00',
+      userCashbackPct: '15.00',
+      loopMarginPct: '5.00',
+      active: true,
+    };
+    insertedRow.out = {
+      merchantId: 'm-1',
+      wholesalePct: '75.00',
+      userCashbackPct: '18.00',
+      loopMarginPct: '7.00',
+      active: true,
+    };
+    const { ctx } = makeCtx({
+      param: { merchantId: 'm-1' },
+      body: { wholesalePct: 75, userCashbackPct: 18, loopMarginPct: 7 },
+      user: { id: 'admin-uuid' },
+    });
+    await upsertConfigHandler(ctx);
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    const call = notifyMock.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(call['previous']).toEqual({
+      wholesalePct: '80.00',
+      userCashbackPct: '15.00',
+      loopMarginPct: '5.00',
+      active: true,
+    });
+    expect(call['next']).toEqual({
+      wholesalePct: '75.00',
+      userCashbackPct: '18.00',
+      loopMarginPct: '7.00',
+      active: true,
+    });
+  });
+
+  it('falls back to merchantId as the Discord merchantName when the catalog has evicted the row (Rule A)', async () => {
+    preEditRow.value = undefined;
+    insertedRow.out = {
+      merchantId: 'ghost',
+      wholesalePct: '70.00',
+      userCashbackPct: '25.00',
+      loopMarginPct: '5.00',
+      active: true,
+    };
+    const { ctx } = makeCtx({
+      param: { merchantId: 'ghost' },
+      body: { wholesalePct: 70, userCashbackPct: 25, loopMarginPct: 5 },
+      user: { id: 'admin-uuid' },
+    });
+    await upsertConfigHandler(ctx);
+    const call = notifyMock.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(call['merchantName']).toBe('ghost');
   });
 });
 

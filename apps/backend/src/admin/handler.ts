@@ -4,6 +4,8 @@ import { desc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { merchantCashbackConfigs, merchantCashbackConfigHistory } from '../db/schema.js';
 import type { User } from '../db/users.js';
+import { notifyCashbackConfigChanged, type CashbackConfigSnapshot } from '../discord.js';
+import { getMerchants } from '../merchants/sync.js';
 
 /**
  * Admin — cashback config endpoints (ADR 011). All routes expect
@@ -52,6 +54,24 @@ export async function upsertConfigHandler(c: Context): Promise<Response> {
     );
   }
   const admin = c.get('user') as User;
+  // Snapshot the pre-edit row for the Discord audit diff (ADR 018).
+  // One extra SELECT per admin edit — the configs table is tiny and
+  // the write-audit signal is more valuable than the round-trip cost.
+  // Null = first-time create path; the notifier renders it as a
+  // distinct "created" embed rather than an update-with-no-diff.
+  const previous = await db.query.merchantCashbackConfigs.findFirst({
+    where: eq(merchantCashbackConfigs.merchantId, merchantId),
+  });
+  const previousSnapshot: CashbackConfigSnapshot | null =
+    previous === undefined
+      ? null
+      : {
+          wholesalePct: previous.wholesalePct,
+          userCashbackPct: previous.userCashbackPct,
+          loopMarginPct: previous.loopMarginPct,
+          active: previous.active,
+        };
+
   // numeric columns round-trip as strings in postgres-js; cast on
   // the way in to keep the type contract explicit.
   const values = {
@@ -77,6 +97,29 @@ export async function upsertConfigHandler(c: Context): Promise<Response> {
       },
     })
     .returning();
+
+  // Fire-and-forget Discord audit AFTER the commit (ADR 018). A
+  // webhook failure must never revert a successful config write.
+  // Merchant-name resolution follows ADR 021 Rule A: fall back to
+  // merchantId so a config-before-catalog edit still renders a
+  // usable embed.
+  const { merchantsById } = getMerchants();
+  const merchantName = merchantsById.get(merchantId)?.name ?? merchantId;
+  if (row !== undefined) {
+    notifyCashbackConfigChanged({
+      merchantId,
+      merchantName,
+      actorUserId: admin.id,
+      previous: previousSnapshot,
+      next: {
+        wholesalePct: row.wholesalePct,
+        userCashbackPct: row.userCashbackPct,
+        loopMarginPct: row.loopMarginPct,
+        active: row.active,
+      },
+    });
+  }
+
   return c.json({ config: row }, 200);
 }
 

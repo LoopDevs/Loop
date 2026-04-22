@@ -279,6 +279,72 @@ export function notifyAdminAudit(args: {
   });
 }
 
+/**
+ * Notify: merchant cashback-config create / update (ADR 011 / 018).
+ * Called fire-and-forget AFTER the DB upsert commits, from
+ * `upsertConfigHandler`. The admin-audit channel already receives a
+ * generic `notifyAdminAudit` line; this one is the domain-specific
+ * view with the old → new pct diff so the commercial impact of the
+ * edit is readable in Discord.
+ *
+ * `previous` is null for first-time creates (no prior row to diff).
+ * Actor id is truncated to the last 8 chars per ADR 018 convention.
+ * `merchantName` falls back to merchantId at the call site — we
+ * don't redo the fallback here so the embed text reflects what the
+ * admin actually saw in the UI.
+ */
+export interface CashbackConfigSnapshot {
+  wholesalePct: string;
+  userCashbackPct: string;
+  loopMarginPct: string;
+  active: boolean;
+}
+
+export function notifyCashbackConfigChanged(args: {
+  merchantId: string;
+  merchantName: string;
+  actorUserId: string;
+  previous: CashbackConfigSnapshot | null;
+  next: CashbackConfigSnapshot;
+}): void {
+  const actorTail = args.actorUserId.slice(-8);
+  const fields: Array<{ name: string; value: string; inline?: boolean }> = [
+    {
+      name: 'Merchant',
+      value: truncate(escapeMarkdown(args.merchantName), FIELD_VALUE_MAX),
+      inline: true,
+    },
+    { name: 'Admin', value: `\`${actorTail}\``, inline: true },
+    {
+      name: 'New',
+      value: fmtConfigLine(args.next),
+      inline: false,
+    },
+  ];
+  if (args.previous !== null) {
+    fields.push({
+      name: 'Previous',
+      value: fmtConfigLine(args.previous),
+      inline: false,
+    });
+  }
+  const isCreate = args.previous === null;
+  void sendWebhook(env.DISCORD_WEBHOOK_ADMIN_AUDIT, {
+    title: isCreate ? '🟢 Cashback config created' : '🔧 Cashback config updated',
+    color: isCreate ? GREEN : BLUE,
+    fields,
+  });
+}
+
+function fmtConfigLine(s: CashbackConfigSnapshot): string {
+  const body =
+    `wholesale ${escapeMarkdown(s.wholesalePct)}%` +
+    ` · cashback ${escapeMarkdown(s.userCashbackPct)}%` +
+    ` · margin ${escapeMarkdown(s.loopMarginPct)}%` +
+    ` · ${s.active ? 'active' : 'inactive'}`;
+  return truncate(body, FIELD_VALUE_MAX);
+}
+
 /** Notify: circuit breaker state change */
 export function notifyCircuitBreaker(
   state: 'open' | 'closed',
@@ -388,6 +454,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     channel: 'admin-audit',
     description:
       'Every successful admin write (ADR 017). One line per mutation with the actor, method, path, status, and replay flag.',
+  },
+  {
+    name: 'notifyCashbackConfigChanged',
+    channel: 'admin-audit',
+    description:
+      'Fires on merchant cashback-config create / update (ADR 011). Embeds the old→new pct diff so the commercial impact of the edit is legible in the channel without drilling to the admin UI.',
   },
   {
     name: 'notifyOrderCreated',
