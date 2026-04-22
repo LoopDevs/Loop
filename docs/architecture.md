@@ -252,6 +252,7 @@ GET  /api/admin/cashback-activity                       [admin — daily cashbac
 GET  /api/admin/cashback-activity.csv                   [admin — finance CSV export of daily × per-currency accrual, ADR 009/015/018]
 GET  /api/admin/merchant-stats                          [admin — per-merchant cashback stats, ADR 011/015]
 GET  /api/admin/merchant-stats.csv                      [admin — per-merchant CSV for CTX negotiation, ADR 011/015/018]
+GET  /api/admin/merchant-cashback-configs.csv           [admin — snapshot CSV of commercial terms, ADR 011/018]
 GET  /api/admin/orders/:orderId                         [admin — single order detail, ADR 011/015]
 GET  /api/admin/orders/:orderId/payout                  [admin — payout row for a given order]
 GET  /api/admin/supplier-spend                          [admin — per-currency supplier spend, ADR 013/015]
