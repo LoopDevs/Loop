@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import type { Route } from './+types/admin.payouts';
 import { useAuth } from '~/hooks/use-auth';
 import { listPayouts, retryPayout, type AdminPayoutView, type PayoutState } from '~/services/admin';
@@ -214,16 +214,24 @@ export default function AdminPayoutsRoute(): React.JSX.Element {
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800 text-sm">
             <thead className="bg-gray-50 dark:bg-gray-900/50">
               <tr>
-                {['When', 'State', 'Asset', 'Amount', 'To', 'Tx / Error', 'Attempts', ''].map(
-                  (h) => (
-                    <th
-                      key={h}
-                      className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400"
-                    >
-                      {h}
-                    </th>
-                  ),
-                )}
+                {[
+                  'When',
+                  'State',
+                  'Asset',
+                  'Amount',
+                  'User',
+                  'To',
+                  'Tx / Error',
+                  'Attempts',
+                  '',
+                ].map((h) => (
+                  <th
+                    key={h}
+                    className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400"
+                  >
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-900 bg-white dark:bg-gray-900">
@@ -247,6 +255,19 @@ export default function AdminPayoutsRoute(): React.JSX.Element {
                   </td>
                   <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
                     {fmtStroops(p.amountStroops, p.assetCode)}
+                  </td>
+                  <td className="px-3 py-2">
+                    {/* Reverse cross-link to /admin/orders — lets ops
+                        pivot from "which payout is this?" back to
+                        "which orders drove this user's backlog?".
+                        Matches the user-id link on /admin/orders. */}
+                    <Link
+                      to={`/admin/orders?userId=${encodeURIComponent(p.userId)}`}
+                      className="font-mono text-xs text-blue-700 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 underline underline-offset-2"
+                      title={`View orders for ${p.userId}`}
+                    >
+                      {truncId(p.userId)}
+                    </Link>
                   </td>
                   <td
                     className="px-3 py-2 font-mono text-xs text-gray-600 dark:text-gray-400"

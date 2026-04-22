@@ -13,7 +13,7 @@
  */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.orders';
 import { useAuth } from '~/hooks/use-auth';
@@ -76,10 +76,27 @@ function formatMinor(minor: string, currency: string): string {
   }
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export default function AdminOrdersRoute(): React.JSX.Element {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
   const [stateFilter, setStateFilter] = useState<AdminOrderState | 'all'>('all');
+  const [searchParams, setSearchParams] = useSearchParams();
+  // `?userId=<uuid>` narrows the list to one user — reverse
+  // cross-link from `/admin/payouts`. Validated with the same regex
+  // the backend uses; a malformed param is treated as absent so the
+  // page stays usable instead of 400-ing.
+  const userIdParamRaw = searchParams.get('userId');
+  const activeUserId =
+    userIdParamRaw !== null && UUID_RE.test(userIdParamRaw) ? userIdParamRaw : null;
+  const clearUserFilter = (): void => {
+    setSearchParams((params) => {
+      params.delete('userId');
+      return params;
+    });
+    setCursors([undefined]);
+  };
   // Cursor list — each Load more pushes the last row's `createdAt`
   // so pages stay stable across refetches (offset pagination would
   // skip / duplicate rows as new orders land).
@@ -109,6 +126,24 @@ export default function AdminOrdersRoute(): React.JSX.Element {
         </p>
       </header>
 
+      {activeUserId !== null && (
+        // Reverse-cross-link indicator: symmetric with the chip on
+        // /admin/payouts. Rendered above the state pills so it
+        // reads first when the filter is active.
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 dark:border-blue-900/50 dark:bg-blue-900/10">
+          <p className="text-sm text-blue-800 dark:text-blue-300">
+            Filtered to user <code className="font-mono text-xs">{activeUserId.slice(0, 8)}</code>
+          </p>
+          <button
+            type="button"
+            onClick={clearUserFilter}
+            className="text-xs font-medium text-blue-700 hover:text-blue-800 underline underline-offset-2 dark:text-blue-300 dark:hover:text-blue-200"
+          >
+            Clear user filter
+          </button>
+        </div>
+      )}
+
       {/* Filters — intentionally rendered above the table so the
           state change is visible to screen readers right before the
           list redraws. Changing the filter resets the cursor list
@@ -137,8 +172,9 @@ export default function AdminOrdersRoute(): React.JSX.Element {
       <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
         {cursors.map((cursor, idx) => (
           <OrdersPage
-            key={cursor ?? 'head'}
+            key={`${activeUserId ?? 'all-users'}:${cursor ?? 'head'}`}
             state={stateFilter}
+            userId={activeUserId}
             cursor={cursor}
             isLastPage={idx === cursors.length - 1}
             onLoadMore={(nextCursor) => {
@@ -153,21 +189,24 @@ export default function AdminOrdersRoute(): React.JSX.Element {
 
 function OrdersPage({
   state,
+  userId,
   cursor,
   isLastPage,
   onLoadMore,
 }: {
   state: AdminOrderState | 'all';
+  userId: string | null;
   cursor: string | undefined;
   isLastPage: boolean;
   onLoadMore: (nextCursor: string) => void;
 }): React.JSX.Element {
   const query = useQuery({
-    queryKey: ['admin-orders', state, cursor ?? null, PAGE_SIZE],
+    queryKey: ['admin-orders', state, userId, cursor ?? null, PAGE_SIZE],
     queryFn: () =>
       listAdminOrders({
         limit: PAGE_SIZE,
         ...(state !== 'all' ? { state } : {}),
+        ...(userId !== null ? { userId } : {}),
         ...(cursor !== undefined ? { before: cursor } : {}),
       }),
     retry: shouldRetry,
