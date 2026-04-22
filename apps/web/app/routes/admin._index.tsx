@@ -13,6 +13,7 @@ import {
 import { AdminAuditTail } from '~/components/features/admin/AdminAuditTail';
 import { ConfigsHistoryCard } from '~/components/features/admin/ConfigsHistoryCard';
 import { CashbackSparkline } from '~/components/features/admin/CashbackSparkline';
+import { PayoutsSparkline } from '~/components/features/admin/PayoutsSparkline';
 import { FleetFlywheelHeadline } from '~/components/features/admin/FleetFlywheelHeadline';
 import { OrdersSparkline } from '~/components/features/admin/OrdersSparkline';
 import { StuckOrdersCard } from '~/components/features/admin/StuckOrdersCard';
@@ -181,6 +182,13 @@ export default function AdminIndexRoute(): React.JSX.Element {
       {denied ? null : <FleetFlywheelHeadline />}
 
       {denied ? null : <CashbackSparkline />}
+
+      {/* Settlement-side sparkline (#637). Pairs with cashback
+          above: cashback = liability-creation per day, payouts =
+          liability-settlement per day. Same 30-day window, same
+          sparkline primitive — so the two read naturally side-by-
+          side as in/out flows of the on-chain LOOP ledger. */}
+      {denied ? null : <PayoutsSparkline />}
 
       {denied ? null : <OrdersSparkline />}
 

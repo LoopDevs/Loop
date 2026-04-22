@@ -579,6 +579,35 @@ export async function getCashbackActivity(days?: number): Promise<CashbackActivi
   return authenticatedRequest<CashbackActivityResponse>(`/api/admin/cashback-activity${qs}`);
 }
 
+/**
+ * One day of confirmed-payout activity (#637). Settlement-side
+ * sibling of `CashbackActivityDay`. `byAsset` is empty on zero
+ * days so the UI can render gaps without an extra count branch.
+ */
+export interface PerAssetPayoutAmount {
+  assetCode: string;
+  /** SUM(amount_stroops) on this day. bigint-as-string. */
+  stroops: string;
+  count: number;
+}
+
+export interface PayoutsActivityDay {
+  day: string;
+  count: number;
+  byAsset: PerAssetPayoutAmount[];
+}
+
+export interface PayoutsActivityResponse {
+  days: number;
+  rows: PayoutsActivityDay[];
+}
+
+/** `GET /api/admin/payouts-activity` — N-day confirmed-payout series (default 30, max 180). */
+export async function getPayoutsActivity(days?: number): Promise<PayoutsActivityResponse> {
+  const qs = days !== undefined ? `?days=${days}` : '';
+  return authenticatedRequest<PayoutsActivityResponse>(`/api/admin/payouts-activity${qs}`);
+}
+
 export async function getPayoutsByAsset(): Promise<{ rows: PayoutsByAssetRow[] }> {
   return authenticatedRequest<{ rows: PayoutsByAssetRow[] }>('/api/admin/payouts-by-asset');
 }
