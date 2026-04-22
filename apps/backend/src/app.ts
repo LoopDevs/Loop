@@ -51,6 +51,7 @@ import {
 import { adminListOrdersHandler } from './admin/orders.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
+import { adminUserCreditTransactionsHandler } from './admin/user-credit-transactions.js';
 import {
   getCashbackHistoryHandler,
   getMeHandler,
@@ -677,6 +678,14 @@ app.get('/api/admin/supplier-spend', rateLimit(60, 60_000), adminSupplierSpendHa
 // a support ticket; complements the treasury aggregate which only
 // gives fleet-wide outstanding.
 app.get('/api/admin/users/:userId/credits', rateLimit(120, 60_000), adminUserCreditsHandler);
+// Credit-transaction log for a user (ADR 009). Drill-down from the
+// balance endpoint — shows how the balance got there (cashback,
+// withdrawals, refunds, adjustments).
+app.get(
+  '/api/admin/users/:userId/credit-transactions',
+  rateLimit(120, 60_000),
+  adminUserCreditTransactionsHandler,
+);
 
 // ─── 404 fallback ────────────────────────────────────────────────────────────
 
