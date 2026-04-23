@@ -109,6 +109,18 @@ export function OrderPayoutCard({ orderId }: { orderId: string }): React.JSX.Ele
               </>
             )}
           </p>
+          {/* Failed payouts: show retry count + support reassurance.
+              Admin can resubmit via /admin/payouts/:id/retry; from
+              the user's side the important signal is "we tried N
+              times and we're on it", not the raw last_error (which
+              can leak internals — kept admin-only). */}
+          {payout.state === 'failed' ? (
+            <p className="mt-1 text-xs text-red-700 dark:text-red-400">
+              {payout.attempts === 0
+                ? 'Our system hasn\u2019t retried yet — support will pick it up shortly.'
+                : `Tried ${payout.attempts} time${payout.attempts === 1 ? '' : 's'}. Support is reviewing.`}
+            </p>
+          ) : null}
         </div>
         <span
           className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${ui.classes}`}

@@ -120,7 +120,7 @@ describe('<OrderPayoutCard />', () => {
     expect(screen.queryByRole('link', { name: /view tx/i })).toBeNull();
   });
 
-  it('renders failed-state pill', async () => {
+  it('renders failed-state pill + attempts reassurance line', async () => {
     userMock.getUserPayoutByOrder.mockResolvedValue({
       id: 'payout-1',
       orderId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
@@ -139,6 +139,49 @@ describe('<OrderPayoutCard />', () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText('Payout state: Failed')).toBeDefined();
+    });
+    expect(screen.getByText(/Tried 3 times\. Support is reviewing\./i)).toBeDefined();
+  });
+
+  it('pluralises attempts=1 correctly on failed state', async () => {
+    userMock.getUserPayoutByOrder.mockResolvedValue({
+      id: 'payout-1',
+      orderId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      assetCode: 'USDLOOP',
+      assetIssuer: 'GISSUER',
+      amountStroops: '10000000',
+      state: 'failed',
+      txHash: null,
+      attempts: 1,
+      createdAt: '2026-04-20T10:00:00.000Z',
+      submittedAt: '2026-04-20T10:01:00.000Z',
+      confirmedAt: null,
+      failedAt: '2026-04-20T10:03:00.000Z',
+    });
+    renderCard();
+    await waitFor(() => {
+      expect(screen.getByText(/Tried 1 time\. Support is reviewing\./i)).toBeDefined();
+    });
+  });
+
+  it('covers the zero-attempts failed edge case (never-retried)', async () => {
+    userMock.getUserPayoutByOrder.mockResolvedValue({
+      id: 'payout-1',
+      orderId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      assetCode: 'USDLOOP',
+      assetIssuer: 'GISSUER',
+      amountStroops: '10000000',
+      state: 'failed',
+      txHash: null,
+      attempts: 0,
+      createdAt: '2026-04-20T10:00:00.000Z',
+      submittedAt: null,
+      confirmedAt: null,
+      failedAt: '2026-04-20T10:03:00.000Z',
+    });
+    renderCard();
+    await waitFor(() => {
+      expect(screen.getByText(/Our system hasn.t retried yet/i)).toBeDefined();
     });
   });
 });
