@@ -9,11 +9,15 @@
  * push the balance negative raises `InsufficientBalanceError` and
  * the transaction rolls back with no row left behind.
  *
- * Reason + actor_user_id are pinned onto a dedicated audit table
- * (`credit_transactions.reference_type = 'admin_adjustment'`,
- * `reference_id = <actor uuid>`) so the full story — who did it, why,
- * what was the prior and new balance — is reconstructable from the
- * append-only ledger without an edit log (ADR 017 #4).
+ * Reason + actor_user_id are pinned onto the ledger row — the reason
+ * lands in the new `credit_transactions.reason` column (A2-908) and
+ * the actor in `reference_type = 'admin_adjustment'` / `reference_id
+ * = <actor uuid>`. The full story — who did it, why, what was the
+ * prior and new balance — is reconstructable from the append-only
+ * ledger without an edit log (ADR 017 #4). The reason used to live
+ * only in the admin-idempotency snapshot, whose 24h TTL sweep would
+ * erase it; persisting on the ledger row makes the promise hold past
+ * the TTL.
  */
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
@@ -75,12 +79,12 @@ export async function applyAdminCreditAdjustment(args: {
         amountMinor: args.amountMinor,
         currency: args.currency,
         // (reference_type, reference_id) pins the adjustment to the
-        // admin user who made it. The reason is stored separately in
-        // the idempotency snapshot + Discord audit — future follow-up
-        // ADR will add a reason column on credit_transactions when we
-        // outgrow that.
+        // admin user who made it; `reason` carries the operator-
+        // authored "why" (A2-908) so the full story stays on the
+        // ledger row past the 24h idempotency-key TTL.
         referenceType: 'admin_adjustment',
         referenceId: args.adminUserId,
+        reason: args.reason,
       })
       .returning();
     if (row === undefined) {
