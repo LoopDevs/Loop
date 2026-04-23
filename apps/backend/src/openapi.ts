@@ -610,6 +610,34 @@ const AssetCirculationResponse = registry.register(
   }),
 );
 
+const AssetDriftStateRow = registry.register(
+  'AssetDriftStateRow',
+  z.object({
+    assetCode: LoopAssetCode,
+    state: z.enum(['unknown', 'ok', 'over']).openapi({
+      description:
+        "`unknown` = watcher hasn't read this asset yet (fresh boot / issuer unconfigured); `ok` = within threshold on last successful tick; `over` = outside threshold.",
+    }),
+    lastDriftStroops: z.string().nullable().openapi({
+      description:
+        'Last drift in stroops (bigint-as-string). Null until the first successful read.',
+    }),
+    lastThresholdStroops: z.string().nullable(),
+    lastCheckedMs: z.number().int().nullable(),
+  }),
+);
+
+const AssetDriftStateResponse = registry.register(
+  'AssetDriftStateResponse',
+  z.object({
+    lastTickMs: z.number().int().nullable().openapi({
+      description: 'Unix ms of the last full watcher pass. Null when the watcher never ran.',
+    }),
+    running: z.boolean(),
+    perAsset: z.array(AssetDriftStateRow),
+  }),
+);
+
 const AdminPayoutView = registry.register(
   'AdminPayoutView',
   z.object({
@@ -3175,6 +3203,34 @@ registry.registerPath({
     },
     503: {
       description: 'Horizon circulation read failed',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/asset-drift/state',
+  summary: 'In-memory snapshot of the asset-drift watcher (ADR 015).',
+  description:
+    "Surfaces the background drift watcher's last-pass per-asset state without forcing a fresh Horizon read. `running: false` means the watcher is not active in this process (no LOOP issuers configured or `LOOP_WORKERS_ENABLED=false`). `perAsset[].state` is `unknown` until the first successful per-asset tick. Cheap enough to poll from the admin landing (120/min rate limit).",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Watcher state snapshot',
+      content: { 'application/json': { schema: AssetDriftStateResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },

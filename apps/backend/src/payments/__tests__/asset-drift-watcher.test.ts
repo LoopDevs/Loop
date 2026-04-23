@@ -41,7 +41,11 @@ vi.mock('../../discord.js', () => ({
   notifyAssetDriftRecovered: (args: unknown) => mocks.notifyAssetDriftRecovered(args),
 }));
 
-import { runAssetDriftTick, __resetAssetDriftWatcherForTests } from '../asset-drift-watcher.js';
+import {
+  runAssetDriftTick,
+  getAssetDriftState,
+  __resetAssetDriftWatcherForTests,
+} from '../asset-drift-watcher.js';
 
 beforeEach(() => {
   __resetAssetDriftWatcherForTests();
@@ -195,5 +199,64 @@ describe('runAssetDriftTick', () => {
     expect(usd?.over).toBe(true);
     expect(gbp?.over).toBe(false);
     expect(mocks.notifyAssetDrift).toHaveBeenCalledOnce();
+  });
+});
+
+describe('getAssetDriftState', () => {
+  it('emits one entry per configured asset, defaulting to unknown before any tick', () => {
+    mocks.configuredLoopPayableAssets.mockReturnValue([
+      { code: 'USDLOOP', issuer: 'GUSD' },
+      { code: 'GBPLOOP', issuer: 'GGBP' },
+    ]);
+    const s = getAssetDriftState();
+    expect(s.lastTickMs).toBeNull();
+    expect(s.running).toBe(false);
+    expect(s.perAsset).toHaveLength(2);
+    for (const a of s.perAsset) {
+      expect(a.state).toBe('unknown');
+      expect(a.lastDriftStroops).toBeNull();
+      expect(a.lastCheckedMs).toBeNull();
+    }
+  });
+
+  it('reflects the last-tick values per asset after a run', async () => {
+    mocks.configuredLoopPayableAssets.mockReturnValue([{ code: 'USDLOOP', issuer: 'GUSD' }]);
+    mocks.getLoopAssetCirculation.mockResolvedValue({
+      stroops: 10_000_000n,
+      assetCode: 'USDLOOP',
+      issuer: 'GUSD',
+      asOfMs: 0,
+    });
+    mocks.sumOutstandingLiability.mockResolvedValue(0n);
+    await runAssetDriftTick({ thresholdStroops: 1_000n });
+
+    const s = getAssetDriftState();
+    expect(s.lastTickMs).not.toBeNull();
+    expect(s.perAsset[0]!.state).toBe('over');
+    expect(s.perAsset[0]!.lastDriftStroops).toBe(10_000_000n);
+    expect(s.perAsset[0]!.lastThresholdStroops).toBe(1_000n);
+    expect(s.perAsset[0]!.lastCheckedMs).not.toBeNull();
+  });
+
+  it('does not overwrite a prior snapshot for an asset whose Horizon read failed this tick', async () => {
+    mocks.configuredLoopPayableAssets.mockReturnValue([{ code: 'USDLOOP', issuer: 'GUSD' }]);
+    // Tick 1: successful — populates snapshot.
+    mocks.getLoopAssetCirculation.mockResolvedValueOnce({
+      stroops: 500_000n,
+      assetCode: 'USDLOOP',
+      issuer: 'GUSD',
+      asOfMs: 0,
+    });
+    mocks.sumOutstandingLiability.mockResolvedValueOnce(5n);
+    await runAssetDriftTick({ thresholdStroops: 1_000n });
+    const before = getAssetDriftState().perAsset[0]!;
+    expect(before.state).toBe('ok');
+
+    // Tick 2: Horizon throws — snapshot must NOT be flipped.
+    mocks.getLoopAssetCirculation.mockRejectedValueOnce(new Error('Horizon 503'));
+    await runAssetDriftTick({ thresholdStroops: 1_000n });
+    const after = getAssetDriftState().perAsset[0]!;
+    expect(after.state).toBe('ok');
+    expect(after.lastDriftStroops).toBe(before.lastDriftStroops);
   });
 });
