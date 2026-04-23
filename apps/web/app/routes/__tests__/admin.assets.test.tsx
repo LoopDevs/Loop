@@ -12,6 +12,7 @@ const { adminMock, authMock } = vi.hoisted(() => ({
   adminMock: {
     getTreasurySnapshot: vi.fn(),
     getPayoutsByAsset: vi.fn(),
+    getAssetCirculation: vi.fn(),
   },
   authMock: { isAuthenticated: true },
 }));
@@ -22,6 +23,7 @@ vi.mock('~/services/admin', async (importActual) => {
     ...actual,
     getTreasurySnapshot: () => adminMock.getTreasurySnapshot(),
     getPayoutsByAsset: () => adminMock.getPayoutsByAsset(),
+    getAssetCirculation: (code: string) => adminMock.getAssetCirculation(code),
   };
 });
 
@@ -145,5 +147,11 @@ describe('<AdminAssetsIndexRoute />', () => {
 
     // Not-configured issuer surfaces a pill, not a truncated pubkey.
     expect(screen.getAllByText(/not configured/i)).toHaveLength(2);
+
+    // Drift column header renders — locks in the 8-column layout
+    // (Asset / Outstanding / Drift / Issuer / Pending / Submitted /
+    // Confirmed / Failed). Unconfigured issuers show an em-dash in
+    // place of a drift badge.
+    expect(screen.getByText('Drift')).toBeDefined();
   });
 });
