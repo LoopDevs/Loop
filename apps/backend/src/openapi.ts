@@ -3923,6 +3923,358 @@ registry.registerPath({
   },
 });
 
+// ─── Admin per-user drill metrics (ADR 009/015/022) ────────────────────────
+//
+// Per-user axis of the triplet pattern — recovers content from the
+// auto-closed #670 (its stacked base branch was deleted during cascade
+// merge) plus ships the batch 4 CSV siblings and the fleet payouts pair
+// in one coherent PR.
+
+const AdminUserFlywheelStats = registry.register(
+  'AdminUserFlywheelStats',
+  z.object({
+    userId: z.string().uuid(),
+    currency: z.string().length(3).openapi({
+      description:
+        "Target user's home_currency — both numerator and denominator share it so the ratio has a coherent denomination.",
+    }),
+    recycledOrderCount: z.number().int(),
+    recycledChargeMinor: z.string().openapi({ description: 'bigint-as-string.' }),
+    totalFulfilledCount: z.number().int(),
+    totalFulfilledChargeMinor: z.string().openapi({ description: 'bigint-as-string.' }),
+  }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users/{userId}/flywheel-stats',
+  summary: 'Per-user recycled-vs-total scalar (ADR 015).',
+  description:
+    "Admin-scoped mirror of /api/users/me/flywheel-stats. 404 on unknown userId (distinguishes 'user not in DB' from 'user with no fulfilled orders' which returns zeroed counts). Home-currency-locked.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: { params: z.object({ userId: z.string().uuid() }) },
+  responses: {
+    200: {
+      description: 'Per-user flywheel scalar',
+      content: { 'application/json': { schema: AdminUserFlywheelStats } },
+    },
+    400: {
+      description: 'Malformed userId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'User not found',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
+const AdminUserCashbackMonthlyEntry = registry.register(
+  'AdminUserCashbackMonthlyEntry',
+  z.object({
+    month: z.string().openapi({ description: '"YYYY-MM" in UTC.' }),
+    currency: z.string().length(3),
+    cashbackMinor: z.string().openapi({ description: 'bigint-as-string.' }),
+  }),
+);
+
+const AdminUserCashbackMonthlyResponse = registry.register(
+  'AdminUserCashbackMonthlyResponse',
+  z.object({
+    userId: z.string().uuid(),
+    entries: z.array(AdminUserCashbackMonthlyEntry),
+  }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users/{userId}/cashback-monthly',
+  summary: 'Per-user 12-month cashback emission trend (ADR 009/015).',
+  description:
+    'Admin-scoped per-user sibling of /api/admin/cashback-monthly. 12-month window on credit_transactions of type=cashback. Existence probe separates 404 (unknown userId) from empty entries[] (exists, no cashback in window).',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: { params: z.object({ userId: z.string().uuid() }) },
+  responses: {
+    200: {
+      description: 'Per-(month, currency) cashback for the user',
+      content: { 'application/json': { schema: AdminUserCashbackMonthlyResponse } },
+    },
+    400: {
+      description: 'Malformed userId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'User not found',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
+const UserPaymentMethodShareResponse = registry.register(
+  'UserPaymentMethodShareResponse',
+  z.object({
+    userId: z.string().uuid(),
+    state: z.enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired']),
+    totalOrders: z.number().int(),
+    byMethod: z.object({
+      xlm: PaymentMethodBucketShape,
+      usdc: PaymentMethodBucketShape,
+      credit: PaymentMethodBucketShape,
+      loop_asset: PaymentMethodBucketShape,
+    }),
+  }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users/{userId}/payment-method-share',
+  summary: 'Per-user rail mix (ADR 010/015).',
+  description:
+    'Admin-scoped per-user sibling of the per-merchant payment-method-share (#668). Default ?state=fulfilled. Zero-filled byMethod. Support-triage: "does this user only pay with LOOP asset?" vs "never touched it?".',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ userId: z.string().uuid() }),
+    query: z.object({
+      state: z
+        .enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired'])
+        .optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Per-user rail mix',
+      content: { 'application/json': { schema: UserPaymentMethodShareResponse } },
+    },
+    400: {
+      description: 'Malformed userId or invalid ?state',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
+// ─── Admin CSV exports (ADR 018 Tier-3) ─────────────────────────────────────
+//
+// Content-type text/csv; charset=utf-8 — no JSON schema because the body
+// is raw CSV text. Generated clients learn the endpoint exists + query
+// params + error shapes. ADR 018 conventions: RFC 4180, 10k-row cap with
+// __TRUNCATED__ sentinel, 10/min rate, Cache-Control: private, no-store.
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/cashback-activity.csv',
+  summary: 'Daily cashback accrual as RFC 4180 CSV (ADR 009/015/018).',
+  description:
+    'Tier-3 finance export of /api/admin/cashback-activity. Columns: day,currency,cashback_count,cashback_minor. Zero-activity days emit day,,,0,0. Window: ?days (default 31, cap 366). Row cap 10 000.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(366).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'CSV body',
+      content: { 'text/csv; charset=utf-8': { schema: z.string() } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/payouts-activity.csv',
+  summary:
+    'Daily confirmed-payout CSV — settlement counterpart to cashback-activity.csv (ADR 015/016/018).',
+  description:
+    'Tier-3 CSV of /api/admin/payouts-activity. Columns: day,asset_code,payout_count,stroops. Zero days emit day,,0,0. Bucketed on confirmed_at::date. Window: ?days (default 31, cap 366).',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(366).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'CSV body',
+      content: { 'text/csv; charset=utf-8': { schema: z.string() } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/merchants/{merchantId}/flywheel-activity.csv',
+  summary: 'Per-merchant flywheel-activity CSV for BD/commercial prep (ADR 011/015/018).',
+  description:
+    "Tier-3 CSV of /api/admin/merchants/:merchantId/flywheel-activity. Columns: day,recycled_count,total_count,recycled_charge_minor,total_charge_minor. Filename includes merchantId so multi-merchant BD pulls don't collide.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ merchantId: z.string() }),
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(366).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'CSV body',
+      content: { 'text/csv; charset=utf-8': { schema: z.string() } },
+    },
+    400: {
+      description: 'Malformed merchantId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/merchants-catalog.csv',
+  summary: 'Full merchant catalog + cashback-config state as CSV (ADR 011/018).',
+  description:
+    'Tier-3 CSV of the in-memory catalog joined against merchant_cashback_configs. Columns: merchant_id,name,enabled,user_cashback_pct,active,updated_by,updated_at. Merchants without a config emit empty config columns ("no config yet" — distinct from active=false). Catalog is source of truth; evicted merchants drop out.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'CSV body',
+      content: { 'text/csv; charset=utf-8': { schema: z.string() } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
+// ─── Admin fleet-wide monthly / daily (ADR 015/016) ─────────────────────────
+
+const AdminPayoutsMonthlyEntry = registry.register(
+  'AdminPayoutsMonthlyEntry',
+  z.object({
+    month: z.string().openapi({ description: '"YYYY-MM" in UTC.' }),
+    assetCode: z.string().openapi({
+      description: 'LOOP asset code — USDLOOP / GBPLOOP / EURLOOP or future additions.',
+    }),
+    paidStroops: z.string().openapi({ description: 'bigint-as-string stroops.' }),
+    payoutCount: z.number().int(),
+  }),
+);
+
+const AdminPayoutsMonthlyResponse = registry.register(
+  'AdminPayoutsMonthlyResponse',
+  z.object({ entries: z.array(AdminPayoutsMonthlyEntry) }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/payouts-monthly',
+  summary: 'Settlement counterpart to /cashback-monthly (ADR 015/016).',
+  description:
+    'Fixed 12-month window; filter state=confirmed; bucket on (month, assetCode). Pair with /cashback-monthly to answer "is outstanding LOOP-asset liability growing or shrinking this month?". bigint-as-string on paidStroops.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Per-(month, assetCode) confirmed-payout totals',
+      content: { 'application/json': { schema: AdminPayoutsMonthlyResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
+const PerAssetPayoutAmount = registry.register(
+  'PerAssetPayoutAmount',
+  z.object({
+    assetCode: z.string(),
+    stroops: z.string().openapi({ description: 'bigint-as-string.' }),
+    count: z.number().int(),
+  }),
+);
+
+const PayoutsActivityDay = registry.register(
+  'PayoutsActivityDay',
+  z.object({
+    day: z.string().openapi({ description: 'YYYY-MM-DD (UTC).' }),
+    count: z.number().int(),
+    byAsset: z.array(PerAssetPayoutAmount),
+  }),
+);
+
+const PayoutsActivityResponse = registry.register(
+  'PayoutsActivityResponse',
+  z.object({
+    days: z.number().int(),
+    rows: z.array(PayoutsActivityDay),
+  }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/payouts-activity',
+  summary:
+    'Daily confirmed-payout sparkline — settlement sibling of cashback-activity (ADR 015/016).',
+  description:
+    'generate_series LEFT JOIN zero-fills every day. Bucketed on confirmed_at::date. ?days default 30, max 180. Per (day, assetCode) so UI can render per-asset sparklines. bigint-as-string on stroops.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(180).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Daily confirmed-payout series',
+      content: { 'application/json': { schema: PayoutsActivityResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
 // ─── Spec generator ─────────────────────────────────────────────────────────
 
 // Register the bearer auth scheme on the registry so the generator emits it
