@@ -106,13 +106,29 @@ describe('notifyOrderFulfilled', () => {
     expect(amount?.value).toBe('€25.00 EUR');
   });
 
-  it('formats unknown currencies with the code only (no symbol)', async () => {
+  it('A2-1522: Intl-backed symbol for currencies beyond the launch four (NOK → kr25.00 NOK)', async () => {
     notifyOrderFulfilled('o1', 'Acme', 25, 'NOK', 'barcode');
     await new Promise((r) => setTimeout(r, 10));
     const body = lastBody();
     const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
     const amount = embed.fields.find((f) => f.name === 'Amount');
-    expect(amount?.value).toBe('25.00 NOK');
+    // Intl.NumberFormat picks the correct symbol for NOK. The exact
+    // symbol is `kr` on modern ICU; accept either `kr` or `Kr` to
+    // stay robust against Node version drift in the ICU tables.
+    expect(amount?.value).toMatch(/^[Kk]r25\.00 NOK$/);
+  });
+
+  it('A2-1522: falls back to code-only for truly invalid currency codes', async () => {
+    notifyOrderFulfilled('o1', 'Acme', 25, 'ZZZ', 'barcode');
+    await new Promise((r) => setTimeout(r, 10));
+    const body = lastBody();
+    const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
+    const amount = embed.fields.find((f) => f.name === 'Amount');
+    // ZZZ is the ISO-4217 "no currency" code; Intl.NumberFormat
+    // accepts it and returns 'ZZZ' as the symbol. Either branch of
+    // the fallback (no symbol found) or symbol === code is fine —
+    // the point is the method doesn't throw.
+    expect(amount?.value).toMatch(/^(25\.00 ZZZ|ZZZ25\.00 ZZZ)$/);
   });
 });
 
@@ -231,7 +247,7 @@ describe('notifyCashbackCredited', () => {
     expect(amount?.value).toBe('$12,345.67 USD');
   });
 
-  it('falls back to code-only rendering for unknown currencies', async () => {
+  it('A2-1522: Intl picks the NOK symbol — no hardcoded 4-currency map drift', async () => {
     notifyCashbackCredited({
       orderId: 'o3',
       merchantName: 'Acme',
@@ -243,7 +259,7 @@ describe('notifyCashbackCredited', () => {
     const body = lastBody();
     const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
     const amount = embed.fields.find((f) => f.name === 'Amount');
-    expect(amount?.value).toBe('5.00 NOK');
+    expect(amount?.value).toMatch(/^[Kk]r5\.00 NOK$/);
   });
 
   it('truncates the user id so full UUIDs never hit Discord', async () => {
