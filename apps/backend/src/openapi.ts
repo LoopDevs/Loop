@@ -952,6 +952,28 @@ const AdminOperatorMerchantMixResponse = registry.register(
   }),
 );
 
+// ─── Admin — user × operator mix (ADR 013 / 022) ───────────────────────────
+
+const AdminUserOperatorMixRow = registry.register(
+  'AdminUserOperatorMixRow',
+  z.object({
+    operatorId: z.string(),
+    orderCount: z.number().int().min(0),
+    fulfilledCount: z.number().int().min(0),
+    failedCount: z.number().int().min(0),
+    lastOrderAt: z.string().datetime(),
+  }),
+);
+
+const AdminUserOperatorMixResponse = registry.register(
+  'AdminUserOperatorMixResponse',
+  z.object({
+    userId: z.string().uuid(),
+    since: z.string().datetime(),
+    rows: z.array(AdminUserOperatorMixRow),
+  }),
+);
+
 // ─── Admin — operator stats (ADR 013) ──────────────────────────────────────
 
 const AdminOperatorStatsRow = registry.register(
@@ -3407,6 +3429,52 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error reading the ledger',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users/{userId}/operator-mix',
+  summary: 'Per-user × per-operator attribution for support triage (ADR 013 / 022).',
+  description:
+    'Third corner of the mix-axis triangle (alongside /merchants/{id}/operator-mix and /operators/{id}/merchant-mix). Aggregates orders for one user by ctx_operator_id. Support pivots here during per-user complaints: "user X\'s slow cashback → 80% of their orders went through op-beta-02 which has a failing circuit". Zero-mix users return 200 with rows: []. Only rows with non-null `ctx_operator_id` aggregated. Default window 24h, cap 366d.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ userId: z.string().uuid() }),
+    query: z.object({
+      since: z
+        .string()
+        .datetime()
+        .optional()
+        .openapi({ description: 'ISO-8601 — lower bound on createdAt. Defaults to 24h ago.' }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Per-operator rows scoped to the user',
+      content: { 'application/json': { schema: AdminUserOperatorMixResponse } },
+    },
+    400: {
+      description: 'Malformed `userId` or `since`',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the aggregate',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
