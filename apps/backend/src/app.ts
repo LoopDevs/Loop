@@ -128,6 +128,7 @@ import { publicMerchantHandler } from './public/merchant.js';
 import { publicCashbackPreviewHandler } from './public/cashback-preview.js';
 import {
   getCashbackHistoryHandler,
+  getCashbackHistoryCsvHandler,
   getCashbackSummaryHandler,
   getMeHandler,
   getUserCreditsHandler,
@@ -761,6 +762,9 @@ app.get('/api/users/me/stellar-trustlines', rateLimit(30, 60_000), getUserStella
 // Account page loads it alongside /me on mount, and TanStack Query invalidates
 // it after any ledger-touching admin action (support edits, payouts).
 app.get('/api/users/me/cashback-history', rateLimit(60, 60_000), getCashbackHistoryHandler);
+// Full credit-ledger CSV dump for the caller (ADR 009). Tighter rate
+// limit than the JSON sibling because the query is unbounded in size.
+app.get('/api/users/me/cashback-history.csv', rateLimit(6, 60_000), getCashbackHistoryCsvHandler);
 // GET /api/users/me/credits — caller's off-chain cashback balance per
 // currency (ADR 009 / 015). /me surfaces a single scalar in the user's
 // home currency; this is the multi-currency complement for users who

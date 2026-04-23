@@ -2114,6 +2114,34 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/users/me/cashback-history.csv',
+  summary: 'Full credit-ledger CSV export for the caller (ADR 009).',
+  description:
+    "One-shot CSV dump of the caller's credit-ledger history. Columns: Created (UTC), Type, Amount (minor), Currency, Reference type, Reference ID. Capped at 10 000 rows; the `X-Result-Count` response header reports the actual row count so the client can warn when the cap is hit. Tighter rate limit (6/min) than the JSON sibling because the query is unbounded in size.",
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'CSV attachment — Content-Disposition: attachment; filename="loop-cashback-history.csv".',
+      content: { 'text/csv': { schema: z.string() } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (6/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error resolving the user',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/users/me/credits',
   summary: 'Caller per-currency credit balance (ADR 009 / 015).',
   description:
