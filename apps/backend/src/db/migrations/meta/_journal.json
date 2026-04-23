@@ -99,6 +99,13 @@
       "when": 1778200000000,
       "tag": "0013_ledger_constraints",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1778300000000,
+      "tag": "0014_credit_tx_currency_check",
+      "breakpoints": true
     }
   ]
 }
