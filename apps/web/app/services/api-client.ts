@@ -6,6 +6,23 @@ import { API_BASE } from './config';
 // (stuck upstream, bad network) would leave the UI spinning forever.
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+/**
+ * A2-1529: client version stamped on every outbound request as
+ * `X-Client-Version`. Baked in at build time from `package.json`
+ * (see `vite.config.ts`). Backend access-log ties each request to a
+ * specific client build, so a prod regression can be scoped ("only
+ * clients ≥ 0.3.1 hit the bug") without Sentry forensics.
+ *
+ * Platform is known at runtime (`getPlatform()`) — `web`, `ios`,
+ * `android`. `X-Client-Platform` gives ops a quick Grafana filter
+ * without inferring it from the User-Agent.
+ */
+const CLIENT_VERSION =
+  (typeof import.meta !== 'undefined' &&
+    typeof import.meta.env !== 'undefined' &&
+    (import.meta.env['VITE_CLIENT_VERSION'] as string | undefined)) ||
+  '0.0.0';
+
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   body?: unknown;
@@ -41,9 +58,13 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
         : AbortSignal.timeout(timeoutMs)
       : callerSignal;
 
+  // A2-1529: X-Client-Version on every outbound request. Callers can
+  // still override via `headers` if they need to; the spread places
+  // theirs after so per-caller wins on conflict.
   const init: RequestInit = {
     method,
     headers: {
+      'X-Client-Version': CLIENT_VERSION,
       ...headers,
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
     },

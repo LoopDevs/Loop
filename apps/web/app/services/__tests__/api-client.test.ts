@@ -45,6 +45,27 @@ describe('apiRequest', () => {
     );
   });
 
+  it('A2-1529: stamps X-Client-Version on every request', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    await apiRequest('/api/merchants');
+    const [, init] = vi.mocked(fetch).mock.calls[0]!;
+    const headers = init?.headers as Record<string, string>;
+    expect(headers['X-Client-Version']).toBeDefined();
+    expect(headers['X-Client-Version']).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  it('A2-1529: caller-provided X-Client-Version overrides the default (test seam)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    await apiRequest('/api/merchants', { headers: { 'X-Client-Version': '9.9.9' } });
+    const [, init] = vi.mocked(fetch).mock.calls[0]!;
+    const headers = init?.headers as Record<string, string>;
+    expect(headers['X-Client-Version']).toBe('9.9.9');
+  });
+
   it('sends JSON body for POST requests', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), { status: 200 }),
