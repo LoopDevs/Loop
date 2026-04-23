@@ -4,7 +4,7 @@ import type * as SchemaModule from '../../db/schema.js';
 const { dbMock, state } = vi.hoisted(() => {
   const s: {
     config: unknown;
-    insertedRow: unknown;
+    insertedRow: Record<string, unknown> | null | undefined;
     /**
      * Capture of every `.values(...)` call across inserts. For
      * credit-order tests this collects both the `orders` row and the
