@@ -10,6 +10,7 @@ import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton
 import { PayoutsByAssetTable } from '~/components/features/admin/PayoutsByAssetTable';
 import { SupplierSpendCard } from '~/components/features/admin/SupplierSpendCard';
 import { SupplierSpendActivityChart } from '~/components/features/admin/SupplierSpendActivityChart';
+import { CreditFlowChart } from '~/components/features/admin/CreditFlowChart';
 import { OperatorStatsCard } from '~/components/features/admin/OperatorStatsCard';
 import { TopUsersByPendingPayoutCard } from '~/components/features/admin/TopUsersByPendingPayoutCard';
 import { UsersRecyclingActivityCard } from '~/components/features/admin/UsersRecyclingActivityCard';
@@ -248,6 +249,18 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="mt-6">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            30-day credit flow
+          </p>
+          <p className="mb-3 text-sm text-gray-600 dark:text-gray-400">
+            Per-day credited vs. debited from the ledger, one currency at a time (ADR 009/015).
+            &ldquo;Are we generating liability faster than we settle it?&rdquo; — sustained
+            positive-net days mean cashback issuance is outpacing user settlement and treasury needs
+            to plan Stellar-side funding ahead of the curve.
+          </p>
+          <CreditFlowChart />
         </div>
       </section>
 
