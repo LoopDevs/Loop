@@ -67,24 +67,52 @@ interface DriftRow extends Record<string, unknown> {
 
 /** GET /api/admin/reconciliation */
 export async function adminReconciliationHandler(c: Context): Promise<Response> {
-  // Drifted rows — a LEFT JOIN so a user_credits row with zero
-  // matching credit_transactions still surfaces (HAVING sees
-  // COALESCE(SUM, 0), and if balance != 0 we flag it). Bigint minus
-  // bigint is computed server-side; Postgres returns text via the
-  // explicit ::text casts.
+  // A2-900: build the drift set from BOTH directions so the endpoint
+  // catches orphans on either side.
+  //
+  //   (1) user_credits rows whose ledger sum disagrees with
+  //       balance_minor. Covers the LEFT-JOIN shape (balance row
+  //       exists, ledger sum may be zero) where the prior single
+  //       query was anchored.
+  //
+  //   (2) credit_transactions keyed on (user_id, currency) for which
+  //       NO user_credits row exists at all. Prior LEFT JOIN anchored
+  //       on user_credits would miss these entirely — a dangling
+  //       ledger entry (deleted balance row, failed migration) stays
+  //       invisible to ops. Surface them here with balance=0, ledger
+  //       sum computed, delta = -ledger_sum.
+  //
+  // UNION ALL is safe: the two halves partition on "has matching
+  // user_credits row" so no row appears twice. Results merged,
+  // ordered by user id, capped at DRIFT_PAGE_LIMIT.
   const driftResult = await db.execute<DriftRow>(sql`
-    SELECT
-      uc.user_id::text AS "userId",
-      uc.currency AS currency,
-      uc.balance_minor::text AS "balanceMinor",
-      COALESCE(SUM(ct.amount_minor), 0)::text AS "ledgerSumMinor",
-      (uc.balance_minor - COALESCE(SUM(ct.amount_minor), 0))::text AS "deltaMinor"
-    FROM user_credits uc
-    LEFT JOIN credit_transactions ct
-      ON ct.user_id = uc.user_id AND ct.currency = uc.currency
-    GROUP BY uc.user_id, uc.currency, uc.balance_minor
-    HAVING uc.balance_minor != COALESCE(SUM(ct.amount_minor), 0)
-    ORDER BY uc.user_id
+    SELECT "userId", currency, "balanceMinor", "ledgerSumMinor", "deltaMinor"
+    FROM (
+      SELECT
+        uc.user_id::text AS "userId",
+        uc.currency AS currency,
+        uc.balance_minor::text AS "balanceMinor",
+        COALESCE(SUM(ct.amount_minor), 0)::text AS "ledgerSumMinor",
+        (uc.balance_minor - COALESCE(SUM(ct.amount_minor), 0))::text AS "deltaMinor"
+      FROM user_credits uc
+      LEFT JOIN credit_transactions ct
+        ON ct.user_id = uc.user_id AND ct.currency = uc.currency
+      GROUP BY uc.user_id, uc.currency, uc.balance_minor
+      HAVING uc.balance_minor != COALESCE(SUM(ct.amount_minor), 0)
+      UNION ALL
+      SELECT
+        ct.user_id::text AS "userId",
+        ct.currency AS currency,
+        '0' AS "balanceMinor",
+        SUM(ct.amount_minor)::text AS "ledgerSumMinor",
+        (-SUM(ct.amount_minor))::text AS "deltaMinor"
+      FROM credit_transactions ct
+      LEFT JOIN user_credits uc
+        ON uc.user_id = ct.user_id AND uc.currency = ct.currency
+      WHERE uc.user_id IS NULL
+      GROUP BY ct.user_id, ct.currency
+    ) drift
+    ORDER BY "userId"
     LIMIT ${DRIFT_PAGE_LIMIT}
   `);
 
