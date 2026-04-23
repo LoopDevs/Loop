@@ -21,9 +21,20 @@ function getBootRestore(): Promise<void> {
       if (accessToken !== null) {
         useAuthStore.getState().setAccessToken(accessToken);
         if (email) useAuthStore.setState({ email });
-      } else {
-        useAuthStore.getState().clearSession();
+        return;
       }
+      // A2-1150: do NOT call clearSession() here. tryRefresh returns
+      // null for both "definitively rejected" (4xx-not-429 → doRefresh
+      // already cleared storage in its catch branch) and "transient"
+      // (5xx / 429 / network — storage deliberately kept on disk per
+      // audit A-020). Calling clearSession on the transient path would
+      // wipe the refresh token from Keychain / sessionStorage and
+      // force a re-login even though the backend just had a blip.
+      //
+      // The auth store's accessToken was already null before boot
+      // restore ran; leaving it null lets the UI render the login
+      // screen while preserving the refresh token for a subsequent
+      // launch to retry once upstream recovers.
     } catch {
       /* refresh failed — user will need to log in again */
     }
