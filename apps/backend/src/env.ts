@@ -251,6 +251,15 @@ export const EnvSchema = z.object({
   // failure to terminal `failed`. ADR 016 default 5.
   LOOP_PAYOUT_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
 
+  // A2-602 watchdog: rows stuck in `submitted` for longer than this
+  // (seconds) are re-picked by the worker. The idempotency pre-check
+  // converges them to `confirmed` if the prior submit actually landed;
+  // otherwise a fresh submit is issued with a new sequence number.
+  // Default 300s (5m) — a well-behaved Horizon close is ~5s, so five
+  // minutes is well outside the normal submit→seal window while still
+  // short enough that a crash-loop doesn't silently eat payouts.
+  LOOP_PAYOUT_WATCHDOG_STALE_SECONDS: z.coerce.number().int().positive().default(300),
+
   // Feature flag for the Loop-native order workers (ADR 010). When
   // true at boot, the backend starts the payment watcher and
   // procurement worker intervals. Default false — workers are opt-in

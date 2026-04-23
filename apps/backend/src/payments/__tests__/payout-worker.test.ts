@@ -8,7 +8,9 @@ vi.mock('../../logger.js', () => ({
 
 const { repoMocks } = vi.hoisted(() => ({
   repoMocks: {
-    listPendingPayouts: vi.fn<(limit?: number) => Promise<unknown[]>>(async () => []),
+    listClaimablePayouts: vi.fn<
+      (opts: { limit?: number; staleSeconds: number; maxAttempts: number }) => Promise<unknown[]>
+    >(async () => []),
     markPayoutSubmitted: vi.fn<(id: string) => Promise<unknown>>(async (id: string) => ({ id })),
     markPayoutConfirmed: vi.fn<(args: { id: string; txHash: string }) => Promise<unknown>>(
       async (args: { id: string; txHash: string }) => ({
@@ -19,14 +21,23 @@ const { repoMocks } = vi.hoisted(() => ({
     markPayoutFailed: vi.fn<(args: { id: string; reason: string }) => Promise<unknown>>(
       async (args: { id: string; reason: string }) => ({ id: args.id, reason: args.reason }),
     ),
+    reclaimSubmittedPayout: vi.fn<
+      (args: { id: string; expectedAttempts: number }) => Promise<unknown>
+    >(async (args: { id: string; expectedAttempts: number }) => ({
+      id: args.id,
+      attempts: args.expectedAttempts + 1,
+    })),
   },
 }));
 vi.mock('../../credits/pending-payouts.js', () => ({
-  listPendingPayouts: (n?: number) => repoMocks.listPendingPayouts(n),
+  listClaimablePayouts: (opts: { limit?: number; staleSeconds: number; maxAttempts: number }) =>
+    repoMocks.listClaimablePayouts(opts),
   markPayoutSubmitted: (id: string) => repoMocks.markPayoutSubmitted(id),
   markPayoutConfirmed: (args: { id: string; txHash: string }) =>
     repoMocks.markPayoutConfirmed(args),
   markPayoutFailed: (args: { id: string; reason: string }) => repoMocks.markPayoutFailed(args),
+  reclaimSubmittedPayout: (args: { id: string; expectedAttempts: number }) =>
+    repoMocks.reclaimSubmittedPayout(args),
 }));
 
 const { horizonMock } = vi.hoisted(() => ({
@@ -102,15 +113,22 @@ function makeRow(overrides: Record<string, unknown> = {}): Record<string, unknow
 }
 
 beforeEach(() => {
-  repoMocks.listPendingPayouts.mockReset();
+  repoMocks.listClaimablePayouts.mockReset();
   repoMocks.markPayoutSubmitted.mockReset();
   repoMocks.markPayoutConfirmed.mockReset();
   repoMocks.markPayoutFailed.mockReset();
+  repoMocks.reclaimSubmittedPayout.mockReset();
   horizonMock.findOutboundPaymentByMemo.mockReset();
   sdkMock.submitPayout.mockReset();
   // Sensible defaults.
-  repoMocks.listPendingPayouts.mockResolvedValue([]);
+  repoMocks.listClaimablePayouts.mockResolvedValue([]);
   repoMocks.markPayoutSubmitted.mockImplementation(async (id: string) => ({ id }));
+  repoMocks.reclaimSubmittedPayout.mockImplementation(
+    async (args: { id: string; expectedAttempts: number }) => ({
+      id: args.id,
+      attempts: args.expectedAttempts + 1,
+    }),
+  );
   repoMocks.markPayoutConfirmed.mockImplementation(
     async (args: { id: string; txHash: string }) => ({ id: args.id, txHash: args.txHash }),
   );
@@ -131,7 +149,7 @@ describe('runPayoutTick', () => {
   });
 
   it('happy path: pre-check null → submit → confirm', async () => {
-    repoMocks.listPendingPayouts.mockResolvedValue([makeRow()]);
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
     const r = await runPayoutTick(BASE_ARGS);
     expect(r.confirmed).toBe(1);
     expect(horizonMock.findOutboundPaymentByMemo).toHaveBeenCalledTimes(1);
@@ -145,7 +163,7 @@ describe('runPayoutTick', () => {
   });
 
   it('idempotency pre-check finds prior submit → converges to confirmed without re-submitting', async () => {
-    repoMocks.listPendingPayouts.mockResolvedValue([makeRow()]);
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
     horizonMock.findOutboundPaymentByMemo.mockResolvedValue({
       txHash: 'prior-tx',
       amount: '5.0000000',
@@ -161,7 +179,7 @@ describe('runPayoutTick', () => {
   });
 
   it('pre-check race (markConfirmed returns null) counts as skippedRace', async () => {
-    repoMocks.listPendingPayouts.mockResolvedValue([makeRow()]);
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
     horizonMock.findOutboundPaymentByMemo.mockResolvedValue({
       txHash: 'prior-tx',
       amount: '5.0000000',
@@ -174,7 +192,7 @@ describe('runPayoutTick', () => {
   });
 
   it('markSubmitted race (another worker claimed it) counts as skippedRace, no submit', async () => {
-    repoMocks.listPendingPayouts.mockResolvedValue([makeRow()]);
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
     repoMocks.markPayoutSubmitted.mockResolvedValue(null);
     const r = await runPayoutTick(BASE_ARGS);
     expect(r.skippedRace).toBe(1);
@@ -182,7 +200,7 @@ describe('runPayoutTick', () => {
   });
 
   it('transient_horizon under the attempts cap → retriedLater, no markFailed', async () => {
-    repoMocks.listPendingPayouts.mockResolvedValue([makeRow({ attempts: 1 })]);
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow({ attempts: 1 })]);
     sdkMock.submitPayout.mockRejectedValue(new PayoutSubmitErrorMock('transient_horizon', 'blip'));
     const r = await runPayoutTick({ ...BASE_ARGS, maxAttempts: 5 });
     expect(r.retriedLater).toBe(1);
@@ -192,7 +210,7 @@ describe('runPayoutTick', () => {
 
   it('transient_rebuild at the attempts cap → markFailed', async () => {
     // attempts=4 → after markSubmitted bumps, used=5. At cap → fail.
-    repoMocks.listPendingPayouts.mockResolvedValue([makeRow({ attempts: 4 })]);
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow({ attempts: 4 })]);
     sdkMock.submitPayout.mockRejectedValue(
       new PayoutSubmitErrorMock('transient_rebuild', 'tx_bad_seq'),
     );
@@ -202,7 +220,7 @@ describe('runPayoutTick', () => {
   });
 
   it('terminal_no_trust immediately marks failed regardless of attempts', async () => {
-    repoMocks.listPendingPayouts.mockResolvedValue([makeRow({ attempts: 0 })]);
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow({ attempts: 0 })]);
     sdkMock.submitPayout.mockRejectedValue(
       new PayoutSubmitErrorMock('terminal_no_trust', 'op_no_trust'),
     );
@@ -212,7 +230,7 @@ describe('runPayoutTick', () => {
   });
 
   it('unclassified throw falls through to markFailed', async () => {
-    repoMocks.listPendingPayouts.mockResolvedValue([makeRow()]);
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
     sdkMock.submitPayout.mockRejectedValue(new Error('socket hang up'));
     const r = await runPayoutTick(BASE_ARGS);
     expect(r.failed).toBe(1);
@@ -222,7 +240,7 @@ describe('runPayoutTick', () => {
   });
 
   it('fires the Discord alert on terminal failure with the classified kind', async () => {
-    repoMocks.listPendingPayouts.mockResolvedValue([makeRow({ attempts: 0 })]);
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow({ attempts: 0 })]);
     sdkMock.submitPayout.mockRejectedValue(
       new PayoutSubmitErrorMock('terminal_no_trust', 'op_no_trust'),
     );
@@ -238,7 +256,7 @@ describe('runPayoutTick', () => {
   });
 
   it('fires the Discord alert for unclassified throws with kind=unclassified', async () => {
-    repoMocks.listPendingPayouts.mockResolvedValue([makeRow()]);
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
     sdkMock.submitPayout.mockRejectedValue(new Error('socket hang up'));
     await runPayoutTick(BASE_ARGS);
     expect(discordMock.notifyPayoutFailed).toHaveBeenCalledWith(
@@ -250,14 +268,14 @@ describe('runPayoutTick', () => {
   });
 
   it('does not fire the Discord alert on transient-retry outcomes', async () => {
-    repoMocks.listPendingPayouts.mockResolvedValue([makeRow({ attempts: 1 })]);
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow({ attempts: 1 })]);
     sdkMock.submitPayout.mockRejectedValue(new PayoutSubmitErrorMock('transient_horizon', 'blip'));
     await runPayoutTick({ ...BASE_ARGS, maxAttempts: 5 });
     expect(discordMock.notifyPayoutFailed).not.toHaveBeenCalled();
   });
 
   it('pre-check throw does not block the submit — logs + proceeds', async () => {
-    repoMocks.listPendingPayouts.mockResolvedValue([makeRow()]);
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
     horizonMock.findOutboundPaymentByMemo.mockRejectedValue(new Error('Horizon 502'));
     const r = await runPayoutTick(BASE_ARGS);
     expect(r.confirmed).toBe(1);
@@ -265,7 +283,7 @@ describe('runPayoutTick', () => {
   });
 
   it('confirm race after submit counts as skippedRace (payment did land)', async () => {
-    repoMocks.listPendingPayouts.mockResolvedValue([makeRow()]);
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
     repoMocks.markPayoutConfirmed.mockResolvedValue(null);
     const r = await runPayoutTick(BASE_ARGS);
     expect(r.skippedRace).toBe(1);
@@ -273,7 +291,7 @@ describe('runPayoutTick', () => {
   });
 
   it('processes rows in order (serialises to respect operator seq numbers)', async () => {
-    repoMocks.listPendingPayouts.mockResolvedValue([
+    repoMocks.listClaimablePayouts.mockResolvedValue([
       makeRow({ id: 'p-1' }),
       makeRow({ id: 'p-2' }),
       makeRow({ id: 'p-3' }),
@@ -290,15 +308,78 @@ describe('runPayoutTick', () => {
     expect(sdkMock.submitPayout).toHaveBeenCalledTimes(3);
   });
 
-  it('honours the limit arg (passes through to listPendingPayouts)', async () => {
-    repoMocks.listPendingPayouts.mockResolvedValue([]);
-    await runPayoutTick({ ...BASE_ARGS, limit: 3 });
-    expect(repoMocks.listPendingPayouts).toHaveBeenCalledWith(3);
+  it('honours the limit + watchdog args (passes through to listClaimablePayouts)', async () => {
+    repoMocks.listClaimablePayouts.mockResolvedValue([]);
+    await runPayoutTick({ ...BASE_ARGS, limit: 3, watchdogStaleSeconds: 120 });
+    expect(repoMocks.listClaimablePayouts).toHaveBeenCalledWith({
+      limit: 3,
+      staleSeconds: 120,
+      maxAttempts: 5,
+    });
   });
 
-  it('defaults limit to 5 when not given', async () => {
-    repoMocks.listPendingPayouts.mockResolvedValue([]);
+  it('defaults limit to 5 and watchdog staleSeconds to 300 when not given', async () => {
+    repoMocks.listClaimablePayouts.mockResolvedValue([]);
     await runPayoutTick(BASE_ARGS);
-    expect(repoMocks.listPendingPayouts).toHaveBeenCalledWith(5);
+    expect(repoMocks.listClaimablePayouts).toHaveBeenCalledWith({
+      limit: 5,
+      staleSeconds: 300,
+      maxAttempts: 5,
+    });
+  });
+
+  // ─── A2-602 watchdog coverage ──────────────────────────────────
+
+  it('A2-602 watchdog: stuck submitted row, prior submit landed → converges to confirmed via reclaim', async () => {
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ state: 'submitted', attempts: 1 }),
+    ]);
+    horizonMock.findOutboundPaymentByMemo.mockResolvedValue({
+      txHash: 'landed-tx',
+      amount: '5.0000000',
+      assetCode: 'GBPLOOP',
+    });
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.skippedAlreadyLanded).toBe(1);
+    // No second submit — idempotency check short-circuited.
+    expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+    // Row is already 'submitted' so markPayoutSubmitted must NOT be
+    // called — the guard expects state='pending' and would fail the
+    // CAS. We go straight to confirm.
+    expect(repoMocks.markPayoutSubmitted).not.toHaveBeenCalled();
+    expect(repoMocks.markPayoutConfirmed).toHaveBeenCalledWith({
+      id: 'p-1',
+      txHash: 'landed-tx',
+    });
+  });
+
+  it('A2-602 watchdog: stuck submitted row, prior submit NOT landed → reclaim + fresh submit + confirm', async () => {
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ state: 'submitted', attempts: 1 }),
+    ]);
+    horizonMock.findOutboundPaymentByMemo.mockResolvedValue(null);
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.confirmed).toBe(1);
+    expect(repoMocks.reclaimSubmittedPayout).toHaveBeenCalledWith({
+      id: 'p-1',
+      expectedAttempts: 1,
+    });
+    // markPayoutSubmitted reserved for the pending-row path only.
+    expect(repoMocks.markPayoutSubmitted).not.toHaveBeenCalled();
+    expect(sdkMock.submitPayout).toHaveBeenCalledTimes(1);
+    expect(repoMocks.markPayoutConfirmed).toHaveBeenCalledWith({
+      id: 'p-1',
+      txHash: 'tx-hash',
+    });
+  });
+
+  it('A2-602 watchdog: reclaim race (another worker claimed it) → skippedRace, no submit', async () => {
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ state: 'submitted', attempts: 1 }),
+    ]);
+    repoMocks.reclaimSubmittedPayout.mockResolvedValue(null);
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.skippedRace).toBe(1);
+    expect(sdkMock.submitPayout).not.toHaveBeenCalled();
   });
 });
