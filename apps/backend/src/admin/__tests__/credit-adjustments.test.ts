@@ -36,10 +36,39 @@ vi.mock('../idempotency.js', () => ({
   IDEMPOTENCY_KEY_MAX: 128,
   validateIdempotencyKey: (k: string | undefined): k is string =>
     k !== undefined && k.length >= 16 && k.length <= 128,
-  lookupIdempotencyKey: vi.fn(async () => state.priorSnapshot),
-  storeIdempotencyKey: vi.fn(async (args: Record<string, unknown>) => {
-    state.storedSnapshot = args;
-  }),
+  // A2-2001: handler now calls withIdempotencyGuard instead of the
+  // separate lookup + store pair. Mock it to branch on state.priorSnapshot:
+  //   - If state.priorSnapshot is non-null, short-circuit to replay.
+  //   - Otherwise call doWrite() and record the resulting snapshot.
+  withIdempotencyGuard: vi.fn(
+    async (
+      args: {
+        adminUserId: string;
+        key: string;
+        method: string;
+        path: string;
+      },
+      doWrite: () => Promise<{ status: number; body: Record<string, unknown> }>,
+    ) => {
+      if (state.priorSnapshot !== null && state.priorSnapshot !== undefined) {
+        return {
+          replayed: true,
+          status: (state.priorSnapshot as { status: number }).status,
+          body: (state.priorSnapshot as { body: Record<string, unknown> }).body,
+        };
+      }
+      const { status, body } = await doWrite();
+      state.storedSnapshot = {
+        adminUserId: args.adminUserId,
+        key: args.key,
+        method: args.method,
+        path: args.path,
+        status,
+        body,
+      };
+      return { replayed: false, status, body };
+    },
+  ),
 }));
 
 vi.mock('../../discord.js', () => ({
