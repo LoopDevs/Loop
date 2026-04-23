@@ -14,6 +14,7 @@ import { Spinner } from '~/components/ui/Spinner';
 import { Button } from '~/components/ui/Button';
 import { PurchaseComplete } from '~/components/features/purchase/PurchaseComplete';
 import { EarnedCashbackCard } from '~/components/features/purchase/EarnedCashbackCard';
+import { OrderPayoutCard } from '~/components/features/order/OrderPayoutCard';
 import { formatMoney } from '~/utils/money';
 import { friendlyError } from '~/utils/error-messages';
 import { openWebView } from '~/native/webview';
@@ -186,6 +187,12 @@ function OrderDetailBody({ order, now }: { order: Order; now: number }): React.J
             amount={order.amount}
             currency={order.currency}
           />
+          {/* Per-order settlement state (ADR 015/016). Self-hides
+              when there's no payout row — fresh-fulfil orders show
+              nothing here until the builder queues a row, and
+              credit-only ledgers (user has no Stellar trustline)
+              render the EarnedCashbackCard alone. */}
+          <OrderPayoutCard orderId={order.id} />
           <PurchaseComplete
             merchantName={order.merchantName}
             code={order.giftCardCode}
