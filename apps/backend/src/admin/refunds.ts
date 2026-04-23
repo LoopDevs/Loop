@@ -137,6 +137,7 @@ export async function adminRefundHandler(c: Context): Promise<Response> {
       amountMinor,
       orderId: parsed.data.orderId,
       adminUserId: actor.id,
+      reason: parsed.data.reason,
     });
   } catch (err) {
     if (err instanceof RefundAlreadyIssuedError) {
