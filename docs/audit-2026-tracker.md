@@ -201,20 +201,20 @@ Complete. Evidence: [phase-3-dependencies.md](./audit-2026-evidence/phase-3-depe
 
 Complete. Evidence: [phase-4-build-release.md](./audit-2026-evidence/phase-4-build-release.md). Commit SHA at capture: `450011d`. 12 findings (1 High / 6 Medium / 4 Low / 1 Info).
 
-| ID     | Severity | Title                                                                                                                              |
-| ------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| A2-401 | **High** | Drizzle `_journal.json` missing migration 0011; `runMigrations` silently skips `admin_idempotency_keys`                            |
-| A2-402 | Medium   | No `HEALTHCHECK` directive in either Dockerfile                                                                                    |
-| A2-403 | Medium   | Base image `node:22-alpine` pinned by floating tag, not SHA256 digest                                                              |
-| A2-404 | Medium   | `npm run proto:generate` produces a diff vs checked-in `clustering_pb.ts` (quote + whitespace drift; no prettier step)             |
-| A2-405 | Low      | `NSFaceIDUsageDescription` copy in overlay script drifted from live Info.plist; overlay only writes when absent                    |
-| A2-406 | Low      | Overlay script `cp`s unconditionally even when source == dest; mtime churn on every pass                                           |
-| A2-407 | Medium   | No `[deploy] release_command` in fly.toml; migration-vs-deploy ordering documented only in an inline code comment                  |
-| A2-408 | Medium   | SBOM, provenance attestation, container CVE scanning, image signing all absent                                                     |
-| A2-409 | Medium   | GitHub Actions pinned by tag, not commit SHA (`superfly/flyctl-actions/setup-flyctl@master` worst)                                 |
-| A2-410 | Low      | `.dockerignore` only at repo root, not per-app; docs tell operators to `cd apps/backend && fly deploy`                             |
-| A2-411 | Low      | `.husky/pre-push` doesn't call `scripts/verify.sh`; skips typecheck/lint/format:check                                              |
-| A2-412 | Info     | Drizzle snapshot chain broken (`0001_snapshot.json`..`0011_snapshot.json` absent); `db:generate` would diff against initial schema |
+| ID     | Severity | Title                                                                                                                                                                                                   |
+| ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A2-401 | **High** | ~~Drizzle `_journal.json` missing migration 0011; `runMigrations` silently skips `admin_idempotency_keys`~~ **resolved-pending-review** by Batch 1 PR 2 (corroborated by Phase 6 as A2-720 at Critical) |
+| A2-402 | Medium   | No `HEALTHCHECK` directive in either Dockerfile                                                                                                                                                         |
+| A2-403 | Medium   | Base image `node:22-alpine` pinned by floating tag, not SHA256 digest                                                                                                                                   |
+| A2-404 | Medium   | `npm run proto:generate` produces a diff vs checked-in `clustering_pb.ts` (quote + whitespace drift; no prettier step)                                                                                  |
+| A2-405 | Low      | `NSFaceIDUsageDescription` copy in overlay script drifted from live Info.plist; overlay only writes when absent                                                                                         |
+| A2-406 | Low      | Overlay script `cp`s unconditionally even when source == dest; mtime churn on every pass                                                                                                                |
+| A2-407 | Medium   | No `[deploy] release_command` in fly.toml; migration-vs-deploy ordering documented only in an inline code comment                                                                                       |
+| A2-408 | Medium   | SBOM, provenance attestation, container CVE scanning, image signing all absent                                                                                                                          |
+| A2-409 | Medium   | GitHub Actions pinned by tag, not commit SHA (`superfly/flyctl-actions/setup-flyctl@master` worst)                                                                                                      |
+| A2-410 | Low      | `.dockerignore` only at repo root, not per-app; docs tell operators to `cd apps/backend && fly deploy`                                                                                                  |
+| A2-411 | Low      | `.husky/pre-push` doesn't call `scripts/verify.sh`; skips typecheck/lint/format:check                                                                                                                   |
+| A2-412 | Info     | Drizzle snapshot chain broken (`0001_snapshot.json`..`0011_snapshot.json` absent); `db:generate` would diff against initial schema                                                                      |
 
 Full per-finding evidence + remediation pointers in the evidence file.
 
@@ -336,10 +336,10 @@ Complete. Evidence: [phase-6-database.md](./audit-2026-evidence/phase-6-database
 
 **Critical (2):**
 
-| ID     | Title                                                                                                                                                                                                  |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| A2-700 | `accrue-interest.ts` UPDATE filters only by `user_id` (not `currency`), writes stale balance outside `FOR UPDATE` — ledger invariant breaks for multi-currency users, concurrent cashback lost         |
-| A2-720 | Migration `0011_admin_idempotency_keys.sql` absent from `_journal.json` — drizzle's migrator iterates journal only; fresh deploys never create the table; every ADR-017 admin write would fail on boot |
+| ID     | Title                                                                                                                                                                                                                                                  |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A2-700 | `accrue-interest.ts` UPDATE filters only by `user_id` (not `currency`), writes stale balance outside `FOR UPDATE` — ledger invariant breaks for multi-currency users, concurrent cashback lost                                                         |
+| A2-720 | ~~Migration `0011_admin_idempotency_keys.sql` absent from `_journal.json` — drizzle's migrator iterates journal only; fresh deploys never create the table; every ADR-017 admin write would fail on boot~~ **resolved-pending-review** by Batch 1 PR 2 |
 
 **High (6):**
 
