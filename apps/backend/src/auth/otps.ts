@@ -10,7 +10,7 @@
  * the ceiling is hit.
  */
 import { createHash, randomInt } from 'node:crypto';
-import { and, desc, eq, gt, isNull, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, lt, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { otps } from '../db/schema.js';
 
@@ -100,7 +100,12 @@ export async function findLiveOtp(args: {
         eq(otps.codeHash, codeHash),
         isNull(otps.consumedAt),
         gt(otps.expiresAt, now),
-        lte(otps.attempts, OTP_MAX_ATTEMPTS),
+        // A2-560: strict less-than (`lt`) so OTP_MAX_ATTEMPTS is the
+        // true ceiling. Prior `lte` let attempts reach MAX before
+        // bumping to MAX+1 — effectively allowed MAX+1 bad guesses.
+        // With `lt`, a row at attempts=MAX fails the live-lookup;
+        // verify handler returns 401 as if the code were wrong.
+        lt(otps.attempts, OTP_MAX_ATTEMPTS),
       ),
     )
     .orderBy(desc(otps.createdAt))
