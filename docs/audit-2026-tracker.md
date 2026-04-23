@@ -278,13 +278,13 @@ Complete. Evidence: [phase-5c-money-flow.md](./audit-2026-evidence/phase-5c-mone
 
 **Critical (5):**
 
-| ID     | Title                                                                                                                                                                                        |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A2-601 | Credit-funded orders have no debit path; never transition to `paid`; stay `pending_payment` until 24h expiry                                                                                 |
-| A2-602 | Payout worker's "leave in `submitted` for retry" path unreachable — `listPendingPayouts` filters `state='pending'` only; transient failures strand rows forever                              |
-| A2-610 | ~~`accrueOnePeriod` UPDATE omits the `currency` clause — any multi-currency user has every balance row overwritten on every accrual~~ **resolved-pending-review** by Batch 1 PR 3            |
-| A2-611 | ~~`accrueOnePeriod` writes `row.balanceMinor + accrual` from a pre-txn read — lost-update race against concurrent `applyAdminCreditAdjustment`~~ **resolved-pending-review** by Batch 1 PR 3 |
-| A2-619 | Loop-handler returns `chargeMinor` in home currency; watcher validates against `faceValueMinor` in catalog currency — cross-currency orders silently mis-validate                            |
+| ID     | Title                                                                                                                                                                                                                                                 |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A2-601 | ~~Credit-funded orders have no debit path; never transition to `paid`; stay `pending_payment` until 24h expiry~~ **resolved-pending-review** by Batch 1 PR 4 (#765)                                                                                   |
+| A2-602 | ~~Payout worker's "leave in `submitted` for retry" path unreachable — `listPendingPayouts` filters `state='pending'` only; transient failures strand rows forever~~ **resolved-pending-review** by Batch 1 PR 5 (#766). Amplifies A2-603 and A2-1512. |
+| A2-610 | ~~`accrueOnePeriod` UPDATE omits the `currency` clause — any multi-currency user has every balance row overwritten on every accrual~~ **resolved-pending-review** by Batch 1 PR 3                                                                     |
+| A2-611 | ~~`accrueOnePeriod` writes `row.balanceMinor + accrual` from a pre-txn read — lost-update race against concurrent `applyAdminCreditAdjustment`~~ **resolved-pending-review** by Batch 1 PR 3                                                          |
+| A2-619 | ~~Loop-handler returns `chargeMinor` in home currency; watcher validates against `faceValueMinor` in catalog currency — cross-currency orders silently mis-validate~~ **resolved-pending-review** by Batch 1 PR 6 (#767)                              |
 
 **High (7):**
 
