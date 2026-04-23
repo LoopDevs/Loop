@@ -84,6 +84,7 @@ import { adminMerchantTopEarnersHandler } from './admin/merchant-top-earners.js'
 import { adminCashbackConfigsCsvHandler } from './admin/cashback-configs-csv.js';
 import { adminMerchantsCatalogCsvHandler } from './admin/merchants-catalog-csv.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
+import { adminSupplierSpendActivityHandler } from './admin/supplier-spend-activity.js';
 import { adminOperatorSupplierSpendHandler } from './admin/operator-supplier-spend.js';
 import { adminOperatorActivityHandler } from './admin/operator-activity.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
@@ -1040,6 +1041,17 @@ app.get('/api/admin/orders/:orderId/payout', rateLimit(120, 60_000), adminPayout
 // renders this on the treasury page as the "supplier" card next to
 // outstanding liabilities.
 app.get('/api/admin/supplier-spend', rateLimit(60, 60_000), adminSupplierSpendHandler);
+// Supplier-spend activity time-series (ADR 013 / 015) — per-day
+// per-currency wholesale/face/cashback/margin paid to CTX. The
+// time-axis of the supplier-spend snapshot. Together with
+// credit-flow (ledger in) and payouts-activity (chain out) this
+// completes the three treasury-velocity feeds ops watches to
+// know money moved as expected today.
+app.get(
+  '/api/admin/supplier-spend/activity',
+  rateLimit(60, 60_000),
+  adminSupplierSpendActivityHandler,
+);
 // Per-operator supplier-spend (#674) — per-currency aggregate
 // scoped to one CTX operator. Answers "which operator drove the
 // supplier spend?" — the ADR-022 per-operator axis of the fleet-
