@@ -128,6 +128,7 @@ import {
   getUserPayoutByOrderHandler,
   getUserPendingPayoutDetailHandler,
   getUserPendingPayoutsHandler,
+  getUserPendingPayoutsSummaryHandler,
   setHomeCurrencyHandler,
   setStellarAddressHandler,
 } from './users/handler.js';
@@ -750,6 +751,15 @@ app.get('/api/users/me/credits', rateLimit(60, 60_000), getUserCreditsHandler);
 // typically poll this from /settings/cashback while a payout is in
 // flight. State + before + limit query shape mirrors the admin endpoint.
 app.get('/api/users/me/pending-payouts', rateLimit(60, 60_000), getUserPendingPayoutsHandler);
+// GET /api/users/me/pending-payouts/summary — aggregate view of the
+// caller's in-flight payouts, bucketed by (asset, state). One round
+// trip replaces paging the full list when a UI only needs the "you
+// have $X cashback settling" signal (client-homepage chip etc).
+app.get(
+  '/api/users/me/pending-payouts/summary',
+  rateLimit(60, 60_000),
+  getUserPendingPayoutsSummaryHandler,
+);
 // GET /api/users/me/pending-payouts/:id — caller-scoped single
 // drill-down. Cross-user access returns 404 (not 403) so payout
 // ids aren't enumerable.
