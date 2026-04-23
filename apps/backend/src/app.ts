@@ -97,6 +97,7 @@ import { adminMerchantsCatalogCsvHandler } from './admin/merchants-catalog-csv.j
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminSupplierSpendActivityHandler } from './admin/supplier-spend-activity.js';
 import { adminSupplierMarginHandler } from './admin/supplier-margin.js';
+import { adminSupplierMarginDailyHandler } from './admin/supplier-margin-daily.js';
 import { adminOperatorSupplierSpendHandler } from './admin/operator-supplier-spend.js';
 import { adminOperatorActivityHandler } from './admin/operator-activity.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
@@ -1190,6 +1191,10 @@ app.get('/api/admin/supplier-spend', rateLimit(60, 60_000), adminSupplierSpendHa
 // commercial-health signal alongside realization and settlement-lag.
 // Follow-up slices: /daily time-series + CSV + UI card (ADR 024).
 app.get('/api/admin/supplier-margin', rateLimit(60, 60_000), adminSupplierMarginHandler);
+// Supplier-margin daily trend (ADR 024) — per-(day, currency)
+// face/wholesale/cashback/margin + marginBps. Time-series half of
+// the ADR-024 triad; powers the forthcoming sparkline.
+app.get('/api/admin/supplier-margin/daily', rateLimit(60, 60_000), adminSupplierMarginDailyHandler);
 // Supplier-spend activity time-series (ADR 013 / 015) — per-day
 // per-currency wholesale/face/cashback/margin paid to CTX. The
 // time-axis of the supplier-spend snapshot. Together with
