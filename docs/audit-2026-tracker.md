@@ -228,22 +228,22 @@ Phase split across four sub-agents (5a–5d) per surface. Completion marked when
 
 Complete. Evidence: [phase-5a-admin.md](./audit-2026-evidence/phase-5a-admin.md). Commit SHA at capture: `450011d`. 14 findings (0 Critical / 1 High / 5 Medium / 8 Low / 0 Info).
 
-| ID     | Severity | Title                                                                                                                                         |
-| ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| A2-500 | Medium   | Admin idempotency snapshots never expire; no handler honors TTL; no sweeper                                                                   |
-| A2-501 | Medium   | `GET /api/admin/discord/config` omits `DISCORD_WEBHOOK_ADMIN_AUDIT`                                                                           |
-| A2-502 | **High** | `PUT /merchant-cashback-configs/:merchantId` not ADR-017-compliant: no Idempotency-Key, no reason, no `{result, audit}` envelope              |
-| A2-503 | Low      | ~~`merchants-catalog-csv` row-cap applied to in-memory count, not the unbounded SQL SELECT~~ **resolved-pending-review** by A2-503/504 PR     |
-| A2-504 | Low      | ~~`merchants-catalog-csv` contains a no-op self-comparison `where(eq(merchantId, merchantId))`~~ **resolved-pending-review** by A2-503/504 PR |
-| A2-505 | Medium   | 3 CSV admin endpoints missing from `openapi.ts`                                                                                               |
-| A2-506 | Medium   | 9 non-CSV admin endpoints missing from `openapi.ts` (incl. base `GET /api/admin/orders`)                                                      |
-| A2-507 | Low      | 4 admin handlers lack try/catch; errors lose handler-scoped logger bindings                                                                   |
-| A2-508 | Medium   | 13 admin handlers have no paired test file (mostly PII-exposing user drill-down)                                                              |
-| A2-509 | Low      | `POST /api/admin/merchants/resync` has no Idempotency-Key (idempotent by mutex only)                                                          |
-| A2-510 | Low      | `user-credits-csv` truncation sentinel diverges from canonical shape                                                                          |
-| A2-511 | Low      | `notifyAdminAudit` posts full admin email to Discord (inconsistent with tail-only user-id convention)                                         |
-| A2-512 | Low      | UUID regex duplicated across ~14 files; drift-prone                                                                                           |
-| A2-513 | Low      | Several merchant-scoped handlers skip the `/^[A-Za-z0-9._-]+$/` + 128-char check used by siblings                                             |
+| ID     | Severity | Title                                                                                                                                              |
+| ------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A2-500 | Medium   | Admin idempotency snapshots never expire; no handler honors TTL; no sweeper                                                                        |
+| A2-501 | Medium   | `GET /api/admin/discord/config` omits `DISCORD_WEBHOOK_ADMIN_AUDIT`                                                                                |
+| A2-502 | **High** | `PUT /merchant-cashback-configs/:merchantId` not ADR-017-compliant: no Idempotency-Key, no reason, no `{result, audit}` envelope                   |
+| A2-503 | Low      | ~~`merchants-catalog-csv` row-cap applied to in-memory count, not the unbounded SQL SELECT~~ **resolved-pending-review** by A2-503/504 PR          |
+| A2-504 | Low      | ~~`merchants-catalog-csv` contains a no-op self-comparison `where(eq(merchantId, merchantId))`~~ **resolved-pending-review** by A2-503/504 PR      |
+| A2-505 | Medium   | 3 CSV admin endpoints missing from `openapi.ts`                                                                                                    |
+| A2-506 | Medium   | 9 non-CSV admin endpoints missing from `openapi.ts` (incl. base `GET /api/admin/orders`)                                                           |
+| A2-507 | Low      | 4 admin handlers lack try/catch; errors lose handler-scoped logger bindings                                                                        |
+| A2-508 | Medium   | 13 admin handlers have no paired test file (mostly PII-exposing user drill-down)                                                                   |
+| A2-509 | Low      | `POST /api/admin/merchants/resync` has no Idempotency-Key (idempotent by mutex only)                                                               |
+| A2-510 | Low      | `user-credits-csv` truncation sentinel diverges from canonical shape                                                                               |
+| A2-511 | Low      | ~~`notifyAdminAudit` posts full admin email to Discord (inconsistent with tail-only user-id convention)~~ **resolved-pending-review** by A2-511 PR |
+| A2-512 | Low      | UUID regex duplicated across ~14 files; drift-prone                                                                                                |
+| A2-513 | Low      | Several merchant-scoped handlers skip the `/^[A-Za-z0-9._-]+$/` + 128-char check used by siblings                                                  |
 
 #### Phase 5b — `auth/`, `ctx/`, `users/`, `config/`
 

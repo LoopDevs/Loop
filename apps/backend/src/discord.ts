@@ -426,11 +426,13 @@ export function notifyUsdcBelowFloor(args: {
  * Notify: admin write action (ADR 017/018). Called fire-and-forget
  * AFTER the DB commit of every admin mutation. Actor id truncated to
  * the last 8 chars so the embed doesn't expose a full uuid; full id
- * is still in the ledger for audit.
+ * is still in the ledger for audit. A2-511: actor email dropped from
+ * the embed — the tail-id convention is the Discord-side identifier,
+ * and admin emails are reserved for the ledger row (where they're
+ * useful) rather than the webhook feed (where they aren't).
  */
 export function notifyAdminAudit(args: {
   actorUserId: string;
-  actorEmail: string;
   endpoint: string;
   targetUserId?: string;
   amountMinor?: string;
@@ -441,7 +443,7 @@ export function notifyAdminAudit(args: {
 }): void {
   const actorTail = args.actorUserId.slice(-8);
   const fields: Array<{ name: string; value: string; inline?: boolean }> = [
-    { name: 'Actor', value: `\`${actorTail}\` ${escapeMarkdown(args.actorEmail)}`, inline: true },
+    { name: 'Actor', value: `\`${actorTail}\``, inline: true },
     { name: 'Endpoint', value: `\`${escapeMarkdown(args.endpoint)}\``, inline: true },
   ];
   if (args.targetUserId !== undefined) {
