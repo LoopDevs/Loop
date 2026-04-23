@@ -16,14 +16,13 @@
  * `bigint`-as-string on the wire, same as every other money field.
  */
 import type { Context } from 'hono';
+import { UUID_RE } from '../uuid.js';
 import { asc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { userCredits } from '../db/schema.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-user-credits' });
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface AdminUserCreditRow {
   currency: string;

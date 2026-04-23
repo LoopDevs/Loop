@@ -16,6 +16,7 @@
  * admin UI can share the post-action renderer.
  */
 import type { Context } from 'hono';
+import { UUID_RE } from '../uuid.js';
 import { z } from 'zod';
 import { HOME_CURRENCIES } from '../db/schema.js';
 import type { User } from '../db/users.js';
@@ -32,8 +33,6 @@ import {
 } from './idempotency.js';
 
 const log = logger.child({ handler: 'admin-refund' });
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * `amountMinor` is an unsigned integer-as-string. Refunds are always

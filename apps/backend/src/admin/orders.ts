@@ -14,6 +14,7 @@
  * mounted in app.ts.
  */
 import type { Context } from 'hono';
+import { UUID_RE } from '../uuid.js';
 import { and, eq, lt, sql } from 'drizzle-orm';
 import { ORDER_PAYMENT_METHODS } from '@loop/shared';
 import { db } from '../db/client.js';
@@ -102,8 +103,6 @@ function rowToView(row: typeof orders.$inferSelect): AdminOrderView {
     failedAt: row.failedAt?.toISOString() ?? null,
   };
 }
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Single-order drill-down. The admin UI links each row in the

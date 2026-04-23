@@ -19,14 +19,13 @@
  * home_currency, not the admin's.
  */
 import type { Context } from 'hono';
+import { UUID_RE } from '../uuid.js';
 import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { creditTransactions, orders, users } from '../db/schema.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-user-cashback-by-merchant' });
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const DEFAULT_WINDOW_MS = 180 * 24 * 60 * 60 * 1000;
 const MAX_WINDOW_MS = 366 * 24 * 60 * 60 * 1000;

@@ -11,6 +11,7 @@
  * in each bucket.
  */
 import type { Context } from 'hono';
+import { UUID_RE } from '../uuid.js';
 import { z } from 'zod';
 import { PAYOUT_STATES } from '../db/schema.js';
 import { LOOP_ASSET_CODES } from '../credits/payout-asset.js';
@@ -31,8 +32,6 @@ import {
   storeIdempotencyKey,
   validateIdempotencyKey,
 } from './idempotency.js';
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const log = logger.child({ handler: 'admin-payouts' });
 
