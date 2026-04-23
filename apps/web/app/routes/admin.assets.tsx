@@ -12,6 +12,7 @@ import {
   type PayoutsByAssetRow,
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { AssetDriftBadge } from '~/components/features/admin/AssetDriftBadge';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -156,6 +157,7 @@ export default function AdminAssetsIndexRoute(): React.JSX.Element {
                   {[
                     'Asset',
                     'Outstanding',
+                    'Drift',
                     'Issuer',
                     'Pending',
                     'Submitted',
@@ -185,6 +187,13 @@ export default function AdminAssetsIndexRoute(): React.JSX.Element {
                     </td>
                     <td className="px-3 py-2 tabular-nums text-gray-900 dark:text-white">
                       {fmtMinor(s.outstandingMinor, s.fiat)}
+                    </td>
+                    <td className="px-3 py-2">
+                      {s.issuer === null ? (
+                        <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+                      ) : (
+                        <AssetDriftBadge assetCode={s.code} />
+                      )}
                     </td>
                     <td className="px-3 py-2 text-xs">
                       {s.issuer === null ? (
