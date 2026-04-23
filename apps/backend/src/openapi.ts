@@ -2646,6 +2646,41 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/discord/config',
+  summary: 'Discord webhook configuration status (ADR 018).',
+  description:
+    "Read-only companion to `POST /api/admin/discord/test`. Reports whether each webhook env var is set so the admin panel can render a 'configured' / 'missing' badge next to each channel without POSTing. Never echoes the actual webhook URL — those are secrets.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Config status',
+      content: {
+        'application/json': {
+          schema: z.object({
+            orders: z.enum(['configured', 'missing']),
+            monitoring: z.enum(['configured', 'missing']),
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/payouts',
   summary: 'Paginated pending-payouts backlog (ADR 015).',
   description:
