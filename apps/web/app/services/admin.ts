@@ -359,6 +359,42 @@ export async function getOperatorStats(
 }
 
 /**
+ * Per-merchant × per-operator mix row (ADR 013 / 022). Merchant-
+ * scoped sibling of `OperatorStatsRow` — same columns, but rows
+ * are operators carrying orders for one specific merchant.
+ */
+export interface MerchantOperatorMixRow {
+  operatorId: string;
+  orderCount: number;
+  fulfilledCount: number;
+  failedCount: number;
+  lastOrderAt: string;
+}
+
+export interface MerchantOperatorMixResponse {
+  merchantId: string;
+  since: string;
+  rows: MerchantOperatorMixRow[];
+}
+
+/**
+ * `GET /api/admin/merchants/:merchantId/operator-mix` — for one
+ * merchant, which CTX operators are carrying its orders. Default
+ * window 24h; server clamps `?since=` at 366d.
+ */
+export async function getMerchantOperatorMix(
+  merchantId: string,
+  opts: { since?: string } = {},
+): Promise<MerchantOperatorMixResponse> {
+  const params = new URLSearchParams();
+  if (opts.since !== undefined) params.set('since', opts.since);
+  const qs = params.toString();
+  return authenticatedRequest<MerchantOperatorMixResponse>(
+    `/api/admin/merchants/${encodeURIComponent(merchantId)}/operator-mix${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
+/**
  * Per-operator fulfilment latency row (ADR 013 / 022). One row per
  * operator that had at least one fulfilled order in the window.
  * Percentiles are reported in ms and rounded.

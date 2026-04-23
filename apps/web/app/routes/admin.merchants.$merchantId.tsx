@@ -39,6 +39,7 @@ import { MerchantCashbackMonthlyChart } from '~/components/features/admin/Mercha
 import { MerchantCashbackPaidCard } from '~/components/features/admin/MerchantCashbackPaidCard';
 import { MerchantFlywheelActivityChart } from '~/components/features/admin/MerchantFlywheelActivityChart';
 import { MerchantFlywheelChip } from '~/components/features/admin/MerchantFlywheelChip';
+import { MerchantOperatorMixCard } from '~/components/features/admin/MerchantOperatorMixCard';
 import { MerchantRailMixCard } from '~/components/features/admin/MerchantRailMixCard';
 import { MerchantTopEarnersCard } from '~/components/features/admin/MerchantTopEarnersCard';
 import { Spinner } from '~/components/ui/Spinner';
@@ -338,6 +339,26 @@ export default function AdminMerchantDetailRoute(): React.JSX.Element {
             </table>
           )}
         </div>
+      </section>
+
+      {/* Per-merchant × per-operator mix (ADR 013 / 022). Which
+          CTX operators have been carrying this merchant's orders
+          in the last 24h — the triage view during incidents, slot
+          above Recent orders so the "who's carrying this?" answer
+          sits right next to the "which orders just failed" list. */}
+      <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-200 px-6 py-4 dark:border-gray-800">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+              Operator mix (24h)
+            </h2>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Which CTX operators carried this merchant&apos;s orders (ADR 013). Failed count drills
+              into the pre-scoped orders filter.
+            </p>
+          </div>
+        </header>
+        <MerchantOperatorMixCard merchantId={merchantId} />
       </section>
 
       {/* Recent orders for this merchant — 10 most-recent rows.
