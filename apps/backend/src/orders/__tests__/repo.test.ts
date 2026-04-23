@@ -4,23 +4,85 @@ import type * as SchemaModule from '../../db/schema.js';
 const { dbMock, state } = vi.hoisted(() => {
   const s: {
     config: unknown;
-    insertedRow: unknown;
+    insertedRow: Record<string, unknown> | null | undefined;
+    /**
+     * Capture of every `.values(...)` call across inserts. For
+     * credit-order tests this collects both the `orders` row and the
+     * subsequent `credit_transactions` row; tests inspect by index.
+     */
     insertValues: unknown[];
+    /** Capture of every `.set(...)` call across updates (balance + state). */
+    updateSets: unknown[];
+    /** The row the inner FOR UPDATE select returns (credit-order path). */
+    creditBalanceRow: unknown;
+    /** The row `update(orders).set(...).returning()` returns for the paid transition. */
+    paidRow: unknown;
     orderByMemo: unknown;
-  } = { config: undefined, insertedRow: null, insertValues: [], orderByMemo: undefined };
+  } = {
+    config: undefined,
+    insertedRow: null,
+    insertValues: [],
+    updateSets: [],
+    creditBalanceRow: { balanceMinor: 10_000n },
+    paidRow: null,
+    orderByMemo: undefined,
+  };
   const m: Record<string, ReturnType<typeof vi.fn>> = {};
   m['insert'] = vi.fn(() => m);
   m['values'] = vi.fn((v: unknown) => {
     s.insertValues.push(v);
     return m;
   });
-  m['returning'] = vi.fn(async () => [s.insertedRow]);
+  m['returning'] = vi.fn(async () => {
+    // Called by both the order insert AND the `update(orders).set().returning()`
+    // paid-transition in the credit path. The first call hits the insert,
+    // the second the transition. Track with a simple per-run counter.
+    returningCallIndex++;
+    if (returningCallIndex === 1) return [s.insertedRow];
+    return [s.paidRow ?? s.insertedRow];
+  });
+  m['update'] = vi.fn(() => m);
+  m['set'] = vi.fn((v: unknown) => {
+    s.updateSets.push(v);
+    return m;
+  });
+  m['select'] = vi.fn(() => m);
+  m['from'] = vi.fn(() => m);
+  // For the credit-path inner select: `.where(...).for('update')` resolves
+  // to `[creditBalanceRow]`.
+  m['where'] = vi.fn(() => {
+    const thenable: {
+      then: (resolve: (v: unknown) => unknown) => unknown;
+      for: ReturnType<typeof vi.fn>;
+      returning: ReturnType<typeof vi.fn>;
+    } = {
+      then: (resolve) => resolve([]),
+      for: vi.fn(async () => [s.creditBalanceRow]),
+      // `update(...).set(...).where(...).returning()` path — same
+      // cursor-indexed return as the insert's returning().
+      returning: vi.fn(async () => {
+        returningCallIndex++;
+        if (returningCallIndex === 1) return [s.insertedRow];
+        return [s.paidRow ?? s.insertedRow];
+      }),
+    };
+    return thenable;
+  });
+  m['transaction'] = vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(m));
+  let returningCallIndex = 0;
+  // Reset cursor when callers clear state.
+  (m as unknown as { __resetReturningCursor: () => void }).__resetReturningCursor = () => {
+    returningCallIndex = 0;
+  };
   return { dbMock: m, state: s };
 });
 
 vi.mock('../../db/client.js', () => ({
   db: {
     insert: dbMock['insert'],
+    update: dbMock['update'],
+    select: dbMock['select'],
+    transaction: dbMock['transaction'],
     query: {
       merchantCashbackConfigs: {
         findFirst: vi.fn(async () => state.config),
@@ -36,6 +98,7 @@ vi.mock('../../db/schema.js', async () => {
   return {
     ...actual,
     orders: {
+      id: 'id',
       userId: 'userId',
       merchantId: 'merchantId',
       faceValueMinor: 'faceValueMinor',
@@ -46,6 +109,19 @@ vi.mock('../../db/schema.js', async () => {
     },
     merchantCashbackConfigs: {
       merchantId: 'merchantId',
+    },
+    userCredits: {
+      userId: 'userId',
+      currency: 'currency',
+      balanceMinor: 'balanceMinor',
+    },
+    creditTransactions: {
+      userId: 'userId',
+      type: 'type',
+      amountMinor: 'amountMinor',
+      currency: 'currency',
+      referenceType: 'referenceType',
+      referenceId: 'referenceId',
     },
   };
 });
@@ -61,7 +137,11 @@ beforeEach(() => {
   state.config = undefined;
   state.insertedRow = null;
   state.insertValues = [];
+  state.updateSets = [];
+  state.creditBalanceRow = { balanceMinor: 10_000n };
+  state.paidRow = null;
   state.orderByMemo = undefined;
+  (dbMock as unknown as { __resetReturningCursor: () => void }).__resetReturningCursor();
   for (const fn of Object.values(dbMock)) {
     if (typeof fn === 'function' && 'mockClear' in fn) {
       (fn as unknown as { mockClear: () => void }).mockClear();
@@ -234,6 +314,18 @@ describe('createOrder', () => {
   });
 
   it('leaves payment_memo null for credit-funded orders', async () => {
+    // A2-601 fix: credit orders now do insert + debit + paid
+    // transition in one txn. Seed enough balance and a paid-row to
+    // return so the flow completes.
+    state.insertedRow = {
+      id: 'o-credit-1',
+      paymentMethod: 'credit',
+      state: 'pending_payment',
+      chargeMinor: 10_000n,
+      chargeCurrency: 'GBP',
+    };
+    state.paidRow = { ...state.insertedRow, state: 'paid' };
+    state.creditBalanceRow = { balanceMinor: 50_000n };
     await createOrder({
       userId: 'u-1',
       merchantId: 'm1',
@@ -241,8 +333,72 @@ describe('createOrder', () => {
       currency: 'GBP',
       paymentMethod: 'credit',
     });
-    const values = state.insertValues[0] as Record<string, unknown>;
-    expect(values['paymentMemo']).toBeNull();
+    // First insert is the order row; its paymentMemo should be null.
+    const orderValues = state.insertValues[0] as Record<string, unknown>;
+    expect(orderValues['paymentMemo']).toBeNull();
+  });
+
+  it('A2-601: credit-funded orders insert a spend ledger row + debit user_credits + transition to paid (one txn)', async () => {
+    state.insertedRow = {
+      id: 'o-credit-42',
+      paymentMethod: 'credit',
+      state: 'pending_payment',
+      chargeMinor: 10_000n,
+      chargeCurrency: 'GBP',
+    };
+    state.paidRow = { ...state.insertedRow, state: 'paid' };
+    state.creditBalanceRow = { balanceMinor: 50_000n };
+    const result = await createOrder({
+      userId: 'u-1',
+      merchantId: 'm1',
+      faceValueMinor: 10_000n,
+      currency: 'GBP',
+      paymentMethod: 'credit',
+    });
+    // Two insert calls: the order row, then the spend ledger row.
+    expect(state.insertValues).toHaveLength(2);
+    const spendInsert = state.insertValues[1] as Record<string, unknown>;
+    expect(spendInsert).toMatchObject({
+      userId: 'u-1',
+      type: 'spend',
+      amountMinor: -10_000n,
+      currency: 'GBP',
+      referenceType: 'order',
+      referenceId: 'o-credit-42',
+    });
+    // Update calls: balance decrement, then order state='paid'.
+    expect(state.updateSets.length).toBeGreaterThanOrEqual(2);
+    const stateUpdate = state.updateSets[state.updateSets.length - 1] as Record<string, unknown>;
+    expect(stateUpdate['state']).toBe('paid');
+    expect(stateUpdate['paidAt']).toBeInstanceOf(Date);
+    // Returned order is the paid row, not the pending_payment insert.
+    expect(result.state).toBe('paid');
+  });
+
+  it('A2-601: InsufficientCreditError raised when live balance is below chargeMinor (race with handler-level check)', async () => {
+    state.insertedRow = {
+      id: 'o-credit-broke',
+      paymentMethod: 'credit',
+      state: 'pending_payment',
+      chargeMinor: 10_000n,
+      chargeCurrency: 'GBP',
+    };
+    // Balance is below the charge — the FOR UPDATE re-read catches it.
+    state.creditBalanceRow = { balanceMinor: 500n };
+    const { InsufficientCreditError } = await import('../repo.js');
+    await expect(
+      createOrder({
+        userId: 'u-1',
+        merchantId: 'm1',
+        faceValueMinor: 10_000n,
+        currency: 'GBP',
+        paymentMethod: 'credit',
+      }),
+    ).rejects.toBeInstanceOf(InsufficientCreditError);
+    // No spend row was inserted (txn rolled back on the throw; the
+    // mock captures the attempted insert before the rollback, but we
+    // can assert the balance update DIDN'T fire — the throw beat it).
+    expect(state.updateSets).toHaveLength(0);
   });
 
   it('honours an explicit paymentMemo override (for tests / replays)', async () => {

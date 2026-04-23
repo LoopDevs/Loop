@@ -37,7 +37,7 @@ import { getUserById } from '../db/users.js';
 import { convertMinorUnits } from '../payments/price-feed.js';
 import { payoutAssetFor } from '../credits/payout-asset.js';
 import { notifyCashbackRecycled, notifyFirstCashbackRecycled } from '../discord.js';
-import { createOrder } from './repo.js';
+import { createOrder, InsufficientCreditError } from './repo.js';
 
 const log = logger.child({ handler: 'loop-orders' });
 
@@ -346,6 +346,16 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
       },
     });
   } catch (err) {
+    // Balance race between `hasSufficientCredit` check and the FOR
+    // UPDATE debit inside `createOrder` (A2-601 guard). No order
+    // row was persisted (txn rolled back), so the UX is the same as
+    // the pre-check failure — a 400 the client can surface.
+    if (err instanceof InsufficientCreditError) {
+      return c.json(
+        { code: 'INSUFFICIENT_CREDIT', message: 'Loop credit balance is below the order amount' },
+        400,
+      );
+    }
     log.error({ err, userId: auth.userId }, 'Loop-native order creation failed');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to create order' }, 500);
   }
