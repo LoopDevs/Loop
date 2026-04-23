@@ -18,6 +18,8 @@ const findOrCreateUserMock = vi.fn();
 const recordRefreshMock = vi.fn();
 const findLiveRefreshMock = vi.fn();
 const revokeRefreshMock = vi.fn();
+const findRefreshRecordMock = vi.fn();
+const revokeAllRefreshForUserMock = vi.fn();
 
 vi.mock('../otps.js', async () => {
   const actual = await vi.importActual<typeof OtpsModule>('../otps.js');
@@ -42,7 +44,9 @@ vi.mock('../../db/users.js', () => ({
 vi.mock('../refresh-tokens.js', () => ({
   recordRefreshToken: (args: unknown) => recordRefreshMock(args),
   findLiveRefreshToken: (args: unknown) => findLiveRefreshMock(args),
+  findRefreshTokenRecord: (jti: string) => findRefreshRecordMock(jti),
   revokeRefreshToken: (args: unknown) => revokeRefreshMock(args),
+  revokeAllRefreshTokensForUser: (userId: string) => revokeAllRefreshForUserMock(userId),
 }));
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -92,6 +96,10 @@ beforeEach(() => {
   recordRefreshMock.mockReset();
   findLiveRefreshMock.mockReset();
   revokeRefreshMock.mockReset();
+  findRefreshRecordMock.mockReset();
+  revokeAllRefreshForUserMock.mockReset();
+  findRefreshRecordMock.mockResolvedValue(null);
+  revokeAllRefreshForUserMock.mockResolvedValue(undefined);
 
   countRecentMock.mockResolvedValue(0);
   createOtpMock.mockResolvedValue({ id: 'row-1', expiresAt: new Date(Date.now() + 60_000) });
@@ -214,8 +222,32 @@ describe('nativeRefreshHandler', () => {
       ttlSeconds: 300,
     });
     findLiveRefreshMock.mockResolvedValue(null);
+    // Record-not-found case: no reuse, just forged / cleaned-up
+    findRefreshRecordMock.mockResolvedValue(null);
     const { ctx } = makeCtx({ refreshToken: token });
     expect((await nativeRefreshHandler(ctx)).status).toBe(401);
+    expect(revokeAllRefreshForUserMock).not.toHaveBeenCalled();
+  });
+
+  it('A2-1608: refresh-token reuse (revoked row exists) → revokes the entire family', async () => {
+    const { token, claims } = signLoopToken({
+      sub: 'user-1',
+      email: 'a@b.com',
+      typ: 'refresh',
+      ttlSeconds: 300,
+    });
+    // findLiveRefreshToken returns null (row revoked, so live filter
+    // excludes it). findRefreshTokenRecord returns the revoked row.
+    findLiveRefreshMock.mockResolvedValue(null);
+    findRefreshRecordMock.mockResolvedValue({
+      jti: claims.jti,
+      userId: 'user-1',
+      revokedAt: new Date(),
+    });
+    const { ctx } = makeCtx({ refreshToken: token });
+    const res = await nativeRefreshHandler(ctx);
+    expect(res.status).toBe(401);
+    expect(revokeAllRefreshForUserMock).toHaveBeenCalledWith('user-1');
   });
 
   it('rotates: revokes the old jti, issues a new pair', async () => {

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as RefreshTokensModule from '../refresh-tokens.js';
 
 const mockEnv = vi.hoisted(() => ({
   PORT: '8080',
@@ -17,6 +18,17 @@ const mockEnv = vi.hoisted(() => ({
 }));
 
 vi.mock('../../env.js', () => ({ env: mockEnv }));
+
+const revokeRefreshMock = vi.hoisted(() =>
+  vi.fn<(args: unknown) => Promise<void>>(async () => undefined),
+);
+vi.mock('../refresh-tokens.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof RefreshTokensModule>();
+  return {
+    ...actual,
+    revokeRefreshToken: (args: unknown) => revokeRefreshMock(args),
+  };
+});
 
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -375,6 +387,32 @@ describe('DELETE /api/auth/session', () => {
 
     expect(res.status).toBe(200);
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('A2-565: revokes the Loop-native refresh-token row when the token is Loop-signed', async () => {
+    // Turn on Loop-native auth just for this test. The signing key
+    // must be ≥32 chars. Use a fixed value so the token below is
+    // deterministic across reruns.
+    const key = 'k'.repeat(32);
+    mockEnv['LOOP_JWT_SIGNING_KEY' as keyof typeof mockEnv] = key as never;
+    const { signLoopToken } = await import('../tokens.js');
+    const { token, claims } = signLoopToken({
+      sub: 'u-1',
+      email: 'a@b.com',
+      typ: 'refresh',
+      ttlSeconds: 300,
+    });
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    revokeRefreshMock.mockClear();
+    const res = await app.request('/api/auth/session', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '10.0.0.4' },
+      body: JSON.stringify({ refreshToken: token, platform: 'web' }),
+    });
+    expect(res.status).toBe(200);
+    expect(revokeRefreshMock).toHaveBeenCalledWith(expect.objectContaining({ jti: claims.jti }));
+    // Undo the env override so downstream tests see no LOOP auth config.
+    delete (mockEnv as Record<string, unknown>)['LOOP_JWT_SIGNING_KEY'];
   });
 
   it('rate limits at 20/min per IP', async () => {

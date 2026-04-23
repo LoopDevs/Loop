@@ -6,6 +6,7 @@ import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
 import { nativeRequestOtpHandler, nativeVerifyOtpHandler, nativeRefreshHandler } from './native.js';
 import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
+import { revokeRefreshToken } from './refresh-tokens.js';
 
 const log = logger.child({ handler: 'auth' });
 
@@ -273,6 +274,26 @@ export async function logoutHandler(c: Context): Promise<Response> {
     // No token in body — nothing to revoke upstream. Still succeed so the
     // client proceeds with local clear.
     return c.json({ message: 'Logged out' });
+  }
+
+  // A2-565: when the refresh token is Loop-signed, revoke the row so
+  // the 30-day TTL doesn't keep it live server-side. Do this before
+  // the upstream call — if upstream throws, we still want the local
+  // revoke to have happened. verifyLoopToken ignores tokens from
+  // other issuers / audiences (A2-1600), so a CTX-signed bearer
+  // falls through harmlessly.
+  if (isLoopAuthConfigured()) {
+    const verified = verifyLoopToken(parsed.data.refreshToken, 'refresh');
+    if (verified.ok && verified.claims.jti !== undefined) {
+      try {
+        await revokeRefreshToken({ jti: verified.claims.jti });
+      } catch (err) {
+        // Revocation failure is not fatal — the signed token still
+        // expires at its exp regardless. Log and continue so the
+        // upstream call still gets made.
+        log.warn({ err, jti: verified.claims.jti }, 'Loop refresh-token revocation failed');
+      }
+    }
   }
 
   try {

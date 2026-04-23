@@ -68,6 +68,23 @@ export async function findLiveRefreshToken(args: {
 }
 
 /**
+ * A2-1608: raw lookup by jti (no live / hash / expiry filter). Used
+ * by the refresh handler to distinguish "jti never existed" (forged)
+ * from "jti exists but was already revoked" (reuse of a rotated
+ * token → token-theft signal). On reuse the handler triggers a
+ * family-wide revoke via `revokeAllRefreshTokensForUser`.
+ *
+ * Never return this row to the client — it's strictly for classifying
+ * the reason-for-rejection and driving the revoke decision.
+ */
+export async function findRefreshTokenRecord(jti: string): Promise<RefreshTokenRow | null> {
+  const row = await db.query.refreshTokens.findFirst({
+    where: eq(refreshTokens.jti, jti),
+  });
+  return row ?? null;
+}
+
+/**
  * Revokes a refresh token and optionally links it to its successor
  * (for rotation audit). Called inside the refresh handler's txn path
  * before writing the new row.
