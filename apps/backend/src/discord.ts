@@ -78,18 +78,36 @@ const FIELD_VALUE_MAX = 1024;
 const DESCRIPTION_MAX = 4096;
 
 /**
- * Format an amount for display. The previous code always prefixed `$`
- * regardless of currency, producing nonsense like "$25.00 EUR". Use the
- * currency-specific symbol when we know it, otherwise fall back to the
- * currency code on its own (e.g. "25.00 GBP"). Deliberately narrow
- * mapping — anything not in this table falls back to the safe format.
+ * A2-1522: format an amount using `Intl.NumberFormat` for the symbol.
+ * The prior hardcoded 4-entry symbol map (USD/EUR/GBP/CAD) drifted
+ * from the web's `Intl`-based formatter and produced `"25.00 JPY"`
+ * instead of `"¥25"` for any fifth currency Loop launched into.
+ *
+ * The output shape is `<narrowSymbol><amount> <CODE>` — the code
+ * suffix keeps the embed unambiguous at a glance for ops even when
+ * two currencies share a symbol (USD and CAD both render `$`,
+ * several others use `Kr`, etc.). Intl picks the symbol, we still
+ * append the code for clarity.
  */
-const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', EUR: '€', GBP: '£', CAD: 'C$' };
 function formatAmount(amount: number, currency: string): string {
-  const code = escapeMarkdown(currency);
-  const body = amount.toFixed(2);
-  const symbol = CURRENCY_SYMBOLS[currency.toUpperCase()];
-  return symbol !== undefined ? `${symbol}${body} ${code}` : `${body} ${code}`;
+  const code = currency.toUpperCase();
+  try {
+    const symbol = new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: code,
+      currencyDisplay: 'narrowSymbol',
+    })
+      .formatToParts(0)
+      .find((p) => p.type === 'currency')?.value;
+    const body = amount.toFixed(2);
+    if (symbol !== undefined) {
+      return `${escapeMarkdown(symbol)}${body} ${escapeMarkdown(code)}`;
+    }
+    return `${body} ${escapeMarkdown(code)}`;
+  } catch {
+    // Invalid currency code — fall back to the code-suffix form.
+    return `${amount.toFixed(2)} ${escapeMarkdown(code)}`;
+  }
 }
 
 /** Notify: new order created */
@@ -293,6 +311,10 @@ export function notifyCashbackCredited(args: {
  * currencies on Loop today).
  */
 function formatMinorAmount(minorStr: string, currency: string): string {
+  // A2-1522: BigInt-safe minor-unit rendering with Intl for the
+  // currency symbol. We do the 2-decimal split ourselves (so
+  // cashback totals beyond JS's safe-integer range keep their
+  // precision), then look up the symbol via Intl.
   const negative = minorStr.startsWith('-');
   const digits = negative ? minorStr.slice(1) : minorStr;
   const padded = digits.padStart(3, '0');
@@ -300,10 +322,25 @@ function formatMinorAmount(minorStr: string, currency: string): string {
   const fraction = padded.slice(-2);
   const sign = negative ? '-' : '';
   const code = currency.toUpperCase();
-  const symbol = CURRENCY_SYMBOLS[code];
   const wholeWithSeparators = Number(whole).toLocaleString('en-US');
   const body = `${wholeWithSeparators}.${fraction}`;
-  return symbol !== undefined ? `${sign}${symbol}${body} ${code}` : `${sign}${body} ${code}`;
+
+  let symbol: string | undefined;
+  try {
+    symbol = new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: code,
+      currencyDisplay: 'narrowSymbol',
+    })
+      .formatToParts(0)
+      .find((p) => p.type === 'currency')?.value;
+  } catch {
+    symbol = undefined;
+  }
+  if (symbol !== undefined) {
+    return `${sign}${escapeMarkdown(symbol)}${body} ${escapeMarkdown(code)}`;
+  }
+  return `${sign}${body} ${escapeMarkdown(code)}`;
 }
 
 /** Notify: health status changed */
