@@ -18,6 +18,7 @@ import { FleetFlywheelHeadline } from '~/components/features/admin/FleetFlywheel
 import { OrdersSparkline } from '~/components/features/admin/OrdersSparkline';
 import { StuckOrdersCard } from '~/components/features/admin/StuckOrdersCard';
 import { StuckPayoutsCard } from '~/components/features/admin/StuckPayoutsCard';
+import { AssetDriftBadge } from '~/components/features/admin/AssetDriftBadge';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -68,6 +69,15 @@ function LiabilityCard({
       <div className="mt-1 text-lg font-semibold text-gray-900 dark:text-white tabular-nums">
         {fmtMinor(outstandingMinor, fiat)}
       </div>
+      {/* Drift badge (#712/#713). Third surface sharing the
+          ['admin-asset-circulation', code] cache line — treasury
+          cards, fleet-index column, and here. Self-hides while
+          loading / on non-503 error / when issuer isn't set. */}
+      {issuer !== null ? (
+        <div className="mt-2">
+          <AssetDriftBadge assetCode={code} />
+        </div>
+      ) : null}
     </Link>
   );
 }
