@@ -3277,6 +3277,32 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/supplier-margin/daily.csv',
+  summary: 'Daily supplier-margin CSV (ADR 011/013/015/018/024).',
+  description:
+    "Tier-3 finance export of /api/admin/supplier-margin/daily. Columns: day,currency,charge_minor,wholesale_minor,user_cashback_minor,loop_margin_minor,order_count,margin_bps. LEFT-JOIN null-currency rows dropped pre-truncation. Window: ?days (default 31, cap 366). Row cap 10 000. margin_bps via the shared helper so the CSV can't disagree with the UI card.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(366).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'CSV body',
+      content: { 'text/csv; charset=utf-8': { schema: z.string() } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/operator-stats',
   summary: 'Per-operator order volume + success rate (ADR 013).',
   description:
