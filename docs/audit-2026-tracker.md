@@ -278,13 +278,13 @@ Complete. Evidence: [phase-5c-money-flow.md](./audit-2026-evidence/phase-5c-mone
 
 **Critical (5):**
 
-| ID     | Title                                                                                                                                                             |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A2-601 | Credit-funded orders have no debit path; never transition to `paid`; stay `pending_payment` until 24h expiry                                                      |
-| A2-602 | Payout worker's "leave in `submitted` for retry" path unreachable — `listPendingPayouts` filters `state='pending'` only; transient failures strand rows forever   |
-| A2-610 | `accrueOnePeriod` UPDATE omits the `currency` clause — any multi-currency user has every balance row overwritten on every accrual                                 |
-| A2-611 | `accrueOnePeriod` writes `row.balanceMinor + accrual` from a pre-txn read — lost-update race against concurrent `applyAdminCreditAdjustment`                      |
-| A2-619 | Loop-handler returns `chargeMinor` in home currency; watcher validates against `faceValueMinor` in catalog currency — cross-currency orders silently mis-validate |
+| ID     | Title                                                                                                                                                                                        |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A2-601 | Credit-funded orders have no debit path; never transition to `paid`; stay `pending_payment` until 24h expiry                                                                                 |
+| A2-602 | Payout worker's "leave in `submitted` for retry" path unreachable — `listPendingPayouts` filters `state='pending'` only; transient failures strand rows forever                              |
+| A2-610 | ~~`accrueOnePeriod` UPDATE omits the `currency` clause — any multi-currency user has every balance row overwritten on every accrual~~ **resolved-pending-review** by Batch 1 PR 3            |
+| A2-611 | ~~`accrueOnePeriod` writes `row.balanceMinor + accrual` from a pre-txn read — lost-update race against concurrent `applyAdminCreditAdjustment`~~ **resolved-pending-review** by Batch 1 PR 3 |
+| A2-619 | Loop-handler returns `chargeMinor` in home currency; watcher validates against `faceValueMinor` in catalog currency — cross-currency orders silently mis-validate                            |
 
 **High (7):**
 
@@ -336,10 +336,10 @@ Complete. Evidence: [phase-6-database.md](./audit-2026-evidence/phase-6-database
 
 **Critical (2):**
 
-| ID     | Title                                                                                                                                                                                                                                                  |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| A2-700 | `accrue-interest.ts` UPDATE filters only by `user_id` (not `currency`), writes stale balance outside `FOR UPDATE` — ledger invariant breaks for multi-currency users, concurrent cashback lost                                                         |
-| A2-720 | ~~Migration `0011_admin_idempotency_keys.sql` absent from `_journal.json` — drizzle's migrator iterates journal only; fresh deploys never create the table; every ADR-017 admin write would fail on boot~~ **resolved-pending-review** by Batch 1 PR 2 |
+| ID     | Title                                                                                                                                                                                                                                                                    |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A2-700 | ~~`accrue-interest.ts` UPDATE filters only by `user_id` (not `currency`), writes stale balance outside `FOR UPDATE` — ledger invariant breaks for multi-currency users, concurrent cashback lost~~ **resolved-pending-review** by Batch 1 PR 3 (corroborates A2-610/611) |
+| A2-720 | ~~Migration `0011_admin_idempotency_keys.sql` absent from `_journal.json` — drizzle's migrator iterates journal only; fresh deploys never create the table; every ADR-017 admin write would fail on boot~~ **resolved-pending-review** by Batch 1 PR 2                   |
 
 **High (6):**
 
@@ -375,7 +375,7 @@ Complete. Evidence: [phase-6.5-financial.md](./audit-2026-evidence/phase-6.5-fin
 | A2-903 | **High** | `user_credits.currency` has no CHECK constraint; `'ZZZ'` accepted (parallel to A2-704 on `credit_transactions`)                                                                 |
 | A2-904 | Medium   | `orders.wholesale_minor` in chargeCurrency units not catalog; any `supplier-spend` aggregate summing without `GROUP BY charge_currency` is currency-mixed                       |
 | A2-905 | Medium   | Interest accrual has no scheduler wiring; ADR 009 feature never runs                                                                                                            |
-| A2-906 | **High** | Interest accrual has no period-level idempotency (no cursor, no unique constraint); dormant but ships                                                                           |
+| A2-906 | **High** | ~~Interest accrual has no period-level idempotency (no cursor, no unique constraint); dormant but ships~~ **resolved-pending-review** by Batch 1 PR 3                           |
 | A2-907 | Low      | `reconciliationResponse.userCount` mislabels rows as users (multi-currency users double-counted)                                                                                |
 | A2-908 | Medium   | Admin adjustment `reason` not persisted on ledger row; lost after 24h idempotency-key TTL sweep. ADR 017 claim of "full story reconstructable from append-only ledger" is false |
 

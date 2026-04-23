@@ -17,8 +17,32 @@
  * row + bumps `user_credits.balance_minor` inside one transaction so
  * balance and ledger always agree. Zero accruals (tiny balance,
  * zero APY) skip both — type='interest' has a CHECK amount>0.
+ *
+ * Correctness properties (audit remediation, 2026-04-23 — closes
+ * A2-610 / A2-611 / A2-700 / A2-906):
+ *
+ * - **Currency-scoped UPDATE** — the balance update is keyed by
+ *   `(user_id, currency)`. A multi-currency user's other-currency
+ *   rows are left untouched. (The prior bug: UPDATE filtered only
+ *   by `user_id`, so every currency row got the same single-currency
+ *   balance written back.)
+ *
+ * - **SELECT ... FOR UPDATE inside the txn** — the balance read
+ *   and the subsequent write happen against a row locked for the
+ *   duration of the transaction. A concurrent
+ *   `applyAdminCreditAdjustment` waits for the lock and then reads
+ *   the post-accrual balance; neither write is lost.
+ *
+ * - **Period-level idempotency** — the caller supplies a
+ *   `periodCursor` string (e.g. `"2026-04-23"` for daily accrual).
+ *   The `credit_transactions` table has a partial unique index on
+ *   `(user_id, currency, period_cursor) WHERE type='interest'` — a
+ *   re-tick with the same cursor raises a unique-violation at the
+ *   DB layer rather than silently double-crediting. We catch the
+ *   violation per row and skip, so a retry of a partially-completed
+ *   run makes progress on the remaining users instead of bailing.
  */
-import { eq, gt } from 'drizzle-orm';
+import { and, eq, gt } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { creditTransactions, userCredits } from '../db/schema.js';
 import { logger } from '../logger.js';
@@ -45,78 +69,151 @@ export interface AccrualResult {
   users: number;
   credited: number;
   skippedZero: number;
+  /**
+   * Users skipped because this `periodCursor` had already accrued
+   * for them (unique-index violation caught). Non-zero means the
+   * run is a partial retry of a prior tick — expected, not an error.
+   */
+  skippedAlreadyAccrued: number;
   /** Sum of all credited amounts, keyed by currency. BigInt minor units. */
   totalsMinor: Record<string, bigint>;
 }
 
 /**
- * Accrues one period of interest against every user_credits row with
- * a positive balance. Returns counts + per-currency totals so the
- * caller can log a single batch summary.
+ * Accrues one period of interest against every `user_credits` row
+ * with a positive balance. Returns counts + per-currency totals so
+ * the caller can log a single batch summary.
  *
- * Idempotency: this function is NOT idempotent on its own — running
- * it twice in the same period double-credits. Scheduling is expected
- * to drive it exactly once per period (the follow-up scheduling slice
- * keys the last-run timestamp on a `watcher_cursors` row; a replayed
- * tick inside the same period is a no-op there).
+ * `periodCursor` uniquely identifies this period. Two calls with
+ * the same cursor are a no-op for already-accrued (user, currency)
+ * pairs. The cursor is stored on every inserted row so a human
+ * auditing the ledger can see which tick credited them.
  */
-export async function accrueOnePeriod(period: AccrualPeriod): Promise<AccrualResult> {
+export async function accrueOnePeriod(
+  period: AccrualPeriod,
+  periodCursor: string,
+): Promise<AccrualResult> {
   if (period.apyBasisPoints <= 0) {
-    return { users: 0, credited: 0, skippedZero: 0, totalsMinor: {} };
+    return {
+      users: 0,
+      credited: 0,
+      skippedZero: 0,
+      skippedAlreadyAccrued: 0,
+      totalsMinor: {},
+    };
+  }
+  if (periodCursor.length === 0) {
+    throw new Error('accrueOnePeriod: periodCursor must be a non-empty string');
   }
 
   // Read all non-zero balances. user_credits has one row per
   // (user_id, currency); a user with no credits has no row at all,
   // and `balance_minor > 0` is a CHECK-enforced invariant we further
-  // narrow here for clarity.
-  const rows = await db
+  // narrow here for clarity. The read here is the *planning* list —
+  // each user's actual balance is re-read inside its own txn under
+  // a FOR UPDATE lock so the write is against a fresh value.
+  const plan = await db
     .select({
       userId: userCredits.userId,
       currency: userCredits.currency,
-      balanceMinor: userCredits.balanceMinor,
     })
     .from(userCredits)
     .where(gt(userCredits.balanceMinor, 0n));
 
   const result: AccrualResult = {
-    users: rows.length,
+    users: plan.length,
     credited: 0,
     skippedZero: 0,
+    skippedAlreadyAccrued: 0,
     totalsMinor: {},
   };
 
-  for (const row of rows) {
-    const accrual = computeAccrualMinor(row.balanceMinor, period);
-    if (accrual <= 0n) {
-      result.skippedZero++;
-      continue;
-    }
+  for (const target of plan) {
     try {
-      await db.transaction(async (tx) => {
+      const applied = await db.transaction(async (tx) => {
+        // Re-read the balance under a FOR UPDATE row lock. Concurrent
+        // writers to the same (user, currency) row — admin
+        // adjustments, cashback capture, a racing accrual — wait
+        // here and see the post-accrual balance.
+        const fresh = await tx
+          .select({ balanceMinor: userCredits.balanceMinor })
+          .from(userCredits)
+          .where(
+            and(eq(userCredits.userId, target.userId), eq(userCredits.currency, target.currency)),
+          )
+          .for('update');
+
+        const balance = fresh[0]?.balanceMinor;
+        if (balance === undefined || balance <= 0n) {
+          return { status: 'skipped-zero' as const };
+        }
+
+        const accrual = computeAccrualMinor(balance, period);
+        if (accrual <= 0n) {
+          return { status: 'skipped-zero' as const };
+        }
+
         await tx.insert(creditTransactions).values({
-          userId: row.userId,
+          userId: target.userId,
           type: 'interest',
           amountMinor: accrual,
-          currency: row.currency,
+          currency: target.currency,
           referenceType: null,
           referenceId: null,
+          periodCursor,
         });
+
         await tx
           .update(userCredits)
-          .set({
-            balanceMinor: row.balanceMinor + accrual,
-          })
-          .where(eq(userCredits.userId, row.userId));
+          .set({ balanceMinor: balance + accrual })
+          .where(
+            and(eq(userCredits.userId, target.userId), eq(userCredits.currency, target.currency)),
+          );
+
+        return { status: 'credited' as const, accrual };
       });
-      result.credited++;
-      const prev = result.totalsMinor[row.currency];
-      result.totalsMinor[row.currency] = (prev ?? 0n) + accrual;
+
+      if (applied.status === 'credited') {
+        result.credited++;
+        const prev = result.totalsMinor[target.currency];
+        result.totalsMinor[target.currency] = (prev ?? 0n) + applied.accrual;
+      } else {
+        result.skippedZero++;
+      }
     } catch (err) {
+      // Unique-violation on the partial index = this (user, currency,
+      // periodCursor) already accrued. That's the idempotency
+      // guarantee firing — skip the row and keep going so a retried
+      // run of a partially-completed tick still makes progress on
+      // users that never accrued.
+      const message = err instanceof Error ? err.message : String(err);
+      if (
+        message.includes('credit_transactions_interest_period_unique') ||
+        message.includes('duplicate key value violates unique constraint')
+      ) {
+        result.skippedAlreadyAccrued++;
+        continue;
+      }
       log.error(
-        { err, userId: row.userId, currency: row.currency },
+        { err, userId: target.userId, currency: target.currency, periodCursor },
         'Interest accrual txn failed for user',
       );
     }
+  }
+
+  // Surface a single batch summary when the run was meaningfully
+  // noisy — either because some users were skipped due to prior
+  // accrual (retry of a partial tick) or because no balances ticked
+  // (quiet period).
+  if (result.skippedAlreadyAccrued > 0) {
+    log.info(
+      {
+        periodCursor,
+        credited: result.credited,
+        skippedAlreadyAccrued: result.skippedAlreadyAccrued,
+      },
+      'Interest accrual partial-retry skipped already-accrued rows',
+    );
   }
 
   return result;
