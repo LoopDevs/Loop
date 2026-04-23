@@ -40,6 +40,7 @@ import { MerchantCashbackPaidCard } from '~/components/features/admin/MerchantCa
 import { MerchantFlywheelActivityChart } from '~/components/features/admin/MerchantFlywheelActivityChart';
 import { MerchantFlywheelChip } from '~/components/features/admin/MerchantFlywheelChip';
 import { MerchantRailMixCard } from '~/components/features/admin/MerchantRailMixCard';
+import { MerchantTopEarnersCard } from '~/components/features/admin/MerchantTopEarnersCard';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -246,6 +247,13 @@ export default function AdminMerchantDetailRoute(): React.JSX.Element {
           merchant. A rising LOOP-asset share is the per-merchant
           version of the fleet flywheel signal. */}
       <MerchantRailMixCard merchantId={merchantId} />
+
+      {/* Top earners (#655). Inverse axis of the user-drill's
+          cashback-by-merchant table — ranks users by cashback
+          earned at this one merchant. Drives BD outreach ("who
+          spends a lot at Amazon?") and support triage ("who's
+          the impact of this merchant's incident?"). */}
+      <MerchantTopEarnersCard merchantId={merchantId} />
 
       {/* Config audit trail (ADR 011). Newest first, last 50 rows
           by backend default. Silent-hide on error — the current-
