@@ -19,7 +19,7 @@ npm run dev  # backend on :8080, web on :5173
    git checkout -b feat/my-feature
    ```
 
-   Branch names must match: `feat/`, `fix/`, `chore/`, `docs/`, `test/`, `refactor/`
+   Branch names must match: `feat/`, `fix/`, `chore/`, `docs/`, `test/`, `refactor/`, `perf/`, `ci/`, `build/` (enforced by `.husky/pre-push`).
 
 2. **Make your changes.** Read the relevant `AGENTS.md` first:
    - Backend: `apps/backend/AGENTS.md`
@@ -32,7 +32,7 @@ npm run dev  # backend on :8080, web on :5173
    npm run verify  # typecheck + lint + test + docs
    ```
 
-4. **Push and open a PR.** CI runs 6 jobs including e2e tests (only on PRs). Discord `#loop-deployments` notifies on results.
+4. **Push and open a PR.** CI runs 7 jobs — `quality`, `test-unit`, `audit`, `build`, `test-e2e-mocked`, `test-e2e` (PR-only), and `notify`. Discord `#loop-deployments` notifies on results.
 
 5. **Get review.** Auth, payment, and storage code requires human review (see `.github/CODEOWNERS`).
 
