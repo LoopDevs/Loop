@@ -5,6 +5,7 @@
  * narrow — adding more profile fields later adds more functions
  * here rather than a single bloated "me" service.
  */
+import { ApiException } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
 
 export interface UserMeView {
@@ -131,6 +132,25 @@ export async function getUserPendingPayouts(
   return authenticatedRequest<UserPendingPayoutsResponse>(
     `/api/users/me/pending-payouts${query.length > 0 ? `?${query}` : ''}`,
   );
+}
+
+/**
+ * `GET /api/users/me/orders/:orderId/payout` — per-order
+ * settlement drill. Returns the single pending-payout row tied
+ * to one of the caller's own orders, or null when there isn't
+ * one (cashback not yet minted, order not fulfilled, or the user
+ * doesn't own the order). Cross-user access returns 404 server-
+ * side so we turn that into null here to keep call sites simple.
+ */
+export async function getUserPayoutByOrder(orderId: string): Promise<UserPendingPayoutView | null> {
+  try {
+    return await authenticatedRequest<UserPendingPayoutView>(
+      `/api/users/me/orders/${encodeURIComponent(orderId)}/payout`,
+    );
+  } catch (err) {
+    if (err instanceof ApiException && err.status === 404) return null;
+    throw err;
+  }
 }
 
 /**
