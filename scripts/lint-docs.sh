@@ -40,12 +40,14 @@ for stale in \
   "nodemailer" "JWT_SECRET" "SMTP_HOST" \
   "claude-audit.md" "RESEARCH.md" "ctx.postman_collection.json" \
   "dashdirect"; do
-  # docs/archive/ and docs/audit-tracker.md deliberately preserve some of
-  # these names in their historical narratives — exclude them so the
-  # check only fires on *active* docs where the reference would be a
-  # live bug.
+  # docs/archive/, docs/audit-tracker.md, and the new audit-2026-*
+  # artifacts deliberately preserve some of these names in their
+  # historical narratives + audit evidence — exclude them so the check
+  # only fires on *active* docs where the reference would be a live bug.
+  # (Audit evidence is append-only post-capture per
+  # docs/audit-2026-evidence/README.md so we cannot rephrase it.)
   matches=$(grep -rn "$stale" docs/ AGENTS.md apps/*/AGENTS.md packages/*/AGENTS.md 2>/dev/null \
-    | grep -v "node_modules\|__tests__\|docs/archive/\|docs/audit-tracker.md\|scripts/lint-docs.sh" \
+    | grep -v "node_modules\|__tests__\|docs/archive/\|docs/audit-tracker.md\|docs/audit-2026-tracker.md\|docs/audit-2026-adversarial-plan.md\|docs/audit-2026-evidence/\|scripts/lint-docs.sh" \
     || true)
   if [ -n "$matches" ]; then
     err "Stale reference to '$stale' in docs"
