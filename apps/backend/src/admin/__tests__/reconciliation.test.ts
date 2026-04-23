@@ -120,6 +120,42 @@ describe('adminReconciliationHandler', () => {
     expect(body.drift[1]?.deltaMinor).toBe('-500');
   });
 
+  it('A2-900: surfaces orphan credit_transactions (no matching user_credits row) as drift', async () => {
+    // The expanded SQL now UNIONs a second branch that finds
+    // credit_transactions rows whose (user_id, currency) has no
+    // user_credits counterpart. Those rows appear with balance=0,
+    // ledgerSum = net sum of the orphan transactions, and a negative
+    // delta (balance - ledgerSum). Prior LEFT-JOIN-anchored query
+    // missed them entirely.
+    executeQueue.push([
+      {
+        userId: 'orphan-user',
+        currency: 'USD',
+        balanceMinor: '0',
+        ledgerSumMinor: '250',
+        deltaMinor: '-250',
+      },
+    ]);
+    selectRows.push({ count: '0' });
+    const res = await adminReconciliationHandler(makeCtx());
+    const body = (await res.json()) as {
+      driftedCount: string;
+      drift: Array<{
+        userId: string;
+        balanceMinor: string;
+        ledgerSumMinor: string;
+        deltaMinor: string;
+      }>;
+    };
+    expect(body.driftedCount).toBe('1');
+    expect(body.drift[0]).toMatchObject({
+      userId: 'orphan-user',
+      balanceMinor: '0',
+      ledgerSumMinor: '250',
+      deltaMinor: '-250',
+    });
+  });
+
   it('handles the { rows: [...] } wrapper shape from a future drizzle driver', async () => {
     executeQueue.push(
       // Simulate an execute result that carries rows inside a wrapper
