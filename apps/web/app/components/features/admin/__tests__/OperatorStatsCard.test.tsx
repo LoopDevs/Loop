@@ -93,8 +93,8 @@ describe('<OperatorStatsCard />', () => {
     await waitFor(() => {
       expect(screen.getByText('op-alpha-01')).toBeDefined();
     });
-    const row = screen.getByRole('link', { name: /show orders carried by op-alpha-01/i });
-    expect(row.getAttribute('href')).toBe('/admin/orders?ctxOperatorId=op-alpha-01');
+    const row = screen.getByRole('link', { name: /open operator detail for op-alpha-01/i });
+    expect(row.getAttribute('href')).toBe('/admin/operators/op-alpha-01');
     // Non-zero failed count becomes its own failed-state drill link.
     const failedLink = screen.getByRole('link', { name: /review 2 failed orders on op-alpha-01/i });
     expect(failedLink.getAttribute('href')).toBe(

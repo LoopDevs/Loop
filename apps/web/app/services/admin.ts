@@ -322,6 +322,98 @@ export async function getOperatorStats(
 }
 
 /**
+ * Per-operator fulfilment latency row (ADR 013 / 022). One row per
+ * operator that had at least one fulfilled order in the window.
+ * Percentiles are reported in ms and rounded.
+ */
+export interface OperatorLatencyRow {
+  operatorId: string;
+  sampleCount: number;
+  p50Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+  meanMs: number;
+}
+
+export interface OperatorLatencyResponse {
+  since: string;
+  rows: OperatorLatencyRow[];
+}
+
+/**
+ * `GET /api/admin/operators/latency` — fleet per-operator p50/p95/p99
+ * of `fulfilledAt - paidAt`. Default window 24h; server clamps 366d.
+ */
+export async function getOperatorLatency(
+  opts: { since?: string } = {},
+): Promise<OperatorLatencyResponse> {
+  const params = new URLSearchParams();
+  if (opts.since !== undefined) params.set('since', opts.since);
+  const qs = params.toString();
+  return authenticatedRequest<OperatorLatencyResponse>(
+    `/api/admin/operators/latency${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
+/** Per-operator per-currency supplier-spend row. Same shape as the
+ *  fleet SupplierSpendRow — reused here so the drill page table
+ *  doesn't duplicate the type. */
+export interface OperatorSupplierSpendResponse {
+  operatorId: string;
+  since: string;
+  rows: SupplierSpendRow[];
+}
+
+/**
+ * `GET /api/admin/operators/:operatorId/supplier-spend` — per-currency
+ * supplier-spend scoped to one operator. Default window 24h; server
+ * clamps 366d.
+ */
+export async function getOperatorSupplierSpend(
+  operatorId: string,
+  opts: { since?: string } = {},
+): Promise<OperatorSupplierSpendResponse> {
+  const params = new URLSearchParams();
+  if (opts.since !== undefined) params.set('since', opts.since);
+  const qs = params.toString();
+  return authenticatedRequest<OperatorSupplierSpendResponse>(
+    `/api/admin/operators/${encodeURIComponent(operatorId)}/supplier-spend${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
+/** Per-operator daily activity row. */
+export interface OperatorActivityDay {
+  day: string;
+  created: number;
+  fulfilled: number;
+  failed: number;
+}
+
+export interface OperatorActivityResponse {
+  operatorId: string;
+  windowDays: number;
+  days: OperatorActivityDay[];
+}
+
+/**
+ * `GET /api/admin/operators/:operatorId/activity` — per-day
+ * created/fulfilled/failed for one operator over `?days=1-90`
+ * (default 7). Response is zero-filled by the backend so a stable
+ * N-row chart layout is guaranteed.
+ */
+export async function getOperatorActivity(
+  operatorId: string,
+  opts: { days?: number } = {},
+): Promise<OperatorActivityResponse> {
+  const params = new URLSearchParams();
+  if (opts.days !== undefined) params.set('days', String(opts.days));
+  const qs = params.toString();
+  return authenticatedRequest<OperatorActivityResponse>(
+    `/api/admin/operators/${encodeURIComponent(operatorId)}/activity${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
+/**
  * One row from the admin audit tail (ADR 017 / 018). Mirrors the
  * Discord audit message: who did what, when, status. Response body
  * is intentionally omitted — audit is "activity happened" not
