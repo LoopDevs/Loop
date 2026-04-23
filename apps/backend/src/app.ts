@@ -224,6 +224,21 @@ export function __resetRateLimitsForTests(): void {
 export function __resetHealthProbeCacheForTests(): void {
   upstreamProbeCache = null;
   upstreamProbeInFlight = null;
+  lastHealthStatus = null;
+  degradedReadingStreak = 0;
+  healthyReadingStreak = 0;
+  lastHealthNotifyAt = 0;
+}
+
+/**
+ * Test seam: resets only the upstream probe cache (not the hysteresis
+ * streaks or notify cooldown). Used by flap-damping tests that need to
+ * force a fresh probe between /health calls while preserving the
+ * accumulated streak state — the whole point the tests are verifying.
+ */
+export function __resetUpstreamProbeCacheOnlyForTests(): void {
+  upstreamProbeCache = null;
+  upstreamProbeInFlight = null;
 }
 
 // Cap on the rate-limit map. Without this, an attacker spraying requests
@@ -465,6 +480,25 @@ if (env.NODE_ENV === 'test') {
 // ─── Health ───────────────────────────────────────────────────────────────────
 
 let lastHealthStatus: 'healthy' | 'degraded' | null = null;
+// Hysteresis counters. The raw per-probe reading goes into the counters;
+// we only flip `lastHealthStatus` once a streak crosses the threshold.
+// Asymmetric: getting *into* degraded is easy (2 consecutive) so real
+// outages still page ops inside ~30s; getting *back out* is harder
+// (3 consecutive) so a marginally-slow upstream doesn't flap us healthy
+// before the underlying issue stabilises.
+const HEALTH_FLIP_TO_DEGRADED_STREAK = 2;
+const HEALTH_FLIP_TO_HEALTHY_STREAK = 3;
+let degradedReadingStreak = 0;
+let healthyReadingStreak = 0;
+// Cooldown on the monitoring-channel Discord notify itself. Even with
+// hysteresis, a genuine two-state outage (upstream flickering in and
+// out over hours) would still emit a pair of embeds per flip — at
+// worst once per ~15s × streak-length. The 5-minute minimum between
+// `notifyHealthChange` calls ensures the monitoring channel stays
+// readable; ops still sees the first transition (the one that matters)
+// and the raw state is always queryable via `GET /health`.
+const HEALTH_NOTIFY_COOLDOWN_MS = 5 * 60 * 1000;
+let lastHealthNotifyAt = 0;
 
 // Cache the upstream reachability probe: `/health` is unauthenticated and
 // unrate-limited (Fly.io probes it every 15s, k8s-ish liveness patterns also
@@ -474,8 +508,29 @@ let lastHealthStatus: 'healthy' | 'degraded' | null = null;
 // and burns our local socket budget. 10s is shorter than the Fly probe
 // interval so the cached value is always the one from the last probe.
 const UPSTREAM_PROBE_TTL_MS = 10_000;
+// Probe timeout is kept under the Fly healthcheck timeout (5s) so the
+// outer check always gets a response, but is bumped from the original
+// 3s — anything lower was catching marginally-slow CTX responses and
+// producing spurious degraded readings (real-world flap on the
+// /status endpoint ran well past 3s under load).
+const UPSTREAM_PROBE_TIMEOUT_MS = 5_000;
 let upstreamProbeCache: { reachable: boolean; at: number } | null = null;
 let upstreamProbeInFlight: Promise<boolean> | null = null;
+
+/**
+ * Throttle wrapper on top of `notifyHealthChange`. The streak gating
+ * above already absorbs per-probe jitter; this is the belt-and-braces
+ * second layer so that a sustained hour-long outage emitting repeated
+ * healthy↔degraded transitions (genuine ones, each with a streak) still
+ * keeps the monitoring channel readable. Raw `/health` state is always
+ * queryable so ops still has ground truth.
+ */
+function maybeNotifyHealthChange(status: 'healthy' | 'degraded', details: string): void {
+  const now = Date.now();
+  if (now - lastHealthNotifyAt < HEALTH_NOTIFY_COOLDOWN_MS) return;
+  lastHealthNotifyAt = now;
+  notifyHealthChange(status, details);
+}
 
 async function probeUpstream(): Promise<boolean> {
   const now = Date.now();
@@ -498,7 +553,9 @@ async function probeUpstream(): Promise<boolean> {
       // after upstream came back. See `docs/architecture.md §Circuit
       // breaker` — this is the one documented exception to the AGENTS.md
       // "never bare fetch" rule for upstream calls.
-      const res = await fetch(upstreamUrl('/status'), { signal: AbortSignal.timeout(3000) });
+      const res = await fetch(upstreamUrl('/status'), {
+        signal: AbortSignal.timeout(UPSTREAM_PROBE_TIMEOUT_MS),
+      });
       reachable = res.ok;
     } catch {
       reachable = false;
@@ -525,14 +582,43 @@ app.get('/health', async (c) => {
 
   const degraded = merchantsStale || locationsStale || !upstreamReachable;
 
-  const currentStatus = degraded ? 'degraded' : 'healthy';
-  if (lastHealthStatus !== null && lastHealthStatus !== currentStatus) {
-    const details = degraded
-      ? `Merchants stale: ${merchantsStale}, Locations stale: ${locationsStale}, Upstream: ${upstreamReachable ? 'up' : 'DOWN'}`
-      : 'All systems operational';
-    notifyHealthChange(currentStatus, details);
+  // Raw reading → streak counters. Consecutive identical readings
+  // accumulate; any flip resets the other counter. Only once a streak
+  // crosses the threshold do we promote it to `lastHealthStatus` and
+  // (maybe) fire the Discord notify — see `HEALTH_FLIP_TO_*` above for
+  // the asymmetric threshold rationale.
+  const rawReading: 'degraded' | 'healthy' = degraded ? 'degraded' : 'healthy';
+  if (rawReading === 'degraded') {
+    degradedReadingStreak += 1;
+    healthyReadingStreak = 0;
+  } else {
+    healthyReadingStreak += 1;
+    degradedReadingStreak = 0;
   }
-  lastHealthStatus = currentStatus;
+
+  // Bootstrap on first /health hit — no streak gating yet because we
+  // have no prior state to protect against flapping against. After this
+  // one-shot seed, every subsequent transition has to clear its streak.
+  if (lastHealthStatus === null) {
+    lastHealthStatus = rawReading;
+  } else if (
+    lastHealthStatus === 'healthy' &&
+    rawReading === 'degraded' &&
+    degradedReadingStreak >= HEALTH_FLIP_TO_DEGRADED_STREAK
+  ) {
+    lastHealthStatus = 'degraded';
+    maybeNotifyHealthChange(
+      'degraded',
+      `Merchants stale: ${merchantsStale}, Locations stale: ${locationsStale}, Upstream: ${upstreamReachable ? 'up' : 'DOWN'}`,
+    );
+  } else if (
+    lastHealthStatus === 'degraded' &&
+    rawReading === 'healthy' &&
+    healthyReadingStreak >= HEALTH_FLIP_TO_HEALTHY_STREAK
+  ) {
+    lastHealthStatus = 'healthy';
+    maybeNotifyHealthChange('healthy', 'All systems operational');
+  }
 
   // /health reports live service state (merchant/location staleness,
   // upstream reachability). A CDN in front caching this would serve

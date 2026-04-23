@@ -60,6 +60,14 @@ vi.mock('../clustering/handler.js', () => ({
   ),
 }));
 
+// Mock Discord notifiers so the health-change tests can observe the
+// flap-damping behavior via call counts without hitting a webhook.
+const mockNotifyHealthChange = vi.hoisted(() => vi.fn());
+vi.mock('../discord.js', async (importOriginal) => {
+  const orig = (await importOriginal()) as Record<string, unknown>;
+  return { ...orig, notifyHealthChange: mockNotifyHealthChange };
+});
+
 // Mock circuit breaker to pass through to global fetch (avoids cross-test state leaks)
 vi.mock('../circuit-breaker.js', () => {
   class CircuitOpenError extends Error {
@@ -79,7 +87,11 @@ vi.mock('../circuit-breaker.js', () => {
   };
 });
 
-import { app, __resetHealthProbeCacheForTests } from '../app.js';
+import {
+  app,
+  __resetHealthProbeCacheForTests,
+  __resetUpstreamProbeCacheOnlyForTests,
+} from '../app.js';
 
 // Mock global fetch for upstream proxy calls
 const mockFetch = vi.fn();
@@ -87,10 +99,13 @@ vi.stubGlobal('fetch', mockFetch);
 
 beforeEach(() => {
   mockFetch.mockReset();
+  mockNotifyHealthChange.mockReset();
   // /health caches the upstream reachability probe for 10s so external
   // spammers don't turn into an outbound fetch amplifier. Invalidate the
   // cache between cases so the reachable→unreachable transition is
-  // observable inside a single test run.
+  // observable inside a single test run. Also resets the hysteresis
+  // streak counters + notify cooldown so each test case starts from a
+  // known state.
   __resetHealthProbeCacheForTests();
 });
 
@@ -142,6 +157,117 @@ describe('GET /health', () => {
     // and other handlers don't run for /health, so every fetch call is
     // the probe. Exactly one probe should have fired for 5 inbound calls.
     expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  // ─── flap damping ─────────────────────────────────────────────────
+  // The Fly healthcheck hits /health every 15s with a 10s probe cache,
+  // so ~one fresh upstream probe per check. A CTX /status that briefly
+  // runs slow used to flip lastHealthStatus on every probe and spam
+  // the monitoring channel every minute. These tests verify the
+  // asymmetric streak gating + cooldown wrapper introduced in the
+  // flap-damping fix. `__resetUpstreamProbeCacheOnlyForTests` drops the
+  // probe cache between calls *without* clearing the streak state, so
+  // we can drive consecutive transitions inside one test.
+
+  it('body always reflects raw reading — Fly liveness must not be debounced', async () => {
+    // First-ever call on a fresh process: the bootstrap seeds
+    // lastHealthStatus silently (no notify), but the response body
+    // still reports the raw reading so Fly can act on it.
+    mockFetch.mockRejectedValueOnce(new Error('timeout'));
+    const res = await app.request('/health');
+    const body = (await res.json()) as { status: string };
+    expect(body.status).toBe('degraded');
+    expect(mockNotifyHealthChange).not.toHaveBeenCalled();
+  });
+
+  it('single failed probe after healthy does not fire the degraded notify', async () => {
+    // Seed healthy
+    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+    await app.request('/health');
+    expect(mockNotifyHealthChange).not.toHaveBeenCalled();
+
+    // One failed probe — streak = 1, below HEALTH_FLIP_TO_DEGRADED_STREAK.
+    __resetUpstreamProbeCacheOnlyForTests();
+    mockFetch.mockRejectedValueOnce(new Error('timeout'));
+    const res = await app.request('/health');
+    const body = (await res.json()) as { status: string };
+    expect(body.status).toBe('degraded'); // raw reading surfaces
+    expect(mockNotifyHealthChange).not.toHaveBeenCalled(); // but no page
+  });
+
+  it('two consecutive failed probes fire the degraded notify once', async () => {
+    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 })); // seed healthy
+    await app.request('/health');
+
+    __resetUpstreamProbeCacheOnlyForTests();
+    mockFetch.mockRejectedValueOnce(new Error('timeout'));
+    await app.request('/health');
+    expect(mockNotifyHealthChange).not.toHaveBeenCalled(); // streak=1
+
+    __resetUpstreamProbeCacheOnlyForTests();
+    mockFetch.mockRejectedValueOnce(new Error('timeout'));
+    await app.request('/health');
+    expect(mockNotifyHealthChange).toHaveBeenCalledTimes(1); // streak=2 → fires
+    expect(mockNotifyHealthChange).toHaveBeenCalledWith('degraded', expect.any(String));
+  });
+
+  it('two consecutive successes are NOT enough to flip back to healthy (asymmetric)', async () => {
+    // Seed into degraded via two failures
+    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+    await app.request('/health');
+    __resetUpstreamProbeCacheOnlyForTests();
+    mockFetch.mockRejectedValueOnce(new Error('timeout'));
+    await app.request('/health');
+    __resetUpstreamProbeCacheOnlyForTests();
+    mockFetch.mockRejectedValueOnce(new Error('timeout'));
+    await app.request('/health');
+    expect(mockNotifyHealthChange).toHaveBeenCalledTimes(1); // degraded fired
+
+    // Two recoveries — should NOT flip back (threshold is 3)
+    for (let i = 0; i < 2; i += 1) {
+      __resetUpstreamProbeCacheOnlyForTests();
+      mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+      await app.request('/health');
+    }
+    expect(mockNotifyHealthChange).toHaveBeenCalledTimes(1); // still 1 — no healthy fire yet
+  });
+
+  it('three consecutive successes after degraded flip back to healthy', async () => {
+    // Drive into degraded
+    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+    await app.request('/health');
+    __resetUpstreamProbeCacheOnlyForTests();
+    mockFetch.mockRejectedValueOnce(new Error('timeout'));
+    await app.request('/health');
+    __resetUpstreamProbeCacheOnlyForTests();
+    mockFetch.mockRejectedValueOnce(new Error('timeout'));
+    await app.request('/health');
+    expect(mockNotifyHealthChange).toHaveBeenCalledTimes(1);
+
+    // But notify cooldown is 5min, so the subsequent healthy flip
+    // would normally get throttled. Drop the cooldown clock by
+    // recycling the full test-reset once we've verified the degraded
+    // fire above. The streak test of the flip-back is what we want
+    // to cover here.
+    __resetHealthProbeCacheForTests();
+    mockNotifyHealthChange.mockReset();
+
+    // Drive into healthy — needs the degraded state first to have
+    // somewhere to flip FROM, then 3 healthy readings.
+    mockFetch.mockRejectedValueOnce(new Error('timeout'));
+    await app.request('/health'); // bootstrap to degraded
+    __resetUpstreamProbeCacheOnlyForTests();
+    mockFetch.mockRejectedValueOnce(new Error('timeout'));
+    await app.request('/health'); // streak=1 degraded (no fire — bootstrap already set it)
+    // Actually: after reset, first call seeds lastHealthStatus=degraded
+    // silently, then subsequent degraded readings just increment the
+    // (redundant) streak without firing. We need 3 healthy in a row.
+    for (let i = 0; i < 3; i += 1) {
+      __resetUpstreamProbeCacheOnlyForTests();
+      mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+      await app.request('/health');
+    }
+    expect(mockNotifyHealthChange).toHaveBeenCalledWith('healthy', expect.any(String));
   });
 });
 

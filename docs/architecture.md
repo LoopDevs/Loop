@@ -171,7 +171,8 @@ CLOSED ──(N consecutive failures)──→ OPEN ──(cooldown elapsed)─�
 
 - **4xx responses** do not count as failures (client errors, not upstream outage).
 - When OPEN, upstream proxy handlers return **503** `Service temporarily unavailable` (not 502).
-- The `/health` endpoint bypasses the circuit breaker — it probes upstream directly so external monitors can detect recovery. Result is cached 10s (PR #131) to stop an attacker from turning `/health` into an outbound-fetch amplifier.
+- The `/health` endpoint bypasses the circuit breaker — it probes upstream directly so external monitors can detect recovery. Probe result is cached 10s (PR #131) to stop an attacker from turning `/health` into an outbound-fetch amplifier; the probe's own fetch timeout is 5s (matches the Fly healthcheck timeout budget).
+- Status-change notifications to the Discord monitoring channel are flap-damped: a healthy→degraded flip requires **2 consecutive degraded readings**, and a degraded→healthy flip requires **3 consecutive healthy readings** (asymmetric — getting _into_ degraded still pages inside ~30s, but getting _out of_ it is harder so a marginally-slow upstream doesn't flap back prematurely). On top of the streak gate, `notifyHealthChange` itself has a 5-minute per-process cooldown so even a legitimate multi-hour flap can't spam the channel. The raw `/health` response body is always the current reading so Fly's liveness probe remains undebounced.
 - One breaker **per upstream endpoint** — `login`, `verify-email`, `refresh-token`, `logout`, `merchants`, `locations`, `gift-cards`. Lazily created via `getUpstreamCircuit(key)` in `circuit-breaker.ts`. Independent so a failing merchants sync can't trip auth, and a failing gift-cards endpoint can't trip clusters.
 
 ---
