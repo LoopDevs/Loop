@@ -45,6 +45,20 @@ vi.mock('~/services/user', () => ({
     }>,
   setStellarAddress: (addr: string | null) => userMock.setStellarAddress(addr),
   setHomeCurrency: (code: 'USD' | 'GBP' | 'EUR') => userMock.setHomeCurrency(code),
+  // Stellar trustline status is read by `<StellarTrustlineStatus />`
+  // mounted on the linked-wallet path. These wallet tests don't
+  // assert on its rendered text — the stub returns a "wallet ready"
+  // shape so the component renders (non-error) and out of the way.
+  getUserStellarTrustlines: () =>
+    Promise.resolve({
+      address: 'stub',
+      accountLinked: true,
+      accountExists: true,
+      rows: [],
+    }),
+  // Same treatment for the pending-payouts card mounted on the same
+  // page — stub an empty list so the card self-hides.
+  getUserPendingPayouts: () => Promise.resolve({ payouts: [] }),
 }));
 
 vi.mock('~/hooks/use-auth', () => ({
