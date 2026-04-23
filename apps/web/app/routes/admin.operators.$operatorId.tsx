@@ -259,7 +259,7 @@ function Metric({
 }: {
   label: string;
   value: string;
-  tone?: 'warn' | 'muted';
+  tone?: 'warn' | 'muted' | undefined;
 }): React.JSX.Element {
   const valueClass =
     tone === 'warn'
