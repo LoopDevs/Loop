@@ -240,6 +240,7 @@ GET  /api/admin/merchant-cashback-configs/history      [admin — fleet-wide con
 PUT  /api/admin/merchant-cashback-configs/:merchantId  [admin]
 GET  /api/admin/merchant-cashback-configs/:merchantId/history  [admin]
 GET  /api/admin/treasury                               [admin]
+GET  /api/admin/treasury/credit-flow                   [admin — per-day credited/debited/net ledger time-series, ?days=1-180, ?currency=USD|GBP|EUR, ADR 009/015]
 GET  /api/admin/payouts                                [admin — ADR 015 payout backlog, ?state/?userId/?assetCode filters]
 GET  /api/admin/payouts/:id                            [admin — single pending-payout drill-down]
 POST /api/admin/payouts/:id/retry                      [admin — reset failed payout to pending, ADR 015/016/017]
