@@ -135,6 +135,37 @@ export async function getUserPendingPayouts(
 }
 
 /**
+ * Caller's LOOP-asset trustline status (ADR 015). One row per
+ * configured LOOP asset; `present: true` means the user's linked
+ * address already has the trustline so the next payout in that
+ * asset will land. `accountLinked: false` → user hasn't linked a
+ * wallet yet; `accountExists: false` → address is linked but not
+ * yet funded on Stellar (needs an XLM reserve before any trustline
+ * can be created).
+ */
+export interface StellarTrustlineRow {
+  code: 'USDLOOP' | 'GBPLOOP' | 'EURLOOP';
+  issuer: string;
+  present: boolean;
+  /** BigInt as string. `"0"` when absent. */
+  balanceStroops: string;
+  /** BigInt as string. `"0"` when absent. */
+  limitStroops: string;
+}
+
+export interface StellarTrustlinesResponse {
+  address: string | null;
+  accountLinked: boolean;
+  accountExists: boolean;
+  rows: StellarTrustlineRow[];
+}
+
+/** `GET /api/users/me/stellar-trustlines` */
+export async function getUserStellarTrustlines(): Promise<StellarTrustlinesResponse> {
+  return authenticatedRequest<StellarTrustlinesResponse>('/api/users/me/stellar-trustlines');
+}
+
+/**
  * `GET /api/users/me/orders/:orderId/payout` — per-order
  * settlement drill. Returns the single pending-payout row tied
  * to one of the caller's own orders, or null when there isn't
