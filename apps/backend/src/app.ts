@@ -71,6 +71,7 @@ import { adminCashbackMonthlyHandler } from './admin/cashback-monthly.js';
 import { adminPayoutsMonthlyHandler } from './admin/payouts-monthly.js';
 import { adminPayoutsActivityHandler } from './admin/payouts-activity.js';
 import { adminPayoutsActivityCsvHandler } from './admin/payouts-activity-csv.js';
+import { adminSupplierSpendActivityCsvHandler } from './admin/supplier-spend-activity-csv.js';
 import { adminMerchantStatsHandler } from './admin/merchant-stats.js';
 import { adminMerchantStatsCsvHandler } from './admin/merchant-stats-csv.js';
 import { adminMerchantsFlywheelShareHandler } from './admin/merchants-flywheel-share.js';
@@ -936,6 +937,16 @@ app.get('/api/admin/payouts-activity', rateLimit(60, 60_000), adminPayoutsActivi
 // to reconcile liability creation vs. settlement. Rate-limited
 // 10/min per ADR 018.
 app.get('/api/admin/payouts-activity.csv', rateLimit(10, 60_000), adminPayoutsActivityCsvHandler);
+// Tier-3 CSV export of supplier-spend activity (ADR 013/015/018) —
+// finance runs this at month-end to reconcile CTX's invoice: the
+// wholesale_minor column per (day, currency) should tie to CTX's
+// line items. Pairs with cashback-activity.csv (what we minted)
+// and payouts-activity.csv (what we settled).
+app.get(
+  '/api/admin/supplier-spend/activity.csv',
+  rateLimit(10, 60_000),
+  adminSupplierSpendActivityCsvHandler,
+);
 // Per-merchant cashback stats — which merchants drive volume /
 // cashback outlay / margin. Distinct from supplier-spend (currency
 // grouped) — this one groups by merchant.
