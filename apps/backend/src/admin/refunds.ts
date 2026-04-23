@@ -118,7 +118,6 @@ export async function adminRefundHandler(c: Context): Promise<Response> {
     const priorResult = (prior.body as { result?: RefundResponse }).result;
     notifyAdminAudit({
       actorUserId: actor.id,
-      actorEmail: actor.email,
       endpoint: `POST /api/admin/users/${userId}/refunds`,
       targetUserId: userId,
       ...(priorResult?.amountMinor !== undefined ? { amountMinor: priorResult.amountMinor } : {}),
@@ -191,7 +190,6 @@ export async function adminRefundHandler(c: Context): Promise<Response> {
 
   notifyAdminAudit({
     actorUserId: actor.id,
-    actorEmail: actor.email,
     endpoint: `POST /api/admin/users/${userId}/refunds`,
     targetUserId: userId,
     amountMinor: result.amountMinor,
