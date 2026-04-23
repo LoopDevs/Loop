@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router';
-import { ApiException } from '@loop/shared';
+import { ApiException, LOOP_ASSET_CODES, type LoopAssetCode } from '@loop/shared';
 import type { Route } from './+types/admin._index';
 import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -28,6 +28,48 @@ interface CardLink {
   href: string;
   title: string;
   description: string;
+}
+
+/** Minor units → localised currency string. `—` on non-finite. */
+function fmtMinor(minor: string, fiat: string): string {
+  const n = Number(minor);
+  if (!Number.isFinite(n)) return '—';
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: fiat }).format(n / 100);
+  } catch {
+    return `${(n / 100).toFixed(2)} ${fiat}`;
+  }
+}
+
+function LiabilityCard({
+  code,
+  outstandingMinor,
+  issuer,
+}: {
+  code: LoopAssetCode;
+  outstandingMinor: string;
+  issuer: string | null;
+}): React.JSX.Element {
+  const fiat = code.slice(0, 3);
+  return (
+    <Link
+      to={`/admin/assets/${encodeURIComponent(code)}`}
+      aria-label={`Open ${code} asset detail`}
+      className="rounded-xl border border-gray-200 bg-white p-4 hover:border-gray-400 dark:border-gray-800 dark:bg-gray-900 dark:hover:border-gray-600"
+    >
+      <div className="flex items-baseline justify-between">
+        <div className="text-xs font-medium text-gray-500 dark:text-gray-400 font-mono">{code}</div>
+        {issuer === null ? (
+          <span className="text-[10px] uppercase tracking-wide font-semibold text-amber-700 dark:text-amber-400">
+            not configured
+          </span>
+        ) : null}
+      </div>
+      <div className="mt-1 text-lg font-semibold text-gray-900 dark:text-white tabular-nums">
+        {fmtMinor(outstandingMinor, fiat)}
+      </div>
+    </Link>
+  );
 }
 
 const CARDS: ReadonlyArray<CardLink> = [
@@ -64,10 +106,28 @@ const CARDS: ReadonlyArray<CardLink> = [
       'Searchable catalog index with cashback-config state per merchant. Exports the catalog as CSV for BD / finance.',
   },
   {
+    href: '/admin/operators',
+    title: 'Operators',
+    description:
+      'CTX supplier operator pool — volume, success rate, p50/p95 fulfilment latency per operator (ADR 013/022).',
+  },
+  {
+    href: '/admin/assets',
+    title: 'Assets',
+    description:
+      'LOOP stablecoins (USDLOOP / GBPLOOP / EURLOOP) — outstanding liability, issuer, in-flight payout state (ADR 015/022).',
+  },
+  {
     href: '/admin/stuck-orders',
     title: 'Stuck orders',
     description:
       'SLO-triage list for orders sitting past threshold in paid / procuring (ADR 011/013).',
+  },
+  {
+    href: '/admin/audit',
+    title: 'Audit',
+    description:
+      'Admin write-audit trail (ADR 017/018) — every POST/PUT/DELETE with actor email and result.',
   },
 ];
 
@@ -175,6 +235,32 @@ export default function AdminIndexRoute(): React.JSX.Element {
           </Link>
           <StuckOrdersCard />
           <StuckPayoutsCard />
+        </section>
+      )}
+
+      {/* LOOP-asset outstanding-liability strip. Three cards,
+          one per issued stablecoin — click drills into
+          /admin/assets/:code. Placed above the flywheel
+          headline so the first thing an op sees on /admin is
+          "what does Loop owe users right now, per stablecoin".
+          Hidden while the treasury snapshot is loading / errored
+          / denied so the layout doesn't flash stubs. */}
+      {denied || snapshotQuery.data === undefined ? null : (
+        <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {LOOP_ASSET_CODES.map((code) => {
+            const row = snapshotQuery.data.liabilities?.[code] ?? {
+              outstandingMinor: '0',
+              issuer: null,
+            };
+            return (
+              <LiabilityCard
+                key={code}
+                code={code}
+                outstandingMinor={row.outstandingMinor}
+                issuer={row.issuer}
+              />
+            );
+          })}
         </section>
       )}
 
