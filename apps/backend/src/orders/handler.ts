@@ -4,6 +4,7 @@ import { logger } from '../logger.js';
 import { getMerchants } from '../merchants/sync.js';
 import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
+import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { notifyOrderCreated, notifyOrderFulfilled } from '../discord.js';
 
 /**
@@ -218,7 +219,7 @@ export async function createOrderHandler(c: Context): Promise<Response> {
       // Truncate the body before logging — pino redact only matches structured
       // field names, not substrings of strings. Cap at 500 chars as
       // defense-in-depth against an upstream echoing sensitive data.
-      const body = (await response.text()).slice(0, 500);
+      const body = scrubUpstreamBody(await response.text());
       log.error({ status: response.status, body, merchantId }, 'Upstream order creation failed');
       return c.json({ code: 'UPSTREAM_ERROR', message: 'Order creation failed' }, 502);
     }
@@ -359,7 +360,7 @@ export async function listOrdersHandler(c: Context): Promise<Response> {
     }
 
     if (!response.ok) {
-      const body = (await response.text()).slice(0, 500);
+      const body = scrubUpstreamBody(await response.text());
       log.error({ status: response.status, body }, 'Upstream order list failed');
       return c.json({ code: 'UPSTREAM_ERROR', message: 'Failed to fetch orders' }, 502);
     }
@@ -457,7 +458,7 @@ export async function getOrderHandler(c: Context): Promise<Response> {
     }
 
     if (!response.ok) {
-      const body = (await response.text()).slice(0, 500);
+      const body = scrubUpstreamBody(await response.text());
       log.error({ status: response.status, body, orderId }, 'Upstream order fetch failed');
       return c.json({ code: 'UPSTREAM_ERROR', message: 'Failed to fetch order' }, 502);
     }
