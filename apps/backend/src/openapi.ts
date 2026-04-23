@@ -4650,6 +4650,68 @@ registry.registerPath({
   },
 });
 
+// ─── Admin — ledger reconciliation (ADR 009) ────────────────────────────────
+
+const ReconciliationEntry = registry.register(
+  'ReconciliationEntry',
+  z.object({
+    userId: z.string().uuid(),
+    currency: z.string(),
+    balanceMinor: z.string().openapi({
+      description: 'Materialised balance from user_credits.balance_minor. BigInt-string.',
+    }),
+    ledgerSumMinor: z.string().openapi({
+      description:
+        'Sum of credit_transactions.amount_minor for this (user, currency). BigInt-string.',
+    }),
+    deltaMinor: z.string().openapi({
+      description: 'balance - ledger_sum. Non-zero by construction (drift query filters on !=).',
+    }),
+  }),
+);
+
+const ReconciliationResponse = registry.register(
+  'ReconciliationResponse',
+  z.object({
+    userCount: z.string().openapi({
+      description: 'Total user_credits rows across all users and currencies. BigInt-string.',
+    }),
+    driftedCount: z.string().openapi({
+      description:
+        'Number of drifted rows returned in `drift`. Capped at 100 — more may exist beyond.',
+    }),
+    drift: z.array(ReconciliationEntry),
+  }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/reconciliation',
+  summary: 'Ledger-integrity drift check (ADR 009).',
+  description:
+    "Joins `user_credits` against the grouped sum of `credit_transactions` per (user_id, currency) and returns any rows where they disagree. A healthy deployment returns an empty `drift` array. The `driftedCount` is capped at 100 to keep responses bounded; a catastrophic divergence surfaces but isn't exhaustively listed.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Drift report',
+      content: { 'application/json': { schema: ReconciliationResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (30/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Admin — user search (ADR 011) ──────────────────────────────────────────
 
 const AdminUserSearchResult = registry.register(

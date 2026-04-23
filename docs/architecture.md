@@ -268,6 +268,7 @@ GET  /api/admin/merchant-flows                          [admin — per-merchant 
 GET  /api/admin/discord/config                          [admin — webhook env-var configured? ADR 018]
 GET  /api/admin/users/search                            [admin — find users by email fragment, ADR 011]
 GET  /api/admin/user-credits.csv                        [admin — Tier-3 CSV of off-chain balances, ADR 009/019]
+GET  /api/admin/reconciliation                          [admin — ledger drift check, ADR 009]
 GET  /api/admin/operator-stats                          [admin — per-operator order volume + success rate, ADR 013]
 GET  /api/admin/operators/latency                       [admin — per-operator p50/p95/p99 fulfilment latency, ADR 013/022]
 GET  /api/admin/operators-snapshot.csv                  [admin — Tier-3 CSV joining operator-stats + latency per operator for CTX quarterly reviews, ADR 013/018/022]
