@@ -183,6 +183,13 @@ export const creditTransactions = pgTable(
       'credit_transactions_type_known',
       sql`${t.type} IN ('cashback', 'interest', 'spend', 'withdrawal', 'refund', 'adjustment')`,
     ),
+    // A2-704: match the `user_credits_currency_known` CHECK so a ledger
+    // row can never be written in a currency the aggregate table refuses
+    // to hold. The reconciliation query joins on (user_id, currency) —
+    // a `JPY` ledger row with no `user_credits` counterpart would surface
+    // through A2-900's orphan-drift path forever. Adding a fourth
+    // currency is a deliberate migration against both tables.
+    check('credit_transactions_currency_known', sql`${t.currency} IN ('USD', 'GBP', 'EUR')`),
     // period_cursor is populated iff type='interest'. Caller supplies
     // the cursor; everything else must leave it NULL.
     check(
