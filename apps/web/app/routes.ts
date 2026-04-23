@@ -14,6 +14,8 @@ export default [
   route('cashback', 'routes/cashback.tsx'),
   route('cashback/:slug', 'routes/cashback.$slug.tsx'),
   route('trustlines', 'routes/trustlines.tsx'),
+  route('privacy', 'routes/privacy.tsx'),
+  route('terms', 'routes/terms.tsx'),
   ...sitemapRoutes,
   route('auth', 'routes/auth.tsx'),
   route('onboarding', 'routes/onboarding.tsx'),
