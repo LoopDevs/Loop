@@ -28,7 +28,11 @@ import {
   HOME_CURRENCIES,
   PAYOUT_STATES,
 } from '../db/schema.js';
-import { getPayoutForUser, listPayoutsForUser } from '../credits/pending-payouts.js';
+import {
+  getPayoutByOrderIdForUser,
+  getPayoutForUser,
+  listPayoutsForUser,
+} from '../credits/pending-payouts.js';
 import { decodeJwtPayload } from '../auth/jwt.js';
 import { upsertUserFromCtx, getUserById, type User } from '../db/users.js';
 import type { LoopAuthContext } from '../auth/handler.js';
@@ -505,6 +509,60 @@ export async function getUserPendingPayoutDetailHandler(c: Context): Promise<Res
   const row = await getPayoutForUser(id, user.id);
   if (row === null) {
     return c.json({ code: 'NOT_FOUND', message: 'Payout not found' }, 404);
+  }
+
+  return c.json<UserPendingPayoutView>({
+    id: row.id,
+    orderId: row.orderId,
+    assetCode: row.assetCode,
+    assetIssuer: row.assetIssuer,
+    amountStroops: row.amountStroops.toString(),
+    state: row.state as (typeof PAYOUT_STATES)[number],
+    txHash: row.txHash,
+    attempts: row.attempts,
+    createdAt: row.createdAt.toISOString(),
+    submittedAt: row.submittedAt?.toISOString() ?? null,
+    confirmedAt: row.confirmedAt?.toISOString() ?? null,
+    failedAt: row.failedAt?.toISOString() ?? null,
+  });
+}
+
+/**
+ * `GET /api/users/me/orders/:orderId/payout` — for one of the
+ * caller's own orders, return the single pending-payout row tied to
+ * it (if any). Mirror of `/api/admin/orders/:orderId/payout` but
+ * ownership-scoped: cross-user access returns 404 (not 403) so
+ * order ids aren't enumerable.
+ *
+ * Powers a per-order cashback-settlement card on `/orders/:id` so
+ * users can see their Stellar-side state ("pending / submitted /
+ * confirmed / failed") without scrolling the global payouts list.
+ * 404 covers both "order doesn't exist" and "order exists but
+ * belongs to someone else" — same copy on the client.
+ */
+export async function getUserPayoutByOrderHandler(c: Context): Promise<Response> {
+  const orderId = c.req.param('orderId');
+  if (orderId === undefined || orderId.length === 0) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'orderId is required' }, 400);
+  }
+  if (!PENDING_PAYOUT_UUID_RE.test(orderId)) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'orderId must be a uuid' }, 400);
+  }
+
+  let user: User | null;
+  try {
+    user = await resolveCallingUser(c);
+  } catch (err) {
+    log.error({ err }, 'Failed to resolve calling user');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+  }
+  if (user === null) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+
+  const row = await getPayoutByOrderIdForUser(orderId, user.id);
+  if (row === null) {
+    return c.json({ code: 'NOT_FOUND', message: 'No payout for this order' }, 404);
   }
 
   return c.json<UserPendingPayoutView>({

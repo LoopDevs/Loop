@@ -122,6 +122,7 @@ import {
   getCashbackSummaryHandler,
   getMeHandler,
   getUserCreditsHandler,
+  getUserPayoutByOrderHandler,
   getUserPendingPayoutDetailHandler,
   getUserPendingPayoutsHandler,
   setHomeCurrencyHandler,
@@ -753,6 +754,17 @@ app.get(
   '/api/users/me/pending-payouts/:id',
   rateLimit(120, 60_000),
   getUserPendingPayoutDetailHandler,
+);
+// GET /api/users/me/orders/:orderId/payout — for one of the
+// caller's own orders, return the single pending-payout row tied
+// to it. Mirror of the admin /api/admin/orders/:orderId/payout
+// but ownership-scoped. Powers a per-order settlement card on
+// /orders/:id — users see their Stellar-side cashback state
+// ("submitted / confirmed / failed") without scrolling payouts.
+app.get(
+  '/api/users/me/orders/:orderId/payout',
+  rateLimit(120, 60_000),
+  getUserPayoutByOrderHandler,
 );
 // GET /api/users/me/cashback-summary — compact lifetime + this-month
 // cashback totals in the user's home currency. Powers the home-page
