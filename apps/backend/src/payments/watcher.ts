@@ -28,6 +28,7 @@ import { markOrderPaid, sweepExpiredOrders } from '../orders/transitions.js';
 import { listAccountPayments, isMatchingIncomingPayment, type HorizonPayment } from './horizon.js';
 import { stroopsPerCent, usdcStroopsPerCent } from './price-feed.js';
 import { configuredLoopPayableAssets, type LoopAssetCode } from '../credits/payout-asset.js';
+import { notifyPaymentWatcherStuck } from '../discord.js';
 
 const log = logger.child({ area: 'payment-watcher' });
 
@@ -335,6 +336,7 @@ export async function runPaymentWatcherTick(args: {
  */
 let watcherTimer: ReturnType<typeof setInterval> | null = null;
 let expirySweepTimer: ReturnType<typeof setInterval> | null = null;
+let cursorWatchdogTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
  * How old a `pending_payment` order must be before the expiry sweep
@@ -347,6 +349,66 @@ const PAYMENT_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
 /** How often the expiry sweep runs. 5 min is generous given 24h horizon. */
 const EXPIRY_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+
+/**
+ * A2-626: cursor-age watchdog. If the payment watcher ticks cleanly,
+ * every tick either reads an empty page (no cursor change needed
+ * beyond an existing row's updated_at) or advances the cursor and
+ * bumps updated_at. A cursor that hasn't moved for longer than this
+ * threshold is a signal the watcher is stuck — the process died,
+ * Horizon is unreachable beyond the circuit-breaker window, or the
+ * tick is crashing in a way that swallows all exceptions.
+ *
+ * 10 min is well outside the normal per-tick window (10s default
+ * interval) but tight enough that ops gets paged while the cause
+ * is still forensically obvious.
+ */
+const CURSOR_STALE_MS = 10 * 60 * 1000;
+
+/** How often the cursor-age watchdog runs. 1 min is cheap. */
+const CURSOR_WATCHDOG_INTERVAL_MS = 60 * 1000;
+
+/**
+ * A2-626: checks the watcher cursor's `updated_at` against the
+ * staleness threshold and fires a Discord alert if exceeded.
+ * Re-runs on a fixed interval from `startPaymentWatcher`. Never
+ * re-fires for the same stall — cursorStaleAlertFired gates the
+ * notification to once per process lifetime per stuck period
+ * (once the cursor moves, the gate resets).
+ *
+ * Safe on a cold deploy: if no cursor row exists yet, we skip
+ * silently. The watchdog is about detecting REGRESSIONS in an
+ * already-running watcher, not first-boot.
+ */
+let cursorStaleAlertFired = false;
+async function runCursorWatchdog(): Promise<void> {
+  const row = await db.query.watcherCursors.findFirst({
+    where: sql`${watcherCursors.name} = ${WATCHER_NAME}`,
+  });
+  if (row === undefined) return;
+  const ageMs = Date.now() - row.updatedAt.getTime();
+  if (ageMs > CURSOR_STALE_MS) {
+    if (!cursorStaleAlertFired) {
+      cursorStaleAlertFired = true;
+      notifyPaymentWatcherStuck({
+        cursorAgeMs: ageMs,
+        lastCursor: row.cursor ?? '',
+        lastUpdatedAtMs: row.updatedAt.getTime(),
+      });
+      log.error(
+        { cursorAgeMs: ageMs, lastCursor: row.cursor },
+        'Payment watcher cursor is stale — watcher may be stuck',
+      );
+    }
+  } else {
+    cursorStaleAlertFired = false;
+  }
+}
+
+/** Test seam: resets the one-shot alert gate. */
+export function __resetCursorWatchdogForTests(): void {
+  cursorStaleAlertFired = false;
+}
 
 export function startPaymentWatcher(args: {
   account: string;
@@ -381,6 +443,13 @@ export function startPaymentWatcher(args: {
       log.error({ err }, 'Expiry sweep failed');
     }
   };
+  const watchdog = async (): Promise<void> => {
+    try {
+      await runCursorWatchdog();
+    } catch (err) {
+      log.error({ err }, 'Cursor watchdog failed');
+    }
+  };
   // Kick off an immediate first tick so restart latency doesn't leave
   // fresh deposits unprocessed for a full interval.
   void tick();
@@ -389,9 +458,19 @@ export function startPaymentWatcher(args: {
   watcherTimer.unref();
   expirySweepTimer = setInterval(() => void expirySweep(), EXPIRY_SWEEP_INTERVAL_MS);
   expirySweepTimer.unref();
+  // A2-626 — 1-minute cadence cursor-age probe. Fires a Discord
+  // alert once per stuck period if the cursor hasn't moved in the
+  // CURSOR_STALE_MS window (default 10 min). Doesn't fire on a
+  // fresh deployment (no cursor row yet).
+  cursorWatchdogTimer = setInterval(() => void watchdog(), CURSOR_WATCHDOG_INTERVAL_MS);
+  cursorWatchdogTimer.unref();
 }
 
 export function stopPaymentWatcher(): void {
+  if (cursorWatchdogTimer !== null) {
+    clearInterval(cursorWatchdogTimer);
+    cursorWatchdogTimer = null;
+  }
   if (expirySweepTimer !== null) {
     clearInterval(expirySweepTimer);
     expirySweepTimer = null;
