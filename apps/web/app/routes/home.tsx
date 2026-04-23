@@ -1,5 +1,7 @@
+import { Link } from 'react-router';
 import type { Route } from './+types/home';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
+import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
@@ -23,6 +25,7 @@ export function meta(): Route.MetaDescriptors {
 /** Thin wrapper that owns the QueryClient for this route tree. */
 function HomeContent(): React.JSX.Element {
   const { isNative } = useNativePlatform();
+  const { isAuthenticated } = useAuth();
   const { merchants, isLoading, isError } = useAllMerchants();
   // Bulk cashback-rate map (ADR 011 / 015). One fetch for the whole
   // page — the lookup below is O(1) per card, so both grids share it.
@@ -163,6 +166,15 @@ function HomeContent(): React.JSX.Element {
             <FlywheelStatsBand />
           </div>
 
+          {/* How it works — three-step explainer for unauthenticated
+              crawlers + first-time visitors (#661). SEO content for
+              the "how does Loop cashback work" query class; internal
+              links down to /cashback and /trustlines give the
+              acquisition funnel two natural next clicks. Rendered
+              only when not authenticated (signed-in users already
+              know the flow; the band would be just noise). */}
+          {!isAuthenticated && <HowItWorksStrip />}
+
           {/* Featured */}
           {featured.length > 0 && (
             <section className="mb-16">
@@ -241,6 +253,94 @@ function Feature({ icon, label }: { icon: React.ReactNode; label: string }): Rea
       <div className="flex justify-center mb-2">{icon}</div>
       <div className="text-sm sm:text-base font-medium">{label}</div>
     </div>
+  );
+}
+
+/**
+ * Three-step cashback-flywheel explainer strip for unauthenticated
+ * homepage visitors (#661). Keyword-rich body copy ("cashback on
+ * gift cards", "LOOP asset stablecoin", "compounds") so crawlers
+ * have content to rank; internal links to /cashback and
+ * /trustlines give first-time visitors two natural next clicks
+ * without breaking the main merchant-browse flow.
+ *
+ * Self-hides for authenticated users — they already know how it
+ * works; the strip would just add noise between the stats band
+ * and the merchant grid. Non-authenticated = pre-funnel audience,
+ * the only people the explainer helps.
+ */
+function HowItWorksStrip(): React.JSX.Element {
+  return (
+    <section
+      aria-labelledby="how-it-works-heading"
+      className="mb-16 rounded-xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-gray-900"
+    >
+      <div className="text-center mb-8">
+        <h2
+          id="how-it-works-heading"
+          className="text-2xl font-bold text-gray-900 dark:text-white mb-2"
+        >
+          How Loop cashback works
+        </h2>
+        <p className="text-sm text-gray-600 dark:text-gray-300 max-w-xl mx-auto">
+          Every gift card pays back. Your cashback compounds into more cashback — a flywheel, not a
+          one-shot rebate.
+        </p>
+      </div>
+      <ol className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
+        <Step
+          index={1}
+          heading="Buy a gift card"
+          body="Pay with XLM, USDC, or your existing LOOP-asset balance. We check out at the merchant on your behalf — same brand, same card."
+        />
+        <Step
+          index={2}
+          heading="Earn in LOOP asset"
+          body="Cashback lands in USDLOOP / GBPLOOP / EURLOOP — Stellar stablecoins pinned 1:1 to your home currency. Verified issuers live on the /trustlines page."
+          linkTo="/trustlines"
+          linkLabel="See the verified issuers →"
+        />
+        <Step
+          index={3}
+          heading="Spend it again"
+          body="Use your LOOP-asset balance to pay for your next gift card. Cashback on order #1 pays part of order #2 — the flywheel."
+          linkTo="/cashback"
+          linkLabel="Browse all cashback rates →"
+        />
+      </ol>
+    </section>
+  );
+}
+
+function Step({
+  index,
+  heading,
+  body,
+  linkTo,
+  linkLabel,
+}: {
+  index: number;
+  heading: string;
+  body: string;
+  linkTo?: string;
+  linkLabel?: string;
+}): React.JSX.Element {
+  return (
+    <li className="flex flex-col">
+      <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-green-100 text-sm font-semibold text-green-800 dark:bg-green-900/40 dark:text-green-300 mb-3">
+        {index}
+      </span>
+      <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-1">{heading}</h3>
+      <p className="text-gray-600 dark:text-gray-300">{body}</p>
+      {linkTo !== undefined && linkLabel !== undefined ? (
+        <Link
+          to={linkTo}
+          className="mt-2 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+        >
+          {linkLabel}
+        </Link>
+      ) : null}
+    </li>
   );
 }
 
