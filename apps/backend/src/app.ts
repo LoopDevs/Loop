@@ -63,6 +63,7 @@ import { adminUsersRecyclingActivityCsvHandler } from './admin/users-recycling-a
 import { adminAuditTailHandler } from './admin/audit-tail.js';
 import { adminAuditTailCsvHandler } from './admin/audit-tail-csv.js';
 import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js';
+import { adminMerchantFlowsHandler } from './admin/merchant-flows.js';
 import { adminOrdersActivityHandler } from './admin/orders-activity.js';
 import { adminPaymentMethodShareHandler } from './admin/payment-method-share.js';
 import { adminPaymentMethodActivityHandler } from './admin/payment-method-activity.js';
@@ -937,6 +938,10 @@ app.get('/api/admin/payouts.csv', rateLimit(10, 60_000), adminPayoutsCsvHandler)
 // by state and userId. Ops uses this to triage stuck orders + audit
 // the cashback split + correlate with operator-pool health.
 app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+// Per-merchant fulfilled-order flow aggregate (ADR 011 / 015). Feeds
+// the per-row "actual split" display on /admin/cashback next to each
+// merchant's configured split.
+app.get('/api/admin/merchant-flows', rateLimit(60, 60_000), adminMerchantFlowsHandler);
 // 7-day (or N-day, clamped 1-90) order-activity sparkline. Drives the
 // admin dashboard's "created vs fulfilled per day" chart. Single
 // generate_series + LEFT JOIN; every day in the window appears with

@@ -263,6 +263,7 @@ GET  /api/admin/audit-tail.csv                          [admin — finance/legal
 POST /api/admin/users/:userId/credit-adjustments        [admin — signed credit adjustment, ADR 017]
 GET  /api/admin/payouts.csv                            [admin — finance-ready CSV export, ADR 015]
 GET  /api/admin/orders                                  [admin — Loop-native orders drill-down + ?state/?userId/?merchantId/?chargeCurrency/?paymentMethod/?ctxOperatorId filters, ADR 011/013/015]
+GET  /api/admin/merchant-flows                          [admin — per-merchant fulfilled-order flow, ADR 011/015]
 GET  /api/admin/operator-stats                          [admin — per-operator order volume + success rate, ADR 013]
 GET  /api/admin/operators/latency                       [admin — per-operator p50/p95/p99 fulfilment latency, ADR 013/022]
 GET  /api/admin/operators-snapshot.csv                  [admin — Tier-3 CSV joining operator-stats + latency per operator for CTX quarterly reviews, ADR 013/018/022]

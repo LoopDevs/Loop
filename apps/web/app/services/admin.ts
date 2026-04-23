@@ -1910,3 +1910,23 @@ export async function listAdminOrders(opts: {
     `/api/admin/orders${qs.length > 0 ? `?${qs}` : ''}`,
   );
 }
+
+/**
+ * One bucket of fulfilled-order flow, grouped by (merchantId,
+ * chargeCurrency). Rendered on /admin/cashback below each row so ops
+ * can compare configured split to actual lifetime money movement.
+ */
+export interface MerchantFlow {
+  merchantId: string;
+  currency: string;
+  count: string;
+  faceValueMinor: string;
+  wholesaleMinor: string;
+  userCashbackMinor: string;
+  loopMarginMinor: string;
+}
+
+/** `GET /api/admin/merchant-flows` — per-merchant fulfilled-order flows. */
+export async function listMerchantFlows(): Promise<{ flows: MerchantFlow[] }> {
+  return authenticatedRequest<{ flows: MerchantFlow[] }>(`/api/admin/merchant-flows`);
+}

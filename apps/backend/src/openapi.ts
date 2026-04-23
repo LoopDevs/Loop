@@ -4514,6 +4514,56 @@ registry.registerPath({
   },
 });
 
+// ─── Admin — per-merchant fulfilled-order flows (ADR 011 / 015) ─────────────
+
+const MerchantFlow = registry.register(
+  'MerchantFlow',
+  z.object({
+    merchantId: z.string(),
+    currency: z.string().openapi({ description: 'ISO charge currency for this bucket.' }),
+    count: z.string().openapi({
+      description: 'Number of fulfilled orders in this bucket. BigInt-string count.',
+    }),
+    faceValueMinor: z.string(),
+    wholesaleMinor: z.string().openapi({ description: 'Total paid to CTX (supplier).' }),
+    userCashbackMinor: z.string().openapi({ description: 'Total credited to users.' }),
+    loopMarginMinor: z.string().openapi({ description: 'Total kept by Loop.' }),
+  }),
+);
+
+const MerchantFlowsResponse = registry.register(
+  'MerchantFlowsResponse',
+  z.object({ flows: z.array(MerchantFlow) }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/merchant-flows',
+  summary: 'Aggregated fulfilled-order flow per (merchant, charge currency) (ADR 011 / 015).',
+  description:
+    "Groups `orders` WHERE `state='fulfilled'` by `merchant_id` + `charge_currency`, summing face/wholesale/cashback/margin. Feeds the per-row 'actual vs configured' display on /admin/cashback so ops can spot merchants whose real split doesn't match their configured cashback.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Per-merchant flow buckets',
+      content: { 'application/json': { schema: MerchantFlowsResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Admin — cashback-config CRUD (ADR 011) ─────────────────────────────────
 
 registry.registerPath({
