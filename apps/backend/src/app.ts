@@ -6,6 +6,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { sentry, captureException } from '@sentry/hono/node';
+import { scrubSentryEvent } from './sentry-scrubber.js';
 import { env } from './env.js';
 import { logger } from './logger.js';
 import { getLocations, isLocationLoading } from './clustering/data-store.js';
@@ -159,6 +160,13 @@ if (env.SENTRY_DSN) {
       dsn: env.SENTRY_DSN,
       environment: env.NODE_ENV,
       tracesSampleRate: env.NODE_ENV === 'production' ? 0.1 : 1.0,
+      // A2-1308: scrub known-secret keys out of every captured event
+      // before it leaves the process. Sentry's sendDefaultPii:false
+      // default handles the well-known PII fields; this catches the
+      // Loop-specific secrets (env-named signing keys, CTX API
+      // credentials, DATABASE_URL, Discord webhooks) that would
+      // otherwise land in `extra` / `contexts` / `request.headers`.
+      beforeSend: (event) => scrubSentryEvent(event),
     }),
   );
 }

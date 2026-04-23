@@ -10,6 +10,7 @@ import {
 } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as Sentry from '@sentry/react';
+import { scrubSentryEvent } from '~/utils/sentry-scrubber';
 import type { Route } from './+types/root';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useSessionRestore } from '~/hooks/use-session-restore';
@@ -41,6 +42,10 @@ if (typeof window !== 'undefined' && import.meta.env.VITE_SENTRY_DSN) {
     environment: import.meta.env.MODE,
     integrations: [Sentry.browserTracingIntegration()],
     tracesSampleRate: import.meta.env.PROD ? 0.1 : 1.0,
+    // A2-1308: scrub known-secret keys out of every captured event.
+    // Mirror of the backend Sentry init; utility is duplicated across
+    // apps/web and apps/backend (they don't share a build).
+    beforeSend: (event) => scrubSentryEvent(event),
   });
 }
 
