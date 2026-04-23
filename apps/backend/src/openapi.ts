@@ -589,6 +589,27 @@ const TreasurySnapshot = registry.register(
   }),
 );
 
+const AssetCirculationResponse = registry.register(
+  'AssetCirculationResponse',
+  z.object({
+    assetCode: LoopAssetCode,
+    fiatCurrency: z.enum(['USD', 'GBP', 'EUR']),
+    issuer: z.string(),
+    onChainStroops: z.string().openapi({
+      description: 'Horizon-issued circulation for (assetCode, issuer). bigint-as-string stroops.',
+    }),
+    ledgerLiabilityMinor: z.string().openapi({
+      description:
+        'Sum of user_credits.balance_minor for the matching fiat. bigint-as-string minor units.',
+    }),
+    driftStroops: z.string().openapi({
+      description:
+        'onChainStroops - ledgerLiabilityMinor × 1e5 (1 minor = 1e5 stroops for a 1:1-pinned LOOP asset). Positive = over-minted; negative = settlement backlog.',
+    }),
+    onChainAsOfMs: z.number().int(),
+  }),
+);
+
 const AdminPayoutView = registry.register(
   'AdminPayoutView',
   z.object({
@@ -3107,6 +3128,53 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error computing the aggregate',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/assets/{assetCode}/circulation',
+  summary: 'Per-asset circulation drift — stablecoin safety metric (ADR 015).',
+  description:
+    'Compares Horizon-side issued circulation (via `/assets?asset_code=X&asset_issuer=Y`) against the off-chain ledger liability (`user_credits.balance_minor` for the matching fiat). `driftStroops = onChainStroops - ledgerLiabilityMinor × 1e5` — positive drift means over-minted (investigate now), negative means settlement backlog (expected as the payout worker catches up). Horizon failures surface as 503 rather than 500 so the admin UI keeps the ledger side authoritative. Missing issuer env → 409. 30/min rate limit; Horizon calls cached 30s internally.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ assetCode: LoopAssetCode }),
+  },
+  responses: {
+    200: {
+      description: 'Drift snapshot',
+      content: { 'application/json': { schema: AssetCirculationResponse } },
+    },
+    400: {
+      description: 'Unknown `assetCode`',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    409: {
+      description: 'Issuer env not configured for this asset',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (30/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading ledger liability',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    503: {
+      description: 'Horizon circulation read failed',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
