@@ -27,9 +27,8 @@ import { ApiException } from '@loop/shared';
 import type { LoopAssetCode } from '@loop/shared';
 import { configuredLoopPayableAssets } from '../credits/payout-asset.js';
 import { getAccountTrustlines } from '../payments/horizon-trustlines.js';
-import { getUserById, upsertUserFromCtx, type User } from '../db/users.js';
-import { decodeJwtPayload } from '../auth/jwt.js';
-import type { LoopAuthContext } from '../auth/handler.js';
+import { type User } from '../db/users.js';
+import { resolveLoopAuthenticatedUser } from '../auth/authenticated-user.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'user-stellar-trustlines' });
@@ -52,18 +51,12 @@ export interface StellarTrustlinesResponse {
   rows: StellarTrustlineRow[];
 }
 
+/**
+ * A2-550 / A2-551 fix: identity resolution now requires a verified
+ * Loop-signed token. See `apps/backend/src/auth/authenticated-user.ts`.
+ */
 async function resolveCallingUser(c: Context): Promise<User | null> {
-  const auth = c.get('auth') as LoopAuthContext | undefined;
-  if (auth === undefined) return null;
-  if (auth.kind === 'loop') {
-    return await getUserById(auth.userId);
-  }
-  const claims = decodeJwtPayload(auth.bearerToken);
-  if (claims === null) return null;
-  return await upsertUserFromCtx({
-    ctxUserId: claims.sub,
-    email: typeof claims['email'] === 'string' ? claims['email'] : undefined,
-  });
+  return await resolveLoopAuthenticatedUser(c);
 }
 
 export async function getUserStellarTrustlinesHandler(c: Context): Promise<Response> {

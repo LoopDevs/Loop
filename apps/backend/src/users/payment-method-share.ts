@@ -35,9 +35,7 @@ import {
 import { db } from '../db/client.js';
 import { orders } from '../db/schema.js';
 import type { User } from '../db/users.js';
-import { decodeJwtPayload } from '../auth/jwt.js';
-import { upsertUserFromCtx, getUserById } from '../db/users.js';
-import type { LoopAuthContext } from '../auth/handler.js';
+import { resolveLoopAuthenticatedUser } from '../auth/authenticated-user.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'user-payment-method-share' });
@@ -61,16 +59,12 @@ interface AggRow {
   charge_minor: string | number | bigint;
 }
 
+/**
+ * A2-550 / A2-551 fix: identity resolution now requires a verified
+ * Loop-signed token. See `apps/backend/src/auth/authenticated-user.ts`.
+ */
 async function resolveCallingUser(c: Context): Promise<User | null> {
-  const auth = c.get('auth') as LoopAuthContext | undefined;
-  if (auth === undefined) return null;
-  if (auth.kind === 'loop') return await getUserById(auth.userId);
-  const claims = decodeJwtPayload(auth.bearerToken);
-  if (claims === null) return null;
-  return await upsertUserFromCtx({
-    ctxUserId: claims.sub,
-    email: typeof claims['email'] === 'string' ? claims['email'] : undefined,
-  });
+  return await resolveLoopAuthenticatedUser(c);
 }
 
 function toNumber(value: string | number | bigint): number {
