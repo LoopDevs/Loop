@@ -210,6 +210,33 @@ export async function getAssetCirculation(assetCode: string): Promise<AssetCircu
 }
 
 /**
+ * Asset-drift watcher state (ADR 015). In-memory snapshot of the
+ * background watcher's last pass — cheap to poll, no Horizon read
+ * triggered by this call. `state === 'unknown'` means the watcher
+ * hasn't read this asset yet (fresh boot / unconfigured issuer).
+ */
+export type AssetDriftState = 'unknown' | 'ok' | 'over';
+
+export interface AssetDriftStateRow {
+  assetCode: LoopAssetCode;
+  state: AssetDriftState;
+  lastDriftStroops: string | null;
+  lastThresholdStroops: string | null;
+  lastCheckedMs: number | null;
+}
+
+export interface AssetDriftStateResponse {
+  lastTickMs: number | null;
+  running: boolean;
+  perAsset: AssetDriftStateRow[];
+}
+
+/** `GET /api/admin/asset-drift/state` */
+export async function getAssetDriftState(): Promise<AssetDriftStateResponse> {
+  return authenticatedRequest<AssetDriftStateResponse>('/api/admin/asset-drift/state');
+}
+
+/**
  * Downloads an admin CSV endpoint by fetching with the bearer token
  * in binary mode, then synthesising a click on a temporary anchor
  * with a Blob URL. Works around the fact that a plain `<a href>`
