@@ -887,6 +887,25 @@ const CashbackRealizationResponse = registry.register(
   z.object({ rows: z.array(CashbackRealizationRow) }),
 );
 
+const CashbackRealizationDay = registry.register(
+  'CashbackRealizationDay',
+  z.object({
+    day: z.string().openapi({ description: 'ISO date (YYYY-MM-DD).' }),
+    currency: z.string().length(3),
+    earnedMinor: z.string(),
+    spentMinor: z.string(),
+    recycledBps: z.number().int().nonnegative().max(10_000),
+  }),
+);
+
+const CashbackRealizationDailyResponse = registry.register(
+  'CashbackRealizationDailyResponse',
+  z.object({
+    days: z.number().int().min(1).max(180),
+    rows: z.array(CashbackRealizationDay),
+  }),
+);
+
 // ─── Admin — stuck-orders triage ───────────────────────────────────────────
 
 const StuckOrderRow = registry.register(
@@ -4306,6 +4325,43 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error computing the aggregate',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/cashback-realization/daily',
+  summary: 'Daily cashback-realization trend (ADR 009 / 015).',
+  description:
+    "Drift-over-time companion to `/api/admin/cashback-realization`. Per-(day, currency) rows with `earnedMinor`, `spentMinor`, and `recycledBps`. `generate_series` LEFT JOIN emits every day in the window even when zero cashback was earned or spent (so sparkline x-axis doesn't compress on gaps). Window: `?days=30` default, 1..180 clamp.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(180).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Daily rows (oldest → newest)',
+      content: { 'application/json': { schema: CashbackRealizationDailyResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the series',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
