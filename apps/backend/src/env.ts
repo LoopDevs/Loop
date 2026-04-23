@@ -128,6 +128,26 @@ export const EnvSchema = z.object({
   // future refinement once the user-profile sync job lands.
   ADMIN_CTX_USER_IDS: z.string().default(''),
 
+  // Defaults for the cashback split when a merchant has no admin-set
+  // `merchant_cashback_configs` row (ADR 011). Applied in
+  // `computeCashbackSplit` as a fallback so newly-synced merchants
+  // aren't accidentally zero-cashback before ops gets to them.
+  // Expressed as a percent-of-face-value string (e.g. "8.00" = 8%);
+  // the sum must be ≤ 100. The `_OF_CTX` suffix traces back to the
+  // ADR wording ("of CTX's discount to Loop") — today we apply them
+  // directly to face value because the per-merchant CTX-discount
+  // rate isn't in the catalog's hot data. Default 0/0 preserves the
+  // prior behaviour (zero cashback + zero margin) until ops
+  // explicitly opts in.
+  DEFAULT_USER_CASHBACK_PCT_OF_CTX: z
+    .string()
+    .regex(/^\d+(\.\d{1,2})?$/, 'must be a 0-100 percent with ≤ 2 decimals')
+    .default('0.00'),
+  DEFAULT_LOOP_MARGIN_PCT_OF_CTX: z
+    .string()
+    .regex(/^\d+(\.\d{1,2})?$/, 'must be a 0-100 percent with ≤ 2 decimals')
+    .default('0.00'),
+
   // Loop-signed JWT secret (ADR 013). Used to sign and verify access
   // + refresh tokens minted by Loop's own auth path. Required in
   // production; absent in development / test the backend skips
@@ -377,6 +397,20 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
       'Invalid environment variables — IMAGE_PROXY_ALLOWED_HOSTS must be set in production (audit A-025). ' +
         'Set it to a comma-separated list of upstream image hostnames (e.g. "cdn.ctx.com,ctx-spend.s3.us-west-2.amazonaws.com"), ' +
         'or set DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1 to override for an emergency push.',
+    );
+  }
+
+  // A2-203: the fallback cashback split must respect the
+  // `userCashback + margin + wholesale = 100` invariant. Reject a
+  // misconfigured env at boot rather than silently over-granting
+  // cashback at order-creation time.
+  const userCashback = Number.parseFloat(parsed.data.DEFAULT_USER_CASHBACK_PCT_OF_CTX);
+  const loopMargin = Number.parseFloat(parsed.data.DEFAULT_LOOP_MARGIN_PCT_OF_CTX);
+  if (userCashback + loopMargin > 100) {
+    throw new Error(
+      `Invalid environment variables — DEFAULT_USER_CASHBACK_PCT_OF_CTX (${userCashback}%) ` +
+        `+ DEFAULT_LOOP_MARGIN_PCT_OF_CTX (${loopMargin}%) exceeds 100% of face value. ` +
+        `Wholesale (what Loop pays CTX) would go negative.`,
     );
   }
 
