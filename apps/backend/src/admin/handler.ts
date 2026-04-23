@@ -24,6 +24,14 @@ const UpsertBody = z
     message: 'wholesale + cashback + margin must be ≤ 100',
   });
 
+// A2-513: match the shape check used by sibling per-merchant admin
+// handlers (merchant-cashback-summary, merchant-top-earners, etc.) —
+// catalog-id chars only, capped at 128. Keeps malformed IDs from
+// reaching the DB as a parameterised SQL literal with surprising
+// width.
+const MERCHANT_ID_RE = /^[A-Za-z0-9._-]+$/;
+const MERCHANT_ID_MAX = 128;
+
 /** GET /api/admin/merchant-cashback-configs */
 export async function listConfigsHandler(c: Context): Promise<Response> {
   const rows = await db
@@ -44,6 +52,9 @@ export async function upsertConfigHandler(c: Context): Promise<Response> {
   const merchantId = c.req.param('merchantId');
   if (merchantId === undefined || merchantId.length === 0) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId required' }, 400);
+  }
+  if (merchantId.length > MERCHANT_ID_MAX || !MERCHANT_ID_RE.test(merchantId)) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
   }
   const body = await c.req.json().catch(() => null);
   const parsed = UpsertBody.safeParse(body);
@@ -128,6 +139,9 @@ export async function configHistoryHandler(c: Context): Promise<Response> {
   const merchantId = c.req.param('merchantId');
   if (merchantId === undefined || merchantId.length === 0) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId required' }, 400);
+  }
+  if (merchantId.length > MERCHANT_ID_MAX || !MERCHANT_ID_RE.test(merchantId)) {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
   }
   const rows = await db
     .select()
