@@ -5160,6 +5160,32 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/cashback-realization/daily.csv',
+  summary: 'Daily cashback-realization trend CSV (ADR 009/015/018).',
+  description:
+    'Tier-3 finance export of /api/admin/cashback-realization/daily. Columns: day,currency,earned_minor,spent_minor,recycled_bps. LEFT-JOIN null-currency rows are dropped pre-truncation so the row cap counts real signal. Window: ?days (default 31, cap 366). Row cap 10 000.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(366).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'CSV body',
+      content: { 'text/csv; charset=utf-8': { schema: z.string() } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/cashback-activity.csv',
   summary: 'Daily cashback accrual as RFC 4180 CSV (ADR 009/015/018).',
   description:

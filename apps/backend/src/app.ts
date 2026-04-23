@@ -73,6 +73,7 @@ import { adminCashbackActivityHandler } from './admin/cashback-activity.js';
 import { adminCashbackActivityCsvHandler } from './admin/cashback-activity-csv.js';
 import { adminCashbackRealizationHandler } from './admin/cashback-realization.js';
 import { adminCashbackRealizationDailyHandler } from './admin/cashback-realization-daily.js';
+import { adminCashbackRealizationDailyCsvHandler } from './admin/cashback-realization-daily-csv.js';
 import { adminCashbackMonthlyHandler } from './admin/cashback-monthly.js';
 import { adminPayoutsMonthlyHandler } from './admin/payouts-monthly.js';
 import { adminPayoutsActivityHandler } from './admin/payouts-activity.js';
@@ -988,6 +989,14 @@ app.get(
   '/api/admin/cashback-realization/daily',
   rateLimit(60, 60_000),
   adminCashbackRealizationDailyHandler,
+);
+// Finance-ready CSV of the daily realization trend. Tier-3 10/min
+// rate limit + `private, no-store` + attachment disposition — same
+// discipline as the other month-end exports.
+app.get(
+  '/api/admin/cashback-realization/daily.csv',
+  rateLimit(10, 60_000),
+  adminCashbackRealizationDailyCsvHandler,
 );
 // Finance-ready CSV: daily × per-currency cashback accrual. Same
 // aggregate as the JSON surface, flattened for spreadsheet use.
