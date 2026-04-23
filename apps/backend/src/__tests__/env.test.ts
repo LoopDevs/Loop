@@ -59,6 +59,44 @@ describe('parseEnv', () => {
     ).toBe('https://spend.ctx.com');
   });
 
+  // A2-203: the default cashback split must respect userCashback +
+  // margin + wholesale = 100 invariant. A misconfigured env should
+  // fail at boot rather than silently over-granting cashback.
+  it('A2-203: defaults to 0/0 for DEFAULT_USER_CASHBACK_PCT_OF_CTX + DEFAULT_LOOP_MARGIN_PCT_OF_CTX', () => {
+    const env = parseEnv(base);
+    expect(env.DEFAULT_USER_CASHBACK_PCT_OF_CTX).toBe('0.00');
+    expect(env.DEFAULT_LOOP_MARGIN_PCT_OF_CTX).toBe('0.00');
+  });
+
+  it('A2-203: accepts a valid non-zero split (8% cashback + 2% margin)', () => {
+    const env = parseEnv({
+      ...base,
+      DEFAULT_USER_CASHBACK_PCT_OF_CTX: '8.00',
+      DEFAULT_LOOP_MARGIN_PCT_OF_CTX: '2.00',
+    });
+    expect(env.DEFAULT_USER_CASHBACK_PCT_OF_CTX).toBe('8.00');
+    expect(env.DEFAULT_LOOP_MARGIN_PCT_OF_CTX).toBe('2.00');
+  });
+
+  it('A2-203: rejects non-percent strings', () => {
+    expect(() => parseEnv({ ...base, DEFAULT_USER_CASHBACK_PCT_OF_CTX: 'eight' })).toThrow(
+      /DEFAULT_USER_CASHBACK_PCT_OF_CTX/,
+    );
+    expect(() => parseEnv({ ...base, DEFAULT_LOOP_MARGIN_PCT_OF_CTX: '2.555' })).toThrow(
+      /DEFAULT_LOOP_MARGIN_PCT_OF_CTX/,
+    );
+  });
+
+  it('A2-203: refuses a sum > 100 (wholesale would go negative)', () => {
+    expect(() =>
+      parseEnv({
+        ...base,
+        DEFAULT_USER_CASHBACK_PCT_OF_CTX: '80.00',
+        DEFAULT_LOOP_MARGIN_PCT_OF_CTX: '30.00',
+      }),
+    ).toThrow(/exceeds 100%/);
+  });
+
   it('includes the actual validation reason in the error, not just the path', () => {
     try {
       parseEnv({ GIFT_CARD_API_BASE_URL: 'not-a-url' });
