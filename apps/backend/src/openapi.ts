@@ -2759,6 +2759,7 @@ registry.registerPath({
           schema: z.object({
             orders: z.enum(['configured', 'missing']),
             monitoring: z.enum(['configured', 'missing']),
+            adminAudit: z.enum(['configured', 'missing']),
           }),
         },
       },
