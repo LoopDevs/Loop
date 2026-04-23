@@ -16,8 +16,16 @@ import { env } from '../env.js';
 export interface AdminDiscordConfigResponse {
   /** Customer-facing order events (notifyOrderCreated / Fulfilled). */
   orders: 'configured' | 'missing';
-  /** Admin audit + health paging (notifyHealthChange et al). */
+  /** Infra health paging (notifyHealthChange et al). */
   monitoring: 'configured' | 'missing';
+  /**
+   * Admin-write audit feed (notifyAdminAudit, ADR 017). A2-501 —
+   * this channel was missing from the config surface even though
+   * `DISCORD_WEBHOOK_ADMIN_AUDIT` is set in production, so the admin
+   * UI rendered no badge for it and operators couldn't see that the
+   * audit trail was wired up.
+   */
+  adminAudit: 'configured' | 'missing';
 }
 
 function statusOf(url: string | undefined): 'configured' | 'missing' {
@@ -28,5 +36,6 @@ export async function adminDiscordConfigHandler(c: Context): Promise<Response> {
   return c.json<AdminDiscordConfigResponse>({
     orders: statusOf(env.DISCORD_WEBHOOK_ORDERS),
     monitoring: statusOf(env.DISCORD_WEBHOOK_MONITORING),
+    adminAudit: statusOf(env.DISCORD_WEBHOOK_ADMIN_AUDIT),
   });
 }
