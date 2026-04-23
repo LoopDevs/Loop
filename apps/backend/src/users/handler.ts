@@ -147,33 +147,43 @@ export async function setHomeCurrencyHandler(c: Context): Promise<Response> {
   // Order guard — the ledger pins charge_currency at order creation
   // (ADR 015). Flipping home_currency after even one order would
   // leave future orders denominated in a different currency from the
-  // user's balance. Support has a separate path to handle that.
-  const [orderCountRow] = await db
-    .select({ n: sql<string>`COUNT(*)::text` })
-    .from(orders)
-    .where(eq(orders.userId, user.id));
-  const orderCount = BigInt(orderCountRow?.n ?? '0');
-  if (orderCount > 0n) {
-    return c.json(
-      {
-        code: 'HOME_CURRENCY_LOCKED',
-        message: 'Home currency cannot be changed after placing an order',
-      },
-      409,
-    );
-  }
-
+  // user's balance. A2-552: collapsed count→update into a single
+  // conditional UPDATE so a concurrent `POST /api/orders` can't slip
+  // an order in between the lock check and the write. The NOT EXISTS
+  // subquery is evaluated inside the UPDATE's statement-level snapshot,
+  // closing the interleave window that made the previous two-statement
+  // sequence visible to racing writers.
   const [updated] = await db
     .update(users)
     .set({ homeCurrency: parsed.data.currency, updatedAt: sql`NOW()` })
-    .where(eq(users.id, user.id))
+    .where(
+      sql`${users.id} = ${user.id} AND NOT EXISTS (SELECT 1 FROM ${orders} WHERE ${orders.userId} = ${user.id})`,
+    )
     .returning();
-  if (updated === undefined) {
-    // User row disappeared between resolve and update — race with
-    // account deletion, or a concurrent support-auth'd edit.
+  if (updated !== undefined) {
+    return c.json<UserMeView>(await toView(updated));
+  }
+
+  // Zero rows updated: either the user has at least one order (locked)
+  // or the user row vanished between resolve-and-update. Disambiguate
+  // with a cheap existence probe so the client can render the right
+  // copy — "contact support" for the locked case, a re-auth prompt
+  // for the vanished case.
+  const [stillExists] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, user.id))
+    .limit(1);
+  if (stillExists === undefined) {
     return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
   }
-  return c.json<UserMeView>(await toView(updated));
+  return c.json(
+    {
+      code: 'HOME_CURRENCY_LOCKED',
+      message: 'Home currency cannot be changed after placing an order',
+    },
+    409,
+  );
 }
 
 // Stellar ED25519 public keys: 56 uppercase base32 chars starting
