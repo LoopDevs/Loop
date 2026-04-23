@@ -28,6 +28,7 @@ import { logger } from '../logger.js';
 
 const log = logger.child({ area: 'horizon-circulation' });
 
+/** Horizon URL — see horizon-balances.ts for the read-at-call-time rationale. */
 function horizonUrl(): string {
   const v = process.env['LOOP_STELLAR_HORIZON_URL'];
   if (typeof v === 'string' && v.length > 0) return v;

@@ -28,7 +28,12 @@ import { logger } from '../logger.js';
 
 const log = logger.child({ area: 'horizon-balances' });
 
-/** Horizon URL resolver — mirrors the pattern in horizon.ts. */
+/**
+ * Horizon URL resolver — read at call time so tests can flip
+ * `process.env['LOOP_STELLAR_HORIZON_URL']` without a module reload.
+ * env.ts validates the var at BOOT (A2-1513) so a malformed URL
+ * fails startup; runtime reads stay flexible for test harnesses.
+ */
 function horizonUrl(): string {
   const v = process.env['LOOP_STELLAR_HORIZON_URL'];
   if (typeof v === 'string' && v.length > 0) return v;
