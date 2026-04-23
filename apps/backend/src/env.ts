@@ -264,6 +264,19 @@ export const EnvSchema = z.object({
   // the gift card arrives.
   LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS: z.coerce.number().int().positive().default(10),
   LOOP_PROCUREMENT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(5),
+
+  // Asset-drift watcher (ADR 015). 300s (5m) default — drift is an
+  // accounting metric, not latency-sensitive; paging the monitoring
+  // channel faster than that would just generate noise from
+  // in-flight payouts.
+  LOOP_ASSET_DRIFT_WATCHER_INTERVAL_SECONDS: z.coerce.number().int().positive().default(300),
+
+  // Threshold in stroops at which a non-zero drift pages ops. 1e8
+  // stroops = 10 whole LOOP units = $10 of over/under-mint for the
+  // USD asset. Leaves room for normal in-flight payout drift (a
+  // queue of say 20 × $5 cashbacks still fits) while catching
+  // real accounting divergence.
+  LOOP_ASSET_DRIFT_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(100_000_000n),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
