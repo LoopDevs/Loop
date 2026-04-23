@@ -2253,6 +2253,45 @@ registry.registerPath({
   },
 });
 
+registry.registerPath({
+  method: 'get',
+  path: '/api/users/me/orders/{orderId}/payout',
+  summary: 'Per-order cashback settlement drill (ADR 015 / 016).',
+  description:
+    "For one of the caller's own orders, return the single pending-payout row tied to it. Mirror of the admin `/api/admin/orders/{orderId}/payout` but ownership-scoped: (orderId, userId) predicate guarantees cross-user access returns 404 (not 403), so order ids aren't enumerable. Powers the per-order settlement card on `/orders/:id` — users see Stellar-side state (pending / submitted / confirmed / failed) next to the gift-card redemption. Null result when the order has no payout row yet (pre-cashback, credit-only ledger, or order doesn't belong to the caller).",
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ orderId: z.string().uuid() }),
+  },
+  responses: {
+    200: {
+      description: 'Payout row for the order',
+      content: { 'application/json': { schema: UserPendingPayoutView } },
+    },
+    400: {
+      description: 'Missing or malformed orderId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: "No payout row for this order (or order doesn't belong to caller)",
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error resolving the user',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Admin — treasury + payouts (ADR 015) ───────────────────────────────────
 
 registry.registerPath({
