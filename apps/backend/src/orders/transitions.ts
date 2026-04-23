@@ -194,7 +194,6 @@ export async function markOrderFulfilled(
             stellarAddress: userRow.stellarAddress,
             homeCurrency: userRow.homeCurrency,
             userCashbackMinor: order.userCashbackMinor,
-            memoSeed: order.id,
           });
           if (decision.kind === 'pay') {
             await tx
