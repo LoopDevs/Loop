@@ -147,6 +147,14 @@ export const creditTransactions = pgTable(
     currency: char('currency', { length: 3 }).notNull(),
     referenceType: text('reference_type'),
     referenceId: text('reference_id'),
+    // A2-908: operator-authored rationale for admin-originated writes
+    // (adjustment, refund). Nullable because machine-generated types
+    // (cashback / interest / spend) have no operator reason. Prior to
+    // this column the reason was kept only in the admin-idempotency
+    // snapshot, which a 24h TTL sweep clears — the ledger-replay
+    // promise from ADR 017 #4 ("why is reconstructable from the
+    // append-only ledger") was false past the TTL.
+    reason: text('reason'),
     // Period identifier for `type='interest'` rows — the
     // accrue-interest caller passes a string like `"2026-04-23"` for
     // daily accrual. Combined with the partial unique index below,
