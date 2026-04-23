@@ -16,6 +16,7 @@
  * path to correct regions for existing users (not in this slice).
  */
 import type { Context } from 'hono';
+import { UUID_RE } from '../uuid.js';
 import { z } from 'zod';
 import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import { STELLAR_PUBKEY_REGEX } from '@loop/shared';
@@ -593,8 +594,6 @@ export async function getUserPendingPayoutsSummaryHandler(c: Context): Promise<R
   });
 }
 
-const PENDING_PAYOUT_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /**
  * `GET /api/users/me/pending-payouts/:id` — caller-scoped single
  * payout drill-down (ADR 015 / 016). Permalink for a stuck
@@ -610,7 +609,7 @@ export async function getUserPendingPayoutDetailHandler(c: Context): Promise<Res
   if (id === undefined || id.length === 0) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'id is required' }, 400);
   }
-  if (!PENDING_PAYOUT_UUID_RE.test(id)) {
+  if (!UUID_RE.test(id)) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'id must be a uuid' }, 400);
   }
 
@@ -664,7 +663,7 @@ export async function getUserPayoutByOrderHandler(c: Context): Promise<Response>
   if (orderId === undefined || orderId.length === 0) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'orderId is required' }, 400);
   }
-  if (!PENDING_PAYOUT_UUID_RE.test(orderId)) {
+  if (!UUID_RE.test(orderId)) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'orderId must be a uuid' }, 400);
   }
 
