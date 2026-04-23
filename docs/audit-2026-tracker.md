@@ -243,7 +243,7 @@ Complete. Evidence: [phase-5a-admin.md](./audit-2026-evidence/phase-5a-admin.md)
 | A2-510 | Low      | ~~`user-credits-csv` truncation sentinel diverges from canonical shape~~ **resolved-pending-review** by A2-510 PR                                  |
 | A2-511 | Low      | ~~`notifyAdminAudit` posts full admin email to Discord (inconsistent with tail-only user-id convention)~~ **resolved-pending-review** by A2-511 PR |
 | A2-512 | Low      | UUID regex duplicated across ~14 files; drift-prone                                                                                                |
-| A2-513 | Low      | Several merchant-scoped handlers skip the `/^[A-Za-z0-9._-]+$/` + 128-char check used by siblings                                                  |
+| A2-513 | Low      | ~~Several merchant-scoped handlers skip the `/^[A-Za-z0-9._-]+$/` + 128-char check used by siblings~~ **resolved-pending-review** by A2-513 PR     |
 
 #### Phase 5b — `auth/`, `ctx/`, `users/`, `config/`
 
