@@ -27,7 +27,13 @@ import {
   isLoopAuthConfigured,
 } from './tokens.js';
 import { findOrCreateUserByEmail } from '../db/users.js';
-import { recordRefreshToken, findLiveRefreshToken, revokeRefreshToken } from './refresh-tokens.js';
+import {
+  recordRefreshToken,
+  findLiveRefreshToken,
+  findRefreshTokenRecord,
+  revokeRefreshToken,
+  revokeAllRefreshTokensForUser,
+} from './refresh-tokens.js';
 
 const log = logger.child({ handler: 'auth-native' });
 
@@ -213,11 +219,23 @@ export async function nativeRefreshHandler(c: Context): Promise<Response> {
       token: parsed.data.refreshToken,
     });
     if (row === null) {
-      // Either the row is missing (attacker forged a signature with a
-      // stolen key — already caught by verify — or we've rotated
-      // behind it) or it's revoked (reuse of a previously-rotated
-      // refresh — token-theft signal). Either way, 401.
-      log.warn({ jti: claims.jti, sub: claims.sub }, 'Refresh token not live');
+      // A2-1608: distinguish two rejection modes:
+      //   - record exists but revokedAt != null → reuse of a rotated
+      //     refresh. Only an attacker presenting a previously-valid
+      //     token (already rotated out) can reach this branch; the
+      //     legitimate client has the successor token. Revoke the
+      //     entire family so the attacker's stolen lineage dies.
+      //   - record missing → forged / cleaned-up row. 401 alone.
+      const record = await findRefreshTokenRecord(claims.jti);
+      if (record !== null && record.revokedAt !== null) {
+        log.error(
+          { jti: claims.jti, sub: claims.sub, userId: record.userId },
+          'Refresh-token reuse detected — revoking all refresh tokens for user',
+        );
+        await revokeAllRefreshTokensForUser(record.userId);
+      } else {
+        log.warn({ jti: claims.jti, sub: claims.sub }, 'Refresh token not live');
+      }
       return c.json({ code: 'UNAUTHORIZED', message: 'Invalid refresh token' }, 401);
     }
 
