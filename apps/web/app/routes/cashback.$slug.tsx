@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/cashback.$slug';
 import { getPublicMerchant } from '~/services/public-stats';
+import { CashbackCalculator } from '~/components/features/cashback/CashbackCalculator';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
@@ -101,6 +102,17 @@ export default function CashbackMerchantLanding(): React.JSX.Element {
             isPending={query.isPending}
           />
         )}
+
+        {/* Pre-signup cashback calculator (#735). Renders only when
+            the public merchant endpoint has resolved a real id —
+            the NotFoundCopy branch above handles the 404 case, so
+            by the time we get here we have the merchant id or the
+            slug fallback (which the backend also resolves). */}
+        {query.data !== undefined && query.data.userCashbackPct !== null ? (
+          <div className="mt-8">
+            <CashbackCalculator merchantId={query.data.id} />
+          </div>
+        ) : null}
 
         <section className="mt-12 rounded-xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-gray-900">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
