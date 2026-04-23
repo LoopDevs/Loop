@@ -160,7 +160,7 @@ describe('provider not configured', () => {
     const handler = makeSocialLoginHandler({
       provider: 'google',
       jwksUrl: 'https://example.local/jwks',
-      expectedIssuer: 'https://example.local',
+      expectedIssuers: ['https://example.local'],
       resolveAudiences: () => [],
     });
     const res = await handler(makeCtx({ idToken: 'x.y.z' }));

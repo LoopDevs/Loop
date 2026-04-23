@@ -93,7 +93,13 @@ export interface IdTokenClaims {
 export interface VerifyIdTokenArgs {
   token: string;
   jwksUrl: string;
-  expectedIssuer: string;
+  /**
+   * A2-567: list of acceptable `iss` values. Verification accepts
+   * any member — a token whose iss doesn't match any entry returns
+   * `wrong_issuer`. See SocialProviderConfig for Google's two
+   * documented variants.
+   */
+  expectedIssuers: string[];
   /** Set of acceptable audience values — usually one per platform. */
   expectedAudiences: string[];
   /** Override `Date.now()` for tests; seconds since epoch. */
@@ -217,7 +223,7 @@ function verifyWithKey(
     return { ok: false, reason: 'schema' };
   }
 
-  if (obj['iss'] !== args.expectedIssuer) {
+  if (!args.expectedIssuers.includes(obj['iss'])) {
     return { ok: false, reason: 'wrong_issuer' };
   }
   if (!args.expectedAudiences.includes(obj['aud'])) {
