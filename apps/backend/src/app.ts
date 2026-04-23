@@ -43,6 +43,7 @@ import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
 import { adminConfigsHistoryHandler } from './admin/configs-history.js';
 import { treasuryHandler } from './admin/treasury.js';
+import { adminTreasurySnapshotCsvHandler } from './admin/treasury-snapshot-csv.js';
 import { adminTreasuryCreditFlowHandler } from './admin/treasury-credit-flow.js';
 import {
   adminGetPayoutHandler,
@@ -837,6 +838,12 @@ app.get(
   configHistoryHandler,
 );
 app.get('/api/admin/treasury', rateLimit(60, 60_000), treasuryHandler);
+// Tier-3 CSV of the treasury snapshot (ADR 009/015/018). Point-
+// in-time flat dump for SOC-2 / audit evidence. Long-form CSV
+// (metric,key,value) — diffable across successive snapshots so
+// auditors can eyeball "what moved between Monday and Tuesday".
+// Reuses the JSON snapshot handler; no new DB query.
+app.get('/api/admin/treasury.csv', rateLimit(10, 60_000), adminTreasurySnapshotCsvHandler);
 // Treasury credit-flow time-series (ADR 009/015) — per-day credited
 // vs debited per currency from credit_transactions. Answers "are we
 // generating liability faster than we settle it?" — the dynamic

@@ -240,6 +240,7 @@ GET  /api/admin/merchant-cashback-configs/history      [admin — fleet-wide con
 PUT  /api/admin/merchant-cashback-configs/:merchantId  [admin]
 GET  /api/admin/merchant-cashback-configs/:merchantId/history  [admin]
 GET  /api/admin/treasury                               [admin]
+GET  /api/admin/treasury.csv                           [admin — Tier-3 long-form CSV of the treasury snapshot for SOC-2 / audit evidence, ADR 009/015/018]
 GET  /api/admin/treasury/credit-flow                   [admin — per-day credited/debited/net ledger time-series, ?days=1-180, ?currency=USD|GBP|EUR, ADR 009/015]
 GET  /api/admin/treasury/credit-flow.csv               [admin — Tier-3 CSV of the credit-flow time series for month-end ledger reconciliation, ADR 009/015/018]
 GET  /api/admin/payouts                                [admin — ADR 015 payout backlog, ?state/?userId/?assetCode filters]
