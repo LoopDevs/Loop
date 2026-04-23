@@ -281,6 +281,7 @@ GET  /api/admin/orders/:orderId/payout                  [admin — payout row fo
 GET  /api/admin/orders/payment-method-share             [admin — cashback-flywheel metric: xlm/usdc/credit/loop_asset share, ADR 010/015]
 GET  /api/admin/orders/payment-method-activity          [admin — daily payment-method time-series (1-90d), trend complement to the share, ADR 010/015]
 GET  /api/admin/supplier-spend                          [admin — per-currency supplier spend, ADR 013/015]
+GET  /api/admin/supplier-spend/activity                 [admin — per-day per-currency supplier spend time-series (1-180d, ?currency=USD|GBP|EUR), ADR 013/015]
 GET  /api/admin/operators/:operatorId/supplier-spend    [admin — per-operator per-currency supplier spend (axis of fleet supplier-spend), ADR 013/015/022]
 GET  /api/admin/operators/:operatorId/activity          [admin — per-operator daily created/fulfilled/failed time-series (1-90d), ADR 013/022]
 GET  /api/admin/users                                   [admin — paginated user directory w/ email fragment filter]
