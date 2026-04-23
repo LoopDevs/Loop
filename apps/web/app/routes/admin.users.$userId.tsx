@@ -14,6 +14,7 @@ import { CreditTransactionsTable } from '~/components/features/admin/CreditTrans
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { UserCashbackByMerchantTable } from '~/components/features/admin/UserCashbackByMerchantTable';
 import { UserCashbackMonthlyChart } from '~/components/features/admin/UserCashbackMonthlyChart';
+import { UserOperatorMixCard } from '~/components/features/admin/UserOperatorMixCard';
 import { UserOrdersTable } from '~/components/features/admin/UserOrdersTable';
 import { UserRailMixCard } from '~/components/features/admin/UserRailMixCard';
 import { UserPayoutsTable } from '~/components/features/admin/UserPayoutsTable';
@@ -307,6 +308,31 @@ export default function AdminUserDetailRoute(): React.JSX.Element {
           </header>
           <div className="px-6 py-5">
             <UserPayoutsTable userId={userId} />
+          </div>
+        </section>
+      ) : null}
+
+      {/* Operator mix (ADR 013 / 022) — which CTX operators have
+          carried this user's recent orders. Support-triage pivot:
+          if their cashback is slow, this card correlates it with
+          a specific operator's health (a failing operator name
+          here links straight to the per-operator drill). Slot
+          below on-chain payouts so the flow reads "ledger →
+          on-chain settlement → supplier attribution". */}
+      {userId !== undefined && !userNotFound ? (
+        <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+          <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
+            <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+              Operator mix (24h)
+            </h2>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Which CTX operators have carried this user&apos;s orders. Drill into an operator to
+              check its health; the failed-count cell opens the per-(user, operator) failed orders
+              list.
+            </p>
+          </header>
+          <div className="px-6 py-5">
+            <UserOperatorMixCard userId={userId} />
           </div>
         </section>
       ) : null}

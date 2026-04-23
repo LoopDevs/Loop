@@ -432,6 +432,43 @@ export async function getOperatorMerchantMix(
 }
 
 /**
+ * Per-user × per-operator mix row (ADR 013 / 022). Third corner of
+ * the mix-axis matrix. Used for support triage — "user X's slow
+ * cashback correlates with op-beta-02, which has a failing
+ * circuit".
+ */
+export interface UserOperatorMixRow {
+  operatorId: string;
+  orderCount: number;
+  fulfilledCount: number;
+  failedCount: number;
+  lastOrderAt: string;
+}
+
+export interface UserOperatorMixResponse {
+  userId: string;
+  since: string;
+  rows: UserOperatorMixRow[];
+}
+
+/**
+ * `GET /api/admin/users/:userId/operator-mix` — for one user,
+ * which CTX operators have carried their orders. Default window
+ * 24h; server clamps `?since=` at 366d.
+ */
+export async function getUserOperatorMix(
+  userId: string,
+  opts: { since?: string } = {},
+): Promise<UserOperatorMixResponse> {
+  const params = new URLSearchParams();
+  if (opts.since !== undefined) params.set('since', opts.since);
+  const qs = params.toString();
+  return authenticatedRequest<UserOperatorMixResponse>(
+    `/api/admin/users/${encodeURIComponent(userId)}/operator-mix${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
+/**
  * Per-operator fulfilment latency row (ADR 013 / 022). One row per
  * operator that had at least one fulfilled order in the window.
  * Percentiles are reported in ms and rounded.
