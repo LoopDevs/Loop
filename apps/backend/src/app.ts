@@ -45,6 +45,7 @@ import { adminConfigsHistoryHandler } from './admin/configs-history.js';
 import { treasuryHandler } from './admin/treasury.js';
 import { adminTreasurySnapshotCsvHandler } from './admin/treasury-snapshot-csv.js';
 import { adminTreasuryCreditFlowHandler } from './admin/treasury-credit-flow.js';
+import { adminAssetCirculationHandler } from './admin/asset-circulation.js';
 import {
   adminGetPayoutHandler,
   adminListPayoutsHandler,
@@ -861,6 +862,15 @@ app.get('/api/admin/treasury.csv', rateLimit(10, 60_000), adminTreasurySnapshotC
 // generating liability faster than we settle it?" — the dynamic
 // view the treasury snapshot can't give.
 app.get('/api/admin/treasury/credit-flow', rateLimit(60, 60_000), adminTreasuryCreditFlowHandler);
+// Per-asset circulation drift (ADR 015). Compares Horizon-side
+// issued circulation against off-chain ledger liability — the
+// stablecoin-operator safety metric. 30/min: admin drill page,
+// not a dashboard card; Horizon calls are cached 30s internally.
+app.get(
+  '/api/admin/assets/:assetCode/circulation',
+  rateLimit(30, 60_000),
+  adminAssetCirculationHandler,
+);
 // Pending-payouts backlog list (ADR 015). Admin UI's "payouts" page
 // drills into pending/submitted/confirmed/failed rows; counts for the
 // at-a-glance card come from the treasury snapshot above.
