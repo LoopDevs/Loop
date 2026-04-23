@@ -19,6 +19,7 @@
  */
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
+import { env } from '../env.js';
 import {
   orders,
   merchantCashbackConfigs,
@@ -58,20 +59,26 @@ export interface CashbackSplit {
 
 /**
  * Default split applied when no `merchant_cashback_configs` row
- * exists for a merchant. All three pcts are zero — Loop hasn't set
- * commercial terms for this merchant yet, so we take nothing, give
- * nothing back, and wholesale = face value (Loop pays CTX full-price
- * for the card). Admin must configure the merchant before any margin
- * or cashback can accrue.
+ * exists for a merchant. A2-203: the cashback / margin percentages
+ * come from `DEFAULT_USER_CASHBACK_PCT_OF_CTX` + `DEFAULT_LOOP_MARGIN_PCT_OF_CTX`
+ * (ADR 011), with zero on both as the out-of-the-box default. An ops
+ * operator can flip in a non-zero default so newly-synced merchants
+ * aren't accidentally zero-cashback between catalog-sync and the
+ * first admin edit. Wholesale is residual (face - cashback - margin).
  */
-const FALLBACK_SPLIT: CashbackSplit = {
-  wholesalePct: '100.00',
-  userCashbackPct: '0.00',
-  loopMarginPct: '0.00',
-  wholesaleMinor: 0n,
-  userCashbackMinor: 0n,
-  loopMarginMinor: 0n,
-};
+function fallbackSplit(): Pick<
+  CashbackSplit,
+  'wholesalePct' | 'userCashbackPct' | 'loopMarginPct'
+> {
+  const userCashbackPct = env.DEFAULT_USER_CASHBACK_PCT_OF_CTX;
+  const loopMarginPct = env.DEFAULT_LOOP_MARGIN_PCT_OF_CTX;
+  const wholesale = 100 - Number.parseFloat(userCashbackPct) - Number.parseFloat(loopMarginPct);
+  return {
+    wholesalePct: wholesale.toFixed(2),
+    userCashbackPct,
+    loopMarginPct,
+  };
+}
 
 /**
  * Multiplies a minor-unit amount by a NUMERIC(5,2)-typed pct string,
@@ -113,22 +120,26 @@ export async function computeCashbackSplit(args: {
   const config = await db.query.merchantCashbackConfigs.findFirst({
     where: eq(merchantCashbackConfigs.merchantId, args.merchantId),
   });
-  if (config === undefined || config === null || !config.active) {
-    return {
-      ...FALLBACK_SPLIT,
-      wholesaleMinor: args.faceValueMinor,
-    };
-  }
-  const userCashbackMinor = applyPct(args.faceValueMinor, config.userCashbackPct);
-  const loopMarginMinor = applyPct(args.faceValueMinor, config.loopMarginPct);
+  // Either there's no admin-set row or the row is explicitly inactive —
+  // both collapse onto the env-driven fallback (A2-203).
+  const split =
+    config === undefined || config === null || !config.active
+      ? fallbackSplit()
+      : {
+          wholesalePct: config.wholesalePct,
+          userCashbackPct: config.userCashbackPct,
+          loopMarginPct: config.loopMarginPct,
+        };
+  const userCashbackMinor = applyPct(args.faceValueMinor, split.userCashbackPct);
+  const loopMarginMinor = applyPct(args.faceValueMinor, split.loopMarginPct);
   // Wholesale = face value - cashback - margin. Residual from the
   // flooring lands in wholesale; Loop overpays CTX by a few minor
   // units in the worst case, never the other way around.
   const wholesaleMinor = args.faceValueMinor - userCashbackMinor - loopMarginMinor;
   return {
-    wholesalePct: config.wholesalePct,
-    userCashbackPct: config.userCashbackPct,
-    loopMarginPct: config.loopMarginPct,
+    wholesalePct: split.wholesalePct,
+    userCashbackPct: split.userCashbackPct,
+    loopMarginPct: split.loopMarginPct,
     wholesaleMinor,
     userCashbackMinor,
     loopMarginMinor,
