@@ -21,6 +21,7 @@ import { StuckPayoutsCard } from '~/components/features/admin/StuckPayoutsCard';
 import { AssetDriftBadge } from '~/components/features/admin/AssetDriftBadge';
 import { AssetDriftWatcherCard } from '~/components/features/admin/AssetDriftWatcherCard';
 import { SettlementLagCard } from '~/components/features/admin/SettlementLagCard';
+import { CashbackRealizationCard } from '~/components/features/admin/CashbackRealizationCard';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -250,16 +251,18 @@ export default function AdminIndexRoute(): React.JSX.Element {
         </section>
       )}
 
-      {/* Two stablecoin-operator dashboard cards side-by-side (ADR
-          015/016). Drift = ledger health ("is our on-chain mint
-          matched to what we owe?"); settlement-lag = SLA health
-          ("is cashback hitting users fast enough?"). Self-hide
-          independently so a zero-payout deployment still sees the
-          drift card and vice versa. */}
+      {/* Three stablecoin-operator dashboard cards (ADR 009/015/016).
+          Drift = ledger health ("is our on-chain mint matched to what
+          we owe?"); settlement-lag = SLA health ("is cashback hitting
+          users fast enough?"); realization = flywheel health ("are
+          users spending cashback back on Loop?"). Each self-hides
+          independently so a fresh deployment sees only the signals
+          it has data for. */}
       {denied ? null : (
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <AssetDriftWatcherCard />
           <SettlementLagCard />
+          <CashbackRealizationCard />
         </section>
       )}
 

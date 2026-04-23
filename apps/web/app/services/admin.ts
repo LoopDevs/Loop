@@ -264,6 +264,29 @@ export async function getSettlementLag(sinceIso?: string): Promise<SettlementLag
 }
 
 /**
+ * Cashback realization rate (ADR 009 / 015). Per-currency + fleet-
+ * wide aggregate (`currency: null`). `recycledBps = spent / earned
+ * × 10 000` — the flywheel-health KPI.
+ */
+export interface CashbackRealizationRow {
+  currency: string | null;
+  earnedMinor: string;
+  spentMinor: string;
+  withdrawnMinor: string;
+  outstandingMinor: string;
+  recycledBps: number;
+}
+
+export interface CashbackRealizationResponse {
+  rows: CashbackRealizationRow[];
+}
+
+/** `GET /api/admin/cashback-realization` */
+export async function getCashbackRealization(): Promise<CashbackRealizationResponse> {
+  return authenticatedRequest<CashbackRealizationResponse>('/api/admin/cashback-realization');
+}
+
+/**
  * Downloads an admin CSV endpoint by fetching with the bearer token
  * in binary mode, then synthesising a click on a temporary anchor
  * with a Blob URL. Works around the fact that a plain `<a href>`
