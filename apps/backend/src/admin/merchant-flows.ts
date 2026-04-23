@@ -47,31 +47,40 @@ export interface MerchantFlowsResponse {
 
 /** GET /api/admin/merchant-flows */
 export async function adminMerchantFlowsHandler(c: Context): Promise<Response> {
-  const rows = await db
-    .select({
-      merchantId: orders.merchantId,
-      currency: orders.chargeCurrency,
-      count: sql<string>`COUNT(*)::text`,
-      faceValue: sql<string>`COALESCE(SUM(${orders.faceValueMinor}), 0)::text`,
-      wholesale: sql<string>`COALESCE(SUM(${orders.wholesaleMinor}), 0)::text`,
-      userCashback: sql<string>`COALESCE(SUM(${orders.userCashbackMinor}), 0)::text`,
-      loopMargin: sql<string>`COALESCE(SUM(${orders.loopMarginMinor}), 0)::text`,
-    })
-    .from(orders)
-    .where(eq(orders.state, 'fulfilled'))
-    .groupBy(orders.merchantId, orders.chargeCurrency)
-    .orderBy(orders.merchantId);
+  try {
+    const rows = await db
+      .select({
+        merchantId: orders.merchantId,
+        currency: orders.chargeCurrency,
+        count: sql<string>`COUNT(*)::text`,
+        faceValue: sql<string>`COALESCE(SUM(${orders.faceValueMinor}), 0)::text`,
+        wholesale: sql<string>`COALESCE(SUM(${orders.wholesaleMinor}), 0)::text`,
+        userCashback: sql<string>`COALESCE(SUM(${orders.userCashbackMinor}), 0)::text`,
+        loopMargin: sql<string>`COALESCE(SUM(${orders.loopMarginMinor}), 0)::text`,
+      })
+      .from(orders)
+      .where(eq(orders.state, 'fulfilled'))
+      .groupBy(orders.merchantId, orders.chargeCurrency)
+      .orderBy(orders.merchantId);
 
-  const flows: MerchantFlow[] = rows.map((r) => ({
-    merchantId: r.merchantId,
-    currency: r.currency,
-    count: r.count,
-    faceValueMinor: r.faceValue,
-    wholesaleMinor: r.wholesale,
-    userCashbackMinor: r.userCashback,
-    loopMarginMinor: r.loopMargin,
-  }));
+    const flows: MerchantFlow[] = rows.map((r) => ({
+      merchantId: r.merchantId,
+      currency: r.currency,
+      count: r.count,
+      faceValueMinor: r.faceValue,
+      wholesaleMinor: r.wholesale,
+      userCashbackMinor: r.userCashback,
+      loopMarginMinor: r.loopMargin,
+    }));
 
-  log.debug({ buckets: flows.length }, 'admin merchant-flows served');
-  return c.json<MerchantFlowsResponse>({ flows });
+    log.debug({ buckets: flows.length }, 'admin merchant-flows served');
+    return c.json<MerchantFlowsResponse>({ flows });
+  } catch (err) {
+    // A2-507: match sibling admin handlers that route errors through
+    // their handler-scoped logger bindings before the global onError
+    // fallback. The log line + request-id correlation is what ops needs
+    // to debug a specific /admin/cashback load failure.
+    log.error({ err }, 'admin merchant-flows query failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load merchant flows' }, 500);
+  }
 }
