@@ -32,6 +32,7 @@ import {
   getPayoutByOrderIdForUser,
   getPayoutForUser,
   listPayoutsForUser,
+  pendingPayoutsSummaryForUser,
 } from '../credits/pending-payouts.js';
 import { decodeJwtPayload } from '../auth/jwt.js';
 import { upsertUserFromCtx, getUserById, type User } from '../db/users.js';
@@ -470,6 +471,57 @@ export async function getUserPendingPayoutsHandler(c: Context): Promise<Response
       submittedAt: row.submittedAt?.toISOString() ?? null,
       confirmedAt: row.confirmedAt?.toISOString() ?? null,
       failedAt: row.failedAt?.toISOString() ?? null,
+    })),
+  });
+}
+
+export interface UserPendingPayoutsSummaryRow {
+  assetCode: string;
+  state: 'pending' | 'submitted';
+  count: number;
+  /** Stroops as bigint-string — JSON-safe. */
+  totalStroops: string;
+  /** ISO-8601 of the oldest row in this (asset, state) bucket. */
+  oldestCreatedAt: string;
+}
+
+export interface UserPendingPayoutsSummaryResponse {
+  rows: UserPendingPayoutsSummaryRow[];
+}
+
+/**
+ * `GET /api/users/me/pending-payouts/summary` — caller-scoped
+ * aggregate view of pending / submitted payouts, bucketed by
+ * (asset_code, state). One round-trip replaces paging through the
+ * full list when a UI only needs "you have $X cashback settling"
+ * signal.
+ *
+ * Confirmed rows are deliberately excluded (they've landed on-chain
+ * — the user reads them in the cashback history feed instead) as
+ * are failed rows (they belong to the admin retry flow, not the
+ * user's in-flight view). Empty response when the caller has no
+ * in-flight payouts.
+ */
+export async function getUserPendingPayoutsSummaryHandler(c: Context): Promise<Response> {
+  let user: User | null;
+  try {
+    user = await resolveCallingUser(c);
+  } catch (err) {
+    log.error({ err }, 'Failed to resolve calling user');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+  }
+  if (user === null) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+
+  const rows = await pendingPayoutsSummaryForUser(user.id);
+  return c.json<UserPendingPayoutsSummaryResponse>({
+    rows: rows.map((r) => ({
+      assetCode: r.assetCode,
+      state: r.state as 'pending' | 'submitted',
+      count: r.count,
+      totalStroops: r.totalStroops.toString(),
+      oldestCreatedAt: new Date(r.oldestCreatedAtMs).toISOString(),
     })),
   });
 }

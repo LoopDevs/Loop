@@ -1929,6 +1929,26 @@ const UserPendingPayoutsResponse = registry.register(
   z.object({ payouts: z.array(UserPendingPayoutView) }),
 );
 
+const UserPendingPayoutsSummaryRow = registry.register(
+  'UserPendingPayoutsSummaryRow',
+  z.object({
+    assetCode: z
+      .string()
+      .openapi({ description: 'LOOP asset code — USDLOOP / GBPLOOP / EURLOOP.' }),
+    state: z.enum(['pending', 'submitted']),
+    count: z.number().int().nonnegative(),
+    totalStroops: z.string().openapi({
+      description: 'Sum of `amount_stroops` in the bucket. BigInt as string.',
+    }),
+    oldestCreatedAt: z.string().datetime(),
+  }),
+);
+
+const UserPendingPayoutsSummaryResponse = registry.register(
+  'UserPendingPayoutsSummaryResponse',
+  z.object({ rows: z.array(UserPendingPayoutsSummaryRow) }),
+);
+
 registry.registerPath({
   method: 'get',
   path: '/api/users/me/pending-payouts',
@@ -1964,6 +1984,34 @@ registry.registerPath({
     400: {
       description: 'Invalid state or before',
       content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error resolving the user',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/users/me/pending-payouts/summary',
+  summary: "Caller's pending-payouts aggregate (ADR 015 / 016).",
+  description:
+    "Aggregate view of the caller's in-flight payouts bucketed by `(asset_code, state)`. One round-trip replaces paging the full list when a UI only needs the 'you have $X cashback settling' signal. Excludes `confirmed` rows (they're in the cashback history feed) and `failed` rows (they belong to the admin retry flow, not the user's in-flight view). Empty `rows` when the caller has no in-flight payouts.",
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'One row per (assetCode, state) bucket',
+      content: { 'application/json': { schema: UserPendingPayoutsSummaryResponse } },
     },
     401: {
       description: 'Missing or invalid bearer',
