@@ -26,12 +26,13 @@
  * truncation into a `number`).
  */
 import type { Context } from 'hono';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
   userCredits,
   creditTransactions,
   pendingPayouts,
+  orders,
   HOME_CURRENCIES,
   PAYOUT_STATES,
   type PayoutState,
@@ -60,6 +61,25 @@ export interface TreasuryHolding {
   stroops: string | null;
 }
 
+/**
+ * ADR 015 — per charge-currency economics of fulfilled orders.
+ * Aggregated from `orders` WHERE state='fulfilled' so admins can see
+ * how much of each customer payment went to CTX (supplier), back to
+ * the user (cashback), and kept by Loop (margin). Keyed by the
+ * currency the user was charged in — the same one they'll see on
+ * their card statement.
+ *
+ * All amounts are `bigint`-string minor units in the key's currency.
+ * `count` is the number of fulfilled orders contributing to the row.
+ */
+export interface TreasuryOrderFlow {
+  count: string;
+  faceValueMinor: string;
+  wholesaleMinor: string;
+  userCashbackMinor: string;
+  loopMarginMinor: string;
+}
+
 export interface TreasurySnapshot {
   outstanding: Record<string, string>;
   totals: Record<string, Record<string, string>>;
@@ -78,6 +98,13 @@ export interface TreasurySnapshot {
    * watcher is lagging.
    */
   payouts: Record<PayoutState, string>;
+  /**
+   * ADR 015 — fulfilled-order flow per charge currency. Renders as the
+   * "Supplier flow" card on /admin/treasury so ops can see, at a
+   * glance, the CTX-as-supplier split (what Loop paid CTX, what it
+   * credited users, what it kept).
+   */
+  orderFlows: Record<string, TreasuryOrderFlow>;
   operatorPool: {
     size: number;
     operators: Array<{ id: string; state: string }>;
@@ -121,6 +148,7 @@ export async function treasuryHandler(c: Context): Promise<Response> {
   const liabilities = buildLiabilities(outstanding);
   const assets = await buildAssets();
   const payouts = await buildPayoutCounts();
+  const orderFlows = await buildOrderFlows();
 
   const snapshot: TreasurySnapshot = {
     outstanding,
@@ -128,6 +156,7 @@ export async function treasuryHandler(c: Context): Promise<Response> {
     liabilities,
     assets,
     payouts,
+    orderFlows,
     operatorPool: {
       size: operatorPoolSize(),
       operators: getOperatorHealth(),
@@ -159,6 +188,44 @@ async function buildPayoutCounts(): Promise<Record<PayoutState, string>> {
     if ((PAYOUT_STATES as ReadonlyArray<string>).includes(row.state)) {
       out[row.state as PayoutState] = row.count;
     }
+  }
+  return out;
+}
+
+/**
+ * Aggregates fulfilled-order economics by charge currency (ADR 015).
+ * Each row sums the four pinned minor-unit columns (`face_value`,
+ * `wholesale`, `user_cashback`, `loop_margin`) plus a row count —
+ * letting the admin UI render the CTX-as-supplier P&L without the
+ * client re-running the math.
+ *
+ * Pending / failed / expired orders are excluded: an order hasn't
+ * "flowed" until it lands fulfilled (CTX procured, user holds a
+ * redeemable card). Refunds would show up as negative-sign entries
+ * in the credits ledger, not here.
+ */
+async function buildOrderFlows(): Promise<Record<string, TreasuryOrderFlow>> {
+  const rows = await db
+    .select({
+      currency: orders.chargeCurrency,
+      count: sql<string>`COUNT(*)::text`,
+      faceValue: sql<string>`COALESCE(SUM(${orders.faceValueMinor}), 0)::text`,
+      wholesale: sql<string>`COALESCE(SUM(${orders.wholesaleMinor}), 0)::text`,
+      userCashback: sql<string>`COALESCE(SUM(${orders.userCashbackMinor}), 0)::text`,
+      loopMargin: sql<string>`COALESCE(SUM(${orders.loopMarginMinor}), 0)::text`,
+    })
+    .from(orders)
+    .where(eq(orders.state, 'fulfilled'))
+    .groupBy(orders.chargeCurrency);
+  const out: Record<string, TreasuryOrderFlow> = {};
+  for (const row of rows) {
+    out[row.currency] = {
+      count: row.count,
+      faceValueMinor: row.faceValue,
+      wholesaleMinor: row.wholesale,
+      userCashbackMinor: row.userCashback,
+      loopMarginMinor: row.loopMargin,
+    };
   }
   return out;
 }

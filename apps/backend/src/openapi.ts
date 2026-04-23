@@ -607,6 +607,25 @@ const TreasuryHolding = z.object({
   }),
 });
 
+const TreasuryOrderFlow = z.object({
+  count: z.string().openapi({
+    description: 'Number of fulfilled orders in this charge-currency bucket. BigInt-string count.',
+  }),
+  faceValueMinor: z.string().openapi({
+    description:
+      'Sum of gift-card face values (minor units of the charge currency). BigInt-string.',
+  }),
+  wholesaleMinor: z.string().openapi({
+    description: 'Total paid to CTX (supplier) for this bucket. Minor units, bigint-string.',
+  }),
+  userCashbackMinor: z.string().openapi({
+    description: 'Total cashback credited to users for this bucket. Minor units, bigint-string.',
+  }),
+  loopMarginMinor: z.string().openapi({
+    description: 'Total kept by Loop for this bucket. Minor units, bigint-string.',
+  }),
+});
+
 const OperatorHealthEntry = z.object({
   id: z.string(),
   state: z.string().openapi({
@@ -634,6 +653,10 @@ const TreasurySnapshot = registry.register(
     payouts: z.record(PayoutState, z.string()).openapi({
       description:
         'ADR 015 — pending_payouts row counts per state. Always returns an entry for each state (zero when empty).',
+    }),
+    orderFlows: z.record(z.string(), TreasuryOrderFlow).openapi({
+      description:
+        'ADR 015 — aggregated economics of fulfilled orders, keyed by charge currency. Surfaces the CTX-supplier split (wholesale / user cashback / Loop margin).',
     }),
     operatorPool: z.object({
       size: z.number().int(),

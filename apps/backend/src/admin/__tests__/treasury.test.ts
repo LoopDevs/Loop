@@ -2,15 +2,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Context } from 'hono';
 
 const { dbMock, state } = vi.hoisted(() => {
-  // Two distinct .select() calls in the handler — one against
-  // user_credits, one against credit_transactions. Differentiate by
-  // making select() return a table-scoped chain that holds its own
-  // rows. Simpler approach: keep a FIFO of result arrays; each
-  // .groupBy() (the terminal chain) dequeues one.
+  // Four distinct .select() calls in the handler — user_credits,
+  // credit_transactions, pending_payouts, orders. Differentiate by
+  // keeping a FIFO of result arrays; each .groupBy() (the terminal
+  // chain) dequeues one. `.where()` is a pass-through link in the
+  // chain used only by the orders query.
   const results: unknown[][] = [];
   const m: Record<string, ReturnType<typeof vi.fn>> = {};
   m['select'] = vi.fn(() => m);
   m['from'] = vi.fn(() => m);
+  m['where'] = vi.fn(() => m);
   m['groupBy'] = vi.fn(async () => results.shift() ?? []);
   return { dbMock: m, state: { results } };
 });
@@ -31,6 +32,14 @@ vi.mock('../../db/schema.js', () => ({
   },
   pendingPayouts: {
     state: 'state',
+  },
+  orders: {
+    state: 'state',
+    chargeCurrency: 'chargeCurrency',
+    faceValueMinor: 'faceValueMinor',
+    wholesaleMinor: 'wholesaleMinor',
+    userCashbackMinor: 'userCashbackMinor',
+    loopMarginMinor: 'loopMarginMinor',
   },
   HOME_CURRENCIES: ['USD', 'GBP', 'EUR'] as const,
   PAYOUT_STATES: ['pending', 'submitted', 'confirmed', 'failed'] as const,
@@ -116,17 +125,19 @@ beforeEach(() => {
 
 describe('treasuryHandler', () => {
   it('returns an empty-shape snapshot when the ledger has no rows', async () => {
-    state.results.push([], [], []); // outstanding, totals
+    state.results.push([], [], [], []); // outstanding, totals, payouts, orderFlows
     const { ctx } = makeCtx();
     const res = await treasuryHandler(ctx);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       outstanding: Record<string, string>;
       totals: Record<string, Record<string, string>>;
+      orderFlows: Record<string, unknown>;
       operatorPool: { size: number; operators: unknown[] };
     };
     expect(body.outstanding).toEqual({});
     expect(body.totals).toEqual({});
+    expect(body.orderFlows).toEqual({});
     expect(body.operatorPool).toEqual({ size: 0, operators: [] });
   });
 
@@ -299,6 +310,62 @@ describe('treasuryHandler', () => {
       submitted: '0',
       confirmed: '0',
       failed: '0',
+    });
+  });
+
+  it('aggregates fulfilled-order flows by charge currency (ADR 015)', async () => {
+    state.results.push(
+      [],
+      [],
+      [],
+      [
+        {
+          currency: 'GBP',
+          count: '12',
+          faceValue: '120000',
+          wholesale: '96000',
+          userCashback: '6000',
+          loopMargin: '18000',
+        },
+        {
+          currency: 'USD',
+          count: '4',
+          faceValue: '50000',
+          wholesale: '40000',
+          userCashback: '2500',
+          loopMargin: '7500',
+        },
+      ],
+    );
+    const { ctx } = makeCtx();
+    const res = await treasuryHandler(ctx);
+    const body = (await res.json()) as {
+      orderFlows: Record<
+        string,
+        {
+          count: string;
+          faceValueMinor: string;
+          wholesaleMinor: string;
+          userCashbackMinor: string;
+          loopMarginMinor: string;
+        }
+      >;
+    };
+    expect(body.orderFlows).toEqual({
+      GBP: {
+        count: '12',
+        faceValueMinor: '120000',
+        wholesaleMinor: '96000',
+        userCashbackMinor: '6000',
+        loopMarginMinor: '18000',
+      },
+      USD: {
+        count: '4',
+        faceValueMinor: '50000',
+        wholesaleMinor: '40000',
+        userCashbackMinor: '2500',
+        loopMarginMinor: '7500',
+      },
     });
   });
 

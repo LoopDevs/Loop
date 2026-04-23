@@ -266,6 +266,80 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
       </section>
 
       <section>
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Supplier flow (fulfilled)
+          </h2>
+          <Link
+            to="/admin/orders?state=fulfilled"
+            className="text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+          >
+            See orders →
+          </Link>
+        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          How fulfilled-order money splits between CTX (supplier), users (cashback), and Loop
+          (margin) — ADR 015. Keyed by the currency the user was charged in.
+        </p>
+        {Object.keys(snapshot.orderFlows).length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">No fulfilled orders yet.</p>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800 text-sm">
+              <thead className="bg-gray-50 dark:bg-gray-900/50">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400">
+                    Currency
+                  </th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+                    Orders
+                  </th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+                    Face value
+                  </th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+                    CTX wholesale
+                  </th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+                    User cashback
+                  </th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-500 dark:text-gray-400">
+                    Loop margin
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-900 bg-white dark:bg-gray-900">
+                {Object.entries(snapshot.orderFlows)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([currency, flow]) => (
+                    <tr key={currency}>
+                      <td className="px-3 py-2 font-medium text-gray-900 dark:text-white">
+                        {currency}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                        {flow.count}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                        {fmtMinor(flow.faceValueMinor, currency)}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                        {fmtMinor(flow.wholesaleMinor, currency)}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                        {fmtMinor(flow.userCashbackMinor, currency)}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                        {fmtMinor(flow.loopMarginMinor, currency)}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section>
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
           LOOP-asset liabilities
         </h2>
