@@ -30,10 +30,11 @@
 import { env } from '../env.js';
 import { logger } from '../logger.js';
 import {
-  listPendingPayouts,
+  listClaimablePayouts,
   markPayoutSubmitted,
   markPayoutConfirmed,
   markPayoutFailed,
+  reclaimSubmittedPayout,
   type PendingPayout,
 } from '../credits/pending-payouts.js';
 import { findOutboundPaymentByMemo } from './horizon.js';
@@ -60,6 +61,12 @@ export interface RunPayoutTickArgs {
   networkPassphrase: string;
   maxAttempts: number;
   limit?: number;
+  /**
+   * A2-602 watchdog threshold (seconds). Rows stuck in `submitted`
+   * past this are re-picked by the worker for an idempotent retry.
+   * Defaults to 300s when unset.
+   */
+  watchdogStaleSeconds?: number;
 }
 
 /**
@@ -68,7 +75,11 @@ export interface RunPayoutTickArgs {
  * the Horizon memo pre-check inside `payOne`.
  */
 export async function runPayoutTick(args: RunPayoutTickArgs): Promise<PayoutTickResult> {
-  const rows = await listPendingPayouts(args.limit ?? 5);
+  const rows = await listClaimablePayouts({
+    limit: args.limit ?? 5,
+    staleSeconds: args.watchdogStaleSeconds ?? 300,
+    maxAttempts: args.maxAttempts,
+  });
   const result: PayoutTickResult = {
     picked: rows.length,
     confirmed: 0,
@@ -106,13 +117,23 @@ async function payOne(row: PendingPayout, args: RunPayoutTickArgs): Promise<PayO
       memo: row.memoText,
     });
     if (prior !== null) {
+      // markPayoutConfirmed is state-guarded on 'submitted'. A
+      // row still in 'pending' must transition → 'submitted' first
+      // so the confirm actually applies; otherwise the guard
+      // blocks and the row stays pending forever.
+      if (row.state === 'pending') {
+        const claimed = await markPayoutSubmitted(row.id);
+        if (claimed === null) {
+          return 'skippedRace';
+        }
+      }
       const confirmed = await markPayoutConfirmed({ id: row.id, txHash: prior.txHash });
       if (confirmed === null) {
         // Another worker already transitioned.
         return 'skippedRace';
       }
       log.info(
-        { payoutId: row.id, txHash: prior.txHash },
+        { payoutId: row.id, txHash: prior.txHash, priorState: row.state },
         'Payout converged via idempotency check — prior submit had landed',
       );
       return 'skippedAlreadyLanded';
@@ -129,9 +150,31 @@ async function payOne(row: PendingPayout, args: RunPayoutTickArgs): Promise<PayO
     // resolves to the same tx hash.
   }
 
-  const claimed = await markPayoutSubmitted(row.id);
-  if (claimed === null) {
-    return 'skippedRace';
+  // Claim the row before re-submitting. Two paths:
+  //   - `pending`: existing markPayoutSubmitted moves pending →
+  //     submitted + bumps attempts.
+  //   - `submitted` (A2-602 watchdog): row has been sitting past
+  //     staleSeconds. Re-claim with a CAS on attempts so two racing
+  //     workers don't both re-submit; bumps attempts + fresh
+  //     submittedAt while leaving state in 'submitted'.
+  if (row.state === 'pending') {
+    const claimed = await markPayoutSubmitted(row.id);
+    if (claimed === null) {
+      return 'skippedRace';
+    }
+  } else {
+    // state === 'submitted' — watchdog re-pick.
+    const claimed = await reclaimSubmittedPayout({
+      id: row.id,
+      expectedAttempts: row.attempts,
+    });
+    if (claimed === null) {
+      return 'skippedRace';
+    }
+    log.warn(
+      { payoutId: row.id, attempts: claimed.attempts },
+      'Payout watchdog re-picked stuck submitted row',
+    );
   }
 
   try {
@@ -232,6 +275,7 @@ export function startPayoutWorker(args: {
   intervalMs: number;
   maxAttempts: number;
   limit?: number;
+  watchdogStaleSeconds?: number;
 }): void {
   if (payoutTimer !== null) return;
   log.info({ intervalMs: args.intervalMs }, 'Starting payout worker');
@@ -243,6 +287,9 @@ export function startPayoutWorker(args: {
         networkPassphrase: args.networkPassphrase,
         maxAttempts: args.maxAttempts,
         ...(args.limit !== undefined ? { limit: args.limit } : {}),
+        ...(args.watchdogStaleSeconds !== undefined
+          ? { watchdogStaleSeconds: args.watchdogStaleSeconds }
+          : {}),
       });
       if (r.picked > 0) {
         log.info(r, 'Payout tick complete');
@@ -278,6 +325,7 @@ export function resolvePayoutConfig(): {
   networkPassphrase: string;
   maxAttempts: number;
   intervalMs: number;
+  watchdogStaleSeconds: number;
 } | null {
   if (env.LOOP_STELLAR_OPERATOR_SECRET === undefined) return null;
   const horizonUrl =
@@ -291,5 +339,6 @@ export function resolvePayoutConfig(): {
     networkPassphrase: env.LOOP_STELLAR_NETWORK_PASSPHRASE,
     maxAttempts: env.LOOP_PAYOUT_MAX_ATTEMPTS,
     intervalMs: env.LOOP_PAYOUT_WORKER_INTERVAL_SECONDS * 1000,
+    watchdogStaleSeconds: env.LOOP_PAYOUT_WATCHDOG_STALE_SECONDS,
   };
 }

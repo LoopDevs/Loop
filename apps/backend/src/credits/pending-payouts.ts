@@ -66,6 +66,81 @@ export async function listPendingPayouts(limit = 20): Promise<PendingPayout[]> {
 }
 
 /**
+ * A2-602 watchdog: same as `listPendingPayouts` but also returns rows
+ * stuck in `submitted` for longer than `staleSeconds` with attempts
+ * still under `maxAttempts`. The worker re-runs them through the
+ * idempotency pre-check — if the prior submit landed we converge to
+ * `confirmed`, otherwise a fresh submit is issued with a new sequence.
+ *
+ * Without this, a row that entered `submitted` but never reached
+ * `confirmed` (pod crash mid-submit, Horizon blackhole, mark-confirmed
+ * DB blip) sits forever: `listPendingPayouts` filters it out, and the
+ * old `markPayoutSubmitted(state='pending')` guard refuses to re-claim.
+ *
+ * Ordering: pending first (fresh work) then stale submitted (watchdog
+ * recovery). Both ordered by createdAt ASC so a backlog drains FIFO.
+ */
+export async function listClaimablePayouts(opts: {
+  limit?: number;
+  staleSeconds: number;
+  maxAttempts: number;
+}): Promise<PendingPayout[]> {
+  const limit = opts.limit ?? 20;
+  return db
+    .select()
+    .from(pendingPayouts)
+    .where(
+      sql`(${pendingPayouts.state} = 'pending')
+        OR (
+          ${pendingPayouts.state} = 'submitted'
+          AND ${pendingPayouts.submittedAt} < NOW() - make_interval(secs => ${opts.staleSeconds})
+          AND ${pendingPayouts.attempts} < ${opts.maxAttempts}
+        )`,
+    )
+    .orderBy(
+      // `pending` before `submitted` so fresh work drains before the
+      // watchdog backlog. `<` orders alphabetically so 'pending' >
+      // 'submitted' — flip with a CASE.
+      sql`CASE WHEN ${pendingPayouts.state} = 'pending' THEN 0 ELSE 1 END`,
+      asc(pendingPayouts.createdAt),
+    )
+    .limit(limit);
+}
+
+/**
+ * A2-602 watchdog re-claim: a row already in `submitted` whose
+ * idempotency pre-check found no prior landed payment needs a fresh
+ * submit. We bump `attempts`, reset `submittedAt` to NOW, and CAS on
+ * the previous attempts value so two workers racing on the same stale
+ * row can't both proceed to submit.
+ *
+ * Returns the updated row on success, null on a race (the other worker
+ * already re-claimed). The `state='submitted'` guard means this is
+ * only ever a no-op state change (submitted → submitted) — the only
+ * side-effects are attempts+1 and a fresh submittedAt stamp.
+ */
+export async function reclaimSubmittedPayout(args: {
+  id: string;
+  expectedAttempts: number;
+}): Promise<PendingPayout | null> {
+  const [row] = await db
+    .update(pendingPayouts)
+    .set({
+      submittedAt: sql`NOW()`,
+      attempts: sql`${pendingPayouts.attempts} + 1`,
+    })
+    .where(
+      and(
+        eq(pendingPayouts.id, args.id),
+        eq(pendingPayouts.state, 'submitted'),
+        eq(pendingPayouts.attempts, args.expectedAttempts),
+      ),
+    )
+    .returning();
+  return row ?? null;
+}
+
+/**
  * Admin-facing list across any state + cursor pagination. Newest
  * first (admin UI pattern — you want to see the most recent failures
  * first when you open the page). `before` is the ISO `created_at` of
