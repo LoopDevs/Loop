@@ -16,6 +16,7 @@
  * for spend/withdrawal, positive for cashback/interest/refund).
  */
 import type { Context } from 'hono';
+import { UUID_RE } from '../uuid.js';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { CREDIT_TRANSACTION_TYPES } from '@loop/shared';
 import { db } from '../db/client.js';
@@ -23,8 +24,6 @@ import { creditTransactions } from '../db/schema.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-user-credit-transactions' });
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface AdminCreditTransactionView {
   id: string;
