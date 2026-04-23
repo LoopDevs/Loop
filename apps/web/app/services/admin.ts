@@ -264,6 +264,34 @@ export async function getSettlementLag(sinceIso?: string): Promise<SettlementLag
 }
 
 /**
+ * Daily cashback-realization trend (ADR 009 / 015). One row per
+ * (day, currency); dense (every day in the window has a row) so
+ * sparklines don't compress on gap days.
+ */
+export interface CashbackRealizationDay {
+  day: string;
+  currency: string;
+  earnedMinor: string;
+  spentMinor: string;
+  recycledBps: number;
+}
+
+export interface CashbackRealizationDailyResponse {
+  days: number;
+  rows: CashbackRealizationDay[];
+}
+
+/** `GET /api/admin/cashback-realization/daily?days=N` */
+export async function getCashbackRealizationDaily(
+  days?: number,
+): Promise<CashbackRealizationDailyResponse> {
+  const qs = days !== undefined ? `?days=${days}` : '';
+  return authenticatedRequest<CashbackRealizationDailyResponse>(
+    `/api/admin/cashback-realization/daily${qs}`,
+  );
+}
+
+/**
  * Downloads an admin CSV endpoint by fetching with the bearer token
  * in binary mode, then synthesising a click on a temporary anchor
  * with a Blob URL. Works around the fact that a plain `<a href>`
