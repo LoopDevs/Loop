@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { assertNever } from '@loop/shared';
 import { listLoopOrders, loopOrderStateLabel, type LoopOrderView } from '~/services/orders-loop';
 import { useAllMerchants } from '~/hooks/use-merchants';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -218,6 +219,11 @@ function RedemptionField({ label, value }: { label: string; value: string }): Re
 }
 
 function stateColour(state: LoopOrderView['state']): string {
+  // A2-1531 fix: the prior `default:` silently routed new OrderState
+  // variants to yellow. Exhaustive switch + assertNever forces every
+  // new state to land here explicitly at compile time; runtime hit
+  // (wire-side variant the client doesn't know) throws loudly rather
+  // than faking a neutral pill.
   switch (state) {
     case 'fulfilled':
       return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
@@ -225,8 +231,12 @@ function stateColour(state: LoopOrderView['state']): string {
       return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
     case 'expired':
       return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
-    default:
+    case 'pending_payment':
+    case 'paid':
+    case 'procuring':
       return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
+    default:
+      return assertNever(state, 'OrderState');
   }
 }
 
