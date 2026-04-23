@@ -741,6 +741,30 @@ const PayoutsByAssetResponse = registry.register(
   z.object({ rows: z.array(PayoutsByAssetRow) }),
 );
 
+// ─── Admin — settlement-lag SLA (ADR 015 / 016) ────────────────────────────
+
+const SettlementLagRow = registry.register(
+  'SettlementLagRow',
+  z.object({
+    assetCode: z.string().nullable().openapi({
+      description: 'LOOP asset code; `null` for the fleet-wide aggregate row.',
+    }),
+    sampleCount: z.number().int().nonnegative(),
+    p50Seconds: z.number().nonnegative(),
+    p95Seconds: z.number().nonnegative(),
+    maxSeconds: z.number().nonnegative(),
+    meanSeconds: z.number().nonnegative(),
+  }),
+);
+
+const SettlementLagResponse = registry.register(
+  'SettlementLagResponse',
+  z.object({
+    since: z.string().datetime(),
+    rows: z.array(SettlementLagRow),
+  }),
+);
+
 // ─── Admin — credit-adjustment write (ADR 017) ─────────────────────────────
 
 const AdminWriteAudit = registry.register(
@@ -2576,6 +2600,51 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error computing the breakdown',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/payouts/settlement-lag',
+  summary: 'Payout settlement-lag SLA (ADR 015 / 016).',
+  description:
+    "Percentile latency (in seconds) from `pending_payouts` insert (`createdAt`) to on-chain confirmation (`confirmedAt`) for `state='confirmed'` rows in the window. One row per LOOP asset, plus a fleet-wide aggregate where `assetCode: null`. The user-facing SLA: if p95 is minutes we're healthy; hours means the payout worker or Horizon is backed up and users are waiting. Window: `?since=<iso>` (default 24h, cap 366d). Same clamp as the operator-latency endpoint.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      since: z
+        .string()
+        .datetime()
+        .optional()
+        .openapi({ description: 'ISO-8601 — lower bound on `confirmedAt`. Defaults to 24h ago.' }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Per-asset rows plus fleet-wide aggregate',
+      content: { 'application/json': { schema: SettlementLagResponse } },
+    },
+    400: {
+      description: 'Malformed `since` or window > 366d',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the aggregate',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },

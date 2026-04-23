@@ -55,6 +55,7 @@ import {
 } from './admin/payouts.js';
 import { adminPayoutsCsvHandler } from './admin/payouts-csv.js';
 import { adminPayoutsByAssetHandler } from './admin/payouts-by-asset.js';
+import { adminSettlementLagHandler } from './admin/settlement-lag.js';
 import { adminTopUsersHandler } from './admin/top-users.js';
 import { adminTopUsersByPendingPayoutHandler } from './admin/top-users-by-pending-payout.js';
 import { adminUsersRecyclingActivityHandler } from './admin/users-recycling-activity.js';
@@ -891,6 +892,12 @@ app.get('/api/admin/payouts/:id', rateLimit(120, 60_000), adminGetPayoutHandler)
 // list, so an incident in one asset doesn't get lost in the volume
 // of another.
 app.get('/api/admin/payouts-by-asset', rateLimit(60, 60_000), adminPayoutsByAssetHandler);
+// Settlement-lag SLA — p50/p95/max seconds from pending_payouts row
+// insert to on-chain confirmation, windowed. One row per LOOP asset
+// plus a fleet-wide aggregate (`assetCode: null`). The SLA signal
+// operators watch alongside drift: if payouts are taking hours, the
+// drift number will grow regardless of minting health.
+app.get('/api/admin/payouts/settlement-lag', rateLimit(60, 60_000), adminSettlementLagHandler);
 // POST /api/admin/payouts/:id/retry — flip a failed row back to pending.
 // Lower rate limit: retries should be rare, one-at-a-time ops actions.
 app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayoutHandler);
