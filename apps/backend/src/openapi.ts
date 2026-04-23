@@ -3595,6 +3595,177 @@ registry.registerPath({
   },
 });
 
+// ─── Admin per-merchant drill metrics (ADR 011/015/022) ────────────────────
+//
+// Scalar-per-merchant trio that backs the /admin/merchants/:id drill-down.
+// See ADR-022 for the triplet pattern — these are the per-merchant axis of
+// the fleet + per-merchant + per-user + self quartet shipped around the
+// cashback-flywheel pivot.
+
+const AdminMerchantFlywheelStats = registry.register(
+  'AdminMerchantFlywheelStats',
+  z.object({
+    merchantId: z.string(),
+    since: z.string().datetime().openapi({ description: 'Window start — 31 days ago.' }),
+    totalFulfilledCount: z.number().int(),
+    recycledOrderCount: z.number().int(),
+    recycledChargeMinor: z.string().openapi({
+      description: 'SUM(charge_minor) over loop_asset orders. bigint-as-string.',
+    }),
+    totalChargeMinor: z.string().openapi({
+      description: 'SUM(charge_minor) over every fulfilled order. bigint-as-string.',
+    }),
+  }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/merchants/{merchantId}/flywheel-stats',
+  summary: 'Per-merchant recycled-vs-total scalar (ADR 011 / 015).',
+  description:
+    'Drives the flywheel chip on the merchant drill. 31-day fixed window, home-currency-agnostic at the merchant axis. Zero-volume merchants return zeroed fields (not 404) — a catalog merchant with no orders yet is a valid row.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: { params: z.object({ merchantId: z.string() }) },
+  responses: {
+    200: {
+      description: 'Per-merchant flywheel scalar',
+      content: { 'application/json': { schema: AdminMerchantFlywheelStats } },
+    },
+    400: {
+      description: 'Malformed merchantId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'DB error',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+const AdminMerchantCashbackCurrencyBucket = registry.register(
+  'AdminMerchantCashbackCurrencyBucket',
+  z.object({
+    currency: z.string().length(3),
+    fulfilledCount: z.number().int(),
+    lifetimeCashbackMinor: z.string().openapi({
+      description:
+        'SUM(user_cashback_minor) over fulfilled orders in this currency. bigint-as-string.',
+    }),
+    lifetimeChargeMinor: z.string().openapi({
+      description: 'SUM(charge_minor) in this currency — context for "cashback as % of spend".',
+    }),
+  }),
+);
+
+const AdminMerchantCashbackSummary = registry.register(
+  'AdminMerchantCashbackSummary',
+  z.object({
+    merchantId: z.string(),
+    totalFulfilledCount: z.number().int(),
+    currencies: z.array(AdminMerchantCashbackCurrencyBucket).openapi({
+      description:
+        'One entry per charge currency the merchant has seen. Sorted desc by fulfilledCount. Multi-row because per-merchant volume spans user home_currencies (no coherent rolled-up denomination).',
+    }),
+  }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/merchants/{merchantId}/cashback-summary',
+  summary: 'Per-currency lifetime cashback paid out on a merchant (ADR 009 / 011 / 015).',
+  description:
+    'Sourced from orders.user_cashback_minor (pinned at creation) rather than credit_transactions, so the number is stable even when a ledger row is delayed. Only state=fulfilled counts. Zero-volume merchants return empty currencies[], not 404.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: { params: z.object({ merchantId: z.string() }) },
+  responses: {
+    200: {
+      description: 'Per-currency cashback summary for the merchant',
+      content: { 'application/json': { schema: AdminMerchantCashbackSummary } },
+    },
+    400: {
+      description: 'Malformed merchantId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'DB error',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+const PaymentMethodBucketShape = z.object({
+  orderCount: z.number().int(),
+  chargeMinor: z.string().openapi({
+    description: 'SUM(charge_minor) for this (state, method) bucket. bigint-as-string.',
+  }),
+});
+
+const MerchantPaymentMethodShareResponse = registry.register(
+  'MerchantPaymentMethodShareResponse',
+  z.object({
+    merchantId: z.string(),
+    state: z.enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired']),
+    totalOrders: z.number().int(),
+    byMethod: z
+      .object({
+        xlm: PaymentMethodBucketShape,
+        usdc: PaymentMethodBucketShape,
+        credit: PaymentMethodBucketShape,
+        loop_asset: PaymentMethodBucketShape,
+      })
+      .openapi({
+        description:
+          'Zero-filled across every known ORDER_PAYMENT_METHODS value so the admin UI layout stays stable across merchants with incomplete rail coverage.',
+      }),
+  }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/merchants/{merchantId}/payment-method-share',
+  summary: 'Per-merchant rail mix (ADR 010 / 015).',
+  description:
+    'Drives the "rail mix" card on the merchant drill. Merchant-scoped mirror of /api/admin/orders/payment-method-share — same zero-filled byMethod shape, filtered via WHERE merchant_id = :merchantId. Default ?state=fulfilled.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ merchantId: z.string() }),
+    query: z.object({
+      state: z
+        .enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired'])
+        .optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Per-merchant rail mix',
+      content: { 'application/json': { schema: MerchantPaymentMethodShareResponse } },
+    },
+    400: {
+      description: 'Malformed merchantId or invalid ?state',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'DB error',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Spec generator ─────────────────────────────────────────────────────────
 
 // Register the bearer auth scheme on the registry so the generator emits it
