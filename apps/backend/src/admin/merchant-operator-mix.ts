@@ -55,7 +55,7 @@ export interface MerchantOperatorMixResponse {
   rows: MerchantOperatorMixRow[];
 }
 
-interface AggRow {
+interface AggRow extends Record<string, unknown> {
   operator_id: string;
   order_count: string | number | bigint;
   fulfilled_count: string | number | bigint;
