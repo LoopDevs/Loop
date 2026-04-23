@@ -27,7 +27,7 @@
  *   - Content-Disposition: attachment; filename=merchants-catalog-YYYY-MM-DD.csv
  */
 import type { Context } from 'hono';
-import { eq } from 'drizzle-orm';
+import { inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { merchantCashbackConfigs } from '../db/schema.js';
 import { getMerchants } from '../merchants/sync.js';
@@ -75,26 +75,34 @@ function formatTimestamp(value: Date | string | null | undefined): string {
 
 export async function adminMerchantsCatalogCsvHandler(c: Context): Promise<Response> {
   try {
-    const configRows = (await db
-      .select({
-        merchantId: merchantCashbackConfigs.merchantId,
-        userCashbackPct: merchantCashbackConfigs.userCashbackPct,
-        active: merchantCashbackConfigs.active,
-        updatedBy: merchantCashbackConfigs.updatedBy,
-        updatedAt: merchantCashbackConfigs.updatedAt,
-      })
-      .from(merchantCashbackConfigs)
-      .where(
-        eq(merchantCashbackConfigs.merchantId, merchantCashbackConfigs.merchantId),
-      )) as ConfigRow[];
-
-    const configsById = new Map<string, ConfigRow>();
-    for (const r of configRows) configsById.set(r.merchantId, r);
-
+    // A2-503: cap the SQL SELECT to the merchants we're actually going
+    // to emit rather than streaming every cashback-config row out of
+    // Postgres. A2-504: drop the no-op self-comparison `where`.
+    // We slice the catalog first so the configs query scope matches
+    // the truncated row set exactly — no wasted rows when the catalog
+    // exceeds ROW_CAP, no extra round-trip when it doesn't.
     const { merchants } = getMerchants();
     const total = merchants.length;
     const truncated = total > ROW_CAP;
     const emitted = truncated ? merchants.slice(0, ROW_CAP) : merchants;
+
+    const emittedIds = emitted.map((m) => m.id);
+    const configRows: ConfigRow[] =
+      emittedIds.length === 0
+        ? []
+        : ((await db
+            .select({
+              merchantId: merchantCashbackConfigs.merchantId,
+              userCashbackPct: merchantCashbackConfigs.userCashbackPct,
+              active: merchantCashbackConfigs.active,
+              updatedBy: merchantCashbackConfigs.updatedBy,
+              updatedAt: merchantCashbackConfigs.updatedAt,
+            })
+            .from(merchantCashbackConfigs)
+            .where(inArray(merchantCashbackConfigs.merchantId, emittedIds))) as ConfigRow[]);
+
+    const configsById = new Map<string, ConfigRow>();
+    for (const r of configRows) configsById.set(r.merchantId, r);
 
     const lines: string[] = [HEADERS.join(',')];
     for (const m of emitted) {
