@@ -9,6 +9,7 @@ import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { PayoutsByAssetTable } from '~/components/features/admin/PayoutsByAssetTable';
 import { SupplierSpendCard } from '~/components/features/admin/SupplierSpendCard';
+import { SupplierSpendActivityChart } from '~/components/features/admin/SupplierSpendActivityChart';
 import { OperatorStatsCard } from '~/components/features/admin/OperatorStatsCard';
 import { TopUsersByPendingPayoutCard } from '~/components/features/admin/TopUsersByPendingPayoutCard';
 import { UsersRecyclingActivityCard } from '~/components/features/admin/UsersRecyclingActivityCard';
@@ -504,6 +505,12 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
           value column within the CTX discount.
         </p>
         <SupplierSpendCard />
+        <div className="mt-5">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            30-day trend
+          </p>
+          <SupplierSpendActivityChart />
+        </div>
       </section>
 
       <section>

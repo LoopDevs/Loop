@@ -247,6 +247,44 @@ export async function getSupplierSpend(
 }
 
 /**
+ * Per-day per-currency supplier-spend activity (ADR 013 / 015). Time-
+ * axis of `SupplierSpendRow` — same columns, but bucketed by
+ * `fulfilledAt` UTC over the last N days.
+ */
+export interface SupplierSpendActivityDay {
+  day: string;
+  currency: string;
+  count: number;
+  faceValueMinor: string;
+  wholesaleMinor: string;
+  userCashbackMinor: string;
+  loopMarginMinor: string;
+}
+
+export interface SupplierSpendActivityResponse {
+  windowDays: number;
+  currency: 'USD' | 'GBP' | 'EUR' | null;
+  days: SupplierSpendActivityDay[];
+}
+
+/**
+ * `GET /api/admin/supplier-spend/activity` — per-day per-currency
+ * supplier-spend time-series. Pass `?currency=USD|GBP|EUR` to
+ * zero-fill days (stable chart layout).
+ */
+export async function getSupplierSpendActivity(
+  opts: { days?: number; currency?: 'USD' | 'GBP' | 'EUR' } = {},
+): Promise<SupplierSpendActivityResponse> {
+  const params = new URLSearchParams();
+  if (opts.days !== undefined) params.set('days', String(opts.days));
+  if (opts.currency !== undefined) params.set('currency', opts.currency);
+  const qs = params.toString();
+  return authenticatedRequest<SupplierSpendActivityResponse>(
+    `/api/admin/supplier-spend/activity${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
+/**
  * Per-operator order-count / success-count / failure-count breakdown
  * (ADR 013). Complements `SupplierSpendRow` — spend is "what did we
  * pay CTX this window", operator-stats is "which CTX operator actually
