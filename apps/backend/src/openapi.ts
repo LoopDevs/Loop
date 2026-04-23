@@ -4883,6 +4883,35 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/admin/treasury.csv',
+  summary: 'Treasury snapshot CSV for SOC-2 / audit evidence (ADR 009/015/018).',
+  description:
+    'Point-in-time long-form CSV of the same aggregate /api/admin/treasury serves. Columns: metric,key,value. Metric vocabulary: snapshot_taken_at, outstanding, ledger_total, liability, liability_issuer, asset_stroops, payout_state, operator, operator_pool_size. Successive snapshots diff cleanly in audit tooling — auditors can eyeball which field moved between evidence runs. Reuses the JSON snapshot handler so no aggregate drift.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'CSV body',
+      content: { 'text/csv; charset=utf-8': { schema: z.string() } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/admin/operators-snapshot.csv',
   summary: 'Per-operator fleet snapshot CSV for CTX reviews (ADR 013/018/022).',
   description:
