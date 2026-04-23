@@ -176,6 +176,31 @@ describe('operatorFetch', () => {
     fetchMock = vi.spyOn(global, 'fetch').mockRejectedValue(err);
     await expect(operatorFetch('https://example.local/x')).rejects.toBe(err);
   });
+
+  it('A2-1510: applies a default 30s timeout signal when the caller supplies none', async () => {
+    const captured: Array<RequestInit | undefined> = [];
+    fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
+      captured.push(init);
+      return new Response('{}', { status: 200 });
+    });
+    await operatorFetch('https://example.local/x');
+    expect(captured).toHaveLength(1);
+    // Fetch init should have a signal present — the default timeout
+    // we inject. We don't assert the exact ms (timer may drift) — the
+    // contract is "not undefined".
+    expect(captured[0]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('A2-1510: respects a caller-provided signal verbatim (no double timeout)', async () => {
+    const captured: Array<RequestInit | undefined> = [];
+    fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
+      captured.push(init);
+      return new Response('{}', { status: 200 });
+    });
+    const callerController = new AbortController();
+    await operatorFetch('https://example.local/x', { signal: callerController.signal });
+    expect(captured[0]?.signal).toBe(callerController.signal);
+  });
 });
 
 describe('getOperatorHealth', () => {
