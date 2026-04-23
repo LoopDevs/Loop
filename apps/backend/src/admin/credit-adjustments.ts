@@ -14,6 +14,7 @@
  * Response envelope: `{ result, audit }` per ADR 017.
  */
 import type { Context } from 'hono';
+import { UUID_RE } from '../uuid.js';
 import { z } from 'zod';
 import { HOME_CURRENCIES } from '../db/schema.js';
 import type { User } from '../db/users.js';
@@ -29,8 +30,6 @@ import {
 } from './idempotency.js';
 
 const log = logger.child({ handler: 'admin-credit-adjustment' });
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Body shape. `amountMinor` is a signed integer-as-string to survive

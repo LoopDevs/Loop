@@ -12,14 +12,13 @@
  * and uses `updatedAt` to spot recent support edits.
  */
 import type { Context } from 'hono';
+import { UUID_RE } from '../uuid.js';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { users } from '../db/schema.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-user-detail' });
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface AdminUserView {
   id: string;
