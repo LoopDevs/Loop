@@ -16,6 +16,7 @@
  * isolation — the @stellar/stellar-sdk integration is just the
  * thin shim that converts an intent into a signed tx.
  */
+import { randomBytes } from 'node:crypto';
 import type { HomeCurrency } from '../db/schema.js';
 import { payoutAssetFor, type LoopAssetCode } from './payout-asset.js';
 
@@ -51,8 +52,43 @@ export interface BuildPayoutArgs {
   homeCurrency: HomeCurrency;
   /** Cashback owed to the user in minor units (pence / cents). */
   userCashbackMinor: bigint;
-  /** Something uniquely identifying the order, used for the memo text. Capped at 28 chars. */
-  memoSeed: string;
+  /**
+   * Optional test-only memo override. Production leaves this
+   * undefined and the builder generates a fresh 20-char base32
+   * random memo via `generatePayoutMemo` (A2-605). Persist whatever
+   * memo comes out into `pending_payouts.memo_text` so the submit
+   * worker's idempotency pre-check (findOutboundPaymentByMemo)
+   * can find the prior landed payment on retry.
+   */
+  memoText?: string;
+}
+
+/**
+ * A2-605: generates a fresh 20-char base32 payout memo with 100 bits
+ * of entropy. Earlier versions used `orderId.slice(0, 28)`, which is
+ * a UUID prefix — ~94 bits of effective entropy after factoring out
+ * the fixed variant/version bits, with a ~2^-47 birthday-collision
+ * ceiling that's fine in theory but treats the memo as a derived
+ * identifier rather than one that's engineered for uniqueness. A
+ * dedicated generator keeps the memo independent of the order id's
+ * shape so future order-id changes can't narrow collision resistance.
+ *
+ * Mirrors `generatePaymentMemo` in orders/repo.ts for consistency:
+ * same alphabet, same 20-char width, same entropy budget. Both write
+ * through a text memo (Stellar memo_text, 28 bytes max).
+ */
+export function generatePayoutMemo(): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const buf = new Uint8Array(20);
+  // node:crypto.randomBytes — cryptographic-grade CSPRNG, safe for
+  // generating identifiers at scale.
+  const bytes = randomBytes(20);
+  for (let i = 0; i < 20; i++) buf[i] = bytes[i]!;
+  let out = '';
+  for (const byte of buf) {
+    out += alphabet[byte % alphabet.length];
+  }
+  return out;
 }
 
 /**
@@ -84,7 +120,7 @@ export function buildPayoutIntent(args: BuildPayoutArgs): PayoutDecision {
       assetCode: asset.code,
       assetIssuer: asset.issuer,
       amountStroops: args.userCashbackMinor * 100_000n,
-      memoText: args.memoSeed.slice(0, 28),
+      memoText: args.memoText ?? generatePayoutMemo(),
     },
   };
 }

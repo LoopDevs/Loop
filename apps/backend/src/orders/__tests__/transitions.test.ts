@@ -158,7 +158,7 @@ vi.mock('../../credits/payout-builder.js', () => ({
     userCashbackMinor: bigint;
     stellarAddress: string | null;
     homeCurrency: string;
-    memoSeed: string;
+    memoText?: string;
   }) => {
     if (payoutBuilderMock.decision !== null) return payoutBuilderMock.decision;
     if (args.userCashbackMinor <= 0n) return { kind: 'skip', reason: 'no_cashback' };
@@ -170,7 +170,7 @@ vi.mock('../../credits/payout-builder.js', () => ({
         assetCode: `${args.homeCurrency}LOOP`,
         assetIssuer: 'GISSUER',
         amountStroops: args.userCashbackMinor * 100_000n,
-        memoText: args.memoSeed.slice(0, 28),
+        memoText: args.memoText ?? 'mock-memo-20chars000',
       },
     };
   },

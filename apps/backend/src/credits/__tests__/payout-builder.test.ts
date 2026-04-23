@@ -32,7 +32,7 @@ describe('buildPayoutIntent', () => {
       stellarAddress: VALID_ADDRESS,
       homeCurrency: 'USD',
       userCashbackMinor: 0n,
-      memoSeed: 'order-1',
+      memoText: 'order-1',
     });
     expect(d).toEqual({ kind: 'skip', reason: 'no_cashback' });
   });
@@ -43,7 +43,7 @@ describe('buildPayoutIntent', () => {
       stellarAddress: VALID_ADDRESS,
       homeCurrency: 'USD',
       userCashbackMinor: -1n,
-      memoSeed: 'order-1',
+      memoText: 'order-1',
     });
     expect(d).toEqual({ kind: 'skip', reason: 'no_cashback' });
   });
@@ -54,7 +54,7 @@ describe('buildPayoutIntent', () => {
       stellarAddress: null,
       homeCurrency: 'GBP',
       userCashbackMinor: 500n,
-      memoSeed: 'order-1',
+      memoText: 'order-1',
     });
     expect(d).toEqual({ kind: 'skip', reason: 'no_address' });
   });
@@ -68,7 +68,7 @@ describe('buildPayoutIntent', () => {
       stellarAddress: VALID_ADDRESS,
       homeCurrency: 'USD',
       userCashbackMinor: 500n,
-      memoSeed: 'order-1',
+      memoText: 'order-1',
     });
     expect(d).toEqual({ kind: 'skip', reason: 'no_issuer' });
   });
@@ -79,7 +79,7 @@ describe('buildPayoutIntent', () => {
       stellarAddress: VALID_ADDRESS,
       homeCurrency: 'GBP',
       userCashbackMinor: 250n, // £2.50
-      memoSeed: 'order-abc',
+      memoText: 'order-abc', // pinned via override for deterministic assertion
     });
     expect(d.kind).toBe('pay');
     if (d.kind !== 'pay') throw new Error('unreachable');
@@ -92,18 +92,6 @@ describe('buildPayoutIntent', () => {
     });
   });
 
-  it('truncates memo to 28 bytes (Stellar memo_text limit)', () => {
-    payoutAssetMock.EUR.issuer = 'G' + 'D'.repeat(55);
-    const d = buildPayoutIntent({
-      stellarAddress: VALID_ADDRESS,
-      homeCurrency: 'EUR',
-      userCashbackMinor: 1n,
-      memoSeed: 'x'.repeat(40),
-    });
-    if (d.kind !== 'pay') throw new Error('unreachable');
-    expect(d.intent.memoText).toHaveLength(28);
-  });
-
   it('checks skip reasons in a stable order: no_cashback first, then no_address, then no_issuer', () => {
     payoutAssetMock.USD.issuer = null;
     // 0 cashback + no address + no issuer — no_cashback wins so the
@@ -112,7 +100,7 @@ describe('buildPayoutIntent', () => {
       stellarAddress: null,
       homeCurrency: 'USD',
       userCashbackMinor: 0n,
-      memoSeed: 'order-1',
+      memoText: 'order-1',
     });
     expect(d).toEqual({ kind: 'skip', reason: 'no_cashback' });
   });
