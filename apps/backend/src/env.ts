@@ -89,6 +89,14 @@ export const EnvSchema = z.object({
   // deployments set it to `true` explicitly via `fly.toml`.
   TRUST_PROXY: envBoolean.default(false),
 
+  // Rate-limit escape hatch for e2e test harnesses. The mocked-
+  // e2e suite drives the purchase flow with Playwright retries,
+  // which collides with the 5/min request-otp limit. Set to `1`
+  // ONLY in test configs (playwright.mocked.config.ts, playwright
+  // .config.ts); production must never set this — it disables
+  // every per-IP limit on every route.
+  DISABLE_RATE_LIMITING: envBoolean.default(false),
+
   // Discord webhooks (optional — for notifications)
   DISCORD_WEBHOOK_ORDERS: z.string().url().optional(),
   DISCORD_WEBHOOK_MONITORING: z.string().url().optional(),

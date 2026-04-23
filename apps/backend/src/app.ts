@@ -211,6 +211,17 @@ function rateLimit(
   windowMs: number,
 ): (c: Context, next: () => Promise<void>) => Promise<void | Response> {
   return async (c, next): Promise<void | Response> => {
+    // Escape hatch for e2e test runs. The mocked-e2e suite drives
+    // the purchase flow twice with Playwright retries, which
+    // collides with the 5/min request-otp limit on a cold start.
+    // Setting DISABLE_RATE_LIMITING=1 lets the harness bypass the
+    // limiter without tripping the unit tests that explicitly
+    // verify the 429 path under NODE_ENV=test. Production never
+    // sets this flag.
+    if (env.DISABLE_RATE_LIMITING) {
+      await next();
+      return;
+    }
     const ip = clientIpFor(c);
     const now = Date.now();
     const entry = rateLimitMap.get(ip);
