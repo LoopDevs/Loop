@@ -152,6 +152,19 @@ describe('POST /api/auth/request-otp', () => {
     expect(res.status).toBe(502);
   });
 
+  it('A2-558: collapses fetch network failures to the generic 200 envelope (no enumeration sidechannel)', async () => {
+    // A fetch rejection simulates a transient network / DNS / timeout
+    // error. Prior behaviour returned 500 which diverges from the 200
+    // "Verification code sent" envelope used for 2xx + 4xx, letting
+    // an attacker distinguish "backend networking broken" from
+    // "email valid/invalid". Collapse to 200.
+    mockFetch.mockRejectedValueOnce(new Error('DNS failure'));
+    const res = await post('/api/auth/request-otp', { email: 'u@example.com', platform: 'web' });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, string>;
+    expect(body.message).toContain('Verification');
+  });
+
   it('maps platform ios → CTX_CLIENT_ID_IOS in upstream body', async () => {
     mockFetch.mockResolvedValueOnce(new Response('{}', { status: 200 }));
     await post('/api/auth/request-otp', { email: 'u@example.com', platform: 'ios' });

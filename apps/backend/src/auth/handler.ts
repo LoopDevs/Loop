@@ -96,13 +96,23 @@ export async function requestOtpHandler(c: Context): Promise<Response> {
     return c.json({ message: 'Verification code sent' });
   } catch (err) {
     if (err instanceof CircuitOpenError) {
-      return c.json(
-        { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' },
-        503,
-      );
+      // A2-558: the enumeration-defense envelope above flattens every
+      // upstream outcome (200 success, 4xx "no such user") into a
+      // uniform `{ message: 'Verification code sent' }`. A 503 here
+      // would re-open that sidechannel — an attacker probing the
+      // endpoint could distinguish "circuit open" (service down)
+      // from "any other state". Return the same generic 200 envelope
+      // so the response shape is invariant w.r.t. backend state.
+      // Log so ops still sees the circuit-open event.
+      log.warn('request-otp upstream circuit open — returning generic 200 envelope');
+      return c.json({ message: 'Verification code sent' });
     }
     log.error({ err }, 'Auth proxy error');
-    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to send verification code' }, 500);
+    // Same rationale as the CircuitOpen branch above — an INTERNAL
+    // 500 would also leak the backend state to an enumeration
+    // probe. Collapse to the generic 200. Users who genuinely typed
+    // their email will just not receive a code; logs catch the error.
+    return c.json({ message: 'Verification code sent' });
   }
 }
 
