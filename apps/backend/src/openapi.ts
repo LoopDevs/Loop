@@ -862,6 +862,74 @@ const AdminSupplierSpendResponse = registry.register(
   }),
 );
 
+// ─── Admin — supplier-spend activity (ADR 013 / 015) ───────────────────────
+
+const AdminSupplierSpendActivityDay = registry.register(
+  'AdminSupplierSpendActivityDay',
+  z.object({
+    day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    currency: z.string().length(3),
+    count: z.number().int().min(0),
+    faceValueMinor: z.string(),
+    wholesaleMinor: z.string(),
+    userCashbackMinor: z.string(),
+    loopMarginMinor: z.string(),
+  }),
+);
+
+const AdminSupplierSpendActivityResponse = registry.register(
+  'AdminSupplierSpendActivityResponse',
+  z.object({
+    windowDays: z.number().int().min(1).max(180),
+    currency: z.enum(['USD', 'GBP', 'EUR']).nullable(),
+    days: z.array(AdminSupplierSpendActivityDay),
+  }),
+);
+
+// ─── Admin — treasury credit-flow (ADR 009 / 015) ──────────────────────────
+
+const AdminTreasuryCreditFlowDay = registry.register(
+  'AdminTreasuryCreditFlowDay',
+  z.object({
+    day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    currency: z.string().length(3),
+    creditedMinor: z.string(),
+    debitedMinor: z.string(),
+    netMinor: z.string(),
+  }),
+);
+
+const AdminTreasuryCreditFlowResponse = registry.register(
+  'AdminTreasuryCreditFlowResponse',
+  z.object({
+    windowDays: z.number().int().min(1).max(180),
+    currency: z.enum(['USD', 'GBP', 'EUR']).nullable(),
+    days: z.array(AdminTreasuryCreditFlowDay),
+  }),
+);
+
+// ─── Admin — merchant × operator mix (ADR 013 / 022) ───────────────────────
+
+const AdminMerchantOperatorMixRow = registry.register(
+  'AdminMerchantOperatorMixRow',
+  z.object({
+    operatorId: z.string(),
+    orderCount: z.number().int().min(0),
+    fulfilledCount: z.number().int().min(0),
+    failedCount: z.number().int().min(0),
+    lastOrderAt: z.string().datetime(),
+  }),
+);
+
+const AdminMerchantOperatorMixResponse = registry.register(
+  'AdminMerchantOperatorMixResponse',
+  z.object({
+    merchantId: z.string(),
+    since: z.string().datetime(),
+    rows: z.array(AdminMerchantOperatorMixRow),
+  }),
+);
+
 // ─── Admin — operator stats (ADR 013) ──────────────────────────────────────
 
 const AdminOperatorStatsRow = registry.register(
@@ -2872,6 +2940,138 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error loading activity',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/supplier-spend/activity',
+  summary: 'Per-day per-currency supplier-spend time-series (ADR 013 / 015).',
+  description:
+    "Time-axis of `/api/admin/supplier-spend`: per-day aggregate of face/wholesale/cashback/margin for fulfilled orders bucketed by `fulfilled_at::date` (UTC). `?currency=USD|GBP|EUR` zero-fills days via LEFT JOIN; without the filter, only (day, currency) pairs with activity appear. Pairs with `/api/admin/treasury/credit-flow` (ledger in) and `/api/admin/payouts-activity` (chain settle out) as the 'treasury-velocity triplet' ops watches to know money moved as expected today.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(180).optional(),
+      currency: z.enum(['USD', 'GBP', 'EUR']).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Per-day per-currency rows',
+      content: { 'application/json': { schema: AdminSupplierSpendActivityResponse } },
+    },
+    400: {
+      description: 'Unknown `currency`',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the aggregate',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/treasury/credit-flow',
+  summary: 'Per-day credited/debited/net ledger flow (ADR 009 / 015).',
+  description:
+    "Per-day × per-currency ledger delta from `credit_transactions`. Answers the treasury question the snapshot can't: 'are we generating liability faster than we settle it?'. A week of net > 0 days means cashback issuance is outpacing user settlement — treasury plans Stellar-side funding ahead of the curve. Credited = sum(amount_minor) for positive-amount types (cashback, interest, refund) + positive adjustments; debited = abs(sum) for negative-amount types (spend, withdrawal). bigint-as-string. `?currency` zero-fills; default 30d, cap 180d.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(180).optional(),
+      currency: z.enum(['USD', 'GBP', 'EUR']).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Per-day credit-flow rows',
+      content: { 'application/json': { schema: AdminTreasuryCreditFlowResponse } },
+    },
+    400: {
+      description: 'Unknown `currency`',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the aggregate',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/merchants/{merchantId}/operator-mix',
+  summary: 'Per-merchant × per-operator attribution (ADR 013 / 022).',
+  description:
+    "For one merchant, aggregate orders by `ctx_operator_id`. Exposes the merchant × operator axis currently not surfaced by `/operator-stats` (fleet, any merchant) or `/merchant-stats` (fleet, any operator). Answers the incident-triage question: 'merchant X is slow right now — which operator is primarily carrying them?'. Zero-attribution merchants return 200 with rows: []. Only rows with non-null `ctx_operator_id` aggregated.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({
+      merchantId: z.string().min(1).max(128),
+    }),
+    query: z.object({
+      since: z
+        .string()
+        .datetime()
+        .optional()
+        .openapi({ description: 'ISO-8601 — lower bound on createdAt. Defaults to 24h ago.' }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Per-operator rows scoped to the merchant',
+      content: { 'application/json': { schema: AdminMerchantOperatorMixResponse } },
+    },
+    400: {
+      description: 'Malformed `merchantId` or `since`',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the aggregate',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
