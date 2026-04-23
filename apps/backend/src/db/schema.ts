@@ -141,14 +141,33 @@ export const creditTransactions = pgTable(
     currency: char('currency', { length: 3 }).notNull(),
     referenceType: text('reference_type'),
     referenceId: text('reference_id'),
+    // Period identifier for `type='interest'` rows — the
+    // accrue-interest caller passes a string like `"2026-04-23"` for
+    // daily accrual. Combined with the partial unique index below,
+    // this makes interest accrual idempotent per period (audit
+    // A2-906). Always NULL for non-interest rows (audit A2-610
+    // cluster fix).
+    periodCursor: text('period_cursor'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('credit_transactions_user_created').on(t.userId, t.createdAt),
     index('credit_transactions_reference').on(t.referenceType, t.referenceId),
+    // Partial unique index enforces period-level idempotency for
+    // interest accrual. A re-tick with the same `periodCursor`
+    // fails at the DB layer rather than silently double-crediting.
+    uniqueIndex('credit_transactions_interest_period_unique')
+      .on(t.userId, t.currency, t.periodCursor)
+      .where(sql`${t.type} = 'interest'`),
     check(
       'credit_transactions_type_known',
       sql`${t.type} IN ('cashback', 'interest', 'spend', 'withdrawal', 'refund', 'adjustment')`,
+    ),
+    // period_cursor is populated iff type='interest'. Caller supplies
+    // the cursor; everything else must leave it NULL.
+    check(
+      'credit_transactions_period_cursor_interest_only',
+      sql`(${t.type} = 'interest') = (${t.periodCursor} IS NOT NULL)`,
     ),
     // Amount sign follows the type — catches bugs where a cashback
     // row is accidentally negative or a withdrawal positive.
