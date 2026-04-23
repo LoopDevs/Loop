@@ -32,12 +32,13 @@ function fmtRelative(iso: string): string {
 }
 
 /**
- * Per-operator stats card for /admin/treasury (ADR 013). Sits
+ * Per-operator stats card for /admin/treasury (ADR 013 / 022). Sits
  * alongside SupplierSpendCard: spend answers "what did we pay CTX",
  * this one answers "which CTX operator actually did the work".
- * Each row links into `/admin/orders?ctxOperatorId=<id>` so an
- * operator with a failing streak is one click from the per-operator
- * orders drill-down.
+ * The operator name drills into `/admin/operators/:operatorId` (the
+ * full operator detail page that lands the operator-quartet
+ * endpoints together); the per-row failed-count stays wired to the
+ * admin/orders filter so ops can jump straight to incident triage.
  */
 export function OperatorStatsCard(): React.JSX.Element {
   const since = new Date(Date.now() - WINDOW_HOURS * 60 * 60 * 1000).toISOString();
@@ -90,9 +91,9 @@ export function OperatorStatsCard(): React.JSX.Element {
             <tr key={row.operatorId}>
               <td className="px-3 py-2 font-medium text-gray-900 dark:text-white">
                 <Link
-                  to={`/admin/orders?ctxOperatorId=${encodeURIComponent(row.operatorId)}`}
+                  to={`/admin/operators/${encodeURIComponent(row.operatorId)}`}
                   className="text-blue-600 hover:underline dark:text-blue-400"
-                  aria-label={`Show orders carried by ${row.operatorId}`}
+                  aria-label={`Open operator detail for ${row.operatorId}`}
                 >
                   {row.operatorId}
                 </Link>
