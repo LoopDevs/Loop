@@ -76,6 +76,9 @@ export async function loader(): Promise<Response> {
   const urls: string[] = [
     urlTag(`${PUBLIC_BASE_URL}/`, now, 'weekly', '1.0'),
     urlTag(`${PUBLIC_BASE_URL}/cashback`, lastmod, 'daily', '0.9'),
+    // Trustlines page is near-static — issuer accounts only rotate
+    // via ADR-015 key ceremony, which is rare. Monthly changefreq.
+    urlTag(`${PUBLIC_BASE_URL}/trustlines`, now, 'monthly', '0.7'),
   ];
 
   if (response !== null) {

@@ -13,6 +13,7 @@ export default [
   route('gift-card/:name', 'routes/gift-card.$name.tsx'),
   route('cashback', 'routes/cashback.tsx'),
   route('cashback/:slug', 'routes/cashback.$slug.tsx'),
+  route('trustlines', 'routes/trustlines.tsx'),
   ...sitemapRoutes,
   route('auth', 'routes/auth.tsx'),
   route('onboarding', 'routes/onboarding.tsx'),
