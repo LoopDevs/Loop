@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router';
 import type { Route } from './+types/orders';
 import type { Order } from '@loop/shared';
@@ -7,6 +8,8 @@ import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAuth } from '~/hooks/use-auth';
 import { useOrders } from '~/hooks/use-orders';
 import { useAppConfig } from '~/hooks/use-app-config';
+import { shouldRetry } from '~/hooks/query-retry';
+import { getUserPendingPayouts, type UserPendingPayoutState } from '~/services/user';
 import { Navbar } from '~/components/features/Navbar';
 import { PageHeader } from '~/components/ui/PageHeader';
 import { OrderRowSkeleton } from '~/components/ui/Skeleton';
@@ -56,7 +59,61 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   },
 };
 
-function OrderRow({ order }: { order: Order }): React.JSX.Element {
+/**
+ * Per-row payout-state dot. Compact by design — the list renders a
+ * lot of rows and competing with the order status pill would clutter
+ * the line. A coloured dot + short label only when the user actually
+ * has a payout for this order. Self-hides when `state === null`
+ * (the order is pre-cashback, credit-only, or the user's payouts
+ * list isn't cached yet).
+ */
+const PAYOUT_DOT_UI: Record<
+  UserPendingPayoutState,
+  { label: string; dot: string; classes: string }
+> = {
+  pending: {
+    label: 'Queued',
+    dot: 'bg-gray-400',
+    classes: 'text-gray-600 dark:text-gray-400',
+  },
+  submitted: {
+    label: 'Submitting',
+    dot: 'bg-yellow-500',
+    classes: 'text-yellow-700 dark:text-yellow-400',
+  },
+  confirmed: {
+    label: 'Paid',
+    dot: 'bg-green-500',
+    classes: 'text-green-700 dark:text-green-400',
+  },
+  failed: {
+    label: 'Failed',
+    dot: 'bg-red-500',
+    classes: 'text-red-700 dark:text-red-400',
+  },
+};
+
+function PayoutDot({ state }: { state: UserPendingPayoutState }): React.JSX.Element {
+  const ui = PAYOUT_DOT_UI[state];
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-xs font-medium ${ui.classes}`}
+      aria-label={`Cashback payout: ${ui.label}`}
+      title={`Cashback payout: ${ui.label}`}
+    >
+      <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${ui.dot}`} />
+      {ui.label}
+    </span>
+  );
+}
+
+function OrderRow({
+  order,
+  payoutState,
+}: {
+  order: Order;
+  payoutState: UserPendingPayoutState | null;
+}): React.JSX.Element {
   const status = STATUS_LABELS[order.status] ?? STATUS_LABELS['pending']!;
   // A malformed upstream createdAt would otherwise render "Invalid Date" in
   // the UI. Fall back to the raw string so the row is still informative.
@@ -76,7 +133,10 @@ function OrderRow({ order }: { order: Order }): React.JSX.Element {
     >
       <div className="flex-1 min-w-0">
         <p className="font-medium text-gray-900 dark:text-white truncate">{order.merchantName}</p>
-        <p className="text-sm text-gray-500 dark:text-gray-400">{date}</p>
+        <div className="mt-0.5 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+          <span>{date}</span>
+          {payoutState !== null ? <PayoutDot state={payoutState} /> : null}
+        </div>
       </div>
       <div className="flex items-center gap-3 ml-4">
         <span className="text-sm font-semibold text-gray-900 dark:text-white">
@@ -124,6 +184,30 @@ export default function OrdersRoute(): React.JSX.Element {
   // on the overview.
   const orders = allOrders.filter((o) => o.status !== 'pending');
   const errorText = errorMessage(error);
+
+  // Single fetch of the user's pending-payouts, mapped by orderId
+  // so each OrderRow gets a cheap O(1) lookup for its settlement
+  // state. 100-row cap is generous for any single /orders page;
+  // fan-out per-row queries would be wasteful when this is a list
+  // view. Re-uses the ['me', 'pending-payouts'] query key so the
+  // `PendingPayoutsCard` on /settings/cashback and this list share
+  // the same cache line. Silent degrade on error — the order-status
+  // pill already carries the primary signal; missing the payout
+  // dot is a minor loss, not a page-crasher.
+  const payoutsQuery = useQuery({
+    queryKey: ['me', 'pending-payouts'],
+    queryFn: () => getUserPendingPayouts({ limit: 100 }),
+    enabled: isAuthenticated,
+    retry: shouldRetry,
+    staleTime: 30_000,
+  });
+  const payoutByOrderId = useMemo(() => {
+    const map = new Map<string, UserPendingPayoutState>();
+    for (const p of payoutsQuery.data?.payouts ?? []) {
+      map.set(p.orderId, p.state);
+    }
+    return map;
+  }, [payoutsQuery.data]);
 
   return (
     <>
@@ -231,7 +315,11 @@ export default function OrdersRoute(): React.JSX.Element {
           <>
             <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
               {orders.map((order) => (
-                <OrderRow key={order.id} order={order} />
+                <OrderRow
+                  key={order.id}
+                  order={order}
+                  payoutState={payoutByOrderId.get(order.id) ?? null}
+                />
               ))}
             </div>
 
