@@ -72,6 +72,7 @@ import { adminPayoutsMonthlyHandler } from './admin/payouts-monthly.js';
 import { adminPayoutsActivityHandler } from './admin/payouts-activity.js';
 import { adminPayoutsActivityCsvHandler } from './admin/payouts-activity-csv.js';
 import { adminSupplierSpendActivityCsvHandler } from './admin/supplier-spend-activity-csv.js';
+import { adminOperatorsSnapshotCsvHandler } from './admin/operators-snapshot-csv.js';
 import { adminMerchantStatsHandler } from './admin/merchant-stats.js';
 import { adminMerchantStatsCsvHandler } from './admin/merchant-stats-csv.js';
 import { adminMerchantsFlywheelShareHandler } from './admin/merchants-flywheel-share.js';
@@ -946,6 +947,15 @@ app.get(
   '/api/admin/supplier-spend/activity.csv',
   rateLimit(10, 60_000),
   adminSupplierSpendActivityCsvHandler,
+);
+// Tier-3 CSV of the fleet operator snapshot (ADR 013 / 018 / 022)
+// — joins operator-stats + operator-latency into one row per
+// operator. Handed to CTX relationship owners for quarterly
+// review meetings (SLA + volume + success rate on one sheet).
+app.get(
+  '/api/admin/operators-snapshot.csv',
+  rateLimit(10, 60_000),
+  adminOperatorsSnapshotCsvHandler,
 );
 // Per-merchant cashback stats — which merchants drive volume /
 // cashback outlay / margin. Distinct from supplier-spend (currency

@@ -11,6 +11,7 @@ import {
   type OperatorStatsRow,
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { Spinner } from '~/components/ui/Spinner';
 import { successRatePct } from '~/components/features/admin/OperatorStatsCard';
 
@@ -153,12 +154,23 @@ export default function AdminOperatorsIndexRoute(): React.JSX.Element {
   return (
     <main className="max-w-5xl mx-auto px-6 py-12 space-y-6">
       <AdminNav />
-      <header>
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Admin · Operators</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-          CTX supplier operators — volume, success rate, fulfilment latency (last 24h). Click an
-          operator for the full drill (ADR 013 / 022).
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">
+            Admin · Operators
+          </h1>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+            CTX supplier operators — volume, success rate, fulfilment latency (last 24h). Click an
+            operator for the full drill (ADR 013 / 022).
+          </p>
+        </div>
+        {/* Tier-3 CSV of the joined snapshot for CTX quarterly
+            reviews — hand the relationship owner one sheet. */}
+        <CsvDownloadButton
+          path="/api/admin/operators-snapshot.csv"
+          filename={`operators-snapshot-${new Date().toISOString().slice(0, 10)}.csv`}
+          label="Snapshot CSV"
+        />
       </header>
 
       <section>
