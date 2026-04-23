@@ -285,43 +285,21 @@ describe('getMeHandler', () => {
     expect(res.status).toBe(401);
   });
 
-  it('resolves a CTX bearer via upsertUserFromCtx and returns the profile view', async () => {
-    jwtState.claims = { sub: 'ctx-123', email: 'ctx@example.com' };
-    userState.upsertResult = {
-      id: 'loop-2',
-      email: 'ctx@example.com',
-      isAdmin: true,
-      homeCurrency: 'USD',
-      stellarAddress: null,
-      ctxUserId: 'ctx-123',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    const res = await getMeHandler(makeCtx({ kind: 'ctx', bearerToken: 'ctx-jwt' }));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body).toEqual({
-      id: 'loop-2',
-      email: 'ctx@example.com',
-      isAdmin: true,
-      homeCurrency: 'USD',
-      stellarAddress: null,
-      homeCurrencyBalanceMinor: '0',
-    });
-    expect(userState.upsertCalls).toEqual([{ ctxUserId: 'ctx-123', email: 'ctx@example.com' }]);
-  });
-
-  it('401 when the CTX bearer is unreadable (decodeJwtPayload returns null)', async () => {
-    jwtState.claims = null;
-    const res = await getMeHandler(makeCtx({ kind: 'ctx', bearerToken: 'garbage' }));
+  // A2-550 / A2-551 regression probe: CTX pass-through bearers are no
+  // longer trusted for identity resolution. Previously the handler
+  // used `decodeJwtPayload(bearer).sub` (unverified) to look up the
+  // user — an attacker who could craft any string that base64-decoded
+  // to `{"sub":"<target-user>"}` was treated as that user. The fix
+  // requires a cryptographically-verified Loop-signed token. CTX
+  // pass-through is rejected with 401, including the attack case where
+  // the bearer's payload names another user's id.
+  it('A2-550: rejects CTX pass-through bearers with 401 (forged-sub attack)', async () => {
+    jwtState.claims = { sub: 'some-victim-loop-uuid', email: 'victim@example.com' };
+    const res = await getMeHandler(makeCtx({ kind: 'ctx', bearerToken: 'forged-jwt' }));
     expect(res.status).toBe(401);
-  });
-
-  it('500 when the CTX upsert throws — surfaces a clean internal error', async () => {
-    jwtState.claims = { sub: 'ctx-err', email: 'e@x.com' };
-    userState.upsertThrow = new Error('db exploded');
-    const res = await getMeHandler(makeCtx({ kind: 'ctx', bearerToken: 'ctx' }));
-    expect(res.status).toBe(500);
+    // And the upsert path is never even reached — identity is resolved
+    // solely from the verified Loop-token context.
+    expect(userState.upsertCalls).toEqual([]);
   });
 
   it('omits the ctxUserId and timestamps from the view — only surface id/email/isAdmin/homeCurrency', async () => {
@@ -611,11 +589,10 @@ describe('getCashbackHistoryHandler', () => {
     }
   });
 
-  it('500 when the CTX upsert throws', async () => {
-    jwtState.claims = { sub: 'ctx-err', email: 'e@x.com' };
-    userState.upsertThrow = new Error('db down');
+  it('A2-550: rejects CTX pass-through bearers with 401', async () => {
+    jwtState.claims = { sub: 'some-victim', email: 'v@x.com' };
     const res = await getCashbackHistoryHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
   });
 });
 
@@ -713,11 +690,10 @@ describe('getUserPendingPayoutsHandler', () => {
     expect(payoutState.calls[0]?.limit).toBe(100);
   });
 
-  it('500 when CTX upsert throws', async () => {
-    jwtState.claims = { sub: 'ctx-err', email: 'e@x.com' };
-    userState.upsertThrow = new Error('db down');
+  it('A2-550: rejects CTX pass-through bearers with 401', async () => {
+    jwtState.claims = { sub: 'some-victim', email: 'v@x.com' };
     const res = await getUserPendingPayoutsHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
   });
 });
 
@@ -784,11 +760,10 @@ describe('getUserCreditsHandler', () => {
     expect(body.credits[1]!['balanceMinor']).toBe('890000');
   });
 
-  it('500 when the CTX upsert throws', async () => {
-    jwtState.claims = { sub: 'ctx-err', email: 'e@x.com' };
-    userState.upsertThrow = new Error('db down');
+  it('A2-550: rejects CTX pass-through bearers with 401', async () => {
+    jwtState.claims = { sub: 'some-victim', email: 'v@x.com' };
     const res = await getUserCreditsHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
   });
 });
 
@@ -877,13 +852,12 @@ describe('getUserPendingPayoutDetailHandler', () => {
     });
   });
 
-  it('500 when CTX upsert throws', async () => {
-    jwtState.claims = { sub: 'ctx-err', email: 'e@x.com' };
-    userState.upsertThrow = new Error('db down');
+  it('A2-550: rejects CTX pass-through bearers with 401', async () => {
+    jwtState.claims = { sub: 'some-victim', email: 'v@x.com' };
     const res = await getUserPendingPayoutDetailHandler(
       makeCtx({ kind: 'ctx', bearerToken: 't' }, undefined, undefined, { id: validId }),
     );
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
   });
 });
 

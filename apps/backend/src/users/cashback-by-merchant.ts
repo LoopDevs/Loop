@@ -31,9 +31,7 @@ import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { creditTransactions, orders } from '../db/schema.js';
 import type { User } from '../db/users.js';
-import { decodeJwtPayload } from '../auth/jwt.js';
-import { upsertUserFromCtx, getUserById } from '../db/users.js';
-import type { LoopAuthContext } from '../auth/handler.js';
+import { resolveLoopAuthenticatedUser } from '../auth/authenticated-user.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'user-cashback-by-merchant' });
@@ -67,22 +65,11 @@ interface AggRow {
 }
 
 /**
- * Caller resolver — mirrors the pattern in users/handler.ts so Loop
- * bearers get their row by id and CTX bearers fall through the upsert
- * path on first touch.
+ * A2-550 / A2-551 fix: identity resolution now requires a verified
+ * Loop-signed token. See `apps/backend/src/auth/authenticated-user.ts`.
  */
 async function resolveCallingUser(c: Context): Promise<User | null> {
-  const auth = c.get('auth') as LoopAuthContext | undefined;
-  if (auth === undefined) return null;
-  if (auth.kind === 'loop') {
-    return await getUserById(auth.userId);
-  }
-  const claims = decodeJwtPayload(auth.bearerToken);
-  if (claims === null) return null;
-  return await upsertUserFromCtx({
-    ctxUserId: claims.sub,
-    email: typeof claims['email'] === 'string' ? claims['email'] : undefined,
-  });
+  return await resolveLoopAuthenticatedUser(c);
 }
 
 export async function getCashbackByMerchantHandler(c: Context): Promise<Response> {
