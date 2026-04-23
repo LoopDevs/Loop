@@ -864,6 +864,29 @@ const CashbackActivityResponse = registry.register(
   }),
 );
 
+// ─── Admin — cashback realization (ADR 009 / 015) ──────────────────────────
+
+const CashbackRealizationRow = registry.register(
+  'CashbackRealizationRow',
+  z.object({
+    currency: z.string().length(3).nullable().openapi({
+      description: 'ISO 4217 code; `null` for the fleet-wide aggregate row.',
+    }),
+    earnedMinor: z.string(),
+    spentMinor: z.string(),
+    withdrawnMinor: z.string(),
+    outstandingMinor: z.string(),
+    recycledBps: z.number().int().nonnegative().max(10_000).openapi({
+      description: 'spent / earned, as basis points (10 000 = 100.00%).',
+    }),
+  }),
+);
+
+const CashbackRealizationResponse = registry.register(
+  'CashbackRealizationResponse',
+  z.object({ rows: z.array(CashbackRealizationRow) }),
+);
+
 // ─── Admin — stuck-orders triage ───────────────────────────────────────────
 
 const StuckOrderRow = registry.register(
@@ -4251,6 +4274,38 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error computing the series',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/cashback-realization',
+  summary: 'Cashback realization rate — the flywheel-health KPI (ADR 009 / 015).',
+  description:
+    'Per-currency + fleet-wide aggregate of lifetime cashback emitted, spent on new Loop orders, withdrawn off-ledger, plus outstanding off-chain liability. `recycledBps = spent / earned × 10 000` — the share of emitted cashback that has flowed back into new orders. High realization = flywheel turning; low realization = cashback sitting as stagnant liability. Zero-earned currencies are omitted from per-currency rows but the aggregate row always ships (`currency: null`).',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Per-currency rows + a fleet-wide aggregate',
+      content: { 'application/json': { schema: CashbackRealizationResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the aggregate',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },

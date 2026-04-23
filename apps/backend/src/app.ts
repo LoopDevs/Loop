@@ -71,6 +71,7 @@ import { adminStuckOrdersHandler } from './admin/stuck-orders.js';
 import { adminStuckPayoutsHandler } from './admin/stuck-payouts.js';
 import { adminCashbackActivityHandler } from './admin/cashback-activity.js';
 import { adminCashbackActivityCsvHandler } from './admin/cashback-activity-csv.js';
+import { adminCashbackRealizationHandler } from './admin/cashback-realization.js';
 import { adminCashbackMonthlyHandler } from './admin/cashback-monthly.js';
 import { adminPayoutsMonthlyHandler } from './admin/payouts-monthly.js';
 import { adminPayoutsActivityHandler } from './admin/payouts-activity.js';
@@ -974,6 +975,11 @@ app.get('/api/admin/stuck-payouts', rateLimit(120, 60_000), adminStuckPayoutsHan
 // Cheap read — single generate_series + LEFT JOIN, bounded at 180
 // days so the payload can't explode.
 app.get('/api/admin/cashback-activity', rateLimit(60, 60_000), adminCashbackActivityHandler);
+// Cashback realization rate — per-currency earned vs spent vs
+// outstanding, plus a fleet-wide aggregate row. The flywheel-health
+// KPI: high realization = users recycling cashback into new orders
+// rather than hoarding or withdrawing (ADR 009/015).
+app.get('/api/admin/cashback-realization', rateLimit(60, 60_000), adminCashbackRealizationHandler);
 // Finance-ready CSV: daily × per-currency cashback accrual. Same
 // aggregate as the JSON surface, flattened for spreadsheet use.
 // Tier-3 rate limit — month-end finance use, not polling.
