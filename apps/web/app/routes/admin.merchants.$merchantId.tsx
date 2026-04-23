@@ -21,7 +21,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
-import { ApiException } from '@loop/shared';
+import { ApiException, merchantSlug } from '@loop/shared';
 import type { Route } from './+types/admin.merchants.$merchantId';
 import { useAllMerchants } from '~/hooks/use-merchants';
 import { useAuth } from '~/hooks/use-auth';
@@ -131,11 +131,29 @@ export default function AdminMerchantDetailRoute(): React.JSX.Element {
               <CopyButton text={merchantId} label="Copy merchant id" />
             </p>
           </div>
-          {merchant?.enabled === false ? (
-            <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800 dark:bg-red-900/30 dark:text-red-300">
-              disabled
-            </span>
-          ) : null}
+          <div className="flex items-start gap-2">
+            {/* Cross-link to the public /cashback/:slug landing
+                (#663). Ops previewing a commercial / BD update
+                wants to see the page exactly as a visitor would
+                before flipping the config. Only renders when the
+                merchant is in the catalog — an evicted merchant
+                (ADR 021) has no public URL. */}
+            {merchant !== undefined ? (
+              <Link
+                to={`/cashback/${merchantSlug(merchant.name)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                View public page ↗
+              </Link>
+            ) : null}
+            {merchant?.enabled === false ? (
+              <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800 dark:bg-red-900/30 dark:text-red-300">
+                disabled
+              </span>
+            ) : null}
+          </div>
         </header>
         {merchant === undefined ? (
           <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
