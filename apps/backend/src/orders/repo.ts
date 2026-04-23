@@ -17,11 +17,35 @@
  * lands in Loop's margin — errs toward Loop, never toward a user
  * being owed an extra penny we haven't reserved.
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { orders, merchantCashbackConfigs, type OrderPaymentMethod } from '../db/schema.js';
+import {
+  orders,
+  merchantCashbackConfigs,
+  userCredits,
+  creditTransactions,
+  type OrderPaymentMethod,
+} from '../db/schema.js';
 
 export type Order = typeof orders.$inferSelect;
+
+/**
+ * Raised by `createOrder` when a credit-funded order cannot be paid
+ * because the user's live balance (re-read FOR UPDATE inside the
+ * same txn that would debit it) is below the charge amount.
+ *
+ * The caller's prior `hasSufficientCredit` fast-path check is a UX
+ * nicety, not a guard — a concurrent admin adjustment or a
+ * just-captured spend between the check and the insert can leave
+ * the balance insufficient. In that case the txn aborts and nothing
+ * is written; callers translate this to a 400.
+ */
+export class InsufficientCreditError extends Error {
+  constructor() {
+    super('Loop credit balance is below the order amount');
+    this.name = 'InsufficientCreditError';
+  }
+}
 
 export interface CashbackSplit {
   wholesalePct: string;
@@ -153,9 +177,28 @@ export interface CreateOrderArgs {
 }
 
 /**
- * Writes a new order row in `pending_payment` state with the cashback
- * split pinned. Returns the row so the handler can shape the payment
- * instructions back to the client.
+ * Writes a new order row. For on-chain payment methods the row lands
+ * in `pending_payment` awaiting a watcher-observed deposit. For
+ * credit-funded orders (A2-601 fix) this function additionally debits
+ * the user's `user_credits` balance and transitions the order to
+ * `paid` inside the same transaction — so a caller who observes a
+ * returned order is guaranteed either:
+ *
+ *   - `state='pending_payment'` with no ledger side-effect (on-chain
+ *     orders, awaiting external payment), or
+ *   - `state='paid'` with a matching `type='spend'` ledger row and a
+ *     debited balance (credit orders, fully settled).
+ *
+ * There is no intermediate state where the order is created but the
+ * credit isn't yet debited, which means procurement can treat every
+ * `paid` credit order the same as a `paid` on-chain order.
+ *
+ * If the user's live balance (re-read `FOR UPDATE` inside the txn)
+ * is below `chargeMinor`, the function throws
+ * `InsufficientCreditError` and the txn rolls back — no order row
+ * is persisted. The caller's prior `hasSufficientCredit` fast-path
+ * is a UX check, not a guard; a concurrent admin adjustment could
+ * drain the balance between check and insert.
  *
  * Payment memo is generated for on-chain methods (xlm / usdc) and
  * left null for `credit` — a balance debit doesn't cross the chain.
@@ -176,29 +219,97 @@ export async function createOrder(args: CreateOrderArgs): Promise<Order> {
   });
   const paymentMemo =
     args.paymentMemo ?? (args.paymentMethod === 'credit' ? null : generatePaymentMemo());
-  const [row] = await db
-    .insert(orders)
-    .values({
-      userId: args.userId,
-      merchantId: args.merchantId,
-      faceValueMinor: args.faceValueMinor,
-      currency: args.currency,
-      chargeMinor,
-      chargeCurrency,
-      paymentMethod: args.paymentMethod,
-      paymentMemo,
-      wholesalePct: split.wholesalePct,
-      userCashbackPct: split.userCashbackPct,
-      loopMarginPct: split.loopMarginPct,
-      wholesaleMinor: split.wholesaleMinor,
-      userCashbackMinor: split.userCashbackMinor,
-      loopMarginMinor: split.loopMarginMinor,
-    })
-    .returning();
-  if (row === undefined) {
-    throw new Error('createOrder: no row returned');
+
+  const baseValues = {
+    userId: args.userId,
+    merchantId: args.merchantId,
+    faceValueMinor: args.faceValueMinor,
+    currency: args.currency,
+    chargeMinor,
+    chargeCurrency,
+    paymentMethod: args.paymentMethod,
+    paymentMemo,
+    wholesalePct: split.wholesalePct,
+    userCashbackPct: split.userCashbackPct,
+    loopMarginPct: split.loopMarginPct,
+    wholesaleMinor: split.wholesaleMinor,
+    userCashbackMinor: split.userCashbackMinor,
+    loopMarginMinor: split.loopMarginMinor,
+  };
+
+  // For credit-funded orders, do the insert + debit + state flip all
+  // in one txn. Everything else (on-chain) just inserts and returns
+  // pending_payment.
+  if (args.paymentMethod !== 'credit') {
+    const [row] = await db.insert(orders).values(baseValues).returning();
+    if (row === undefined) {
+      throw new Error('createOrder: no row returned');
+    }
+    return row;
   }
-  return row;
+
+  return await db.transaction(async (tx) => {
+    const [inserted] = await tx.insert(orders).values(baseValues).returning();
+    if (inserted === undefined) {
+      throw new Error('createOrder: no row returned');
+    }
+
+    // Re-read balance under a FOR UPDATE lock. A concurrent admin
+    // adjustment or another credit order against the same
+    // (user, currency) row serialises through here. This is the
+    // guard — the earlier `hasSufficientCredit` at the handler is a
+    // UX fast-path that can be racy.
+    const fresh = await tx
+      .select({ balanceMinor: userCredits.balanceMinor })
+      .from(userCredits)
+      .where(and(eq(userCredits.userId, args.userId), eq(userCredits.currency, chargeCurrency)))
+      .for('update');
+
+    const balance = fresh[0]?.balanceMinor ?? 0n;
+    if (balance < chargeMinor) {
+      throw new InsufficientCreditError();
+    }
+
+    // Ledger: type='spend' carries a NEGATIVE amount per schema CHECK
+    // (`spend`/`withdrawal` amount<0). Reference this order so
+    // reconciliation can trace the debit back to its cause.
+    await tx.insert(creditTransactions).values({
+      userId: args.userId,
+      type: 'spend',
+      amountMinor: -chargeMinor,
+      currency: chargeCurrency,
+      referenceType: 'order',
+      referenceId: inserted.id,
+    });
+
+    // Balance: subtract via SQL expression rather than JS arithmetic
+    // on the freshly-read value, since the lock already serialises
+    // us and the DB expression is the ledger's own source of truth.
+    await tx
+      .update(userCredits)
+      .set({ balanceMinor: sql`${userCredits.balanceMinor} - ${chargeMinor}` })
+      .where(and(eq(userCredits.userId, args.userId), eq(userCredits.currency, chargeCurrency)));
+
+    // Transition to paid. Mirrors `markOrderPaid`'s shape but stays
+    // within this txn so the debit + state flip commit together.
+    const now = new Date();
+    const [paid] = await tx
+      .update(orders)
+      .set({
+        state: 'paid',
+        paidAt: now,
+        paymentReceivedAt: now,
+      })
+      .where(and(eq(orders.id, inserted.id), eq(orders.state, 'pending_payment')))
+      .returning();
+    if (paid === undefined) {
+      // Unreachable — the row was just inserted above in the same
+      // txn; nothing else can have transitioned it. Throw loudly so
+      // a future refactor that breaks this invariant is obvious.
+      throw new Error('createOrder: credit-order paid-transition lost race with self');
+    }
+    return paid;
+  });
 }
 
 /**
