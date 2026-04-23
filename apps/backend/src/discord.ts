@@ -240,6 +240,72 @@ export function notifyOrderFulfilled(
   });
 }
 
+/**
+ * Notify: cashback credited to a user (ADR 009 / 011 / 015).
+ *
+ * Fires from the Loop-native fulfillment path (procurement worker) once
+ * the ledger write has committed. Distinct from `notifyOrderFulfilled`:
+ * the order-fulfilled signal goes out on every successful procurement;
+ * this signal only fires when the user actually earned a positive cashback
+ * credit. The two messages together are the "customer just got money
+ * from Loop" event — useful for an ops-visible running tally of how much
+ * Loop is handing back each day.
+ *
+ * `amountMinor` is the signed bigint-string that went into the ledger
+ * (positive for cashback credits). `currency` is the user's home currency.
+ */
+export function notifyCashbackCredited(args: {
+  orderId: string;
+  merchantName: string;
+  amountMinor: string;
+  currency: string;
+  userId: string;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_ORDERS, {
+    title: '💰 Cashback Credited',
+    color: GREEN,
+    fields: [
+      {
+        name: 'Merchant',
+        value: truncate(escapeMarkdown(args.merchantName), FIELD_VALUE_MAX),
+        inline: true,
+      },
+      {
+        name: 'Amount',
+        value: formatMinorAmount(args.amountMinor, args.currency),
+        inline: true,
+      },
+      {
+        name: 'User',
+        value: `\`${escapeMarkdown(args.userId.slice(0, 8))}…\``,
+        inline: true,
+      },
+      { name: 'Order ID', value: `\`${escapeMarkdown(args.orderId)}\``, inline: false },
+    ],
+  });
+}
+
+/**
+ * Minor-unit bigint-string → human currency. Mirrors the web's fmtMinor
+ * but bigint-safe — a cashback of 250000 minor units on a GBP order
+ * must render as £2,500.00, not lose precision through a Number cast.
+ * Trailing 2 chars are always fractional (we don't support 0/3-decimal
+ * currencies on Loop today).
+ */
+function formatMinorAmount(minorStr: string, currency: string): string {
+  const negative = minorStr.startsWith('-');
+  const digits = negative ? minorStr.slice(1) : minorStr;
+  const padded = digits.padStart(3, '0');
+  const whole = padded.slice(0, -2);
+  const fraction = padded.slice(-2);
+  const sign = negative ? '-' : '';
+  const code = currency.toUpperCase();
+  const symbol = CURRENCY_SYMBOLS[code];
+  const wholeWithSeparators = Number(whole).toLocaleString('en-US');
+  const body = `${wholeWithSeparators}.${fraction}`;
+  return symbol !== undefined ? `${sign}${symbol}${body} ${code}` : `${sign}${body} ${code}`;
+}
+
 /** Notify: health status changed */
 export function notifyHealthChange(status: 'healthy' | 'degraded', details: string): void {
   void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
@@ -619,6 +685,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     channel: 'admin-audit',
     description:
       'Fires on merchant cashback-config create / update (ADR 011). Embeds the old→new pct diff so the commercial impact of the edit is legible in the channel without drilling to the admin UI.',
+  },
+  {
+    name: 'notifyCashbackCredited',
+    channel: 'orders',
+    description:
+      'Fires on every fulfilled order with userCashbackMinor > 0 (ADR 009). Distinct from notifyOrderFulfilled so the "cashback handed out" signal stays separate from the broader fulfillment stream.',
   },
   {
     name: 'notifyCashbackRecycled',

@@ -31,6 +31,7 @@ import {
   notifyCircuitBreaker,
   notifyCashbackRecycled,
   notifyFirstCashbackRecycled,
+  notifyCashbackCredited,
 } from '../discord.js';
 
 const mockFetch = vi.fn();
@@ -196,6 +197,68 @@ describe('notifyFirstCashbackRecycled', () => {
     });
     await new Promise((r) => setTimeout(r, 10));
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('notifyCashbackCredited', () => {
+  it('formats GBP cashback with £ and a two-decimal tail', async () => {
+    notifyCashbackCredited({
+      orderId: 'order-uuid',
+      merchantName: 'Tesco',
+      amountMinor: '250',
+      currency: 'GBP',
+      userId: '12345678-abcd',
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    const body = lastBody();
+    const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
+    const amount = embed.fields.find((f) => f.name === 'Amount');
+    expect(amount?.value).toBe('£2.50 GBP');
+  });
+
+  it('formats large USD amounts with comma separators and keeps bigint precision', async () => {
+    notifyCashbackCredited({
+      orderId: 'o2',
+      merchantName: 'Amazon',
+      amountMinor: '1234567',
+      currency: 'USD',
+      userId: 'abcd1234-efgh',
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    const body = lastBody();
+    const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
+    const amount = embed.fields.find((f) => f.name === 'Amount');
+    expect(amount?.value).toBe('$12,345.67 USD');
+  });
+
+  it('falls back to code-only rendering for unknown currencies', async () => {
+    notifyCashbackCredited({
+      orderId: 'o3',
+      merchantName: 'Acme',
+      amountMinor: '500',
+      currency: 'NOK',
+      userId: 'abc',
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    const body = lastBody();
+    const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
+    const amount = embed.fields.find((f) => f.name === 'Amount');
+    expect(amount?.value).toBe('5.00 NOK');
+  });
+
+  it('truncates the user id so full UUIDs never hit Discord', async () => {
+    notifyCashbackCredited({
+      orderId: 'o4',
+      merchantName: 'Acme',
+      amountMinor: '100',
+      currency: 'USD',
+      userId: 'aaaaaaaa-bbbb-4ccc-9ddd-eeeeeeeeeeee',
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    const body = lastBody();
+    const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
+    const user = embed.fields.find((f) => f.name === 'User');
+    expect(user?.value).toBe('`aaaaaaaa…`');
   });
 });
 
