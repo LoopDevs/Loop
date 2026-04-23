@@ -15,6 +15,7 @@ import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { PendingPayoutsCard } from '~/components/features/cashback/PendingPayoutsCard';
 import { TrustlineSetupCard } from '~/components/features/wallet/TrustlineSetupCard';
+import { StellarTrustlineStatus } from '~/components/features/wallet/StellarTrustlineStatus';
 import { copyToClipboard } from '~/native/clipboard';
 
 export function meta(): Route.MetaDescriptors {
@@ -259,6 +260,12 @@ export default function SettingsWalletRoute(): React.JSX.Element {
           user can watch a payout transition pending → submitted →
           confirmed without reloading. */}
       {linked ? <PendingPayoutsCard /> : null}
+
+      {/* Per-LOOP-asset trustline status (#725). Complements the
+          setup card below with "did my wallet actually open the
+          trustline?" — self-hides when no address is linked since
+          the form above is the primary surface then. */}
+      {linked ? <StellarTrustlineStatus /> : null}
 
       {/* Trustline setup helper — self-hides on error / empty-list /
           unconfigured deployments. Shown to every visitor (linked or
