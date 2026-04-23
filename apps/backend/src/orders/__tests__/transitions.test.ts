@@ -145,6 +145,19 @@ vi.mock('../../logger.js', () => ({
     child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
   },
 }));
+const { notifyStuckProcurementSweptMock } = vi.hoisted(() => ({
+  notifyStuckProcurementSweptMock: vi.fn(),
+}));
+vi.mock('../../discord.js', () => ({
+  notifyStuckProcurementSwept: (args: unknown) => notifyStuckProcurementSweptMock(args),
+  // other notify* functions are not called from transitions.ts —
+  // stub to no-op so the module's import surface stays satisfied.
+  notifyCashbackCredited: vi.fn(),
+  notifyOrderFulfilled: vi.fn(),
+  notifyCashbackRecycled: vi.fn(),
+  notifyFirstCashbackRecycled: vi.fn(),
+  notifyOrderCreated: vi.fn(),
+}));
 // Payout-intent builder — default: "pay" when userCashbackMinor > 0,
 // with a fixed issuer/asset/address. Tests that need skip paths can
 // override via `payoutBuilderMock.decision = { kind: 'skip', reason: 'no_address' }`.
@@ -403,7 +416,27 @@ describe('markOrderProcuring — procured_at pin', () => {
 
 describe('sweepStuckProcurement', () => {
   it('returns the number of rows swept', async () => {
-    state.returningRows = [{ id: 'a' }, { id: 'b' }];
+    state.returningRows = [
+      {
+        id: 'a',
+        userId: 'u-a',
+        merchantId: 'm-1',
+        chargeMinor: 1000n,
+        chargeCurrency: 'GBP',
+        ctxOperatorId: 'pool',
+        procuredAt: new Date(Date.now() - 20 * 60 * 1000),
+      },
+      {
+        id: 'b',
+        userId: 'u-b',
+        merchantId: 'm-2',
+        chargeMinor: 2500n,
+        chargeCurrency: 'USD',
+        ctxOperatorId: null,
+        procuredAt: new Date(Date.now() - 20 * 60 * 1000),
+      },
+    ];
+    notifyStuckProcurementSweptMock.mockClear();
     const { sweepStuckProcurement } = await import('../transitions.js');
     const cutoff = new Date(Date.now() - 15 * 60 * 1000);
     const n = await sweepStuckProcurement(cutoff);
@@ -412,6 +445,14 @@ describe('sweepStuckProcurement', () => {
       state: 'failed',
       failureReason: 'procurement_timeout',
     });
+    // A2-621: per-row Discord alert fires for each swept row.
+    expect(notifyStuckProcurementSweptMock).toHaveBeenCalledTimes(2);
+    expect(notifyStuckProcurementSweptMock).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: 'a', merchantId: 'm-1', chargeCurrency: 'GBP' }),
+    );
+    expect(notifyStuckProcurementSweptMock).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: 'b', ctxOperatorId: null }),
+    );
   });
 
   it('returns 0 when nothing is stuck', async () => {
