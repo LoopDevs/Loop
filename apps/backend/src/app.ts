@@ -46,6 +46,7 @@ import { treasuryHandler } from './admin/treasury.js';
 import { adminTreasurySnapshotCsvHandler } from './admin/treasury-snapshot-csv.js';
 import { adminTreasuryCreditFlowHandler } from './admin/treasury-credit-flow.js';
 import { adminAssetCirculationHandler } from './admin/asset-circulation.js';
+import { adminAssetDriftStateHandler } from './admin/asset-drift-state.js';
 import {
   adminGetPayoutHandler,
   adminListPayoutsHandler,
@@ -871,6 +872,11 @@ app.get(
   rateLimit(30, 60_000),
   adminAssetCirculationHandler,
 );
+// In-memory snapshot of the asset-drift watcher's per-asset state
+// (ADR 015). Process-local, no Horizon call; cheap to poll from the
+// admin UI landing so the "which assets are drifted?" signal reads
+// without forcing each tab to re-read Horizon.
+app.get('/api/admin/asset-drift/state', rateLimit(120, 60_000), adminAssetDriftStateHandler);
 // Pending-payouts backlog list (ADR 015). Admin UI's "payouts" page
 // drills into pending/submitted/confirmed/failed rows; counts for the
 // at-a-glance card come from the treasury snapshot above.

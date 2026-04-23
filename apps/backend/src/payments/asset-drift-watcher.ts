@@ -39,8 +39,30 @@ const log = logger.child({ area: 'asset-drift-watcher' });
 const STROOPS_PER_MINOR = 100_000n;
 
 /** In-memory per-asset drift state. Reset on restart. */
-type DriftState = 'unknown' | 'ok' | 'over';
-const assetState = new Map<LoopAssetCode, DriftState>();
+export type DriftState = 'unknown' | 'ok' | 'over';
+
+/**
+ * Full per-asset snapshot — the transition flag (`state`) plus the
+ * raw numbers from the last tick. The admin state endpoint surfaces
+ * this directly so the UI can render the current drift value
+ * without re-polling Horizon from the browser.
+ */
+export interface DriftAssetSnapshot {
+  state: DriftState;
+  /** Last drift in stroops. `null` until this asset has been read at least once. */
+  lastDriftStroops: bigint | null;
+  /** Threshold used for the last comparison (stroops). */
+  lastThresholdStroops: bigint | null;
+  /** Unix ms of the last successful per-asset read. */
+  lastCheckedMs: number | null;
+}
+
+const assetState = new Map<LoopAssetCode, DriftAssetSnapshot>();
+let lastTickMs: number | null = null;
+
+function currentState(code: LoopAssetCode): DriftState {
+  return assetState.get(code)?.state ?? 'unknown';
+}
 
 export interface AssetDriftSample {
   assetCode: LoopAssetCode;
@@ -118,7 +140,7 @@ export async function runAssetDriftTick(args: RunDriftTickArgs): Promise<DriftTi
 
     const driftStroops = onChainStroops - ledgerMinor * STROOPS_PER_MINOR;
     const over = abs(driftStroops) >= args.thresholdStroops;
-    const previous = assetState.get(code) ?? 'unknown';
+    const previous = currentState(code);
     const next: DriftState = over ? 'over' : 'ok';
     const sample: AssetDriftSample = {
       assetCode: code,
@@ -148,10 +170,47 @@ export async function runAssetDriftTick(args: RunDriftTickArgs): Promise<DriftTi
       sample.notified = true;
     }
 
-    assetState.set(code, next);
+    assetState.set(code, {
+      state: next,
+      lastDriftStroops: driftStroops,
+      lastThresholdStroops: args.thresholdStroops,
+      lastCheckedMs: Date.now(),
+    });
     result.samples.push(sample);
   }
+  lastTickMs = Date.now();
   return result;
+}
+
+/**
+ * Read-only snapshot of the watcher's in-memory state. Used by the
+ * admin handler so the UI can render "which assets are currently
+ * drifted?" without hitting Horizon from the browser.
+ *
+ * Missing entries (assets the watcher has never read successfully,
+ * e.g. the process just booted or an unconfigured issuer) return the
+ * default `state: 'unknown'` snapshot.
+ */
+export function getAssetDriftState(): {
+  lastTickMs: number | null;
+  running: boolean;
+  perAsset: ReadonlyArray<DriftAssetSnapshot & { assetCode: LoopAssetCode }>;
+} {
+  const assets = configuredLoopPayableAssets();
+  const perAsset = assets.map(({ code }) => {
+    const snapshot: DriftAssetSnapshot = assetState.get(code) ?? {
+      state: 'unknown',
+      lastDriftStroops: null,
+      lastThresholdStroops: null,
+      lastCheckedMs: null,
+    };
+    return { assetCode: code, ...snapshot };
+  });
+  return {
+    lastTickMs,
+    running: driftTimer !== null,
+    perAsset,
+  };
 }
 
 // ─── Interval loop ────────────────────────────────────────────────────────
@@ -203,4 +262,5 @@ export function __resetAssetDriftWatcherForTests(): void {
     driftTimer = null;
   }
   assetState.clear();
+  lastTickMs = null;
 }
