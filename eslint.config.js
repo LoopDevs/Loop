@@ -68,6 +68,15 @@ export default [
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/await-thenable': 'error',
       '@typescript-eslint/no-misused-promises': 'error',
+      // A2-1532: forces every discriminating switch to have a branch
+      // per union variant OR an assertNever fallback. Catches the
+      // A2-1531-shape bug where a new OrderState lands silently in
+      // a default: branch instead of forcing every call site to
+      // handle the new case.
+      '@typescript-eslint/switch-exhaustiveness-check': [
+        'error',
+        { allowDefaultCaseForExhaustiveSwitch: true, considerDefaultExhaustiveForUnions: false },
+      ],
 
       // General
       'no-console': 'error',
@@ -144,6 +153,7 @@ export default [
       // their `| never` unreachable config doesn't get evaluated.
       '@typescript-eslint/await-thenable': 'off',
       '@typescript-eslint/no-misused-promises': 'off',
+      '@typescript-eslint/switch-exhaustiveness-check': 'off',
     },
   },
 ];
