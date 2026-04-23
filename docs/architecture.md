@@ -280,6 +280,7 @@ GET  /api/admin/orders/payment-method-share             [admin — cashback-flyw
 GET  /api/admin/orders/payment-method-activity          [admin — daily payment-method time-series (1-90d), trend complement to the share, ADR 010/015]
 GET  /api/admin/supplier-spend                          [admin — per-currency supplier spend, ADR 013/015]
 GET  /api/admin/operators/:operatorId/supplier-spend    [admin — per-operator per-currency supplier spend (axis of fleet supplier-spend), ADR 013/015/022]
+GET  /api/admin/operators/:operatorId/activity          [admin — per-operator daily created/fulfilled/failed time-series (1-90d), ADR 013/022]
 GET  /api/admin/users                                   [admin — paginated user directory w/ email fragment filter]
 GET  /api/admin/users/by-email?email=                   [admin — exact-match user lookup for support-ticket workflow]
 GET  /api/admin/users/top-by-pending-payout             [admin — ops funding prioritisation leaderboard, ADR 015/016]
