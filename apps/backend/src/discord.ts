@@ -441,6 +441,69 @@ function fmtConfigLine(s: CashbackConfigSnapshot): string {
   return truncate(body, FIELD_VALUE_MAX);
 }
 
+/**
+ * Notify: a LOOP-asset has drifted past the operator threshold
+ * (ADR 015). `driftStroops = onChainStroops - ledgerLiabilityMinor × 1e5`.
+ * Positive drift → over-minted (the riskier direction — users are
+ * holding more LOOP asset than the ledger says we owe). Negative
+ * drift → unsettled backlog; usually self-heals as the payout worker
+ * catches up.
+ *
+ * Fires exactly once per ok→over transition (in-memory dedupe at
+ * the watcher). The `notifyAssetDriftRecovered` sibling fires on the
+ * over→ok transition so the channel gets the all-clear. State is
+ * lost on restart: the first post-restart tick re-pages if still
+ * over, which is correct (ops should reassess anyway).
+ */
+export function notifyAssetDrift(args: {
+  assetCode: string;
+  driftStroops: string;
+  thresholdStroops: string;
+  onChainStroops: string;
+  ledgerLiabilityMinor: string;
+}): void {
+  const direction = args.driftStroops.startsWith('-') ? 'Settlement backlog' : 'Over-minted';
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '⚠️ Asset Drift Exceeded Threshold',
+    description: `\`${escapeMarkdown(args.assetCode)}\` drift exceeds the configured threshold. Direction: **${direction}**.`,
+    color: ORANGE,
+    fields: [
+      { name: 'Asset', value: `\`${escapeMarkdown(args.assetCode)}\``, inline: true },
+      { name: 'Drift (stroops)', value: escapeMarkdown(args.driftStroops), inline: true },
+      { name: 'Threshold (stroops)', value: escapeMarkdown(args.thresholdStroops), inline: true },
+      { name: 'On-chain (stroops)', value: escapeMarkdown(args.onChainStroops), inline: true },
+      {
+        name: 'Ledger (minor)',
+        value: escapeMarkdown(args.ledgerLiabilityMinor),
+        inline: true,
+      },
+    ],
+  });
+}
+
+/**
+ * Notify: a previously-drifting asset has returned within the
+ * threshold. Sibling of `notifyAssetDrift` — fires on over→ok so
+ * the channel reads as a closed incident rather than an indefinite
+ * open alert.
+ */
+export function notifyAssetDriftRecovered(args: {
+  assetCode: string;
+  driftStroops: string;
+  thresholdStroops: string;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🟢 Asset Drift Recovered',
+    description: `\`${escapeMarkdown(args.assetCode)}\` drift is back within the configured threshold.`,
+    color: GREEN,
+    fields: [
+      { name: 'Asset', value: `\`${escapeMarkdown(args.assetCode)}\``, inline: true },
+      { name: 'Drift (stroops)', value: escapeMarkdown(args.driftStroops), inline: true },
+      { name: 'Threshold (stroops)', value: escapeMarkdown(args.thresholdStroops), inline: true },
+    ],
+  });
+}
+
 /** Notify: circuit breaker state change */
 export function notifyCircuitBreaker(
   state: 'open' | 'closed',
@@ -579,6 +642,18 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     channel: 'orders',
     description:
       'Fires when an order transitions to `fulfilled` — the user got their gift card. Complement to the orders-created signal above.',
+  },
+  {
+    name: 'notifyAssetDrift',
+    channel: 'monitoring',
+    description:
+      'Fires when a LOOP asset drifts past the operator threshold — on-chain circulation vs off-chain ledger liability (ADR 015). In-memory dedupe: fires once on ok→over, once on over→ok via notifyAssetDriftRecovered.',
+  },
+  {
+    name: 'notifyAssetDriftRecovered',
+    channel: 'monitoring',
+    description:
+      'Fires once per asset on the over→ok transition paired with notifyAssetDrift. Closes the drift incident in the channel so ops reads a beginning AND end for every alert.',
   },
   {
     name: 'notifyCircuitBreaker',

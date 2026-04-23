@@ -13,6 +13,8 @@ import {
   stopPayoutWorker,
   resolvePayoutConfig,
 } from './payments/payout-worker.js';
+import { startAssetDriftWatcher, stopAssetDriftWatcher } from './payments/asset-drift-watcher.js';
+import { configuredLoopPayableAssets } from './credits/payout-asset.js';
 
 // Apply any pending DB migrations before accepting traffic (ADR 012).
 // Awaited so `serve()` below only runs after the schema is up-to-date —
@@ -65,6 +67,16 @@ if (env.LOOP_WORKERS_ENABLED) {
   } else {
     startPayoutWorker(payoutConfig);
   }
+
+  // Asset-drift watcher (ADR 015). Silently skips when no LOOP
+  // issuers are configured — the watcher has nothing to read
+  // against. One issuer is enough (e.g. USD-only deployments).
+  if (configuredLoopPayableAssets().length > 0) {
+    startAssetDriftWatcher({
+      intervalMs: env.LOOP_ASSET_DRIFT_WATCHER_INTERVAL_SECONDS * 1000,
+      thresholdStroops: env.LOOP_ASSET_DRIFT_THRESHOLD_STROOPS,
+    });
+  }
 }
 
 logger.info({ port: env.PORT }, 'Loop backend starting');
@@ -95,6 +107,7 @@ function shutdown(signal: string): void {
   stopPaymentWatcher();
   stopProcurementWorker();
   stopPayoutWorker();
+  stopAssetDriftWatcher();
 
   server.close(() => {
     void Promise.allSettled([sentryFlush(5000), closeDb()]).finally(() => {

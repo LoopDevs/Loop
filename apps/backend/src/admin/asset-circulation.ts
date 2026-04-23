@@ -28,13 +28,11 @@
  * and is always authoritative.
  */
 import type { Context } from 'hono';
-import { sql } from 'drizzle-orm';
 import { LOOP_ASSET_CODES, type LoopAssetCode, HOME_CURRENCIES } from '@loop/shared';
 import type { HomeCurrency } from '@loop/shared';
-import { db } from '../db/client.js';
-import { userCredits } from '../db/schema.js';
 import { getLoopAssetCirculation } from '../payments/horizon-circulation.js';
 import { payoutAssetFor } from '../credits/payout-asset.js';
+import { sumOutstandingLiability } from '../credits/liabilities.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-asset-circulation' });
@@ -67,21 +65,6 @@ function fiatOf(code: LoopAssetCode): HomeCurrency {
   // Unreachable given LOOP_ASSET_CODES is USD/GBP/EURLOOP only —
   // but type-narrow here so the fiat slice stays inside the enum.
   throw new Error(`Unknown fiat for asset ${code}`);
-}
-
-/**
- * Sum `user_credits.balance_minor` for the single fiat matching
- * this LOOP asset. A missing row (no user has ever held this
- * currency) returns 0n.
- */
-async function sumOutstandingLiability(currency: HomeCurrency): Promise<bigint> {
-  const [row] = await db
-    .select({
-      total: sql<string>`COALESCE(SUM(${userCredits.balanceMinor}), 0)::text`,
-    })
-    .from(userCredits)
-    .where(sql`${userCredits.currency} = ${currency}`);
-  return BigInt(row?.total ?? '0');
 }
 
 export async function adminAssetCirculationHandler(c: Context): Promise<Response> {
