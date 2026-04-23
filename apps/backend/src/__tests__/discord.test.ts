@@ -29,6 +29,7 @@ import {
   notifyOrderFulfilled,
   notifyHealthChange,
   notifyCircuitBreaker,
+  notifyOrderRefunded,
 } from '../discord.js';
 
 const mockFetch = vi.fn();
@@ -105,6 +106,64 @@ describe('notifyOrderFulfilled', () => {
     const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
     const amount = embed.fields.find((f) => f.name === 'Amount');
     expect(amount?.value).toBe('25.00 NOK');
+  });
+});
+
+describe('notifyOrderRefunded', () => {
+  it('fires to the orders webhook with formatted amount and truncated ids', async () => {
+    notifyOrderRefunded({
+      orderId: 'order-abcdef',
+      targetUserId: 'user-uuid-1234-5678',
+      adminId: 'admin-uuid-9999-0000',
+      amountMinor: '2500',
+      currency: 'GBP',
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://discord.test/orders-hook');
+    const body = JSON.parse(init.body as string) as {
+      embeds: Array<{ title: string; fields: Array<{ name: string; value: string }> }>;
+    };
+    const embed = body.embeds[0]!;
+    expect(embed.title).toMatch(/Order Refunded/);
+    const amount = embed.fields.find((f) => f.name === 'Amount')?.value;
+    expect(amount).toBe('£25.00 GBP');
+    const user = embed.fields.find((f) => f.name === 'User')?.value;
+    expect(user).toBe('`user-uui…`');
+    const admin = embed.fields.find((f) => f.name === 'Admin')?.value;
+    expect(admin).toBe('`admin-uu…`');
+    const orderId = embed.fields.find((f) => f.name === 'Order ID')?.value;
+    expect(orderId).toBe('`order-abcdef`');
+  });
+
+  it('preserves bigint precision on large refund amounts', async () => {
+    notifyOrderRefunded({
+      orderId: 'o',
+      targetUserId: 'u',
+      adminId: 'a',
+      amountMinor: '1234567',
+      currency: 'USD',
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    const body = lastBody();
+    const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
+    const amount = embed.fields.find((f) => f.name === 'Amount')?.value;
+    expect(amount).toBe('$12,345.67 USD');
+  });
+
+  it('falls back to code-only rendering for unknown currencies', async () => {
+    notifyOrderRefunded({
+      orderId: 'o',
+      targetUserId: 'u',
+      adminId: 'a',
+      amountMinor: '500',
+      currency: 'NOK',
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    const body = lastBody();
+    const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
+    const amount = embed.fields.find((f) => f.name === 'Amount')?.value;
+    expect(amount).toBe('5.00 NOK');
   });
 });
 

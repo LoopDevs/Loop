@@ -7,6 +7,15 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
+// Discord audit signal — hoisted so the vi.mock below references the
+// same spy instance across test cases.
+const { mockNotifyRefund } = vi.hoisted(() => ({
+  mockNotifyRefund: vi.fn(),
+}));
+vi.mock('../../discord.js', () => ({
+  notifyOrderRefunded: mockNotifyRefund,
+}));
+
 /**
  * Two distinct .select().from(...).where(...).limit(1) calls before the
  * transaction body runs (load order, check existing refund), then
@@ -140,6 +149,7 @@ beforeEach(() => {
   txnState.insertReturn.clear();
   txnState.insertCalls.length = 0;
   txnState.updateCalls.length = 0;
+  mockNotifyRefund.mockReset();
 });
 
 const ORDER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -255,5 +265,79 @@ describe('adminRefundOrderHandler', () => {
     const body = (await res.json()) as { balance: { balanceMinor: string } };
     expect(body.balance.balanceMinor).toBe('1900'); // 400 + 1500
     expect(txnState.updateCalls).toContain('userCredits');
+  });
+
+  it('fires notifyOrderRefunded after a successful write with the final shape', async () => {
+    enqueue('orders', [
+      {
+        id: ORDER,
+        userId: USER,
+        state: 'failed',
+        chargeMinor: 3500n,
+        chargeCurrency: 'GBP',
+      },
+    ]);
+    enqueue('creditTransactions', []); // no prior refund
+    enqueue('userCredits', []);
+    txnState.insertReturn.set('creditTransactions', [
+      {
+        id: 'refund-signal',
+        userId: USER,
+        amountMinor: 3500n,
+        currency: 'GBP',
+        createdAt: new Date('2026-04-22T14:00:00.000Z'),
+      },
+    ]);
+
+    const res = await adminRefundOrderHandler(makeCtx(ORDER, { id: 'admin-signal' }));
+    expect(res.status).toBe(201);
+    expect(mockNotifyRefund).toHaveBeenCalledTimes(1);
+    const [args] = mockNotifyRefund.mock.calls[0] as [
+      {
+        orderId: string;
+        targetUserId: string;
+        adminId: string;
+        amountMinor: string;
+        currency: string;
+      },
+    ];
+    expect(args).toEqual({
+      orderId: ORDER,
+      targetUserId: USER,
+      adminId: 'admin-signal',
+      amountMinor: '3500',
+      currency: 'GBP',
+    });
+  });
+
+  it('does NOT fire the signal when the refund is rejected', async () => {
+    enqueue('orders', [
+      {
+        id: ORDER,
+        userId: USER,
+        state: 'fulfilled', // wrong state → 409
+        chargeMinor: 1000n,
+        chargeCurrency: 'GBP',
+      },
+    ]);
+    const res = await adminRefundOrderHandler(makeCtx(ORDER));
+    expect(res.status).toBe(409);
+    expect(mockNotifyRefund).not.toHaveBeenCalled();
+  });
+
+  it('does NOT fire the signal when the order has already been refunded', async () => {
+    enqueue('orders', [
+      {
+        id: ORDER,
+        userId: USER,
+        state: 'failed',
+        chargeMinor: 1000n,
+        chargeCurrency: 'GBP',
+      },
+    ]);
+    enqueue('creditTransactions', [{ id: 'prior-refund' }]); // idempotency hit
+    const res = await adminRefundOrderHandler(makeCtx(ORDER));
+    expect(res.status).toBe(409);
+    expect(mockNotifyRefund).not.toHaveBeenCalled();
   });
 });
