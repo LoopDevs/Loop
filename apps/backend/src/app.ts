@@ -85,6 +85,7 @@ import { adminCashbackConfigsCsvHandler } from './admin/cashback-configs-csv.js'
 import { adminMerchantsCatalogCsvHandler } from './admin/merchants-catalog-csv.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminOperatorSupplierSpendHandler } from './admin/operator-supplier-spend.js';
+import { adminOperatorActivityHandler } from './admin/operator-activity.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
 import { adminOperatorLatencyHandler } from './admin/operator-latency.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
@@ -1049,6 +1050,18 @@ app.get(
   '/api/admin/operators/:operatorId/supplier-spend',
   rateLimit(120, 60_000),
   adminOperatorSupplierSpendHandler,
+);
+// Per-operator daily activity time-series (ADR 013 / 022) —
+// completes the operator-drill quartet alongside operator-stats
+// (fleet snapshot), operators/latency (fleet percentiles) and
+// operators/:id/supplier-spend (per-operator cost). Answers "is
+// this operator degrading?" — a rising `failed` line or a
+// dropping fulfilled/created ratio is a scheduler-tuning /
+// CTX-escalation signal before the circuit breaker trips.
+app.get(
+  '/api/admin/operators/:operatorId/activity',
+  rateLimit(120, 60_000),
+  adminOperatorActivityHandler,
 );
 // Per-operator breakdown of which CTX service account carried which
 // orders (ADR 013). Complements supplier-spend: spend is *what* Loop
