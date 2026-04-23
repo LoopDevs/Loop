@@ -570,6 +570,31 @@ export function notifyAssetDriftRecovered(args: {
   });
 }
 
+/**
+ * Notify: the CTX operator pool has no healthy operators (ADR 013).
+ * Fires from `operatorFetch` after every breaker in the pool tripped.
+ * Paired with a 15-minute throttle at the call site so sustained
+ * outages don't flood the monitoring channel.
+ */
+export function notifyOperatorPoolExhausted(args: { poolSize: number; reason: string }): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🔴 CTX Operator Pool Exhausted',
+    description: truncate(
+      `Every operator in the pool is unhealthy. Loop-native procurement is blocked until at least one circuit recovers.`,
+      DESCRIPTION_MAX,
+    ),
+    color: RED,
+    fields: [
+      { name: 'Pool size', value: String(args.poolSize), inline: true },
+      {
+        name: 'Last error',
+        value: truncate(escapeMarkdown(args.reason), FIELD_VALUE_MAX),
+        inline: false,
+      },
+    ],
+  });
+}
+
 /** Notify: circuit breaker state change */
 export function notifyCircuitBreaker(
   state: 'open' | 'closed',
@@ -732,6 +757,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     channel: 'monitoring',
     description:
       'Fires when the upstream-CTX circuit breaker transitions open or closed (ADR 013 pool health).',
+  },
+  {
+    name: 'notifyOperatorPoolExhausted',
+    channel: 'monitoring',
+    description:
+      'Fires when every operator in the CTX pool is unhealthy — procurement is blocked. Throttled to once per 15 min per deployment so a sustained outage stays loud without flooding the channel (ADR 013).',
   },
   {
     name: 'notifyHealthChange',
