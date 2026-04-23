@@ -186,6 +186,30 @@ export async function getTreasurySnapshot(): Promise<TreasurySnapshot> {
 }
 
 /**
+ * Per-asset circulation drift (ADR 015). onChainStroops comes from
+ * Horizon /assets; ledgerLiabilityMinor from user_credits. drift =
+ * onChain - ledger × 1e5 (1 minor = 1e5 stroops for a 1:1-pinned
+ * LOOP asset). Safety-critical metric — non-zero drift that isn't
+ * explained by in-flight payouts means something's wrong.
+ */
+export interface AssetCirculationResponse {
+  assetCode: LoopAssetCode;
+  fiatCurrency: string;
+  issuer: string;
+  onChainStroops: string;
+  ledgerLiabilityMinor: string;
+  driftStroops: string;
+  onChainAsOfMs: number;
+}
+
+/** `GET /api/admin/assets/:assetCode/circulation` */
+export async function getAssetCirculation(assetCode: string): Promise<AssetCirculationResponse> {
+  return authenticatedRequest<AssetCirculationResponse>(
+    `/api/admin/assets/${encodeURIComponent(assetCode)}/circulation`,
+  );
+}
+
+/**
  * Downloads an admin CSV endpoint by fetching with the bearer token
  * in binary mode, then synthesising a click on a temporary anchor
  * with a Blob URL. Works around the fact that a plain `<a href>`
