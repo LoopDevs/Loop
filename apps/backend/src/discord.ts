@@ -623,6 +623,47 @@ export function notifyStuckProcurementSwept(args: {
   });
 }
 
+/**
+ * A2-626: notify when the payment watcher's cursor hasn't advanced
+ * past the stale-threshold. Fires once per stuck period — if the
+ * cursor moves again, the per-process gate resets and a future stall
+ * can alert fresh.
+ *
+ * Distinct signal from circuit breaker or health-change: the
+ * watcher can be "running" (no exception loop-killing) but stuck
+ * on an upstream Horizon issue, a DB write failure on cursor
+ * persistence, or a subtle bug in the tick. The cursor-age probe
+ * is the only independent observation that catches all of those.
+ */
+export function notifyPaymentWatcherStuck(args: {
+  cursorAgeMs: number;
+  lastCursor: string;
+  lastUpdatedAtMs: number;
+}): void {
+  const ageMin = Math.round(args.cursorAgeMs / 60_000);
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🔴 Payment Watcher Cursor Stuck',
+    description: truncate(
+      `The payment watcher cursor has not advanced in ${ageMin} min. Fresh deposits are not being observed. Check the watcher process, Horizon reachability, and the DB's ability to persist the cursor row.`,
+      DESCRIPTION_MAX,
+    ),
+    color: RED,
+    fields: [
+      { name: 'Cursor age (min)', value: String(ageMin), inline: true },
+      {
+        name: 'Last cursor',
+        value: truncate(`\`${escapeMarkdown(args.lastCursor)}\``, FIELD_VALUE_MAX),
+        inline: false,
+      },
+      {
+        name: 'Last updated',
+        value: new Date(args.lastUpdatedAtMs).toISOString(),
+        inline: true,
+      },
+    ],
+  });
+}
+
 export function notifyOperatorPoolExhausted(args: { poolSize: number; reason: string }): void {
   void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
     title: '🔴 CTX Operator Pool Exhausted',
@@ -828,6 +869,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     channel: 'monitoring',
     description:
       'Fires when the sweep flips a stuck `procuring` order to `failed` (A2-621). Per-row so ops can reconcile individually — each row might be a CTX-minted-but-we-lost-track case where refunding the user would double-spend.',
+  },
+  {
+    name: 'notifyPaymentWatcherStuck',
+    channel: 'monitoring',
+    description:
+      "Fires when the payment watcher's Horizon cursor has not advanced in >10 min (A2-626). Catches crashed / hung tickers that would otherwise silently stop processing deposits. One-shot per stuck period.",
   },
   {
     name: 'notifyUsdcBelowFloor',
