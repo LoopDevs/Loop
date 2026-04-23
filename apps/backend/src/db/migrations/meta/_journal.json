@@ -92,6 +92,13 @@
       "when": 1778100000000,
       "tag": "0012_credit_transactions_period_cursor",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1778200000000,
+      "tag": "0013_ledger_constraints",
+      "breakpoints": true
     }
   ]
 }

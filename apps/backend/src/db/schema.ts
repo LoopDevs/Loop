@@ -116,6 +116,12 @@ export const userCredits = pgTable(
     // more than we've booked). Database-level guard so a bad
     // downstream transaction doesn't silently corrupt the ledger.
     check('user_credits_non_negative', sql`${t.balanceMinor} >= 0`),
+    // A2-903: pin the currency to the three ISO-4217 codes we
+    // actually support (ADR 015). Prevents typos / crafted values
+    // like 'ZZZ' from landing zombie balance rows that the admin
+    // UI can't display. Adding a fourth currency will be a
+    // deliberate migration, not silent drift.
+    check('user_credits_currency_known', sql`${t.currency} IN ('USD', 'GBP', 'EUR')`),
   ],
 );
 
@@ -159,6 +165,20 @@ export const creditTransactions = pgTable(
     uniqueIndex('credit_transactions_interest_period_unique')
       .on(t.userId, t.currency, t.periodCursor)
       .where(sql`${t.type} = 'interest'`),
+    // A2-614 + A2-902: partial unique on
+    // (type, reference_type, reference_id) for the at-most-once
+    // writer types (cashback, refund, spend). Two CTX webhook
+    // retries landing the same cashback payload would otherwise
+    // insert two rows; a duplicate refund would double-credit.
+    // Scope excludes 'adjustment' (idempotency handled by
+    // admin_idempotency_keys, ADR 017) and 'interest' (its own
+    // partial unique above). 'withdrawal' will plug in when the
+    // writer lands.
+    uniqueIndex('credit_transactions_reference_unique')
+      .on(t.type, t.referenceType, t.referenceId)
+      .where(
+        sql`${t.type} IN ('cashback', 'refund', 'spend') AND ${t.referenceType} IS NOT NULL AND ${t.referenceId} IS NOT NULL`,
+      ),
     check(
       'credit_transactions_type_known',
       sql`${t.type} IN ('cashback', 'interest', 'spend', 'withdrawal', 'refund', 'adjustment')`,
