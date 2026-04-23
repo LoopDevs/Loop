@@ -15,12 +15,29 @@ import { env } from '../env.js';
 
 export type TokenType = 'access' | 'refresh';
 
+/**
+ * JWT `iss` (issuer) — identifies the minting service (A2-1600).
+ * Fixed string so one Loop deployment's token cannot be accepted by
+ * any other service that happens to share a key. Verification is an
+ * exact-match check; no suffix / wildcard logic.
+ */
+export const LOOP_JWT_ISSUER = 'loop-api';
+
+/**
+ * JWT `aud` (audience) — identifies the resource server. Paired with
+ * `iss`, this rejects tokens minted for a different service (e.g. a
+ * social-login exchange accidentally replayed against the Loop API).
+ */
+export const LOOP_JWT_AUDIENCE = 'loop-clients';
+
 export interface LoopTokenClaims {
   sub: string;
   email: string;
   typ: TokenType;
   iat: number;
   exp: number;
+  iss: string;
+  aud: string;
   // Refresh-token opaque id — lets us revoke an individual refresh
   // without invalidating the whole key. Access tokens omit this.
   jti?: string;
@@ -78,6 +95,8 @@ export function signLoopToken(opts: SignOptions): { token: string; claims: LoopT
     typ: opts.typ,
     iat: nowSec,
     exp: nowSec + opts.ttlSeconds,
+    iss: LOOP_JWT_ISSUER,
+    aud: LOOP_JWT_AUDIENCE,
   };
   if (opts.typ === 'refresh') {
     // 16 random bytes → 22-char base64url. Enough entropy to survive
@@ -93,7 +112,16 @@ export function signLoopToken(opts: SignOptions): { token: string; claims: LoopT
 
 export type VerifyResult =
   | { ok: true; claims: LoopTokenClaims }
-  | { ok: false; reason: 'malformed' | 'bad_signature' | 'expired' | 'wrong_type' };
+  | {
+      ok: false;
+      reason:
+        | 'malformed'
+        | 'bad_signature'
+        | 'expired'
+        | 'wrong_type'
+        | 'wrong_issuer'
+        | 'wrong_audience';
+    };
 
 /**
  * Verifies a Loop JWT. Checks signature against the current key first,
@@ -146,7 +174,9 @@ export function verifyLoopToken(token: string, expectedType: TokenType): VerifyR
     typeof obj['email'] !== 'string' ||
     (obj['typ'] !== 'access' && obj['typ'] !== 'refresh') ||
     typeof obj['iat'] !== 'number' ||
-    typeof obj['exp'] !== 'number'
+    typeof obj['exp'] !== 'number' ||
+    typeof obj['iss'] !== 'string' ||
+    typeof obj['aud'] !== 'string'
   ) {
     return { ok: false, reason: 'malformed' };
   }
@@ -156,12 +186,23 @@ export function verifyLoopToken(token: string, expectedType: TokenType): VerifyR
   if (obj['exp'] < Math.floor(Date.now() / 1000)) {
     return { ok: false, reason: 'expired' };
   }
+  // A2-1600: exact-match iss/aud. Rejecting here (not at malformed)
+  // gives a dedicated reason code so ops can tell "token from a
+  // different service" apart from "malformed / corrupt token".
+  if (obj['iss'] !== LOOP_JWT_ISSUER) {
+    return { ok: false, reason: 'wrong_issuer' };
+  }
+  if (obj['aud'] !== LOOP_JWT_AUDIENCE) {
+    return { ok: false, reason: 'wrong_audience' };
+  }
   const claims: LoopTokenClaims = {
     sub: obj['sub'],
     email: obj['email'],
     typ: obj['typ'],
     iat: obj['iat'],
     exp: obj['exp'],
+    iss: obj['iss'],
+    aud: obj['aud'],
   };
   if (typeof obj['jti'] === 'string') claims.jti = obj['jti'];
   return { ok: true, claims };
