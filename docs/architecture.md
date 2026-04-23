@@ -245,6 +245,7 @@ GET  /api/admin/treasury.csv                           [admin — Tier-3 long-fo
 GET  /api/admin/treasury/credit-flow                   [admin — per-day credited/debited/net ledger time-series, ?days=1-180, ?currency=USD|GBP|EUR, ADR 009/015]
 GET  /api/admin/treasury/credit-flow.csv               [admin — Tier-3 CSV of the credit-flow time series for month-end ledger reconciliation, ADR 009/015/018]
 GET  /api/admin/assets/:assetCode/circulation          [admin — per-asset circulation drift: onChain stroops vs ledger liability, ADR 015]
+GET  /api/admin/asset-drift/state                      [admin — in-memory snapshot of the asset-drift watcher: per-asset state + last drift + last tick ms, ADR 015]
 GET  /api/admin/payouts                                [admin — ADR 015 payout backlog, ?state/?userId/?assetCode filters]
 GET  /api/admin/payouts/:id                            [admin — single pending-payout drill-down]
 POST /api/admin/payouts/:id/retry                      [admin — reset failed payout to pending, ADR 015/016/017]
