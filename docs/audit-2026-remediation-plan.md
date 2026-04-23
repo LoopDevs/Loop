@@ -169,12 +169,85 @@ Per plan §3.4, Info findings "are discussed at sign-off; actions re-classified 
 
 ---
 
-## Re-audit discipline
+## CI / regression discipline
 
-After every batch completes:
+Fixes can introduce new defects. Remediation is not done when code merges — it's done when we've verified nothing else broke. Two layers of check run against every PR, plus a post-batch sweep.
+
+### Per-PR gates (all must pass before merge)
+
+Every remediation PR must clear, without exception:
+
+| Gate                                                  | Source               | Enforcement                                |
+| ----------------------------------------------------- | -------------------- | ------------------------------------------ |
+| `Quality (typecheck, lint, format, docs)`             | CI workflow `ci.yml` | required check on `main`                   |
+| `Unit tests`                                          | CI                   | required                                   |
+| `Build verification`                                  | CI                   | required                                   |
+| `Security audit` (`npm audit`)                        | CI                   | required                                   |
+| `E2E tests (mocked CTX)`                              | CI                   | required                                   |
+| `E2E tests` (real CTX)                                | CI (PR-only)         | required                                   |
+| New / updated test that would have caught the finding | author-supplied      | reviewer-enforced (part of PR description) |
+
+If any required check fails, the PR does not land. No `--no-verify` bypass; no admin-merge override (except for Batch 0 config changes that are documented as "no-code"). A pre-push that fails on typecheck/lint/format is a signal to dig in, not to suppress.
+
+### Per-PR regression probe
+
+Beyond CI, each Batch 1 and Batch 2 PR ships with a **regression probe** specific to its finding cluster. The probe re-runs the original detection method on the new code and must produce a different result. Examples:
+
+- **PR 1 (A2-550 auth bypass):** probe = Phase 18 attack #1 (forged token with crafted `sub`). Pre-fix: 200 with another user's data. Post-fix: 401. Result captured in PR description.
+- **PR 2 (A2-720 migration journal):** probe = replay migrations against fresh Postgres, `\d admin_idempotency_keys`. Pre-fix: table absent. Post-fix: table present. psql output in PR description.
+- **PR 3 (A2-610/611/700 accrue-interest):** probe = Phase 6.5's concurrent psql session race + multi-currency seeded dataset. Pre-fix: wrong-ccy UPDATE + lost adjustment. Post-fix: invariant holds after 100 concurrent adjustments.
+
+The probe is not a unit test — unit tests go in the test suite. The probe is a **reproducible script** checked into `docs/audit-2026-evidence/phase-N-*.md`'s "regression" section, so future audits can re-run it.
+
+### Post-batch sweep (after Batch 1, Batch 2, etc.)
+
+Before moving to the next batch, we run:
+
+1. **Full audit automated checks** — `scripts/lint-docs.sh`, `npm run verify`, `npm run test:coverage`, `./scripts/e2e-real.mjs` if env permits. Must all pass.
+2. **Surface re-probe** — re-run the audit evidence-gathering for every phase that was in scope of the batch. For Batch 1, that's Phases 5c (money flow), 6 (database), 6.5 (financial), 12 (security), 18 (red-team). Not a full re-audit of the phase — just the specific probes tied to the retired findings.
+3. **Ledger invariant check** (runs for every batch touching the ledger) — production-shaped SQL `SELECT user_id, currency FROM user_credits EXCEPT SELECT user_id, currency FROM (SELECT user_id, currency, SUM(amount_minor) FROM credit_transactions GROUP BY user_id, currency HAVING SUM = user_credits.balance_minor)`. Zero rows = healthy.
+4. **Ops signal check** — the monitoring Discord channel, the Sentry issue feed, and the `/health` probe all quiet for the 10-minute window after merge.
+
+### Regression-finding protocol
+
+If any re-probe, CI job, or post-batch sweep surfaces a new defect:
+
+1. File it as a new finding in the **A2-R-NNN** series (R for "regression"), separate from the original A2-NNN numbering.
+2. Link the regression to the PR that introduced it — `Caused by: #ZZZ`.
+3. Halt the current batch until the regression is addressed. The original fix PR may need to be reverted, amended, or followed up with a narrow fix PR.
+4. Decide whether to amend the open PR, follow up with a narrow fix PR, or revert. Amended PRs lose reviewer approval, so follow-up is usually faster.
+
+### Continuous regression surface (to build early in the remediation phase)
+
+A subset of the audit's automated probes is worth running on every PR (not just batch-bounded), so we catch a regression at the PR-gate rather than at the batch-sweep:
+
+- **Ledger invariant SQL** run against the test DB after migrations
+- **openapi ↔ consumer-type drift check** (closes A2-1507 simultaneously)
+- **Forged-token probe** against a test harness (closes A2-550 regression surface)
+- **SSRF allowlist probe** on `/api/image`
+- **Discord notifier PII scrub probe**
+- **Enum-exhaustiveness lint rule** (closes A2-1532)
+
+Wiring each of these into `ci.yml` as a dedicated check happens during Batch 2C (observability + security headers cluster). Until then, the per-PR regression probe documented in each PR description is the gate.
+
+### What "done" means for each severity
+
+A finding moves from `open` to `resolved` only when:
+
+- the code change has landed on `main`
+- CI is green on that commit
+- the per-PR regression probe produced the expected shift
+- a second reviewer independent of the code author signed off (Critical and High only)
+- the tracker's entry has been updated with the PR number and commit SHA
+
+If any of those are missing, status is `resolved-pending-<thing>` until closed.
+
+### Old audit discipline (kept, re-titled)
+
+Same rule set applies at the per-finding level:
 
 1. Re-run the impacted phase's evidence gathering on the new commit SHA — e.g. after Batch 1 PR 1 lands, re-probe Phase 12's auth matrix and Phase 18 attack #1.
-2. If re-probe finds a regression, file a new finding (A2-NNN continuing from 2100+) and add it to the appropriate batch.
+2. If the re-probe finds a regression, file a new finding per the Regression-finding protocol above.
 3. The goal of each batch is to retire a cluster of findings, not to introduce new ones. Net-new findings from re-probes halt the batch until they're addressed.
 
 ---
