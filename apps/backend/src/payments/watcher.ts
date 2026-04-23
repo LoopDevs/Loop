@@ -55,17 +55,18 @@ export function parseStroops(amount: string): bigint {
 }
 
 /**
- * Returns true when `payment.amount` covers the face value pinned on
- * the order. USDC is treated 1:1 with USD for MVP — a $100 order
- * needs ≥100 USDC. XLM payments consult the price oracle
- * (`stroopsPerCent`) to derive the required stroops dynamically;
- * an oracle failure bubbles as a rejection so the watcher logs
- * and retries on the next tick.
+ * Returns true when `payment.amount` covers the amount the user was
+ * charged in their home currency (`chargeMinor` in `chargeCurrency`),
+ * NOT the catalog-currency face value (A2-619). The two coincide for
+ * same-currency orders and diverge for cross-currency: a US user
+ * buying a £100 Boots card at a $1.25/£ pin sends USDC for ~$125,
+ * and the watcher must validate against $125, not £100.
  *
- * For currencies other than USD, the 1:1 USDC peg means we under-
- * credit when the local currency is weaker than USD (e.g. a £100
- * order paid with 100 USDC would fail). Ops currently run Loop in
- * USD only; multi-currency fiat-FX for USDC is a separate slice.
+ * LOOP-asset payments (ADR 015) are 1:1 with matching fiat at 7
+ * decimals — USDLOOP:USD = GBPLOOP:GBP = EURLOOP:EUR — so the size
+ * check skips the oracle. USDC payments consult the USDC fiat-FX
+ * feed; XLM payments consult the XLM price oracle. Either oracle
+ * failure rejects — the watcher retries on the next tick.
  */
 export async function isAmountSufficient(
   payment: HorizonPayment,
@@ -110,35 +111,52 @@ export async function isAmountSufficient(
     return receivedStroops >= requiredStroops;
   }
 
+  // A2-619: validate against what the user was *charged*
+  // (`chargeMinor` in `chargeCurrency`), not the gift-card face value
+  // in catalog currency. For same-currency orders these are equal and
+  // behaviour is unchanged. For cross-currency orders (e.g. a US user
+  // buying a £100 Boots card quoted as $125 at order time) the user's
+  // wallet committed the charge-currency amount, so the oracle lookup
+  // + requiredStroops must use the charge-currency basis or the check
+  // silently rejects the exact expected payment.
   if (order.paymentMethod === 'usdc') {
-    if (order.currency !== 'USD' && order.currency !== 'GBP' && order.currency !== 'EUR') {
+    if (
+      order.chargeCurrency !== 'USD' &&
+      order.chargeCurrency !== 'GBP' &&
+      order.chargeCurrency !== 'EUR'
+    ) {
       log.warn(
-        { orderId: order.id, currency: order.currency },
-        'USDC path has no FX rate for currency',
+        { orderId: order.id, chargeCurrency: order.chargeCurrency },
+        'USDC path has no FX rate for charge currency',
       );
       return false;
     }
     try {
-      const perCent = await usdcStroopsPerCent(order.currency);
-      const requiredStroops = order.faceValueMinor * perCent;
+      const perCent = await usdcStroopsPerCent(order.chargeCurrency);
+      const requiredStroops = order.chargeMinor * perCent;
       return receivedStroops >= requiredStroops;
     } catch (err) {
       log.warn({ err, orderId: order.id }, 'USDC FX oracle unavailable — rejecting USDC payment');
       return false;
     }
   }
-  // xlm — query the oracle for the current rate, convert the
-  // order's minor-unit face value into stroops, compare.
-  if (order.currency !== 'USD' && order.currency !== 'GBP' && order.currency !== 'EUR') {
+  // xlm — query the oracle for the current rate in the order's
+  // charge currency, convert the charged minor-unit total into
+  // stroops, compare.
+  if (
+    order.chargeCurrency !== 'USD' &&
+    order.chargeCurrency !== 'GBP' &&
+    order.chargeCurrency !== 'EUR'
+  ) {
     log.warn(
-      { orderId: order.id, currency: order.currency },
-      'XLM oracle has no rate for currency',
+      { orderId: order.id, chargeCurrency: order.chargeCurrency },
+      'XLM oracle has no rate for charge currency',
     );
     return false;
   }
   try {
-    const perCent = await stroopsPerCent(order.currency);
-    const requiredStroops = order.faceValueMinor * perCent;
+    const perCent = await stroopsPerCent(order.chargeCurrency);
+    const requiredStroops = order.chargeMinor * perCent;
     return receivedStroops >= requiredStroops;
   } catch (err) {
     log.warn({ err, orderId: order.id }, 'XLM price oracle unavailable — rejecting XLM payment');
