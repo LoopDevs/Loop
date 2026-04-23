@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router';
 import type { Route } from './+types/calculator';
 import { getPublicTopCashbackMerchants, type TopCashbackMerchant } from '~/services/public-stats';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -83,6 +84,19 @@ export default function CalculatorRoute(): React.JSX.Element {
             {active !== null && active !== undefined ? (
               <CashbackCalculator merchantId={active.id} />
             ) : null}
+            {/* Conversion CTA — visitors who've typed an amount and
+                seen a concrete cashback number are warm leads. Match
+                the copy/style on /cashback/:slug so a visitor
+                bouncing between calculator + merchant pages gets a
+                consistent call-to-action. */}
+            <div className="text-center pt-2">
+              <Link
+                to="/auth"
+                className="inline-block rounded-lg bg-blue-600 px-6 py-3 text-base font-semibold text-white hover:bg-blue-700"
+              >
+                Start earning cashback →
+              </Link>
+            </div>
           </section>
         )}
       </main>
