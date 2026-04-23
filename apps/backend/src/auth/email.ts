@@ -58,9 +58,15 @@ export function getEmailProvider(): EmailProvider {
   if (cached !== null) return cached;
   const configured = process.env['EMAIL_PROVIDER'];
   if (configured === undefined || configured === 'console') {
-    if (env.NODE_ENV === 'production' && configured !== 'console') {
+    // A2-571: the console provider logs plaintext OTPs to stdout and
+    // MUST NEVER run in production — regardless of whether it's the
+    // unset default or an explicit `EMAIL_PROVIDER=console`. A prior
+    // version only rejected the unset case; a deploy that shipped
+    // `EMAIL_PROVIDER=console` would silently leak OTPs into
+    // production logs. Reject both shapes loudly.
+    if (env.NODE_ENV === 'production') {
       throw new Error(
-        'EMAIL_PROVIDER is unset in production — refusing to fall back to the console stub',
+        `EMAIL_PROVIDER=${configured ?? '<unset>'} is not permitted in production — the console stub logs plaintext OTPs`,
       );
     }
     cached = new ConsoleEmailProvider();

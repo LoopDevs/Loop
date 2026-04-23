@@ -35,10 +35,42 @@ describe('getEmailProvider', () => {
     expect(() => getEmailProvider()).toThrow(/Unsupported EMAIL_PROVIDER/);
   });
 
-  it('honours an explicit EMAIL_PROVIDER=console', () => {
+  it('honours an explicit EMAIL_PROVIDER=console in non-production', () => {
     process.env['EMAIL_PROVIDER'] = 'console';
     const p = getEmailProvider();
     expect(p.name).toBe('console');
+  });
+
+  // A2-571 production-guard coverage. Loading env.ts in production
+  // requires a lot of other env vars (A-025 image-proxy allowlist,
+  // etc.) that aren't relevant to this test — instead we mock the env
+  // module so the production switch is the only variable under test.
+  it('A2-571: refuses EMAIL_PROVIDER=console in production (stub leaks plaintext OTPs)', async () => {
+    vi.resetModules();
+    vi.doMock('../../env.js', () => ({
+      env: { NODE_ENV: 'production', LOG_LEVEL: 'silent' },
+    }));
+    process.env['EMAIL_PROVIDER'] = 'console';
+    const { getEmailProvider: fresh, __resetEmailProviderForTests: freshReset } =
+      await import('../email.js');
+    freshReset();
+    expect(() => fresh()).toThrow(/not permitted in production/);
+    vi.doUnmock('../../env.js');
+    vi.resetModules();
+  });
+
+  it('A2-571: refuses unset EMAIL_PROVIDER in production', async () => {
+    vi.resetModules();
+    vi.doMock('../../env.js', () => ({
+      env: { NODE_ENV: 'production', LOG_LEVEL: 'silent' },
+    }));
+    delete process.env['EMAIL_PROVIDER'];
+    const { getEmailProvider: fresh, __resetEmailProviderForTests: freshReset } =
+      await import('../email.js');
+    freshReset();
+    expect(() => fresh()).toThrow(/not permitted in production/);
+    vi.doUnmock('../../env.js');
+    vi.resetModules();
   });
 });
 
