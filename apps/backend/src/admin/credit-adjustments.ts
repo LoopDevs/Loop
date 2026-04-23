@@ -24,9 +24,8 @@ import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js
 import {
   IDEMPOTENCY_KEY_MIN,
   IDEMPOTENCY_KEY_MAX,
-  lookupIdempotencyKey,
-  storeIdempotencyKey,
   validateIdempotencyKey,
+  withIdempotencyGuard,
 } from './idempotency.js';
 
 const log = logger.child({ handler: 'admin-credit-adjustment' });
@@ -106,41 +105,49 @@ export async function adminCreditAdjustmentHandler(c: Context): Promise<Response
     );
   }
 
-  // Replay path: if we've seen this (actor, key) before, return the
-  // stored snapshot verbatim with replayed:true on the envelope.
-  const prior = await lookupIdempotencyKey({
-    adminUserId: actor.id,
-    key: idempotencyKey,
-  });
-  if (prior !== null) {
-    // Fire the Discord audit for the replay too — ops should see
-    // "this was already processed 3 min ago" in the channel.
-    const priorResult = (prior.body as { result?: CreditAdjustmentResult }).result;
-    notifyAdminAudit({
-      actorUserId: actor.id,
-      actorEmail: actor.email,
-      endpoint: `POST /api/admin/users/${userId}/credit-adjustments`,
-      targetUserId: userId,
-      ...(priorResult?.amountMinor !== undefined ? { amountMinor: priorResult.amountMinor } : {}),
-      ...(priorResult?.currency !== undefined ? { currency: priorResult.currency } : {}),
-      reason: parsed.data.reason,
-      idempotencyKey,
-      replayed: true,
-    });
-    return c.json(prior.body, prior.status as 200 | 400 | 409 | 500);
-  }
-
-  // Fresh write.
+  // A2-2001: serialise lookup → write → store under an advisory
+  // lock keyed by (actor, idempotencyKey). Two concurrent requests
+  // with the same key block on the lock; the second sees the stored
+  // snapshot on re-lookup and replays. Before this, both could pass
+  // the lookup, both call applyAdminCreditAdjustment, and both
+  // double-credit the user.
   const amountMinor = BigInt(parsed.data.amountMinor);
-  let applied;
+  let guardResult;
   try {
-    applied = await applyAdminCreditAdjustment({
-      userId,
-      currency: parsed.data.currency,
-      amountMinor,
-      adminUserId: actor.id,
-      reason: parsed.data.reason,
-    });
+    guardResult = await withIdempotencyGuard(
+      {
+        adminUserId: actor.id,
+        key: idempotencyKey,
+        method: 'POST',
+        path: `/api/admin/users/${userId}/credit-adjustments`,
+      },
+      async () => {
+        const applied = await applyAdminCreditAdjustment({
+          userId,
+          currency: parsed.data.currency,
+          amountMinor,
+          adminUserId: actor.id,
+          reason: parsed.data.reason,
+        });
+        const result: CreditAdjustmentResult = {
+          id: applied.id,
+          userId: applied.userId,
+          currency: applied.currency,
+          amountMinor: applied.amountMinor.toString(),
+          priorBalanceMinor: applied.priorBalanceMinor.toString(),
+          newBalanceMinor: applied.newBalanceMinor.toString(),
+          createdAt: applied.createdAt.toISOString(),
+        };
+        const envelope: AdminAuditEnvelope<CreditAdjustmentResult> = buildAuditEnvelope({
+          result,
+          actor,
+          idempotencyKey,
+          appliedAt: applied.createdAt,
+          replayed: false,
+        });
+        return { status: 200, body: envelope as unknown as Record<string, unknown> };
+      },
+    );
   } catch (err) {
     if (err instanceof InsufficientBalanceError) {
       return c.json(
@@ -155,56 +162,21 @@ export async function adminCreditAdjustmentHandler(c: Context): Promise<Response
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to apply adjustment' }, 500);
   }
 
-  const result: CreditAdjustmentResult = {
-    id: applied.id,
-    userId: applied.userId,
-    currency: applied.currency,
-    amountMinor: applied.amountMinor.toString(),
-    priorBalanceMinor: applied.priorBalanceMinor.toString(),
-    newBalanceMinor: applied.newBalanceMinor.toString(),
-    createdAt: applied.createdAt.toISOString(),
-  };
-
-  const envelope: AdminAuditEnvelope<CreditAdjustmentResult> = buildAuditEnvelope({
-    result,
-    actor,
-    idempotencyKey,
-    appliedAt: applied.createdAt,
-    replayed: false,
-  });
-
-  // Snapshot store — populated AFTER commit so a failed insert/
-  // update doesn't leave a "success" snapshot behind. If this throws,
-  // the write has already landed; we log and still return success
-  // because the caller already got their side-effect.
-  try {
-    await storeIdempotencyKey({
-      adminUserId: actor.id,
-      key: idempotencyKey,
-      method: 'POST',
-      path: `/api/admin/users/${userId}/credit-adjustments`,
-      status: 200,
-      body: envelope as unknown as Record<string, unknown>,
-    });
-  } catch (err) {
-    log.warn(
-      { err, adminUserId: actor.id, key: idempotencyKey },
-      'Failed to persist idempotency snapshot; retry will replay as new write',
-    );
-  }
-
   // Discord fanout — fire-and-forget AFTER commit per ADR 017 #5.
+  // Runs for both fresh writes and replays so ops sees "this was
+  // already processed" in the channel.
+  const priorResult = (guardResult.body as { result?: CreditAdjustmentResult }).result;
   notifyAdminAudit({
     actorUserId: actor.id,
     actorEmail: actor.email,
     endpoint: `POST /api/admin/users/${userId}/credit-adjustments`,
     targetUserId: userId,
-    amountMinor: result.amountMinor,
-    currency: result.currency,
+    ...(priorResult?.amountMinor !== undefined ? { amountMinor: priorResult.amountMinor } : {}),
+    ...(priorResult?.currency !== undefined ? { currency: priorResult.currency } : {}),
     reason: parsed.data.reason,
     idempotencyKey,
-    replayed: false,
+    replayed: guardResult.replayed,
   });
 
-  return c.json(envelope, 200);
+  return c.json(guardResult.body, guardResult.status as 200 | 400 | 409 | 500);
 }
