@@ -16,6 +16,7 @@ import { CashbackSparkline } from '~/components/features/admin/CashbackSparkline
 import { PayoutsSparkline } from '~/components/features/admin/PayoutsSparkline';
 import { FleetFlywheelHeadline } from '~/components/features/admin/FleetFlywheelHeadline';
 import { OrdersSparkline } from '~/components/features/admin/OrdersSparkline';
+import { RealizationSparkline } from '~/components/features/admin/RealizationSparkline';
 import { StuckOrdersCard } from '~/components/features/admin/StuckOrdersCard';
 import { StuckPayoutsCard } from '~/components/features/admin/StuckPayoutsCard';
 import { AssetDriftBadge } from '~/components/features/admin/AssetDriftBadge';
@@ -311,6 +312,13 @@ export default function AdminIndexRoute(): React.JSX.Element {
       {denied ? null : <PayoutsSparkline />}
 
       {denied ? null : <OrdersSparkline />}
+
+      {/* Fleet realization-rate trend (#731). Companion to the
+          single-point realization card above: point = "are we
+          recycling now?", trend = "is that direction holding?".
+          Ops catches flywheel regressions before they cross the
+          threshold on the point card. */}
+      {denied ? null : <RealizationSparkline />}
 
       {denied ? null : <AdminAuditTail />}
 
