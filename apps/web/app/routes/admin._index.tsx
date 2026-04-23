@@ -20,6 +20,7 @@ import { StuckOrdersCard } from '~/components/features/admin/StuckOrdersCard';
 import { StuckPayoutsCard } from '~/components/features/admin/StuckPayoutsCard';
 import { AssetDriftBadge } from '~/components/features/admin/AssetDriftBadge';
 import { AssetDriftWatcherCard } from '~/components/features/admin/AssetDriftWatcherCard';
+import { SettlementLagCard } from '~/components/features/admin/SettlementLagCard';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -249,12 +250,18 @@ export default function AdminIndexRoute(): React.JSX.Element {
         </section>
       )}
 
-      {/* Drift-watcher status — at-a-glance "is anything over
-          threshold right now?" from the background watcher (ADR 015).
-          Self-hides when the watcher is inactive; when over, the
-          card itself turns amber so it reads as the first alert
-          signal on the page. */}
-      {denied ? null : <AssetDriftWatcherCard />}
+      {/* Two stablecoin-operator dashboard cards side-by-side (ADR
+          015/016). Drift = ledger health ("is our on-chain mint
+          matched to what we owe?"); settlement-lag = SLA health
+          ("is cashback hitting users fast enough?"). Self-hide
+          independently so a zero-payout deployment still sees the
+          drift card and vice versa. */}
+      {denied ? null : (
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <AssetDriftWatcherCard />
+          <SettlementLagCard />
+        </section>
+      )}
 
       {/* LOOP-asset outstanding-liability strip. Three cards,
           one per issued stablecoin — click drills into
