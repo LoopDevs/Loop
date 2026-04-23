@@ -124,14 +124,35 @@ export async function markOtpConsumed(id: string, now?: Date): Promise<void> {
 /**
  * Bumps the per-row `attempts` counter. Called on a bad code guess so
  * the row locks itself out after `OTP_MAX_ATTEMPTS`.
+ *
+ * A2-561: target the SINGLE newest live row, not every live row for
+ * the email. The prior UPDATE bumped `attempts` across the whole
+ * window — if a user requested two codes back-to-back and typed a
+ * wrong guess, BOTH rows got burned. A separate code (like the
+ * second one they actually want to use) can't be the target of an
+ * `attempts`-range check if the row is already at MAX.
+ *
+ * We scope the UPDATE to the single newest live row via a subselect
+ * so the attempts counter is per-row again.
  */
 export async function incrementOtpAttempts(args: { email: string; now?: Date }): Promise<void> {
-  // Bump the most recent live row for this email. If none exists
-  // (user typing after expiry) the update is a no-op — handler
-  // already returned a 400.
-  const now = args.now ?? new Date();
+  // `args.now` is accepted for test-time overrides (the call sites
+  // pass a fixed clock in a few legacy tests). Prefer NOW() in-SQL
+  // so we never serialise a JS Date across postgres-js's parameter
+  // bridge, which historically throws on Date values.
+  const nowExpr = args.now === undefined ? sql`NOW()` : sql`${args.now.toISOString()}::timestamptz`;
   await db
     .update(otps)
     .set({ attempts: sql`${otps.attempts} + 1` })
-    .where(and(eq(otps.email, args.email), isNull(otps.consumedAt), gt(otps.expiresAt, now)));
+    .where(
+      sql`${otps.id} = (
+        SELECT ${otps.id}
+        FROM ${otps}
+        WHERE ${otps.email} = ${args.email}
+          AND ${otps.consumedAt} IS NULL
+          AND ${otps.expiresAt} > ${nowExpr}
+        ORDER BY ${otps.createdAt} DESC
+        LIMIT 1
+      )`,
+    );
 }
