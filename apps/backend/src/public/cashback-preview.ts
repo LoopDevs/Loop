@@ -68,17 +68,22 @@ export interface PublicCashbackPreview {
   currency: string;
 }
 
+/**
+ * `Merchant.denominations.currency` is where the merchant's catalog
+ * currency lives. A merchant without denominations configured falls
+ * back to USD — upstream CTX catalog is US-based by default and the
+ * cashback amount is what a pre-signup visitor sees, not a ledger
+ * number, so defensive-defaulting is fine here.
+ */
 function resolveMerchant(idOrSlug: string): { id: string; name: string; currency: string } | null {
   const { merchantsById, merchantsBySlug } = getMerchants();
-  const byId = merchantsById.get(idOrSlug);
-  if (byId !== undefined) {
-    return { id: byId.id, name: byId.name, currency: byId.currency };
-  }
-  const bySlug = merchantsBySlug.get(idOrSlug);
-  if (bySlug !== undefined) {
-    return { id: bySlug.id, name: bySlug.name, currency: bySlug.currency };
-  }
-  return null;
+  const m = merchantsById.get(idOrSlug) ?? merchantsBySlug.get(idOrSlug);
+  if (m === undefined) return null;
+  return {
+    id: m.id,
+    name: m.name,
+    currency: m.denominations?.currency ?? 'USD',
+  };
 }
 
 /**

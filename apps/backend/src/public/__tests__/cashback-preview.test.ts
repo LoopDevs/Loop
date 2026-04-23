@@ -4,8 +4,14 @@ import type { Context } from 'hono';
 const state = vi.hoisted(() => ({
   configRows: [] as Array<{ userCashbackPct: string }>,
   throwErr: null as Error | null,
-  merchantsById: new Map<string, { id: string; name: string; currency: string }>(),
-  merchantsBySlug: new Map<string, { id: string; name: string; currency: string }>(),
+  merchantsById: new Map<
+    string,
+    { id: string; name: string; denominations?: { currency: string } }
+  >(),
+  merchantsBySlug: new Map<
+    string,
+    { id: string; name: string; denominations?: { currency: string } }
+  >(),
 }));
 
 const limitMock = vi.fn(async () => {
@@ -75,10 +81,10 @@ beforeEach(() => {
   state.configRows = [];
   state.throwErr = null;
   state.merchantsById = new Map([
-    ['amazon-us', { id: 'amazon-us', name: 'Amazon', currency: 'USD' }],
+    ['amazon-us', { id: 'amazon-us', name: 'Amazon', denominations: { currency: 'USD' } }],
   ]);
   state.merchantsBySlug = new Map([
-    ['amazon', { id: 'amazon-us', name: 'Amazon', currency: 'USD' }],
+    ['amazon', { id: 'amazon-us', name: 'Amazon', denominations: { currency: 'USD' } }],
   ]);
 });
 
