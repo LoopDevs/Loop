@@ -80,6 +80,7 @@ import { adminMerchantPaymentMethodShareHandler } from './admin/merchant-payment
 import { adminMerchantCashbackMonthlyHandler } from './admin/merchant-cashback-monthly.js';
 import { adminMerchantFlywheelActivityHandler } from './admin/merchant-flywheel-activity.js';
 import { adminMerchantFlywheelActivityCsvHandler } from './admin/merchant-flywheel-activity-csv.js';
+import { adminMerchantTopEarnersHandler } from './admin/merchant-top-earners.js';
 import { adminCashbackConfigsCsvHandler } from './admin/cashback-configs-csv.js';
 import { adminMerchantsCatalogCsvHandler } from './admin/merchants-catalog-csv.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
@@ -1002,6 +1003,19 @@ app.get(
   '/api/admin/merchants/:merchantId/flywheel-activity.csv',
   rateLimit(10, 60_000),
   adminMerchantFlywheelActivityCsvHandler,
+);
+// Per-merchant top-earners leaderboard (#655) — ranked list of
+// users who earned the most cashback at one merchant in the
+// window. Inverse axis of user-cashback-by-merchant (per-user
+// view asks "where did Alice earn?"; this asks "who earns at
+// Amazon?"). Drives a "Top earners" card on the merchant drill
+// so BD/support can target outreach to whales at a specific
+// merchant. Joins against users for email enrichment — admin-
+// gated, so email is fine in the response.
+app.get(
+  '/api/admin/merchants/:merchantId/top-earners',
+  rateLimit(120, 60_000),
+  adminMerchantTopEarnersHandler,
 );
 // Given an order id, return the single pending_payouts row for it.
 // Nested under /orders/:orderId so the UI can link from the order
