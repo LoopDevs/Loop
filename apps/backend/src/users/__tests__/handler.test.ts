@@ -9,29 +9,31 @@ vi.mock('../../logger.js', () => ({
 }));
 
 // DB mocks:
-//   select(...).from(...).where(...)                      → count rows
-//     (setHomeCurrency path — awaits the where directly)
+//   select(...).from(...).where(...).limit(1)             → user-existence probe rows
+//     (A2-552: setHomeCurrency fallback — disambiguates 404 vs 409
+//      after a no-op UPDATE)
 //   select(...).from(...).where(...).orderBy(...).limit(N) → history rows
 //     (cashback-history path — chains a terminal .limit)
 //   update(...).set(...).where(...).returning()           → updated user rows
-// The select chain's `.where()` returns a shapeshifter leaf that's
-// thenable (so the first caller can `await` it and read the count
-// row) AND exposes `.orderBy` / `.limit` (so the second caller can
-// chain onto it and read the list). Drizzle's real query builder
-// behaves similarly — the chain is lazy until awaited.
+// The select chain's `.where()` returns a shapeshifter leaf that
+// exposes `.limit` (user-existence probe + cashback-history) and
+// `.orderBy` (credits / cashback-history). `userExistsProbeRows`
+// routes `.limit()` output — the fallback probe sets it, the
+// cashback-history path leaves it `null` and reads `historyRows`
+// instead.
 //
 // The `query` surface fronts drizzle's relational builder — only
 // userCredits is exposed since that's what `toView` reaches for.
 const { selectChain, updateChain, queryObj, dbState } = vi.hoisted(() => {
   const state: {
-    orderCount: string;
     updatedUser: unknown;
+    userExistsProbeRows: unknown[] | null;
     historyRows: unknown[];
     homeBalanceMinor: bigint | null;
     creditsRows: unknown[];
   } = {
-    orderCount: '0',
     updatedUser: null,
+    userExistsProbeRows: null,
     historyRows: [],
     homeBalanceMinor: null,
     creditsRows: [],
@@ -40,13 +42,6 @@ const { selectChain, updateChain, queryObj, dbState } = vi.hoisted(() => {
   sel['from'] = vi.fn(() => sel);
   sel['where'] = vi.fn(() => {
     const leaf: Record<string, unknown> = {};
-    leaf['then'] = (resolve: (v: Array<{ n: string }>) => void, reject: (err: unknown) => void) => {
-      try {
-        resolve([{ n: state.orderCount }]);
-      } catch (err) {
-        reject(err);
-      }
-    };
     // getUserCreditsHandler ends its chain on `.orderBy(...)` (no
     // `.limit`). Return an awaitable that resolves to `creditsRows`
     // for that path; the cashback-history path still chains to
@@ -63,7 +58,9 @@ const { selectChain, updateChain, queryObj, dbState } = vi.hoisted(() => {
       orderByLeaf['limit'] = vi.fn(async () => state.historyRows);
       return orderByLeaf;
     });
-    leaf['limit'] = vi.fn(async () => state.historyRows);
+    leaf['limit'] = vi.fn(async () =>
+      state.userExistsProbeRows !== null ? state.userExistsProbeRows : state.historyRows,
+    );
     return leaf;
   });
   const upd: Record<string, ReturnType<typeof vi.fn>> = {};
@@ -223,8 +220,8 @@ beforeEach(() => {
   userState.upsertThrow = null;
   userState.upsertCalls = [];
   jwtState.claims = null;
-  dbState.orderCount = '0';
   dbState.updatedUser = null;
+  dbState.userExistsProbeRows = null;
   dbState.historyRows = [];
   dbState.homeBalanceMinor = null;
   payoutState.rows = [];
@@ -383,7 +380,6 @@ describe('setHomeCurrencyHandler', () => {
 
   it('happy path — order-less user gets home_currency written and returns the new view', async () => {
     userState.byId = { ...baseUser, homeCurrency: 'USD' };
-    dbState.orderCount = '0';
     dbState.updatedUser = { ...baseUser, homeCurrency: 'GBP' };
     const res = await setHomeCurrencyHandler(makeCtx(LOOP_AUTH, { currency: 'GBP' }));
     expect(res.status).toBe(200);
@@ -391,19 +387,24 @@ describe('setHomeCurrencyHandler', () => {
     expect(body['homeCurrency']).toBe('GBP');
   });
 
-  it('409 HOME_CURRENCY_LOCKED when the user already has orders', async () => {
+  // A2-552: the UPDATE's NOT EXISTS guard blocks the write when the
+  // user already has orders. The mock leaves `updatedUser = null` so
+  // the guarded UPDATE reports "0 rows updated"; the fallback probe
+  // finds the user row still exists → 409 HOME_CURRENCY_LOCKED.
+  it('409 HOME_CURRENCY_LOCKED when the guarded UPDATE matches no rows and the user still exists', async () => {
     userState.byId = { ...baseUser, homeCurrency: 'USD' };
-    dbState.orderCount = '3';
+    dbState.updatedUser = null;
+    dbState.userExistsProbeRows = [{ id: 'user-uuid' }];
     const res = await setHomeCurrencyHandler(makeCtx(LOOP_AUTH, { currency: 'GBP' }));
     expect(res.status).toBe(409);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('HOME_CURRENCY_LOCKED');
   });
 
-  it('short-circuits when the requested currency already matches (no update, no order-count scan of the actual row)', async () => {
+  it('short-circuits when the requested currency already matches (no update, no probe)', async () => {
     userState.byId = { ...baseUser, homeCurrency: 'GBP' };
     // If the handler fell through to the UPDATE path, .returning() would
-    // reject (updatedUser is null → empty array → 404). Instead the
+    // return [] and the existence-probe fallback would fire. Instead the
     // short-circuit returns the existing view as-is.
     dbState.updatedUser = null;
     const res = await setHomeCurrencyHandler(makeCtx(LOOP_AUTH, { currency: 'GBP' }));
@@ -412,10 +413,12 @@ describe('setHomeCurrencyHandler', () => {
     expect(body['homeCurrency']).toBe('GBP');
   });
 
-  it('404 when the user row disappears between resolve and update (race)', async () => {
+  // A2-552: the fallback probe distinguishes "locked" from "vanished".
+  // Empty probe rows → user row gone → 404 rather than 409.
+  it('404 when the user row disappears between resolve and update (race with deletion)', async () => {
     userState.byId = { ...baseUser, homeCurrency: 'USD' };
-    dbState.orderCount = '0';
-    dbState.updatedUser = null; // .returning() → empty array
+    dbState.updatedUser = null;
+    dbState.userExistsProbeRows = [];
     const res = await setHomeCurrencyHandler(makeCtx(LOOP_AUTH, { currency: 'GBP' }));
     expect(res.status).toBe(404);
   });
