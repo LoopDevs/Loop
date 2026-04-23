@@ -83,32 +83,40 @@ export async function adminUserSearchHandler(c: Context): Promise<Response> {
   const escaped = q.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
   const pattern = `%${escaped}%`;
 
-  // Fetch one extra row to detect truncation without a COUNT(*).
-  const rows = await db
-    .select({
-      id: users.id,
-      email: users.email,
-      isAdmin: users.isAdmin,
-      homeCurrency: users.homeCurrency,
-      createdAt: users.createdAt,
-    })
-    .from(users)
-    .where(ilike(users.email, pattern))
-    .orderBy(desc(users.createdAt))
-    .limit(RESULT_LIMIT + 1);
+  try {
+    // Fetch one extra row to detect truncation without a COUNT(*).
+    const rows = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        isAdmin: users.isAdmin,
+        homeCurrency: users.homeCurrency,
+        createdAt: users.createdAt,
+      })
+      .from(users)
+      .where(ilike(users.email, pattern))
+      .orderBy(desc(users.createdAt))
+      .limit(RESULT_LIMIT + 1);
 
-  const truncated = rows.length > RESULT_LIMIT;
-  const trimmed = truncated ? rows.slice(0, RESULT_LIMIT) : rows;
+    const truncated = rows.length > RESULT_LIMIT;
+    const trimmed = truncated ? rows.slice(0, RESULT_LIMIT) : rows;
 
-  const results: AdminUserSearchResult[] = trimmed.map((r) => ({
-    id: r.id,
-    email: r.email,
-    isAdmin: r.isAdmin,
-    // DB CHECK constrains this; the cast is load-bearing for the wire type only.
-    homeCurrency: r.homeCurrency as 'USD' | 'GBP' | 'EUR',
-    createdAt: r.createdAt.toISOString(),
-  }));
+    const results: AdminUserSearchResult[] = trimmed.map((r) => ({
+      id: r.id,
+      email: r.email,
+      isAdmin: r.isAdmin,
+      // DB CHECK constrains this; the cast is load-bearing for the wire type only.
+      homeCurrency: r.homeCurrency as 'USD' | 'GBP' | 'EUR',
+      createdAt: r.createdAt.toISOString(),
+    }));
 
-  log.debug({ q, hits: results.length, truncated }, 'admin user-search served');
-  return c.json<AdminUserSearchResponse>({ users: results, truncated });
+    log.debug({ q, hits: results.length, truncated }, 'admin user-search served');
+    return c.json<AdminUserSearchResponse>({ users: results, truncated });
+  } catch (err) {
+    // A2-507: keep the handler-scoped logger bindings instead of
+    // letting the global onError swallow them. Ops correlates a failed
+    // search to this log line via the request-id.
+    log.error({ err, q }, 'admin user-search query failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to search users' }, 500);
+  }
 }

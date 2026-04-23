@@ -6,6 +6,9 @@ import { merchantCashbackConfigs, merchantCashbackConfigHistory } from '../db/sc
 import type { User } from '../db/users.js';
 import { notifyCashbackConfigChanged, type CashbackConfigSnapshot } from '../discord.js';
 import { getMerchants } from '../merchants/sync.js';
+import { logger } from '../logger.js';
+
+const log = logger.child({ handler: 'admin-cashback-configs' });
 
 /**
  * Admin — cashback config endpoints (ADR 011). All routes expect
@@ -34,11 +37,19 @@ const MERCHANT_ID_MAX = 128;
 
 /** GET /api/admin/merchant-cashback-configs */
 export async function listConfigsHandler(c: Context): Promise<Response> {
-  const rows = await db
-    .select()
-    .from(merchantCashbackConfigs)
-    .orderBy(merchantCashbackConfigs.merchantId);
-  return c.json({ configs: rows });
+  try {
+    const rows = await db
+      .select()
+      .from(merchantCashbackConfigs)
+      .orderBy(merchantCashbackConfigs.merchantId);
+    return c.json({ configs: rows });
+  } catch (err) {
+    // A2-507: keep the handler-scoped logger binding so the request-id
+    // correlates an /admin/cashback-configs load failure with this log
+    // line rather than the generic global onError message.
+    log.error({ err }, 'admin list-configs query failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load cashback configs' }, 500);
+  }
 }
 
 /**
@@ -143,11 +154,16 @@ export async function configHistoryHandler(c: Context): Promise<Response> {
   if (merchantId.length > MERCHANT_ID_MAX || !MERCHANT_ID_RE.test(merchantId)) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
   }
-  const rows = await db
-    .select()
-    .from(merchantCashbackConfigHistory)
-    .where(eq(merchantCashbackConfigHistory.merchantId, merchantId))
-    .orderBy(desc(merchantCashbackConfigHistory.changedAt))
-    .limit(50);
-  return c.json({ history: rows });
+  try {
+    const rows = await db
+      .select()
+      .from(merchantCashbackConfigHistory)
+      .where(eq(merchantCashbackConfigHistory.merchantId, merchantId))
+      .orderBy(desc(merchantCashbackConfigHistory.changedAt))
+      .limit(50);
+    return c.json({ history: rows });
+  } catch (err) {
+    log.error({ err, merchantId }, 'admin config-history query failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load config history' }, 500);
+  }
 }

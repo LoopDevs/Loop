@@ -237,7 +237,7 @@ Complete. Evidence: [phase-5a-admin.md](./audit-2026-evidence/phase-5a-admin.md)
 | A2-504 | Low      | ~~`merchants-catalog-csv` contains a no-op self-comparison `where(eq(merchantId, merchantId))`~~ **resolved-pending-review** by A2-503/504 PR      |
 | A2-505 | Medium   | 3 CSV admin endpoints missing from `openapi.ts`                                                                                                    |
 | A2-506 | Medium   | 9 non-CSV admin endpoints missing from `openapi.ts` (incl. base `GET /api/admin/orders`)                                                           |
-| A2-507 | Low      | 4 admin handlers lack try/catch; errors lose handler-scoped logger bindings                                                                        |
+| A2-507 | Low      | ~~4 admin handlers lack try/catch; errors lose handler-scoped logger bindings~~ **resolved-pending-review** by A2-507 PR                           |
 | A2-508 | Medium   | 13 admin handlers have no paired test file (mostly PII-exposing user drill-down)                                                                   |
 | A2-509 | Low      | `POST /api/admin/merchants/resync` has no Idempotency-Key (idempotent by mutex only)                                                               |
 | A2-510 | Low      | `user-credits-csv` truncation sentinel diverges from canonical shape                                                                               |
