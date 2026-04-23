@@ -279,9 +279,11 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
             const row = snapshot.liabilities?.[code] ?? { outstandingMinor: '0', issuer: null };
             const fiat = code.slice(0, 3); // USDLOOP → USD
             return (
-              <div
+              <Link
                 key={code}
-                className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white dark:bg-gray-900"
+                to={`/admin/assets/${encodeURIComponent(code)}`}
+                aria-label={`Open ${code} asset detail`}
+                className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white dark:bg-gray-900 hover:border-gray-400 dark:hover:border-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <div className="flex items-baseline justify-between">
                   <div className="text-xs font-medium text-gray-500 dark:text-gray-400">{code}</div>
@@ -298,7 +300,7 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
                 <div className="mt-1 text-xl font-semibold text-gray-900 dark:text-white tabular-nums">
                   {fmtMinor(row.outstandingMinor, fiat)}
                 </div>
-              </div>
+              </Link>
             );
           })}
         </div>
