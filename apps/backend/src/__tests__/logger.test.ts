@@ -191,4 +191,54 @@ describe('logger redaction', () => {
     expect(r.email).toBe('u@example.com');
     expect(r.module).toBe('auth');
   });
+
+  it('A2-655/A2-1601: redacts env-named secret fields (full env-key names)', () => {
+    const { logger, records } = makeLogger();
+    logger.info(
+      {
+        env: {
+          LOOP_JWT_SIGNING_KEY: 'hot-key-32-chars-aaaaaaaaaaaaaaaa',
+          LOOP_JWT_SIGNING_KEY_PREVIOUS: 'cold-key-32-chars-bbbbbbbbbbbbbbbb',
+          GIFT_CARD_API_KEY: 'gc-key',
+          GIFT_CARD_API_SECRET: 'gc-secret',
+          DATABASE_URL: 'postgres://u:hunter2@host/db',
+          SENTRY_DSN: 'https://x@o.ingest.sentry.io/42',
+          DISCORD_WEBHOOK_ORDERS: 'https://discord.com/api/webhooks/123/abc',
+          DISCORD_WEBHOOK_MONITORING: 'https://discord.com/api/webhooks/456/def',
+          DISCORD_WEBHOOK_ADMIN_AUDIT: 'https://discord.com/api/webhooks/789/ghi',
+          // A non-secret field should still pass through.
+          PORT: 8080,
+        },
+      },
+      'env dump',
+    );
+    const e = (records[0] as Record<string, unknown>).env as Record<string, unknown>;
+    expect(e['LOOP_JWT_SIGNING_KEY']).toBe('[REDACTED]');
+    expect(e['LOOP_JWT_SIGNING_KEY_PREVIOUS']).toBe('[REDACTED]');
+    expect(e['GIFT_CARD_API_KEY']).toBe('[REDACTED]');
+    expect(e['GIFT_CARD_API_SECRET']).toBe('[REDACTED]');
+    expect(e['DATABASE_URL']).toBe('[REDACTED]');
+    expect(e['SENTRY_DSN']).toBe('[REDACTED]');
+    expect(e['DISCORD_WEBHOOK_ORDERS']).toBe('[REDACTED]');
+    expect(e['DISCORD_WEBHOOK_MONITORING']).toBe('[REDACTED]');
+    expect(e['DISCORD_WEBHOOK_ADMIN_AUDIT']).toBe('[REDACTED]');
+    // PORT survives — only secret-bearing env keys are redacted.
+    expect(e['PORT']).toBe(8080);
+  });
+
+  it('A2-655/A2-1601: also redacts env-named secrets at top level (log(env) direct)', () => {
+    const { logger, records } = makeLogger();
+    logger.info(
+      {
+        LOOP_JWT_SIGNING_KEY: 'hot',
+        DATABASE_URL: 'postgres://…',
+        DISCORD_WEBHOOK_ORDERS: 'https://…',
+      },
+      'direct env log',
+    );
+    const r = records[0] as Record<string, unknown>;
+    expect(r['LOOP_JWT_SIGNING_KEY']).toBe('[REDACTED]');
+    expect(r['DATABASE_URL']).toBe('[REDACTED]');
+    expect(r['DISCORD_WEBHOOK_ORDERS']).toBe('[REDACTED]');
+  });
 });

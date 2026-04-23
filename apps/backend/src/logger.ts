@@ -78,6 +78,36 @@ export const REDACT_PATHS: readonly string[] = [
   'LOOP_STELLAR_OPERATOR_SECRET_PREVIOUS',
   '*.LOOP_STELLAR_OPERATOR_SECRET',
   '*.LOOP_STELLAR_OPERATOR_SECRET_PREVIOUS',
+  // A2-655 + A2-1601 — env-var names for every secret-bearing
+  // field loaded into process.env / env.ts. A boot-time
+  // `log.debug({ env })` would otherwise leak these verbatim. The
+  // generic `secret`/`apiSecret` globs above catch the short field
+  // names; these cover the fully-qualified env-key shape.
+  //
+  //   Loop-native JWT signing keys (ADR 013):
+  'LOOP_JWT_SIGNING_KEY',
+  'LOOP_JWT_SIGNING_KEY_PREVIOUS',
+  '*.LOOP_JWT_SIGNING_KEY',
+  '*.LOOP_JWT_SIGNING_KEY_PREVIOUS',
+  //   Upstream CTX API credentials:
+  'GIFT_CARD_API_KEY',
+  'GIFT_CARD_API_SECRET',
+  '*.GIFT_CARD_API_KEY',
+  '*.GIFT_CARD_API_SECRET',
+  //   Postgres connection string (includes password):
+  'DATABASE_URL',
+  '*.DATABASE_URL',
+  //   Sentry DSN (public but still flagged by our threat model —
+  //   a leaked DSN lets an attacker fill our error quota):
+  'SENTRY_DSN',
+  '*.SENTRY_DSN',
+  //   Discord webhooks — the URLs themselves are the credentials:
+  'DISCORD_WEBHOOK_ORDERS',
+  'DISCORD_WEBHOOK_MONITORING',
+  'DISCORD_WEBHOOK_ADMIN_AUDIT',
+  '*.DISCORD_WEBHOOK_ORDERS',
+  '*.DISCORD_WEBHOOK_MONITORING',
+  '*.DISCORD_WEBHOOK_ADMIN_AUDIT',
 ];
 
 const basePinoOptions = {
