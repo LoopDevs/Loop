@@ -55,25 +55,25 @@ describe('adminReconciliationHandler', () => {
     selectRows.push({ count: '0' });
     const res = await adminReconciliationHandler(makeCtx());
     const body = (await res.json()) as {
-      userCount: string;
+      rowCount: string;
       driftedCount: string;
       drift: unknown[];
     };
-    expect(body).toEqual({ userCount: '0', driftedCount: '0', drift: [] });
+    expect(body).toEqual({ rowCount: '0', driftedCount: '0', drift: [] });
   });
 
-  it('returns empty drift + non-zero userCount when every row is consistent', async () => {
+  it('returns empty drift + non-zero rowCount when every row is consistent', async () => {
     // Drift query returns nothing (no HAVING matches); count query
     // reports the total user_credits population.
     executeQueue.push([]);
     selectRows.push({ count: '42' });
     const res = await adminReconciliationHandler(makeCtx());
     const body = (await res.json()) as {
-      userCount: string;
+      rowCount: string;
       driftedCount: string;
       drift: unknown[];
     };
-    expect(body.userCount).toBe('42');
+    expect(body.rowCount).toBe('42');
     expect(body.driftedCount).toBe('0');
     expect(body.drift).toEqual([]);
   });
@@ -98,7 +98,7 @@ describe('adminReconciliationHandler', () => {
     selectRows.push({ count: '120' });
     const res = await adminReconciliationHandler(makeCtx());
     const body = (await res.json()) as {
-      userCount: string;
+      rowCount: string;
       driftedCount: string;
       drift: Array<{
         userId: string;
@@ -107,7 +107,7 @@ describe('adminReconciliationHandler', () => {
         deltaMinor: string;
       }>;
     };
-    expect(body.userCount).toBe('120');
+    expect(body.rowCount).toBe('120');
     expect(body.driftedCount).toBe('2');
     expect(body.drift).toHaveLength(2);
     expect(body.drift[0]).toMatchObject({
