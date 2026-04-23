@@ -977,6 +977,30 @@ const AdminSupplierSpendResponse = registry.register(
   }),
 );
 
+// ─── Admin — supplier-margin summary (ADR 011/013/015/024) ────────────────
+
+const SupplierMarginRow = registry.register(
+  'SupplierMarginRow',
+  z.object({
+    currency: z.string().length(3).nullable().openapi({
+      description: 'ISO 4217 code; `null` for the fleet-wide aggregate row.',
+    }),
+    chargeMinor: z.string(),
+    wholesaleMinor: z.string(),
+    userCashbackMinor: z.string(),
+    loopMarginMinor: z.string(),
+    orderCount: z.number().int().nonnegative(),
+    marginBps: z.number().int().nonnegative().max(10_000).openapi({
+      description: 'loopMargin / charge × 10 000. Clamped [0, 10 000].',
+    }),
+  }),
+);
+
+const SupplierMarginResponse = registry.register(
+  'SupplierMarginResponse',
+  z.object({ rows: z.array(SupplierMarginRow) }),
+);
+
 // ─── Admin — supplier-spend activity (ADR 013 / 015) ───────────────────────
 
 const AdminSupplierSpendActivityDay = registry.register(
@@ -3087,6 +3111,38 @@ registry.registerPath({
     400: {
       description: 'Invalid `since`',
       content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the aggregate',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/supplier-margin',
+  summary: 'Lifetime supplier-margin summary (ADR 011/013/015/024).',
+  description:
+    "Aggregates all `state='fulfilled'` orders by catalog currency. Each row exposes chargeMinor, wholesaleMinor (CTX cost), userCashbackMinor, loopMarginMinor, orderCount, and `marginBps = loopMargin / charge × 10_000`. GROUPING SETS ((currency), ()) yields per-currency rows + a fleet-wide row (`currency: null`). First-point of the three-signal validation in ADR 024 — /daily + CSV + UI card land as follow-ups.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Per-currency rows + a fleet-wide aggregate',
+      content: { 'application/json': { schema: SupplierMarginResponse } },
     },
     401: {
       description: 'Missing or invalid bearer',

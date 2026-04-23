@@ -96,6 +96,7 @@ import { adminCashbackConfigsCsvHandler } from './admin/cashback-configs-csv.js'
 import { adminMerchantsCatalogCsvHandler } from './admin/merchants-catalog-csv.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminSupplierSpendActivityHandler } from './admin/supplier-spend-activity.js';
+import { adminSupplierMarginHandler } from './admin/supplier-margin.js';
 import { adminOperatorSupplierSpendHandler } from './admin/operator-supplier-spend.js';
 import { adminOperatorActivityHandler } from './admin/operator-activity.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
@@ -1175,6 +1176,12 @@ app.get('/api/admin/orders/:orderId/payout', rateLimit(120, 60_000), adminPayout
 // renders this on the treasury page as the "supplier" card next to
 // outstanding liabilities.
 app.get('/api/admin/supplier-spend', rateLimit(60, 60_000), adminSupplierSpendHandler);
+// Supplier-margin summary (ADR 011/013/015/024) — per-currency
+// fulfilled-order totals of face / wholesale / cashback / loop
+// margin + fleet-wide aggregate via GROUPING SETS. Third
+// commercial-health signal alongside realization and settlement-lag.
+// Follow-up slices: /daily time-series + CSV + UI card (ADR 024).
+app.get('/api/admin/supplier-margin', rateLimit(60, 60_000), adminSupplierMarginHandler);
 // Supplier-spend activity time-series (ADR 013 / 015) — per-day
 // per-currency wholesale/face/cashback/margin paid to CTX. The
 // time-axis of the supplier-spend snapshot. Together with
