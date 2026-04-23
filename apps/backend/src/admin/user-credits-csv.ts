@@ -72,7 +72,13 @@ export async function adminUserCreditsCsvHandler(c: Context): Promise<Response> 
       lines.push(csvRow([r.userId, r.email, r.currency, r.balanceMinor, r.updatedAt]));
     }
     if (truncated) {
-      lines.push('__TRUNCATED__');
+      // A2-510: route the sentinel through csvRow so the truncation
+      // shape matches every other Tier-3 admin export (payouts-csv,
+      // merchants-catalog-csv, supplier-spend-activity-csv). Output
+      // byte stays identical today because the sentinel has no
+      // RFC-4180 escapables, but unifying the path keeps the shape
+      // drift-free if the sentinel or csvRow format ever changes.
+      lines.push(csvRow(['__TRUNCATED__']));
     }
     const body = `${lines.join('\r\n')}\r\n`;
 
