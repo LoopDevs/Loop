@@ -240,6 +240,15 @@ export const EnvSchema = z.object({
     .string()
     .default('Public Global Stellar Network ; September 2015'),
 
+  // A2-1513: Horizon base URL for all payment-watcher / balance /
+  // circulation reads AND the payout-worker submit. Previously every
+  // consumer did `process.env['LOOP_STELLAR_HORIZON_URL']` directly,
+  // bypassing the env.ts zod layer — a typo in the URL (missing
+  // https://, trailing slash, etc.) only surfaced on the first
+  // Horizon call rather than at boot. Moved into the zod schema so
+  // a malformed URL fails `parseEnv()` at startup.
+  LOOP_STELLAR_HORIZON_URL: z.string().url().default('https://horizon.stellar.org'),
+
   // Payout-worker tick interval (seconds). 30s matches ADR 016's
   // recommended pacing — the worker is slower than the watcher
   // (10s) or procurement (5s) because each payout is a Stellar
