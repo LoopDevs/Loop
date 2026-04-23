@@ -123,6 +123,7 @@ import { publicFlywheelStatsHandler } from './public/flywheel-stats.js';
 import { publicLoopAssetsHandler } from './public/loop-assets.js';
 import { publicTopCashbackMerchantsHandler } from './public/top-cashback-merchants.js';
 import { publicMerchantHandler } from './public/merchant.js';
+import { publicCashbackPreviewHandler } from './public/cashback-preview.js';
 import {
   getCashbackHistoryHandler,
   getCashbackSummaryHandler,
@@ -618,6 +619,13 @@ app.get(
 // Same never-500 / cache-control discipline as the other
 // public endpoints (ADR 020).
 app.get('/api/public/merchants/:id', rateLimit(60, 60_000), publicMerchantHandler);
+// Pre-signup "calculate your cashback" preview. Same never-500 +
+// Cache-Control discipline as the other public endpoints (ADR 020).
+// Accepts ?merchantId (id or slug) + ?amountMinor (integer minor
+// units) and returns the projected cashback amount using the same
+// floor-rounded math as the order-insert path, so the preview never
+// promises more than the user will actually earn.
+app.get('/api/public/cashback-preview', rateLimit(60, 60_000), publicCashbackPreviewHandler);
 // LOOP-asset transparency surface (ADR 015 / 020). Public list of
 // configured (code, issuer) pairs so third-party wallets + users can
 // add trustlines to the verified issuer accounts without guessing
