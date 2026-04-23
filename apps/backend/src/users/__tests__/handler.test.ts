@@ -152,6 +152,8 @@ const { payoutState } = vi.hoisted(() => ({
     }>,
     singleRow: null as unknown,
     singleCalls: [] as Array<{ id: string; userId: string }>,
+    byOrderRow: null as unknown,
+    byOrderCalls: [] as Array<{ orderId: string; userId: string }>,
   },
 }));
 vi.mock('../../credits/pending-payouts.js', () => ({
@@ -162,6 +164,10 @@ vi.mock('../../credits/pending-payouts.js', () => ({
   getPayoutForUser: vi.fn(async (id: string, userId: string) => {
     payoutState.singleCalls.push({ id, userId });
     return payoutState.singleRow;
+  }),
+  getPayoutByOrderIdForUser: vi.fn(async (orderId: string, userId: string) => {
+    payoutState.byOrderCalls.push({ orderId, userId });
+    return payoutState.byOrderRow;
   }),
 }));
 
@@ -181,6 +187,7 @@ import {
   getCashbackSummaryHandler,
   getMeHandler,
   getUserCreditsHandler,
+  getUserPayoutByOrderHandler,
   getUserPendingPayoutDetailHandler,
   getUserPendingPayoutsHandler,
   setHomeCurrencyHandler,
@@ -224,6 +231,8 @@ beforeEach(() => {
   payoutState.calls = [];
   payoutState.singleRow = null;
   payoutState.singleCalls = [];
+  payoutState.byOrderRow = null;
+  payoutState.byOrderCalls = [];
 });
 
 describe('getMeHandler', () => {
@@ -940,5 +949,93 @@ describe('getCashbackSummaryHandler', () => {
     summaryState.throwErr = new Error('db exploded');
     const res = await getCashbackSummaryHandler(makeCtx(LOOP_AUTH));
     expect(res.status).toBe(500);
+  });
+});
+
+describe('getUserPayoutByOrderHandler', () => {
+  const LOOP_AUTH: LoopAuthContext = {
+    kind: 'loop',
+    userId: 'user-uuid',
+    email: 'a@b.com',
+    bearerToken: 'loop-jwt',
+  };
+  const validOrderId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const baseUser = {
+    id: 'user-uuid',
+    email: 'a@b.com',
+    isAdmin: false,
+    homeCurrency: 'GBP',
+    stellarAddress: null,
+    ctxUserId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  const sampleRow = {
+    id: 'payout-id',
+    userId: 'user-uuid',
+    orderId: validOrderId,
+    assetCode: 'USDLOOP',
+    assetIssuer: 'GISSUER',
+    amountStroops: 25_000n,
+    state: 'confirmed',
+    txHash: 'abcdef0123456789',
+    attempts: 1,
+    createdAt: new Date('2026-04-20T10:00:00Z'),
+    submittedAt: new Date('2026-04-20T10:01:00Z'),
+    confirmedAt: new Date('2026-04-20T10:02:00Z'),
+    failedAt: null,
+  };
+
+  beforeEach(() => {
+    userState.byId = baseUser;
+  });
+
+  it('400 when orderId is missing', async () => {
+    const res = await getUserPayoutByOrderHandler(makeCtx(LOOP_AUTH, undefined, undefined, {}));
+    expect(res.status).toBe(400);
+  });
+
+  it('400 when orderId is not a uuid', async () => {
+    const res = await getUserPayoutByOrderHandler(
+      makeCtx(LOOP_AUTH, undefined, undefined, { orderId: 'not-a-uuid' }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('401 when no auth is on the context', async () => {
+    const res = await getUserPayoutByOrderHandler(
+      makeCtx(undefined, undefined, undefined, { orderId: validOrderId }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('404 when the order has no payout row (or belongs to another user)', async () => {
+    payoutState.byOrderRow = null;
+    const res = await getUserPayoutByOrderHandler(
+      makeCtx(LOOP_AUTH, undefined, undefined, { orderId: validOrderId }),
+    );
+    expect(res.status).toBe(404);
+    expect(payoutState.byOrderCalls[0]).toEqual({
+      orderId: validOrderId,
+      userId: 'user-uuid',
+    });
+  });
+
+  it('returns the view shape on hit with tx hash + confirmed timestamp', async () => {
+    payoutState.byOrderRow = sampleRow;
+    const res = await getUserPayoutByOrderHandler(
+      makeCtx(LOOP_AUTH, undefined, undefined, { orderId: validOrderId }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      id: 'payout-id',
+      orderId: validOrderId,
+      assetCode: 'USDLOOP',
+      amountStroops: '25000',
+      state: 'confirmed',
+      txHash: 'abcdef0123456789',
+      confirmedAt: '2026-04-20T10:02:00.000Z',
+    });
   });
 });

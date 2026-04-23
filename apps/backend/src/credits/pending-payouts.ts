@@ -247,3 +247,22 @@ export async function getPayoutForUser(id: string, userId: string): Promise<Pend
     .limit(1);
   return row ?? null;
 }
+
+/**
+ * User-scoped per-order payout lookup — "for my order X, is there a
+ * payout row, and what's its state?". `(order_id, user_id)` predicate
+ * guarantees the row belongs to the caller; a mismatch (another
+ * user's order id guessed) returns null so the handler can 404
+ * without confirming the order exists.
+ */
+export async function getPayoutByOrderIdForUser(
+  orderId: string,
+  userId: string,
+): Promise<PendingPayout | null> {
+  const [row] = await db
+    .select()
+    .from(pendingPayouts)
+    .where(and(eq(pendingPayouts.orderId, orderId), eq(pendingPayouts.userId, userId)))
+    .limit(1);
+  return row ?? null;
+}

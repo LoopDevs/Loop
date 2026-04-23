@@ -224,6 +224,7 @@ GET  /api/users/me/cashback-history [authenticated — recent credit-ledger even
 GET  /api/users/me/credits         [authenticated — per-currency balance list, ADR 009/015]
 GET  /api/users/me/pending-payouts  [authenticated — caller's on-chain payout rows, ADR 015/016]
 GET  /api/users/me/pending-payouts/:id [authenticated — single payout detail, ADR 015/016]
+GET  /api/users/me/orders/:orderId/payout [authenticated — per-order settlement drill, mirror of admin /api/admin/orders/:orderId/payout, ADR 015/016]
 GET  /api/users/me/cashback-summary [authenticated — compact { lifetime, thisMonth } totals, ADR 009/015]
 GET  /api/users/me/cashback-by-merchant [authenticated — top cashback-earning merchants in window, ADR 009/015]
 GET  /api/users/me/cashback-monthly [authenticated — last 12 months of cashback totals by (month,currency), ADR 009/015]
