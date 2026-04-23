@@ -63,6 +63,14 @@ export default function CashbackIndexRoute(): React.JSX.Element {
             Earn cashback every time you buy a gift card. Paid in LOOP-asset stablecoin that
             compounds when you spend it on your next order.
           </p>
+          <p className="mt-4">
+            <Link
+              to="/calculator"
+              className="inline-block text-sm font-medium text-blue-700 underline decoration-blue-300 underline-offset-4 hover:decoration-blue-700 dark:text-blue-400 dark:decoration-blue-800 dark:hover:decoration-blue-400"
+            >
+              Try the cashback calculator →
+            </Link>
+          </p>
         </header>
 
         {query.isPending ? (
