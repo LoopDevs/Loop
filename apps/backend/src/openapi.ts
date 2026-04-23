@@ -1019,6 +1019,9 @@ const AdminSupplierSpendRow = registry.register(
     wholesaleMinor: z.string(),
     userCashbackMinor: z.string(),
     loopMarginMinor: z.string(),
+    marginBps: z.number().int().nonnegative().max(10_000).openapi({
+      description: 'loopMargin / faceValue × 10 000. Clamped [0, 10 000].',
+    }),
   }),
 );
 

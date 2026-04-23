@@ -39,6 +39,13 @@ export interface SupplierSpendRow {
   wholesaleMinor: string;
   userCashbackMinor: string;
   loopMarginMinor: string;
+  /**
+   * Loop margin as basis points of face value (loopMargin / face ×
+   * 10 000). Integer, clamped [0, 10 000]. 0 when a row has zero
+   * face value (shouldn't happen given the CHECK constraints, but
+   * division-by-zero defence is cheap).
+   */
+  marginBps: number;
 }
 
 export interface SupplierSpendResponse {
@@ -62,6 +69,30 @@ function toStringBigint(value: string | number | bigint): string {
   if (typeof value === 'bigint') return value.toString();
   if (typeof value === 'number') return Math.trunc(value).toString();
   return value;
+}
+
+/**
+ * loopMargin / faceValue × 10 000 as integer bps, clamped to
+ * [0, 10 000]. Matches the `recycledBps` contract in @loop/shared
+ * (same rounding direction, same clamp). Kept local for now — a
+ * second consumer would earn a lift to @loop/shared.
+ */
+export function marginBps(faceValueMinor: bigint, loopMarginMinor: bigint): number {
+  if (faceValueMinor <= 0n) return 0;
+  const clamped = loopMarginMinor < 0n ? 0n : loopMarginMinor;
+  const scaled = (clamped * 10_000n) / faceValueMinor;
+  const n = Number(scaled);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return n > 10_000 ? 10_000 : n;
+}
+
+function toBigIntSafe(value: string | number | bigint): bigint {
+  if (typeof value === 'bigint') return value;
+  try {
+    return BigInt(typeof value === 'number' ? Math.trunc(value) : value);
+  } catch {
+    return 0n;
+  }
 }
 
 export async function adminSupplierSpendHandler(c: Context): Promise<Response> {
@@ -115,14 +146,19 @@ export async function adminSupplierSpendHandler(c: Context): Promise<Response> {
         : ((result as unknown as { rows?: AggRow[] }).rows ?? [])
     ) as AggRow[];
 
-    const rows: SupplierSpendRow[] = raw.map((r) => ({
-      currency: r.currency,
-      count: Number(r.count),
-      faceValueMinor: toStringBigint(r.face_value_minor),
-      wholesaleMinor: toStringBigint(r.wholesale_minor),
-      userCashbackMinor: toStringBigint(r.user_cashback_minor),
-      loopMarginMinor: toStringBigint(r.loop_margin_minor),
-    }));
+    const rows: SupplierSpendRow[] = raw.map((r) => {
+      const face = toBigIntSafe(r.face_value_minor);
+      const margin = toBigIntSafe(r.loop_margin_minor);
+      return {
+        currency: r.currency,
+        count: Number(r.count),
+        faceValueMinor: face.toString(),
+        wholesaleMinor: toStringBigint(r.wholesale_minor),
+        userCashbackMinor: toStringBigint(r.user_cashback_minor),
+        loopMarginMinor: margin.toString(),
+        marginBps: marginBps(face, margin),
+      };
+    });
 
     const body: SupplierSpendResponse = { since: since.toISOString(), rows };
     return c.json(body);

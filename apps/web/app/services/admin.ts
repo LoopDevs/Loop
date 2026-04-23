@@ -352,6 +352,8 @@ export interface SupplierSpendRow {
   wholesaleMinor: string;
   userCashbackMinor: string;
   loopMarginMinor: string;
+  /** loopMargin / faceValue × 10 000. Integer, clamped [0, 10 000]. */
+  marginBps: number;
 }
 
 export interface SupplierSpendResponse {
