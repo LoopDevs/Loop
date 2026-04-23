@@ -4481,6 +4481,98 @@ registry.registerPath({
   },
 });
 
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/supplier-spend/activity.csv',
+  summary: 'Daily × per-currency supplier-spend CSV (ADR 013/015/018).',
+  description:
+    "Tier-3 CSV of /api/admin/supplier-spend/activity. Columns: day,currency,count,face_value_minor,wholesale_minor,user_cashback_minor,loop_margin_minor. Finance runs this at month-end to reconcile CTX's invoice — wholesale_minor per (day, currency) should tie to CTX's line items. Zero-activity days emit day,,0,0,0,0,0. Window: ?days (default 31, cap 366). Row cap 10 000.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(366).optional(),
+      currency: z.enum(['USD', 'GBP', 'EUR']).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'CSV body',
+      content: { 'text/csv; charset=utf-8': { schema: z.string() } },
+    },
+    400: {
+      description: 'Unknown `currency`',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/treasury/credit-flow.csv',
+  summary: 'Daily × per-currency credit-flow CSV (ADR 009/015/018).',
+  description:
+    'Tier-3 CSV of /api/admin/treasury/credit-flow. Columns: day,currency,credited_minor,debited_minor,net_minor. Completes the finance-CSV quartet (cashback-activity, payouts-activity, supplier-spend/activity, this). Zero-activity days emit day,,0,0,0. With ?currency the LEFT JOIN generate_series gives a dense series. Row cap 10 000.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(366).optional(),
+      currency: z.enum(['USD', 'GBP', 'EUR']).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'CSV body',
+      content: { 'text/csv; charset=utf-8': { schema: z.string() } },
+    },
+    400: {
+      description: 'Unknown `currency`',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/operators-snapshot.csv',
+  summary: 'Per-operator fleet snapshot CSV for CTX reviews (ADR 013/018/022).',
+  description:
+    'Tier-3 CSV joining operator-stats + operator-latency into one row per operator. Columns: operator_id,order_count,fulfilled_count,failed_count,success_pct,sample_count,p50_ms,p95_ms,p99_ms,mean_ms,last_order_at. Handed to CTX relationship owners for quarterly review meetings — SLA + volume + success rate on one sheet. Stats is the LEFT side: operators with orders but no fulfilled-with-timings samples get zero-filled latency columns. ?since default 24h, cap 366d.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      since: z.string().datetime().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'CSV body',
+      content: { 'text/csv; charset=utf-8': { schema: z.string() } },
+    },
+    400: {
+      description: 'Invalid or out-of-window `since`',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
 // ─── Admin fleet-wide monthly / daily (ADR 015/016) ─────────────────────────
 
 const AdminPayoutsMonthlyEntry = registry.register(
