@@ -33,7 +33,25 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-import { adminSupplierSpendHandler } from '../supplier-spend.js';
+import { adminSupplierSpendHandler, marginBps } from '../supplier-spend.js';
+
+describe('marginBps', () => {
+  it('returns 0 on zero face value', () => {
+    expect(marginBps(0n, 0n)).toBe(0);
+    expect(marginBps(0n, 100n)).toBe(0);
+  });
+
+  it('computes loopMargin / face × 10 000', () => {
+    expect(marginBps(10_000n, 500n)).toBe(500); // 5.00%
+    expect(marginBps(10_000n, 100n)).toBe(100); // 1.00%
+    expect(marginBps(10_000n, 1_234n)).toBe(1234);
+  });
+
+  it('clamps overflow + negative margin', () => {
+    expect(marginBps(100n, 200n)).toBe(10_000);
+    expect(marginBps(100n, -50n)).toBe(0);
+  });
+});
 
 function makeCtx(query: Record<string, string> = {}): Context {
   return {
@@ -87,6 +105,9 @@ describe('adminSupplierSpendHandler', () => {
       rows: Array<Record<string, unknown>>;
     };
     expect(body.rows).toHaveLength(2);
+    // marginBps = loopMargin / faceValue × 10 000
+    //   GBP: 33_600 / 420_000 × 10_000 = 800  (8.00%)
+    //   USD:  5_600 /  70_000 × 10_000 = 800  (8.00%)
     expect(body.rows[0]).toEqual({
       currency: 'GBP',
       count: 42,
@@ -94,9 +115,11 @@ describe('adminSupplierSpendHandler', () => {
       wholesaleMinor: '336000',
       userCashbackMinor: '50400',
       loopMarginMinor: '33600',
+      marginBps: 800,
     });
     expect(body.rows[1]!['count']).toBe(7);
     expect(body.rows[1]!['wholesaleMinor']).toBe('56000');
+    expect(body.rows[1]!['marginBps']).toBe(800);
   });
 
   it('accepts an ISO-8601 since and echoes it back', async () => {

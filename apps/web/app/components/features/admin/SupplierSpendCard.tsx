@@ -73,6 +73,7 @@ export function SupplierSpendCard(): React.JSX.Element {
               'CTX wholesale',
               'User cashback',
               'Loop margin',
+              'Margin %',
             ].map((h) => (
               <th
                 key={h}
@@ -112,6 +113,9 @@ export function SupplierSpendCard(): React.JSX.Element {
               </td>
               <td className="px-3 py-2 tabular-nums text-blue-700 dark:text-blue-400">
                 {fmtMinor(row.loopMarginMinor, row.currency)}
+              </td>
+              <td className="px-3 py-2 tabular-nums text-gray-600 dark:text-gray-400">
+                {(row.marginBps / 100).toFixed(2)}%
               </td>
             </tr>
           ))}
