@@ -153,6 +153,16 @@ function pickHealthyOperator(): Operator | null {
  * 4xx responses are returned as-is; those are not operator-health
  * signals and bumping the breaker on them would be wrong.
  */
+/**
+ * A2-1510: per-request timeout cap. Callers pass a caller-owned
+ * signal for long-running streams or cancellation; absent one, we
+ * apply a conservative 30-second cap so a wedged CTX upstream can't
+ * park a procurement / payout tick forever. Combined with the
+ * circuit-breaker's half-open probe, this bounds the worst-case
+ * blocking time on any single operator call.
+ */
+const OPERATOR_FETCH_DEFAULT_TIMEOUT_MS = 30_000;
+
 export async function operatorFetch(url: string | URL, init?: RequestInit): Promise<Response> {
   ensureInitialised();
   if (operators.length === 0) {
@@ -160,6 +170,12 @@ export async function operatorFetch(url: string | URL, init?: RequestInit): Prom
       'CTX operator pool is not configured (CTX_OPERATOR_POOL unset)',
     );
   }
+
+  // A2-1510: compose a default-timeout signal when the caller didn't
+  // pass one. If they did, respect it verbatim — they've already
+  // thought about the cancellation window.
+  const signal: AbortSignal | undefined =
+    init?.signal ?? AbortSignal.timeout(OPERATOR_FETCH_DEFAULT_TIMEOUT_MS);
 
   // Try up to 2 operators: the picked one, and one fallback if the
   // first errors. `operators.length` can cap that naturally at 1 for
@@ -172,7 +188,7 @@ export async function operatorFetch(url: string | URL, init?: RequestInit): Prom
     const headers = new Headers(init?.headers);
     headers.set('Authorization', `Bearer ${op.bearer}`);
     try {
-      const res = await op.breaker.fetch(url, { ...init, headers });
+      const res = await op.breaker.fetch(url, { ...init, headers, signal });
       return res;
     } catch (err) {
       if (err instanceof CircuitOpenError) {
