@@ -15,6 +15,12 @@ export function Footer(): React.JSX.Element {
             <Link to="/map" className="hover:text-white transition-colors">
               Map
             </Link>
+            <Link to="/cashback" className="hover:text-white transition-colors">
+              Cashback rates
+            </Link>
+            <Link to="/trustlines" className="hover:text-white transition-colors">
+              Trustlines
+            </Link>
           </nav>
           <p className="text-xs text-gray-600">
             &copy; {new Date().getFullYear()} Loop. All rights reserved.
