@@ -51,6 +51,13 @@ export async function applyAdminRefund(args: {
   amountMinor: bigint;
   orderId: string;
   adminUserId: string;
+  /**
+   * A2-908: operator-authored reason, persisted on the ledger row so
+   * the "why" survives past the 24h admin-idempotency TTL sweep.
+   * Optional because older call sites may not pass one; the admin
+   * handler enforces presence at the API boundary.
+   */
+  reason?: string;
 }): Promise<RefundResult> {
   if (args.amountMinor <= 0n) {
     // Schema CHECK already enforces this but we fail fast with a
@@ -80,6 +87,7 @@ export async function applyAdminRefund(args: {
           currency: args.currency,
           referenceType: 'order',
           referenceId: args.orderId,
+          ...(args.reason !== undefined ? { reason: args.reason } : {}),
         })
         .returning();
       if (row === undefined) {
