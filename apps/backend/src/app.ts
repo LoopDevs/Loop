@@ -98,6 +98,7 @@ import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
 import { adminSupplierSpendActivityHandler } from './admin/supplier-spend-activity.js';
 import { adminSupplierMarginHandler } from './admin/supplier-margin.js';
 import { adminSupplierMarginDailyHandler } from './admin/supplier-margin-daily.js';
+import { adminSupplierMarginDailyCsvHandler } from './admin/supplier-margin-daily-csv.js';
 import { adminOperatorSupplierSpendHandler } from './admin/operator-supplier-spend.js';
 import { adminOperatorActivityHandler } from './admin/operator-activity.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
@@ -1195,6 +1196,14 @@ app.get('/api/admin/supplier-margin', rateLimit(60, 60_000), adminSupplierMargin
 // face/wholesale/cashback/margin + marginBps. Time-series half of
 // the ADR-024 triad; powers the forthcoming sparkline.
 app.get('/api/admin/supplier-margin/daily', rateLimit(60, 60_000), adminSupplierMarginDailyHandler);
+// Tier-3 CSV export of the daily supplier-margin trend. Finance
+// month-end reconciliation companion to the JSON endpoint above;
+// same (day, currency) bucketing, plus margin_bps column.
+app.get(
+  '/api/admin/supplier-margin/daily.csv',
+  rateLimit(10, 60_000),
+  adminSupplierMarginDailyCsvHandler,
+);
 // Supplier-spend activity time-series (ADR 013 / 015) — per-day
 // per-currency wholesale/face/cashback/margin paid to CTX. The
 // time-axis of the supplier-spend snapshot. Together with
