@@ -85,6 +85,14 @@ function HomeContent(): React.JSX.Element {
                 Buy from merchants you already shop at. Every order pays back to your Loop balance —
                 withdraw on-chain whenever you&rsquo;re ready.
               </p>
+              <p className="mt-6">
+                <Link
+                  to="/calculator"
+                  className="inline-block text-sm font-medium text-white underline decoration-white/40 underline-offset-4 hover:decoration-white"
+                >
+                  Try the cashback calculator →
+                </Link>
+              </p>
               <div className="flex flex-row justify-center items-center gap-8 md:gap-16 mt-12 mb-12">
                 <Feature
                   icon={
