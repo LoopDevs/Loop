@@ -509,6 +509,59 @@ registry.registerPath({
   },
 });
 
+const PublicCashbackPreview = registry.register(
+  'PublicCashbackPreview',
+  z.object({
+    merchantId: z.string(),
+    merchantName: z.string(),
+    orderAmountMinor: z.string().openapi({
+      description: 'Echo of the caller-supplied amountMinor, bigint-as-string.',
+    }),
+    cashbackPct: z.string().nullable().openapi({
+      description: 'numeric(5,2) as string, null when no active config.',
+    }),
+    cashbackMinor: z.string().openapi({
+      description: 'Computed cashback amount (floor). bigint-as-string. "0" when no config.',
+    }),
+    currency: z.string().length(3),
+  }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/public/cashback-preview',
+  summary: 'Pre-signup "calculate your cashback" preview (ADR 011 / 015 / 020).',
+  description:
+    "Unauthenticated. Returns the cashback a would-be user would earn on an `amountMinor` order at `merchantId`. Matches the floor-rounded math used by `orders/cashback-split.ts` so the preview never promises more than the order-insert path will actually award. Missing config → 200 with `cashbackPct: null, cashbackMinor: '0'` (the 'coming soon' shape). Unknown merchant id/slug → 404. Never 500: a DB failure falls back to the soft-empty shape with `Cache-Control: max-age=60`.",
+  tags: ['Public'],
+  request: {
+    query: z.object({
+      merchantId: z.string().openapi({ description: 'Merchant id or slug.' }),
+      amountMinor: z.string().openapi({
+        description: 'Amount in merchant-currency minor units, as a non-negative integer string.',
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Cashback preview (may carry null pct for "coming soon")',
+      content: { 'application/json': { schema: PublicCashbackPreview } },
+    },
+    400: {
+      description: 'Malformed merchantId or amountMinor, or amount out of range',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'Unknown merchant id / slug',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Users — credit balances (ADR 009 / 015) ────────────────────────────────
 
 const UserCreditRow = registry.register(

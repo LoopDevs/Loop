@@ -236,6 +236,7 @@ GET  /api/users/me/payment-method-share [authenticated — caller's own rail mix
 GET  /api/public/cashback-stats    [public — landing-page aggregates, never-500, ADR 009/015/020]
 GET  /api/public/top-cashback-merchants [public — landing-page "best cashback" list, never-500, ADR 011/020]
 GET  /api/public/merchants/:id     [public — per-merchant SEO detail (accepts id or slug), never-500, ADR 011/020]
+GET  /api/public/cashback-preview  [public — pre-signup "calculate your cashback" preview: ?merchantId + ?amountMinor → floor-rounded cashback, never-500, ADR 011/015/020]
 GET  /api/public/loop-assets       [public — configured (code, issuer) pairs for trustline setup, never-500, ADR 015/020]
 GET  /api/public/flywheel-stats    [public — 30-day fulfilled + recycled counts + % pill, never-500, ADR 015/020]
 GET  /api/admin/merchant-cashback-configs              [admin]
