@@ -9,6 +9,7 @@ import { TrustWelcome, TrustHowItWorks, TrustMerchants } from './screens-trust';
 import { EmailEntry, OtpEntry, WelcomeIn, useOnboardingAuth } from './signup-tail';
 import { BiometricSetup } from './screen-biometric';
 import { CurrencyPickerScreen, guessHomeCurrency, type HomeCurrency } from './screen-currency';
+import { WalletIntroScreen } from './screen-wallet-intro';
 
 interface ScreenCopy {
   eyebrow?: string;
@@ -22,7 +23,7 @@ interface ScreenCopy {
 // we end on Welcome-in right after OTP verify. Step 6 is an
 // optional biometric-enable step between OTP and Welcome-in; it
 // self-skips on devices without biometrics.
-const COPY: Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8, ScreenCopy> = {
+const COPY: Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, ScreenCopy> = {
   1: {
     eyebrow: 'Welcome to Loop',
     title: 'Shop. Save.\nRepeat.',
@@ -53,20 +54,30 @@ const COPY: Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8, ScreenCopy> = {
     sub: 'Use biometrics to unlock Loop and confirm purchases. Your biometric data never leaves the device.',
   },
   8: {
+    eyebrow: 'Stellar wallet',
+    title: 'Your cashback,\nyour wallet.',
+    sub: 'Cashback lands in your Loop balance instantly. Move it to your own Stellar wallet any time — Loop mints a branded stablecoin for your currency.',
+  },
+  9: {
     title: 'You\u2019re in.',
     sub: 'Your Loop account is ready. Start earning on your first purchase.',
   },
 };
 
-const TOTAL_STEPS = 8;
+const TOTAL_STEPS = 9;
 
 /**
- * First-launch onboarding flow. Six screens:
- *   0 Welcome · 1 How it works · 2 Brands · 3 Email · 4 OTP · 5 Welcome-in
+ * First-launch onboarding flow. Nine screens:
+ *   0 Welcome · 1 How it works · 2 Brands · 3 Email · 4 OTP
+ *   5 Currency · 6 Biometrics · 7 Wallet intro · 8 Welcome-in
  *
  * Steps 0-2 are illustrative (no state). Step 3 collects email and
  * fires `requestOtp` on CTA. Step 4 collects the 6-digit code and
- * auto-submits on the final keystroke via `verifyOtp`. Step 5 is
+ * auto-submits on the final keystroke via `verifyOtp`. Step 5 picks
+ * home currency (ADR 015). Step 6 enables biometric unlock (skips
+ * on unsupported devices). Step 7 explains Loop's stablecoin payout
+ * story (ADR 015) and offers a shortcut into /settings/wallet for
+ * users who want to link a Stellar address immediately. Step 8 is
  * the payoff — "Open Loop" returns the user to the home route,
  * authenticated (auth store is hydrated by the verify step).
  *
@@ -281,6 +292,10 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
       },
       enabled: biometricsChecked,
     },
+    // Step 7: wallet intro — informational. CTA always advances;
+    // the "Link a wallet now" button inside the screen handles the
+    // early-exit case by navigating to /settings/wallet.
+    { label: 'Continue', act: next, enabled: true },
     { label: 'Open Loop', act: handleFinish, enabled: true },
   ];
 
@@ -342,7 +357,21 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
           triggerRef={biometricTriggerRef}
         />
       );
-    if (idx === 7) return <WelcomeIn active={active} copy={COPY[8]} />;
+    if (idx === 7)
+      return (
+        <WalletIntroScreen
+          active={active}
+          copy={COPY[8]}
+          homeCurrency={currency}
+          onLinkWallet={() => {
+            // Leave onboarding and drop into the real trustline flow.
+            // The user is already authenticated (verify-otp ran at
+            // step 4), so /settings/wallet is reachable.
+            void navigate('/settings/wallet');
+          }}
+        />
+      );
+    if (idx === 8) return <WelcomeIn active={active} copy={COPY[9]} />;
     return null;
   };
 
