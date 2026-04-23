@@ -70,11 +70,18 @@ export function __resetPoolExhaustedAlertForTests(): void {
 /**
  * Parses `CTX_OPERATOR_POOL` once and constructs a per-operator
  * circuit breaker. Safe to call repeatedly — it no-ops after the
- * first call. Exposed for tests via `__resetOperatorPoolForTests`.
+ * first successful call. Exposed for tests via
+ * `__resetOperatorPoolForTests`.
+ *
+ * A2-573: `initialised` is set AFTER a successful parse, not before.
+ * If the env is malformed on the first call, we throw — but leaving
+ * `initialised = false` means a subsequent call (after ops fixes
+ * CTX_OPERATOR_POOL at runtime) will retry parsing. Previously the
+ * flag flipped up-front, so a malformed env required a full process
+ * restart to recover even after the env was corrected.
  */
 function ensureInitialised(): void {
   if (initialised) return;
-  initialised = true;
   // Read process.env directly (not through env.ts's snapshot) so a
   // test that sets the env after module load still picks it up. The
   // pool's own schema validates the JSON shape — env.ts's .string()
@@ -82,6 +89,7 @@ function ensureInitialised(): void {
   const raw = process.env['CTX_OPERATOR_POOL'];
   if (raw === undefined || raw.trim().length === 0) {
     log.info('CTX_OPERATOR_POOL is unset — pool is inert');
+    initialised = true;
     return;
   }
   let parsed: unknown;
@@ -91,6 +99,8 @@ function ensureInitialised(): void {
     // A malformed env value is an ops error — throwing at first
     // pool access keeps the failure localised to callers of the
     // pool instead of crashing the whole backend on boot.
+    // Leave `initialised = false` so a follow-up call after the
+    // env is corrected can retry without a process restart.
     log.error({ err }, 'CTX_OPERATOR_POOL is not valid JSON');
     throw new Error('CTX_OPERATOR_POOL is not valid JSON');
   }
@@ -104,6 +114,7 @@ function ensureInitialised(): void {
     bearer: o.bearer,
     breaker: createCircuitBreaker(),
   }));
+  initialised = true;
   log.info({ count: operators.length }, 'CTX operator pool initialised');
 }
 
