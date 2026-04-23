@@ -76,6 +76,9 @@ export async function loader(): Promise<Response> {
   const urls: string[] = [
     urlTag(`${PUBLIC_BASE_URL}/`, now, 'weekly', '1.0'),
     urlTag(`${PUBLIC_BASE_URL}/cashback`, lastmod, 'daily', '0.9'),
+    // Standalone cashback calculator (#746) — discovery path for
+    // visitors who haven't landed on a /cashback/:slug page yet.
+    urlTag(`${PUBLIC_BASE_URL}/calculator`, now, 'weekly', '0.8'),
     // Trustlines page is near-static — issuer accounts only rotate
     // via ADR-015 key ceremony, which is rare. Monthly changefreq.
     urlTag(`${PUBLIC_BASE_URL}/trustlines`, now, 'monthly', '0.7'),
