@@ -42,8 +42,14 @@ export interface SocialProviderConfig {
   provider: SocialProvider;
   /** URL of the provider's JWKS. */
   jwksUrl: string;
-  /** Exact `iss` value we expect on a valid id_token. */
-  expectedIssuer: string;
+  /**
+   * A2-567: list of acceptable `iss` values. Google's id_token is
+   * documented to carry either `https://accounts.google.com` or
+   * `accounts.google.com` depending on SDK version, and exact-match
+   * on a single string rejected the scheme-less variant. Pass the
+   * set of valid strings; verification accepts any member.
+   */
+  expectedIssuers: string[];
   /**
    * Resolves the allowed `aud` list from the environment. An empty
    * array means this provider isn't configured in this deployment —
@@ -119,7 +125,7 @@ export function makeSocialLoginHandler(config: SocialProviderConfig) {
       verified = await verifyIdToken({
         token: parsed.data.idToken,
         jwksUrl: config.jwksUrl,
-        expectedIssuer: config.expectedIssuer,
+        expectedIssuers: config.expectedIssuers,
         expectedAudiences: audiences,
       });
     } catch (err) {
@@ -189,7 +195,10 @@ export function makeSocialLoginHandler(config: SocialProviderConfig) {
 export const googleSocialLoginHandler = makeSocialLoginHandler({
   provider: 'google',
   jwksUrl: 'https://www.googleapis.com/oauth2/v3/certs',
-  expectedIssuer: 'https://accounts.google.com',
+  // A2-567: Google's documented `iss` values. The scheme-less form
+  // still ships from older SDKs and server-side verification guides
+  // explicitly list both — rejecting either breaks real users.
+  expectedIssuers: ['https://accounts.google.com', 'accounts.google.com'],
   resolveAudiences: () =>
     [
       env.GOOGLE_OAUTH_CLIENT_ID_WEB,
@@ -206,7 +215,7 @@ export const googleSocialLoginHandler = makeSocialLoginHandler({
 export const appleSocialLoginHandler = makeSocialLoginHandler({
   provider: 'apple',
   jwksUrl: 'https://appleid.apple.com/auth/keys',
-  expectedIssuer: 'https://appleid.apple.com',
+  expectedIssuers: ['https://appleid.apple.com'],
   resolveAudiences: () =>
     env.APPLE_SIGN_IN_SERVICE_ID !== undefined ? [env.APPLE_SIGN_IN_SERVICE_ID] : [],
 });
