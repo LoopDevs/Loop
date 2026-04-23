@@ -7,6 +7,7 @@ import { getTreasurySnapshot, type TreasurySnapshot } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
+import { AssetDriftBadge } from '~/components/features/admin/AssetDriftBadge';
 import { PayoutsByAssetTable } from '~/components/features/admin/PayoutsByAssetTable';
 import { SupplierSpendCard } from '~/components/features/admin/SupplierSpendCard';
 import { SupplierSpendActivityChart } from '~/components/features/admin/SupplierSpendActivityChart';
@@ -300,6 +301,17 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
                 <div className="mt-1 text-xl font-semibold text-gray-900 dark:text-white tabular-nums">
                   {fmtMinor(row.outstandingMinor, fiat)}
                 </div>
+                {/* Circulation drift badge (#709/#710). Self-hides
+                    when the issuer is not configured (Horizon has
+                    nothing to read) or the query is still pending.
+                    Shares the ['admin-asset-circulation', code]
+                    cache key with the full AssetCirculationCard on
+                    /admin/assets/:code. */}
+                {row.issuer !== null ? (
+                  <div className="mt-2">
+                    <AssetDriftBadge assetCode={code} />
+                  </div>
+                ) : null}
               </Link>
             );
           })}
