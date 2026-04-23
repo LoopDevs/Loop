@@ -1,4 +1,5 @@
 export * from './api.js';
+export * from './cashback-realization.js';
 export * from './credit-transaction-type.js';
 export * from './loop-asset.js';
 export * from './merchants.js';

@@ -22,6 +22,7 @@
  */
 import type { Context } from 'hono';
 import { sql } from 'drizzle-orm';
+import { recycledBps } from '@loop/shared';
 import { db } from '../db/client.js';
 import { logger } from '../logger.js';
 
@@ -61,18 +62,9 @@ function toYmd(v: string | Date): string {
   return v.toISOString().slice(0, 10);
 }
 
-/**
- * spent / earned × 10 000, clamped to [0, 10 000]. Integer basis
- * points so sparkline math stays JS-number safe. Zero earned → 0.
- */
-export function recycledBps(earnedMinor: bigint, spentMinor: bigint): number {
-  if (earnedMinor <= 0n) return 0;
-  const clampedSpent = spentMinor < 0n ? 0n : spentMinor;
-  const scaled = (clampedSpent * 10_000n) / earnedMinor;
-  const n = Number(scaled);
-  if (!Number.isFinite(n) || n < 0) return 0;
-  return n > 10_000 ? 10_000 : n;
-}
+// `recycledBps` re-exported from @loop/shared so existing test
+// imports (`from '../cashback-realization-daily.js'`) keep resolving.
+export { recycledBps };
 
 export async function adminCashbackRealizationDailyHandler(c: Context): Promise<Response> {
   const daysRaw = c.req.query('days');

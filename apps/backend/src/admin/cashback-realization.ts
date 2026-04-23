@@ -24,6 +24,7 @@
  */
 import type { Context } from 'hono';
 import { sql } from 'drizzle-orm';
+import { recycledBps } from '@loop/shared';
 import { db } from '../db/client.js';
 import { creditTransactions, userCredits } from '../db/schema.js';
 import { logger } from '../logger.js';
@@ -70,21 +71,10 @@ function toBigIntSafe(v: string | null): bigint {
   }
 }
 
-/**
- * Integer basis-points ratio. `earned = 0n` → 0 rather than a
- * div-by-zero. Negative or > 10_000 values are clamped; a spent
- * total that exceeds earned would imply ledger corruption (you
- * can't spend cashback you didn't earn) but we don't crash the
- * response on it.
- */
-export function recycledBps(earnedMinor: bigint, spentMinor: bigint): number {
-  if (earnedMinor <= 0n) return 0;
-  const clampedSpent = spentMinor < 0n ? 0n : spentMinor;
-  const scaled = (clampedSpent * 10_000n) / earnedMinor;
-  const n = Number(scaled);
-  if (!Number.isFinite(n) || n < 0) return 0;
-  return n > 10_000 ? 10_000 : n;
-}
+// `recycledBps` re-exported from @loop/shared so legacy imports
+// (`from '../cashback-realization.js'`) keep resolving during any
+// transition period.
+export { recycledBps };
 
 export async function adminCashbackRealizationHandler(c: Context): Promise<Response> {
   try {
