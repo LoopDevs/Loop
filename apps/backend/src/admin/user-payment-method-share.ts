@@ -20,6 +20,7 @@
  * 404 — a newly-created account with no orders is valid.
  */
 import type { Context } from 'hono';
+import { UUID_RE } from '../uuid.js';
 import { and, eq, sql } from 'drizzle-orm';
 import {
   ORDER_PAYMENT_METHODS,
@@ -32,8 +33,6 @@ import { orders } from '../db/schema.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-user-payment-method-share' });
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface UserPaymentMethodBucket {
   orderCount: number;
