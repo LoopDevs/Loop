@@ -19,7 +19,9 @@ const mockEnv = vi.hoisted(() => ({
 
 vi.mock('../../env.js', () => ({ env: mockEnv }));
 
-const revokeRefreshMock = vi.hoisted(() => vi.fn(async () => undefined));
+const revokeRefreshMock = vi.hoisted(() =>
+  vi.fn<(args: unknown) => Promise<void>>(async () => undefined),
+);
 vi.mock('../refresh-tokens.js', async (importOriginal) => {
   const actual = await importOriginal<typeof RefreshTokensModule>();
   return {
