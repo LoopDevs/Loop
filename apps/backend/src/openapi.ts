@@ -1840,6 +1840,59 @@ registry.registerPath({
   },
 });
 
+const StellarTrustlineRow = registry.register(
+  'StellarTrustlineRow',
+  z.object({
+    code: LoopAssetCode,
+    issuer: z.string(),
+    present: z.boolean(),
+    balanceStroops: z.string(),
+    limitStroops: z.string(),
+  }),
+);
+
+const StellarTrustlinesResponse = registry.register(
+  'StellarTrustlinesResponse',
+  z.object({
+    address: z.string().nullable(),
+    accountLinked: z.boolean(),
+    accountExists: z.boolean(),
+    rows: z.array(StellarTrustlineRow),
+  }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/users/me/stellar-trustlines',
+  summary: 'Caller-scoped LOOP-asset trustline check (ADR 015).',
+  description:
+    "Reads the caller's linked Stellar address on Horizon and reports which configured LOOP assets already have a trustline established. Lets the wallet UI warn 'your next USDLOOP payout will fail — add the trustline first' rather than surfacing a `op_no_trust` failed payout after the fact. Returns `accountLinked: false` with stub rows when the user hasn't linked a wallet; `accountExists: false` when the address isn't funded yet. 30s cache per address.",
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'One row per configured LOOP asset',
+      content: { 'application/json': { schema: StellarTrustlinesResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (30/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error resolving the user',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    503: {
+      description: 'Horizon trustline check unavailable',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 registry.registerPath({
   method: 'get',
   path: '/api/users/me/cashback-history',
