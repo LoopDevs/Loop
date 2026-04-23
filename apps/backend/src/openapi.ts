@@ -4070,6 +4070,119 @@ registry.registerPath({
   },
 });
 
+// ─── Admin CSV exports (ADR 018 Tier-3) ─────────────────────────────────────
+//
+// Fourth backfill batch. CSV siblings for pivot-session endpoints —
+// ADR 018 Tier-3 conventions (RFC 4180, 10k row cap with __TRUNCATED__
+// sentinel, 10/min rate, private no-store). All four return
+// text/csv; charset=utf-8 so no JSON schema is registered — just the
+// path + response content-type.
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/cashback-activity.csv',
+  summary: 'Daily cashback accrual as RFC 4180 CSV (ADR 009/015/018).',
+  description:
+    'Tier-3 finance export of /api/admin/cashback-activity. Columns: day,currency,cashback_count,cashback_minor. Zero-activity days emit day,,,0,0 (empty currency cell). Window: ?days=<N> (default 31, cap 366). Row cap 10 000 with __TRUNCATED__ sentinel.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(366).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'CSV body',
+      content: { 'text/csv; charset=utf-8': { schema: z.string() } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/payouts-activity.csv',
+  summary:
+    'Daily confirmed-payout CSV — settlement counterpart to cashback-activity.csv (ADR 015/016/018).',
+  description:
+    'Tier-3 CSV of /api/admin/payouts-activity. Columns: day,asset_code,payout_count,stroops. Zero-activity days emit day,,0,0. Bucketed on confirmed_at::date (day the liability settled, not queued). Window: ?days=<N> (default 31, cap 366). Row cap 10 000 with __TRUNCATED__ sentinel.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(366).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'CSV body',
+      content: { 'text/csv; charset=utf-8': { schema: z.string() } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/merchants/{merchantId}/flywheel-activity.csv',
+  summary: 'Per-merchant flywheel-activity CSV for BD/commercial prep (ADR 011/015/018).',
+  description:
+    "Tier-3 CSV of /api/admin/merchants/:merchantId/flywheel-activity. Columns: day,recycled_count,total_count,recycled_charge_minor,total_charge_minor. Filename includes the merchantId so multi-merchant BD pulls don't collide. Window: ?days=<N> (default 31, cap 366).",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ merchantId: z.string() }),
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(366).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'CSV body',
+      content: { 'text/csv; charset=utf-8': { schema: z.string() } },
+    },
+    400: {
+      description: 'Malformed merchantId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/merchants-catalog.csv',
+  summary: 'Full merchant catalog + cashback-config state as CSV (ADR 011/018).',
+  description:
+    'Tier-3 CSV of the in-memory catalog joined against merchant_cashback_configs. Columns: merchant_id,name,enabled,user_cashback_pct,active,updated_by,updated_at. Merchants without a config row emit empty values for the config columns ("no config yet" — distinct from active=false). Catalog is the source of truth; evicted merchants (ADR 021 Rule B) drop out.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'CSV body',
+      content: { 'text/csv; charset=utf-8': { schema: z.string() } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: { description: 'DB error', content: { 'application/json': { schema: ErrorResponse } } },
+  },
+});
+
 // ─── Spec generator ─────────────────────────────────────────────────────────
 
 // Register the bearer auth scheme on the registry so the generator emits it
