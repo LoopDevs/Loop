@@ -132,6 +132,7 @@ import {
   setHomeCurrencyHandler,
   setStellarAddressHandler,
 } from './users/handler.js';
+import { getUserStellarTrustlinesHandler } from './users/stellar-trustlines.js';
 import { getCashbackByMerchantHandler } from './users/cashback-by-merchant.js';
 import { getCashbackMonthlyHandler } from './users/cashback-monthly.js';
 import { getUserOrdersSummaryHandler } from './users/orders-summary.js';
@@ -736,6 +737,12 @@ app.post('/api/users/me/home-currency', rateLimit(10, 60_000), setHomeCurrencyHa
 // wallets is a low-volume action, 10/min is plenty without enabling
 // enumeration.
 app.put('/api/users/me/stellar-address', rateLimit(10, 60_000), setStellarAddressHandler);
+// GET /api/users/me/stellar-trustlines — per-LOOP-asset trustline
+// status for the caller's linked address (ADR 015). Horizon-backed,
+// 30s cache per-address. Powers the /settings/wallet "can I receive
+// USDLOOP cashback?" affordance before the payout worker discovers
+// a missing trustline via a failed submit.
+app.get('/api/users/me/stellar-trustlines', rateLimit(30, 60_000), getUserStellarTrustlinesHandler);
 // GET /api/users/me/cashback-history — paginated credit-ledger events for
 // the caller (ADR 009 / 015). 60/min matches the profile GET cadence; the
 // Account page loads it alongside /me on mount, and TanStack Query invalidates
