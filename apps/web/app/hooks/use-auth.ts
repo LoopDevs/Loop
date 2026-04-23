@@ -1,5 +1,7 @@
 import { ApiException } from '@loop/shared';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '~/stores/auth.store';
+import { usePurchaseStore } from '~/stores/purchase.store';
 import {
   requestOtp,
   verifyOtp,
@@ -38,6 +40,7 @@ function authErrorMessage(err: unknown, fallback: string): string {
 /** Returns auth state and auth actions. */
 export function useAuth(): UseAuthResult {
   const store = useAuthStore();
+  const queryClient = useQueryClient();
 
   return {
     email: store.email,
@@ -85,7 +88,15 @@ export function useAuth(): UseAuthResult {
       try {
         await logout();
       } finally {
+        // A2-1151 + A2-1152: full local teardown. clearSession wipes
+        // the auth store; we also reset the in-flight purchase state
+        // (would otherwise leak a cart or pending order into the next
+        // login) and clear the TanStack Query cache (would otherwise
+        // serve the previous user's /me data on first render after
+        // re-login until each query refetches).
         store.clearSession();
+        usePurchaseStore.getState().reset();
+        queryClient.clear();
       }
     },
   };
