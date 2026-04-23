@@ -37,6 +37,7 @@ export default [
   route('admin/users/:userId', 'routes/admin.users.$userId.tsx'),
   route('admin/operators', 'routes/admin.operators.tsx'),
   route('admin/operators/:operatorId', 'routes/admin.operators.$operatorId.tsx'),
+  route('admin/assets', 'routes/admin.assets.tsx'),
   route('admin/assets/:assetCode', 'routes/admin.assets.$assetCode.tsx'),
   route('admin/audit', 'routes/admin.audit.tsx'),
   route('*', 'routes/not-found.tsx'),
