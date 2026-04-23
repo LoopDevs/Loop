@@ -247,6 +247,43 @@ export async function getSupplierSpend(
 }
 
 /**
+ * Per-day credit-flow row (ADR 009 / 015). Returned by
+ * `/api/admin/treasury/credit-flow`. `netMinor = credited - debited`
+ * is the day's liability delta — positive means Loop's obligation
+ * grew, negative means it shrank.
+ */
+export interface TreasuryCreditFlowDay {
+  day: string;
+  currency: string;
+  creditedMinor: string;
+  debitedMinor: string;
+  netMinor: string;
+}
+
+export interface TreasuryCreditFlowResponse {
+  windowDays: number;
+  currency: 'USD' | 'GBP' | 'EUR' | null;
+  days: TreasuryCreditFlowDay[];
+}
+
+/**
+ * `GET /api/admin/treasury/credit-flow` — per-day per-currency
+ * ledger delta. Pass `?currency=USD|GBP|EUR` to zero-fill days
+ * (stable chart layout).
+ */
+export async function getTreasuryCreditFlow(
+  opts: { days?: number; currency?: 'USD' | 'GBP' | 'EUR' } = {},
+): Promise<TreasuryCreditFlowResponse> {
+  const params = new URLSearchParams();
+  if (opts.days !== undefined) params.set('days', String(opts.days));
+  if (opts.currency !== undefined) params.set('currency', opts.currency);
+  const qs = params.toString();
+  return authenticatedRequest<TreasuryCreditFlowResponse>(
+    `/api/admin/treasury/credit-flow${qs.length > 0 ? `?${qs}` : ''}`,
+  );
+}
+
+/**
  * Per-day per-currency supplier-spend activity (ADR 013 / 015). Time-
  * axis of `SupplierSpendRow` — same columns, but bucketed by
  * `fulfilledAt` UTC over the last N days.
