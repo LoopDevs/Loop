@@ -887,6 +887,42 @@ const CreditAdjustmentEnvelope = registry.register(
   }),
 );
 
+// A2-901 — admin refund write.
+const RefundBody = registry.register(
+  'RefundBody',
+  z.object({
+    amountMinor: z.string().openapi({
+      description:
+        'Positive integer-as-string. 1..10_000_000 minor units. Refunds are credit-only; a debit should be a credit adjustment.',
+    }),
+    currency: z.enum(['USD', 'GBP', 'EUR']),
+    orderId: z.string().uuid(),
+    reason: z.string().min(2).max(500),
+  }),
+);
+
+const RefundResult = registry.register(
+  'RefundResult',
+  z.object({
+    id: z.string().uuid(),
+    userId: z.string().uuid(),
+    currency: z.string().length(3),
+    amountMinor: z.string(),
+    orderId: z.string().uuid(),
+    priorBalanceMinor: z.string(),
+    newBalanceMinor: z.string(),
+    createdAt: z.string().datetime(),
+  }),
+);
+
+const RefundEnvelope = registry.register(
+  'RefundEnvelope',
+  z.object({
+    result: RefundResult,
+    audit: AdminWriteAudit,
+  }),
+);
+
 // ─── Admin — per-merchant cashback stats (ADR 011 / 015) ───────────────────
 
 const MerchantStatsRow = registry.register(
@@ -4095,6 +4131,63 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error applying the adjustment',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+// A2-901 — admin refund write. Same ADR-017 discipline as credit-
+// adjustments (actor from requireAdmin, Idempotency-Key header,
+// reason body field, append-only ledger, Discord audit) + DB-level
+// duplicate-refund rejection via the partial unique index on
+// (type, reference_type, reference_id) landed in migration 0013.
+registry.registerPath({
+  method: 'post',
+  path: '/api/admin/users/{userId}/refunds',
+  summary: 'Issue a refund credit bound to an order (A2-901 + ADR 017).',
+  description:
+    "Writes a positive-amount `credit_transactions` row (`type='refund'`, `reference_type='order'`, `reference_id=<orderId>`) and atomically bumps `user_credits.balance_minor`. Idempotent in two layers: the admin idempotency key replays the stored snapshot on repeat (ADR 017), and the DB partial unique index on (type, reference_type, reference_id) rejects a second refund row for the same order with 409 `REFUND_ALREADY_ISSUED`.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ userId: z.string().uuid() }),
+    headers: z.object({
+      'idempotency-key': z.string().min(16).max(128).openapi({
+        description:
+          'Required. Scoped to (admin_user_id, key); repeats replay the stored snapshot.',
+      }),
+    }),
+    body: {
+      content: { 'application/json': { schema: RefundBody } },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Refund applied (or replayed from idempotency snapshot)',
+      content: { 'application/json': { schema: RefundEnvelope } },
+    },
+    400: {
+      description: 'Missing idempotency key, invalid body, or non-uuid userId / orderId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    409: {
+      description: 'A refund has already been issued for this order (REFUND_ALREADY_ISSUED)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (20/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error applying the refund',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },

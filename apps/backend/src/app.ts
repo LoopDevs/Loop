@@ -123,6 +123,7 @@ import { adminMerchantsResyncHandler } from './admin/merchants-resync.js';
 import { adminDiscordNotifiersHandler } from './admin/discord-notifiers.js';
 import { adminDiscordTestHandler } from './admin/discord-test.js';
 import { adminCreditAdjustmentHandler } from './admin/credit-adjustments.js';
+import { adminRefundHandler } from './admin/refunds.js';
 import { publicCashbackStatsHandler } from './public/cashback-stats.js';
 import { publicFlywheelStatsHandler } from './public/flywheel-stats.js';
 import { publicLoopAssetsHandler } from './public/loop-assets.js';
@@ -1498,6 +1499,13 @@ app.post(
   rateLimit(20, 60_000),
   adminCreditAdjustmentHandler,
 );
+// Refund write (A2-901 + ADR 017). Separate surface from credit-
+// adjustment because refund semantics are positive-only and bind to
+// an order id, with DB-level dupe rejection via the partial unique
+// index on (type, reference_type, reference_id) from migration 0013.
+// Same rate limit and idempotency discipline as the adjustment
+// write.
+app.post('/api/admin/users/:userId/refunds', rateLimit(20, 60_000), adminRefundHandler);
 // Manual merchant-catalog resync (ADR 011). Bypasses the 6h
 // scheduled refresh so ops can apply an upstream catalog change
 // within seconds. 2/min rate limit — every hit goes to CTX, this
