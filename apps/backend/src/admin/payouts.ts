@@ -292,7 +292,6 @@ export async function adminRetryPayoutHandler(c: Context): Promise<Response> {
     const priorResult = (prior.body as { result?: AdminPayoutView }).result;
     notifyAdminAudit({
       actorUserId: actor.id,
-      actorEmail: actor.email,
       endpoint: `POST ${endpointPath}`,
       ...(priorResult?.userId !== undefined ? { targetUserId: priorResult.userId } : {}),
       reason: parsed.data.reason,
@@ -345,7 +344,6 @@ export async function adminRetryPayoutHandler(c: Context): Promise<Response> {
 
   notifyAdminAudit({
     actorUserId: actor.id,
-    actorEmail: actor.email,
     endpoint: `POST ${endpointPath}`,
     targetUserId: result.userId,
     reason: parsed.data.reason,
