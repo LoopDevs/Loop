@@ -15,6 +15,7 @@ import {
   type PayoutsActivityDay,
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { AssetCirculationCard } from '~/components/features/admin/AssetCirculationCard';
 import { Spinner } from '~/components/ui/Spinner';
 import { shortDay } from '~/components/features/admin/PaymentMethodActivityChart';
 
@@ -252,6 +253,25 @@ export default function AdminAssetDetailRoute(): React.JSX.Element {
           </div>
         )}
       </section>
+
+      {/* Circulation drift (#709) — on-chain issuance vs ledger
+          liability. Only renders when the issuer is configured;
+          otherwise there's no asset to read from Horizon. Self-
+          handles Horizon failure with a targeted amber line. */}
+      {liability !== undefined && liability.issuer !== null ? (
+        <section>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+            On-chain vs ledger
+          </h2>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+            Stablecoin safety metric (ADR 015). Compares Horizon&rsquo;s issued circulation against
+            the ledger liability above. Settlement backlog drift is expected during steady state as
+            the payout worker submits transactions; sustained over-mint is the &ldquo;investigate
+            now&rdquo; signal.
+          </p>
+          <AssetCirculationCard assetCode={upper} />
+        </section>
+      ) : null}
 
       <section>
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
