@@ -118,6 +118,51 @@ export async function listPayoutsForUser(
     .limit(limit);
 }
 
+export interface PendingPayoutsSummaryRow {
+  assetCode: string;
+  state: string;
+  count: number;
+  totalStroops: bigint;
+  /** Unix ms of the oldest pending/submitted createdAt in this bucket. */
+  oldestCreatedAtMs: number;
+}
+
+/**
+ * Summary aggregate of a user's pending_payouts rows bucketed by
+ * (asset_code, state). Reads only `state IN ('pending', 'submitted')`
+ * — confirmed rows live in the ledger, failed rows belong to the
+ * admin-retry flow, neither represent "still-awaited cashback."
+ *
+ * Returned rows are empty when the user has no in-flight payouts.
+ */
+export async function pendingPayoutsSummaryForUser(
+  userId: string,
+): Promise<PendingPayoutsSummaryRow[]> {
+  const rows = await db
+    .select({
+      assetCode: pendingPayouts.assetCode,
+      state: pendingPayouts.state,
+      count: sql<string>`COUNT(*)::text`,
+      totalStroops: sql<string>`COALESCE(SUM(${pendingPayouts.amountStroops}), 0)::text`,
+      oldestCreatedAt: sql<Date>`MIN(${pendingPayouts.createdAt})`,
+    })
+    .from(pendingPayouts)
+    .where(
+      and(
+        eq(pendingPayouts.userId, userId),
+        sql`${pendingPayouts.state} IN ('pending', 'submitted')`,
+      ),
+    )
+    .groupBy(pendingPayouts.assetCode, pendingPayouts.state);
+  return rows.map((r) => ({
+    assetCode: r.assetCode,
+    state: r.state,
+    count: Number(r.count),
+    totalStroops: BigInt(r.totalStroops),
+    oldestCreatedAtMs: r.oldestCreatedAt.getTime(),
+  }));
+}
+
 /**
  * State-guarded transition: `pending → submitted`. Bumps `attempts`
  * and stamps `submitted_at`. Returns null when another worker beat us

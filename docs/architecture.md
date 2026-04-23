@@ -223,6 +223,7 @@ PUT  /api/users/me/stellar-address [authenticated — link/unlink Stellar wallet
 GET  /api/users/me/cashback-history [authenticated — recent credit-ledger events, ADR 009/015]
 GET  /api/users/me/credits         [authenticated — per-currency balance list, ADR 009/015]
 GET  /api/users/me/pending-payouts  [authenticated — caller's on-chain payout rows, ADR 015/016]
+GET  /api/users/me/pending-payouts/summary [authenticated — aggregate view of in-flight payouts, bucketed by (asset, state), ADR 015/016]
 GET  /api/users/me/pending-payouts/:id [authenticated — single payout detail, ADR 015/016]
 GET  /api/users/me/orders/:orderId/payout [authenticated — per-order settlement drill, mirror of admin /api/admin/orders/:orderId/payout, ADR 015/016]
 GET  /api/users/me/cashback-summary [authenticated — compact { lifetime, thisMonth } totals, ADR 009/015]
