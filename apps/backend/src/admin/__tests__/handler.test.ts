@@ -135,6 +135,28 @@ describe('upsertConfigHandler', () => {
     expect(res.status).toBe(400);
   });
 
+  // A2-513: match the shape check used by sibling per-merchant admin
+  // handlers — reject malformed ids before they hit the DB.
+  it('A2-513: 400 on a merchantId with unsupported characters', async () => {
+    const { ctx } = makeCtx({
+      param: { merchantId: 'bad id with spaces' },
+      body: { wholesalePct: 70, userCashbackPct: 20, loopMarginPct: 10 },
+    });
+    const res = await upsertConfigHandler(ctx);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { message: string };
+    expect(body.message).toMatch(/malformed/);
+  });
+
+  it('A2-513: 400 on a merchantId longer than 128 chars', async () => {
+    const { ctx } = makeCtx({
+      param: { merchantId: 'a'.repeat(129) },
+      body: { wholesalePct: 70, userCashbackPct: 20, loopMarginPct: 10 },
+    });
+    const res = await upsertConfigHandler(ctx);
+    expect(res.status).toBe(400);
+  });
+
   it('400 when the body is not valid JSON', async () => {
     const { ctx } = makeCtx({ param: { merchantId: 'm1' }, body: '__throw__' });
     const res = await upsertConfigHandler(ctx);
@@ -291,6 +313,28 @@ describe('upsertConfigHandler', () => {
     await upsertConfigHandler(ctx);
     const call = notifyMock.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(call['merchantName']).toBe('ghost');
+  });
+});
+
+describe('configHistoryHandler — A2-513 validation', () => {
+  it('400 when merchantId param is missing', async () => {
+    const { ctx } = makeCtx({ param: { merchantId: undefined } });
+    const res = await configHistoryHandler(ctx);
+    expect(res.status).toBe(400);
+  });
+
+  it('400 on a merchantId with unsupported characters', async () => {
+    const { ctx } = makeCtx({ param: { merchantId: 'bad/id' } });
+    const res = await configHistoryHandler(ctx);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { message: string };
+    expect(body.message).toMatch(/malformed/);
+  });
+
+  it('400 on a merchantId longer than 128 chars', async () => {
+    const { ctx } = makeCtx({ param: { merchantId: 'a'.repeat(129) } });
+    const res = await configHistoryHandler(ctx);
+    expect(res.status).toBe(400);
   });
 });
 
