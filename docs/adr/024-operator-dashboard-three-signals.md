@@ -122,26 +122,47 @@ cross-surface polling deduplicates.
 
 ## Worked example — adding a fourth signal
 
-Supplier margin per day (hypothetical): Loop buys gift cards from
-CTX operators; spread between Loop's user-facing price and CTX's
-wholesale cost is Loop's margin. Classifies as **Flywheel** /
-_in-flow vs cost_ rather than a new category.
+Supplier margin per day: Loop buys gift cards from CTX operators;
+spread between Loop's user-facing price and CTX's wholesale cost
+is Loop's retained margin. Classifies as a **Commercial** signal —
+a stock-ratio sibling to the flow-ratio **Flywheel** signal
+(realization rate). Added to the dashboard as the fourth card.
 
-Shipping the fourth signal:
+Shipped as validation of the template (#738 / #740 / #743):
 
-1. `GET /api/admin/supplier-margin` — per-(operator, currency)
-   lifetime totals + fleet-wide aggregate via `GROUPING SETS`.
-2. `GET /api/admin/supplier-margin/daily?days=30` — dense series
-   via `generate_series LEFT JOIN orders`.
-3. `SupplierMarginCard` on `/admin/_index.tsx` sharing the same
-   grid row (potentially wrap to a second row at that point).
-4. `SupplierMarginSparkline` sharing the sparkline column.
-5. Optional: `GET /api/admin/supplier-margin/daily.csv` for
-   finance.
-6. Margin-ratio math (`marginBps`) lives in
-   `@loop/shared/supplier-margin.ts`.
-7. If a per-operator threshold makes sense, add a watcher +
-   Discord notifier following the drift-watcher template.
+1. `GET /api/admin/supplier-margin` (#738) — per-currency +
+   fleet-wide aggregate via `GROUPING SETS ((currency), ())`.
+2. `GET /api/admin/supplier-margin/daily?days=30` (#740) — dense
+   series via `generate_series LEFT JOIN orders` on
+   `fulfilled_at::date`.
+3. `SupplierMarginCard` (#740) on `/admin/_index.tsx` — landing
+   grid widened from `md:grid-cols-3` to
+   `md:grid-cols-2 lg:grid-cols-4` to fit the fourth card.
+4. `GET /api/admin/supplier-margin/daily.csv` (#743) — Tier-3
+   finance export following ADR 018.
+5. Margin-ratio math (`marginBps`) kept local to
+   `admin/supplier-margin.ts` until a second consumer adopts it —
+   per ADR 019's "three-part test" for shared-package promotion.
+   `recycledBps` (ADR 009/015 flywheel math) already has two
+   consumers and lifted to `@loop/shared`.
+6. `SupplierMarginSparkline` deferred — the three existing
+   cashback / payouts / orders / realization sparklines cover
+   the trend-over-time slot adequately for now. Ships when ops
+   asks.
+7. Per-operator threshold + Discord notifier: deferred. The
+   `asset-drift-watcher.ts` template is ready to reuse when a
+   margin-regression alerts use case lands.
+
+**Observations from the validation**:
+
+- Nothing in the ADR needed rewriting to accommodate a stock-
+  ratio signal vs the ledger-parity / SLA / flow shapes.
+- Zero-state handling ("0.00% / no fulfilled orders yet" vs
+  "card crashed") transferred without modification.
+- Per-currency + fleet-wide aggregate row (`currency: null`) is
+  the most load-bearing convention — every downstream surface
+  (card headline, CSV aggregate, per-currency table) reads off
+  it rather than running a second query.
 
 ## References
 
