@@ -20,6 +20,7 @@
  * lives in the URL, not the payload.
  */
 import type { Context } from 'hono';
+import { UUID_RE } from '../uuid.js';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { creditTransactions } from '../db/schema.js';
@@ -27,7 +28,6 @@ import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-user-credit-transactions-csv' });
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DEFAULT_WINDOW_MS = 366 * 24 * 60 * 60 * 1000;
 const MAX_WINDOW_MS = 366 * 24 * 60 * 60 * 1000;
 const ROW_CAP = 10_000;
