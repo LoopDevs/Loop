@@ -930,6 +930,28 @@ const AdminMerchantOperatorMixResponse = registry.register(
   }),
 );
 
+// ─── Admin — operator × merchant mix (ADR 013 / 022) ───────────────────────
+
+const AdminOperatorMerchantMixRow = registry.register(
+  'AdminOperatorMerchantMixRow',
+  z.object({
+    merchantId: z.string(),
+    orderCount: z.number().int().min(0),
+    fulfilledCount: z.number().int().min(0),
+    failedCount: z.number().int().min(0),
+    lastOrderAt: z.string().datetime(),
+  }),
+);
+
+const AdminOperatorMerchantMixResponse = registry.register(
+  'AdminOperatorMerchantMixResponse',
+  z.object({
+    operatorId: z.string(),
+    since: z.string().datetime(),
+    rows: z.array(AdminOperatorMerchantMixRow),
+  }),
+);
+
 // ─── Admin — operator stats (ADR 013) ──────────────────────────────────────
 
 const AdminOperatorStatsRow = registry.register(
@@ -3056,6 +3078,54 @@ registry.registerPath({
     },
     400: {
       description: 'Malformed `merchantId` or `since`',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the aggregate',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/operators/{operatorId}/merchant-mix',
+  summary: 'Per-operator × per-merchant attribution (ADR 013 / 022).',
+  description:
+    'Dual of `/api/admin/merchants/{merchantId}/operator-mix` — aggregates orders by `merchant_id` for one operator. Closes the operator × merchant matrix in both directions: incident-triage lands on the /merchants side ("which operator is carrying this problematic merchant?"); capacity-reviews land here ("which merchants is this operator carrying — concentration-risk or SLA lever?"). Zero-mix operators return 200 with rows: []. Only rows with non-null `ctx_operator_id` aggregated. Default window 24h, capped 366d.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({
+      operatorId: z.string().min(1).max(128),
+    }),
+    query: z.object({
+      since: z
+        .string()
+        .datetime()
+        .optional()
+        .openapi({ description: 'ISO-8601 — lower bound on createdAt. Defaults to 24h ago.' }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Per-merchant rows scoped to the operator',
+      content: { 'application/json': { schema: AdminOperatorMerchantMixResponse } },
+    },
+    400: {
+      description: 'Malformed `operatorId` or `since`',
       content: { 'application/json': { schema: ErrorResponse } },
     },
     401: {
