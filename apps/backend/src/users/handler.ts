@@ -34,9 +34,8 @@ import {
   listPayoutsForUser,
   pendingPayoutsSummaryForUser,
 } from '../credits/pending-payouts.js';
-import { decodeJwtPayload } from '../auth/jwt.js';
-import { upsertUserFromCtx, getUserById, type User } from '../db/users.js';
-import type { LoopAuthContext } from '../auth/handler.js';
+import { resolveLoopAuthenticatedUser } from '../auth/authenticated-user.js';
+import { type User } from '../db/users.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'users' });
@@ -85,23 +84,12 @@ async function toView(row: User): Promise<UserMeView> {
 }
 
 /**
- * Resolves the authenticated caller to a Loop user row. Loop-native
- * bearers already carry a resolved `userId` on `c.get('auth')`; CTX
- * bearers fall through to the upsert path so the row is created on
- * first touch (mirrors `requireAdmin`'s resolution semantics).
+ * A2-550 / A2-551 fix: identity is now resolved only from the
+ * cryptographically-verified Loop-signed token. See
+ * `apps/backend/src/auth/authenticated-user.ts` for the rationale.
  */
 async function resolveCallingUser(c: Context): Promise<User | null> {
-  const auth = c.get('auth') as LoopAuthContext | undefined;
-  if (auth === undefined) return null;
-  if (auth.kind === 'loop') {
-    return await getUserById(auth.userId);
-  }
-  const claims = decodeJwtPayload(auth.bearerToken);
-  if (claims === null) return null;
-  return await upsertUserFromCtx({
-    ctxUserId: claims.sub,
-    email: typeof claims['email'] === 'string' ? claims['email'] : undefined,
-  });
+  return await resolveLoopAuthenticatedUser(c);
 }
 
 export async function getMeHandler(c: Context): Promise<Response> {
