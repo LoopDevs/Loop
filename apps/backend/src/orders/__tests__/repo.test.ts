@@ -1,6 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as SchemaModule from '../../db/schema.js';
 
+// Mock the env module so per-test overrides of
+// DEFAULT_USER_CASHBACK_PCT_OF_CTX / DEFAULT_LOOP_MARGIN_PCT_OF_CTX
+// drive `fallbackSplit()` (A2-203). Proxy handler falls back to the
+// real env for every other key so the rest of the repo surface (db
+// URL, feature flags, etc.) keeps working.
+const { envOverrides } = vi.hoisted(() => ({
+  envOverrides: {} as Record<string, string | undefined>,
+}));
+vi.mock('../../env.js', async () => {
+  const actual = (await vi.importActual('../../env.js')) as { env: Record<string, unknown> };
+  return {
+    env: new Proxy(
+      {},
+      {
+        get(_, key: string) {
+          if (key in envOverrides) return envOverrides[key];
+          return actual.env[key];
+        },
+      },
+    ),
+  };
+});
+
 const { dbMock, state } = vi.hoisted(() => {
   const s: {
     config: unknown;
@@ -141,6 +164,7 @@ beforeEach(() => {
   state.creditBalanceRow = { balanceMinor: 10_000n };
   state.paidRow = null;
   state.orderByMemo = undefined;
+  for (const k of Object.keys(envOverrides)) delete envOverrides[k];
   (dbMock as unknown as { __resetReturningCursor: () => void }).__resetReturningCursor();
   for (const fn of Object.values(dbMock)) {
     if (typeof fn === 'function' && 'mockClear' in fn) {
@@ -159,6 +183,24 @@ describe('computeCashbackSplit', () => {
     expect(split.userCashbackMinor).toBe(0n);
     expect(split.loopMarginMinor).toBe(0n);
     expect(split.wholesalePct).toBe('100.00');
+  });
+
+  // A2-203: admin-set defaults drive the fallback split, not a
+  // hard-coded zero. A newly-synced merchant without a row earns
+  // whatever DEFAULT_USER_CASHBACK_PCT_OF_CTX says.
+  it('A2-203: honours env defaults when merchant has no config row', async () => {
+    envOverrides['DEFAULT_USER_CASHBACK_PCT_OF_CTX'] = '8.00';
+    envOverrides['DEFAULT_LOOP_MARGIN_PCT_OF_CTX'] = '2.00';
+    const split = await computeCashbackSplit({
+      merchantId: 'fresh-catalog-merchant',
+      faceValueMinor: 10_000n,
+    });
+    expect(split.userCashbackMinor).toBe(800n); // 8%
+    expect(split.loopMarginMinor).toBe(200n); // 2%
+    expect(split.wholesaleMinor).toBe(9_000n); // residual
+    expect(split.userCashbackPct).toBe('8.00');
+    expect(split.loopMarginPct).toBe('2.00');
+    expect(split.wholesalePct).toBe('90.00');
   });
 
   it('falls back to the zero split when config.active = false', async () => {
