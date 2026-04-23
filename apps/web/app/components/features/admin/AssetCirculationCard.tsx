@@ -4,6 +4,7 @@ import type { LoopAssetCode } from '@loop/shared';
 import { getAssetCirculation } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
  * Per-asset circulation-drift card (ADR 015). Renders on
@@ -52,7 +53,7 @@ export function formatMinor(minor: bigint, fiat: string): string {
   const n = Number(abs);
   if (!Number.isFinite(n)) return `${negative ? '-' : ''}${abs.toString()} ${fiat}`;
   try {
-    const formatted = new Intl.NumberFormat('en-US', {
+    const formatted = new Intl.NumberFormat(ADMIN_LOCALE, {
       style: 'currency',
       currency: fiat,
     }).format(n / 100);
@@ -63,7 +64,12 @@ export function formatMinor(minor: bigint, fiat: string): string {
 }
 
 function formatAsOf(ms: number): string {
-  return new Date(ms).toLocaleString(undefined, {
+  // A2-1521: admin view — pin to ADMIN_LOCALE so the timestamp
+  // matches the numeric formatter above. Prior `undefined` read
+  // the operator's browser locale, producing "23 Apr, 14:32" for
+  // a UK operator vs "Apr 23, 2:32 PM" for a US one on the same
+  // row.
+  return new Date(ms).toLocaleString(ADMIN_LOCALE, {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
