@@ -296,6 +296,7 @@ GET  /api/admin/orders/payment-method-share             [admin — cashback-flyw
 GET  /api/admin/orders/payment-method-activity          [admin — daily payment-method time-series (1-90d), trend complement to the share, ADR 010/015]
 GET  /api/admin/supplier-spend                          [admin — per-currency supplier spend, ADR 013/015]
 GET  /api/admin/supplier-margin                         [admin — lifetime per-currency + fleet-wide fulfilled-order margin summary (marginBps), ADR 011/013/015/024]
+GET  /api/admin/supplier-margin/daily                   [admin — daily per-(day, currency) supplier-margin trend (1-180d) sparkline-ready, ADR 011/013/015/024]
 GET  /api/admin/supplier-spend/activity                 [admin — per-day per-currency supplier spend time-series (1-180d, ?currency=USD|GBP|EUR), ADR 013/015]
 GET  /api/admin/supplier-spend/activity.csv             [admin — Tier-3 CSV of daily × per-currency supplier spend for month-end CTX-invoice reconciliation, ADR 013/015/018]
 GET  /api/admin/operators/:operatorId/supplier-spend    [admin — per-operator per-currency supplier spend (axis of fleet supplier-spend), ADR 013/015/022]

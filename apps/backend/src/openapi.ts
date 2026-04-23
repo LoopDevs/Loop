@@ -1054,6 +1054,28 @@ const SupplierMarginResponse = registry.register(
   z.object({ rows: z.array(SupplierMarginRow) }),
 );
 
+const SupplierMarginDay = registry.register(
+  'SupplierMarginDay',
+  z.object({
+    day: z.string(),
+    currency: z.string().length(3),
+    chargeMinor: z.string(),
+    wholesaleMinor: z.string(),
+    userCashbackMinor: z.string(),
+    loopMarginMinor: z.string(),
+    orderCount: z.number().int().nonnegative(),
+    marginBps: z.number().int().nonnegative().max(10_000),
+  }),
+);
+
+const SupplierMarginDailyResponse = registry.register(
+  'SupplierMarginDailyResponse',
+  z.object({
+    days: z.number().int().min(1).max(180),
+    rows: z.array(SupplierMarginDay),
+  }),
+);
+
 // ─── Admin — supplier-spend activity (ADR 013 / 015) ───────────────────────
 
 const AdminSupplierSpendActivityDay = registry.register(
@@ -3211,6 +3233,43 @@ registry.registerPath({
     },
     500: {
       description: 'Internal error computing the aggregate',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/supplier-margin/daily',
+  summary: 'Daily supplier-margin trend (ADR 011/013/015/024).',
+  description:
+    'Time-series companion to /api/admin/supplier-margin. Per-(day, currency) row with chargeMinor, wholesaleMinor, userCashbackMinor, loopMarginMinor, orderCount, marginBps. generate_series LEFT JOIN emits every day in the window; null-currency rows (zero-activity days) are stripped. Window: ?days=30 default, 1..180 clamp.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(180).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Daily rows (oldest → newest)',
+      content: { 'application/json': { schema: SupplierMarginDailyResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error computing the series',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
