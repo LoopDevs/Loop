@@ -73,6 +73,7 @@ import { adminPayoutsActivityHandler } from './admin/payouts-activity.js';
 import { adminPayoutsActivityCsvHandler } from './admin/payouts-activity-csv.js';
 import { adminSupplierSpendActivityCsvHandler } from './admin/supplier-spend-activity-csv.js';
 import { adminOperatorsSnapshotCsvHandler } from './admin/operators-snapshot-csv.js';
+import { adminTreasuryCreditFlowCsvHandler } from './admin/treasury-credit-flow-csv.js';
 import { adminMerchantStatsHandler } from './admin/merchant-stats.js';
 import { adminMerchantStatsCsvHandler } from './admin/merchant-stats-csv.js';
 import { adminMerchantsFlywheelShareHandler } from './admin/merchants-flywheel-share.js';
@@ -956,6 +957,15 @@ app.get(
   '/api/admin/operators-snapshot.csv',
   rateLimit(10, 60_000),
   adminOperatorsSnapshotCsvHandler,
+);
+// Tier-3 CSV of the credit-flow time series (ADR 009 / 015 / 018).
+// Completes the finance-CSV quartet: cashback-activity (minted) +
+// payouts-activity (settled on-chain) + supplier-spend/activity
+// (paid to CTX) + this (net ledger movement).
+app.get(
+  '/api/admin/treasury/credit-flow.csv',
+  rateLimit(10, 60_000),
+  adminTreasuryCreditFlowCsvHandler,
 );
 // Per-merchant cashback stats — which merchants drive volume /
 // cashback outlay / margin. Distinct from supplier-spend (currency
