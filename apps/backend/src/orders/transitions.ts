@@ -28,6 +28,7 @@ import {
 } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { buildPayoutIntent } from '../credits/payout-builder.js';
+import { notifyStuckProcurementSwept } from '../discord.js';
 import type { Order } from './repo.js';
 
 const log = logger.child({ area: 'order-transitions' });
@@ -289,7 +290,33 @@ export async function sweepStuckProcurement(cutoff: Date): Promise<number> {
       failedAt: now,
     })
     .where(and(eq(orders.state, 'procuring'), lt(orders.procuredAt, cutoff)))
-    .returning({ id: orders.id });
+    .returning({
+      id: orders.id,
+      userId: orders.userId,
+      merchantId: orders.merchantId,
+      chargeMinor: orders.chargeMinor,
+      chargeCurrency: orders.chargeCurrency,
+      ctxOperatorId: orders.ctxOperatorId,
+      procuredAt: orders.procuredAt,
+    });
+  // A2-621: per-row Discord alert. The sweep's outcome is ambiguous
+  // — we don't know whether CTX minted the gift card (and Loop was
+  // charged) or the POST never landed. Ops needs to reconcile each
+  // row manually before any user-facing refund. Running per-row
+  // (not aggregated) is deliberate: a non-zero sweep is rare, and
+  // when it happens each row needs its own drill-down, not a
+  // "N swept" counter. Fire-and-forget AFTER the commit.
+  for (const row of rows) {
+    notifyStuckProcurementSwept({
+      orderId: row.id,
+      userId: row.userId,
+      merchantId: row.merchantId,
+      chargeMinor: row.chargeMinor.toString(),
+      chargeCurrency: row.chargeCurrency,
+      ctxOperatorId: row.ctxOperatorId,
+      procuredAtMs: row.procuredAt?.getTime() ?? 0,
+    });
+  }
   return rows.length;
 }
 

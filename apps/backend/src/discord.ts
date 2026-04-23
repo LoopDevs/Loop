@@ -576,6 +576,53 @@ export function notifyAssetDriftRecovered(args: {
  * Paired with a 15-minute throttle at the call site so sustained
  * outages don't flood the monitoring channel.
  */
+/**
+ * A2-621: notify when a `procuring` order ages out and the recovery
+ * sweep flipped it to `failed`. A sweep-swept row is ambiguous — we
+ * don't know whether CTX actually minted the gift card (in which
+ * case Loop was charged but the user is stuck) or the POST never
+ * landed (in which case Loop is whole). Ops has to reconcile
+ * manually against CTX's side by looking up the order id or the
+ * operator's charge history.
+ *
+ * Runs per-swept-row (not aggregated) because each row needs
+ * individual investigation and the sweep normally catches zero rows
+ * per tick — the day this fires is the day the channel needs the
+ * full drill-down, not a "1 more swept" counter.
+ */
+export function notifyStuckProcurementSwept(args: {
+  orderId: string;
+  userId: string;
+  merchantId: string;
+  chargeMinor: string;
+  chargeCurrency: string;
+  ctxOperatorId: string | null;
+  procuredAtMs: number;
+}): void {
+  const stuckForMs = Date.now() - args.procuredAtMs;
+  const stuckForMin = Math.round(stuckForMs / 60_000);
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🟡 Stuck Procuring Order Swept to Failed',
+    description: truncate(
+      `An order sat in \`procuring\` for ${stuckForMin} min and was just swept to \`failed\`. Reconcile against CTX before any user-facing refund — if CTX minted the card, the user is stuck with a paid CTX gift card that Loop thinks never happened.`,
+      DESCRIPTION_MAX,
+    ),
+    color: ORANGE,
+    fields: [
+      { name: 'Order', value: `\`${escapeMarkdown(args.orderId)}\``, inline: false },
+      { name: 'User', value: `\`${escapeMarkdown(args.userId)}\``, inline: true },
+      { name: 'Merchant', value: escapeMarkdown(args.merchantId), inline: true },
+      { name: 'Charge', value: `${args.chargeMinor} ${args.chargeCurrency}`, inline: true },
+      {
+        name: 'Operator',
+        value: args.ctxOperatorId ? `\`${escapeMarkdown(args.ctxOperatorId)}\`` : '_none_',
+        inline: true,
+      },
+      { name: 'Stuck for (min)', value: String(stuckForMin), inline: true },
+    ],
+  });
+}
+
 export function notifyOperatorPoolExhausted(args: { poolSize: number; reason: string }): void {
   void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
     title: '🔴 CTX Operator Pool Exhausted',
@@ -775,6 +822,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     channel: 'monitoring',
     description:
       'Fires when a pending_payouts row flips to `failed` (ADR 015/016). Embed carries asset code + user id + lastError preview.',
+  },
+  {
+    name: 'notifyStuckProcurementSwept',
+    channel: 'monitoring',
+    description:
+      'Fires when the sweep flips a stuck `procuring` order to `failed` (A2-621). Per-row so ops can reconcile individually — each row might be a CTX-minted-but-we-lost-track case where refunding the user would double-spend.',
   },
   {
     name: 'notifyUsdcBelowFloor',
