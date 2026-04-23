@@ -251,6 +251,7 @@ POST /api/admin/users/:userId/credit-adjustments        [admin — signed credit
 GET  /api/admin/payouts.csv                            [admin — finance-ready CSV export, ADR 015]
 GET  /api/admin/orders                                  [admin — Loop-native orders drill-down + ?state/?userId/?merchantId/?chargeCurrency/?paymentMethod/?ctxOperatorId filters, ADR 011/013/015]
 GET  /api/admin/operator-stats                          [admin — per-operator order volume + success rate, ADR 013]
+GET  /api/admin/operators/latency                       [admin — per-operator p50/p95/p99 fulfilment latency, ADR 013/022]
 GET  /api/admin/orders/activity                         [admin — N-day created/fulfilled sparkline, ADR 010]
 GET  /api/admin/orders.csv                              [admin — finance-ready CSV export, ADR 011/015]
 GET  /api/admin/stuck-orders                            [admin — SLO stuck-in-paid/procuring triage, ADR 011/013]
