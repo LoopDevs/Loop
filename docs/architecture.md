@@ -303,6 +303,7 @@ GET  /api/admin/users/:userId/cashback-monthly           [admin — 12-month per
 GET  /api/admin/users/:userId/payment-method-share       [admin — per-user rail mix, sibling of fleet + per-merchant share, ADR 010/015]
 GET  /api/admin/users/:userId/credit-transactions       [admin — per-user credit-ledger log, ADR 009]
 GET  /api/admin/users/:userId/credit-transactions.csv   [admin — per-user credit-ledger CSV for compliance / SAR, ADR 009/015]
+GET  /api/admin/users/:userId/operator-mix              [admin — per-user × per-operator attribution for support triage, ADR 013/022]
 POST /api/admin/merchants/resync                        [admin — force an immediate CTX merchant-catalog sweep, ADR 011]
 GET  /api/admin/discord/notifiers                       [admin — static catalog of Discord notifiers, ADR 018]
 POST /api/admin/discord/test                            [admin — fire a benign test ping at a Discord channel, ADR 018]

@@ -95,6 +95,7 @@ import { adminOperatorStatsHandler } from './admin/operator-stats.js';
 import { adminOperatorLatencyHandler } from './admin/operator-latency.js';
 import { adminMerchantOperatorMixHandler } from './admin/merchant-operator-mix.js';
 import { adminOperatorMerchantMixHandler } from './admin/operator-merchant-mix.js';
+import { adminUserOperatorMixHandler } from './admin/user-operator-mix.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
 import { adminUserCreditTransactionsHandler } from './admin/user-credit-transactions.js';
 import { adminUserCreditTransactionsCsvHandler } from './admin/user-credit-transactions-csv.js';
@@ -1265,6 +1266,16 @@ app.get(
   '/api/admin/users/:userId/credit-transactions',
   rateLimit(120, 60_000),
   adminUserCreditTransactionsHandler,
+);
+// Per-user × per-operator attribution (ADR 013 / 022). Completes
+// the mix-axis matrix: merchant×operator + operator×merchant
+// (existing) plus user×operator here. Support-triage view: "user
+// X complains about slow cashback — which CTX operator has been
+// carrying their recent orders?"
+app.get(
+  '/api/admin/users/:userId/operator-mix',
+  rateLimit(120, 60_000),
+  adminUserOperatorMixHandler,
 );
 // Finance / compliance / support CSV of one user's credit-ledger
 // history. Same Tier-3 rate-limit cadence as the other CSV
