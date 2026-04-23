@@ -168,7 +168,6 @@ export async function adminCreditAdjustmentHandler(c: Context): Promise<Response
   const priorResult = (guardResult.body as { result?: CreditAdjustmentResult }).result;
   notifyAdminAudit({
     actorUserId: actor.id,
-    actorEmail: actor.email,
     endpoint: `POST /api/admin/users/${userId}/credit-adjustments`,
     targetUserId: userId,
     ...(priorResult?.amountMinor !== undefined ? { amountMinor: priorResult.amountMinor } : {}),
