@@ -144,6 +144,10 @@ describe('adminMerchantsCatalogCsvHandler', () => {
   });
 
   it('500 when the db throws', async () => {
+    // A2-503: the configs SELECT is now skipped when the emitted-
+    // merchants list is empty, so this fixture needs at least one
+    // catalog merchant to exercise the DB-error path.
+    state.merchants = [{ id: 'm_1', name: 'Merchant One', enabled: true }];
     state.throwErr = new Error('db exploded');
     const res = await adminMerchantsCatalogCsvHandler(makeCtx());
     expect(res.status).toBe(500);
