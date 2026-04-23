@@ -227,9 +227,19 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
     void navigate(`/gift-card/${merchantSlug(r.name)}`);
   };
 
+  // Prefix-match for everything except "/" — so /cashback/:slug
+  // keeps "Rates" highlighted, /orders/:id keeps "Orders"
+  // highlighted, etc. The home link stays exact-match (only the
+  // literal "/" should highlight Directory; every other page is
+  // a descendant of "/" and would over-match with a prefix).
+  const isPathActive = (path: string): boolean => {
+    if (path === '/') return location.pathname === '/';
+    return location.pathname === path || location.pathname.startsWith(`${path}/`);
+  };
+
   const navLinkClass = (path: string): string =>
     `transition-colors text-sm px-3 py-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 ${
-      location.pathname === path
+      isPathActive(path)
         ? 'text-gray-950 dark:text-white'
         : 'text-gray-600 hover:text-gray-900 dark:text-white/60 dark:hover:text-white/80'
     }`;
