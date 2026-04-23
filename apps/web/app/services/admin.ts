@@ -287,52 +287,6 @@ export async function getCashbackRealization(): Promise<CashbackRealizationRespo
 }
 
 /**
- * Supplier-margin summary (ADR 011 / 013 / 015 / 024). Per-currency
- * + fleet-wide (`currency: null`) roll-up of Loop's cashback-business
- * economics across every fulfilled order.
- */
-export interface SupplierMarginRow {
-  currency: string | null;
-  chargeMinor: string;
-  wholesaleMinor: string;
-  userCashbackMinor: string;
-  loopMarginMinor: string;
-  orderCount: number;
-  marginBps: number;
-}
-
-export interface SupplierMarginResponse {
-  rows: SupplierMarginRow[];
-}
-
-/** `GET /api/admin/supplier-margin` */
-export async function getSupplierMargin(): Promise<SupplierMarginResponse> {
-  return authenticatedRequest<SupplierMarginResponse>('/api/admin/supplier-margin');
-}
-
-export interface SupplierMarginDay {
-  day: string;
-  currency: string;
-  chargeMinor: string;
-  wholesaleMinor: string;
-  userCashbackMinor: string;
-  loopMarginMinor: string;
-  orderCount: number;
-  marginBps: number;
-}
-
-export interface SupplierMarginDailyResponse {
-  days: number;
-  rows: SupplierMarginDay[];
-}
-
-/** `GET /api/admin/supplier-margin/daily?days=N` */
-export async function getSupplierMarginDaily(days?: number): Promise<SupplierMarginDailyResponse> {
-  const qs = days !== undefined ? `?days=${days}` : '';
-  return authenticatedRequest<SupplierMarginDailyResponse>(`/api/admin/supplier-margin/daily${qs}`);
-}
-
-/**
  * Daily cashback-realization trend (ADR 009 / 015). One row per
  * (day, currency); dense (every day in the window has a row) so
  * sparklines don't compress on gap days.

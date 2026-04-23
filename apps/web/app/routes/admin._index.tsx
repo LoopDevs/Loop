@@ -23,7 +23,6 @@ import { AssetDriftBadge } from '~/components/features/admin/AssetDriftBadge';
 import { AssetDriftWatcherCard } from '~/components/features/admin/AssetDriftWatcherCard';
 import { SettlementLagCard } from '~/components/features/admin/SettlementLagCard';
 import { CashbackRealizationCard } from '~/components/features/admin/CashbackRealizationCard';
-import { SupplierMarginCard } from '~/components/features/admin/SupplierMarginCard';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -261,11 +260,10 @@ export default function AdminIndexRoute(): React.JSX.Element {
           independently so a fresh deployment sees only the signals
           it has data for. */}
       {denied ? null : (
-        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <AssetDriftWatcherCard />
           <SettlementLagCard />
           <CashbackRealizationCard />
-          <SupplierMarginCard />
         </section>
       )}
 
