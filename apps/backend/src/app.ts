@@ -92,6 +92,7 @@ import { adminOperatorSupplierSpendHandler } from './admin/operator-supplier-spe
 import { adminOperatorActivityHandler } from './admin/operator-activity.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
 import { adminOperatorLatencyHandler } from './admin/operator-latency.js';
+import { adminMerchantOperatorMixHandler } from './admin/merchant-operator-mix.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
 import { adminUserCreditTransactionsHandler } from './admin/user-credit-transactions.js';
 import { adminUserCreditTransactionsCsvHandler } from './admin/user-credit-transactions-csv.js';
@@ -961,6 +962,17 @@ app.get(
 // cashback outlay / margin. Distinct from supplier-spend (currency
 // grouped) — this one groups by merchant.
 app.get('/api/admin/merchant-stats', rateLimit(60, 60_000), adminMerchantStatsHandler);
+// Per-merchant × per-operator mix (ADR 013 / 022). The
+// merchant-axis complement to operator-stats: lives under
+// /merchants/:merchantId so an incident triage landing on
+// /admin/merchants/:id can ask "which operator is primarily
+// carrying this merchant right now?". Complements the fleet
+// operator-stats + the per-operator drill quartet.
+app.get(
+  '/api/admin/merchants/:merchantId/operator-mix',
+  rateLimit(120, 60_000),
+  adminMerchantOperatorMixHandler,
+);
 // Finance / negotiation CSV — flattened per-merchant stats for
 // the CTX rate-deck spreadsheet. Tier-3 rate limit matches the
 // other admin CSV exports.

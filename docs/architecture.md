@@ -266,6 +266,7 @@ GET  /api/admin/payouts-activity                        [admin — daily per-ass
 GET  /api/admin/payouts-activity.csv                    [admin — Tier-3 CSV of daily × per-asset confirmed payouts for month-end close, ADR 015/016/018]
 GET  /api/admin/merchant-stats                          [admin — per-merchant cashback stats, ADR 011/015]
 GET  /api/admin/merchant-stats.csv                      [admin — per-merchant CSV for CTX negotiation, ADR 011/015/018]
+GET  /api/admin/merchants/:merchantId/operator-mix      [admin — per-merchant × per-operator attribution for incident triage, ADR 013/022]
 GET  /api/admin/merchants/flywheel-share                [admin — per-merchant loop_asset recycled leaderboard, ADR 011/015]
 GET  /api/admin/merchants/flywheel-share.csv            [admin — Tier-3 CSV export of the flywheel leaderboard, ADR 011/015/018]
 GET  /api/admin/merchants/:merchantId/flywheel-stats    [admin — per-merchant scalar flywheel stats for the drill page, ADR 011/015]
