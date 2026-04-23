@@ -35,6 +35,7 @@ export default [
   route('admin/merchants/:merchantId', 'routes/admin.merchants.$merchantId.tsx'),
   route('admin/users', 'routes/admin.users.tsx'),
   route('admin/users/:userId', 'routes/admin.users.$userId.tsx'),
+  route('admin/operators', 'routes/admin.operators.tsx'),
   route('admin/operators/:operatorId', 'routes/admin.operators.$operatorId.tsx'),
   route('admin/audit', 'routes/admin.audit.tsx'),
   route('*', 'routes/not-found.tsx'),
