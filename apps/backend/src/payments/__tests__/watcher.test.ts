@@ -180,23 +180,29 @@ describe('isAmountSufficient', () => {
     expect(await isAmountSufficient(p, makeOrder({ faceValueMinor: 1_000n }) as never)).toBe(false);
   });
 
-  it('accepts a USDC payment against a GBP order via fiat FX', async () => {
-    // £10.00 order (1000 pence). Mocked FX: 128_206 stroops/pence.
-    // Required: 128_206_000 stroops = 12.8206 USDC. A payment of 13 USDC
-    // (130_000_000 stroops) comfortably clears.
+  it('accepts a USDC payment against a GBP-charge order via fiat FX', async () => {
+    // £10.00 charged to the user (chargeMinor=1000 pence, chargeCurrency=GBP).
+    // Mocked FX: 128_206 stroops/pence. Required: 128_206_000 stroops =
+    // 12.8206 USDC. A payment of 13 USDC (130_000_000 stroops) clears.
     const p = usdcPayment('MEMO', '13.0000000');
-    expect(await isAmountSufficient(p, makeOrder({ currency: 'GBP' }) as never)).toBe(true);
+    expect(
+      await isAmountSufficient(p, makeOrder({ currency: 'GBP', chargeCurrency: 'GBP' }) as never),
+    ).toBe(true);
   });
 
-  it('rejects a USDC underpayment against a GBP order', async () => {
-    // £10.00 order requires ~12.82 USDC. 10 USDC (100_000_000 stroops) falls short.
+  it('rejects a USDC underpayment against a GBP-charge order', async () => {
+    // £10.00 charge requires ~12.82 USDC. 10 USDC (100_000_000 stroops) falls short.
     const p = usdcPayment('MEMO', '10.0000000');
-    expect(await isAmountSufficient(p, makeOrder({ currency: 'GBP' }) as never)).toBe(false);
+    expect(
+      await isAmountSufficient(p, makeOrder({ currency: 'GBP', chargeCurrency: 'GBP' }) as never),
+    ).toBe(false);
   });
 
-  it('rejects USDC payment for a currency the FX oracle has no rate for', async () => {
+  it('rejects USDC payment for a charge currency the FX oracle has no rate for', async () => {
     const p = usdcPayment('MEMO', '100.0000000');
-    expect(await isAmountSufficient(p, makeOrder({ currency: 'JPY' }) as never)).toBe(false);
+    expect(
+      await isAmountSufficient(p, makeOrder({ currency: 'JPY', chargeCurrency: 'JPY' }) as never),
+    ).toBe(false);
   });
 
   it('rejects credit-method orders — they are never watcher-transitioned', async () => {
@@ -253,9 +259,75 @@ describe('isAmountSufficient', () => {
     expect(
       await isAmountSufficient(
         p as never,
-        makeOrder({ paymentMethod: 'xlm', currency: 'JPY' }) as never,
+        makeOrder({ paymentMethod: 'xlm', currency: 'JPY', chargeCurrency: 'JPY' }) as never,
       ),
     ).toBe(false);
+  });
+
+  // ─── A2-619: cross-currency orders validate in chargeCurrency ──
+
+  it('A2-619 USDC: cross-ccy order (GBP catalog, USD charge) validates against chargeMinor in USD', async () => {
+    // £100 Boots card (faceValueMinor=10000 GBP pence), user charged
+    // $125 (chargeMinor=12500 USD cents) after FX pin. Mocked USDC
+    // perCent for USD = 100_000 stroops/cent. Required: 12500 * 100k =
+    // 1_250_000_000 stroops = 125 USDC. Pre-fix used faceValueMinor *
+    // USDC-perCent-for-GBP (128_206) = 1_282_060_000 stroops = 128.21
+    // USDC — so a user paying the expected 125 USDC got silently
+    // rejected as underpayment.
+    const p = usdcPayment('MEMO', '125.0000000');
+    expect(
+      await isAmountSufficient(
+        p,
+        makeOrder({
+          paymentMethod: 'usdc',
+          currency: 'GBP',
+          faceValueMinor: 10_000n,
+          chargeCurrency: 'USD',
+          chargeMinor: 12_500n,
+        }) as never,
+      ),
+    ).toBe(true);
+  });
+
+  it('A2-619 USDC: cross-ccy underpayment still rejected', async () => {
+    // Same setup as above but user sends 124 USDC instead of 125.
+    const p = usdcPayment('MEMO', '124.0000000');
+    expect(
+      await isAmountSufficient(
+        p,
+        makeOrder({
+          paymentMethod: 'usdc',
+          currency: 'GBP',
+          faceValueMinor: 10_000n,
+          chargeCurrency: 'USD',
+          chargeMinor: 12_500n,
+        }) as never,
+      ),
+    ).toBe(false);
+  });
+
+  it('A2-619 XLM: cross-ccy order validates against chargeMinor + chargeCurrency', async () => {
+    // £100 catalog / $125 charge. Mocked XLM stroopsPerCent(USD) =
+    // 1_000_000. Required: 12500 * 1M = 12_500_000_000 stroops = 1250
+    // XLM. Payment of 1250 XLM (12_500_000_000 stroops) must clear.
+    const p = {
+      ...usdcPayment('MEMO', '1250.0000000'),
+      asset_type: 'native',
+      asset_code: undefined,
+      asset_issuer: undefined,
+    };
+    expect(
+      await isAmountSufficient(
+        p as never,
+        makeOrder({
+          paymentMethod: 'xlm',
+          currency: 'GBP',
+          faceValueMinor: 10_000n,
+          chargeCurrency: 'USD',
+          chargeMinor: 12_500n,
+        }) as never,
+      ),
+    ).toBe(true);
   });
 });
 
