@@ -460,6 +460,55 @@ registry.registerPath({
   },
 });
 
+const PublicMerchantDetail = registry.register(
+  'PublicMerchantDetail',
+  z.object({
+    id: z.string(),
+    name: z.string(),
+    slug: z.string().openapi({
+      description: 'Marketing slug — matches merchantSlug(name) on the web side.',
+    }),
+    logoUrl: z.string().nullable(),
+    userCashbackPct: z.string().nullable().openapi({
+      description:
+        'numeric(5,2) as string, e.g. "5.50". null when no active config — the "coming soon" SEO state, distinct from "merchant not found" which returns 404.',
+    }),
+    asOf: z.string().datetime(),
+  }),
+);
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/public/merchants/{id}',
+  summary: 'Per-merchant SEO detail (ADR 011 / 020).',
+  description:
+    'Unauthenticated single-merchant view for the /cashback/:slug landing page. Accepts merchant id OR slug as the path parameter. Narrow PII-free shape (no wholesale / margin — only user-facing cashback pct). Never 500: DB trouble → per-merchant last-known-good cache; first-miss → catalog row with null pct. 404 only for unknown id/slug (evicted merchants / typo URLs). `Cache-Control: public, max-age=300` on the happy path; `max-age=60` on the fallback path.',
+  tags: ['Public'],
+  request: {
+    params: z.object({
+      id: z.string().openapi({ description: 'Merchant id or slug.' }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Merchant catalog row + current cashback pct (or null)',
+      content: { 'application/json': { schema: PublicMerchantDetail } },
+    },
+    400: {
+      description: 'Malformed merchant id / slug',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'Unknown merchant id / slug',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Users — credit balances (ADR 009 / 015) ────────────────────────────────
 
 const UserCreditRow = registry.register(
