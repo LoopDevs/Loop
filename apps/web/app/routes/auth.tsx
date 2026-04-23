@@ -21,6 +21,7 @@ import {
   type CashbackHistoryEntry,
   type UserMeView,
 } from '~/services/user';
+import { PendingCashbackChip } from '~/components/features/cashback/PendingCashbackChip';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Sign in — Loop' }];
@@ -426,6 +427,7 @@ export default function AuthRoute(): React.JSX.Element {
             <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Your account</h1>
             <p className="text-gray-500 dark:text-gray-400 mb-6">{userEmail}</p>
             <CashbackBalanceCard me={meQuery.data} isLoading={meQuery.isLoading} />
+            <PendingCashbackChip />
             <CashbackHistoryCard
               entries={historyQuery.data?.entries}
               isLoading={historyQuery.isLoading}

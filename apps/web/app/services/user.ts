@@ -135,6 +135,33 @@ export async function getUserPendingPayouts(
 }
 
 /**
+ * Caller's pending-payouts summary (ADR 015 / 016). One row per
+ * `(assetCode, state)` bucket; confirmed / failed states are
+ * deliberately absent backend-side. Powers a "you have $X cashback
+ * settling" chip without paging the full pending-payouts list.
+ */
+export interface UserPendingPayoutsSummaryRow {
+  assetCode: string;
+  state: 'pending' | 'submitted';
+  count: number;
+  /** Sum of amount_stroops in this bucket. BigInt as string. */
+  totalStroops: string;
+  /** ISO-8601 of the oldest row in the bucket. */
+  oldestCreatedAt: string;
+}
+
+export interface UserPendingPayoutsSummaryResponse {
+  rows: UserPendingPayoutsSummaryRow[];
+}
+
+/** `GET /api/users/me/pending-payouts/summary` */
+export async function getUserPendingPayoutsSummary(): Promise<UserPendingPayoutsSummaryResponse> {
+  return authenticatedRequest<UserPendingPayoutsSummaryResponse>(
+    '/api/users/me/pending-payouts/summary',
+  );
+}
+
+/**
  * `GET /api/users/me/orders/:orderId/payout` — per-order
  * settlement drill. Returns the single pending-payout row tied
  * to one of the caller's own orders, or null when there isn't
