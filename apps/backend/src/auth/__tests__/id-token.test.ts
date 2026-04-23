@@ -116,7 +116,7 @@ describe('verifyIdToken', () => {
     const result = await verifyIdToken({
       token,
       jwksUrl: JWKS_URL,
-      expectedIssuer: ISS,
+      expectedIssuers: [ISS],
       expectedAudiences: [AUD],
     });
     expect(result.ok).toBe(true);
@@ -137,7 +137,7 @@ describe('verifyIdToken', () => {
     const r = await verifyIdToken({
       token,
       jwksUrl: JWKS_URL,
-      expectedIssuer: ISS,
+      expectedIssuers: [ISS],
       expectedAudiences: [AUD],
     });
     expect(r.ok).toBe(false);
@@ -150,7 +150,7 @@ describe('verifyIdToken', () => {
       const r = await verifyIdToken({
         token: bad,
         jwksUrl: JWKS_URL,
-        expectedIssuer: ISS,
+        expectedIssuers: [ISS],
         expectedAudiences: [AUD],
       });
       expect(r.ok).toBe(false);
@@ -175,7 +175,7 @@ describe('verifyIdToken', () => {
     const r = await verifyIdToken({
       token,
       jwksUrl: JWKS_URL,
-      expectedIssuer: ISS,
+      expectedIssuers: [ISS],
       expectedAudiences: [AUD],
     });
     expect(r.ok).toBe(false);
@@ -193,11 +193,36 @@ describe('verifyIdToken', () => {
     const r = await verifyIdToken({
       token,
       jwksUrl: JWKS_URL,
-      expectedIssuer: ISS,
+      expectedIssuers: [ISS],
       expectedAudiences: [AUD],
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe('wrong_issuer');
+  });
+
+  it('A2-567: accepts ANY of the expectedIssuers (Google emits two variants)', async () => {
+    const kp = makeKeypair('k-1');
+    fetchSpy = stubJwks([kp.jwk]);
+    // Token carries the scheme-LESS variant. Without A2-567 the
+    // server would reject on exact-match against the schemed form.
+    const token = signJwt({
+      privateKey: kp.privateKey,
+      header: { alg: 'RS256', kid: 'k-1', typ: 'JWT' },
+      payload: {
+        iss: 'accounts.google.com',
+        aud: AUD,
+        sub: 's',
+        iat: 1,
+        exp: 2_000_000_000,
+      },
+    });
+    const r = await verifyIdToken({
+      token,
+      jwksUrl: JWKS_URL,
+      expectedIssuers: ['https://accounts.google.com', 'accounts.google.com'],
+      expectedAudiences: [AUD],
+    });
+    expect(r.ok).toBe(true);
   });
 
   it('rejects the wrong audience', async () => {
@@ -217,7 +242,7 @@ describe('verifyIdToken', () => {
     const r = await verifyIdToken({
       token,
       jwksUrl: JWKS_URL,
-      expectedIssuer: ISS,
+      expectedIssuers: [ISS],
       expectedAudiences: [AUD],
     });
     expect(r.ok).toBe(false);
@@ -241,7 +266,7 @@ describe('verifyIdToken', () => {
     const r = await verifyIdToken({
       token,
       jwksUrl: JWKS_URL,
-      expectedIssuer: ISS,
+      expectedIssuers: [ISS],
       expectedAudiences: ['web-client', 'ios-client', 'android-client'],
     });
     expect(r.ok).toBe(true);
@@ -258,7 +283,7 @@ describe('verifyIdToken', () => {
     const r = await verifyIdToken({
       token,
       jwksUrl: JWKS_URL,
-      expectedIssuer: ISS,
+      expectedIssuers: [ISS],
       expectedAudiences: [AUD],
       now: 1_000_000,
     });
@@ -291,7 +316,7 @@ describe('verifyIdToken', () => {
     const r = await verifyIdToken({
       token,
       jwksUrl: JWKS_URL,
-      expectedIssuer: ISS,
+      expectedIssuers: [ISS],
       expectedAudiences: [AUD],
     });
     expect(r.ok).toBe(true);
@@ -316,7 +341,7 @@ describe('verifyIdToken', () => {
     const r = await verifyIdToken({
       token,
       jwksUrl: JWKS_URL,
-      expectedIssuer: ISS,
+      expectedIssuers: [ISS],
       expectedAudiences: [AUD],
     });
     expect(r.ok).toBe(false);
