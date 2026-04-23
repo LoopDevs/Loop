@@ -269,7 +269,7 @@ Complete. Evidence: [phase-5b-auth-users.md](./audit-2026-evidence/phase-5b-auth
 | A2-570 | Low          | Social `identities.ts` race can violate `users.email` unique index → 500                                                                                                                                                            |
 | A2-571 | **High**     | ~~`EMAIL_PROVIDER=console` bypasses production guard; ships plaintext-OTP logger~~ **resolved-pending-review** by Batch 2A (#770)                                                                                                   |
 | A2-572 | Medium       | `operatorFetch` doesn't retry against next operator on upstream 5xx, contrary to docstring                                                                                                                                          |
-| A2-573 | Low          | `initialised=true` set before parse; config fix requires restart                                                                                                                                                                    |
+| A2-573 | Low          | ~~`initialised=true` set before parse; config fix requires restart~~ **resolved-pending-review** by A2-573 PR                                                                                                                       |
 | A2-574 | Info         | `/api/config` exposes feature-surface unauth, deliberate per ADR 020                                                                                                                                                                |
 
 #### Phase 5c — `orders/`, `payments/`, `credits/` (money-flow)

@@ -108,6 +108,29 @@ describe('operator pool — configuration', () => {
     process.env['CTX_OPERATOR_POOL'] = '[]';
     expect(() => operatorPoolSize()).toThrow(/schema validation/);
   });
+
+  // A2-573: the `initialised` flag must NOT flip to true until a parse
+  // succeeds. Previously, the first malformed-env access set the flag
+  // up-front, so a follow-up call after ops corrected the env silently
+  // used the stale (empty) pool until a process restart.
+  it('A2-573: retries parsing on subsequent calls after a malformed env is corrected', () => {
+    process.env['CTX_OPERATOR_POOL'] = '{not json';
+    expect(() => operatorPoolSize()).toThrow(/not valid JSON/);
+    validPool();
+    expect(operatorPoolSize()).toBe(2);
+  });
+
+  // A2-573 companion: the inert-env branch should still latch to
+  // avoid re-logging "inert" on every call — the retry behaviour is
+  // specific to recoverable errors (JSON parse / schema), not to the
+  // deliberately-unset case.
+  it('A2-573: inert-env branch still latches so we do not re-enter on every call', () => {
+    expect(operatorPoolSize()).toBe(0);
+    // Flip env after latch — the pool stays inert because the
+    // unset-env path is sticky.
+    validPool();
+    expect(operatorPoolSize()).toBe(0);
+  });
 });
 
 describe('operatorFetch', () => {
