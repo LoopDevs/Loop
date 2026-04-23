@@ -31,6 +31,7 @@ import {
 import type { Order } from './repo.js';
 import { operatorFetch, OperatorPoolUnavailableError } from '../ctx/operator-pool.js';
 import { upstreamUrl } from '../upstream.js';
+import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { getAccountBalances } from '../payments/horizon-balances.js';
 import { notifyCashbackCredited, notifyUsdcBelowFloor } from '../discord.js';
 import { getMerchants } from '../merchants/sync.js';
@@ -254,7 +255,7 @@ async function procureOne(order: Order): Promise<'fulfilled' | 'failed' | 'skipp
     });
 
     if (!res.ok) {
-      const body = (await res.text()).slice(0, 500);
+      const body = scrubUpstreamBody(await res.text());
       log.error({ orderId: order.id, status: res.status, body }, 'CTX procurement returned non-ok');
       await markOrderFailed(order.id, `CTX returned ${res.status}`);
       return 'failed';

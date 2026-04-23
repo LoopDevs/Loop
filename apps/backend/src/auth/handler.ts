@@ -4,6 +4,7 @@ import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
+import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { nativeRequestOtpHandler, nativeVerifyOtpHandler, nativeRefreshHandler } from './native.js';
 import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
 import { revokeRefreshToken } from './refresh-tokens.js';
@@ -82,7 +83,7 @@ export async function requestOtpHandler(c: Context): Promise<Response> {
       // Truncate the body before logging — pino redact only matches structured
       // field names, so if an upstream ever echoed a token in an error string
       // it would slip through. Cap at 500 chars to keep logs parseable.
-      const body = (await response.text()).slice(0, 500);
+      const body = scrubUpstreamBody(await response.text());
       log.error({ status: response.status, body }, 'Upstream login request failed');
       // Enumeration defense: return 200 with a generic message for 4xx from upstream
       // (e.g. "no such user") so an attacker cannot distinguish valid vs invalid emails.
@@ -147,7 +148,7 @@ export async function verifyOtpHandler(c: Context): Promise<Response> {
       // Log body for schema-drift debugging. Truncate: pino redact is
       // field-based so an upstream echoing a token string would leak
       // through the body verbatim.
-      const body = (await response.text()).slice(0, 500);
+      const body = scrubUpstreamBody(await response.text());
       log.error({ status, body }, 'Upstream verify request failed');
       return c.json({ code: 'UPSTREAM_ERROR', message: 'Verification failed' }, 502);
     }
@@ -224,7 +225,7 @@ export async function refreshHandler(c: Context): Promise<Response> {
       }
       // Only read the body for debug-logging on unexpected statuses. Reading
       // unconditionally wastes work on the hot path.
-      const body = (await response.text()).slice(0, 500);
+      const body = scrubUpstreamBody(await response.text());
       log.error({ status, body }, 'Upstream refresh request failed');
       return c.json({ code: 'UPSTREAM_ERROR', message: 'Token refresh failed' }, 502);
     }
