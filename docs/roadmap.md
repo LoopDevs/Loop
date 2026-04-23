@@ -71,7 +71,7 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 - [ ] Google Play Console setup, package name `io.loopfinance.app`
 - [ ] App Store screenshots and metadata
 - [ ] Play Store screenshots and metadata
-- [ ] Privacy policy and terms of service pages on `loopfinance.io`
+- [ ] Privacy policy and terms of service pages on `loopfinance.io` — **code side wired** (#662): React Router routes at `/privacy` + `/terms`, Footer links, sitemap.xml entries, SSR meta + canonical tags. Each page carries a yellow "pending legal review" banner over a placeholder outline. **Operator side remaining**: legal review of the placeholder copy, final wording drop-in, provision `privacy@` / `legal@` / `hello@loopfinance.io` mailboxes referenced in the copy.
 - [ ] Submit to App Store review
 - [ ] Submit to Play Store review
 
