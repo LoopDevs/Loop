@@ -288,15 +288,15 @@ Complete. Evidence: [phase-5c-money-flow.md](./audit-2026-evidence/phase-5c-mone
 
 **High (7):**
 
-| ID     | Title                                                                                                                                           |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| A2-603 | No watchdog timer on `submitted`-state payouts (amplifies A2-602)                                                                               |
-| A2-605 | Outbound payout memo is `orderId.slice(0,28)` — ~2^-40 birthday collision; separate generator recommended                                       |
-| A2-613 | Ledger invariant has no DB-level enforcement                                                                                                    |
-| A2-614 | No unique constraint on `(type, reference_type, reference_id)` in `credit_transactions` — duplicate-writer risk                                 |
-| A2-621 | `sweepStuckProcurement` can flip CTX-fulfilled orders to `failed` with no reconciliation                                                        |
-| A2-622 | Procurement txn gap — CTX charge and Loop ledger write can't be atomic; crash between them leaves CTX billed, user uncredited, no refund writer |
-| A2-626 | Cursor write after transitions loop; no cursor-age watchdog                                                                                     |
+| ID     | Title                                                                                                                                                              |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A2-603 | No watchdog timer on `submitted`-state payouts (amplifies A2-602)                                                                                                  |
+| A2-605 | ~~Outbound payout memo is `orderId.slice(0,28)` — ~2^-40 birthday collision; separate generator recommended~~ **resolved-pending-review** by Batch 2B (#776)       |
+| A2-613 | Ledger invariant has no DB-level enforcement                                                                                                                       |
+| A2-614 | ~~No unique constraint on `(type, reference_type, reference_id)` in `credit_transactions` — duplicate-writer risk~~ **resolved-pending-review** by Batch 2B (#774) |
+| A2-621 | `sweepStuckProcurement` can flip CTX-fulfilled orders to `failed` with no reconciliation                                                                           |
+| A2-622 | Procurement txn gap — CTX charge and Loop ledger write can't be atomic; crash between them leaves CTX billed, user uncredited, no refund writer                    |
+| A2-626 | Cursor write after transitions loop; no cursor-age watchdog                                                                                                        |
 
 Remaining 38 findings (A2-604, A2-606–A2-609, A2-612, A2-615–A2-618, A2-620, A2-623–A2-625, A2-627–A2-649) are in the evidence file — 22 Medium / 14 Low / 2 Info.
 
@@ -367,17 +367,17 @@ Complete. Evidence: [phase-6.5-financial.md](./audit-2026-evidence/phase-6.5-fin
 
 **9 new findings (A2-900 through A2-908):** 0 Critical / 5 High / 3 Medium / 1 Low / 0 Info.
 
-| ID     | Severity | Title                                                                                                                                                                           |
-| ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A2-900 | **High** | Reconciliation endpoint is `user_credits`-anchored LEFT JOIN; orphan `credit_transactions` rows (no matching `user_credits`) are invisible                                      |
-| A2-901 | **High** | `refund`, `spend`, `withdrawal` declared in DB CHECK + shared type + openapi, but ZERO production writers exist — admin cannot issue a refund today                             |
-| A2-902 | **High** | No DB UNIQUE on `(type, reference_type, reference_id)` for cashback idempotency; two identical cashback rows inserted successfully (elevates prior A2-614)                      |
-| A2-903 | **High** | `user_credits.currency` has no CHECK constraint; `'ZZZ'` accepted (parallel to A2-704 on `credit_transactions`)                                                                 |
-| A2-904 | Medium   | `orders.wholesale_minor` in chargeCurrency units not catalog; any `supplier-spend` aggregate summing without `GROUP BY charge_currency` is currency-mixed                       |
-| A2-905 | Medium   | Interest accrual has no scheduler wiring; ADR 009 feature never runs                                                                                                            |
-| A2-906 | **High** | ~~Interest accrual has no period-level idempotency (no cursor, no unique constraint); dormant but ships~~ **resolved-pending-review** by Batch 1 PR 3                           |
-| A2-907 | Low      | `reconciliationResponse.userCount` mislabels rows as users (multi-currency users double-counted)                                                                                |
-| A2-908 | Medium   | Admin adjustment `reason` not persisted on ledger row; lost after 24h idempotency-key TTL sweep. ADR 017 claim of "full story reconstructable from append-only ledger" is false |
+| ID     | Severity | Title                                                                                                                                                                                                                                                                                         |
+| ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A2-900 | **High** | ~~Reconciliation endpoint is `user_credits`-anchored LEFT JOIN; orphan `credit_transactions` rows (no matching `user_credits`) are invisible~~ **resolved-pending-review** by Batch 2B (#775)                                                                                                 |
+| A2-901 | **High** | ~~`refund`, `spend`, `withdrawal` declared in DB CHECK + shared type + openapi, but ZERO production writers exist — admin cannot issue a refund today~~ **resolved-pending-review** by Batch 2B (#777 refund, #765 spend). `withdrawal` still deferred pending on-chain payout worker wiring. |
+| A2-902 | **High** | ~~No DB UNIQUE on `(type, reference_type, reference_id)` for cashback idempotency; two identical cashback rows inserted successfully (elevates prior A2-614)~~ **resolved-pending-review** by Batch 2B (#774)                                                                                 |
+| A2-903 | **High** | ~~`user_credits.currency` has no CHECK constraint; `'ZZZ'` accepted (parallel to A2-704 on `credit_transactions`)~~ **resolved-pending-review** by Batch 2B (#774)                                                                                                                            |
+| A2-904 | Medium   | `orders.wholesale_minor` in chargeCurrency units not catalog; any `supplier-spend` aggregate summing without `GROUP BY charge_currency` is currency-mixed                                                                                                                                     |
+| A2-905 | Medium   | Interest accrual has no scheduler wiring; ADR 009 feature never runs                                                                                                                                                                                                                          |
+| A2-906 | **High** | ~~Interest accrual has no period-level idempotency (no cursor, no unique constraint); dormant but ships~~ **resolved-pending-review** by Batch 1 PR 3                                                                                                                                         |
+| A2-907 | Low      | `reconciliationResponse.userCount` mislabels rows as users (multi-currency users double-counted)                                                                                                                                                                                              |
+| A2-908 | Medium   | Admin adjustment `reason` not persisted on ledger row; lost after 24h idempotency-key TTL sweep. ADR 017 claim of "full story reconstructable from append-only ledger" is false                                                                                                               |
 
 **Empirical re-confirmation of prior findings (elevating confidence, not re-filing):**
 
@@ -686,17 +686,17 @@ Complete. Evidence: [phase-18-redteam.md](./audit-2026-evidence/phase-18-redteam
 
 **New findings:**
 
-| ID      | Severity | Title                                                                                                                                                  |
-| ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| A2-2000 | Info     | Meta — Phase 18 produced zero net-new Critical findings, consistent with plan §0.4 (confirmation pass)                                                 |
-| A2-2001 | **High** | Admin idempotency-key race — concurrent `POST /credit-adjustments` with same key both pass read, both write, double-credit (amplifies A2-902 / A2-612) |
-| A2-2002 | Medium   | `users.email` accepts Unicode confusables (`admin@loop.com` vs Cyrillic `аdmin@loop.com`); no NFKC normalization (amplifies A2-706)                    |
-| A2-2003 | Medium   | `POST /api/orders` and `/api/orders/loop` do not require `Idempotency-Key` — client double-click produces duplicate orders                             |
-| A2-2004 | Low      | Discord `escapeMarkdown` misses `[]()` link construction + `\u202E` / zero-width chars — deceptive links + RTL spoofing reach admin audit channel      |
-| A2-2005 | Medium   | CTX `/request-otp` path has no per-email rate limit (native path does) — IP-cycling attacker email-spams victim inbox                                  |
-| A2-2006 | Medium   | No tamper-evident audit trail — `admin_idempotency_keys` deletable at DB; Discord channel retention-bounded and editable                               |
-| A2-2007 | Low      | `/api/public/*` commercially-sensitive endpoints only IP-rate-limited (60/min); competitive scraping cheap with IP rotation                            |
-| A2-2008 | Medium   | Admin read endpoints (≥65 handlers, CSV exports, user searches) emit zero audit trail — malicious admin can bulk-exfil PII zero-trace                  |
+| ID      | Severity | Title                                                                                                                                                                                                                                                               |
+| ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A2-2000 | Info     | Meta — Phase 18 produced zero net-new Critical findings, consistent with plan §0.4 (confirmation pass)                                                                                                                                                              |
+| A2-2001 | **High** | ~~Admin idempotency-key race — concurrent `POST /credit-adjustments` with same key both pass read, both write, double-credit (amplifies A2-902 / A2-612)~~ **resolved-pending-review** by Batch 2B (#778) via `pg_advisory_xact_lock`-backed `withIdempotencyGuard` |
+| A2-2002 | Medium   | `users.email` accepts Unicode confusables (`admin@loop.com` vs Cyrillic `аdmin@loop.com`); no NFKC normalization (amplifies A2-706)                                                                                                                                 |
+| A2-2003 | Medium   | `POST /api/orders` and `/api/orders/loop` do not require `Idempotency-Key` — client double-click produces duplicate orders                                                                                                                                          |
+| A2-2004 | Low      | Discord `escapeMarkdown` misses `[]()` link construction + `\u202E` / zero-width chars — deceptive links + RTL spoofing reach admin audit channel                                                                                                                   |
+| A2-2005 | Medium   | CTX `/request-otp` path has no per-email rate limit (native path does) — IP-cycling attacker email-spams victim inbox                                                                                                                                               |
+| A2-2006 | Medium   | No tamper-evident audit trail — `admin_idempotency_keys` deletable at DB; Discord channel retention-bounded and editable                                                                                                                                            |
+| A2-2007 | Low      | `/api/public/*` commercially-sensitive endpoints only IP-rate-limited (60/min); competitive scraping cheap with IP rotation                                                                                                                                         |
+| A2-2008 | Medium   | Admin read endpoints (≥65 handlers, CSV exports, user searches) emit zero audit trail — malicious admin can bulk-exfil PII zero-trace                                                                                                                               |
 
 **Prior findings empirically re-confirmed (not re-filed):** A2-550, A2-551, A2-556 + A2-1608, A2-605 (re-graded pass), A2-612, A2-672, A2-706, A2-902, A2-1005, A2-1009, A2-1602, A2-1603, A2-1607.
 
