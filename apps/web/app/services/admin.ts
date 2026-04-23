@@ -237,6 +237,33 @@ export async function getAssetDriftState(): Promise<AssetDriftStateResponse> {
 }
 
 /**
+ * Payout settlement-lag SLA (ADR 015 / 016). Percentile latency in
+ * seconds from `pending_payouts` insert → on-chain confirm. Fleet-
+ * wide row surfaces with `assetCode: null`; per-asset rows carry
+ * the LOOP code. Sample count ships alongside so callers can
+ * down-weight low-n rows (p95 of n=1 is noise).
+ */
+export interface SettlementLagRow {
+  assetCode: string | null;
+  sampleCount: number;
+  p50Seconds: number;
+  p95Seconds: number;
+  maxSeconds: number;
+  meanSeconds: number;
+}
+
+export interface SettlementLagResponse {
+  since: string;
+  rows: SettlementLagRow[];
+}
+
+/** `GET /api/admin/payouts/settlement-lag?since=...` */
+export async function getSettlementLag(sinceIso?: string): Promise<SettlementLagResponse> {
+  const qs = sinceIso !== undefined ? `?since=${encodeURIComponent(sinceIso)}` : '';
+  return authenticatedRequest<SettlementLagResponse>(`/api/admin/payouts/settlement-lag${qs}`);
+}
+
+/**
  * Downloads an admin CSV endpoint by fetching with the bearer token
  * in binary mode, then synthesising a click on a temporary anchor
  * with a Blob URL. Works around the fact that a plain `<a href>`
