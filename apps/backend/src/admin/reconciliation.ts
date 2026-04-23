@@ -18,8 +18,14 @@
  * The query returns at most 100 drifted rows (ordered by user id)
  * so a catastrophic drift doesn't produce a multi-MB response. A
  * healthy deployment returns an empty `drift` array. The aggregate
- * `userCount` / `driftedCount` in the response let the UI render
+ * `rowCount` / `driftedCount` in the response let the UI render
  * "✓ 0 drift across N rows" or "⚠️ M drifted — more may exist".
+ *
+ * A2-907: `rowCount` counts `user_credits` rows — a user with
+ * balances in two currencies contributes two rows. The field was
+ * previously labelled `userCount`, which implied distinct users and
+ * would double-count anyone multi-currency. No UI consumes the
+ * field today, so the rename is clean.
  */
 import type { Context } from 'hono';
 import { sql } from 'drizzle-orm';
@@ -44,8 +50,12 @@ export interface ReconciliationEntry {
 }
 
 export interface ReconciliationResponse {
-  /** Total `user_credits` rows across all users and currencies. */
-  userCount: string;
+  /**
+   * Total `user_credits` rows across all users and currencies. A
+   * multi-currency user contributes one row per currency — this is
+   * NOT a distinct-user count (A2-907).
+   */
+  rowCount: string;
   /** Number of drifted rows returned in `drift`. Capped at `DRIFT_PAGE_LIMIT`. */
   driftedCount: string;
   /** Drifted rows, newest user first. Empty when the ledger is consistent. */
@@ -129,7 +139,7 @@ export async function adminReconciliationHandler(c: Context): Promise<Response> 
     const [countRow] = await db.select({ count: sql<string>`COUNT(*)::text` }).from(userCredits);
 
     const response: ReconciliationResponse = {
-      userCount: countRow?.count ?? '0',
+      rowCount: countRow?.count ?? '0',
       driftedCount: String(driftRows.length),
       drift: driftRows.map((r) => ({
         userId: r.userId,
