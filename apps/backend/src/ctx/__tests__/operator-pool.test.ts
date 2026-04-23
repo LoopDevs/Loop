@@ -194,10 +194,64 @@ describe('operatorFetch', () => {
     expect(await res.text()).toBe('hello');
   });
 
-  it('surfaces non-CircuitOpen errors from fetch to the caller without retry', async () => {
+  // A2-572: a persistent network error across both operators does still
+  // surface to the caller — retry exhausted, not retry skipped.
+  it('A2-572: throws the last error when every operator rejects the fetch', async () => {
     const err = new Error('connection reset');
     fetchMock = vi.spyOn(global, 'fetch').mockRejectedValue(err);
     await expect(operatorFetch('https://example.local/x')).rejects.toBe(err);
+    // Two attempts — one per operator in the 2-entry pool.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('A2-572: retries against the fallback operator when the first fetch errors', async () => {
+    const bearers: string[] = [];
+    let call = 0;
+    fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
+      const h = new Headers(init?.headers);
+      bearers.push(h.get('Authorization') ?? '');
+      call++;
+      if (call === 1) throw new Error('connection reset');
+      return new Response('ok', { status: 200 });
+    });
+    const res = await operatorFetch('https://example.local/x');
+    expect(res.status).toBe(200);
+    expect(bearers).toHaveLength(2);
+    expect(bearers[0]).not.toBe(bearers[1]);
+  });
+
+  it('A2-572: retries against the fallback operator when the first returns 5xx', async () => {
+    const bearers: string[] = [];
+    let call = 0;
+    fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
+      const h = new Headers(init?.headers);
+      bearers.push(h.get('Authorization') ?? '');
+      call++;
+      if (call === 1) return new Response('upstream boom', { status: 503 });
+      return new Response('ok', { status: 200 });
+    });
+    const res = await operatorFetch('https://example.local/x');
+    expect(res.status).toBe(200);
+    expect(bearers).toHaveLength(2);
+    expect(bearers[0]).not.toBe(bearers[1]);
+  });
+
+  it('A2-572: surfaces the last 5xx when every operator returns 5xx', async () => {
+    fetchMock = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response('fleetwide outage', { status: 500 }));
+    const res = await operatorFetch('https://example.local/x');
+    expect(res.status).toBe(500);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('A2-572: does NOT retry on 4xx — client errors propagate verbatim', async () => {
+    fetchMock = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response('bad request', { status: 400 }));
+    const res = await operatorFetch('https://example.local/x');
+    expect(res.status).toBe(400);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('A2-1510: applies a default 30s timeout signal when the caller supplies none', async () => {

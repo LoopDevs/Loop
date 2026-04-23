@@ -157,12 +157,23 @@ function pickHealthyOperator(): Operator | null {
 /**
  * Injects `Authorization: Bearer <operator-token>` into `init.headers`
  * and dispatches via the operator's circuit breaker. On a transient
- * failure (network or 5xx) against the first picked operator, we
- * retry once against the next healthy operator — a single lame
- * account shouldn't show up as an end-user error.
+ * failure (network error, 5xx, or breaker tripping mid-flight)
+ * against the first picked operator, we retry once against the next
+ * healthy operator — a single lame account shouldn't show up as an
+ * end-user error (ADR 013).
  *
- * 4xx responses are returned as-is; those are not operator-health
- * signals and bumping the breaker on them would be wrong.
+ * A2-572: the 5xx and network-error retry paths now match the
+ * docstring. Before, only `CircuitOpenError` triggered a retry, so a
+ * flat 500 or a network error on the first attempt propagated to the
+ * caller even when a healthy sibling operator existed. Each 5xx /
+ * throw on an operator also credits a breaker failure via
+ * `op.breaker.fetch` — a second 5xx from the fallback on the same
+ * request doesn't double-count because each operator's breaker is
+ * independent.
+ *
+ * 4xx responses are still returned as-is — those are client errors,
+ * not operator-health signals, and a second operator would hit the
+ * same 4xx. Retrying would mask real request-shape bugs.
  */
 /**
  * A2-1510: per-request timeout cap. Callers pass a caller-owned
@@ -188,9 +199,9 @@ export async function operatorFetch(url: string | URL, init?: RequestInit): Prom
   const signal: AbortSignal | undefined =
     init?.signal ?? AbortSignal.timeout(OPERATOR_FETCH_DEFAULT_TIMEOUT_MS);
 
-  // Try up to 2 operators: the picked one, and one fallback if the
-  // first errors. `operators.length` can cap that naturally at 1 for
-  // a single-entry pool.
+  // Try up to 2 operators: the picked one, and one fallback on any
+  // transient failure (5xx, network error, breaker trip). `operators.length`
+  // caps attempts naturally at 1 for a single-entry pool.
   const attempts = Math.min(2, operators.length);
   let lastErr: unknown = null;
   for (let i = 0; i < attempts; i++) {
@@ -198,8 +209,26 @@ export async function operatorFetch(url: string | URL, init?: RequestInit): Prom
     if (op === null) break;
     const headers = new Headers(init?.headers);
     headers.set('Authorization', `Bearer ${op.bearer}`);
+    const isLastAttempt = i === attempts - 1;
     try {
       const res = await op.breaker.fetch(url, { ...init, headers, signal });
+      // A2-572: a 5xx is a supplier-health signal per the docstring —
+      // try the next operator instead of handing a 500 to the caller.
+      // Only 4xx returns straight through (client errors — retrying
+      // against a different operator would hit the same 4xx and mask
+      // request-shape bugs). On the last attempt the 5xx propagates
+      // so the caller sees CTX's real status.
+      if (res.status >= 500 && !isLastAttempt) {
+        // Release the response body before we shadow `res` with the
+        // next attempt so undici's socket is returned to the pool.
+        try {
+          await res.arrayBuffer();
+        } catch {
+          /* already consumed / aborted — harmless */
+        }
+        lastErr = new Error(`operator ${op.id} returned ${res.status}`);
+        continue;
+      }
       return res;
     } catch (err) {
       if (err instanceof CircuitOpenError) {
@@ -207,9 +236,14 @@ export async function operatorFetch(url: string | URL, init?: RequestInit): Prom
         lastErr = err;
         continue;
       }
-      // Other errors propagate the first time; a second attempt
-      // against another operator may mask a bug in our request
-      // shape. Let the caller handle it.
+      // A2-572: network error / timeout / aborted-fetch — retry
+      // against the fallback on non-last attempts. On the final
+      // attempt the error propagates so the caller sees a truthful
+      // failure instead of a silent success.
+      if (!isLastAttempt) {
+        lastErr = err;
+        continue;
+      }
       throw err;
     }
   }
