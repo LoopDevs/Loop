@@ -4,6 +4,7 @@ import { formatMinorCurrency } from '@loop/shared';
 import { getAdminUsersRecyclingActivity, type UserRecyclingActivityRow } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
  * `/admin/treasury` — "who's recycling right now?" leaderboard (#611).
@@ -98,7 +99,7 @@ function RecyclingRow({ row }: { row: UserRecyclingActivityRow }): React.JSX.Ele
         </Link>
       </td>
       <td className="px-3 py-2 tabular-nums text-gray-900 dark:text-white">
-        {row.recycledOrderCount.toLocaleString('en-US')}
+        {row.recycledOrderCount.toLocaleString(ADMIN_LOCALE)}
       </td>
       <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">{chargeDisplay}</td>
       <td
@@ -128,7 +129,11 @@ export function formatRelative(iso: string): string {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   if (days < 7) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString(undefined, {
+  // A2-1521: admin view — use ADMIN_LOCALE so the date format
+  // matches the numeric formatters in the same table (`42,000`
+  // style). Prior `undefined` read the operator's browser locale
+  // and mixed "23 Apr" (GB) with "Apr 23" (US) in one screen.
+  return new Date(iso).toLocaleDateString(ADMIN_LOCALE, {
     month: 'short',
     day: 'numeric',
   });
