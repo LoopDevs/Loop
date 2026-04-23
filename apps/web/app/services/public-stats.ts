@@ -57,6 +57,37 @@ export async function getPublicMerchant(idOrSlug: string): Promise<PublicMerchan
 }
 
 /**
+ * Public cashback-preview shape — matches the backend response from
+ * `/api/public/cashback-preview`. Unauthenticated; returned fields
+ * carry no PII. `cashbackPct` is null when the merchant has no
+ * active cashback config; the calculator shows an em-dash then.
+ */
+export interface PublicCashbackPreview {
+  merchantId: string;
+  merchantName: string;
+  orderAmountMinor: string;
+  cashbackPct: string | null;
+  cashbackMinor: string;
+  currency: string;
+}
+
+/**
+ * `GET /api/public/cashback-preview?merchantId=<id>&amountMinor=<n>` —
+ * pre-signup cashback calculator shape. Same floor-rounded math as
+ * the order-insert path so the preview never over-promises.
+ */
+export async function getPublicCashbackPreview(args: {
+  merchantId: string;
+  amountMinor: number;
+}): Promise<PublicCashbackPreview> {
+  const qs = new URLSearchParams({
+    merchantId: args.merchantId,
+    amountMinor: String(args.amountMinor),
+  }).toString();
+  return apiRequest<PublicCashbackPreview>(`/api/public/cashback-preview?${qs}`);
+}
+
+/**
  * One configured LOOP asset from `/api/public/loop-assets` (#596).
  * `code` is the Stellar asset code; `issuer` is the G-account that
  * mints it. Both are public — the endpoint is an intentional
