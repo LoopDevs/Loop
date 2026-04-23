@@ -19,6 +19,7 @@ import { OrdersSparkline } from '~/components/features/admin/OrdersSparkline';
 import { StuckOrdersCard } from '~/components/features/admin/StuckOrdersCard';
 import { StuckPayoutsCard } from '~/components/features/admin/StuckPayoutsCard';
 import { AssetDriftBadge } from '~/components/features/admin/AssetDriftBadge';
+import { AssetDriftWatcherCard } from '~/components/features/admin/AssetDriftWatcherCard';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -247,6 +248,13 @@ export default function AdminIndexRoute(): React.JSX.Element {
           <StuckPayoutsCard />
         </section>
       )}
+
+      {/* Drift-watcher status — at-a-glance "is anything over
+          threshold right now?" from the background watcher (ADR 015).
+          Self-hides when the watcher is inactive; when over, the
+          card itself turns amber so it reads as the first alert
+          signal on the page. */}
+      {denied ? null : <AssetDriftWatcherCard />}
 
       {/* LOOP-asset outstanding-liability strip. Three cards,
           one per issued stablecoin — click drills into
