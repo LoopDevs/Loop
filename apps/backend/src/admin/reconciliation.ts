@@ -67,25 +67,26 @@ interface DriftRow extends Record<string, unknown> {
 
 /** GET /api/admin/reconciliation */
 export async function adminReconciliationHandler(c: Context): Promise<Response> {
-  // A2-900: build the drift set from BOTH directions so the endpoint
-  // catches orphans on either side.
-  //
-  //   (1) user_credits rows whose ledger sum disagrees with
-  //       balance_minor. Covers the LEFT-JOIN shape (balance row
-  //       exists, ledger sum may be zero) where the prior single
-  //       query was anchored.
-  //
-  //   (2) credit_transactions keyed on (user_id, currency) for which
-  //       NO user_credits row exists at all. Prior LEFT JOIN anchored
-  //       on user_credits would miss these entirely — a dangling
-  //       ledger entry (deleted balance row, failed migration) stays
-  //       invisible to ops. Surface them here with balance=0, ledger
-  //       sum computed, delta = -ledger_sum.
-  //
-  // UNION ALL is safe: the two halves partition on "has matching
-  // user_credits row" so no row appears twice. Results merged,
-  // ordered by user id, capped at DRIFT_PAGE_LIMIT.
-  const driftResult = await db.execute<DriftRow>(sql`
+  try {
+    // A2-900: build the drift set from BOTH directions so the endpoint
+    // catches orphans on either side.
+    //
+    //   (1) user_credits rows whose ledger sum disagrees with
+    //       balance_minor. Covers the LEFT-JOIN shape (balance row
+    //       exists, ledger sum may be zero) where the prior single
+    //       query was anchored.
+    //
+    //   (2) credit_transactions keyed on (user_id, currency) for which
+    //       NO user_credits row exists at all. Prior LEFT JOIN anchored
+    //       on user_credits would miss these entirely — a dangling
+    //       ledger entry (deleted balance row, failed migration) stays
+    //       invisible to ops. Surface them here with balance=0, ledger
+    //       sum computed, delta = -ledger_sum.
+    //
+    // UNION ALL is safe: the two halves partition on "has matching
+    // user_credits row" so no row appears twice. Results merged,
+    // ordered by user id, capped at DRIFT_PAGE_LIMIT.
+    const driftResult = await db.execute<DriftRow>(sql`
     SELECT "userId", currency, "balanceMinor", "ledgerSumMinor", "deltaMinor"
     FROM (
       SELECT
@@ -116,37 +117,45 @@ export async function adminReconciliationHandler(c: Context): Promise<Response> 
     LIMIT ${DRIFT_PAGE_LIMIT}
   `);
 
-  // Drizzle's `execute` wraps the driver result; drizzle-orm/postgres-js
-  // exposes the rows as the top-level array at `result.rows` on recent
-  // versions and the result itself behaves as an array on older ones.
-  // Normalise to a plain row array here so handler logic below doesn't
-  // have to branch on version.
-  const driftRows = extractRows<DriftRow>(driftResult);
+    // Drizzle's `execute` wraps the driver result; drizzle-orm/postgres-js
+    // exposes the rows as the top-level array at `result.rows` on recent
+    // versions and the result itself behaves as an array on older ones.
+    // Normalise to a plain row array here so handler logic below doesn't
+    // have to branch on version.
+    const driftRows = extractRows<DriftRow>(driftResult);
 
-  // Total user_credits count — just an aggregate, no filter. Used by
-  // the UI for the "0 drift across N rows" copy.
-  const [countRow] = await db.select({ count: sql<string>`COUNT(*)::text` }).from(userCredits);
+    // Total user_credits count — just an aggregate, no filter. Used by
+    // the UI for the "0 drift across N rows" copy.
+    const [countRow] = await db.select({ count: sql<string>`COUNT(*)::text` }).from(userCredits);
 
-  const response: ReconciliationResponse = {
-    userCount: countRow?.count ?? '0',
-    driftedCount: String(driftRows.length),
-    drift: driftRows.map((r) => ({
-      userId: r.userId,
-      currency: r.currency,
-      balanceMinor: r.balanceMinor,
-      ledgerSumMinor: r.ledgerSumMinor,
-      deltaMinor: r.deltaMinor,
-    })),
-  };
+    const response: ReconciliationResponse = {
+      userCount: countRow?.count ?? '0',
+      driftedCount: String(driftRows.length),
+      drift: driftRows.map((r) => ({
+        userId: r.userId,
+        currency: r.currency,
+        balanceMinor: r.balanceMinor,
+        ledgerSumMinor: r.ledgerSumMinor,
+        deltaMinor: r.deltaMinor,
+      })),
+    };
 
-  if (driftRows.length > 0) {
-    log.warn(
-      { driftedCount: driftRows.length },
-      'Ledger drift detected — some user_credits rows disagree with their credit_transactions sum',
-    );
+    if (driftRows.length > 0) {
+      log.warn(
+        { driftedCount: driftRows.length },
+        'Ledger drift detected — some user_credits rows disagree with their credit_transactions sum',
+      );
+    }
+
+    return c.json(response);
+  } catch (err) {
+    // A2-507: keep the handler-scoped logger binding so ops can
+    // correlate a failed /admin/reconciliation load to this log line
+    // via the request-id. The generic onError would lose the
+    // `handler: 'admin-reconciliation'` tag.
+    log.error({ err }, 'admin reconciliation query failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute reconciliation' }, 500);
   }
-
-  return c.json(response);
 }
 
 /**
