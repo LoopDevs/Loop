@@ -12,6 +12,7 @@ import {
   type SupplierSpendRow,
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { OperatorMerchantMixCard } from '~/components/features/admin/OperatorMerchantMixCard';
 import { Spinner } from '~/components/ui/Spinner';
 import { shortDay } from '~/components/features/admin/PaymentMethodActivityChart';
 
@@ -228,6 +229,19 @@ export default function AdminOperatorDetailRoute(): React.JSX.Element {
         ) : (
           <SpendTable rows={spendQuery.data.rows} />
         )}
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+          Merchant mix (24h)
+        </h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Which merchants this operator is carrying. Dual of the per-merchant operator-mix — the
+          capacity-review view for CTX relationship owners. Concentration-risk signal: if one
+          merchant is &gt;40% of this operator&rsquo;s volume, that&rsquo;s a pool- rebalancing or
+          SLA lever.
+        </p>
+        <OperatorMerchantMixCard operatorId={operatorId} />
       </section>
 
       <section>
