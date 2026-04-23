@@ -66,6 +66,7 @@ import { adminGetOrderHandler, adminListOrdersHandler } from './admin/orders.js'
 import { adminMerchantFlowsHandler } from './admin/merchant-flows.js';
 import { adminDiscordConfigHandler } from './admin/discord-config.js';
 import { adminUserSearchHandler } from './admin/user-search.js';
+import { adminUserCreditsCsvHandler } from './admin/user-credits-csv.js';
 import { adminOrdersActivityHandler } from './admin/orders-activity.js';
 import { adminPaymentMethodShareHandler } from './admin/payment-method-share.js';
 import { adminPaymentMethodActivityHandler } from './admin/payment-method-activity.js';
@@ -956,6 +957,9 @@ app.get('/api/admin/discord/config', rateLimit(60, 60_000), adminDiscordConfigHa
 // Rate limit matches other reads; the ILIKE query is indexed by the
 // users_email index so it stays fast even on growth.
 app.get('/api/admin/users/search', rateLimit(60, 60_000), adminUserSearchHandler);
+// Tier 3 CSV export of the full user_credits table. Support audit /
+// liability reconciliation. 20/min matches other admin exports.
+app.get('/api/admin/user-credits.csv', rateLimit(20, 60_000), adminUserCreditsCsvHandler);
 // 7-day (or N-day, clamped 1-90) order-activity sparkline. Drives the
 // admin dashboard's "created vs fulfilled per day" chart. Single
 // generate_series + LEFT JOIN; every day in the window appears with
