@@ -43,6 +43,7 @@ import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
 import { adminConfigsHistoryHandler } from './admin/configs-history.js';
 import { treasuryHandler } from './admin/treasury.js';
+import { adminTreasuryCreditFlowHandler } from './admin/treasury-credit-flow.js';
 import {
   adminGetPayoutHandler,
   adminListPayoutsHandler,
@@ -828,6 +829,11 @@ app.get(
   configHistoryHandler,
 );
 app.get('/api/admin/treasury', rateLimit(60, 60_000), treasuryHandler);
+// Treasury credit-flow time-series (ADR 009/015) — per-day credited
+// vs debited per currency from credit_transactions. Answers "are we
+// generating liability faster than we settle it?" — the dynamic
+// view the treasury snapshot can't give.
+app.get('/api/admin/treasury/credit-flow', rateLimit(60, 60_000), adminTreasuryCreditFlowHandler);
 // Pending-payouts backlog list (ADR 015). Admin UI's "payouts" page
 // drills into pending/submitted/confirmed/failed rows; counts for the
 // at-a-glance card come from the treasury snapshot above.
