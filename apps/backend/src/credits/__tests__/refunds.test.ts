@@ -162,6 +162,35 @@ describe('applyAdminRefund', () => {
     ).rejects.toBeInstanceOf(RefundAlreadyIssuedError);
   });
 
+  // A2-908: reason passes through to the ledger insert so ops can
+  // reconstruct the "why" past the 24h idempotency-key TTL sweep.
+  it('A2-908: persists operator reason on the credit_transactions row', async () => {
+    state.returnedCreditRow = { id: 'ct-reason', createdAt: new Date() };
+    await applyAdminRefund({
+      userId: 'u-1',
+      currency: 'USD',
+      amountMinor: 500n,
+      orderId: 'o-1',
+      adminUserId: 'admin-1',
+      reason: 'merchant shipped wrong denomination',
+    });
+    expect(state.insertCreditCalls[0]).toMatchObject({
+      reason: 'merchant shipped wrong denomination',
+    });
+  });
+
+  it('A2-908: omits reason field when caller provides none (backwards compat)', async () => {
+    state.returnedCreditRow = { id: 'ct-no-reason', createdAt: new Date() };
+    await applyAdminRefund({
+      userId: 'u-1',
+      currency: 'USD',
+      amountMinor: 500n,
+      orderId: 'o-1',
+      adminUserId: 'admin-1',
+    });
+    expect(state.insertCreditCalls[0]).not.toHaveProperty('reason');
+  });
+
   it('rethrows unrelated pg errors', async () => {
     state.creditInsertError = Object.assign(new Error('fk violation'), {
       code: '23503',
