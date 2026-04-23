@@ -21,6 +21,12 @@ export function Footer(): React.JSX.Element {
             <Link to="/trustlines" className="hover:text-white transition-colors">
               Trustlines
             </Link>
+            <Link to="/privacy" className="hover:text-white transition-colors">
+              Privacy
+            </Link>
+            <Link to="/terms" className="hover:text-white transition-colors">
+              Terms
+            </Link>
           </nav>
           <p className="text-xs text-gray-600">
             &copy; {new Date().getFullYear()} Loop. All rights reserved.

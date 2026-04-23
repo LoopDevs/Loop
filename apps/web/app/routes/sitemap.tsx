@@ -79,6 +79,10 @@ export async function loader(): Promise<Response> {
     // Trustlines page is near-static — issuer accounts only rotate
     // via ADR-015 key ceremony, which is rare. Monthly changefreq.
     urlTag(`${PUBLIC_BASE_URL}/trustlines`, now, 'monthly', '0.7'),
+    // Legal pages — yearly changefreq, low priority (required for
+    // App Store submission but not the primary acquisition surface).
+    urlTag(`${PUBLIC_BASE_URL}/privacy`, now, 'yearly', '0.3'),
+    urlTag(`${PUBLIC_BASE_URL}/terms`, now, 'yearly', '0.3'),
   ];
 
   if (response !== null) {
