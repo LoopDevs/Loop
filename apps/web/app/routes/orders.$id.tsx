@@ -15,6 +15,7 @@ import { Button } from '~/components/ui/Button';
 import { PurchaseComplete } from '~/components/features/purchase/PurchaseComplete';
 import { EarnedCashbackCard } from '~/components/features/purchase/EarnedCashbackCard';
 import { OrderPayoutCard } from '~/components/features/order/OrderPayoutCard';
+import { LinkWalletNudge } from '~/components/features/cashback/LinkWalletNudge';
 import { formatMoney } from '~/utils/money';
 import { friendlyError } from '~/utils/error-messages';
 import { openWebView } from '~/native/webview';
@@ -193,6 +194,15 @@ function OrderDetailBody({ order, now }: { order: Order; now: number }): React.J
               credit-only ledgers (user has no Stellar trustline)
               render the EarnedCashbackCard alone. */}
           <OrderPayoutCard orderId={order.id} />
+          {/* Link-wallet nudge — self-hides when user has already
+              linked a Stellar address or has zero balance. For the
+              user who just earned cashback and doesn't have a
+              wallet yet, this is the "claim it on-chain" hint at
+              the exact point they'd expect to see it: right where
+              OrderPayoutCard silently hid itself. Re-uses the
+              /settings/cashback nudge so copy + behaviour stay in
+              lockstep across surfaces. */}
+          <LinkWalletNudge />
           <PurchaseComplete
             merchantName={order.merchantName}
             code={order.giftCardCode}
