@@ -130,35 +130,35 @@ Complete. Evidence: [phase-0-inventory.md](./audit-2026-evidence/phase-0-invento
 
 Complete. Evidence: [phase-1-governance.md](./audit-2026-evidence/phase-1-governance.md). Commit SHA at capture: `450011d`. 27 findings (1 Critical / 4 High / 9 Medium / 10 Low / 3 Info).
 
-| ID     | Severity     | Title                                                                              |
-| ------ | ------------ | ---------------------------------------------------------------------------------- |
-| A2-101 | **High**     | Branch protection permits admin bypass; zero required reviews                      |
-| A2-102 | Medium       | No signed-commit policy on `main`                                                  |
-| A2-103 | **High**     | CODEOWNERS references non-existent `@LoopDevs/engineering` team                    |
-| A2-104 | Medium       | CODEOWNERS coverage stale vs admin / credits / stellar / migration surfaces        |
-| A2-105 | **High**     | Secret-scanning + dependabot-alerts + push-protection disabled at repo & org level |
-| A2-106 | Low          | Dependabot `reviewers` points at missing team                                      |
-| A2-107 | Medium       | Commitlint is client-side only; no server-side enforcement                         |
-| A2-108 | Low          | Branch-prefix hook / CONTRIBUTING.md type-list drift                               |
-| A2-109 | Medium       | CONTRIBUTING.md overstates review gate vs actual                                   |
-| A2-110 | Low          | CONTRIBUTING.md CI job-count drift (6 vs 7)                                        |
-| A2-111 | Low          | No `.gitattributes`                                                                |
-| A2-112 | Info         | `ctx.postman_collection.json` at repo root (see lint-docs sentinel)                |
-| A2-113 | Low          | PR template is decorative; authors don't use it                                    |
-| A2-114 | **High**     | `superfly/flyctl-actions/setup-flyctl@master` pins a branch                        |
-| A2-115 | Medium       | All first-party actions tag-pinned, not SHA-pinned                                 |
-| A2-116 | Low          | `pr-automation.yml`, `pr-review.yml` lack top-level `permissions`                  |
-| A2-117 | Info         | Repo `allowed_actions: "all"` — unbounded Marketplace access                       |
-| A2-118 | Info         | Org webhook inventory not verifiable from audit session (auth scope)               |
-| A2-119 | **Critical** | `LoopDevs` org does not require 2FA; both members are admins                       |
-| A2-120 | Medium       | Org on free plan — no audit log retention                                          |
-| A2-121 | Medium       | Stale "stellarspendtest server" SSH key                                            |
-| A2-122 | Low          | No GPG keys on file for push-capable members                                       |
-| A2-123 | Low          | Three merge modes enabled despite squash-only convention                           |
-| A2-124 | Medium       | Public repo has no LICENSE                                                         |
-| A2-125 | Medium       | No SECURITY.md on a public pre-launch repo                                         |
-| A2-126 | Low          | No issue templates                                                                 |
-| A2-127 | Low          | No CHANGELOG.md                                                                    |
+| ID     | Severity     | Title                                                                                                 |
+| ------ | ------------ | ----------------------------------------------------------------------------------------------------- |
+| A2-101 | **High**     | Branch protection permits admin bypass; zero required reviews                                         |
+| A2-102 | Medium       | No signed-commit policy on `main`                                                                     |
+| A2-103 | **High**     | CODEOWNERS references non-existent `@LoopDevs/engineering` team                                       |
+| A2-104 | Medium       | CODEOWNERS coverage stale vs admin / credits / stellar / migration surfaces                           |
+| A2-105 | **High**     | Secret-scanning + dependabot-alerts + push-protection disabled at repo & org level                    |
+| A2-106 | Low          | Dependabot `reviewers` points at missing team                                                         |
+| A2-107 | Medium       | Commitlint is client-side only; no server-side enforcement                                            |
+| A2-108 | Low          | ~~Branch-prefix hook / CONTRIBUTING.md type-list drift~~ **resolved-pending-review** by A2-108/110 PR |
+| A2-109 | Medium       | CONTRIBUTING.md overstates review gate vs actual                                                      |
+| A2-110 | Low          | ~~CONTRIBUTING.md CI job-count drift (6 vs 7)~~ **resolved-pending-review** by A2-108/110 PR          |
+| A2-111 | Low          | No `.gitattributes`                                                                                   |
+| A2-112 | Info         | `ctx.postman_collection.json` at repo root (see lint-docs sentinel)                                   |
+| A2-113 | Low          | PR template is decorative; authors don't use it                                                       |
+| A2-114 | **High**     | `superfly/flyctl-actions/setup-flyctl@master` pins a branch                                           |
+| A2-115 | Medium       | All first-party actions tag-pinned, not SHA-pinned                                                    |
+| A2-116 | Low          | `pr-automation.yml`, `pr-review.yml` lack top-level `permissions`                                     |
+| A2-117 | Info         | Repo `allowed_actions: "all"` — unbounded Marketplace access                                          |
+| A2-118 | Info         | Org webhook inventory not verifiable from audit session (auth scope)                                  |
+| A2-119 | **Critical** | `LoopDevs` org does not require 2FA; both members are admins                                          |
+| A2-120 | Medium       | Org on free plan — no audit log retention                                                             |
+| A2-121 | Medium       | Stale "stellarspendtest server" SSH key                                                               |
+| A2-122 | Low          | No GPG keys on file for push-capable members                                                          |
+| A2-123 | Low          | Three merge modes enabled despite squash-only convention                                              |
+| A2-124 | Medium       | Public repo has no LICENSE                                                                            |
+| A2-125 | Medium       | No SECURITY.md on a public pre-launch repo                                                            |
+| A2-126 | Low          | No issue templates                                                                                    |
+| A2-127 | Low          | No CHANGELOG.md                                                                                       |
 
 **Blockers / deferred probes:**
 
