@@ -94,6 +94,7 @@ import { adminOperatorActivityHandler } from './admin/operator-activity.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
 import { adminOperatorLatencyHandler } from './admin/operator-latency.js';
 import { adminMerchantOperatorMixHandler } from './admin/merchant-operator-mix.js';
+import { adminOperatorMerchantMixHandler } from './admin/operator-merchant-mix.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
 import { adminUserCreditTransactionsHandler } from './admin/user-credit-transactions.js';
 import { adminUserCreditTransactionsCsvHandler } from './admin/user-credit-transactions-csv.js';
@@ -1123,6 +1124,16 @@ app.get(
   '/api/admin/operators/:operatorId/activity',
   rateLimit(120, 60_000),
   adminOperatorActivityHandler,
+);
+// Per-operator merchant mix (ADR 013 / 022) — dual of the
+// /merchants/:id/operator-mix endpoint. Answers "which merchants
+// is THIS operator carrying?" for CTX relationship capacity
+// reviews ("op-alpha is pulling 40% of its volume from a single
+// merchant — concentration-risk or SLA lever?").
+app.get(
+  '/api/admin/operators/:operatorId/merchant-mix',
+  rateLimit(120, 60_000),
+  adminOperatorMerchantMixHandler,
 );
 // Per-operator breakdown of which CTX service account carried which
 // orders (ADR 013). Complements supplier-spend: spend is *what* Loop

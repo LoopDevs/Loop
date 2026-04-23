@@ -288,6 +288,7 @@ GET  /api/admin/supplier-spend/activity                 [admin — per-day per-c
 GET  /api/admin/supplier-spend/activity.csv             [admin — Tier-3 CSV of daily × per-currency supplier spend for month-end CTX-invoice reconciliation, ADR 013/015/018]
 GET  /api/admin/operators/:operatorId/supplier-spend    [admin — per-operator per-currency supplier spend (axis of fleet supplier-spend), ADR 013/015/022]
 GET  /api/admin/operators/:operatorId/activity          [admin — per-operator daily created/fulfilled/failed time-series (1-90d), ADR 013/022]
+GET  /api/admin/operators/:operatorId/merchant-mix      [admin — per-operator × per-merchant attribution (dual of /merchants/:id/operator-mix), ADR 013/022]
 GET  /api/admin/users                                   [admin — paginated user directory w/ email fragment filter]
 GET  /api/admin/users/by-email?email=                   [admin — exact-match user lookup for support-ticket workflow]
 GET  /api/admin/users/top-by-pending-payout             [admin — ops funding prioritisation leaderboard, ADR 015/016]
