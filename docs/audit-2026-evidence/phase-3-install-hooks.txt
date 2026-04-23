@@ -1,0 +1,187 @@
+Total packages with install-time hook: 62
+---
+esbuild@0.25.12 (node_modules/drizzle-kit/node_modules/esbuild/package.json)
+  postinstall : node install.js
+---
+ts-api-utils@2.5.0 (node_modules/ts-api-utils/package.json)
+  prepare : husky
+---
+@bufbuild/buf@1.68.2 (node_modules/@bufbuild/buf/package.json)
+  postinstall : node ./install.js
+---
+istanbul-reports@3.2.0 (node_modules/istanbul-reports/package.json)
+  prepare : webpack --config lib/html-spa/webpack.config.js --mode production
+---
+tinyexec@0.3.2 (node_modules/tsup/node_modules/tinyexec/package.json)
+  prepare : npm run build
+---
+@stellar/stellar-sdk@15.0.1 (node_modules/@stellar/stellar-sdk/package.json)
+  prepare : yarn build:prod && yarn setup
+---
+@stellar/stellar-base@15.0.0 (node_modules/@stellar/stellar-base/package.json)
+  prepare : yarn build:prod
+---
+chownr@3.0.0 (node_modules/chownr/package.json)
+  prepare : tshy
+---
+lru-cache@11.2.6 (node_modules/rimraf/node_modules/lru-cache/package.json)
+  prepare : tshy && bash fixup.sh
+---
+glob@13.0.6 (node_modules/rimraf/node_modules/glob/package.json)
+  prepare : tshy && bash scripts/build.sh
+---
+path-scurry@2.0.2 (node_modules/rimraf/node_modules/path-scurry/package.json)
+  prepare : tshy
+---
+rimraf@6.1.3 (node_modules/rimraf/package.json)
+  prepare : tshy
+---
+balanced-match@4.0.4 (node_modules/balanced-match/package.json)
+  prepare : tshy
+---
+acorn@8.16.0 (node_modules/acorn/package.json)
+  prepare : cd ..; npm run build:main
+---
+signal-exit@4.1.0 (node_modules/signal-exit/package.json)
+  prepare : tsc -p tsconfig.json && tsc -p tsconfig-esm.json && bash ./scripts/fixup.sh
+---
+@asteasolutions/zod-to-openapi@8.5.0 (node_modules/@asteasolutions/zod-to-openapi/package.json)
+  prepare : npm run build
+---
+y18n@5.0.8 (node_modules/y18n/package.json)
+  prepare : npm run compile
+---
+yargs-parser@21.1.1 (node_modules/yargs-parser/package.json)
+  prepare : npm run compile
+---
+undici@7.25.0 (node_modules/undici/package.json)
+  prepare : husky && node ./scripts/platform-shell.js
+---
+keyv@4.5.4 (node_modules/keyv/package.json)
+  prepare : yarn build
+---
+@tybys/wasm-util@0.10.1 (node_modules/@tybys/wasm-util/package.json)
+  prepare : npm run build
+---
+eslint-visitor-keys@3.4.3 (node_modules/eslint-visitor-keys/package.json)
+  prepare : npm run build
+---
+whatwg-url@16.0.1 (node_modules/whatwg-url/package.json)
+  prepare : node scripts/transform.js
+---
+@humanwhocodes/retry@0.4.3 (node_modules/@humanwhocodes/retry/package.json)
+  prepare : npm run build
+---
+@humanwhocodes/module-importer@1.0.1 (node_modules/@humanwhocodes/module-importer/package.json)
+  prepare : npm run build
+---
+@isaacs/fs-minipass@4.0.1 (node_modules/@isaacs/fs-minipass/package.json)
+  prepare : tshy
+---
+enhanced-resolve@5.20.1 (node_modules/enhanced-resolve/package.json)
+  prepare : husky
+---
+yargs@15.4.1 (node_modules/qrcode/node_modules/yargs/package.json)
+  prepare : npm run compile
+---
+brace-expansion@5.0.5 (node_modules/brace-expansion/package.json)
+  prepare : tshy
+---
+lru-cache@11.3.5 (node_modules/jsdom/node_modules/lru-cache/package.json)
+  prepare : tshy && bash scripts/build.sh
+---
+jsdom@29.0.2 (node_modules/jsdom/package.json)
+  prepare : wireit
+---
+leaflet@1.9.4 (node_modules/leaflet/package.json)
+  prepare : husky install
+---
+get-caller-file@2.0.5 (node_modules/get-caller-file/package.json)
+  prepare : tsc
+---
+isbot@5.1.39 (node_modules/isbot/package.json)
+  prepare : ./scripts/prepare/index.js
+---
+minizlib@3.1.0 (node_modules/minizlib/package.json)
+  prepare : tshy
+---
+postgres@3.4.9 (node_modules/postgres/package.json)
+  prepare : npm run build
+---
+minimatch@10.2.4 (node_modules/minimatch/package.json)
+  prepare : tshy
+---
+zod-validation-error@4.0.2 (node_modules/zod-validation-error/package.json)
+  prepare : husky
+---
+@humanfs/core@0.19.1 (node_modules/@humanfs/core/package.json)
+  prepare : npm run build
+---
+@humanfs/node@0.16.7 (node_modules/@humanfs/node/package.json)
+  prepare : npm run build
+---
+rollup@4.59.0 (node_modules/rollup/package.json)
+  prepare : husky && npm run prepare:patch && node scripts/check-release.js || npm run build:prepare
+---
+cliui@8.0.1 (node_modules/cliui/package.json)
+  prepare : npm run compile
+---
+package-json-from-dist@1.0.1 (node_modules/package-json-from-dist/package.json)
+  prepare : tshy
+---
+thread-stream@4.0.0 (node_modules/thread-stream/package.json)
+  prepare : husky install
+---
+mime@1.6.0 (node_modules/mime/package.json)
+  prepare : node src/build.js
+---
+yargs@17.7.2 (node_modules/yargs/package.json)
+  prepare : npm run compile
+---
+meow@13.2.0 (node_modules/meow/package.json)
+  prepare : npm run build
+---
+cosmiconfig@9.0.1 (node_modules/cosmiconfig/package.json)
+  prepare : husky install
+---
+esbuild@0.18.20 (node_modules/@esbuild-kit/core-utils/node_modules/esbuild/package.json)
+  postinstall : node install.js
+---
+esbuild@0.27.3 (node_modules/esbuild/package.json)
+  postinstall : node install.js
+---
+minipass@7.1.3 (node_modules/minipass/package.json)
+  prepare : tshy
+---
+tinyexec@1.0.4 (node_modules/tinyexec/package.json)
+  prepare : npm run build
+---
+yallist@5.0.0 (node_modules/tar/node_modules/yallist/package.json)
+  prepare : tshy
+---
+tar@7.5.12 (node_modules/tar/package.json)
+  prepare : tshy && bash scripts/build.sh
+---
+pino-abstract-transport@3.0.0 (node_modules/pino-abstract-transport/package.json)
+  prepare : husky install
+---
+@hapi/tlds@1.1.6 (node_modules/@hapi/tlds/package.json)
+  prepare : tshy
+---
+colorette@2.0.20 (node_modules/colorette/package.json)
+  prepare : npm run build
+---
+axios@1.15.0 (node_modules/axios/package.json)
+  prepare : husky
+---
+sharp@0.34.5 (node_modules/sharp/package.json)
+  install : node install/check.js || npm run build
+---
+dedent@1.7.2 (node_modules/dedent/package.json)
+  prepare : husky install
+---
+cookie@1.1.1 (node_modules/react-router/node_modules/cookie/package.json)
+  prepare : ts-scripts install
+---
+lightningcss@1.32.0 (node_modules/lightningcss/package.json)
+  prepare : patch-package

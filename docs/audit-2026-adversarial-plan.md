@@ -27,9 +27,9 @@ The existing `codebase-audit.md` / `audit-tracker.md` closed with the repo decla
 The audit is **complete** when:
 
 - every file listed in Phase 0 has a recorded disposition (audited / excluded with reason / deleted as dead)
-- every phase has a dated "findings closed" marker
-- every Critical and High finding is resolved or explicitly owned, rationaled, dated
-- every Medium finding is resolved, accepted-with-owner, or deferred-with-date
+- every phase has a dated "findings closed" marker (findings _logged_, not yet resolved — remediation is a separate post-audit phase)
+- **the audit itself runs all phases through to completion without stopping to fix anything.** Pre-launch context: no live customers, no outage risk, so no mid-audit pause is ever warranted. Fixing during the audit would cause later phases to observe a moving target and undermine evidence integrity.
+- **every finding, at every severity, is resolved in the post-audit remediation phase** (Critical → High → Medium → Low order). No severity is "not worth fixing." `accepted` / `wontfix` / `deferred` are not default dispositions; if used at all they need an explicit written rationale (e.g. "blocked on external vendor") that another reviewer signs off on.
 - every ADR has a reconciliation line (code matches / code drifted / ADR withdrawn)
 - the sign-off checklist at §19 is fully green with references
 
@@ -174,11 +174,17 @@ Every finding in the tracker must carry:
 
 ### 3.4 Severity rubric
 
-- **Critical** — active production defect, data loss/corruption, security breach, regulatory exposure, or outage risk
-- **High** — latent defect with clear path to production harm; missing security control; integrity invariant at risk
-- **Medium** — correctness/quality issue likely to cause incidents later; non-trivial tech debt with blast radius
-- **Low** — cosmetic, stylistic, dead code, minor doc drift
-- **Info** — observation; no action required but worth recording
+Severity communicates _magnitude of the problem_, not _whether it will be fixed_. In this codebase's pre-launch context every finding gets addressed; severity orders the remediation queue that runs **after** the audit.
+
+**The audit does not pause to remediate, at any severity.** Findings are logged and we continue. Remediation happens in a dedicated post-audit phase (after Phase 19 synthesis), in this order: Critical → High → Medium → Low. Mid-audit fixes are forbidden because they would cause later phases to audit a moving target.
+
+- **Critical** — defect that would cause data loss/corruption, a security breach, regulatory exposure, or an outage _once traffic is live_. First in the post-audit remediation queue.
+- **High** — latent defect with clear path to harm once live; missing security control; integrity invariant at risk. Second in the queue.
+- **Medium** — correctness/quality issue likely to cause incidents; non-trivial tech debt with blast radius. Third.
+- **Low** — cosmetic, stylistic, dead code, minor doc drift. Fourth, but still resolved.
+- **Info** — observation worth recording (e.g. "SBOM not generated today"). If the observation implies an action, re-classified up; pure observations stay Info but are discussed at sign-off.
+
+`accepted` / `wontfix` / `deferred` are not default dispositions; they require an explicit rationale signed off by a reviewer different from the finding's author.
 
 ---
 
@@ -1179,8 +1185,20 @@ Phase 15 (docs)                │   last among single-module phases (reconciles
 Phase 16 (CI/CD)               │   can run after 1
 Phase 17 (operational)         │   needs 13/14/15/16
                                │
-Phase 18 (red-team)           ─┘   last — uses everything
-Phase 19 (synthesis)           ──  after 18
+Phase 18 (red-team)           ─┘   last phase of audit
+Phase 19 (synthesis)           ──  after 18; final audit output
+
+─────── AUDIT COMPLETE ───────
+Post-audit remediation           ─┐  Critical → High → Medium → Low
+                                  │  separate phase; tracker drives it
+                                  │  each remediation references the
+                                  │  finding ID and the commit SHA that
+                                  │  resolved it; re-review confirms
+                                  │  before marking resolved
+─────── REMEDIATION COMPLETE ──
+Sign-off                          ──  only when every finding is resolved
+                                      (or accepted-with-rationale + second
+                                      reviewer)
 ```
 
 ## 9. Sign-off criteria (re-asserted)
@@ -1188,7 +1206,8 @@ Phase 19 (synthesis)           ──  after 18
 Before signing:
 
 - [ ] Phase 0 file list covers 100% of `git ls-files`
-- [ ] No `status: open` finding at Critical or High severity
+- [ ] **No `status: open` finding at any severity** (pre-launch; severity orders the queue but every finding is resolved)
+- [ ] Any `accepted` / `wontfix` / `deferred` finding carries a written rationale and a second-reviewer sign-off
 - [ ] Every ADR reconciled
 - [ ] Every route in the API matrix has `auth`, `rateLimit`, `cache`, `openapi-registered`, `error-codes-enumerated` columns filled
 - [ ] Every handler has a test-file pointer and at least one sad-path test
