@@ -84,6 +84,7 @@ import { adminMerchantTopEarnersHandler } from './admin/merchant-top-earners.js'
 import { adminCashbackConfigsCsvHandler } from './admin/cashback-configs-csv.js';
 import { adminMerchantsCatalogCsvHandler } from './admin/merchants-catalog-csv.js';
 import { adminSupplierSpendHandler } from './admin/supplier-spend.js';
+import { adminOperatorSupplierSpendHandler } from './admin/operator-supplier-spend.js';
 import { adminOperatorStatsHandler } from './admin/operator-stats.js';
 import { adminUserCreditsHandler } from './admin/user-credits.js';
 import { adminUserCreditTransactionsHandler } from './admin/user-credit-transactions.js';
@@ -1037,6 +1038,17 @@ app.get('/api/admin/orders/:orderId/payout', rateLimit(120, 60_000), adminPayout
 // renders this on the treasury page as the "supplier" card next to
 // outstanding liabilities.
 app.get('/api/admin/supplier-spend', rateLimit(60, 60_000), adminSupplierSpendHandler);
+// Per-operator supplier-spend (#674) — per-currency aggregate
+// scoped to one CTX operator. Answers "which operator drove the
+// supplier spend?" — the ADR-022 per-operator axis of the fleet-
+// wide supplier-spend. Ops uses this to spot load-balancing
+// drift: one operator suddenly carrying 80% of spend is a
+// scheduler / circuit-breaker signal.
+app.get(
+  '/api/admin/operators/:operatorId/supplier-spend',
+  rateLimit(120, 60_000),
+  adminOperatorSupplierSpendHandler,
+);
 // Per-operator breakdown of which CTX service account carried which
 // orders (ADR 013). Complements supplier-spend: spend is *what* Loop
 // paid CTX per currency, operator-stats is *which operator* carried
