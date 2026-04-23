@@ -4768,8 +4768,9 @@ const ReconciliationEntry = registry.register(
 const ReconciliationResponse = registry.register(
   'ReconciliationResponse',
   z.object({
-    userCount: z.string().openapi({
-      description: 'Total user_credits rows across all users and currencies. BigInt-string.',
+    rowCount: z.string().openapi({
+      description:
+        'Total user_credits rows across all users and currencies. A multi-currency user contributes one row per currency — this is NOT a distinct-user count (A2-907). BigInt-string.',
     }),
     driftedCount: z.string().openapi({
       description:
