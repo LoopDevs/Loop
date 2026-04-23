@@ -513,6 +513,11 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
             filename={`treasury-credit-flow-${new Date().toISOString().slice(0, 10)}.csv`}
             label="Credit-flow CSV"
           />
+          <CsvDownloadButton
+            path="/api/admin/treasury.csv"
+            filename={`treasury-snapshot-${new Date().toISOString().slice(0, 10)}.csv`}
+            label="Treasury snapshot CSV"
+          />
         </div>
       </section>
 
