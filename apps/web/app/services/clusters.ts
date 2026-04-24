@@ -1,5 +1,6 @@
 import { ApiException } from '@loop/shared';
-import type { ApiError, ClusterResponse, ClusterParams } from '@loop/shared';
+import type { ClusterResponse, ClusterParams } from '@loop/shared';
+import { parseErrorResponse } from './parse-error-response';
 import { API_BASE } from './config';
 
 const PROTOBUF_MIME = 'application/x-protobuf';
@@ -49,36 +50,10 @@ export async function fetchClusters(
   }
 
   if (!response.ok) {
-    // Normalize the error body so downstream consumers always get a valid
-    // `{ code, message }`. Mirrors the logic in api-client.ts (PR #36) —
-    // proxies, gateways, or HTML error pages can all land here with bodies
-    // that don't match our shape, and those previously produced ApiException
-    // instances with `code: undefined`, breaking every `switch (err.code)`
-    // in downstream code.
-    let error: ApiError;
-    try {
-      const body = (await response.json()) as unknown;
-      if (body !== null && typeof body === 'object') {
-        const b = body as {
-          code?: unknown;
-          message?: unknown;
-          details?: unknown;
-          requestId?: unknown;
-        };
-        error = {
-          code: typeof b.code === 'string' ? b.code : 'UPSTREAM_ERROR',
-          message: typeof b.message === 'string' ? b.message : response.statusText,
-          ...(b.details !== undefined && typeof b.details === 'object' && b.details !== null
-            ? { details: b.details as Record<string, unknown> }
-            : {}),
-          ...(typeof b.requestId === 'string' ? { requestId: b.requestId } : {}),
-        };
-      } else {
-        error = { code: 'UPSTREAM_ERROR', message: response.statusText };
-      }
-    } catch {
-      error = { code: 'UPSTREAM_ERROR', message: response.statusText };
-    }
+    // A2-1162: shared body-shape normalisation lives in
+    // `parse-error-response.ts`. This file and `api-client.ts` used
+    // to carry byte-for-byte copies of the coerce logic.
+    const error = await parseErrorResponse(response);
     throw new ApiException(response.status, error);
   }
 
