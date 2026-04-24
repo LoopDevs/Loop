@@ -672,10 +672,23 @@ app.get('/api/image', rateLimit(300, 60_000), imageProxyHandler);
 
 // ─── Merchants ────────────────────────────────────────────────────────────────
 
-app.get('/api/merchants', merchantListHandler);
+// A2-650: the list + by-slug + /all reads were previously unlimited —
+// a crawler or misbehaved client could burst them without ever hitting
+// a 429. Per-IP limits sized for realistic browse patterns:
+//   - /api/merchants is paginated (page + limit + optional ?q=) and
+//     fires on filter/page-change, so 180/min comfortably covers a
+//     fast typist + rapid pagination.
+//   - /api/merchants/all returns the full catalog in one shot; legitimate
+//     clients fetch it once and cache. 60/min is more than enough.
+//   - /api/merchants/by-slug/:slug drives the SEO landing pages via the
+//     web bundle; 120/min matches the sibling cashback-rate endpoints.
+// Matches the shape of /api/merchants/cashback-rates (120/min) and
+// /api/merchants/:id/cashback-rate (120/min) which were rate-limited
+// already.
+app.get('/api/merchants', rateLimit(180, 60_000), merchantListHandler);
 // /all must come before /:id so that 'all' is not interpreted as an id.
-app.get('/api/merchants/all', merchantAllHandler);
-app.get('/api/merchants/by-slug/:slug', merchantBySlugHandler); // must be before /:id
+app.get('/api/merchants/all', rateLimit(60, 60_000), merchantAllHandler);
+app.get('/api/merchants/by-slug/:slug', rateLimit(120, 60_000), merchantBySlugHandler); // must be before /:id
 // GET /api/merchants/cashback-rates — bulk map of active cashback
 // pcts across every merchant (ADR 011 / 015). Lets catalog / list /
 // map views render "X% cashback" badges without N+1-ing the
