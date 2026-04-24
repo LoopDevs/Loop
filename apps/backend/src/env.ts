@@ -135,6 +135,15 @@ export const EnvSchema = z.object({
 
   // Error tracking (optional — get DSN from sentry.io)
   SENTRY_DSN: z.string().url().optional(),
+
+  // A2-1309: release tag for Sentry. Pair with `VITE_SENTRY_RELEASE`
+  // on the web side. CI/CD should set this to the git SHA (or a
+  // version + SHA composite) so Sentry can pivot from an event to
+  // the exact deploy artifact that produced it. Absent → Sentry
+  // omits the `release` attribute on every event; pre-launch we keep
+  // this unset locally so dev runs don't poison the "release" pivot
+  // in the Sentry UI.
+  SENTRY_RELEASE: z.string().min(1).optional(),
   // A2-1310: deploy-time logical environment tag. Backend was using
   // `NODE_ENV` for the Sentry `environment` field and web was using
   // `import.meta.env.MODE` — these diverge on a staging deploy that
