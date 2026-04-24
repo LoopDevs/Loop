@@ -208,13 +208,25 @@ export async function merchantDetailHandler(c: Context): Promise<Response> {
  * is acceptable.
  */
 export async function merchantsCashbackRatesHandler(c: Context): Promise<Response> {
-  const rows = await db
-    .select({
-      merchantId: merchantCashbackConfigs.merchantId,
-      userCashbackPct: merchantCashbackConfigs.userCashbackPct,
-    })
-    .from(merchantCashbackConfigs)
-    .where(eq(merchantCashbackConfigs.active, true));
+  // A2-664 / A2-1006 — ADR-020 never-500. A DB outage here previously
+  // bubbled out as an uncaught 500, breaking every merchant-list card
+  // on the client. Soft-fail to an empty `{ rates: {} }` (clients treat
+  // missing keys as "no cashback") with a shorter cache window so we
+  // don't pin the degraded answer for long.
+  let rows: Array<{ merchantId: string; userCashbackPct: string }>;
+  try {
+    rows = await db
+      .select({
+        merchantId: merchantCashbackConfigs.merchantId,
+        userCashbackPct: merchantCashbackConfigs.userCashbackPct,
+      })
+      .from(merchantCashbackConfigs)
+      .where(eq(merchantCashbackConfigs.active, true));
+  } catch (err) {
+    log.warn({ err }, 'merchant-cashback-rates DB read failed — serving empty');
+    c.header('Cache-Control', 'public, max-age=60');
+    return c.json({ rates: {} });
+  }
 
   // Map-shaped response — the frontend converts to a `Map` once
   // and does O(1) lookups per merchant card. Plain object (not
@@ -257,12 +269,22 @@ export async function merchantCashbackRateHandler(c: Context): Promise<Response>
     return c.json({ code: 'NOT_FOUND', message: 'Merchant not found' }, 404);
   }
 
-  const row = await db.query.merchantCashbackConfigs.findFirst({
-    where: and(
-      eq(merchantCashbackConfigs.merchantId, id),
-      eq(merchantCashbackConfigs.active, true),
-    ),
-  });
+  // A2-665 — ADR-020 never-500. DB outage ⇒ `{ userCashbackPct: null }`
+  // (same shape the no-active-config branch returns); client hides the
+  // badge rather than showing a 500 on a public, CDN-cached path.
+  let row: { userCashbackPct: string } | undefined;
+  try {
+    row = await db.query.merchantCashbackConfigs.findFirst({
+      where: and(
+        eq(merchantCashbackConfigs.merchantId, id),
+        eq(merchantCashbackConfigs.active, true),
+      ),
+    });
+  } catch (err) {
+    log.warn({ err, merchantId: id }, 'merchant-cashback-rate DB read failed — serving null');
+    c.header('Cache-Control', 'public, max-age=60');
+    return c.json({ merchantId: id, userCashbackPct: null });
+  }
 
   c.header('Cache-Control', 'public, max-age=300');
   return c.json({
