@@ -74,6 +74,15 @@ export const users = pgTable(
       .on(t.ctxUserId)
       .where(sql`${t.ctxUserId} IS NOT NULL`),
     index('users_email').on(t.email),
+    // A2-706: partial unique on LOWER(email) scoped to Loop-native
+    // rows (ctx_user_id IS NULL). Prevents the duplicate-INSERT race
+    // in findOrCreateUserByEmail. CTX-proxied users keep the
+    // ctx_user_id-anchored uniqueness above; their `email` is a
+    // denormalised copy and may legitimately collide with a separate
+    // Loop-native row (same person, two identity planes).
+    uniqueIndex('users_email_loop_native_unique')
+      .on(sql`LOWER(${t.email})`)
+      .where(sql`${t.ctxUserId} IS NULL`),
     // CHECK gates the enum at the DB boundary; the TypeScript union
     // (HOME_CURRENCIES) gates it in-app. Both agree — either layer
     // catching a bad write is a tripwire on the other layer drifting.
