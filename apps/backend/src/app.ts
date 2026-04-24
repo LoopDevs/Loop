@@ -13,6 +13,7 @@ import { getLocations, isLocationLoading } from './clustering/data-store.js';
 import { getMerchants } from './merchants/sync.js';
 import { clustersHandler } from './clustering/handler.js';
 import { imageProxyHandler, evictExpiredImageCache } from './images/proxy.js';
+import { sweepStaleIdempotencyKeys } from './admin/idempotency.js';
 import { upstreamUrl } from './upstream.js';
 import { getAllCircuitStates } from './circuit-breaker.js';
 import { generateOpenApiSpec } from './openapi.js';
@@ -1587,6 +1588,11 @@ function runCleanup(): void {
   for (const [key, entry] of rateLimitMap) {
     if (now > entry.resetAt) rateLimitMap.delete(key);
   }
+  // A2-500: expire admin-idempotency snapshots past the 24h TTL
+  // promised by ADR-017. Fire-and-forget — a sweep failure can be
+  // retried next hour; the read-time TTL gate in lookupIdempotencyKey
+  // keeps replay semantics correct in the meantime.
+  void sweepStaleIdempotencyKeys();
 }
 
 // Start the cleanup interval unless we are in the test runner — tests import
