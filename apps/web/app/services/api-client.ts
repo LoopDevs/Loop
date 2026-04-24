@@ -1,6 +1,7 @@
 import { ApiException, DEFAULT_CLIENT_IDS } from '@loop/shared';
-import type { ApiError, RefreshRequest } from '@loop/shared';
+import type { RefreshRequest } from '@loop/shared';
 import { API_BASE } from './config';
+import { parseErrorResponse } from './parse-error-response';
 
 // Browsers have no default fetch timeout. Without this, a backend that hangs
 // (stuck upstream, bad network) would leave the UI spinning forever.
@@ -88,34 +89,12 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
 
   if (!response.ok) {
-    // Upstream/backend errors are expected to be `{ code, message }`, but
-    // proxies, intermediate gateways, and misconfigured servers can return
-    // anything — HTML error pages, empty bodies, or JSON without our fields.
-    // Normalize so `ApiException.code` and `.message` are always strings.
-    let error: ApiError;
-    try {
-      const body = (await response.json()) as unknown;
-      if (body !== null && typeof body === 'object') {
-        const b = body as {
-          code?: unknown;
-          message?: unknown;
-          details?: unknown;
-          requestId?: unknown;
-        };
-        error = {
-          code: typeof b.code === 'string' ? b.code : 'UPSTREAM_ERROR',
-          message: typeof b.message === 'string' ? b.message : response.statusText,
-          ...(b.details !== undefined && typeof b.details === 'object' && b.details !== null
-            ? { details: b.details as Record<string, unknown> }
-            : {}),
-          ...(typeof b.requestId === 'string' ? { requestId: b.requestId } : {}),
-        };
-      } else {
-        error = { code: 'UPSTREAM_ERROR', message: response.statusText };
-      }
-    } catch {
-      error = { code: 'UPSTREAM_ERROR', message: response.statusText };
-    }
+    // A2-1162: body-shape normalisation lives in `parse-error-response.ts`
+    // so this file + `clusters.ts` share one definition instead of the
+    // previous byte-for-byte duplicate. See that file for the defensive-
+    // coerce rationale (HTML error pages, empty bodies, JSON without our
+    // fields all land here).
+    const error = await parseErrorResponse(response);
     throw new ApiException(response.status, error);
   }
 

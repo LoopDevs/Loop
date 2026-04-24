@@ -108,9 +108,14 @@ export async function adminOperatorSupplierSpendHandler(c: Context): Promise<Res
   }
 
   try {
+    // A2-904: GROUP BY charge_currency, not catalog `currency`. The
+    // summed minor-units (wholesale / user_cashback / loop_margin)
+    // are stored in home-currency terms by orders/repo.ts; grouping
+    // by catalog mixed GBP + USD into the same bucket. See
+    // supplier-spend.ts header for the full rationale.
     const result = await db.execute<AggRow>(sql`
       SELECT
-        ${orders.currency}                                  AS currency,
+        ${orders.chargeCurrency}                            AS currency,
         COUNT(*)::bigint                                    AS count,
         COALESCE(SUM(${orders.faceValueMinor}), 0)::bigint   AS face_value_minor,
         COALESCE(SUM(${orders.wholesaleMinor}), 0)::bigint   AS wholesale_minor,
@@ -122,8 +127,8 @@ export async function adminOperatorSupplierSpendHandler(c: Context): Promise<Res
         eq(orders.state, 'fulfilled'),
         gte(orders.fulfilledAt, since),
       )}
-      GROUP BY ${orders.currency}
-      ORDER BY ${orders.currency} ASC
+      GROUP BY ${orders.chargeCurrency}
+      ORDER BY ${orders.chargeCurrency} ASC
     `);
 
     const rawRows = (

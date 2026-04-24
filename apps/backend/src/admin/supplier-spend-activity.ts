@@ -92,6 +92,11 @@ export async function adminSupplierSpendActivityHandler(c: Context): Promise<Res
   }
 
   try {
+    // A2-904: GROUP BY charge_currency (not catalog `currency`) — see
+    // supplier-spend.ts for the rationale. The `currency` response
+    // field keeps its name for wire-compat but means charge_currency.
+    // The `currencyFilter` query param likewise now filters on
+    // charge_currency so filter + aggregate agree.
     const result = currencyFilter
       ? await db.execute<Row>(sql`
           WITH days AS (
@@ -113,14 +118,14 @@ export async function adminSupplierSpendActivityHandler(c: Context): Promise<Res
           LEFT JOIN ${orders}
             ON DATE_TRUNC('day', ${orders.fulfilledAt} AT TIME ZONE 'UTC') = days.day
            AND ${orders.state} = 'fulfilled'
-           AND ${orders.currency} = ${currencyFilter}
+           AND ${orders.chargeCurrency} = ${currencyFilter}
           GROUP BY days.day
           ORDER BY days.day ASC
         `)
       : await db.execute<Row>(sql`
           SELECT
             TO_CHAR(DATE_TRUNC('day', ${orders.fulfilledAt} AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
-            ${orders.currency} AS currency,
+            ${orders.chargeCurrency} AS currency,
             COUNT(*)::bigint AS count,
             COALESCE(SUM(${orders.faceValueMinor}), 0)::text AS face_value_minor,
             COALESCE(SUM(${orders.wholesaleMinor}), 0)::text AS wholesale_minor,
@@ -132,7 +137,7 @@ export async function adminSupplierSpendActivityHandler(c: Context): Promise<Res
             AND ${orders.fulfilledAt} >=
               DATE_TRUNC('day', NOW() AT TIME ZONE 'UTC') - INTERVAL '1 day' * (${windowDays} - 1)
           GROUP BY DATE_TRUNC('day', ${orders.fulfilledAt} AT TIME ZONE 'UTC'),
-                   ${orders.currency}
+                   ${orders.chargeCurrency}
           ORDER BY day ASC, currency ASC
         `);
 

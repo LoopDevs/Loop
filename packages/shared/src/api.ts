@@ -78,6 +78,9 @@ export const ApiErrorCode = {
   // Image proxy specific
   IMAGE_TOO_LARGE: 'IMAGE_TOO_LARGE',
   NOT_AN_IMAGE: 'NOT_AN_IMAGE',
+  // Request-body limit (A2-1005) — 413 Payload Too Large at the
+  // `bodyLimit` middleware boundary, before any handler runs.
+  PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
   // Admin write contract (ADR 017) — A2-204: every backend-emitted
   // `code` string needs a shared-enum entry so the web switch-ladder
   // catches drift at the TypeScript layer. Ops-facing UX for these

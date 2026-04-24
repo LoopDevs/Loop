@@ -324,6 +324,22 @@ export const EnvSchema = z.object({
   // queue of say 20 × $5 cashbacks still fits) while catching
   // real accounting divergence.
   LOOP_ASSET_DRIFT_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(100_000_000n),
+
+  // A2-905 / ADR 009: interest accrual on user credit balances.
+  // Off by default (0 bps) — ADR 009 explicitly feature-flags this
+  // "until counsel confirms the framing of interest on promotional
+  // credits in each target market." Switching on requires setting
+  // INTEREST_APY_BASIS_POINTS > 0 AND LOOP_WORKERS_ENABLED=true.
+  // APY in integer basis points (400 = 4.00%); periodsPerYear is
+  // the denominator the primitive divides the annual rate by (365
+  // for daily, 12 for monthly, 52 for weekly). Tick interval is the
+  // scheduler cadence — kept independent from periodsPerYear so a
+  // deploy that wants nightly accrual on the first UTC day after
+  // boot (periodsPerYear=365) can still tick hourly and rely on the
+  // per-cursor idempotency to no-op the duplicates.
+  INTEREST_APY_BASIS_POINTS: z.coerce.number().int().min(0).max(10_000).default(0),
+  INTEREST_PERIODS_PER_YEAR: z.coerce.number().int().positive().default(365),
+  INTEREST_TICK_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
