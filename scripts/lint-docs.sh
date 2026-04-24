@@ -21,16 +21,40 @@ grep -E '^\s+[A-Z_]+:' apps/backend/src/env.ts | sed 's/[[:space:]]*//' | cut -d
   fi
 done
 
-# ─── 2. Every API route in app.ts should be in architecture.md ──────────────
+# ─── 2. app.ts ⇄ architecture.md route parity (A2-1804) ─────────────────────
+#
+# Bidirectional drift check. The earlier single-direction rule caught
+# "new endpoint without doc entry" but not "doc entry that no longer
+# corresponds to a live route". It also relied on a same-line
+# `app.get('…', handler)` pattern and missed the multi-line form
+# (`app.get(\n  '…',\n  rateLimit(…),\n  handler\n)`) that several
+# admin routes use. Both gaps are closed here.
+#
+# The extractor now pulls every `'/api/…'` string literal from app.ts
+# (regardless of how the surrounding `app.get(` call is formatted)
+# and pairs it with every `METHOD /api/…` line in architecture.md's
+# endpoint listing. Stale entries on either side fail CI.
 
 echo "Checking API routes vs architecture.md..."
-grep -E "app\.(get|post|put|delete)\(" apps/backend/src/app.ts | \
-  sed "s/.*'\(\/api\/[^']*\)'.*/\1/" | \
-  grep "^/api/" | sort -u | while read -r route; do
-    if ! grep -qF "$route" docs/architecture.md 2>/dev/null; then
-      err "Route '$route' is in app.ts but not in docs/architecture.md"
-    fi
-  done
+app_route_literals=$(grep -oE "'/api/[a-zA-Z0-9/:._-]+'" apps/backend/src/app.ts \
+  | tr -d "'" | sort -u)
+arch_route_listings=$(grep -E "^(GET|POST|PUT|DELETE|PATCH) +/api/" docs/architecture.md \
+  | sed -E "s/^(GET|POST|PUT|DELETE|PATCH) +(\/api\/[^ ?[:space:]]+).*/\2/" \
+  | sort -u)
+
+while read -r route; do
+  [ -z "$route" ] && continue
+  if ! echo "$arch_route_listings" | grep -qxF "$route"; then
+    err "Route '$route' is in app.ts but not in docs/architecture.md"
+  fi
+done <<< "$app_route_literals"
+
+while read -r route; do
+  [ -z "$route" ] && continue
+  if ! echo "$app_route_literals" | grep -qxF "$route"; then
+    err "Route '$route' is listed in docs/architecture.md but no matching literal exists in apps/backend/src/app.ts"
+  fi
+done <<< "$arch_route_listings"
 
 # ─── 3. No references to deleted files ──────────────────────────────────────
 
