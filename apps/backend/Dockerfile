@@ -41,4 +41,17 @@ USER node
 EXPOSE 8080
 ENV PORT=8080 NODE_ENV=production
 
+# A2-402: orchestrator-visible liveness probe. `GET /health` runs the
+# app-level health logic (upstream reachability + DB + signing-key
+# present) and always responds — 200 when green, 503 when degraded.
+# Fly.io + Kubernetes read HEALTHCHECK status; a degraded container
+# gets cycled instead of left serving traffic.
+#
+# Uses node's built-in http (no curl/wget dep on alpine). 5s timeout
+# is well under the 30s interval so a hung process shows as unhealthy
+# promptly. retries=3 keeps a transient upstream blip from cycling
+# the pod.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "require('http').get('http://127.0.0.1:' + (process.env.PORT || 8080) + '/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+
 CMD ["node", "apps/backend/dist/index.js"]
