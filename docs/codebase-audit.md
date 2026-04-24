@@ -1,5 +1,13 @@
 # Comprehensive Codebase Audit Program
 
+> **Superseded 2026-04 (A2-1809).** This file was the hub for the
+> first-generation audit program. The current active audit is the
+> **2026-04 adversarial audit** tracked in
+> [`docs/audit-2026-tracker.md`](./audit-2026-tracker.md) with
+> per-phase evidence in `docs/audit-2026-evidence/`. Kept here for
+> historical context; do not update. New findings go into the 2026
+> tracker.
+
 This document is the audit hub for Loop. It replaces the previous `docs/codebase-audit.md`, which mixed a partial checklist with a false "complete" conclusion and is not sufficient for a full-project audit.
 
 ## Goal

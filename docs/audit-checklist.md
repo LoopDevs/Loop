@@ -1,5 +1,12 @@
 # Audit Checklist
 
+> **Superseded 2026-04 (A2-1809).** Paired with the first-generation
+> `codebase-audit.md` program. The current active checklist is
+> embedded in the per-phase evidence files under
+> `docs/audit-2026-evidence/` with status in
+> [`docs/audit-2026-tracker.md`](./audit-2026-tracker.md). Kept for
+> history; do not update.
+
 Use this with [`codebase-audit.md`](codebase-audit.md) and record progress in [`audit-tracker.md`](audit-tracker.md).
 
 ## How To Use This Checklist
