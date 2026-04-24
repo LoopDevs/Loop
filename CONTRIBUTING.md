@@ -34,7 +34,7 @@ npm run dev  # backend on :8080, web on :5173
 
 4. **Push and open a PR.** CI runs 7 jobs — `quality`, `test-unit`, `audit`, `build`, `test-e2e-mocked`, `test-e2e` (PR-only), and `notify`. Discord `#loop-deployments` notifies on results.
 
-5. **Get review.** Auth, payment, and storage code requires human review (see `.github/CODEOWNERS`).
+5. **Get review.** `.github/CODEOWNERS` lists reviewer expectations for auth, ledger, admin, Stellar, CTX-operator, DB schema, and shared-type code. Note: the `@LoopDevs/engineering` team referenced there hasn't been created yet (audit A2-103), so GitHub silently skips the required-reviews rule today — branch protection allows an admin squash-merge without approval. Treat a reviewer as mandatory on those paths anyway; enforcement flips on once the team lands.
 
 6. **Merge.** Squash merge to `main`. Branch auto-deletes.
 
