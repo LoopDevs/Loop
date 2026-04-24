@@ -1,4 +1,5 @@
 export * from './admin-assets.js';
+export * from './admin-supplier-spend.js';
 export * from './admin-treasury.js';
 export * from './api.js';
 export * from './assert-never.js';

@@ -44,26 +44,10 @@ import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-supplier-spend' });
 
-export interface SupplierSpendRow {
-  currency: string;
-  count: number;
-  faceValueMinor: string;
-  wholesaleMinor: string;
-  userCashbackMinor: string;
-  loopMarginMinor: string;
-  /**
-   * Loop margin as basis points of face value (loopMargin / face ×
-   * 10 000). Integer, clamped [0, 10 000]. 0 when a row has zero
-   * face value (shouldn't happen given the CHECK constraints, but
-   * division-by-zero defence is cheap).
-   */
-  marginBps: number;
-}
-
-export interface SupplierSpendResponse {
-  since: string;
-  rows: SupplierSpendRow[];
-}
+// A2-1506: moved to `@loop/shared/admin-supplier-spend.ts`.
+// Re-exported for in-file builders + any downstream imports.
+import type { SupplierSpendResponse, SupplierSpendRow } from '@loop/shared';
+export type { SupplierSpendResponse, SupplierSpendRow };
 
 const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_WINDOW_MS = 366 * 24 * 60 * 60 * 1000;

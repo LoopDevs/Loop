@@ -8,6 +8,10 @@ import type {
   LoopLiability,
   OrderState,
   PayoutState,
+  SupplierSpendActivityDay,
+  SupplierSpendActivityResponse,
+  SupplierSpendResponse,
+  SupplierSpendRow,
   TreasuryHolding,
   TreasuryOrderFlow,
   TreasurySnapshot,
@@ -322,21 +326,9 @@ export async function downloadAdminCsv(path: string, filename: string): Promise<
  * CTX, `userCashbackMinor` + `loopMarginMinor` are the counts on the
  * other side of the split that fell out of those orders.
  */
-export interface SupplierSpendRow {
-  currency: string;
-  count: number;
-  faceValueMinor: string;
-  wholesaleMinor: string;
-  userCashbackMinor: string;
-  loopMarginMinor: string;
-  /** loopMargin / faceValue × 10 000. Integer, clamped [0, 10 000]. */
-  marginBps: number;
-}
-
-export interface SupplierSpendResponse {
-  since: string;
-  rows: SupplierSpendRow[];
-}
+// A2-1506: `SupplierSpendRow` / `SupplierSpendResponse` moved to
+// `@loop/shared/admin-supplier-spend.ts`. Re-exported for stability.
+export type { SupplierSpendRow, SupplierSpendResponse };
 
 /**
  * `GET /api/admin/supplier-spend` — per-currency aggregate of what
@@ -396,21 +388,9 @@ export async function getTreasuryCreditFlow(
  * axis of `SupplierSpendRow` — same columns, but bucketed by
  * `fulfilledAt` UTC over the last N days.
  */
-export interface SupplierSpendActivityDay {
-  day: string;
-  currency: string;
-  count: number;
-  faceValueMinor: string;
-  wholesaleMinor: string;
-  userCashbackMinor: string;
-  loopMarginMinor: string;
-}
-
-export interface SupplierSpendActivityResponse {
-  windowDays: number;
-  currency: 'USD' | 'GBP' | 'EUR' | null;
-  days: SupplierSpendActivityDay[];
-}
+// A2-1506: `SupplierSpendActivityDay` / `SupplierSpendActivityResponse`
+// moved to `@loop/shared/admin-supplier-spend.ts`.
+export type { SupplierSpendActivityDay, SupplierSpendActivityResponse };
 
 /**
  * `GET /api/admin/supplier-spend/activity` — per-day per-currency
