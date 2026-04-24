@@ -98,7 +98,10 @@ describe('adminTreasuryCreditFlowCsvHandler', () => {
     ];
     const res = await adminTreasuryCreditFlowCsvHandler(makeCtx());
     const body = await res.text();
-    expect(body.split('\r\n')[1]).toBe('2026-04-20,USD,100,400,-300');
+    // A2-1602: formula-injection escape prefixes leading `-` with `'`
+    // so spreadsheet apps don't evaluate `-300` as a negative formula.
+    // Raw CSV carries the `'`; spreadsheets display `-300` correctly.
+    expect(body.split('\r\n')[1]).toBe("2026-04-20,USD,100,400,'-300");
   });
 
   it('zero-fill rows carry empty currency + all zeros', async () => {
