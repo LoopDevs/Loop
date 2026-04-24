@@ -60,7 +60,7 @@ jobs:
         # fly-side push to `master` can't swap in a token-exfil
         # step. Bump deliberately — verify the new SHA against a
         # signed release tag, don't chase the tag.
-        uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # v1.6
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
