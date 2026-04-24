@@ -22,6 +22,7 @@
     "test:e2e:real": "playwright test",
     "verify": "./scripts/verify.sh",
     "lint:docs": "./scripts/lint-docs.sh",
+    "check:bundle-budget": "./scripts/check-bundle-budget.sh",
     "audit": "npm audit --audit-level=high",
     "build": "npm run build -w @loop/backend -w @loop/web",
     "proto:generate": "cd apps/backend && npx buf generate && cd ../.. && prettier --write 'packages/shared/src/proto/**/*.ts'",
