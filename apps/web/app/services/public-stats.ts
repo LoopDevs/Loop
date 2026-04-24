@@ -56,20 +56,12 @@ export async function getPublicMerchant(idOrSlug: string): Promise<PublicMerchan
   return apiRequest<PublicMerchantDetail>(`/api/public/merchants/${encodeURIComponent(idOrSlug)}`);
 }
 
-/**
- * Public cashback-preview shape — matches the backend response from
- * `/api/public/cashback-preview`. Unauthenticated; returned fields
- * carry no PII. `cashbackPct` is null when the merchant has no
- * active cashback config; the calculator shows an em-dash then.
- */
-export interface PublicCashbackPreview {
-  merchantId: string;
-  merchantName: string;
-  orderAmountMinor: string;
-  cashbackPct: string | null;
-  cashbackMinor: string;
-  currency: string;
-}
+// A2-676 + ADR 019: PublicCashbackPreview was previously duplicated
+// here + in the backend + in openapi. The single source of truth is
+// now `@loop/shared`; re-export so existing `import` sites that read
+// the type from `~/services/public-stats` keep resolving.
+export type { PublicCashbackPreview } from '@loop/shared';
+import type { PublicCashbackPreview } from '@loop/shared';
 
 /**
  * `GET /api/public/cashback-preview?merchantId=<id>&amountMinor=<n>` —
