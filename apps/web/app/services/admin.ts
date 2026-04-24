@@ -1,4 +1,5 @@
-import type { LoopAssetCode } from '@loop/shared';
+import type { CreditTransactionType, LoopAssetCode } from '@loop/shared';
+export type { CreditTransactionType } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
 
 // Re-export so existing `import { LoopAssetCode } from
@@ -1863,14 +1864,6 @@ export async function applyCreditAdjustment(args: {
     },
   );
 }
-
-export type CreditTransactionType =
-  | 'cashback'
-  | 'interest'
-  | 'spend'
-  | 'withdrawal'
-  | 'refund'
-  | 'adjustment';
 
 /** Row shape from `/api/admin/users/:userId/credit-transactions` (ADR 009). */
 export interface AdminCreditTransactionView {
