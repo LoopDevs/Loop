@@ -14,6 +14,7 @@ import { AdminNav } from '~/components/features/admin/AdminNav';
 import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { TopUsersTable } from '~/components/features/admin/TopUsersTable';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · Users — Loop' }];
@@ -231,7 +232,7 @@ function AdminUsersRouteInner(): React.JSX.Element {
               {rows.map((u: AdminUserRow) => (
                 <tr key={u.id}>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-700 dark:text-gray-300">
-                    {new Date(u.createdAt).toLocaleString('en-US', {
+                    {new Date(u.createdAt).toLocaleString(ADMIN_LOCALE, {
                       dateStyle: 'short',
                       timeStyle: 'short',
                     })}

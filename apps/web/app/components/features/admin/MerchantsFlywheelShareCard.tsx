@@ -4,6 +4,7 @@ import { getAdminMerchantsFlywheelShare, type MerchantFlywheelShareRow } from '~
 import { shouldRetry } from '~/hooks/query-retry';
 import { pctBigint } from '@loop/shared';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
  * `/admin/cashback` — per-merchant flywheel leaderboard (#602).
@@ -108,10 +109,10 @@ function FlywheelRow({ row }: { row: MerchantFlywheelShareRow }): React.JSX.Elem
         </Link>
       </td>
       <td className="px-3 py-2 tabular-nums text-gray-900 dark:text-white">
-        {row.recycledOrderCount.toLocaleString('en-US')}
+        {row.recycledOrderCount.toLocaleString(ADMIN_LOCALE)}
       </td>
       <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
-        {row.totalFulfilledCount.toLocaleString('en-US')}
+        {row.totalFulfilledCount.toLocaleString(ADMIN_LOCALE)}
       </td>
       <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">{pctOrders}</td>
       <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">{pctCharge}</td>

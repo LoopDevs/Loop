@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { getTopUsersByPendingPayout, type TopUserByPendingPayoutEntry } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 const DEFAULT_LIMIT = 10;
 
@@ -107,7 +108,7 @@ export function TopUsersByPendingPayoutCard(): React.JSX.Element {
                   className="text-blue-600 hover:underline dark:text-blue-400"
                   aria-label={`Review in-flight ${row.assetCode} payouts`}
                 >
-                  {row.payoutCount.toLocaleString('en-US')}
+                  {row.payoutCount.toLocaleString(ADMIN_LOCALE)}
                 </Link>
               </td>
             </tr>

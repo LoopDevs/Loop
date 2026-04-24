@@ -43,6 +43,7 @@ import { MerchantOperatorMixCard } from '~/components/features/admin/MerchantOpe
 import { MerchantRailMixCard } from '~/components/features/admin/MerchantRailMixCard';
 import { MerchantTopEarnersCard } from '~/components/features/admin/MerchantTopEarnersCard';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · Merchant — Loop' }];
@@ -297,7 +298,7 @@ function AdminMerchantDetailRouteInner(): React.JSX.Element {
                 {historyQuery.data.history.map((h) => (
                   <tr key={h.id}>
                     <td className="px-6 py-2 text-xs text-gray-600 dark:text-gray-400 tabular-nums">
-                      {new Date(h.changedAt).toLocaleString('en-US', {
+                      {new Date(h.changedAt).toLocaleString(ADMIN_LOCALE, {
                         dateStyle: 'medium',
                         timeStyle: 'short',
                       })}
@@ -401,7 +402,7 @@ function PctRow({ label, value }: { label: string; value: string }): React.JSX.E
 }
 
 function OrderRow({ order }: { order: AdminOrderView }): React.JSX.Element {
-  const date = new Date(order.createdAt).toLocaleString('en-US', {
+  const date = new Date(order.createdAt).toLocaleString(ADMIN_LOCALE, {
     dateStyle: 'short',
     timeStyle: 'short',
   });

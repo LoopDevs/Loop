@@ -3,6 +3,7 @@ import { ApiException, formatMinorCurrency, pctBigint } from '@loop/shared';
 import { getAdminMerchantCashbackSummary } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
  * Admin `/admin/merchants/:merchantId` — lifetime cashback paid
@@ -106,7 +107,7 @@ function Body({
                   {bucket.currency}
                 </td>
                 <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
-                  {bucket.fulfilledCount.toLocaleString('en-US')}
+                  {bucket.fulfilledCount.toLocaleString(ADMIN_LOCALE)}
                 </td>
                 <td className="px-3 py-2 tabular-nums font-semibold text-green-700 dark:text-green-300">
                   {formatMinorCurrency(cashback, bucket.currency)}

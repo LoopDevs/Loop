@@ -4,6 +4,7 @@ import { ApiException, formatMinorCurrency } from '@loop/shared';
 import { getAdminMerchantTopEarners, type MerchantTopEarnerRow } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
  * Admin `/admin/merchants/:merchantId` — top cashback earners at
@@ -134,7 +135,7 @@ function TopEarnerRow({
           {row.currency}
         </td>
         <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
-          {row.orderCount.toLocaleString('en-US')}
+          {row.orderCount.toLocaleString(ADMIN_LOCALE)}
         </td>
         <td className="px-3 py-2 text-gray-400">—</td>
       </tr>
@@ -157,7 +158,7 @@ function TopEarnerRow({
         {row.currency}
       </td>
       <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
-        {row.orderCount.toLocaleString('en-US')}
+        {row.orderCount.toLocaleString(ADMIN_LOCALE)}
       </td>
       <td className="px-3 py-2 tabular-nums font-semibold text-green-700 dark:text-green-300">
         {formatMinorCurrency(cashback, row.currency)}

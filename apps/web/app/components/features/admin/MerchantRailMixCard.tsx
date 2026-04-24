@@ -9,6 +9,7 @@ import {
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { fmtPct, fmtPctBigint } from './PaymentMethodShareCard';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
  * Admin `/admin/merchants/:merchantId` — per-rail share on the one
@@ -143,7 +144,7 @@ function Body({
                   </Link>
                 </td>
                 <td className="px-3 py-2 tabular-nums text-gray-900 dark:text-white">
-                  {bucket.orderCount.toLocaleString('en-US')}
+                  {bucket.orderCount.toLocaleString(ADMIN_LOCALE)}
                 </td>
                 <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
                   {fmtPct(bucket.orderCount, snapshot.totalOrders)}

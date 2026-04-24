@@ -7,6 +7,7 @@ import {
 } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
  * Stable render order + copy for the four rails. Kept outside the
@@ -126,7 +127,7 @@ export function PaymentMethodShareCard(): React.JSX.Element {
                   </Link>
                 </td>
                 <td className="px-3 py-2 tabular-nums text-gray-900 dark:text-white">
-                  {bucket.orderCount.toLocaleString('en-US')}
+                  {bucket.orderCount.toLocaleString(ADMIN_LOCALE)}
                 </td>
                 <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
                   {fmtPct(bucket.orderCount, snapshot.totalOrders)}

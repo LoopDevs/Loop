@@ -3,6 +3,7 @@ import { pctBigint } from '@loop/shared';
 import { getPaymentMethodShare, type AdminPaymentMethod } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
  * `/admin` — at-a-glance fleet-wide flywheel scalar (ADR 015).
@@ -84,8 +85,8 @@ export function FleetFlywheelHeadline(): React.JSX.Element | null {
     >
       <p className="font-medium">
         <span className="font-semibold">{pctOrders}%</span> of the last{' '}
-        <span className="font-semibold">{snap.totalOrders.toLocaleString('en-US')}</span> fulfilled
-        orders were paid with recycled LOOP-asset cashback
+        <span className="font-semibold">{snap.totalOrders.toLocaleString(ADMIN_LOCALE)}</span>{' '}
+        fulfilled orders were paid with recycled LOOP-asset cashback
         {pctCharge !== null ? (
           <>
             {' '}

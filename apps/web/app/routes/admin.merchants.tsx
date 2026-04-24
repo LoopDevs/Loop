@@ -10,6 +10,7 @@ import { AdminNav } from '~/components/features/admin/AdminNav';
 import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · Merchants — Loop' }];
@@ -167,8 +168,8 @@ function AdminMerchantsRouteInner(): React.JSX.Element {
       )}
 
       <p className="text-xs text-gray-500 dark:text-gray-400">
-        Showing {filtered.length.toLocaleString('en-US')} of{' '}
-        {merchants.length.toLocaleString('en-US')} merchants.
+        Showing {filtered.length.toLocaleString(ADMIN_LOCALE)} of{' '}
+        {merchants.length.toLocaleString(ADMIN_LOCALE)} merchants.
       </p>
     </main>
   );

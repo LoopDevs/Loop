@@ -18,6 +18,7 @@ import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { AssetCirculationCard } from '~/components/features/admin/AssetCirculationCard';
 import { Spinner } from '~/components/ui/Spinner';
 import { shortDay } from '~/components/features/admin/PaymentMethodActivityChart';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · Asset — Loop' }];
@@ -36,7 +37,9 @@ function fmtMinor(minor: string, fiat: string): string {
   const n = Number(minor);
   if (!Number.isFinite(n)) return '—';
   try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: fiat }).format(n / 100);
+    return new Intl.NumberFormat(ADMIN_LOCALE, { style: 'currency', currency: fiat }).format(
+      n / 100,
+    );
   } catch {
     return `${(n / 100).toFixed(2)} ${fiat}`;
   }
@@ -50,7 +53,7 @@ function fmtStroops(stroops: string, assetCode: LoopAssetCode): string {
   const fractionRaw = padded.slice(-7).replace(/0+$/, '');
   const fraction = fractionRaw.length > 0 ? `.${fractionRaw}` : '';
   const sign = negative ? '-' : '';
-  return `${sign}${Number(whole).toLocaleString('en-US')}${fraction} ${assetCode}`;
+  return `${sign}${Number(whole).toLocaleString(ADMIN_LOCALE)}${fraction} ${assetCode}`;
 }
 
 function truncPubkey(pk: string): string {

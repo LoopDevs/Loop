@@ -4,6 +4,7 @@ import { getTreasuryCreditFlow, type TreasuryCreditFlowDay } from '~/services/ad
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { shortDay } from './PaymentMethodActivityChart';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
  * CSS-only per-day ledger-delta chart over the last N days for one
@@ -33,7 +34,7 @@ function fmtMinor(minor: string, currency: Cur): string {
   const whole = padded.slice(0, -2);
   const fraction = padded.slice(-2);
   const sign = negative ? '-' : '';
-  return `${sign}${SYMBOL[currency]}${Number(whole).toLocaleString('en-US')}.${fraction}`;
+  return `${sign}${SYMBOL[currency]}${Number(whole).toLocaleString(ADMIN_LOCALE)}.${fraction}`;
 }
 
 function absBig(v: bigint): bigint {

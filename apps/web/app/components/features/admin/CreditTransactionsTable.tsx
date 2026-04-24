@@ -7,6 +7,7 @@ import {
 } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 const PAGE_SIZE = 20;
 
@@ -28,7 +29,7 @@ function fmtSignedMinor(minor: string, currency: string): string {
     // `signDisplay: 'exceptZero'` surfaces +/- in the output so a debit
     // reads as "-£1.00" and a cashback reads as "+£0.20" — the direction
     // is the signal for ops, not just the type pill.
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat(ADMIN_LOCALE, {
       style: 'currency',
       currency,
       signDisplay: 'exceptZero',
@@ -149,7 +150,7 @@ export function CreditTransactionsTable({ userId }: Props): React.JSX.Element {
               {rows.map((tx: AdminCreditTransactionView) => (
                 <tr key={tx.id}>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-700 dark:text-gray-300">
-                    {new Date(tx.createdAt).toLocaleString('en-US', {
+                    {new Date(tx.createdAt).toLocaleString(ADMIN_LOCALE, {
                       dateStyle: 'short',
                       timeStyle: 'short',
                     })}

@@ -15,6 +15,7 @@ import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { OperatorMerchantMixCard } from '~/components/features/admin/OperatorMerchantMixCard';
 import { Spinner } from '~/components/ui/Spinner';
 import { shortDay } from '~/components/features/admin/PaymentMethodActivityChart';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · Operator — Loop' }];
@@ -24,7 +25,7 @@ function fmtMinor(minor: string, currency: string): string {
   const n = Number(minor);
   if (!Number.isFinite(n)) return '—';
   try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(n / 100);
+    return new Intl.NumberFormat(ADMIN_LOCALE, { style: 'currency', currency }).format(n / 100);
   } catch {
     return `${(n / 100).toFixed(2)} ${currency}`;
   }

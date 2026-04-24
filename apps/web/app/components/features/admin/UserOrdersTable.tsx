@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { listAdminOrders, type AdminOrderState, type AdminOrderView } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 const LIMIT = 25;
 
@@ -24,7 +25,7 @@ export function fmtMinor(minor: string, currency: string): string {
   try {
     const major = Number(BigInt(minor)) / 100;
     if (!Number.isFinite(major)) return '—';
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(major);
+    return new Intl.NumberFormat(ADMIN_LOCALE, { style: 'currency', currency }).format(major);
   } catch {
     return '—';
   }
@@ -88,7 +89,7 @@ export function UserOrdersTable({ userId }: Props): React.JSX.Element {
           {query.data.orders.map((row: AdminOrderView) => (
             <tr key={row.id}>
               <td className="px-3 py-2 whitespace-nowrap text-gray-700 dark:text-gray-300">
-                {new Date(row.createdAt).toLocaleString('en-US', {
+                {new Date(row.createdAt).toLocaleString(ADMIN_LOCALE, {
                   dateStyle: 'short',
                   timeStyle: 'short',
                 })}

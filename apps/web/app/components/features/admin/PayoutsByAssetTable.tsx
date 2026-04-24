@@ -7,6 +7,7 @@ import {
 } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
  * Renders a stroops-as-string amount as `X.Y <code>`. Same formatting
@@ -22,7 +23,7 @@ function fmtStroops(stroops: string, code: string): string {
   const fractionRaw = padded.slice(-7).replace(/0+$/, '');
   const fraction = fractionRaw.length > 0 ? `.${fractionRaw}` : '';
   const sign = negative ? '-' : '';
-  return `${sign}${Number(whole).toLocaleString('en-US')}${fraction} ${code}`;
+  return `${sign}${Number(whole).toLocaleString(ADMIN_LOCALE)}${fraction} ${code}`;
 }
 
 function StateCell({

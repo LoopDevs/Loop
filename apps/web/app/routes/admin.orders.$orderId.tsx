@@ -14,6 +14,7 @@ import { AdminNav } from '~/components/features/admin/AdminNav';
 import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · Order — Loop' }];
@@ -36,7 +37,7 @@ export function fmtMinor(minor: string, currency: string): string {
   try {
     const major = Number(BigInt(minor)) / 100;
     if (!Number.isFinite(major)) return '—';
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(major);
+    return new Intl.NumberFormat(ADMIN_LOCALE, { style: 'currency', currency }).format(major);
   } catch {
     return '—';
   }
@@ -48,7 +49,7 @@ function TimelineRow({ label, iso }: { label: string; iso: string | null }): Rea
       <span className="w-24 shrink-0 text-gray-500 dark:text-gray-400">{label}</span>
       {iso !== null ? (
         <span title={iso} className="text-gray-900 dark:text-white tabular-nums">
-          {new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}
+          {new Date(iso).toLocaleString(ADMIN_LOCALE, { dateStyle: 'medium', timeStyle: 'short' })}
         </span>
       ) : (
         <span className="text-gray-400 dark:text-gray-600">—</span>

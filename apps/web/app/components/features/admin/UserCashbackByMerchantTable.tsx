@@ -6,6 +6,7 @@ import {
 } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
  * Minor-unit string → localised currency, with an em-dash fallback
@@ -17,7 +18,7 @@ export function fmtCashback(minor: string, currency: string): string {
   const n = Number(minor);
   if (!Number.isFinite(n)) return '—';
   try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(n / 100);
+    return new Intl.NumberFormat(ADMIN_LOCALE, { style: 'currency', currency }).format(n / 100);
   } catch {
     return `${(n / 100).toFixed(2)} ${currency}`;
   }
@@ -112,7 +113,7 @@ export function UserCashbackByMerchantTable({ userId }: { userId: string }): Rea
                 </Link>
               </td>
               <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
-                {row.orderCount.toLocaleString('en-US')}
+                {row.orderCount.toLocaleString(ADMIN_LOCALE)}
               </td>
               <td className="px-3 py-2 tabular-nums font-medium text-green-700 dark:text-green-400">
                 +{fmtCashback(row.cashbackMinor, currency)}

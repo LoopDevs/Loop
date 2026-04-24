@@ -21,6 +21,7 @@ import { DiscordNotifiersCard } from '~/components/features/admin/DiscordNotifie
 import { PaymentMethodActivityChart } from '~/components/features/admin/PaymentMethodActivityChart';
 import { PaymentMethodShareCard } from '~/components/features/admin/PaymentMethodShareCard';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · Treasury — Loop' }];
@@ -41,7 +42,7 @@ function fmtMinor(minor: string, currency: string): string {
   const sign = negative ? '-' : '';
   const symbol =
     currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : currency === 'USD' ? '$' : '';
-  return `${sign}${symbol}${Number(whole).toLocaleString('en-US')}.${fraction} ${currency}`;
+  return `${sign}${symbol}${Number(whole).toLocaleString(ADMIN_LOCALE)}.${fraction} ${currency}`;
 }
 
 /**
@@ -58,7 +59,7 @@ function fmtStroops(stroops: string | null, code: string): string {
   const fractionRaw = padded.slice(-7).replace(/0+$/, '');
   const fraction = fractionRaw.length > 0 ? `.${fractionRaw}` : '';
   const sign = negative ? '-' : '';
-  return `${sign}${Number(whole).toLocaleString('en-US')}${fraction} ${code}`;
+  return `${sign}${Number(whole).toLocaleString(ADMIN_LOCALE)}${fraction} ${code}`;
 }
 
 // LOOP asset enumeration comes from `@loop/shared` so the treasury

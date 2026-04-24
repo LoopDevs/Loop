@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { getUserOperatorMix, type UserOperatorMixRow } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 const WINDOW_HOURS = 24;
 
@@ -99,10 +100,10 @@ export function UserOperatorMixCard({ userId }: { userId: string }): React.JSX.E
                 </Link>
               </td>
               <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
-                {r.orderCount.toLocaleString('en-US')}
+                {r.orderCount.toLocaleString(ADMIN_LOCALE)}
               </td>
               <td className="px-3 py-2 tabular-nums text-green-700 dark:text-green-400">
-                {r.fulfilledCount.toLocaleString('en-US')}
+                {r.fulfilledCount.toLocaleString(ADMIN_LOCALE)}
               </td>
               <td
                 className={`px-3 py-2 tabular-nums ${
@@ -117,10 +118,10 @@ export function UserOperatorMixCard({ userId }: { userId: string }): React.JSX.E
                     className="hover:underline"
                     aria-label={`Review ${r.failedCount} failed orders for this user carried by ${r.operatorId}`}
                   >
-                    {r.failedCount.toLocaleString('en-US')}
+                    {r.failedCount.toLocaleString(ADMIN_LOCALE)}
                   </Link>
                 ) : (
-                  r.failedCount.toLocaleString('en-US')
+                  r.failedCount.toLocaleString(ADMIN_LOCALE)
                 )}
               </td>
               <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">

@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { listPayouts, type AdminPayoutView, type PayoutState } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 const LIMIT = 25;
 
@@ -26,7 +27,7 @@ export function fmtStroops(stroops: string, code: string): string {
   const fractionRaw = padded.slice(-7).replace(/0+$/, '');
   const fraction = fractionRaw.length > 0 ? `.${fractionRaw}` : '';
   const sign = negative ? '-' : '';
-  return `${sign}${Number(whole).toLocaleString('en-US')}${fraction} ${code}`;
+  return `${sign}${Number(whole).toLocaleString(ADMIN_LOCALE)}${fraction} ${code}`;
 }
 
 interface Props {
@@ -86,7 +87,7 @@ export function UserPayoutsTable({ userId }: Props): React.JSX.Element {
           {query.data.payouts.map((row: AdminPayoutView) => (
             <tr key={row.id}>
               <td className="px-3 py-2 whitespace-nowrap text-gray-700 dark:text-gray-300">
-                {new Date(row.createdAt).toLocaleString('en-US', {
+                {new Date(row.createdAt).toLocaleString(ADMIN_LOCALE, {
                   dateStyle: 'short',
                   timeStyle: 'short',
                 })}

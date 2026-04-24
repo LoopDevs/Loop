@@ -9,6 +9,7 @@ import { AdminNav } from '~/components/features/admin/AdminNav';
 import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · Payouts — Loop' }];
@@ -35,7 +36,7 @@ function fmtStroops(stroops: string, code: string): string {
   const fractionRaw = padded.slice(-7).replace(/0+$/, '');
   const fraction = fractionRaw.length > 0 ? `.${fractionRaw}` : '';
   const sign = negative ? '-' : '';
-  return `${sign}${Number(whole).toLocaleString('en-US')}${fraction} ${code}`;
+  return `${sign}${Number(whole).toLocaleString(ADMIN_LOCALE)}${fraction} ${code}`;
 }
 
 function truncId(s: string): string {
@@ -240,7 +241,7 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
                       to={`/admin/payouts/${p.id}`}
                       className="hover:underline text-blue-600 dark:text-blue-400"
                     >
-                      {new Date(p.createdAt).toLocaleString('en-US', {
+                      {new Date(p.createdAt).toLocaleString(ADMIN_LOCALE, {
                         dateStyle: 'short',
                         timeStyle: 'short',
                       })}
