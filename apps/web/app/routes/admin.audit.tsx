@@ -13,14 +13,14 @@
  */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router';
+import { Link } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.audit';
-import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { getAdminAuditTail, type AdminAuditTailRow } from '~/services/admin';
 import { auditRowLink, fmtRelative } from '~/components/features/admin/AdminAuditTail';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { Spinner } from '~/components/ui/Spinner';
 import { Button } from '~/components/ui/Button';
@@ -41,24 +41,20 @@ function statusColor(status: number): string {
   return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
 }
 
+// A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminAuditRoute(): React.JSX.Element {
-  const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  return (
+    <RequireAdmin>
+      <AdminAuditRouteInner />
+    </RequireAdmin>
+  );
+}
+
+function AdminAuditRouteInner(): React.JSX.Element {
   // Each Load-more push the last row's createdAt — cursor key means
   // TanStack caches each page independently and re-visiting the tab
   // restores the accumulated view instead of collapsing to page 1.
   const [cursors, setCursors] = useState<Array<string | undefined>>([undefined]);
-
-  if (!isAuthenticated) {
-    return (
-      <main className="max-w-5xl mx-auto px-6 py-12">
-        <AdminNav />
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">Admin · Audit</h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in with an admin account.</p>
-        <Button onClick={() => void navigate('/auth')}>Sign in</Button>
-      </main>
-    );
-  }
 
   return (
     <main className="max-w-5xl mx-auto px-6 py-12 space-y-6">

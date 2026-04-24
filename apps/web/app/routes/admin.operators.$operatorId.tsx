@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import type { Route } from './+types/admin.operators.$operatorId';
-import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import {
   getOperatorActivity,
@@ -12,6 +11,7 @@ import {
   type SupplierSpendRow,
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { OperatorMerchantMixCard } from '~/components/features/admin/OperatorMerchantMixCard';
 import { Spinner } from '~/components/ui/Spinner';
 import { shortDay } from '~/components/features/admin/PaymentMethodActivityChart';
@@ -59,15 +59,21 @@ function fmtMs(ms: number): string {
  * by the treasury page — if the operator just arrived from there,
  * TanStack Query's 30-60s staleTime keeps the cache warm.
  */
+// A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminOperatorDetailRoute(): React.JSX.Element {
+  return (
+    <RequireAdmin>
+      <AdminOperatorDetailRouteInner />
+    </RequireAdmin>
+  );
+}
+
+function AdminOperatorDetailRouteInner(): React.JSX.Element {
   const { operatorId = '' } = useParams<{ operatorId: string }>();
-  const { isAuthenticated } = useAuth();
-  const navigate = useNavigate();
 
   const statsQuery = useQuery({
     queryKey: ['admin-operator-stats'],
     queryFn: () => getOperatorStats(),
-    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 30_000,
   });
@@ -75,7 +81,6 @@ export default function AdminOperatorDetailRoute(): React.JSX.Element {
   const latencyQuery = useQuery({
     queryKey: ['admin-operator-latency'],
     queryFn: () => getOperatorLatency(),
-    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 30_000,
   });
@@ -83,7 +88,7 @@ export default function AdminOperatorDetailRoute(): React.JSX.Element {
   const spendQuery = useQuery({
     queryKey: ['admin-operator-supplier-spend', operatorId],
     queryFn: () => getOperatorSupplierSpend(operatorId),
-    enabled: isAuthenticated && operatorId.length > 0,
+    enabled: operatorId.length > 0,
     retry: shouldRetry,
     staleTime: 30_000,
   });
@@ -91,30 +96,10 @@ export default function AdminOperatorDetailRoute(): React.JSX.Element {
   const activityQuery = useQuery({
     queryKey: ['admin-operator-activity', operatorId, 30],
     queryFn: () => getOperatorActivity(operatorId, { days: 30 }),
-    enabled: isAuthenticated && operatorId.length > 0,
+    enabled: operatorId.length > 0,
     retry: shouldRetry,
     staleTime: 30_000,
   });
-
-  if (!isAuthenticated) {
-    return (
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
-          Admin · Operator
-        </h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in with an admin account.</p>
-        <button
-          type="button"
-          className="text-blue-600 underline"
-          onClick={() => {
-            void navigate('/auth');
-          }}
-        >
-          Go to sign-in
-        </button>
-      </main>
-    );
-  }
 
   const statsRow = statsQuery.data?.rows.find((r) => r.operatorId === operatorId);
   const latencyRow = latencyQuery.data?.rows.find((r) => r.operatorId === operatorId);

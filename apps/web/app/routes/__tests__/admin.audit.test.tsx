@@ -39,6 +39,26 @@ vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: authMock.isAuthenticated }),
 }));
 
+// A2-1101: RequireAdmin gates the shell on /api/users/me.isAdmin —
+// admin routes can't render without a successful getMe() returning
+// isAdmin:true. Tests that want to exercise the denial banner can
+// override by resetting this mock per-test.
+import type * as UserModule from '~/services/user';
+vi.mock('~/services/user', async (importActual) => {
+  const actual = (await importActual()) as typeof UserModule;
+  return {
+    ...actual,
+    getMe: vi.fn(async () => ({
+      id: 'u1',
+      email: 'admin@loop.test',
+      isAdmin: true,
+      homeCurrency: 'USD' as const,
+      stellarAddress: null,
+      homeCurrencyBalanceMinor: '0',
+    })),
+  };
+});
+
 vi.mock('~/hooks/query-retry', () => ({
   shouldRetry: () => false,
 }));

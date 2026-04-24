@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.users.$userId';
-import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { getAdminUser, getAdminUserCredits, type AdminUserCreditRow } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { AdminUserFlywheelChip } from '~/components/features/admin/AdminUserFlywheelChip';
 import { CashbackSummaryChip } from '~/components/features/admin/CashbackSummaryChip';
 import { CopyButton } from '~/components/features/admin/CopyButton';
@@ -59,15 +59,22 @@ function fmtMinor(balanceMinor: string, currency: string): string {
  * The credit-adjustment form + the credit-transactions log are
  * follow-up slices (ADR 017 backend is already live).
  */
+// A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminUserDetailRoute(): React.JSX.Element {
-  const navigate = useNavigate();
+  return (
+    <RequireAdmin>
+      <AdminUserDetailRouteInner />
+    </RequireAdmin>
+  );
+}
+
+function AdminUserDetailRouteInner(): React.JSX.Element {
   const { userId } = useParams<{ userId: string }>();
-  const { isAuthenticated } = useAuth();
 
   const userQuery = useQuery({
     queryKey: ['admin-user', userId ?? null],
     queryFn: () => getAdminUser(userId ?? ''),
-    enabled: isAuthenticated && userId !== undefined && userId.length > 0,
+    enabled: userId !== undefined && userId.length > 0,
     retry: shouldRetry,
     staleTime: 30_000,
   });
@@ -75,28 +82,10 @@ export default function AdminUserDetailRoute(): React.JSX.Element {
   const creditsQuery = useQuery({
     queryKey: ['admin-user-credits', userId ?? null],
     queryFn: () => getAdminUserCredits(userId ?? ''),
-    enabled: isAuthenticated && userId !== undefined && userId.length > 0,
+    enabled: userId !== undefined && userId.length > 0,
     retry: shouldRetry,
     staleTime: 15_000,
   });
-
-  if (!isAuthenticated) {
-    return (
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">Admin · User</h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in with an admin account.</p>
-        <button
-          type="button"
-          className="text-blue-600 underline"
-          onClick={() => {
-            void navigate('/auth');
-          }}
-        >
-          Go to sign-in
-        </button>
-      </main>
-    );
-  }
 
   // 404 body is used by both the user fetch (user not found) and the
   // credits fetch (shouldn't happen if the user exists, but handle

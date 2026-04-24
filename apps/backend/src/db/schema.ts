@@ -695,3 +695,23 @@ export const adminIdempotencyKeys = pgTable(
     check('admin_idempotency_keys_status_valid', sql`${t.status} >= 100 AND ${t.status} < 600`),
   ],
 );
+
+/**
+ * A2-566: social-login ID-token replay guard. Every successfully
+ * verified Google / Apple id_token is recorded by its sha256 digest
+ * before we mint a Loop session. A second attempt with the same token
+ * hits the unique constraint and the handler rejects with 401.
+ *
+ * See `auth/id-token-replay.ts` for the consume helper and the
+ * corresponding migration (`0019_social_id_token_replay_guard.sql`).
+ */
+export const socialIdTokenUses = pgTable(
+  'social_id_token_uses',
+  {
+    tokenHash: text('token_hash').primaryKey(),
+    provider: text('provider').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('social_id_token_uses_expires_at_idx').on(t.expiresAt)],
+);

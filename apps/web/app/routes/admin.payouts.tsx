@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate, useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { isLoopAssetCode } from '@loop/shared';
 import type { Route } from './+types/admin.payouts';
-import { useAuth } from '~/hooks/use-auth';
 import { listPayouts, retryPayout, type AdminPayoutView, type PayoutState } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -61,9 +61,16 @@ function statePillClass(s: PayoutState): string {
  * `pending_payouts`. Filter chips route via `?state=`; failed rows
  * show a Retry button that wraps `resetPayoutToPending`.
  */
+// A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminPayoutsRoute(): React.JSX.Element {
-  const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  return (
+    <RequireAdmin>
+      <AdminPayoutsRouteInner />
+    </RequireAdmin>
+  );
+}
+
+function AdminPayoutsRouteInner(): React.JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
   const stateParam = searchParams.get('state');
   const activeState = STATES.includes(stateParam as PayoutState | 'all')
@@ -85,7 +92,6 @@ export default function AdminPayoutsRoute(): React.JSX.Element {
         ...(activeState !== 'all' ? { state: activeState } : {}),
         ...(assetCodeFilter !== undefined ? { assetCode: assetCodeFilter } : {}),
       }),
-    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 10_000,
   });
@@ -129,26 +135,6 @@ export default function AdminPayoutsRoute(): React.JSX.Element {
       return params;
     });
   };
-
-  if (!isAuthenticated) {
-    return (
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
-          Admin · Payouts
-        </h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in with an admin account.</p>
-        <button
-          type="button"
-          className="text-blue-600 underline"
-          onClick={() => {
-            void navigate('/auth');
-          }}
-        >
-          Go to sign-in
-        </button>
-      </main>
-    );
-  }
 
   return (
     <main className="max-w-6xl mx-auto px-6 py-12 space-y-6">
