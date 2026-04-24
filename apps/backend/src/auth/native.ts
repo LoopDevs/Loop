@@ -104,12 +104,22 @@ const VerifyOtpBody = z.object({
 interface TokenPair {
   accessToken: string;
   refreshToken: string;
+  /**
+   * A2-557: jti of the freshly-minted refresh token. Returned
+   * alongside the token strings so `nativeRefreshHandler` can
+   * populate the `replacedByJti` link on the prior row without
+   * re-verifying the token it just signed. The client contract
+   * (`{ accessToken, refreshToken }`) is unchanged — this field is
+   * internal and stripped at the handler boundary via destructure.
+   */
+  refreshJti: string;
 }
 
 /**
  * Mints a fresh access + refresh pair for `user` and persists the
  * refresh row. Shared by `verify-otp` (first issue) and `refresh`
- * (rotation). Returns the token strings to send to the client.
+ * (rotation). Returns the token strings to send to the client plus
+ * the refresh `jti` for internal revoke-linking (A2-557).
  */
 async function issueTokenPair(user: { id: string; email: string }): Promise<TokenPair> {
   const access = signLoopToken({
@@ -135,7 +145,11 @@ async function issueTokenPair(user: { id: string; email: string }): Promise<Toke
     token: refresh.token,
     expiresAt: new Date(refresh.claims.exp * 1000),
   });
-  return { accessToken: access.token, refreshToken: refresh.token };
+  return {
+    accessToken: access.token,
+    refreshToken: refresh.token,
+    refreshJti: refresh.claims.jti,
+  };
 }
 
 /**
@@ -174,7 +188,9 @@ export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
     await markOtpConsumed(hit.id);
     const user = await findOrCreateUserByEmail(email);
     const pair = await issueTokenPair({ id: user.id, email: user.email });
-    return c.json(pair);
+    // A2-557: strip the internal `refreshJti` field; wire contract
+    // stays `{ accessToken, refreshToken }`.
+    return c.json({ accessToken: pair.accessToken, refreshToken: pair.refreshToken });
   } catch (err) {
     log.error({ err, email }, 'Native verify-otp failed unexpectedly');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Verification failed' }, 500);
@@ -241,17 +257,16 @@ export async function nativeRefreshHandler(c: Context): Promise<Response> {
 
     const pair = await issueTokenPair({ id: claims.sub, email: claims.email });
     // Revoke the old row after issuing the new one — if the new-row
-    // insert fails the old row is still usable on a retry.
-    const newRefreshClaims = verifyLoopToken(pair.refreshToken, 'refresh');
-    if (newRefreshClaims.ok && newRefreshClaims.claims.jti !== undefined) {
-      await revokeRefreshToken({
-        jti: claims.jti,
-        replacedByJti: newRefreshClaims.claims.jti,
-      });
-    } else {
-      await revokeRefreshToken({ jti: claims.jti });
-    }
-    return c.json(pair);
+    // insert fails the old row is still usable on a retry. A2-557:
+    // `issueTokenPair` already knows the new refresh jti from
+    // signing; no need to re-verify the token string to extract it.
+    await revokeRefreshToken({
+      jti: claims.jti,
+      replacedByJti: pair.refreshJti,
+    });
+    // Strip the internal `refreshJti` field before returning to the
+    // client — the wire contract stays `{ accessToken, refreshToken }`.
+    return c.json({ accessToken: pair.accessToken, refreshToken: pair.refreshToken });
   } catch (err) {
     log.error({ err }, 'Native refresh failed unexpectedly');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Refresh failed' }, 500);
