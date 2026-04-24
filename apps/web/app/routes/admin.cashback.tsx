@@ -1,10 +1,9 @@
 import { Fragment, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.cashback';
 import { useAllMerchants } from '~/hooks/use-merchants';
-import { useAuth } from '~/hooks/use-auth';
 import {
   cashbackConfigHistory,
   listCashbackConfigs,
@@ -45,16 +44,22 @@ interface RowDraft {
  * frontend does not gate on is_admin locally — it's not the source
  * of truth (see `requireAdmin` in the backend).
  */
+// A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminCashbackRoute(): React.JSX.Element {
-  const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  return (
+    <RequireAdmin>
+      <AdminCashbackRouteInner />
+    </RequireAdmin>
+  );
+}
+
+function AdminCashbackRouteInner(): React.JSX.Element {
   const { merchants } = useAllMerchants();
   const queryClient = useQueryClient();
 
   const configsQuery = useQuery({
     queryKey: ['admin-cashback-configs'],
     queryFn: listCashbackConfigs,
-    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 0,
   });
@@ -66,7 +71,6 @@ export default function AdminCashbackRoute(): React.JSX.Element {
   const flowsQuery = useQuery({
     queryKey: ['admin-merchant-flows'],
     queryFn: listMerchantFlows,
-    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 30_000,
   });
@@ -133,16 +137,6 @@ export default function AdminCashbackRoute(): React.JSX.Element {
   const denied =
     configsQuery.error instanceof ApiException &&
     (configsQuery.error.status === 401 || configsQuery.error.status === 404);
-
-  if (!isAuthenticated) {
-    return (
-      <div className="max-w-4xl mx-auto px-4 py-10">
-        <h1 className="text-2xl font-bold mb-4">Admin · Cashback</h1>
-        <p className="text-gray-500 dark:text-gray-400 mb-4">Sign in to continue.</p>
-        <Button onClick={() => void navigate('/auth')}>Sign in</Button>
-      </div>
-    );
-  }
 
   if (configsQuery.isLoading) {
     return (

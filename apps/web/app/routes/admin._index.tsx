@@ -1,8 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router';
+import { Link } from 'react-router';
 import { ApiException, LOOP_ASSET_CODES, type LoopAssetCode } from '@loop/shared';
 import type { Route } from './+types/admin._index';
-import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { getTreasurySnapshot, type TreasurySnapshot } from '~/services/admin';
 import {
@@ -10,6 +9,7 @@ import {
   failedPayoutsCount,
   operatorPoolStatus,
 } from '~/components/features/admin/AdminNav';
+import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { AdminAuditTail } from '~/components/features/admin/AdminAuditTail';
 import { ConfigsHistoryCard } from '~/components/features/admin/ConfigsHistoryCard';
 import { CashbackSparkline } from '~/components/features/admin/CashbackSparkline';
@@ -156,35 +156,24 @@ const CARDS: ReadonlyArray<CardLink> = [
  * when logged out; the 401/403 from the treasury fetch is how we
  * tell the caller isn't an admin.
  */
+// A2-1101: the whole admin shell gates on `RequireAdmin`, which resolves
+// /api/users/me.isAdmin before rendering children. Non-admins see the
+// deny banner without any of the admin-specific data fetches firing.
 export default function AdminIndexRoute(): React.JSX.Element {
-  const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  return (
+    <RequireAdmin>
+      <AdminIndexRouteInner />
+    </RequireAdmin>
+  );
+}
 
+function AdminIndexRouteInner(): React.JSX.Element {
   const snapshotQuery = useQuery<TreasurySnapshot, Error>({
     queryKey: ['admin-treasury'],
     queryFn: getTreasurySnapshot,
-    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 30_000,
   });
-
-  if (!isAuthenticated) {
-    return (
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">Admin</h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in with an admin account.</p>
-        <button
-          type="button"
-          className="text-blue-600 underline"
-          onClick={() => {
-            void navigate('/auth');
-          }}
-        >
-          Go to sign-in
-        </button>
-      </main>
-    );
-  }
 
   const denied =
     snapshotQuery.error instanceof ApiException &&
