@@ -1,7 +1,8 @@
 # ADR 014: Social login — Google and Apple
 
-Status: Proposed
+Status: Accepted
 Date: 2026-04-21
+Implemented: 2026-04-21 onwards (`POST /api/auth/social/google` + `/apple` in auth/social.ts; JWKS verification in auth/id-token.ts; identity resolve-or-create in auth/identities.ts — both handlers gated on `LOOP_AUTH_NATIVE_ENABLED` plus per-provider audience env configuration)
 Related: ADR 013 (Loop-owned auth + CTX operator pool)
 
 ## Context
