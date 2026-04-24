@@ -262,6 +262,17 @@ export const merchantCashbackConfigs = pgTable(
  * No FK to `merchantCashbackConfigs` — we want history rows to
  * survive if a config row is ever deleted (which shouldn't happen
  * in normal ops, but the history should outlive it).
+ *
+ * A2-703: drizzle-kit does NOT model triggers, functions, or
+ * policies. The trigger + plpgsql function that write to this table
+ * live in the SQL migrations only (0000 creates, 0016 re-asserts
+ * idempotently). Running `drizzle-kit generate` after schema
+ * changes will NOT emit them — you must manually verify migrations
+ * preserve the `record_merchant_cashback_config_history` function
+ * and the `merchant_cashback_configs_audit` BEFORE UPDATE trigger.
+ * Migration 0016 re-asserts both via CREATE OR REPLACE + DROP IF
+ * EXISTS + CREATE so any accidental drizzle-push that dropped them
+ * gets healed on next deploy.
  */
 export const merchantCashbackConfigHistory = pgTable(
   'merchant_cashback_config_history',
