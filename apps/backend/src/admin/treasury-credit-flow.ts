@@ -39,20 +39,10 @@ const MIN_DAYS = 1;
 const MAX_DAYS = 180;
 const DEFAULT_DAYS = 30;
 
-export interface TreasuryCreditFlowDay {
-  /** YYYY-MM-DD in UTC. */
-  day: string;
-  currency: string;
-  creditedMinor: string;
-  debitedMinor: string;
-  netMinor: string;
-}
-
-export interface TreasuryCreditFlowResponse {
-  windowDays: number;
-  currency: HomeCurrency | null;
-  days: TreasuryCreditFlowDay[];
-}
+// A2-1506: moved to `@loop/shared/admin-treasury.ts`. Re-exported
+// for in-file handler builders.
+import type { TreasuryCreditFlowDay, TreasuryCreditFlowResponse } from '@loop/shared';
+export type { TreasuryCreditFlowDay, TreasuryCreditFlowResponse };
 
 interface Row extends Record<string, unknown> {
   day: string | Date;

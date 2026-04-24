@@ -12,6 +12,8 @@ import type {
   SupplierSpendActivityResponse,
   SupplierSpendResponse,
   SupplierSpendRow,
+  TreasuryCreditFlowDay,
+  TreasuryCreditFlowResponse,
   TreasuryHolding,
   TreasuryOrderFlow,
   TreasurySnapshot,
@@ -346,25 +348,11 @@ export async function getSupplierSpend(
   );
 }
 
-/**
- * Per-day credit-flow row (ADR 009 / 015). Returned by
- * `/api/admin/treasury/credit-flow`. `netMinor = credited - debited`
- * is the day's liability delta — positive means Loop's obligation
- * grew, negative means it shrank.
- */
-export interface TreasuryCreditFlowDay {
-  day: string;
-  currency: string;
-  creditedMinor: string;
-  debitedMinor: string;
-  netMinor: string;
-}
-
-export interface TreasuryCreditFlowResponse {
-  windowDays: number;
-  currency: 'USD' | 'GBP' | 'EUR' | null;
-  days: TreasuryCreditFlowDay[];
-}
+// A2-1506: `TreasuryCreditFlowDay` / `TreasuryCreditFlowResponse`
+// moved to `@loop/shared/admin-treasury.ts` — the shared declaration
+// types `currency` as `HomeCurrency | null`, which is the accurate
+// wire contract (the handler only returns USD/GBP/EUR and null).
+export type { TreasuryCreditFlowDay, TreasuryCreditFlowResponse };
 
 /**
  * `GET /api/admin/treasury/credit-flow` — per-day per-currency
