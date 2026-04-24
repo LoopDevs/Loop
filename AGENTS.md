@@ -4,42 +4,40 @@
 
 ## Docs index
 
-| Doc                                                         | Contents                                                          |
-| ----------------------------------------------------------- | ----------------------------------------------------------------- |
-| `docs/architecture.md`                                      | System design, data flows, component responsibilities             |
-| `docs/development.md`                                       | Getting started, env vars, all dev commands                       |
-| `docs/deployment.md`                                        | How to deploy backend, web, and mobile                            |
-| `docs/testing.md`                                           | Testing pyramid, when tests run, coverage requirements            |
-| `docs/standards.md`                                         | Code style, commit format, branching, review rules                |
-| `docs/slo.md`                                               | Availability / latency / freshness / settlement SLOs (A2-1325)    |
-| `docs/alerting.md`                                          | Paging tiers and limits of Discord-only alerting (A2-1327)        |
-| `docs/error-codes.md`                                       | Error-code taxonomy — every `{ code, message }` + client guidance |
-| `docs/third-party-licenses.md`                              | OSS attribution — libvips, Leaflet markers, postgres driver       |
-| `docs/roadmap.md`                                           | What's left for Phase 1, Phase 2, Phase 3                         |
-| `docs/codebase-audit.md`                                    | Audit program, scope, evidence model, exit criteria               |
-| `docs/audit-checklist.md`                                   | Detailed audit checklist by workstream                            |
-| `docs/audit-tracker.md`                                     | Working tracker for evidence, findings, and status                |
-| `docs/adr/`                                                 | Architecture Decision Records                                     |
-| `docs/adr/005-known-limitations.md`                         | Items we deliberately do NOT fix in Phase 1                       |
-| `docs/adr/006-keychain-backed-secure-storage.md`            | Keychain/EncryptedSharedPreferences for refresh tokens            |
-| `docs/adr/007-native-projects-source-of-truth.md`           | Why native iOS/Android projects stay generated, not versioned     |
-| `docs/adr/008-capacitor-filesystem-for-share.md`            | Why share-image writes go through Filesystem on Android           |
-| `docs/adr/009-credits-ledger-cashback-flow.md`              | Off-chain postgres ledger + cashback capture                      |
-| `docs/adr/010-principal-switch-payment-rails.md`            | Loop becomes merchant of record; payment rails                    |
-| `docs/adr/011-admin-panel-cashback-configuration.md`        | Admin panel shape + cashback-config audit trail                   |
-| `docs/adr/012-drizzle-orm-fly-postgres.md`                  | ORM + Postgres-on-Fly stack choice                                |
-| `docs/adr/013-loop-owned-auth-and-ctx-operator-accounts.md` | Loop owns user auth; CTX is a supplier pool                       |
-| `docs/adr/014-social-login-google-apple.md`                 | Google + Apple social login, verified server-side                 |
-| `docs/adr/015-stablecoin-topology-and-payment-rails.md`     | USDLOOP/GBPLOOP/EURLOOP + USDC + XLM asset flows                  |
-| `docs/adr/016-stellar-sdk-payout-submit.md`                 | Stellar SDK for outbound payout submit + retry + idempotency      |
-| `docs/adr/017-admin-credit-primitives.md`                   | Admin-write invariants: actor, idempotency, reason, audit         |
-| `docs/adr/018-admin-panel-architecture.md`                  | Admin drill-down / triage / CSV compliance pattern                |
-| `docs/adr/019-shared-package-policy.md`                     | `@loop/shared` — three-part test, re-export rule, phased adoption |
-| `docs/adr/020-public-api-surface.md`                        | `/api/public/*` — never-500, Cache-Control, no-PII conventions    |
-| `docs/adr/021-merchant-catalog-eviction-policy.md`          | Merchant-catalog eviction — admin fall-back / public drop / pin   |
-| `docs/adr/022-admin-drill-triplet-pattern.md`               | Fleet / per-merchant / per-user / self quartet for every metric   |
-| `docs/adr/023-admin-mix-axis-matrix.md`                     | Mix-axis matrix pattern for `/:scope/:id/<target>-mix` endpoints  |
-| `docs/adr/024-withdrawal-writer.md`                         | Admin withdrawal writer — USDLOOP debit + payout-queue insert     |
+| Doc                                                         | Contents                                                                                                                                                                                                                               |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/architecture.md`                                      | System design, data flows, component responsibilities                                                                                                                                                                                  |
+| `docs/development.md`                                       | Getting started, env vars, all dev commands                                                                                                                                                                                            |
+| `docs/deployment.md`                                        | How to deploy backend, web, and mobile                                                                                                                                                                                                 |
+| `docs/testing.md`                                           | Testing pyramid, when tests run, coverage requirements                                                                                                                                                                                 |
+| `docs/standards.md`                                         | Code style, commit format, branching, review rules                                                                                                                                                                                     |
+| `docs/slo.md`                                               | Availability / latency / freshness / settlement SLOs (A2-1325)                                                                                                                                                                         |
+| `docs/alerting.md`                                          | Paging tiers and limits of Discord-only alerting (A2-1327)                                                                                                                                                                             |
+| `docs/error-codes.md`                                       | Error-code taxonomy — every `{ code, message }` + client guidance                                                                                                                                                                      |
+| `docs/third-party-licenses.md`                              | OSS attribution — libvips, Leaflet markers, postgres driver                                                                                                                                                                            |
+| `docs/roadmap.md`                                           | What's left for Phase 1, Phase 2, Phase 3                                                                                                                                                                                              |
+| `docs/audit-2026-tracker.md`                                | Working tracker for the 2026-04 adversarial audit (467 findings). Previous pre-2026 audit (`codebase-audit.md` / `audit-checklist.md` / `audit-tracker.md`) is superseded — files kept for history but not the active source of truth. |
+| `docs/adr/`                                                 | Architecture Decision Records                                                                                                                                                                                                          |
+| `docs/adr/005-known-limitations.md`                         | Items we deliberately do NOT fix in Phase 1                                                                                                                                                                                            |
+| `docs/adr/006-keychain-backed-secure-storage.md`            | Keychain/EncryptedSharedPreferences for refresh tokens                                                                                                                                                                                 |
+| `docs/adr/007-native-projects-source-of-truth.md`           | Why native iOS/Android projects stay generated, not versioned                                                                                                                                                                          |
+| `docs/adr/008-capacitor-filesystem-for-share.md`            | Why share-image writes go through Filesystem on Android                                                                                                                                                                                |
+| `docs/adr/009-credits-ledger-cashback-flow.md`              | Off-chain postgres ledger + cashback capture                                                                                                                                                                                           |
+| `docs/adr/010-principal-switch-payment-rails.md`            | Loop becomes merchant of record; payment rails                                                                                                                                                                                         |
+| `docs/adr/011-admin-panel-cashback-configuration.md`        | Admin panel shape + cashback-config audit trail                                                                                                                                                                                        |
+| `docs/adr/012-drizzle-orm-fly-postgres.md`                  | ORM + Postgres-on-Fly stack choice                                                                                                                                                                                                     |
+| `docs/adr/013-loop-owned-auth-and-ctx-operator-accounts.md` | Loop owns user auth; CTX is a supplier pool                                                                                                                                                                                            |
+| `docs/adr/014-social-login-google-apple.md`                 | Google + Apple social login, verified server-side                                                                                                                                                                                      |
+| `docs/adr/015-stablecoin-topology-and-payment-rails.md`     | USDLOOP/GBPLOOP/EURLOOP + USDC + XLM asset flows                                                                                                                                                                                       |
+| `docs/adr/016-stellar-sdk-payout-submit.md`                 | Stellar SDK for outbound payout submit + retry + idempotency                                                                                                                                                                           |
+| `docs/adr/017-admin-credit-primitives.md`                   | Admin-write invariants: actor, idempotency, reason, audit                                                                                                                                                                              |
+| `docs/adr/018-admin-panel-architecture.md`                  | Admin drill-down / triage / CSV compliance pattern                                                                                                                                                                                     |
+| `docs/adr/019-shared-package-policy.md`                     | `@loop/shared` — three-part test, re-export rule, phased adoption                                                                                                                                                                      |
+| `docs/adr/020-public-api-surface.md`                        | `/api/public/*` — never-500, Cache-Control, no-PII conventions                                                                                                                                                                         |
+| `docs/adr/021-merchant-catalog-eviction-policy.md`          | Merchant-catalog eviction — admin fall-back / public drop / pin                                                                                                                                                                        |
+| `docs/adr/022-admin-drill-triplet-pattern.md`               | Fleet / per-merchant / per-user / self quartet for every metric                                                                                                                                                                        |
+| `docs/adr/023-admin-mix-axis-matrix.md`                     | Mix-axis matrix pattern for `/:scope/:id/<target>-mix` endpoints                                                                                                                                                                       |
+| `docs/adr/024-withdrawal-writer.md`                         | Admin withdrawal writer — USDLOOP debit + payout-queue insert                                                                                                                                                                          |
 
 ---
 

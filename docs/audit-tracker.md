@@ -1,5 +1,10 @@
 # Audit Tracker
 
+> **Superseded 2026-04 (A2-1809).** The active tracker is
+> [`docs/audit-2026-tracker.md`](./audit-2026-tracker.md) — 467
+> findings across 20 phases, live-updated. This file is frozen
+> historical state from the first-generation audit program.
+
 This is the execution document for the comprehensive audit. Update it as the audit proceeds.
 
 ## Baseline Snapshot
