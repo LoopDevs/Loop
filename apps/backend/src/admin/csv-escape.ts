@@ -1,6 +1,11 @@
 /**
  * CSV escaping for admin exporters (A2-1602).
  *
+ * Wire conventions — column naming, minor-unit scale, truncation
+ * marker — are documented in `docs/admin-csv-conventions.md`
+ * (A2-1523). Reviewers push back on exports that emit floats or skip
+ * the `_minor` / `_stroops` suffix.
+ *
  * Two concerns: RFC 4180 special characters (comma, quote, newline)
  * and spreadsheet formula injection (leading `=`, `+`, `-`, `@`, or
  * tab/cr).
