@@ -12,6 +12,7 @@
 | `docs/testing.md`                                           | Testing pyramid, when tests run, coverage requirements            |
 | `docs/standards.md`                                         | Code style, commit format, branching, review rules                |
 | `docs/slo.md`                                               | Availability / latency / freshness / settlement SLOs (A2-1325)    |
+| `docs/alerting.md`                                          | Paging tiers and limits of Discord-only alerting (A2-1327)        |
 | `docs/error-codes.md`                                       | Error-code taxonomy — every `{ code, message }` + client guidance |
 | `docs/third-party-licenses.md`                              | OSS attribution — libvips, Leaflet markers, postgres driver       |
 | `docs/roadmap.md`                                           | What's left for Phase 1, Phase 2, Phase 3                         |
