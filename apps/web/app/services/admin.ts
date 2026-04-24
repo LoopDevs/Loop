@@ -35,7 +35,13 @@ export async function listCashbackConfigs(): Promise<{ configs: MerchantCashback
   );
 }
 
-/** PUT /api/admin/merchant-cashback-configs/:merchantId */
+/**
+ * PUT /api/admin/merchant-cashback-configs/:merchantId — ADR 017
+ * admin write (A2-502). Caller supplies the split + a 2..500 char
+ * reason; the service generates a per-click `Idempotency-Key` so a
+ * double-submit of the form can't apply the edit twice. Response is
+ * the standard `{ result, audit }` envelope.
+ */
 export async function upsertCashbackConfig(
   merchantId: string,
   body: {
@@ -43,11 +49,20 @@ export async function upsertCashbackConfig(
     userCashbackPct: number;
     loopMarginPct: number;
     active?: boolean;
+    reason: string;
   },
-): Promise<{ config: MerchantCashbackConfig }> {
-  return authenticatedRequest<{ config: MerchantCashbackConfig }>(
+): Promise<AdminWriteEnvelope<MerchantCashbackConfig>> {
+  const idempotencyKey =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID().replace(/-/g, '')
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  return authenticatedRequest<AdminWriteEnvelope<MerchantCashbackConfig>>(
     `/api/admin/merchant-cashback-configs/${encodeURIComponent(merchantId)}`,
-    { method: 'PUT', body },
+    {
+      method: 'PUT',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body,
+    },
   );
 }
 
