@@ -57,6 +57,8 @@ function mkOrder(overrides: Partial<LoopOrderView> = {}): LoopOrderView {
     state: 'pending_payment',
     faceValueMinor: '1000',
     currency: 'USD',
+    chargeMinor: '1000',
+    chargeCurrency: 'USD',
     paymentMethod: 'usdc',
     paymentMemo: 'MEMO-ABCDEFGHIJKLMN',
     stellarAddress: 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW',

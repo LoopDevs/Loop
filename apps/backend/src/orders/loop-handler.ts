@@ -33,6 +33,7 @@ import {
   type OrderPaymentMethod,
   type HomeCurrency,
 } from '../db/schema.js';
+import type { CreateLoopOrderResponse, LoopOrderView as SharedLoopOrderView } from '@loop/shared';
 import { getUserById } from '../db/users.js';
 import { convertMinorUnits } from '../payments/price-feed.js';
 import { payoutAssetFor } from '../credits/payout-asset.js';
@@ -55,32 +56,12 @@ const CreateBody = z.object({
   paymentMethod: z.enum(ORDER_PAYMENT_METHODS),
 });
 
-export interface OrderPaymentResponse {
-  orderId: string;
-  payment:
-    | {
-        method: Extract<OrderPaymentMethod, 'xlm' | 'usdc'>;
-        stellarAddress: string;
-        memo: string;
-        amountMinor: string;
-        currency: string;
-      }
-    | {
-        method: 'loop_asset';
-        stellarAddress: string;
-        memo: string;
-        amountMinor: string;
-        currency: string;
-        /** The LOOP asset code + issuer the user should send. Pinned to home_currency. */
-        assetCode: 'USDLOOP' | 'GBPLOOP' | 'EURLOOP';
-        assetIssuer: string;
-      }
-    | {
-        method: 'credit';
-        amountMinor: string;
-        currency: string;
-      };
-}
+/**
+ * A2-1504: wire response type is now canonical in `@loop/shared`
+ * (`CreateLoopOrderResponse`). Re-export the legacy name so callers
+ * don't need to rename in the same PR that unified the contract.
+ */
+export type OrderPaymentResponse = CreateLoopOrderResponse;
 
 /**
  * Verifies the user has at least `amountMinor` in `currency`. Returns
@@ -370,39 +351,17 @@ function isHomeCurrency(s: string): s is HomeCurrency {
   return (HOME_CURRENCIES as ReadonlyArray<string>).includes(s);
 }
 
-export interface LoopOrderView {
-  id: string;
-  merchantId: string;
-  state: string;
-  /** Gift-card face value, in the catalog currency (ADR 015). */
-  faceValueMinor: string;
-  /** Catalog currency the gift card is denominated in. */
-  currency: string;
-  /**
-   * What the user was charged, in their home currency. For orders
-   * where home_currency === catalog currency (every pre-ADR-015
-   * order), this mirrors `faceValueMinor` + `currency`.
-   */
-  chargeMinor: string;
-  chargeCurrency: string;
-  paymentMethod: 'xlm' | 'usdc' | 'credit';
-  /** Populated when state ≥ pending_payment and the method is on-chain. */
-  paymentMemo: string | null;
-  /** Loop's deposit address for the configured env. Always populated for on-chain orders. */
-  stellarAddress: string | null;
-  userCashbackMinor: string;
-  /** CTX gift-card id, populated once procurement resolves. */
-  ctxOrderId: string | null;
-  /** Redemption payload (ADR 010). Null fields when CTX didn't return them. */
-  redeemCode: string | null;
-  redeemPin: string | null;
-  redeemUrl: string | null;
-  failureReason: string | null;
-  createdAt: string;
-  paidAt: string | null;
-  fulfilledAt: string | null;
-  failedAt: string | null;
-}
+/**
+ * A2-1504: wire view type is now canonical in `@loop/shared`
+ * (`LoopOrderView`). Re-export under the historical name to keep
+ * the handler's public surface stable.
+ *
+ * The shared view also widens `paymentMethod` to include `loop_asset`
+ * — the DB column holds it and the UI reads it
+ * (`LoopOrdersList.tsx:84`), so the prior local cast to
+ * `'xlm' | 'usdc' | 'credit'` was a silent narrowing.
+ */
+export type LoopOrderView = SharedLoopOrderView;
 
 /**
  * Shapes a DB `orders` row into the BigInt-safe wire view. Shared by
@@ -432,12 +391,19 @@ function orderToView(row: {
   return {
     id: row.id,
     merchantId: row.merchantId,
-    state: row.state,
+    // DB CHECK constraint `orders_state_known` (ADR 010) is the
+    // runtime gate; the cast here tells TS that what comes out of
+    // the column is one of the `OrderState` variants.
+    state: row.state as SharedLoopOrderView['state'],
     faceValueMinor: row.faceValueMinor.toString(),
     currency: row.currency,
     chargeMinor: row.chargeMinor.toString(),
     chargeCurrency: row.chargeCurrency,
-    paymentMethod: row.paymentMethod as 'xlm' | 'usdc' | 'credit',
+    // DB CHECK constraint `orders_payment_method_known` pins the
+    // column to `ORDER_PAYMENT_METHODS`. A2-1504 widened this from
+    // `'xlm' | 'usdc' | 'credit'` because `loop_asset` rows do reach
+    // this path (recycled cashback — ADR 015) and the UI keys off it.
+    paymentMethod: row.paymentMethod as OrderPaymentMethod,
     paymentMemo: row.paymentMemo,
     stellarAddress:
       row.paymentMethod === 'credit' ? null : (env.LOOP_STELLAR_DEPOSIT_ADDRESS ?? null),
