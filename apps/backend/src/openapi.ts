@@ -2579,7 +2579,10 @@ const UserPendingPayoutView = registry.register(
   'UserPendingPayoutView',
   z.object({
     id: z.string().uuid(),
-    orderId: z.string().uuid(),
+    orderId: z.string().uuid().nullable().openapi({
+      description:
+        "Origin order id for order-fulfilment cashback payouts; null for kind='withdrawal' (A2-901 / ADR-024 §2).",
+    }),
     assetCode: z
       .string()
       .openapi({ description: 'LOOP asset code — USDLOOP / GBPLOOP / EURLOOP.' }),
