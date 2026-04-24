@@ -6,28 +6,47 @@
 
 ```
 app/
-├── routes/           ← File-based routes (React Router v7)
-│   ├── home.tsx      ← Merchant directory (featured + all)
-│   ├── auth.tsx      ← Email → OTP login flow
-│   ├── gift-card.$name.tsx  ← Merchant detail + purchase flow
-│   ├── map.tsx       ← Cluster map (lazy-loaded Leaflet)
-│   ├── orders.tsx    ← Order history (paginated)
-│   └── not-found.tsx ← 404 catch-all
+├── routes/           ← File-based routes (React Router v7, 33 routes)
+│   ├── home.tsx, map.tsx, gift-card.$name.tsx, auth.tsx,
+│   │   onboarding.tsx, calculator.tsx, sitemap.tsx,
+│   │   privacy.tsx, terms.tsx, not-found.tsx
+│   ├── orders.tsx, orders.$id.tsx          ← order history + detail
+│   ├── cashback.tsx, cashback.$slug.tsx    ← user cashback dashboard
+│   ├── settings.*.tsx                      ← profile / wallet / cashback / home-currency
+│   └── admin.*.tsx (17 routes)             ← admin panel: treasury / cashback /
+│                                             orders / users / merchants / operators /
+│                                             payouts / assets / audit / stuck-orders
 ├── components/
-│   ├── features/     ← Domain components (Navbar, Footer, MerchantCard, ClusterMap,
-│   │                   MapBottomSheet, NativeTabBar, NativeBackButton, purchase/)
-│   └── ui/           ← Primitives (Button, Input, LazyImage, OfflineBanner, Skeleton,
-│                       Spinner, ToastContainer)
+│   ├── features/     ← Domain components, grouped by feature:
+│   │   ├── admin/    ← ~40 components (treasury, cashback, operator, supplier,
+│   │   │               payout, mix-axis-matrix cards + csv export)
+│   │   ├── auth/     ← social login button, email+OTP flow
+│   │   ├── cashback/ ← flywheel chip, balance, pending-payouts, rail-mix
+│   │   ├── home/     ← stats bands (cashback + flywheel)
+│   │   ├── onboarding/ ← biometric, currency, wallet-trust, signup-tail
+│   │   ├── order/    ← per-order payout card
+│   │   ├── orders/   ← loop-orders list + summary header
+│   │   ├── purchase/ ← amount → payment → complete / redeem state machine
+│   │   ├── wallet/   ← Stellar trustline status / setup cards
+│   │   └── top-level: Navbar, Footer, MerchantCard, ClusterMap, MapBottomSheet,
+│   │                  NativeTabBar, NativeBackButton, FixedSearchButton
+│   └── ui/           ← Primitives (Button, Input, LazyImage, OfflineBanner,
+│                       Skeleton, Spinner, ToastContainer)
 ├── hooks/            ← TanStack Query wrappers + lifecycle (use-auth, use-merchants,
 │                       use-orders, use-native-platform, use-session-restore, query-retry)
-├── services/         ← Typed API client (api-client, auth, clusters, merchants, orders, config)
+├── services/         ← Typed API client (api-client, auth, clusters, merchants,
+│                       orders, orders-loop, config, admin, user, public-stats,
+│                       parse-error-response)
 ├── stores/           ← Zustand (auth.store, purchase.store, ui.store)
 ├── native/           ← Capacitor plugin wrappers (platform, haptics, secure-storage,
 │                       biometrics, app-lock, back-button, clipboard, keyboard, network,
 │                       notifications, purchase-storage, screenshot-guard, share,
 │                       status-bar, webview)
-├── utils/            ← error-messages, image (proxy URL builder), money, security-headers
-└── root.tsx          ← Layout, QueryClientProvider, meta, links
+├── utils/            ← admin-cache, error-messages, image, locale, money,
+│                       security-headers, query-error-reporting (A2-1322),
+│                       sentry-error-scrubber (A2-1312), sentry-scrubber (A2-1308)
+└── root.tsx          ← Layout, QueryClientProvider (QueryCache + MutationCache
+                        forwarding to Sentry), Sentry.init with LOOP_ENV, meta, links
 ```
 
 ## Key patterns
