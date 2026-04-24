@@ -1,38 +1,60 @@
 /**
- * A2-555: redact JWT-shaped substrings from upstream response bodies
- * before logging them.
+ * A2-555 + A2-1306: redact secrets, emails, and card-shape substrings
+ * from upstream response bodies before logging them.
  *
  * Multiple handlers log truncated upstream bodies (`text().slice(0, 500)`)
  * when an upstream request fails, for schema-drift debugging. Pino's
  * redaction only matches structured field names — a body string
- * containing `"Invalid token eyJ...xyz"` slips through verbatim.
+ * containing `"Invalid token eyJ...xyz"` or `"user alice@example.com
+ * not found"` or `"card 4111111111111111 rejected"` slips through
+ * verbatim. This scrubber catches the three shapes that most often
+ * land in CTX / gift-card-provider error bodies.
  *
- * A JWT is three base64url segments separated by dots. Each segment
- * is at least 4 chars in practice (header is always `{"alg":...}`),
- * so we require 4+ chars per segment to reduce false positives on
- * IP-adjacent strings like `1.2.3`.
+ * Patterns:
  *
- * Also redacts obvious opaque token shapes: long base64url strings
- * 32+ chars long that aren't JWTs. Call these out as
- * `[REDACTED_TOKEN]` so operators still see the string was redacted.
+ * - **JWT** (A2-555) — three base64url segments separated by dots.
+ *   Each segment is at least 4 chars in practice (header is always
+ *   `{"alg":...}`), so we require 4+ chars per segment to reduce false
+ *   positives on IP-adjacent strings like `1.2.3`.
+ * - **Opaque token** (A2-555) — a run of 32+ base64url chars that
+ *   isn't already claimed by the JWT pattern.
+ * - **Email** (A2-1306) — `local@host.tld` shape. Hostname must be
+ *   dotted so we don't false-positive on Twitter handles or common
+ *   `@someone` strings.
+ * - **Card shape** (A2-1306) — 13-19 consecutive digits, matching
+ *   the standard PAN / gift-card-code length range. Luhn check is
+ *   skipped — cost isn't worth it for a logging scrubber, and false
+ *   positives on long numeric ids are acceptable collateral.
+ *
+ * Each pattern is tagged in the replacement so an operator reading
+ * the log can still tell WHAT was redacted even if they can't see it.
  */
 
 const JWT_RE = /[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g;
 const OPAQUE_TOKEN_RE = /\b[A-Za-z0-9_-]{32,}\b/g;
+const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+const CARD_RE = /\b\d{13,19}\b/g;
 
 /**
- * Returns a copy of `body` with JWT-shaped and long opaque-token
- * substrings replaced. Safe on arbitrary strings; never throws.
+ * Returns a copy of `body` with JWT-shaped, long opaque-token,
+ * email, and card-shape substrings replaced. Safe on arbitrary
+ * strings; never throws.
  *
  * Cap the result at the same 500-char length callers already use so
  * the redaction can't accidentally grow the log line.
+ *
+ * Replacement order matters: JWT runs first (longest, most specific),
+ * then the opaque-token run, then email + card which are disjoint
+ * from both.
  */
 export function scrubUpstreamBody(body: string, maxLen = 500): string {
   if (body.length === 0) return body;
   try {
     const scrubbed = body
       .replace(JWT_RE, '[REDACTED_JWT]')
-      .replace(OPAQUE_TOKEN_RE, '[REDACTED_TOKEN]');
+      .replace(OPAQUE_TOKEN_RE, '[REDACTED_TOKEN]')
+      .replace(EMAIL_RE, '[REDACTED_EMAIL]')
+      .replace(CARD_RE, '[REDACTED_CARD]');
     return scrubbed.length > maxLen ? scrubbed.slice(0, maxLen) : scrubbed;
   } catch {
     // Regex engine blowup on a pathological body — fall back to the
