@@ -19,7 +19,7 @@ import {
   extendZodWithOpenApi,
 } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
-import { STELLAR_PUBKEY_REGEX } from '@loop/shared';
+import { ApiErrorCode, STELLAR_PUBKEY_REGEX, type ApiErrorCodeValue } from '@loop/shared';
 
 extendZodWithOpenApi(z);
 
@@ -27,11 +27,28 @@ const registry = new OpenAPIRegistry();
 
 // ─── Shared components ──────────────────────────────────────────────────────
 
+// A2-1003: derive the OpenAPI `code` enum from the shared `ApiErrorCode`
+// const object instead of declaring `z.string()`. The runtime enum is
+// the single source of truth — `Object.values(ApiErrorCode)` here means
+// adding a code to `packages/shared/src/api.ts` automatically widens the
+// schema, and removing one tightens it. Generated clients now see the
+// closed set; the web `switch (err.code)` on `ApiErrorCodeValue` and the
+// OpenAPI `code` enum can no longer drift apart.
+const apiErrorCodeValues = Object.values(ApiErrorCode) as [
+  ApiErrorCodeValue,
+  ...ApiErrorCodeValue[],
+];
+const ApiErrorCodeEnum = z.enum(apiErrorCodeValues);
+
 const ErrorResponse = registry.register(
   'ErrorResponse',
   z
     .object({
-      code: z.string().openapi({ example: 'VALIDATION_ERROR' }),
+      code: ApiErrorCodeEnum.openapi({
+        example: 'VALIDATION_ERROR',
+        description:
+          'Closed set; see `ApiErrorCode` in `@loop/shared/api.ts`. Web client should `switch` on this rather than comparing to string literals.',
+      }),
       message: z.string().openapi({ example: 'Valid email is required' }),
       details: z
         .record(z.string(), z.unknown().openapi({ type: 'object' }))
