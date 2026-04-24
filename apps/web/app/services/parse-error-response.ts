@@ -16,6 +16,12 @@ import type { ApiError } from '@loop/shared';
  * breaking every `switch (err.code)` in downstream code.
  */
 export async function parseErrorResponse(response: Response): Promise<ApiError> {
+  // A2-1323: the `X-Request-Id` response header is stable across every
+  // backend response (Hono's requestId() middleware stamps it). Body
+  // `requestId` is opportunistic — only the catch-all 500 handler
+  // attaches it. Read the header up front so the thrown ApiException
+  // always carries the correlation id, even when the body didn't.
+  const headerRequestId = response.headers.get('X-Request-Id') ?? undefined;
   try {
     const body = (await response.json()) as unknown;
     if (body !== null && typeof body === 'object') {
@@ -25,17 +31,28 @@ export async function parseErrorResponse(response: Response): Promise<ApiError> 
         details?: unknown;
         requestId?: unknown;
       };
+      const bodyRequestId = typeof b.requestId === 'string' ? b.requestId : undefined;
       return {
         code: typeof b.code === 'string' ? b.code : 'UPSTREAM_ERROR',
         message: typeof b.message === 'string' ? b.message : response.statusText,
         ...(b.details !== undefined && typeof b.details === 'object' && b.details !== null
           ? { details: b.details as Record<string, unknown> }
           : {}),
-        ...(typeof b.requestId === 'string' ? { requestId: b.requestId } : {}),
+        // Body wins if present (older backends that attach it to the
+        // body match the header anyway); header is the stable fallback.
+        ...(bodyRequestId !== undefined
+          ? { requestId: bodyRequestId }
+          : headerRequestId !== undefined
+            ? { requestId: headerRequestId }
+            : {}),
       };
     }
   } catch {
     // fall through to the UPSTREAM_ERROR fallback below
   }
-  return { code: 'UPSTREAM_ERROR', message: response.statusText };
+  return {
+    code: 'UPSTREAM_ERROR',
+    message: response.statusText,
+    ...(headerRequestId !== undefined ? { requestId: headerRequestId } : {}),
+  };
 }
