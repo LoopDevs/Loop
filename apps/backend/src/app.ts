@@ -987,8 +987,11 @@ app.get('/api/orders/loop/:id', rateLimit(120, 60_000), loopGetOrderHandler);
 // flag, and home_currency (ADR 015). Works against both Loop-native
 // and legacy CTX bearers — CTX bearers upsert the Loop user row on
 // first touch, Loop bearers resolve by userId.
-app.use('/api/users/me', requireAuth);
-app.use('/api/users/me/*', requireAuth);
+// A2-1002: cache header mw registered BEFORE requireAuth so a 401
+// from missing/invalid Bearer still gets `Cache-Control: private,
+// no-store`. Without this ordering, a misbehaving CDN that caches
+// 401s could leak the "this URL needs auth" shape across users.
+// Mirrors the /api/orders ordering documented above.
 app.use('/api/users/me', async (c, next) => {
   await next();
   c.header('Cache-Control', 'private, no-store');
@@ -997,6 +1000,8 @@ app.use('/api/users/me/*', async (c, next) => {
   await next();
   c.header('Cache-Control', 'private, no-store');
 });
+app.use('/api/users/me', requireAuth);
+app.use('/api/users/me/*', requireAuth);
 app.get('/api/users/me', rateLimit(60, 60_000), getMeHandler);
 // POST /api/users/me/home-currency — onboarding-time picker (ADR 015).
 // Rate limit lower than GET: users only hit this during signup, so 10/min
