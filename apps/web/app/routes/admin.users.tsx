@@ -3,7 +3,6 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.users';
-import { useAuth } from '~/hooks/use-auth';
 import {
   listAdminUsers,
   getAdminUserByEmail,
@@ -12,6 +11,7 @@ import {
 } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { TopUsersTable } from '~/components/features/admin/TopUsersTable';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -36,9 +36,17 @@ function truncId(s: string): string {
  * Click a row → detail view (`/admin/users/:id`) ships in a follow-up
  * slice along with the drill-down endpoint's credit-adjustment UI.
  */
+// A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminUsersRoute(): React.JSX.Element {
+  return (
+    <RequireAdmin>
+      <AdminUsersRouteInner />
+    </RequireAdmin>
+  );
+}
+
+function AdminUsersRouteInner(): React.JSX.Element {
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const q = searchParams.get('q') ?? '';
   const before = searchParams.get('before') ?? undefined;
@@ -68,7 +76,6 @@ export default function AdminUsersRoute(): React.JSX.Element {
         ...(before !== undefined ? { before } : {}),
         limit: PAGE_SIZE,
       }),
-    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 10_000,
   });
@@ -107,24 +114,6 @@ export default function AdminUsersRoute(): React.JSX.Element {
       return params;
     });
   };
-
-  if (!isAuthenticated) {
-    return (
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">Admin · Users</h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in with an admin account.</p>
-        <button
-          type="button"
-          className="text-blue-600 underline"
-          onClick={() => {
-            void navigate('/auth');
-          }}
-        >
-          Go to sign-in
-        </button>
-      </main>
-    );
-  }
 
   const rows = query.data?.users ?? [];
   const hasMore = rows.length === PAGE_SIZE;

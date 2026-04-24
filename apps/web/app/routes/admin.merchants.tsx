@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router';
+import { Link } from 'react-router';
 import { foldForSearch } from '@loop/shared';
 import type { Route } from './+types/admin.merchants';
-import { useAuth } from '~/hooks/use-auth';
 import { useAllMerchants } from '~/hooks/use-merchants';
 import { shouldRetry } from '~/hooks/query-retry';
 import { listCashbackConfigs, type MerchantCashbackConfig } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -38,14 +38,20 @@ export function meta(): Route.MetaDescriptors {
  * without a second click. ADR 011 active=false state is
  * highlighted so it can't be confused with "no config yet".
  */
+// A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminMerchantsRoute(): React.JSX.Element {
-  const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  return (
+    <RequireAdmin>
+      <AdminMerchantsRouteInner />
+    </RequireAdmin>
+  );
+}
+
+function AdminMerchantsRouteInner(): React.JSX.Element {
   const { merchants, isLoading: merchantsLoading } = useAllMerchants();
   const configsQuery = useQuery({
     queryKey: ['admin-cashback-configs'],
     queryFn: listCashbackConfigs,
-    enabled: isAuthenticated,
     retry: shouldRetry,
     // Matches the /admin/merchants/:id drill — so navigating
     // between the two reuses the cache rather than re-fetching.
@@ -68,26 +74,6 @@ export default function AdminMerchantsRoute(): React.JSX.Element {
     if (folded.length === 0) return merchants;
     return merchants.filter((m) => foldForSearch(m.name).includes(folded));
   }, [merchants, folded]);
-
-  if (!isAuthenticated) {
-    return (
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
-          Admin · Merchants
-        </h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in with an admin account.</p>
-        <button
-          type="button"
-          className="text-blue-600 underline"
-          onClick={() => {
-            void navigate('/auth');
-          }}
-        >
-          Go to sign-in
-        </button>
-      </main>
-    );
-  }
 
   return (
     <main className="max-w-4xl mx-auto px-6 py-12 space-y-6">

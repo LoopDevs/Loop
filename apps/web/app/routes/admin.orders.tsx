@@ -13,10 +13,10 @@
  */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate, useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.orders';
-import { useAuth } from '~/hooks/use-auth';
+import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import {
   listAdminOrders,
   type AdminOrderState,
@@ -85,9 +85,16 @@ function formatMinor(minor: string, currency: string): string {
   }
 }
 
+// A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminOrdersRoute(): React.JSX.Element {
-  const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  return (
+    <RequireAdmin>
+      <AdminOrdersRouteInner />
+    </RequireAdmin>
+  );
+}
+
+function AdminOrdersRouteInner(): React.JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
   const merchantIdFilter = searchParams.get('merchantId') ?? undefined;
   const chargeCurrencyRaw = searchParams.get('chargeCurrency');
@@ -123,19 +130,6 @@ export default function AdminOrdersRoute(): React.JSX.Element {
   // so pages stay stable across refetches (offset pagination would
   // skip / duplicate rows as new orders land).
   const [cursors, setCursors] = useState<Array<string | undefined>>([undefined]);
-
-  if (!isAuthenticated) {
-    return (
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <AdminNav />
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
-          Admin · Orders
-        </h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in to continue.</p>
-        <Button onClick={() => void navigate('/auth')}>Sign in</Button>
-      </main>
-    );
-  }
 
   return (
     <main className="max-w-6xl mx-auto px-6 py-12 space-y-6">

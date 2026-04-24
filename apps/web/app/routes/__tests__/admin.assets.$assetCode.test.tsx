@@ -33,6 +33,23 @@ vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: authMock.isAuthenticated }),
 }));
 
+// A2-1101: RequireAdmin gates the admin shell on /api/users/me.isAdmin.
+import type * as UserModule from '~/services/user';
+vi.mock('~/services/user', async (importActual) => {
+  const actual = (await importActual()) as typeof UserModule;
+  return {
+    ...actual,
+    getMe: vi.fn(async () => ({
+      id: 'u1',
+      email: 'admin@loop.test',
+      isAdmin: true,
+      homeCurrency: 'USD' as const,
+      stellarAddress: null,
+      homeCurrencyBalanceMinor: '0',
+    })),
+  };
+});
+
 vi.mock('~/hooks/query-retry', () => ({ shouldRetry: () => false }));
 
 function renderAt(path = '/admin/assets/USDLOOP'): void {
@@ -59,9 +76,11 @@ describe('<AdminAssetDetailRoute />', () => {
     }
   });
 
-  it('rejects an unknown asset code with a clear 400-style body', () => {
+  it('rejects an unknown asset code with a clear 400-style body', async () => {
     renderAt('/admin/assets/JPYLOOP');
-    expect(screen.getByText(/Unknown asset code/i)).toBeDefined();
+    await waitFor(() => {
+      expect(screen.getByText(/Unknown asset code/i)).toBeDefined();
+    });
   });
 
   it('renders outstanding liability + Stellar Expert issuer link', async () => {

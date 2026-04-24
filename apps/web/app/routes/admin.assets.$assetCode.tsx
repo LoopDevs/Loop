@@ -1,9 +1,8 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import { LOOP_ASSET_CODES, isLoopAssetCode, type LoopAssetCode } from '@loop/shared';
 import type { Route } from './+types/admin.assets.$assetCode';
-import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import {
   getTreasurySnapshot,
@@ -15,6 +14,7 @@ import {
   type PayoutsActivityDay,
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { AssetCirculationCard } from '~/components/features/admin/AssetCirculationCard';
 import { Spinner } from '~/components/ui/Spinner';
 import { shortDay } from '~/components/features/admin/PaymentMethodActivityChart';
@@ -88,10 +88,17 @@ const STATE_PILL: Record<PayoutState, string> = {
  * or `/admin/payouts` — shared TanStack keys dedupe the fetches.
  * No new backend surface is needed.
  */
+// A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminAssetDetailRoute(): React.JSX.Element {
+  return (
+    <RequireAdmin>
+      <AdminAssetDetailRouteInner />
+    </RequireAdmin>
+  );
+}
+
+function AdminAssetDetailRouteInner(): React.JSX.Element {
   const { assetCode = '' } = useParams<{ assetCode: string }>();
-  const { isAuthenticated } = useAuth();
-  const navigate = useNavigate();
 
   const upper = assetCode.toUpperCase();
   const validAsset = isLoopAssetCode(upper);
@@ -99,7 +106,7 @@ export default function AdminAssetDetailRoute(): React.JSX.Element {
   const snapshotQuery = useQuery({
     queryKey: ['admin-treasury'],
     queryFn: getTreasurySnapshot,
-    enabled: isAuthenticated && validAsset,
+    enabled: validAsset,
     retry: shouldRetry,
     staleTime: 30_000,
   });
@@ -107,7 +114,7 @@ export default function AdminAssetDetailRoute(): React.JSX.Element {
   const byAssetQuery = useQuery({
     queryKey: ['admin-payouts-by-asset'],
     queryFn: getPayoutsByAsset,
-    enabled: isAuthenticated && validAsset,
+    enabled: validAsset,
     retry: shouldRetry,
     staleTime: 30_000,
   });
@@ -115,7 +122,7 @@ export default function AdminAssetDetailRoute(): React.JSX.Element {
   const topUsersQuery = useQuery({
     queryKey: ['admin-top-users-by-pending-payout', 50],
     queryFn: () => getTopUsersByPendingPayout({ limit: 50 }),
-    enabled: isAuthenticated && validAsset,
+    enabled: validAsset,
     retry: shouldRetry,
     staleTime: 30_000,
   });
@@ -123,7 +130,7 @@ export default function AdminAssetDetailRoute(): React.JSX.Element {
   const activityQuery = useQuery({
     queryKey: ['admin-payouts-activity', 30],
     queryFn: () => getPayoutsActivity(30),
-    enabled: isAuthenticated && validAsset,
+    enabled: validAsset,
     retry: shouldRetry,
     staleTime: 30_000,
   });
@@ -150,24 +157,6 @@ export default function AdminAssetDetailRoute(): React.JSX.Element {
       };
     });
   }, [activityQuery.data, upper, validAsset]);
-
-  if (!isAuthenticated) {
-    return (
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">Admin · Asset</h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in with an admin account.</p>
-        <button
-          type="button"
-          className="text-blue-600 underline"
-          onClick={() => {
-            void navigate('/auth');
-          }}
-        >
-          Go to sign-in
-        </button>
-      </main>
-    );
-  }
 
   if (!validAsset) {
     return (

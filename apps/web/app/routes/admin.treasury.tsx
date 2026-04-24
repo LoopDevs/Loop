@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router';
+import { Link } from 'react-router';
 import { LOOP_ASSET_CODES } from '@loop/shared';
 import type { Route } from './+types/admin.treasury';
-import { useAuth } from '~/hooks/use-auth';
 import { getTreasurySnapshot, type TreasurySnapshot } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { AssetDriftBadge } from '~/components/features/admin/AssetDriftBadge';
 import { PayoutsByAssetTable } from '~/components/features/admin/PayoutsByAssetTable';
@@ -100,14 +100,19 @@ const KNOWN_TYPES = ['cashback', 'interest', 'refund', 'spend', 'withdrawal', 'a
  * Backend returns a read-optimised shape so the UI doesn't run its
  * own aggregation — see `src/admin/treasury.ts`.
  */
+// A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminTreasuryRoute(): React.JSX.Element {
-  const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  return (
+    <RequireAdmin>
+      <AdminTreasuryRouteInner />
+    </RequireAdmin>
+  );
+}
 
+function AdminTreasuryRouteInner(): React.JSX.Element {
   const query = useQuery({
     queryKey: ['admin-treasury'],
     queryFn: getTreasurySnapshot,
-    enabled: isAuthenticated,
     retry: shouldRetry,
     // Treasury is read-mostly but changes as new orders / credits
     // land. 10s staleness is a balance between "fresh enough for an
@@ -115,26 +120,6 @@ export default function AdminTreasuryRoute(): React.JSX.Element {
     // aggregation for a tab left open in the background".
     staleTime: 10_000,
   });
-
-  if (!isAuthenticated) {
-    return (
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
-          Admin · Treasury
-        </h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in with an admin account.</p>
-        <button
-          type="button"
-          className="text-blue-600 underline"
-          onClick={() => {
-            void navigate('/auth');
-          }}
-        >
-          Go to sign-in
-        </button>
-      </main>
-    );
-  }
 
   if (query.isPending) {
     return (

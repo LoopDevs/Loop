@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.payouts.$id';
-import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import {
   getAdminPayout,
@@ -12,6 +11,7 @@ import {
   type PayoutState,
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -65,16 +65,23 @@ function TimelineRow({ label, iso }: { label: string; iso: string | null }): Rea
  * transcript when failed, retry button on failed rows (ADR 017
  * compliant — prompts for reason, generates an Idempotency-Key).
  */
+// A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminPayoutDetailRoute(): React.JSX.Element {
-  const navigate = useNavigate();
+  return (
+    <RequireAdmin>
+      <AdminPayoutDetailRouteInner />
+    </RequireAdmin>
+  );
+}
+
+function AdminPayoutDetailRouteInner(): React.JSX.Element {
   const { id } = useParams<{ id: string }>();
-  const { isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: ['admin-payout', id ?? null],
     queryFn: () => getAdminPayout(id ?? ''),
-    enabled: isAuthenticated && id !== undefined && id.length > 0,
+    enabled: id !== undefined && id.length > 0,
     retry: shouldRetry,
     staleTime: 10_000,
   });
@@ -107,26 +114,6 @@ export default function AdminPayoutDetailRoute(): React.JSX.Element {
     setRetryError(null);
     retryMutation.mutate({ id: payoutId, reason: trimmed });
   };
-
-  if (!isAuthenticated) {
-    return (
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
-          Admin · Payout
-        </h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in with an admin account.</p>
-        <button
-          type="button"
-          className="text-blue-600 underline"
-          onClick={() => {
-            void navigate('/auth');
-          }}
-        >
-          Go to sign-in
-        </button>
-      </main>
-    );
-  }
 
   const notFound = query.error instanceof ApiException && query.error.status === 404;
 

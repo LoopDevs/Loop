@@ -40,6 +40,23 @@ vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: authMock.isAuthenticated }),
 }));
 
+// A2-1101: RequireAdmin gates the admin shell on /api/users/me.isAdmin.
+import type * as UserModule from '~/services/user';
+vi.mock('~/services/user', async (importActual) => {
+  const actual = (await importActual()) as typeof UserModule;
+  return {
+    ...actual,
+    getMe: vi.fn(async () => ({
+      id: 'u1',
+      email: 'admin@loop.test',
+      isAdmin: true,
+      homeCurrency: 'USD' as const,
+      stellarAddress: null,
+      homeCurrencyBalanceMinor: '0',
+    })),
+  };
+});
+
 vi.mock('~/hooks/query-retry', () => ({
   shouldRetry: () => false,
 }));
