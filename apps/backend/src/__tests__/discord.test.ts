@@ -33,6 +33,7 @@ import {
   notifyFirstCashbackRecycled,
   notifyCashbackCredited,
   notifyPayoutFailed,
+  __resetCircuitNotifyDedupForTests,
 } from '../discord.js';
 
 const mockFetch = vi.fn();
@@ -283,6 +284,10 @@ describe('notifyCashbackCredited', () => {
 });
 
 describe('notifyCircuitBreaker', () => {
+  beforeEach(() => {
+    __resetCircuitNotifyDedupForTests();
+  });
+
   it('includes the cooldown seconds from the caller (not hardcoded 30)', async () => {
     notifyCircuitBreaker('open', 7, 60);
     await new Promise((r) => setTimeout(r, 10));
@@ -298,6 +303,43 @@ describe('notifyCircuitBreaker', () => {
     const body = lastBody();
     const embed = body.embeds[0] as { description: string };
     expect(embed.description).toContain('30s');
+  });
+
+  // A2-1326: per-(name, state) dedup.
+  it('dedups a repeat (name, state) pair within the 10-min window', async () => {
+    notifyCircuitBreaker('open', 5, 30, 'upstream:login');
+    notifyCircuitBreaker('open', 5, 30, 'upstream:login');
+    notifyCircuitBreaker('open', 5, 30, 'upstream:login');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('distinguishes different names — "login open" and "merchants open" both fire', async () => {
+    notifyCircuitBreaker('open', 5, 30, 'upstream:login');
+    notifyCircuitBreaker('open', 5, 30, 'upstream:merchants');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('distinguishes the same name across states — "login open" then "login closed" both fire', async () => {
+    notifyCircuitBreaker('open', 5, 30, 'upstream:login');
+    notifyCircuitBreaker('closed', 0, 30, 'upstream:login');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('an unnamed call shares the `unknown` bucket — flood protection on legacy callers', async () => {
+    notifyCircuitBreaker('open', 5);
+    notifyCircuitBreaker('open', 5);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('tags the embed description with the circuit name so ops knows which circuit', async () => {
+    notifyCircuitBreaker('open', 5, 30, 'upstream:login');
+    await new Promise((r) => setTimeout(r, 10));
+    const embed = lastBody().embeds[0] as { description: string };
+    expect(embed.description).toContain('`upstream:login`');
   });
 });
 

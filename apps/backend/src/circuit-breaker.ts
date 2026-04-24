@@ -18,6 +18,14 @@ interface CircuitBreakerOptions {
    * original upstream recovered. Default: 60_000.
    */
   probeTimeoutMs?: number;
+  /**
+   * A2-1326: opaque key the breaker uses to tag its Discord embeds
+   * so the notifier's per-key dedup can tell "login open again" from
+   * "merchants open" and throttle separately. Falls back to
+   * `'unknown'` — which means every unnamed breaker shares one dedup
+   * bucket, which is the conservative direction.
+   */
+  name?: string;
 }
 
 interface CircuitBreaker {
@@ -40,8 +48,9 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
   const failureThreshold = options?.failureThreshold ?? 5;
   const cooldownMs = options?.cooldownMs ?? 30_000;
   const probeTimeoutMs = options?.probeTimeoutMs ?? 60_000;
+  const name = options?.name ?? 'unknown';
 
-  const log = logger.child({ module: 'circuit-breaker' });
+  const log = logger.child({ module: 'circuit-breaker', circuit: name });
 
   let state: CircuitState = 'closed';
   let consecutiveFailures = 0;
@@ -88,7 +97,7 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
     clearProbeTimer();
     transitionTo('closed');
     if (wasHalfOpen) {
-      notifyCircuitBreaker('closed', 0);
+      notifyCircuitBreaker('closed', 0, undefined, name);
     }
   }
 
@@ -105,7 +114,7 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
     if (state !== 'open' && consecutiveFailures >= failureThreshold) {
       openedAt = Date.now();
       transitionTo('open');
-      notifyCircuitBreaker('open', consecutiveFailures, Math.round(cooldownMs / 1000));
+      notifyCircuitBreaker('open', consecutiveFailures, Math.round(cooldownMs / 1000), name);
     }
   }
 
@@ -204,7 +213,7 @@ const circuitsByKey = new Map<string, CircuitBreaker>();
 export function getUpstreamCircuit(key: string): CircuitBreaker {
   let cb = circuitsByKey.get(key);
   if (cb === undefined) {
-    cb = createCircuitBreaker();
+    cb = createCircuitBreaker({ name: `upstream:${key}` });
     circuitsByKey.set(key, cb);
   }
   return cb;
