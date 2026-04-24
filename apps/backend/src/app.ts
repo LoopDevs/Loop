@@ -344,7 +344,19 @@ app.use(
     },
   }),
 );
-app.use('*', bodyLimit({ maxSize: 1024 * 1024 }));
+// A2-1005: the default `bodyLimit` error handler lets the middleware
+// throw, which Hono's fallback handler turns into a 500. The correct
+// HTTP status for "request body exceeds declared limit" is 413
+// Payload Too Large, and the error envelope should match the
+// `{ code, message }` shape every other handler uses.
+app.use(
+  '*',
+  bodyLimit({
+    maxSize: 1024 * 1024,
+    onError: (c) =>
+      c.json({ code: 'PAYLOAD_TOO_LARGE', message: 'Request body exceeds 1 MB limit' }, 413),
+  }),
+);
 app.use('*', requestId());
 
 // Audit A-021: replace the default `hono/logger` with a Pino-backed
