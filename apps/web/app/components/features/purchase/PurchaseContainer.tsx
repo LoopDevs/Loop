@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { Merchant } from '@loop/shared';
 import { useAuthStore } from '~/stores/auth.store';
 import { usePurchaseStore } from '~/stores/purchase.store';
@@ -32,6 +33,7 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
   const email = useAuthStore((s) => s.email);
   const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
   const store = usePurchaseStore();
+  const queryClient = useQueryClient();
   const { config } = useAppConfig();
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
@@ -304,6 +306,10 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
           paymentMethod: 'usdc',
         });
         setLoopCreate(result);
+        // A2-1159: new row exists server-side; mark the cache stale so
+        // /account/orders (LoopOrdersList) refetches on next mount
+        // instead of sitting on its 30s staleTime.
+        void queryClient.invalidateQueries({ queryKey: ['loop-orders'] });
         void triggerHapticNotification('success');
         return;
       }

@@ -92,7 +92,7 @@ npm run test:e2e             # Playwright e2e — self-contained mocked suite (d
 npm run test:e2e:real        # Playwright e2e — requires a running real-CTX backend
 
 # Proto
-npm run proto:generate       # buf generate → packages/shared/src/proto/
+npm run proto:generate       # buf generate → packages/shared/src/proto/ (A2-404: auto-prettier'd)
 ```
 
 ---
