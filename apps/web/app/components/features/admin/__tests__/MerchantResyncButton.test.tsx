@@ -14,12 +14,32 @@ const { adminMock } = vi.hoisted(() => ({
   },
 }));
 
+// A2-509: service now takes `{ reason }` and returns an ADR-017
+// envelope. Tests stub the prompt so the button call is deterministic.
 vi.mock('~/services/admin', async (importActual) => {
   const actual = (await importActual()) as typeof AdminModule;
   return {
     ...actual,
-    resyncMerchants: () => adminMock.resyncMerchants(),
+    resyncMerchants: (args: { reason: string }) => adminMock.resyncMerchants(args),
   };
+});
+
+/** Wrap result in the ADR-017 {result, audit} envelope — matches backend. */
+function envelope<T>(result: T): { result: T; audit: Record<string, unknown> } {
+  return {
+    result,
+    audit: {
+      actorUserId: 'admin',
+      actorEmail: 'a@loop.test',
+      idempotencyKey: 'k'.repeat(32),
+      appliedAt: '2026-04-22T14:00:00.000Z',
+      replayed: false,
+    },
+  };
+}
+
+beforeEach(() => {
+  window.prompt = vi.fn(() => 'ops-initiated resync');
 });
 
 function renderButton(): void {
@@ -37,11 +57,13 @@ beforeEach(() => {
 
 describe('<MerchantResyncButton />', () => {
   it('flashes the synced merchant count on triggered: true', async () => {
-    adminMock.resyncMerchants.mockResolvedValue({
-      merchantCount: 473,
-      loadedAt: '2026-04-22T14:00:00.000Z',
-      triggered: true,
-    });
+    adminMock.resyncMerchants.mockResolvedValue(
+      envelope({
+        merchantCount: 473,
+        loadedAt: '2026-04-22T14:00:00.000Z',
+        triggered: true,
+      }),
+    );
     renderButton();
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /Resync catalog/i }));
@@ -52,11 +74,13 @@ describe('<MerchantResyncButton />', () => {
   });
 
   it('flashes "Already in sync" on coalesced responses (triggered: false)', async () => {
-    adminMock.resyncMerchants.mockResolvedValue({
-      merchantCount: 10,
-      loadedAt: '2026-04-22T14:00:00.000Z',
-      triggered: false,
-    });
+    adminMock.resyncMerchants.mockResolvedValue(
+      envelope({
+        merchantCount: 10,
+        loadedAt: '2026-04-22T14:00:00.000Z',
+        triggered: false,
+      }),
+    );
     renderButton();
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /Resync catalog/i }));
@@ -109,7 +133,28 @@ describe('<MerchantResyncButton />', () => {
     expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(true);
     // Let the promise settle so the test harness doesn't hang.
     await act(async () => {
-      resolve({ merchantCount: 0, loadedAt: '2026-01-01T00:00:00Z', triggered: true });
+      resolve(envelope({ merchantCount: 0, loadedAt: '2026-01-01T00:00:00Z', triggered: true }));
     });
+  });
+
+  // A2-509: prompt-cancelled (null) → no-op, no mutation fires.
+  it('A2-509: does nothing when the reason prompt is cancelled', async () => {
+    window.prompt = vi.fn(() => null);
+    renderButton();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Resync catalog/i }));
+    });
+    expect(adminMock.resyncMerchants).not.toHaveBeenCalled();
+  });
+
+  it('A2-509: rejects a too-short reason without firing the mutation', async () => {
+    window.prompt = vi.fn(() => 'x');
+    renderButton();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Resync catalog/i }));
+    });
+    expect(adminMock.resyncMerchants).not.toHaveBeenCalled();
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/2–500/);
   });
 });
