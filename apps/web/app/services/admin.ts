@@ -1,4 +1,8 @@
 import type {
+  AssetCirculationResponse,
+  AssetDriftState,
+  AssetDriftStateResponse,
+  AssetDriftStateRow,
   CreditTransactionType,
   LoopAssetCode,
   LoopLiability,
@@ -186,43 +190,22 @@ export async function getTreasurySnapshot(): Promise<TreasurySnapshot> {
  * LOOP asset). Safety-critical metric — non-zero drift that isn't
  * explained by in-flight payouts means something's wrong.
  */
-export interface AssetCirculationResponse {
-  assetCode: LoopAssetCode;
-  fiatCurrency: string;
-  issuer: string;
-  onChainStroops: string;
-  ledgerLiabilityMinor: string;
-  driftStroops: string;
-  onChainAsOfMs: number;
-}
+// A2-1506: `AssetCirculationResponse`, `AssetDriftState`,
+// `AssetDriftStateRow`, `AssetDriftStateResponse` moved to
+// `@loop/shared/admin-assets.ts`. Re-exported via `export type` so
+// existing `~/services/admin` call sites keep resolving.
+export type {
+  AssetCirculationResponse,
+  AssetDriftState,
+  AssetDriftStateRow,
+  AssetDriftStateResponse,
+};
 
 /** `GET /api/admin/assets/:assetCode/circulation` */
 export async function getAssetCirculation(assetCode: string): Promise<AssetCirculationResponse> {
   return authenticatedRequest<AssetCirculationResponse>(
     `/api/admin/assets/${encodeURIComponent(assetCode)}/circulation`,
   );
-}
-
-/**
- * Asset-drift watcher state (ADR 015). In-memory snapshot of the
- * background watcher's last pass — cheap to poll, no Horizon read
- * triggered by this call. `state === 'unknown'` means the watcher
- * hasn't read this asset yet (fresh boot / unconfigured issuer).
- */
-export type AssetDriftState = 'unknown' | 'ok' | 'over';
-
-export interface AssetDriftStateRow {
-  assetCode: LoopAssetCode;
-  state: AssetDriftState;
-  lastDriftStroops: string | null;
-  lastThresholdStroops: string | null;
-  lastCheckedMs: number | null;
-}
-
-export interface AssetDriftStateResponse {
-  lastTickMs: number | null;
-  running: boolean;
-  perAsset: AssetDriftStateRow[];
 }
 
 /** `GET /api/admin/asset-drift/state` */

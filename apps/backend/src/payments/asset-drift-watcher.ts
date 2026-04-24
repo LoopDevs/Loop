@@ -38,8 +38,11 @@ const log = logger.child({ area: 'asset-drift-watcher' });
 /** 1e5 stroops per minor unit — LOOP assets are 1:1 with fiat at 7 decimals. */
 const STROOPS_PER_MINOR = 100_000n;
 
-/** In-memory per-asset drift state. Reset on restart. */
-export type DriftState = 'unknown' | 'ok' | 'over';
+// A2-1506: the literal union is `AssetDriftState` in `@loop/shared`.
+// Re-export under the `DriftState` alias so in-file code keeps
+// resolving (the watcher predates the shared type).
+import type { AssetDriftState } from '@loop/shared';
+export type DriftState = AssetDriftState;
 
 /**
  * Full per-asset snapshot — the transition flag (`state`) plus the
