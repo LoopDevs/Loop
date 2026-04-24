@@ -1,7 +1,8 @@
 # ADR 011: Admin panel for cashback configuration
 
-Status: Proposed
+Status: Accepted
 Date: 2026-04-21
+Implemented: 2026-04-21 onwards (`PUT /api/admin/merchant-cashback-configs/:merchantId` in admin/handler.ts; merchant_cashback_configs + merchant_cashback_config_history tables with trigger-based audit; admin panel routes under apps/web/app/routes/admin/)
 Related: ADR 009 (credits ledger), ADR 010 (principal switch)
 
 ## Context
