@@ -20,8 +20,18 @@
  * failure so the `/api/merchants` surface keeps serving prior data.
  */
 import type { Context } from 'hono';
+import { z } from 'zod';
 import { forceRefreshMerchants, getMerchants } from '../merchants/sync.js';
+import { notifyAdminAudit } from '../discord.js';
 import { logger } from '../logger.js';
+import type { User } from '../db/users.js';
+import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
+import {
+  IDEMPOTENCY_KEY_MIN,
+  IDEMPOTENCY_KEY_MAX,
+  validateIdempotencyKey,
+  withIdempotencyGuard,
+} from './idempotency.js';
 
 const log = logger.child({ handler: 'admin-merchants-resync' });
 
@@ -34,16 +44,71 @@ export interface AdminMerchantResyncResponse {
   triggered: boolean;
 }
 
+const BodySchema = z.object({
+  // A2-509: ADR-017 admin write. `reason` captures WHY ops forced a
+  // resync so the audit feed answers the question later without
+  // having to reach for Slack.
+  reason: z.string().min(2).max(500),
+});
+
 export async function adminMerchantsResyncHandler(c: Context): Promise<Response> {
+  const idempotencyKey = c.req.header('idempotency-key');
+  if (!validateIdempotencyKey(idempotencyKey)) {
+    return c.json(
+      {
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: `Idempotency-Key header required (${IDEMPOTENCY_KEY_MIN}-${IDEMPOTENCY_KEY_MAX} chars)`,
+      },
+      400,
+    );
+  }
+
+  const actor = c.get('user') as User | undefined;
+  if (actor === undefined) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Admin context missing' }, 401);
+  }
+
+  let body: unknown;
   try {
-    const outcome = await forceRefreshMerchants();
-    const store = getMerchants();
-    const body: AdminMerchantResyncResponse = {
-      merchantCount: store.merchants.length,
-      loadedAt: new Date(store.loadedAt).toISOString(),
-      triggered: outcome.triggered,
-    };
-    return c.json(body);
+    body = await c.req.json();
+  } catch {
+    return c.json({ code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON' }, 400);
+  }
+  const parsed = BodySchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(
+      { code: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid body' },
+      400,
+    );
+  }
+
+  let guardResult;
+  try {
+    guardResult = await withIdempotencyGuard(
+      {
+        adminUserId: actor.id,
+        key: idempotencyKey,
+        method: 'POST',
+        path: '/api/admin/merchants/resync',
+      },
+      async () => {
+        const outcome = await forceRefreshMerchants();
+        const store = getMerchants();
+        const result: AdminMerchantResyncResponse = {
+          merchantCount: store.merchants.length,
+          loadedAt: new Date(store.loadedAt).toISOString(),
+          triggered: outcome.triggered,
+        };
+        const envelope: AdminAuditEnvelope<AdminMerchantResyncResponse> = buildAuditEnvelope({
+          result,
+          actor,
+          idempotencyKey,
+          appliedAt: new Date(store.loadedAt),
+          replayed: false,
+        });
+        return { status: 200, body: envelope as unknown as Record<string, unknown> };
+      },
+    );
   } catch (err) {
     log.error({ err }, 'Admin merchant-catalog resync failed');
     return c.json(
@@ -54,4 +119,14 @@ export async function adminMerchantsResyncHandler(c: Context): Promise<Response>
       502,
     );
   }
+
+  notifyAdminAudit({
+    actorUserId: actor.id,
+    endpoint: 'POST /api/admin/merchants/resync',
+    reason: parsed.data.reason,
+    idempotencyKey,
+    replayed: guardResult.replayed,
+  });
+
+  return c.json(guardResult.body, guardResult.status as 200 | 400 | 500);
 }
