@@ -194,7 +194,6 @@ export function notifyCashbackRecycled(args: {
 export function notifyFirstCashbackRecycled(args: {
   orderId: string;
   userId: string;
-  userEmail: string;
   merchantName: string;
   /** Face-value amount for the gift card, in the catalog currency. */
   amount: number;
@@ -202,17 +201,21 @@ export function notifyFirstCashbackRecycled(args: {
   /** LOOP asset code: USDLOOP / GBPLOOP / EURLOOP. */
   assetCode: string;
 }): void {
+  // A2-1313: follow the ADR-018 last-8 convention for user + order
+  // ids. Prior shape leaked `userEmail` and full uuids to a broadly-
+  // visible channel; the milestone is ops/celebration-grade, not
+  // forensic — the tail-id is enough to look up the user in the
+  // admin shell, and full ids remain in the ledger + access log
+  // where they're useful.
+  const userTail = args.userId.slice(-8);
+  const orderTail = args.orderId.slice(-8);
   void sendWebhook(env.DISCORD_WEBHOOK_ORDERS, {
     title: '🎉 First Cashback Recycled',
     description:
       'A user just graduated from earning cashback to spending it — their first `loop_asset` order has landed.',
     color: GREEN,
     fields: [
-      {
-        name: 'User',
-        value: truncate(escapeMarkdown(args.userEmail), FIELD_VALUE_MAX),
-        inline: true,
-      },
+      { name: 'User', value: `\`${userTail}\``, inline: true },
       {
         name: 'Merchant',
         value: truncate(escapeMarkdown(args.merchantName), FIELD_VALUE_MAX),
@@ -224,8 +227,7 @@ export function notifyFirstCashbackRecycled(args: {
         value: truncate(escapeMarkdown(args.assetCode), FIELD_VALUE_MAX),
         inline: true,
       },
-      { name: 'User ID', value: `\`${escapeMarkdown(args.userId)}\``, inline: false },
-      { name: 'Order ID', value: `\`${escapeMarkdown(args.orderId)}\``, inline: false },
+      { name: 'Order', value: `\`${orderTail}\``, inline: true },
     ],
   });
 }
@@ -373,6 +375,12 @@ export function notifyPayoutFailed(args: {
   reason: string;
   attempts: number;
 }): void {
+  // A2-1314: ADR-018 last-8 convention. Prior shape emitted full
+  // userId / orderId / payoutId into the monitoring channel, so an
+  // admin with Discord access but no DB access could reconstruct a
+  // user's full uuid + order history from a stream of failures. The
+  // tail-id is enough to pivot into the admin shell where the full
+  // id lives alongside the access-controlled context.
   void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
     title: '🔴 Stellar Payout Failed',
     color: RED,
@@ -381,13 +389,13 @@ export function notifyPayoutFailed(args: {
       { name: 'Asset', value: escapeMarkdown(args.assetCode), inline: true },
       { name: 'Amount', value: escapeMarkdown(args.amount), inline: true },
       { name: 'Attempts', value: String(args.attempts), inline: true },
-      { name: 'User', value: `\`${escapeMarkdown(args.userId)}\``, inline: true },
+      { name: 'User', value: `\`${args.userId.slice(-8)}\``, inline: true },
       {
         name: 'Order',
-        value: args.orderId === null ? '_withdrawal_' : `\`${escapeMarkdown(args.orderId)}\``,
+        value: args.orderId === null ? '_withdrawal_' : `\`${args.orderId.slice(-8)}\``,
         inline: true,
       },
-      { name: 'Payout ID', value: `\`${escapeMarkdown(args.payoutId)}\``, inline: false },
+      { name: 'Payout', value: `\`${args.payoutId.slice(-8)}\``, inline: true },
       {
         name: 'Reason',
         value: truncate(escapeMarkdown(args.reason), FIELD_VALUE_MAX),
