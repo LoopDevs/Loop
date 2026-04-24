@@ -305,6 +305,25 @@ export const EnvSchema = z.object({
   // a malformed URL fails `parseEnv()` at startup.
   LOOP_STELLAR_HORIZON_URL: z.string().url().default('https://horizon.stellar.org'),
 
+  // A2-1812: price-feed + operator-pool bypass fix. These three
+  // were previously read via `process.env[...]` in `payments/price-feed.ts`
+  // and `ctx/operator-pool.ts` with no zod schema — a malformed URL
+  // or malformed JSON only surfaced at first use (mid-request). Moved
+  // into the schema so boot catches them. Callers still read from
+  // `process.env` directly at their call sites — that's the
+  // documented test-reload pattern (A2-1513 resolution notes) where
+  // a test mutates `process.env[...]` and expects the next read to
+  // pick the mutation up. Zod validates at boot; runtime reads stay
+  // live.
+  //
+  // `CTX_OPERATOR_POOL` is a JSON-encoded array of
+  // `{ id, bearer }` objects (ADR 013). Left as `string` here — the
+  // full JSON-shape validation lives in `operator-pool.ts::loadOperators`
+  // where a good error message is easier to produce.
+  LOOP_XLM_PRICE_FEED_URL: z.string().url().optional(),
+  LOOP_FX_FEED_URL: z.string().url().optional(),
+  CTX_OPERATOR_POOL: z.string().min(1).optional(),
+
   // Payout-worker tick interval (seconds). 30s matches ADR 016's
   // recommended pacing — the worker is slower than the watcher
   // (10s) or procurement (5s) because each payout is a Stellar
