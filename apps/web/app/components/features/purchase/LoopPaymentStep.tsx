@@ -74,12 +74,23 @@ export function LoopPaymentStep({ create, onTerminal }: LoopPaymentStepProps): R
       ) : create.payment.method === 'credit' ? (
         <CreditPaymentBody order={orderQuery.data} />
       ) : (
+        // A2-1504: the stellar-funded payload now includes `loop_asset`
+        // (ADR 015 recycled-cashback rail). Rendering is identical to
+        // xlm/usdc — stellarAddress + memo + amount — and
+        // StellarPaymentBody shows the asset label in the "Send X in Y"
+        // line. assetCode is only on the loop_asset variant; the render
+        // asserts its presence via a method-narrowing check inside.
         <StellarPaymentBody
           address={create.payment.stellarAddress}
           memo={create.payment.memo}
           method={create.payment.method}
           amountMinor={create.payment.amountMinor}
           currency={create.payment.currency}
+          assetLabel={
+            create.payment.method === 'loop_asset'
+              ? create.payment.assetCode
+              : create.payment.method.toUpperCase()
+          }
           order={orderQuery.data}
         />
       )}
@@ -165,28 +176,32 @@ function CreditPaymentBody({ order }: { order: LoopOrderView | undefined }): Rea
 interface StellarPaymentBodyProps {
   address: string;
   memo: string;
-  method: 'xlm' | 'usdc';
+  /** Payment rail: native XLM, USDC trustline, or a LOOP-branded stablecoin. */
+  method: 'xlm' | 'usdc' | 'loop_asset';
   amountMinor: string;
   currency: string;
+  /**
+   * User-facing label for the rail. `XLM` / `USDC` for native methods,
+   * the `USDLOOP`/`GBPLOOP`/`EURLOOP` asset code for `loop_asset` so
+   * the user sees the exact asset their wallet needs to send.
+   */
+  assetLabel: string;
   order: LoopOrderView | undefined;
 }
 
 function StellarPaymentBody({
   address,
   memo,
-  method,
   amountMinor,
   currency,
+  assetLabel,
   order,
 }: StellarPaymentBodyProps): React.JSX.Element {
   const showSpinner = order === undefined || order.state === 'pending_payment';
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
-        <Row
-          label="Send"
-          value={`${formatMinor(amountMinor)} ${currency} in ${method.toUpperCase()}`}
-        />
+        <Row label="Send" value={`${formatMinor(amountMinor)} ${currency} in ${assetLabel}`} />
         <Row label="To address" value={address} copyable />
         <Row label="Memo (required)" value={memo} copyable mono />
       </div>
