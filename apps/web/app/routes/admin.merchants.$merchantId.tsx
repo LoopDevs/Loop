@@ -20,11 +20,10 @@
  * `/admin/cashback` (#603) and would duplicate the same aggregate.
  */
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import { ApiException, merchantSlug } from '@loop/shared';
 import type { Route } from './+types/admin.merchants.$merchantId';
 import { useAllMerchants } from '~/hooks/use-merchants';
-import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import {
   cashbackConfigHistory,
@@ -33,6 +32,7 @@ import {
   type AdminOrderView,
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { MerchantCashbackMonthlyChart } from '~/components/features/admin/MerchantCashbackMonthlyChart';
@@ -50,17 +50,23 @@ export function meta(): Route.MetaDescriptors {
 
 const RECENT_ORDERS_LIMIT = 10;
 
+// A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminMerchantDetailRoute(): React.JSX.Element {
-  const navigate = useNavigate();
+  return (
+    <RequireAdmin>
+      <AdminMerchantDetailRouteInner />
+    </RequireAdmin>
+  );
+}
+
+function AdminMerchantDetailRouteInner(): React.JSX.Element {
   const { merchantId = '' } = useParams<{ merchantId: string }>();
-  const { isAuthenticated } = useAuth();
   const { merchants } = useAllMerchants();
   const merchant = merchants.find((m) => m.id === merchantId);
 
   const configsQuery = useQuery({
     queryKey: ['admin-cashback-configs'],
     queryFn: listCashbackConfigs,
-    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 60_000,
   });
@@ -68,7 +74,7 @@ export default function AdminMerchantDetailRoute(): React.JSX.Element {
   const historyQuery = useQuery({
     queryKey: ['admin-cashback-config-history', merchantId],
     queryFn: () => cashbackConfigHistory(merchantId),
-    enabled: isAuthenticated && merchantId.length > 0,
+    enabled: merchantId.length > 0,
     retry: shouldRetry,
     staleTime: 60_000,
   });
@@ -76,30 +82,10 @@ export default function AdminMerchantDetailRoute(): React.JSX.Element {
   const ordersQuery = useQuery({
     queryKey: ['admin-merchant-orders', merchantId],
     queryFn: () => listAdminOrders({ merchantId, limit: RECENT_ORDERS_LIMIT }),
-    enabled: isAuthenticated && merchantId.length > 0,
+    enabled: merchantId.length > 0,
     retry: shouldRetry,
     staleTime: 30_000,
   });
-
-  if (!isAuthenticated) {
-    return (
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
-          Admin · Merchant
-        </h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in with an admin account.</p>
-        <button
-          type="button"
-          className="text-blue-600 underline"
-          onClick={() => {
-            void navigate('/auth');
-          }}
-        >
-          Go to sign-in
-        </button>
-      </main>
-    );
-  }
 
   const config = configsQuery.data?.configs.find((c) => c.merchantId === merchantId);
   // A missing row is the common case — only ~20% of catalog

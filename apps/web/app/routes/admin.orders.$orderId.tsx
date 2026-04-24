@@ -1,8 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.orders.$orderId';
-import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import {
   getAdminOrder,
@@ -12,6 +11,7 @@ import {
   type AdminPayoutView,
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -64,36 +64,25 @@ function TimelineRow({ label, iso }: { label: string; iso: string | null }): Rea
  * permalink target. Shows state, the full cashback split, CTX
  * procurement metadata, state timeline, and any failure transcript.
  */
+// A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminOrderDetailRoute(): React.JSX.Element {
-  const navigate = useNavigate();
+  return (
+    <RequireAdmin>
+      <AdminOrderDetailRouteInner />
+    </RequireAdmin>
+  );
+}
+
+function AdminOrderDetailRouteInner(): React.JSX.Element {
   const { orderId } = useParams<{ orderId: string }>();
-  const { isAuthenticated } = useAuth();
 
   const query = useQuery({
     queryKey: ['admin-order', orderId ?? null],
     queryFn: () => getAdminOrder(orderId ?? ''),
-    enabled: isAuthenticated && orderId !== undefined && orderId.length > 0,
+    enabled: orderId !== undefined && orderId.length > 0,
     retry: shouldRetry,
     staleTime: 10_000,
   });
-
-  if (!isAuthenticated) {
-    return (
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">Admin · Order</h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in with an admin account.</p>
-        <button
-          type="button"
-          className="text-blue-600 underline"
-          onClick={() => {
-            void navigate('/auth');
-          }}
-        >
-          Go to sign-in
-        </button>
-      </main>
-    );
-  }
 
   const notFound = query.error instanceof ApiException && query.error.status === 404;
 
