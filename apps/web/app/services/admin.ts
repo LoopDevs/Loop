@@ -20,6 +20,8 @@ import type {
   OperatorMerchantMixRow,
   OperatorStatsResponse,
   OperatorStatsRow,
+  SettlementLagResponse,
+  SettlementLagRow,
   SupplierSpendActivityDay,
   SupplierSpendActivityResponse,
   SupplierSpendResponse,
@@ -240,19 +242,8 @@ export async function getAssetDriftState(): Promise<AssetDriftStateResponse> {
  * the LOOP code. Sample count ships alongside so callers can
  * down-weight low-n rows (p95 of n=1 is noise).
  */
-export interface SettlementLagRow {
-  assetCode: string | null;
-  sampleCount: number;
-  p50Seconds: number;
-  p95Seconds: number;
-  maxSeconds: number;
-  meanSeconds: number;
-}
-
-export interface SettlementLagResponse {
-  since: string;
-  rows: SettlementLagRow[];
-}
+// A2-1506: moved to `@loop/shared/admin-settlement-lag.ts`.
+export type { SettlementLagResponse, SettlementLagRow };
 
 /** `GET /api/admin/payouts/settlement-lag?since=...` */
 export async function getSettlementLag(sinceIso?: string): Promise<SettlementLagResponse> {
