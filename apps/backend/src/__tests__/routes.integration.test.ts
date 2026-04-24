@@ -168,11 +168,24 @@ describe('GET /health', () => {
   // The Fly healthcheck hits /health every 15s with a 10s probe cache,
   // so ~one fresh upstream probe per check. A CTX /status that briefly
   // runs slow used to flip lastHealthStatus on every probe and spam
-  // the monitoring channel every minute. These tests verify the
-  // asymmetric streak gating + cooldown wrapper introduced in the
-  // flap-damping fix. `__resetUpstreamProbeCacheOnlyForTests` drops the
-  // probe cache between calls *without* clearing the streak state, so
-  // we can drive consecutive transitions inside one test.
+  // the monitoring channel every minute. These tests exercise the
+  // rolling-window detector that replaced the consecutive-streak
+  // detector — a supermajority of last-10 readings decides the state,
+  // so one-off slow probes are absorbed without a transition. Thresholds
+  // are asymmetric: 5-of-10 degraded trips the alarm (~2–3 min of
+  // persistent badness), 8-of-10 healthy is needed to flip back.
+
+  // `__resetUpstreamProbeCacheOnlyForTests` drops the probe cache
+  // between calls *without* clearing the window, so a single test
+  // can drive a sequence of transitions.
+  async function driveHealth(probes: Array<'ok' | 'fail'>): Promise<void> {
+    for (const p of probes) {
+      __resetUpstreamProbeCacheOnlyForTests();
+      if (p === 'ok') mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+      else mockFetch.mockRejectedValueOnce(new Error('timeout'));
+      await app.request('/health');
+    }
+  }
 
   it('body always reflects raw reading — Fly liveness must not be debounced', async () => {
     // First-ever call on a fresh process: the bootstrap seeds
@@ -185,93 +198,60 @@ describe('GET /health', () => {
     expect(mockNotifyHealthChange).not.toHaveBeenCalled();
   });
 
-  it('single failed probe after healthy does not fire the degraded notify', async () => {
-    // Seed healthy
-    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
-    await app.request('/health');
+  it('a single failed probe after healthy does not fire the degraded notify', async () => {
+    await driveHealth(['ok', 'fail']);
     expect(mockNotifyHealthChange).not.toHaveBeenCalled();
-
-    // One failed probe — streak = 1, below HEALTH_FLIP_TO_DEGRADED_STREAK.
-    __resetUpstreamProbeCacheOnlyForTests();
-    mockFetch.mockRejectedValueOnce(new Error('timeout'));
-    const res = await app.request('/health');
-    const body = (await res.json()) as { status: string };
-    expect(body.status).toBe('degraded'); // raw reading surfaces
-    expect(mockNotifyHealthChange).not.toHaveBeenCalled(); // but no page
   });
 
-  it('two consecutive failed probes fire the degraded notify once', async () => {
-    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 })); // seed healthy
-    await app.request('/health');
+  it('4 of 5 bad probes does NOT trip degraded — threshold is 5-of-window', async () => {
+    // Seed healthy, then 4 bad readings. Window = [h,f,f,f,f] —
+    // 4 degraded < 5 threshold. The old streak detector would have
+    // fired on the 2nd failure in a row; the window tolerates it.
+    await driveHealth(['ok', 'fail', 'fail', 'fail', 'fail']);
+    expect(mockNotifyHealthChange).not.toHaveBeenCalled();
+  });
 
-    __resetUpstreamProbeCacheOnlyForTests();
-    mockFetch.mockRejectedValueOnce(new Error('timeout'));
-    await app.request('/health');
-    expect(mockNotifyHealthChange).not.toHaveBeenCalled(); // streak=1
-
-    __resetUpstreamProbeCacheOnlyForTests();
-    mockFetch.mockRejectedValueOnce(new Error('timeout'));
-    await app.request('/health');
-    expect(mockNotifyHealthChange).toHaveBeenCalledTimes(1); // streak=2 → fires
+  it('5 of 10 bad probes fires degraded exactly once', async () => {
+    await driveHealth(['ok', 'fail', 'fail', 'fail', 'fail', 'fail']);
+    // Window now has 5 degraded — at the threshold.
+    expect(mockNotifyHealthChange).toHaveBeenCalledTimes(1);
     expect(mockNotifyHealthChange).toHaveBeenCalledWith('degraded', expect.any(String));
   });
 
-  it('two consecutive successes are NOT enough to flip back to healthy (asymmetric)', async () => {
-    // Seed into degraded via two failures
-    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
-    await app.request('/health');
-    __resetUpstreamProbeCacheOnlyForTests();
-    mockFetch.mockRejectedValueOnce(new Error('timeout'));
-    await app.request('/health');
-    __resetUpstreamProbeCacheOnlyForTests();
-    mockFetch.mockRejectedValueOnce(new Error('timeout'));
-    await app.request('/health');
-    expect(mockNotifyHealthChange).toHaveBeenCalledTimes(1); // degraded fired
-
-    // Two recoveries — should NOT flip back (threshold is 3)
-    for (let i = 0; i < 2; i += 1) {
-      __resetUpstreamProbeCacheOnlyForTests();
-      mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
-      await app.request('/health');
-    }
-    expect(mockNotifyHealthChange).toHaveBeenCalledTimes(1); // still 1 — no healthy fire yet
+  it('one transient timeout inside a healthy run is absorbed — no flap to Discord', async () => {
+    // Drive a realistic "mostly fine, one blip" pattern. The
+    // supermajority stays healthy so nothing fires.
+    await driveHealth(['ok', 'ok', 'ok', 'fail', 'ok', 'ok', 'ok', 'ok', 'ok', 'ok']);
+    expect(mockNotifyHealthChange).not.toHaveBeenCalled();
   });
 
-  it('three consecutive successes after degraded flip back to healthy', async () => {
-    // Drive into degraded
-    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
-    await app.request('/health');
-    __resetUpstreamProbeCacheOnlyForTests();
-    mockFetch.mockRejectedValueOnce(new Error('timeout'));
-    await app.request('/health');
-    __resetUpstreamProbeCacheOnlyForTests();
-    mockFetch.mockRejectedValueOnce(new Error('timeout'));
-    await app.request('/health');
+  it('a partial recovery (4 successes after degraded) is NOT enough to flip back', async () => {
+    // Drive into degraded first (6 fails on top of 1 healthy seed).
+    await driveHealth(['ok', 'fail', 'fail', 'fail', 'fail', 'fail']);
     expect(mockNotifyHealthChange).toHaveBeenCalledTimes(1);
 
-    // But notify cooldown is 5min, so the subsequent healthy flip
-    // would normally get throttled. Drop the cooldown clock by
-    // recycling the full test-reset once we've verified the degraded
-    // fire above. The streak test of the flip-back is what we want
-    // to cover here.
+    // 4 healthy readings — not enough (threshold is 8 healthy in the
+    // 10-wide window).
+    await driveHealth(['ok', 'ok', 'ok', 'ok']);
+    expect(mockNotifyHealthChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('8 of 10 healthy probes after a degraded flip eventually flip back to healthy', async () => {
+    // Drive degraded via 5 bad readings on top of 1 seed.
+    await driveHealth(['ok', 'fail', 'fail', 'fail', 'fail', 'fail']);
+    expect(mockNotifyHealthChange).toHaveBeenCalledWith('degraded', expect.any(String));
+
+    // The full-reset below clears the 30-min notify cooldown (this is
+    // what stands in the way of the recovery fire in a real process
+    // running within the cooldown window; the test fast-forwards it).
     __resetHealthProbeCacheForTests();
     mockNotifyHealthChange.mockReset();
 
-    // Drive into healthy — needs the degraded state first to have
-    // somewhere to flip FROM, then 3 healthy readings.
-    mockFetch.mockRejectedValueOnce(new Error('timeout'));
-    await app.request('/health'); // bootstrap to degraded
-    __resetUpstreamProbeCacheOnlyForTests();
-    mockFetch.mockRejectedValueOnce(new Error('timeout'));
-    await app.request('/health'); // streak=1 degraded (no fire — bootstrap already set it)
-    // Actually: after reset, first call seeds lastHealthStatus=degraded
-    // silently, then subsequent degraded readings just increment the
-    // (redundant) streak without firing. We need 3 healthy in a row.
-    for (let i = 0; i < 3; i += 1) {
-      __resetUpstreamProbeCacheOnlyForTests();
-      mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
-      await app.request('/health');
-    }
+    // Re-seed degraded, then push enough healthy probes to cross
+    // the 8-of-10 threshold.
+    await driveHealth(['fail', 'fail', 'fail', 'fail', 'fail']); // window = [d,d,d,d,d]
+    await driveHealth(['ok', 'ok', 'ok', 'ok', 'ok', 'ok', 'ok', 'ok']);
+    // Window now has 8 healthy out of last 10 → flip back.
     expect(mockNotifyHealthChange).toHaveBeenCalledWith('healthy', expect.any(String));
   });
 });
