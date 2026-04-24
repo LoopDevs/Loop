@@ -1431,9 +1431,16 @@ const AdminCashbackConfigListResponse = registry.register(
   z.object({ configs: z.array(AdminCashbackConfig) }),
 );
 
-const AdminCashbackConfigDetailResponse = registry.register(
-  'AdminCashbackConfigDetailResponse',
-  z.object({ config: AdminCashbackConfig }),
+// A2-502: ADR-017 envelope returned by the upsert endpoint. Mirrors
+// CreditAdjustmentEnvelope / RefundEnvelope — `result` is the updated
+// config row, `audit` is the shared admin-write audit shape that every
+// ADR-017 mutation returns.
+const AdminCashbackConfigEnvelope = registry.register(
+  'AdminCashbackConfigEnvelope',
+  z.object({
+    result: AdminCashbackConfig,
+    audit: AdminWriteAudit,
+  }),
 );
 
 const UpsertCashbackConfigBody = registry.register(
@@ -1444,10 +1451,14 @@ const UpsertCashbackConfigBody = registry.register(
       userCashbackPct: z.coerce.number().min(0).max(100),
       loopMarginPct: z.coerce.number().min(0).max(100),
       active: z.boolean().optional(),
+      reason: z.string().min(2).max(500).openapi({
+        description:
+          'A2-502 / ADR 017: operator-authored rationale for the edit. Fanned out to the admin-audit Discord channel and (A2-908) persisted on any downstream ledger writes — NOT on the config row itself, which carries its own audit trail via the `merchant_cashback_config_history` trigger.',
+      }),
     })
     .openapi({
       description:
-        'The three split percentages are coerced from number-or-numeric-string and must sum to ≤100. `active` defaults to true on initial insert.',
+        'The three split percentages are coerced from number-or-numeric-string and must sum to ≤100. `active` defaults to true on initial insert. `reason` is required per ADR 017 admin-write contract.',
     }),
 );
 
@@ -5000,22 +5011,29 @@ registry.registerPath({
 registry.registerPath({
   method: 'put',
   path: '/api/admin/merchant-cashback-configs/{merchantId}',
-  summary: 'Upsert a merchant cashback-split config (ADR 011).',
+  summary: 'Upsert a merchant cashback-split config (ADR 011 / ADR 017).',
   description:
-    'INSERT on first touch, UPDATE otherwise. Either way a Postgres trigger appends the pre-edit values to `merchant_cashback_config_history` so every change is auditable by `admin_user_id` + timestamp. The response echoes the latest row — the frontend uses it to refresh the list without a second round-trip.',
+    'INSERT on first touch, UPDATE otherwise. A Postgres trigger appends the pre-edit values to `merchant_cashback_config_history` so every change is auditable by `admin_user_id` + timestamp. A2-502: ADR-017 admin-write contract — `Idempotency-Key` header required, `reason` required in the body, response is the standard `{ result, audit }` envelope. A repeat PUT with the same actor+key replays the stored snapshot (`audit.replayed: true`).',
   tags: ['Admin'],
   security: [{ bearerAuth: [] }],
   request: {
     params: z.object({ merchantId: z.string() }),
+    headers: z.object({
+      'idempotency-key': z.string().min(16).max(128).openapi({
+        description:
+          'ADR 017 idempotency key — a UUID or any 16..128-char opaque token the client generates per click.',
+      }),
+    }),
     body: { content: { 'application/json': { schema: UpsertCashbackConfigBody } } },
   },
   responses: {
     200: {
-      description: 'Updated row',
-      content: { 'application/json': { schema: AdminCashbackConfigDetailResponse } },
+      description: 'Updated row wrapped in the ADR-017 {result, audit} envelope',
+      content: { 'application/json': { schema: AdminCashbackConfigEnvelope } },
     },
     400: {
-      description: 'Invalid body — percentages out of range, sum > 100, or missing merchantId',
+      description:
+        'Invalid body / missing Idempotency-Key / missing reason / percentages out of range / sum > 100 / malformed merchantId',
       content: { 'application/json': { schema: ErrorResponse } },
     },
     401: {
@@ -5028,6 +5046,10 @@ registry.registerPath({
     },
     429: {
       description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'DB write failed',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
