@@ -19,6 +19,7 @@ import {
   integer,
   index,
   check,
+  primaryKey,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
@@ -111,7 +112,14 @@ export const userCredits = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex('user_credits_user_currency').on(t.userId, t.currency),
+    // A2-702: composite primary key replaces the unique index. Semantics
+    // are identical (both enforce uniqueness on `(user_id, currency)`),
+    // but PKs give logical-replication / CDC tools a stable row identity
+    // and pg_stat surfaces them in contexts where unique indexes are
+    // opaque. The old `user_credits_user_currency` unique index is
+    // dropped by migration 0017 — PK's underlying index covers the same
+    // lookups.
+    primaryKey({ columns: [t.userId, t.currency], name: 'user_credits_pkey' }),
     // Negative balance is always a bug (we'd be owing the user
     // more than we've booked). Database-level guard so a bad
     // downstream transaction doesn't silently corrupt the ledger.
