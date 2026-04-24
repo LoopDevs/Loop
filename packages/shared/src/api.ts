@@ -73,10 +73,22 @@ export const ApiErrorCode = {
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   UPSTREAM_ERROR: 'UPSTREAM_ERROR',
   UPSTREAM_REDIRECT: 'UPSTREAM_REDIRECT',
+  UPSTREAM_UNAVAILABLE: 'UPSTREAM_UNAVAILABLE',
   SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
   // Image proxy specific
   IMAGE_TOO_LARGE: 'IMAGE_TOO_LARGE',
   NOT_AN_IMAGE: 'NOT_AN_IMAGE',
+  // Admin write contract (ADR 017) — A2-204: every backend-emitted
+  // `code` string needs a shared-enum entry so the web switch-ladder
+  // catches drift at the TypeScript layer. Ops-facing UX for these
+  // is tracked under A2-1153.
+  IDEMPOTENCY_KEY_REQUIRED: 'IDEMPOTENCY_KEY_REQUIRED',
+  INSUFFICIENT_BALANCE: 'INSUFFICIENT_BALANCE',
+  INSUFFICIENT_CREDIT: 'INSUFFICIENT_CREDIT',
+  HOME_CURRENCY_LOCKED: 'HOME_CURRENCY_LOCKED',
+  REFUND_ALREADY_ISSUED: 'REFUND_ALREADY_ISSUED',
+  NOT_CONFIGURED: 'NOT_CONFIGURED',
+  WEBHOOK_NOT_CONFIGURED: 'WEBHOOK_NOT_CONFIGURED',
 } as const;
 
 export type ApiErrorCodeValue = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];
