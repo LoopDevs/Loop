@@ -11,6 +11,7 @@
 | `docs/deployment.md`                                        | How to deploy backend, web, and mobile                            |
 | `docs/testing.md`                                           | Testing pyramid, when tests run, coverage requirements            |
 | `docs/standards.md`                                         | Code style, commit format, branching, review rules                |
+| `docs/error-codes.md`                                       | Error-code taxonomy — every `{ code, message }` + client guidance |
 | `docs/roadmap.md`                                           | What's left for Phase 1, Phase 2, Phase 3                         |
 | `docs/codebase-audit.md`                                    | Audit program, scope, evidence model, exit criteria               |
 | `docs/audit-checklist.md`                                   | Detailed audit checklist by workstream                            |
@@ -35,6 +36,7 @@
 | `docs/adr/021-merchant-catalog-eviction-policy.md`          | Merchant-catalog eviction — admin fall-back / public drop / pin   |
 | `docs/adr/022-admin-drill-triplet-pattern.md`               | Fleet / per-merchant / per-user / self quartet for every metric   |
 | `docs/adr/023-admin-mix-axis-matrix.md`                     | Mix-axis matrix pattern for `/:scope/:id/<target>-mix` endpoints  |
+| `docs/adr/024-withdrawal-writer.md`                         | Admin withdrawal writer — USDLOOP debit + payout-queue insert     |
 
 ---
 
@@ -181,6 +183,11 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # NODE_ENV=development
 # LOG_LEVEL=info                      — trace|debug|info|warn|error|fatal|silent
 
+# A2-207: payout submit worker (ADR 016). Default off outside production
+# so a dev-mode backend doesn't submit Stellar transactions; set true in
+# production + Fly staging after LOOP_STELLAR_OPERATOR_SECRET is wired.
+# LOOP_WORKERS_ENABLED=true
+
 # Observability
 # SENTRY_DSN=<dsn>
 # DISCORD_WEBHOOK_ORDERS=<url>
@@ -195,12 +202,12 @@ Full env var docs → `docs/development.md`.
 
 Applied in order on every request:
 
-1. **CORS** — production: `loopfinance.io`, `www.loopfinance.io`, plus the Capacitor native origins (`capacitor://localhost`, `https://localhost`, `http://localhost`) so iOS and Android webview requests pass preflight. Dev: `*`. Source of truth: `PRODUCTION_ORIGINS` in `apps/backend/src/app.ts`.
+1. **CORS** — production: `loopfinance.io`, `www.loopfinance.io`, plus the Capacitor native origins (`capacitor://localhost`, `https://localhost`) so iOS and Android webview requests pass preflight. Dev: `*`. Source of truth: `PRODUCTION_ORIGINS` in `apps/backend/src/app.ts`. `http://localhost` was dropped under A2-1009 to close a CSRF surface from attacker-run localhost processes.
 2. **Secure headers** — HSTS, X-Content-Type-Options, X-Frame-Options, etc.
-3. **Body limit** — 1MB max request body
+3. **Body limit** — 1MB max request body; overflow returns 413 `PAYLOAD_TOO_LARGE` (A2-1005)
 4. **Request ID** — unique `X-Request-Id` on every request
 5. **Logger** — Pino-backed access log for every request (audit A-021); shares service/env/redaction with application logs and correlates via `X-Request-Id`
-6. **Rate limiting** — per-IP: `/api/clusters` (60/min), `/api/image` (300/min), `/api/auth/request-otp` (5/min), `/api/auth/verify-otp` (10/min), `/api/auth/refresh` (30/min), `DELETE /api/auth/session` (20/min), `POST /api/orders` (10/min), `GET /api/orders` (60/min), `GET /api/orders/:id` (120/min). 429 responses include `Retry-After`.
+6. **Rate limiting** — per-IP: `/api/clusters` (60/min), `/api/image` (300/min), `/api/merchants/:id` (120/min, A2-1008 — authed), `/api/auth/request-otp` (5/min), `/api/auth/verify-otp` (10/min), `/api/auth/refresh` (30/min), `DELETE /api/auth/session` (20/min), `POST /api/orders` (10/min), `GET /api/orders` (60/min), `GET /api/orders/:id` (120/min). 429 responses include `Retry-After`.
 7. **Circuit breaker** — per-upstream-endpoint breakers (login, verify-email, refresh-token, logout, merchants, locations, gift-cards), each 5 failures → 30s open → HALF_OPEN probe. Independent so a failing `/locations` doesn't trip auth.
 
 ---
@@ -209,24 +216,24 @@ Applied in order on every request:
 
 **Every code change must update the relevant docs in the same commit.** Use this checklist:
 
-| If you changed…                                         | Update…                                                                                                                                                                                                                           |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| An API endpoint (add/remove/modify)                     | `docs/architecture.md` → Backend API endpoints section, **and** `apps/backend/src/openapi.ts` registration — declare every status code the handler can return (429 if rate-limited, 502 for upstream-proxy, 503 for circuit-open) |
-| An API response shape or field                          | Shared type in `packages/shared/`, **and** the matching schema in `apps/backend/src/openapi.ts` so generated clients don't strip the field                                                                                        |
-| A rate limit, Cache-Control, or middleware ordering     | `AGENTS.md` middleware stack section, **and** the 429 entry in the endpoint's `openapi.ts` registration                                                                                                                           |
-| An env var (add/remove/rename)                          | `docs/development.md`, `AGENTS.md` env summary, `.env.example` files, `docs/deployment.md` env table                                                                                                                              |
-| A build command or dev workflow                         | `docs/development.md`, `AGENTS.md` quick commands                                                                                                                                                                                 |
-| Deploy config (Dockerfile, fly.toml) on backend AND web | Make sure both stay parity — web Dockerfile/fly drift has happened (PRs #149/#150)                                                                                                                                                |
-| Deploy config (Dockerfile, Fly.io, Vercel)              | `docs/deployment.md`                                                                                                                                                                                                              |
-| Test patterns or coverage rules                         | `docs/testing.md`                                                                                                                                                                                                                 |
-| A code convention or standard                           | `docs/standards.md`                                                                                                                                                                                                               |
-| An architectural decision                               | **Required:** Add/update `docs/adr/NNN-title.md` before implementing                                                                                                                                                              |
-| A new dependency                                        | **Required:** ADR justifying the addition before `npm install`                                                                                                                                                                    |
-| A Capacitor plugin used by the web runtime              | Declare in **both** `apps/web/package.json` and `apps/mobile/package.json` at the same version (PR #151) — `cap sync` discovers via workspace hoisting, but isolated installs break without the mobile declaration                |
-| File structure (add/move/delete files)                  | `AGENTS.md` §Architecture (one-liner per layer) if a package's role changes, per-package `AGENTS.md` Files table always                                                                                                           |
-| `packages/shared` exports                               | Check both `apps/web` and `apps/backend` imports; add the file to `packages/shared/AGENTS.md` Files                                                                                                                               |
-| Dependencies (add/remove)                               | Verify no duplicates across packages                                                                                                                                                                                              |
-| Middleware or backend infrastructure                    | `AGENTS.md` middleware stack section                                                                                                                                                                                              |
+| If you changed…                                         | Update…                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An API endpoint (add/remove/modify)                     | `docs/architecture.md` → Backend API endpoints section, **and** `apps/backend/src/openapi.ts` registration — declare every status code the handler can return (429 if rate-limited, 502 for upstream-proxy, 503 for circuit-open). `scripts/lint-docs.sh` §9 enforces the openapi side. |
+| An API response shape or field                          | Shared type in `packages/shared/`, **and** the matching schema in `apps/backend/src/openapi.ts` so generated clients don't strip the field                                                                                                                                              |
+| A rate limit, Cache-Control, or middleware ordering     | `AGENTS.md` middleware stack section, **and** the 429 entry in the endpoint's `openapi.ts` registration                                                                                                                                                                                 |
+| An env var (add/remove/rename)                          | `docs/development.md`, `AGENTS.md` env summary, `.env.example` files, `docs/deployment.md` env table                                                                                                                                                                                    |
+| A build command or dev workflow                         | `docs/development.md`, `AGENTS.md` quick commands                                                                                                                                                                                                                                       |
+| Deploy config (Dockerfile, fly.toml) on backend AND web | Make sure both stay parity — web Dockerfile/fly drift has happened (PRs #149/#150)                                                                                                                                                                                                      |
+| Deploy config (Dockerfile, Fly.io, Vercel)              | `docs/deployment.md`                                                                                                                                                                                                                                                                    |
+| Test patterns or coverage rules                         | `docs/testing.md`                                                                                                                                                                                                                                                                       |
+| A code convention or standard                           | `docs/standards.md`                                                                                                                                                                                                                                                                     |
+| An architectural decision                               | **Required:** Add/update `docs/adr/NNN-title.md` before implementing                                                                                                                                                                                                                    |
+| A new dependency                                        | **Required:** ADR justifying the addition before `npm install`                                                                                                                                                                                                                          |
+| A Capacitor plugin used by the web runtime              | Declare in **both** `apps/web/package.json` and `apps/mobile/package.json` at the same version (PR #151) — `cap sync` discovers via workspace hoisting, but isolated installs break without the mobile declaration                                                                      |
+| File structure (add/move/delete files)                  | `AGENTS.md` §Architecture (one-liner per layer) if a package's role changes, per-package `AGENTS.md` Files table always                                                                                                                                                                 |
+| `packages/shared` exports                               | Check both `apps/web` and `apps/backend` imports; add the file to `packages/shared/AGENTS.md` Files                                                                                                                                                                                     |
+| Dependencies (add/remove)                               | Verify no duplicates across packages                                                                                                                                                                                                                                                    |
+| Middleware or backend infrastructure                    | `AGENTS.md` middleware stack section                                                                                                                                                                                                                                                    |
 
 **If unsure, update `AGENTS.md`.** It is the first thing AI agents read. Stale instructions here cause cascading errors.
 
