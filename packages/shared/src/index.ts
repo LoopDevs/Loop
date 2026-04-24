@@ -3,6 +3,7 @@ export * from './assert-never.js';
 export * from './cashback-realization.js';
 export * from './credit-transaction-type.js';
 export * from './loop-asset.js';
+export * from './loop-orders.js';
 export * from './merchants.js';
 export * from './money-format.js';
 export * from './order-state.js';
