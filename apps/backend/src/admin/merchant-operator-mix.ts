@@ -41,19 +41,10 @@ const MERCHANT_ID_MAX = 128;
 const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_WINDOW_MS = 366 * 24 * 60 * 60 * 1000;
 
-export interface MerchantOperatorMixRow {
-  operatorId: string;
-  orderCount: number;
-  fulfilledCount: number;
-  failedCount: number;
-  lastOrderAt: string;
-}
-
-export interface MerchantOperatorMixResponse {
-  merchantId: string;
-  since: string;
-  rows: MerchantOperatorMixRow[];
-}
+// A2-1506: moved to `@loop/shared/admin-operator-mixes.ts`. Re-exported
+// for in-file handler builders.
+import type { MerchantOperatorMixResponse, MerchantOperatorMixRow } from '@loop/shared';
+export type { MerchantOperatorMixResponse, MerchantOperatorMixRow };
 
 interface AggRow extends Record<string, unknown> {
   operator_id: string;
