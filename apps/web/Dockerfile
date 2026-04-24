@@ -1,4 +1,4 @@
-FROM node:22-alpine AS builder
+FROM node:22-alpine@sha256:8ea2348b068a9544dae7317b4f3aafcdc032df1647bb7d768a05a5cad1a7683f AS builder
 WORKDIR /app
 
 # Copy root workspace files
@@ -21,7 +21,7 @@ ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build -w @loop/web
 
 # --- Production image ---
-FROM node:22-alpine
+FROM node:22-alpine@sha256:8ea2348b068a9544dae7317b4f3aafcdc032df1647bb7d768a05a5cad1a7683f
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -47,4 +47,11 @@ EXPOSE 3000
 ENV PORT=3000 NODE_ENV=production
 
 WORKDIR /app/apps/web
+
+# A2-402: liveness probe for Fly.io / Kubernetes. Hits the SSR root
+# which always responds — react-router-serve serves the home route.
+# 5s timeout; 3 retries keep a transient blip from cycling the pod.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "require('http').get('http://127.0.0.1:' + (process.env.PORT || 3000) + '/', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+
 CMD ["npx", "react-router-serve", "./build/server/index.js"]

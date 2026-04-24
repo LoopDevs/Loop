@@ -365,7 +365,8 @@ export function notifyHealthChange(status: 'healthy' | 'degraded', details: stri
 export function notifyPayoutFailed(args: {
   payoutId: string;
   userId: string;
-  orderId: string;
+  /** Null for `kind='withdrawal'` payouts (A2-901 / ADR-024 §2). */
+  orderId: string | null;
   assetCode: string;
   amount: string;
   kind: string;
@@ -381,7 +382,11 @@ export function notifyPayoutFailed(args: {
       { name: 'Amount', value: escapeMarkdown(args.amount), inline: true },
       { name: 'Attempts', value: String(args.attempts), inline: true },
       { name: 'User', value: `\`${escapeMarkdown(args.userId)}\``, inline: true },
-      { name: 'Order', value: `\`${escapeMarkdown(args.orderId)}\``, inline: true },
+      {
+        name: 'Order',
+        value: args.orderId === null ? '_withdrawal_' : `\`${escapeMarkdown(args.orderId)}\``,
+        inline: true,
+      },
       { name: 'Payout ID', value: `\`${escapeMarkdown(args.payoutId)}\``, inline: false },
       {
         name: 'Reason',

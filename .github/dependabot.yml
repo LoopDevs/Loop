@@ -14,8 +14,15 @@ updates:
         update-types:
           - 'minor'
           - 'patch'
-    reviewers:
-      - 'LoopDevs/engineering'
+    # A2-106: the prior `reviewers: ['LoopDevs/engineering']` pointed
+    # at a team that doesn't exist in the org (A2-103). Dependabot's
+    # review-request API silently drops unknown teams, so the field
+    # accomplished nothing except noise in the logs. Dropped entirely
+    # — CODEOWNERS now handles reviewer assignment for the paths that
+    # actually need human review (audit A2-104 closed by PR #823
+    # covering admin/credits/stellar/migrations), and dependabot-
+    # generated PRs land in the normal approval flow without a
+    # phantom team ping.
 
   - package-ecosystem: 'github-actions'
     directory: '/'

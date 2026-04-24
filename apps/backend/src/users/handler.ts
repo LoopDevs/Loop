@@ -458,7 +458,8 @@ export async function getUserCreditsHandler(c: Context): Promise<Response> {
  */
 export interface UserPendingPayoutView {
   id: string;
-  orderId: string;
+  /** Null for `kind='withdrawal'` payouts (A2-901 / ADR-024 §2). */
+  orderId: string | null;
   assetCode: string;
   assetIssuer: string;
   /** Stroops (7 decimals). BigInt as string — JSON-safe. */
