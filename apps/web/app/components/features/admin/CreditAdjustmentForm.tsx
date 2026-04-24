@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ApiException } from '@loop/shared';
+import { ApiException, formatMinorCurrency } from '@loop/shared';
 import {
   applyCreditAdjustment,
   type AdminWriteEnvelope,
@@ -191,11 +191,13 @@ export function CreditAdjustmentForm({ userId, defaultCurrency }: Props): React.
           role="status"
           className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-800 dark:bg-green-900/20 dark:text-green-300"
         >
-          Adjustment applied. New {lastApplied.result.currency} balance:{' '}
+          Adjustment applied. New balance:{' '}
           <strong className="tabular-nums">
-            {(Number(lastApplied.result.newBalanceMinor) / 100).toFixed(2)}
+            {formatMinorCurrency(lastApplied.result.newBalanceMinor, lastApplied.result.currency)}
           </strong>{' '}
-          (was {(Number(lastApplied.result.priorBalanceMinor) / 100).toFixed(2)}).
+          (was{' '}
+          {formatMinorCurrency(lastApplied.result.priorBalanceMinor, lastApplied.result.currency)}
+          ).
           <ReplayedBadge replayed={lastApplied.replayed} />
         </div>
       ) : null}

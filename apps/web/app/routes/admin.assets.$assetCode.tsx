@@ -33,17 +33,8 @@ function fiatOf(code: LoopAssetCode): string {
 // from `@loop/shared/loop-asset`. Now imported for parity with the
 // backend admin/asset-circulation handler.
 
-function fmtMinor(minor: string, fiat: string): string {
-  const n = Number(minor);
-  if (!Number.isFinite(n)) return '—';
-  try {
-    return new Intl.NumberFormat(ADMIN_LOCALE, { style: 'currency', currency: fiat }).format(
-      n / 100,
-    );
-  } catch {
-    return `${(n / 100).toFixed(2)} ${fiat}`;
-  }
-}
+// A2-1520: local fmtMinor replaced with bigint-safe shared helper.
+import { formatMinorCurrency as fmtMinor } from '@loop/shared';
 
 function fmtStroops(stroops: string, assetCode: LoopAssetCode): string {
   const negative = stroops.startsWith('-');

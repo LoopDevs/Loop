@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState } from 'react';
 import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ApiException } from '@loop/shared';
+import { ApiException, formatMinorCurrency } from '@loop/shared';
 import type { Route } from './+types/admin.cashback';
 import { useAllMerchants } from '~/hooks/use-merchants';
 import {
@@ -496,25 +496,6 @@ function PctInput({
 }
 
 /**
- * Bigint-minor → localised currency string. Inlined here (not imported
- * from `@loop/shared`) so this route doesn't depend on PR #390's
- * formatter before it merges — a copy-drift follow-up swaps to the
- * shared helper.
- */
-function fmtMinor(minor: string, currency: string): string {
-  try {
-    const major = Number(BigInt(minor)) / 100;
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 2,
-    }).format(major);
-  } catch {
-    return '—';
-  }
-}
-
-/**
  * One-line summary of a (merchant, currency) flow bucket. Rendered
  * under the merchant name on /admin/cashback so ops can eyeball the
  * actual supplier split beside each merchant's configured split.
@@ -523,11 +504,11 @@ function fmtMinor(minor: string, currency: string): string {
 function MerchantFlowSummary({ flow }: { flow: MerchantFlow }): React.JSX.Element {
   return (
     <span
-      title={`${flow.count} fulfilled ${flow.currency} orders — face ${fmtMinor(flow.faceValueMinor, flow.currency)}`}
+      title={`${flow.count} fulfilled ${flow.currency} orders — face ${formatMinorCurrency(flow.faceValueMinor, flow.currency)}`}
     >
-      {flow.count} {flow.currency} · CTX {fmtMinor(flow.wholesaleMinor, flow.currency)} · cashback{' '}
-      {fmtMinor(flow.userCashbackMinor, flow.currency)} · margin{' '}
-      {fmtMinor(flow.loopMarginMinor, flow.currency)}
+      {flow.count} {flow.currency} · CTX {formatMinorCurrency(flow.wholesaleMinor, flow.currency)} ·
+      cashback {formatMinorCurrency(flow.userCashbackMinor, flow.currency)} · margin{' '}
+      {formatMinorCurrency(flow.loopMarginMinor, flow.currency)}
     </span>
   );
 }

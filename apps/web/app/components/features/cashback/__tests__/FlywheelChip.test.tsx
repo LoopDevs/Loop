@@ -48,6 +48,22 @@ describe('formatMinor', () => {
     const out = formatMinor(9_007_199_254_740_993n, 'USD');
     expect(out).toContain('90,071,992,547,409');
   });
+
+  // A2-1520: admin JSON comes back as bigint-as-string; the helper
+  // must accept that shape and stay bigint-safe across the coerce.
+  it('accepts string input and preserves precision past 2^53', () => {
+    const out = formatMinor('9007199254740993', 'USD');
+    expect(out).toContain('90,071,992,547,409');
+  });
+
+  it('accepts number input for small amounts', () => {
+    expect(formatMinor(4200, 'GBP')).toMatch(/£42\.00/);
+  });
+
+  it('returns em-dash for unparseable input', () => {
+    expect(formatMinor('not-a-number', 'USD')).toBe('—');
+    expect(formatMinor(Number.NaN, 'USD')).toBe('—');
+  });
 });
 
 describe('pctBigint', () => {

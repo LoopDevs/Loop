@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
-import { ApiException } from '@loop/shared';
+import { ApiException, formatMinorCurrency as fmtMinor } from '@loop/shared';
 import type { Route } from './+types/admin.orders.$orderId';
 import { shouldRetry } from '~/hooks/query-retry';
 import {
@@ -29,19 +29,9 @@ const STATE_CLASSES: Record<AdminOrderState, string> = {
   expired: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
 };
 
-/**
- * Formats a minor-unit (pence/cent) bigint-string as localised
- * currency. Falls back to em-dash on bad input.
- */
-export function fmtMinor(minor: string, currency: string): string {
-  try {
-    const major = Number(BigInt(minor)) / 100;
-    if (!Number.isFinite(major)) return '—';
-    return new Intl.NumberFormat(ADMIN_LOCALE, { style: 'currency', currency }).format(major);
-  } catch {
-    return '—';
-  }
-}
+// A2-1520: `fmtMinor` re-exported so the test file's named import
+// stays stable. Algorithm now bigint-safe end-to-end.
+export { fmtMinor };
 
 function TimelineRow({ label, iso }: { label: string; iso: string | null }): React.JSX.Element {
   return (

@@ -4,6 +4,7 @@ import { listAdminOrders, type AdminOrderState, type AdminOrderView } from '~/se
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
+import { formatMinorCurrency as fmtMinor } from '@loop/shared';
 
 const LIMIT = 25;
 
@@ -16,20 +17,8 @@ const STATE_CLASSES: Record<AdminOrderState, string> = {
   expired: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
 };
 
-/**
- * Formats a minor-unit (pence/cent) bigint-string as localised
- * currency. Returns em-dash for non-numeric input so a bad backend
- * row doesn't surface as "NaN".
- */
-export function fmtMinor(minor: string, currency: string): string {
-  try {
-    const major = Number(BigInt(minor)) / 100;
-    if (!Number.isFinite(major)) return '—';
-    return new Intl.NumberFormat(ADMIN_LOCALE, { style: 'currency', currency }).format(major);
-  } catch {
-    return '—';
-  }
-}
+// A2-1520: `fmtMinor` re-exported for the test import; bigint-safe now.
+export { fmtMinor };
 
 interface Props {
   userId: string;

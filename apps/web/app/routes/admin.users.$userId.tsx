@@ -32,22 +32,8 @@ export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · User — Loop' }];
 }
 
-/**
- * Formats minor-unit balance as a localised currency string. Uses
- * Intl.NumberFormat so it renders correctly for GBP / USD / EUR
- * without a hand-rolled symbol map. Non-finite amounts render as
- * `—` so a bad backend response doesn't print "NaN" in the UI.
- */
-function fmtMinor(balanceMinor: string, currency: string): string {
-  const n = Number(balanceMinor);
-  if (!Number.isFinite(n)) return '—';
-  try {
-    return new Intl.NumberFormat(ADMIN_LOCALE, { style: 'currency', currency }).format(n / 100);
-  } catch {
-    // Unknown ISO currency code → fall back to a plain decimal + code suffix.
-    return `${(n / 100).toFixed(2)} ${currency}`;
-  }
-}
+// A2-1520: local fmtMinor replaced with bigint-safe shared helper.
+import { formatMinorCurrency as fmtMinor } from '@loop/shared';
 
 /**
  * `/admin/users/:userId` — user detail + credit-balance drill.
