@@ -1,4 +1,10 @@
-FROM node:22-alpine AS builder
+# A2-403: base image pinned by SHA256 digest, not just `22-alpine`.
+# A floating tag lets a compromised upstream rewrite what our build
+# actually uses; the digest is the one stable identity. Dependabot
+# doesn't auto-bump digests — update deliberately: verify the new
+# SHA against Docker Hub's signed manifest + Node's release notes
+# before flipping.
+FROM node:22-alpine@sha256:8ea2348b068a9544dae7317b4f3aafcdc032df1647bb7d768a05a5cad1a7683f AS builder
 WORKDIR /app
 
 # Copy workspace files
@@ -18,7 +24,7 @@ COPY apps/backend/ apps/backend/
 RUN npm run build -w @loop/backend
 
 # --- Production image ---
-FROM node:22-alpine
+FROM node:22-alpine@sha256:8ea2348b068a9544dae7317b4f3aafcdc032df1647bb7d768a05a5cad1a7683f
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -40,5 +46,18 @@ USER node
 
 EXPOSE 8080
 ENV PORT=8080 NODE_ENV=production
+
+# A2-402: orchestrator-visible liveness probe. `GET /health` runs the
+# app-level health logic (upstream reachability + DB + signing-key
+# present) and always responds — 200 when green, 503 when degraded.
+# Fly.io + Kubernetes read HEALTHCHECK status; a degraded container
+# gets cycled instead of left serving traffic.
+#
+# Uses node's built-in http (no curl/wget dep on alpine). 5s timeout
+# is well under the 30s interval so a hung process shows as unhealthy
+# promptly. retries=3 keeps a transient upstream blip from cycling
+# the pod.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "require('http').get('http://127.0.0.1:' + (process.env.PORT || 8080) + '/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
 CMD ["node", "apps/backend/dist/index.js"]

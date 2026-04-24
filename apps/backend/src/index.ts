@@ -15,6 +15,7 @@ import {
 } from './payments/payout-worker.js';
 import { startAssetDriftWatcher, stopAssetDriftWatcher } from './payments/asset-drift-watcher.js';
 import { configuredLoopPayableAssets } from './credits/payout-asset.js';
+import { startInterestScheduler, stopInterestScheduler } from './credits/interest-scheduler.js';
 
 // Apply any pending DB migrations before accepting traffic (ADR 012).
 // Awaited so `serve()` below only runs after the schema is up-to-date —
@@ -77,6 +78,20 @@ if (env.LOOP_WORKERS_ENABLED) {
       thresholdStroops: env.LOOP_ASSET_DRIFT_THRESHOLD_STROOPS,
     });
   }
+
+  // A2-905 / ADR 009: interest accrual scheduler. Zero bps →
+  // feature-off; skip silently so a deployment that hasn't
+  // received legal sign-off stays quiet instead of warning on
+  // every boot. Non-zero bps turns on the tick.
+  if (env.INTEREST_APY_BASIS_POINTS > 0) {
+    startInterestScheduler({
+      period: {
+        apyBasisPoints: env.INTEREST_APY_BASIS_POINTS,
+        periodsPerYear: env.INTEREST_PERIODS_PER_YEAR,
+      },
+      intervalMs: env.INTEREST_TICK_INTERVAL_HOURS * 60 * 60 * 1000,
+    });
+  }
 }
 
 logger.info({ port: env.PORT }, 'Loop backend starting');
@@ -108,6 +123,7 @@ function shutdown(signal: string): void {
   stopProcurementWorker();
   stopPayoutWorker();
   stopAssetDriftWatcher();
+  stopInterestScheduler();
 
   server.close(() => {
     void Promise.allSettled([sentryFlush(5000), closeDb()]).finally(() => {

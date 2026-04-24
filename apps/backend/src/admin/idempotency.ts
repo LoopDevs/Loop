@@ -17,12 +17,28 @@
  * retry would look like a new request and side-effects would double.
  */
 import { createHash } from 'node:crypto';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, lt, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { adminIdempotencyKeys } from '../db/schema.js';
+import { logger } from '../logger.js';
+
+const log = logger.child({ area: 'admin-idempotency' });
 
 export const IDEMPOTENCY_KEY_MIN = 16;
 export const IDEMPOTENCY_KEY_MAX = 128;
+
+/**
+ * A2-500: ADR-017 #6 promised a 24h TTL on admin-idempotency
+ * snapshots, but nothing enforced it — rows accumulated forever.
+ * The TTL is applied in two places:
+ *   - `sweepStaleIdempotencyKeys()` runs hourly from the app-level
+ *     cleanup interval and DELETEs rows whose `created_at` is older
+ *     than the TTL.
+ *   - `lookupIdempotencyKey()` filters expired rows at read time so
+ *     a replay within the first sweep window after a restart still
+ *     sees the correct behaviour.
+ */
+export const IDEMPOTENCY_TTL_HOURS = 24;
 
 export interface IdempotencySnapshot {
   status: number;
@@ -163,10 +179,10 @@ export async function withIdempotencyGuard(
 
 /**
  * Fetch a prior snapshot for the given (adminUserId, key). Returns
- * null on miss. The caller is responsible for the 24h TTL check —
- * we return whatever the row has and let the handler decide; most
- * handlers just always replay what exists since an opaque key from
- * the client should only ever be used once.
+ * null on miss OR on a TTL-expired row. A2-500: expired rows are
+ * treated as a miss so replay semantics match the promised 24h
+ * window even in the gap between scheduled sweeps (e.g. right after
+ * boot, before `sweepStaleIdempotencyKeys()` has fired).
  */
 export async function lookupIdempotencyKey(args: {
   adminUserId: string;
@@ -179,6 +195,11 @@ export async function lookupIdempotencyKey(args: {
     ),
   });
   if (row === undefined) return null;
+  // A2-500: TTL gate. A row older than the declared window is
+  // treated as absent; the next write will overwrite it via the
+  // ON CONFLICT path in storeIdempotencyKey.
+  const ageMs = Date.now() - row.createdAt.getTime();
+  if (ageMs > IDEMPOTENCY_TTL_HOURS * 60 * 60 * 1000) return null;
   let body: Record<string, unknown>;
   try {
     body = JSON.parse(row.responseBody) as Record<string, unknown>;
@@ -188,6 +209,32 @@ export async function lookupIdempotencyKey(args: {
     return null;
   }
   return { status: row.status, body, createdAt: row.createdAt };
+}
+
+/**
+ * A2-500: hourly sweep that DELETEs admin-idempotency snapshots
+ * older than the declared TTL. Called from the app-level cleanup
+ * interval. Cheap even at steady state because
+ * `admin_idempotency_keys_created_at` is indexed.
+ */
+export async function sweepStaleIdempotencyKeys(): Promise<number> {
+  try {
+    const cutoff = new Date(Date.now() - IDEMPOTENCY_TTL_HOURS * 60 * 60 * 1000);
+    const result = await db
+      .delete(adminIdempotencyKeys)
+      .where(lt(adminIdempotencyKeys.createdAt, cutoff))
+      .returning({ key: adminIdempotencyKeys.key });
+    if (result.length > 0) {
+      log.info(
+        { deletedCount: result.length, ttlHours: IDEMPOTENCY_TTL_HOURS },
+        'Swept stale admin idempotency snapshots',
+      );
+    }
+    return result.length;
+  } catch (err) {
+    log.error({ err }, 'Admin idempotency sweep failed');
+    return 0;
+  }
 }
 
 /**
