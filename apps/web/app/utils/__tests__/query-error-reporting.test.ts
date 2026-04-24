@@ -94,4 +94,41 @@ describe('forwardQueryErrorToSentry', () => {
       extra: { key: null },
     });
   });
+
+  // A2-1323: tag the Sentry event with the backend request id when
+  // ApiException carries one, so ops can pivot from a Sentry event
+  // to the backend log line via the shared correlation id.
+  it('adds backendRequestId tag when ApiException.requestId is set', () => {
+    const sentry = { captureException: vi.fn() };
+    const err = new ApiException(500, {
+      code: 'INTERNAL',
+      message: 'boom',
+      requestId: 'req-backend-123',
+    });
+    forwardQueryErrorToSentry(err, { source: 'tanstack-query', key: ['admin'] }, sentry);
+    expect(sentry.captureException.mock.calls[0]?.[1]).toMatchObject({
+      tags: { source: 'tanstack-query', backendRequestId: 'req-backend-123' },
+    });
+  });
+
+  it('omits backendRequestId tag when ApiException has no requestId', () => {
+    const sentry = { captureException: vi.fn() };
+    const err = new ApiException(500, { code: 'INTERNAL', message: 'boom' });
+    forwardQueryErrorToSentry(err, { source: 'tanstack-query', key: ['admin'] }, sentry);
+    expect(sentry.captureException.mock.calls[0]?.[1].tags).toEqual({
+      source: 'tanstack-query',
+    });
+  });
+
+  it('omits backendRequestId tag for non-ApiException errors', () => {
+    const sentry = { captureException: vi.fn() };
+    forwardQueryErrorToSentry(
+      new Error('runtime'),
+      { source: 'tanstack-mutation', key: undefined },
+      sentry,
+    );
+    expect(sentry.captureException.mock.calls[0]?.[1].tags).toEqual({
+      source: 'tanstack-mutation',
+    });
+  });
 });

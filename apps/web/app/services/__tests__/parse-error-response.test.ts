@@ -97,8 +97,56 @@ describe('parseErrorResponse (A2-1162 shared coerce)', () => {
   it('drops requestId when it is non-string', async () => {
     const res = new Response(JSON.stringify({ code: 'X', message: 'ok', requestId: 123 }), {
       status: 400,
+      headers: { 'content-type': 'application/json' },
     });
     const err = await parseErrorResponse(res);
     expect(err.requestId).toBeUndefined();
+  });
+
+  // A2-1323: source the backend X-Request-Id from the response header
+  // whenever the body doesn't include it. Most handlers don't attach
+  // it to the body — only the catch-all 500 does — so the header is
+  // the reliable source.
+  describe('A2-1323 — reads X-Request-Id from the response header', () => {
+    it('uses the header when the body has no requestId field', async () => {
+      const res = new Response(JSON.stringify({ code: 'X', message: 'boom' }), {
+        status: 500,
+        headers: { 'content-type': 'application/json', 'X-Request-Id': 'req-from-header' },
+      });
+      const err = await parseErrorResponse(res);
+      expect(err.requestId).toBe('req-from-header');
+    });
+
+    it('body requestId wins over header when both present', async () => {
+      const res = new Response(
+        JSON.stringify({ code: 'X', message: 'boom', requestId: 'req-from-body' }),
+        {
+          status: 500,
+          headers: { 'content-type': 'application/json', 'X-Request-Id': 'req-from-header' },
+        },
+      );
+      const err = await parseErrorResponse(res);
+      expect(err.requestId).toBe('req-from-body');
+    });
+
+    it('carries header requestId onto the HTML/empty-body fallback path', async () => {
+      const res = new Response('<html>oops</html>', {
+        status: 502,
+        statusText: 'Bad Gateway',
+        headers: { 'content-type': 'text/html', 'X-Request-Id': 'req-html' },
+      });
+      const err = await parseErrorResponse(res);
+      expect(err).toEqual({
+        code: 'UPSTREAM_ERROR',
+        message: 'Bad Gateway',
+        requestId: 'req-html',
+      });
+    });
+
+    it('omits requestId when the header is absent and the body lacks it', async () => {
+      const res = new Response(JSON.stringify({ code: 'X', message: 'boom' }), { status: 500 });
+      const err = await parseErrorResponse(res);
+      expect(err.requestId).toBeUndefined();
+    });
   });
 });

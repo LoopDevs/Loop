@@ -60,6 +60,12 @@ export interface ForwardArgs {
  * Forwards the error to Sentry if it looks unexpected. Quietly drops
  * expected 4xx cases. Accepts a `sentry` module reference so tests
  * can pass an in-memory double.
+ *
+ * A2-1323: when the error is an `ApiException` with a backend
+ * request-id (populated from the response's `X-Request-Id` header in
+ * `parse-error-response.ts`), tag the Sentry event with
+ * `backendRequestId`. Ops can then pivot from a Sentry event straight
+ * to the backend log line via the shared correlation id.
  */
 export function forwardQueryErrorToSentry(
   err: unknown,
@@ -67,8 +73,12 @@ export function forwardQueryErrorToSentry(
   sentry: SentryLike,
 ): void {
   if (isExpectedClientError(err)) return;
+  const tags: Record<string, string> = { source: args.source };
+  if (err instanceof ApiException && err.requestId !== undefined) {
+    tags.backendRequestId = err.requestId;
+  }
   sentry.captureException(err, {
-    tags: { source: args.source },
+    tags,
     extra: { key: args.key ?? null },
   });
 }
