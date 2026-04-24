@@ -81,6 +81,15 @@ export const EnvSchema = z.object({
   // Example: "cdn.giftcards.com,images.merchant.com"
   IMAGE_PROXY_ALLOWED_HOSTS: z.string().optional(),
 
+  // A2-654: emergency opt-out for the production-allowlist boot guard
+  // below. Typed here rather than read from bare `process.env` so a
+  // typo on deploy (`DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCMENT=1`) fails
+  // at parse time with a clear message instead of silently leaving the
+  // override inactive. Only `"1"` counts as the off-switch; any other
+  // non-empty value is rejected so operators can't set it to `"true"`
+  // or `"yes"` and wonder why production still refuses to boot.
+  DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT: z.enum(['1']).optional(),
+
   // Rate-limiter trust boundary (audit A-023). When `true` the rate limiter
   // reads the client IP from the first value in X-Forwarded-For (required
   // when running behind Fly.io / a load balancer). When `false` it falls
@@ -387,11 +396,17 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
   // which the proxy's own source documents as TOCTOU-vulnerable to DNS
   // rebinding. Refuse to start in production unless the allowlist is set.
   // Emergency opt-out is DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1.
+  //
+  // A2-654: the override used to be read directly from `source[...]`
+  // (i.e. process.env), bypassing the zod schema. A typo on deploy
+  // left the override silently inactive. It's now a schema field
+  // whose only accepted value is `"1"`; any other non-empty value
+  // fails at parse time with a clear message.
   if (
     parsed.data.NODE_ENV === 'production' &&
     (parsed.data.IMAGE_PROXY_ALLOWED_HOSTS === undefined ||
       parsed.data.IMAGE_PROXY_ALLOWED_HOSTS.trim() === '') &&
-    source['DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT'] !== '1'
+    parsed.data.DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT !== '1'
   ) {
     throw new Error(
       'Invalid environment variables — IMAGE_PROXY_ALLOWED_HOSTS must be set in production (audit A-025). ' +
