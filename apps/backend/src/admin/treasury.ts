@@ -27,6 +27,12 @@
  */
 import type { Context } from 'hono';
 import { eq, sql } from 'drizzle-orm';
+import type {
+  LoopLiability,
+  TreasuryHolding,
+  TreasuryOrderFlow,
+  TreasurySnapshot,
+} from '@loop/shared';
 import { db } from '../db/client.js';
 import {
   userCredits,
@@ -45,71 +51,11 @@ import { getAccountBalances } from '../payments/horizon-balances.js';
 
 const log = logger.child({ handler: 'treasury' });
 
-export interface LoopLiability {
-  /** Outstanding claim in the matching fiat's minor units (pence, cents). */
-  outstandingMinor: string;
-  /** Stellar issuer account pinned by env; null when the operator hasn't configured this asset yet. */
-  issuer: string | null;
-}
-
-export interface TreasuryHolding {
-  /**
-   * Live on-chain balance in stroops (7 decimals), or null when Loop
-   * doesn't query that asset today. A future slice queries Horizon
-   * for the operator account's USDC + XLM balances.
-   */
-  stroops: string | null;
-}
-
-/**
- * ADR 015 — per charge-currency economics of fulfilled orders.
- * Aggregated from `orders` WHERE state='fulfilled' so admins can see
- * how much of each customer payment went to CTX (supplier), back to
- * the user (cashback), and kept by Loop (margin). Keyed by the
- * currency the user was charged in — the same one they'll see on
- * their card statement.
- *
- * All amounts are `bigint`-string minor units in the key's currency.
- * `count` is the number of fulfilled orders contributing to the row.
- */
-export interface TreasuryOrderFlow {
-  count: string;
-  faceValueMinor: string;
-  wholesaleMinor: string;
-  userCashbackMinor: string;
-  loopMarginMinor: string;
-}
-
-export interface TreasurySnapshot {
-  outstanding: Record<string, string>;
-  totals: Record<string, Record<string, string>>;
-  /** ADR 015 — per LOOP asset, outstanding + configured issuer. */
-  liabilities: Record<LoopAssetCode, LoopLiability>;
-  /** ADR 015 — Loop's yield-earning pile (USDC + XLM operator holdings). */
-  assets: {
-    USDC: TreasuryHolding;
-    XLM: TreasuryHolding;
-  };
-  /**
-   * ADR 015 — outbound Stellar cashback payouts at each state.
-   * The admin UI renders this as a health card: any non-zero
-   * `failed` count should page ops; a growing `submitted` count
-   * without matching `confirmed` means the Horizon confirmation
-   * watcher is lagging.
-   */
-  payouts: Record<PayoutState, string>;
-  /**
-   * ADR 015 — fulfilled-order flow per charge currency. Renders as the
-   * "Supplier flow" card on /admin/treasury so ops can see, at a
-   * glance, the CTX-as-supplier split (what Loop paid CTX, what it
-   * credited users, what it kept).
-   */
-  orderFlows: Record<string, TreasuryOrderFlow>;
-  operatorPool: {
-    size: number;
-    operators: Array<{ id: string; state: string }>;
-  };
-}
+// A2-1506: treasury shapes moved to `@loop/shared/admin-treasury.ts`
+// so the openapi registration + web consumer compile against the same
+// definition. Re-exported via `export type` so existing in-file and
+// handler-side imports keep resolving.
+export type { LoopLiability, TreasuryHolding, TreasuryOrderFlow, TreasurySnapshot };
 
 /** GET /api/admin/treasury */
 export async function treasuryHandler(c: Context): Promise<Response> {
