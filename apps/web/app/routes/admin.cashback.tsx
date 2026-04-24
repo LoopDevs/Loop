@@ -107,7 +107,7 @@ export default function AdminCashbackRoute(): React.JSX.Element {
   }, [configsQuery.data]);
 
   const saveMutation = useMutation({
-    mutationFn: async (args: { merchantId: string; draft: RowDraft }) => {
+    mutationFn: async (args: { merchantId: string; draft: RowDraft; reason: string }) => {
       const wholesalePct = Number(args.draft.wholesalePct);
       const userCashbackPct = Number(args.draft.userCashbackPct);
       const loopMarginPct = Number(args.draft.loopMarginPct);
@@ -115,6 +115,7 @@ export default function AdminCashbackRoute(): React.JSX.Element {
         wholesalePct,
         userCashbackPct,
         loopMarginPct,
+        reason: args.reason,
       });
     },
     onSuccess: async () => {
@@ -285,7 +286,24 @@ export default function AdminCashbackRoute(): React.JSX.Element {
                       <Button
                         variant="secondary"
                         disabled={!dirty || saving}
-                        onClick={() => saveMutation.mutate({ merchantId: m.id, draft })}
+                        onClick={() => {
+                          // A2-502: ADR-017 requires a reason on every
+                          // admin mutation. Prompt inline — matches the
+                          // admin retry-payout UX. A2-1107 tracks the
+                          // a11y/UX upgrade from window.prompt to a
+                          // modal across every admin write form.
+                          const reason = window.prompt(
+                            `Reason for updating ${m.name}'s cashback split:`,
+                            '',
+                          );
+                          if (reason === null) return;
+                          const trimmed = reason.trim();
+                          if (trimmed.length < 2 || trimmed.length > 500) {
+                            setSaveError('Reason must be 2–500 characters');
+                            return;
+                          }
+                          saveMutation.mutate({ merchantId: m.id, draft, reason: trimmed });
+                        }}
                       >
                         {saving ? 'Saving…' : 'Save'}
                       </Button>
