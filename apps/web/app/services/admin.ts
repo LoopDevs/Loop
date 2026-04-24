@@ -1,4 +1,4 @@
-import type { CreditTransactionType, LoopAssetCode } from '@loop/shared';
+import type { CreditTransactionType, LoopAssetCode, OrderState } from '@loop/shared';
 export type { CreditTransactionType } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
 
@@ -127,21 +127,17 @@ export interface PaymentMethodShareBucket {
 
 export type AdminPaymentMethod = 'xlm' | 'usdc' | 'credit' | 'loop_asset';
 
-// NOTE: `AdminOrderState` is also declared further down this file
-// (for the /admin/orders response type). Forward-referencing it
-// here via `import type` on the same module isn't possible, so the
-// shape repeats itself — but both declarations must agree. If you
-// edit one, edit the other.
-type AdminOrderStateLocal =
-  | 'pending_payment'
-  | 'paid'
-  | 'procuring'
-  | 'fulfilled'
-  | 'failed'
-  | 'expired';
+// A2-1166: `AdminOrderState` + `AdminOrderState` used to be two
+// hand-maintained copies of the same six-literal union in this file.
+// Both were identical to `OrderState` from `@loop/shared`; removing
+// the second occurrence here also kept the file in sync with the
+// backend CHECK constraint, which reads from the shared tuple.
+// The type export at the bottom of this file now re-exports
+// `OrderState` under the `AdminOrderState` name for external
+// consumers (`UserOrdersTable`, the admin orders route).
 
 export interface PaymentMethodShareResponse {
-  state: AdminOrderStateLocal;
+  state: AdminOrderState;
   totalOrders: number;
   byMethod: Record<AdminPaymentMethod, PaymentMethodShareBucket>;
 }
@@ -153,7 +149,7 @@ export interface PaymentMethodShareResponse {
  * Default `?state=fulfilled`.
  */
 export async function getPaymentMethodShare(
-  opts: { state?: AdminOrderStateLocal } = {},
+  opts: { state?: AdminOrderState } = {},
 ): Promise<PaymentMethodShareResponse> {
   const params = new URLSearchParams();
   if (opts.state !== undefined) params.set('state', opts.state);
@@ -1160,13 +1156,12 @@ export async function retryPayout(args: {
   );
 }
 
-export type AdminOrderState =
-  | 'pending_payment'
-  | 'paid'
-  | 'procuring'
-  | 'fulfilled'
-  | 'failed'
-  | 'expired';
+// A2-1166: re-export of `OrderState` from `@loop/shared`, which is
+// the single source of truth for the order state machine (ADR 010 +
+// backend CHECK constraint). The `AdminOrderState` name is kept so
+// existing consumers — `UserOrdersTable`, admin orders routes — don't
+// need to re-import.
+export type AdminOrderState = OrderState;
 
 /** Admin-shaped row from `/api/admin/orders` (ADR 011 / 015). */
 export interface AdminOrderView {
@@ -1545,7 +1540,7 @@ export async function getAdminMerchantCashbackSummary(
  */
 export interface AdminMerchantPaymentMethodShareResponse {
   merchantId: string;
-  state: AdminOrderStateLocal;
+  state: AdminOrderState;
   totalOrders: number;
   byMethod: Record<AdminPaymentMethod, PaymentMethodShareBucket>;
 }
@@ -1553,7 +1548,7 @@ export interface AdminMerchantPaymentMethodShareResponse {
 /** `GET /api/admin/merchants/:merchantId/payment-method-share` — rail mix for one merchant. */
 export async function getAdminMerchantPaymentMethodShare(
   merchantId: string,
-  opts: { state?: AdminOrderStateLocal } = {},
+  opts: { state?: AdminOrderState } = {},
 ): Promise<AdminMerchantPaymentMethodShareResponse> {
   const params = new URLSearchParams();
   if (opts.state !== undefined) params.set('state', opts.state);
@@ -1570,7 +1565,7 @@ export async function getAdminMerchantPaymentMethodShare(
  */
 export interface AdminUserPaymentMethodShareResponse {
   userId: string;
-  state: AdminOrderStateLocal;
+  state: AdminOrderState;
   totalOrders: number;
   byMethod: Record<AdminPaymentMethod, PaymentMethodShareBucket>;
 }
@@ -1578,7 +1573,7 @@ export interface AdminUserPaymentMethodShareResponse {
 /** `GET /api/admin/users/:userId/payment-method-share` — rail mix for one user. */
 export async function getAdminUserPaymentMethodShare(
   userId: string,
-  opts: { state?: AdminOrderStateLocal } = {},
+  opts: { state?: AdminOrderState } = {},
 ): Promise<AdminUserPaymentMethodShareResponse> {
   const params = new URLSearchParams();
   if (opts.state !== undefined) params.set('state', opts.state);
