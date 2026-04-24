@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router';
+import { Link } from 'react-router';
 import type { Route } from './+types/admin.stuck-orders';
-import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import {
   getStuckOrders,
@@ -10,6 +9,7 @@ import {
   type StuckPayoutRow,
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { Spinner } from '~/components/ui/Spinner';
 
 export function meta(): Route.MetaDescriptors {
@@ -39,38 +39,23 @@ export function ageClass(ageMinutes: number, thresholdMinutes: number): string {
  * incident — paid/procuring rows piling up means the CTX operator
  * pool can't clear the backlog fast enough.
  */
+// A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminStuckOrdersRoute(): React.JSX.Element {
-  const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  return (
+    <RequireAdmin>
+      <AdminStuckOrdersRouteInner />
+    </RequireAdmin>
+  );
+}
 
+function AdminStuckOrdersRouteInner(): React.JSX.Element {
   const query = useQuery({
     queryKey: ['admin-stuck-orders'],
     queryFn: getStuckOrders,
-    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 15_000,
     refetchInterval: 30_000,
   });
-
-  if (!isAuthenticated) {
-    return (
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
-          Admin · Stuck orders
-        </h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in with an admin account.</p>
-        <button
-          type="button"
-          className="text-blue-600 underline"
-          onClick={() => {
-            void navigate('/auth');
-          }}
-        >
-          Go to sign-in
-        </button>
-      </main>
-    );
-  }
 
   return (
     <main className="max-w-5xl mx-auto px-6 py-12 space-y-6">

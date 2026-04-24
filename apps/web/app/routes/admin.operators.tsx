@@ -1,8 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router';
+import { Link } from 'react-router';
 import type { Route } from './+types/admin.operators';
-import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import {
   getOperatorLatency,
@@ -11,6 +10,7 @@ import {
   type OperatorStatsRow,
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { Spinner } from '~/components/ui/Spinner';
 import { successRatePct } from '~/components/features/admin/OperatorStatsCard';
@@ -103,14 +103,19 @@ export function combineRows(
  * detail page; failed-count keeps its incident-triage shortcut into
  * `/admin/orders` for direct triage.
  */
+// A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminOperatorsIndexRoute(): React.JSX.Element {
-  const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  return (
+    <RequireAdmin>
+      <AdminOperatorsIndexRouteInner />
+    </RequireAdmin>
+  );
+}
 
+function AdminOperatorsIndexRouteInner(): React.JSX.Element {
   const statsQuery = useQuery({
     queryKey: ['admin-operator-stats'],
     queryFn: () => getOperatorStats(),
-    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 30_000,
   });
@@ -118,7 +123,6 @@ export default function AdminOperatorsIndexRoute(): React.JSX.Element {
   const latencyQuery = useQuery({
     queryKey: ['admin-operator-latency'],
     queryFn: () => getOperatorLatency(),
-    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 30_000,
   });
@@ -127,26 +131,6 @@ export default function AdminOperatorsIndexRoute(): React.JSX.Element {
     () => combineRows(statsQuery.data?.rows ?? [], latencyQuery.data?.rows ?? []),
     [statsQuery.data, latencyQuery.data],
   );
-
-  if (!isAuthenticated) {
-    return (
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
-          Admin · Operators
-        </h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in with an admin account.</p>
-        <button
-          type="button"
-          className="text-blue-600 underline"
-          onClick={() => {
-            void navigate('/auth');
-          }}
-        >
-          Go to sign-in
-        </button>
-      </main>
-    );
-  }
 
   const isPending = statsQuery.isPending || latencyQuery.isPending;
   const hasError = statsQuery.isError || latencyQuery.isError;

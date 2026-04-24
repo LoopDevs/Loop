@@ -1,9 +1,8 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router';
+import { Link } from 'react-router';
 import { LOOP_ASSET_CODES, type LoopAssetCode } from '@loop/shared';
 import type { Route } from './+types/admin.assets';
-import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import {
   getTreasurySnapshot,
@@ -12,6 +11,7 @@ import {
   type PayoutsByAssetRow,
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
+import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { AssetDriftBadge } from '~/components/features/admin/AssetDriftBadge';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -85,14 +85,19 @@ export function buildAssetSummaries(
  * and the asset drill page (`['admin-payouts-by-asset']`), so
  * navigating between them deduplicates fetches.
  */
+// A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminAssetsIndexRoute(): React.JSX.Element {
-  const { isAuthenticated } = useAuth();
-  const navigate = useNavigate();
+  return (
+    <RequireAdmin>
+      <AdminAssetsIndexRouteInner />
+    </RequireAdmin>
+  );
+}
 
+function AdminAssetsIndexRouteInner(): React.JSX.Element {
   const snapshotQuery = useQuery({
     queryKey: ['admin-treasury'],
     queryFn: getTreasurySnapshot,
-    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 30_000,
   });
@@ -100,7 +105,6 @@ export default function AdminAssetsIndexRoute(): React.JSX.Element {
   const byAssetQuery = useQuery({
     queryKey: ['admin-payouts-by-asset'],
     queryFn: getPayoutsByAsset,
-    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 30_000,
   });
@@ -109,26 +113,6 @@ export default function AdminAssetsIndexRoute(): React.JSX.Element {
     () => buildAssetSummaries(snapshotQuery.data?.liabilities, byAssetQuery.data?.rows),
     [snapshotQuery.data, byAssetQuery.data],
   );
-
-  if (!isAuthenticated) {
-    return (
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">
-          Admin · Assets
-        </h1>
-        <p className="text-gray-700 dark:text-gray-300 mb-6">Sign in with an admin account.</p>
-        <button
-          type="button"
-          className="text-blue-600 underline"
-          onClick={() => {
-            void navigate('/auth');
-          }}
-        >
-          Go to sign-in
-        </button>
-      </main>
-    );
-  }
 
   const isPending = snapshotQuery.isPending || byAssetQuery.isPending;
   const hasError = snapshotQuery.isError || byAssetQuery.isError;
