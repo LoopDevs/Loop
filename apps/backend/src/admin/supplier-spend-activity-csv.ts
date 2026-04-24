@@ -83,6 +83,11 @@ export async function adminSupplierSpendActivityCsvHandler(c: Context): Promise<
   );
 
   try {
+    // A2-904: GROUP BY charge_currency. Per orders/repo.ts, the
+    // wholesale / cashback / margin minor-unit sums are denominated
+    // in charge_currency (home currency). Grouping by catalog
+    // currency mixed them. `currency` CSV column name preserved for
+    // wire-compat but now reflects the charge_currency.
     const result = await db.execute(sql`
       WITH days AS (
         SELECT generate_series(
@@ -93,7 +98,7 @@ export async function adminSupplierSpendActivityCsvHandler(c: Context): Promise<
       )
       SELECT
         days.d::text                                       AS day,
-        o.currency                                         AS currency,
+        o.charge_currency                                  AS currency,
         COUNT(o.id)::bigint                                AS count,
         COALESCE(SUM(o.face_value_minor), 0)::bigint       AS face_value_minor,
         COALESCE(SUM(o.wholesale_minor), 0)::bigint        AS wholesale_minor,
@@ -104,8 +109,8 @@ export async function adminSupplierSpendActivityCsvHandler(c: Context): Promise<
         ON o.state = 'fulfilled'
         AND o.fulfilled_at IS NOT NULL
         AND o.fulfilled_at::date = days.d
-      GROUP BY days.d, o.currency
-      ORDER BY days.d ASC, o.currency ASC NULLS LAST
+      GROUP BY days.d, o.charge_currency
+      ORDER BY days.d ASC, o.charge_currency ASC NULLS LAST
       LIMIT ${ROW_CAP + 1}
     `);
 
