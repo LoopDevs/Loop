@@ -1,4 +1,4 @@
-FROM node:22-alpine AS builder
+FROM node:22-alpine@sha256:8ea2348b068a9544dae7317b4f3aafcdc032df1647bb7d768a05a5cad1a7683f AS builder
 WORKDIR /app
 
 # Copy root workspace files
@@ -21,7 +21,7 @@ ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build -w @loop/web
 
 # --- Production image ---
-FROM node:22-alpine
+FROM node:22-alpine@sha256:8ea2348b068a9544dae7317b4f3aafcdc032df1647bb7d768a05a5cad1a7683f
 WORKDIR /app
 
 COPY package.json package-lock.json ./

@@ -1,4 +1,10 @@
-FROM node:22-alpine AS builder
+# A2-403: base image pinned by SHA256 digest, not just `22-alpine`.
+# A floating tag lets a compromised upstream rewrite what our build
+# actually uses; the digest is the one stable identity. Dependabot
+# doesn't auto-bump digests — update deliberately: verify the new
+# SHA against Docker Hub's signed manifest + Node's release notes
+# before flipping.
+FROM node:22-alpine@sha256:8ea2348b068a9544dae7317b4f3aafcdc032df1647bb7d768a05a5cad1a7683f AS builder
 WORKDIR /app
 
 # Copy workspace files
@@ -18,7 +24,7 @@ COPY apps/backend/ apps/backend/
 RUN npm run build -w @loop/backend
 
 # --- Production image ---
-FROM node:22-alpine
+FROM node:22-alpine@sha256:8ea2348b068a9544dae7317b4f3aafcdc032df1647bb7d768a05a5cad1a7683f
 WORKDIR /app
 
 COPY package.json package-lock.json ./
