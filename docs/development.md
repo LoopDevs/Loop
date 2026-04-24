@@ -59,11 +59,16 @@ the `scripts/lint-docs.sh` check fails CI if a variable is in
 hand.
 
 ```bash
+# ── Runtime ──────────────────────────────────────────────────────────
 PORT=8080
-LOG_LEVEL=info                          # debug | info | warn | error
+LOG_LEVEL=info                          # trace | debug | info | warn | error | fatal | silent
 NODE_ENV=development
+# A2-1310: logical-env tag for Sentry bucketing. Pair with VITE_LOOP_ENV
+# on the web side. Staging deploys that run NODE_ENV=production should
+# set LOOP_ENV=staging so events still bucket as staging, not production.
+# LOOP_ENV=staging
 
-# Upstream Gift Card API (public — no auth needed)
+# ── Upstream CTX (ADR 013) ───────────────────────────────────────────
 GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 
 # Optional upstream API credentials — needed only for /locations endpoint
@@ -78,13 +83,59 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # CTX_CLIENT_ID_IOS=loopios
 # CTX_CLIENT_ID_ANDROID=loopandroid
 
-# Refresh intervals (optional)
+# CTX operator-account pool (ADR 013). JSON array of service accounts
+# used as CTX-side customers when fulfilling Loop-native orders. At
+# least one entry must have `id` + `bearer`. Absent → Loop-native
+# order fulfillment is blocked (merchant browse still works).
+# CTX_OPERATOR_POOL=[{"id":"primary","bearer":"eyJ..."},{"id":"backup-1","bearer":"eyJ..."}]
+
+# ── Merchant sync (ADR 021) ──────────────────────────────────────────
 REFRESH_INTERVAL_HOURS=6                # merchant cache refresh
-LOCATION_REFRESH_INTERVAL_HOURS=24     # location data refresh
+LOCATION_REFRESH_INTERVAL_HOURS=24      # location data refresh
+# INCLUDE_DISABLED_MERCHANTS=true       # dev mode — show disabled merchants
 
-# Dev mode — show disabled merchants so UI can be tested before CTX enables them.
-# INCLUDE_DISABLED_MERCHANTS=true
+# ── Database (ADR 012) ───────────────────────────────────────────────
+# Required in production. The dev default points at the docker-compose
+# Postgres instance — see `docker-compose.yml` at the repo root.
+DATABASE_URL=postgres://loop:loop@localhost:5433/loop
+# DATABASE_POOL_MAX=10                   # default 10
 
+# ── Admin gate + write invariants (ADR 017 / 018) ────────────────────
+# Comma-separated CTX user IDs allowed to hit /api/admin/*. Absent →
+# admin surface is locked (401 Unauthorized on every admin endpoint).
+# ADMIN_CTX_USER_IDS=abc-123-xyz,def-456-uvw
+
+# A2-1610: per-admin per-currency daily cap on credit adjustments,
+# in minor units. Default 100000000 (1,000,000 units minor =
+# $10,000 / £10,000 / €10,000). A single admin exceeding the cap
+# inside a rolling 24h window gets a 403 with `code: 'DAILY_CAP_EXCEEDED'`.
+# ADMIN_DAILY_ADJUSTMENT_CAP_MINOR=100000000
+
+# ── Default cashback split (ADR 010 / 011) ───────────────────────────
+# Fallbacks used when a merchant has no row in merchant_cashback_configs.
+# Keep at 0 in dev / staging — a non-zero default will silently credit
+# test purchases. Configure per-merchant via the admin UI instead.
+# DEFAULT_USER_CASHBACK_PCT_OF_CTX=0.00
+# DEFAULT_LOOP_MARGIN_PCT_OF_CTX=0.00
+
+# ── Observability (A2-1606 / A2-1607 / A2-1310 / A2-1327) ────────────
+# Shared-secret bearer tokens. Set either → endpoint requires
+# `Authorization: Bearer <token>` on every request. Absent → endpoint
+# is public. Use 32+ random chars.
+# METRICS_BEARER_TOKEN=<32+ random chars>      # gates /metrics
+# OPENAPI_BEARER_TOKEN=<32+ random chars>      # gates /openapi.json
+
+# Discord webhooks (optional)
+# DISCORD_WEBHOOK_ORDERS=https://discord.com/api/webhooks/...
+# DISCORD_WEBHOOK_MONITORING=https://discord.com/api/webhooks/...
+# ADR 017 / 018 admin-write audit fanout. Fire-and-forget AFTER DB
+# commit; never blocks the admin write.
+# DISCORD_WEBHOOK_ADMIN_AUDIT=https://discord.com/api/webhooks/...
+
+# Error tracking (optional)
+# SENTRY_DSN=https://xxx@yyy.ingest.sentry.io/zzz
+
+# ── Security posture (audit A-023 / A-025 / test-only) ───────────────
 # Image proxy SSRF allowlist — REQUIRED in production (audit A-025).
 # Comma-separated upstream hostnames. Boot fails in production if unset
 # unless DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1.
@@ -97,45 +148,54 @@ LOCATION_REFRESH_INTERVAL_HOURS=24     # location data refresh
 # cannot spoof.
 # TRUST_PROXY=true
 
-# Discord webhooks (optional — for notifications)
-# DISCORD_WEBHOOK_ORDERS=https://discord.com/api/webhooks/...
-# DISCORD_WEBHOOK_MONITORING=https://discord.com/api/webhooks/...
+# Test-only escape hatch. Read by playwright.mocked.config.ts and the
+# e2e fixtures so 10-req/min gates don't trip the suite. Never set in
+# production — it is an input to env.ts that bypasses the rate limiter
+# entirely.
+# DISABLE_RATE_LIMITING=1
 
-# Error tracking (optional — get DSN from sentry.io)
-# SENTRY_DSN=https://xxx@yyy.ingest.sentry.io/zzz
-
-# Loop-native auth signing key (ADR 013). HS256 secret; ≥32 chars.
-# Absent → Loop-native auth endpoints are inert and CTX-proxy auth is
-# the only path. `_PREVIOUS` is only set during a rotation window so
-# in-flight access tokens signed with the old key still verify.
+# ── Loop-native auth (ADR 013 / 014) ─────────────────────────────────
+# HS256 signing key; ≥32 chars. Absent → Loop-native auth endpoints
+# are inert and CTX-proxy auth is the only path. `_PREVIOUS` is only
+# set during a rotation window so in-flight access tokens signed with
+# the old key still verify.
 # LOOP_JWT_SIGNING_KEY=...(≥32 chars)
 # LOOP_JWT_SIGNING_KEY_PREVIOUS=...(≥32 chars)
 
-# Loop-native auth feature flag (ADR 013). When true + the signing
-# key is set, /request-otp / /verify-otp / /refresh take the Loop-
-# native path (Loop sends the email, mints its own JWTs).
+# Feature flag. When true + the signing key is set, /request-otp /
+# /verify-otp / /refresh take the Loop-native path (Loop sends the
+# email, mints its own JWTs).
 # LOOP_AUTH_NATIVE_ENABLED=true
 
 # Social login (ADR 014). Verified server-side against Google /
-# Apple's issuer keys. Generate the Google IDs in Google Cloud
-# Console → Credentials; Apple Service ID / Bundle ID are assigned
-# in the Apple developer portal. Omit a platform to disable it.
-# GOOGLE_OAUTH_CLIENT_ID_WEB=...
-# GOOGLE_OAUTH_CLIENT_ID_IOS=...
-# GOOGLE_OAUTH_CLIENT_ID_ANDROID=...
-# APPLE_SIGN_IN_SERVICE_ID=...
+# Apple's issuer keys. Omit a platform to disable it.
+# GOOGLE_OAUTH_CLIENT_ID_WEB=<web-client>.apps.googleusercontent.com
+# GOOGLE_OAUTH_CLIENT_ID_IOS=<ios-client>.apps.googleusercontent.com
+# GOOGLE_OAUTH_CLIENT_ID_ANDROID=<android-client>.apps.googleusercontent.com
+# APPLE_SIGN_IN_SERVICE_ID=io.loopfinance.app
 
-# Loop-native order rails — Stellar deposit + asset issuers (ADR 010 / 015).
+# ── Stellar / LOOP-asset rails (ADR 010 / 015 / 016) ─────────────────
 # Loop's Stellar deposit address (operator account) is where users send
 # XLM / USDC for Loop-native orders. The three LOOP-asset issuers back
 # the cashback payouts (USDLOOP / GBPLOOP / EURLOOP — one per home
-# currency). Omit an issuer → cashback for that currency stays off-chain
-# (ledger row written, Stellar side skipped).
+# currency). Omit an issuer → cashback for that currency stays off-chain.
 # LOOP_STELLAR_DEPOSIT_ADDRESS=G...(55 chars)
 # LOOP_STELLAR_USDC_ISSUER=GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
 # LOOP_STELLAR_USDLOOP_ISSUER=G...
 # LOOP_STELLAR_GBPLOOP_ISSUER=G...
 # LOOP_STELLAR_EURLOOP_ISSUER=G...
+
+# Horizon endpoint (A2-1513 / A2-1525). Default `https://horizon.stellar.org`.
+# Override for staging → Testnet Horizon. Required through env.ts so a
+# bad URL fails parseEnv at boot rather than the first live call.
+# LOOP_STELLAR_HORIZON_URL=https://horizon.stellar.org
+
+# Price / FX feed overrides (A2-1812). XLM-in-home-currency + fiat FX
+# oracles — keep on the CoinGecko / Frankfurter defaults in production
+# unless a deployment has its own pinned oracle. Response shape must
+# match CoinGecko + Frankfurter formats respectively.
+# LOOP_XLM_PRICE_FEED_URL=https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=usd,gbp,eur
+# LOOP_FX_FEED_URL=https://api.frankfurter.app/latest?from=USD&to=GBP,EUR
 
 # Procurement USDC-floor (ADR 015). Stroops (7 decimals; 10^7 = 1 USDC).
 # When the operator account's USDC balance dips below this many stroops,
@@ -151,24 +211,41 @@ LOCATION_REFRESH_INTERVAL_HOURS=24     # location data refresh
 # LOOP_STELLAR_OPERATOR_SECRET=S...(55 chars)
 # LOOP_STELLAR_OPERATOR_SECRET_PREVIOUS=S...
 
-# Payout worker pacing + bounded retry (ADR 016). 30s interval matches
-# the ledger-close cadence; a max-attempts of 5 promotes a transient
-# failure to terminal `failed` before the row starves the queue.
-# LOOP_PAYOUT_WORKER_INTERVAL_SECONDS=30
-# LOOP_PAYOUT_MAX_ATTEMPTS=5
-
 # Stellar network passphrase (ADR 016). Public mainnet is the default;
 # override with the Testnet string for staging.
 # LOOP_STELLAR_NETWORK_PASSPHRASE=Public Global Stellar Network ; September 2015
 
-# Worker feature flag + cadences (ADR 010 / 015). Default false — a
-# fresh clone doesn't auto-start Horizon + CTX polling. Set true once
-# the operator account + issuers are configured above. Watcher runs
-# every 10s (deposit latency), procurement every 5s (user-blocking
-# once an order is paid).
+# ── Workers (ADR 010 / 015 / 016 / A2-602 / A2-905) ──────────────────
+# Feature flag. Default false — a fresh clone doesn't auto-start
+# Horizon + CTX polling. Set true once the operator account + issuers
+# are configured above.
 # LOOP_WORKERS_ENABLED=true
+
+# Per-worker cadences. Watcher runs every 10s (deposit latency),
+# procurement every 5s (user-blocking once an order is paid). Payout
+# interval matches Stellar ledger-close cadence.
 # LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS=10
 # LOOP_PROCUREMENT_INTERVAL_SECONDS=5
+# LOOP_PAYOUT_WORKER_INTERVAL_SECONDS=30
+# LOOP_PAYOUT_MAX_ATTEMPTS=5                   # bounded retry
+
+# A2-602 watchdog. Rows stuck in `submitted` past this many seconds
+# are requeued (idempotent — the memo-check in the submit path will
+# noop if the tx already landed).
+# LOOP_PAYOUT_WATCHDOG_STALE_SECONDS=300
+
+# ADR 015 drift watcher. Walks every LOOP asset, compares on-chain
+# issuance against the off-chain ledger liability, posts Discord if
+# the delta exceeds the threshold (stroops; 7 decimals).
+# LOOP_ASSET_DRIFT_WATCHER_INTERVAL_SECONDS=300
+# LOOP_ASSET_DRIFT_THRESHOLD_STROOPS=100000000   # 10 LOOP-asset units
+
+# A2-905 / ADR 009 interest accrual. Off by default — a non-zero APY
+# with an un-tuned ledger will silently inflate balances. When in
+# doubt keep all three at the defaults.
+# INTEREST_APY_BASIS_POINTS=0                  # 250 = 2.50% APY
+# INTEREST_PERIODS_PER_YEAR=365                # daily
+# INTEREST_TICK_INTERVAL_HOURS=24              # how often the worker ticks
 ```
 
 ### Inheritance model
