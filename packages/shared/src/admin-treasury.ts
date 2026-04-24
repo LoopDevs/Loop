@@ -23,7 +23,7 @@
  * `services/admin.ts` via `export type { ... }` so existing call sites
  * don't learn the shared path.
  */
-import type { LoopAssetCode } from './loop-asset.js';
+import type { HomeCurrency, LoopAssetCode } from './loop-asset.js';
 import type { PayoutState } from './payout-state.js';
 
 /**
@@ -97,4 +97,30 @@ export interface TreasurySnapshot {
     size: number;
     operators: Array<{ id: string; state: string }>;
   };
+}
+
+/**
+ * One (day × currency) bucket of the off-chain ledger delta — `net =
+ * credited - debited`. Rendered on the admin treasury-credit-flow
+ * chart so ops can see day-over-day liability flow per currency.
+ * `day` is YYYY-MM-DD in UTC; amounts are bigint-string minor units.
+ */
+export interface TreasuryCreditFlowDay {
+  day: string;
+  currency: string;
+  creditedMinor: string;
+  debitedMinor: string;
+  netMinor: string;
+}
+
+/**
+ * `GET /api/admin/treasury/credit-flow?days=<n>&currency=<iso>` —
+ * per-day liability-delta time-series. When `currency` is pinned, the
+ * response zero-fills days so the chart layout stays stable across
+ * quiet periods.
+ */
+export interface TreasuryCreditFlowResponse {
+  windowDays: number;
+  currency: HomeCurrency | null;
+  days: TreasuryCreditFlowDay[];
 }
