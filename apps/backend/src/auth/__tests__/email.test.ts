@@ -85,4 +85,67 @@ describe('ConsoleEmailProvider.sendOtpEmail', () => {
       }),
     ).resolves.toBeUndefined();
   });
+
+  // A2-1612: if @sentry/pino is configured, log records land in the
+  // Sentry transport before Pino's REDACT_PATHS pass runs. Guard by
+  // checking SENTRY_DSN at the call site; raw code only in the
+  // no-Sentry (default dev) branch.
+  it('A2-1612: includes the raw code when SENTRY_DSN is unset', async () => {
+    vi.resetModules();
+    vi.doMock('../../env.js', () => ({ env: { NODE_ENV: 'test', SENTRY_DSN: undefined } }));
+    const loggerCalls: Array<[Record<string, unknown>, string]> = [];
+    vi.doMock('../../logger.js', () => ({
+      logger: {
+        child: () => ({
+          info: (data: Record<string, unknown>, msg: string) => loggerCalls.push([data, msg]),
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn(),
+        }),
+      },
+    }));
+    const { getEmailProvider: fresh, __resetEmailProviderForTests: reset } =
+      await import('../email.js');
+    reset();
+    await fresh().sendOtpEmail({
+      to: 'a@b.com',
+      code: '123456',
+      expiresAt: new Date('2026-01-01T00:00:00Z'),
+    });
+    expect(loggerCalls[0]![0]['code']).toBe('123456');
+    expect(loggerCalls[0]![1]).toMatch(/dev-only/);
+    vi.doUnmock('../../env.js');
+    vi.doUnmock('../../logger.js');
+  });
+
+  it('A2-1612: redacts the code when SENTRY_DSN is set (Sentry pre-redaction protection)', async () => {
+    vi.resetModules();
+    vi.doMock('../../env.js', () => ({
+      env: { NODE_ENV: 'test', SENTRY_DSN: 'https://x@o.ingest.sentry.io/42' },
+    }));
+    const loggerCalls: Array<[Record<string, unknown>, string]> = [];
+    vi.doMock('../../logger.js', () => ({
+      logger: {
+        child: () => ({
+          info: (data: Record<string, unknown>, msg: string) => loggerCalls.push([data, msg]),
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn(),
+        }),
+      },
+    }));
+    const { getEmailProvider: fresh, __resetEmailProviderForTests: reset } =
+      await import('../email.js');
+    reset();
+    await fresh().sendOtpEmail({
+      to: 'a@b.com',
+      code: '123456',
+      expiresAt: new Date('2026-01-01T00:00:00Z'),
+    });
+    expect(loggerCalls[0]![0]['code']).not.toBe('123456');
+    expect(String(loggerCalls[0]![0]['code'])).toMatch(/REDACTED/);
+    expect(loggerCalls[0]![1]).toMatch(/redacted/);
+    vi.doUnmock('../../env.js');
+    vi.doUnmock('../../logger.js');
+  });
 });
