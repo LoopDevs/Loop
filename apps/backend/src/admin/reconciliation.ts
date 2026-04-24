@@ -32,6 +32,7 @@ import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { userCredits } from '../db/schema.js';
 import { logger } from '../logger.js';
+import { computeLedgerDriftSql } from '../credits/ledger-invariant.js';
 
 const log = logger.child({ handler: 'admin-reconciliation' });
 
@@ -62,77 +63,15 @@ export interface ReconciliationResponse {
   drift: ReconciliationEntry[];
 }
 
-/**
- * Raw-SQL shape the drift query emits. Keyed with camelCase aliases
- * so we avoid a second mapping pass; postgres-js returns plain objects
- * with whatever column labels the SELECT uses.
- */
-interface DriftRow extends Record<string, unknown> {
-  userId: string;
-  currency: string;
-  balanceMinor: string;
-  ledgerSumMinor: string;
-  deltaMinor: string;
-}
-
 /** GET /api/admin/reconciliation */
 export async function adminReconciliationHandler(c: Context): Promise<Response> {
   try {
-    // A2-900: build the drift set from BOTH directions so the endpoint
-    // catches orphans on either side.
-    //
-    //   (1) user_credits rows whose ledger sum disagrees with
-    //       balance_minor. Covers the LEFT-JOIN shape (balance row
-    //       exists, ledger sum may be zero) where the prior single
-    //       query was anchored.
-    //
-    //   (2) credit_transactions keyed on (user_id, currency) for which
-    //       NO user_credits row exists at all. Prior LEFT JOIN anchored
-    //       on user_credits would miss these entirely — a dangling
-    //       ledger entry (deleted balance row, failed migration) stays
-    //       invisible to ops. Surface them here with balance=0, ledger
-    //       sum computed, delta = -ledger_sum.
-    //
-    // UNION ALL is safe: the two halves partition on "has matching
-    // user_credits row" so no row appears twice. Results merged,
-    // ordered by user id, capped at DRIFT_PAGE_LIMIT.
-    const driftResult = await db.execute<DriftRow>(sql`
-    SELECT "userId", currency, "balanceMinor", "ledgerSumMinor", "deltaMinor"
-    FROM (
-      SELECT
-        uc.user_id::text AS "userId",
-        uc.currency AS currency,
-        uc.balance_minor::text AS "balanceMinor",
-        COALESCE(SUM(ct.amount_minor), 0)::text AS "ledgerSumMinor",
-        (uc.balance_minor - COALESCE(SUM(ct.amount_minor), 0))::text AS "deltaMinor"
-      FROM user_credits uc
-      LEFT JOIN credit_transactions ct
-        ON ct.user_id = uc.user_id AND ct.currency = uc.currency
-      GROUP BY uc.user_id, uc.currency, uc.balance_minor
-      HAVING uc.balance_minor != COALESCE(SUM(ct.amount_minor), 0)
-      UNION ALL
-      SELECT
-        ct.user_id::text AS "userId",
-        ct.currency AS currency,
-        '0' AS "balanceMinor",
-        SUM(ct.amount_minor)::text AS "ledgerSumMinor",
-        (-SUM(ct.amount_minor))::text AS "deltaMinor"
-      FROM credit_transactions ct
-      LEFT JOIN user_credits uc
-        ON uc.user_id = ct.user_id AND uc.currency = ct.currency
-      WHERE uc.user_id IS NULL
-      GROUP BY ct.user_id, ct.currency
-    ) drift
-    ORDER BY "userId"
-    LIMIT ${DRIFT_PAGE_LIMIT}
-  `);
-
-    // Drizzle's `execute` wraps the driver result; drizzle-orm/postgres-js
-    // exposes the rows as the top-level array at `result.rows` on recent
-    // versions and the result itself behaves as an array on older ones.
-    // Normalise to a plain row array here so handler logic below doesn't
-    // have to branch on version.
-    const driftRows = extractRows<DriftRow>(driftResult);
+    // A2-1519: the drift SQL lives in `credits/ledger-invariant.ts`
+    // so the `check-ledger-invariant` CLI and this handler share one
+    // definition. The historical SQL (dual balance-side + orphan-side
+    // UNION ALL) is preserved verbatim in that module — see the
+    // `computeLedgerDriftSql` source for the per-branch rationale.
+    const driftRows = await computeLedgerDriftSql(db, DRIFT_PAGE_LIMIT);
 
     // Total user_credits count — just an aggregate, no filter. Used by
     // the UI for the "0 drift across N rows" copy.
@@ -166,19 +105,4 @@ export async function adminReconciliationHandler(c: Context): Promise<Response> 
     log.error({ err }, 'admin reconciliation query failed');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute reconciliation' }, 500);
   }
-}
-
-/**
- * Extract the row array from a drizzle `execute` result. Accepts both
- * the plain-array shape (postgres-js returns this today) and the
- * `{ rows: [] }` wrapper shape in case the driver upgrades. Narrows
- * to `T[]` so callers get the alias-shaped row directly.
- */
-function extractRows<T>(result: unknown): T[] {
-  if (Array.isArray(result)) return result as T[];
-  if (typeof result === 'object' && result !== null && 'rows' in result) {
-    const rows = (result as { rows: unknown }).rows;
-    if (Array.isArray(rows)) return rows as T[];
-  }
-  return [];
 }
