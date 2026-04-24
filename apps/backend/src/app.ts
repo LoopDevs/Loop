@@ -305,19 +305,28 @@ function rateLimit(
 
 // ─── Global middleware ────────────────────────────────────────────────────────
 
-// Production CORS allowlist. The three non-web origins below are the local
-// schemes Capacitor WebViews use on iOS (default `capacitor://localhost`)
-// and Android (`https://localhost` since Capacitor 3; `http://localhost`
-// kept as well for older debug builds). Without them, every fetch from the
-// native app to the production API would fail preflight — a "works in dev,
-// CORS errors in production" regression on mobile release that would be
-// easy to catch late.
+// Production CORS allowlist. The two non-web origins below are the
+// local schemes Capacitor WebViews use on iOS (default
+// `capacitor://localhost`) and Android (`https://localhost` since
+// Capacitor 3). Without them, every fetch from the native app to the
+// production API would fail preflight — a "works in dev, CORS errors
+// in production" regression on mobile release that would be easy to
+// catch late.
+//
+// A2-1009: `http://localhost` used to be on this list too ("kept for
+// older Capacitor debug builds"). Dropped — debug builds aren't in
+// the App Store / Play Store, so no production user hits that
+// origin, and the allowlist entry was CSRF-adjacent: any attacker-
+// controlled process binding a port on a user's localhost (a
+// malicious npm `postinstall`, a dev-server sidecar, a VS Code
+// extension) could mint cross-origin fetches against production API
+// routes using the user's cookies / stored bearer. The canonical
+// Capacitor schemes above cover every shipping native build.
 const PRODUCTION_ORIGINS = [
   'https://loopfinance.io',
   'https://www.loopfinance.io',
   'capacitor://localhost',
   'https://localhost',
-  'http://localhost',
 ];
 
 app.use(
