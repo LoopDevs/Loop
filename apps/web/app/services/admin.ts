@@ -8,6 +8,10 @@ import type {
   LoopLiability,
   OrderState,
   PayoutState,
+  MerchantOperatorMixResponse,
+  MerchantOperatorMixRow,
+  OperatorMerchantMixResponse,
+  OperatorMerchantMixRow,
   SupplierSpendActivityDay,
   SupplierSpendActivityResponse,
   SupplierSpendResponse,
@@ -17,6 +21,8 @@ import type {
   TreasuryHolding,
   TreasuryOrderFlow,
   TreasurySnapshot,
+  UserOperatorMixResponse,
+  UserOperatorMixRow,
 } from '@loop/shared';
 export type { CreditTransactionType } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
@@ -439,19 +445,8 @@ export async function getOperatorStats(
  * scoped sibling of `OperatorStatsRow` — same columns, but rows
  * are operators carrying orders for one specific merchant.
  */
-export interface MerchantOperatorMixRow {
-  operatorId: string;
-  orderCount: number;
-  fulfilledCount: number;
-  failedCount: number;
-  lastOrderAt: string;
-}
-
-export interface MerchantOperatorMixResponse {
-  merchantId: string;
-  since: string;
-  rows: MerchantOperatorMixRow[];
-}
+// A2-1506: moved to `@loop/shared/admin-operator-mixes.ts`.
+export type { MerchantOperatorMixResponse, MerchantOperatorMixRow };
 
 /**
  * `GET /api/admin/merchants/:merchantId/operator-mix` — for one
@@ -476,19 +471,8 @@ export async function getMerchantOperatorMix(
  * scoped. Used for CTX capacity reviews: "which merchants is this
  * operator carrying?".
  */
-export interface OperatorMerchantMixRow {
-  merchantId: string;
-  orderCount: number;
-  fulfilledCount: number;
-  failedCount: number;
-  lastOrderAt: string;
-}
-
-export interface OperatorMerchantMixResponse {
-  operatorId: string;
-  since: string;
-  rows: OperatorMerchantMixRow[];
-}
+// A2-1506: moved to `@loop/shared/admin-operator-mixes.ts`.
+export type { OperatorMerchantMixResponse, OperatorMerchantMixRow };
 
 /**
  * `GET /api/admin/operators/:operatorId/merchant-mix` — for one
@@ -513,19 +497,8 @@ export async function getOperatorMerchantMix(
  * cashback correlates with op-beta-02, which has a failing
  * circuit".
  */
-export interface UserOperatorMixRow {
-  operatorId: string;
-  orderCount: number;
-  fulfilledCount: number;
-  failedCount: number;
-  lastOrderAt: string;
-}
-
-export interface UserOperatorMixResponse {
-  userId: string;
-  since: string;
-  rows: UserOperatorMixRow[];
-}
+// A2-1506: moved to `@loop/shared/admin-operator-mixes.ts`.
+export type { UserOperatorMixResponse, UserOperatorMixRow };
 
 /**
  * `GET /api/admin/users/:userId/operator-mix` — for one user,

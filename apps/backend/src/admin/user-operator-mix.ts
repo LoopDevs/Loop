@@ -43,19 +43,9 @@ const log = logger.child({ handler: 'admin-user-operator-mix' });
 const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_WINDOW_MS = 366 * 24 * 60 * 60 * 1000;
 
-export interface UserOperatorMixRow {
-  operatorId: string;
-  orderCount: number;
-  fulfilledCount: number;
-  failedCount: number;
-  lastOrderAt: string;
-}
-
-export interface UserOperatorMixResponse {
-  userId: string;
-  since: string;
-  rows: UserOperatorMixRow[];
-}
+// A2-1506: moved to `@loop/shared/admin-operator-mixes.ts`.
+import type { UserOperatorMixResponse, UserOperatorMixRow } from '@loop/shared';
+export type { UserOperatorMixResponse, UserOperatorMixRow };
 
 interface AggRow extends Record<string, unknown> {
   operator_id: string;

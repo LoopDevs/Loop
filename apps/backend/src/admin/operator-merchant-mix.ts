@@ -44,19 +44,9 @@ const OPERATOR_ID_MAX = 128;
 const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_WINDOW_MS = 366 * 24 * 60 * 60 * 1000;
 
-export interface OperatorMerchantMixRow {
-  merchantId: string;
-  orderCount: number;
-  fulfilledCount: number;
-  failedCount: number;
-  lastOrderAt: string;
-}
-
-export interface OperatorMerchantMixResponse {
-  operatorId: string;
-  since: string;
-  rows: OperatorMerchantMixRow[];
-}
+// A2-1506: moved to `@loop/shared/admin-operator-mixes.ts`.
+import type { OperatorMerchantMixResponse, OperatorMerchantMixRow } from '@loop/shared';
+export type { OperatorMerchantMixResponse, OperatorMerchantMixRow };
 
 interface AggRow extends Record<string, unknown> {
   merchant_id: string;
