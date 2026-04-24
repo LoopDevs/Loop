@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { merchantSlug } from '@loop/shared';
 import { getCashbackByMerchant, type CashbackByMerchantRow } from '~/services/user';
 import { useAllMerchants } from '~/hooks/use-merchants';
+import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -38,9 +39,12 @@ export function fmtCashback(minor: string, currency: string): string {
  * fetch error (the authoritative history is the ledger).
  */
 export function CashbackByMerchantCard(): React.JSX.Element | null {
+  // A2-1156: auth-gate so cold-start doesn't fire before session restore.
+  const { isAuthenticated } = useAuth();
   const query = useQuery({
     queryKey: ['me', 'cashback-by-merchant'],
     queryFn: () => getCashbackByMerchant({ limit: 10 }),
+    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 60_000,
   });
