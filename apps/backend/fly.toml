@@ -3,6 +3,16 @@ primary_region = "iad"
 
 [build]
 
+# A2-407: run pending Drizzle migrations in a one-shot release
+# machine BEFORE the new version takes traffic. A failing migration
+# aborts the deploy — the old machines keep serving — instead of
+# rolling out a new binary against a not-yet-migrated DB. The
+# boot-time `runMigrations()` in `src/index.ts` is kept as a
+# belt-and-braces safety net (drizzle's migrator is idempotent on an
+# up-to-date DB, so the second call is a no-op).
+[deploy]
+  release_command = "node apps/backend/dist/migrate-cli.js"
+
 [env]
   PORT = "8080"
   NODE_ENV = "production"

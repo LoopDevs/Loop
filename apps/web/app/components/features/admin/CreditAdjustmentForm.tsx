@@ -6,6 +6,7 @@ import {
   type AdminWriteEnvelope,
   type CreditAdjustmentResult,
 } from '~/services/admin';
+import { ReplayedBadge } from './ReplayedBadge';
 
 const CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
 type Currency = (typeof CURRENCIES)[number];
@@ -58,12 +59,19 @@ export function CreditAdjustmentForm({ userId, defaultCurrency }: Props): React.
   const [currency, setCurrency] = useState<Currency>(defaultCurrency);
   const [reason, setReason] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
-  const [lastApplied, setLastApplied] = useState<CreditAdjustmentResult | null>(null);
+  // A2-1163: track `audit.replayed` alongside `result` so a
+  // double-click on Apply doesn't look identical to a fresh write.
+  // When the backend replays a stored snapshot, the new reason /
+  // amount in the form were ignored — operators need to see that.
+  const [lastApplied, setLastApplied] = useState<{
+    result: CreditAdjustmentResult;
+    replayed: boolean;
+  } | null>(null);
 
   const mutation = useMutation({
     mutationFn: applyCreditAdjustment,
     onSuccess: (envelope: AdminWriteEnvelope<CreditAdjustmentResult>) => {
-      setLastApplied(envelope.result);
+      setLastApplied({ result: envelope.result, replayed: envelope.audit.replayed });
       setAmountMajor('');
       setReason('');
       setFormError(null);
@@ -183,11 +191,12 @@ export function CreditAdjustmentForm({ userId, defaultCurrency }: Props): React.
           role="status"
           className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-800 dark:bg-green-900/20 dark:text-green-300"
         >
-          Adjustment applied. New {lastApplied.currency} balance:{' '}
+          Adjustment applied. New {lastApplied.result.currency} balance:{' '}
           <strong className="tabular-nums">
-            {(Number(lastApplied.newBalanceMinor) / 100).toFixed(2)}
+            {(Number(lastApplied.result.newBalanceMinor) / 100).toFixed(2)}
           </strong>{' '}
-          (was {(Number(lastApplied.priorBalanceMinor) / 100).toFixed(2)}).
+          (was {(Number(lastApplied.result.priorBalanceMinor) / 100).toFixed(2)}).
+          <ReplayedBadge replayed={lastApplied.replayed} />
         </div>
       ) : null}
     </form>
