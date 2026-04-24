@@ -146,8 +146,12 @@ function MonthBar({
  * Largest minor-unit amount across all entries. BigInt because a
  * long-time user's annual totals can exceed Number.MAX_SAFE_INTEGER;
  * the bar-width ratio is computed with bigint arithmetic.
+ *
+ * Signature is structural so admin charts can reuse it with their
+ * looser per-variant entry types (`AdminCashbackMonthlyEntry` etc.)
+ * — the helper only cares that each entry has `cashbackMinor`.
  */
-export function computeMax(entries: CashbackMonthlyEntry[]): bigint {
+export function computeMax<T extends { cashbackMinor: string }>(entries: readonly T[]): bigint {
   let max = 0n;
   for (const e of entries) {
     try {

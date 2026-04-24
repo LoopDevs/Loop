@@ -14,3 +14,4 @@ export * from './public-top-cashback-merchants.js';
 export * from './search.js';
 export * from './slugs.js';
 export * from './stellar.js';
+export * from './users-me.js';
