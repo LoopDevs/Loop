@@ -3,6 +3,10 @@ import type {
   AssetDriftState,
   AssetDriftStateResponse,
   AssetDriftStateRow,
+  CashbackRealizationDailyResponse,
+  CashbackRealizationDay,
+  CashbackRealizationResponse,
+  CashbackRealizationRow,
   CreditTransactionType,
   LoopAssetCode,
   LoopLiability,
@@ -261,18 +265,8 @@ export async function getSettlementLag(sinceIso?: string): Promise<SettlementLag
  * wide aggregate (`currency: null`). `recycledBps = spent / earned
  * × 10 000` — the flywheel-health KPI.
  */
-export interface CashbackRealizationRow {
-  currency: string | null;
-  earnedMinor: string;
-  spentMinor: string;
-  withdrawnMinor: string;
-  outstandingMinor: string;
-  recycledBps: number;
-}
-
-export interface CashbackRealizationResponse {
-  rows: CashbackRealizationRow[];
-}
+// A2-1506: moved to `@loop/shared/admin-cashback-realization.ts`.
+export type { CashbackRealizationResponse, CashbackRealizationRow };
 
 /** `GET /api/admin/cashback-realization` */
 export async function getCashbackRealization(): Promise<CashbackRealizationResponse> {
@@ -284,18 +278,8 @@ export async function getCashbackRealization(): Promise<CashbackRealizationRespo
  * (day, currency); dense (every day in the window has a row) so
  * sparklines don't compress on gap days.
  */
-export interface CashbackRealizationDay {
-  day: string;
-  currency: string;
-  earnedMinor: string;
-  spentMinor: string;
-  recycledBps: number;
-}
-
-export interface CashbackRealizationDailyResponse {
-  days: number;
-  rows: CashbackRealizationDay[];
-}
+// A2-1506: moved to `@loop/shared/admin-cashback-realization.ts`.
+export type { CashbackRealizationDay, CashbackRealizationDailyResponse };
 
 /** `GET /api/admin/cashback-realization/daily?days=N` */
 export async function getCashbackRealizationDaily(
