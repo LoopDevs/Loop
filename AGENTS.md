@@ -54,7 +54,7 @@ packages/shared  Shared TypeScript types (Merchant, Order, ClusterResponse, etc.
 upstream API  CTX gift card provider at spend.ctx.com — merchant catalog, auth, gift card orders
 ```
 
-**Auth is proxied, not custom.** Backend forwards request-otp, verify-otp, refresh, and logout to upstream CTX API. Tokens are upstream tokens — backend does not issue its own JWTs. See `docs/architecture.md` for full auth flow.
+**Auth has two paths.** Loop-native (ADR 013, default once `LOOP_AUTH_NATIVE_ENABLED=true`): backend mints its own HS256 JWTs, generates OTPs, and sends email via the configured provider. Legacy CTX-proxy: backend forwards request-otp / verify-otp / refresh / logout to upstream `spend.ctx.com` and tokens are upstream-issued. Both paths coexist while the identity takeover rolls out. See `docs/architecture.md` + ADR-013 for the full auth flow.
 
 ---
 
@@ -97,8 +97,8 @@ npm run proto:generate       # buf generate → packages/shared/src/proto/
 
 ## Critical architecture rules
 
-1. **Web is a pure API client.** No server-side data fetching in loaders. All data via TanStack Query against `apps/backend`.
-2. **Auth is proxied through upstream CTX.** Backend does not generate OTPs, issue JWTs, or send emails. All auth endpoints proxy to `spend.ctx.com`.
+1. **Web is a pure API client — with one documented exception.** All data via TanStack Query against `apps/backend`. The only loader that fetches server-side is `routes/sitemap.tsx`: crawlers need an XML response, not a React shell. Any new loader-side fetch beyond that needs a comment explaining why TanStack Query doesn't fit.
+2. **Auth has two coexisting paths.** Loop-native (ADR 013): backend mints HS256 JWTs, generates OTPs, sends email. Gated on `LOOP_AUTH_NATIVE_ENABLED`. Legacy CTX-proxy: backend forwards request-otp / verify-otp / refresh / logout to `spend.ctx.com`. All upstream responses are Zod-validated before forwarding. Do NOT assume a single path when modifying auth code; both need to keep working until the takeover is complete.
 3. **All Capacitor plugin calls live in `apps/web/app/native/`.** Never import plugins in components or hooks directly.
 4. **Static export constraint**: `BUILD_TARGET=mobile` → loaders cannot run server-side. Loaders do layout/meta only.
 5. **Protobuf for clusters**: clients send `Accept: application/x-protobuf`. JSON is the fallback for debugging only.
@@ -245,7 +245,7 @@ Applied in order on every request:
 ## What NOT to do
 
 - Push directly to `main` — all changes via PR
-- Fetch data in server-side loaders (pure API client architecture)
+- Fetch data in server-side loaders (pure API client architecture — `sitemap.tsx` is the only documented exception)
 - Import Capacitor plugins outside `app/native/`
 - Install Expo or React Native packages
 - Bypass `app/services/` with direct `fetch()` in components
