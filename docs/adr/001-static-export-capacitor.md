@@ -1,12 +1,7 @@
-# 001 — Static export over remote URL for Capacitor
+# ADR 001: Static export over remote URL for Capacitor
 
-## Status
-
-Accepted
-
-## Date
-
-2026-03-05
+Status: Accepted
+Date: 2026-03-05
 
 ## Context
 

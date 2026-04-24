@@ -3,7 +3,6 @@
 Status: Proposed
 Date: 2026-04-24
 Related: ADR 009 (credits ledger), ADR 013 (Loop-owned auth), ADR 015 (stablecoin topology), ADR 016 (payout submit worker), ADR 017 (admin write primitives)
-Supersedes: none
 Resolves: A2-901 residual (`withdrawal` writer), migration 0013 §28
 
 ## Context

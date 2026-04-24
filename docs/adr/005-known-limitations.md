@@ -1,10 +1,7 @@
-# ADR-005: Known Limitations
+# ADR 005: Known Limitations
 
-- **Status**: Accepted
-- **Date**: 2026-04-17
-- **Deciders**: Engineering
-- **Supersedes**: —
-- **Superseded by**: —
+Status: Accepted
+Date: 2026-04-17
 
 ## Context
 

@@ -1,11 +1,8 @@
-# ADR-007: Native iOS/Android projects — overlays over versioning
+# ADR 007: Native iOS/Android projects — overlays over versioning
 
-- **Status**: Accepted
-- **Date**: 2026-04-18
-- **Deciders**: Engineering
-- **Supersedes**: —
-- **Superseded by**: —
-- **Closes**: Audit A-012
+Status: Accepted
+Date: 2026-04-18
+Closes: Audit A-012
 
 ## Context
 

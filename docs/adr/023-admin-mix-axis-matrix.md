@@ -1,10 +1,7 @@
-# ADR-023: Admin mix-axis matrix for attribution endpoints
+# ADR 023: Admin mix-axis matrix for attribution endpoints
 
-- **Status**: Accepted
-- **Date**: 2026-04-23
-- **Deciders**: Engineering
-- **Supersedes**: —
-- **Superseded by**: —
+Status: Accepted
+Date: 2026-04-23
 
 ## Context
 
