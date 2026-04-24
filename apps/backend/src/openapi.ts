@@ -5993,6 +5993,149 @@ registry.registerPath({
 // ─── Spec generator ─────────────────────────────────────────────────────────
 
 // Register the bearer auth scheme on the registry so the generator emits it
+// A2-505: CSV admin endpoints were missing from the OpenAPI surface
+// even though every other admin export had a registration. Adding
+// them so generated clients (and the /admin-panel Swagger preview)
+// see the complete admin catalogue. All three follow the Tier-3
+// convention from ADR 018: attachment + private cache + RFC 4180
+// body + `__TRUNCATED__` sentinel at the row cap.
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users/recycling-activity.csv',
+  summary: 'CSV export of per-user recycling activity (ADR 015).',
+  description:
+    'One row per user in the fleet-wide flywheel view: total charge, recycled charge, cashback, order counts, and most-recent activity timestamp. Default window is 31 days; pass `?days=N` to override (cap 366). Row cap 10 000 with `__TRUNCATED__` sentinel. `Cache-Control: private, no-store` (PII: user ids + emails) + `Content-Disposition: attachment`.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(366).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'RFC 4180 CSV body',
+      content: {
+        'text/csv': {
+          schema: z.string().openapi({
+            description:
+              'CRLF-terminated. Header row lists every recycling-activity column; bigint charges emitted as strings to survive JSON round-trips in downstream tooling.',
+          }),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid `days` (out of range 1..366)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error building the export',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/user-credits.csv',
+  summary: 'CSV export of user_credits balances (ADR 009).',
+  description:
+    'One row per `(user_id, currency)` credit balance, joined to `users.email`. Finance uses this to audit total off-chain liability per currency or to pull a list of balance-holders. Ordered by currency then balance desc so a "top holders" audit is the natural read order. Row cap 10 000 with `__TRUNCATED__` sentinel. `Cache-Control: private, no-store` (PII: email) + `Content-Disposition: attachment`.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'RFC 4180 CSV body',
+      content: {
+        'text/csv': {
+          schema: z.string().openapi({
+            description:
+              'Header row: `User ID, Email, Currency, Balance (minor), Updated at (UTC)`. Balance emitted as bigint-string to preserve precision.',
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (20/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error building the export',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users/{userId}/credit-transactions.csv',
+  summary: "CSV export of one user's credit-transactions ledger (ADR 009).",
+  description:
+    'Full credit-ledger stream for a single user in a window — support / legal use it for a user dispute or a subject-access-request. Default window is 366 days; pass `?since=<iso-8601>` to override (cap 366 days). Row cap 10 000 with `__TRUNCATED__` sentinel. `Cache-Control: private, no-store` + `Content-Disposition: attachment; filename="credit-transactions-<userTail>-<date>.csv"`.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ userId: z.string().uuid() }),
+    query: z.object({
+      since: z.string().datetime().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'RFC 4180 CSV body',
+      content: {
+        'text/csv': {
+          schema: z.string().openapi({
+            description:
+              'Header row: `id, type, amount_minor, currency, reference_type, reference_id, created_at`. bigint-as-string for amount_minor; ISO-8601 for created_at.',
+          }),
+        },
+      },
+    },
+    400: {
+      description: 'Malformed userId, invalid `since`, or window over 366 days',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error building the export',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // under components.securitySchemes.
 registry.registerComponent('securitySchemes', 'bearerAuth', {
   type: 'http',
