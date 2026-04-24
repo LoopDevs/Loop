@@ -266,6 +266,55 @@ else
   echo "  (flyctl not installed — skipping; install from https://fly.io/docs/flyctl/install/)"
 fi
 
+# ─── 10. Capacitor plugin-set parity across iOS + Android (A2-1200/A2-1206) ─
+#
+# The `@capacitor/filesystem` ADR-008 regression — iOS `cap sync` had not
+# been re-run after the plugin landed, so Android had it but iOS did not —
+# would have been caught by this check. Plugin-set drift between platforms
+# is silent otherwise: an iOS TestFlight build boots fine, but the share
+# path throws the moment a user taps "Share" on a completed order.
+#
+# Source of truth: `apps/mobile/package.json` dependencies under the
+# Capacitor scopes (`@capacitor/*` minus core/cli/ios/android, `@capgo/*`,
+# `@aparajita/capacitor-*`). Every such dep must be registered in BOTH:
+#   - Android: `apps/mobile/android/app/src/main/assets/capacitor.plugins.json`
+#   - iOS:     `apps/mobile/ios/App/CapApp-SPM/Package.swift`
+
+echo "Checking Capacitor plugin-set parity across iOS + Android..."
+ios_pkg_file="apps/mobile/ios/App/CapApp-SPM/Package.swift"
+android_plugins_file="apps/mobile/android/app/src/main/assets/capacitor.plugins.json"
+
+if [ -f apps/mobile/package.json ] && [ -f "$ios_pkg_file" ] && [ -f "$android_plugins_file" ]; then
+  cap_plugins=$(node -e '
+    const pkg = require("./apps/mobile/package.json");
+    const deps = Object.keys(pkg.dependencies || {});
+    const nonPluginScopes = new Set([
+      "@capacitor/core", "@capacitor/cli", "@capacitor/ios", "@capacitor/android",
+    ]);
+    for (const d of deps) {
+      if (nonPluginScopes.has(d)) continue;
+      if (d.startsWith("@capacitor/") || d.startsWith("@capgo/") || d.startsWith("@aparajita/capacitor-")) {
+        console.log(d);
+      }
+    }
+  ' | sort -u)
+  while IFS= read -r plugin; do
+    [ -z "$plugin" ] && continue
+    # Android check: look for `"pkg": "<name>"` line.
+    if ! grep -qF "\"pkg\": \"$plugin\"" "$android_plugins_file"; then
+      err "Capacitor plugin '$plugin' is in apps/mobile/package.json but not registered in $android_plugins_file (Android sync drift — re-run 'cap sync android')"
+    fi
+    # iOS check: look for `path: ".../node_modules/<name>"` in Package.swift.
+    # Escape the forward slash in the package name for the grep pattern.
+    escaped_plugin=${plugin//\//\\/}
+    if ! grep -qE "node_modules/$escaped_plugin\"" "$ios_pkg_file"; then
+      err "Capacitor plugin '$plugin' is in apps/mobile/package.json but not registered in $ios_pkg_file (iOS sync drift — re-run 'cap sync ios')"
+    fi
+  done <<< "$cap_plugins"
+else
+  echo "  (apps/mobile artifacts missing — skipping plugin parity check)"
+fi
+
 # ─── Done ───────────────────────────────────────────────────────────────────
 
 echo ""
