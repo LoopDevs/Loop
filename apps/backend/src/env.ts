@@ -431,6 +431,24 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     );
   }
 
+  // A2-1605: DISABLE_RATE_LIMITING bypasses every per-IP rate
+  // limiter in the middleware stack. That's a test-harness flag —
+  // shipped to production it opens every auth/payment/admin route
+  // to volumetric abuse, and the breakers downstream are not a
+  // substitute (they trip on upstream failure, not request volume).
+  //
+  // Refuse to boot in production if the flag is set. No override —
+  // if an operator truly needs a prod rate-limit bypass they can
+  // edit this check out and redeploy, which is a harder foot-gun
+  // than a silently-honoured env var.
+  if (parsed.data.NODE_ENV === 'production' && parsed.data.DISABLE_RATE_LIMITING) {
+    throw new Error(
+      'Invalid environment variables — DISABLE_RATE_LIMITING must not be set in production (audit A2-1605). ' +
+        'The flag is a test-harness escape hatch; production runs without it. ' +
+        'Unset the variable and redeploy.',
+    );
+  }
+
   // A2-203: the fallback cashback split must respect the
   // `userCashback + margin + wholesale = 100` invariant. Reject a
   // misconfigured env at boot rather than silently over-granting
