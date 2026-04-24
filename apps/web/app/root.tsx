@@ -11,6 +11,7 @@ import {
 import { QueryClient, QueryCache, MutationCache, QueryClientProvider } from '@tanstack/react-query';
 import * as Sentry from '@sentry/react';
 import { scrubSentryEvent } from '~/utils/sentry-scrubber';
+import { scrubErrorForSentry } from '~/utils/sentry-error-scrubber';
 import { forwardQueryErrorToSentry } from '~/utils/query-error-reporting';
 import type { Route } from './+types/root';
 import { useNativePlatform } from '~/hooks/use-native-platform';
@@ -490,8 +491,15 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps): React.JSX.El
   // parent provider change doesn't fire a duplicate capture for the same
   // error. React Router remounts the boundary on a new error, so the
   // [error]-keyed effect fires exactly once per distinct failure.
+  //
+  // A2-1312: React Router loader errors can carry `Response` payloads
+  // (`throw new Response(await res.text(), { status: 500 })`) — the
+  // body would then land in Sentry as a serialised string field. The
+  // scrubber strips `.response` / `.cause` when they're `Response` /
+  // `Request`, and redacts email / bearer / stellar-secret shapes
+  // out of the error message before Sentry sees it.
   useEffect(() => {
-    Sentry.captureException(error);
+    Sentry.captureException(scrubErrorForSentry(error));
   }, [error]);
 
   let message = 'Oops!';
