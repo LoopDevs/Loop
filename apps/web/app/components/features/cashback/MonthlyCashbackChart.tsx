@@ -5,6 +5,7 @@ import {
   type CashbackMonthlyEntry,
   type CashbackMonthlyResponse,
 } from '~/services/user';
+import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -27,9 +28,15 @@ import { Spinner } from '~/components/ui/Spinner';
  * its own month + amount label.
  */
 export function MonthlyCashbackChart(): React.JSX.Element | null {
+  // A2-1156: gate every `['me', …]` query on `isAuthenticated` so a
+  // cold-start render doesn't fire the request before the session
+  // restore finishes — which previously spawned parallel 401 → tryRefresh
+  // storms on every mount.
+  const { isAuthenticated } = useAuth();
   const query = useQuery({
     queryKey: ['me', 'cashback-monthly'],
     queryFn: getCashbackMonthly,
+    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 5 * 60 * 1000,
   });

@@ -2,6 +2,7 @@ import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { getMe } from '~/services/user';
 import { getMyCredits, type UserCreditRow } from '~/services/user';
+import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 
 /**
@@ -34,15 +35,20 @@ export function hasPositiveBalance(rows: UserCreditRow[] | undefined): boolean {
  * accrues off-chain whether or not a wallet is linked.
  */
 export function LinkWalletNudge(): React.JSX.Element | null {
+  // A2-1156: auth-gate both queries so cold-start doesn't fire before
+  // session restore finishes.
+  const { isAuthenticated } = useAuth();
   const meQuery = useQuery({
     queryKey: ['me'],
     queryFn: getMe,
+    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 60_000,
   });
   const creditsQuery = useQuery({
     queryKey: ['me', 'credits'],
     queryFn: getMyCredits,
+    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 30_000,
   });
