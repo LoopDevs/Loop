@@ -239,6 +239,117 @@ const OrderListResponse = registry.register(
 // envelope instead of trying to unmarshal the raw Order type.
 const OrderDetailResponse = registry.register('OrderDetailResponse', z.object({ order: Order }));
 
+// A2-662 / A2-1504 — Loop-native order surface (POST /api/orders/loop,
+// GET /api/orders/loop, GET /api/orders/loop/:id). These replace the
+// legacy CTX-proxy order flow for Loop-auth users; they cover all
+// four payment methods (xlm, usdc, credit, loop_asset) plus the
+// cashback-recycling paths from ADR 015. Schemas mirror the runtime
+// shapes declared in `apps/backend/src/orders/loop-handler.ts`.
+const LoopPaymentMethod = registry.register(
+  'LoopPaymentMethod',
+  z.enum(['xlm', 'usdc', 'credit', 'loop_asset']),
+);
+
+const LoopCreateOrderBody = registry.register(
+  'LoopCreateOrderBody',
+  z.object({
+    merchantId: z.string().min(1),
+    amountMinor: z.union([z.number().int().positive(), z.string().regex(/^[1-9]\d*$/)]).openapi({
+      description:
+        'Gift-card face value in the catalog currency, minor units. Number OR digit-string so BigInt values survive the wire.',
+    }),
+    currency: z
+      .string()
+      .length(3)
+      .openapi({ description: 'ISO 4217 three-letter code, uppercase.' }),
+    paymentMethod: LoopPaymentMethod,
+  }),
+);
+
+// Per-method payment-instruction shape returned by `POST /api/orders/loop`.
+// On-chain methods (xlm / usdc / loop_asset) return the Stellar address,
+// memo, and amount the client needs to construct the outbound payment;
+// credit orders return only the amount we'll debit from the user's
+// cashback balance (the debit itself happens later, on the paid-state
+// transition, per orders/repo.ts A2-601).
+const LoopPaymentStellar = z.object({
+  method: z.enum(['xlm', 'usdc']),
+  stellarAddress: z.string(),
+  memo: z.string(),
+  amountMinor: z.string(),
+  currency: z.string(),
+});
+
+const LoopPaymentLoopAsset = z.object({
+  method: z.literal('loop_asset'),
+  stellarAddress: z.string(),
+  memo: z.string(),
+  amountMinor: z.string(),
+  currency: z.string(),
+  assetCode: z.enum(['USDLOOP', 'GBPLOOP', 'EURLOOP']).openapi({
+    description: 'LOOP-branded stablecoin the user pays in — pinned to their home currency.',
+  }),
+  assetIssuer: z.string(),
+});
+
+const LoopPaymentCredit = z.object({
+  method: z.literal('credit'),
+  amountMinor: z.string(),
+  currency: z.string(),
+});
+
+const LoopCreateOrderResponse = registry.register(
+  'LoopCreateOrderResponse',
+  z.object({
+    orderId: z.string().uuid(),
+    payment: z.union([LoopPaymentStellar, LoopPaymentLoopAsset, LoopPaymentCredit]),
+  }),
+);
+
+const LoopOrderView = registry.register(
+  'LoopOrderView',
+  z.object({
+    id: z.string().uuid(),
+    merchantId: z.string(),
+    state: z.string().openapi({
+      description:
+        'Order state machine — pending_payment, paid, procuring, fulfilled, failed, expired.',
+    }),
+    faceValueMinor: z.string().openapi({
+      description: 'Gift-card face value, catalog currency, minor units. BigInt as string.',
+    }),
+    currency: z.string(),
+    chargeMinor: z.string().openapi({
+      description:
+        'What the user was charged, in their home currency. Mirrors faceValueMinor when home === catalog currency.',
+    }),
+    chargeCurrency: z.string(),
+    paymentMethod: z.enum(['xlm', 'usdc', 'credit']).openapi({
+      description:
+        'Payment rail used to pay the order. `loop_asset` maps to `credit` on the view since the user-visible shape is identical (no Stellar address to display post-pay).',
+    }),
+    paymentMemo: z.string().nullable(),
+    stellarAddress: z.string().nullable().openapi({
+      description: "Loop's deposit address for on-chain methods; null for credit-funded orders.",
+    }),
+    userCashbackMinor: z.string(),
+    ctxOrderId: z.string().nullable(),
+    redeemCode: z.string().nullable(),
+    redeemPin: z.string().nullable(),
+    redeemUrl: z.string().nullable(),
+    failureReason: z.string().nullable(),
+    createdAt: z.string().datetime(),
+    paidAt: z.string().datetime().nullable(),
+    fulfilledAt: z.string().datetime().nullable(),
+    failedAt: z.string().datetime().nullable(),
+  }),
+);
+
+const LoopOrderListResponse = registry.register(
+  'LoopOrderListResponse',
+  z.object({ orders: z.array(LoopOrderView) }),
+);
+
 // ─── Users ──────────────────────────────────────────────────────────────────
 
 const UserMeView = registry.register(
@@ -1948,6 +2059,122 @@ registry.registerPath({
     },
     503: {
       description: 'Circuit breaker open',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+// A2-662 / A2-1504: Loop-native order surface (ADR 015). Gated on
+// LOOP_AUTH_NATIVE_ENABLED + a Loop-kind auth context — returns 404
+// to callers not on the Loop-auth path so the surface isn't observable
+// from the legacy CTX-proxy bearer path.
+registry.registerPath({
+  method: 'post',
+  path: '/api/orders/loop',
+  summary: 'Create a Loop-native order (ADR 015).',
+  description:
+    "Creates an order under the Loop-native auth path. Returns per-method payment instructions: on-chain methods (`xlm`, `usdc`, `loop_asset`) include the destination address + memo the client uses to build the outbound payment; `credit` returns only the amount we'll debit from the user's cashback balance on the paid-state transition.",
+  tags: ['Orders'],
+  security: [{ bearerAuth: [] }],
+  request: { body: { content: { 'application/json': { schema: LoopCreateOrderBody } } } },
+  responses: {
+    200: {
+      description: 'Order created — payment instructions returned per method',
+      content: { 'application/json': { schema: LoopCreateOrderResponse } },
+    },
+    400: {
+      description: 'Validation error or unknown/disabled merchant',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or non-Loop auth context',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    402: {
+      description: 'Credit-funded order with insufficient balance',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'Loop-native auth disabled (LOOP_AUTH_NATIVE_ENABLED=false)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Invalid account currency or unexpected server error',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/orders/loop',
+  summary: "List the caller's Loop-native orders (newest first, cursor-paged).",
+  description:
+    "Descending by `created_at`. Optional `?limit=` (1-100, default 50) and `?before=<iso>` for pagination — pass the last row's createdAt to page backwards. Returns `{ orders: [] }` for fresh accounts.",
+  tags: ['Orders'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+      before: z.string().datetime().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Order list',
+      content: { 'application/json': { schema: LoopOrderListResponse } },
+    },
+    400: {
+      description: 'Invalid `before` timestamp',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or non-Loop auth context',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'Loop-native auth disabled',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/orders/loop/{id}',
+  summary: 'Fetch a single Loop-native order the caller owns.',
+  description:
+    '404 on non-owner reads so an attacker cannot enumerate order ids — every order belongs to exactly one Loop user, keyed on the JWT `sub`.',
+  tags: ['Orders'],
+  security: [{ bearerAuth: [] }],
+  request: { params: z.object({ id: z.string() }) },
+  responses: {
+    200: {
+      description: 'Order',
+      content: { 'application/json': { schema: LoopOrderView } },
+    },
+    400: {
+      description: 'Invalid id',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or non-Loop auth context',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'Loop-native auth disabled OR order not found / not owned by caller',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP)',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
@@ -5993,6 +6220,149 @@ registry.registerPath({
 // ─── Spec generator ─────────────────────────────────────────────────────────
 
 // Register the bearer auth scheme on the registry so the generator emits it
+// A2-505: CSV admin endpoints were missing from the OpenAPI surface
+// even though every other admin export had a registration. Adding
+// them so generated clients (and the /admin-panel Swagger preview)
+// see the complete admin catalogue. All three follow the Tier-3
+// convention from ADR 018: attachment + private cache + RFC 4180
+// body + `__TRUNCATED__` sentinel at the row cap.
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users/recycling-activity.csv',
+  summary: 'CSV export of per-user recycling activity (ADR 015).',
+  description:
+    'One row per user in the fleet-wide flywheel view: total charge, recycled charge, cashback, order counts, and most-recent activity timestamp. Default window is 31 days; pass `?days=N` to override (cap 366). Row cap 10 000 with `__TRUNCATED__` sentinel. `Cache-Control: private, no-store` (PII: user ids + emails) + `Content-Disposition: attachment`.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(366).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'RFC 4180 CSV body',
+      content: {
+        'text/csv': {
+          schema: z.string().openapi({
+            description:
+              'CRLF-terminated. Header row lists every recycling-activity column; bigint charges emitted as strings to survive JSON round-trips in downstream tooling.',
+          }),
+        },
+      },
+    },
+    400: {
+      description: 'Invalid `days` (out of range 1..366)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error building the export',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/user-credits.csv',
+  summary: 'CSV export of user_credits balances (ADR 009).',
+  description:
+    'One row per `(user_id, currency)` credit balance, joined to `users.email`. Finance uses this to audit total off-chain liability per currency or to pull a list of balance-holders. Ordered by currency then balance desc so a "top holders" audit is the natural read order. Row cap 10 000 with `__TRUNCATED__` sentinel. `Cache-Control: private, no-store` (PII: email) + `Content-Disposition: attachment`.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'RFC 4180 CSV body',
+      content: {
+        'text/csv': {
+          schema: z.string().openapi({
+            description:
+              'Header row: `User ID, Email, Currency, Balance (minor), Updated at (UTC)`. Balance emitted as bigint-string to preserve precision.',
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (20/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error building the export',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users/{userId}/credit-transactions.csv',
+  summary: "CSV export of one user's credit-transactions ledger (ADR 009).",
+  description:
+    'Full credit-ledger stream for a single user in a window — support / legal use it for a user dispute or a subject-access-request. Default window is 366 days; pass `?since=<iso-8601>` to override (cap 366 days). Row cap 10 000 with `__TRUNCATED__` sentinel. `Cache-Control: private, no-store` + `Content-Disposition: attachment; filename="credit-transactions-<userTail>-<date>.csv"`.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ userId: z.string().uuid() }),
+    query: z.object({
+      since: z.string().datetime().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'RFC 4180 CSV body',
+      content: {
+        'text/csv': {
+          schema: z.string().openapi({
+            description:
+              'Header row: `id, type, amount_minor, currency, reference_type, reference_id, created_at`. bigint-as-string for amount_minor; ISO-8601 for created_at.',
+          }),
+        },
+      },
+    },
+    400: {
+      description: 'Malformed userId, invalid `since`, or window over 366 days',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error building the export',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // under components.securitySchemes.
 registry.registerComponent('securitySchemes', 'bearerAuth', {
   type: 'http',
