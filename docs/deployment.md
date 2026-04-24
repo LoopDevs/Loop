@@ -79,6 +79,79 @@ See `apps/backend/fly.toml`:
 | `NODE_ENV`                        | No                 | `development` | Environment. Schema default is `development`; prod deployments set it to `production` explicitly (our `fly.toml` + Dockerfile both do). Audit A-025's image-proxy allowlist enforcement and the `INCLUDE_DISABLED_MERCHANTS=true` boot warn only fire when `NODE_ENV === 'production'`, so leaving it unset in prod silently disables both. |
 | `LOG_LEVEL`                       | No                 | `info`        | Pino log level (`trace`/`debug`/`info`/`warn`/`error`/`fatal`/`silent`)                                                                                                                                                                                                                                                                     |
 
+#### Auth (ADR 013 / ADR 014)
+
+| Variable                         | Required   | Default | Description                                                                                                     |
+| -------------------------------- | ---------- | ------- | --------------------------------------------------------------------------------------------------------------- |
+| `LOOP_JWT_SIGNING_KEY`           | Yes (prod) | —       | 32+ char secret for HS256 signing on the Loop-native auth path (ADR 013). Rotate via `_PREVIOUS` below.         |
+| `LOOP_JWT_SIGNING_KEY_PREVIOUS`  | No         | —       | Prior signing key accepted during rotation. Remove after all outstanding tokens expire.                         |
+| `LOOP_AUTH_NATIVE_ENABLED`       | No         | `false` | Gates the Loop-native OTP path. `false` → legacy CTX-proxy. Flip to `true` per deploy in the identity takeover. |
+| `GOOGLE_OAUTH_CLIENT_ID_WEB`     | No         | —       | ADR-014 social login. Absent → Google button hidden on web.                                                     |
+| `GOOGLE_OAUTH_CLIENT_ID_IOS`     | No         | —       | ADR-014 social login, iOS.                                                                                      |
+| `GOOGLE_OAUTH_CLIENT_ID_ANDROID` | No         | —       | ADR-014 social login, Android.                                                                                  |
+| `APPLE_SIGN_IN_SERVICE_ID`       | No         | —       | ADR-014 Apple Sign-In service id.                                                                               |
+
+#### Database (ADR 012)
+
+| Variable            | Required | Default | Description                                                                                                   |
+| ------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`      | Yes      | —       | `postgres://` or `postgresql://` URL. Dev points at the docker-compose Postgres on `:5433`; prod Fly-managed. |
+| `DATABASE_POOL_MAX` | No       | `10`    | Drizzle pool size per Node process. Tune if a machine hosts multiple workers.                                 |
+
+#### Admin + audit (ADR 017 / ADR 018)
+
+| Variable                           | Required    | Default        | Description                                                                                              |
+| ---------------------------------- | ----------- | -------------- | -------------------------------------------------------------------------------------------------------- |
+| `ADMIN_CTX_USER_IDS`               | Yes (prod)  | `''`           | Comma-separated CTX user IDs granted admin. Evaluated at user upsert; controls `users.is_admin`.         |
+| `DEFAULT_USER_CASHBACK_PCT_OF_CTX` | No          | schema default | ADR 009 / 011 cashback split default.                                                                    |
+| `DEFAULT_LOOP_MARGIN_PCT_OF_CTX`   | No          | schema default | ADR 009 / 011 margin split default.                                                                      |
+| `ADMIN_DAILY_ADJUSTMENT_CAP_MINOR` | No          | `100_000_000`  | Per-admin-per-day magnitude cap on credit adjustments (A2-1610). 0 disables. ~1M major units at default. |
+| `DISCORD_WEBHOOK_ADMIN_AUDIT`      | No          | —              | Fires on every admin write post-commit (ADR 017/018). Leave unset in dev.                                |
+| `METRICS_BEARER_TOKEN`             | Recommended | —              | 16+ char token gating `/metrics` (A2-1606). Absent → endpoint returns 404.                               |
+| `OPENAPI_BEARER_TOKEN`             | Recommended | —              | 16+ char token gating `/openapi.json` (A2-1607).                                                         |
+| `DISABLE_RATE_LIMITING`            | No          | `false`        | Dev-only escape hatch. `parseEnv()` throws on `prod + DISABLE_RATE_LIMITING=true` (A2-1605).             |
+
+#### Stellar rails (ADR 015 / ADR 016)
+
+| Variable                                | Required    | Default                                            | Description                                                                           |
+| --------------------------------------- | ----------- | -------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `LOOP_STELLAR_DEPOSIT_ADDRESS`          | Yes (prod)  | —                                                  | Operator account receiving inbound deposits.                                          |
+| `LOOP_STELLAR_OPERATOR_SECRET`          | Yes (prod)  | —                                                  | Operator signing secret for outbound payouts.                                         |
+| `LOOP_STELLAR_OPERATOR_SECRET_PREVIOUS` | No          | —                                                  | Prior operator secret during key rotation.                                            |
+| `LOOP_STELLAR_USDC_ISSUER`              | Yes (prod)  | —                                                  | Circle USDC issuer G-account.                                                         |
+| `LOOP_STELLAR_USDLOOP_ISSUER`           | Yes (prod)  | —                                                  | USDLOOP issuer (ADR 015).                                                             |
+| `LOOP_STELLAR_GBPLOOP_ISSUER`           | Yes (prod)  | —                                                  | GBPLOOP issuer.                                                                       |
+| `LOOP_STELLAR_EURLOOP_ISSUER`           | Yes (prod)  | —                                                  | EURLOOP issuer.                                                                       |
+| `LOOP_STELLAR_USDC_FLOOR_STROOPS`       | Recommended | —                                                  | Alert floor on the USDC operator balance; below this triggers `notifyUsdcBelowFloor`. |
+| `LOOP_STELLAR_NETWORK_PASSPHRASE`       | No          | `"Public Global Stellar Network ; September 2015"` | Mainnet passphrase; override for testnet.                                             |
+| `LOOP_STELLAR_HORIZON_URL`              | No          | `https://horizon.stellar.org`                      | Horizon base URL (A2-1513).                                                           |
+| `LOOP_XLM_PRICE_FEED_URL`               | No          | —                                                  | Override XLM price feed (A2-1812).                                                    |
+| `LOOP_FX_FEED_URL`                      | No          | —                                                  | Override FX price feed (A2-1812).                                                     |
+| `LOOP_ASSET_DRIFT_THRESHOLD_STROOPS`    | No          | schema default                                     | Drift watcher alert threshold.                                                        |
+
+#### CTX operator pool (ADR 013)
+
+| Variable            | Required | Default | Description                                                                                                                             |
+| ------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `CTX_OPERATOR_POOL` | No       | `''`    | JSON-encoded `[{ id, bearer }]` array for the principal-switch operator pool (A2-1812). Unset → pool is inert (legacy proxy path only). |
+
+#### Background workers
+
+| Variable                                    | Required | Default        | Description                                                                                              |
+| ------------------------------------------- | -------- | -------------- | -------------------------------------------------------------------------------------------------------- |
+| `LOOP_WORKERS_ENABLED`                      | No       | `false`        | Master switch for all outbound workers. Set `true` on prod + Fly staging once Stellar secrets are wired. |
+| `LOOP_PAYOUT_WORKER_INTERVAL_SECONDS`       | No       | `30`           | Payout worker tick cadence.                                                                              |
+| `LOOP_PAYOUT_MAX_ATTEMPTS`                  | No       | schema default | Retries before a payout transitions to `failed`.                                                         |
+| `LOOP_PAYOUT_WATCHDOG_STALE_SECONDS`        | No       | schema default | `submitted` payouts older than this get re-picked (A2-602).                                              |
+| `LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS`     | No       | schema default | Horizon payment watcher cadence.                                                                         |
+| `LOOP_PROCUREMENT_INTERVAL_SECONDS`         | No       | schema default | CTX procurement worker cadence.                                                                          |
+| `LOOP_ASSET_DRIFT_WATCHER_INTERVAL_SECONDS` | No       | schema default | Asset drift watcher cadence.                                                                             |
+| `INTEREST_APY_BASIS_POINTS`                 | No       | schema default | APY for the interest-accrual primitive.                                                                  |
+| `INTEREST_PERIODS_PER_YEAR`                 | No       | schema default | E.g. `365` for daily, `12` for monthly.                                                                  |
+| `INTEREST_TICK_INTERVAL_HOURS`              | No       | schema default | Wall-clock cadence of the interest scheduler.                                                            |
+
+`env.ts` is the source of truth; run `parseEnv()` via `npm run dev -w @loop/backend` locally to validate a deploy's env block before pushing.
+
 ### Subsequent deploys
 
 ```bash
