@@ -23,6 +23,7 @@ import { z } from 'zod';
 import { createCircuitBreaker, CircuitOpenError } from '../circuit-breaker.js';
 import { notifyOperatorPoolExhausted } from '../discord.js';
 import { logger } from '../logger.js';
+import { getCurrentRequestId } from '../request-context.js';
 
 const log = logger.child({ area: 'operator-pool' });
 
@@ -209,6 +210,15 @@ export async function operatorFetch(url: string | URL, init?: RequestInit): Prom
     if (op === null) break;
     const headers = new Headers(init?.headers);
     headers.set('Authorization', `Bearer ${op.bearer}`);
+    // A2-1305: propagate our X-Request-Id onto the CTX call so ops
+    // can correlate our request id with CTX's server logs. The
+    // circuit-breaker wrapper does the same when called directly,
+    // but we set it here too so a caller reading `headers` before
+    // the fetch can log the id they're about to send.
+    const requestId = getCurrentRequestId();
+    if (requestId !== undefined && !headers.has('X-Request-Id')) {
+      headers.set('X-Request-Id', requestId);
+    }
     const isLastAttempt = i === attempts - 1;
     try {
       const res = await op.breaker.fetch(url, { ...init, headers, signal });

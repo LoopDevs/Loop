@@ -353,3 +353,51 @@ describe('notification behavior', () => {
     expect(mockNotify).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('A2-1305 — outbound X-Request-Id propagation', () => {
+  // Dynamically imported inside the describe so the `getCurrentRequestId`
+  // ALS is a fresh instance for these tests (circuit-breaker.ts captures
+  // the import at module load).
+  it('passes the ambient request ID onto outbound fetch headers', async () => {
+    const { runWithRequestContext } = await import('../request-context.js');
+    const cb = createCircuitBreaker();
+    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+
+    await runWithRequestContext({ requestId: 'req-42' }, async () => {
+      await cb.fetch('http://ctx.local/x');
+    });
+
+    const [, init] = mockFetch.mock.calls[0]!;
+    const headers = new Headers((init as RequestInit).headers);
+    expect(headers.get('X-Request-Id')).toBe('req-42');
+  });
+
+  it('does not set X-Request-Id when no request context is active', async () => {
+    const cb = createCircuitBreaker();
+    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+
+    await cb.fetch('http://ctx.local/x');
+
+    const [, init] = mockFetch.mock.calls[0]!;
+    // `init` may be `undefined` entirely when the caller passed none;
+    // either way, no id should be set.
+    const headers = new Headers((init as RequestInit | undefined)?.headers);
+    expect(headers.get('X-Request-Id')).toBeNull();
+  });
+
+  it('respects a caller-set X-Request-Id — does not override', async () => {
+    const { runWithRequestContext } = await import('../request-context.js');
+    const cb = createCircuitBreaker();
+    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+
+    await runWithRequestContext({ requestId: 'req-ambient' }, async () => {
+      await cb.fetch('http://ctx.local/x', {
+        headers: { 'X-Request-Id': 'req-caller-override' },
+      });
+    });
+
+    const [, init] = mockFetch.mock.calls[0]!;
+    const headers = new Headers((init as RequestInit).headers);
+    expect(headers.get('X-Request-Id')).toBe('req-caller-override');
+  });
+});
