@@ -149,10 +149,10 @@ Claims:
 - `typ`: `'access'` | `'refresh'` — distinguishes token roles; the
   refresh-only endpoint refuses an access typ and vice versa
 
-Access tokens: 15 min. Refresh tokens: 30 days, rotated on every use
-(mirrors CTX's behaviour — and the
-[`project_ctx_refresh_rotation`](../../memory/project_ctx_refresh_rotation.md)
-note calls this out as a known pattern in our current proxy).
+Access tokens: 15 min. Refresh tokens: 30 days, rotated on every
+use — mirrors CTX's behaviour (confirmed by prior proxy-path
+integration; callers must persist the rotated token returned from
+`/api/auth/refresh` on every call, never reuse the original).
 
 RS256 is deferred. HS256 is adequate for a single-service verifier
 (the backend both signs and verifies), and a key rotation is simpler

@@ -93,12 +93,15 @@ surface.
 Docker Compose brings up a Postgres 16 container on port 5433 (off
 the default 5432 so it doesn't clash with any host-installed Postgres).
 `DATABASE_URL=postgres://loop:loop@localhost:5433/loop` in
-`apps/backend/.env.local`. `docker compose up -d db` is the only
-command a new engineer runs.
+`apps/backend/.env` (template at `apps/backend/.env.example`).
+`docker compose up -d db` is the only command a new engineer runs.
 
-Seeds live in `apps/backend/src/db/seed.ts`, run explicitly via
-`npm run db:seed` — not auto-run, because we want tests to clear
-state between suites.
+Seeds are not shipped in-repo today — each integration test constructs
+the fixtures it needs inline. If ad-hoc demo data ever becomes
+valuable, the convention is to add `apps/backend/src/scripts/seed-*.ts`
+
+- an `npm run seed:<name>` entry per dataset, not a single
+  "run everything" script (tests already clear state between suites).
 
 ### Connection pooling
 

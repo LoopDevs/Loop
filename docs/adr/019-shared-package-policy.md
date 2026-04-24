@@ -126,8 +126,10 @@ the test moves with the logic at that point.
   A checklist comment in `packages/shared/src/*.ts` cross-links the
   sites so future edits don't skip one.
 - `packages/shared/` cannot host test utilities that depend on Node
-  (`pg`, `drizzle-orm`, `hono/testing`). Those stay in
-  `apps/backend/src/__tests__/helpers/`.
+  (`pg`, `drizzle-orm`, `hono/testing`). Those stay inline in each
+  backend test file (or `apps/backend/src/__tests__/vitest-env-setup.ts`
+  for the shared setup hook). No dedicated `__tests__/helpers/`
+  directory has been needed — tests use `vi.hoisted` mocks per file.
 
 ## Open issues
 
