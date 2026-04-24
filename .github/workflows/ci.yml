@@ -207,7 +207,7 @@ jobs:
       # Reuse the backend dist produced by the `build` job — saves ~30s of
       # rebuilding the same code the previous job already built.
       - name: Download backend build
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: backend-dist
           path: apps/backend/dist/
