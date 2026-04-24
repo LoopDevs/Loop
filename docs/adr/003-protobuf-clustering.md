@@ -1,12 +1,7 @@
-# 003 — Protobuf for the clustering endpoint
+# ADR 003: Protobuf for the clustering endpoint
 
-## Status
-
-Accepted
-
-## Date
-
-2026-03-05
+Status: Accepted
+Date: 2026-03-05
 
 ## Context
 

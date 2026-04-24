@@ -1,12 +1,7 @@
-# 002 — TypeScript over Go for the backend
+# ADR 002: TypeScript over Go for the backend
 
-## Status
-
-Accepted
-
-## Date
-
-2026-03-05
+Status: Accepted
+Date: 2026-03-05
 
 ## Context
 

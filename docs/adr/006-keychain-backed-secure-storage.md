@@ -1,11 +1,8 @@
-# ADR-006: Keychain-backed secure storage for refresh tokens
+# ADR 006: Keychain-backed secure storage for refresh tokens
 
-- **Status**: Accepted
-- **Date**: 2026-04-18
-- **Deciders**: Engineering
-- **Supersedes**: —
-- **Superseded by**: —
-- **Closes**: Audit A-024
+Status: Accepted
+Date: 2026-04-18
+Closes: Audit A-024
 
 ## Context
 

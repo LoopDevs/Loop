@@ -56,10 +56,16 @@ Scopes: `web`, `mobile`, `backend`, `shared`, `infra`, `deps`
 Significant changes (new dependency, new service, data model change) require an ADR (Architecture Decision Record) in `docs/adr/`. Use the template:
 
 ```markdown
-# NNN — Title
+# ADR NNN: Title
 
 Status: Proposed
 Date: YYYY-MM-DD
+[Closes: A2-XXXX | Audit A-NNN] ← optional: the finding this ADR resolves
+[Related: ADR MMM (one-line), ...] ← optional: adjacent ADRs a reader should keep in mind
+[Supersedes: ADR MMM] ← only when this ADR replaces another
+[Superseded by: ADR PPP] ← set on the old ADR when flipped to Deprecated
+[Resolves: <ticket / note>] ← optional: non-ADR work item this completes
+[Implemented: YYYY-MM-DD onwards (<pointer to live code>)] ← set when status flips to Accepted
 
 ## Context
 
@@ -73,6 +79,13 @@ What we decided.
 
 Benefits and trade-offs.
 ```
+
+Header conventions (A2-1816 / A2-1818):
+
+- The `#` H1 is always `ADR NNN: Title` (space, colon — no hyphen, no em-dash).
+- `Status:` / `Date:` are plain key-value lines, not headings and not bullets.
+- Optional rows (`Closes`, `Related`, `Supersedes`, `Superseded by`, `Resolves`, `Implemented`) are present only when they carry information — empty placeholders (`Supersedes: —`, `Supersedes: none`) are noise and should be omitted.
+- `Deciders:` is not used (Loop is a pre-team project; see `.github/CODEOWNERS` for the active maintainer).
 
 ### ADR lifecycle
 

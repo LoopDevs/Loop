@@ -1,10 +1,7 @@
-# ADR-022: Admin drill-triplet pattern for cashback metrics
+# ADR 022: Admin drill-triplet pattern for cashback metrics
 
-- **Status**: Accepted
-- **Date**: 2026-04-23
-- **Deciders**: Engineering
-- **Supersedes**: —
-- **Superseded by**: —
+Status: Accepted
+Date: 2026-04-23
 
 ## Context
 

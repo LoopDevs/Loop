@@ -1,8 +1,7 @@
 # ADR 004: Security-hardening architectural decisions
 
-**Status:** Accepted
-**Date:** 2026-04-17
-**Decision makers:** Engineering
+Status: Accepted
+Date: 2026-04-17
 
 ## Context
 
