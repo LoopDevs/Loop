@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Context } from 'hono';
-import { InsufficientBalanceError } from '../../credits/adjustments.js';
+import { DailyAdjustmentLimitError, InsufficientBalanceError } from '../../credits/adjustments.js';
 
 const state = vi.hoisted(() => ({
   applyArgs: null as null | Record<string, unknown>,
@@ -314,6 +314,33 @@ describe('adminCreditAdjustmentHandler', () => {
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('INSUFFICIENT_BALANCE');
     expect(state.discordCalls).toHaveLength(0);
+    expect(state.storedSnapshot).toBeNull();
+  });
+
+  // A2-1610: per-admin per-currency daily cap guards against a stolen
+  // admin session draining the treasury via many sub-per-request-cap
+  // writes. Repo throws DailyAdjustmentLimitError; handler surfaces
+  // as 429 DAILY_LIMIT_EXCEEDED with the numbers so the operator
+  // understands the rejection.
+  it('A2-1610: 429 DAILY_LIMIT_EXCEEDED when the day cap is hit', async () => {
+    state.applyThrow = new DailyAdjustmentLimitError(
+      'GBP',
+      new Date('2026-04-24T00:00:00Z'),
+      95_000_000n,
+      100_000_000n,
+      10_000_000n,
+    );
+    const res = await adminCreditAdjustmentHandler(
+      makeCtx({
+        headers: { 'idempotency-key': validKey },
+        body: { amountMinor: '10000000', currency: 'GBP', reason: 'legit but over cap' },
+      }),
+    );
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('DAILY_LIMIT_EXCEEDED');
+    expect(body.message).toContain('100000000');
+    expect(body.message).toContain('95000000');
     expect(state.storedSnapshot).toBeNull();
   });
 

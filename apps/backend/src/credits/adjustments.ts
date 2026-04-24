@@ -22,6 +22,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { creditTransactions, userCredits } from '../db/schema.js';
+import { env } from '../env.js';
 
 export class InsufficientBalanceError extends Error {
   constructor(
@@ -31,6 +32,25 @@ export class InsufficientBalanceError extends Error {
   ) {
     super('Debit would drive balance below zero');
     this.name = 'InsufficientBalanceError';
+  }
+}
+
+/**
+ * A2-1610: thrown when an admin's cumulative-absolute adjustment
+ * volume for the UTC day would exceed the configured per-admin
+ * per-currency cap. Guards against a stolen or coerced admin session
+ * draining the treasury via many sub-cap writes inside the token TTL.
+ */
+export class DailyAdjustmentLimitError extends Error {
+  constructor(
+    public readonly currency: string,
+    public readonly dayStartUtc: Date,
+    public readonly usedMinor: bigint,
+    public readonly capMinor: bigint,
+    public readonly attemptedDelta: bigint,
+  ) {
+    super('Daily admin adjustment cap would be exceeded');
+    this.name = 'DailyAdjustmentLimitError';
   }
 }
 
@@ -54,6 +74,40 @@ export async function applyAdminCreditAdjustment(args: {
   reason: string;
 }): Promise<CreditAdjustment> {
   return db.transaction(async (tx) => {
+    // A2-1610: pre-flight daily cap check. Sum of absolute adjustment
+    // values for this admin in this currency since UTC-start-of-day.
+    // Adding |args.amountMinor| must not exceed the configured cap.
+    // Runs inside the txn so concurrent writes serialise against the
+    // same day-so-far total via the `user_credits` FOR UPDATE lock
+    // below (same admin hitting the same user bucket funnel through
+    // that lock; different users / admins don't need serialisation
+    // because a per-admin race is only dangerous against ONE admin's
+    // own writes).
+    const capMinor = env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR;
+    if (capMinor > 0n) {
+      const dayStart = new Date();
+      dayStart.setUTCHours(0, 0, 0, 0);
+      const [dayRow] = await tx
+        .select({
+          usedMinor: sql<string>`COALESCE(SUM(ABS(${creditTransactions.amountMinor}))::text, '0')`,
+        })
+        .from(creditTransactions)
+        .where(
+          and(
+            eq(creditTransactions.type, 'adjustment'),
+            eq(creditTransactions.referenceType, 'admin_adjustment'),
+            eq(creditTransactions.referenceId, args.adminUserId),
+            eq(creditTransactions.currency, args.currency),
+            sql`${creditTransactions.createdAt} >= ${dayStart}`,
+          ),
+        );
+      const used = BigInt(dayRow?.usedMinor ?? '0');
+      const attempt = args.amountMinor < 0n ? -args.amountMinor : args.amountMinor;
+      if (used + attempt > capMinor) {
+        throw new DailyAdjustmentLimitError(args.currency, dayStart, used, capMinor, attempt);
+      }
+    }
+
     // Lock the (userId, currency) row FOR UPDATE so two concurrent
     // admin writes can't race the balance check. `SELECT ... FOR
     // UPDATE` returns null when the row doesn't exist yet — we

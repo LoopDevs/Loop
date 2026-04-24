@@ -18,7 +18,11 @@ import { UUID_RE } from '../uuid.js';
 import { z } from 'zod';
 import { HOME_CURRENCIES } from '../db/schema.js';
 import type { User } from '../db/users.js';
-import { applyAdminCreditAdjustment, InsufficientBalanceError } from '../credits/adjustments.js';
+import {
+  applyAdminCreditAdjustment,
+  InsufficientBalanceError,
+  DailyAdjustmentLimitError,
+} from '../credits/adjustments.js';
 import { notifyAdminAudit } from '../discord.js';
 import { logger } from '../logger.js';
 import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
@@ -155,6 +159,20 @@ export async function adminCreditAdjustmentHandler(c: Context): Promise<Response
           message: `Debit of ${amountMinor} would drive ${err.currency} balance below zero (current: ${err.balanceMinor})`,
         },
         409,
+      );
+    }
+    if (err instanceof DailyAdjustmentLimitError) {
+      // A2-1610: per-admin per-currency daily cap hit. Bodies carry
+      // the numbers so an operator can see "you've already done ±X
+      // today, cap is Y" and escalate or wait rather than retrying
+      // blind. Discord audit fanout below still fires for the
+      // attempted write so the compromised-session signal is visible.
+      return c.json(
+        {
+          code: 'DAILY_LIMIT_EXCEEDED',
+          message: `Daily ${err.currency} adjustment cap (${err.capMinor} minor) hit — ${err.usedMinor} used today, attempted ${err.attemptedDelta}`,
+        },
+        429,
       );
     }
     log.error({ err, userId, adminUserId: actor.id }, 'Credit adjustment failed');
