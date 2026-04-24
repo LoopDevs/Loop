@@ -356,12 +356,21 @@ app.use('*', requestId());
 // var but does NOT mutate the incoming request's headers, so reading
 // `c.req.header('X-Request-Id')` would be undefined for every client
 // that didn't already send one (almost all of them).
+//
+// A2-1321: Fly load balancer, Prometheus scraper, and openapi clients
+// poll these three paths every few seconds (the http_service healthcheck
+// in fly.toml alone fires every 15s per machine). Logging every 2xx
+// balloons the Pino stream by ~5,760 lines/day/machine with no operator
+// signal — the same counts are already on `/metrics`. Skip successful
+// probes, keep 4xx/5xx so a sick probe path still surfaces.
+const SILENT_PROBE_PATHS = new Set(['/health', '/metrics', '/openapi.json']);
 const accessLog = logger.child({ component: 'access' });
 app.use('*', async (c, next) => {
   const start = Date.now();
   await next();
   const ms = Date.now() - start;
   const status = c.res.status;
+  if (SILENT_PROBE_PATHS.has(c.req.path) && status < 400) return;
   accessLog.info(
     {
       method: c.req.method,
