@@ -113,7 +113,10 @@ function ensureInitialised(): void {
   operators = validated.data.map((o: OperatorConfig) => ({
     id: o.id,
     bearer: o.bearer,
-    breaker: createCircuitBreaker(),
+    // A2-1326: tag the breaker so its Discord embeds dedup per-operator
+    // — one flapping operator won't suppress notifications for a
+    // different operator that flaps an hour later.
+    breaker: createCircuitBreaker({ name: `operator:${o.id}` }),
   }));
   initialised = true;
   log.info({ count: operators.length }, 'CTX operator pool initialised');

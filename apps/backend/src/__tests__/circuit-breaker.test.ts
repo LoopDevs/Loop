@@ -307,7 +307,12 @@ describe('notification behavior', () => {
 
     expect(cb.getState()).toBe('open');
     expect(mockNotify).toHaveBeenCalledTimes(1);
-    expect(mockNotify).toHaveBeenCalledWith('open', expect.any(Number), expect.any(Number));
+    expect(mockNotify).toHaveBeenCalledWith(
+      'open',
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(String),
+    );
   });
 
   it('fires one "closed" notification when HALF_OPEN probe succeeds', async () => {
@@ -318,7 +323,12 @@ describe('notification behavior', () => {
       mockFetch.mockResolvedValueOnce(new Response('err', { status: 500 }));
       await cb.fetch('http://x');
     }
-    expect(mockNotify).toHaveBeenCalledWith('open', expect.any(Number), expect.any(Number));
+    expect(mockNotify).toHaveBeenCalledWith(
+      'open',
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(String),
+    );
 
     mockNotify.mockClear();
 
@@ -329,7 +339,7 @@ describe('notification behavior', () => {
 
     expect(cb.getState()).toBe('closed');
     expect(mockNotify).toHaveBeenCalledTimes(1);
-    expect(mockNotify).toHaveBeenCalledWith('closed', 0);
+    expect(mockNotify).toHaveBeenCalledWith('closed', 0, undefined, expect.any(String));
   });
 
   it('does not re-fire "open" when a failed HALF_OPEN probe re-trips the circuit', async () => {
