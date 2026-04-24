@@ -113,6 +113,13 @@
       "when": 1778400000000,
       "tag": "0015_credit_tx_reason",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1778500000000,
+      "tag": "0016_cashback_config_audit_trigger_guard",
+      "breakpoints": true
     }
   ]
 }
