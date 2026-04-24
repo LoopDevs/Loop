@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { getMyCredits, type UserCreditRow } from '~/services/user';
+import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -31,9 +32,13 @@ export function fmtBalance(balanceMinor: string, currency: string): string {
  * banner above the ledger that the ledger itself will disprove.
  */
 export function CashbackBalanceCard(): React.JSX.Element {
+  // A2-1156: gate on isAuthenticated so cold-start doesn't fire a 401
+  // before session restore completes.
+  const { isAuthenticated } = useAuth();
   const query = useQuery({
     queryKey: ['me', 'credits'],
     queryFn: getMyCredits,
+    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 30_000,
   });
