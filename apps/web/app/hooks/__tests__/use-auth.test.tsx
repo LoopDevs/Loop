@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ApiException } from '@loop/shared';
 import type { ReactNode } from 'react';
 
 vi.mock('~/services/auth', () => ({
@@ -122,5 +123,71 @@ describe('auth flow integration', () => {
     expect(usePurchaseStore.getState().amount).toBeNull();
     // Query cache wiped — prior user's /me data must be gone.
     expect(queryClient.getQueryData(['me'])).toBeUndefined();
+  });
+});
+
+// A2-1154: auth translator is an overlay on friendlyError. 401 and 502
+// are the auth-specific overrides; every other branch must inherit
+// friendlyError's copy so /auth and /onboarding render the same string
+// for the same backend response.
+describe('A2-1154: useAuth error translation', () => {
+  beforeEach(() => {
+    useAuthStore.getState().clearSession();
+    vi.clearAllMocks();
+  });
+
+  const runRequestOtp = async (err: unknown): Promise<string> => {
+    vi.mocked(requestOtp).mockRejectedValueOnce(err);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }): React.JSX.Element => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    try {
+      await act(async () => {
+        await result.current.requestOtp('user@test.com');
+      });
+      throw new Error('requestOtp should have thrown');
+    } catch (e) {
+      return (e as Error).message;
+    }
+  };
+
+  const apiErr = (status: number, code: string, message: string): ApiException =>
+    new ApiException(status, { code, message });
+
+  it('401 → auth-specific "Incorrect or expired code" copy', async () => {
+    const msg = await runRequestOtp(apiErr(401, 'UNAUTHORIZED', 'unauthorized'));
+    expect(msg).toBe('Incorrect or expired code. Please try again.');
+  });
+
+  it('502 → auth-specific "Unable to reach the auth provider" copy', async () => {
+    const msg = await runRequestOtp(apiErr(502, 'UPSTREAM_ERROR', 'bad gateway'));
+    expect(msg).toBe('Unable to reach the auth provider. Please try again.');
+  });
+
+  it('429 → inherits shared "Too many attempts" copy from friendlyError', async () => {
+    const msg = await runRequestOtp(apiErr(429, 'RATE_LIMITED', 'rate-limited'));
+    expect(msg).toBe('Too many attempts. Please wait a moment.');
+  });
+
+  it('503 → inherits shared copy from friendlyError', async () => {
+    const msg = await runRequestOtp(apiErr(503, 'UNAVAILABLE', 'unavailable'));
+    expect(msg).toBe('Service temporarily unavailable. Please try again shortly.');
+  });
+
+  it('504 → inherits shared copy (previously missing on auth surface)', async () => {
+    const msg = await runRequestOtp(apiErr(504, 'GATEWAY_TIMEOUT', 'gateway timeout'));
+    expect(msg).toBe('Our provider timed out. Please try again.');
+  });
+
+  it('TIMEOUT → inherits shared copy (previously hit fallback on auth surface)', async () => {
+    const msg = await runRequestOtp(apiErr(0, 'TIMEOUT', 'timeout'));
+    expect(msg).toBe('The request took too long. Please try again.');
+  });
+
+  it('unmatched error → fallback from caller', async () => {
+    const msg = await runRequestOtp(apiErr(500, 'INTERNAL', 'server blew up'));
+    expect(msg).toBe('Failed to send verification code. Please try again.');
   });
 });
