@@ -496,6 +496,12 @@ export const orders = pgTable(
       sql`${t.paymentMethod} IN ('xlm', 'usdc', 'credit', 'loop_asset')`,
     ),
     check('orders_charge_currency_known', sql`${t.chargeCurrency} IN ('USD', 'GBP', 'EUR')`),
+    // A2-705: catalog-side currency (what CTX denominates the gift
+    // card in). Paired with `orders_charge_currency_known` — both
+    // currencies on this row must be one of the three Loop-asset
+    // currencies. Adding a fourth is a deliberate migration against
+    // this CHECK and `user_credits_currency_known`.
+    check('orders_currency_known', sql`${t.currency} IN ('USD', 'GBP', 'EUR')`),
     check(
       'orders_percentages_sum',
       sql`${t.wholesalePct} + ${t.userCashbackPct} + ${t.loopMarginPct} <= 100`,
@@ -698,7 +704,14 @@ export const adminIdempotencyKeys = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex('admin_idempotency_keys_pk_idx').on(t.adminUserId, t.key),
+    // A2-701: match the actual constraint shape the migration
+    // installs — `CONSTRAINT "admin_idempotency_keys_pk" PRIMARY KEY
+    // ("admin_user_id", "key")` — instead of declaring a separate
+    // uniqueIndex with a `_pk_idx` suffix. Earlier drift would have
+    // made `drizzle-kit generate` emit a DROP-PK + ADD-uniqueIndex
+    // on the next run, losing the PK metadata without any semantic
+    // change on the uniqueness side.
+    primaryKey({ columns: [t.adminUserId, t.key], name: 'admin_idempotency_keys_pk' }),
     index('admin_idempotency_keys_created_at').on(t.createdAt),
     check('admin_idempotency_keys_key_length', sql`char_length(${t.key}) BETWEEN 16 AND 128`),
     check('admin_idempotency_keys_status_valid', sql`${t.status} >= 100 AND ${t.status} < 600`),
