@@ -60,7 +60,7 @@ loop-app/
 │   ├── standards.md     # This file
 │   ├── audit-2026-tracker.md # 2026-04 adversarial audit tracker (467 findings)
 │   ├── audit-2026-evidence/  # Per-phase evidence files for the 2026-04 audit
-│   ├── migration.md     # Migration plan and checklist
+│   ├── archive/         # Historical/completed docs — not the current source of truth
 │   └── adr/             # Architecture Decision Records
 ├── .github/
 │   └── workflows/    # CI/CD pipelines
@@ -680,15 +680,15 @@ Use explicit, readable test fixtures — not random generation unless specifical
 
 ### Where documentation lives
 
-| Type                          | Location                                               |
-| ----------------------------- | ------------------------------------------------------ |
-| Engineering standards         | `docs/standards.md` (this file)                        |
-| Architecture decisions        | `docs/adr/NNN-title.md`                                |
-| API reference                 | `docs/architecture.md` (Backend API endpoints section) |
-| Migration plan                | `docs/migration.md`                                    |
-| AI agent instructions         | `AGENTS.md` (symlinked as `CLAUDE.md`)                 |
-| Component/hook usage          | JSDoc on the export                                    |
-| Complex algorithm explanation | Inline comment in the file                             |
+| Type                          | Location                                                                                                         |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Engineering standards         | `docs/standards.md` (this file)                                                                                  |
+| Architecture decisions        | `docs/adr/NNN-title.md`                                                                                          |
+| API reference                 | `docs/architecture.md` (Backend API endpoints section)                                                           |
+| Historical/completed docs     | `docs/archive/` (migration plan, pre-impl research, UI restoration — kept for git-blame continuity, not current) |
+| AI agent instructions         | `AGENTS.md` (symlinked as `CLAUDE.md`)                                                                           |
+| Component/hook usage          | JSDoc on the export                                                                                              |
+| Complex algorithm explanation | Inline comment in the file                                                                                       |
 
 ### When to write an ADR
 
