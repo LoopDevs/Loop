@@ -32,6 +32,7 @@ import {
   HOME_CURRENCIES,
   LOOP_ASSET_CODES,
   isLoopAssetCode,
+  type AssetCirculationResponse,
   type HomeCurrency,
   type LoopAssetCode,
 } from '@loop/shared';
@@ -42,19 +43,10 @@ import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-asset-circulation' });
 
-export interface AssetCirculationResponse {
-  assetCode: LoopAssetCode;
-  fiatCurrency: HomeCurrency;
-  issuer: string;
-  /** On-chain issued total in stroops (bigint-as-string). */
-  onChainStroops: string;
-  /** Off-chain ledger liability for the matching fiat, minor units (bigint-as-string). */
-  ledgerLiabilityMinor: string;
-  /** On-chain minus ledger (in stroops). Positive = over-minted; negative = unsettled. */
-  driftStroops: string;
-  /** Unix ms the Horizon read was taken. */
-  onChainAsOfMs: number;
-}
+// A2-1506: `AssetCirculationResponse` moved to
+// `@loop/shared/admin-assets.ts`. Re-exported below via `export type`
+// for in-file builders.
+export type { AssetCirculationResponse };
 
 const STROOPS_PER_MINOR = 100_000n;
 

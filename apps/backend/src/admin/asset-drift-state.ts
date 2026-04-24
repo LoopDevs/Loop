@@ -20,27 +20,13 @@
  * that implies healthy drift.
  */
 import type { Context } from 'hono';
-import type { LoopAssetCode } from '@loop/shared';
-import { getAssetDriftState, type DriftState } from '../payments/asset-drift-watcher.js';
+import type { AssetDriftStateResponse, AssetDriftStateRow } from '@loop/shared';
+import { getAssetDriftState } from '../payments/asset-drift-watcher.js';
 
-export interface AssetDriftStateRow {
-  assetCode: LoopAssetCode;
-  state: DriftState;
-  /** Last drift in stroops (bigint-as-string). `null` until the asset has been read. */
-  lastDriftStroops: string | null;
-  /** Threshold used for the last comparison (bigint-as-string). `null` pre-first-tick. */
-  lastThresholdStroops: string | null;
-  /** Unix ms of the last successful per-asset read. `null` pre-first-tick. */
-  lastCheckedMs: number | null;
-}
-
-export interface AssetDriftStateResponse {
-  /** Unix ms the watcher last completed a pass (any result). `null` when inactive. */
-  lastTickMs: number | null;
-  /** True when the background interval is running in this process. */
-  running: boolean;
-  perAsset: AssetDriftStateRow[];
-}
+// A2-1506: `AssetDriftStateRow` / `AssetDriftStateResponse` moved to
+// `@loop/shared/admin-assets.ts`. Re-exported for in-file builders +
+// any downstream imports that expect them at this path.
+export type { AssetDriftStateRow, AssetDriftStateResponse };
 
 export function adminAssetDriftStateHandler(c: Context): Response {
   const state = getAssetDriftState();
