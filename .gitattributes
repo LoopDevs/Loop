@@ -1,0 +1,41 @@
+# A2-111: force LF line endings on text files across platforms so a
+# Windows checkout doesn't silently CRLF-munge shell scripts, ESLint
+# configs, or drizzle migration SQL — which would make pre-commit
+# hooks blow up and migrations legally-valid-but-cosmetically-drifted
+# vs git history. `text=auto` does per-file detection; explicit
+# declarations below pin the tricky cases.
+*                               text=auto eol=lf
+
+# Shell + SQL must stay LF for bash + psql.
+*.sh                            text eol=lf
+*.bash                          text eol=lf
+*.sql                           text eol=lf
+
+# Binary assets — disable diff + LF normalisation.
+*.png                           binary
+*.jpg                           binary
+*.jpeg                          binary
+*.gif                           binary
+*.webp                          binary
+*.ico                           binary
+*.pdf                           binary
+*.woff                          binary
+*.woff2                         binary
+*.ttf                           binary
+*.otf                           binary
+
+# Lock files — collapse as a single "file changed" in diff review;
+# their internal structure is already deterministic and reviewers
+# should be looking at the accompanying package.json change, not the
+# tree of transitive deps.
+package-lock.json               -diff linguist-generated
+pnpm-lock.yaml                  -diff linguist-generated
+yarn.lock                       -diff linguist-generated
+
+# Generated proto bundles (see `npm run proto:generate`) — same as
+# above; the .proto source is the reviewable surface.
+packages/shared/src/proto/**    linguist-generated
+
+# Drizzle meta snapshot is machine-written on every migration; keep
+# it out of language stats + regular diff noise.
+apps/backend/src/db/migrations/meta/** linguist-generated
