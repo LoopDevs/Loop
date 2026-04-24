@@ -1,4 +1,13 @@
-import type { CreditTransactionType, LoopAssetCode, OrderState } from '@loop/shared';
+import type {
+  CreditTransactionType,
+  LoopAssetCode,
+  LoopLiability,
+  OrderState,
+  PayoutState,
+  TreasuryHolding,
+  TreasuryOrderFlow,
+  TreasurySnapshot,
+} from '@loop/shared';
 export type { CreditTransactionType } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
 
@@ -159,54 +168,11 @@ export async function getPaymentMethodShare(
   );
 }
 
-// (LoopAssetCode re-exported from `@loop/shared` at the top of this file.)
-export type PayoutState = 'pending' | 'submitted' | 'confirmed' | 'failed';
-
-export interface LoopLiability {
-  outstandingMinor: string;
-  issuer: string | null;
-}
-
-export interface TreasuryHolding {
-  stroops: string | null;
-}
-
-/**
- * ADR 015 — per charge-currency flow of fulfilled orders. Each row
- * sums how much Loop paid CTX (wholesale), credited users (cashback),
- * and kept (margin), alongside the face value and order count.
- * BigInt-as-string for precision across currencies.
- */
-export interface TreasuryOrderFlow {
-  count: string;
-  faceValueMinor: string;
-  wholesaleMinor: string;
-  userCashbackMinor: string;
-  loopMarginMinor: string;
-}
-
-export interface TreasurySnapshot {
-  /** Outstanding credit (what Loop owes users), keyed by currency. Minor units, string. */
-  outstanding: Record<string, string>;
-  /** Ledger-by-type totals, keyed [currency][type]. Minor units, string. */
-  totals: Record<string, Record<string, string>>;
-  /** ADR 015 — per LOOP asset, outstanding + configured issuer. */
-  liabilities: Record<LoopAssetCode, LoopLiability>;
-  /** ADR 015 — Loop's yield-earning pile (USDC + XLM operator holdings). */
-  assets: {
-    USDC: TreasuryHolding;
-    XLM: TreasuryHolding;
-  };
-  /** ADR 015 — outbound Stellar cashback payouts at each state. */
-  payouts: Record<PayoutState, string>;
-  /** ADR 015 — fulfilled-order flows per charge currency (CTX supplier P&L). */
-  orderFlows: Record<string, TreasuryOrderFlow>;
-  /** CTX operator pool snapshot — ADR 013. */
-  operatorPool: {
-    size: number;
-    operators: Array<{ id: string; state: string }>;
-  };
-}
+// A2-1506: treasury shapes moved to `@loop/shared/admin-treasury.ts` +
+// `PayoutState` moved to `@loop/shared/payout-state.ts`. Re-exported
+// here via `export type` so the 30+ call sites importing from
+// `~/services/admin` don't fan out a rename.
+export type { PayoutState, LoopLiability, TreasuryHolding, TreasuryOrderFlow, TreasurySnapshot };
 
 /** GET /api/admin/treasury */
 export async function getTreasurySnapshot(): Promise<TreasurySnapshot> {
