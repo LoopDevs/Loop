@@ -22,9 +22,9 @@
  */
 import { env } from '../env.js';
 import {
-  CURRENCY_TO_ASSET_CODE,
   HOME_CURRENCIES,
   LOOP_ASSET_CODES,
+  loopAssetForCurrency,
   type HomeCurrency,
   type LoopAssetCode,
 } from '@loop/shared';
@@ -50,7 +50,10 @@ export interface PayoutAsset {
  * as the "skip the Stellar-side payout" signal.
  */
 export function payoutAssetFor(homeCurrency: HomeCurrency): PayoutAsset {
-  const code = CURRENCY_TO_ASSET_CODE[homeCurrency];
+  // A2-812: prefer the shared helper over the direct map access so
+  // the backend tracks any future logic `loopAssetForCurrency` picks
+  // up (e.g. promo-asset overrides, per-region mapping).
+  const code = loopAssetForCurrency(homeCurrency);
   const issuer = issuerFor(code);
   return { code, issuer };
 }
