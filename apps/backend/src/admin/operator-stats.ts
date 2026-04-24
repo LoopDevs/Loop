@@ -31,18 +31,9 @@ import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-operator-stats' });
 
-export interface OperatorStatsRow {
-  operatorId: string;
-  orderCount: number;
-  fulfilledCount: number;
-  failedCount: number;
-  lastOrderAt: string;
-}
-
-export interface OperatorStatsResponse {
-  since: string;
-  rows: OperatorStatsRow[];
-}
+// A2-1506: moved to `@loop/shared/admin-operator-stats.ts`.
+import type { OperatorStatsResponse, OperatorStatsRow } from '@loop/shared';
+export type { OperatorStatsResponse, OperatorStatsRow };
 
 const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_WINDOW_MS = 366 * 24 * 60 * 60 * 1000;

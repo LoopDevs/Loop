@@ -28,19 +28,9 @@ import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-operator-latency' });
 
-export interface OperatorLatencyRow {
-  operatorId: string;
-  sampleCount: number;
-  p50Ms: number;
-  p95Ms: number;
-  p99Ms: number;
-  meanMs: number;
-}
-
-export interface OperatorLatencyResponse {
-  since: string;
-  rows: OperatorLatencyRow[];
-}
+// A2-1506: moved to `@loop/shared/admin-operator-stats.ts`.
+import type { OperatorLatencyResponse, OperatorLatencyRow } from '@loop/shared';
+export type { OperatorLatencyResponse, OperatorLatencyRow };
 
 const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_WINDOW_MS = 366 * 24 * 60 * 60 * 1000;

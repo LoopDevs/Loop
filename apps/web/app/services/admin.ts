@@ -10,8 +10,12 @@ import type {
   PayoutState,
   MerchantOperatorMixResponse,
   MerchantOperatorMixRow,
+  OperatorLatencyResponse,
+  OperatorLatencyRow,
   OperatorMerchantMixResponse,
   OperatorMerchantMixRow,
+  OperatorStatsResponse,
+  OperatorStatsRow,
   SupplierSpendActivityDay,
   SupplierSpendActivityResponse,
   SupplierSpendResponse,
@@ -410,18 +414,8 @@ export async function getSupplierSpendActivity(
  * carried it". `lastOrderAt` is the newest `createdAt` attributed to
  * this operator in the window.
  */
-export interface OperatorStatsRow {
-  operatorId: string;
-  orderCount: number;
-  fulfilledCount: number;
-  failedCount: number;
-  lastOrderAt: string;
-}
-
-export interface OperatorStatsResponse {
-  since: string;
-  rows: OperatorStatsRow[];
-}
+// A2-1506: moved to `@loop/shared/admin-operator-stats.ts`.
+export type { OperatorStatsResponse, OperatorStatsRow };
 
 /**
  * `GET /api/admin/operator-stats` — per-operator aggregate keyed on
@@ -522,19 +516,8 @@ export async function getUserOperatorMix(
  * operator that had at least one fulfilled order in the window.
  * Percentiles are reported in ms and rounded.
  */
-export interface OperatorLatencyRow {
-  operatorId: string;
-  sampleCount: number;
-  p50Ms: number;
-  p95Ms: number;
-  p99Ms: number;
-  meanMs: number;
-}
-
-export interface OperatorLatencyResponse {
-  since: string;
-  rows: OperatorLatencyRow[];
-}
+// A2-1506: moved to `@loop/shared/admin-operator-stats.ts`.
+export type { OperatorLatencyResponse, OperatorLatencyRow };
 
 /**
  * `GET /api/admin/operators/latency` — fleet per-operator p50/p95/p99
