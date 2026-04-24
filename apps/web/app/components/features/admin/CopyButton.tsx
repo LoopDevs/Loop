@@ -15,10 +15,62 @@ interface Props {
  * copy saves a highlight-triple-click every time.
  *
  * Shows a brief "Copied" flash after success, reverts after 1.5s.
- * Falls back silently when clipboard access fails (denied, insecure
- * context) — the value is still visible next to the button so the
- * user can select it manually.
+ *
+ * A2-1158: clipboard fallback chain — the Async Clipboard API
+ * (`navigator.clipboard.writeText`) throws on:
+ *   - non-secure origins (HTTP pages that aren't localhost)
+ *   - older Safari that hasn't shipped the API
+ *   - browsers with clipboard-permission denied
+ *
+ * Previously the bare `await writeText` path silently no-op'd in
+ * those cases; ops on an HTTP staging host or an older Safari
+ * would click and get nothing. Fall through to the deprecated-
+ * but-universal `document.execCommand('copy')` via a hidden
+ * textarea — deprecated since 2018, still implemented by every
+ * browser, and the only way to programmatically copy on an
+ * insecure origin. Final fallback is a silent no-op (same as
+ * before); the value is still visible next to the button so the
+ * user can manually select + Ctrl-C.
  */
+async function tryClipboardCopy(text: string): Promise<boolean> {
+  // Prefer the modern async API when available and allowed.
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText !== undefined) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through — permission denied, insecure context, or
+      // browser quirk. Try the execCommand path below.
+    }
+  }
+  // Fallback: hidden textarea + document.execCommand('copy').
+  // Works on insecure origins + older Safari + anywhere the
+  // Clipboard API hasn't landed. Guarded for SSR — `document`
+  // doesn't exist server-side, and this function is only ever
+  // called from a click handler so we shouldn't reach here at
+  // import time, but belt-and-braces.
+  if (typeof document === 'undefined') return false;
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    // Hide off-screen so the page doesn't visibly twitch during
+    // the focus/select round-trip; readonly + aria-hidden keep
+    // it out of the tab order + screen-reader output.
+    textarea.setAttribute('readonly', '');
+    textarea.setAttribute('aria-hidden', 'true');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 export function CopyButton({ text, label }: Props): React.JSX.Element {
   const [copied, setCopied] = useState(false);
 
@@ -29,12 +81,11 @@ export function CopyButton({ text, label }: Props): React.JSX.Element {
   }, [copied]);
 
   const handleClick = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-    } catch {
-      /* clipboard unavailable — silent; user can still select text */
-    }
+    const ok = await tryClipboardCopy(text);
+    if (ok) setCopied(true);
+    // Final failure is silent — the value is still visible next
+    // to the button so the user can select it manually. Matches
+    // prior behaviour for the Clipboard-API-denied path.
   };
 
   return (
