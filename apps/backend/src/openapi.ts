@@ -102,6 +102,29 @@ const LogoutBody = registry.register(
   }),
 );
 
+// A2-568: social login (ADR 014). Body + response are shared across
+// Google and Apple — the handler factory in `auth/social.ts` wires
+// both to the same shape.
+const SocialLoginBody = registry.register(
+  'SocialLoginBody',
+  z.object({
+    idToken: z.string().min(1),
+    platform: PlatformEnum.default('web'),
+  }),
+);
+
+const SocialLoginResponse = registry.register(
+  'SocialLoginResponse',
+  z.object({
+    accessToken: z.string(),
+    refreshToken: z.string(),
+    email: z.string().email().openapi({
+      description:
+        "Echo of the verified provider email so the client doesn't decode the access JWT.",
+    }),
+  }),
+);
+
 // ─── Merchants ──────────────────────────────────────────────────────────────
 
 const MerchantDenominations = registry.register(
@@ -1817,6 +1840,98 @@ registry.registerPath({
     },
     429: {
       description: 'Rate limit exceeded (20/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+// A2-568: social login — Google. Gated on LOOP_AUTH_NATIVE_ENABLED
+// (404 when disabled) and on GOOGLE_OAUTH_CLIENT_ID_* envs being set
+// (404 when no audiences configured). See ADR 014.
+registry.registerPath({
+  method: 'post',
+  path: '/api/auth/social/google',
+  summary: 'Exchange a Google id_token for Loop access and refresh tokens.',
+  description:
+    'Verifies the provider id_token against the Google JWKS (iss, aud, exp, signature). On first successful sign-in the user row is created; thereafter the identity is matched by (provider, sub) or by verified email. Every rejection maps to a generic 401 so a probe cannot learn which check failed.',
+  tags: ['Auth'],
+  request: { body: { content: { 'application/json': { schema: SocialLoginBody } } } },
+  responses: {
+    200: {
+      description: 'Tokens',
+      content: { 'application/json': { schema: SocialLoginResponse } },
+    },
+    400: {
+      description: 'Validation error (missing idToken)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description:
+        'id_token rejected (invalid signature / iss / aud / exp / email missing / email_verified=false)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description:
+        'Loop-native auth disabled (LOOP_AUTH_NATIVE_ENABLED=false) or Google audiences unconfigured in this deployment.',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description:
+        'Auth misconfigured (LOOP_AUTH_NATIVE_ENABLED without signing key) or unexpected server error',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    503: {
+      description: 'Google JWKS unreachable — retry-safe',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+// A2-568: social login — Apple. Same gating and verification shape as
+// Google; Apple's id_token includes an `email_verified` that may arrive
+// as a string "true"/"false", which `auth/social.ts` coerces.
+registry.registerPath({
+  method: 'post',
+  path: '/api/auth/social/apple',
+  summary: 'Exchange an Apple id_token for Loop access and refresh tokens.',
+  description:
+    'Verifies the Apple id_token against Apple Sign In JWKS. Single audience (APPLE_SIGN_IN_SERVICE_ID). Apple relay emails arrive with email_verified=true by construction. Rejections collapse to 401.',
+  tags: ['Auth'],
+  request: { body: { content: { 'application/json': { schema: SocialLoginBody } } } },
+  responses: {
+    200: {
+      description: 'Tokens',
+      content: { 'application/json': { schema: SocialLoginResponse } },
+    },
+    400: {
+      description: 'Validation error (missing idToken)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description:
+        'id_token rejected (invalid signature / iss / aud / exp / email missing / email_verified=false)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description:
+        'Loop-native auth disabled (LOOP_AUTH_NATIVE_ENABLED=false) or APPLE_SIGN_IN_SERVICE_ID unconfigured.',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description:
+        'Auth misconfigured (LOOP_AUTH_NATIVE_ENABLED without signing key) or unexpected server error',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    503: {
+      description: 'Apple JWKS unreachable — retry-safe',
       content: { 'application/json': { schema: ErrorResponse } },
     },
   },
