@@ -36,22 +36,9 @@ const MIN_DAYS = 1;
 const MAX_DAYS = 180;
 const DEFAULT_DAYS = 30;
 
-export interface SupplierSpendActivityDay {
-  /** YYYY-MM-DD in UTC. */
-  day: string;
-  currency: string;
-  count: number;
-  faceValueMinor: string;
-  wholesaleMinor: string;
-  userCashbackMinor: string;
-  loopMarginMinor: string;
-}
-
-export interface SupplierSpendActivityResponse {
-  windowDays: number;
-  currency: HomeCurrency | null;
-  days: SupplierSpendActivityDay[];
-}
+// A2-1506: moved to `@loop/shared/admin-supplier-spend.ts`.
+import type { SupplierSpendActivityDay, SupplierSpendActivityResponse } from '@loop/shared';
+export type { SupplierSpendActivityDay, SupplierSpendActivityResponse };
 
 interface Row extends Record<string, unknown> {
   day: string | Date;
