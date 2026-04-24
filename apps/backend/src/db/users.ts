@@ -79,12 +79,13 @@ export async function getUserById(id: string): Promise<User | null> {
  * unique index on `users.ctx_user_id` does not apply; we find by
  * lower-cased email and insert a new row if nothing matches.
  *
- * Best-effort idempotency: if two concurrent `verify-otp` calls for
- * the same new email both miss the SELECT, they'll both INSERT and
- * create two rows. Signup throughput is low enough that the race is
- * not worth a heavier constraint today. A future migration can add
- * a unique index on `LOWER(email) WHERE ctx_user_id IS NULL` when
- * this becomes relevant.
+ * Race-safe (A2-706). The unique index
+ * `users_email_loop_native_unique` on `LOWER(email) WHERE
+ * ctx_user_id IS NULL` (migration 0020) means two concurrent
+ * `verify-otp` calls for the same new email will collide at the
+ * second INSERT — we use `ON CONFLICT DO NOTHING` to absorb the
+ * collision and re-SELECT so the losing caller returns the winning
+ * caller's row instead of erroring.
  */
 export async function findOrCreateUserByEmail(email: string): Promise<User> {
   const normalised = email.toLowerCase().trim();
@@ -92,16 +93,25 @@ export async function findOrCreateUserByEmail(email: string): Promise<User> {
     where: eq(users.email, normalised),
   });
   if (existing !== undefined && existing !== null) return existing;
-  const [row] = await db
+  // INSERT ... ON CONFLICT DO NOTHING — if a concurrent signup raced
+  // us past the SELECT, the unique index trips and no row is
+  // returned. We then re-SELECT to find the row the winning caller
+  // inserted.
+  const inserted = await db
     .insert(users)
     .values({
       email: normalised,
       // isAdmin defaults to false in the schema. Loop-native users get
       // admin via a future migration to key allowlists on Loop UUIDs.
     })
+    .onConflictDoNothing()
     .returning();
-  if (row === undefined) {
-    throw new Error('findOrCreateUserByEmail: no row returned');
+  if (inserted[0] !== undefined) return inserted[0];
+  const raced = await db.query.users.findFirst({
+    where: eq(users.email, normalised),
+  });
+  if (raced === undefined || raced === null) {
+    throw new Error('findOrCreateUserByEmail: no row returned after conflict');
   }
-  return row;
+  return raced;
 }

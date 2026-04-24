@@ -6,15 +6,17 @@ vi.hoisted(() => {
   process.env['ADMIN_CTX_USER_IDS'] = 'ctx-admin-1, ctx-admin-2';
 });
 
-const { dbMock, returned } = vi.hoisted(() => {
+const { dbMock, returned, findFirstMock } = vi.hoisted(() => {
   const state = { row: null as unknown };
   const m: Record<string, ReturnType<typeof vi.fn>> = {};
   m['insert'] = vi.fn(() => m);
   m['values'] = vi.fn(() => m);
   m['onConflictDoUpdate'] = vi.fn(() => m);
+  m['onConflictDoNothing'] = vi.fn(() => m);
   m['returning'] = vi.fn(async () => [state.row]);
   m['query'] = vi.fn(() => m) as unknown as ReturnType<typeof vi.fn>;
-  return { dbMock: m, returned: state };
+  const findFirst = vi.fn(async (_args: unknown) => state.row ?? null);
+  return { dbMock: m, returned: state, findFirstMock: findFirst };
 });
 
 vi.mock('../client.js', () => ({
@@ -22,7 +24,7 @@ vi.mock('../client.js', () => ({
     insert: dbMock['insert'],
     query: {
       users: {
-        findFirst: vi.fn(async (_args: unknown) => returned.row ?? null),
+        findFirst: findFirstMock,
       },
     },
   },
@@ -41,6 +43,7 @@ beforeEach(() => {
   for (const fn of Object.values(dbMock)) {
     if (typeof fn === 'function' && 'mockClear' in fn) fn.mockClear();
   }
+  findFirstMock.mockClear();
   returned.row = null;
 });
 
@@ -108,8 +111,6 @@ describe('findOrCreateUserByEmail', () => {
   });
 
   it('inserts and returns a fresh row when the email is unknown', async () => {
-    // findFirst returns null → insert path. We flip returned.row to
-    // the inserted row for the .returning() await.
     returned.row = null;
     const inserted = {
       id: 'uuid-e2',
@@ -117,22 +118,43 @@ describe('findOrCreateUserByEmail', () => {
       email: 'new@b.com',
       isAdmin: false,
     };
-    // findFirst first (returns null), then returning() second. The
-    // hoisted mock uses returned.row for BOTH — swap it between the
-    // calls by relying on findFirst being awaited first.
-    returned.row = null;
-    // Hack: override returning() for this test to yield the inserted
-    // row regardless of state.
     dbMock['returning']!.mockResolvedValueOnce([inserted]);
     const user = await findOrCreateUserByEmail('new@B.com');
     expect(user).toEqual(inserted);
-    // Insert saw the lower-cased email.
     expect(dbMock['values']!).toHaveBeenCalledWith(expect.objectContaining({ email: 'new@b.com' }));
+    // A2-706: INSERT uses onConflictDoNothing to absorb the signup
+    // race when two concurrent verify-otp calls target the same
+    // brand-new email.
+    expect(dbMock['onConflictDoNothing']!).toHaveBeenCalled();
   });
 
-  it('throws when the insert returns no row', async () => {
-    returned.row = null;
-    dbMock['returning']!.mockResolvedValueOnce([undefined]);
-    await expect(findOrCreateUserByEmail('x@y.com')).rejects.toThrow(/no row returned/);
+  it('A2-706: re-selects the raced row when ON CONFLICT DO NOTHING absorbs the insert', async () => {
+    // Concurrent signup scenario:
+    //  1. findFirst → null (row not yet visible)
+    //  2. INSERT ... ON CONFLICT DO NOTHING → [] (losing side)
+    //  3. findFirst → the row the winning caller inserted
+    const winningRow = {
+      id: 'uuid-e3',
+      ctxUserId: null,
+      email: 'raced@b.com',
+      isAdmin: false,
+    };
+    findFirstMock.mockResolvedValueOnce(null); // first pre-insert SELECT
+    findFirstMock.mockResolvedValueOnce(winningRow); // re-SELECT after conflict
+    dbMock['returning']!.mockResolvedValueOnce([]); // conflict — no row returned
+    const user = await findOrCreateUserByEmail('RACED@b.com');
+    expect(user).toEqual(winningRow);
+    expect(findFirstMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws when both the insert and the re-select return no row', async () => {
+    // Pathological: conflict happens but the re-SELECT still misses
+    // (could only occur if the row was deleted between steps 2 and 3).
+    findFirstMock.mockResolvedValueOnce(null);
+    findFirstMock.mockResolvedValueOnce(null);
+    dbMock['returning']!.mockResolvedValueOnce([]);
+    await expect(findOrCreateUserByEmail('x@y.com')).rejects.toThrow(
+      /no row returned after conflict/,
+    );
   });
 });
