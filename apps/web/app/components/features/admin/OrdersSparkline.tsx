@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getOrdersActivity } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Sparkline } from './Sparkline';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 const WINDOW_DAYS = 14;
 
@@ -27,7 +28,7 @@ export function OrdersSparkline(): React.JSX.Element {
   return (
     <Sparkline
       title={`Orders activity (${WINDOW_DAYS}d)`}
-      subtitle={`${totalCreated.toLocaleString('en-US')} created · ${totalFulfilled.toLocaleString('en-US')} fulfilled`}
+      subtitle={`${totalCreated.toLocaleString(ADMIN_LOCALE)} created · ${totalFulfilled.toLocaleString(ADMIN_LOCALE)} fulfilled`}
       ariaLabel={`Orders activity over the last ${WINDOW_DAYS} days: ${totalCreated} created, ${totalFulfilled} fulfilled`}
       isPending={query.isPending}
       isError={query.isError}

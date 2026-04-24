@@ -7,6 +7,7 @@ import {
   type AdminWriteEnvelope,
 } from '~/services/admin';
 import { ReplayedBadge } from './ReplayedBadge';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
  * Force-refresh the merchant catalog from upstream CTX (ADR 011).
@@ -41,7 +42,7 @@ export function MerchantResyncButton(): React.JSX.Element {
     onSuccess: ({ result, audit }) => {
       setError(null);
       const label = result.triggered
-        ? `Synced ${result.merchantCount.toLocaleString('en-US')} merchants`
+        ? `Synced ${result.merchantCount.toLocaleString(ADMIN_LOCALE)} merchants`
         : 'Already in sync';
       setFlash({ label, replayed: audit.replayed });
       setTimeout(() => setFlash(null), 3000);

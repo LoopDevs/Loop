@@ -11,6 +11,7 @@ import {
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · Stuck orders — Loop' }];
@@ -191,7 +192,7 @@ function fmtStroops(stroops: string, code: string): string {
   const fractionRaw = padded.slice(-7).replace(/0+$/, '');
   const fraction = fractionRaw.length > 0 ? `.${fractionRaw}` : '';
   const sign = negative ? '-' : '';
-  return `${sign}${Number(whole).toLocaleString('en-US')}${fraction} ${code}`;
+  return `${sign}${Number(whole).toLocaleString(ADMIN_LOCALE)}${fraction} ${code}`;
 }
 
 /**

@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getTopUsers, type TopUserRow } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 const WINDOWS = [
   { days: 7, label: '7d' },
@@ -22,7 +23,7 @@ export function fmtPositiveMinor(minor: string, currency: string): string {
   const n = Number(minor);
   if (!Number.isFinite(n)) return '—';
   try {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat(ADMIN_LOCALE, {
       style: 'currency',
       currency,
       signDisplay: 'never',
@@ -134,7 +135,7 @@ export function TopUsersTable(): React.JSX.Element {
                 </td>
                 <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{r.currency}</td>
                 <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
-                  {r.count.toLocaleString('en-US')}
+                  {r.count.toLocaleString(ADMIN_LOCALE)}
                 </td>
                 <td className="px-3 py-2 tabular-nums font-medium text-gray-900 dark:text-white">
                   {fmtPositiveMinor(r.amountMinor, r.currency)}

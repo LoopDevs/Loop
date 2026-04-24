@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { getMerchantStats, type MerchantStatsRow } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
  * Formats a non-negative minor amount in the row's currency. Rows
@@ -13,7 +14,7 @@ export function fmtMinor(minor: string, currency: string): string {
   const n = Number(minor);
   if (!Number.isFinite(n)) return '—';
   try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(n / 100);
+    return new Intl.NumberFormat(ADMIN_LOCALE, { style: 'currency', currency }).format(n / 100);
   } catch {
     return `${(n / 100).toFixed(2)} ${currency}`;
   }
@@ -112,13 +113,13 @@ export function MerchantStatsTable(): React.JSX.Element {
                 </Link>
               </td>
               <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
-                {r.orderCount.toLocaleString('en-US')}
+                {r.orderCount.toLocaleString(ADMIN_LOCALE)}
               </td>
               <td
                 className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300"
                 title="Distinct users who earned cashback from this merchant in the window"
               >
-                {r.uniqueUserCount.toLocaleString('en-US')}
+                {r.uniqueUserCount.toLocaleString(ADMIN_LOCALE)}
               </td>
               <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
                 {fmtMinor(r.faceValueMinor, r.currency)}

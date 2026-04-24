@@ -3,6 +3,7 @@ import { ApiException, pctBigint } from '@loop/shared';
 import { getAdminMerchantFlywheelStats } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
  * Admin `/admin/merchants/:merchantId` — recycled-vs-total flywheel
@@ -73,8 +74,8 @@ export function MerchantFlywheelChip({
         className="text-xs text-gray-500 dark:text-gray-400"
         aria-label="Flywheel: no recycled orders yet"
       >
-        No recycled orders yet — {stats.totalFulfilledCount.toLocaleString('en-US')} fulfilled in
-        the last 31 days, none paid with LOOP asset.
+        No recycled orders yet — {stats.totalFulfilledCount.toLocaleString(ADMIN_LOCALE)} fulfilled
+        in the last 31 days, none paid with LOOP asset.
       </p>
     );
   }
@@ -94,10 +95,10 @@ export function MerchantFlywheelChip({
       aria-label="Flywheel stats"
     >
       <span className="font-semibold text-green-900 dark:text-green-200">
-        {stats.recycledOrderCount.toLocaleString('en-US')} recycled
+        {stats.recycledOrderCount.toLocaleString(ADMIN_LOCALE)} recycled
       </span>
       <span className="text-xs text-green-800 dark:text-green-300">
-        / {stats.totalFulfilledCount.toLocaleString('en-US')} fulfilled · {pctOrders} by count
+        / {stats.totalFulfilledCount.toLocaleString(ADMIN_LOCALE)} fulfilled · {pctOrders} by count
       </span>
       {pctCharge !== null ? (
         <>

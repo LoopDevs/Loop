@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { getSupplierSpend, type SupplierSpendRow } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 const HOME_CURRENCIES: ReadonlySet<string> = new Set(['USD', 'GBP', 'EUR']);
 
@@ -17,7 +18,7 @@ export function fmtMinor(minor: string, currency: string): string {
   try {
     const major = Number(BigInt(minor)) / 100;
     if (!Number.isFinite(major)) return '—';
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(major);
+    return new Intl.NumberFormat(ADMIN_LOCALE, { style: 'currency', currency }).format(major);
   } catch {
     return '—';
   }
@@ -100,7 +101,7 @@ export function SupplierSpendCard(): React.JSX.Element {
                 )}
               </td>
               <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
-                {row.count.toLocaleString('en-US')}
+                {row.count.toLocaleString(ADMIN_LOCALE)}
               </td>
               <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
                 {fmtMinor(row.faceValueMinor, row.currency)}

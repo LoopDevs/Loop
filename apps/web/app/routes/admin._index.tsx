@@ -24,6 +24,7 @@ import { AssetDriftWatcherCard } from '~/components/features/admin/AssetDriftWat
 import { SettlementLagCard } from '~/components/features/admin/SettlementLagCard';
 import { CashbackRealizationCard } from '~/components/features/admin/CashbackRealizationCard';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin — Loop' }];
@@ -40,7 +41,9 @@ function fmtMinor(minor: string, fiat: string): string {
   const n = Number(minor);
   if (!Number.isFinite(n)) return '—';
   try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: fiat }).format(n / 100);
+    return new Intl.NumberFormat(ADMIN_LOCALE, { style: 'currency', currency: fiat }).format(
+      n / 100,
+    );
   } catch {
     return `${(n / 100).toFixed(2)} ${fiat}`;
   }

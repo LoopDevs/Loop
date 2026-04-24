@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getPayoutsActivity, type PayoutsActivityDay } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Sparkline } from './Sparkline';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 const WINDOW_DAYS = 30;
 
@@ -56,7 +57,7 @@ export function PayoutsSparkline(): React.JSX.Element {
   return (
     <Sparkline
       title={`Payouts activity (${WINDOW_DAYS}d)`}
-      subtitle={`${totalCount.toLocaleString('en-US')} confirmed`}
+      subtitle={`${totalCount.toLocaleString(ADMIN_LOCALE)} confirmed`}
       ariaLabel={`Confirmed on-chain payouts over the last ${WINDOW_DAYS} days, ${totalCount} transactions total`}
       isPending={query.isPending}
       isError={query.isError}

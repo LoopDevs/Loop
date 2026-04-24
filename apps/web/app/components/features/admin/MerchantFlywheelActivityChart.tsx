@@ -6,6 +6,7 @@ import {
 } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Sparkline } from './Sparkline';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 const WINDOW_DAYS = 30;
 
@@ -70,7 +71,7 @@ export function MerchantFlywheelActivityChart({
   const subtitle =
     totalOrders === 0
       ? `${WINDOW_DAYS}d`
-      : `${totalRecycled.toLocaleString('en-US')} / ${totalOrders.toLocaleString('en-US')} recycled · ${sharePct.toFixed(1)}%`;
+      : `${totalRecycled.toLocaleString(ADMIN_LOCALE)} / ${totalOrders.toLocaleString(ADMIN_LOCALE)} recycled · ${sharePct.toFixed(1)}%`;
 
   return (
     <Sparkline

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getCashbackActivity, type CashbackActivityDay } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Sparkline } from './Sparkline';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 const WINDOW_DAYS = 30;
 
@@ -48,7 +49,7 @@ export function CashbackSparkline(): React.JSX.Element {
   return (
     <Sparkline
       title={`Cashback activity (${WINDOW_DAYS}d)`}
-      subtitle={`${totalCount.toLocaleString('en-US')} credits`}
+      subtitle={`${totalCount.toLocaleString(ADMIN_LOCALE)} credits`}
       ariaLabel={`Cashback accrual over the last ${WINDOW_DAYS} days, ${totalCount} credit-transactions total`}
       isPending={query.isPending}
       isError={query.isError}

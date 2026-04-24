@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { getOperatorStats, type OperatorStatsRow } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 const WINDOW_HOURS = 24;
 
@@ -99,10 +100,10 @@ export function OperatorStatsCard(): React.JSX.Element {
                 </Link>
               </td>
               <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
-                {row.orderCount.toLocaleString('en-US')}
+                {row.orderCount.toLocaleString(ADMIN_LOCALE)}
               </td>
               <td className="px-3 py-2 tabular-nums text-green-700 dark:text-green-400">
-                {row.fulfilledCount.toLocaleString('en-US')}
+                {row.fulfilledCount.toLocaleString(ADMIN_LOCALE)}
               </td>
               <td
                 className={`px-3 py-2 tabular-nums ${
@@ -117,10 +118,10 @@ export function OperatorStatsCard(): React.JSX.Element {
                     className="hover:underline"
                     aria-label={`Review ${row.failedCount} failed orders on ${row.operatorId}`}
                   >
-                    {row.failedCount.toLocaleString('en-US')}
+                    {row.failedCount.toLocaleString(ADMIN_LOCALE)}
                   </Link>
                 ) : (
-                  row.failedCount.toLocaleString('en-US')
+                  row.failedCount.toLocaleString(ADMIN_LOCALE)
                 )}
               </td>
               <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">

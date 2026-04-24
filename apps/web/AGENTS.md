@@ -36,6 +36,8 @@ app/
 
 **Query-key taxonomy:** flat hyphenated strings — `['admin-treasury']`, `['admin-user-credits', userId]`, `['merchants']`, `['me', 'credits']` (me-surface only uses a 2-element array because the first element is a scope selector, not a module name). Never add a hierarchical admin key like `['admin', 'treasury']` — it overlaps cosmetically with me-surface keys and defeats the flat convention. For the rare case where a mutation invalidates a broad admin surface, `utils/admin-cache.ts::invalidateAllAdminQueries(queryClient)` sweeps every `admin-*` key via predicate.
 
+**Locale policy (A2-1521):** admin surfaces import `ADMIN_LOCALE` from `utils/locale.ts` (pinned `en-US`) so every operator sees identical number / date formatting regardless of their browser locale — operator screenshots in support tickets must be comparable. User-facing surfaces pass `USER_LOCALE` (currently `undefined`, so `Intl` picks up the browser locale) so dates and thousands separators feel native. Never hardcode `'en-US'` in a component — the two constants are the single point of change when the policy evolves.
+
 **API calls:** Always through `services/api-client.ts`. Authenticated calls use `authenticatedRequest()` which handles token injection and silent refresh on 401.
 
 **Auth flow:** `useAuth()` hook → `services/auth.ts` → backend proxy → upstream CTX. Tokens stored: access token in Zustand (memory only), refresh token via `@aparajita/capacitor-secure-storage` (Keychain on iOS / EncryptedSharedPreferences on Android — audit A-024, ADR-006) on native, or `sessionStorage` on web. The secure-storage wrapper also one-shot-migrates any legacy `@capacitor/preferences` value on first read so upgrades don't log every user out.

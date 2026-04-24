@@ -19,6 +19,7 @@ import { UserOrdersTable } from '~/components/features/admin/UserOrdersTable';
 import { UserRailMixCard } from '~/components/features/admin/UserRailMixCard';
 import { UserPayoutsTable } from '~/components/features/admin/UserPayoutsTable';
 import { Spinner } from '~/components/ui/Spinner';
+import { ADMIN_LOCALE } from '~/utils/locale';
 
 const HOME_CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
 type HomeCurrency = (typeof HOME_CURRENCIES)[number];
@@ -41,7 +42,7 @@ function fmtMinor(balanceMinor: string, currency: string): string {
   const n = Number(balanceMinor);
   if (!Number.isFinite(n)) return '—';
   try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(n / 100);
+    return new Intl.NumberFormat(ADMIN_LOCALE, { style: 'currency', currency }).format(n / 100);
   } catch {
     // Unknown ISO currency code → fall back to a plain decimal + code suffix.
     return `${(n / 100).toFixed(2)} ${currency}`;
@@ -171,7 +172,7 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
             <div>
               <dt className="text-gray-500 dark:text-gray-400">Signed up</dt>
               <dd className="text-gray-900 dark:text-white">
-                {new Date(userQuery.data.createdAt).toLocaleString('en-US', {
+                {new Date(userQuery.data.createdAt).toLocaleString(ADMIN_LOCALE, {
                   dateStyle: 'medium',
                   timeStyle: 'short',
                 })}
@@ -226,7 +227,7 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
                     {fmtMinor(c.balanceMinor, c.currency)}
                   </td>
                   <td className="px-6 py-3 whitespace-nowrap text-gray-600 dark:text-gray-400">
-                    {new Date(c.updatedAt).toLocaleString('en-US', {
+                    {new Date(c.updatedAt).toLocaleString(ADMIN_LOCALE, {
                       dateStyle: 'short',
                       timeStyle: 'short',
                     })}
