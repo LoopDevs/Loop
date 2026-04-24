@@ -1,0 +1,54 @@
+name: Feature request
+description: Suggest a new capability or improvement.
+title: 'feat: '
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests are most useful with a concrete use-case and
+        a sense of the audience. If you're proposing something that
+        needs an ADR (new dependency, new service, data-model change),
+        please call that out — a linked ADR draft is welcome.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: The user or operator pain, not the solution.
+      placeholder: "Ops can't see per-operator CTX-side spend trends without pulling CSVs and pivoting in a spreadsheet."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Shape of the feature. Bullet points / screenshots / API sketch are all fine.
+      placeholder: |
+        - Add `/admin/operators/:id/supplier-spend?days=30` chart view.
+        - Chart by day, stacked by merchant.
+        - CSV export at the same path with `.csv` suffix.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What else did you think about, and why not?
+      placeholder: 'Could build on the existing `/admin/operators/:id/activity` endpoint, but that is order-count not spend-amount.'
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope hint
+      description: Optional — helps us triage.
+      options:
+        - Admin panel / treasury
+        - Cashback / ledger
+        - Stellar / on-chain
+        - CTX operator flow
+        - Mobile / web UX
+        - Infra / security / docs
+        - Other

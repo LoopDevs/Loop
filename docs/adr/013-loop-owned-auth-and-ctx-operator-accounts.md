@@ -1,7 +1,8 @@
 # ADR 013: Loop-owned auth and CTX operator-account pool
 
-Status: Proposed
+Status: Accepted
 Date: 2026-04-21
+Implemented: 2026-04-21 onwards (HS256 JWT minting in auth/tokens.ts, OTP generation in auth/otps.ts, native-handler dispatch in auth/native.ts, refresh-token rotation + reuse-detection in auth/refresh-tokens.ts, CTX operator pool in ctx/operator-pool.ts — all gated on `LOOP_AUTH_NATIVE_ENABLED`)
 Related: ADR 009 (credits ledger), ADR 010 (principal switch), ADR 011 (admin panel), ADR 012 (Drizzle + Fly Postgres)
 
 ## Context

@@ -599,9 +599,19 @@ export const pendingPayouts = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
-    orderId: uuid('order_id')
-      .notNull()
-      .references(() => orders.id, { onDelete: 'restrict' }),
+    // A2-901 / ADR-024 §2: nullable for withdrawal-initiated payouts.
+    // Order-fulfilment (`kind='order_cashback'`) rows keep populating
+    // this; withdrawal (`kind='withdrawal'`) rows leave it NULL. The
+    // shape CHECK below pins the per-kind invariant.
+    orderId: uuid('order_id').references(() => orders.id, { onDelete: 'restrict' }),
+    // A2-901 / ADR-024 §2: discriminator for the two payout flows
+    // this table now serves. Default 'order_cashback' preserves the
+    // backfill semantics for existing rows — everything written
+    // before migration 0018 was an order-fulfilment cashback payout.
+    // `.$type` narrows the TypeScript side to the same literal set
+    // the SQL CHECK enforces; callers get a compile-time error if
+    // they try a third value.
+    kind: text('kind').notNull().default('order_cashback').$type<'order_cashback' | 'withdrawal'>(),
     // The LOOP asset + issuer pinned at write-time. If an operator
     // changes the issuer env var later, in-flight rows still reference
     // the issuer at the time the intent was built — otherwise a rotate
@@ -641,6 +651,15 @@ export const pendingPayouts = pgTable(
     ),
     check('pending_payouts_amount_positive', sql`${t.amountStroops} > 0`),
     check('pending_payouts_attempts_non_negative', sql`${t.attempts} >= 0`),
+    // A2-901 / ADR-024 §2: discriminator + per-kind shape invariants.
+    check('pending_payouts_kind_known', sql`${t.kind} IN ('order_cashback', 'withdrawal')`),
+    check(
+      'pending_payouts_kind_shape',
+      sql`
+        (${t.kind} = 'order_cashback' AND ${t.orderId} IS NOT NULL)
+        OR (${t.kind} = 'withdrawal' AND ${t.orderId} IS NULL)
+      `,
+    ),
   ],
 );
 
