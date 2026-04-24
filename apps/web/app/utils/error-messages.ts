@@ -40,7 +40,6 @@ const CODE_MESSAGES: Record<string, string | null> = {
 
   // Generic client-surfaced codes.
   RATE_LIMITED: 'Too many attempts. Please wait a moment.',
-  UNAUTHORIZED: 'Sign-in required. Please log in and try again.',
   SERVICE_UNAVAILABLE: 'Service temporarily unavailable. Please try again shortly.',
   UPSTREAM_UNAVAILABLE: 'Our provider is temporarily unavailable. Please try again shortly.',
   UPSTREAM_ERROR: 'Our provider is having trouble. Please try again.',
@@ -57,6 +56,15 @@ const CODE_MESSAGES: Record<string, string | null> = {
   IDEMPOTENCY_KEY_REQUIRED: null,
   NOT_FOUND: null,
   INTERNAL_ERROR: null,
+
+  // NOTE: UNAUTHORIZED is deliberately absent from this map.
+  // It's context-sensitive — OTP verify surfaces want "Invalid code",
+  // session-expired surfaces want "Sign in again". The specific
+  // auth-surface wrapper (`hooks/use-auth.ts::authErrorMessage`)
+  // owns the OTP case; every other caller's fallback string ends up
+  // being the right copy. Adding UNAUTHORIZED here would swallow
+  // those call-site-specific strings (e.g. breaking the
+  // purchase-flow "Invalid code" e2e assertion).
 };
 
 /**
