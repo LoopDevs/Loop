@@ -294,7 +294,6 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
         notifyFirstCashbackRecycled({
           orderId: order.id,
           userId: user.id,
-          userEmail: user.email,
           merchantName: merchant.name,
           amount: Number(order.faceValueMinor) / 100,
           currency: order.currency,

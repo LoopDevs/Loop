@@ -32,6 +32,7 @@ import {
   notifyCashbackRecycled,
   notifyFirstCashbackRecycled,
   notifyCashbackCredited,
+  notifyPayoutFailed,
 } from '../discord.js';
 
 const mockFetch = vi.fn();
@@ -172,11 +173,10 @@ describe('notifyCashbackRecycled', () => {
 });
 
 describe('notifyFirstCashbackRecycled', () => {
-  it('posts the milestone embed with user email + order + asset', async () => {
+  it('posts the milestone embed with tail-8 ids (A2-1313)', async () => {
     notifyFirstCashbackRecycled({
-      orderId: 'o-555',
-      userId: 'u-123',
-      userEmail: 'alice@example.com',
+      orderId: 'o-55555555',
+      userId: 'u-12345678',
       merchantName: 'Starbucks',
       amount: 15,
       currency: 'GBP',
@@ -192,12 +192,17 @@ describe('notifyFirstCashbackRecycled', () => {
     };
     expect(embed.title).toBe('🎉 First Cashback Recycled');
     expect(embed.description).toMatch(/graduated/i);
-    expect(embed.fields.find((f) => f.name === 'User')?.value).toBe('alice@example.com');
+    // A2-1313: tail-8 only; no full uuid, no email anywhere in the
+    // serialised embed.
+    expect(embed.fields.find((f) => f.name === 'User')?.value).toBe('`12345678`');
     expect(embed.fields.find((f) => f.name === 'Merchant')?.value).toBe('Starbucks');
     expect(embed.fields.find((f) => f.name === 'Amount')?.value).toBe('£15.00 GBP');
     expect(embed.fields.find((f) => f.name === 'Asset')?.value).toBe('GBPLOOP');
-    expect(embed.fields.find((f) => f.name === 'User ID')?.value).toBe('`u-123`');
-    expect(embed.fields.find((f) => f.name === 'Order ID')?.value).toBe('`o-555`');
+    expect(embed.fields.find((f) => f.name === 'Order')?.value).toBe('`55555555`');
+    const serialised = JSON.stringify(body);
+    expect(serialised).not.toContain('u-12345678');
+    expect(serialised).not.toContain('o-55555555');
+    expect(serialised).not.toMatch(/@/);
   });
 
   it('skips silently when the orders webhook is not configured', async () => {
@@ -205,7 +210,6 @@ describe('notifyFirstCashbackRecycled', () => {
     notifyFirstCashbackRecycled({
       orderId: 'o-1',
       userId: 'u-1',
-      userEmail: 'a@b.com',
       merchantName: 'Acme',
       amount: 10,
       currency: 'USD',
@@ -352,5 +356,53 @@ describe('sendWebhook error handling', () => {
     mockFetch.mockRejectedValueOnce(new Error('boom'));
     // This must not throw — callers are sync `void sendWebhook(...)`.
     expect(() => notifyOrderCreated('o1', 'm', 1, 'USD', '1')).not.toThrow();
+  });
+});
+
+describe('notifyPayoutFailed', () => {
+  it('emits the failure embed with tail-8 ids (A2-1314)', async () => {
+    notifyPayoutFailed({
+      payoutId: 'p-aabbccdd11223344',
+      userId: 'u-abcdef0123456789',
+      orderId: 'o-1122334455667788',
+      assetCode: 'USDLOOP',
+      amount: '10.0000000',
+      kind: 'terminal_no_trust',
+      reason: 'op_no_trust',
+      attempts: 3,
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const body = lastBody();
+    const embed = body.embeds[0] as {
+      title: string;
+      fields: Array<{ name: string; value: string }>;
+    };
+    expect(embed.title).toBe('🔴 Stellar Payout Failed');
+    expect(embed.fields.find((f) => f.name === 'User')?.value).toBe('`23456789`');
+    expect(embed.fields.find((f) => f.name === 'Order')?.value).toBe('`55667788`');
+    expect(embed.fields.find((f) => f.name === 'Payout')?.value).toBe('`11223344`');
+    const serialised = JSON.stringify(body);
+    expect(serialised).not.toContain('u-abcdef0123456789');
+    expect(serialised).not.toContain('o-1122334455667788');
+    expect(serialised).not.toContain('p-aabbccdd11223344');
+  });
+
+  it('renders "_withdrawal_" for withdrawal payouts (no order id)', async () => {
+    notifyPayoutFailed({
+      payoutId: 'p-a1b2c3d4e5f60000',
+      userId: 'u-ffffeeeeddddcccc',
+      orderId: null,
+      assetCode: 'USDLOOP',
+      amount: '5.0000000',
+      kind: 'transient_horizon',
+      reason: 'blip',
+      attempts: 5,
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    const embed = lastBody().embeds[0] as {
+      fields: Array<{ name: string; value: string }>;
+    };
+    expect(embed.fields.find((f) => f.name === 'Order')?.value).toBe('_withdrawal_');
   });
 });
