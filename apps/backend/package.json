@@ -19,7 +19,7 @@
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "8.5.0",
     "@bufbuild/protobuf": "2.11.0",
-    "@hono/node-server": "1.19.14",
+    "@hono/node-server": "2.0.0",
     "@loop/shared": "*",
     "@sentry/hono": "10.49.0",
     "@stellar/stellar-sdk": "15.0.1",
