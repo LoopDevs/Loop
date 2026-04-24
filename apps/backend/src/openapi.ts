@@ -1969,6 +1969,10 @@ registry.registerPath({
       description: 'Merchant page',
       content: { 'application/json': { schema: MerchantListResponse } },
     },
+    429: {
+      description: 'Rate limit exceeded (180/min per IP) — A2-650',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
   },
 });
 
@@ -1982,6 +1986,10 @@ registry.registerPath({
     200: {
       description: 'Complete merchant catalog',
       content: { 'application/json': { schema: MerchantAllResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP) — A2-650',
+      content: { 'application/json': { schema: ErrorResponse } },
     },
   },
 });
@@ -1998,6 +2006,10 @@ registry.registerPath({
       content: { 'application/json': { schema: MerchantDetailResponse } },
     },
     404: { description: 'Not found', content: { 'application/json': { schema: ErrorResponse } } },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP) — A2-650',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
   },
 });
 
