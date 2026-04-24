@@ -31,24 +31,9 @@ import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-cashback-realization' });
 
-export interface CashbackRealizationRow {
-  /** ISO 4217 code; `null` for the fleet-wide aggregate row. */
-  currency: string | null;
-  /** Lifetime cashback earned. BigInt as string, minor units. */
-  earnedMinor: string;
-  /** Lifetime cashback spent on new Loop orders. BigInt as string, minor units. */
-  spentMinor: string;
-  /** Lifetime cashback withdrawn off-ledger. BigInt as string, minor units. */
-  withdrawnMinor: string;
-  /** Current outstanding liability (sum of user_credits.balance_minor). */
-  outstandingMinor: string;
-  /** 10000x recycledPct to preserve two decimals as integer bps. spent / earned. */
-  recycledBps: number;
-}
-
-export interface CashbackRealizationResponse {
-  rows: CashbackRealizationRow[];
-}
+// A2-1506: moved to `@loop/shared/admin-cashback-realization.ts`.
+import type { CashbackRealizationResponse, CashbackRealizationRow } from '@loop/shared';
+export type { CashbackRealizationResponse, CashbackRealizationRow };
 
 interface LedgerAgg extends Record<string, unknown> {
   currency: string | null;

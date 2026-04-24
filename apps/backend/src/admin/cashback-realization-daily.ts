@@ -28,18 +28,16 @@ import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-cashback-realization-daily' });
 
-export interface RealizationDay {
-  day: string;
-  currency: string;
-  earnedMinor: string;
-  spentMinor: string;
-  recycledBps: number;
-}
-
-export interface RealizationDailyResponse {
-  days: number;
-  rows: RealizationDay[];
-}
+// A2-1506: realigned to the canonical wire names used in openapi.ts
+// + web consumer. The local `RealizationDay` / `RealizationDailyResponse`
+// were inconsistent with the registered openapi schema names (which
+// the web side mirrored) — that divergence broke the one-name-per-
+// wire-shape contract A2-1506 enforces.
+import type {
+  CashbackRealizationDailyResponse as RealizationDailyResponse,
+  CashbackRealizationDay as RealizationDay,
+} from '@loop/shared';
+export type { CashbackRealizationDailyResponse, CashbackRealizationDay } from '@loop/shared';
 
 const DEFAULT_DAYS = 30;
 const MAX_DAYS = 180;
