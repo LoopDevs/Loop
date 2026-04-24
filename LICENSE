@@ -1,0 +1,36 @@
+Copyright (c) 2026 LoopDevs.
+
+All rights reserved.
+
+This source code is made public for transparency, security review, and
+community feedback while Loop is pre-launch. It is NOT open-source: no
+permission is granted to copy, modify, distribute, or use the software,
+in source or compiled form, for any commercial or production purpose
+without prior written authorisation from LoopDevs.
+
+Permitted uses WITHOUT prior authorisation, for non-commercial
+research, security review, and reading:
+
+  - Clone, read, and run the code locally.
+  - File bug reports or security disclosures (see SECURITY.md).
+  - Submit pull requests; by submitting a contribution you grant
+    LoopDevs a perpetual, irrevocable, worldwide, royalty-free
+    licence to use, modify, and sublicense that contribution under
+    any terms LoopDevs chooses for the Loop product.
+
+Prohibited without prior written authorisation from LoopDevs:
+
+  - Running a competing service built on this code.
+  - Redistributing source or compiled artefacts to third parties.
+  - Using the Loop name, logos, or branding in any derivative work.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
+NON-INFRINGEMENT. IN NO EVENT SHALL LOOPDEVS OR ITS CONTRIBUTORS BE
+LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+This licence may be replaced at a future launch date with an
+open-source licence (e.g. AGPL-3.0 or Business Source Licence); any
+such change will be announced in the repository's README.
