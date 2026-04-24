@@ -711,7 +711,14 @@ app.get(
 // content (description / longDescription / terms / instructions).
 // Unauthed callers still see the basic cached merchant via by-slug.
 app.use('/api/merchants/:id', requireAuth);
-app.get('/api/merchants/:id', merchantDetailHandler);
+// A2-1008: the single authed merchant-detail route was the only authed
+// GET with no rate limit. The handler fires a CTX upstream fetch on
+// every call — a runaway client (or a compromised bearer driving the
+// endpoint in a loop) would pin an upstream circuit + burn CTX quota
+// without any local backpressure. 120/min per IP matches the other
+// merchant reads and is well above a logged-in user's realistic
+// browse rate.
+app.get('/api/merchants/:id', rateLimit(120, 60_000), merchantDetailHandler);
 
 // Public, unauthenticated, marketing-facing cashback totals. 60/min
 // per IP is generous for a landing-page widget that renders once

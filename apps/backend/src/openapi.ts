@@ -1876,13 +1876,22 @@ registry.registerPath({
   path: '/api/merchants/{id}',
   summary: 'Fetch a merchant by id.',
   tags: ['Merchants'],
+  security: [{ bearerAuth: [] }],
   request: { params: z.object({ id: z.string() }) },
   responses: {
     200: {
       description: 'Merchant',
       content: { 'application/json': { schema: MerchantDetailResponse } },
     },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
     404: { description: 'Not found', content: { 'application/json': { schema: ErrorResponse } } },
+    429: {
+      description: 'Rate limit exceeded (120/min per IP) — A2-1008',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
   },
 });
 
