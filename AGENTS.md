@@ -12,6 +12,7 @@
 | `docs/testing.md`                                           | Testing pyramid, when tests run, coverage requirements            |
 | `docs/standards.md`                                         | Code style, commit format, branching, review rules                |
 | `docs/error-codes.md`                                       | Error-code taxonomy — every `{ code, message }` + client guidance |
+| `docs/third-party-licenses.md`                              | OSS attribution — libvips, Leaflet markers, postgres driver       |
 | `docs/roadmap.md`                                           | What's left for Phase 1, Phase 2, Phase 3                         |
 | `docs/codebase-audit.md`                                    | Audit program, scope, evidence model, exit criteria               |
 | `docs/audit-checklist.md`                                   | Detailed audit checklist by workstream                            |
