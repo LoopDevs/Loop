@@ -218,16 +218,6 @@ openapi_exceptions=(
   # Infra / debug — intentionally outside the public contract.
   '/__test__/reset'
   '/openapi.json'
-  # Known in-flight gaps, each tracked to an open PR that registers
-  # the route. Remove from this list in the same PR that lands the
-  # registration so CI goes hard-fail on any NEW drift immediately.
-  '/api/admin/cashback-monthly'    # PR #831 (A2-506)
-  '/api/admin/merchant-stats.csv'  # PR #831 (A2-506)
-  '/api/admin/orders'              # PR #831 (A2-506)
-  '/api/auth/social/apple'         # PR #837 (A2-568)
-  '/api/auth/social/google'        # PR #837 (A2-568)
-  '/api/orders/loop'               # PR #840 (A2-662)
-  '/api/orders/loop/{id}'          # PR #840 (A2-662)
 )
 app_routes_tmp=$(mktemp)
 openapi_paths_tmp=$(mktemp)
