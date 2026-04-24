@@ -83,6 +83,12 @@ export interface IdTokenClaims {
   aud: string;
   exp: number;
   iat: number;
+  /**
+   * A2-569: "not before" claim (RFC 7519). Optional — providers
+   * rarely set it, but when present the token isn't valid before
+   * this time. Checked with the same leeway as exp / iat.
+   */
+  nbf?: number;
   email?: string;
   email_verified?: boolean;
   /** Apple-specific — whether the email is a private relay. */
@@ -104,6 +110,20 @@ export interface VerifyIdTokenArgs {
   expectedAudiences: string[];
   /** Override `Date.now()` for tests; seconds since epoch. */
   now?: number;
+  /**
+   * A2-569: clock-skew tolerance in seconds applied to every time-
+   * bound check (`nbf`, `iat`, `exp`, lifetime). 60s matches typical
+   * NTP drift + provider-clock variance; used by Google and Apple
+   * verifier reference code. Tests can pass 0 for exact-boundary
+   * assertions.
+   */
+  leewaySeconds?: number;
+  /**
+   * A2-569: upper bound on `exp - iat` (in seconds). A provider-
+   * issued id_token lives ~1 hour in practice; a claim asserting
+   * `exp - iat` > this cap is a forgery signal. Default 3600s (1h).
+   */
+  maxLifetimeSeconds?: number;
 }
 
 export type VerifyIdTokenError =
@@ -114,6 +134,10 @@ export type VerifyIdTokenError =
   | 'wrong_issuer'
   | 'wrong_audience'
   | 'expired'
+  // A2-569 — time-bound extensions:
+  | 'not_yet_valid' // nbf > now + leeway
+  | 'iat_future' // iat > now + leeway
+  | 'lifetime_exceeded' // exp - iat > maxLifetimeSeconds
   | 'schema';
 
 export type VerifyIdTokenResult =
@@ -230,8 +254,34 @@ function verifyWithKey(
     return { ok: false, reason: 'wrong_audience' };
   }
   const now = args.now ?? Math.floor(Date.now() / 1000);
-  if (obj['exp'] < now) {
+  const leeway = args.leewaySeconds ?? 60;
+  const maxLifetime = args.maxLifetimeSeconds ?? 3600;
+  const exp = obj['exp'];
+  const iat = obj['iat'];
+
+  // A2-569: tighter time-bound checks than the prior "exp < now" alone.
+  // Every boundary tolerates `leeway` seconds of clock skew in the
+  // safe direction (past for exp, future for nbf/iat).
+  if (exp + leeway < now) {
     return { ok: false, reason: 'expired' };
+  }
+  if (iat > now + leeway) {
+    // Future-dated issuance — either a severely-skewed provider
+    // clock or a forgery. Reject; a legit client re-attempt after
+    // clock sync will pass.
+    return { ok: false, reason: 'iat_future' };
+  }
+  if (exp - iat > maxLifetime) {
+    // id_token carrying a lifetime longer than providers ever issue
+    // — Google caps at 1h, Apple at ~1h. A longer window is a
+    // forgery signal (attacker-controlled signer pretending to be
+    // the provider but setting their own expiry).
+    return { ok: false, reason: 'lifetime_exceeded' };
+  }
+  // `nbf` is optional per RFC 7519; only enforce when present.
+  const nbf = obj['nbf'];
+  if (typeof nbf === 'number' && nbf > now + leeway) {
+    return { ok: false, reason: 'not_yet_valid' };
   }
 
   return {

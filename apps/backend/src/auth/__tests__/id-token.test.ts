@@ -118,6 +118,11 @@ describe('verifyIdToken', () => {
       jwksUrl: JWKS_URL,
       expectedIssuers: [ISS],
       expectedAudiences: [AUD],
+      // A2-569: fixture uses a wide synthetic iat→exp span (2023→2033)
+      // to avoid time-coupling this happy-path test. The lifetime cap
+      // would reject the token in production but isn't the invariant
+      // under test here. Explicit disable for fixture compatibility.
+      maxLifetimeSeconds: Number.MAX_SAFE_INTEGER,
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -221,6 +226,7 @@ describe('verifyIdToken', () => {
       jwksUrl: JWKS_URL,
       expectedIssuers: ['https://accounts.google.com', 'accounts.google.com'],
       expectedAudiences: [AUD],
+      maxLifetimeSeconds: Number.MAX_SAFE_INTEGER, // A2-569 fixture compat
     });
     expect(r.ok).toBe(true);
   });
@@ -268,6 +274,7 @@ describe('verifyIdToken', () => {
       jwksUrl: JWKS_URL,
       expectedIssuers: [ISS],
       expectedAudiences: ['web-client', 'ios-client', 'android-client'],
+      maxLifetimeSeconds: Number.MAX_SAFE_INTEGER, // A2-569 fixture compat
     });
     expect(r.ok).toBe(true);
   });
@@ -318,6 +325,7 @@ describe('verifyIdToken', () => {
       jwksUrl: JWKS_URL,
       expectedIssuers: [ISS],
       expectedAudiences: [AUD],
+      maxLifetimeSeconds: Number.MAX_SAFE_INTEGER, // A2-569 fixture compat
     });
     expect(r.ok).toBe(true);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
@@ -346,6 +354,127 @@ describe('verifyIdToken', () => {
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe('unknown_kid');
+  });
+});
+
+describe('A2-569 time-bound extensions', () => {
+  const ISS_A = 'https://accounts.google.com';
+  const AUD_A = 'web-client.apps.googleusercontent.com';
+
+  it('rejects a token with exp-iat exceeding the lifetime cap', async () => {
+    const kp = makeKeypair('k-1');
+    fetchSpy = stubJwks([kp.jwk]);
+    const now = 1_700_000_000;
+    const token = signJwt({
+      privateKey: kp.privateKey,
+      header: { alg: 'RS256', kid: 'k-1', typ: 'JWT' },
+      // lifetime = 2 hours, cap default is 1 hour
+      payload: { iss: ISS_A, aud: AUD_A, sub: 's', iat: now - 3600, exp: now + 3600 },
+    });
+    const r = await verifyIdToken({
+      token,
+      jwksUrl: JWKS_URL,
+      expectedIssuers: [ISS_A],
+      expectedAudiences: [AUD_A],
+      now,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('lifetime_exceeded');
+  });
+
+  it('rejects a token whose iat is in the future beyond leeway', async () => {
+    const kp = makeKeypair('k-1');
+    fetchSpy = stubJwks([kp.jwk]);
+    const now = 1_700_000_000;
+    const token = signJwt({
+      privateKey: kp.privateKey,
+      header: { alg: 'RS256', kid: 'k-1', typ: 'JWT' },
+      // iat 5 min in the future — beyond the 60s leeway
+      payload: { iss: ISS_A, aud: AUD_A, sub: 's', iat: now + 300, exp: now + 900 },
+    });
+    const r = await verifyIdToken({
+      token,
+      jwksUrl: JWKS_URL,
+      expectedIssuers: [ISS_A],
+      expectedAudiences: [AUD_A],
+      now,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('iat_future');
+  });
+
+  it('rejects when nbf is set and in the future beyond leeway', async () => {
+    const kp = makeKeypair('k-1');
+    fetchSpy = stubJwks([kp.jwk]);
+    const now = 1_700_000_000;
+    const token = signJwt({
+      privateKey: kp.privateKey,
+      header: { alg: 'RS256', kid: 'k-1', typ: 'JWT' },
+      payload: {
+        iss: ISS_A,
+        aud: AUD_A,
+        sub: 's',
+        iat: now - 10,
+        exp: now + 900,
+        nbf: now + 300,
+      },
+    });
+    const r = await verifyIdToken({
+      token,
+      jwksUrl: JWKS_URL,
+      expectedIssuers: [ISS_A],
+      expectedAudiences: [AUD_A],
+      now,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('not_yet_valid');
+  });
+
+  it('accepts an nbf that is slightly in the future but within leeway', async () => {
+    const kp = makeKeypair('k-1');
+    fetchSpy = stubJwks([kp.jwk]);
+    const now = 1_700_000_000;
+    const token = signJwt({
+      privateKey: kp.privateKey,
+      header: { alg: 'RS256', kid: 'k-1', typ: 'JWT' },
+      payload: {
+        iss: ISS_A,
+        aud: AUD_A,
+        sub: 's',
+        iat: now - 10,
+        exp: now + 900,
+        // 30s future — inside 60s default leeway, so accepted (clock skew)
+        nbf: now + 30,
+      },
+    });
+    const r = await verifyIdToken({
+      token,
+      jwksUrl: JWKS_URL,
+      expectedIssuers: [ISS_A],
+      expectedAudiences: [AUD_A],
+      now,
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('accepts an expired token within the leeway window', async () => {
+    const kp = makeKeypair('k-1');
+    fetchSpy = stubJwks([kp.jwk]);
+    const now = 1_700_000_000;
+    // exp 30s in the past — inside the 60s leeway, should still pass
+    const token = signJwt({
+      privateKey: kp.privateKey,
+      header: { alg: 'RS256', kid: 'k-1', typ: 'JWT' },
+      payload: { iss: ISS_A, aud: AUD_A, sub: 's', iat: now - 600, exp: now - 30 },
+    });
+    const r = await verifyIdToken({
+      token,
+      jwksUrl: JWKS_URL,
+      expectedIssuers: [ISS_A],
+      expectedAudiences: [AUD_A],
+      now,
+    });
+    expect(r.ok).toBe(true);
   });
 });
 
