@@ -215,4 +215,57 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ ...base, NODE_ENV: 'development' })).not.toThrow();
     expect(() => parseEnv({ ...base, NODE_ENV: 'test' })).not.toThrow();
   });
+
+  // A2-1605: DISABLE_RATE_LIMITING is a test-harness flag; production
+  // with it set opens every rate-limited route to volumetric abuse.
+  describe('A2-1605: DISABLE_RATE_LIMITING production guard', () => {
+    it('refuses to start in production when DISABLE_RATE_LIMITING=true', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          NODE_ENV: 'production',
+          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+          DISABLE_RATE_LIMITING: 'true',
+        }),
+      ).toThrow(/DISABLE_RATE_LIMITING/);
+    });
+
+    it('refuses in production on the boolean coercions too (1 / yes / on)', () => {
+      for (const v of ['1', 'yes', 'on']) {
+        expect(() =>
+          parseEnv({
+            ...base,
+            NODE_ENV: 'production',
+            IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+            DISABLE_RATE_LIMITING: v,
+          }),
+        ).toThrow(/DISABLE_RATE_LIMITING/);
+      }
+    });
+
+    it('accepts DISABLE_RATE_LIMITING=true in development + test', () => {
+      for (const nodeEnv of ['development', 'test'] as const) {
+        const env = parseEnv({ ...base, NODE_ENV: nodeEnv, DISABLE_RATE_LIMITING: 'true' });
+        expect(env.DISABLE_RATE_LIMITING).toBe(true);
+      }
+    });
+
+    it('accepts production when DISABLE_RATE_LIMITING is unset / false', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          NODE_ENV: 'production',
+          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+        }),
+      ).not.toThrow();
+      expect(() =>
+        parseEnv({
+          ...base,
+          NODE_ENV: 'production',
+          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+          DISABLE_RATE_LIMITING: 'false',
+        }),
+      ).not.toThrow();
+    });
+  });
 });
