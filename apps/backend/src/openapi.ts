@@ -6226,6 +6226,308 @@ registry.registerPath({
   },
 });
 
+// A2-506: 8 non-CSV admin endpoints were missing from the OpenAPI
+// surface. Each handler's own TypeScript response interface is the
+// authoritative wire shape; these registrations carry the route
+// identity, auth contract, and error ladder so generated clients
+// + the admin Swagger preview see them. The response schemas use
+// `z.unknown()` for the body payload — the TS interface in the
+// handler file is the source of truth for the row shape; OpenAPI
+// callers read the doc comment for column-level detail. A follow-up
+// could mirror each interface into a zod schema, but parity with
+// TS would need a single-source-of-truth machinery we don't have
+// today.
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/orders',
+  summary: 'Paginated admin view of orders (ADR 010 / 018).',
+  description:
+    "Fleet-wide orders list for the admin drill. Supports `?state=`, `?merchantId=`, `?userId=`, `?before=<iso>`, `?limit=` (default 20, cap 100) for paging. Returns the orders alongside user/merchant context resolved server-side so the admin UI doesn't need per-row round-trips.",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      state: z.string().optional(),
+      merchantId: z.string().optional(),
+      userId: z.string().uuid().optional(),
+      before: z.string().datetime().optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Page of orders + pagination cursor',
+      content: { 'application/json': { schema: z.unknown() } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/orders/payment-method-activity',
+  summary: 'Fleet payment-method-share activity per day (ADR 015 / 018).',
+  description:
+    'Daily bucketed counts and charge totals grouped by payment method (credit, loop_asset, usdc, xlm) — powers the rail-mix activity chart on /admin/cashback. Window: `?days=N` (default 30, cap 180).',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(180).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Per-day payment-method activity',
+      content: { 'application/json': { schema: z.unknown() } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/cashback-monthly',
+  summary: 'Fleet-wide monthly cashback aggregate (ADR 009 / 015).',
+  description:
+    'Monthly sum of cashback credited across all users in the last 12 months, grouped by currency. Drives the admin dashboard headline. Self-scoped — a user-drill variant lives at `/api/users/me/cashback-monthly`.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: '12-month cashback buckets',
+      content: { 'application/json': { schema: z.unknown() } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/merchant-stats.csv',
+  summary: 'CSV export of per-merchant fleet statistics (ADR 011 / 018).',
+  description:
+    'Finance-ready CSV of per-merchant order volume, cashback paid, margin, and activity. `Cache-Control: private, no-store` + `Content-Disposition: attachment`. Row cap 10 000 with `__TRUNCATED__` sentinel.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'RFC 4180 CSV body',
+      content: {
+        'text/csv': {
+          schema: z.string().openapi({
+            description:
+              'Header row lists every merchant-stats column. bigint amounts emitted as strings.',
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error building the export',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/merchants/flywheel-share',
+  summary: 'Fleet flywheel share per merchant (ADR 015).',
+  description:
+    "Per-merchant breakdown of recycled vs non-recycled orders over a window — what share of each merchant's volume comes from LOOP-asset (cashback-recycled) payments. Window: `?days=N` (default 30, cap 180).",
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(180).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Per-merchant flywheel share',
+      content: { 'application/json': { schema: z.unknown() } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/merchants/flywheel-share.csv',
+  summary: 'CSV export of per-merchant flywheel share (ADR 015 / 018).',
+  description:
+    'Downloadable CSV companion to `/api/admin/merchants/flywheel-share` — same columns and windowing. `Cache-Control: private, no-store` + `Content-Disposition: attachment`. Row cap 10 000 with `__TRUNCATED__` sentinel.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(180).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'RFC 4180 CSV body',
+      content: {
+        'text/csv': {
+          schema: z.string().openapi({
+            description: 'Header: merchantId, merchantName, recycled_count, total_count, pct.',
+          }),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (10/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error building the export',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users/{userId}/cashback-by-merchant',
+  summary: 'User-drill: cashback earned per merchant (ADR 009).',
+  description:
+    'Per-merchant breakdown of cashback one user has earned in a window. Companion to `/api/users/me/cashback-by-merchant`; admin-scoped by userId param.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ userId: z.string().uuid() }),
+    query: z.object({
+      days: z.coerce.number().int().min(1).max(366).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Per-merchant cashback rows for the target user',
+      content: { 'application/json': { schema: z.unknown() } },
+    },
+    400: {
+      description: 'Malformed userId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users/{userId}/cashback-summary',
+  summary: 'User-drill: lifetime + this-month cashback summary (ADR 009 / 015).',
+  description:
+    'Admin-scoped mirror of `/api/users/me/cashback-summary`. Returns lifetime + month-to-date cashback for the target user, denominated in their current home currency. Used on `/admin/users/:userId` as the compact headline above the ledger drill.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ userId: z.string().uuid() }),
+  },
+  responses: {
+    200: {
+      description: 'Cashback summary for the target user',
+      content: { 'application/json': { schema: z.unknown() } },
+    },
+    400: {
+      description: 'Malformed userId',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'Target user not found',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (60/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 // ─── Spec generator ─────────────────────────────────────────────────────────
 
 // Register the bearer auth scheme on the registry so the generator emits it
