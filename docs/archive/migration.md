@@ -1,12 +1,16 @@
 # Loop — Migration Plan
 
-> **HISTORICAL** — this is the original monorepo-assembly plan. The
-> migration completed; for the current architecture see
-> [`docs/architecture.md`](architecture.md). Some details here describe
-> a target the project deliberately deviated from — most notably the
-> auth module, which proxies upstream CTX tokens rather than minting
-> local JWTs (see [AGENTS.md §auth](../AGENTS.md) and the auth handler
-> in `apps/backend/src/auth/handler.ts`).
+> **HISTORICAL (A2-1808).** This is the original monorepo-assembly
+> plan. The migration completed long ago; live architecture lives in
+> [`docs/architecture.md`](../architecture.md) and the ADR tree
+> ([`docs/adr/`](../adr/)). Several targets described below have been
+> superseded since this doc was written — most notably the auth module
+> (which now mints its own HS256 JWTs and maintains a CTX operator
+> pool per ADR-013, rather than proxying CTX tokens as originally
+> planned) and the data layer (Postgres credits ledger per ADR-009 +
+> ADR-012, which post-dates this plan entirely). Do not treat the
+> contents as current guidance. Moved from `docs/migration.md` on
+> 2026-04-24.
 
 Setting up the Loop monorepo from scratch and migrating existing codebases in as clean, standards-compliant packages.
 

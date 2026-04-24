@@ -1,5 +1,7 @@
 # UI Restoration Plan
 
+> **HISTORICAL (A2-1807).** Every item in this plan carries `Status: Done`. The doc recorded a one-off restoration sweep that completed; it is kept for git-blame continuity and is no longer the current source of truth. For the live web structure see [`apps/web/AGENTS.md`](../../apps/web/AGENTS.md) and for any future UX work consult [`docs/roadmap.md`](../roadmap.md). Moved from `docs/ui-restoration-plan.md` on 2026-04-24.
+
 Restoring features from the original dash-spend app that were simplified during migration.
 
 ---
