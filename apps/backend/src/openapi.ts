@@ -1754,6 +1754,11 @@ registry.registerPath({
       description: 'Rate limit exceeded (5/min per IP)',
       content: { 'application/json': { schema: ErrorResponse } },
     },
+    500: {
+      description:
+        'Loop-native auth misconfigured (LOOP_AUTH_NATIVE_ENABLED without signing key) or an unexpected backend failure — A2-1001',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
     502: {
       description: 'Upstream error',
       content: { 'application/json': { schema: ErrorResponse } },
@@ -1785,6 +1790,11 @@ registry.registerPath({
       description: 'Rate limit exceeded (10/min per IP)',
       content: { 'application/json': { schema: ErrorResponse } },
     },
+    500: {
+      description:
+        'Loop-native auth misconfigured or unexpected backend failure during token issuance — A2-1001',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
     502: {
       description: 'Upstream returned an unexpected shape or non-auth error',
       content: { 'application/json': { schema: ErrorResponse } },
@@ -1814,6 +1824,11 @@ registry.registerPath({
     },
     429: {
       description: 'Rate limit exceeded (30/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description:
+        'Loop-native auth misconfigured or unexpected backend failure during refresh rotation — A2-1001',
       content: { 'application/json': { schema: ErrorResponse } },
     },
     502: {
