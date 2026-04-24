@@ -4,6 +4,7 @@ import {
   type UserPaymentMethod,
   type UserPaymentMethodBucket,
 } from '~/services/user';
+import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { fmtPct, fmtPctBigint } from '~/components/features/admin/PaymentMethodShareCard';
@@ -46,9 +47,12 @@ const METHOD_CLASSES: Record<UserPaymentMethod, string> = {
 };
 
 export function RailMixCard(): React.JSX.Element | null {
+  // A2-1156: auth-gate so cold-start doesn't fire before session restore.
+  const { isAuthenticated } = useAuth();
   const query = useQuery({
     queryKey: ['me', 'payment-method-share', 'fulfilled'],
     queryFn: () => getUserPaymentMethodShare({ state: 'fulfilled' }),
+    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 60_000,
   });

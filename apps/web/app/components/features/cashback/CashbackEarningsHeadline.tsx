@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { getCashbackSummary, type UserCashbackSummary } from '~/services/user';
+import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 
 /**
@@ -32,9 +33,12 @@ export function fmtEarnings(minor: string, currency: string): string {
  * list below is the user's actual goal.
  */
 export function CashbackEarningsHeadline(): React.JSX.Element | null {
+  // A2-1156: auth-gate so cold-start doesn't fire before session restore.
+  const { isAuthenticated } = useAuth();
   const query = useQuery({
     queryKey: ['me', 'cashback-summary'],
     queryFn: getCashbackSummary,
+    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 60_000,
   });

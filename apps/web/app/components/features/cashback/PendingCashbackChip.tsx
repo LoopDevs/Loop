@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { getUserPendingPayoutsSummary } from '~/services/user';
+import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 
 /**
@@ -72,9 +73,12 @@ export function formatOldestAgo(iso: string, now: number = Date.now()): string {
 }
 
 export function PendingCashbackChip(): React.JSX.Element | null {
+  // A2-1156: auth-gate so cold-start doesn't fire before session restore.
+  const { isAuthenticated } = useAuth();
   const query = useQuery({
     queryKey: ['me', 'pending-payouts-summary'],
     queryFn: getUserPendingPayoutsSummary,
+    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 30_000,
     refetchInterval: 30_000,
