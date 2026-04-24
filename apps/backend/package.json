@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "check:ledger": "tsx src/scripts/check-ledger-invariant.ts"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "8.5.0",

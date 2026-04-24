@@ -101,6 +101,28 @@ fly ssh console               # SSH into machine
 curl https://loopfinance-api.fly.dev/health  # Health check
 ```
 
+### Ledger invariant smoke (A2-1519)
+
+Every ledger-mutating path (cashback capture, interest accrual, admin
+adjustment, refund) maintains the ADR-009 invariant
+`user_credits.balance_minor == SUM(credit_transactions.amount_minor)`
+per `(user_id, currency)` pair. To smoke-test after a deploy that
+touched any of those paths, from a machine with `DATABASE_URL` set:
+
+```bash
+fly ssh console -a loopfinance-api
+# inside the machine:
+DATABASE_URL=$DATABASE_URL node --loader tsx dist/scripts/check-ledger-invariant.js
+# or from a local env pointed at prod read-replica:
+DATABASE_URL=postgres://... npm --workspace=@loop/backend run check:ledger
+```
+
+Exit codes: `0` consistent, `1` drift (rows printed to stdout), `2` DB
+error. The live admin surface `GET /api/admin/reconciliation` runs the
+same query — `src/credits/ledger-invariant.ts::computeLedgerDriftSql`
+is the single source of truth. Synthetic drift scenarios are covered by
+`src/credits/__tests__/ledger-invariant.test.ts`.
+
 ---
 
 ## Web (SSR) — Fly.io
