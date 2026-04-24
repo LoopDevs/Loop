@@ -262,6 +262,16 @@ describe('runProcurementTick', () => {
     });
   });
 
+  it('A2-1508: pins the CTX procurement POST with an Idempotency-Key = order id', async () => {
+    state.paid = [makeOrder({ id: 'order_abc123' })];
+    mockProcureAndFetch('ctx-1');
+    await runProcurementTick();
+    const init = operatorFetchMock.mock.calls[0]![1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Idempotency-Key']).toBe('order_abc123');
+    expect(headers['Content-Type']).toBe('application/json');
+  });
+
   it('another worker already claimed order → skipped, no CTX call', async () => {
     state.paid = [makeOrder({ id: 'o-1' })];
     markProcuringMock.mockResolvedValue(null);
