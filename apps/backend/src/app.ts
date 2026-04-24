@@ -237,8 +237,7 @@ export function __resetHealthProbeCacheForTests(): void {
   upstreamProbeCache = null;
   upstreamProbeInFlight = null;
   lastHealthStatus = null;
-  degradedReadingStreak = 0;
-  healthyReadingStreak = 0;
+  healthReadings.length = 0;
   lastHealthNotifyAt = 0;
 }
 
@@ -579,25 +578,36 @@ if (env.NODE_ENV === 'test') {
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 
+const healthLog = logger.child({ component: 'health' });
+
 let lastHealthStatus: 'healthy' | 'degraded' | null = null;
-// Hysteresis counters. The raw per-probe reading goes into the counters;
-// we only flip `lastHealthStatus` once a streak crosses the threshold.
-// Asymmetric: getting *into* degraded is easy (2 consecutive) so real
-// outages still page ops inside ~30s; getting *back out* is harder
-// (3 consecutive) so a marginally-slow upstream doesn't flap us healthy
-// before the underlying issue stabilises.
-const HEALTH_FLIP_TO_DEGRADED_STREAK = 2;
-const HEALTH_FLIP_TO_HEALTHY_STREAK = 3;
-let degradedReadingStreak = 0;
-let healthyReadingStreak = 0;
-// Cooldown on the monitoring-channel Discord notify itself. Even with
-// hysteresis, a genuine two-state outage (upstream flickering in and
-// out over hours) would still emit a pair of embeds per flip — at
-// worst once per ~15s × streak-length. The 5-minute minimum between
-// `notifyHealthChange` calls ensures the monitoring channel stays
-// readable; ops still sees the first transition (the one that matters)
+// Rolling-window hysteresis. Each `/health` probe appends a
+// `'degraded' | 'healthy'` reading to `healthReadings` (newest at the
+// end); only once the window shows a supermajority do we flip
+// `lastHealthStatus` and (maybe) fire the Discord notify.
+//
+// Switched from a consecutive-streak detector after prod flap: a
+// marginally-slow CTX `/status` probe (near the 5s timeout) would
+// produce alternating DOWN/UP readings. The streak detector caught
+// every one as a transition. The window approach tolerates a few
+// bad probes without flipping — the signal has to be persistent.
+//
+// Asymmetric thresholds keep the behaviour of the prior detector:
+// easier to fall *into* degraded (5 of 10 bad probes) so real
+// outages still page ops in ~2–3 minutes, harder to claim *back*
+// to healthy (8 of 10 good probes) so a marginally-slow upstream
+// doesn't bounce us healthy before the underlying issue settles.
+const HEALTH_WINDOW_SIZE = 10;
+const HEALTH_FLIP_TO_DEGRADED_THRESHOLD = 5;
+const HEALTH_FLIP_TO_HEALTHY_THRESHOLD = 8;
+const healthReadings: Array<'healthy' | 'degraded'> = [];
+// Cooldown on the monitoring-channel Discord notify itself. Per-machine
+// in-memory state; Fly runs one or more machines, each with its own
+// counters — the cooldown bounds the worst-case noise per machine.
+// Bumped from 5min → 30min after the production flap made the
+// monitoring channel unreadable; ops still sees the first transition
 // and the raw state is always queryable via `GET /health`.
-const HEALTH_NOTIFY_COOLDOWN_MS = 5 * 60 * 1000;
+const HEALTH_NOTIFY_COOLDOWN_MS = 30 * 60 * 1000;
 let lastHealthNotifyAt = 0;
 
 // Cache the upstream reachability probe: `/health` is unauthenticated and
@@ -608,12 +618,14 @@ let lastHealthNotifyAt = 0;
 // and burns our local socket budget. 10s is shorter than the Fly probe
 // interval so the cached value is always the one from the last probe.
 const UPSTREAM_PROBE_TTL_MS = 10_000;
-// Probe timeout is kept under the Fly healthcheck timeout (5s) so the
-// outer check always gets a response, but is bumped from the original
-// 3s — anything lower was catching marginally-slow CTX responses and
-// producing spurious degraded readings (real-world flap on the
-// /status endpoint ran well past 3s under load).
-const UPSTREAM_PROBE_TIMEOUT_MS = 5_000;
+// Probe timeout. Intentionally LONGER than the Fly healthcheck timeout
+// (5s) — the Fly probe times out and retries its own schedule, but the
+// probe result we care about here is whether upstream *eventually*
+// responds within a few seconds. Keeping this at 5s was producing
+// degraded readings whenever CTX `/status` p95 latency spiked into the
+// 4.5–7s band (common under load). 8s covers that band without
+// stretching so far that a genuinely down upstream waits forever.
+const UPSTREAM_PROBE_TIMEOUT_MS = 8_000;
 let upstreamProbeCache: { reachable: boolean; at: number } | null = null;
 let upstreamProbeInFlight: Promise<boolean> | null = null;
 
@@ -682,41 +694,52 @@ app.get('/health', async (c) => {
 
   const degraded = merchantsStale || locationsStale || !upstreamReachable;
 
-  // Raw reading → streak counters. Consecutive identical readings
-  // accumulate; any flip resets the other counter. Only once a streak
-  // crosses the threshold do we promote it to `lastHealthStatus` and
-  // (maybe) fire the Discord notify — see `HEALTH_FLIP_TO_*` above for
-  // the asymmetric threshold rationale.
+  // Raw reading → rolling window. Keep the last N readings, flip when
+  // a supermajority agrees. Shifts out the oldest reading once the
+  // window is full so the detector always reflects recent state.
   const rawReading: 'degraded' | 'healthy' = degraded ? 'degraded' : 'healthy';
-  if (rawReading === 'degraded') {
-    degradedReadingStreak += 1;
-    healthyReadingStreak = 0;
-  } else {
-    healthyReadingStreak += 1;
-    degradedReadingStreak = 0;
-  }
+  healthReadings.push(rawReading);
+  if (healthReadings.length > HEALTH_WINDOW_SIZE) healthReadings.shift();
 
-  // Bootstrap on first /health hit — no streak gating yet because we
-  // have no prior state to protect against flapping against. After this
-  // one-shot seed, every subsequent transition has to clear its streak.
+  const degradedInWindow = healthReadings.filter((r) => r === 'degraded').length;
+  const healthyInWindow = healthReadings.length - degradedInWindow;
+
+  // Bootstrap on first /health hit — no window gating yet because we
+  // have no prior state to flip against. After this one-shot seed,
+  // every subsequent transition has to clear the threshold.
   if (lastHealthStatus === null) {
     lastHealthStatus = rawReading;
   } else if (
     lastHealthStatus === 'healthy' &&
-    rawReading === 'degraded' &&
-    degradedReadingStreak >= HEALTH_FLIP_TO_DEGRADED_STREAK
+    degradedInWindow >= HEALTH_FLIP_TO_DEGRADED_THRESHOLD
   ) {
     lastHealthStatus = 'degraded';
-    maybeNotifyHealthChange(
-      'degraded',
-      `Merchants stale: ${merchantsStale}, Locations stale: ${locationsStale}, Upstream: ${upstreamReachable ? 'up' : 'DOWN'}`,
+    const why = `Merchants stale: ${merchantsStale}, Locations stale: ${locationsStale}, Upstream: ${upstreamReachable ? 'up' : 'DOWN'}`;
+    healthLog.warn(
+      {
+        degradedInWindow,
+        healthyInWindow,
+        windowSize: healthReadings.length,
+        merchantsStale,
+        locationsStale,
+        upstreamReachable,
+      },
+      'Health flip → degraded',
     );
+    maybeNotifyHealthChange('degraded', why);
   } else if (
     lastHealthStatus === 'degraded' &&
-    rawReading === 'healthy' &&
-    healthyReadingStreak >= HEALTH_FLIP_TO_HEALTHY_STREAK
+    healthyInWindow >= HEALTH_FLIP_TO_HEALTHY_THRESHOLD
   ) {
     lastHealthStatus = 'healthy';
+    healthLog.info(
+      {
+        degradedInWindow,
+        healthyInWindow,
+        windowSize: healthReadings.length,
+      },
+      'Health flip → healthy',
+    );
     maybeNotifyHealthChange('healthy', 'All systems operational');
   }
 
