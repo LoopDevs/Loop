@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { formatMinorCurrency, pctBigint } from '@loop/shared';
 import { getUserFlywheelStats } from '~/services/user';
+import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -26,9 +27,12 @@ import { Spinner } from '~/components/ui/Spinner';
  *    cashback-adjacent component.
  */
 export function FlywheelChip(): React.JSX.Element | null {
+  // A2-1156: auth-gate so cold-start doesn't fire before session restore.
+  const { isAuthenticated } = useAuth();
   const query = useQuery({
     queryKey: ['me', 'flywheel-stats'],
     queryFn: getUserFlywheelStats,
+    enabled: isAuthenticated,
     retry: shouldRetry,
     // 60s staleness — matches the siblings. An order fulfills, the
     // balance moves, the chip refreshes on the next render window.

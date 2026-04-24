@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { getUserOrdersSummary, type UserOrdersSummary } from '~/services/user';
+import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 
 /**
@@ -20,9 +21,12 @@ import { shouldRetry } from '~/hooks/query-retry';
  * mount.
  */
 export function OrdersSummaryHeader(): React.JSX.Element | null {
+  // A2-1156: auth-gate so cold-start doesn't fire before session restore.
+  const { isAuthenticated } = useAuth();
   const query = useQuery({
     queryKey: ['me', 'orders', 'summary'],
     queryFn: getUserOrdersSummary,
+    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 60_000,
   });
