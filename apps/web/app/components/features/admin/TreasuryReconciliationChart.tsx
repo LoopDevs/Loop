@@ -57,14 +57,19 @@ interface MonthRow {
 }
 
 export function TreasuryReconciliationChart(): React.JSX.Element {
+  // A2-1160: hyphenated single-string keys match the rest of the
+  // admin-side taxonomy (`admin-cashback-activity`, `admin-treasury`,
+  // etc.); previously `['admin', 'cashback-monthly']` collided
+  // cosmetically with `['me', 'cashback-monthly']` from
+  // MonthlyCashbackChart.
   const cashbackQuery = useQuery({
-    queryKey: ['admin', 'cashback-monthly'],
+    queryKey: ['admin-cashback-monthly'],
     queryFn: getAdminCashbackMonthly,
     retry: shouldRetry,
     staleTime: 5 * 60 * 1000,
   });
   const payoutsQuery = useQuery({
-    queryKey: ['admin', 'payouts-monthly'],
+    queryKey: ['admin-payouts-monthly'],
     queryFn: getAdminPayoutsMonthly,
     retry: shouldRetry,
     staleTime: 5 * 60 * 1000,

@@ -55,18 +55,12 @@ const MERCHANT_ID_MAX = 128;
  */
 const AMOUNT_MINOR_MAX = 10_000_000;
 
-export interface PublicCashbackPreview {
-  merchantId: string;
-  merchantName: string;
-  /** Echo of the caller-supplied amount as bigint-as-string. */
-  orderAmountMinor: string;
-  /** numeric(5,2) string (e.g. "2.50"). Null when no active config. */
-  cashbackPct: string | null;
-  /** Computed cashback amount (floor). BigInt as string. `"0"` when no config. */
-  cashbackMinor: string;
-  /** Merchant's catalog currency — same value the ordering flow charges in. */
-  currency: string;
-}
+// A2-676 + ADR 019: PublicCashbackPreview was duplicated across
+// backend + openapi + web. Single source of truth now lives in
+// `@loop/shared`; re-export here so the many existing backend
+// imports keep resolving without a rename.
+export type { PublicCashbackPreview } from '@loop/shared';
+import type { PublicCashbackPreview } from '@loop/shared';
 
 /**
  * `Merchant.denominations.currency` is where the merchant's catalog
