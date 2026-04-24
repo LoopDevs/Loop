@@ -1336,17 +1336,31 @@ export interface AdminMerchantResyncResponse {
 
 /**
  * `POST /api/admin/merchants/resync` — force an immediate CTX catalog
- * sweep (ADR 011). Bypasses the 6h scheduled refresh so a merchant
- * change lands within seconds. Two admins clicking simultaneously
- * coalesce into one upstream sweep via the backend mutex (one
- * response carries `triggered: true`, the other `triggered: false`
- * with the same post-sync `loadedAt`). 502 on upstream failure;
- * cached snapshot is retained.
+ * sweep (ADR 011 / ADR 017). Bypasses the 6h scheduled refresh so a
+ * merchant change lands within seconds. A2-509 made the endpoint
+ * ADR-017 compliant: caller supplies a reason, the service generates
+ * a per-click Idempotency-Key, and the backend returns the standard
+ * `{ result, audit }` envelope. Two admins clicking simultaneously
+ * coalesce into one upstream sweep via the backend mutex (one response
+ * carries `triggered: true`, the other `triggered: false` with the
+ * same post-sync `loadedAt`). 502 on upstream failure; cached snapshot
+ * is retained.
  */
-export async function resyncMerchants(): Promise<AdminMerchantResyncResponse> {
-  return authenticatedRequest<AdminMerchantResyncResponse>('/api/admin/merchants/resync', {
-    method: 'POST',
-  });
+export async function resyncMerchants(args: {
+  reason: string;
+}): Promise<AdminWriteEnvelope<AdminMerchantResyncResponse>> {
+  const idempotencyKey =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID().replace(/-/g, '')
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  return authenticatedRequest<AdminWriteEnvelope<AdminMerchantResyncResponse>>(
+    '/api/admin/merchants/resync',
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: { reason: args.reason },
+    },
+  );
 }
 
 /** One notifier in the Discord catalog (ADR 018 / #572). */
