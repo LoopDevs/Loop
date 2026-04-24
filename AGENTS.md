@@ -182,6 +182,11 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # NODE_ENV=development
 # LOG_LEVEL=info                      — trace|debug|info|warn|error|fatal|silent
 
+# A2-207: payout submit worker (ADR 016). Default off outside production
+# so a dev-mode backend doesn't submit Stellar transactions; set true in
+# production + Fly staging after LOOP_STELLAR_OPERATOR_SECRET is wired.
+# LOOP_WORKERS_ENABLED=true
+
 # Observability
 # SENTRY_DSN=<dsn>
 # DISCORD_WEBHOOK_ORDERS=<url>
