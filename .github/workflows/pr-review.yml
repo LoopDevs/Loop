@@ -4,6 +4,11 @@ on:
   pull_request:
     types: [opened, synchronize]
 
+# A2-116: deny-by-default at the workflow level. The single review
+# job below opts into the narrow `contents: read` + `pull-requests:
+# write` set it needs (read the diff, post a comment).
+permissions: {}
+
 jobs:
   review:
     name: AI Code Review
