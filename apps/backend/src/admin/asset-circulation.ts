@@ -28,8 +28,13 @@
  * and is always authoritative.
  */
 import type { Context } from 'hono';
-import { LOOP_ASSET_CODES, type LoopAssetCode, HOME_CURRENCIES } from '@loop/shared';
-import type { HomeCurrency } from '@loop/shared';
+import {
+  HOME_CURRENCIES,
+  LOOP_ASSET_CODES,
+  isLoopAssetCode,
+  type HomeCurrency,
+  type LoopAssetCode,
+} from '@loop/shared';
 import { getLoopAssetCirculation } from '../payments/horizon-circulation.js';
 import { payoutAssetFor } from '../credits/payout-asset.js';
 import { sumOutstandingLiability } from '../credits/liabilities.js';
@@ -53,9 +58,9 @@ export interface AssetCirculationResponse {
 
 const STROOPS_PER_MINOR = 100_000n;
 
-function isLoopAsset(v: string): v is LoopAssetCode {
-  return (LOOP_ASSET_CODES as ReadonlyArray<string>).includes(v);
-}
+// A2-812: local `isLoopAsset` was a duplicate of `isLoopAssetCode`
+// from `@loop/shared/loop-asset`. Now imported — one place to
+// maintain the LOOP-asset allowlist for both backend and web.
 
 function fiatOf(code: LoopAssetCode): HomeCurrency {
   const fiat = code.slice(0, 3);
@@ -73,7 +78,7 @@ export async function adminAssetCirculationHandler(c: Context): Promise<Response
     return c.json({ code: 'VALIDATION_ERROR', message: 'assetCode is required' }, 400);
   }
   const assetCode = assetCodeRaw.toUpperCase();
-  if (!isLoopAsset(assetCode)) {
+  if (!isLoopAssetCode(assetCode)) {
     return c.json(
       {
         code: 'VALIDATION_ERROR',
