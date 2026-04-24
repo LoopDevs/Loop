@@ -18,19 +18,13 @@ import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { userCredits, users } from '../db/schema.js';
 import { logger } from '../logger.js';
+import { csvEscape } from './csv-escape.js';
 
 const log = logger.child({ handler: 'admin-user-credits-csv' });
 
 const HEADER = ['User ID', 'Email', 'Currency', 'Balance (minor)', 'Updated at (UTC)'] as const;
 
 const ROW_CAP = 10_000;
-
-function csvEscape(value: string): string {
-  if (/[",\r\n]/.test(value)) {
-    return `"${value.replace(/"/g, '""')}"`;
-  }
-  return value;
-}
 
 function csvRow(fields: readonly (string | number | bigint | Date | null)[]): string {
   return fields

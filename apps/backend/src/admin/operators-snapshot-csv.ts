@@ -22,6 +22,7 @@ import type { Context } from 'hono';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { logger } from '../logger.js';
+import { csvEscape } from './csv-escape.js';
 
 const log = logger.child({ handler: 'admin-operators-snapshot-csv' });
 
@@ -42,14 +43,6 @@ const HEADERS = [
   'mean_ms',
   'last_order_at',
 ] as const;
-
-function csvEscape(value: string | null | undefined): string {
-  if (value === null || value === undefined) return '';
-  if (/[",\r\n]/.test(value)) {
-    return `"${value.replaceAll('"', '""')}"`;
-  }
-  return value;
-}
 
 function csvRow(values: Array<string | null | undefined>): string {
   return values.map((v) => csvEscape(v ?? null)).join(',');

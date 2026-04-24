@@ -29,18 +29,11 @@
 import type { Context } from 'hono';
 import { treasuryHandler } from './treasury.js';
 import { logger } from '../logger.js';
+import { csvEscape } from './csv-escape.js';
 
 const log = logger.child({ handler: 'admin-treasury-snapshot-csv' });
 
 const HEADERS = ['metric', 'key', 'value'] as const;
-
-function csvEscape(value: string | null | undefined): string {
-  if (value === null || value === undefined) return '';
-  if (/[",\r\n]/.test(value)) {
-    return `"${value.replaceAll('"', '""')}"`;
-  }
-  return value;
-}
 
 function csvRow(values: Array<string | null | undefined>): string {
   return values.map((v) => csvEscape(v ?? null)).join(',');

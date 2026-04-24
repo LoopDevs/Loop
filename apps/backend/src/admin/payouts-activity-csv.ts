@@ -27,6 +27,7 @@ import type { Context } from 'hono';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { logger } from '../logger.js';
+import { csvEscape } from './csv-escape.js';
 
 const log = logger.child({ handler: 'admin-payouts-activity-csv' });
 
@@ -35,14 +36,6 @@ const MAX_DAYS = 366;
 const ROW_CAP = 10_000;
 
 const HEADERS = ['day', 'asset_code', 'payout_count', 'stroops'] as const;
-
-function csvEscape(value: string | null | undefined): string {
-  if (value === null || value === undefined) return '';
-  if (/[",\r\n]/.test(value)) {
-    return `"${value.replaceAll('"', '""')}"`;
-  }
-  return value;
-}
 
 function csvRow(values: Array<string | null | undefined>): string {
   return values.map((v) => csvEscape(v ?? null)).join(',');

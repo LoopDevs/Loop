@@ -39,6 +39,7 @@ import { db } from '../db/client.js';
 import { merchantCashbackConfigs } from '../db/schema.js';
 import { getMerchants } from '../merchants/sync.js';
 import { logger } from '../logger.js';
+import { csvEscape } from './csv-escape.js';
 
 const log = logger.child({ handler: 'admin-cashback-configs-csv' });
 
@@ -54,14 +55,6 @@ const HEADERS = [
   'updated_by',
   'updated_at',
 ] as const;
-
-function csvEscape(value: string | null | undefined): string {
-  if (value === null || value === undefined) return '';
-  if (/[",\r\n]/.test(value)) {
-    return `"${value.replaceAll('"', '""')}"`;
-  }
-  return value;
-}
 
 function csvRow(values: Array<string | null | undefined>): string {
   return values.map((v) => csvEscape(v ?? null)).join(',');
