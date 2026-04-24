@@ -4,6 +4,7 @@ import {
   type UserPendingPayoutState,
   type UserPendingPayoutView,
 } from '~/services/user';
+import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -24,9 +25,12 @@ import { Spinner } from '~/components/ui/Spinner';
  * TanStack Query defaults.
  */
 export function PendingPayoutsCard(): React.JSX.Element | null {
+  // A2-1156: auth-gate so cold-start doesn't fire before session restore.
+  const { isAuthenticated } = useAuth();
   const query = useQuery({
     queryKey: ['me', 'pending-payouts'],
     queryFn: () => getUserPendingPayouts({ limit: 25 }),
+    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 30_000,
     refetchInterval: 30_000,

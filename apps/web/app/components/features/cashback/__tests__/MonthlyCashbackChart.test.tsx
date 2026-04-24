@@ -28,6 +28,11 @@ vi.mock('~/services/user', async (importActual) => {
 });
 
 vi.mock('~/hooks/query-retry', () => ({ shouldRetry: () => false }));
+// A2-1156: auth-gate in the component → tests need to pretend
+// the user is authenticated so the query fires.
+vi.mock('~/hooks/use-auth', () => ({
+  useAuth: () => ({ isAuthenticated: true, user: null, refreshUser: () => {} }),
+}));
 
 function renderChart(): { container: HTMLElement } {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
