@@ -8,9 +8,10 @@ import {
   ScrollRestoration,
   useLocation,
 } from 'react-router';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryCache, MutationCache, QueryClientProvider } from '@tanstack/react-query';
 import * as Sentry from '@sentry/react';
 import { scrubSentryEvent } from '~/utils/sentry-scrubber';
+import { forwardQueryErrorToSentry } from '~/utils/query-error-reporting';
 import type { Route } from './+types/root';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useSessionRestore } from '~/hooks/use-session-restore';
@@ -49,7 +50,28 @@ if (typeof window !== 'undefined' && import.meta.env.VITE_SENTRY_DSN) {
   });
 }
 
+// A2-1322: forward unexpected TanStack Query / Mutation failures into
+// Sentry. Before this hook, call-site `onError` was the only way errors
+// reached Sentry — and nothing in the codebase did that, so broken admin
+// shapes and backend 500s passed silently. The filter in
+// `forwardQueryErrorToSentry` skips expected 4xx outcomes (401 on an
+// admin surface visited by a non-admin, 422 on a validation denial, etc.)
+// so Sentry signal stays meaningful.
 const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (err, query) => {
+      forwardQueryErrorToSentry(err, { source: 'tanstack-query', key: query.queryKey }, Sentry);
+    },
+  }),
+  mutationCache: new MutationCache({
+    onError: (err, _vars, _ctx, mutation) => {
+      forwardQueryErrorToSentry(
+        err,
+        { source: 'tanstack-mutation', key: mutation.options.mutationKey },
+        Sentry,
+      );
+    },
+  }),
   defaultOptions: {
     queries: {
       // Use the shared retry predicate as the default so any new hook
