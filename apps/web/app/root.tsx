@@ -41,7 +41,11 @@ const Onboarding = lazy(() =>
 if (typeof window !== 'undefined' && import.meta.env.VITE_SENTRY_DSN) {
   Sentry.init({
     dsn: import.meta.env.VITE_SENTRY_DSN,
-    environment: import.meta.env.MODE,
+    // A2-1310: prefer the explicit `VITE_LOOP_ENV` deploy tag so a
+    // staging build bucketed as `MODE=production` can still report
+    // events as `staging`. Falls back to `MODE` so existing deploys
+    // without the env var set continue to behave as before.
+    environment: (import.meta.env.VITE_LOOP_ENV as string | undefined) ?? import.meta.env.MODE,
     integrations: [Sentry.browserTracingIntegration()],
     tracesSampleRate: import.meta.env.PROD ? 0.1 : 1.0,
     // A2-1308: scrub known-secret keys out of every captured event.

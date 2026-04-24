@@ -140,6 +140,10 @@ Each package has its own `AGENTS.md` with file structure, patterns, and recipes:
 # apps/web/.env.local (dev only, git-ignored)
 VITE_API_URL=http://localhost:8080
 # VITE_SENTRY_DSN=<dsn>               — optional, Sentry error tracking for web
+# VITE_LOOP_ENV=staging                — A2-1310: logical-env tag for Sentry
+#   bucketing. Pair with backend `LOOP_ENV`. Staging deploys that run
+#   `MODE=production` should set this to `staging` on both sides so
+#   Sentry events align. Unset → falls back to `import.meta.env.MODE`.
 
 # apps/backend/.env (git-ignored — `apps/backend/.env.example` is the
 # authoritative reference; `scripts/lint-docs.sh` enforces parity with
@@ -191,6 +195,10 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 
 # Observability
 # SENTRY_DSN=<dsn>
+# LOOP_ENV=staging                      — A2-1310: paired with VITE_LOOP_ENV;
+#   overrides the Sentry `environment` tag so a staging deploy running
+#   NODE_ENV=production still buckets events as `staging`. Unset →
+#   falls back to NODE_ENV.
 # DISCORD_WEBHOOK_ORDERS=<url>
 # DISCORD_WEBHOOK_MONITORING=<url>
 ```
