@@ -38,7 +38,11 @@ import { Spinner } from '~/components/ui/Spinner';
  */
 export function AdminMonthlyCashbackChart(): React.JSX.Element {
   const query = useQuery({
-    queryKey: ['admin', 'cashback-monthly'],
+    // A2-1160: single-string hyphenated key matches the rest of the
+    // admin-side taxonomy (`admin-cashback-activity`,
+    // `admin-treasury`, etc.); previously collided cosmetically with
+    // `['me', 'cashback-monthly']` from MonthlyCashbackChart.
+    queryKey: ['admin-cashback-monthly'],
     queryFn: getAdminCashbackMonthly,
     retry: shouldRetry,
     staleTime: 5 * 60 * 1000,

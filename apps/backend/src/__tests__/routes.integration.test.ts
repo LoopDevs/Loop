@@ -90,6 +90,7 @@ vi.mock('../circuit-breaker.js', () => {
 import {
   app,
   __resetHealthProbeCacheForTests,
+  __resetRateLimitsForTests,
   __resetUpstreamProbeCacheOnlyForTests,
 } from '../app.js';
 
@@ -107,6 +108,10 @@ beforeEach(() => {
   // streak counters + notify cooldown so each test case starts from a
   // known state.
   __resetHealthProbeCacheForTests();
+  // A2-1005 body-limit tests need a clean per-IP counter; generally
+  // safer to reset between every case so rate-limit state doesn't
+  // bleed across describe blocks.
+  __resetRateLimitsForTests();
 });
 
 describe('GET /health', () => {
@@ -568,5 +573,41 @@ describe('app-level middleware', () => {
       const helpLines = body.split('\n').filter((l) => l.startsWith(`# HELP ${metric} `));
       expect(helpLines, `expected exactly one HELP line for ${metric}`).toHaveLength(1);
     }
+  });
+});
+
+describe('bodyLimit middleware (A2-1005)', () => {
+  // 1 MB + 1 byte — the smallest overflow the middleware must reject.
+  // Send an explicit Content-Length header so hono/bodyLimit's
+  // fast-path (which inspects the header) fires; without it the
+  // middleware would fall back to streaming the body, and app.request
+  // in this harness may hand the body through unparsed.
+  it('returns 413 PAYLOAD_TOO_LARGE when body exceeds 1 MB, not 500', async () => {
+    const oversized = 'a'.repeat(1024 * 1024 + 1);
+    const res = await app.request('/api/auth/request-otp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': String(oversized.length),
+      },
+      body: oversized,
+    });
+    expect(res.status).toBe(413);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('PAYLOAD_TOO_LARGE');
+    expect(body.message).toMatch(/1 MB/);
+  });
+
+  it('passes through normal-sized bodies to the handler', async () => {
+    // Use a body small enough to pass the limit but malformed enough
+    // for the handler to reject — confirms the bodyLimit middleware
+    // isn't over-zealously rejecting legitimate requests.
+    const res = await app.request('/api/auth/request-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    // Handler-level 400 for missing email — NOT the middleware's 413.
+    expect(res.status).toBe(400);
   });
 });

@@ -1,7 +1,8 @@
 # ADR 009: Credits ledger and cashback flow
 
-Status: Proposed
+Status: Accepted
 Date: 2026-04-21
+Implemented: 2026-04-21 onwards (credit_transactions + user_credits tables from migration 0000; cashback capture on order fulfilment in orders/repo.ts; interest accrual in credits/accrue-interest.ts; reconciliation surface at /api/admin/reconciliation)
 Related: ADR 010 (principal switch + payment rails), ADR 011 (admin panel)
 
 ## Context
