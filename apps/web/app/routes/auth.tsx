@@ -544,6 +544,11 @@ export default function AuthRoute(): React.JSX.Element {
                 onChange={(v) => setEmail(v)}
                 required
                 label="Email address"
+                // A2-1100: let password managers + iOS / Android auto-fill
+                // the email from Keychain / Autofill. Matches the
+                // onboarding signup form (signup-tail.tsx) which already
+                // sets this.
+                autoComplete="email"
               />
               {error !== null && <p className="text-red-500 text-sm">{error}</p>}
               <Button type="submit" className="w-full" disabled={isLoading}>
@@ -569,6 +574,11 @@ export default function AuthRoute(): React.JSX.Element {
               required
               autoFocus
               label="Verification code"
+              // A2-1100: iOS surfaces the OTP from the notification
+              // bar as a keyboard suggestion; Android Autofill does
+              // the same via Google Messages. Matches the onboarding
+              // form (signup-tail.tsx) which already sets this.
+              autoComplete="one-time-code"
             />
             {error !== null && <p className="text-red-500 text-sm">{error}</p>}
             <Button type="submit" className="w-full" disabled={isLoading}>

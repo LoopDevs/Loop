@@ -1,7 +1,8 @@
 # ADR 017: Admin credit primitives (writes)
 
-Status: Proposed
+Status: Accepted
 Date: 2026-04-22
+Implemented: 2026-04-22 onwards (admin_idempotency_keys table from migration 0011; admin/idempotency.ts primitives with 24h TTL sweep; buildAuditEnvelope in admin/audit-envelope.ts; live handlers: credit-adjustments, refunds, merchant-cashback-configs, merchants/resync — each ADR-017 compliant)
 Related: ADR 009 (credits ledger), ADR 011 (admin panel), ADR 015 (stablecoins), ADR 018 (Discord operational visibility)
 
 ## Context
