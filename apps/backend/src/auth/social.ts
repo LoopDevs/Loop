@@ -21,6 +21,7 @@ import { z } from 'zod';
 import { logger } from '../logger.js';
 import { env } from '../env.js';
 import { verifyIdToken, type VerifyIdTokenResult } from './id-token.js';
+import { consumeIdToken } from './id-token-replay.js';
 import { resolveOrCreateUserForIdentity } from './identities.js';
 import {
   signLoopToken,
@@ -144,6 +145,30 @@ export function makeSocialLoginHandler(config: SocialProviderConfig) {
       return c.json({ code: 'UNAUTHORIZED', message: 'Invalid id_token' }, 401);
     }
     const claims = verified.claims;
+
+    // A2-566: one-shot consume. A verified-once id_token is replayable
+    // within its provider TTL without this — sha256(token) goes into
+    // social_id_token_uses; a second attempt with the same token hits
+    // the PK conflict and we reject with the same generic 401 as a
+    // verify failure (don't tell the caller it was a replay).
+    let firstUse: boolean;
+    try {
+      firstUse = await consumeIdToken({
+        token: parsed.data.idToken,
+        provider: config.provider,
+        expSeconds: claims.exp,
+      });
+    } catch {
+      // DB error is operational, not a replay. Surface as 503 so the
+      // caller retries — silently passing would open a replay window.
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: 'Auth service temporarily unavailable' },
+        503,
+      );
+    }
+    if (!firstUse) {
+      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid id_token' }, 401);
+    }
 
     // `email` + `email_verified` are optional in the id_token spec
     // but required for our resolve-or-create policy: step 2 (link
