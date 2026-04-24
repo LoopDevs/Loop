@@ -45,18 +45,20 @@
 
 ## What we're building
 
-**Loop** — cross-platform gift card cashback app. Users buy discounted gift cards (XLM, Phase 1) and earn USDC cashback to a Stellar wallet (Phase 2). Single brand only.
+**Loop** — cross-platform gift card cashback app. Users buy discounted gift cards (XLM, Phase 1) and earn per-home-currency LOOP stablecoin cashback (USDLOOP / GBPLOOP / EURLOOP, ADR 015) to a Stellar wallet (Phase 2). LOOP assets are 1:1 backed by off-chain liability; Loop settles to CTX in XLM + USDC on the supplier side. Single brand only.
 
 ---
 
 ## Architecture (one-liner per layer)
 
 ```
-apps/mobile   Capacitor v8 shell — loads static web build from disk
-apps/web      React Router v7 + Vite — SSR for loopfinance.io, static export for mobile
-apps/backend  TypeScript + Hono — proxies upstream CTX API, caches merchants, clusters locations
-packages/shared  Shared TypeScript types (Merchant, Order, ClusterResponse, etc.)
-upstream API  CTX gift card provider at spend.ctx.com — merchant catalog, auth, gift card orders
+apps/mobile      Capacitor v8 shell — loads static web build from disk
+apps/web         React Router v7 + Vite — SSR for loopfinance.io, static export for mobile
+apps/backend     TypeScript + Hono — proxies upstream CTX API, caches merchants, clusters locations
+packages/shared  Shared TypeScript types (Merchant, Order, ClusterResponse, admin response shapes)
+postgres         Off-chain credits ledger (Drizzle ORM + Postgres-on-Fly, ADR 012 / ADR 009)
+stellar          On-chain LOOP-asset issuance + USDC/XLM operator accounts (ADR 015 / ADR 016)
+upstream API     CTX gift card provider at spend.ctx.com — merchant catalog, auth, gift card orders
 ```
 
 **Auth has two paths.** Loop-native (ADR 013, default once `LOOP_AUTH_NATIVE_ENABLED=true`): backend mints its own HS256 JWTs, generates OTPs, and sends email via the configured provider. Legacy CTX-proxy: backend forwards request-otp / verify-otp / refresh / logout to upstream `spend.ctx.com` and tokens are upstream-issued. Both paths coexist while the identity takeover rolls out. See `docs/architecture.md` + ADR-013 for the full auth flow.
