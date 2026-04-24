@@ -202,7 +202,7 @@ Applied in order on every request:
 
 1. **CORS** — production: `loopfinance.io`, `www.loopfinance.io`, plus the Capacitor native origins (`capacitor://localhost`, `https://localhost`, `http://localhost`) so iOS and Android webview requests pass preflight. Dev: `*`. Source of truth: `PRODUCTION_ORIGINS` in `apps/backend/src/app.ts`.
 2. **Secure headers** — HSTS, X-Content-Type-Options, X-Frame-Options, etc.
-3. **Body limit** — 1MB max request body
+3. **Body limit** — 1MB max request body; overflow returns 413 `PAYLOAD_TOO_LARGE` (A2-1005)
 4. **Request ID** — unique `X-Request-Id` on every request
 5. **Logger** — Pino-backed access log for every request (audit A-021); shares service/env/redaction with application logs and correlates via `X-Request-Id`
 6. **Rate limiting** — per-IP: `/api/clusters` (60/min), `/api/image` (300/min), `/api/auth/request-otp` (5/min), `/api/auth/verify-otp` (10/min), `/api/auth/refresh` (30/min), `DELETE /api/auth/session` (20/min), `POST /api/orders` (10/min), `GET /api/orders` (60/min), `GET /api/orders/:id` (120/min). 429 responses include `Retry-After`.
