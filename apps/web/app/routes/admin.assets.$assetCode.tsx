@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
-import { LOOP_ASSET_CODES, type LoopAssetCode } from '@loop/shared';
+import { LOOP_ASSET_CODES, isLoopAssetCode, type LoopAssetCode } from '@loop/shared';
 import type { Route } from './+types/admin.assets.$assetCode';
 import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -28,9 +28,9 @@ function fiatOf(code: LoopAssetCode): string {
   return code.slice(0, 3);
 }
 
-function isLoopAsset(v: string): v is LoopAssetCode {
-  return (LOOP_ASSET_CODES as ReadonlyArray<string>).includes(v);
-}
+// A2-812: local `isLoopAsset` was a duplicate of `isLoopAssetCode`
+// from `@loop/shared/loop-asset`. Now imported for parity with the
+// backend admin/asset-circulation handler.
 
 function fmtMinor(minor: string, fiat: string): string {
   const n = Number(minor);
@@ -94,7 +94,7 @@ export default function AdminAssetDetailRoute(): React.JSX.Element {
   const navigate = useNavigate();
 
   const upper = assetCode.toUpperCase();
-  const validAsset = isLoopAsset(upper);
+  const validAsset = isLoopAssetCode(upper);
 
   const snapshotQuery = useQuery({
     queryKey: ['admin-treasury'],
