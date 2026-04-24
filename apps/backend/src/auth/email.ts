@@ -27,21 +27,35 @@ export interface EmailProvider {
 
 /**
  * Dev-only provider: logs the code to stdout instead of sending.
- * Intentionally writes at `info` so it's visible in default LOG_LEVEL,
- * and intentionally includes the raw code — this provider must never
- * be selected in production (see `getEmailProvider`).
+ * Intentionally writes at `info` so it's visible in default LOG_LEVEL.
+ * This provider must never be selected in production (see
+ * `getEmailProvider`).
+ *
+ * A2-1612: Pino redacts `code` via `REDACT_PATHS`, but if
+ * `@sentry/pino` is configured the Sentry transport receives the log
+ * record BEFORE the redaction pass applies. Guard by skipping the
+ * raw-code payload when `SENTRY_DSN` is set — devs running local
+ * Sentry read the code from the DB row (`auth_otps`) or the API's
+ * test-only verify-otp response rather than through the log.
  */
 class ConsoleEmailProvider implements EmailProvider {
   readonly name = 'console';
 
   async sendOtpEmail(input: OtpEmailInput): Promise<void> {
+    const sentryActive = env.SENTRY_DSN !== undefined;
     log.info(
       {
         to: input.to,
-        code: input.code,
+        // Redact when Sentry is active so the raw code can't land in
+        // a Sentry breadcrumb. Fall through to full code in the
+        // default (no-Sentry) dev loop so the console stub still
+        // serves its "grab the OTP from the log" purpose.
+        ...(sentryActive ? { code: '[REDACTED: SENTRY_DSN set]' } : { code: input.code }),
         expiresAt: input.expiresAt.toISOString(),
       },
-      'OTP email (console stub) — this provider is dev-only',
+      sentryActive
+        ? 'OTP email (console stub) — code redacted because SENTRY_DSN is set; read from DB'
+        : 'OTP email (console stub) — this provider is dev-only',
     );
   }
 }
