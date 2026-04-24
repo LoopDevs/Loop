@@ -56,7 +56,11 @@ jobs:
       # orphaned `[[services.http_checks]]` block (PR #120) slips through
       # CI and only surfaces when an ops engineer runs validate locally.
       - name: Install flyctl
-        uses: superfly/flyctl-actions/setup-flyctl@master
+        # A2-114: SHA-pinned to the 1.5 release so a compromised
+        # fly-side push to `master` can't swap in a token-exfil
+        # step. Bump deliberately — verify the new SHA against a
+        # signed release tag, don't chase the tag.
+        uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
