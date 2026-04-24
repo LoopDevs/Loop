@@ -106,6 +106,15 @@ export const EnvSchema = z.object({
   // every per-IP limit on every route.
   DISABLE_RATE_LIMITING: envBoolean.default(false),
 
+  // A2-1606 / A2-1607: shared-secret bearer tokens for `/metrics` and
+  // `/openapi.json`. When set, the route requires `Authorization:
+  // Bearer <token>` for every request. When unset the route is open in
+  // development/test and 404s in production so probes can't scrape
+  // the live route-map or circuit state anonymously. 32+ chars
+  // recommended (the same threshold LOOP_JWT_SIGNING_KEY enforces).
+  METRICS_BEARER_TOKEN: z.string().min(16).optional(),
+  OPENAPI_BEARER_TOKEN: z.string().min(16).optional(),
+
   // Discord webhooks (optional — for notifications)
   DISCORD_WEBHOOK_ORDERS: z.string().url().optional(),
   DISCORD_WEBHOOK_MONITORING: z.string().url().optional(),

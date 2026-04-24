@@ -1,3 +1,5 @@
+import { timingSafeEqual } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { cors } from 'hono/cors';
@@ -456,7 +458,44 @@ app.use('*', async (c, next) => {
   metrics.requestsTotal.set(key, (metrics.requestsTotal.get(key) ?? 0) + 1);
 });
 
+/**
+ * A2-1606: `/metrics` leaks the live route map + circuit-state gauge.
+ * A2-1607: `/openapi.json` exposes every admin route + schema.
+ *
+ * Gate both on a shared-secret bearer token (`METRICS_BEARER_TOKEN`
+ * / `OPENAPI_BEARER_TOKEN` in env). When the env var is set the
+ * caller must send `Authorization: Bearer <token>` — otherwise the
+ * route 401s. When the env var is unset the route stays open in
+ * `development` / `test` (local tooling / vitest convenience) and
+ * 404s in `production` so a probe can't fingerprint us. Constant-
+ * time compare defeats timing-oracle leaks against the token.
+ */
+function probeGateAllows(c: Context, expected: string | undefined): boolean {
+  if (expected === undefined) {
+    return env.NODE_ENV !== 'production';
+  }
+  const header = c.req.header('Authorization');
+  if (header === undefined) return false;
+  const match = /^Bearer\s+(.+)$/i.exec(header);
+  if (match === null) return false;
+  const presented = match[1]!.trim();
+  // Constant-time compare: guard against length leaks + per-byte
+  // short-circuit leaks. crypto.timingSafeEqual throws on length
+  // mismatch so size first.
+  if (presented.length !== expected.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(presented), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
+
 app.get('/metrics', (c) => {
+  if (!probeGateAllows(c, env.METRICS_BEARER_TOKEN)) {
+    return env.METRICS_BEARER_TOKEN === undefined
+      ? c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404)
+      : c.json({ code: 'UNAUTHORIZED', message: 'Bearer token required' }, 401);
+  }
   const lines: string[] = [];
 
   lines.push('# HELP loop_rate_limit_hits_total Total 429 responses issued.');
@@ -502,9 +541,14 @@ app.get('/metrics', (c) => {
 // registrations in openapi.ts — it does not depend on runtime state — so
 // serializing on every request would just burn CPU.
 const openApiSpec = generateOpenApiSpec();
-app.get('/openapi.json', (c) =>
-  c.json(openApiSpec, 200, { 'Cache-Control': 'public, max-age=3600' }),
-);
+app.get('/openapi.json', (c) => {
+  if (!probeGateAllows(c, env.OPENAPI_BEARER_TOKEN)) {
+    return env.OPENAPI_BEARER_TOKEN === undefined
+      ? c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404)
+      : c.json({ code: 'UNAUTHORIZED', message: 'Bearer token required' }, 401);
+  }
+  return c.json(openApiSpec, 200, { 'Cache-Control': 'public, max-age=3600' });
+});
 
 // ─── Test-only reset endpoint ─────────────────────────────────────────────────
 //
