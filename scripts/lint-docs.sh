@@ -177,6 +177,60 @@ done
 # In CI we don't wire FLY_API_TOKEN (deploys are manual from a maintainer
 # laptop), so treat the "no access token" case the same way we treat
 # "flyctl not installed" — a skip with a warning, not a hard failure.
+# ─── 9. OpenAPI drift — every /api route in app.ts must be in openapi.ts ────
+#
+# A2-1507: drift between `app.ts` route wiring and `openapi.ts`
+# registrations has produced repeated audit misses — A2-505, A2-506,
+# A2-568, A2-662 all shipped handlers without the matching schema.
+# Generated clients + the drift detector from plan G5-68 both depend
+# on every live route being declared, so this check pins it.
+#
+# Normalisation: app.ts uses `:param` and openapi.ts uses `{param}` —
+# convert both to the same shape before comparing. Exception list
+# covers infra / debug routes that intentionally aren't in the public
+# contract.
+echo "Checking OpenAPI drift (app.ts ⇄ openapi.ts)..."
+openapi_exceptions=(
+  # Infra / debug — intentionally outside the public contract.
+  '/__test__/reset'
+  '/openapi.json'
+  # Known in-flight gaps, each tracked to an open PR that registers
+  # the route. Remove from this list in the same PR that lands the
+  # registration so CI goes hard-fail on any NEW drift immediately.
+  '/api/admin/cashback-monthly'    # PR #831 (A2-506)
+  '/api/admin/merchant-stats.csv'  # PR #831 (A2-506)
+  '/api/admin/orders'              # PR #831 (A2-506)
+  '/api/auth/social/apple'         # PR #837 (A2-568)
+  '/api/auth/social/google'        # PR #837 (A2-568)
+  '/api/orders/loop'               # PR #840 (A2-662)
+  '/api/orders/loop/{id}'          # PR #840 (A2-662)
+)
+app_routes_tmp=$(mktemp)
+openapi_paths_tmp=$(mktemp)
+
+grep -E "^\s*app\.(get|post|put|delete|patch)\(" apps/backend/src/app.ts \
+  | grep -oE "'/[^']+'" \
+  | sed -E "s/:([a-zA-Z_]+)/{\1}/g" \
+  | sort -u > "$app_routes_tmp"
+
+grep -E "path: '/" apps/backend/src/openapi.ts \
+  | grep -oE "'/[^']+'" \
+  | sort -u > "$openapi_paths_tmp"
+
+while IFS= read -r route; do
+  stripped=${route//\'/}
+  skip=0
+  for ex in "${openapi_exceptions[@]}"; do
+    if [ "$stripped" = "$ex" ]; then skip=1; break; fi
+  done
+  [ "$skip" = 1 ] && continue
+  if ! grep -qxF "$route" "$openapi_paths_tmp"; then
+    err "Route '$stripped' is wired in app.ts but not registered in openapi.ts"
+  fi
+done < "$app_routes_tmp"
+
+rm -f "$app_routes_tmp" "$openapi_paths_tmp"
+
 echo "Checking Fly deploy configs..."
 if command -v flyctl >/dev/null 2>&1; then
   while IFS= read -r fly_toml; do

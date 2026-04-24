@@ -5,44 +5,27 @@
  * The backend is BigInt-safe: integer columns come back as strings so we
  * don't lose precision here; the UI is responsible for parsing to
  * BigInt when it needs to do arithmetic.
+ *
+ * A2-1504: wire contracts live in `@loop/shared` (ADR 019) — this
+ * module re-exports under the historical web-side names so existing
+ * imports (`CreateLoopOrderBody`, `LoopOrderView`, `LoopOrderState`,
+ * `LoopOrderPaymentMethod`) don't need to fan out a rename across 10+
+ * components and tests in the same PR.
  */
+import type {
+  CreateLoopOrderRequest,
+  CreateLoopOrderResponse,
+  LoopOrderListResponse,
+  LoopOrderView,
+  OrderState,
+  OrderPaymentMethod,
+} from '@loop/shared';
 import { authenticatedRequest } from './api-client';
 
-export type LoopOrderState =
-  | 'pending_payment'
-  | 'paid'
-  | 'procuring'
-  | 'fulfilled'
-  | 'failed'
-  | 'expired';
-
-export type LoopOrderPaymentMethod = 'xlm' | 'usdc' | 'credit' | 'loop_asset';
-
-export interface CreateLoopOrderBody {
-  merchantId: string;
-  /** Face value in minor units (pence / cents). Passed as string to keep BigInts readable. */
-  amountMinor: number | string;
-  /** ISO 4217 3-letter code. */
-  currency: string;
-  paymentMethod: LoopOrderPaymentMethod;
-}
-
-export interface CreateLoopOrderResponse {
-  orderId: string;
-  payment:
-    | {
-        method: 'xlm' | 'usdc';
-        stellarAddress: string;
-        memo: string;
-        amountMinor: string;
-        currency: string;
-      }
-    | {
-        method: 'credit';
-        amountMinor: string;
-        currency: string;
-      };
-}
+export type LoopOrderState = OrderState;
+export type LoopOrderPaymentMethod = OrderPaymentMethod;
+export type CreateLoopOrderBody = CreateLoopOrderRequest;
+export type { CreateLoopOrderResponse, LoopOrderView };
 
 /** POST /api/orders/loop — creates a Loop-native order in `pending_payment`. */
 export async function createLoopOrder(body: CreateLoopOrderBody): Promise<CreateLoopOrderResponse> {
@@ -50,27 +33,6 @@ export async function createLoopOrder(body: CreateLoopOrderBody): Promise<Create
     method: 'POST',
     body,
   });
-}
-
-export interface LoopOrderView {
-  id: string;
-  merchantId: string;
-  state: LoopOrderState;
-  faceValueMinor: string;
-  currency: string;
-  paymentMethod: LoopOrderPaymentMethod;
-  paymentMemo: string | null;
-  stellarAddress: string | null;
-  userCashbackMinor: string;
-  ctxOrderId: string | null;
-  redeemCode: string | null;
-  redeemPin: string | null;
-  redeemUrl: string | null;
-  failureReason: string | null;
-  createdAt: string;
-  paidAt: string | null;
-  fulfilledAt: string | null;
-  failedAt: string | null;
 }
 
 /** GET /api/orders/loop/:id — owner-scoped read of a Loop-native order. */
@@ -86,12 +48,12 @@ export async function getLoopOrder(id: string): Promise<LoopOrderView> {
  */
 export async function listLoopOrders(
   args: { limit?: number; before?: string } = {},
-): Promise<{ orders: LoopOrderView[] }> {
+): Promise<LoopOrderListResponse> {
   const params = new URLSearchParams();
   if (args.limit !== undefined) params.set('limit', String(args.limit));
   if (args.before !== undefined) params.set('before', args.before);
   const qs = params.toString();
-  return authenticatedRequest<{ orders: LoopOrderView[] }>(
+  return authenticatedRequest<LoopOrderListResponse>(
     `/api/orders/loop${qs.length > 0 ? `?${qs}` : ''}`,
   );
 }

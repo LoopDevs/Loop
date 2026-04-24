@@ -3,10 +3,22 @@
  *
  * `GET /api/admin/supplier-spend` — per-currency aggregate of what
  * Loop has paid CTX (the gift-card supplier) across fulfilled orders
- * in a rolling window. Keyed on `orders.currency` (the gift card's
- * catalog currency) because wholesale cost is denominated in what
- * CTX invoices us, which matches the card's face-value currency —
- * not the user's home currency they were charged in.
+ * in a rolling window.
+ *
+ * A2-904: rows are keyed on `orders.charge_currency` — the user's
+ * home currency at order creation — because `orders/repo.ts`
+ * computes `wholesale_minor` from `chargeMinor` at the pinned FX
+ * rate, so the ledger-side wholesale number is in home-currency
+ * terms. An earlier version of this handler grouped by
+ * `orders.currency` (the gift card's catalog currency), which
+ * silently mixed GBP pence + USD cents whenever a user bought a
+ * cross-region gift card — the resulting USD bucket summed
+ * different-currency rows and labelled the total as USD. The
+ * `face_value_minor` sum remains slightly currency-mixed within a
+ * single charge_currency bucket (face_value is catalog currency and
+ * a GBP user can buy a USD card), but that field is "gift cards
+ * shipped to users" — a headline metric, not a ledger-reconcile
+ * number — and the mix is ≤1% of orders in Phase 1.
  *
  * For each currency the snapshot surfaces:
  *   - count           — fulfilled orders in the window
@@ -124,9 +136,15 @@ export async function adminSupplierSpendHandler(c: Context): Promise<Response> {
   }
 
   try {
+    // A2-904: GROUP BY charge_currency (not catalog `currency`) so
+    // SUM(wholesale_minor / user_cashback_minor / loop_margin_minor)
+    // aggregates values that are actually in the same currency. The
+    // response field is still named `currency` for wire-compat but
+    // means "the currency the aggregated sums are denominated in",
+    // i.e. user home currency.
     const result = await db.execute(sql`
       SELECT
-        ${orders.currency} AS currency,
+        ${orders.chargeCurrency} AS currency,
         COUNT(*)::bigint AS count,
         COALESCE(SUM(${orders.faceValueMinor}), 0)::bigint AS face_value_minor,
         COALESCE(SUM(${orders.wholesaleMinor}), 0)::bigint AS wholesale_minor,
@@ -136,8 +154,8 @@ export async function adminSupplierSpendHandler(c: Context): Promise<Response> {
       WHERE ${orders.state} = 'fulfilled'
         AND ${orders.fulfilledAt} IS NOT NULL
         AND ${orders.fulfilledAt} >= ${since}
-      GROUP BY ${orders.currency}
-      ORDER BY ${orders.currency} ASC
+      GROUP BY ${orders.chargeCurrency}
+      ORDER BY ${orders.chargeCurrency} ASC
     `);
 
     const raw = (
