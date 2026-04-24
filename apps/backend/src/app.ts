@@ -201,7 +201,12 @@ const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
  * still apply but everyone lands in the same bucket, which is
  * conservative.
  */
-function clientIpFor(c: Context): string {
+// A2-1526: exported so `__tests__/trust-proxy.test.ts` can drive
+// both TRUST_PROXY=true and TRUST_PROXY=false paths end-to-end
+// without having to bring up a real rate-limited endpoint to observe
+// the bucketing decision. The rate-limit middleware calls this for
+// every request.
+export function clientIpFor(c: Context): string {
   if (env.TRUST_PROXY) {
     const xff = c.req.header('x-forwarded-for');
     if (xff !== undefined && xff.length > 0) {
