@@ -975,6 +975,24 @@ app.get(
 // gate on is_admin, and set c.get('user'). Rate-limited same as the
 // other authenticated surfaces — an admin still hits the limiter,
 // but the limits are generous since it's a low-volume UI.
+// A2-1010: force Cache-Control: private, no-store on every admin
+// response. Every handler under this namespace returns operator-
+// visible data (treasury snapshots, per-user credit history, audit
+// events, CSV exports of the ledger), so a CDN / intermediate proxy
+// keyed on URL alone — not Authorization — must not cache a response.
+// Mirror of the `/api/orders` + `/api/users/me` pattern above; the
+// individual CSV handlers already set it on the happy path, but this
+// namespace-level middleware guarantees the header also lands on 4xx
+// / 5xx responses (where a handler that threw never reached its own
+// `c.header(...)` call). Registered BEFORE requireAuth so a 401 /
+// 403 response emitted by the auth middleware also carries no-store
+// — a misbehaving CDN caching 401 / 403 envelopes shouldn't leak
+// "this URL is admin-only" cross-user.
+app.use('/api/admin/*', async (c, next) => {
+  await next();
+  c.header('Cache-Control', 'private, no-store');
+});
+
 app.use('/api/admin/*', requireAuth);
 app.use('/api/admin/*', requireAdmin);
 
