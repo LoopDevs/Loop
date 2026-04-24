@@ -13,6 +13,7 @@ import { getLocations, isLocationLoading } from './clustering/data-store.js';
 import { getMerchants } from './merchants/sync.js';
 import { clustersHandler } from './clustering/handler.js';
 import { imageProxyHandler, evictExpiredImageCache } from './images/proxy.js';
+import { sweepStaleIdempotencyKeys } from './admin/idempotency.js';
 import { upstreamUrl } from './upstream.js';
 import { getAllCircuitStates } from './circuit-breaker.js';
 import { generateOpenApiSpec } from './openapi.js';
@@ -304,19 +305,28 @@ function rateLimit(
 
 // ─── Global middleware ────────────────────────────────────────────────────────
 
-// Production CORS allowlist. The three non-web origins below are the local
-// schemes Capacitor WebViews use on iOS (default `capacitor://localhost`)
-// and Android (`https://localhost` since Capacitor 3; `http://localhost`
-// kept as well for older debug builds). Without them, every fetch from the
-// native app to the production API would fail preflight — a "works in dev,
-// CORS errors in production" regression on mobile release that would be
-// easy to catch late.
+// Production CORS allowlist. The two non-web origins below are the
+// local schemes Capacitor WebViews use on iOS (default
+// `capacitor://localhost`) and Android (`https://localhost` since
+// Capacitor 3). Without them, every fetch from the native app to the
+// production API would fail preflight — a "works in dev, CORS errors
+// in production" regression on mobile release that would be easy to
+// catch late.
+//
+// A2-1009: `http://localhost` used to be on this list too ("kept for
+// older Capacitor debug builds"). Dropped — debug builds aren't in
+// the App Store / Play Store, so no production user hits that
+// origin, and the allowlist entry was CSRF-adjacent: any attacker-
+// controlled process binding a port on a user's localhost (a
+// malicious npm `postinstall`, a dev-server sidecar, a VS Code
+// extension) could mint cross-origin fetches against production API
+// routes using the user's cookies / stored bearer. The canonical
+// Capacitor schemes above cover every shipping native build.
 const PRODUCTION_ORIGINS = [
   'https://loopfinance.io',
   'https://www.loopfinance.io',
   'capacitor://localhost',
   'https://localhost',
-  'http://localhost',
 ];
 
 app.use(
@@ -344,7 +354,19 @@ app.use(
     },
   }),
 );
-app.use('*', bodyLimit({ maxSize: 1024 * 1024 }));
+// A2-1005: the default `bodyLimit` error handler lets the middleware
+// throw, which Hono's fallback handler turns into a 500. The correct
+// HTTP status for "request body exceeds declared limit" is 413
+// Payload Too Large, and the error envelope should match the
+// `{ code, message }` shape every other handler uses.
+app.use(
+  '*',
+  bodyLimit({
+    maxSize: 1024 * 1024,
+    onError: (c) =>
+      c.json({ code: 'PAYLOAD_TOO_LARGE', message: 'Request body exceeds 1 MB limit' }, 413),
+  }),
+);
 app.use('*', requestId());
 
 // Audit A-021: replace the default `hono/logger` with a Pino-backed
@@ -356,12 +378,21 @@ app.use('*', requestId());
 // var but does NOT mutate the incoming request's headers, so reading
 // `c.req.header('X-Request-Id')` would be undefined for every client
 // that didn't already send one (almost all of them).
+//
+// A2-1321: Fly load balancer, Prometheus scraper, and openapi clients
+// poll these three paths every few seconds (the http_service healthcheck
+// in fly.toml alone fires every 15s per machine). Logging every 2xx
+// balloons the Pino stream by ~5,760 lines/day/machine with no operator
+// signal — the same counts are already on `/metrics`. Skip successful
+// probes, keep 4xx/5xx so a sick probe path still surfaces.
+const SILENT_PROBE_PATHS = new Set(['/health', '/metrics', '/openapi.json']);
 const accessLog = logger.child({ component: 'access' });
 app.use('*', async (c, next) => {
   const start = Date.now();
   await next();
   const ms = Date.now() - start;
   const status = c.res.status;
+  if (SILENT_PROBE_PATHS.has(c.req.path) && status < 400) return;
   accessLog.info(
     {
       method: c.req.method,
@@ -699,7 +730,14 @@ app.get(
 // content (description / longDescription / terms / instructions).
 // Unauthed callers still see the basic cached merchant via by-slug.
 app.use('/api/merchants/:id', requireAuth);
-app.get('/api/merchants/:id', merchantDetailHandler);
+// A2-1008: the single authed merchant-detail route was the only authed
+// GET with no rate limit. The handler fires a CTX upstream fetch on
+// every call — a runaway client (or a compromised bearer driving the
+// endpoint in a loop) would pin an upstream circuit + burn CTX quota
+// without any local backpressure. 120/min per IP matches the other
+// merchant reads and is well above a logged-in user's realistic
+// browse rate.
+app.get('/api/merchants/:id', rateLimit(120, 60_000), merchantDetailHandler);
 
 // Public, unauthenticated, marketing-facing cashback totals. 60/min
 // per IP is generous for a landing-page widget that renders once
@@ -946,6 +984,24 @@ app.get(
 // gate on is_admin, and set c.get('user'). Rate-limited same as the
 // other authenticated surfaces — an admin still hits the limiter,
 // but the limits are generous since it's a low-volume UI.
+// A2-1010: force Cache-Control: private, no-store on every admin
+// response. Every handler under this namespace returns operator-
+// visible data (treasury snapshots, per-user credit history, audit
+// events, CSV exports of the ledger), so a CDN / intermediate proxy
+// keyed on URL alone — not Authorization — must not cache a response.
+// Mirror of the `/api/orders` + `/api/users/me` pattern above; the
+// individual CSV handlers already set it on the happy path, but this
+// namespace-level middleware guarantees the header also lands on 4xx
+// / 5xx responses (where a handler that threw never reached its own
+// `c.header(...)` call). Registered BEFORE requireAuth so a 401 /
+// 403 response emitted by the auth middleware also carries no-store
+// — a misbehaving CDN caching 401 / 403 envelopes shouldn't leak
+// "this URL is admin-only" cross-user.
+app.use('/api/admin/*', async (c, next) => {
+  await next();
+  c.header('Cache-Control', 'private, no-store');
+});
+
 app.use('/api/admin/*', requireAuth);
 app.use('/api/admin/*', requireAdmin);
 
@@ -1559,6 +1615,11 @@ function runCleanup(): void {
   for (const [key, entry] of rateLimitMap) {
     if (now > entry.resetAt) rateLimitMap.delete(key);
   }
+  // A2-500: expire admin-idempotency snapshots past the 24h TTL
+  // promised by ADR-017. Fire-and-forget — a sweep failure can be
+  // retried next hour; the read-time TTL gate in lookupIdempotencyKey
+  // keeps replay semantics correct in the meantime.
+  void sweepStaleIdempotencyKeys();
 }
 
 // Start the cleanup interval unless we are in the test runner — tests import

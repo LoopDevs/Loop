@@ -1,3 +1,29 @@
+/**
+ * UI store — theme preference + toast stack.
+ *
+ * A2-1161: SSR-safety contract, written down so the rules aren't
+ * tribal knowledge. This module is imported at the root of the
+ * React Router v7 SSR build (`root.tsx`), so it runs on the
+ * server before hydration. Three things must stay true for every
+ * invocation of this file at module-import time:
+ *
+ *   1. `loadPreference()` must not throw when `localStorage` is
+ *      undefined. It wraps the `localStorage.getItem` in a try
+ *      block and falls back to `'system'`.
+ *   2. `resolveTheme()` must not throw when `window` is undefined.
+ *      It guards the `matchMedia` call with `typeof window` and
+ *      falls back to `'light'`.
+ *   3. `applyTheme()` must not throw when `document` is undefined.
+ *      It guards the classList mutation with `typeof document`
+ *      and silently no-ops. The real application lives in a
+ *      `useEffect` inside components that hydrate on the client.
+ *
+ * Any new top-level DOM access here needs the same pattern —
+ * otherwise a bare `document.documentElement...` at module scope
+ * crashes the SSR build. The `ui.store.ssr-safe.test.ts` test
+ * pins this contract by importing the module in a fresh context
+ * with no DOM globals and asserting it loads without throwing.
+ */
 import { create } from 'zustand';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
