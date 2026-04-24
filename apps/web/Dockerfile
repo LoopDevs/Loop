@@ -47,4 +47,11 @@ EXPOSE 3000
 ENV PORT=3000 NODE_ENV=production
 
 WORKDIR /app/apps/web
+
+# A2-402: liveness probe for Fly.io / Kubernetes. Hits the SSR root
+# which always responds — react-router-serve serves the home route.
+# 5s timeout; 3 retries keep a transient blip from cycling the pod.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "require('http').get('http://127.0.0.1:' + (process.env.PORT || 3000) + '/', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+
 CMD ["npx", "react-router-serve", "./build/server/index.js"]
