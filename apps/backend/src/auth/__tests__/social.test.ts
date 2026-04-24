@@ -13,9 +13,16 @@ vi.hoisted(() => {
 const verifyMock = vi.fn();
 const resolveMock = vi.fn();
 const recordRefreshMock = vi.fn();
+const consumeIdTokenMock = vi.fn();
 
 vi.mock('../id-token.js', () => ({
   verifyIdToken: (args: unknown) => verifyMock(args),
+}));
+// A2-566: social handler one-shot-consumes the id_token after verify.
+// Default happy-path returns `true` (first use); replay-test cases
+// override to `false` to exercise the rejection path.
+vi.mock('../id-token-replay.js', () => ({
+  consumeIdToken: (args: unknown) => consumeIdTokenMock(args),
 }));
 vi.mock('../identities.js', () => ({
   resolveOrCreateUserForIdentity: (args: unknown) => resolveMock(args),
@@ -57,6 +64,9 @@ beforeEach(() => {
   resolveMock.mockReset();
   recordRefreshMock.mockReset();
   recordRefreshMock.mockResolvedValue(undefined);
+  consumeIdTokenMock.mockReset();
+  // Default: id_token is fresh. A2-566 tests override to false.
+  consumeIdTokenMock.mockResolvedValue(true);
 });
 
 describe('googleSocialLoginHandler', () => {
@@ -131,6 +141,48 @@ describe('googleSocialLoginHandler', () => {
     verifyMock.mockRejectedValue(new Error('JWKS fetch 500'));
     const res = await googleSocialLoginHandler(makeCtx({ idToken: 'x.y.z' }));
     expect(res.status).toBe(503);
+  });
+
+  // A2-566: one-shot consume. A replayed id_token (already seen) is
+  // rejected with the same generic 401 as a verify failure — don't tell
+  // the caller it was a replay specifically.
+  it('A2-566: 401 when consumeIdToken reports a replay', async () => {
+    verifyMock.mockResolvedValue({
+      ok: true,
+      claims: {
+        iss: 'https://accounts.google.com',
+        aud: 'google-web-client',
+        sub: 'google-sub-replay',
+        email: 'a@b.com',
+        email_verified: true,
+        exp: 9999999999,
+        iat: 1,
+      },
+    });
+    consumeIdTokenMock.mockResolvedValue(false);
+    const res = await googleSocialLoginHandler(makeCtx({ idToken: 'replay-token' }));
+    expect(res.status).toBe(401);
+    expect(resolveMock).not.toHaveBeenCalled();
+    expect(recordRefreshMock).not.toHaveBeenCalled();
+  });
+
+  it('A2-566: 503 when consumeIdToken throws (fail closed on DB blip)', async () => {
+    verifyMock.mockResolvedValue({
+      ok: true,
+      claims: {
+        iss: 'https://accounts.google.com',
+        aud: 'google-web-client',
+        sub: 'google-sub-db',
+        email: 'a@b.com',
+        email_verified: true,
+        exp: 9999999999,
+        iat: 1,
+      },
+    });
+    consumeIdTokenMock.mockRejectedValue(new Error('postgres down'));
+    const res = await googleSocialLoginHandler(makeCtx({ idToken: 'db-error-token' }));
+    expect(res.status).toBe(503);
+    expect(resolveMock).not.toHaveBeenCalled();
   });
 
   it('accepts Apple email_verified="true" (string) as verified', async () => {
