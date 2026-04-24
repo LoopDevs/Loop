@@ -4,6 +4,11 @@ on:
   pull_request:
     types: [opened, synchronize, labeled]
 
+# A2-116: deny-by-default at the workflow level so an added job
+# without explicit `permissions:` can't inherit write access to
+# anything. Each job below opts into the narrow set it needs.
+permissions: {}
+
 jobs:
   label:
     name: Auto-label
