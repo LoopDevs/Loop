@@ -31,20 +31,9 @@ import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-settlement-lag' });
 
-export interface SettlementLagRow {
-  /** LOOP asset code; `null` for the fleet-wide aggregate row. */
-  assetCode: string | null;
-  sampleCount: number;
-  p50Seconds: number;
-  p95Seconds: number;
-  maxSeconds: number;
-  meanSeconds: number;
-}
-
-export interface SettlementLagResponse {
-  since: string;
-  rows: SettlementLagRow[];
-}
+// A2-1506: moved to `@loop/shared/admin-settlement-lag.ts`.
+import type { SettlementLagResponse, SettlementLagRow } from '@loop/shared';
+export type { SettlementLagResponse, SettlementLagRow };
 
 const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_WINDOW_MS = 366 * 24 * 60 * 60 * 1000;
