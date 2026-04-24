@@ -15,10 +15,20 @@ src/
 ├── discord.ts          ← Webhook senders (orders, health, circuit, payout-failed, below-floor)
 ├── openapi.ts          ← OpenAPI 3.1 spec (every new handler registers its path + status codes)
 ├── auth/handler.ts     ← Auth proxy + Loop-native OTP (ADR 013 + ADR 014 social login)
-├── admin/
-│   ├── handler.ts      ← Cashback-config CRUD (ADR 011)
-│   ├── treasury.ts     ← Admin treasury snapshot (ledger + LOOP liabilities + assets + payout counts, ADR 015)
-│   └── payouts.ts      ← Admin payout list + per-row retry (ADR 015/016)
+├── admin/              ← Admin-panel handlers (~60 files) grouped by domain:
+│   │                     ADR 011 cashback config, ADR 015 treasury + asset
+│   │                     drift + settlement lag, ADR 017/018 credit
+│   │                     primitives (adjustments / refunds / idempotency /
+│   │                     audit envelope), supplier-spend, operator pools,
+│   │                     mix-axis matrix (ADR 022), per-merchant / per-user
+│   │                     drill-down (ADR 018). Every response shape lives in
+│   │                     `@loop/shared/admin-*` (A2-1506) so web + backend +
+│   │                     openapi registration compile against one definition.
+├── config/handler.ts   ← GET /api/config (feature-flag snapshot — ADR 010)
+├── public/             ← ADR 020 Tier-1 unauthenticated never-500 surface:
+│   │                     cashback-stats, top-cashback-merchants, cashback-preview,
+│   │                     loop-assets, flywheel-stats, merchant-by-id/slug.
+│   │                     Shared cache-control + last-known-good fallback.
 ├── ctx/                ← CTX operator-pool client (ADR 013)
 ├── credits/
 │   ├── payout-asset.ts ← home-currency → LOOP asset code + issuer lookup (ADR 015)
