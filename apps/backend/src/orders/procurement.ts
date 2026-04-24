@@ -243,7 +243,19 @@ async function procureOne(order: Order): Promise<'fulfilled' | 'failed' | 'skipp
   try {
     const res = await operatorFetch(upstreamUrl('/gift-cards'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        // A2-1508: pin the CTX charge to this Loop order. A 30s
+        // fetch timeout + retry-on-next-tick (after
+        // `sweepStuckProcurement` flips the order back) could otherwise
+        // post the same purchase twice if the first call reached CTX
+        // but the response was lost. The key is the Loop order id —
+        // stable, unique per order, and already the audit pivot on
+        // our side. CTX dedupes by this key server-side (if they
+        // honour it); worst case the header is inert and we've spent
+        // zero bytes of behaviour on it.
+        'Idempotency-Key': order.id,
+      },
       body: JSON.stringify({
         cryptoCurrency,
         fiatCurrency: order.currency,
