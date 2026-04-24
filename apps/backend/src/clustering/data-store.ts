@@ -4,6 +4,7 @@ import { logger } from '../logger.js';
 import { env } from '../env.js';
 import { getUpstreamCircuit } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
+import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { getMerchants } from '../merchants/sync.js';
 
 /**
@@ -99,12 +100,12 @@ export async function refreshLocations(): Promise<void> {
 
       if (!response.ok) {
         // Capture a truncated body snippet so schema-drift or auth-rejection
-        // debugging doesn't require reproducing. Same pattern as auth/orders.
-        // Cap at 500 chars — pino redact is field-based, can't scrub tokens
-        // if upstream ever echoed one in an error string.
+        // debugging doesn't require reproducing. A2-1306: scrub JWT /
+        // opaque-token / email / card substrings before logging — matches
+        // the redaction posture of auth/orders/procurement sites.
         const body = await response.text().catch(() => '');
         log.error(
-          { status: response.status, body: body.slice(0, 500), page },
+          { status: response.status, body: scrubUpstreamBody(body), page },
           'Upstream locations API returned non-ok status',
         );
         throw new Error(`Upstream locations API returned ${response.status}`);

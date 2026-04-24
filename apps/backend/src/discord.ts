@@ -1,5 +1,6 @@
 import { env } from './env.js';
 import { logger } from './logger.js';
+import { scrubUpstreamBody } from './upstream-body-scrub.js';
 
 const log = logger.child({ module: 'discord' });
 
@@ -56,7 +57,11 @@ async function sendWebhook(webhookUrl: string | undefined, embed: DiscordEmbed):
     if (!response.ok) {
       let body = '';
       try {
-        body = (await response.text()).slice(0, 500);
+        // A2-1306: scrub JWT / opaque-token / email / card substrings
+        // before logging. Discord error bodies usually echo the
+        // submitted payload back, which can include user identifiers
+        // (email, IDs) that arrived from upstream notifiers.
+        body = scrubUpstreamBody(await response.text());
       } catch {
         /* body unreadable */
       }
