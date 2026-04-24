@@ -1,8 +1,45 @@
-# Default — all PRs require at least one review
-* @LoopDevs/engineering
+# CODEOWNERS — reviewers required by path.
+#
+# A2-103 (separate finding): the `@LoopDevs/engineering` team doesn't
+# exist yet; GitHub silently ignores entries naming a missing team,
+# so until the team is created these rules act as documentation
+# only. Once it exists, branch-protection's "required reviewers from
+# CODEOWNERS" rule kicks in and these become enforceable gates.
+#
+# A2-104 (this file's scope): coverage was previously limited to
+# auth/ + orders/ + native/ + stores/auth*. Every surface that
+# mutates ledger state, talks to Stellar, writes DB migrations, or
+# is an admin-only endpoint is now listed explicitly so the same
+# reviewer bar applies.
 
-# Security-sensitive paths — require explicit security review
-apps/backend/src/auth/      @LoopDevs/engineering
-apps/backend/src/orders/    @LoopDevs/engineering
-apps/web/app/native/        @LoopDevs/engineering
-apps/web/app/stores/auth*   @LoopDevs/engineering
+# Default — all PRs require at least one review
+*                                               @LoopDevs/engineering
+
+# ─── Auth (token mint, OTP, sessions, social login) ─────────────────
+apps/backend/src/auth/                          @LoopDevs/engineering
+apps/web/app/native/                            @LoopDevs/engineering
+apps/web/app/stores/auth*                       @LoopDevs/engineering
+
+# ─── Ledger writers + admin-write primitives (ADR 009 / 017) ────────
+apps/backend/src/credits/                       @LoopDevs/engineering
+apps/backend/src/admin/                         @LoopDevs/engineering
+apps/backend/src/orders/                        @LoopDevs/engineering
+
+# ─── Stellar / on-chain (ADR 015 / 016) ────────────────────────────
+apps/backend/src/payments/                      @LoopDevs/engineering
+apps/web/app/routes/settings.wallet*            @LoopDevs/engineering
+
+# ─── CTX operator pool (ADR 013) ────────────────────────────────────
+apps/backend/src/ctx/                           @LoopDevs/engineering
+
+# ─── DB schema + migrations — reviewer-gate every schema change ────
+apps/backend/src/db/                            @LoopDevs/engineering
+
+# ─── Shared wire types + money helpers ─────────────────────────────
+packages/shared/src/api.ts                      @LoopDevs/engineering
+packages/shared/src/loop-asset.ts               @LoopDevs/engineering
+packages/shared/src/credit-transaction-type.ts  @LoopDevs/engineering
+packages/shared/src/stellar*                    @LoopDevs/engineering
+
+# ─── ADRs — architectural changes go through the reviewer group ────
+docs/adr/                                       @LoopDevs/engineering
