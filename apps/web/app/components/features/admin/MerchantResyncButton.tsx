@@ -6,6 +6,7 @@ import {
   type AdminMerchantResyncResponse,
   type AdminWriteEnvelope,
 } from '~/services/admin';
+import { ReplayedBadge } from './ReplayedBadge';
 
 /**
  * Force-refresh the merchant catalog from upstream CTX (ADR 011).
@@ -29,17 +30,20 @@ import {
  */
 export function MerchantResyncButton(): React.JSX.Element {
   const queryClient = useQueryClient();
-  const [flash, setFlash] = useState<string | null>(null);
+  // A2-1163: capture `audit.replayed` so an operator double-clicking
+  // Resync sees the idempotency-replay badge instead of a success
+  // flash indistinguishable from a fresh sweep.
+  const [flash, setFlash] = useState<{ label: string; replayed: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const mutation = useMutation<AdminWriteEnvelope<AdminMerchantResyncResponse>, Error, string>({
     mutationFn: (reason: string) => resyncMerchants({ reason }),
-    onSuccess: ({ result }) => {
+    onSuccess: ({ result, audit }) => {
       setError(null);
       const label = result.triggered
         ? `Synced ${result.merchantCount.toLocaleString('en-US')} merchants`
         : 'Already in sync';
-      setFlash(label);
+      setFlash({ label, replayed: audit.replayed });
       setTimeout(() => setFlash(null), 3000);
       void queryClient.invalidateQueries({ queryKey: ['merchants'] });
       void queryClient.invalidateQueries({ queryKey: ['admin-merchant-stats'] });
@@ -83,7 +87,8 @@ export function MerchantResyncButton(): React.JSX.Element {
       </button>
       {flash !== null ? (
         <span role="status" className="text-xs text-green-700 dark:text-green-400">
-          {flash}
+          {flash.label}
+          <ReplayedBadge replayed={flash.replayed} />
         </span>
       ) : null}
       {error !== null ? (

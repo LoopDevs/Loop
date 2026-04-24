@@ -24,7 +24,7 @@
     "lint:docs": "./scripts/lint-docs.sh",
     "audit": "npm audit --audit-level=high",
     "build": "npm run build -w @loop/backend -w @loop/web",
-    "proto:generate": "cd apps/backend && npx buf generate",
+    "proto:generate": "cd apps/backend && npx buf generate && cd ../.. && prettier --write 'packages/shared/src/proto/**/*.ts'",
     "prepare": "husky"
   },
   "lint-staged": {

@@ -1,7 +1,10 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  // A2-407: `migrate-cli.ts` is a second entry point for Fly's
+  // `[deploy] release_command`. Bundled alongside the main server so
+  // the production image ships both without a second build step.
+  entry: ['src/index.ts', 'src/migrate-cli.ts'],
   format: ['esm'],
   target: 'node22',
   outDir: 'dist',

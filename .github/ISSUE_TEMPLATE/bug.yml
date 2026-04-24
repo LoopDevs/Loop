@@ -1,0 +1,66 @@
+name: Bug report
+description: Something is broken or not behaving as expected.
+title: 'bug: '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Before you submit:
+
+        - **Security issues** — do NOT file them here. Use the private
+          advisory channel described in SECURITY.md.
+        - **Questions / support** — open a Discussion instead; issues
+          are for bugs and feature requests.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: One-sentence summary plus any error messages you saw.
+      placeholder: 'Clicking Save on /admin/cashback shows `IDEMPOTENCY_KEY_REQUIRED` even though the request includes the header.'
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps so someone on the Loop team can reproduce locally. Screenshots welcome.
+      placeholder: |
+        1. Sign in as an admin.
+        2. Go to `/admin/cashback`.
+        3. Edit Tesco's user cashback to 6.00 and click Save.
+        4. Observe the error.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+      placeholder: 'Save succeeds and the row updates in the table.'
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit / version
+      description: "Output of `git rev-parse --short HEAD` if you're on a local checkout, or the deploy marker from the footer of the admin UI."
+      placeholder: 'abc1234'
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser + OS (web) or iOS / Android version (mobile).
+      placeholder: 'Chrome 121 / macOS 14'
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / request-id
+      description: |
+        If you have a `X-Request-Id` from the browser devtools or a
+        backend log line, paste it here — it lets us jump straight to
+        the failure in the Pino / Sentry stream.
+      render: shell
