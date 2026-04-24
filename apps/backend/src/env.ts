@@ -115,6 +115,15 @@ export const EnvSchema = z.object({
   METRICS_BEARER_TOKEN: z.string().min(16).optional(),
   OPENAPI_BEARER_TOKEN: z.string().min(16).optional(),
 
+  // A2-1610: per-admin per-currency daily cap on credit adjustments,
+  // in minor units. Stops a stolen admin session from draining the
+  // treasury via many sub-per-request-cap writes inside the token
+  // TTL. Default 100M minor (£1M / $1M / €1M) — a volume in-flight
+  // ops would never hit in a single UTC day. Set to `0` to disable
+  // the check (dev / test). The per-request ±10M cap stays in place
+  // regardless.
+  ADMIN_DAILY_ADJUSTMENT_CAP_MINOR: z.coerce.bigint().nonnegative().default(100_000_000n),
+
   // Discord webhooks (optional — for notifications)
   DISCORD_WEBHOOK_ORDERS: z.string().url().optional(),
   DISCORD_WEBHOOK_MONITORING: z.string().url().optional(),
