@@ -46,6 +46,13 @@ if (typeof window !== 'undefined' && import.meta.env.VITE_SENTRY_DSN) {
     // events as `staging`. Falls back to `MODE` so existing deploys
     // without the env var set continue to behave as before.
     environment: (import.meta.env.VITE_LOOP_ENV as string | undefined) ?? import.meta.env.MODE,
+    // A2-1309: release tag pivots a Sentry event back to the deploy
+    // artifact. CI/CD sets `VITE_SENTRY_RELEASE` to the git SHA at
+    // build time; left unset on dev so Sentry omits the attribute.
+    ...(import.meta.env.VITE_SENTRY_RELEASE !== undefined &&
+    import.meta.env.VITE_SENTRY_RELEASE !== ''
+      ? { release: import.meta.env.VITE_SENTRY_RELEASE as string }
+      : {}),
     integrations: [Sentry.browserTracingIntegration()],
     tracesSampleRate: import.meta.env.PROD ? 0.1 : 1.0,
     // A2-1308: scrub known-secret keys out of every captured event.
