@@ -4,21 +4,10 @@ import { getMerchantStats, type MerchantStatsRow } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
+import { formatMinorCurrency as fmtMinor } from '@loop/shared';
 
-/**
- * Formats a non-negative minor amount in the row's currency. Rows
- * here are always positive aggregate sums; the helper guards against
- * non-finite inputs so a bad backend row doesn't print NaN.
- */
-export function fmtMinor(minor: string, currency: string): string {
-  const n = Number(minor);
-  if (!Number.isFinite(n)) return '—';
-  try {
-    return new Intl.NumberFormat(ADMIN_LOCALE, { style: 'currency', currency }).format(n / 100);
-  } catch {
-    return `${(n / 100).toFixed(2)} ${currency}`;
-  }
-}
+// A2-1520: `fmtMinor` re-exported for the test import; bigint-safe now.
+export { fmtMinor };
 
 function fmtRelative(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();

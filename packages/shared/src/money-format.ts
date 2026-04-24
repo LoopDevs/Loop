@@ -23,24 +23,39 @@
  */
 
 /**
- * Bigint minor-units → localised currency string with two decimals.
+ * Minor-units → localised currency string with two decimals.
  *
  * `formatMinorCurrency(4200n, 'GBP')` → `"£42.00"` (or locale
  * equivalent).
  *
- * bigint-safe: value / 100n + value % 100n avoids the
- * `Number(bigint)` precision loss past 2^53. Fleet-wide cashback
- * totals can exceed that; per-user amounts can't today but share
- * one helper to stay consistent.
+ * Accepts `bigint | string | number` (A2-1520). Strings come from
+ * backend JSON (admin aggregates serialise bigints as strings to
+ * survive JSON.stringify); numbers are tolerated for legacy call
+ * sites but internally converted to bigint so the same pad/slice
+ * arithmetic applies. The 2^53 precision window is not enough for
+ * fleet-wide lifetime-cashback totals at scale, so the helper never
+ * relies on it — the Number cast only touches the whole/frac
+ * components after the bigint split.
+ *
+ * Non-integer numbers are floored (drops to minor-unit precision);
+ * non-finite numbers return `"—"` so a bad backend row doesn't
+ * render `NaN` to operators.
  *
  * Unknown ISO codes → falls back to `"<amount> <code>"`. Intl's
  * behaviour with unassigned 3-letter codes is engine-defined
  * (V8 accepts `XYZ`; JSC may not), so the fallback catches
  * engine-level throws rather than depending on the silent-accept.
+ *
+ * Locale is pinned `en-US` per the admin-facing policy (A2-1521 +
+ * `apps/web/app/utils/locale.ts`). User-facing surfaces that want
+ * the browser locale should format themselves with `USER_LOCALE`;
+ * they're rendering per-user amounts where Number-cast is safe.
  */
-export function formatMinorCurrency(minor: bigint, currency: string): string {
-  const neg = minor < 0n;
-  const abs = neg ? -minor : minor;
+export function formatMinorCurrency(minor: bigint | string | number, currency: string): string {
+  const big = coerceMinor(minor);
+  if (big === null) return '—';
+  const neg = big < 0n;
+  const abs = neg ? -big : big;
   const major = Number(abs / 100n);
   const frac = Number(abs % 100n) / 100;
   const total = (neg ? -1 : 1) * (major + frac);
@@ -53,6 +68,19 @@ export function formatMinorCurrency(minor: bigint, currency: string): string {
     }).format(total);
   } catch {
     return `${total.toFixed(2)} ${currency}`;
+  }
+}
+
+function coerceMinor(minor: bigint | string | number): bigint | null {
+  if (typeof minor === 'bigint') return minor;
+  if (typeof minor === 'number') {
+    if (!Number.isFinite(minor)) return null;
+    return BigInt(Math.trunc(minor));
+  }
+  try {
+    return BigInt(minor);
+  } catch {
+    return null;
   }
 }
 

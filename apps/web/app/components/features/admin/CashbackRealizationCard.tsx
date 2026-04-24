@@ -106,16 +106,34 @@ export function formatBps(bps: number): string {
   return `${pct.toFixed(2)}%`;
 }
 
-/** Minor-units bigint-string → localised currency label. */
+// Minor-units bigint-string → localised whole-unit currency label for
+// the realization chart. Unlike `formatMinorCurrency` (two-decimal,
+// pinned en-US) this one rounds to the major unit and uses the
+// browser locale — the card is a glance-view where cent precision
+// would be noise.
+//
+// A2-1520: avoid `Number(BigInt(minor)) / 100` so fleet-wide realized
+// cashback past 2^53 minor units ($9e13) doesn't silently lose
+// precision on the whole-unit part.
 export function formatMinor(minor: string, currency: string): string {
+  let big: bigint;
   try {
-    const major = Number(BigInt(minor)) / 100;
+    big = BigInt(minor);
+  } catch {
+    return '—';
+  }
+  const neg = big < 0n;
+  const abs = neg ? -big : big;
+  const major = Number(abs / 100n);
+  const frac = Number(abs % 100n) / 100;
+  const total = (neg ? -1 : 1) * (major + frac);
+  try {
     return new Intl.NumberFormat(undefined, {
       style: 'currency',
       currency,
       currencyDisplay: 'narrowSymbol',
       maximumFractionDigits: 0,
-    }).format(major);
+    }).format(total);
   } catch {
     return '—';
   }

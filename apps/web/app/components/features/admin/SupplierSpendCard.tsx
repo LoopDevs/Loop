@@ -4,25 +4,14 @@ import { getSupplierSpend, type SupplierSpendRow } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
+import { formatMinorCurrency as fmtMinor } from '@loop/shared';
 
 const HOME_CURRENCIES: ReadonlySet<string> = new Set(['USD', 'GBP', 'EUR']);
 
 const WINDOW_HOURS = 24;
 
-/**
- * Formats a non-negative minor amount in the row's currency. Rows
- * here are always positive aggregate sums; the helper guards against
- * non-finite inputs so a bad backend row doesn't print NaN.
- */
-export function fmtMinor(minor: string, currency: string): string {
-  try {
-    const major = Number(BigInt(minor)) / 100;
-    if (!Number.isFinite(major)) return '—';
-    return new Intl.NumberFormat(ADMIN_LOCALE, { style: 'currency', currency }).format(major);
-  } catch {
-    return '—';
-  }
-}
+// A2-1520: `fmtMinor` re-exported for the test import; bigint-safe now.
+export { fmtMinor };
 
 /**
  * Supplier-spend card for /admin/treasury. Surfaces the CTX-as-
