@@ -162,7 +162,11 @@ if (env.SENTRY_DSN) {
   app.use(
     sentry(app, {
       dsn: env.SENTRY_DSN,
-      environment: env.NODE_ENV,
+      // A2-1310: `LOOP_ENV` is the explicit logical-env tag so a
+      // staging deploy that sets `NODE_ENV=production` can still
+      // bucket events as `staging`. Falls back to NODE_ENV so
+      // existing prod + dev deploys are unaffected.
+      environment: env.LOOP_ENV ?? env.NODE_ENV,
       tracesSampleRate: env.NODE_ENV === 'production' ? 0.1 : 1.0,
       // A2-1308: scrub known-secret keys out of every captured event
       // before it leaves the process. Sentry's sendDefaultPii:false

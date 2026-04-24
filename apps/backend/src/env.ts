@@ -135,6 +135,15 @@ export const EnvSchema = z.object({
 
   // Error tracking (optional — get DSN from sentry.io)
   SENTRY_DSN: z.string().url().optional(),
+  // A2-1310: deploy-time logical environment tag. Backend was using
+  // `NODE_ENV` for the Sentry `environment` field and web was using
+  // `import.meta.env.MODE` — these diverge on a staging deploy that
+  // sets `NODE_ENV=production` but `MODE=staging`, bucketing backend
+  // and web events into different Sentry environments. `LOOP_ENV`
+  // (backend) paired with `VITE_LOOP_ENV` (web) is the explicit
+  // override: both sides fall back to their respective defaults when
+  // unset, so existing deploys keep working.
+  LOOP_ENV: z.string().min(1).optional(),
 
   // Database (ADR 012). Required — the credits ledger + admin panel
   // can't start without it. Standard postgres URL; in dev points at
