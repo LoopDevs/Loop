@@ -6,5 +6,9 @@ if [ "$BRANCH" != "main" ] && ! echo "$BRANCH" | grep -qE "^(feat|fix|chore|docs
   exit 1
 fi
 
-npm test
-./scripts/lint-docs.sh
+# A2-411: run the full local verification suite — typecheck, lint,
+# format:check, lint-docs, tests — so a push that would fail CI's
+# Quality job fails locally instead. Previously pre-push only ran
+# `npm test` + `lint-docs.sh`, leaving typecheck / lint / format drift
+# to surface only after the CI cycle started.
+./scripts/verify.sh
