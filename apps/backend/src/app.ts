@@ -6,6 +6,7 @@ import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
+import { runWithRequestContext } from './request-context.js';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { sentry, captureException } from '@sentry/hono/node';
 import { scrubSentryEvent } from './sentry-scrubber.js';
@@ -369,6 +370,16 @@ app.use(
   }),
 );
 app.use('*', requestId());
+// A2-1305: mount the request ID into an AsyncLocalStorage context so
+// any downstream helper — `operatorFetch`, `CircuitBreaker.fetch`,
+// handler-scope code that doesn't pass `c` around — can read it and
+// propagate it onto outbound CTX fetches as `X-Request-Id`. CTX will
+// then log our id against theirs, letting ops ask "what happened to
+// our request abc123?" without a timestamp-only dig.
+app.use('*', async (c, next) => {
+  const id = c.get('requestId') ?? c.req.header('X-Request-Id') ?? 'unknown';
+  await runWithRequestContext({ requestId: id }, next);
+});
 
 // Audit A-021: replace the default `hono/logger` with a Pino-backed
 // access logger so request logs share the same structure, redaction

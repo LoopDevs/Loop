@@ -1,5 +1,6 @@
 import { logger } from './logger.js';
 import { notifyCircuitBreaker } from './discord.js';
+import { getCurrentRequestId } from './request-context.js';
 
 export type CircuitState = 'closed' | 'open' | 'half_open';
 
@@ -128,8 +129,24 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
       armProbeTimer();
     }
 
+    // A2-1305: thread our request ID onto the outbound so CTX can log
+    // it against theirs. The caller's own `init.headers` wins over this
+    // default — a handler that sets X-Request-Id explicitly is assumed
+    // to know what it's doing. Only attached when an ambient request
+    // context exists (i.e. inside a real request, not at boot-time
+    // sync or a scheduled worker that runs outside the middleware).
+    const requestId = getCurrentRequestId();
+    let outboundInit = init;
+    if (requestId !== undefined) {
+      const headers = new Headers(init?.headers);
+      if (!headers.has('X-Request-Id')) {
+        headers.set('X-Request-Id', requestId);
+        outboundInit = { ...init, headers };
+      }
+    }
+
     try {
-      const response = await fetch(url, init);
+      const response = await fetch(url, outboundInit);
 
       // Treat 5xx as upstream failures for circuit-breaker purposes.
       // 4xx are client errors and should NOT trip the circuit.
