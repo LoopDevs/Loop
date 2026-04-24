@@ -1,7 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiException } from '@loop/shared';
-import { resyncMerchants, type AdminMerchantResyncResponse } from '~/services/admin';
+import {
+  resyncMerchants,
+  type AdminMerchantResyncResponse,
+  type AdminWriteEnvelope,
+} from '~/services/admin';
 
 /**
  * Force-refresh the merchant catalog from upstream CTX (ADR 011).
@@ -28,12 +32,12 @@ export function MerchantResyncButton(): React.JSX.Element {
   const [flash, setFlash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const mutation = useMutation<AdminMerchantResyncResponse>({
-    mutationFn: resyncMerchants,
-    onSuccess: (res) => {
+  const mutation = useMutation<AdminWriteEnvelope<AdminMerchantResyncResponse>, Error, string>({
+    mutationFn: (reason: string) => resyncMerchants({ reason }),
+    onSuccess: ({ result }) => {
       setError(null);
-      const label = res.triggered
-        ? `Synced ${res.merchantCount.toLocaleString('en-US')} merchants`
+      const label = result.triggered
+        ? `Synced ${result.merchantCount.toLocaleString('en-US')} merchants`
         : 'Already in sync';
       setFlash(label);
       setTimeout(() => setFlash(null), 3000);
@@ -60,7 +64,17 @@ export function MerchantResyncButton(): React.JSX.Element {
         type="button"
         onClick={() => {
           setError(null);
-          mutation.mutate();
+          // A2-509: ADR-017 requires a reason on every admin mutation.
+          // Same prompt-based pattern as retry-payout and the cashback
+          // split editor — a11y/UX upgrade tracked under A2-1107.
+          const reason = window.prompt('Reason for forcing a catalog resync:', '');
+          if (reason === null) return;
+          const trimmed = reason.trim();
+          if (trimmed.length < 2 || trimmed.length > 500) {
+            setError('Reason must be 2–500 characters');
+            return;
+          }
+          mutation.mutate(trimmed);
         }}
         disabled={mutation.isPending}
         className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
