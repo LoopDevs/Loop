@@ -1,37 +1,18 @@
+// A2-814: `LocationPoint` + `ClusterPoint` come from `@loop/shared/merchants`.
+// The two declarations were structurally identical; the shared
+// version is the wire contract the web client + the openapi schema
+// already consume, so the backend clusterer now imports rather
+// than re-declaring them.
+import type { LocationPoint, ClusterPoint } from '@loop/shared';
+
+export type { LocationPoint, ClusterPoint };
+
 /** A single merchant location from the in-memory store. */
 export interface Location {
   merchantId: string;
   mapPinUrl: string | null;
   latitude: number;
   longitude: number;
-}
-
-/** An individual location point (zoom ≥ 14 or single in cell). */
-export interface LocationPoint {
-  type: 'Feature';
-  properties: {
-    cluster: false;
-    merchantId: string;
-    mapPinUrl: string;
-  };
-  geometry: {
-    type: 'Point';
-    coordinates: { longitude: number; latitude: number };
-  };
-}
-
-/** An aggregated cluster of multiple nearby locations. */
-export interface ClusterPoint {
-  type: 'Feature';
-  id: number;
-  properties: {
-    cluster: true;
-    pointCount: number;
-  };
-  geometry: {
-    type: 'Point';
-    coordinates: { longitude: number; latitude: number };
-  };
 }
 
 export interface ClusteringResult {
