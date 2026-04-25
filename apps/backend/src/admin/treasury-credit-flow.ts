@@ -31,6 +31,7 @@ import type { Context } from 'hono';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { creditTransactions, HOME_CURRENCIES, type HomeCurrency } from '../db/schema.js';
+import { isHomeCurrency } from '@loop/shared';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-treasury-credit-flow' });
@@ -49,10 +50,6 @@ interface Row extends Record<string, unknown> {
   currency: string;
   credited_minor: string | bigint | number;
   debited_minor: string | bigint | number;
-}
-
-function isHomeCurrency(v: string): v is HomeCurrency {
-  return (HOME_CURRENCIES as ReadonlyArray<string>).includes(v);
 }
 
 export async function adminTreasuryCreditFlowHandler(c: Context): Promise<Response> {

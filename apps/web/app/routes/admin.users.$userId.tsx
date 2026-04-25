@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
-import { ApiException } from '@loop/shared';
+import { ApiException, isHomeCurrency } from '@loop/shared';
 import type { Route } from './+types/admin.users.$userId';
 import { shouldRetry } from '~/hooks/query-retry';
 import { getAdminUser, getAdminUserCredits, type AdminUserCreditRow } from '~/services/admin';
@@ -20,13 +20,6 @@ import { UserRailMixCard } from '~/components/features/admin/UserRailMixCard';
 import { UserPayoutsTable } from '~/components/features/admin/UserPayoutsTable';
 import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
-
-const HOME_CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
-type HomeCurrency = (typeof HOME_CURRENCIES)[number];
-
-function isHomeCurrency(s: string): s is HomeCurrency {
-  return (HOME_CURRENCIES as readonly string[]).includes(s);
-}
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · User — Loop' }];

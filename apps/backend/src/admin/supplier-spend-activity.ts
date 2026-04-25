@@ -28,6 +28,7 @@ import type { Context } from 'hono';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { orders, HOME_CURRENCIES, type HomeCurrency } from '../db/schema.js';
+import { isHomeCurrency } from '@loop/shared';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-supplier-spend-activity' });
@@ -48,10 +49,6 @@ interface Row extends Record<string, unknown> {
   wholesale_minor: string | bigint;
   user_cashback_minor: string | bigint;
   loop_margin_minor: string | bigint;
-}
-
-function isHomeCurrency(v: string): v is HomeCurrency {
-  return (HOME_CURRENCIES as ReadonlyArray<string>).includes(v);
 }
 
 export async function adminSupplierSpendActivityHandler(c: Context): Promise<Response> {

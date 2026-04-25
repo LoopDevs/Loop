@@ -17,16 +17,9 @@
  */
 import { and, eq, lt, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import {
-  orders,
-  creditTransactions,
-  userCredits,
-  users,
-  pendingPayouts,
-  HOME_CURRENCIES,
-  type HomeCurrency,
-} from '../db/schema.js';
+import { orders, creditTransactions, userCredits, users, pendingPayouts } from '../db/schema.js';
 import { logger } from '../logger.js';
+import { isHomeCurrency } from '@loop/shared';
 import { buildPayoutIntent } from '../credits/payout-builder.js';
 import { notifyStuckProcurementSwept } from '../discord.js';
 import type { Order } from './repo.js';
@@ -220,11 +213,6 @@ export async function markOrderFulfilled(
     }
     return order;
   });
-}
-
-/** Narrows a DB-read string into the HomeCurrency union — same guard as loop-handler. */
-function isHomeCurrency(s: string): s is HomeCurrency {
-  return (HOME_CURRENCIES as ReadonlyArray<string>).includes(s);
 }
 
 /**
