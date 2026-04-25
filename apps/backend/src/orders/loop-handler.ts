@@ -27,13 +27,12 @@ import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { getMerchants } from '../merchants/sync.js';
 import type { LoopAuthContext } from '../auth/handler.js';
+import { ORDER_PAYMENT_METHODS, type OrderPaymentMethod } from '../db/schema.js';
 import {
-  ORDER_PAYMENT_METHODS,
-  HOME_CURRENCIES,
-  type OrderPaymentMethod,
-  type HomeCurrency,
-} from '../db/schema.js';
-import type { CreateLoopOrderResponse, LoopOrderView as SharedLoopOrderView } from '@loop/shared';
+  isHomeCurrency,
+  type CreateLoopOrderResponse,
+  type LoopOrderView as SharedLoopOrderView,
+} from '@loop/shared';
 import { getUserById } from '../db/users.js';
 import { convertMinorUnits } from '../payments/price-feed.js';
 import { payoutAssetFor } from '../credits/payout-asset.js';
@@ -339,15 +338,6 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     log.error({ err, userId: auth.userId }, 'Loop-native order creation failed');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to create order' }, 500);
   }
-}
-
-/**
- * Narrow a DB-read string into the `HomeCurrency` union. Guards the
- * handler from a schema-drifted `users.home_currency` row sneaking
- * past the convertMinorUnits typed parameter.
- */
-function isHomeCurrency(s: string): s is HomeCurrency {
-  return (HOME_CURRENCIES as ReadonlyArray<string>).includes(s);
 }
 
 /**

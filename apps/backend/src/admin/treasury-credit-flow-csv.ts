@@ -29,6 +29,7 @@ import type { Context } from 'hono';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { HOME_CURRENCIES, type HomeCurrency } from '../db/schema.js';
+import { isHomeCurrency } from '@loop/shared';
 import { logger } from '../logger.js';
 import { csvEscape } from './csv-escape.js';
 
@@ -60,10 +61,6 @@ function toBigInt(v: string | number | bigint): bigint {
   if (typeof v === 'bigint') return v;
   if (typeof v === 'number') return BigInt(Math.trunc(v));
   return BigInt(v);
-}
-
-function isHomeCurrency(v: string): v is HomeCurrency {
-  return (HOME_CURRENCIES as ReadonlyArray<string>).includes(v);
 }
 
 export async function adminTreasuryCreditFlowCsvHandler(c: Context): Promise<Response> {
