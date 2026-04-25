@@ -155,6 +155,13 @@
       "when": 1779000000000,
       "tag": "0021_orders_currency_check",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1779100000000,
+      "tag": "0022_credit_tx_withdrawal_unique",
+      "breakpoints": true
     }
   ]
 }
