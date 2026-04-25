@@ -17,9 +17,12 @@ zod boundary) and once in the web's `services/*` layer:
 - `LOOP_ASSET_CODES` + `LoopAssetCode` + `CURRENCY_TO_ASSET_CODE` +
   `loopAssetForCurrency` (ADR 015 — payout asset mapping; the admin
   UI filters on codes the backend validates).
-- `STELLAR_PUBKEY_REGEX` + `isStellarPublicKey` (ADR 015 / 016 — the
-  format `/settings/wallet` validates before submit and the backend
-  re-validates at the `setStellarAddress` handler).
+- `STELLAR_PUBKEY_REGEX` (ADR 015 / 016 — the format
+  `/settings/wallet` validates before submit and the backend
+  re-validates at the `setStellarAddress` handler). The earlier
+  `isStellarPublicKey(s): s is string` helper was dropped under
+  A2-820 / A2-821 — zero consumers and a no-op type predicate; every
+  call site uses `STELLAR_PUBKEY_REGEX.test(s)` directly.
 
 Each extraction followed the same shape. Without a written rule the
 pattern lives only in the diffs, and reviewers on the next extraction
