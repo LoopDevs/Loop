@@ -20,6 +20,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { userIdentities, users, type SocialProvider } from '../db/schema.js';
 import type { User } from '../db/users.js';
+import { normalizeEmail } from './normalize-email.js';
 
 export interface ResolveOrCreateArgs {
   provider: SocialProvider;
@@ -35,7 +36,12 @@ export interface ResolveOrCreateArgs {
 export async function resolveOrCreateUserForIdentity(
   args: ResolveOrCreateArgs,
 ): Promise<{ user: User; created: boolean }> {
-  const email = args.email.toLowerCase().trim();
+  // A2-2002: normalizeEmail does NFKC + lowercase + trim and rejects
+  // non-ASCII. The social-login handlers call this with the email
+  // returned by the provider's id_token, so any homograph the
+  // provider would have accepted is filtered here. NonAsciiEmailError
+  // bubbles up to the social-login handler which maps it to 400.
+  const email = normalizeEmail(args.email);
 
   // Step 1 — known (provider, sub).
   const knownIdentity = await db.query.userIdentities.findFirst({
