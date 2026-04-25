@@ -65,6 +65,16 @@ jobs:
       - run: npm run lint
       - run: npm run format:check
       - run: npm run lint:docs
+      # A2-107: server-side commitlint on PRs. Husky's commit-msg hook
+      # only runs on the author's machine, so a bypass (`--no-verify`,
+      # broken local install, GitHub web-edit commit) would let a
+      # malformed Conventional Commit slip onto the PR. Re-run the
+      # check here against every commit between the PR base and head;
+      # the same `commitlint.config.js` from the repo root is the
+      # source of truth.
+      - name: Commitlint (PR commits)
+        if: github.event_name == 'pull_request'
+        run: npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
 
   test-unit:
     name: Unit tests
