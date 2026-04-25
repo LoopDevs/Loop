@@ -1,7 +1,8 @@
 # ADR 024: Withdrawal writer (USDC cash-out of cashback balance)
 
-Status: Proposed
+Status: Accepted
 Date: 2026-04-24
+Implemented: 2026-04-25 onwards (migration 0018 generalised pending_payouts; migration 0022 extended `credit_transactions_reference_unique` to include `withdrawal`; `applyAdminWithdrawal` ledger primitive in `apps/backend/src/credits/withdrawals.ts`; `POST /api/admin/users/:userId/withdrawals` admin handler in `apps/backend/src/admin/withdrawals.ts` with full ADR-017 idempotency + audit envelope + Discord fanout)
 Related: ADR 009 (credits ledger), ADR 013 (Loop-owned auth), ADR 015 (stablecoin topology), ADR 016 (payout submit worker), ADR 017 (admin write primitives)
 Resolves: A2-901 residual (`withdrawal` writer), migration 0013 §28
 
