@@ -31,6 +31,21 @@ say() {
   printf '[apply-native-overlays] %s\n' "$*"
 }
 
+# A2-406: copy only when the destination differs from the source.
+# Naked `cp src dest` rewrites the file (and bumps mtime) every run,
+# which churns Xcode's incremental build cache and makes
+# `git status` on the gitignored native trees noisy. `cmp -s`
+# returns 0 only when the bytes match exactly; on first run (dest
+# absent) it returns non-zero and we `cp`.
+cp_if_changed() {
+  local src=$1
+  local dest=$2
+  if [ -f "$dest" ] && cmp -s "$src" "$dest"; then
+    return 0
+  fi
+  cp "$src" "$dest"
+}
+
 # ─── Android: backup rules (audit A-033) ────────────────────────────────────
 if [ -d "$ANDROID_DIR" ]; then
   ANDROID_XML_DIR="$ANDROID_DIR/app/src/main/res/xml"
@@ -39,8 +54,8 @@ if [ -d "$ANDROID_DIR" ]; then
 
   say "Copying backup rules XML into $ANDROID_XML_DIR"
   mkdir -p "$ANDROID_XML_DIR"
-  cp "$OVERLAY_DIR/android/app/src/main/res/xml/backup_rules.xml" "$ANDROID_XML_DIR/"
-  cp "$OVERLAY_DIR/android/app/src/main/res/xml/data_extraction_rules.xml" "$ANDROID_XML_DIR/"
+  cp_if_changed "$OVERLAY_DIR/android/app/src/main/res/xml/backup_rules.xml" "$ANDROID_XML_DIR/backup_rules.xml"
+  cp_if_changed "$OVERLAY_DIR/android/app/src/main/res/xml/data_extraction_rules.xml" "$ANDROID_XML_DIR/data_extraction_rules.xml"
 
   # MainActivity override — disables WebView overscroll so the fixed
   # tab bar isn't dragged by the visual viewport during rubber-band.
@@ -48,7 +63,7 @@ if [ -d "$ANDROID_DIR" ]; then
   # this overlay must be reapplied after every cap sync / cap add.
   say "Copying MainActivity override into $ANDROID_JAVA_DIR"
   mkdir -p "$ANDROID_JAVA_DIR"
-  cp "$OVERLAY_DIR/android/app/src/main/java/io/loopfinance/app/MainActivity.java" "$ANDROID_JAVA_DIR/"
+  cp_if_changed "$OVERLAY_DIR/android/app/src/main/java/io/loopfinance/app/MainActivity.java" "$ANDROID_JAVA_DIR/MainActivity.java"
 
   # Launcher icons — replaces the default Capacitor "C" icon with the
   # Loop square logo at every density. Both legacy PNGs (ic_launcher /
@@ -60,9 +75,9 @@ if [ -d "$ANDROID_DIR" ]; then
     DEST_DIR="$ANDROID_DIR/app/src/main/res/mipmap-$DENSITY"
     if [ -d "$SRC_DIR" ]; then
       mkdir -p "$DEST_DIR"
-      cp "$SRC_DIR/ic_launcher.png" "$DEST_DIR/"
-      cp "$SRC_DIR/ic_launcher_round.png" "$DEST_DIR/"
-      cp "$SRC_DIR/ic_launcher_foreground.png" "$DEST_DIR/"
+      cp_if_changed "$SRC_DIR/ic_launcher.png" "$DEST_DIR/ic_launcher.png"
+      cp_if_changed "$SRC_DIR/ic_launcher_round.png" "$DEST_DIR/ic_launcher_round.png"
+      cp_if_changed "$SRC_DIR/ic_launcher_foreground.png" "$DEST_DIR/ic_launcher_foreground.png"
     fi
   done
   say "Copied Loop launcher icons into mipmap-* folders"
@@ -74,7 +89,7 @@ if [ -d "$ANDROID_DIR" ]; then
   VALUES_SRC="$OVERLAY_DIR/android/app/src/main/res/values/ic_launcher_background.xml"
   VALUES_DEST="$ANDROID_DIR/app/src/main/res/values/ic_launcher_background.xml"
   if [ -f "$VALUES_SRC" ]; then
-    cp "$VALUES_SRC" "$VALUES_DEST"
+    cp_if_changed "$VALUES_SRC" "$VALUES_DEST"
     say "Copied ic_launcher_background color override"
   fi
 
@@ -87,7 +102,7 @@ if [ -d "$ANDROID_DIR" ]; then
   STYLES_SRC="$OVERLAY_DIR/android/app/src/main/res/values/styles.xml"
   STYLES_DEST="$ANDROID_DIR/app/src/main/res/values/styles.xml"
   if [ -f "$STYLES_SRC" ]; then
-    cp "$STYLES_SRC" "$STYLES_DEST"
+    cp_if_changed "$STYLES_SRC" "$STYLES_DEST"
     say "Copied styles.xml splash theme override"
   fi
 
@@ -103,7 +118,7 @@ if [ -d "$ANDROID_DIR" ]; then
       drawable-port-xxhdpi drawable-port-xxxhdpi; do
       DEST="$ANDROID_DIR/app/src/main/res/$DRAWABLE"
       mkdir -p "$DEST"
-      cp "$SPLASH_SRC" "$DEST/splash.png"
+      cp_if_changed "$SPLASH_SRC" "$DEST/splash.png"
     done
     say "Copied Loop splash.png into drawable-* folders"
   fi
@@ -118,7 +133,7 @@ if [ -d "$ANDROID_DIR" ]; then
   if [ -f "$SPLASH_ICON_SRC" ]; then
     DEST="$ANDROID_DIR/app/src/main/res/drawable"
     mkdir -p "$DEST"
-    cp "$SPLASH_ICON_SRC" "$DEST/splash_icon.png"
+    cp_if_changed "$SPLASH_ICON_SRC" "$DEST/splash_icon.png"
     say "Copied Loop splash_icon.png"
   fi
 
@@ -173,30 +188,44 @@ else
   say "Android project not present at $ANDROID_DIR — skipping (run \`npx cap add android\` first)"
 fi
 
-# ─── iOS: NSFaceIDUsageDescription (audit A-034) ────────────────────────────
-if [ -f "$IOS_PLIST" ]; then
-  FACE_ID_KEY="NSFaceIDUsageDescription"
-  FACE_ID_VALUE="Loop uses Face ID to lock the app so your gift cards stay private, even if your unlocked device is in someone else's hands."
-
-  if /usr/libexec/PlistBuddy -c "Print :$FACE_ID_KEY" "$IOS_PLIST" >/dev/null 2>&1; then
-    say "Info.plist already has $FACE_ID_KEY, skipping"
+# ─── iOS: usage-description copy reconciliation (audit A-034 / A2-405) ─────
+#
+# A2-405: the script previously only Add'd a usage-description key when
+# absent — if a developer (or a manual Xcode UI edit) left a stale or
+# drifted copy in the live Info.plist, this overlay would never
+# reconcile it. Fixed by Set-or-Add: read the current value, compare
+# with the canonical, and rewrite only if they differ. Idempotent —
+# match → no PlistBuddy write at all, drift → single Set, missing →
+# Add.
+plist_set_or_add_string() {
+  local key=$1
+  local desired=$2
+  local current
+  if current=$(/usr/libexec/PlistBuddy -c "Print :$key" "$IOS_PLIST" 2>/dev/null); then
+    if [ "$current" = "$desired" ]; then
+      say "Info.plist :$key already matches — skipping"
+      return 0
+    fi
+    say "Info.plist :$key drifted — reconciling to canonical copy"
+    /usr/libexec/PlistBuddy -c "Set :$key $desired" "$IOS_PLIST"
   else
-    say "Adding $FACE_ID_KEY to Info.plist"
-    /usr/libexec/PlistBuddy -c "Add :$FACE_ID_KEY string $FACE_ID_VALUE" "$IOS_PLIST"
+    say "Adding :$key to Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :$key string $desired" "$IOS_PLIST"
   fi
+}
+
+if [ -f "$IOS_PLIST" ]; then
+  plist_set_or_add_string \
+    "NSFaceIDUsageDescription" \
+    "Loop uses Face ID to lock the app so your gift cards stay private, even if your unlocked device is in someone else's hands."
 
   # Location when-in-use — required for `navigator.geolocation` in
   # the WKWebView to resolve on iOS 14+ and for App Store review.
   # When-in-use only (no always / background) — we only fetch a
   # one-shot position when the user taps the map's locate button.
-  LOC_KEY="NSLocationWhenInUseUsageDescription"
-  LOC_VALUE="Loop uses your location to show nearby merchants on the map."
-  if /usr/libexec/PlistBuddy -c "Print :$LOC_KEY" "$IOS_PLIST" >/dev/null 2>&1; then
-    say "Info.plist already has $LOC_KEY, skipping"
-  else
-    say "Adding $LOC_KEY to Info.plist"
-    /usr/libexec/PlistBuddy -c "Add :$LOC_KEY string $LOC_VALUE" "$IOS_PLIST"
-  fi
+  plist_set_or_add_string \
+    "NSLocationWhenInUseUsageDescription" \
+    "Loop uses your location to show nearby merchants on the map."
 else
   say "iOS Info.plist not present at $IOS_PLIST — skipping (run \`npx cap add ios\` first)"
 fi
