@@ -1723,6 +1723,53 @@ export async function applyCreditAdjustment(args: {
   );
 }
 
+/** Result shape from a successful admin withdrawal (ADR 024). */
+export interface WithdrawalResult {
+  id: string;
+  payoutId: string;
+  userId: string;
+  currency: string;
+  amountMinor: string;
+  destinationAddress: string;
+  priorBalanceMinor: string;
+  newBalanceMinor: string;
+  createdAt: string;
+}
+
+/**
+ * `POST /api/admin/users/:userId/withdrawals` — ADR 024 admin-write.
+ * Debits the user's off-chain cashback balance and queues a matching
+ * on-chain LOOP-asset payout. Caller supplies a positive minor amount,
+ * one of the home currencies (USD/GBP/EUR), the user's Stellar
+ * destination address, and a 2..500 char reason. The service generates
+ * the Idempotency-Key so a double-submit can't double-debit.
+ */
+export async function applyAdminWithdrawal(args: {
+  userId: string;
+  amountMinor: string;
+  currency: 'USD' | 'GBP' | 'EUR';
+  destinationAddress: string;
+  reason: string;
+}): Promise<AdminWriteEnvelope<WithdrawalResult>> {
+  const idempotencyKey =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID().replace(/-/g, '')
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  return authenticatedRequest<AdminWriteEnvelope<WithdrawalResult>>(
+    `/api/admin/users/${encodeURIComponent(args.userId)}/withdrawals`,
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: {
+        amountMinor: args.amountMinor,
+        currency: args.currency,
+        destinationAddress: args.destinationAddress,
+        reason: args.reason,
+      },
+    },
+  );
+}
+
 /** Row shape from `/api/admin/users/:userId/credit-transactions` (ADR 009). */
 export interface AdminCreditTransactionView {
   id: string;
