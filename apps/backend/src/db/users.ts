@@ -88,6 +88,13 @@ export async function getUserById(id: string): Promise<User | null> {
  * caller's row instead of erroring.
  */
 export async function findOrCreateUserByEmail(email: string): Promise<User> {
+  // A2-2002: NFKC normalize + ASCII-only check now lives in
+  // `auth/normalize-email.ts`. Callers (verify-otp, social) already
+  // route through it before calling here, so by the time we land at
+  // this function the email is canonical. The lowercase + trim below
+  // is preserved as defence-in-depth for any future caller that
+  // forgets the upstream guard — both shapes converge to the same
+  // canonical string.
   const normalised = email.toLowerCase().trim();
   const existing = await db.query.users.findFirst({
     where: eq(users.email, normalised),

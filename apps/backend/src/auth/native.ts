@@ -19,6 +19,7 @@ import {
   OTP_REQUESTS_PER_EMAIL_PER_MINUTE,
 } from './otps.js';
 import { getEmailProvider } from './email.js';
+import { normalizeEmail, NonAsciiEmailError } from './normalize-email.js';
 import {
   signLoopToken,
   verifyLoopToken,
@@ -60,7 +61,18 @@ export async function nativeRequestOtpHandler(c: Context): Promise<Response> {
   if (!parsed.success) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'Valid email is required' }, 400);
   }
-  const email = parsed.data.email.toLowerCase().trim();
+  let email: string;
+  try {
+    email = normalizeEmail(parsed.data.email);
+  } catch (err) {
+    if (err instanceof NonAsciiEmailError) {
+      // A2-2002: non-ASCII email rejected after NFKC. Keep the
+      // generic "Valid email is required" message — telling the
+      // caller "non-ASCII rejected" leaks the validation rule.
+      return c.json({ code: 'VALIDATION_ERROR', message: 'Valid email is required' }, 400);
+    }
+    throw err;
+  }
 
   try {
     const recent = await countRecentOtpsForEmail({ email, windowMs: 60_000 });
@@ -175,7 +187,17 @@ export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
   if (!parsed.success) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'email and otp are required' }, 400);
   }
-  const email = parsed.data.email.toLowerCase().trim();
+  let email: string;
+  try {
+    email = normalizeEmail(parsed.data.email);
+  } catch (err) {
+    if (err instanceof NonAsciiEmailError) {
+      // A2-2002: same generic shape as request-otp. Verify shouldn't
+      // confirm "your email looks valid but" either.
+      return c.json({ code: 'VALIDATION_ERROR', message: 'email and otp are required' }, 400);
+    }
+    throw err;
+  }
 
   try {
     const hit = await findLiveOtp({ email, code: parsed.data.otp });
