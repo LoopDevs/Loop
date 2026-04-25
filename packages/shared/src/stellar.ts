@@ -23,19 +23,12 @@
  * Does NOT cover muxed accounts (`M...`) — Loop rejects muxed on
  * purpose because our memo-based attribution would collide with
  * muxed subaccount resolution.
+ *
+ * A2-820 / A2-821: the previous `isStellarPublicKey(s): s is string`
+ * helper has been removed. It declared a no-op type predicate
+ * (the input was already `string`, so narrowing produced no new
+ * type information) and had zero callers — every consumer used
+ * `STELLAR_PUBKEY_REGEX.test(s)` directly. Dropping the helper
+ * leaves one less near-duplicate API to keep in sync.
  */
 export const STELLAR_PUBKEY_REGEX: RegExp = /^G[A-Z2-7]{55}$/;
-
-/**
- * Runtime check — `true` if `s` looks like a Stellar ED25519 public
- * key. Returns a type predicate so callers can narrow after the
- * guard runs.
- *
- * This is a shape-only check. A real Stellar SDK decode would also
- * verify the base32 checksum; we deliberately don't require the
- * SDK on the web side (where this is a UX hint before a backend
- * submission), so the regex is the contract.
- */
-export function isStellarPublicKey(s: string): s is string {
-  return STELLAR_PUBKEY_REGEX.test(s);
-}
