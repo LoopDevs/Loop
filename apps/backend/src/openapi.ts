@@ -6748,6 +6748,67 @@ registry.registerPath({
   },
 });
 
+// A2-506 residual — JSON variant of recycling-activity. The CSV
+// shipped its registration; the JSON-returning sibling at
+// `app.ts:1585` was missed in the original wave.
+registry.registerPath({
+  method: 'get',
+  path: '/api/admin/users/recycling-activity',
+  summary: 'Top-N most-recent flywheel-active users (ADR 015).',
+  description:
+    'Ranked list of users who have placed at least one `loop_asset` paid order in the rolling 90-day window, ordered by most-recent recycle. Zero-recycle users are omitted (the signal is "who is in the loop", not the full directory). `?limit=` clamp 1..100, default 25. `Cache-Control: private, no-store` (per-user data).',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    query: z.object({
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Recycling-activity rows',
+      content: {
+        'application/json': {
+          schema: z
+            .object({
+              since: z.string().openapi({ format: 'date-time' }),
+              rows: z.array(
+                z.object({
+                  userId: z.string(),
+                  email: z.string(),
+                  lastRecycledAt: z.string().openapi({ format: 'date-time' }),
+                  recycledOrderCount: z.number().int().nonnegative(),
+                  recycledChargeMinor: z.string().openapi({
+                    description:
+                      'Bigint-as-string — sum of charge_minor over loop_asset orders in window.',
+                  }),
+                  currency: z.string(),
+                }),
+              ),
+            })
+            .openapi('AdminUsersRecyclingActivityResponse'),
+        },
+      },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error reading the aggregate',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 registry.registerPath({
   method: 'get',
   path: '/api/admin/user-credits.csv',
