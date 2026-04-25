@@ -77,25 +77,53 @@ export async function resolveOrCreateUserForIdentity(
 
   // Step 3 — brand-new user. Create the users row, then the
   // user_identities row linking the provider.
+  //
+  // A2-570: race-safe against the `users_email_loop_native_unique`
+  // partial index (A2-706). Two concurrent first-time social
+  // logins for the same brand-new email could both reach step 3
+  // having missed the step-2 SELECT; the second INSERT would
+  // otherwise throw. `onConflictDoNothing` absorbs the unique
+  // collision and the losing caller re-SELECTs the winning row,
+  // then attaches its identity row to it. Same shape as
+  // `findOrCreateUserByEmail` (A2-706) for OTP signup.
   return db.transaction(async (tx) => {
-    const [created] = await tx
+    const inserted = await tx
       .insert(users)
       .values({
         email,
         // isAdmin defaults to false; CTX-anchored admin allowlist
         // doesn't apply to social-native users.
       })
+      .onConflictDoNothing()
       .returning();
-    if (created === undefined) {
-      throw new Error('resolveOrCreateUserForIdentity: user insert returned no row');
+    let userRow: User | undefined = inserted[0];
+    if (userRow === undefined) {
+      // Conflict: a parallel signup created the row first. Fetch it.
+      const raced = await tx.query.users.findFirst({ where: eq(users.email, email) });
+      if (raced === undefined || raced === null) {
+        throw new Error('resolveOrCreateUserForIdentity: insert + re-select both empty');
+      }
+      userRow = raced;
     }
-    await tx.insert(userIdentities).values({
-      userId: created.id,
-      provider: args.provider,
-      providerSub: args.providerSub,
-      emailAtLink: email,
-    });
-    return { user: created, created: true };
+    await tx
+      .insert(userIdentities)
+      .values({
+        userId: userRow.id,
+        provider: args.provider,
+        providerSub: args.providerSub,
+        emailAtLink: email,
+      })
+      .onConflictDoNothing({
+        // Partial conflict on (provider, provider_sub) — same race
+        // protection as the step-2 path; two parallel sign-ins for
+        // the same sub both reach this point and the later insert
+        // harmlessly no-ops.
+        target: [userIdentities.provider, userIdentities.providerSub],
+      });
+    // `created` reports whether THIS call did the user insert. If a
+    // parallel call won the race, the user already existed at the
+    // time we observed it, so `created: false` is the honest answer.
+    return { user: userRow, created: inserted[0] !== undefined };
   });
 }
 

@@ -27,8 +27,15 @@ const { dbMock, state } = vi.hoisted(() => {
     s.insertCalls.push({ table: lastInsertTable, values: v });
     return m;
   });
-  m['returning'] = vi.fn(async () => [s.insertedUser]);
-  m['onConflictDoNothing'] = vi.fn(async () => undefined);
+  m['returning'] = vi.fn(async () => (s.insertedUser === null ? [] : [s.insertedUser]));
+  m['onConflictDoNothing'] = vi.fn(() => m);
+  // A2-570: the inserted-user re-SELECT path needs a `tx.query.users.findFirst`
+  // mock — the transaction callback receives the same `m` mock object, so we
+  // attach a `query` property here. Returns whatever state.user has set.
+  m['query'] = {
+    userIdentities: { findFirst: vi.fn(async () => s.identity) },
+    users: { findFirst: vi.fn(async () => s.user) },
+  } as unknown as ReturnType<typeof vi.fn>;
   m['transaction'] = vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(m));
   // select is overridden per-test for listLinkedIdentities; default
   // is a chain that resolves empty.
@@ -166,6 +173,40 @@ describe('resolveOrCreateUserForIdentity', () => {
     });
     expect(out.created).toBe(true);
     expect(out.user.id).toBe('u-new');
+  });
+
+  it('A2-570: step 3 race — onConflictDoNothing + re-SELECT yields the winning row, created=false', async () => {
+    // Two parallel social signups for the same brand-new email both
+    // miss the step-2 SELECT and reach step 3. The losing INSERT
+    // returns [] (ON CONFLICT DO NOTHING), then the re-SELECT inside
+    // the transaction picks up the winner's row.
+    state.identity = undefined;
+    state.user = undefined; // step-2 pre-tx SELECT misses (uses outer mock).
+    state.insertedUser = null; // INSERT inside step 3 returns empty (ON CONFLICT DO NOTHING).
+    // The in-transaction re-SELECT runs against `tx.query.users.findFirst`
+    // — that's the inner `m['query']` mock, separate from the outer
+    // `db.query.users.findFirst`. Override the inner mock once so it
+    // returns the winning row that a parallel caller inserted.
+    const winningRow = { id: 'u-winning', email: 'raced@b.com', isAdmin: false };
+    const txUsersFindFirst = (
+      dbMock['query'] as unknown as {
+        users: { findFirst: ReturnType<typeof vi.fn> };
+      }
+    ).users.findFirst;
+    txUsersFindFirst.mockResolvedValueOnce(winningRow);
+    const out = await resolveOrCreateUserForIdentity({
+      provider: 'google',
+      providerSub: 'sub-r',
+      email: 'RACED@b.com',
+    });
+    expect(out.user).toEqual(winningRow);
+    // `created` reports honestly — this caller did NOT do the user
+    // insert (it was a no-op via ON CONFLICT).
+    expect(out.created).toBe(false);
+    // Two insert calls: the racy users-insert + the identity link.
+    expect(state.insertCalls).toHaveLength(2);
+    expect(state.insertCalls[0]!.table).toBe('users');
+    expect(state.insertCalls[1]!.table).toBe('userIdentities');
   });
 });
 
