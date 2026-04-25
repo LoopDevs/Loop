@@ -26,16 +26,12 @@ export function isOrderState(s: string): s is OrderState {
   return (ORDER_STATES as readonly string[]).includes(s);
 }
 
-/**
- * Terminal states — once a row lands here, no worker will advance
- * it further. The web polling loops use this to stop refetching.
- */
-export const TERMINAL_ORDER_STATES = ['fulfilled', 'failed', 'expired'] as const;
-export type TerminalOrderState = (typeof TERMINAL_ORDER_STATES)[number];
-
-export function isTerminalOrderState(s: OrderState): s is TerminalOrderState {
-  return (TERMINAL_ORDER_STATES as readonly string[]).includes(s);
-}
+// A2-817: `TERMINAL_ORDER_STATES` + `TerminalOrderState` +
+// `isTerminalOrderState` had zero callers. The web polling loops
+// the JSDoc claimed would consume them ended up using their own
+// `state === 'fulfilled' || ...` literals, and the backend stops
+// polling at the source. Removed; one less near-duplicate to keep
+// in sync with the `ORDER_STATES` tuple above.
 
 /**
  * Supported order payment rails (ADR 010 / 015).
