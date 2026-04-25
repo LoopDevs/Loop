@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { recycledBps } from '@loop/shared';
 import { getCashbackRealizationDaily, type CashbackRealizationDay } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Sparkline } from './Sparkline';
@@ -15,9 +16,15 @@ const WINDOW_DAYS = 30;
  * flywheel's daily signal. Days with zero earned emit 0 — the chart
  * primitive handles the rendering.
  *
- * Exported for unit testing — the integer math is worth an
- * explicit contract test since it's not the shape the backend
- * emits (backend emits per-currency rows).
+ * A2-810: per-day bps is now computed via the shared
+ * `recycledBps` helper from `@loop/shared/cashback-realization` —
+ * the same function `/api/admin/cashback-realization` and the
+ * daily CSV exporter use, so the sparkline can never round
+ * differently from the headline card on the same data.
+ *
+ * Exported for unit testing — the cross-currency aggregation step
+ * is not the shape the backend emits (per-currency rows), so the
+ * collapse remains worth an explicit contract test.
  */
 export function toDailyBps(rows: readonly CashbackRealizationDay[]): number[] {
   const byDay = new Map<string, { earned: bigint; spent: bigint }>();
@@ -39,11 +46,7 @@ export function toDailyBps(rows: readonly CashbackRealizationDay[]): number[] {
   const days = Array.from(byDay.keys()).sort();
   return days.map((d) => {
     const { earned, spent } = byDay.get(d)!;
-    if (earned <= 0n) return 0;
-    const clampedSpent = spent < 0n ? 0n : spent;
-    const bps = Number((clampedSpent * 10_000n) / earned);
-    if (!Number.isFinite(bps) || bps < 0) return 0;
-    return bps > 10_000 ? 10_000 : bps;
+    return recycledBps(earned, spent);
   });
 }
 
