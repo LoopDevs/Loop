@@ -127,12 +127,11 @@ export interface RefreshRequest {
   platform?: Platform;
 }
 
-/** Response from POST /api/auth/refresh */
-export interface RefreshResponse {
-  accessToken: string;
-  /** Upstream may rotate the refresh token; when present, clients must replace the stored one. */
-  refreshToken?: string;
-}
+// A2-802: `RefreshResponse` was exported from `@loop/shared` with zero
+// callers — both the backend openapi schema and the web refresh
+// fetcher type the response in-place. Removed; the openapi `RefreshResponse`
+// at `apps/backend/src/openapi.ts:104` is the canonical wire shape and
+// the web client narrows against the same.
 
 // ─── Image proxy ─────────────────────────────────────────────────────────────
 
