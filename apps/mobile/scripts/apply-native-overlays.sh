@@ -169,6 +169,21 @@ if [ -d "$ANDROID_DIR" ]; then
   # Patch AndroidManifest.xml only if the attributes are missing, so a
   # hand-edited manifest is left alone.
   if ! grep -q 'android:fullBackupContent' "$ANDROID_MANIFEST"; then
+    # A2-1209: fail loudly if the sed anchor is missing. The patch is
+    # anchored to `android:allowBackup="true"`. If a future Capacitor
+    # template flips that to `false` or removes the attribute, the
+    # bare `sed` would silently no-op and leave the backup-rules
+    # attributes unset — A-033's protection vanishes without a single
+    # CI signal. Pre-flight the anchor and bail with a pointer at the
+    # overlay script so the next run shouts instead of regressing.
+    if ! grep -q 'android:allowBackup="true"' "$ANDROID_MANIFEST"; then
+      say "ERROR: AndroidManifest.xml is missing the 'android:allowBackup=\"true\"' anchor."
+      say "       The backup-content overlay (A-033) needs that attribute to splice in"
+      say "       fullBackupContent / dataExtractionRules. Update apply-native-overlays.sh"
+      say "       to match whatever the new Capacitor template uses, or hand-add the"
+      say "       attributes to AndroidManifest.xml directly."
+      exit 1
+    fi
     say "Adding fullBackupContent / dataExtractionRules attributes to AndroidManifest.xml"
     # Insert after android:allowBackup="true"
     # NOTE: sed -i syntax differs between GNU and BSD. Handle both.
@@ -180,6 +195,16 @@ if [ -d "$ANDROID_DIR" ]; then
       sed -i '' "s|android:allowBackup=\"true\"|android:allowBackup=\"true\"\\
         android:fullBackupContent=\"@xml/backup_rules\"\\
         android:dataExtractionRules=\"@xml/data_extraction_rules\"|" "$ANDROID_MANIFEST"
+    fi
+    # A2-1209: post-condition check. The sed should have inserted the
+    # attributes. If `grep` doesn't see them now, the regex didn't
+    # match for a different reason (escaped quotes, indentation, etc.)
+    # — fail loudly rather than pretend success.
+    if ! grep -q 'android:fullBackupContent' "$ANDROID_MANIFEST"; then
+      say "ERROR: sed completed but android:fullBackupContent is still missing from"
+      say "       AndroidManifest.xml. Inspect the file by hand and adjust the"
+      say "       overlay script. A-033 protection is NOT in place."
+      exit 1
     fi
   else
     say "AndroidManifest.xml already has backup-content attributes, skipping"
