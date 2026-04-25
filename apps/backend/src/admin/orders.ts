@@ -16,23 +16,19 @@
 import type { Context } from 'hono';
 import { UUID_RE } from '../uuid.js';
 import { and, eq, lt, sql } from 'drizzle-orm';
-import { ORDER_PAYMENT_METHODS } from '@loop/shared';
+import { ORDER_PAYMENT_METHODS, ORDER_STATES, type OrderState } from '@loop/shared';
 import { db } from '../db/client.js';
 import { orders } from '../db/schema.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'admin-orders' });
 
-/** State enum — mirrors the CHECK constraint on `orders.state`. */
-const ORDER_STATES = [
-  'pending_payment',
-  'paid',
-  'procuring',
-  'fulfilled',
-  'failed',
-  'expired',
-] as const;
-type OrderState = (typeof ORDER_STATES)[number];
+// A2-816: ORDER_STATES + OrderState come from `@loop/shared` —
+// the CHECK constraint on `orders.state`, the openapi schema, and
+// every admin handler now agree on one canonical list. Removing
+// the inline re-declaration here closes the drift surface where a
+// state added in shared (e.g. a future `refunded`) would silently
+// not be accepted by this admin filter.
 
 /**
  * Compact admin view of an order row. BigInt columns round-trip as
