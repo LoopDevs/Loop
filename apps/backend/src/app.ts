@@ -129,6 +129,7 @@ import { adminDiscordNotifiersHandler } from './admin/discord-notifiers.js';
 import { adminDiscordTestHandler } from './admin/discord-test.js';
 import { adminCreditAdjustmentHandler } from './admin/credit-adjustments.js';
 import { adminRefundHandler } from './admin/refunds.js';
+import { adminWithdrawalHandler } from './admin/withdrawals.js';
 import { publicCashbackStatsHandler } from './public/cashback-stats.js';
 import { publicFlywheelStatsHandler } from './public/flywheel-stats.js';
 import { publicLoopAssetsHandler } from './public/loop-assets.js';
@@ -1696,6 +1697,10 @@ app.post(
 // Same rate limit and idempotency discipline as the adjustment
 // write.
 app.post('/api/admin/users/:userId/refunds', rateLimit(20, 60_000), adminRefundHandler);
+// ADR-024 / A2-901 — admin-mediated withdrawal: debit user's
+// cashback balance + queue an on-chain LOOP-asset payout. Same
+// rate limit + idempotency discipline as refund.
+app.post('/api/admin/users/:userId/withdrawals', rateLimit(20, 60_000), adminWithdrawalHandler);
 // Manual merchant-catalog resync (ADR 011). Bypasses the 6h
 // scheduled refresh so ops can apply an upstream catalog change
 // within seconds. 2/min rate limit — every hit goes to CTX, this
