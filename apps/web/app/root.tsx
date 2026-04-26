@@ -526,6 +526,15 @@ export default function App(): React.JSX.Element {
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps): React.JSX.Element {
+  // A2-1114: surface the Sentry event ID to the user on production
+  // non-route errors. Without an event ID, "An unexpected error
+  // occurred" leaves the user with nothing to reference in a support
+  // message and ops with no way to correlate the report to a Sentry
+  // issue. The captured ID is pinned to component state (not derived
+  // from `Sentry.lastEventId()` on every render) so a re-render can't
+  // attach the wrong ID to a different error.
+  const [eventId, setEventId] = useState<string | undefined>(undefined);
+
   // Report to Sentry — inside useEffect so a re-render triggered by (say) a
   // parent provider change doesn't fire a duplicate capture for the same
   // error. React Router remounts the boundary on a new error, so the
@@ -538,14 +547,17 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps): React.JSX.El
   // `Request`, and redacts email / bearer / stellar-secret shapes
   // out of the error message before Sentry sees it.
   useEffect(() => {
-    Sentry.captureException(scrubErrorForSentry(error));
+    const id = Sentry.captureException(scrubErrorForSentry(error));
+    setEventId(id);
   }, [error]);
 
   let message = 'Oops!';
   let details = 'An unexpected error occurred.';
   let stack: string | undefined;
+  let isRouteError = false;
 
   if (isRouteErrorResponse(error)) {
+    isRouteError = true;
     // A2-1103: 403 gets its own dedicated copy so users hitting an
     // admin route they aren't allowed in see "you don't have access"
     // rather than the generic "page could not be found" 404 fallback.
@@ -575,6 +587,19 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps): React.JSX.El
     <main className="pt-16 p-4 container mx-auto">
       <h1>{message}</h1>
       <p>{details}</p>
+      {/* A2-1114: surface the Sentry event ID for non-route errors so
+          users can quote it in support requests. Skipped for route
+          errors (404/403/401) — those are deterministic from the URL
+          and don't need a correlation ID. Skipped in dev where the
+          stack is already visible. */}
+      {!isRouteError && stack === undefined && eventId !== undefined && (
+        <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">
+          Reference:{' '}
+          <code className="font-mono select-all" data-testid="error-event-id">
+            {eventId}
+          </code>
+        </p>
+      )}
       {stack !== undefined && (
         <pre className="w-full p-4 overflow-x-auto">
           <code>{stack}</code>
