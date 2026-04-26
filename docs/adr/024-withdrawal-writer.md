@@ -2,7 +2,7 @@
 
 Status: Accepted
 Date: 2026-04-24
-Implemented: 2026-04-25 onwards (migration 0018 generalised pending_payouts; migration 0022 extended `credit_transactions_reference_unique` to include `withdrawal`; `applyAdminWithdrawal` ledger primitive in `apps/backend/src/credits/withdrawals.ts`; `POST /api/admin/users/:userId/withdrawals` admin handler in `apps/backend/src/admin/withdrawals.ts` with full ADR-017 idempotency + audit envelope + Discord fanout)
+Implemented: 2026-04-25 onwards. Schema: migration 0018 generalised `pending_payouts` for `kind='withdrawal'`; migration 0022 extended `credit_transactions_reference_unique` to include `withdrawal`. Withdrawal flow: `applyAdminWithdrawal` ledger primitive in `apps/backend/src/credits/withdrawals.ts`; `POST /api/admin/users/:userId/withdrawals` admin handler in `apps/backend/src/admin/withdrawals.ts`; web client `applyAdminWithdrawal` in `apps/web/app/services/admin.ts`; admin form `AdminWithdrawalForm` in `apps/web/app/components/features/admin/`; mounted on `/admin/users/:userId`. Compensation flow (ADR §5): `applyAdminPayoutCompensation` primitive in `apps/backend/src/credits/payout-compensation.ts`; `POST /api/admin/payouts/:id/compensate` handler in `apps/backend/src/admin/payout-compensation.ts`. Both flows ADR-017 compliant — idempotency-key + audit envelope + Discord fanout + handler-level test coverage.
 Related: ADR 009 (credits ledger), ADR 013 (Loop-owned auth), ADR 015 (stablecoin topology), ADR 016 (payout submit worker), ADR 017 (admin write primitives)
 Resolves: A2-901 residual (`withdrawal` writer), migration 0013 §28
 
