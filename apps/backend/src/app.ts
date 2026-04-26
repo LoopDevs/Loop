@@ -423,17 +423,25 @@ app.use('*', requestId());
 // our request abc123?" without a timestamp-only dig.
 app.use('*', async (c, next) => {
   const id = c.get('requestId') ?? c.req.header('X-Request-Id') ?? 'unknown';
-  await runWithRequestContext({ requestId: id }, next);
-  // A2-1305 follow-up: surface the most recent CTX-side request ID
-  // observed during this inbound request as `X-Ctx-Request-Id`.
-  // `circuit-breaker.ts::wrappedFetch` writes it onto the per-request
-  // context after every CTX response; reading here (after handlers
-  // run) picks up whichever value won the race when multiple CTX
-  // calls fired in one request. Skipped silently when no CTX call
-  // happened — most non-proxy endpoints (health, admin reads) won't
-  // emit the header.
-  const ctxId = getCtxResponseRequestId();
-  if (ctxId !== undefined) c.res.headers.set('X-Ctx-Request-Id', ctxId);
+  // A2-1305 follow-up: read the captured CTX request ID INSIDE the
+  // AsyncLocalStorage scope — `getCtxResponseRequestId()` only sees
+  // the per-request store while we're still under `als.run`. Reading
+  // it after `runWithRequestContext` returns gets `undefined` because
+  // node has already torn the store back down. The handler chain
+  // (`next()`) runs first, then the read, then the response-header
+  // set, all within the same `als.run` callback.
+  await runWithRequestContext({ requestId: id }, async () => {
+    await next();
+    // `circuit-breaker.ts::wrappedFetch` writes the captured CTX
+    // X-Request-Id onto the per-request store after every CTX
+    // response; the value here is the most recent one (last-write
+    // wins when a single inbound request fires multiple CTX calls,
+    // e.g. circuit half-open retry). Skipped silently when no CTX
+    // call happened — most non-proxy endpoints (health, admin
+    // reads) won't emit the header.
+    const ctxId = getCtxResponseRequestId();
+    if (ctxId !== undefined) c.res.headers.set('X-Ctx-Request-Id', ctxId);
+  });
 });
 
 // Audit A-021: replace the default `hono/logger` with a Pino-backed
