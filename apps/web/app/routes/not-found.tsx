@@ -1,29 +1,24 @@
 import { useNavigate } from 'react-router';
-import type { Route } from './+types/not-found';
 import { Navbar } from '~/components/features/Navbar';
 import { Button } from '~/components/ui/Button';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 
-export function meta(): Route.MetaDescriptors {
+// Plain literal — Route types from `./+types/not-found` only exist
+// in the mobile typegen output (this file is the mobile-build splat).
+// The SSR build's typegen never sees this route since `routes.ts`
+// switches the splat to `not-found-ssr.tsx`. Avoid the conditional
+// import; the meta shape is small enough to inline.
+export function meta(): Array<{ title: string }> {
   return [{ title: 'Page not found — Loop' }];
 }
 
-// A2-1111: previously the splat route returned HTTP 200 with 404
-// content (a "soft 404"), so crawlers and uptime checkers treated
-// unknown URLs as successful pages. Throwing a 404 Response from
-// the loader makes the SSR response carry the right status code,
-// which RR v7 propagates through entry.server.tsx to the HTTP layer.
-// Guarded on `typeof window === 'undefined'` so client-side navigation
-// (Capacitor mobile + SPA after first load) keeps rendering the
-// component normally — the throw is purely for the SSR/crawler path.
-export function loader(_: Route.LoaderArgs): null {
-  if (typeof window === 'undefined') {
-    throw new Response(null, { status: 404, statusText: 'Not Found' });
-  }
-  return null;
-}
-
-function NotFoundContent(): React.JSX.Element {
+// A2-1111: pure component, no loader. SPA mode (mobile static export)
+// rejects `loader` exports — RR v7 fails the build with
+// "SPA Mode: invalid route export(s)". The SSR build wires the splat
+// to `not-found-ssr.tsx` instead, which has the loader that throws a
+// real HTTP 404 for crawlers / uptime checkers; this file is the
+// mobile-build splat route and exports the shared 404 UI.
+export function NotFoundContent(): React.JSX.Element {
   const { isNative } = useNativePlatform();
   const navigate = useNavigate();
 
@@ -47,15 +42,6 @@ function NotFoundContent(): React.JSX.Element {
   );
 }
 
-// Renders for the loader-thrown 404 (SSR / crawler path) so the
-// dedicated 404 UI shows with HTTP 404 instead of the root
-// ErrorBoundary's plain-text fallback.
-export function ErrorBoundary(): React.JSX.Element {
-  return <NotFoundContent />;
-}
-
-// Renders for client-side navigation to an unknown URL where the
-// guarded loader returns null instead of throwing.
 export default function NotFoundRoute(): React.JSX.Element {
   return <NotFoundContent />;
 }
