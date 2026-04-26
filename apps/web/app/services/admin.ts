@@ -1,12 +1,10 @@
 import type {
   LoopAssetCode,
-  OrderState,
   PayoutState,
   SettlementLagResponse,
   SettlementLagRow,
 } from '@loop/shared';
 export type { CreditTransactionType } from '@loop/shared';
-import type { AdminPaymentMethod } from './admin-payment-method-share';
 import type { AdminWriteEnvelope } from './admin-write-envelope';
 import { authenticatedRequest } from './api-client';
 
@@ -458,40 +456,14 @@ export async function retryPayout(args: {
   );
 }
 
-// A2-1166: re-export of `OrderState` from `@loop/shared`, which is
-// the single source of truth for the order state machine (ADR 010 +
-// backend CHECK constraint). The `AdminOrderState` name is kept so
-// existing consumers — `UserOrdersTable`, admin orders routes — don't
-// need to re-import.
-export type AdminOrderState = OrderState;
-
-/** Admin-shaped row from `/api/admin/orders` (ADR 011 / 015). */
-export interface AdminOrderView {
-  id: string;
-  userId: string;
-  merchantId: string;
-  state: AdminOrderState;
-  currency: string;
-  faceValueMinor: string;
-  chargeCurrency: string;
-  chargeMinor: string;
-  paymentMethod: 'xlm' | 'usdc' | 'credit' | 'loop_asset';
-  /** `numeric(5,2)` as string (e.g. `"80.00"`). */
-  wholesalePct: string;
-  userCashbackPct: string;
-  loopMarginPct: string;
-  wholesaleMinor: string;
-  userCashbackMinor: string;
-  loopMarginMinor: string;
-  ctxOrderId: string | null;
-  ctxOperatorId: string | null;
-  failureReason: string | null;
-  createdAt: string;
-  paidAt: string | null;
-  procuredAt: string | null;
-  fulfilledAt: string | null;
-  failedAt: string | null;
-}
+// A2-1165 (slice 24): orders surface (AdminOrderState alias +
+// AdminOrderView shape + getAdminOrder + listAdminOrders) moved
+// to `./admin-orders.ts`. Inline shape + alias moved with the
+// functions — `AdminOrderState` was the only re-export of
+// `OrderState` from `@loop/shared`, kept under the `Admin…` name
+// so existing consumers don't need to re-import. The barrel
+// re-export at the listAdminOrders anchor below covers all 4
+// exports.
 
 /** Row shape from `/api/admin/users` (admin directory). */
 export interface AdminUserRow {
@@ -725,40 +697,16 @@ export {
   listAdminUserCreditTransactions,
 } from './admin-user-credits';
 
-/**
- * `GET /api/admin/orders/:orderId` — single Loop-native order
- * drill-down (ADR 011 / 015). Returns the same shape as a single
- * row from the list endpoint; 404 when the id doesn't match.
- */
-export async function getAdminOrder(orderId: string): Promise<AdminOrderView> {
-  return authenticatedRequest<AdminOrderView>(`/api/admin/orders/${encodeURIComponent(orderId)}`);
-}
-
-/** `GET /api/admin/orders` — paginated, filterable admin view. */
-export async function listAdminOrders(opts: {
-  state?: AdminOrderState;
-  userId?: string;
-  merchantId?: string;
-  chargeCurrency?: string;
-  paymentMethod?: AdminPaymentMethod;
-  ctxOperatorId?: string;
-  limit?: number;
-  before?: string;
-}): Promise<{ orders: AdminOrderView[] }> {
-  const params = new URLSearchParams();
-  if (opts.state !== undefined) params.set('state', opts.state);
-  if (opts.userId !== undefined) params.set('userId', opts.userId);
-  if (opts.merchantId !== undefined) params.set('merchantId', opts.merchantId);
-  if (opts.chargeCurrency !== undefined) params.set('chargeCurrency', opts.chargeCurrency);
-  if (opts.paymentMethod !== undefined) params.set('paymentMethod', opts.paymentMethod);
-  if (opts.ctxOperatorId !== undefined) params.set('ctxOperatorId', opts.ctxOperatorId);
-  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
-  if (opts.before !== undefined) params.set('before', opts.before);
-  const qs = params.toString();
-  return authenticatedRequest<{ orders: AdminOrderView[] }>(
-    `/api/admin/orders${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
+// A2-1165 (slice 24): admin orders surface lives in
+// `./admin-orders.ts`. Re-export keeps `AdminOrdersTable.tsx`,
+// `UserOrdersTable.tsx`, `routes/admin.orders.tsx`, paired
+// tests untouched.
+export {
+  type AdminOrderState,
+  type AdminOrderView,
+  getAdminOrder,
+  listAdminOrders,
+} from './admin-orders';
 
 /**
  * One bucket of fulfilled-order flow, grouped by (merchantId,
