@@ -3,19 +3,13 @@ import type {
   LoopAssetCode,
   OrderState,
   PayoutState,
-  MerchantOperatorMixResponse,
-  MerchantOperatorMixRow,
   OperatorLatencyResponse,
   OperatorLatencyRow,
-  OperatorMerchantMixResponse,
-  OperatorMerchantMixRow,
   OperatorStatsResponse,
   OperatorStatsRow,
   SettlementLagResponse,
   SettlementLagRow,
   SupplierSpendRow,
-  UserOperatorMixResponse,
-  UserOperatorMixRow,
 } from '@loop/shared';
 export type { CreditTransactionType } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
@@ -314,82 +308,22 @@ export async function getOperatorStats(
   );
 }
 
-/**
- * Per-merchant × per-operator mix row (ADR 013 / 022). Merchant-
- * scoped sibling of `OperatorStatsRow` — same columns, but rows
- * are operators carrying orders for one specific merchant.
- */
-// A2-1506: moved to `@loop/shared/admin-operator-mixes.ts`.
-export type { MerchantOperatorMixResponse, MerchantOperatorMixRow };
-
-/**
- * `GET /api/admin/merchants/:merchantId/operator-mix` — for one
- * merchant, which CTX operators are carrying its orders. Default
- * window 24h; server clamps `?since=` at 366d.
- */
-export async function getMerchantOperatorMix(
-  merchantId: string,
-  opts: { since?: string } = {},
-): Promise<MerchantOperatorMixResponse> {
-  const params = new URLSearchParams();
-  if (opts.since !== undefined) params.set('since', opts.since);
-  const qs = params.toString();
-  return authenticatedRequest<MerchantOperatorMixResponse>(
-    `/api/admin/merchants/${encodeURIComponent(merchantId)}/operator-mix${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
-
-/**
- * Per-operator × per-merchant mix row (ADR 013 / 022). Dual of
- * `MerchantOperatorMixRow` — operator-scoped rather than merchant-
- * scoped. Used for CTX capacity reviews: "which merchants is this
- * operator carrying?".
- */
-// A2-1506: moved to `@loop/shared/admin-operator-mixes.ts`.
-export type { OperatorMerchantMixResponse, OperatorMerchantMixRow };
-
-/**
- * `GET /api/admin/operators/:operatorId/merchant-mix` — for one
- * operator, which merchants are they carrying. Default window
- * 24h; server clamps `?since=` at 366d.
- */
-export async function getOperatorMerchantMix(
-  operatorId: string,
-  opts: { since?: string } = {},
-): Promise<OperatorMerchantMixResponse> {
-  const params = new URLSearchParams();
-  if (opts.since !== undefined) params.set('since', opts.since);
-  const qs = params.toString();
-  return authenticatedRequest<OperatorMerchantMixResponse>(
-    `/api/admin/operators/${encodeURIComponent(operatorId)}/merchant-mix${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
-
-/**
- * Per-user × per-operator mix row (ADR 013 / 022). Third corner of
- * the mix-axis matrix. Used for support triage — "user X's slow
- * cashback correlates with op-beta-02, which has a failing
- * circuit".
- */
-// A2-1506: moved to `@loop/shared/admin-operator-mixes.ts`.
-export type { UserOperatorMixResponse, UserOperatorMixRow };
-
-/**
- * `GET /api/admin/users/:userId/operator-mix` — for one user,
- * which CTX operators have carried their orders. Default window
- * 24h; server clamps `?since=` at 366d.
- */
-export async function getUserOperatorMix(
-  userId: string,
-  opts: { since?: string } = {},
-): Promise<UserOperatorMixResponse> {
-  const params = new URLSearchParams();
-  if (opts.since !== undefined) params.set('since', opts.since);
-  const qs = params.toString();
-  return authenticatedRequest<UserOperatorMixResponse>(
-    `/api/admin/users/${encodeURIComponent(userId)}/operator-mix${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
+// A2-1165 (slice 7): operator mix-axis matrix (ADR 023) extracted
+// to `./admin-operator-mixes.ts`. Type definitions remain canonical
+// in `@loop/shared/admin-operator-mixes.ts` (per A2-1506). Re-
+// export keeps the merchant / operator / user drill pages and
+// their paired tests untouched.
+export {
+  type MerchantOperatorMixResponse,
+  type MerchantOperatorMixRow,
+  type OperatorMerchantMixResponse,
+  type OperatorMerchantMixRow,
+  type UserOperatorMixResponse,
+  type UserOperatorMixRow,
+  getMerchantOperatorMix,
+  getOperatorMerchantMix,
+  getUserOperatorMix,
+} from './admin-operator-mixes';
 
 /**
  * Per-operator fulfilment latency row (ADR 013 / 022). One row per
