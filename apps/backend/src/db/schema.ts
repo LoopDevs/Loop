@@ -696,7 +696,12 @@ export const pendingPayouts = pgTable(
     uniqueIndex('pending_payouts_order_unique').on(t.orderId),
     // Worker picks up pending rows in FIFO order on each tick.
     index('pending_payouts_state_created').on(t.state, t.createdAt),
-    index('pending_payouts_user').on(t.userId),
+    // A2-716: composite (user_id, created_at desc) so
+    // `listPayoutsForUser` (admin user-detail page) gets an index-
+    // only scan + sort. Replaces the prior single-column
+    // `pending_payouts_user` index — the composite covers every
+    // single-column lookup as well.
+    index('pending_payouts_user_created').on(t.userId, t.createdAt),
     check(
       'pending_payouts_state_known',
       sql`${t.state} IN ('pending', 'submitted', 'confirmed', 'failed')`,
