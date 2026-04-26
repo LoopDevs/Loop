@@ -33,7 +33,9 @@ import {
   notifyFirstCashbackRecycled,
   notifyCashbackCredited,
   notifyPayoutFailed,
+  notifyCtxSchemaDrift,
   __resetCircuitNotifyDedupForTests,
+  __resetCtxSchemaDriftDedupForTests,
 } from '../discord.js';
 
 const mockFetch = vi.fn();
@@ -466,5 +468,44 @@ describe('notifyPayoutFailed', () => {
       fields: Array<{ name: string; value: string }>;
     };
     expect(embed.fields.find((f) => f.name === 'Order')?.value).toBe('_withdrawal_');
+  });
+});
+
+// A2-1915: runtime CTX schema-drift notifier
+describe('notifyCtxSchemaDrift', () => {
+  beforeEach(() => {
+    __resetCtxSchemaDriftDedupForTests();
+  });
+
+  it('posts an embed naming the surface and zod issues summary', async () => {
+    notifyCtxSchemaDrift({
+      surface: 'POST /verify-email',
+      issuesSummary: '[accessToken] invalid_type: expected string, got undefined',
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const embed = lastBody().embeds[0] as {
+      title: string;
+      fields: Array<{ name: string; value: string }>;
+    };
+    expect(embed.title).toMatch(/CTX schema drift/i);
+    expect(embed.fields.find((f) => f.name === 'Surface')?.value).toContain('POST /verify-email');
+    expect(embed.fields.find((f) => f.name === 'Zod issues')?.value).toContain('accessToken');
+  });
+
+  it('dedups within the 10-minute window per surface', async () => {
+    notifyCtxSchemaDrift({ surface: 'GET /merchants', issuesSummary: 'first' });
+    notifyCtxSchemaDrift({ surface: 'GET /merchants', issuesSummary: 'second' });
+    notifyCtxSchemaDrift({ surface: 'GET /merchants', issuesSummary: 'third' });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT dedup across different surfaces', async () => {
+    notifyCtxSchemaDrift({ surface: 'POST /gift-cards', issuesSummary: 'a' });
+    notifyCtxSchemaDrift({ surface: 'GET /gift-cards/:id', issuesSummary: 'b' });
+    notifyCtxSchemaDrift({ surface: 'POST /verify-email', issuesSummary: 'c' });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 });
