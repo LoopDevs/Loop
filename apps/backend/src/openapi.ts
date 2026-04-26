@@ -3544,6 +3544,92 @@ registry.registerPath({
   },
 });
 
+const PayoutCompensationBody = registry.register(
+  'PayoutCompensationBody',
+  z.object({
+    reason: z.string().min(2).max(500),
+  }),
+);
+
+const PayoutCompensationResult = registry.register(
+  'PayoutCompensationResult',
+  z.object({
+    id: z.string().uuid(),
+    payoutId: z.string().uuid(),
+    userId: z.string().uuid(),
+    currency: z.enum(['USD', 'GBP', 'EUR']),
+    amountMinor: z.string(),
+    priorBalanceMinor: z.string(),
+    newBalanceMinor: z.string(),
+    createdAt: z.string().datetime(),
+  }),
+);
+
+const PayoutCompensationEnvelope = registry.register(
+  'PayoutCompensationEnvelope',
+  z.object({
+    result: PayoutCompensationResult,
+    audit: AdminWriteAudit,
+  }),
+);
+
+registry.registerPath({
+  method: 'post',
+  path: '/api/admin/payouts/{id}/compensate',
+  summary: 'Compensate a permanently-failed withdrawal payout (ADR-024 §5).',
+  description:
+    'Re-credits the user after their withdrawal payout permanently failed on-chain. Writes a positive `type=adjustment` row referencing the payout id; net result is the original withdrawal debit is offset and the user is back to where they started. Manual-only (Phase 2a) — finance reviews failures before triggering. 400 if the payout is not a withdrawal; 409 if the payout is in any state other than `failed`. ADR 017 compliant: `Idempotency-Key` header + `reason` body required.',
+  tags: ['Admin'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({ id: z.string().uuid() }),
+    headers: z.object({
+      'idempotency-key': z.string().min(16).max(128).openapi({
+        description:
+          'Required. Scoped to (admin_user_id, key); repeats replay the stored snapshot.',
+      }),
+    }),
+    body: {
+      content: { 'application/json': { schema: PayoutCompensationBody } },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Compensation applied (or replayed from snapshot)',
+      content: { 'application/json': { schema: PayoutCompensationEnvelope } },
+    },
+    400: {
+      description:
+        'Missing idempotency key, invalid reason, malformed id, or payout is not a withdrawal',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    403: {
+      description: 'Not an admin',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'Payout not found',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    409: {
+      description: "Payout is not in 'failed' state — only failed payouts can be compensated",
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (20/min per IP)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error applying compensation',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
 registry.registerPath({
   method: 'get',
   path: '/api/admin/orders/activity',

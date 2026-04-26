@@ -258,6 +258,7 @@ GET  /api/admin/cashback-realization/daily.csv         [admin — Tier-3 finance
 GET  /api/admin/payouts                                [admin — ADR 015 payout backlog, ?state/?userId/?assetCode filters]
 GET  /api/admin/payouts/:id                            [admin — single pending-payout drill-down]
 POST /api/admin/payouts/:id/retry                      [admin — reset failed payout to pending, ADR 015/016/017]
+POST /api/admin/payouts/:id/compensate                 [admin — re-credit user after permanently failed withdrawal payout, ADR 024 §5]
 GET  /api/admin/payouts-by-asset                       [admin — per-asset × per-state payout breakdown, ADR 015/016]
 GET  /api/admin/top-users                               [admin — ranked top users by cashback, ADR 009/015]
 GET  /api/admin/audit-tail                              [admin — newest-first admin-write audit rows + ?before cursor, ADR 017/018]

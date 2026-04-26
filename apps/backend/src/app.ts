@@ -59,6 +59,7 @@ import {
   adminRetryPayoutHandler,
 } from './admin/payouts.js';
 import { adminPayoutsCsvHandler } from './admin/payouts-csv.js';
+import { adminPayoutCompensationHandler } from './admin/payout-compensation.js';
 import { adminPayoutsByAssetHandler } from './admin/payouts-by-asset.js';
 import { adminSettlementLagHandler } from './admin/settlement-lag.js';
 import { adminTopUsersHandler } from './admin/top-users.js';
@@ -1216,6 +1217,14 @@ app.get('/api/admin/payouts/settlement-lag', rateLimit(60, 60_000), adminSettlem
 // POST /api/admin/payouts/:id/retry — flip a failed row back to pending.
 // Lower rate limit: retries should be rare, one-at-a-time ops actions.
 app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayoutHandler);
+// POST /api/admin/payouts/:id/compensate — re-credit a user after a
+// permanently-failed withdrawal payout (ADR-024 §5). Same rate limit
+// as retry: rare, finance-reviewed, one-at-a-time.
+app.post(
+  '/api/admin/payouts/:id/compensate',
+  rateLimit(20, 60_000),
+  adminPayoutCompensationHandler,
+);
 // Finance-ready CSV export of pending_payouts rows. Lower rate
 // limit than the JSON list because exports scan rows 500× the
 // size of a pagination fetch.
