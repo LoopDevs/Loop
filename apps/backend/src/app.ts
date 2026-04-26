@@ -7,6 +7,7 @@ import { secureHeaders } from 'hono/secure-headers';
 import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
 import { runWithRequestContext } from './request-context.js';
+import { isKilled, type KillSwitch } from './kill-switches.js';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { sentry, captureException } from '@sentry/hono/node';
 import { scrubSentryEvent } from './sentry-scrubber.js';
@@ -317,6 +318,31 @@ function rateLimit(
       }
     }
 
+    await next();
+  };
+}
+
+/**
+ * A2-1907: per-subsystem runtime kill switch. Returns 503
+ * SUBSYSTEM_DISABLED with a Retry-After hint when the matching
+ * `LOOP_KILL_<NAME>` env var is set. `isKilled` reads `process.env`
+ * at call time (not the frozen `env` snapshot) so a Fly-secret flip
+ * takes effect on the next request without waiting for the new
+ * machine to come up. See `docs/runbooks/` for the operator flow.
+ */
+function killSwitch(
+  subsystem: KillSwitch,
+): (c: Context, next: () => Promise<void>) => Promise<void | Response> {
+  return async (c, next): Promise<void | Response> => {
+    if (isKilled(subsystem)) {
+      return c.json(
+        {
+          code: 'SUBSYSTEM_DISABLED',
+          message: `${subsystem} is temporarily disabled — retry shortly`,
+        },
+        503,
+      );
+    }
     await next();
   };
 }
@@ -911,18 +937,28 @@ app.use('/api/auth/*', async (c, next) => {
   c.header('Cache-Control', 'no-store');
 });
 
-app.post('/api/auth/request-otp', rateLimit(5, 60_000), requestOtpHandler);
+app.post('/api/auth/request-otp', killSwitch('auth'), rateLimit(5, 60_000), requestOtpHandler);
 // OTP brute-force defense: 10 attempts per minute per IP. With a 6-digit code
 // that caps guesses at ~14,400/day — upstream lockout/expiry happens first.
-app.post('/api/auth/verify-otp', rateLimit(10, 60_000), verifyOtpHandler);
+app.post('/api/auth/verify-otp', killSwitch('auth'), rateLimit(10, 60_000), verifyOtpHandler);
 // Refresh abuse defense: legit clients refresh once per access-token lifetime,
 // so 30/min per IP leaves plenty of headroom without enabling spray attacks.
 app.post('/api/auth/refresh', rateLimit(30, 60_000), refreshHandler);
 // Social login (ADR 014). Same 10/min cap as verify-otp — both
 // are unauthenticated entry points and both resolve to a minted
 // Loop JWT pair on success.
-app.post('/api/auth/social/google', rateLimit(10, 60_000), googleSocialLoginHandler);
-app.post('/api/auth/social/apple', rateLimit(10, 60_000), appleSocialLoginHandler);
+app.post(
+  '/api/auth/social/google',
+  killSwitch('auth'),
+  rateLimit(10, 60_000),
+  googleSocialLoginHandler,
+);
+app.post(
+  '/api/auth/social/apple',
+  killSwitch('auth'),
+  rateLimit(10, 60_000),
+  appleSocialLoginHandler,
+);
 // Logout: 20/min per IP. The handler fans out to an upstream revoke, so
 // without a limit an attacker could cheaply spam arbitrary refresh tokens
 // at CTX through us.
@@ -965,14 +1001,14 @@ app.use('/api/orders/*', async (c, next) => {
 app.use('/api/orders', requireAuth);
 app.use('/api/orders/*', requireAuth);
 
-app.post('/api/orders', rateLimit(10, 60_000), createOrderHandler);
+app.post('/api/orders', killSwitch('orders'), rateLimit(10, 60_000), createOrderHandler);
 app.get('/api/orders', rateLimit(60, 60_000), listOrdersHandler);
 app.get('/api/orders/:id', rateLimit(120, 60_000), getOrderHandler);
 // Loop-native order creation (ADR 010). Lives at a distinct path so
 // the legacy CTX-proxy flow at POST /api/orders stays live during
 // the migration window. Gated inside the handler on
 // LOOP_AUTH_NATIVE_ENABLED — off → 404.
-app.post('/api/orders/loop', rateLimit(10, 60_000), loopCreateOrderHandler);
+app.post('/api/orders/loop', killSwitch('orders'), rateLimit(10, 60_000), loopCreateOrderHandler);
 // Loop-native orders list (ADR 010). Listed before :id so the path
 // param doesn't capture 'list' or similar; rate 60/min matches the
 // legacy /api/orders GET.
@@ -1222,6 +1258,7 @@ app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayout
 // as retry: rare, finance-reviewed, one-at-a-time.
 app.post(
   '/api/admin/payouts/:id/compensate',
+  killSwitch('withdrawals'),
   rateLimit(20, 60_000),
   adminPayoutCompensationHandler,
 );
@@ -1709,7 +1746,12 @@ app.post('/api/admin/users/:userId/refunds', rateLimit(20, 60_000), adminRefundH
 // ADR-024 / A2-901 — admin-mediated withdrawal: debit user's
 // cashback balance + queue an on-chain LOOP-asset payout. Same
 // rate limit + idempotency discipline as refund.
-app.post('/api/admin/users/:userId/withdrawals', rateLimit(20, 60_000), adminWithdrawalHandler);
+app.post(
+  '/api/admin/users/:userId/withdrawals',
+  killSwitch('withdrawals'),
+  rateLimit(20, 60_000),
+  adminWithdrawalHandler,
+);
 // Manual merchant-catalog resync (ADR 011). Bypasses the 6h
 // scheduled refresh so ops can apply an upstream catalog change
 // within seconds. 2/min rate limit — every hit goes to CTX, this
