@@ -183,6 +183,12 @@ jobs:
         run: npm run build:mobile -w @loop/web
         env:
           VITE_API_URL: https://api.loopfinance.io
+      # A2-1115: assert admin route chunks stay out of the eagerly-loaded
+      # entry/root bundle. Catches regressions like a non-admin route
+      # importing from routes/admin*.tsx, which would silently ship
+      # admin payloads to every signed-out visitor.
+      - name: Verify admin bundle code-split
+        run: ./scripts/check-admin-bundle-split.sh
       - name: Report bundle size
         run: |
           echo "## Bundle Size" >> $GITHUB_STEP_SUMMARY
