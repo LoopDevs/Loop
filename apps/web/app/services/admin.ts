@@ -9,7 +9,6 @@ import type {
   CashbackRealizationRow,
   CreditTransactionType,
   LoopAssetCode,
-  LoopLiability,
   OrderState,
   PayoutState,
   MerchantOperatorMixResponse,
@@ -26,11 +25,6 @@ import type {
   SupplierSpendActivityResponse,
   SupplierSpendResponse,
   SupplierSpendRow,
-  TreasuryCreditFlowDay,
-  TreasuryCreditFlowResponse,
-  TreasuryHolding,
-  TreasuryOrderFlow,
-  TreasurySnapshot,
   UserOperatorMixResponse,
   UserOperatorMixRow,
 } from '@loop/shared';
@@ -194,16 +188,22 @@ export async function getPaymentMethodShare(
   );
 }
 
-// A2-1506: treasury shapes moved to `@loop/shared/admin-treasury.ts` +
-// `PayoutState` moved to `@loop/shared/payout-state.ts`. Re-exported
-// here via `export type` so the 30+ call sites importing from
-// `~/services/admin` don't fan out a rename.
-export type { PayoutState, LoopLiability, TreasuryHolding, TreasuryOrderFlow, TreasurySnapshot };
-
-/** GET /api/admin/treasury */
-export async function getTreasurySnapshot(): Promise<TreasurySnapshot> {
-  return authenticatedRequest<TreasurySnapshot>('/api/admin/treasury');
-}
+// A2-1165 (slice 4): treasury surface extracted to
+// `./admin-treasury.ts`. Type definitions remain canonical in
+// `@loop/shared/admin-treasury.ts` (per A2-1506). Re-export here
+// keeps existing consumers (AdminNav, CreditFlowChart, the
+// admin.assets routes + tests) untouched.
+export {
+  type PayoutState,
+  type LoopLiability,
+  type TreasuryHolding,
+  type TreasuryOrderFlow,
+  type TreasurySnapshot,
+  type TreasuryCreditFlowDay,
+  type TreasuryCreditFlowResponse,
+  getTreasurySnapshot,
+  getTreasuryCreditFlow,
+} from './admin-treasury';
 
 /**
  * Per-asset circulation drift (ADR 015). onChainStroops comes from
@@ -333,28 +333,10 @@ export async function getSupplierSpend(
   );
 }
 
-// A2-1506: `TreasuryCreditFlowDay` / `TreasuryCreditFlowResponse`
-// moved to `@loop/shared/admin-treasury.ts` — the shared declaration
-// types `currency` as `HomeCurrency | null`, which is the accurate
-// wire contract (the handler only returns USD/GBP/EUR and null).
-export type { TreasuryCreditFlowDay, TreasuryCreditFlowResponse };
-
-/**
- * `GET /api/admin/treasury/credit-flow` — per-day per-currency
- * ledger delta. Pass `?currency=USD|GBP|EUR` to zero-fill days
- * (stable chart layout).
- */
-export async function getTreasuryCreditFlow(
-  opts: { days?: number; currency?: 'USD' | 'GBP' | 'EUR' } = {},
-): Promise<TreasuryCreditFlowResponse> {
-  const params = new URLSearchParams();
-  if (opts.days !== undefined) params.set('days', String(opts.days));
-  if (opts.currency !== undefined) params.set('currency', opts.currency);
-  const qs = params.toString();
-  return authenticatedRequest<TreasuryCreditFlowResponse>(
-    `/api/admin/treasury/credit-flow${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
+// A2-1165 (slice 4): `getTreasuryCreditFlow` + the
+// `TreasuryCreditFlow*` re-exports also moved to `./admin-treasury.ts`
+// (consolidated with the snapshot reader). The barrel re-export
+// above brings them back into the `~/services/admin` surface.
 
 /**
  * Per-day per-currency supplier-spend activity (ADR 013 / 015). Time-
