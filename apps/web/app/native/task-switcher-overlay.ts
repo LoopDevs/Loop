@@ -1,12 +1,25 @@
 import { Capacitor } from '@capacitor/core';
 
 /**
- * Prevents screenshots on sensitive screens.
- * On iOS, blurs the view when app is backgrounded (task switcher).
- * On Android, this is a best-effort overlay — true FLAG_SECURE requires a native plugin.
+ * Renders a JS-side blur overlay on the Capacitor `pause` event so the
+ * iOS task-switcher snapshot of a sensitive screen (gift-card code,
+ * Stellar secret, etc.) is blurred rather than legible. On Android
+ * the same overlay shows but the platform's recents thumbnail still
+ * captures the underlying view milliseconds before the pause fires.
+ *
+ * A2-1207: this helper was previously called `enableScreenshotGuard`,
+ * which oversold what it actually does. Real screenshot prevention
+ * needs `WindowManager.FLAG_SECURE` on Android (blocks both the
+ * recents thumbnail and the screenshot button) and a
+ * `UserDidTakeScreenshot` listener on iOS (no API to block the
+ * shortcut, but you can detect + warn). Both require native plugins
+ * we haven't shipped yet — see ADR-005 §"Phase-1 known limitations"
+ * for the deferred decision. The rename keeps this codepath honest:
+ * it's a task-switcher privacy overlay, not a screenshot guard.
+ *
  * Returns a cleanup function.
  */
-export function enableScreenshotGuard(): () => void {
+export function enableTaskSwitcherPrivacyOverlay(): () => void {
   if (!Capacitor.isNativePlatform()) return () => {};
 
   let overlay: HTMLDivElement | null = null;

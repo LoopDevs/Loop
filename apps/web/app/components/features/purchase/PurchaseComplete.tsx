@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { triggerHapticNotification } from '~/native/haptics';
 import { copyToClipboard } from '~/native/clipboard';
-import { enableScreenshotGuard } from '~/native/screenshot-guard';
+import { enableTaskSwitcherPrivacyOverlay } from '~/native/task-switcher-overlay';
 import { nativeShare } from '~/native/share';
 import { getImageProxyUrl } from '~/utils/image';
 import { composeGiftCardShareImage } from '~/utils/share-image';
@@ -80,9 +80,12 @@ export function PurchaseComplete({
     void triggerHapticNotification('success');
   }, []);
 
-  // Blur screen when app is backgrounded to protect gift card code
+  // A2-1207: blur the iOS task-switcher snapshot of the gift card
+  // code. This is privacy theatre on Android (the recents thumbnail
+  // is still captured before the pause event fires); the underlying
+  // platform-native protections are deferred — see ADR-005.
   useEffect(() => {
-    return enableScreenshotGuard();
+    return enableTaskSwitcherPrivacyOverlay();
   }, []);
 
   useEffect(() => {

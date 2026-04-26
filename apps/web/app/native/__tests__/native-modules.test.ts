@@ -95,7 +95,7 @@ import { setupNotificationChannels } from '../notifications';
 import { setStatusBarStyle, setStatusBarOverlay } from '../status-bar';
 import { registerBackButton } from '../back-button';
 import { watchNetwork } from '../network';
-import { enableScreenshotGuard } from '../screenshot-guard';
+import { enableTaskSwitcherPrivacyOverlay } from '../task-switcher-overlay';
 import { nativeShare } from '../share';
 import { checkBiometrics, authenticateWithBiometrics } from '../biometrics';
 import { isAppLockEnabled, setAppLockEnabled, registerAppLockGuard } from '../app-lock';
@@ -356,22 +356,22 @@ describe('network', () => {
 });
 
 // ────────────────────────────────────────────────────────────
-// 8. Screenshot Guard
+// 8. Task-switcher privacy overlay (A2-1207 — renamed from screenshot-guard)
 // ────────────────────────────────────────────────────────────
-describe('screenshot-guard', () => {
-  it('enableScreenshotGuard returns a cleanup function on web', () => {
-    const cleanup = enableScreenshotGuard();
+describe('task-switcher-overlay', () => {
+  it('enableTaskSwitcherPrivacyOverlay returns a cleanup function on web', () => {
+    const cleanup = enableTaskSwitcherPrivacyOverlay();
     expect(typeof cleanup).toBe('function');
   });
 
   it('cleanup function is a no-op on web (does not throw)', () => {
-    const cleanup = enableScreenshotGuard();
+    const cleanup = enableTaskSwitcherPrivacyOverlay();
     expect(() => cleanup()).not.toThrow();
   });
 
   it('does not register pause/resume event listeners on web', () => {
     mockDocument.addEventListener.mockClear();
-    enableScreenshotGuard();
+    enableTaskSwitcherPrivacyOverlay();
     const pauseCall = mockDocument.addEventListener.mock.calls.find(
       (call: unknown[]) => call[0] === 'pause',
     );
