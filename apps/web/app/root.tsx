@@ -546,11 +546,26 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps): React.JSX.El
   let stack: string | undefined;
 
   if (isRouteErrorResponse(error)) {
-    message = error.status === 404 ? '404' : 'Error';
-    details =
-      error.status === 404
-        ? 'The requested page could not be found.'
-        : (error.statusText ?? details);
+    // A2-1103: 403 gets its own dedicated copy so users hitting an
+    // admin route they aren't allowed in see "you don't have access"
+    // rather than the generic "page could not be found" 404 fallback.
+    // The admin shell (RequireAdmin) handles its own banner without
+    // throwing, but loaders/actions are free to `throw new Response(…,
+    // { status: 403 })` and this branch will catch them with the
+    // right copy.
+    if (error.status === 404) {
+      message = '404';
+      details = 'The requested page could not be found.';
+    } else if (error.status === 403) {
+      message = '403';
+      details = "You don't have access to this page.";
+    } else if (error.status === 401) {
+      message = '401';
+      details = 'You need to sign in to view this page.';
+    } else {
+      message = 'Error';
+      details = error.statusText ?? details;
+    }
   } else if (import.meta.env.DEV && error instanceof Error) {
     details = error.message;
     stack = error.stack;
