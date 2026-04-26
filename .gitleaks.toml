@@ -1,0 +1,34 @@
+# A2-206: gitleaks config layered on top of the default ruleset.
+# `useDefault = true` keeps every built-in rule (AWS, GCP, Stripe,
+# Slack, private keys, JWTs, generic API-key heuristics) — only the
+# allowlist below is bespoke.
+#
+# Allowlists are intentionally narrow: each entry pins a path or a
+# regex to a known false-positive class so a real leak in a
+# different file would still trip the rule.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Loop-specific false-positive paths"
+
+# `.env.example` files document required environment variables with
+# obvious placeholder values (`change_me`, `dev-only-jwt-secret`,
+# repeated character runs). gitleaks' generic-api-key heuristic flags
+# anything high-entropy after `=`; the placeholders trip it. Real
+# secrets never live in `.env.example` — they go in `.env` (gitignored).
+paths = [
+  '''(^|/)\.env\.example$''',
+  # Test fixtures use deliberately random-looking strings as
+  # idempotency keys, JWT secrets, mock API keys. The repo's policy
+  # is that anything under `__tests__/` is fixture data, never real.
+  '''__tests__/.*\.(test|spec)\.(ts|tsx|js|jsx)$''',
+  # Vitest setup files seed deterministic-but-random-looking values
+  # for the same reason.
+  '''(^|/)test/.*setup.*\.(ts|js)$''',
+  # CTX upstream response fixtures contain sample JWTs (already
+  # expired / synthetic) — kept as JSON to lock the response shape
+  # for contract tests. Real upstream tokens never live in the repo.
+  '''__fixtures__/.*\.json$''',
+]
