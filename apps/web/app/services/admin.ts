@@ -372,31 +372,11 @@ export {
   getStuckPayouts,
 } from './admin-stuck';
 
-/**
- * One day of order activity — counts of rows created vs fulfilled
- * bucketed to the UTC day. Returned oldest-first so a bar chart
- * renders left-to-right.
- */
-export interface OrdersActivityDay {
-  day: string;
-  created: number;
-  fulfilled: number;
-}
-
-export interface OrdersActivityResponse {
-  days: OrdersActivityDay[];
-  windowDays: number;
-}
-
-/**
- * `GET /api/admin/orders/activity?days=N` — per-day created/fulfilled
- * orders series for the admin dashboard sparkline. Server clamps
- * N to [1, 90]; default 7.
- */
-export async function getOrdersActivity(days?: number): Promise<OrdersActivityResponse> {
-  const qs = days !== undefined ? `?days=${days}` : '';
-  return authenticatedRequest<OrdersActivityResponse>(`/api/admin/orders/activity${qs}`);
-}
+// A2-1165 (slice 12): orders/cashback/payouts activity time-series
+// moved to `./admin-activity.ts`. Inline shapes moved with the
+// functions — no other consumers. The barrel re-export at the
+// payouts-activity anchor below covers all three reads + 8 type
+// re-exports.
 
 /**
  * Top earners ranking (ADR 009 / 015). Grouped by `(user, currency)` —
@@ -457,66 +437,27 @@ export interface PayoutsByAssetRow {
  * `(asset_code, state)`. Answers "which LOOP assets are affected
  * when I see N failed payouts?" at a glance.
  */
-/** Per-currency minor-unit amount on a single day. */
-export interface PerCurrencyAmount {
-  currency: string;
-  amountMinor: string;
-}
+// A2-1165 (slice 12): cashback-activity moved to
+// `./admin-activity.ts` (paired with orders/payouts activity).
 
-/**
- * One day of cashback accrual — count of `cashback`-type transactions
- * plus per-currency minor sums. `byCurrency` is empty on zero-activity
- * days so the UI can render a gap without an extra branch on count.
- */
-export interface CashbackActivityDay {
-  day: string;
-  count: number;
-  byCurrency: PerCurrencyAmount[];
-}
-
-export interface CashbackActivityResponse {
-  days: number;
-  rows: CashbackActivityDay[];
-}
-
-/**
- * `GET /api/admin/cashback-activity` — oldest-first N-day series of
- * cashback-type `credit_transactions` accrual. Default 30 days; caller
- * passes `?days=<N>` to override (server clamps [1, 180]).
- */
-export async function getCashbackActivity(days?: number): Promise<CashbackActivityResponse> {
-  const qs = days !== undefined ? `?days=${days}` : '';
-  return authenticatedRequest<CashbackActivityResponse>(`/api/admin/cashback-activity${qs}`);
-}
-
-/**
- * One day of confirmed-payout activity (#637). Settlement-side
- * sibling of `CashbackActivityDay`. `byAsset` is empty on zero
- * days so the UI can render gaps without an extra count branch.
- */
-export interface PerAssetPayoutAmount {
-  assetCode: string;
-  /** SUM(amount_stroops) on this day. bigint-as-string. */
-  stroops: string;
-  count: number;
-}
-
-export interface PayoutsActivityDay {
-  day: string;
-  count: number;
-  byAsset: PerAssetPayoutAmount[];
-}
-
-export interface PayoutsActivityResponse {
-  days: number;
-  rows: PayoutsActivityDay[];
-}
-
-/** `GET /api/admin/payouts-activity` — N-day confirmed-payout series (default 30, max 180). */
-export async function getPayoutsActivity(days?: number): Promise<PayoutsActivityResponse> {
-  const qs = days !== undefined ? `?days=${days}` : '';
-  return authenticatedRequest<PayoutsActivityResponse>(`/api/admin/payouts-activity${qs}`);
-}
+// A2-1165 (slice 12): orders/cashback/payouts activity time-series
+// (admin dashboard sparkline + bar charts) extracted to
+// `./admin-activity.ts`. Inline shapes moved with the functions —
+// no other consumers. Re-export keeps existing chart cards + paired
+// tests untouched.
+export {
+  type OrdersActivityDay,
+  type OrdersActivityResponse,
+  type CashbackActivityDay,
+  type CashbackActivityResponse,
+  type PerCurrencyAmount,
+  type PayoutsActivityDay,
+  type PayoutsActivityResponse,
+  type PerAssetPayoutAmount,
+  getOrdersActivity,
+  getCashbackActivity,
+  getPayoutsActivity,
+} from './admin-activity';
 
 export async function getPayoutsByAsset(): Promise<{ rows: PayoutsByAssetRow[] }> {
   return authenticatedRequest<{ rows: PayoutsByAssetRow[] }>('/api/admin/payouts-by-asset');
