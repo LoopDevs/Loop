@@ -8,6 +8,18 @@ import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { nativeRequestOtpHandler, nativeVerifyOtpHandler, nativeRefreshHandler } from './native.js';
 import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
 import { revokeRefreshToken } from './refresh-tokens.js';
+import { notifyCtxSchemaDrift } from '../discord.js';
+
+/**
+ * A2-1915: condense a Zod issue array into a compact one-line
+ * summary suitable for a Discord embed field.
+ */
+function summariseZodIssues(issues: readonly z.ZodIssue[]): string {
+  return issues
+    .slice(0, 5)
+    .map((i) => `[${i.path.join('.') || '·'}] ${i.code}: ${i.message}`)
+    .join(' | ');
+}
 
 const log = logger.child({ handler: 'auth' });
 
@@ -172,6 +184,10 @@ export async function verifyOtpHandler(c: Context): Promise<Response> {
         { issues: validated.error.issues },
         'Upstream verify response did not match expected shape',
       );
+      notifyCtxSchemaDrift({
+        surface: 'POST /verify-email',
+        issuesSummary: summariseZodIssues(validated.error.issues),
+      });
       return c.json(
         { code: 'UPSTREAM_ERROR', message: 'Unexpected response from auth provider' },
         502,
@@ -249,6 +265,10 @@ export async function refreshHandler(c: Context): Promise<Response> {
         { issues: validated.error.issues },
         'Upstream refresh response did not match expected shape',
       );
+      notifyCtxSchemaDrift({
+        surface: 'POST /refresh-token',
+        issuesSummary: summariseZodIssues(validated.error.issues),
+      });
       return c.json(
         { code: 'UPSTREAM_ERROR', message: 'Unexpected response from auth provider' },
         502,
