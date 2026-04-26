@@ -37,3 +37,26 @@ export interface AdminWriteEnvelope<T> {
   result: T;
   audit: AdminWriteAudit;
 }
+
+/**
+ * Generates a per-click idempotency key for ADR-017 admin writes.
+ *
+ * Used by every admin writer (`upsertCashbackConfig`,
+ * `applyCreditAdjustment`, `applyAdminWithdrawal`, `retryPayout`,
+ * `resyncMerchants`) so a double-click on a write button can't
+ * apply the mutation twice — the backend looks for a prior snapshot
+ * keyed by `Idempotency-Key` and returns the stored response
+ * verbatim if one exists (`audit.replayed: true`).
+ *
+ * Prefers `crypto.randomUUID()` (universally available in supported
+ * browsers + the Capacitor webview), with a time + Math.random
+ * fallback for non-browser test environments where `crypto` may be
+ * absent. UUID hyphens are stripped because the backend treats the
+ * key as an opaque token and the shorter form keeps logs tidy.
+ */
+export function generateIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().replace(/-/g, '');
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+}

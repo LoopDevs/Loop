@@ -33,7 +33,7 @@
  * to re-target imports.
  */
 import type { CreditTransactionType } from '@loop/shared';
-import type { AdminWriteEnvelope } from './admin-write-envelope';
+import { generateIdempotencyKey, type AdminWriteEnvelope } from './admin-write-envelope';
 import { authenticatedRequest } from './api-client';
 
 /** Result shape from a successful credit-adjustment write (ADR 017). */
@@ -69,14 +69,6 @@ export interface AdminCreditTransactionView {
   referenceType: string | null;
   referenceId: string | null;
   createdAt: string;
-}
-
-/** Generates a per-click idempotency key for ADR-017 admin writes. */
-function generateIdempotencyKey(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID().replace(/-/g, '');
-  }
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 }
 
 /**
