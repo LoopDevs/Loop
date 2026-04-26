@@ -22,6 +22,7 @@ import { sweepStaleIdempotencyKeys } from './admin/idempotency.js';
 import { upstreamUrl } from './upstream.js';
 import { getAllCircuitStates } from './circuit-breaker.js';
 import { generateOpenApiSpec } from './openapi.js';
+import { metrics, incrementRateLimitHit, incrementRequest } from './metrics.js';
 import {
   merchantListHandler,
   merchantAllHandler,
@@ -316,7 +317,7 @@ function rateLimit(
         // instead of hot-looping retries.
         const retryAfterSec = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
         c.header('Retry-After', String(retryAfterSec));
-        metrics.rateLimitHitsTotal++;
+        incrementRateLimitHit();
         return c.json({ code: 'RATE_LIMITED', message: 'Too many requests' }, 429);
       }
     }
@@ -497,15 +498,12 @@ app.use('*', async (c, next) => {
 });
 
 // ─── Metrics ─────────────────────────────────────────────────────────────────
-
-interface Metrics {
-  rateLimitHitsTotal: number;
-  requestsTotal: Map<string, number>;
-}
-const metrics: Metrics = {
-  rateLimitHitsTotal: 0,
-  requestsTotal: new Map(),
-};
+//
+// `Metrics` interface, the `metrics` singleton, and the
+// `incrementRateLimitHit` / `incrementRequest` mutators all live in
+// `./metrics.ts` so the rate-limit middleware (below) and the
+// `/metrics` Prometheus emitter (lower in this file) can both reach
+// the same singleton without one of them being the carrier module.
 
 // Request counter middleware. Runs after all other middleware + the handler
 // so it observes the final status. Keys are `METHOD:ROUTE:STATUS` with the
@@ -527,8 +525,7 @@ app.use('*', async (c, next) => {
   // Treat both as NOT_FOUND — everything else is a real registered route.
   const raw = c.req.routePath;
   const route = raw === undefined || raw === '/*' || raw === '*' ? 'NOT_FOUND' : raw;
-  const key = `${c.req.method}:${route}:${c.res.status}`;
-  metrics.requestsTotal.set(key, (metrics.requestsTotal.get(key) ?? 0) + 1);
+  incrementRequest(c.req.method, route, c.res.status);
 });
 
 /**
