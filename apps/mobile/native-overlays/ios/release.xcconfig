@@ -1,0 +1,22 @@
+// A2-1201: explicit Release-configuration overlay for the Capacitor
+// iOS shell. Capacitor's `cap add ios` template generates only
+// `debug.xcconfig` (defining `CAPACITOR_DEBUG = true`) and leaves the
+// Release configuration without an xcconfig at all — so the runtime
+// `CAPACITOR_DEBUG` flag falls through to whatever the
+// `CapacitorBridge` Objective-C source defaults to. The audit flagged
+// that verbose bridge logging is one developer-edit away from a
+// production binary.
+//
+// This file pins the Release-configuration value to `false` so a
+// stray edit to debug.xcconfig that flips Debug logging on cannot
+// also flip it on for App-Store-signed builds.
+//
+// Wiring: `apply-native-overlays.sh` copies this file into
+// `apps/mobile/ios/release.xcconfig`. The Xcode .pbxproj reference
+// to it must be added once by the operator after `cap add ios` —
+// Project navigator → App target → Build Settings → Configurations →
+// Release → set baseConfigurationReference to release.xcconfig.
+// `cap sync` does not regenerate the .pbxproj, so the reference
+// survives subsequent runs.
+
+CAPACITOR_DEBUG = false

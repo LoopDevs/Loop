@@ -257,6 +257,20 @@ if [ -f "$IOS_PLIST" ]; then
   plist_set_or_add_string \
     "NSLocationWhenInUseUsageDescription" \
     "Loop uses your location to show nearby merchants on the map."
+
+  # A2-1201: drop a release.xcconfig next to debug.xcconfig so the
+  # Release configuration has an explicit `CAPACITOR_DEBUG = false`
+  # rather than falling through to the framework default. The .pbxproj
+  # reference (baseConfigurationReference for the Release config) is
+  # an operator-side step done once after `cap add ios`; this overlay
+  # ensures the file itself is always present and current so that
+  # reference resolves.
+  IOS_RELEASE_XCCONFIG_SRC="$OVERLAY_DIR/ios/release.xcconfig"
+  IOS_RELEASE_XCCONFIG_DEST="$ROOT_DIR/apps/mobile/ios/release.xcconfig"
+  if [ -f "$IOS_RELEASE_XCCONFIG_SRC" ]; then
+    cp_if_changed "$IOS_RELEASE_XCCONFIG_SRC" "$IOS_RELEASE_XCCONFIG_DEST"
+    say "Copied iOS release.xcconfig (A2-1201)"
+  fi
 else
   say "iOS Info.plist not present at $IOS_PLIST — skipping (run \`npx cap add ios\` first)"
 fi
