@@ -582,62 +582,19 @@ export interface AdminOrderView {
   failedAt: string | null;
 }
 
-/** Row shape from `/api/admin/users` (admin directory). */
-export interface AdminUserRow {
-  id: string;
-  email: string;
-  isAdmin: boolean;
-  homeCurrency: string;
-  createdAt: string;
-}
-
-/** `GET /api/admin/users` — paginated admin directory with email search. */
-export async function listAdminUsers(opts: {
-  q?: string;
-  limit?: number;
-  before?: string;
-}): Promise<{ users: AdminUserRow[] }> {
-  const params = new URLSearchParams();
-  if (opts.q !== undefined && opts.q.length > 0) params.set('q', opts.q);
-  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
-  if (opts.before !== undefined) params.set('before', opts.before);
-  const qs = params.toString();
-  return authenticatedRequest<{ users: AdminUserRow[] }>(
-    `/api/admin/users${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
-
-/** Full user detail shape from `/api/admin/users/:userId`. */
-export interface AdminUserDetail {
-  id: string;
-  email: string;
-  isAdmin: boolean;
-  homeCurrency: string;
-  stellarAddress: string | null;
-  ctxUserId: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/** `GET /api/admin/users/:userId` — single user drill-down. */
-export async function getAdminUser(userId: string): Promise<AdminUserDetail> {
-  return authenticatedRequest<AdminUserDetail>(`/api/admin/users/${encodeURIComponent(userId)}`);
-}
-
-/**
- * `GET /api/admin/users/by-email?email=` — exact-match lookup. Support
- * pastes the full email address and gets the user row in one request.
- * Complements the fragment search on `/api/admin/users?q=` (ILIKE-based,
- * paginated) — this one does exact equality against a lowercase-normalised
- * form so `Alice@Example.COM` matches `alice@example.com`. Throws on 404 /
- * 500 via the shared ApiException path; handlers render "no user with that
- * email" for 404.
- */
-export async function getAdminUserByEmail(email: string): Promise<AdminUserDetail> {
-  return authenticatedRequest<AdminUserDetail>(
-    `/api/admin/users/by-email?email=${encodeURIComponent(email)}`,
-  );
-}
+// A2-1165 (slice 23): admin users directory + detail (list +
+// drill-header + by-email lookup) moved to
+// `./admin-users-list.ts`. Inline shapes moved with the
+// functions — no other consumers. Re-export keeps
+// `AdminUsersTable.tsx`, `routes/admin.users.tsx`,
+// `routes/admin.users.$userId.tsx`, and paired tests untouched.
+export {
+  type AdminUserRow,
+  type AdminUserDetail,
+  listAdminUsers,
+  getAdminUser,
+  getAdminUserByEmail,
+} from './admin-users-list';
 
 // A2-1165 (slice 19): fleet-level user-activity leaderboards
 // (top-by-pending-payout + recycling-activity) moved to
