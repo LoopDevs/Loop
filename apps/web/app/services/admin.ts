@@ -794,110 +794,26 @@ export {
 // consolidated with the fleet read so the rail-mix mix-axis lives
 // in one file. The barrel re-export at the top covers all three.
 
-/**
- * Fleet-wide cashback-monthly entry (#592). Identical shape to the
- * user-facing `CashbackMonthlyEntry` by design — the admin chart
- * re-uses the same bar-rendering helpers. One entry per
- * (month, currency) pair; oldest-first ordering.
- */
-export interface AdminCashbackMonthlyEntry {
-  /** "YYYY-MM" in UTC. */
-  month: string;
-  currency: string;
-  /** bigint-as-string, minor units. */
-  cashbackMinor: string;
-}
-
-export interface AdminCashbackMonthlyResponse {
-  entries: AdminCashbackMonthlyEntry[];
-}
-
-/**
- * `GET /api/admin/cashback-monthly` — 12-month fleet-wide cashback
- * emissions grouped by (month, currency). Drives the monthly bar
- * chart on `/admin/treasury`.
- */
-export async function getAdminCashbackMonthly(): Promise<AdminCashbackMonthlyResponse> {
-  return authenticatedRequest<AdminCashbackMonthlyResponse>('/api/admin/cashback-monthly');
-}
-
-/**
- * Settlement-side sibling of `AdminCashbackMonthlyEntry` (#631).
- * Confirmed on-chain payouts grouped by (month, assetCode).
- * Stroops rather than fiat minor units because `pending_payouts`
- * pins the Stellar-native amount — the UI converts via the
- * `stroops / 1e5 = minor` factor pinned in `credits/payout-
- * builder.ts`.
- */
-export interface AdminPayoutsMonthlyEntry {
-  /** "YYYY-MM" in UTC. */
-  month: string;
-  /** LOOP asset code — USDLOOP / GBPLOOP / EURLOOP. */
-  assetCode: string;
-  /** SUM(amount_stroops) of confirmed payouts. bigint-as-string. */
-  paidStroops: string;
-  payoutCount: number;
-}
-
-export interface AdminPayoutsMonthlyResponse {
-  entries: AdminPayoutsMonthlyEntry[];
-}
-
-/** `GET /api/admin/payouts-monthly` — 12-month fleet-wide confirmed payouts by (month, assetCode). */
-export async function getAdminPayoutsMonthly(): Promise<AdminPayoutsMonthlyResponse> {
-  return authenticatedRequest<AdminPayoutsMonthlyResponse>('/api/admin/payouts-monthly');
-}
-
-/**
- * Per-user cashback-monthly response (#633). Same entry shape as
- * the fleet-wide `AdminCashbackMonthlyEntry` — the chart primitive
- * in `MonthlyCashbackChart` accepts either.
- */
-export interface AdminUserCashbackMonthlyEntry {
-  month: string;
-  currency: string;
-  cashbackMinor: string;
-}
-
-export interface AdminUserCashbackMonthlyResponse {
-  userId: string;
-  entries: AdminUserCashbackMonthlyEntry[];
-}
-
-/** `GET /api/admin/users/:userId/cashback-monthly` — 12-month trend for one user. */
-export async function getAdminUserCashbackMonthly(
-  userId: string,
-): Promise<AdminUserCashbackMonthlyResponse> {
-  return authenticatedRequest<AdminUserCashbackMonthlyResponse>(
-    `/api/admin/users/${encodeURIComponent(userId)}/cashback-monthly`,
-  );
-}
-
-/**
- * Per-merchant cashback-monthly response (#635). Same entry
- * shape as the per-user and fleet variants; `currency` here is
- * the order's `charge_currency` (the user's home_currency at
- * order-creation time).
- */
-export interface AdminMerchantCashbackMonthlyEntry {
-  month: string;
-  currency: string;
-  cashbackMinor: string;
-}
-
-export interface AdminMerchantCashbackMonthlyResponse {
-  merchantId: string;
-  entries: AdminMerchantCashbackMonthlyEntry[];
-}
-
-/** `GET /api/admin/merchants/:merchantId/cashback-monthly` — 12-month trend for one merchant. */
-export async function getAdminMerchantCashbackMonthly(
-  merchantId: string,
-): Promise<AdminMerchantCashbackMonthlyResponse> {
-  return authenticatedRequest<AdminMerchantCashbackMonthlyResponse>(
-    `/api/admin/merchants/${encodeURIComponent(merchantId)}/cashback-monthly`,
-  );
-}
+// A2-1165 (slice 17): cashback-monthly + payouts-monthly time-
+// series quartet (fleet + per-user + per-merchant cashback +
+// fleet payouts) moved to `./admin-monthly.ts`. Inline shapes
+// moved with the functions — no other consumers. Re-export keeps
+// `MonthlyCashbackChart.tsx`, `PayoutsMonthlyChart.tsx`, and the
+// user/merchant drill routes + paired tests untouched.
+export {
+  type AdminCashbackMonthlyEntry,
+  type AdminCashbackMonthlyResponse,
+  type AdminPayoutsMonthlyEntry,
+  type AdminPayoutsMonthlyResponse,
+  type AdminUserCashbackMonthlyEntry,
+  type AdminUserCashbackMonthlyResponse,
+  type AdminMerchantCashbackMonthlyEntry,
+  type AdminMerchantCashbackMonthlyResponse,
+  getAdminCashbackMonthly,
+  getAdminPayoutsMonthly,
+  getAdminUserCashbackMonthly,
+  getAdminMerchantCashbackMonthly,
+} from './admin-monthly';
 
 /**
  * One day of merchant flywheel activity (#641). Time-axis
