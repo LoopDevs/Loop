@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { LOOP_ASSET_CODES } from '@loop/shared';
+import { LOOP_ASSET_CODES, PAYOUT_STATES } from '@loop/shared';
 import type { Route } from './+types/admin.treasury';
 import { getTreasurySnapshot, type TreasurySnapshot } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -66,7 +66,6 @@ function fmtStroops(stroops: string | null, code: string): string {
 // liability card renders the same set as the payout list / admin
 // filter without drift.
 const LOOP_LIABILITY_CODES = LOOP_ASSET_CODES;
-const PAYOUT_STATES = ['pending', 'submitted', 'confirmed', 'failed'] as const;
 
 /** Abbreviated Stellar pubkey for UI display — G...xyz. */
 function truncPubkey(pk: string): string {

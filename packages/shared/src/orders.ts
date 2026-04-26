@@ -1,4 +1,22 @@
-/** Status of a gift card order. */
+/**
+ * Status of a gift card order on the **legacy CTX-proxy flow** (`POST
+ * /api/orders` → upstream `POST /gift-cards`). CTX is the merchant of
+ * record on this path; the four-state vocabulary mirrors the
+ * upstream's normalised status enum (`apps/backend/src/orders/handler.ts`
+ * `mapStatus`).
+ *
+ * **Distinct from `OrderState`** in `./order-state.ts` — that one is
+ * the **Loop-native** order state machine (`POST /api/orders/loop`,
+ * ADR 010) where Loop is merchant of record and orders go through
+ * `created → paid → fulfilled → settled` with explicit failure
+ * branches. The two state spaces don't map onto each other; an order
+ * lives in exactly one of the two flows for its lifetime, and the
+ * shape on the wire identifies which (`Order` for legacy CTX-proxy,
+ * `LoopOrderView` from `./loop-orders.ts` for Loop-native).
+ *
+ * A2-818: cross-reference added so a reader landing on either type
+ * understands which surface it belongs to.
+ */
 export type OrderStatus = 'pending' | 'completed' | 'failed' | 'expired';
 
 /** A placed gift card order. */
