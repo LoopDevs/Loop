@@ -69,6 +69,7 @@ vi.mock('../../discord.js', () => ({
   notifyOrderFulfilled: (...args: unknown[]) => mockNotifyOrderFulfilled(...args),
   notifyHealthChange: vi.fn(),
   notifyCircuitBreaker: vi.fn(),
+  notifyCtxSchemaDrift: vi.fn(),
 }));
 
 // Mock circuit breaker to pass through to global fetch (avoids cross-test state leaks)
