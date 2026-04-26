@@ -360,6 +360,17 @@ export const EnvSchema = z.object({
   // CTX pre-configuration.
   LOOP_WORKERS_ENABLED: envBoolean.default(false),
 
+  // A2-1907: runtime kill switches. Setting any of these to `true` on
+  // a running deployment makes the matching surface return 503
+  // SUBSYSTEM_DISABLED without redeploying. Toggle via:
+  //   `fly secrets set LOOP_KILL_<NAME>=true -a loopfinance-api`
+  // The Fly secret-set triggers a rolling restart picking up the new
+  // value. Default false on every switch — fail-open posture, no
+  // surprise blackout if an env var is mis-set.
+  LOOP_KILL_ORDERS: envBoolean.default(false),
+  LOOP_KILL_AUTH: envBoolean.default(false),
+  LOOP_KILL_WITHDRAWALS: envBoolean.default(false),
+
   // Worker tick intervals (seconds). Defaults tuned for a moderate
   // order volume: watcher every 10s to keep deposit latency low;
   // procurement every 5s since a paid order is user-blocking until
