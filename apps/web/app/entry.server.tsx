@@ -35,18 +35,22 @@ export const streamTimeout = 5_000;
  * Overwrites any pre-existing value — the utility is the single source
  * of truth, and the default RR flow never emits these today.
  *
- * Skips `Content-Security-Policy` because `root.tsx` already emits
- * it via a `<meta http-equiv>` tag with a meta-friendly subset
- * (frame-ancestors/report-uri/sandbox stripped). Setting it here
- * too would duplicate the directive and Chrome would union them
- * restrictively — most likely breaking nothing, but avoiding the
- * double-emit keeps the contract simple.
+ * A2-1104: emits the full `Content-Security-Policy` HTTP header,
+ * including `frame-ancestors 'none'`, which the meta tag in `root.tsx`
+ * cannot deliver — the CSP spec requires `frame-ancestors`,
+ * `report-uri`, and `sandbox` to come from a header. The meta tag
+ * stays for the static-export mobile build (Capacitor webview has no
+ * SSR to attach headers to). Browsers enforce both policies as their
+ * intersection; since the HTTP CSP is a superset of the meta CSP
+ * (only the three header-only directives are added), the effective
+ * policy equals the HTTP CSP — no functional regression vs. the
+ * previous "skip HTTP CSP" behaviour, but `frame-ancestors` is now
+ * actually enforced (defence-in-depth on top of `X-Frame-Options`).
  */
 function applySecurityHeaders(responseHeaders: Headers): void {
   const apiOrigin = process.env['VITE_API_URL'] ?? 'https://api.loopfinance.io';
   const headers = buildSecurityHeaders({ apiOrigin });
   for (const [name, value] of Object.entries(headers)) {
-    if (name === 'Content-Security-Policy') continue;
     responseHeaders.set(name, value);
   }
 }

@@ -22,19 +22,23 @@ describe('A2-1604 — web security headers at serve time', () => {
     expect(h['Cross-Origin-Resource-Policy']).toBe('same-origin');
   });
 
-  it('the non-CSP headers survive a Headers round-trip (the entry.server.tsx contract)', () => {
-    // Simulates what handleRequest does: set every non-CSP header on
-    // the responseHeaders Headers collection.
+  it('every header (incl. CSP) survives a Headers round-trip — the entry.server.tsx contract', () => {
+    // Simulates what handleRequest does: set every header on the
+    // responseHeaders Headers collection. A2-1104 changed this from
+    // "skip CSP" to "emit CSP at HTTP layer" so frame-ancestors,
+    // report-uri, and sandbox can be enforced (header-only per spec).
     const responseHeaders = new Headers();
     const source = buildSecurityHeaders();
     for (const [name, value] of Object.entries(source)) {
-      if (name === 'Content-Security-Policy') continue;
       responseHeaders.set(name, value);
     }
     expect(responseHeaders.get('X-Frame-Options')).toBe('DENY');
     expect(responseHeaders.get('Strict-Transport-Security')).toContain('max-age=');
-    // CSP is intentionally NOT duplicated into the HTTP header — root.tsx
-    // already emits it via <meta http-equiv>.
-    expect(responseHeaders.get('Content-Security-Policy')).toBeNull();
+    // A2-1104: HTTP CSP now emitted (in addition to <meta http-equiv>
+    // in root.tsx) so frame-ancestors actually applies. The two
+    // policies are enforced as their intersection by browsers.
+    const httpCsp = responseHeaders.get('Content-Security-Policy');
+    expect(httpCsp).toContain("frame-ancestors 'none'");
+    expect(httpCsp).toContain("default-src 'self'");
   });
 });
