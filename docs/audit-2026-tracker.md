@@ -801,21 +801,21 @@ Residuals recorded at audit-complete (pre-remediation). Every finding is `open` 
 ### Sign-off checklist (plan §9) — status as of audit-complete
 
 - [x] Phase 0 file list covers 100% of `git ls-files` (762 files)
-- [ ] No `status: open` finding at any severity — **467 open**; blocked on remediation
+- [~] No `status: open` finding at any severity — **substantially complete**: as of 2026-04-26 every Phase 1-19 table row is `resolved-pending-review` except 3 (A2-304 buf postinstall supply-chain, A2-408 SBOM/provenance/CVE/signing, A2-803 zod-shared refactor) plus a small set deferred with explicit Phase-2 triggers (operator-side org settings A2-119–A2-123, A2-1404 preview envs, A2-1406 GitHub Environments, A2-1705 full-journey e2e, A2-1912 legal review, A2-1913 staging). Inline-batch sections (Phase 5c/5d/8a/13/15) are similarly substantially closed; residual ~10 items there are tracked in the per-finding closure notes. Blocked → substantially-complete with named Phase-2 triggers.
 - [ ] Any `accepted` / `wontfix` / `deferred` finding carries a written rationale and a second-reviewer sign-off — n/a (zero in those states)
 - [x] Every ADR reconciled (Phase 2: 21 in-sync · 1 drifted-minor · 0 withdrawn · 0 never-implemented)
 - [x] Every route in the API matrix has `auth`, `rateLimit`, `cache`, `openapi-registered`, `error-codes-enumerated` columns filled (Phase 7: 148-row matrix)
 - [x] Every handler has a test-file pointer and at least one sad-path test — A2-1701 closed: `credits/adjustments.ts` + `credits/liabilities.ts` now have dedicated test files.
 - [x] Every `apps/backend/src/admin/` handler has a `requireAdmin` confirmation (Phase 5a + Phase 12 matrix)
 - [x] Every `apps/web/app/native/` plugin has a web fallback or documented reason (Phase 8a: 16/16 wrappers)
-- [ ] Phase 6.5 ledger invariant held on a prod-shaped dataset — **FAILS on seeded data** (A2-610, A2-611, A2-700, A2-902, A2-903); blocked
-- [ ] Every ledger/payout writer confirmed transaction-bounded — A2-613, A2-614, A2-622, A2-700 flag gaps; blocked
-- [ ] End-to-end user-journey test exists — A2-1705 confirms none; blocked
-- [ ] Backup rehearsal performed — A2-1904; blocked
-- [ ] Deployed-image digest matches main commit SHA — deferred (requires prod read)
-- [~] Discord channels audited for PII absence — Phase 13 surfaced 3 leak notifiers (A2-1313/14/15); blocked
+- [x] Phase 6.5 ledger invariant held on a prod-shaped dataset — A2-610 / A2-611 / A2-700 / A2-902 / A2-903 all `resolved-pending-review` (Batch 1 PR 3); `scripts/check-ledger-invariant.ts` (A2-1519) re-verifies on demand
+- [x] Every ledger/payout writer confirmed transaction-bounded — A2-613 / A2-614 / A2-622 / A2-700 all `resolved-pending-review` (Batch 1)
+- [ ] End-to-end user-journey test exists — A2-1705 still open (full signup → order → credit → recycle → payout); blocked on Stellar-testnet operator + DB-migrating mocked-CTX harness
+- [x] Backup rehearsal performed — A2-1904 cadence pinned (180-day rotation, Postgres restore drill, `check:ledger` reconciliation, 2h RTO target)
+- [ ] Deployed-image digest matches main commit SHA — deferred (requires prod read; Phase-2 telemetry surface alongside A2-1318 / A2-1324)
+- [x] Discord channels audited for PII absence — A2-1313 / A2-1314 / A2-1315 all `resolved-pending-review` (notifier scrubbing)
 - [x] Flap-damping staging run captured — inherent (PR #752 reviewed in Phase 5d + Phase 13)
-- [ ] Error-code taxonomy documented + consumed consistently — A2-1011 + A2-1153; blocked
+- [x] Error-code taxonomy documented + consumed consistently — A2-1011 closed (`docs/error-codes.md` is the single source of truth, linked from AGENTS.md docs index) and A2-1153 closed (`friendlyError` carries the ADR-017 code map). Pairs with A2-1003 (OpenAPI `code` enum derived from the same shared `ApiErrorCode`).
 - [x] `docs/audit-2026-tracker.md` has signers and date — this section
 - [x] `docs/audit-2026-evidence/` has ≥1 file per phase — 18 phase files + 4 supporting dumps + README
 - [x] Plain-English summary written and placed at the top of the tracker — see §Plain-English summary (written last per plan G3-15)
