@@ -37,7 +37,7 @@
  * re-target imports.
  */
 import type { LoopAssetCode, PayoutState } from '@loop/shared';
-import type { AdminWriteEnvelope } from './admin-write-envelope';
+import { generateIdempotencyKey, type AdminWriteEnvelope } from './admin-write-envelope';
 import { authenticatedRequest } from './api-client';
 
 /** Admin-shaped row from `/api/admin/payouts` (ADR 015 / 016 / 024). */
@@ -61,14 +61,6 @@ export interface AdminPayoutView {
   submittedAt: string | null;
   confirmedAt: string | null;
   failedAt: string | null;
-}
-
-/** Generates a per-click idempotency key for ADR-017 admin writes. */
-function generateIdempotencyKey(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID().replace(/-/g, '');
-  }
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 }
 
 /** `GET /api/admin/payouts` — paginated drilldown. Server clamps `limit` to [1, 100]. */

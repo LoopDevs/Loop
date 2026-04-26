@@ -31,7 +31,7 @@
  * `ConfigHistoryStrip.tsx`, `routes/admin.merchants.$merchantId.tsx`,
  * paired tests) don't have to re-target imports.
  */
-import type { AdminWriteEnvelope } from './admin-write-envelope';
+import { generateIdempotencyKey, type AdminWriteEnvelope } from './admin-write-envelope';
 import { authenticatedRequest } from './api-client';
 
 export interface MerchantCashbackConfig {
@@ -100,15 +100,11 @@ export async function upsertCashbackConfig(
     reason: string;
   },
 ): Promise<AdminWriteEnvelope<MerchantCashbackConfig>> {
-  const idempotencyKey =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID().replace(/-/g, '')
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
   return authenticatedRequest<AdminWriteEnvelope<MerchantCashbackConfig>>(
     `/api/admin/merchant-cashback-configs/${encodeURIComponent(merchantId)}`,
     {
       method: 'PUT',
-      headers: { 'Idempotency-Key': idempotencyKey },
+      headers: { 'Idempotency-Key': generateIdempotencyKey() },
       body,
     },
   );

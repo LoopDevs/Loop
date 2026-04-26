@@ -23,7 +23,7 @@
  * `MerchantResyncButton.tsx` and paired tests don't have to
  * re-target imports.
  */
-import type { AdminWriteEnvelope } from './admin-write-envelope';
+import { generateIdempotencyKey, type AdminWriteEnvelope } from './admin-write-envelope';
 import { authenticatedRequest } from './api-client';
 
 /** Response shape from `POST /api/admin/merchants/resync`. */
@@ -34,14 +34,6 @@ export interface AdminMerchantResyncResponse {
   loadedAt: string;
   /** Whether THIS call advanced the store (vs. coalesced with an in-flight sweep). */
   triggered: boolean;
-}
-
-/** Generates a per-click idempotency key for ADR-017 admin writes. */
-function generateIdempotencyKey(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID().replace(/-/g, '');
-  }
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 }
 
 /**
