@@ -76,6 +76,21 @@ export const EnvSchema = z.object({
   // Dev mode: include disabled merchants so UI can be tested before CTX enables them
   INCLUDE_DISABLED_MERCHANTS: envBoolean.default(false),
 
+  // A2-1922: comma-separated list of CTX merchant IDs to filter out
+  // of the catalog at sync time. Operator-controlled deny-list for
+  // merchants Loop refuses to resell — slurs in the brand name,
+  // upstream CTX entries we want temporarily hidden during a dispute,
+  // or commercial relationships Loop hasn't agreed to. Filter applies
+  // at `mapUpstreamMerchant` so denied IDs never enter the in-memory
+  // store, never reach the public API, and never show up in the
+  // admin catalog. CTX's upstream catalog is unchanged.
+  //
+  // ID-based rather than name-substring matching because IDs are
+  // stable; CTX may rename a merchant without notice. If a name-
+  // pattern filter is needed for a class of brands, that's a
+  // follow-up (admin DB column rather than an env var).
+  LOOP_MERCHANT_DENYLIST: z.string().optional(),
+
   // Image proxy: comma-separated list of allowed hostnames.
   // If set, only URLs from these hosts are fetched. Recommended in production.
   // Example: "cdn.giftcards.com,images.merchant.com"
