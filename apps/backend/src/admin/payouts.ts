@@ -145,10 +145,25 @@ export async function adminListPayoutsHandler(c: Context): Promise<Response> {
     );
   }
 
+  // ADR-024 §2: kind discriminator filter. Treasury wants to split
+  // order-cashback (cashback owed on a fulfilled order) from
+  // withdrawal (admin cash-out from balance) flows visually.
+  const kindParam = c.req.query('kind');
+  if (kindParam !== undefined && kindParam !== 'order_cashback' && kindParam !== 'withdrawal') {
+    return c.json(
+      {
+        code: 'VALIDATION_ERROR',
+        message: 'kind must be one of: order_cashback, withdrawal',
+      },
+      400,
+    );
+  }
+
   const rows = await listPayoutsForAdmin({
     ...(stateParam !== undefined ? { state: stateParam } : {}),
     ...(userIdParam !== undefined ? { userId: userIdParam } : {}),
     ...(assetCodeParam !== undefined ? { assetCode: assetCodeParam } : {}),
+    ...(kindParam !== undefined ? { kind: kindParam } : {}),
     ...(before !== undefined ? { before } : {}),
     limit,
   });

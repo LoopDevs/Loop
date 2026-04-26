@@ -3247,6 +3247,10 @@ registry.registerPath({
       limit: z.coerce.number().int().min(1).max(100).optional().openapi({
         description: 'Page size. Default 20, hard-capped at 100.',
       }),
+      kind: z.enum(['order_cashback', 'withdrawal']).optional().openapi({
+        description:
+          'ADR-024 §2 discriminator filter. `order_cashback` = legacy order-fulfilment payout; `withdrawal` = admin cash-out from balance. Omitted → both.',
+      }),
     }),
   },
   responses: {
