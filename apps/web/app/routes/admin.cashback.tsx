@@ -17,6 +17,7 @@ import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { MerchantResyncButton } from '~/components/features/admin/MerchantResyncButton';
+import { ReasonDialog } from '~/components/features/admin/ReasonDialog';
 import { MerchantStatsTable } from '~/components/features/admin/MerchantStatsTable';
 import { MerchantsFlywheelShareCard } from '~/components/features/admin/MerchantsFlywheelShareCard';
 import { Button } from '~/components/ui/Button';
@@ -89,6 +90,10 @@ function AdminCashbackRouteInner(): React.JSX.Element {
 
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
+  // A2-1107: per-merchant reason-prompt target. `null` → dialog closed;
+  // a merchantId → dialog open with the matching merchant's name in the
+  // title. Single dialog instance reused across rows.
+  const [reasonTarget, setReasonTarget] = useState<{ id: string; name: string } | null>(null);
   // Expanded-row set for the inline history drawer (ADR 011). Each
   // merchantId in the set renders an extra tbody row below its main
   // row with the most-recent 50 audit snapshots. The drawer is a
@@ -180,6 +185,24 @@ function AdminCashbackRouteInner(): React.JSX.Element {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
+      <ReasonDialog
+        open={reasonTarget !== null}
+        title={
+          reasonTarget !== null
+            ? `Reason for updating ${reasonTarget.name}'s cashback split?`
+            : 'Reason'
+        }
+        description="2–500 characters. Logged in the cashback-config audit trail (ADR-011)."
+        confirmLabel="Save split"
+        onResolve={(reason) => {
+          const target = reasonTarget;
+          setReasonTarget(null);
+          if (target === null || reason === null) return;
+          const draft = drafts[target.id];
+          if (draft === undefined) return;
+          saveMutation.mutate({ merchantId: target.id, draft, reason });
+        }}
+      />
       <AdminNav />
       <div className="flex items-start justify-between gap-4 mb-6">
         <div>
@@ -282,21 +305,11 @@ function AdminCashbackRouteInner(): React.JSX.Element {
                         disabled={!dirty || saving}
                         onClick={() => {
                           // A2-502: ADR-017 requires a reason on every
-                          // admin mutation. Prompt inline — matches the
-                          // admin retry-payout UX. A2-1107 tracks the
-                          // a11y/UX upgrade from window.prompt to a
-                          // modal across every admin write form.
-                          const reason = window.prompt(
-                            `Reason for updating ${m.name}'s cashback split:`,
-                            '',
-                          );
-                          if (reason === null) return;
-                          const trimmed = reason.trim();
-                          if (trimmed.length < 2 || trimmed.length > 500) {
-                            setSaveError('Reason must be 2–500 characters');
-                            return;
-                          }
-                          saveMutation.mutate({ merchantId: m.id, draft, reason: trimmed });
+                          // admin mutation. A2-1107: opens the shared
+                          // ReasonDialog instead of window.prompt for
+                          // a11y / focus trap / ESC cancel.
+                          setSaveError(null);
+                          setReasonTarget({ id: m.id, name: m.name });
                         }}
                       >
                         {saving ? 'Saving…' : 'Save'}
