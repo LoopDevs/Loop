@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A2-1213: scoped FileProvider authority. Capacitor's default
+  file_paths.xml grants whole-root access to both <external-path> and
+  <cache-path>:
+
+      <external-path name="my_images" path="." />
+      <cache-path    name="my_cache_images" path="." />
+
+  That hands every receiving Activity access to the entire cache and
+  external-storage tree. Loop only uses the FileProvider for share-image
+  PNGs that `apps/web/app/native/share.ts` writes via
+  `Filesystem.writeFile(... directory: Directory.Cache)`. Two tightenings:
+
+  1. Removed `<external-path>` entirely — Loop never writes to the
+     external-storage tree, so granting any access there is gratuitous.
+  2. Narrowed `<cache-path>` to the `share/` subdirectory; share.ts now
+     prefixes every share-image filename with `share/` to land in scope.
+
+  The overlay script rewrites this on every `cap sync` so Capacitor's
+  permissive default doesn't return.
+-->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+  <cache-path name="share" path="share/" />
+</paths>

@@ -56,6 +56,12 @@ if [ -d "$ANDROID_DIR" ]; then
   mkdir -p "$ANDROID_XML_DIR"
   cp_if_changed "$OVERLAY_DIR/android/app/src/main/res/xml/backup_rules.xml" "$ANDROID_XML_DIR/backup_rules.xml"
   cp_if_changed "$OVERLAY_DIR/android/app/src/main/res/xml/data_extraction_rules.xml" "$ANDROID_XML_DIR/data_extraction_rules.xml"
+  # A2-1213: tightened FileProvider scope. Capacitor's default
+  # file_paths.xml grants whole-root access (`path="."`) to both
+  # external-storage and the cache directory. The overlay scopes the
+  # provider down to `<cache>/share/` only — the single dir share-image
+  # PNGs land in (apps/web/app/native/share.ts).
+  cp_if_changed "$OVERLAY_DIR/android/app/src/main/res/xml/file_paths.xml" "$ANDROID_XML_DIR/file_paths.xml"
 
   # MainActivity override — disables WebView overscroll so the fixed
   # tab bar isn't dragged by the visual viewport during rubber-band.

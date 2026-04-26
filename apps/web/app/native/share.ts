@@ -57,17 +57,24 @@ async function writeTempShareImage(imageUrl: string, filename: string): Promise<
         reader.readAsDataURL(blob);
       });
     }
+    // A2-1213: prefix the filename with `share/` so it lands in
+    // `<cache>/share/`, the only directory the Android FileProvider
+    // grants access to (see `apps/mobile/native-overlays/android/app/
+    // src/main/res/xml/file_paths.xml`). Capacitor's writeFile creates
+    // intermediate directories automatically.
+    const scopedPath = `share/${filename}`;
     // No `encoding` field — the plugin interprets the data as
     // base64 when the option is omitted, which is exactly what we
     // want for binary PNG payloads. Passing `Encoding.UTF8` would
     // write the base64 string as literal text instead of decoding.
     await Filesystem.writeFile({
-      path: filename,
+      path: scopedPath,
       data: base64,
       directory: Directory.Cache,
+      recursive: true,
     });
     const { uri } = await Filesystem.getUri({
-      path: filename,
+      path: scopedPath,
       directory: Directory.Cache,
     });
     return uri;
