@@ -162,6 +162,13 @@
       "when": 1779100000000,
       "tag": "0022_credit_tx_withdrawal_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1779200000000,
+      "tag": "0023_orders_idempotency_key",
+      "breakpoints": true
     }
   ]
 }

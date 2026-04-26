@@ -152,8 +152,10 @@ vi.mock('../../db/schema.js', async () => {
 import {
   computeCashbackSplit,
   createOrder,
+  findOrderByIdempotencyKey,
   findPendingOrderByMemo,
   generatePaymentMemo,
+  IdempotentOrderConflictError,
 } from '../repo.js';
 
 beforeEach(() => {
@@ -482,5 +484,85 @@ describe('findPendingOrderByMemo', () => {
     state.orderByMemo = undefined;
     const out = await findPendingOrderByMemo('missing');
     expect(out).toBeNull();
+  });
+});
+
+// A2-2003: idempotency-key path on createOrder
+describe('A2-2003 idempotency on createOrder', () => {
+  it('findOrderByIdempotencyKey returns the matched row, null otherwise', async () => {
+    const row = {
+      id: 'o-prior',
+      userId: 'u-1',
+      idempotencyKey: 'key-1234567890ab',
+    };
+    state.orderByMemo = row;
+    expect(await findOrderByIdempotencyKey('u-1', 'key-1234567890ab')).toBe(row);
+    state.orderByMemo = undefined;
+    expect(await findOrderByIdempotencyKey('u-1', 'absent-key-aaaaaa')).toBeNull();
+  });
+
+  it('passes the idempotencyKey through into the inserted row', async () => {
+    state.insertedRow = {
+      id: 'o-new',
+      userId: 'u-1',
+      faceValueMinor: 10_000n,
+      currency: 'GBP',
+      chargeMinor: 10_000n,
+      chargeCurrency: 'GBP',
+      paymentMethod: 'xlm',
+      idempotencyKey: 'key-1234567890ab',
+    };
+    await createOrder({
+      userId: 'u-1',
+      merchantId: 'm1',
+      faceValueMinor: 10_000n,
+      currency: 'GBP',
+      paymentMethod: 'xlm',
+      idempotencyKey: 'key-1234567890ab',
+    });
+    const values = state.insertValues[0] as Record<string, unknown>;
+    expect(values['idempotencyKey']).toBe('key-1234567890ab');
+  });
+
+  it('throws IdempotentOrderConflictError when the unique-index rejects (xlm path)', async () => {
+    // First insert .returning() throws as if pg surfaced the unique
+    // violation. The catch arm re-fetches the prior row via
+    // `findOrderByIdempotencyKey` and re-throws with the existing
+    // attached.
+    const priorRow = {
+      id: 'o-prior',
+      userId: 'u-1',
+      idempotencyKey: 'key-1234567890ab',
+    };
+    state.orderByMemo = priorRow;
+    const dupErr = new Error(
+      'duplicate key value violates unique constraint "orders_user_idempotency_unique"',
+    );
+    dbMock['returning']!.mockRejectedValueOnce(dupErr);
+    await expect(
+      createOrder({
+        userId: 'u-1',
+        merchantId: 'm1',
+        faceValueMinor: 10_000n,
+        currency: 'GBP',
+        paymentMethod: 'xlm',
+        idempotencyKey: 'key-1234567890ab',
+      }),
+    ).rejects.toBeInstanceOf(IdempotentOrderConflictError);
+  });
+
+  it('rethrows non-idempotency errors unchanged', async () => {
+    const otherErr = new Error('connection lost');
+    dbMock['returning']!.mockRejectedValueOnce(otherErr);
+    await expect(
+      createOrder({
+        userId: 'u-1',
+        merchantId: 'm1',
+        faceValueMinor: 10_000n,
+        currency: 'GBP',
+        paymentMethod: 'xlm',
+        idempotencyKey: 'key-1234567890ab',
+      }),
+    ).rejects.toThrow(/connection lost/);
   });
 });

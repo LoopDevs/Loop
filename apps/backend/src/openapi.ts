@@ -2293,17 +2293,30 @@ registry.registerPath({
   path: '/api/orders/loop',
   summary: 'Create a Loop-native order (ADR 015).',
   description:
-    "Creates an order under the Loop-native auth path. Returns per-method payment instructions: on-chain methods (`xlm`, `usdc`, `loop_asset`) include the destination address + memo the client uses to build the outbound payment; `credit` returns only the amount we'll debit from the user's cashback balance on the paid-state transition.",
+    "Creates an order under the Loop-native auth path. Returns per-method payment instructions: on-chain methods (`xlm`, `usdc`, `loop_asset`) include the destination address + memo the client uses to build the outbound payment; `credit` returns only the amount we'll debit from the user's cashback balance on the paid-state transition. Optional `Idempotency-Key` header (16-128 chars) — when present, a repeat post replays the prior order's response instead of creating a duplicate (A2-2003).",
   tags: ['Orders'],
   security: [{ bearerAuth: [] }],
-  request: { body: { content: { 'application/json': { schema: LoopCreateOrderBody } } } },
+  request: {
+    headers: z.object({
+      'Idempotency-Key': z
+        .string()
+        .min(16)
+        .max(128)
+        .optional()
+        .describe(
+          'A2-2003: client-supplied de-dup key. When present, scoped per-user and unique per order. A repeat POST with the same key returns the original order rather than creating a duplicate.',
+        ),
+    }),
+    body: { content: { 'application/json': { schema: LoopCreateOrderBody } } },
+  },
   responses: {
     200: {
       description: 'Order created — payment instructions returned per method',
       content: { 'application/json': { schema: LoopCreateOrderResponse } },
     },
     400: {
-      description: 'Validation error or unknown/disabled merchant',
+      description:
+        'Validation error or unknown/disabled merchant (also: malformed Idempotency-Key length)',
       content: { 'application/json': { schema: ErrorResponse } },
     },
     401: {

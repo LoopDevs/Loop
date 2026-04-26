@@ -470,6 +470,14 @@ export const orders = pgTable(
     state: text('state').notNull().default('pending_payment'),
     failureReason: text('failure_reason'),
 
+    // A2-2003: client-supplied `Idempotency-Key` HTTP header at create
+    // time. Optional — legacy rows + clients that don't send the
+    // header carry NULL. The partial unique index below catches a
+    // duplicate (user_id, key) pair so a double-clicked or retried
+    // request can't write a second order row + (for credit-funded
+    // orders) a second debit against `user_credits`.
+    idempotencyKey: text('idempotency_key'),
+
     // Timestamps corresponding to each transition. Nulls are fine —
     // they're set on the transition, never backfilled.
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -519,6 +527,12 @@ export const orders = pgTable(
         AND ${t.loopMarginMinor} >= 0
       `,
     ),
+    // A2-2003: see `idempotencyKey` column comment. Partial unique
+    // index because legacy rows + non-idempotent clients persist
+    // NULL and would otherwise all collide on a single key.
+    uniqueIndex('orders_user_idempotency_unique')
+      .on(t.userId, t.idempotencyKey)
+      .where(sql`${t.idempotencyKey} IS NOT NULL`),
   ],
 );
 
