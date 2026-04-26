@@ -112,27 +112,7 @@ import { adminCreditAdjustmentHandler } from './admin/credit-adjustments.js';
 import { adminRefundHandler } from './admin/refunds.js';
 import { adminWithdrawalHandler } from './admin/withdrawals.js';
 import { mountPublicRoutes } from './routes/public.js';
-import {
-  dsrDeleteHandler,
-  dsrExportHandler,
-  getCashbackHistoryHandler,
-  getCashbackHistoryCsvHandler,
-  getCashbackSummaryHandler,
-  getMeHandler,
-  getUserCreditsHandler,
-  getUserPayoutByOrderHandler,
-  getUserPendingPayoutDetailHandler,
-  getUserPendingPayoutsHandler,
-  getUserPendingPayoutsSummaryHandler,
-  setHomeCurrencyHandler,
-  setStellarAddressHandler,
-} from './users/handler.js';
-import { getUserStellarTrustlinesHandler } from './users/stellar-trustlines.js';
-import { getCashbackByMerchantHandler } from './users/cashback-by-merchant.js';
-import { getCashbackMonthlyHandler } from './users/cashback-monthly.js';
-import { getUserOrdersSummaryHandler } from './users/orders-summary.js';
-import { getUserFlywheelStatsHandler } from './users/flywheel-stats.js';
-import { getUserPaymentMethodShareHandler } from './users/payment-method-share.js';
+import { mountUserRoutes } from './routes/users.js';
 
 export const app = new Hono();
 
@@ -285,135 +265,12 @@ mountOrderRoutes(app);
 
 // ─── User profile ───────────────────────────────────────────────────────────
 //
-// `GET /api/users/me` returns the caller's profile: id, email, admin
-// flag, and home_currency (ADR 015). Works against both Loop-native
-// and legacy CTX bearers — CTX bearers upsert the Loop user row on
-// first touch, Loop bearers resolve by userId.
-// A2-1002: cache header mw registered BEFORE requireAuth so a 401
-// from missing/invalid Bearer still gets `Cache-Control: private,
-// no-store`. Without this ordering, a misbehaving CDN that caches
-// 401s could leak the "this URL needs auth" shape across users.
-// Mirrors the /api/orders ordering documented above.
-app.use('/api/users/me', privateNoStoreResponse);
-app.use('/api/users/me/*', privateNoStoreResponse);
-app.use('/api/users/me', requireAuth);
-app.use('/api/users/me/*', requireAuth);
-app.get('/api/users/me', rateLimit(60, 60_000), getMeHandler);
-// POST /api/users/me/home-currency — onboarding-time picker (ADR 015).
-// Rate limit lower than GET: users only hit this during signup, so 10/min
-// is plenty of headroom for a double-tap retry without enabling enumeration.
-app.post('/api/users/me/home-currency', rateLimit(10, 60_000), setHomeCurrencyHandler);
-// PUT /api/users/me/stellar-address — opt in / out of on-chain cashback
-// payouts by linking a Stellar address (ADR 015). Null body unlinks.
-// Rate-limited same cadence as other profile writes — a user changing
-// wallets is a low-volume action, 10/min is plenty without enabling
-// enumeration.
-app.put('/api/users/me/stellar-address', rateLimit(10, 60_000), setStellarAddressHandler);
-// A2-1906: GET /api/users/me/dsr/export — self-serve data export
-// (GDPR right to portability / CCPA equivalent the privacy policy
-// promises). 5/hour per IP — the export is a non-trivial multi-table
-// scan, but a legitimate user testing their export shouldn't hit a
-// wall on a couple of dry-runs. Each request also writes an
-// info-level log line tagged `area: 'dsr-export'` for the operator
-// audit trail.
-app.get('/api/users/me/dsr/export', rateLimit(5, 60 * 60_000), dsrExportHandler);
-// A2-1905: POST /api/users/me/dsr/delete — self-serve account
-// anonymisation (DSR / GDPR right of erasure the privacy policy
-// promises). Anonymisation rather than hard delete because ADR-009
-// makes the credit ledger append-only — see `dsr-delete.ts` module
-// header for the full posture. 3/hour per IP — destructive, but
-// must allow legitimate retries on transient 5xx without locking the
-// user out of their own deletion.
-app.post('/api/users/me/dsr/delete', rateLimit(3, 60 * 60_000), dsrDeleteHandler);
-// GET /api/users/me/stellar-trustlines — per-LOOP-asset trustline
-// status for the caller's linked address (ADR 015). Horizon-backed,
-// 30s cache per-address. Powers the /settings/wallet "can I receive
-// USDLOOP cashback?" affordance before the payout worker discovers
-// a missing trustline via a failed submit.
-app.get('/api/users/me/stellar-trustlines', rateLimit(30, 60_000), getUserStellarTrustlinesHandler);
-// GET /api/users/me/cashback-history — paginated credit-ledger events for
-// the caller (ADR 009 / 015). 60/min matches the profile GET cadence; the
-// Account page loads it alongside /me on mount, and TanStack Query invalidates
-// it after any ledger-touching admin action (support edits, payouts).
-app.get('/api/users/me/cashback-history', rateLimit(60, 60_000), getCashbackHistoryHandler);
-// Full credit-ledger CSV dump for the caller (ADR 009). Tighter rate
-// limit than the JSON sibling because the query is unbounded in size.
-app.get('/api/users/me/cashback-history.csv', rateLimit(6, 60_000), getCashbackHistoryCsvHandler);
-// GET /api/users/me/credits — caller's off-chain cashback balance per
-// currency (ADR 009 / 015). /me surfaces a single scalar in the user's
-// home currency; this is the multi-currency complement for users who
-// have flipped home currency or received a non-home adjustment.
-app.get('/api/users/me/credits', rateLimit(60, 60_000), getUserCreditsHandler);
-// GET /api/users/me/pending-payouts — caller-scoped on-chain payout
-// rows (ADR 015 / 016). 60/min matches the history endpoint; clients
-// typically poll this from /settings/cashback while a payout is in
-// flight. State + before + limit query shape mirrors the admin endpoint.
-app.get('/api/users/me/pending-payouts', rateLimit(60, 60_000), getUserPendingPayoutsHandler);
-// GET /api/users/me/pending-payouts/summary — aggregate view of the
-// caller's in-flight payouts, bucketed by (asset, state). One round
-// trip replaces paging the full list when a UI only needs the "you
-// have $X cashback settling" signal (client-homepage chip etc).
-app.get(
-  '/api/users/me/pending-payouts/summary',
-  rateLimit(60, 60_000),
-  getUserPendingPayoutsSummaryHandler,
-);
-// GET /api/users/me/pending-payouts/:id — caller-scoped single
-// drill-down. Cross-user access returns 404 (not 403) so payout
-// ids aren't enumerable.
-app.get(
-  '/api/users/me/pending-payouts/:id',
-  rateLimit(120, 60_000),
-  getUserPendingPayoutDetailHandler,
-);
-// GET /api/users/me/orders/:orderId/payout — for one of the
-// caller's own orders, return the single pending-payout row tied
-// to it. Mirror of the admin /api/admin/orders/:orderId/payout
-// but ownership-scoped. Powers a per-order settlement card on
-// /orders/:id — users see their Stellar-side cashback state
-// ("submitted / confirmed / failed") without scrolling payouts.
-app.get(
-  '/api/users/me/orders/:orderId/payout',
-  rateLimit(120, 60_000),
-  getUserPayoutByOrderHandler,
-);
-// GET /api/users/me/cashback-summary — compact lifetime + this-month
-// cashback totals in the user's home currency. Powers the home-page
-// headline ("£42 earned · £3.20 this month") without paging the
-// whole credit_transactions ledger.
-app.get('/api/users/me/cashback-summary', rateLimit(60, 60_000), getCashbackSummaryHandler);
-// GET /api/users/me/cashback-by-merchant — user's top cashback-earning
-// merchants in a rolling window. Powers the "earned by merchant" card
-// on /settings/cashback so users see which merchants drive their
-// cashback accrual without scrolling the full ledger (ADR 009/015).
-app.get('/api/users/me/cashback-by-merchant', rateLimit(60, 60_000), getCashbackByMerchantHandler);
-// Last-12-months cashback totals for the caller, grouped by (month,
-// currency). Drives the monthly bar chart on /settings/cashback —
-// answers "how did this month compare to last?" without hitting the
-// full ledger endpoint on the client (ADR 009/015).
-app.get('/api/users/me/cashback-monthly', rateLimit(60, 60_000), getCashbackMonthlyHandler);
-// 5-number summary header for /orders: total, fulfilled, pending,
-// failed, lifetime spend. Companion to /cashback-summary; single
-// query with FILTER-ed COUNT/SUM so the /orders page doesn't hit
-// the list endpoint just to render a header (ADR 010).
-app.get('/api/users/me/orders/summary', rateLimit(60, 60_000), getUserOrdersSummaryHandler);
-// Personal flywheel stats — how many of the caller's fulfilled
-// orders they paid for with LOOP asset (recycled cashback), vs
-// the total fulfilled denominator. Powers a motivational chip on
-// /orders: "You've recycled £X of cashback across Y orders". User-
-// side mirror of /api/admin/orders/payment-method-share. One query.
-app.get('/api/users/me/flywheel-stats', rateLimit(60, 60_000), getUserFlywheelStatsHandler);
-// User-facing rail mix (#643) — self-view of the caller's own
-// orders-by-payment-method, home-currency locked. Drives a
-// forthcoming "your rail mix" card on /settings/cashback so
-// users can see their own LOOP-asset share and the app can
-// nudge toward LOOP for compounding cashback. Same zero-fill +
-// default ?state=fulfilled as the admin siblings.
-app.get(
-  '/api/users/me/payment-method-share',
-  rateLimit(60, 60_000),
-  getUserPaymentMethodShareHandler,
-);
+// `/api/users/me/*` route mounts (profile + DSR + cashback +
+// payouts + flywheel — ~17 endpoints) live in `./routes/users.ts`.
+// Bundles cache-control + requireAuth + handlers because the
+// mount-order constraint between them (cache-control before auth
+// so 401s also get `private, no-store`) is the contract.
+mountUserRoutes(app);
 
 // ─── Admin (authenticated + admin-flagged) ──────────────────────────────────
 //
