@@ -15,12 +15,10 @@ import { corsMiddleware } from './middleware/cors.js';
 import { secureHeadersMiddleware } from './middleware/secure-headers.js';
 import { bodyLimitMiddleware } from './middleware/body-limit.js';
 import { killSwitch } from './middleware/kill-switch.js';
-import {
-  rateLimit,
-  __resetRateLimitsForTests as resetRateLimitMap,
-} from './middleware/rate-limit.js';
+import { rateLimit } from './middleware/rate-limit.js';
 import { startCleanupInterval } from './cleanup.js';
 import { metricsHandler, openApiHandler } from './observability-handlers.js';
+import { mountTestEndpoints } from './test-endpoints.js';
 import {
   merchantListHandler,
   merchantAllHandler,
@@ -207,10 +205,7 @@ export {
   __resetHealthProbeCacheForTests,
   __resetUpstreamProbeCacheOnlyForTests,
 } from './health.js';
-import {
-  healthHandler,
-  __resetUpstreamProbeCacheOnlyForTests as resetUpstreamProbeCacheOnly,
-} from './health.js';
+import { healthHandler } from './health.js';
 
 // (rate-limit body extracted to ./middleware/rate-limit.ts above)
 
@@ -265,28 +260,11 @@ app.get('/openapi.json', openApiHandler);
 
 // ─── Test-only reset endpoint ─────────────────────────────────────────────────
 //
-// Mocked e2e tests run against this process as a long-lived server (each
-// test spawns a fresh browser context but hits the same backend). Per-IP
-// rate-limit state accumulates across tests — a single IP exercising
-// `/api/auth/request-otp` across multiple tests + Playwright retries will
-// blow through the 5/min budget and start seeing 429, which manifests as
-// a disabled Continue button that never re-enables (the UI sees it as a
-// network error and leaves auth-loading stuck in its cleanup path).
-//
-// Expose a reset hook for the mocked suite's `beforeEach` to call. Gated
-// on `NODE_ENV=test` so production can't be nudged into dropping the
-// limiter. The unit-test rate-limit coverage (see
-// `routes.integration.test.ts`) imports `__resetRateLimitsForTests`
-// directly and isn't affected by this endpoint.
+// `/__test__/reset` (mocked-e2e harness rate-limit + probe-cache
+// reset hook) lives in `./test-endpoints.ts`. Gated on
+// `NODE_ENV=test` here so production can't mount it.
 if (env.NODE_ENV === 'test') {
-  // Deliberately outside the `/api` namespace so it doesn't appear in
-  // the OpenAPI spec and the lint-docs "route must be in architecture.md"
-  // check leaves it alone.
-  app.post('/__test__/reset', (c) => {
-    resetRateLimitMap();
-    resetUpstreamProbeCacheOnly();
-    return c.json({ message: 'reset' });
-  });
+  mountTestEndpoints(app);
 }
 
 // ─── Health ───────────────────────────────────────────────────────────────────
