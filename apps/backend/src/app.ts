@@ -13,6 +13,7 @@ import { sentry, captureException } from '@sentry/hono/node';
 import { scrubSentryEvent } from './sentry-scrubber.js';
 import { env } from './env.js';
 import { logger } from './logger.js';
+import type { User } from './db/users.js';
 import { getLocations, isLocationLoading } from './clustering/data-store.js';
 import { getMerchants } from './merchants/sync.js';
 import { clustersHandler } from './clustering/handler.js';
@@ -44,7 +45,7 @@ import {
 } from './orders/loop-handler.js';
 import { configHandler } from './config/handler.js';
 import { googleSocialLoginHandler, appleSocialLoginHandler } from './auth/social.js';
-import { notifyHealthChange } from './discord.js';
+import { notifyAdminBulkRead, notifyHealthChange } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
 import { adminConfigsHistoryHandler } from './admin/configs-history.js';
@@ -1168,6 +1169,47 @@ app.use('/api/admin/*', async (c, next) => {
 
 app.use('/api/admin/*', requireAuth);
 app.use('/api/admin/*', requireAdmin);
+
+// A2-2008: admin read audit. Every admin GET emits a Pino access-log
+// line tagged `audit-read` so the line-item read trail survives off
+// the host (Fly logflow ships logs externally — harder to tamper with
+// than a DB row). Bulk reads (CSV downloads + sufficiently-large list
+// pulls) additionally fire a Discord ping in #admin-audit so a human
+// sees the export-in-progress signal alongside the existing write
+// stream. Single-row drills stay log-only — sending every drill to
+// Discord would flood the channel and dilute the signal on real
+// bulk-exfil patterns.
+app.use('/api/admin/*', async (c, next) => {
+  await next();
+  if (c.req.method !== 'GET') return;
+  if (c.res.status !== 200) return;
+  const actor = (c as unknown as Context).get('user') as User | undefined;
+  if (actor === undefined) return;
+
+  const path = c.req.path;
+  const query = c.req.url.split('?')[1] ?? '';
+  const isCsv = path.endsWith('.csv');
+
+  logger.info(
+    {
+      area: 'admin-read-audit',
+      actorUserId: actor.id,
+      method: c.req.method,
+      path,
+      query: query.length > 0 ? query.slice(0, 200) : undefined,
+      isBulk: isCsv,
+    },
+    'Admin read',
+  );
+
+  if (isCsv) {
+    notifyAdminBulkRead({
+      actorUserId: actor.id,
+      endpoint: `${c.req.method} ${path}`,
+      ...(query.length > 0 ? { queryString: query } : {}),
+    });
+  }
+});
 
 app.get('/api/admin/merchant-cashback-configs', rateLimit(120, 60_000), listConfigsHandler);
 // CSV export of merchant_cashback_configs — Tier-3 bulk per ADR 018.
