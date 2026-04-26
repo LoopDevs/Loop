@@ -1,0 +1,61 @@
+name: CodeQL (static security analysis)
+
+# A2-1408: GitHub-native static analysis. CodeQL ships a default JS/TS
+# query suite that catches the OWASP top-10 classes (XSS, SSRF, path
+# traversal, prototype pollution, hardcoded secrets that gitleaks
+# misses, regex DoS) plus a Loop-relevant subset (unsafe deserialisation
+# in upstream-proxy paths, taint flow from request body → DB query).
+# Findings land in the Security tab; PR runs surface inline review
+# comments on offending lines.
+#
+# Runs on every push + PR (covers `apps/web` + `apps/backend` +
+# `packages/shared` in one analysis pass — CodeQL extracts the whole
+# JS/TS surface together) and on a weekly cron so newly-published
+# query updates run against the current main without waiting for the
+# next push.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly Monday 04:00 UTC — outside business hours, ahead of any
+    # weekly review meeting.
+    - cron: '0 4 * * 1'
+
+# Mirror the principle-of-least-privilege stance from ci.yml.
+# `security-events: write` is the one CodeQL-specific permission —
+# without it the analyse step can't upload SARIF results to the
+# Security tab. `actions: read` is needed for the matrix init API.
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      # CodeQL covers JS + TS in a single language pass — no need to
+      # split into apps/web vs apps/backend matrix entries.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@4e828ff8d448a8a6e532957b1811f387a63867e8 # v3.30.4
+        with:
+          languages: javascript-typescript
+          # `security-and-quality` is the broadest default suite —
+          # security-extended only runs the security queries, but
+          # quality findings (regex DoS, prototype pollution) are
+          # worth catching too.
+          queries: security-and-quality
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@4e828ff8d448a8a6e532957b1811f387a63867e8 # v3.30.4
+        with:
+          category: '/language:javascript-typescript'
