@@ -259,7 +259,7 @@ POST /api/auth/social/google                — ADR 014
 POST /api/auth/social/apple                 — ADR 014
 DELETE /api/auth/session
 POST /api/orders             [authenticated]
-POST /api/orders/loop        [authenticated — Loop-native flow, ADR 010]
+POST /api/orders/loop        [authenticated — Loop-native flow, ADR 010 + Idempotency-Key, A2-2003]
 GET  /api/orders/loop        [authenticated — Loop-native list, ADR 010]
 GET  /api/orders/loop/:id    [authenticated — Loop-native flow, ADR 010]
 GET  /api/orders             [authenticated]

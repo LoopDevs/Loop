@@ -27,11 +27,44 @@ export type LoopOrderPaymentMethod = OrderPaymentMethod;
 export type CreateLoopOrderBody = CreateLoopOrderRequest;
 export type { CreateLoopOrderResponse, LoopOrderView };
 
-/** POST /api/orders/loop — creates a Loop-native order in `pending_payment`. */
-export async function createLoopOrder(body: CreateLoopOrderBody): Promise<CreateLoopOrderResponse> {
+/**
+ * A2-2003: stamps every `POST /api/orders/loop` with a fresh
+ * `Idempotency-Key`. The backend dedups against (user_id, key) so a
+ * double-clicked submit, a retried fetch, or a network-flap retransmit
+ * all collapse onto a single order row + (for credit-funded orders) a
+ * single ledger debit.
+ *
+ * Generates a UUID v4 — 36 chars sits well inside the 16-128 server
+ * window, the entropy is far past anything a client double-click can
+ * collide on, and `crypto.randomUUID` is universally available in
+ * supported browsers + the Capacitor webview.
+ */
+function freshOrderIdempotencyKey(): string {
+  // `crypto.randomUUID()` requires a secure context; web runs over
+  // HTTPS in prod and on `capacitor://` in the native shell which
+  // counts as secure. Locally over `http://localhost` it's also OK.
+  return crypto.randomUUID();
+}
+
+/**
+ * POST /api/orders/loop — creates a Loop-native order in `pending_payment`.
+ *
+ * Pass `idempotencyKey` if the caller has already minted one (e.g. the
+ * payment-screen state survived a soft remount and we want to retry
+ * without creating a duplicate). Otherwise the service mints a fresh
+ * UUID v4 for each call so the natural double-click case is covered
+ * without the caller thinking about it.
+ */
+export async function createLoopOrder(
+  body: CreateLoopOrderBody,
+  options: { idempotencyKey?: string } = {},
+): Promise<CreateLoopOrderResponse> {
   return authenticatedRequest<CreateLoopOrderResponse>('/api/orders/loop', {
     method: 'POST',
     body,
+    headers: {
+      'Idempotency-Key': options.idempotencyKey ?? freshOrderIdempotencyKey(),
+    },
   });
 }
 

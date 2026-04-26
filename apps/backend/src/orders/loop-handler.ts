@@ -37,9 +37,23 @@ import { getUserById } from '../db/users.js';
 import { convertMinorUnits } from '../payments/price-feed.js';
 import { payoutAssetFor } from '../credits/payout-asset.js';
 import { notifyCashbackRecycled, notifyFirstCashbackRecycled } from '../discord.js';
-import { createOrder, InsufficientCreditError } from './repo.js';
+import {
+  createOrder,
+  findOrderByIdempotencyKey,
+  IdempotentOrderConflictError,
+  InsufficientCreditError,
+  type Order,
+} from './repo.js';
 
 const log = logger.child({ handler: 'loop-orders' });
+
+/**
+ * A2-2003: bounds match the admin idempotency contract
+ * (`apps/backend/src/admin/idempotency.ts`) — a single mental model
+ * for "what shape is an Idempotency-Key" across the API surface.
+ */
+const ORDER_IDEMPOTENCY_KEY_MIN = 16;
+const ORDER_IDEMPOTENCY_KEY_MAX = 128;
 
 const CreateBody = z.object({
   merchantId: z.string().min(1),
@@ -80,6 +94,80 @@ async function hasSufficientCredit(
     .where(and(eq(userCredits.userId, userId), eq(userCredits.currency, currency)));
   const balanceStr = row[0]?.balance ?? '0';
   return BigInt(balanceStr) >= amountMinor;
+}
+
+/**
+ * A2-2003: build the create-order response from an already-persisted
+ * row. Two callers:
+ *   - lookup-first short-circuit before we even hit `createOrder`
+ *     (a repeat post within TTL),
+ *   - `IdempotentOrderConflictError` recovery when a concurrent
+ *     caller raced us through that lookup.
+ *
+ * Discord notifications (`notifyCashbackRecycled` / `notifyFirstCashbackRecycled`)
+ * are deliberately NOT re-fired here — those are tied to user intent
+ * at first creation; firing them again on every retry would dilute
+ * the signal and risk per-attempt double-pings on a flaky client.
+ */
+function replayOrderResponse(c: Context, order: Order): Response {
+  const base = { orderId: order.id };
+  if (order.paymentMethod === 'credit') {
+    return c.json<OrderPaymentResponse>({
+      ...base,
+      payment: {
+        method: 'credit',
+        amountMinor: order.chargeMinor.toString(),
+        currency: order.chargeCurrency,
+      },
+    });
+  }
+  if (order.paymentMethod === 'loop_asset') {
+    if (!isHomeCurrency(order.chargeCurrency)) {
+      // Defence-in-depth: the DB CHECK constraint pins charge_currency
+      // to the supported set; a stored row that no longer parses means
+      // schema drift. Refuse to replay rather than guess.
+      log.error(
+        { orderId: order.id, chargeCurrency: order.chargeCurrency },
+        'replay: stored loop_asset order has charge_currency outside the home-currency enum',
+      );
+      return c.json({ code: 'INTERNAL_ERROR', message: 'Invalid stored order currency' }, 500);
+    }
+    const payoutAsset = payoutAssetFor(order.chargeCurrency);
+    if (payoutAsset.issuer === null || env.LOOP_STELLAR_DEPOSIT_ADDRESS === undefined) {
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: 'LOOP asset not configured for your region' },
+        503,
+      );
+    }
+    return c.json<OrderPaymentResponse>({
+      ...base,
+      payment: {
+        method: 'loop_asset',
+        stellarAddress: env.LOOP_STELLAR_DEPOSIT_ADDRESS,
+        memo: order.paymentMemo ?? '',
+        amountMinor: order.chargeMinor.toString(),
+        currency: order.chargeCurrency,
+        assetCode: payoutAsset.code,
+        assetIssuer: payoutAsset.issuer,
+      },
+    });
+  }
+  if (env.LOOP_STELLAR_DEPOSIT_ADDRESS === undefined) {
+    return c.json(
+      { code: 'SERVICE_UNAVAILABLE', message: 'On-chain payment temporarily unavailable' },
+      503,
+    );
+  }
+  return c.json<OrderPaymentResponse>({
+    ...base,
+    payment: {
+      method: order.paymentMethod as 'xlm' | 'usdc',
+      stellarAddress: env.LOOP_STELLAR_DEPOSIT_ADDRESS,
+      memo: order.paymentMemo ?? '',
+      amountMinor: order.chargeMinor.toString(),
+      currency: order.chargeCurrency,
+    },
+  });
 }
 
 /**
@@ -124,6 +212,36 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
       },
       400,
     );
+  }
+
+  // A2-2003: optional `Idempotency-Key` header. When present and well-
+  // formed, a repeat post within the row's lifetime returns the
+  // already-created order's response instead of writing a second row
+  // (and, for credit-funded orders, a second `user_credits` debit).
+  // When absent, the legacy double-click risk is preserved — the
+  // header is opt-in for now while the loop-native client rolls out.
+  const idempotencyKey = c.req.header('Idempotency-Key') ?? c.req.header('idempotency-key');
+  if (idempotencyKey !== undefined) {
+    if (
+      idempotencyKey.length < ORDER_IDEMPOTENCY_KEY_MIN ||
+      idempotencyKey.length > ORDER_IDEMPOTENCY_KEY_MAX
+    ) {
+      return c.json(
+        {
+          code: 'VALIDATION_ERROR',
+          message: `Idempotency-Key must be between ${ORDER_IDEMPOTENCY_KEY_MIN} and ${ORDER_IDEMPOTENCY_KEY_MAX} characters`,
+        },
+        400,
+      );
+    }
+    // Lookup-first: a repeat post short-circuits without holding any
+    // locks. The unique index is scoped to (user_id, key), so a key
+    // re-used by a different user simply doesn't match here and falls
+    // through to the create path.
+    const prior = await findOrderByIdempotencyKey(auth.userId, idempotencyKey);
+    if (prior !== null) {
+      return replayOrderResponse(c, prior);
+    }
   }
 
   // Validate the merchant exists + is enabled in the in-memory cache.
@@ -234,6 +352,7 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
       chargeMinor,
       chargeCurrency: user.homeCurrency,
       paymentMethod: parsed.data.paymentMethod,
+      ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
     });
     const base = {
       orderId: order.id,
@@ -325,6 +444,13 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
       },
     });
   } catch (err) {
+    // A2-2003: a concurrent request raced us through the lookup-first
+    // path (e.g. parallel double-clicks dispatched in flight before
+    // the first INSERT committed). The unique-violation rolled the
+    // failing txn back; replay the prior order's response.
+    if (err instanceof IdempotentOrderConflictError) {
+      return replayOrderResponse(c, err.existing);
+    }
     // Balance race between `hasSufficientCredit` check and the FOR
     // UPDATE debit inside `createOrder` (A2-601 guard). No order
     // row was persisted (txn rolled back), so the UX is the same as

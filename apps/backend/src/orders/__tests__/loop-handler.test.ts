@@ -10,10 +10,33 @@ vi.hoisted(() => {
 });
 
 const createOrderMock = vi.fn();
+const findOrderByIdempotencyKeyMock = vi.fn();
 const getMerchantsMock = vi.fn();
+
+const { IdempotentOrderConflictError, InsufficientCreditError } = vi.hoisted(() => {
+  class IdempotentOrderConflictError extends Error {
+    readonly existing: unknown;
+    constructor(existing: unknown) {
+      super('replay');
+      this.name = 'IdempotentOrderConflictError';
+      this.existing = existing;
+    }
+  }
+  class InsufficientCreditError extends Error {
+    constructor() {
+      super('balance');
+      this.name = 'InsufficientCreditError';
+    }
+  }
+  return { IdempotentOrderConflictError, InsufficientCreditError };
+});
 
 vi.mock('../repo.js', () => ({
   createOrder: (args: unknown) => createOrderMock(args),
+  findOrderByIdempotencyKey: (userId: string, key: string) =>
+    findOrderByIdempotencyKeyMock(userId, key),
+  IdempotentOrderConflictError,
+  InsufficientCreditError,
 }));
 vi.mock('../../merchants/sync.js', () => ({
   getMerchants: () => getMerchantsMock(),
@@ -106,9 +129,19 @@ interface FakeCtx {
   ctx: Context;
 }
 
-function makeCtx(opts: { auth?: LoopAuthContext | undefined; body?: unknown }): FakeCtx {
+function makeCtx(opts: {
+  auth?: LoopAuthContext | undefined;
+  body?: unknown;
+  headers?: Record<string, string>;
+}): FakeCtx {
   const store = new Map<string, unknown>();
   if (opts.auth !== undefined) store.set('auth', opts.auth);
+  const headers: Record<string, string> = {};
+  if (opts.headers !== undefined) {
+    for (const [k, v] of Object.entries(opts.headers)) {
+      headers[k.toLowerCase()] = v;
+    }
+  }
   return {
     store,
     body: opts.body,
@@ -118,6 +151,7 @@ function makeCtx(opts: { auth?: LoopAuthContext | undefined; body?: unknown }): 
           if (opts.body === '__throw__') throw new Error('bad json');
           return opts.body;
         },
+        header: (name: string) => headers[name.toLowerCase()],
       },
       get: (k: string) => store.get(k),
       json: (b: unknown, status?: number) =>
@@ -138,6 +172,8 @@ const LOOP_AUTH: LoopAuthContext = {
 
 beforeEach(() => {
   createOrderMock.mockReset();
+  findOrderByIdempotencyKeyMock.mockReset();
+  findOrderByIdempotencyKeyMock.mockResolvedValue(null);
   getMerchantsMock.mockReset();
   balanceState.rows = [];
   payoutAssetState.issuer = null;
@@ -465,6 +501,158 @@ describe('loopCreateOrderHandler', () => {
     });
     const res = await loopCreateOrderHandler(ctx);
     expect(res.status).toBe(503);
+  });
+
+  // A2-2003: Idempotency-Key support on POST /api/orders/loop
+  describe('Idempotency-Key (A2-2003)', () => {
+    const VALID_KEY = '0123456789abcdef-loop-order-idempotency-key';
+
+    it('400 when Idempotency-Key is too short', async () => {
+      const { ctx } = makeCtx({
+        auth: LOOP_AUTH,
+        headers: { 'Idempotency-Key': 'short' },
+        body: {
+          merchantId: 'm1',
+          amountMinor: 10_000,
+          currency: 'GBP',
+          paymentMethod: 'xlm',
+        },
+      });
+      const res = await loopCreateOrderHandler(ctx);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code: string; message: string };
+      expect(body.code).toBe('VALIDATION_ERROR');
+      expect(body.message).toMatch(/Idempotency-Key/i);
+      expect(createOrderMock).not.toHaveBeenCalled();
+    });
+
+    it('400 when Idempotency-Key exceeds the 128-char ceiling', async () => {
+      const tooLong = 'x'.repeat(129);
+      const { ctx } = makeCtx({
+        auth: LOOP_AUTH,
+        headers: { 'Idempotency-Key': tooLong },
+        body: {
+          merchantId: 'm1',
+          amountMinor: 10_000,
+          currency: 'GBP',
+          paymentMethod: 'xlm',
+        },
+      });
+      const res = await loopCreateOrderHandler(ctx);
+      expect(res.status).toBe(400);
+      expect(createOrderMock).not.toHaveBeenCalled();
+    });
+
+    it('replays the prior order when (userId, key) already maps to one', async () => {
+      const prior = {
+        id: 'prior-order-id',
+        userId: 'user-uuid',
+        merchantId: 'm1',
+        faceValueMinor: 7_500n,
+        currency: 'GBP',
+        chargeMinor: 7_500n,
+        chargeCurrency: 'GBP',
+        paymentMethod: 'xlm',
+        paymentMemo: 'PRIORMEMO',
+      };
+      findOrderByIdempotencyKeyMock.mockResolvedValueOnce(prior);
+      const { ctx } = makeCtx({
+        auth: LOOP_AUTH,
+        headers: { 'Idempotency-Key': VALID_KEY },
+        body: {
+          merchantId: 'm1',
+          amountMinor: 10_000,
+          currency: 'GBP',
+          paymentMethod: 'xlm',
+        },
+      });
+      const res = await loopCreateOrderHandler(ctx);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        orderId: string;
+        payment: { memo: string; amountMinor: string };
+      };
+      // Replay returns the PRIOR order's data — not the freshly-built
+      // FX result. Memo + amount come from the stored row.
+      expect(body.orderId).toBe('prior-order-id');
+      expect(body.payment.memo).toBe('PRIORMEMO');
+      expect(body.payment.amountMinor).toBe('7500');
+      // Crucially: createOrder is NOT called on replay, so no second
+      // row + (for credit-funded orders) no second debit lands.
+      expect(createOrderMock).not.toHaveBeenCalled();
+    });
+
+    it('passes the key through to createOrder when no prior order exists', async () => {
+      findOrderByIdempotencyKeyMock.mockResolvedValueOnce(null);
+      const { ctx } = makeCtx({
+        auth: LOOP_AUTH,
+        headers: { 'Idempotency-Key': VALID_KEY },
+        body: {
+          merchantId: 'm1',
+          amountMinor: 10_000,
+          currency: 'GBP',
+          paymentMethod: 'xlm',
+        },
+      });
+      const res = await loopCreateOrderHandler(ctx);
+      expect(res.status).toBe(200);
+      expect(createOrderMock).toHaveBeenCalledWith(
+        expect.objectContaining({ idempotencyKey: VALID_KEY }),
+      );
+    });
+
+    it('replays the existing order when createOrder hits a unique-violation race', async () => {
+      // Lookup says no prior — second caller raced past the lookup
+      // before the first caller's INSERT committed. Now createOrder
+      // throws IdempotentOrderConflictError carrying the prior row.
+      findOrderByIdempotencyKeyMock.mockResolvedValueOnce(null);
+      const winner = {
+        id: 'winner-order-id',
+        userId: 'user-uuid',
+        merchantId: 'm1',
+        faceValueMinor: 10_000n,
+        currency: 'GBP',
+        chargeMinor: 10_000n,
+        chargeCurrency: 'GBP',
+        paymentMethod: 'xlm',
+        paymentMemo: 'WINNERMEMO',
+      };
+      createOrderMock.mockRejectedValueOnce(new IdempotentOrderConflictError(winner));
+      const { ctx } = makeCtx({
+        auth: LOOP_AUTH,
+        headers: { 'Idempotency-Key': VALID_KEY },
+        body: {
+          merchantId: 'm1',
+          amountMinor: 10_000,
+          currency: 'GBP',
+          paymentMethod: 'xlm',
+        },
+      });
+      const res = await loopCreateOrderHandler(ctx);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { orderId: string; payment: { memo: string } };
+      expect(body.orderId).toBe('winner-order-id');
+      expect(body.payment.memo).toBe('WINNERMEMO');
+    });
+
+    it('header is optional — request without it succeeds without lookup', async () => {
+      const { ctx } = makeCtx({
+        auth: LOOP_AUTH,
+        body: {
+          merchantId: 'm1',
+          amountMinor: 10_000,
+          currency: 'GBP',
+          paymentMethod: 'xlm',
+        },
+      });
+      const res = await loopCreateOrderHandler(ctx);
+      expect(res.status).toBe(200);
+      expect(findOrderByIdempotencyKeyMock).not.toHaveBeenCalled();
+      // createOrder receives no idempotencyKey on this path.
+      expect(createOrderMock).toHaveBeenCalledWith(
+        expect.not.objectContaining({ idempotencyKey: expect.anything() }),
+      );
+    });
   });
 });
 

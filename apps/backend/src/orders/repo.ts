@@ -185,6 +185,47 @@ export interface CreateOrderArgs {
   chargeCurrency?: string;
   /** Override for tests; production leaves this undefined and the repo generates it. */
   paymentMemo?: string;
+  /**
+   * A2-2003: optional client-supplied idempotency key. When set, the
+   * row carries it and the (user_id, key) partial unique index in
+   * `orders_user_idempotency_unique` rejects a second insert with the
+   * same pair. The handler converts that violation into a replay of
+   * the already-created order's response.
+   */
+  idempotencyKey?: string;
+}
+
+/**
+ * A2-2003: thrown by `createOrder` when the (userId, idempotencyKey)
+ * pair already exists. Carries the prior order so the caller can
+ * build a replay response without a second SELECT round-trip — the
+ * row was returned by the same SQL roundtrip that detected the
+ * violation, courtesy of the post-insert lookup in the catch arm.
+ */
+export class IdempotentOrderConflictError extends Error {
+  readonly existing: Order;
+  constructor(existing: Order) {
+    super('Idempotency-Key already maps to a different order for this user');
+    this.name = 'IdempotentOrderConflictError';
+    this.existing = existing;
+  }
+}
+
+/**
+ * A2-2003: lookup the prior order for a given (userId, idempotencyKey)
+ * pair. Returns null on miss. Called by the handler before the write
+ * so a repeat request short-circuits without holding any locks; the
+ * unique-index race is caught by `IdempotentOrderConflictError` from
+ * the insert path.
+ */
+export async function findOrderByIdempotencyKey(
+  userId: string,
+  idempotencyKey: string,
+): Promise<Order | null> {
+  const row = await db.query.orders.findFirst({
+    where: and(eq(orders.userId, userId), eq(orders.idempotencyKey, idempotencyKey)),
+  });
+  return row ?? null;
 }
 
 /**
@@ -246,81 +287,124 @@ export async function createOrder(args: CreateOrderArgs): Promise<Order> {
     wholesaleMinor: split.wholesaleMinor,
     userCashbackMinor: split.userCashbackMinor,
     loopMarginMinor: split.loopMarginMinor,
+    idempotencyKey: args.idempotencyKey ?? null,
   };
 
   // For credit-funded orders, do the insert + debit + state flip all
   // in one txn. Everything else (on-chain) just inserts and returns
   // pending_payment.
   if (args.paymentMethod !== 'credit') {
-    const [row] = await db.insert(orders).values(baseValues).returning();
-    if (row === undefined) {
-      throw new Error('createOrder: no row returned');
+    try {
+      const [row] = await db.insert(orders).values(baseValues).returning();
+      if (row === undefined) {
+        throw new Error('createOrder: no row returned');
+      }
+      return row;
+    } catch (err) {
+      // A2-2003: a concurrent caller raced us to the same
+      // (userId, idempotencyKey) pair. Re-fetch the prior order so
+      // the handler can replay its response.
+      const conflict = await maybeFetchIdempotentConflict(args, err);
+      if (conflict !== null) throw new IdempotentOrderConflictError(conflict);
+      throw err;
     }
-    return row;
   }
 
-  return await db.transaction(async (tx) => {
-    const [inserted] = await tx.insert(orders).values(baseValues).returning();
-    if (inserted === undefined) {
-      throw new Error('createOrder: no row returned');
-    }
+  try {
+    return await db.transaction(async (tx) => {
+      const [inserted] = await tx.insert(orders).values(baseValues).returning();
+      if (inserted === undefined) {
+        throw new Error('createOrder: no row returned');
+      }
 
-    // Re-read balance under a FOR UPDATE lock. A concurrent admin
-    // adjustment or another credit order against the same
-    // (user, currency) row serialises through here. This is the
-    // guard — the earlier `hasSufficientCredit` at the handler is a
-    // UX fast-path that can be racy.
-    const fresh = await tx
-      .select({ balanceMinor: userCredits.balanceMinor })
-      .from(userCredits)
-      .where(and(eq(userCredits.userId, args.userId), eq(userCredits.currency, chargeCurrency)))
-      .for('update');
+      // Re-read balance under a FOR UPDATE lock. A concurrent admin
+      // adjustment or another credit order against the same
+      // (user, currency) row serialises through here. This is the
+      // guard — the earlier `hasSufficientCredit` at the handler is a
+      // UX fast-path that can be racy.
+      const fresh = await tx
+        .select({ balanceMinor: userCredits.balanceMinor })
+        .from(userCredits)
+        .where(and(eq(userCredits.userId, args.userId), eq(userCredits.currency, chargeCurrency)))
+        .for('update');
 
-    const balance = fresh[0]?.balanceMinor ?? 0n;
-    if (balance < chargeMinor) {
-      throw new InsufficientCreditError();
-    }
+      const balance = fresh[0]?.balanceMinor ?? 0n;
+      if (balance < chargeMinor) {
+        throw new InsufficientCreditError();
+      }
 
-    // Ledger: type='spend' carries a NEGATIVE amount per schema CHECK
-    // (`spend`/`withdrawal` amount<0). Reference this order so
-    // reconciliation can trace the debit back to its cause.
-    await tx.insert(creditTransactions).values({
-      userId: args.userId,
-      type: 'spend',
-      amountMinor: -chargeMinor,
-      currency: chargeCurrency,
-      referenceType: 'order',
-      referenceId: inserted.id,
+      // Ledger: type='spend' carries a NEGATIVE amount per schema CHECK
+      // (`spend`/`withdrawal` amount<0). Reference this order so
+      // reconciliation can trace the debit back to its cause.
+      await tx.insert(creditTransactions).values({
+        userId: args.userId,
+        type: 'spend',
+        amountMinor: -chargeMinor,
+        currency: chargeCurrency,
+        referenceType: 'order',
+        referenceId: inserted.id,
+      });
+
+      // Balance: subtract via SQL expression rather than JS arithmetic
+      // on the freshly-read value, since the lock already serialises
+      // us and the DB expression is the ledger's own source of truth.
+      await tx
+        .update(userCredits)
+        .set({ balanceMinor: sql`${userCredits.balanceMinor} - ${chargeMinor}` })
+        .where(and(eq(userCredits.userId, args.userId), eq(userCredits.currency, chargeCurrency)));
+
+      // Transition to paid. Mirrors `markOrderPaid`'s shape but stays
+      // within this txn so the debit + state flip commit together.
+      const now = new Date();
+      const [paid] = await tx
+        .update(orders)
+        .set({
+          state: 'paid',
+          paidAt: now,
+          paymentReceivedAt: now,
+        })
+        .where(and(eq(orders.id, inserted.id), eq(orders.state, 'pending_payment')))
+        .returning();
+      if (paid === undefined) {
+        // Unreachable — the row was just inserted above in the same
+        // txn; nothing else can have transitioned it. Throw loudly so
+        // a future refactor that breaks this invariant is obvious.
+        throw new Error('createOrder: credit-order paid-transition lost race with self');
+      }
+      return paid;
     });
+  } catch (err) {
+    if (err instanceof InsufficientCreditError) throw err;
+    // A2-2003: a concurrent caller raced us to the same
+    // (userId, idempotencyKey) pair. The whole txn rolled back, so
+    // no debit / order row landed for this attempt. Re-fetch the
+    // prior order and surface as IdempotentOrderConflictError so the
+    // handler can replay its response.
+    const conflict = await maybeFetchIdempotentConflict(args, err);
+    if (conflict !== null) throw new IdempotentOrderConflictError(conflict);
+    throw err;
+  }
+}
 
-    // Balance: subtract via SQL expression rather than JS arithmetic
-    // on the freshly-read value, since the lock already serialises
-    // us and the DB expression is the ledger's own source of truth.
-    await tx
-      .update(userCredits)
-      .set({ balanceMinor: sql`${userCredits.balanceMinor} - ${chargeMinor}` })
-      .where(and(eq(userCredits.userId, args.userId), eq(userCredits.currency, chargeCurrency)));
-
-    // Transition to paid. Mirrors `markOrderPaid`'s shape but stays
-    // within this txn so the debit + state flip commit together.
-    const now = new Date();
-    const [paid] = await tx
-      .update(orders)
-      .set({
-        state: 'paid',
-        paidAt: now,
-        paymentReceivedAt: now,
-      })
-      .where(and(eq(orders.id, inserted.id), eq(orders.state, 'pending_payment')))
-      .returning();
-    if (paid === undefined) {
-      // Unreachable — the row was just inserted above in the same
-      // txn; nothing else can have transitioned it. Throw loudly so
-      // a future refactor that breaks this invariant is obvious.
-      throw new Error('createOrder: credit-order paid-transition lost race with self');
-    }
-    return paid;
-  });
+/**
+ * A2-2003: when an `INSERT INTO orders` fails, classify the failure as
+ * an idempotency-key conflict iff:
+ *   - the caller passed an `idempotencyKey`, and
+ *   - the error mentions the partial unique index name.
+ *
+ * Re-fetches the prior order so the caller can build the replay
+ * response. Returns null when the failure was something else
+ * (CHECK violation, FK violation, connection error) — the original
+ * exception bubbles unchanged.
+ */
+async function maybeFetchIdempotentConflict(
+  args: CreateOrderArgs,
+  err: unknown,
+): Promise<Order | null> {
+  if (args.idempotencyKey === undefined) return null;
+  const message = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  if (!message.includes('orders_user_idempotency_unique')) return null;
+  return await findOrderByIdempotencyKey(args.userId, args.idempotencyKey);
 }
 
 /**
