@@ -16,6 +16,16 @@ const log = logger.child({ area: 'db' });
  * `DATABASE_POOL_MAX` if we ever outgrow single-digit concurrency per
  * machine.
  */
+// A2-724: per-session statement_timeout. Postgres-js's `connection`
+// option becomes the startup-parameter set sent on each connect, so
+// every connection out of this pool has the timeout applied without
+// us needing a per-query SET LOCAL. Value of 0 turns the timeout off
+// (matches Postgres's own convention).
+const startupParameters: Record<string, string> = {};
+if (env.DATABASE_STATEMENT_TIMEOUT_MS > 0) {
+  startupParameters['statement_timeout'] = String(env.DATABASE_STATEMENT_TIMEOUT_MS);
+}
+
 const client = postgres(env.DATABASE_URL, {
   max: env.DATABASE_POOL_MAX,
   // `idle_timeout` closes pool members after N seconds of inactivity.
@@ -23,6 +33,8 @@ const client = postgres(env.DATABASE_URL, {
   // interacting badly with Fly Postgres idle disconnects.
   idle_timeout: 20,
   connect_timeout: 10,
+  // A2-724: see `startupParameters` above.
+  connection: startupParameters,
   // We use `bigint` mode on our bigint columns in schema.ts; keep the
   // driver in sync so `balance_minor` round-trips as a BigInt
   // end-to-end instead of silently truncating to Number.

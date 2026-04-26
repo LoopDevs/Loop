@@ -180,6 +180,17 @@ export const EnvSchema = z.object({
     }),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
 
+  // A2-724: per-session statement_timeout (milliseconds). Sent as a
+  // startup parameter on every connection so a runaway query
+  // (admin aggregate, errant ad-hoc) can't monopolise a pool slot
+  // indefinitely. 30s is the Phase-1 baseline — every documented
+  // admin endpoint completes well under this with the partial
+  // indexes from A2-708/709 + A2-716. Set to 0 to disable (the
+  // migrator path runs through the same pool and can take longer
+  // on a fresh-clone replay; default keeps boot-time migrations
+  // well-bounded since none currently exceed 5s of pure DDL).
+  DATABASE_STATEMENT_TIMEOUT_MS: z.coerce.number().int().nonnegative().default(30_000),
+
   // Comma-separated list of CTX user IDs granted admin privileges
   // (ADR 011). Evaluated at user-upsert time to set `users.is_admin`.
   // Matching by CTX sub (not email) keeps the upsert path synchronous
