@@ -8,7 +8,6 @@ import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
 import { runWithRequestContext, getCtxResponseRequestId } from './request-context.js';
 import { isKilled, type KillSwitch } from './kill-switches.js';
-import { getConnInfo } from '@hono/node-server/conninfo';
 import { sentry, captureException } from '@sentry/hono/node';
 import { scrubSentryEvent } from './sentry-scrubber.js';
 import { env } from './env.js';
@@ -22,7 +21,12 @@ import { sweepStaleIdempotencyKeys } from './admin/idempotency.js';
 import { upstreamUrl } from './upstream.js';
 import { getAllCircuitStates } from './circuit-breaker.js';
 import { generateOpenApiSpec } from './openapi.js';
-import { metrics, incrementRateLimitHit, incrementRequest } from './metrics.js';
+import { metrics, incrementRequest } from './metrics.js';
+import {
+  rateLimit,
+  __resetRateLimitsForTests as resetRateLimitMap,
+  sweepExpiredRateLimits,
+} from './middleware/rate-limit.js';
 import {
   merchantListHandler,
   merchantAllHandler,
@@ -192,61 +196,15 @@ if (env.SENTRY_DSN) {
 }
 
 // ─── Rate limiting ───────────────────────────────────────────────────────────
-
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-
-/**
- * Resolves the client IP the rate limiter should key on. Audit A-023:
- * previously `c.req.header('x-forwarded-for')?.split(',')[0]` was used
- * unconditionally, meaning any client could send an `X-Forwarded-For`
- * header with an arbitrary value and bypass per-IP limits by rotating
- * that value.
- *
- * Policy:
- *   - `env.TRUST_PROXY === true`: we're behind a trusted edge proxy
- *     (Fly.io, nginx, Cloud Run, etc.) that writes X-Forwarded-For. Use
- *     the leftmost value — that's the original client the edge saw.
- *   - `env.TRUST_PROXY === false`: no trusted proxy in front of us. Use
- *     the TCP socket's remote address. Ignores X-Forwarded-For entirely.
- *
- * Returns the string `'unknown'` only if both sources fail — rate limits
- * still apply but everyone lands in the same bucket, which is
- * conservative.
- */
-// A2-1526: exported so `__tests__/trust-proxy.test.ts` can drive
-// both TRUST_PROXY=true and TRUST_PROXY=false paths end-to-end
-// without having to bring up a real rate-limited endpoint to observe
-// the bucketing decision. The rate-limit middleware calls this for
-// every request.
-export function clientIpFor(c: Context): string {
-  if (env.TRUST_PROXY) {
-    const xff = c.req.header('x-forwarded-for');
-    if (xff !== undefined && xff.length > 0) {
-      const first = xff.split(',')[0]?.trim();
-      if (first !== undefined && first.length > 0) return first;
-    }
-  }
-  try {
-    const info = getConnInfo(c);
-    const address = info.remote.address;
-    if (address !== undefined && address.length > 0) return address;
-  } catch {
-    /* conninfo unavailable — dev server/test harness */
-  }
-  return 'unknown';
-}
-
-/**
- * Test helper: wipe the rate-limit map between cases. Module state
- * persists across `app.request(...)` calls, so a test that exercises
- * the same route many times in a loop will start receiving 429 as soon
- * as it passes the route's per-minute budget. Tests that hit the budget
- * intentionally (the order-validation suite fires dozens of rejections
- * back-to-back) call this from `beforeEach` to reset.
- */
-export function __resetRateLimitsForTests(): void {
-  rateLimitMap.clear();
-}
+//
+// `rateLimit`, `clientIpFor`, the `rateLimitMap` cap, and the test
+// reset helper all live in `./middleware/rate-limit.ts` so the
+// limiter has a single home that owns its module-local state.
+// `clientIpFor` and `__resetRateLimitsForTests` are re-exported here
+// so existing test imports (`trust-proxy.test.ts`,
+// `routes.integration.test.ts`, etc.) keep working without
+// re-targeting in this PR.
+export { clientIpFor, __resetRateLimitsForTests } from './middleware/rate-limit.js';
 
 /**
  * Test helper: clear the /health upstream-probe cache. The `/health`
@@ -274,57 +232,7 @@ export function __resetUpstreamProbeCacheOnlyForTests(): void {
   upstreamProbeInFlight = null;
 }
 
-// Cap on the rate-limit map. Without this, an attacker spraying requests
-// from fresh IPs faster than the hourly cleanup runs could grow the map
-// until the process OOMs. With the cap, once we hit it we evict the
-// oldest entry before inserting — the attacker loses memory of their own
-// earlier hits but we stay stable.
-const RATE_LIMIT_MAP_MAX = 10_000;
-
-/** Simple per-IP rate limiter. Returns 429 if limit exceeded within the window. */
-function rateLimit(
-  maxRequests: number,
-  windowMs: number,
-): (c: Context, next: () => Promise<void>) => Promise<void | Response> {
-  return async (c, next): Promise<void | Response> => {
-    // Escape hatch for e2e test runs. The mocked-e2e suite drives
-    // the purchase flow twice with Playwright retries, which
-    // collides with the 5/min request-otp limit on a cold start.
-    // Setting DISABLE_RATE_LIMITING=1 lets the harness bypass the
-    // limiter without tripping the unit tests that explicitly
-    // verify the 429 path under NODE_ENV=test. Production never
-    // sets this flag.
-    if (env.DISABLE_RATE_LIMITING) {
-      await next();
-      return;
-    }
-    const ip = clientIpFor(c);
-    const now = Date.now();
-    const entry = rateLimitMap.get(ip);
-
-    if (entry === undefined || now > entry.resetAt) {
-      // Evict the oldest entry if we're at capacity. Map iteration order is
-      // insertion order, so keys().next().value is the oldest.
-      if (rateLimitMap.size >= RATE_LIMIT_MAP_MAX && entry === undefined) {
-        const oldest = rateLimitMap.keys().next().value;
-        if (oldest !== undefined) rateLimitMap.delete(oldest);
-      }
-      rateLimitMap.set(ip, { count: 1, resetAt: now + windowMs });
-    } else {
-      entry.count++;
-      if (entry.count > maxRequests) {
-        // Tell the client when the window resets so clients can back off
-        // instead of hot-looping retries.
-        const retryAfterSec = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
-        c.header('Retry-After', String(retryAfterSec));
-        incrementRateLimitHit();
-        return c.json({ code: 'RATE_LIMITED', message: 'Too many requests' }, 429);
-      }
-    }
-
-    await next();
-  };
-}
+// (rate-limit body extracted to ./middleware/rate-limit.ts above)
 
 /**
  * A2-1907: per-subsystem runtime kill switch. Returns 503
@@ -640,7 +548,7 @@ if (env.NODE_ENV === 'test') {
   // the OpenAPI spec and the lint-docs "route must be in architecture.md"
   // check leaves it alone.
   app.post('/__test__/reset', (c) => {
-    rateLimitMap.clear();
+    resetRateLimitMap();
     upstreamProbeCache = null;
     upstreamProbeInFlight = null;
     return c.json({ message: 'reset' });
@@ -1868,10 +1776,7 @@ app.onError((err, c) => {
 
 function runCleanup(): void {
   evictExpiredImageCache();
-  const now = Date.now();
-  for (const [key, entry] of rateLimitMap) {
-    if (now > entry.resetAt) rateLimitMap.delete(key);
-  }
+  sweepExpiredRateLimits();
   // A2-500: expire admin-idempotency snapshots past the 24h TTL
   // promised by ADR-017. Fire-and-forget — a sweep failure can be
   // retried next hour; the read-time TTL gate in lookupIdempotencyKey
