@@ -786,69 +786,18 @@ export {
   getAdminUserFlywheelStats,
 } from './admin-user-drill';
 
-/**
- * Admin per-merchant flywheel scalar (#623). Sibling of the per-user
- * variant above, but scoped to a merchant's 31-day fulfilled volume.
- *
- * No `currency` field — per-merchant volume can span multiple user
- * home_currencies, so charges are summed without a common
- * denomination. The chip renders by count + percentage only.
- */
-export interface AdminMerchantFlywheelStats {
-  merchantId: string;
-  /** ISO-8601 start of the 31-day window. */
-  since: string;
-  totalFulfilledCount: number;
-  recycledOrderCount: number;
-  /** SUM(charge_minor) over loop_asset orders. bigint-as-string. */
-  recycledChargeMinor: string;
-  /** SUM(charge_minor) over every fulfilled order. bigint-as-string. */
-  totalChargeMinor: string;
-}
-
-/** `GET /api/admin/merchants/:merchantId/flywheel-stats` — per-merchant recycled-vs-total. */
-export async function getAdminMerchantFlywheelStats(
-  merchantId: string,
-): Promise<AdminMerchantFlywheelStats> {
-  return authenticatedRequest<AdminMerchantFlywheelStats>(
-    `/api/admin/merchants/${encodeURIComponent(merchantId)}/flywheel-stats`,
-  );
-}
-
-/**
- * Admin per-merchant cashback-summary (#625). Per-currency
- * breakdown of `user_cashback_minor` summed over the merchant's
- * fulfilled orders.
- *
- * Per-currency instead of one total because a merchant's volume
- * spans user home_currencies, so there's no coherent denomination
- * for a rolled-up aggregate. Each bucket carries context for
- * "cashback as % of spend" (`lifetimeChargeMinor`).
- */
-export interface AdminMerchantCashbackCurrencyBucket {
-  currency: string;
-  fulfilledCount: number;
-  /** SUM(user_cashback_minor) over fulfilled orders in this currency. bigint-as-string. */
-  lifetimeCashbackMinor: string;
-  /** SUM(charge_minor) in this currency — "cashback as % of spend" denominator. */
-  lifetimeChargeMinor: string;
-}
-
-export interface AdminMerchantCashbackSummary {
-  merchantId: string;
-  totalFulfilledCount: number;
-  /** Sorted desc by fulfilledCount. Empty for zero-volume merchants (not 404). */
-  currencies: AdminMerchantCashbackCurrencyBucket[];
-}
-
-/** `GET /api/admin/merchants/:merchantId/cashback-summary` — per-currency cashback paid out. */
-export async function getAdminMerchantCashbackSummary(
-  merchantId: string,
-): Promise<AdminMerchantCashbackSummary> {
-  return authenticatedRequest<AdminMerchantCashbackSummary>(
-    `/api/admin/merchants/${encodeURIComponent(merchantId)}/cashback-summary`,
-  );
-}
+// A2-1165 (slice 15): per-merchant drill surface (flywheel-stats
+// + cashback-summary) moved to `./admin-merchant-drill.ts`,
+// sibling of the per-user drill from slice 14. Inline shapes
+// moved with the functions — no other consumers. Re-export keeps
+// the merchant-detail page + paired tests untouched.
+export {
+  type AdminMerchantFlywheelStats,
+  type AdminMerchantCashbackCurrencyBucket,
+  type AdminMerchantCashbackSummary,
+  getAdminMerchantFlywheelStats,
+  getAdminMerchantCashbackSummary,
+} from './admin-merchant-drill';
 
 // A2-1165 (slice 13): per-merchant + per-user payment-method-
 // share also moved to `./admin-payment-method-share.ts`,
