@@ -141,6 +141,33 @@ Each of the above is a number we believe we can hit **at the rate
 of traffic we expect during Phase 1 (tens of orders/day)**.
 Re-evaluate at every phase gate.
 
+## Rate-limit review cadence (A2-1918)
+
+The per-IP rate-limit values in `apps/backend/src/app.ts` (and
+documented in `AGENTS.md` § Backend middleware stack) are
+**intuition-derived for Phase 1**. The exit door:
+
+| Cadence                            | What                                                                                                                                                                                                                                                                     |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Post-launch + 30d**              | First measurement-driven review. On-call pulls `/metrics` scraped counters (or, post-A2-1318 Phase-2, a Prometheus snapshot) for every gated route and compares 429-rate vs request-rate. Any route emitting >0.5% 429s under steady-state traffic is too tight; loosen. |
+| **Quarterly**                      | Repeat the review. Drop or raise per-route limits based on the prior quarter's data; commit the new values + the measurement source as a tracker note. No ADR per change — the ADR is this section pinning the cadence.                                                  |
+| **On every PR adding a new route** | The PR author picks a starting limit using the route's nearest analogue from the existing table as their seed. Reviewer sanity-checks. Re-evaluation lands in the next quarterly review.                                                                                 |
+
+If a rate-limit incident fires (a real-traffic 429-spike that
+flagged real users): treat it as a P2, raise the offending limit
+in the same on-call window, document in the post-incident summary.
+Don't wait for the quarterly review to fix a known gap.
+
+The live limit table for review lives in `AGENTS.md` § Backend
+middleware stack (single source of truth — don't duplicate).
+
+**Default action when in doubt: loosen, don't tighten.** Tightening
+a rate limit can lock real users out; loosening one only re-exposes
+the attack surface that the request-validators + circuit breakers
+
+- auth gating already cover. The 429 layer is defence-in-depth,
+  not the primary control.
+
 ## Cross-reference
 
 - ADR 015 — stablecoin reserve / liability invariant (drift SLO)
