@@ -52,8 +52,11 @@ const CreateOrderBody = z.object({
   amount: z.number().finite().positive().min(0.01).max(10_000).multipleOf(0.01),
 });
 
-// Upstream response schemas — validate before forwarding to client
-const CreateOrderUpstreamResponse = z
+// Upstream response schemas — validate before forwarding to client.
+// A2-1706: exported so the contract-test suite can parse recorded
+// CTX fixtures through them at PR-time and detect schema drift before
+// it hits prod.
+export const CreateOrderUpstreamResponse = z
   .object({
     id: z.string(),
     paymentCryptoAmount: z.string(),
@@ -74,7 +77,7 @@ const CreateOrderUpstreamResponse = z
  */
 const ORDER_EXPIRY_SECONDS = 30 * 60;
 
-const GetOrderUpstreamResponse = z
+export const GetOrderUpstreamResponse = z
   .object({
     id: z.string(),
     merchantId: z.string(),
@@ -115,7 +118,7 @@ const ListOrdersUpstreamItem = z
   })
   .passthrough();
 
-const ListOrdersUpstreamResponse = z
+export const ListOrdersUpstreamResponse = z
   .object({
     result: z.array(ListOrdersUpstreamItem),
     pagination: z.object({
