@@ -6,7 +6,7 @@ import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
-import { runWithRequestContext } from './request-context.js';
+import { runWithRequestContext, getCtxResponseRequestId } from './request-context.js';
 import { isKilled, type KillSwitch } from './kill-switches.js';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { sentry, captureException } from '@sentry/hono/node';
@@ -424,6 +424,16 @@ app.use('*', requestId());
 app.use('*', async (c, next) => {
   const id = c.get('requestId') ?? c.req.header('X-Request-Id') ?? 'unknown';
   await runWithRequestContext({ requestId: id }, next);
+  // A2-1305 follow-up: surface the most recent CTX-side request ID
+  // observed during this inbound request as `X-Ctx-Request-Id`.
+  // `circuit-breaker.ts::wrappedFetch` writes it onto the per-request
+  // context after every CTX response; reading here (after handlers
+  // run) picks up whichever value won the race when multiple CTX
+  // calls fired in one request. Skipped silently when no CTX call
+  // happened — most non-proxy endpoints (health, admin reads) won't
+  // emit the header.
+  const ctxId = getCtxResponseRequestId();
+  if (ctxId !== undefined) c.res.headers.set('X-Ctx-Request-Id', ctxId);
 });
 
 // Audit A-021: replace the default `hono/logger` with a Pino-backed
