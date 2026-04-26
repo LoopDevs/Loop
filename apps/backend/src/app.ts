@@ -14,6 +14,7 @@ import { requestCounterMiddleware } from './middleware/request-counter.js';
 import { corsMiddleware } from './middleware/cors.js';
 import { secureHeadersMiddleware } from './middleware/secure-headers.js';
 import { bodyLimitMiddleware } from './middleware/body-limit.js';
+import { noStoreResponse, privateNoStoreResponse } from './middleware/cache-control.js';
 import { killSwitch } from './middleware/kill-switch.js';
 import {
   rateLimit,
@@ -414,10 +415,7 @@ app.get('/api/public/flywheel-stats', rateLimit(60, 60_000), publicFlywheelStats
 // that treats any HTTP response as cacheable would otherwise hand one
 // user's freshly-minted tokens to the next caller of the same URL. Same
 // defense-in-depth pattern used for /api/orders.
-app.use('/api/auth/*', async (c, next) => {
-  await next();
-  c.header('Cache-Control', 'no-store');
-});
+app.use('/api/auth/*', noStoreResponse);
 
 app.post('/api/auth/request-otp', killSwitch('auth'), rateLimit(5, 60_000), requestOtpHandler);
 // OTP brute-force defense: 10 attempts per minute per IP. With a 6-digit code
@@ -471,14 +469,8 @@ app.delete('/api/auth/session', rateLimit(20, 60_000), logoutHandler);
 // 401 response requireAuth emits when no Bearer is present — a
 // misbehaving CDN that caches 401s wouldn't then leak the "this URL
 // needs auth" shape across requests.
-app.use('/api/orders', async (c, next) => {
-  await next();
-  c.header('Cache-Control', 'private, no-store');
-});
-app.use('/api/orders/*', async (c, next) => {
-  await next();
-  c.header('Cache-Control', 'private, no-store');
-});
+app.use('/api/orders', privateNoStoreResponse);
+app.use('/api/orders/*', privateNoStoreResponse);
 
 app.use('/api/orders', requireAuth);
 app.use('/api/orders/*', requireAuth);
@@ -512,14 +504,8 @@ app.get('/api/orders/loop/:id', rateLimit(120, 60_000), loopGetOrderHandler);
 // no-store`. Without this ordering, a misbehaving CDN that caches
 // 401s could leak the "this URL needs auth" shape across users.
 // Mirrors the /api/orders ordering documented above.
-app.use('/api/users/me', async (c, next) => {
-  await next();
-  c.header('Cache-Control', 'private, no-store');
-});
-app.use('/api/users/me/*', async (c, next) => {
-  await next();
-  c.header('Cache-Control', 'private, no-store');
-});
+app.use('/api/users/me', privateNoStoreResponse);
+app.use('/api/users/me/*', privateNoStoreResponse);
 app.use('/api/users/me', requireAuth);
 app.use('/api/users/me/*', requireAuth);
 app.get('/api/users/me', rateLimit(60, 60_000), getMeHandler);
@@ -659,10 +645,7 @@ app.get(
 // 403 response emitted by the auth middleware also carries no-store
 // — a misbehaving CDN caching 401 / 403 envelopes shouldn't leak
 // "this URL is admin-only" cross-user.
-app.use('/api/admin/*', async (c, next) => {
-  await next();
-  c.header('Cache-Control', 'private, no-store');
-});
+app.use('/api/admin/*', privateNoStoreResponse);
 
 app.use('/api/admin/*', requireAuth);
 app.use('/api/admin/*', requireAdmin);
