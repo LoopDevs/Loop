@@ -815,75 +815,22 @@ export {
   getAdminMerchantCashbackMonthly,
 } from './admin-monthly';
 
-/**
- * One day of merchant flywheel activity (#641). Time-axis
- * companion to the scalar `AdminMerchantFlywheelStats` — same
- * merchant, same 31-day window (or whatever `?days` asked for),
- * but one row per day so the UI can render a trajectory.
- */
-export interface MerchantFlywheelActivityDay {
-  /** YYYY-MM-DD (UTC). */
-  day: string;
-  recycledCount: number;
-  totalCount: number;
-  /** bigint-as-string. */
-  recycledChargeMinor: string;
-  /** bigint-as-string. */
-  totalChargeMinor: string;
-}
-
-export interface AdminMerchantFlywheelActivityResponse {
-  merchantId: string;
-  days: number;
-  rows: MerchantFlywheelActivityDay[];
-}
-
-/** `GET /api/admin/merchants/:merchantId/flywheel-activity` — daily flywheel timeseries. */
-export async function getAdminMerchantFlywheelActivity(
-  merchantId: string,
-  days?: number,
-): Promise<AdminMerchantFlywheelActivityResponse> {
-  const qs = days !== undefined ? `?days=${days}` : '';
-  return authenticatedRequest<AdminMerchantFlywheelActivityResponse>(
-    `/api/admin/merchants/${encodeURIComponent(merchantId)}/flywheel-activity${qs}`,
-  );
-}
-
-/**
- * Per-merchant top-earners row (#655). One entry per
- * (user, charge_currency) pair — a user can appear twice if
- * they've fulfilled orders at the merchant in two currencies.
- */
-export interface MerchantTopEarnerRow {
-  userId: string;
-  email: string;
-  currency: string;
-  orderCount: number;
-  /** SUM(user_cashback_minor) for this (user, currency). bigint-as-string. */
-  cashbackMinor: string;
-  /** SUM(charge_minor) — context for "cashback as % of their spend". */
-  chargeMinor: string;
-}
-
-export interface AdminMerchantTopEarnersResponse {
-  merchantId: string;
-  since: string;
-  rows: MerchantTopEarnerRow[];
-}
-
-/** `GET /api/admin/merchants/:merchantId/top-earners` — ranked top cashback earners at one merchant. */
-export async function getAdminMerchantTopEarners(
-  merchantId: string,
-  opts: { days?: number; limit?: number } = {},
-): Promise<AdminMerchantTopEarnersResponse> {
-  const params = new URLSearchParams();
-  if (opts.days !== undefined) params.set('days', String(opts.days));
-  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
-  const qs = params.toString();
-  return authenticatedRequest<AdminMerchantTopEarnersResponse>(
-    `/api/admin/merchants/${encodeURIComponent(merchantId)}/top-earners${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
+// A2-1165 (slice 18): merchant activity drill (flywheel-activity
+// time-series + top-earners ranking) moved to
+// `./admin-merchant-activity.ts`. Companion to the scalar
+// `admin-merchant-drill.ts` from slice 15. Inline shapes moved
+// with the functions — no other consumers. Re-export keeps
+// `MerchantFlywheelActivityChart.tsx`,
+// `MerchantTopEarnersTable.tsx`, the merchant-drill route +
+// paired tests untouched.
+export {
+  type MerchantFlywheelActivityDay,
+  type AdminMerchantFlywheelActivityResponse,
+  type MerchantTopEarnerRow,
+  type AdminMerchantTopEarnersResponse,
+  getAdminMerchantFlywheelActivity,
+  getAdminMerchantTopEarners,
+} from './admin-merchant-activity';
 
 /**
  * Admin payment-method activity day (#594). One row per UTC day in
