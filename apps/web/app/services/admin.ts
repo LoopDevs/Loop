@@ -414,68 +414,20 @@ export async function getAdminMerchantsFlywheelShare(
   );
 }
 
-/** Single stuck-order row from `/api/admin/stuck-orders` (ADR 011/013). */
-export interface StuckOrderRow {
-  id: string;
-  userId: string;
-  merchantId: string;
-  state: string;
-  /** Payment rail the user chose (ADR 015). Matters for triage — a
-   * stuck loop_asset order is a flywheel-path incident; a stuck
-   * xlm/usdc is a Stellar-watcher incident; a stuck credit is an
-   * off-ledger state-machine bug. */
-  paymentMethod: string;
-  /** ISO timestamp keyed by paid_at or procured_at depending on state. */
-  stuckSince: string;
-  /** Elapsed minutes since stuckSince. */
-  ageMinutes: number;
-  ctxOrderId: string | null;
-  ctxOperatorId: string | null;
-}
-
-export interface StuckOrdersResponse {
-  thresholdMinutes: number;
-  rows: StuckOrderRow[];
-}
-
-/**
- * `GET /api/admin/stuck-orders` — orders sitting past the SLO in
- * `paid` or `procuring` states. Admin dashboard polls this to flag
- * potential supplier incidents before users notice.
- */
-export async function getStuckOrders(): Promise<StuckOrdersResponse> {
-  return authenticatedRequest<StuckOrdersResponse>('/api/admin/stuck-orders');
-}
-
-/** Single stuck-payout row from `/api/admin/stuck-payouts` (ADR 015/016). */
-export interface StuckPayoutRow {
-  id: string;
-  userId: string;
-  orderId: string;
-  assetCode: string;
-  /** Bigint-as-string stroops (7 decimals). */
-  amountStroops: string;
-  state: string;
-  /** ISO timestamp keyed by submitted_at (submitted) or created_at (pending). */
-  stuckSince: string;
-  ageMinutes: number;
-  attempts: number;
-}
-
-export interface StuckPayoutsResponse {
-  thresholdMinutes: number;
-  rows: StuckPayoutRow[];
-}
-
-/**
- * `GET /api/admin/stuck-payouts` — pending_payouts rows in
- * pending/submitted past the SLO. Complements `getStuckOrders`:
- * orders stuck in CTX procurement, payouts stuck in Stellar
- * submission. Same dashboard poll cadence.
- */
-export async function getStuckPayouts(): Promise<StuckPayoutsResponse> {
-  return authenticatedRequest<StuckPayoutsResponse>('/api/admin/stuck-payouts');
-}
+// A2-1165 (slice 11): stuck-orders + stuck-payouts (the two
+// safety-critical alerting cards on the admin dashboard) moved to
+// `./admin-stuck.ts` (ADR 011 / 013 / 015 / 016). Inline shapes
+// moved with the functions — no other consumers. Re-export keeps
+// `StuckOrdersCard.tsx`, `StuckPayoutsCard.tsx`, `routes/admin.
+// dashboard.tsx` and their paired tests untouched.
+export {
+  type StuckOrderRow,
+  type StuckOrdersResponse,
+  type StuckPayoutRow,
+  type StuckPayoutsResponse,
+  getStuckOrders,
+  getStuckPayouts,
+} from './admin-stuck';
 
 /**
  * One day of order activity — counts of rows created vs fulfilled
