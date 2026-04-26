@@ -23,6 +23,19 @@ const STATES: readonly (PayoutState | 'all')[] = [
   'failed',
 ];
 
+// ADR-024 §2: discriminator filter for the two payout flows. `order_cashback`
+// is the legacy order-fulfilment payout; `withdrawal` is the admin cash-out
+// from a user's balance (ADR-024). Treasury wants to drill into one or the
+// other without scrolling.
+const KINDS = ['all', 'order_cashback', 'withdrawal'] as const;
+type KindFilter = (typeof KINDS)[number];
+
+function kindLabel(k: KindFilter): string {
+  if (k === 'all') return 'All kinds';
+  if (k === 'order_cashback') return 'Order cashback';
+  return 'Withdrawal';
+}
+
 // LOOP_ASSET_CODES + isLoopAssetCode come from `@loop/shared` —
 // see imports at top of file. Kept the narrowing function name in
 // scope via the import so the `?assetCode=` URL-param check below
@@ -84,14 +97,21 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
   const assetCodeFilter =
     assetCodeParam !== null && isLoopAssetCode(assetCodeParam) ? assetCodeParam : undefined;
 
+  // ADR-024 §2 kind filter — `?kind=order_cashback` or `?kind=withdrawal`.
+  const kindParam = searchParams.get('kind');
+  const activeKind: KindFilter = (KINDS as readonly string[]).includes(kindParam ?? '')
+    ? (kindParam as KindFilter)
+    : 'all';
+
   const queryClient = useQueryClient();
   const query = useQuery({
-    queryKey: ['admin-payouts', activeState, assetCodeFilter ?? null],
+    queryKey: ['admin-payouts', activeState, assetCodeFilter ?? null, activeKind],
     queryFn: () =>
       listPayouts({
         limit: 50,
         ...(activeState !== 'all' ? { state: activeState } : {}),
         ...(assetCodeFilter !== undefined ? { assetCode: assetCodeFilter } : {}),
+        ...(activeKind !== 'all' ? { kind: activeKind } : {}),
       }),
     retry: shouldRetry,
     staleTime: 10_000,
@@ -137,6 +157,14 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
     });
   };
 
+  const setKind = (next: KindFilter): void => {
+    setSearchParams((params) => {
+      if (next === 'all') params.delete('kind');
+      else params.set('kind', next);
+      return params;
+    });
+  };
+
   return (
     <main className="max-w-6xl mx-auto px-6 py-12 space-y-6">
       <AdminNav />
@@ -167,6 +195,23 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
             }`}
           >
             {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
+          </button>
+        ))}
+      </nav>
+
+      <nav className="flex flex-wrap gap-2" aria-label="Payout kind filter">
+        {KINDS.map((k) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setKind(k)}
+            className={`rounded-full px-3 py-1 text-xs font-medium border ${
+              activeKind === k
+                ? 'border-purple-700 bg-purple-700 text-white dark:border-purple-400 dark:bg-purple-700 dark:text-white'
+                : 'border-gray-200 text-gray-700 bg-white dark:border-gray-700 dark:text-gray-300 dark:bg-gray-900'
+            }`}
+          >
+            {kindLabel(k)}
           </button>
         ))}
       </nav>
@@ -221,16 +266,24 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800 text-sm">
             <thead className="bg-gray-50 dark:bg-gray-900/50">
               <tr>
-                {['When', 'State', 'Asset', 'Amount', 'To', 'Tx / Error', 'Attempts', ''].map(
-                  (h) => (
-                    <th
-                      key={h}
-                      className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400"
-                    >
-                      {h}
-                    </th>
-                  ),
-                )}
+                {[
+                  'When',
+                  'Kind',
+                  'State',
+                  'Asset',
+                  'Amount',
+                  'To',
+                  'Tx / Error',
+                  'Attempts',
+                  '',
+                ].map((h) => (
+                  <th
+                    key={h}
+                    className="px-3 py-2 text-left font-medium text-gray-500 dark:text-gray-400"
+                  >
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-900 bg-white dark:bg-gray-900">
@@ -246,6 +299,9 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
                         timeStyle: 'short',
                       })}
                     </Link>
+                  </td>
+                  <td className="px-3 py-2 text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                    {p.kind === 'withdrawal' ? 'Withdrawal' : 'Cashback'}
                   </td>
                   <td className="px-3 py-2">
                     <span
