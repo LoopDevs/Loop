@@ -1,8 +1,4 @@
 import type {
-  CashbackRealizationDailyResponse,
-  CashbackRealizationDay,
-  CashbackRealizationResponse,
-  CashbackRealizationRow,
   CreditTransactionType,
   LoopAssetCode,
   LoopLiability,
@@ -240,36 +236,19 @@ export async function getSettlementLag(sinceIso?: string): Promise<SettlementLag
   return authenticatedRequest<SettlementLagResponse>(`/api/admin/payouts/settlement-lag${qs}`);
 }
 
-/**
- * Cashback realization rate (ADR 009 / 015). Per-currency + fleet-
- * wide aggregate (`currency: null`). `recycledBps = spent / earned
- * × 10 000` — the flywheel-health KPI.
- */
-// A2-1506: moved to `@loop/shared/admin-cashback-realization.ts`.
-export type { CashbackRealizationResponse, CashbackRealizationRow };
-
-/** `GET /api/admin/cashback-realization` */
-export async function getCashbackRealization(): Promise<CashbackRealizationResponse> {
-  return authenticatedRequest<CashbackRealizationResponse>('/api/admin/cashback-realization');
-}
-
-/**
- * Daily cashback-realization trend (ADR 009 / 015). One row per
- * (day, currency); dense (every day in the window has a row) so
- * sparklines don't compress on gap days.
- */
-// A2-1506: moved to `@loop/shared/admin-cashback-realization.ts`.
-export type { CashbackRealizationDay, CashbackRealizationDailyResponse };
-
-/** `GET /api/admin/cashback-realization/daily?days=N` */
-export async function getCashbackRealizationDaily(
-  days?: number,
-): Promise<CashbackRealizationDailyResponse> {
-  const qs = days !== undefined ? `?days=${days}` : '';
-  return authenticatedRequest<CashbackRealizationDailyResponse>(
-    `/api/admin/cashback-realization/daily${qs}`,
-  );
-}
+// A2-1165 (slice 5): cashback-realization surface (snapshot + daily)
+// extracted to `./admin-cashback-realization.ts`. Type definitions
+// remain canonical in `@loop/shared/admin-cashback-realization.ts`
+// (per A2-1506). Re-export keeps CashbackRealizationCard.tsx,
+// RealizationSparkline.tsx, and both paired tests untouched.
+export {
+  type CashbackRealizationResponse,
+  type CashbackRealizationRow,
+  type CashbackRealizationDay,
+  type CashbackRealizationDailyResponse,
+  getCashbackRealization,
+  getCashbackRealizationDaily,
+} from './admin-cashback-realization';
 
 /**
  * Downloads an admin CSV endpoint by fetching with the bearer token
