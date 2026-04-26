@@ -159,10 +159,33 @@ if (typeof window !== 'undefined') {
   });
 }
 
+// A2-1108 + A2-1112: root-level OpenGraph + Twitter card defaults so
+// every Loop URL surfaces a sensible preview when shared (Slack /
+// Discord / WhatsApp / Twitter unfurls). Per-route `meta()` can
+// override individual entries (sitemap, privacy, terms) — these are
+// the fallback for routes that don't.
+const SITE_URL = 'https://loopfinance.io';
+const OG_DEFAULT_TITLE = 'Loop — Save money every time you shop';
+const OG_DEFAULT_DESCRIPTION =
+  'Buy discounted gift cards with XLM and earn cashback on every purchase.';
+const OG_DEFAULT_IMAGE = `${SITE_URL}/loop-logo.svg`;
+
 export function meta(): Route.MetaDescriptors {
   return [
-    { title: 'Loop — Save money every time you shop' },
-    { name: 'description', content: 'Buy discounted gift cards with XLM on Loop.' },
+    { title: OG_DEFAULT_TITLE },
+    { name: 'description', content: OG_DEFAULT_DESCRIPTION },
+    // OpenGraph (Facebook / LinkedIn / Slack / Discord)
+    { property: 'og:type', content: 'website' },
+    { property: 'og:site_name', content: 'Loop' },
+    { property: 'og:title', content: OG_DEFAULT_TITLE },
+    { property: 'og:description', content: OG_DEFAULT_DESCRIPTION },
+    { property: 'og:url', content: SITE_URL },
+    { property: 'og:image', content: OG_DEFAULT_IMAGE },
+    // Twitter card
+    { name: 'twitter:card', content: 'summary' },
+    { name: 'twitter:title', content: OG_DEFAULT_TITLE },
+    { name: 'twitter:description', content: OG_DEFAULT_DESCRIPTION },
+    { name: 'twitter:image', content: OG_DEFAULT_IMAGE },
   ];
 }
 
