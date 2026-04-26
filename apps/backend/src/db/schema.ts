@@ -527,6 +527,17 @@ export const orders = pgTable(
         AND ${t.loopMarginMinor} >= 0
       `,
     ),
+    // A2-714: payment_memo nullability is correlated with payment
+    // method. On-chain methods (xlm / usdc / loop_asset) all
+    // require a memo so the payment watcher can match incoming
+    // deposits to the order; credit-funded orders skip the memo
+    // entirely (no chain transit). The repo enforces this in code,
+    // the CHECK enforces it at the DB layer against a manual
+    // INSERT.
+    check(
+      'orders_payment_memo_coherence',
+      sql`${t.paymentMethod} = 'credit' OR ${t.paymentMemo} IS NOT NULL`,
+    ),
     // A2-2003: see `idempotencyKey` column comment. Partial unique
     // index because legacy rows + non-idempotent clients persist
     // NULL and would otherwise all collide on a single key.
@@ -597,6 +608,12 @@ export const userIdentities = pgTable(
     // Google account could spawn a duplicate user row.
     uniqueIndex('user_identities_provider_sub').on(t.provider, t.providerSub),
     index('user_identities_user').on(t.userId),
+    // A2-712: pin provider to the supported set. App-layer zod
+    // (SOCIAL_PROVIDERS) gates writes from the social-login handler;
+    // the DB CHECK is the defence-in-depth gate against an admin DB
+    // shell or a future writer that bypasses the validator. Adding a
+    // fourth provider is a deliberate migration touching this CHECK.
+    check('user_identities_provider_known', sql`${t.provider} IN ('google', 'apple')`),
   ],
 );
 
