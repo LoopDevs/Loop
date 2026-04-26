@@ -27,22 +27,27 @@ No shared state between regions — each instance fetches merchants/locations in
 ### First-time setup
 
 ```bash
-cd apps/backend
-fly launch --name loopfinance-api --region iad --no-deploy
+# Deploy from the repo root, not `cd apps/backend` — the Dockerfile at
+# apps/backend/Dockerfile copies from `packages/shared/` and the repo-
+# root `package.json` / `package-lock.json`, so the docker build
+# context has to be the repo root for those COPYs to resolve. The
+# `--config` + `--dockerfile` flags tell Fly which fly.toml + Dockerfile
+# to use while keeping the build context = cwd (repo root). Audit A2-410.
+fly launch --name loopfinance-api --region iad --no-deploy --config apps/backend/fly.toml --dockerfile apps/backend/Dockerfile
 
 # Set secrets (API credentials for /locations endpoint only — the
 # non-secret config like GIFT_CARD_API_BASE_URL, IMAGE_PROXY_ALLOWED_HOSTS,
 # TRUST_PROXY, PORT, NODE_ENV, and LOG_LEVEL are baked into the
 # apps/backend/fly.toml [env] block)
-fly secrets set \
+fly secrets set --config apps/backend/fly.toml \
   GIFT_CARD_API_KEY=<key> \
   GIFT_CARD_API_SECRET=<secret>
 
 # Add EU region
-fly regions add lhr
+fly regions add lhr --config apps/backend/fly.toml
 
 # Deploy
-fly deploy
+fly deploy --config apps/backend/fly.toml --dockerfile apps/backend/Dockerfile
 ```
 
 ### Configuration
@@ -187,7 +192,10 @@ that the role-grant wasn't extended for a new table.
 ### Subsequent deploys
 
 ```bash
-cd apps/backend && fly deploy
+# A2-410: deploy from repo root so the docker build context covers
+# packages/shared/ and the workspace lockfile. `--config` + `--dockerfile`
+# pin the apps/backend artifacts while leaving the context = cwd.
+fly deploy --config apps/backend/fly.toml --dockerfile apps/backend/Dockerfile
 ```
 
 ### Scaling
@@ -236,14 +244,16 @@ is the single source of truth. Synthetic drift scenarios are covered by
 ### First-time setup
 
 ```bash
-cd apps/web
-fly launch --name loop-web --region iad --no-deploy
+# Deploy from repo root — same rationale as the backend (audit A2-410):
+# apps/web/Dockerfile copies from packages/shared/ + the workspace lockfile,
+# so the docker build context has to be the repo root.
+fly launch --name loop-web --region iad --no-deploy --config apps/web/fly.toml --dockerfile apps/web/Dockerfile
 
 # Add EU region
-fly regions add lhr
+fly regions add lhr --config apps/web/fly.toml
 
 # Deploy
-fly deploy
+fly deploy --config apps/web/fly.toml --dockerfile apps/web/Dockerfile
 ```
 
 ### Configuration
@@ -259,7 +269,8 @@ See `apps/web/fly.toml`:
 ### Subsequent deploys
 
 ```bash
-cd apps/web && fly deploy
+# A2-410: deploy from repo root, same rationale as the backend.
+fly deploy --config apps/web/fly.toml --dockerfile apps/web/Dockerfile
 ```
 
 ---
@@ -277,9 +288,11 @@ www.loopfinance.io  → CNAME loop-web.fly.dev
 Fly.io handles TLS certificates automatically via Let's Encrypt.
 
 ```bash
-# Register custom domains with Fly
-cd apps/backend && fly certs add api.loopfinance.io
-cd apps/web && fly certs add loopfinance.io && fly certs add www.loopfinance.io
+# Register custom domains with Fly. `--config` selects the right
+# fly.toml from repo root — A2-410 unified deploy posture.
+fly certs add api.loopfinance.io --config apps/backend/fly.toml
+fly certs add loopfinance.io --config apps/web/fly.toml
+fly certs add www.loopfinance.io --config apps/web/fly.toml
 ```
 
 ---
