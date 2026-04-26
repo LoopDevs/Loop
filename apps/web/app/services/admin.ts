@@ -689,80 +689,23 @@ export {
   getAdminMerchantTopEarners,
 } from './admin-merchant-activity';
 
-/**
- * Admin payment-method activity day (#594). One row per UTC day in
- * the requested window (default 30, cap 90), with fulfilled-order
- * counts per rail. Every rail is always present — the backend pre-
- * seeds zero buckets — so the chart component doesn't gap-fill.
- */
-export interface PaymentMethodActivityDay {
-  /** YYYY-MM-DD (UTC). */
-  day: string;
-  byMethod: Record<AdminPaymentMethod, number>;
-}
+// A2-1165 (slice 21): payment-method-activity time-series chart
+// + per-user cashback-by-merchant support-triage drill moved to
+// their respective sibling modules. Both inline shapes moved
+// with the functions. Re-exports keep
+// `PaymentMethodActivityChart.tsx`,
+// `UserCashbackByMerchantCard.tsx`, and paired tests untouched.
+export {
+  type PaymentMethodActivityDay,
+  type AdminPaymentMethodActivityResponse,
+  getAdminPaymentMethodActivity,
+} from './admin-payment-method-activity';
 
-export interface AdminPaymentMethodActivityResponse {
-  /** Oldest-first so the chart renders left-to-right. */
-  days: PaymentMethodActivityDay[];
-  windowDays: number;
-}
-
-/**
- * `GET /api/admin/orders/payment-method-activity` — daily payment-
- * method time-series. Trend complement to the scalar share card:
- * share answers "where are we now", this one answers "where are we
- * going".
- */
-export async function getAdminPaymentMethodActivity(
-  opts: { days?: number } = {},
-): Promise<AdminPaymentMethodActivityResponse> {
-  const params = new URLSearchParams();
-  if (opts.days !== undefined) params.set('days', String(opts.days));
-  const qs = params.toString();
-  return authenticatedRequest<AdminPaymentMethodActivityResponse>(
-    `/api/admin/orders/payment-method-activity${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
-
-/**
- * One row of an admin per-user cashback-by-merchant breakdown.
- * Admin-facing equivalent of the user's own card — same join on
- * `credit_transactions.reference_id::uuid = orders.id`, same
- * ordering, but with the caller resolved from the URL userId.
- */
-export interface AdminUserCashbackByMerchantRow {
-  merchantId: string;
-  cashbackMinor: string;
-  orderCount: number;
-  lastEarnedAt: string;
-}
-
-export interface AdminUserCashbackByMerchantResponse {
-  userId: string;
-  currency: string;
-  since: string;
-  rows: AdminUserCashbackByMerchantRow[];
-}
-
-/**
- * `GET /api/admin/users/:userId/cashback-by-merchant` — support
- * triage breakdown. Default window 180d (cap 366d); default limit
- * 25 (cap 100).
- */
-export async function getAdminUserCashbackByMerchant(
-  userId: string,
-  opts: { since?: string; limit?: number } = {},
-): Promise<AdminUserCashbackByMerchantResponse> {
-  const params = new URLSearchParams();
-  if (opts.since !== undefined) params.set('since', opts.since);
-  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
-  const qs = params.toString();
-  return authenticatedRequest<AdminUserCashbackByMerchantResponse>(
-    `/api/admin/users/${encodeURIComponent(userId)}/cashback-by-merchant${
-      qs.length > 0 ? `?${qs}` : ''
-    }`,
-  );
-}
+export {
+  type AdminUserCashbackByMerchantRow,
+  type AdminUserCashbackByMerchantResponse,
+  getAdminUserCashbackByMerchant,
+} from './admin-user-cashback-by-merchant';
 
 /** Result shape from a successful credit-adjustment write (ADR 017). */
 export interface CreditAdjustmentResult {
