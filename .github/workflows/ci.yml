@@ -130,6 +130,53 @@ jobs:
           node-version: '22'
       - run: npm audit --audit-level=high
 
+  # A2-408 (partial): container CVE scan via Trivy. Scans the
+  # Dockerfile-pinned base image (`node:22-alpine@sha256:…`) for
+  # known OS-level vulnerabilities and surfaces the Dockerfile
+  # itself for misconfig (root user, ADD-with-URL, etc). Closes
+  # the "container CVE scanning" leg of A2-408; SBOM + provenance
+  # attestation + image signing remain Phase-2.
+  #
+  # `--severity HIGH,CRITICAL` keeps the noise floor reasonable;
+  # the job fails on any HIGH or above. Bump the base-image SHA
+  # deliberately when this fires — that's the intended remediation
+  # path, same as A2-403's pinned-digest posture.
+  container-cve-scan:
+    name: Container CVE scan (trivy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Run trivy image scan (backend Dockerfile base image)
+        # aquasec/trivy is the upstream maintainer image. `image`
+        # mode scans an OCI image for OS + lib CVEs; the base
+        # image SHA is pinned in apps/backend/Dockerfile (A2-403)
+        # and reused by apps/web/Dockerfile, so a single scan
+        # covers both deploys.
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$HOME/.cache/trivy:/root/.cache/" \
+            aquasec/trivy:0.55.2 \
+            image \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --no-progress \
+            --ignore-unfixed \
+            'node:22-alpine@sha256:8ea2348b068a9544dae7317b4f3aafcdc032df1647bb7d768a05a5cad1a7683f'
+      - name: Run trivy config scan (Dockerfile misconfig)
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE":/repo \
+            -w /repo \
+            aquasec/trivy:0.55.2 \
+            config \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --no-progress \
+            apps/backend/Dockerfile apps/web/Dockerfile
+
   # A2-206: secret scanning runs the gitleaks binary directly. The
   # gitleaks-action wrapper requires a paid license for org-owned
   # repos; the underlying CLI is free + open source. Default ruleset
@@ -394,7 +441,8 @@ jobs:
     # Include test-e2e so the Discord status matches the actual PR gate. Without
     # it, Discord reported PASSED whenever the fast jobs were green, even if
     # e2e had failed.
-    needs: [quality, test-unit, audit, secret-scan, build, test-e2e, test-e2e-mocked]
+    needs:
+      [quality, test-unit, audit, secret-scan, container-cve-scan, build, test-e2e, test-e2e-mocked]
     steps:
       - name: Notify Discord
         env:
