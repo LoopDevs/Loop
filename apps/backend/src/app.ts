@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
@@ -21,6 +20,7 @@ import { getAllCircuitStates } from './circuit-breaker.js';
 import { generateOpenApiSpec } from './openapi.js';
 import { metrics, incrementRequest } from './metrics.js';
 import { accessLogMiddleware } from './middleware/access-log.js';
+import { corsMiddleware } from './middleware/cors.js';
 import {
   rateLimit,
   __resetRateLimitsForTests as resetRateLimitMap,
@@ -261,36 +261,10 @@ function killSwitch(
 
 // ─── Global middleware ────────────────────────────────────────────────────────
 
-// Production CORS allowlist. The two non-web origins below are the
-// local schemes Capacitor WebViews use on iOS (default
-// `capacitor://localhost`) and Android (`https://localhost` since
-// Capacitor 3). Without them, every fetch from the native app to the
-// production API would fail preflight — a "works in dev, CORS errors
-// in production" regression on mobile release that would be easy to
-// catch late.
-//
-// A2-1009: `http://localhost` used to be on this list too ("kept for
-// older Capacitor debug builds"). Dropped — debug builds aren't in
-// the App Store / Play Store, so no production user hits that
-// origin, and the allowlist entry was CSRF-adjacent: any attacker-
-// controlled process binding a port on a user's localhost (a
-// malicious npm `postinstall`, a dev-server sidecar, a VS Code
-// extension) could mint cross-origin fetches against production API
-// routes using the user's cookies / stored bearer. The canonical
-// Capacitor schemes above cover every shipping native build.
-const PRODUCTION_ORIGINS = [
-  'https://loopfinance.io',
-  'https://www.loopfinance.io',
-  'capacitor://localhost',
-  'https://localhost',
-];
-
-app.use(
-  '*',
-  cors({
-    origin: env.NODE_ENV === 'production' ? PRODUCTION_ORIGINS : '*',
-  }),
-);
+// CORS — `PRODUCTION_ORIGINS` allowlist + middleware factory live
+// in `./middleware/cors.ts` (audit A-…/A2-1009 — the source of
+// truth for which origins can hit the prod API).
+app.use('*', corsMiddleware);
 app.use(
   '*',
   secureHeaders({
