@@ -680,6 +680,14 @@ export const pendingPayouts = pgTable(
       sql`${t.state} IN ('pending', 'submitted', 'confirmed', 'failed')`,
     ),
     check('pending_payouts_amount_positive', sql`${t.amountStroops} > 0`),
+    // A2-715: pin Stellar pubkey shape at the DB layer. App-layer
+    // regex validation already exists at the API boundary, but a
+    // direct INSERT (admin shell, future writers) without going
+    // through the validator could land a malformed address that
+    // the submit worker would later round-trip into Horizon and
+    // fail loudly. CHECK pins the 56-char `G…` base32 pattern at
+    // the column.
+    check('pending_payouts_to_address_format', sql`${t.toAddress} ~ '^G[A-Z2-7]{55}$'`),
     check('pending_payouts_attempts_non_negative', sql`${t.attempts} >= 0`),
     // A2-901 / ADR-024 §2: discriminator + per-kind shape invariants.
     check('pending_payouts_kind_known', sql`${t.kind} IN ('order_cashback', 'withdrawal')`),

@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../../env.js', () => ({
-  env: {
+// A2-1922: env mock is mutable so tests can flip the denylist
+// per-scenario without resetting modules.
+const { envState } = vi.hoisted(() => ({
+  envState: {
     GIFT_CARD_API_BASE_URL: 'http://test',
     JWT_SECRET: 'test-secret-that-is-long-enough-32ch',
     JWT_REFRESH_SECRET: 'test-refresh-secret-long-enough-32',
@@ -10,8 +12,11 @@ vi.mock('../../env.js', () => ({
     REFRESH_INTERVAL_HOURS: 6,
     LOCATION_REFRESH_INTERVAL_HOURS: 24,
     EMAIL_FROM: 'test@test.com',
+    LOOP_MERCHANT_DENYLIST: undefined as string | undefined,
   },
 }));
+
+vi.mock('../../env.js', () => ({ env: envState }));
 
 vi.mock('../../logger.js', () => ({
   logger: { child: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }) },
@@ -356,5 +361,72 @@ describe('refreshMerchants', () => {
     // are filtered out entirely.
     await refreshMerchants();
     expect(getMerchants().merchants.find((m) => m.id === 'm-disabled')).toBeUndefined();
+  });
+
+  // A2-1922: denylist filter
+  describe('LOOP_MERCHANT_DENYLIST (A2-1922)', () => {
+    it('drops denylisted merchants from the catalog before they enter the store', async () => {
+      envState.LOOP_MERCHANT_DENYLIST = 'merchant-2,merchant-3';
+      mockFetch.mockResolvedValueOnce(
+        upstreamResponse(
+          [
+            { id: 'merchant-1', name: 'Keep', enabled: true },
+            { id: 'merchant-2', name: 'Filter Me', enabled: true },
+            { id: 'merchant-3', name: 'Filter Me Too', enabled: true },
+            { id: 'merchant-4', name: 'Keep Too', enabled: true },
+          ],
+          1,
+          1,
+        ),
+      );
+
+      await refreshMerchants();
+      const ids = getMerchants().merchants.map((m) => m.id);
+      expect(ids).toContain('merchant-1');
+      expect(ids).toContain('merchant-4');
+      expect(ids).not.toContain('merchant-2');
+      expect(ids).not.toContain('merchant-3');
+      envState.LOOP_MERCHANT_DENYLIST = undefined;
+    });
+
+    it('treats absent / empty env as no-op (everything passes through)', async () => {
+      envState.LOOP_MERCHANT_DENYLIST = '';
+      mockFetch.mockResolvedValueOnce(
+        upstreamResponse(
+          [
+            { id: 'm-a', name: 'A', enabled: true },
+            { id: 'm-b', name: 'B', enabled: true },
+          ],
+          1,
+          1,
+        ),
+      );
+
+      await refreshMerchants();
+      const ids = getMerchants().merchants.map((m) => m.id);
+      expect(ids).toContain('m-a');
+      expect(ids).toContain('m-b');
+      envState.LOOP_MERCHANT_DENYLIST = undefined;
+    });
+
+    it('trims whitespace and ignores empty entries', async () => {
+      envState.LOOP_MERCHANT_DENYLIST = '  bad-1 , , bad-2 ,';
+      mockFetch.mockResolvedValueOnce(
+        upstreamResponse(
+          [
+            { id: 'good-1', name: 'Good', enabled: true },
+            { id: 'bad-1', name: 'Bad 1', enabled: true },
+            { id: 'bad-2', name: 'Bad 2', enabled: true },
+          ],
+          1,
+          1,
+        ),
+      );
+
+      await refreshMerchants();
+      const ids = getMerchants().merchants.map((m) => m.id);
+      expect(ids).toEqual(['good-1']);
+      envState.LOOP_MERCHANT_DENYLIST = undefined;
+    });
   });
 });
