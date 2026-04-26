@@ -192,16 +192,57 @@ jobs:
         run: npm run build -w @loop/web
         env:
           VITE_API_URL: https://api.loopfinance.io
+          # A2-1307: stamp the build with the commit SHA so the Sentry
+          # release tag (Sentry.init reads VITE_SENTRY_RELEASE in
+          # apps/web/app/root.tsx) matches the source-map artifacts
+          # uploaded below. Push-only; PR builds leave it unset.
+          VITE_SENTRY_RELEASE: ${{ github.event_name == 'push' && github.sha || '' }}
       - name: Build web (mobile static export)
         run: npm run build:mobile -w @loop/web
         env:
           VITE_API_URL: https://api.loopfinance.io
+          VITE_SENTRY_RELEASE: ${{ github.event_name == 'push' && github.sha || '' }}
       # A2-1115: assert admin route chunks stay out of the eagerly-loaded
       # entry/root bundle. Catches regressions like a non-admin route
       # importing from routes/admin*.tsx, which would silently ship
       # admin payloads to every signed-out visitor.
       - name: Verify admin bundle code-split
         run: ./scripts/check-admin-bundle-split.sh
+      # A2-1307: upload web source maps to Sentry on push-to-main only.
+      # Without source maps, the Sentry events from prod (`apps/web/app/
+      # root.tsx` Sentry.init) carry minified stack traces — operator
+      # debug time scales with bundle obfuscation. Sentry's CLI matches
+      # the uploaded maps to the deployed release via the build-time
+      # `VITE_SENTRY_RELEASE` (set to the commit SHA below) which
+      # `Sentry.init` already forwards.
+      #
+      # Gated on the `SENTRY_AUTH_TOKEN` repo secret. When unset (e.g.
+      # PR runs from forks, or before the operator provisions the
+      # token), the step is a no-op — never blocks the build. Skipped
+      # entirely for PRs to avoid spamming Sentry with throwaway
+      # artifacts.
+      - name: Upload web source maps to Sentry
+        if: github.event_name == 'push' && env.SENTRY_AUTH_TOKEN != ''
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+          SENTRY_RELEASE: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SENTRY_ORG:-}" ] || [ -z "${SENTRY_PROJECT:-}" ]; then
+            echo "::warning::SENTRY_ORG / SENTRY_PROJECT vars unset — skipping source-map upload"
+            exit 0
+          fi
+          npx @sentry/cli@2.49.0 sourcemaps inject \
+            --org "$SENTRY_ORG" \
+            --project "$SENTRY_PROJECT" \
+            apps/web/build
+          npx @sentry/cli@2.49.0 sourcemaps upload \
+            --org "$SENTRY_ORG" \
+            --project "$SENTRY_PROJECT" \
+            --release "$SENTRY_RELEASE" \
+            apps/web/build
       - name: Report bundle size
         run: |
           echo "## Bundle Size" >> $GITHUB_STEP_SUMMARY
