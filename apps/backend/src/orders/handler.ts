@@ -5,7 +5,21 @@ import { getMerchants } from '../merchants/sync.js';
 import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
-import { notifyOrderCreated, notifyOrderFulfilled } from '../discord.js';
+import { notifyCtxSchemaDrift, notifyOrderCreated, notifyOrderFulfilled } from '../discord.js';
+import type { ZodIssue } from 'zod';
+
+/**
+ * A2-1915: condense a Zod issue array into a compact one-line
+ * summary suitable for a Discord embed field. Used by the
+ * `notifyCtxSchemaDrift` call sites in this module + auth +
+ * merchants.
+ */
+function summariseZodIssues(issues: readonly ZodIssue[]): string {
+  return issues
+    .slice(0, 5)
+    .map((i) => `[${i.path.join('.') || '·'}] ${i.code}: ${i.message}`)
+    .join(' | ');
+}
 
 /**
  * Tracks which order ids we've already Discord-notified as fulfilled,
@@ -234,6 +248,10 @@ export async function createOrderHandler(c: Context): Promise<Response> {
         { issues: validated.error.issues },
         'Upstream order response did not match expected shape',
       );
+      notifyCtxSchemaDrift({
+        surface: 'POST /gift-cards',
+        issuesSummary: summariseZodIssues(validated.error.issues),
+      });
       return c.json(
         { code: 'UPSTREAM_ERROR', message: 'Unexpected response from order provider' },
         502,
@@ -375,6 +393,10 @@ export async function listOrdersHandler(c: Context): Promise<Response> {
         { issues: validated.error.issues },
         'Upstream order list response did not match expected shape',
       );
+      notifyCtxSchemaDrift({
+        surface: 'GET /gift-cards',
+        issuesSummary: summariseZodIssues(validated.error.issues),
+      });
       return c.json(
         { code: 'UPSTREAM_ERROR', message: 'Unexpected response from order provider' },
         502,
@@ -473,6 +495,10 @@ export async function getOrderHandler(c: Context): Promise<Response> {
         { issues: validated.error.issues, orderId },
         'Upstream order detail did not match expected shape',
       );
+      notifyCtxSchemaDrift({
+        surface: 'GET /gift-cards/:id',
+        issuesSummary: summariseZodIssues(validated.error.issues),
+      });
       return c.json(
         { code: 'UPSTREAM_ERROR', message: 'Unexpected response from order provider' },
         502,
