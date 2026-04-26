@@ -22,6 +22,17 @@ export function meta(): Route.MetaDescriptors {
   ];
 }
 
+// A2-1109: hero.webp is the LCP candidate on the marketing home page —
+// applied as a CSS `background-image`, which the preload scanner can't
+// see (background images come from the parsed CSSOM, not the HTML).
+// Emitting an explicit `<link rel="preload" as="image">` from the route
+// tells the browser to start the fetch in parallel with the HTML/CSS
+// download, which moves the LCP earlier. Scoped to this route so other
+// pages (settings, admin, search) don't pay for bytes they never paint.
+export function links(): Route.LinkDescriptors {
+  return [{ rel: 'preload', as: 'image', href: '/hero.webp', type: 'image/webp' }];
+}
+
 /** Thin wrapper that owns the QueryClient for this route tree. */
 function HomeContent(): React.JSX.Element {
   const { isNative } = useNativePlatform();
