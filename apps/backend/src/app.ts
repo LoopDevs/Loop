@@ -131,12 +131,7 @@ import { adminDiscordTestHandler } from './admin/discord-test.js';
 import { adminCreditAdjustmentHandler } from './admin/credit-adjustments.js';
 import { adminRefundHandler } from './admin/refunds.js';
 import { adminWithdrawalHandler } from './admin/withdrawals.js';
-import { publicCashbackStatsHandler } from './public/cashback-stats.js';
-import { publicFlywheelStatsHandler } from './public/flywheel-stats.js';
-import { publicLoopAssetsHandler } from './public/loop-assets.js';
-import { publicTopCashbackMerchantsHandler } from './public/top-cashback-merchants.js';
-import { publicMerchantHandler } from './public/merchant.js';
-import { publicCashbackPreviewHandler } from './public/cashback-preview.js';
+import { mountPublicRoutes } from './routes/public.js';
 import {
   dsrDeleteHandler,
   dsrExportHandler,
@@ -349,42 +344,11 @@ app.use('/api/merchants/:id', requireAuth);
 // browse rate.
 app.get('/api/merchants/:id', rateLimit(120, 60_000), merchantDetailHandler);
 
-// Public, unauthenticated, marketing-facing cashback totals. 60/min
-// per IP is generous for a landing-page widget that renders once
-// per visit; edge-cache respects the handler's Cache-Control so real
-// origin load will be much lower.
-app.get('/api/public/cashback-stats', rateLimit(60, 60_000), publicCashbackStatsHandler);
-// Public, unauthenticated, CDN-friendly "best cashback" list for the
-// landing page. Same never-500 + Cache-Control discipline as the
-// cashback-stats endpoint (ADR 020).
-app.get(
-  '/api/public/top-cashback-merchants',
-  rateLimit(60, 60_000),
-  publicTopCashbackMerchantsHandler,
-);
-// Per-merchant unauthenticated detail (#647) — backs the SEO
-// landing pages at /cashback/:merchant-slug. Accepts merchant
-// id OR slug so SSR can pass whichever form is on the URL.
-// Same never-500 / cache-control discipline as the other
-// public endpoints (ADR 020).
-app.get('/api/public/merchants/:id', rateLimit(60, 60_000), publicMerchantHandler);
-// Pre-signup "calculate your cashback" preview. Same never-500 +
-// Cache-Control discipline as the other public endpoints (ADR 020).
-// Accepts ?merchantId (id or slug) + ?amountMinor (integer minor
-// units) and returns the projected cashback amount using the same
-// floor-rounded math as the order-insert path, so the preview never
-// promises more than the user will actually earn.
-app.get('/api/public/cashback-preview', rateLimit(60, 60_000), publicCashbackPreviewHandler);
-// LOOP-asset transparency surface (ADR 015 / 020). Public list of
-// configured (code, issuer) pairs so third-party wallets + users can
-// add trustlines to the verified issuer accounts without guessing
-// from on-chain traffic.
-app.get('/api/public/loop-assets', rateLimit(60, 60_000), publicLoopAssetsHandler);
-// Marketing flywheel scalar — % of fulfilled orders in the last 30
-// days paid via LOOP-asset cashback. Complement to
-// /api/public/cashback-stats (emission) with the recycle side of
-// the story. Never-500; 300s cache on happy path, 60s on fallback.
-app.get('/api/public/flywheel-stats', rateLimit(60, 60_000), publicFlywheelStatsHandler);
+// `/api/public/*` route mounts (ADR 020 — unauthenticated,
+// never-500, CDN-friendly) live in `./routes/public.ts`. Mount
+// site stays here so the route-table view in app.ts surfaces
+// where the public surface lands in the middleware chain.
+mountPublicRoutes(app);
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 

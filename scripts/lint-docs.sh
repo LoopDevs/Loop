@@ -30,13 +30,17 @@ done
 # (`app.get(\n  '…',\n  rateLimit(…),\n  handler\n)`) that several
 # admin routes use. Both gaps are closed here.
 #
-# The extractor now pulls every `'/api/…'` string literal from app.ts
-# (regardless of how the surrounding `app.get(` call is formatted)
-# and pairs it with every `METHOD /api/…` line in architecture.md's
-# endpoint listing. Stale entries on either side fail CI.
+# The extractor now pulls every `'/api/…'` string literal from
+# `apps/backend/src/app.ts` AND `apps/backend/src/routes/*.ts`
+# (per-domain route modules introduced in the A2-1165-style backend
+# decomposition; A2-1165 was the admin.ts split, this is the same
+# pattern applied to app.ts). Pairs the union with every
+# `METHOD /api/…` line in architecture.md's endpoint listing.
+# Stale entries on either side fail CI.
 
 echo "Checking API routes vs architecture.md..."
-app_route_literals=$(grep -oE "'/api/[a-zA-Z0-9/:._-]+'" apps/backend/src/app.ts \
+app_route_literals=$(grep -ohE "'/api/[a-zA-Z0-9/:._-]+'" \
+  apps/backend/src/app.ts apps/backend/src/routes/*.ts 2>/dev/null \
   | tr -d "'" | sort -u)
 arch_route_listings=$(grep -E "^(GET|POST|PUT|DELETE|PATCH) +/api/" docs/architecture.md \
   | sed -E "s/^(GET|POST|PUT|DELETE|PATCH) +(\/api\/[^ ?[:space:]]+).*/\2/" \
@@ -52,7 +56,7 @@ done <<< "$app_route_literals"
 while read -r route; do
   [ -z "$route" ] && continue
   if ! echo "$app_route_literals" | grep -qxF "$route"; then
-    err "Route '$route' is listed in docs/architecture.md but no matching literal exists in apps/backend/src/app.ts"
+    err "Route '$route' is listed in docs/architecture.md but no matching literal exists in apps/backend/src/app.ts or apps/backend/src/routes/*.ts"
   fi
 done <<< "$arch_route_listings"
 
