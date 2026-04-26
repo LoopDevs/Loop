@@ -224,7 +224,7 @@ Full env var docs → `docs/development.md`.
 
 Applied in order on every request:
 
-1. **CORS** — production: `loopfinance.io`, `www.loopfinance.io`, plus the Capacitor native origins (`capacitor://localhost`, `https://localhost`) so iOS and Android webview requests pass preflight. Dev: `*`. Source of truth: `PRODUCTION_ORIGINS` in `apps/backend/src/app.ts`. `http://localhost` was dropped under A2-1009 to close a CSRF surface from attacker-run localhost processes.
+1. **CORS** — production: `loopfinance.io`, `www.loopfinance.io`, plus the Capacitor native origins (`capacitor://localhost`, `https://localhost`) so iOS and Android webview requests pass preflight. Dev: `*`. Source of truth: `PRODUCTION_ORIGINS` in `apps/backend/src/middleware/cors.ts`. `http://localhost` was dropped under A2-1009 to close a CSRF surface from attacker-run localhost processes.
 2. **Secure headers** — HSTS, X-Content-Type-Options, X-Frame-Options, etc.
 3. **Body limit** — 1MB max request body; overflow returns 413 `PAYLOAD_TOO_LARGE` (A2-1005)
 4. **Request ID** — unique `X-Request-Id` on every request
