@@ -86,6 +86,26 @@ describe('notifyOrderCreated', () => {
     expect(merchant?.value).toBe('Evil\\`Name\\*With\\_Markdown');
   });
 
+  it('A2-2004: neutralises Discord link-construction syntax in merchant name', async () => {
+    notifyOrderCreated('o1', '[Click](https://evil.com)', 10, 'USD', '1');
+    await new Promise((r) => setTimeout(r, 10));
+    const body = lastBody();
+    const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
+    const merchant = embed.fields.find((f) => f.name === 'Merchant');
+    expect(merchant?.value).toBe('\\[Click\\]\\(https://evil.com\\)');
+  });
+
+  it('A2-2004: strips bidi RTL override + zero-width chars before escaping', async () => {
+    notifyOrderCreated('o1', 'Acme\u202Ereverse\u200B', 10, 'USD', '1');
+    await new Promise((r) => setTimeout(r, 10));
+    const body = lastBody();
+    const embed = body.embeds[0] as { fields: Array<{ name: string; value: string }> };
+    const merchant = embed.fields.find((f) => f.name === 'Merchant');
+    expect(merchant?.value).toBe('Acmereverse');
+    expect(merchant?.value).not.toContain('\u202E');
+    expect(merchant?.value).not.toContain('\u200B');
+  });
+
   it('truncates excessively long field values (>1024 chars)', async () => {
     const longName = 'a'.repeat(2000);
     notifyOrderCreated('o1', longName, 10, 'USD', '1');

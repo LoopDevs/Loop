@@ -23,12 +23,30 @@ function truncate(value: string, max: number): string {
 }
 
 /**
- * Escapes characters that Discord interprets as markdown or code-fence syntax.
- * Merchant names, order IDs, etc. are upstream-sourced — a value containing
- * backticks or underscores would otherwise break the embed's formatting.
+ * Escapes characters that Discord interprets as markdown or code-fence syntax,
+ * neutralises link-construction syntax, and strips bidi/zero-width characters
+ * before the value lands in an embed (A2-2004).
+ *
+ * Three threat surfaces:
+ *
+ *   1. Markdown emphasis (`*`, `_`, `~`, `|`, `>`, `\``) — a merchant name
+ *      with a backtick would corrupt the embed; not a security issue but
+ *      breaks ops readability.
+ *   2. **Link construction** — Discord renders `[text](url)` as a clickable
+ *      link. An attacker who controls a field (merchant name, reason, email
+ *      address) can plant a deceptive link in the audit channel that looks
+ *      benign but resolves to a phishing URL. Escape `[`, `]`, `(`, `)` so
+ *      the syntax never reaches Discord's parser.
+ *   3. **Bidi + zero-width control characters** — RTL overrides like
+ *      `\u202E` flip rendering direction (`pa\u202Eytuoyap` looks like
+ *      "payouytua" but actually contains "paytuoyap" reversed). Zero-width
+ *      joiners hide characters entirely. Strip both ranges so an admin
+ *      reviewing a Discord ping sees the literal bytes.
  */
+const BIDI_AND_ZERO_WIDTH = /[\u200B-\u200F\u2028-\u202F\u2066-\u2069\uFEFF]/g;
+
 function escapeMarkdown(value: string): string {
-  return value.replace(/([\\`*_~|>])/g, '\\$1');
+  return value.replace(BIDI_AND_ZERO_WIDTH, '').replace(/([\\`*_~|>[\]()])/g, '\\$1');
 }
 
 /** Sends a message to a Discord webhook. Fails silently — never blocks app logic. */
