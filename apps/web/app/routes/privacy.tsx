@@ -105,7 +105,10 @@ export default function PrivacyRoute(): React.JSX.Element {
             <p>
               Access, rectification, erasure, portability, and restriction of processing — subject
               to the applicable regime in your jurisdiction (UK GDPR / EU GDPR / CCPA / equivalent).
-              Requests:{' '}
+              Self-serve: <code>GET /api/users/me/dsr/export</code> returns a JSON envelope of every
+              row Loop holds for your account; <code>POST /api/users/me/dsr/delete</code> anonymises
+              your account (ledger rows are retained per accounting / regulatory rules and are no
+              longer linked to a real person). Requests:{' '}
               <a
                 href="mailto:privacy@loopfinance.io"
                 className="text-blue-600 underline hover:text-blue-800 dark:text-blue-400"
@@ -117,7 +120,39 @@ export default function PrivacyRoute(): React.JSX.Element {
           </section>
 
           <section>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">6. Contact</h2>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+              6. Where your data is hosted
+            </h2>
+            <p>
+              Loop runs on Fly.io, a US-headquartered cloud platform. Application servers and the
+              Postgres database operate from Fly's primary region (currently <code>lhr</code> —
+              London) with hot replicas in adjacent regions for failover. On-chain settlement
+              activity transits the public Stellar network. Email is delivered via our
+              transactional-mail provider; that provider stores message bodies for the duration
+              required to deliver and bounce-handle them. International data transfers (between
+              Loop's UK-incorporated entity and Fly's US infrastructure) rely on the UK / EU
+              Standard Contractual Clauses where applicable.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+              7. Cookies &amp; tracking
+            </h2>
+            <p>
+              Loop is bearer-token authenticated; the backend never sets cookies for our own session
+              state. Authentication metadata is held in your browser&apos;s sessionStorage on the
+              web and the OS keychain on native (iOS / Android), neither of which is a cookie. We
+              don&apos;t set analytics or advertising cookies. The Google / Apple sign-in providers
+              may set short-lived cookies during the OAuth flow on their own domains; those cookies
+              are strictly necessary for the sign-in to complete and fall outside the consent-banner
+              requirement under UK PECR / EU ePrivacy. If we add an analytics or advertising vendor
+              in future, we will surface a consent banner before any non-essential cookie is set.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">8. Contact</h2>
             <p>
               Data protection questions:{' '}
               <a
