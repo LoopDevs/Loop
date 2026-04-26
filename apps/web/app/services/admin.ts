@@ -13,9 +13,6 @@ import type {
   OperatorStatsRow,
   SettlementLagResponse,
   SettlementLagRow,
-  SupplierSpendActivityDay,
-  SupplierSpendActivityResponse,
-  SupplierSpendResponse,
   SupplierSpendRow,
   UserOperatorMixResponse,
   UserOperatorMixRow,
@@ -275,62 +272,20 @@ export async function downloadAdminCsv(path: string, filename: string): Promise<
   }
 }
 
-/**
- * Per-currency supplier-spend aggregate (ADR 013 / 015). One row per
- * charge currency in the window; `wholesaleMinor` is what Loop owes
- * CTX, `userCashbackMinor` + `loopMarginMinor` are the counts on the
- * other side of the split that fell out of those orders.
- */
-// A2-1506: `SupplierSpendRow` / `SupplierSpendResponse` moved to
-// `@loop/shared/admin-supplier-spend.ts`. Re-exported for stability.
-export type { SupplierSpendRow, SupplierSpendResponse };
-
-/**
- * `GET /api/admin/supplier-spend` — per-currency aggregate of what
- * Loop has spent with CTX in the window. Default window 24h;
- * caller passes `?since=<iso>` to override (server clamps to 366d).
- */
-export async function getSupplierSpend(
-  opts: { since?: string } = {},
-): Promise<SupplierSpendResponse> {
-  const params = new URLSearchParams();
-  if (opts.since !== undefined) params.set('since', opts.since);
-  const qs = params.toString();
-  return authenticatedRequest<SupplierSpendResponse>(
-    `/api/admin/supplier-spend${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
-
-// A2-1165 (slice 4): `getTreasuryCreditFlow` + the
-// `TreasuryCreditFlow*` re-exports also moved to `./admin-treasury.ts`
-// (consolidated with the snapshot reader). The barrel re-export
-// above brings them back into the `~/services/admin` surface.
-
-/**
- * Per-day per-currency supplier-spend activity (ADR 013 / 015). Time-
- * axis of `SupplierSpendRow` — same columns, but bucketed by
- * `fulfilledAt` UTC over the last N days.
- */
-// A2-1506: `SupplierSpendActivityDay` / `SupplierSpendActivityResponse`
-// moved to `@loop/shared/admin-supplier-spend.ts`.
-export type { SupplierSpendActivityDay, SupplierSpendActivityResponse };
-
-/**
- * `GET /api/admin/supplier-spend/activity` — per-day per-currency
- * supplier-spend time-series. Pass `?currency=USD|GBP|EUR` to
- * zero-fill days (stable chart layout).
- */
-export async function getSupplierSpendActivity(
-  opts: { days?: number; currency?: 'USD' | 'GBP' | 'EUR' } = {},
-): Promise<SupplierSpendActivityResponse> {
-  const params = new URLSearchParams();
-  if (opts.days !== undefined) params.set('days', String(opts.days));
-  if (opts.currency !== undefined) params.set('currency', opts.currency);
-  const qs = params.toString();
-  return authenticatedRequest<SupplierSpendActivityResponse>(
-    `/api/admin/supplier-spend/activity${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
+// A2-1165 (slice 6): supplier-spend surface (snapshot + activity
+// time-series) extracted to `./admin-supplier-spend.ts`. Type
+// definitions remain canonical in
+// `@loop/shared/admin-supplier-spend.ts` (per A2-1506). Re-export
+// keeps SupplierSpendCard.tsx, SupplierSpendActivityCard.tsx, and
+// `routes/admin.supplier-spend.tsx` untouched.
+export {
+  type SupplierSpendRow,
+  type SupplierSpendResponse,
+  type SupplierSpendActivityDay,
+  type SupplierSpendActivityResponse,
+  getSupplierSpend,
+  getSupplierSpendActivity,
+} from './admin-supplier-spend';
 
 /**
  * Per-operator order-count / success-count / failure-count breakdown
