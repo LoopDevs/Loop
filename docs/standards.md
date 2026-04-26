@@ -508,6 +508,27 @@ already expired at 5 minutes. Increased to 10 minutes based on P95
 email delivery latency data.
 ```
 
+### Signed commits (A2-122)
+
+Push-capable members **should** configure GitHub-verified commit signing locally — either GPG, SSH, or GitHub's S/MIME — so each commit on `main` carries a `Verified` badge. Without signed commits, a compromised account or laptop can push as you with no cryptographic check.
+
+Phase-1 posture is "policy-by-convention": branch protection requires PR + a passing CI gate, but does not require `required_signatures = true` on the GitHub side. The current operator pair both push from machines they control end-to-end, so the marginal value of the org-side gate is low; the rule flips on once a third push-capable member joins.
+
+To enable signing locally:
+
+```bash
+# Recommended: SSH-key signing (no extra binary, reuses your existing
+# Git push key). Works in GitHub's UI from 2022+.
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519.pub
+git config --global commit.gpgsign true
+
+# Then add the same key as a "Signing key" in GitHub →
+# Settings → SSH and GPG keys (separate from the auth key list).
+```
+
+Once the third push-capable member is on the rotation, flip the org rule on via `gh api` (`enforce_signed_commits` on the branch protection block) and update this section.
+
 ---
 
 ## 7. Branching strategy
