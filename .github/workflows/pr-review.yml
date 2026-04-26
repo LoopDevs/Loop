@@ -9,6 +9,17 @@ on:
 # write` set it needs (read the diff, post a comment).
 permissions: {}
 
+# A2-1414: cancel an in-flight review when the same PR pushes a new
+# commit before the prior review finishes. Without this, a rapid
+# push series spawns N concurrent reviews — each posts a comment +
+# burns Anthropic API quota, even though only the latest diff is
+# meaningful. `${{ github.ref }}` keys the lock per-PR (the ref is
+# `refs/pull/<n>/merge`), so reviews on different PRs don't block
+# each other.
+concurrency:
+  group: pr-review-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   review:
     name: AI Code Review
