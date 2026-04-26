@@ -41,6 +41,7 @@
 | `docs/adr/023-admin-mix-axis-matrix.md`                     | Mix-axis matrix pattern for `/:scope/:id/<target>-mix` endpoints                                                                                                                                                                       |
 | `docs/adr/024-withdrawal-writer.md`                         | Admin withdrawal writer — USDLOOP debit + payout-queue insert                                                                                                                                                                          |
 | `docs/adr/025-llm-pr-review.md`                             | LLM-assisted PR review — what gets sent to Anthropic + why it's acceptable                                                                                                                                                             |
+| `docs/adr/026-tax-regulatory-reporting-data-model.md`       | Tax / regulatory reporting data model — Phase-1 CSV exports + Phase-2 jurisdiction tagging                                                                                                                                             |
 
 ---
 
