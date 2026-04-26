@@ -5,14 +5,24 @@ test.describe('Smoke tests', () => {
     const consoleErrors: string[] = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') {
-        consoleErrors.push(msg.text());
+        const text = msg.text();
+        // A2-1704: real-CTX e2e runs hit upstream's rate limiter
+        // intermittently (spend.ctx.com 429s on warm CI bursts).
+        // The browser logs `Failed to load resource ... 429` which
+        // tripped this assertion ~10% of runs and produced no signal
+        // about app health. App-level 429 handling already exists
+        // (TanStack Query retry + circuit breaker); the console line
+        // is upstream-load noise. Filter so the assertion surfaces
+        // only real app errors.
+        if (/Failed to load resource.*429/i.test(text)) return;
+        consoleErrors.push(text);
       }
     });
 
     await page.goto('/');
     await expect(page).toHaveTitle(/Loop/);
 
-    // No uncaught console errors
+    // No uncaught console errors (transient upstream 429s filtered above).
     expect(consoleErrors).toHaveLength(0);
   });
 
