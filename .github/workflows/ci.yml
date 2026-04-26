@@ -130,13 +130,13 @@ jobs:
           node-version: '22'
       - run: npm audit --audit-level=high
 
-  # A2-206: secret scanning runs gitleaks on every push + PR with the
-  # default ruleset (covers AWS / GCP / Stripe / Slack / private keys /
-  # JWTs / generic API-key heuristics). On a PR the action only scans
-  # the diff; on push to main it scans the full history. Anything that
-  # does manage to land triggers an audit-trail commit + a CI failure
-  # the next push so the offending secret is at least visible
-  # immediately.
+  # A2-206: secret scanning runs the gitleaks binary directly (the
+  # gitleaks-action wrapper requires a paid license for org-owned
+  # repos — the underlying CLI is free + open source). Default
+  # ruleset covers AWS / GCP / Stripe / Slack / private keys / JWTs /
+  # generic API-key heuristics. Scans the full git history on every
+  # push + PR; gitleaks itself is fast enough that diff-only scoping
+  # isn't worth the conditional.
   secret-scan:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
@@ -144,12 +144,27 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
-          # gitleaks needs full history to scan the diff range against
-          # main on a PR and to scan the full history on a push.
+          # gitleaks needs full history to scan past commits.
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run gitleaks
+        # zricethezav/gitleaks is the upstream maintainer image.
+        # `detect` walks every reachable commit; `--redact` keeps the
+        # offending value out of CI logs while still pointing at the
+        # commit + path. `--exit-code=1` is the default but explicit
+        # so the job fails on any finding.
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE":/repo \
+            -w /repo \
+            zricethezav/gitleaks:v8.30.1 \
+            detect \
+            --source=/repo \
+            --config=/repo/.gitleaks.toml \
+            --redact \
+            --verbose \
+            --no-banner \
+            --exit-code=1
 
   build:
     name: Build verification
