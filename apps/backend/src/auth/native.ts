@@ -7,7 +7,6 @@
  * Users never see CTX; all user identity is Loop-internal.
  */
 import type { Context } from 'hono';
-import { z } from 'zod';
 import { logger } from '../logger.js';
 import {
   createOtp,
@@ -36,14 +35,14 @@ import {
   revokeAllRefreshTokensForUser,
 } from './refresh-tokens.js';
 
-const log = logger.child({ handler: 'auth-native' });
+// A2-803 (auth slice): request-body schemas live in the shared
+// `request-schemas.ts` module so both this Loop-native path and the
+// CTX-proxy path (`handler.ts`) verify against the same source.
+// Platform is forwarded only so the response envelope matches the
+// CTX proxy's; the native path doesn't consume it today.
+import { RequestOtpBody, VerifyOtpBody, RefreshBody } from './request-schemas.js';
 
-const RequestOtpBody = z.object({
-  email: z.string().email(),
-  // Platform is forwarded only so the response envelope matches the
-  // CTX proxy's; the native path doesn't consume it today.
-  platform: z.enum(['web', 'ios', 'android']).default('web'),
-});
+const log = logger.child({ handler: 'auth-native' });
 
 /**
  * POST /api/auth/request-otp — native path.
@@ -106,12 +105,6 @@ export async function nativeRequestOtpHandler(c: Context): Promise<Response> {
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to send verification code' }, 500);
   }
 }
-
-const VerifyOtpBody = z.object({
-  email: z.string().email(),
-  otp: z.string().min(1),
-  platform: z.enum(['web', 'ios', 'android']).default('web'),
-});
 
 interface TokenPair {
   accessToken: string;
@@ -218,11 +211,6 @@ export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
     return c.json({ code: 'INTERNAL_ERROR', message: 'Verification failed' }, 500);
   }
 }
-
-const RefreshBody = z.object({
-  refreshToken: z.string().min(1),
-  platform: z.enum(['web', 'ios', 'android']).default('web'),
-});
 
 /**
  * POST /api/auth/refresh — native path.
