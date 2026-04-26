@@ -125,6 +125,37 @@ Purchase
 
 ---
 
+## Network egress (A2-1613)
+
+The backend's outbound network surface is **enumerated, not allow-listed**
+at the firewall layer. SSRF defence is per-handler — every fetcher
+that could ever be redirected by user input has its own allowlist —
+and Phase-1 deployments rely on Fly's default outbound policy plus
+the per-handler validators.
+
+The full enumeration of known outbound origins:
+
+| Surface              | Origin(s)                                                           | SSRF defence                                                                               |
+| -------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| **CTX upstream**     | `spend.ctx.com` (configurable via `GIFT_CARD_API_BASE_URL`)         | Origin pinned in env at boot; circuit breaker per-endpoint.                                |
+| **Image proxy**      | Per-request user URL                                                | Per-host allowlist (`IMAGE_PROXY_ALLOWED_HOSTS`, audit A-025) + scheme + private-IP guard. |
+| **Stellar Horizon**  | `horizon.stellar.org` (configurable via `LOOP_STELLAR_HORIZON_URL`) | Origin pinned in env at boot; per-account / per-asset endpoints only.                      |
+| **Price feed**       | `api.coingecko.com`                                                 | Single hardcoded URL; no user-controlled segment.                                          |
+| **Google OAuth**     | `googleapis.com`, `accounts.google.com`                             | Hardcoded JWKS + issuer URLs; per-token signature verify.                                  |
+| **Apple OAuth**      | `appleid.apple.com`                                                 | Hardcoded JWKS + issuer URLs; per-token signature verify.                                  |
+| **Sentry**           | `*.ingest.sentry.io` / `*.ingest.de.sentry.io`                      | DSN baked at deploy time; no user-controlled segment.                                      |
+| **Discord webhooks** | `discord.com/api/webhooks/<id>/<token>`                             | Webhook URL baked into Fly secret per channel; allowed_mentions disabled.                  |
+
+**Phase-1 posture:** runtime egress allowlist (e.g. via `iptables` /
+Fly Machines policy / a forward proxy) is intentionally **not**
+enforced — adding network-level enforcement on top of per-handler
+validation is a Phase 2/3 hardening item once the surface stabilises.
+The enumeration above is the reviewer-facing audit trail; any new
+outbound origin lands here in the same PR that adds it, gated by the
+`apps/backend/AGENTS.md` Files table convention.
+
+---
+
 ## Image proxy
 
 `GET /api/image?url=<encoded>&width=<n>&height=<n>&quality=<n>`

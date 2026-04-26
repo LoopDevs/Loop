@@ -98,6 +98,38 @@ See `apps/backend/fly.toml`:
 | `DATABASE_URL`      | Yes      | —       | `postgres://` or `postgresql://` URL. Dev points at the docker-compose Postgres on `:5433`; prod Fly-managed. |
 | `DATABASE_POOL_MAX` | No       | `10`    | Drizzle pool size per Node process. Tune if a machine hosts multiple workers.                                 |
 
+##### Postgres role hygiene (A2-1614)
+
+**Production (Fly-managed Postgres).** Loop runs against a
+Fly-managed Postgres cluster. The cluster is provisioned with two
+roles:
+
+- **`loop_app`** — owns the schema, runs migrations, has read+write
+  on every table. This is the role `apps/backend` connects as
+  (the `DATABASE_URL` Fly secret encodes its credentials). It does
+  **not** have `SUPERUSER`; cluster admin tasks (replica add, base
+  backup) go through Fly's `fly postgres` CLI which uses a separate
+  out-of-band role provisioned by Fly.
+- **`loop_readonly`** — `SELECT` only on every table in the schema.
+  Used by ad-hoc analytics + reconciliation scripts that read the DB
+  without ever needing to write. Credentials live in 1Password,
+  rotated quarterly.
+
+**Connection pooling.** Drizzle holds an internal connection pool of
+`DATABASE_POOL_MAX` connections per Node process (default 10). Fly's
+managed Postgres exposes both a direct Postgres port and a PgBouncer
+port; Loop connects to the **direct** port — Drizzle's pool already
+multiplexes our queries, and PgBouncer's transaction-mode pooling
+breaks the `LISTEN` / `NOTIFY` and prepared-statement features the
+ledger code relies on (we do `SELECT ... FOR UPDATE` inside
+`db.transaction(...)` in the credits primitives, ADR-009).
+
+**Verifying the prod posture.** The repo can't introspect the live
+DB roles, so this section is the source of truth for what ops should
+configure. Drift surfaces if a migration starts failing on the
+`loop_readonly` role's analytics workload — that's the smoke signal
+that the role-grant wasn't extended for a new table.
+
 #### Admin + audit (ADR 017 / ADR 018)
 
 | Variable                           | Required    | Default        | Description                                                                                              |
