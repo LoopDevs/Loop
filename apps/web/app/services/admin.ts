@@ -1,5 +1,4 @@
 import type {
-  CreditTransactionType,
   LoopAssetCode,
   OrderState,
   PayoutState,
@@ -852,128 +851,24 @@ export async function getAdminUserCashbackByMerchant(
   );
 }
 
-/** Result shape from a successful credit-adjustment write (ADR 017). */
-export interface CreditAdjustmentResult {
-  id: string;
-  userId: string;
-  currency: string;
-  amountMinor: string;
-  priorBalanceMinor: string;
-  newBalanceMinor: string;
-  createdAt: string;
-}
-
-/**
- * `POST /api/admin/users/:userId/credit-adjustments` — ADR 017
- * admin-write. Caller supplies a signed integer minor amount
- * (positive = credit, negative = debit), one of the home currencies
- * (USD/GBP/EUR), and a 2..500 char reason. The service generates the
- * Idempotency-Key so a double-submit of the form can't double-credit.
- */
-export async function applyCreditAdjustment(args: {
-  userId: string;
-  amountMinor: string;
-  currency: 'USD' | 'GBP' | 'EUR';
-  reason: string;
-}): Promise<AdminWriteEnvelope<CreditAdjustmentResult>> {
-  const idempotencyKey =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID().replace(/-/g, '')
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-  return authenticatedRequest<AdminWriteEnvelope<CreditAdjustmentResult>>(
-    `/api/admin/users/${encodeURIComponent(args.userId)}/credit-adjustments`,
-    {
-      method: 'POST',
-      headers: { 'Idempotency-Key': idempotencyKey },
-      body: {
-        amountMinor: args.amountMinor,
-        currency: args.currency,
-        reason: args.reason,
-      },
-    },
-  );
-}
-
-/** Result shape from a successful admin withdrawal (ADR 024). */
-export interface WithdrawalResult {
-  id: string;
-  payoutId: string;
-  userId: string;
-  currency: string;
-  amountMinor: string;
-  destinationAddress: string;
-  priorBalanceMinor: string;
-  newBalanceMinor: string;
-  createdAt: string;
-}
-
-/**
- * `POST /api/admin/users/:userId/withdrawals` — ADR 024 admin-write.
- * Debits the user's off-chain cashback balance and queues a matching
- * on-chain LOOP-asset payout. Caller supplies a positive minor amount,
- * one of the home currencies (USD/GBP/EUR), the user's Stellar
- * destination address, and a 2..500 char reason. The service generates
- * the Idempotency-Key so a double-submit can't double-debit.
- */
-export async function applyAdminWithdrawal(args: {
-  userId: string;
-  amountMinor: string;
-  currency: 'USD' | 'GBP' | 'EUR';
-  destinationAddress: string;
-  reason: string;
-}): Promise<AdminWriteEnvelope<WithdrawalResult>> {
-  const idempotencyKey =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID().replace(/-/g, '')
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-  return authenticatedRequest<AdminWriteEnvelope<WithdrawalResult>>(
-    `/api/admin/users/${encodeURIComponent(args.userId)}/withdrawals`,
-    {
-      method: 'POST',
-      headers: { 'Idempotency-Key': idempotencyKey },
-      body: {
-        amountMinor: args.amountMinor,
-        currency: args.currency,
-        destinationAddress: args.destinationAddress,
-        reason: args.reason,
-      },
-    },
-  );
-}
-
-/** Row shape from `/api/admin/users/:userId/credit-transactions` (ADR 009). */
-export interface AdminCreditTransactionView {
-  id: string;
-  type: CreditTransactionType;
-  amountMinor: string;
-  currency: string;
-  referenceType: string | null;
-  referenceId: string | null;
-  createdAt: string;
-}
-
-/**
- * `GET /api/admin/users/:userId/credit-transactions` — newest-first
- * paginated ledger drill. Cursor via `before=<iso>`; `limit` clamped
- * 1..100 server-side (default 20). Optional `type` filter.
- */
-export async function listAdminUserCreditTransactions(opts: {
-  userId: string;
-  type?: CreditTransactionType;
-  before?: string;
-  limit?: number;
-}): Promise<{ transactions: AdminCreditTransactionView[] }> {
-  const params = new URLSearchParams();
-  if (opts.type !== undefined) params.set('type', opts.type);
-  if (opts.before !== undefined) params.set('before', opts.before);
-  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
-  const qs = params.toString();
-  return authenticatedRequest<{ transactions: AdminCreditTransactionView[] }>(
-    `/api/admin/users/${encodeURIComponent(opts.userId)}/credit-transactions${
-      qs.length > 0 ? `?${qs}` : ''
-    }`,
-  );
-}
+// A2-1165 (slice 22): user-credits management surface (credit-
+// adjust write + withdrawal write + ledger read) moved to
+// `./admin-user-credits.ts` (ADR 009 / 017 / 024). Both writes
+// re-use the `AdminWriteEnvelope` primitives from slice 16. The
+// idempotency-key generator that was duplicated inline in both
+// writers is now a private helper in the slice file. Inline
+// shapes moved with the functions — no other consumers.
+// Re-export keeps `CreditAdjustmentForm.tsx`,
+// `AdminWithdrawalForm.tsx`, `UserCreditTransactionsTable.tsx`,
+// and paired tests untouched.
+export {
+  type CreditAdjustmentResult,
+  type WithdrawalResult,
+  type AdminCreditTransactionView,
+  applyCreditAdjustment,
+  applyAdminWithdrawal,
+  listAdminUserCreditTransactions,
+} from './admin-user-credits';
 
 /**
  * `GET /api/admin/orders/:orderId` — single Loop-native order
