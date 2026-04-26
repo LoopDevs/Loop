@@ -791,71 +791,20 @@ export {
   testDiscordChannel,
 } from './admin-discord';
 
-/** One credit-balance row per (user, currency) from `/api/admin/users/:userId/credits`. */
-export interface AdminUserCreditRow {
-  currency: string;
-  balanceMinor: string;
-  updatedAt: string;
-}
-
-export interface AdminUserCreditsResponse {
-  userId: string;
-  rows: AdminUserCreditRow[];
-}
-
-/** `GET /api/admin/users/:userId/credits` — multi-currency balance drill. */
-export async function getAdminUserCredits(userId: string): Promise<AdminUserCreditsResponse> {
-  return authenticatedRequest<AdminUserCreditsResponse>(
-    `/api/admin/users/${encodeURIComponent(userId)}/credits`,
-  );
-}
-
-/**
- * Admin per-user cashback scalar (ADR 009 / 015). Admin-facing mirror
- * of `/api/users/me/cashback-summary` — lifetime + this-month cashback
- * earned, scoped to the user's current `home_currency`. Drives the
- * compact "£42 lifetime · £3.20 this month" chip on the admin drill-
- * down.
- */
-export interface AdminUserCashbackSummary {
-  userId: string;
-  currency: string;
-  lifetimeMinor: string;
-  thisMonthMinor: string;
-}
-
-/** `GET /api/admin/users/:userId/cashback-summary` — scalar headline. */
-export async function getAdminUserCashbackSummary(
-  userId: string,
-): Promise<AdminUserCashbackSummary> {
-  return authenticatedRequest<AdminUserCashbackSummary>(
-    `/api/admin/users/${encodeURIComponent(userId)}/cashback-summary`,
-  );
-}
-
-/**
- * Admin per-user flywheel scalar (#600). Mirrors the user-facing
- * `/flywheel-stats` endpoint shape. Scoped to the target user's
- * current home_currency (numerator + denominator share a
- * denomination).
- */
-export interface AdminUserFlywheelStats {
-  userId: string;
-  currency: string;
-  recycledOrderCount: number;
-  /** SUM(charge_minor) over loop_asset orders. bigint-as-string. */
-  recycledChargeMinor: string;
-  totalFulfilledCount: number;
-  /** SUM(charge_minor) over every fulfilled order in home_currency. bigint-as-string. */
-  totalFulfilledChargeMinor: string;
-}
-
-/** `GET /api/admin/users/:userId/flywheel-stats` — per-user recycled-vs-total. */
-export async function getAdminUserFlywheelStats(userId: string): Promise<AdminUserFlywheelStats> {
-  return authenticatedRequest<AdminUserFlywheelStats>(
-    `/api/admin/users/${encodeURIComponent(userId)}/flywheel-stats`,
-  );
-}
+// A2-1165 (slice 14): per-user drill surface (credits + cashback-
+// summary + flywheel-stats) moved to `./admin-user-drill.ts`
+// (ADR 009 / 015). Inline shapes moved with the functions — no
+// other consumers. Re-export keeps the user-detail page + paired
+// tests untouched.
+export {
+  type AdminUserCreditRow,
+  type AdminUserCreditsResponse,
+  type AdminUserCashbackSummary,
+  type AdminUserFlywheelStats,
+  getAdminUserCredits,
+  getAdminUserCashbackSummary,
+  getAdminUserFlywheelStats,
+} from './admin-user-drill';
 
 /**
  * Admin per-merchant flywheel scalar (#623). Sibling of the per-user
