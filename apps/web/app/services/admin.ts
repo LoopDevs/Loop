@@ -639,76 +639,21 @@ export async function getAdminUserByEmail(email: string): Promise<AdminUserDetai
   );
 }
 
-/** One entry in the top-users-by-pending-payout leaderboard. */
-export interface TopUserByPendingPayoutEntry {
-  userId: string;
-  email: string;
-  /** LOOP asset code (USDLOOP / GBPLOOP / EURLOOP). */
-  assetCode: string;
-  /** Summed in-flight payout amount, stroops as bigint-string. */
-  totalStroops: string;
-  /** Number of payout rows contributing to totalStroops. */
-  payoutCount: number;
-}
-
-export interface TopUsersByPendingPayoutResponse {
-  entries: TopUserByPendingPayoutEntry[];
-}
-
-/**
- * `GET /api/admin/users/top-by-pending-payout?limit=` — ranked users
- * with the most in-flight (pending + submitted) on-chain payout debt,
- * grouped by (user, asset). Drives ops funding prioritisation on the
- * treasury page: "who's owed the most USDLOOP right now?" is the first
- * question before topping up an operator reserve.
- */
-export async function getTopUsersByPendingPayout(
-  opts: { limit?: number } = {},
-): Promise<TopUsersByPendingPayoutResponse> {
-  const params = new URLSearchParams();
-  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
-  const qs = params.toString();
-  return authenticatedRequest<TopUsersByPendingPayoutResponse>(
-    `/api/admin/users/top-by-pending-payout${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
-
-/**
- * One row of the 90-day users-recycling-activity leaderboard (#611).
- * Ranked by most-recent loop_asset order; zero-recycle users are
- * omitted server-side. `recycledChargeMinor` is bigint-as-string
- * (fleet-wide precision can push past 2^53).
- */
-export interface UserRecyclingActivityRow {
-  userId: string;
-  email: string;
-  lastRecycledAt: string;
-  recycledOrderCount: number;
-  recycledChargeMinor: string;
-  currency: string;
-}
-
-export interface UsersRecyclingActivityResponse {
-  since: string;
-  rows: UserRecyclingActivityRow[];
-}
-
-/**
- * `GET /api/admin/users/recycling-activity?limit=` — 90-day list of
- * users with at least one loop_asset order, sorted by most-recent
- * recycle. Complements `/top-users` (by cashback earned) and
- * `/top-by-pending-payout` (by backlog).
- */
-export async function getAdminUsersRecyclingActivity(
-  opts: { limit?: number } = {},
-): Promise<UsersRecyclingActivityResponse> {
-  const params = new URLSearchParams();
-  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
-  const qs = params.toString();
-  return authenticatedRequest<UsersRecyclingActivityResponse>(
-    `/api/admin/users/recycling-activity${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
+// A2-1165 (slice 19): fleet-level user-activity leaderboards
+// (top-by-pending-payout + recycling-activity) moved to
+// `./admin-user-fleet-activity.ts`. Inline shapes moved with
+// the functions — no other consumers. Re-export keeps
+// `TopUsersByPendingPayoutCard.tsx`,
+// `UsersRecyclingActivityCard.tsx`, the treasury route + paired
+// tests untouched.
+export {
+  type TopUserByPendingPayoutEntry,
+  type TopUsersByPendingPayoutResponse,
+  type UserRecyclingActivityRow,
+  type UsersRecyclingActivityResponse,
+  getTopUsersByPendingPayout,
+  getAdminUsersRecyclingActivity,
+} from './admin-user-fleet-activity';
 
 /** Response shape from POST /api/admin/merchants/resync. */
 export interface AdminMerchantResyncResponse {
