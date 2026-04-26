@@ -340,7 +340,19 @@ jobs:
           # sed-based sanitizer could leave a literal backslash in the body,
           # which made the JSON malformed and a careful commit message could
           # inject extra JSON fields.
-          FIRST_LINE=$(printf '%s' "${COMMIT_MSG:-}" | head -n1)
+          #
+          # A2-1415: an attacker-controlled commit message can also contain
+          # Discord-rendered markdown — `[click](https://evil.com)` becomes a
+          # clickable link in the embed; `\u202E` flips the rendering direction;
+          # zero-width chars hide content. Mirror the backend's
+          # `escapeMarkdown` (A2-2004) here: strip bidi + zero-width chars,
+          # then backslash-escape the markdown specials. The escape happens
+          # BEFORE jq, so jq's JSON-encoding then double-escapes the
+          # backslashes — Discord renders the literal characters.
+          FIRST_LINE_RAW=$(printf '%s' "${COMMIT_MSG:-}" | head -n1)
+          FIRST_LINE=$(printf '%s' "$FIRST_LINE_RAW" \
+            | perl -CSD -pe 's/[\x{200B}-\x{200F}\x{2028}-\x{202F}\x{2066}-\x{2069}\x{FEFF}]//g' \
+            | sed 's/\([][()`*_~|>\\]\)/\\\1/g')
           DESCRIPTION=$(printf '**Commit:** %s\n**Branch:** %s\n**Author:** %s' \
             "$FIRST_LINE" "$BRANCH" "$ACTOR")
           URL="$SERVER_URL/$REPO/actions/runs/$RUN_ID"
