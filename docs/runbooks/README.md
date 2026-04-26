@@ -27,6 +27,7 @@ split it into a sub-page rather than padding.
 | **Mobile signing**    | [mobile-cert-renewal.md](./mobile-cert-renewal.md) — Apple/Google cert + provisioning + key renewal flow (A2-1908)                                                   |
 | **Upstream (CTX)**    | [ctx-circuit-open.md](./ctx-circuit-open.md) — circuit breaker tripped on a CTX endpoint                                                                             |
 | **Ledger**            | [ledger-drift.md](./ledger-drift.md) — `/api/admin/reconciliation` reports drift > threshold                                                                         |
+|                       | [deployed-state-spotcheck.md](./deployed-state-spotcheck.md) — gating check before invoice approval / tax filing / Monday dashboards (A2-1924)                       |
 | **Operational gate**  | [kill-switch.md](./kill-switch.md) — flip `LOOP_KILL_ORDERS` / `_AUTH` / `_WITHDRAWALS` to gate a surface without redeploy                                           |
 | **Rollback**          | [rollback.md](./rollback.md) — `fly deploy --image` to a prior release; 90-day rehearsal cadence (A2-1403)                                                           |
 | **DR**                | [disaster-recovery.md](./disaster-recovery.md) — region failure / Postgres data loss / operator drain / env compromise; RPO+RTO targets; 180-day rehearsal (A2-1910) |
