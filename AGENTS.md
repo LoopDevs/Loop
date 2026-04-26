@@ -263,7 +263,7 @@ Applied in order on every request:
 
 - **Never push directly to `main`** — all changes via PR. Branch protection is now enforced by GitHub (audit A-037 closed after the repo went public): required passing status checks are `Quality (typecheck, lint, format, docs)`, `Unit tests`, `Security audit`, `Build verification`, `E2E tests (mocked CTX)`; force-push and branch deletion are blocked; stale reviews dismiss on new commits. The `gh api repos/LoopDevs/Loop/branches/main/protection` endpoint now returns the active ruleset. Admins can still squash-merge without a required approval because the project is pre-team, but the passing-checks gate is non-negotiable.
 - The **real-upstream** e2e suite (`test-e2e`, Playwright against a running backend pointed at spend.ctx.com) is **PR-only**. The self-contained **mocked** e2e suite (`test-e2e-mocked`, boots mock-ctx + backend + web on isolated ports) runs on every push to main and every PR (audit A-003). So a direct push to main still gets the deterministic mocked flow, but not the upstream contract check.
-- Create a feature branch, push, open a PR. CI runs seven jobs: `quality`, `test-unit`, `audit`, `build`, `test-e2e-mocked`, `test-e2e` (PR only), and `notify`.
+- Create a feature branch, push, open a PR. CI runs eight jobs: `quality`, `test-unit`, `audit`, `secret-scan` (gitleaks, A2-206), `build`, `test-e2e-mocked`, `test-e2e` (PR only), and `notify`.
 - Discord `#loop-deployments` notifies on CI pass/fail.
 - Branch protection on `main` is live and enforces the rules above via the GitHub API. To inspect or modify: `gh api repos/LoopDevs/Loop/branches/main/protection`.
 
