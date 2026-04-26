@@ -292,6 +292,47 @@ In Android Studio:
 - Build → Generate Signed Bundle / APK
 - Upload `.aab` to Play Console
 
+### Signing / provisioning / cert-expiry runbook (A2-1205)
+
+Apple and Google credentials expire on different cycles, and a missed
+renewal blocks every release until the new artifact is in place. Track
+each item below; the calendar lives in 1Password under `Loop · Mobile
+signing`.
+
+| Asset                                                          | Lifetime            | Where it lives                            | Renewal trigger                                                                           |
+| -------------------------------------------------------------- | ------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Apple Developer Program membership                             | **1 year**          | Apple Developer account                   | 30-day reminder before lapse — without it, Push, In-App Purchase, and TestFlight stop.    |
+| iOS Distribution Certificate                                   | **1 year**          | Apple Developer → Certificates            | 30-day reminder. Re-issue, re-download, install in Xcode keychain, archive a smoke build. |
+| App Store Connect API Key (`AuthKey_*.p8`)                     | No expiry           | 1Password (download once)                 | Rotate manually if compromised. Used by `xcodebuild` upload + Fastlane match if adopted.  |
+| iOS Provisioning Profile (App Store)                           | **1 year**          | Apple Developer → Profiles                | Auto-renews via Xcode "Automatically manage signing" once cert is current.                |
+| iOS Push (APNs) Auth Key                                       | No expiry           | 1Password                                 | Rotate manually if compromised; one key per team.                                         |
+| Google Play upload key (`upload-keystore.jks`)                 | **25 years** at gen | 1Password (sealed) + offline cold backup  | Never — losing it requires Play Support reset.                                            |
+| Google Play app signing key (Play-managed)                     | Managed by Google   | Google Play Console                       | Never — Google holds it.                                                                  |
+| FCM Server Key / Service-account JSON                          | No expiry           | 1Password                                 | Rotate manually if compromised; document new key in `apps/backend/.env`.                  |
+| Android Studio CMake / NDK toolchain                           | Tied to AGP         | Local install                             | Bump alongside `apps/mobile/android/build.gradle` AGP upgrades.                           |
+| Apple `NSFaceIDUsageDescription` overlay (A-034)               | n/a                 | `apps/mobile/native-overlays/ios/...`     | Re-applies on every `cap sync` via `apply-native-overlays.sh`. CI flag if missing.        |
+| Android backup-rules + FileProvider overlays (A-033 / A2-1213) | n/a                 | `apps/mobile/native-overlays/android/...` | Re-applies on every `cap sync`; see overlay script's pre-flight checks.                   |
+
+**Expiry calendar.** Add the cert + provisioning expiry dates to the
+team's shared calendar with 30-day and 7-day reminders. Both maintainers
+get the alerts. The 30-day window is the renewal-action signal; the
+7-day window is the "this is about to ship-block us" escalation.
+
+**Version-bump discipline (A2-1203).** TestFlight and Play Console both
+**reject any build whose version code is not strictly higher than the
+previously-uploaded artifact**, regardless of build path. Loop's policy:
+
+- iOS `CFBundleVersion` (build number) is the **CI run number** — set by the
+  release workflow before `xcodebuild archive`. Never hand-edit.
+- iOS `CFBundleShortVersionString` (marketing version) is the public
+  semver, edited by the release author.
+- Android `versionCode` is the **CI run number** (matches iOS so the two
+  binaries are easy to correlate). Never hand-edit.
+- Android `versionName` is the public semver, edited by the release
+  author alongside the iOS `CFBundleShortVersionString`.
+- A new release ships only after both stores accept the upload — if one
+  fails, the other gets pulled before users see version skew.
+
 ---
 
 ## Docker (local testing)

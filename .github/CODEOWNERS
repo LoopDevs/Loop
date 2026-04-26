@@ -41,5 +41,13 @@ packages/shared/src/loop-asset.ts               @LoopDevs/engineering
 packages/shared/src/credit-transaction-type.ts  @LoopDevs/engineering
 packages/shared/src/stellar*                    @LoopDevs/engineering
 
+# ─── Mobile (Capacitor shells, native overlays, signing/provisioning) ──
+# A2-1205: every change here can break Apple/Google submission. Native
+# overlay drift (`apply-native-overlays.sh`, `native-overlays/`) breaks
+# A-033 backup rules, A-034 FaceID descriptor, A2-1213 FileProvider scope.
+# `apps/mobile/scripts/` mutates the gitignored native trees on every
+# `cap sync`, so reviewer eyes are needed even on tooling tweaks.
+apps/mobile/                                    @LoopDevs/engineering
+
 # ─── ADRs — architectural changes go through the reviewer group ────
 docs/adr/                                       @LoopDevs/engineering
