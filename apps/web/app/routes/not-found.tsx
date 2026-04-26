@@ -1,14 +1,24 @@
 import { useNavigate } from 'react-router';
-import type { Route } from './+types/not-found';
 import { Navbar } from '~/components/features/Navbar';
 import { Button } from '~/components/ui/Button';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 
-export function meta(): Route.MetaDescriptors {
+// Plain literal — Route types from `./+types/not-found` only exist
+// in the mobile typegen output (this file is the mobile-build splat).
+// The SSR build's typegen never sees this route since `routes.ts`
+// switches the splat to `not-found-ssr.tsx`. Avoid the conditional
+// import; the meta shape is small enough to inline.
+export function meta(): Array<{ title: string }> {
   return [{ title: 'Page not found — Loop' }];
 }
 
-export default function NotFoundRoute(): React.JSX.Element {
+// A2-1111: pure component, no loader. SPA mode (mobile static export)
+// rejects `loader` exports — RR v7 fails the build with
+// "SPA Mode: invalid route export(s)". The SSR build wires the splat
+// to `not-found-ssr.tsx` instead, which has the loader that throws a
+// real HTTP 404 for crawlers / uptime checkers; this file is the
+// mobile-build splat route and exports the shared 404 UI.
+export function NotFoundContent(): React.JSX.Element {
   const { isNative } = useNativePlatform();
   const navigate = useNavigate();
 
@@ -30,4 +40,8 @@ export default function NotFoundRoute(): React.JSX.Element {
       </main>
     </div>
   );
+}
+
+export default function NotFoundRoute(): React.JSX.Element {
+  return <NotFoundContent />;
 }

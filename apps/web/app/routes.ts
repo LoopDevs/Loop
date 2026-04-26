@@ -7,6 +7,15 @@ import { type RouteConfig, index, route } from '@react-router/dev/routes';
 const sitemapRoutes =
   process.env.BUILD_TARGET === 'mobile' ? [] : [route('sitemap.xml', 'routes/sitemap.tsx')];
 
+// A2-1111: SSR build wires the splat to `not-found-ssr.tsx`, whose
+// loader throws a real HTTP 404 so crawlers stop seeing soft-200s.
+// Mobile build uses the plain `not-found.tsx` because SPA mode rejects
+// `loader` exports. Both files render the same 404 UI.
+const splatRoute =
+  process.env.BUILD_TARGET === 'mobile'
+    ? route('*', 'routes/not-found.tsx')
+    : route('*', 'routes/not-found-ssr.tsx');
+
 export default [
   index('routes/home.tsx'),
   route('map', 'routes/map.tsx'),
@@ -41,5 +50,5 @@ export default [
   route('admin/assets', 'routes/admin.assets.tsx'),
   route('admin/assets/:assetCode', 'routes/admin.assets.$assetCode.tsx'),
   route('admin/audit', 'routes/admin.audit.tsx'),
-  route('*', 'routes/not-found.tsx'),
+  splatRoute,
 ] satisfies RouteConfig;
