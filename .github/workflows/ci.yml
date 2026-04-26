@@ -195,6 +195,11 @@ jobs:
             --ignore-unfixed \
             'node:22-alpine@sha256:8ea2348b068a9544dae7317b4f3aafcdc032df1647bb7d768a05a5cad1a7683f'
       - name: Run trivy config scan (Dockerfile misconfig)
+        # `trivy config` (0.55.2) takes a single directory (not a
+        # file list) and rejects `--no-progress` (only the `image`
+        # subcommand supports that flag). Scope to `apps` so both
+        # Dockerfiles fall under the scan root without surfacing
+        # repo-wide configs the audit doesn't care about.
         run: |
           set -euo pipefail
           docker run --rm \
@@ -204,8 +209,7 @@ jobs:
             config \
             --severity HIGH,CRITICAL \
             --exit-code 1 \
-            --no-progress \
-            apps/backend/Dockerfile apps/web/Dockerfile
+            apps
 
   # A2-206: secret scanning runs the gitleaks binary directly. The
   # gitleaks-action wrapper requires a paid license for org-owned
