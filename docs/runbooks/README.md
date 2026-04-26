@@ -31,6 +31,7 @@ split it into a sub-page rather than padding.
 |                       | [deployed-state-spotcheck.md](./deployed-state-spotcheck.md) — gating check before invoice approval / tax filing / Monday dashboards (A2-1924)                       |
 | **Operational gate**  | [kill-switch.md](./kill-switch.md) — flip `LOOP_KILL_ORDERS` / `_AUTH` / `_WITHDRAWALS` to gate a surface without redeploy                                           |
 | **Rollback**          | [rollback.md](./rollback.md) — `fly deploy --image` to a prior release; 90-day rehearsal cadence (A2-1403)                                                           |
+|                       | [migration-rollback.md](./migration-rollback.md) — DB-schema rollback decision tree: forward fix vs Postgres PITR (A2-711)                                           |
 | **DR**                | [disaster-recovery.md](./disaster-recovery.md) — region failure / Postgres data loss / operator drain / env compromise; RPO+RTO targets; 180-day rehearsal (A2-1910) |
 
 ## Conventions
