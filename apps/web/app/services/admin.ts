@@ -339,80 +339,23 @@ export {
   getAdminAuditTail,
 } from './admin-audit';
 
-/**
- * Per-merchant aggregate stats (ADR 011 / 015). Each row sums fulfilled
- * orders for a single merchant in the window; `currency` is the
- * dominant catalog currency for that merchant's volume.
- */
-export interface MerchantStatsRow {
-  merchantId: string;
-  orderCount: number;
-  /** Distinct users who earned from this merchant in the window. */
-  uniqueUserCount: number;
-  faceValueMinor: string;
-  wholesaleMinor: string;
-  userCashbackMinor: string;
-  loopMarginMinor: string;
-  lastFulfilledAt: string;
-  currency: string;
-}
-
-export interface MerchantStatsResponse {
-  since: string;
-  rows: MerchantStatsRow[];
-}
-
-/**
- * `GET /api/admin/merchant-stats` — per-merchant stats ranked by
- * Loop-margin-minor descending. Default window 31d; clamped [1, 366].
- */
-export async function getMerchantStats(
-  opts: { since?: string } = {},
-): Promise<MerchantStatsResponse> {
-  const params = new URLSearchParams();
-  if (opts.since !== undefined) params.set('since', opts.since);
-  const qs = params.toString();
-  return authenticatedRequest<MerchantStatsResponse>(
-    `/api/admin/merchant-stats${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
-
-/**
- * One row of the per-merchant flywheel leaderboard (#602). Ranks
- * merchants by how many of their fulfilled orders came through the
- * LOOP-asset rail (recycled cashback). Merchants with zero recycled
- * orders are omitted server-side — this is explicitly a "who's
- * recycling" list, not a zero-inflated fleet enumeration.
- */
-export interface MerchantFlywheelShareRow {
-  merchantId: string;
-  totalFulfilledCount: number;
-  recycledOrderCount: number;
-  recycledChargeMinor: string;
-  totalChargeMinor: string;
-}
-
-export interface MerchantsFlywheelShareResponse {
-  since: string;
-  rows: MerchantFlywheelShareRow[];
-}
-
-/**
- * `GET /api/admin/merchants/flywheel-share` — merchant-axis flywheel
- * leaderboard. Default 31d window (cap 366d), default limit 25 (cap
- * 100). Sorted by recycled-count desc.
- */
-export async function getAdminMerchantsFlywheelShare(
-  opts: { since?: string; limit?: number } = {},
-): Promise<MerchantsFlywheelShareResponse> {
-  const params = new URLSearchParams();
-  if (opts.since !== undefined) params.set('since', opts.since);
-  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
-  const qs = params.toString();
-  return authenticatedRequest<MerchantsFlywheelShareResponse>(
-    `/api/admin/merchants/flywheel-share${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
+// A2-1165 (slice 10): per-merchant fleet stats + merchants-flywheel-
+// share moved to `./admin-merchant-stats.ts` (ADR 011 / 015). The
+// inline `MerchantStatsRow` / `MerchantStatsResponse` /
+// `MerchantFlywheelShareRow` / `MerchantsFlywheelShareResponse`
+// shapes moved with the functions — no other consumers, so
+// promoting them to `@loop/shared` would just add indirection.
+// Re-export keeps `MerchantStatsCard.tsx`,
+// `MerchantsFlywheelShareCard.tsx`, `routes/admin.merchants.tsx`
+// and their paired tests untouched.
+export {
+  type MerchantStatsRow,
+  type MerchantStatsResponse,
+  type MerchantFlywheelShareRow,
+  type MerchantsFlywheelShareResponse,
+  getMerchantStats,
+  getAdminMerchantsFlywheelShare,
+} from './admin-merchant-stats';
 
 /** Single stuck-order row from `/api/admin/stuck-orders` (ADR 011/013). */
 export interface StuckOrderRow {
