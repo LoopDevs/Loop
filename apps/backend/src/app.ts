@@ -1,10 +1,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { secureHeaders } from 'hono/secure-headers';
-import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
 import { runWithRequestContext, getCtxResponseRequestId } from './request-context.js';
-import { isKilled, type KillSwitch } from './kill-switches.js';
 import { sentry, captureException } from '@sentry/hono/node';
 import { scrubSentryEvent } from './sentry-scrubber.js';
 import { env } from './env.js';
@@ -18,6 +15,9 @@ import { generateOpenApiSpec } from './openapi.js';
 import { metrics, incrementRequest } from './metrics.js';
 import { accessLogMiddleware } from './middleware/access-log.js';
 import { corsMiddleware } from './middleware/cors.js';
+import { secureHeadersMiddleware } from './middleware/secure-headers.js';
+import { bodyLimitMiddleware } from './middleware/body-limit.js';
+import { killSwitch } from './middleware/kill-switch.js';
 import {
   rateLimit,
   __resetRateLimitsForTests as resetRateLimitMap,
@@ -217,30 +217,7 @@ import {
 
 // (rate-limit body extracted to ./middleware/rate-limit.ts above)
 
-/**
- * A2-1907: per-subsystem runtime kill switch. Returns 503
- * SUBSYSTEM_DISABLED with a Retry-After hint when the matching
- * `LOOP_KILL_<NAME>` env var is set. `isKilled` reads `process.env`
- * at call time (not the frozen `env` snapshot) so a Fly-secret flip
- * takes effect on the next request without waiting for the new
- * machine to come up. See `docs/runbooks/` for the operator flow.
- */
-function killSwitch(
-  subsystem: KillSwitch,
-): (c: Context, next: () => Promise<void>) => Promise<void | Response> {
-  return async (c, next): Promise<void | Response> => {
-    if (isKilled(subsystem)) {
-      return c.json(
-        {
-          code: 'SUBSYSTEM_DISABLED',
-          message: `${subsystem} is temporarily disabled — retry shortly`,
-        },
-        503,
-      );
-    }
-    await next();
-  };
-}
+// `killSwitch` factory (A2-1907) lives in `./middleware/kill-switch.ts`.
 
 // ─── Global middleware ────────────────────────────────────────────────────────
 
@@ -248,38 +225,12 @@ function killSwitch(
 // in `./middleware/cors.ts` (audit A-…/A2-1009 — the source of
 // truth for which origins can hit the prod API).
 app.use('*', corsMiddleware);
-app.use(
-  '*',
-  secureHeaders({
-    crossOriginResourcePolicy: env.NODE_ENV === 'production' ? 'same-origin' : 'cross-origin',
-    // API-appropriate CSP: this host only ever serves JSON/binary data
-    // (no HTML), so any browser that receives an injected response should
-    // refuse to execute scripts or load sub-resources from it. default-src
-    // 'none' is the strictest possible base; frame-ancestors 'none'
-    // prevents clickjacking embeds even on error pages. A second line of
-    // defense against any future XSS class of bug (like the ClusterMap
-    // innerHTML one caught in the hardening sweep).
-    contentSecurityPolicy: {
-      defaultSrc: ["'none'"],
-      frameAncestors: ["'none'"],
-      baseUri: ["'none'"],
-      formAction: ["'none'"],
-    },
-  }),
-);
-// A2-1005: the default `bodyLimit` error handler lets the middleware
-// throw, which Hono's fallback handler turns into a 500. The correct
-// HTTP status for "request body exceeds declared limit" is 413
-// Payload Too Large, and the error envelope should match the
-// `{ code, message }` shape every other handler uses.
-app.use(
-  '*',
-  bodyLimit({
-    maxSize: 1024 * 1024,
-    onError: (c) =>
-      c.json({ code: 'PAYLOAD_TOO_LARGE', message: 'Request body exceeds 1 MB limit' }, 413),
-  }),
-);
+// `secureHeaders` (CSP + cross-origin policy) lives in
+// `./middleware/secure-headers.ts`. `bodyLimit` (1 MiB cap with the
+// 413 PAYLOAD_TOO_LARGE envelope from A2-1005) lives in
+// `./middleware/body-limit.ts`.
+app.use('*', secureHeadersMiddleware);
+app.use('*', bodyLimitMiddleware);
 app.use('*', requestId());
 // A2-1305: mount the request ID into an AsyncLocalStorage context so
 // any downstream helper — `operatorFetch`, `CircuitBreaker.fetch`,
