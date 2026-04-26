@@ -80,6 +80,23 @@ export function isLoopAssetCode(s: string): s is LoopAssetCode {
 }
 
 /**
+ * Inverse of `loopAssetForCurrency`. The 1:1 mapping is total — every
+ * `LoopAssetCode` maps to exactly one `HomeCurrency` — so this is a
+ * pure function with no fallback. ADR-024 §5 uses this when reading a
+ * `pending_payouts` row's `asset_code` to find the user_credits
+ * currency for a compensation write.
+ */
+const ASSET_CODE_TO_CURRENCY: Record<LoopAssetCode, HomeCurrency> = {
+  USDLOOP: 'USD',
+  GBPLOOP: 'GBP',
+  EURLOOP: 'EUR',
+};
+
+export function currencyForLoopAsset(code: LoopAssetCode): HomeCurrency {
+  return ASSET_CODE_TO_CURRENCY[code];
+}
+
+/**
  * Narrowing type-guard for `HomeCurrency`. Same shape as
  * `isLoopAssetCode` — accept an arbitrary string, narrow to the
  * enum before further use.
