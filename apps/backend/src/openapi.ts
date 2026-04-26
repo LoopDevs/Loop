@@ -21,6 +21,7 @@ import {
 import { z } from 'zod';
 import { ApiErrorCode, STELLAR_PUBKEY_REGEX, type ApiErrorCodeValue } from '@loop/shared';
 import { registerAuthOpenApi } from './openapi/auth.js';
+import { registerMerchantsOpenApi } from './openapi/merchants.js';
 
 extendZodWithOpenApi(z);
 
@@ -75,35 +76,14 @@ const PlatformEnum = z.enum(['web', 'ios', 'android']).openapi({
 // halves on this module's registry instance.
 
 // ─── Merchants ──────────────────────────────────────────────────────────────
-
-const MerchantDenominations = registry.register(
-  'MerchantDenominations',
-  z.object({
-    type: z.enum(['fixed', 'min-max']),
-    denominations: z.array(z.string()),
-    currency: z.string(),
-    min: z.number().optional(),
-    max: z.number().optional(),
-  }),
-);
-
-const Merchant = registry.register(
-  'Merchant',
-  z.object({
-    id: z.string(),
-    name: z.string(),
-    logoUrl: z.string().optional(),
-    cardImageUrl: z.string().optional(),
-    savingsPercentage: z.number().optional(),
-    denominations: MerchantDenominations.optional(),
-    description: z.string().optional(),
-    instructions: z.string().optional(),
-    terms: z.string().optional(),
-    enabled: z.boolean(),
-    locationCount: z.number().optional(),
-  }),
-);
-
+//
+// Schemas + path registrations for `/api/merchants/*` live in
+// `./openapi/merchants.ts`. `registerMerchantsOpenApi` is called
+// below alongside the other section factories.
+//
+// `Pagination` stays here as a shared schema because the Orders
+// section also uses it. Future slices may consolidate into a
+// shared primitives module.
 const Pagination = registry.register(
   'Pagination',
   z.object({
@@ -113,27 +93,6 @@ const Pagination = registry.register(
     totalPages: z.number(),
     hasNext: z.boolean(),
     hasPrev: z.boolean(),
-  }),
-);
-
-const MerchantListResponse = registry.register(
-  'MerchantListResponse',
-  z.object({
-    merchants: z.array(Merchant),
-    pagination: Pagination,
-  }),
-);
-
-const MerchantDetailResponse = registry.register(
-  'MerchantDetailResponse',
-  z.object({ merchant: Merchant }),
-);
-
-const MerchantAllResponse = registry.register(
-  'MerchantAllResponse',
-  z.object({
-    merchants: z.array(Merchant),
-    total: z.number(),
   }),
 );
 
@@ -1729,161 +1688,6 @@ registry.registerPath({
     200: {
       description: 'Prometheus text format',
       content: { 'text/plain; version=0.0.4': { schema: z.string() } },
-    },
-  },
-});
-
-registry.registerPath({
-  method: 'get',
-  path: '/api/merchants',
-  summary: 'Paginated merchant list with optional name filter.',
-  tags: ['Merchants'],
-  request: {
-    query: z.object({
-      page: z.coerce.number().int().min(1).optional(),
-      limit: z.coerce.number().int().min(1).max(100).optional(),
-      q: z.string().max(100).optional(),
-    }),
-  },
-  responses: {
-    200: {
-      description: 'Merchant page',
-      content: { 'application/json': { schema: MerchantListResponse } },
-    },
-    429: {
-      description: 'Rate limit exceeded (180/min per IP) — A2-650',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-  },
-});
-
-registry.registerPath({
-  method: 'get',
-  path: '/api/merchants/all',
-  summary:
-    'Full merchant catalog in a single response. Serves UI surfaces that need every merchant (audit A-002).',
-  tags: ['Merchants'],
-  responses: {
-    200: {
-      description: 'Complete merchant catalog',
-      content: { 'application/json': { schema: MerchantAllResponse } },
-    },
-    429: {
-      description: 'Rate limit exceeded (60/min per IP) — A2-650',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-  },
-});
-
-registry.registerPath({
-  method: 'get',
-  path: '/api/merchants/by-slug/{slug}',
-  summary: 'Fetch a merchant by URL-safe slug.',
-  tags: ['Merchants'],
-  request: { params: z.object({ slug: z.string() }) },
-  responses: {
-    200: {
-      description: 'Merchant',
-      content: { 'application/json': { schema: MerchantDetailResponse } },
-    },
-    404: { description: 'Not found', content: { 'application/json': { schema: ErrorResponse } } },
-    429: {
-      description: 'Rate limit exceeded (120/min per IP) — A2-650',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-  },
-});
-
-registry.registerPath({
-  method: 'get',
-  path: '/api/merchants/{id}',
-  summary: 'Fetch a merchant by id.',
-  tags: ['Merchants'],
-  security: [{ bearerAuth: [] }],
-  request: { params: z.object({ id: z.string() }) },
-  responses: {
-    200: {
-      description: 'Merchant',
-      content: { 'application/json': { schema: MerchantDetailResponse } },
-    },
-    401: {
-      description: 'Missing or invalid bearer',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    404: { description: 'Not found', content: { 'application/json': { schema: ErrorResponse } } },
-    429: {
-      description: 'Rate limit exceeded (120/min per IP) — A2-1008',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-  },
-});
-
-registry.registerPath({
-  method: 'get',
-  path: '/api/merchants/cashback-rates',
-  summary: 'Bulk cashback-rate map for the merchant catalog (ADR 011 / 015).',
-  description:
-    'Returns a `{ merchantId → userCashbackPct }` map of every merchant with an active cashback config. Lets catalog / list / map views render "X% cashback" badges per card without N+1-ing the per-merchant endpoint. Merchants without an active config are omitted — clients should treat missing keys as "no cashback" and hide the badge. Values are `numeric(5,2)` strings (e.g. `"2.50"`). 5-minute public cache matches the merchant-catalog endpoints.',
-  tags: ['Merchants'],
-  responses: {
-    200: {
-      description: 'Bulk rates map',
-      content: {
-        'application/json': {
-          schema: z.object({
-            rates: z.record(z.string(), CashbackPctString).openapi({
-              description:
-                'Object keyed by merchantId; present only for merchants with active configs.',
-            }),
-          }),
-        },
-      },
-    },
-    429: {
-      description: 'Rate limit exceeded (120/min per IP)',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-  },
-});
-
-registry.registerPath({
-  method: 'get',
-  path: '/api/merchants/{merchantId}/cashback-rate',
-  summary: 'Cashback-rate preview for the gift-card detail page (ADR 011 / 015).',
-  description:
-    "Public surface — no auth. Returns the merchant's active `user_cashback_pct` as a bigint-shaped `numeric(5,2)` string, or `null` when the merchant has no cashback config (or it's inactive). Clients should hide the cashback badge on `null`. 5-minute public cache matches the merchant-catalog endpoints.",
-  tags: ['Merchants'],
-  request: { params: z.object({ merchantId: z.string() }) },
-  responses: {
-    200: {
-      description: 'Cashback-rate preview',
-      content: {
-        'application/json': {
-          schema: z.object({
-            merchantId: z.string(),
-            userCashbackPct: z
-              .string()
-              .regex(/^\d{1,3}(?:\.\d{1,2})?$/)
-              .nullable()
-              .openapi({
-                description:
-                  'Percentage in [0, 100] with ≤2 decimals (e.g. `"2.50"`), or null when no active config exists.',
-              }),
-          }),
-        },
-      },
-    },
-    400: {
-      description: 'Invalid merchant id (must match `[\\w-]+`).',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    404: {
-      description: 'Merchant not found',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    429: {
-      description: 'Rate limit exceeded (120/min per IP)',
-      content: { 'application/json': { schema: ErrorResponse } },
     },
   },
 });
@@ -6913,6 +6717,7 @@ registry.registerComponent('securitySchemes', 'bearerAuth', {
 // Called here so every section runs after the shared components
 // above are defined and before the generator walks the definitions.
 registerAuthOpenApi(registry, ErrorResponse, PlatformEnum);
+registerMerchantsOpenApi(registry, ErrorResponse, CashbackPctString, Pagination);
 
 const generator = new OpenApiGeneratorV31(registry.definitions);
 
