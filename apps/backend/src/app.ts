@@ -6,8 +6,6 @@ import { scrubSentryEvent } from './sentry-scrubber.js';
 import { env } from './env.js';
 import { logger } from './logger.js';
 import type { User } from './db/users.js';
-import { clustersHandler } from './clustering/handler.js';
-import { imageProxyHandler } from './images/proxy.js';
 import { accessLogMiddleware } from './middleware/access-log.js';
 import { requestContextMiddleware } from './middleware/request-context.js';
 import { requestCounterMiddleware } from './middleware/request-counter.js';
@@ -42,7 +40,7 @@ import {
   loopGetOrderHandler,
   loopListOrdersHandler,
 } from './orders/loop-handler.js';
-import { configHandler } from './config/handler.js';
+import { mountMiscRoutes } from './routes/misc.js';
 import { googleSocialLoginHandler, appleSocialLoginHandler } from './auth/social.js';
 import { notifyAdminBulkRead } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
@@ -292,27 +290,10 @@ if (env.NODE_ENV === 'test') {
 // table stays in app.ts.
 app.get('/health', healthHandler);
 
-// ─── Map clustering ───────────────────────────────────────────────────────────
-
-// 60 requests per IP per minute. Each cluster request iterates every cached
-// location and computes centroids; real clients are debounced at 300ms in
-// ClusterMap so 60/min leaves them plenty of headroom while stopping a bot
-// from spamming varied bounds/zoom to pressure the backend.
-app.get('/api/clusters', rateLimit(60, 60_000), clustersHandler);
-
-// ─── Public client config ────────────────────────────────────────────────────
-
-// ADR 010 / ADR 013. Small object of feature flags the web client
-// needs to decide which code paths to take. Unauthenticated — the
-// client needs this before login. Rate-limited generously; the
-// response is Cache-Control: max-age=600 so a healthy client hits
-// it rarely.
-app.get('/api/config', rateLimit(120, 60_000), configHandler);
-
-// ─── Image proxy ──────────────────────────────────────────────────────────────
-
-// 300 requests per IP per minute — images load progressively (lazy + cached), not all at once
-app.get('/api/image', rateLimit(300, 60_000), imageProxyHandler);
+// `/api/clusters` + `/api/config` + `/api/image` (the three
+// single-mount routes that don't fit a larger namespace) live in
+// `./routes/misc.ts`.
+mountMiscRoutes(app);
 
 // ─── Merchants ────────────────────────────────────────────────────────────────
 
