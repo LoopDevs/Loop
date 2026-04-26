@@ -68,8 +68,16 @@ vi.mock('../discord.js', async (importOriginal) => {
   return { ...orig, notifyHealthChange: mockNotifyHealthChange };
 });
 
-// Mock circuit breaker to pass through to global fetch (avoids cross-test state leaks)
-vi.mock('../circuit-breaker.js', () => {
+// Mock circuit breaker to pass through to global fetch (avoids cross-test state leaks).
+// A2-1305: also mirror the production circuit-breaker's CTX-request-id
+// capture so the X-Ctx-Request-Id round-trip integration test can
+// exercise the full middleware chain. Production circuit-breaker
+// reads the response's X-Request-Id (or X-Correlation-Id fallback)
+// and writes it onto the per-request AsyncLocalStorage store via
+// setCtxResponseRequestId — mirror that here so the integration
+// scope sees the same end-to-end behaviour as production.
+vi.mock('../circuit-breaker.js', async () => {
+  const { setCtxResponseRequestId } = await import('../request-context.js');
   class CircuitOpenError extends Error {
     constructor() {
       super('Circuit breaker is open — upstream service unavailable');
@@ -80,7 +88,15 @@ vi.mock('../circuit-breaker.js', () => {
     CircuitOpenError,
     getAllCircuitStates: () => ({}),
     getUpstreamCircuit: () => ({
-      fetch: (...args: Parameters<typeof globalThis.fetch>) => globalThis.fetch(...args),
+      fetch: async (...args: Parameters<typeof globalThis.fetch>): Promise<Response> => {
+        const response = await globalThis.fetch(...args);
+        const ctxId =
+          response.headers.get('X-Request-Id') ?? response.headers.get('X-Correlation-Id');
+        if (ctxId !== null && ctxId.length > 0) {
+          setCtxResponseRequestId(ctxId);
+        }
+        return response;
+      },
       getState: () => 'closed' as const,
       reset: () => {},
     }),
@@ -451,6 +467,65 @@ describe('app-level middleware', () => {
     const id = res.headers.get('X-Request-Id');
     expect(id).not.toBeNull();
     expect(id!.length).toBeGreaterThan(0);
+  });
+
+  // A2-1305: end-to-end round-trip for the CTX response request-id
+  // echo. Outbound CTX call includes our X-Request-Id; inbound CTX
+  // response carries its own X-Request-Id; backend captures it and
+  // emits it back to the client as X-Ctx-Request-Id. Pairs with the
+  // unit tests in `__tests__/request-context.test.ts` (which lock
+  // the AsyncLocalStorage primitive in isolation) — this case
+  // exercises the full middleware chain.
+  it('A2-1305: echoes the CTX response X-Request-Id back as X-Ctx-Request-Id', async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: 'ok' }), {
+        status: 200,
+        headers: { 'X-Request-Id': 'ctx-req-abc123' },
+      }),
+    );
+
+    const res = await app.request('/api/auth/request-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'test@example.com' }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('X-Ctx-Request-Id')).toBe('ctx-req-abc123');
+    // Outbound side of the round-trip (`circuit-breaker.ts` stamping
+    // our own X-Request-Id onto the CTX call) is covered by
+    // `circuit-breaker.test.ts` directly. The integration mock
+    // bypasses wrappedFetch so we can't assert on it here without
+    // re-implementing the logic in two places.
+  });
+
+  it('A2-1305: omits X-Ctx-Request-Id when no CTX call happened', async () => {
+    // /health doesn't fire a CTX fetch (it has its own probe path
+    // that we mock separately). Confirm the header is not stamped
+    // unconditionally — only when an actual CTX response carries one.
+    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+    const res = await app.request('/api/clusters');
+    // /api/clusters reads the in-memory merchant store; no outbound
+    // fetch fires, so no X-Ctx-Request-Id should be set.
+    expect(res.headers.get('X-Ctx-Request-Id')).toBeNull();
+  });
+
+  it('A2-1305: falls back to X-Correlation-Id when X-Request-Id is absent', async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: 'ok' }), {
+        status: 200,
+        headers: { 'X-Correlation-Id': 'ctx-corr-xyz789' },
+      }),
+    );
+
+    const res = await app.request('/api/auth/request-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'test@example.com' }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('X-Ctx-Request-Id')).toBe('ctx-corr-xyz789');
   });
 
   it('sets a strict Content-Security-Policy on every response', async () => {
