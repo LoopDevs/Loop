@@ -20,6 +20,7 @@ import {
 } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import { ApiErrorCode, STELLAR_PUBKEY_REGEX, type ApiErrorCodeValue } from '@loop/shared';
+import { registerAuthOpenApi } from './openapi/auth.js';
 
 extendZodWithOpenApi(z);
 
@@ -67,80 +68,11 @@ const PlatformEnum = z.enum(['web', 'ios', 'android']).openapi({
 });
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
-
-const RequestOtpBody = registry.register(
-  'RequestOtpBody',
-  z.object({
-    email: z.string().email(),
-    platform: PlatformEnum.default('web'),
-  }),
-);
-
-const VerifyOtpBody = registry.register(
-  'VerifyOtpBody',
-  z.object({
-    email: z.string().email(),
-    otp: z.string().min(1),
-    platform: PlatformEnum.default('web'),
-  }),
-);
-
-const VerifyOtpResponse = registry.register(
-  'VerifyOtpResponse',
-  z.object({
-    accessToken: z.string(),
-    refreshToken: z.string(),
-  }),
-);
-
-const RefreshBody = registry.register(
-  'RefreshBody',
-  z.object({
-    refreshToken: z.string().min(1),
-    platform: PlatformEnum.default('web'),
-  }),
-);
-
-const RefreshResponse = registry.register(
-  'RefreshResponse',
-  z.object({
-    accessToken: z.string(),
-    refreshToken: z.string().optional().openapi({
-      description: 'Present when upstream rotates the refresh token on refresh.',
-    }),
-  }),
-);
-
-const LogoutBody = registry.register(
-  'LogoutBody',
-  z.object({
-    refreshToken: z.string().optional(),
-    platform: PlatformEnum.default('web'),
-  }),
-);
-
-// A2-568: social login (ADR 014). Body + response are shared across
-// Google and Apple — the handler factory in `auth/social.ts` wires
-// both to the same shape.
-const SocialLoginBody = registry.register(
-  'SocialLoginBody',
-  z.object({
-    idToken: z.string().min(1),
-    platform: PlatformEnum.default('web'),
-  }),
-);
-
-const SocialLoginResponse = registry.register(
-  'SocialLoginResponse',
-  z.object({
-    accessToken: z.string(),
-    refreshToken: z.string(),
-    email: z.string().email().openapi({
-      description:
-        "Echo of the verified provider email so the client doesn't decode the access JWT.",
-    }),
-  }),
-);
+//
+// Schemas + path registrations for `/api/auth/*` live in
+// `./openapi/auth.ts`. `registerAuthOpenApi` is called below
+// once (after shared components are defined) and registers both
+// halves on this module's registry instance.
 
 // ─── Merchants ──────────────────────────────────────────────────────────────
 
@@ -1797,226 +1729,6 @@ registry.registerPath({
     200: {
       description: 'Prometheus text format',
       content: { 'text/plain; version=0.0.4': { schema: z.string() } },
-    },
-  },
-});
-
-registry.registerPath({
-  method: 'post',
-  path: '/api/auth/request-otp',
-  summary: 'Request a one-time password be emailed to the given address.',
-  description:
-    'Email-enumeration defense: returns 200 with "Verification code sent" even when upstream responds with 4xx (e.g. "no such user"). Clients cannot distinguish "email was accepted" from "email was rejected as unknown" by the response status. Only 5xx upstream errors surface as 502 so legitimate users are not left waiting on real outages.',
-  tags: ['Auth'],
-  request: { body: { content: { 'application/json': { schema: RequestOtpBody } } } },
-  responses: {
-    200: {
-      description:
-        'OTP queued upstream — OR, by design, email rejected upstream with a 4xx (see description for enumeration-defense rationale).',
-      content: { 'application/json': { schema: z.object({ message: z.string() }) } },
-    },
-    400: {
-      description: 'Validation error',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    429: {
-      description: 'Rate limit exceeded (5/min per IP)',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    500: {
-      description:
-        'Loop-native auth misconfigured (LOOP_AUTH_NATIVE_ENABLED without signing key) or an unexpected backend failure — A2-1001',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    502: {
-      description: 'Upstream error',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    503: {
-      description: 'Circuit breaker open — upstream unavailable',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-  },
-});
-
-registry.registerPath({
-  method: 'post',
-  path: '/api/auth/verify-otp',
-  summary: 'Exchange an OTP for access and refresh tokens.',
-  tags: ['Auth'],
-  request: { body: { content: { 'application/json': { schema: VerifyOtpBody } } } },
-  responses: {
-    200: { description: 'Tokens', content: { 'application/json': { schema: VerifyOtpResponse } } },
-    400: {
-      description: 'Validation error',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    401: {
-      description: 'OTP invalid or expired',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    429: {
-      description: 'Rate limit exceeded (10/min per IP)',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    500: {
-      description:
-        'Loop-native auth misconfigured or unexpected backend failure during token issuance — A2-1001',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    502: {
-      description: 'Upstream returned an unexpected shape or non-auth error',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    503: {
-      description: 'Circuit breaker open — upstream unavailable',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-  },
-});
-
-registry.registerPath({
-  method: 'post',
-  path: '/api/auth/refresh',
-  summary: 'Exchange a refresh token for a new access token (may rotate refresh token).',
-  tags: ['Auth'],
-  request: { body: { content: { 'application/json': { schema: RefreshBody } } } },
-  responses: {
-    200: { description: 'Refreshed', content: { 'application/json': { schema: RefreshResponse } } },
-    400: {
-      description: 'Validation error',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    401: {
-      description: 'Refresh token invalid',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    429: {
-      description: 'Rate limit exceeded (30/min per IP)',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    500: {
-      description:
-        'Loop-native auth misconfigured or unexpected backend failure during refresh rotation — A2-1001',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    502: {
-      description: 'Upstream transient error — refresh token may still be valid',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    503: {
-      description: 'Circuit breaker open — upstream unavailable',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-  },
-});
-
-registry.registerPath({
-  method: 'delete',
-  path: '/api/auth/session',
-  summary: 'Logout — revokes refresh token upstream and clears local session.',
-  tags: ['Auth'],
-  request: { body: { content: { 'application/json': { schema: LogoutBody } } } },
-  responses: {
-    200: {
-      description: 'Logged out (always succeeds even if upstream revoke fails)',
-      content: { 'application/json': { schema: z.object({ message: z.string() }) } },
-    },
-    429: {
-      description: 'Rate limit exceeded (20/min per IP)',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-  },
-});
-
-// A2-568: social login — Google. Gated on LOOP_AUTH_NATIVE_ENABLED
-// (404 when disabled) and on GOOGLE_OAUTH_CLIENT_ID_* envs being set
-// (404 when no audiences configured). See ADR 014.
-registry.registerPath({
-  method: 'post',
-  path: '/api/auth/social/google',
-  summary: 'Exchange a Google id_token for Loop access and refresh tokens.',
-  description:
-    'Verifies the provider id_token against the Google JWKS (iss, aud, exp, signature). On first successful sign-in the user row is created; thereafter the identity is matched by (provider, sub) or by verified email. Every rejection maps to a generic 401 so a probe cannot learn which check failed.',
-  tags: ['Auth'],
-  request: { body: { content: { 'application/json': { schema: SocialLoginBody } } } },
-  responses: {
-    200: {
-      description: 'Tokens',
-      content: { 'application/json': { schema: SocialLoginResponse } },
-    },
-    400: {
-      description: 'Validation error (missing idToken)',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    401: {
-      description:
-        'id_token rejected (invalid signature / iss / aud / exp / email missing / email_verified=false)',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    404: {
-      description:
-        'Loop-native auth disabled (LOOP_AUTH_NATIVE_ENABLED=false) or Google audiences unconfigured in this deployment.',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    429: {
-      description: 'Rate limit exceeded (10/min per IP)',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    500: {
-      description:
-        'Auth misconfigured (LOOP_AUTH_NATIVE_ENABLED without signing key) or unexpected server error',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    503: {
-      description: 'Google JWKS unreachable — retry-safe',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-  },
-});
-
-// A2-568: social login — Apple. Same gating and verification shape as
-// Google; Apple's id_token includes an `email_verified` that may arrive
-// as a string "true"/"false", which `auth/social.ts` coerces.
-registry.registerPath({
-  method: 'post',
-  path: '/api/auth/social/apple',
-  summary: 'Exchange an Apple id_token for Loop access and refresh tokens.',
-  description:
-    'Verifies the Apple id_token against Apple Sign In JWKS. Single audience (APPLE_SIGN_IN_SERVICE_ID). Apple relay emails arrive with email_verified=true by construction. Rejections collapse to 401.',
-  tags: ['Auth'],
-  request: { body: { content: { 'application/json': { schema: SocialLoginBody } } } },
-  responses: {
-    200: {
-      description: 'Tokens',
-      content: { 'application/json': { schema: SocialLoginResponse } },
-    },
-    400: {
-      description: 'Validation error (missing idToken)',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    401: {
-      description:
-        'id_token rejected (invalid signature / iss / aud / exp / email missing / email_verified=false)',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    404: {
-      description:
-        'Loop-native auth disabled (LOOP_AUTH_NATIVE_ENABLED=false) or APPLE_SIGN_IN_SERVICE_ID unconfigured.',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    429: {
-      description: 'Rate limit exceeded (10/min per IP)',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    500: {
-      description:
-        'Auth misconfigured (LOOP_AUTH_NATIVE_ENABLED without signing key) or unexpected server error',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    503: {
-      description: 'Apple JWKS unreachable — retry-safe',
-      content: { 'application/json': { schema: ErrorResponse } },
     },
   },
 });
@@ -7194,6 +6906,13 @@ registry.registerComponent('securitySchemes', 'bearerAuth', {
   description:
     'Upstream CTX access token. Obtain via POST /api/auth/verify-otp and refresh via POST /api/auth/refresh.',
 });
+
+// Per-domain section registrations (A2-1165-style decomposition of
+// the openapi.ts monolith). Each module takes the shared registry +
+// shared schemas and adds its own zod definitions + path entries.
+// Called here so every section runs after the shared components
+// above are defined and before the generator walks the definitions.
+registerAuthOpenApi(registry, ErrorResponse, PlatformEnum);
 
 const generator = new OpenApiGeneratorV31(registry.definitions);
 
