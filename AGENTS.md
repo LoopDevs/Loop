@@ -42,6 +42,7 @@
 | `docs/adr/024-withdrawal-writer.md`                         | Admin withdrawal writer — USDLOOP debit + payout-queue insert                                                                                                                                                                          |
 | `docs/adr/025-llm-pr-review.md`                             | LLM-assisted PR review — what gets sent to Anthropic + why it's acceptable                                                                                                                                                             |
 | `docs/adr/026-tax-regulatory-reporting-data-model.md`       | Tax / regulatory reporting data model — Phase-1 CSV exports + Phase-2 jurisdiction tagging                                                                                                                                             |
+| `docs/adr/027-mobile-platform-security.md`                  | Mobile platform security — Phase-1 deferral of SSL pinning / App Attest / Play Integrity / jailbreak-root / binary tamper, with per-control Phase-2 triggers                                                                           |
 
 ---
 
