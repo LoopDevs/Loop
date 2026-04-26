@@ -8,6 +8,7 @@ import type {
 } from '@loop/shared';
 export type { CreditTransactionType } from '@loop/shared';
 import type { AdminPaymentMethod } from './admin-payment-method-share';
+import type { AdminWriteEnvelope } from './admin-write-envelope';
 import { authenticatedRequest } from './api-client';
 
 // Re-export so existing `import { LoopAssetCode } from
@@ -514,24 +515,13 @@ export async function getAdminPayoutByOrder(orderId: string): Promise<AdminPayou
   );
 }
 
-/**
- * ADR 017 admin-write response envelope. Every admin mutation returns
- * `{ result, audit }`; `audit.replayed: true` means the backend found a
- * prior snapshot for the `Idempotency-Key` and returned the stored
- * response verbatim.
- */
-export interface AdminWriteAudit {
-  actorUserId: string;
-  actorEmail: string;
-  idempotencyKey: string;
-  appliedAt: string;
-  replayed: boolean;
-}
-
-export interface AdminWriteEnvelope<T> {
-  result: T;
-  audit: AdminWriteAudit;
-}
+// A2-1165 (slice 16): ADR 017 admin-write envelope primitives
+// (`AdminWriteAudit` + `AdminWriteEnvelope<T>`) moved to
+// `./admin-write-envelope.ts`. Re-export keeps existing consumers
+// (`ReasonDialog.tsx`, write-button helpers, paired tests)
+// untouched, and lets future writer-slice extractions share the
+// primitives without a circular import back into admin.ts.
+export type { AdminWriteAudit, AdminWriteEnvelope } from './admin-write-envelope';
 
 /**
  * `POST /api/admin/payouts/:id/retry` — flips a failed row back to
