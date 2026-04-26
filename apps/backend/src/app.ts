@@ -8,8 +8,7 @@ import { env } from './env.js';
 import { logger } from './logger.js';
 import type { User } from './db/users.js';
 import { clustersHandler } from './clustering/handler.js';
-import { imageProxyHandler, evictExpiredImageCache } from './images/proxy.js';
-import { sweepStaleIdempotencyKeys } from './admin/idempotency.js';
+import { imageProxyHandler } from './images/proxy.js';
 import { getAllCircuitStates } from './circuit-breaker.js';
 import { generateOpenApiSpec } from './openapi.js';
 import { metrics, incrementRequest } from './metrics.js';
@@ -21,8 +20,8 @@ import { killSwitch } from './middleware/kill-switch.js';
 import {
   rateLimit,
   __resetRateLimitsForTests as resetRateLimitMap,
-  sweepExpiredRateLimits,
 } from './middleware/rate-limit.js';
+import { startCleanupInterval } from './cleanup.js';
 import { probeGateAllows } from './middleware/probe-gate.js';
 import {
   merchantListHandler,
@@ -1427,29 +1426,11 @@ app.onError((err, c) => {
 });
 
 // ─── Periodic cleanup ────────────────────────────────────────────────────────
-
-function runCleanup(): void {
-  evictExpiredImageCache();
-  sweepExpiredRateLimits();
-  // A2-500: expire admin-idempotency snapshots past the 24h TTL
-  // promised by ADR-017. Fire-and-forget — a sweep failure can be
-  // retried next hour; the read-time TTL gate in lookupIdempotencyKey
-  // keeps replay semantics correct in the meantime.
-  void sweepStaleIdempotencyKeys();
-}
-
-// Start the cleanup interval unless we are in the test runner — tests import
-// app.ts repeatedly and a leaked interval keeps vitest alive and can trigger
-// timer-leak warnings in suites that use vi.useFakeTimers().
-let cleanupInterval: NodeJS.Timeout | null = null;
-if (env.NODE_ENV !== 'test') {
-  cleanupInterval = setInterval(runCleanup, 60 * 60 * 1000);
-}
-
-/** Stops the periodic cleanup interval. Intended for graceful shutdown. */
-export function stopCleanupInterval(): void {
-  if (cleanupInterval !== null) {
-    clearInterval(cleanupInterval);
-    cleanupInterval = null;
-  }
-}
+//
+// Hourly sweep of expired image-cache blobs, rate-limit windows,
+// and idempotency snapshots lives in `./cleanup.ts`. We start the
+// interval here at module-init time and re-export
+// `stopCleanupInterval` so `index.ts` can call it from its
+// graceful-shutdown handler.
+startCleanupInterval();
+export { stopCleanupInterval } from './cleanup.js';
