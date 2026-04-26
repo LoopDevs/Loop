@@ -15,17 +15,18 @@ split it into a sub-page rather than padding.
 
 ## Indices
 
-| Surface               | Runbooks                                                                                                                                    |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Payouts (Stellar)** | [stuck-payout.md](./stuck-payout.md) — pending_payouts row stuck pending/submitted                                                          |
-|                       | [payout-permanent-failure.md](./payout-permanent-failure.md) — `op_no_destination`-class failure → admin compensation flow                  |
-| **Auth**              | [jwt-key-rotation.md](./jwt-key-rotation.md) — rotating `LOOP_JWT_SIGNING_KEY` without invalidating sessions                                |
-| **Stellar signer**    | [stellar-operator-rotation.md](./stellar-operator-rotation.md) — quarterly + emergency rotation of `LOOP_STELLAR_OPERATOR_SECRET` (A2-1909) |
-| **Mobile signing**    | [mobile-cert-renewal.md](./mobile-cert-renewal.md) — Apple/Google cert + provisioning + key renewal flow (A2-1908)                          |
-| **Upstream (CTX)**    | [ctx-circuit-open.md](./ctx-circuit-open.md) — circuit breaker tripped on a CTX endpoint                                                    |
-| **Ledger**            | [ledger-drift.md](./ledger-drift.md) — `/api/admin/reconciliation` reports drift > threshold                                                |
-| **Operational gate**  | [kill-switch.md](./kill-switch.md) — flip `LOOP_KILL_ORDERS` / `_AUTH` / `_WITHDRAWALS` to gate a surface without redeploy                  |
-| **Rollback**          | [rollback.md](./rollback.md) — `fly deploy --image` to a prior release; 90-day rehearsal cadence (A2-1403)                                  |
+| Surface               | Runbooks                                                                                                                                                             |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Payouts (Stellar)** | [stuck-payout.md](./stuck-payout.md) — pending_payouts row stuck pending/submitted                                                                                   |
+|                       | [payout-permanent-failure.md](./payout-permanent-failure.md) — `op_no_destination`-class failure → admin compensation flow                                           |
+| **Auth**              | [jwt-key-rotation.md](./jwt-key-rotation.md) — rotating `LOOP_JWT_SIGNING_KEY` without invalidating sessions                                                         |
+| **Stellar signer**    | [stellar-operator-rotation.md](./stellar-operator-rotation.md) — quarterly + emergency rotation of `LOOP_STELLAR_OPERATOR_SECRET` (A2-1909)                          |
+| **Mobile signing**    | [mobile-cert-renewal.md](./mobile-cert-renewal.md) — Apple/Google cert + provisioning + key renewal flow (A2-1908)                                                   |
+| **Upstream (CTX)**    | [ctx-circuit-open.md](./ctx-circuit-open.md) — circuit breaker tripped on a CTX endpoint                                                                             |
+| **Ledger**            | [ledger-drift.md](./ledger-drift.md) — `/api/admin/reconciliation` reports drift > threshold                                                                         |
+| **Operational gate**  | [kill-switch.md](./kill-switch.md) — flip `LOOP_KILL_ORDERS` / `_AUTH` / `_WITHDRAWALS` to gate a surface without redeploy                                           |
+| **Rollback**          | [rollback.md](./rollback.md) — `fly deploy --image` to a prior release; 90-day rehearsal cadence (A2-1403)                                                           |
+| **DR**                | [disaster-recovery.md](./disaster-recovery.md) — region failure / Postgres data loss / operator drain / env compromise; RPO+RTO targets; 180-day rehearsal (A2-1910) |
 
 ## Conventions
 
