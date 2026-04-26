@@ -927,6 +927,8 @@ export async function listPayouts(opts: {
   state?: PayoutState;
   userId?: string;
   assetCode?: LoopAssetCode;
+  /** ADR-024 §2 — filter by payout discriminator (order-cashback vs withdrawal). */
+  kind?: 'order_cashback' | 'withdrawal';
   limit?: number;
   before?: string;
 }): Promise<{ payouts: AdminPayoutView[] }> {
@@ -934,6 +936,7 @@ export async function listPayouts(opts: {
   if (opts.state !== undefined) params.set('state', opts.state);
   if (opts.userId !== undefined) params.set('userId', opts.userId);
   if (opts.assetCode !== undefined) params.set('assetCode', opts.assetCode);
+  if (opts.kind !== undefined) params.set('kind', opts.kind);
   if (opts.limit !== undefined) params.set('limit', String(opts.limit));
   if (opts.before !== undefined) params.set('before', opts.before);
   const qs = params.toString();

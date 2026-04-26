@@ -151,6 +151,8 @@ export async function listPayoutsForAdmin(opts: {
   state?: string;
   userId?: string;
   assetCode?: string;
+  /** ADR-024 §2: filter by payout discriminator. Lets treasury split order-cashback from withdrawal flows visually. */
+  kind?: 'order_cashback' | 'withdrawal';
   before?: Date;
   limit?: number;
 }): Promise<PendingPayout[]> {
@@ -159,6 +161,7 @@ export async function listPayoutsForAdmin(opts: {
   if (opts.state !== undefined) conditions.push(eq(pendingPayouts.state, opts.state));
   if (opts.userId !== undefined) conditions.push(eq(pendingPayouts.userId, opts.userId));
   if (opts.assetCode !== undefined) conditions.push(eq(pendingPayouts.assetCode, opts.assetCode));
+  if (opts.kind !== undefined) conditions.push(eq(pendingPayouts.kind, opts.kind));
   if (opts.before !== undefined) conditions.push(sql`${pendingPayouts.createdAt} < ${opts.before}`);
   const where = conditions.length === 0 ? undefined : and(...conditions);
   const q = db.select().from(pendingPayouts);
