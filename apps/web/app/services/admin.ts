@@ -1,11 +1,16 @@
-import type { LoopAssetCode, SettlementLagResponse, SettlementLagRow } from '@loop/shared';
-export type { CreditTransactionType } from '@loop/shared';
-import { authenticatedRequest } from './api-client';
-
-// Re-export so existing `import { LoopAssetCode } from
-// '~/services/admin'` callers keep working without every consumer
-// learning the `@loop/shared` path. Shared is the source of truth.
-export type { LoopAssetCode };
+// A2-1166 / A2-1165 close-out: `services/admin.ts` is a pure
+// barrel re-export module. No values defined here, no inline
+// shapes, no helpers — every admin endpoint and every admin
+// surface lives in its own `./admin-<surface>.ts` sibling. This
+// file exists so existing consumers keep importing from
+// `~/services/admin` without re-targeting; new code should
+// import the surface module directly.
+//
+// `LoopAssetCode` and `CreditTransactionType` are re-exported
+// from `@loop/shared` here for the same reason — historically
+// `~/services/admin` was the import path, and renaming every
+// consumer is more churn than it's worth.
+export type { CreditTransactionType, LoopAssetCode } from '@loop/shared';
 
 // A2-1165 (slice 20): cashback-config quartet (list + upsert +
 // per-merchant history + fleet history) moved to
@@ -90,21 +95,15 @@ export {
   getAssetDriftState,
 } from './admin-assets';
 
-/**
- * Payout settlement-lag SLA (ADR 015 / 016). Percentile latency in
- * seconds from `pending_payouts` insert → on-chain confirm. Fleet-
- * wide row surfaces with `assetCode: null`; per-asset rows carry
- * the LOOP code. Sample count ships alongside so callers can
- * down-weight low-n rows (p95 of n=1 is noise).
- */
-// A2-1506: moved to `@loop/shared/admin-settlement-lag.ts`.
-export type { SettlementLagResponse, SettlementLagRow };
-
-/** `GET /api/admin/payouts/settlement-lag?since=...` */
-export async function getSettlementLag(sinceIso?: string): Promise<SettlementLagResponse> {
-  const qs = sinceIso !== undefined ? `?since=${encodeURIComponent(sinceIso)}` : '';
-  return authenticatedRequest<SettlementLagResponse>(`/api/admin/payouts/settlement-lag${qs}`);
-}
+// A2-1165 (slice 27): settlement-lag read moved to
+// `./admin-settlement-lag.ts`. Type definitions remain canonical
+// in `@loop/shared/admin-settlement-lag.ts` (per A2-1506).
+// Re-export keeps `SettlementLagCard.tsx` + paired test untouched.
+export {
+  type SettlementLagResponse,
+  type SettlementLagRow,
+  getSettlementLag,
+} from './admin-settlement-lag';
 
 // A2-1165 (slice 5): cashback-realization surface (snapshot + daily)
 // extracted to `./admin-cashback-realization.ts`. Type definitions
@@ -120,30 +119,12 @@ export {
   getCashbackRealizationDaily,
 } from './admin-cashback-realization';
 
-/**
- * Downloads an admin CSV endpoint by fetching with the bearer token
- * in binary mode, then synthesising a click on a temporary anchor
- * with a Blob URL. Works around the fact that a plain `<a href>`
- * can't attach the Authorization header that admin CSV endpoints
- * require.
- */
-export async function downloadAdminCsv(path: string, filename: string): Promise<void> {
-  const buf = await authenticatedRequest<ArrayBuffer>(path, { binary: true });
-  const blob = new Blob([buf], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  try {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  } finally {
-    // Release the blob URL — Firefox leaks memory without this, and
-    // Chromium's GC is slow enough that rapid downloads stack up.
-    URL.revokeObjectURL(url);
-  }
-}
+// A2-1165 (slice 27): `downloadAdminCsv` browser-side helper
+// (used by every admin CSV-export button) moved to
+// `./admin-csv.ts`. Re-export keeps every CSV-button caller
+// (`routes/admin.cashback.tsx`, `routes/admin.payouts.tsx`,
+// `routes/admin.users.tsx`, etc.) untouched.
+export { downloadAdminCsv } from './admin-csv';
 
 // A2-1165 (slice 6): supplier-spend surface (snapshot + activity
 // time-series) extracted to `./admin-supplier-spend.ts`. Type
@@ -262,40 +243,11 @@ export {
 // payouts-activity anchor below covers all three reads + 8 type
 // re-exports.
 
-/**
- * Top earners ranking (ADR 009 / 015). Grouped by `(user, currency)` —
- * summing across currencies is meaningless. `amountMinor` is the
- * positive cashback sum in the window as a bigint-as-string.
- */
-export interface TopUserRow {
-  userId: string;
-  email: string;
-  currency: string;
-  count: number;
-  amountMinor: string;
-}
-
-export interface TopUsersResponse {
-  since: string;
-  rows: TopUserRow[];
-}
-
-/**
- * `GET /api/admin/top-users` — ranked list of users by cashback
- * earned in the window. Default window 30d; clamped [1, 366].
- * Default limit 20; clamped [1, 100].
- */
-export async function getTopUsers(
-  opts: { since?: string; limit?: number } = {},
-): Promise<TopUsersResponse> {
-  const params = new URLSearchParams();
-  if (opts.since !== undefined) params.set('since', opts.since);
-  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
-  const qs = params.toString();
-  return authenticatedRequest<TopUsersResponse>(
-    `/api/admin/top-users${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
+// A2-1165 (slice 27): top-users leaderboard moved to
+// `./admin-top-users.ts`. Inline shapes moved with the function
+// — no other consumers. Re-export keeps `TopUsersCard.tsx` and
+// paired test untouched.
+export { type TopUserRow, type TopUsersResponse, getTopUsers } from './admin-top-users';
 
 // A2-1165 (slice 26): payouts-by-asset incident-triage view
 // extracted to `./admin-payouts-by-asset.ts`. Re-export below
