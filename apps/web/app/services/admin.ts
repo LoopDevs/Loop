@@ -16,112 +16,24 @@ import { authenticatedRequest } from './api-client';
 // learning the `@loop/shared` path. Shared is the source of truth.
 export type { LoopAssetCode };
 
-export interface MerchantCashbackConfig {
-  merchantId: string;
-  wholesalePct: string;
-  userCashbackPct: string;
-  loopMarginPct: string;
-  active: boolean;
-  updatedBy: string;
-  updatedAt: string;
-}
-
-export interface MerchantCashbackConfigHistoryEntry {
-  id: string;
-  merchantId: string;
-  wholesalePct: string;
-  userCashbackPct: string;
-  loopMarginPct: string;
-  active: boolean;
-  changedBy: string;
-  changedAt: string;
-}
-
-/** GET /api/admin/merchant-cashback-configs */
-export async function listCashbackConfigs(): Promise<{ configs: MerchantCashbackConfig[] }> {
-  return authenticatedRequest<{ configs: MerchantCashbackConfig[] }>(
-    '/api/admin/merchant-cashback-configs',
-  );
-}
-
-/**
- * PUT /api/admin/merchant-cashback-configs/:merchantId — ADR 017
- * admin write (A2-502). Caller supplies the split + a 2..500 char
- * reason; the service generates a per-click `Idempotency-Key` so a
- * double-submit of the form can't apply the edit twice. Response is
- * the standard `{ result, audit }` envelope.
- */
-export async function upsertCashbackConfig(
-  merchantId: string,
-  body: {
-    wholesalePct: number;
-    userCashbackPct: number;
-    loopMarginPct: number;
-    active?: boolean;
-    reason: string;
-  },
-): Promise<AdminWriteEnvelope<MerchantCashbackConfig>> {
-  const idempotencyKey =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID().replace(/-/g, '')
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-  return authenticatedRequest<AdminWriteEnvelope<MerchantCashbackConfig>>(
-    `/api/admin/merchant-cashback-configs/${encodeURIComponent(merchantId)}`,
-    {
-      method: 'PUT',
-      headers: { 'Idempotency-Key': idempotencyKey },
-      body,
-    },
-  );
-}
-
-/** GET /api/admin/merchant-cashback-configs/:merchantId/history */
-export async function cashbackConfigHistory(
-  merchantId: string,
-): Promise<{ history: MerchantCashbackConfigHistoryEntry[] }> {
-  return authenticatedRequest<{ history: MerchantCashbackConfigHistoryEntry[] }>(
-    `/api/admin/merchant-cashback-configs/${encodeURIComponent(merchantId)}/history`,
-  );
-}
-
-/**
- * One row from the fleet-wide config-history feed (#580). Extends
- * the per-merchant history row with a resolved display name — the
- * backend joins against the catalog so the admin UI doesn't re-fetch
- * every merchant to render the strip.
- */
-export interface AdminConfigHistoryEntry {
-  id: string;
-  merchantId: string;
-  merchantName: string;
-  wholesalePct: string;
-  userCashbackPct: string;
-  loopMarginPct: string;
-  active: boolean;
-  changedBy: string;
-  changedAt: string;
-}
-
-export interface AdminConfigHistoryResponse {
-  history: AdminConfigHistoryEntry[];
-}
-
-/**
- * `GET /api/admin/merchant-cashback-configs/history` — newest-first
- * fleet-wide feed of cashback-config edits. Drives the "recent config
- * changes" card on the admin dashboard; complements the per-merchant
- * `cashbackConfigHistory(merchantId)` drill.
- */
-export async function getAdminConfigsHistory(
-  opts: { limit?: number } = {},
-): Promise<AdminConfigHistoryResponse> {
-  const params = new URLSearchParams();
-  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
-  const qs = params.toString();
-  return authenticatedRequest<AdminConfigHistoryResponse>(
-    `/api/admin/merchant-cashback-configs/history${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
+// A2-1165 (slice 20): cashback-config quartet (list + upsert +
+// per-merchant history + fleet history) moved to
+// `./admin-cashback-config.ts`. The split is the central knob the
+// admin panel exists to turn (ADR 011 / 017). Inline shapes
+// moved with the functions — no other consumers. Re-export keeps
+// `MerchantConfigEditor.tsx`, `ConfigHistoryStrip.tsx`,
+// `routes/admin.merchants.$merchantId.tsx`, and paired tests
+// untouched.
+export {
+  type MerchantCashbackConfig,
+  type MerchantCashbackConfigHistoryEntry,
+  type AdminConfigHistoryEntry,
+  type AdminConfigHistoryResponse,
+  listCashbackConfigs,
+  upsertCashbackConfig,
+  cashbackConfigHistory,
+  getAdminConfigsHistory,
+} from './admin-cashback-config';
 
 // A2-1165 (slice 13): payment-method-share trio (fleet + per-
 // merchant + per-user, ADR 023 mix-axis pattern) moved to
