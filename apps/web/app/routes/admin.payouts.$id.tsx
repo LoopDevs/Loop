@@ -13,6 +13,7 @@ import {
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { CopyButton } from '~/components/features/admin/CopyButton';
+import { ReasonDialog } from '~/components/features/admin/ReasonDialog';
 import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
 
@@ -89,6 +90,7 @@ function AdminPayoutDetailRouteInner(): React.JSX.Element {
 
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const [retryDialogId, setRetryDialogId] = useState<string | null>(null);
   const retryMutation = useMutation({
     mutationFn: retryPayout,
     onSuccess: () => {
@@ -103,23 +105,32 @@ function AdminPayoutDetailRouteInner(): React.JSX.Element {
     onSettled: () => setRetrying(false),
   });
 
+  // A2-1107: ReasonDialog replaces window.prompt for the retry-payout
+  // reason. Opens with the payout id captured; resolve fires the
+  // mutation with the validated 2–500 char reason.
   const handleRetry = (payoutId: string): void => {
-    const reason = window.prompt('Reason for retrying this payout? (2–500 chars, logged in audit)');
-    if (reason === null) return;
-    const trimmed = reason.trim();
-    if (trimmed.length < 2 || trimmed.length > 500) {
-      setRetryError('Reason must be 2–500 characters');
-      return;
-    }
+    setRetryDialogId(payoutId);
+  };
+  const handleRetryReasonResolve = (reason: string | null): void => {
+    const id = retryDialogId;
+    setRetryDialogId(null);
+    if (id === null || reason === null) return;
     setRetrying(true);
     setRetryError(null);
-    retryMutation.mutate({ id: payoutId, reason: trimmed });
+    retryMutation.mutate({ id, reason });
   };
 
   const notFound = query.error instanceof ApiException && query.error.status === 404;
 
   return (
     <main className="max-w-3xl mx-auto px-6 py-12 space-y-6">
+      <ReasonDialog
+        open={retryDialogId !== null}
+        title="Reason for retrying this payout?"
+        description="2–500 characters. Logged in the admin audit trail (ADR-017)."
+        confirmLabel="Retry payout"
+        onResolve={handleRetryReasonResolve}
+      />
       <AdminNav />
       <nav aria-label="Back to payouts list">
         <Link
