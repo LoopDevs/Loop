@@ -517,6 +517,48 @@ export function notifyAdminAudit(args: {
 }
 
 /**
+ * A2-2008: bulk-read audit notification. Admin reads are a separate
+ * surface from admin writes — logging every single-row drill would
+ * flood the channel — but bulk exports (CSV downloads, full-list
+ * pulls past a row threshold) are a high-PII surface where a
+ * malicious or mis-targeted admin can exfiltrate user data without
+ * leaving a trace.
+ *
+ * Fires on:
+ *   - any `GET /api/admin/*.csv` 200 response
+ *   - admin GETs flagged as "bulk" by the middleware (large-page
+ *     full lists)
+ *
+ * The Pino access log (server-side, ships off-host via Fly logflow)
+ * is the line-item read audit; this Discord post is the human-visible
+ * "someone's running an export right now" signal.
+ */
+export function notifyAdminBulkRead(args: {
+  actorUserId: string;
+  endpoint: string;
+  /** Optional query string (truncated) for context. */
+  queryString?: string;
+}): void {
+  const actorTail = args.actorUserId.slice(-8);
+  const fields: Array<{ name: string; value: string; inline?: boolean }> = [
+    { name: 'Actor', value: `\`${actorTail}\``, inline: true },
+    { name: 'Endpoint', value: `\`${escapeMarkdown(args.endpoint)}\``, inline: true },
+  ];
+  if (args.queryString !== undefined && args.queryString.length > 0) {
+    fields.push({
+      name: 'Query',
+      value: `\`${truncate(escapeMarkdown(args.queryString), 200)}\``,
+      inline: false,
+    });
+  }
+  void sendWebhook(env.DISCORD_WEBHOOK_ADMIN_AUDIT, {
+    title: '📤 Admin bulk read',
+    color: BLUE,
+    fields,
+  });
+}
+
+/**
  * Notify: merchant cashback-config create / update (ADR 011 / 018).
  * Called fire-and-forget AFTER the DB upsert commits, from
  * `upsertConfigHandler`. The admin-audit channel already receives a
@@ -905,6 +947,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     channel: 'admin-audit',
     description:
       'Every successful admin write (ADR 017). One line per mutation with the actor, method, path, status, and replay flag.',
+  },
+  {
+    name: 'notifyAdminBulkRead',
+    channel: 'admin-audit',
+    description:
+      'A2-2008 bulk-read audit. Fires on every successful admin CSV export or full-list bulk read. Single-row drills land in Pino only (would flood the channel).',
   },
   {
     name: 'notifyCashbackConfigChanged',
