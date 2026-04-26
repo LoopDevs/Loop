@@ -53,7 +53,23 @@ if (typeof window !== 'undefined' && import.meta.env.VITE_SENTRY_DSN) {
     import.meta.env.VITE_SENTRY_RELEASE !== ''
       ? { release: import.meta.env.VITE_SENTRY_RELEASE as string }
       : {}),
-    integrations: [Sentry.browserTracingIntegration()],
+    // A2-1324: enable standalone CLS + LCP spans so Core Web Vitals
+    // land in Sentry as their own metrics (not just attached to a
+    // sampled trace). At 10% trace sampling, ~90% of pageloads
+    // wouldn't ship LCP/CLS otherwise; standalone spans bypass the
+    // trace-sample gate so RUM data covers the full traffic. INP and
+    // long-task spans are on by default and stay that way.
+    // `enableLongAnimationFrame` flips on so jank attribution surfaces
+    // in the trace timeline (rendering blocked > 50ms).
+    integrations: [
+      Sentry.browserTracingIntegration({
+        enableLongAnimationFrame: true,
+        _experiments: {
+          enableStandaloneClsSpans: true,
+          enableStandaloneLcpSpans: true,
+        },
+      }),
+    ],
     tracesSampleRate: import.meta.env.PROD ? 0.1 : 1.0,
     // A2-1308: scrub known-secret keys out of every captured event.
     // Mirror of the backend Sentry init; utility is duplicated across
