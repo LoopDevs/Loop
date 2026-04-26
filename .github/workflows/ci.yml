@@ -153,12 +153,22 @@ jobs:
         # image SHA is pinned in apps/backend/Dockerfile (A2-403)
         # and reused by apps/web/Dockerfile, so a single scan
         # covers both deploys.
+        #
+        # `--pkg-types os` restricts the scan to OS-level (Alpine
+        # apk) packages. Without it, trivy also scans the bundled
+        # `npm` package.json inside `/usr/local/lib/node_modules` —
+        # which surfaces CVEs in npm's own dep tree (e.g.
+        # picomatch / cross-spawn), tracking them as Loop's
+        # liability when they're actually upstream npm/Node bugs.
+        # Loop's own dep tree is covered by `npm audit` in the
+        # `audit` job; A2-408's scope is OS packages only.
         run: |
           set -euo pipefail
           docker run --rm \
             -v "$HOME/.cache/trivy:/root/.cache/" \
             aquasec/trivy:0.55.2 \
             image \
+            --pkg-types os \
             --severity HIGH,CRITICAL \
             --exit-code 1 \
             --no-progress \
