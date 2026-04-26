@@ -22,6 +22,7 @@ import { upstreamUrl } from './upstream.js';
 import { getAllCircuitStates } from './circuit-breaker.js';
 import { generateOpenApiSpec } from './openapi.js';
 import { metrics, incrementRequest } from './metrics.js';
+import { accessLogMiddleware } from './middleware/access-log.js';
 import {
   rateLimit,
   __resetRateLimitsForTests as resetRateLimitMap,
@@ -353,57 +354,11 @@ app.use('*', async (c, next) => {
   });
 });
 
-// Audit A-021: replace the default `hono/logger` with a Pino-backed
-// access logger so request logs share the same structure, redaction
-// list, and transport as the rest of the backend. Correlates with the
-// handler-side logs via the `requestId` context variable that Hono's
-// `requestId()` middleware (`app.use('*', requestId())` above) sets —
-// that middleware writes the id to the response header and the context
-// var but does NOT mutate the incoming request's headers, so reading
-// `c.req.header('X-Request-Id')` would be undefined for every client
-// that didn't already send one (almost all of them).
-//
-// A2-1321: Fly load balancer, Prometheus scraper, and openapi clients
-// poll these three paths every few seconds (the http_service healthcheck
-// in fly.toml alone fires every 15s per machine). Logging every 2xx
-// balloons the Pino stream by ~5,760 lines/day/machine with no operator
-// signal — the same counts are already on `/metrics`. Skip successful
-// probes, keep 4xx/5xx so a sick probe path still surfaces.
-const SILENT_PROBE_PATHS = new Set(['/health', '/metrics', '/openapi.json']);
-const accessLog = logger.child({ component: 'access' });
-app.use('*', async (c, next) => {
-  const start = Date.now();
-  await next();
-  const ms = Date.now() - start;
-  const status = c.res.status;
-  // A2-1321: skip successful probe paths so Fly/Prometheus/OpenAPI
-  // pollers don't flood the access log. Keep 4xx/5xx so a sick probe
-  // path still surfaces.
-  if (SILENT_PROBE_PATHS.has(c.req.path) && status < 400) return;
-  // A2-1529: record the client-identifying headers so a prod regression
-  // can be scoped ("only v0.3.1 hits this 502") and a mobile rollout
-  // is visible in the access log without User-Agent inference. The web
-  // stamps `X-Client-Version` on every outbound request
-  // (`apps/web/app/services/api-client.ts`); `X-Client-Id` is stamped
-  // on authenticated requests and maps 1:1 to platform via
-  // `DEFAULT_CLIENT_IDS` from @loop/shared. Both are best-effort: the
-  // backend must tolerate their absence (curl, ops tooling) so we
-  // forward whatever's present and let the log consumer join.
-  const clientVersion = c.req.header('X-Client-Version');
-  const clientId = c.req.header('X-Client-Id');
-  accessLog.info(
-    {
-      method: c.req.method,
-      path: c.req.path,
-      status,
-      durationMs: ms,
-      requestId: c.get('requestId') ?? c.req.header('X-Request-Id'),
-      ...(clientVersion !== undefined ? { clientVersion } : {}),
-      ...(clientId !== undefined ? { clientId } : {}),
-    },
-    `${c.req.method} ${c.req.path} ${status} ${ms}ms`,
-  );
-});
+// Pino-backed access logger (audit A-021) lives in
+// `./middleware/access-log.ts`. The mount has to come AFTER
+// `requestId()` so the context var the middleware reads is
+// populated by the time the log line is written.
+app.use('*', accessLogMiddleware);
 
 // ─── Metrics ─────────────────────────────────────────────────────────────────
 //
