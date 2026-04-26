@@ -8,9 +8,6 @@ import { logger } from './logger.js';
 import type { User } from './db/users.js';
 import { clustersHandler } from './clustering/handler.js';
 import { imageProxyHandler } from './images/proxy.js';
-import { getAllCircuitStates } from './circuit-breaker.js';
-import { generateOpenApiSpec } from './openapi.js';
-import { metrics } from './metrics.js';
 import { accessLogMiddleware } from './middleware/access-log.js';
 import { requestContextMiddleware } from './middleware/request-context.js';
 import { requestCounterMiddleware } from './middleware/request-counter.js';
@@ -23,7 +20,7 @@ import {
   __resetRateLimitsForTests as resetRateLimitMap,
 } from './middleware/rate-limit.js';
 import { startCleanupInterval } from './cleanup.js';
-import { probeGateAllows } from './middleware/probe-gate.js';
+import { metricsHandler, openApiHandler } from './observability-handlers.js';
 import {
   merchantListHandler,
   merchantAllHandler,
@@ -259,68 +256,12 @@ app.use('*', accessLogMiddleware);
 // `NOT_FOUND` so a URL fuzz can't balloon Prometheus series.
 app.use('*', requestCounterMiddleware);
 
-// `probeGateAllows` (A2-1606 / A2-1607 — bearer-token guard for
-// `/metrics` + `/openapi.json`) lives in `./middleware/probe-gate.ts`.
-
-app.get('/metrics', (c) => {
-  if (!probeGateAllows(c, env.METRICS_BEARER_TOKEN)) {
-    return env.METRICS_BEARER_TOKEN === undefined
-      ? c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404)
-      : c.json({ code: 'UNAUTHORIZED', message: 'Bearer token required' }, 401);
-  }
-  const lines: string[] = [];
-
-  lines.push('# HELP loop_rate_limit_hits_total Total 429 responses issued.');
-  lines.push('# TYPE loop_rate_limit_hits_total counter');
-  lines.push(`loop_rate_limit_hits_total ${metrics.rateLimitHitsTotal}`);
-  lines.push('');
-
-  lines.push('# HELP loop_requests_total Total HTTP requests by method/route/status.');
-  lines.push('# TYPE loop_requests_total counter');
-  for (const [key, count] of metrics.requestsTotal) {
-    const [method, route, status] = key.split(':');
-    const labels = `method="${method}",route="${route}",status="${status}"`;
-    lines.push(`loop_requests_total{${labels}} ${count}`);
-  }
-  lines.push('');
-
-  // Prometheus exposition format allows exactly one HELP line per metric.
-  // We used to emit two (one for the description, one for the state-value
-  // mapping) which some scrapers/parsers rejected outright. Merge into one
-  // and move the mapping into separate comment lines so the information
-  // is still visible but not mistaken for metadata.
-  lines.push(
-    '# HELP loop_circuit_state Circuit breaker state per upstream endpoint (0=closed, 1=half_open, 2=open).',
-  );
-  lines.push('# TYPE loop_circuit_state gauge');
-  for (const [key, state] of Object.entries(getAllCircuitStates())) {
-    const val = state === 'closed' ? 0 : state === 'half_open' ? 1 : 2;
-    lines.push(`loop_circuit_state{endpoint="${key}"} ${val}`);
-  }
-
-  return c.text(lines.join('\n') + '\n', 200, {
-    'Content-Type': 'text/plain; version=0.0.4',
-    // /metrics reports live counters + gauges. A CDN in front caching
-    // this would report stale numbers to the scraper; no-store makes
-    // that impossible without requiring specific scraper config.
-    'Cache-Control': 'no-store',
-  });
-});
-
-// ─── OpenAPI spec ─────────────────────────────────────────────────────────────
-
-// Generate once at module load. The spec is a pure function of the zod
-// registrations in openapi.ts — it does not depend on runtime state — so
-// serializing on every request would just burn CPU.
-const openApiSpec = generateOpenApiSpec();
-app.get('/openapi.json', (c) => {
-  if (!probeGateAllows(c, env.OPENAPI_BEARER_TOKEN)) {
-    return env.OPENAPI_BEARER_TOKEN === undefined
-      ? c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404)
-      : c.json({ code: 'UNAUTHORIZED', message: 'Bearer token required' }, 401);
-  }
-  return c.json(openApiSpec, 200, { 'Cache-Control': 'public, max-age=3600' });
-});
+// `/metrics` (Prometheus exposition) + `/openapi.json` (static
+// spec) handlers live in `./observability-handlers.ts`. Both are
+// gated by `probeGateAllows` (closed-by-default in production
+// unless `*_BEARER_TOKEN` env var is set).
+app.get('/metrics', metricsHandler);
+app.get('/openapi.json', openApiHandler);
 
 // ─── Test-only reset endpoint ─────────────────────────────────────────────────
 //
