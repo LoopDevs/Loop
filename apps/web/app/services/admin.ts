@@ -1,6 +1,5 @@
 import type { LoopAssetCode, SettlementLagResponse, SettlementLagRow } from '@loop/shared';
 export type { CreditTransactionType } from '@loop/shared';
-import type { AdminWriteEnvelope } from './admin-write-envelope';
 import { authenticatedRequest } from './api-client';
 
 // Re-export so existing `import { LoopAssetCode } from
@@ -298,30 +297,15 @@ export async function getTopUsers(
   );
 }
 
-/**
- * Per-state counts + stroop sums for a single `asset_code` bucket in
- * `pending_payouts`. Zero-counts are surfaced so the admin UI can
- * show an explicit "0 failed" rather than a missing row.
- */
-export interface PerStateBreakdown {
-  count: number;
-  stroops: string;
-}
+// A2-1165 (slice 26): payouts-by-asset incident-triage view
+// extracted to `./admin-payouts-by-asset.ts`. Re-export below
+// covers the function + 2 type re-exports.
+export {
+  type PerStateBreakdown,
+  type PayoutsByAssetRow,
+  getPayoutsByAsset,
+} from './admin-payouts-by-asset';
 
-export interface PayoutsByAssetRow {
-  assetCode: string;
-  pending: PerStateBreakdown;
-  submitted: PerStateBreakdown;
-  confirmed: PerStateBreakdown;
-  failed: PerStateBreakdown;
-}
-
-/**
- * `GET /api/admin/payouts-by-asset` (ADR 015 / 016) — crossed
- * incident-triage view of `pending_payouts` keyed by
- * `(asset_code, state)`. Answers "which LOOP assets are affected
- * when I see N failed payouts?" at a glance.
- */
 // A2-1165 (slice 12): cashback-activity moved to
 // `./admin-activity.ts` (paired with orders/payouts activity).
 
@@ -343,10 +327,6 @@ export {
   getCashbackActivity,
   getPayoutsActivity,
 } from './admin-activity';
-
-export async function getPayoutsByAsset(): Promise<{ rows: PayoutsByAssetRow[] }> {
-  return authenticatedRequest<{ rows: PayoutsByAssetRow[] }>('/api/admin/payouts-by-asset');
-}
 
 // A2-1165 (slice 25): payouts surface (AdminPayoutView + listPayouts
 // + getAdminPayout + getAdminPayoutByOrder + retryPayout writer)
@@ -417,44 +397,11 @@ export {
   getAdminUsersRecyclingActivity,
 } from './admin-user-fleet-activity';
 
-/** Response shape from POST /api/admin/merchants/resync. */
-export interface AdminMerchantResyncResponse {
-  /** Merchant count after the sweep (not delta vs. pre-sync). */
-  merchantCount: number;
-  /** ISO-8601 of the currently-loaded snapshot. */
-  loadedAt: string;
-  /** Whether THIS call advanced the store (vs. coalesced with an in-flight sweep). */
-  triggered: boolean;
-}
-
-/**
- * `POST /api/admin/merchants/resync` — force an immediate CTX catalog
- * sweep (ADR 011 / ADR 017). Bypasses the 6h scheduled refresh so a
- * merchant change lands within seconds. A2-509 made the endpoint
- * ADR-017 compliant: caller supplies a reason, the service generates
- * a per-click Idempotency-Key, and the backend returns the standard
- * `{ result, audit }` envelope. Two admins clicking simultaneously
- * coalesce into one upstream sweep via the backend mutex (one response
- * carries `triggered: true`, the other `triggered: false` with the
- * same post-sync `loadedAt`). 502 on upstream failure; cached snapshot
- * is retained.
- */
-export async function resyncMerchants(args: {
-  reason: string;
-}): Promise<AdminWriteEnvelope<AdminMerchantResyncResponse>> {
-  const idempotencyKey =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID().replace(/-/g, '')
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-  return authenticatedRequest<AdminWriteEnvelope<AdminMerchantResyncResponse>>(
-    '/api/admin/merchants/resync',
-    {
-      method: 'POST',
-      headers: { 'Idempotency-Key': idempotencyKey },
-      body: { reason: args.reason },
-    },
-  );
-}
+// A2-1165 (slice 26): resyncMerchants writer (the 4th and final
+// ADR-017 writer slice after #1125 / #1127 / #1130) moved to
+// `./admin-merchants-resync.ts`. Re-export keeps
+// `MerchantResyncButton.tsx` and paired tests untouched.
+export { type AdminMerchantResyncResponse, resyncMerchants } from './admin-merchants-resync';
 
 // A2-1165 (slice 1): Discord notifier admin types + reads/writes
 // extracted to `./admin-discord.ts`. Re-export keeps existing
@@ -587,22 +534,7 @@ export {
   listAdminOrders,
 } from './admin-orders';
 
-/**
- * One bucket of fulfilled-order flow, grouped by (merchantId,
- * chargeCurrency). Rendered on /admin/cashback below each row so ops
- * can compare configured split to actual lifetime money movement.
- */
-export interface MerchantFlow {
-  merchantId: string;
-  currency: string;
-  count: string;
-  faceValueMinor: string;
-  wholesaleMinor: string;
-  userCashbackMinor: string;
-  loopMarginMinor: string;
-}
-
-/** `GET /api/admin/merchant-flows` — per-merchant fulfilled-order flows. */
-export async function listMerchantFlows(): Promise<{ flows: MerchantFlow[] }> {
-  return authenticatedRequest<{ flows: MerchantFlow[] }>(`/api/admin/merchant-flows`);
-}
+// A2-1165 (slice 26): merchant-flows lifetime cashback table
+// moved to `./admin-merchant-flows.ts`. Re-export keeps
+// `routes/admin.cashback.tsx` and paired tests untouched.
+export { type MerchantFlow, listMerchantFlows } from './admin-merchant-flows';
