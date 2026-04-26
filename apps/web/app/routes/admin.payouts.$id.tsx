@@ -212,9 +212,15 @@ function Detail({ row }: { row: AdminPayoutView }): React.JSX.Element {
           </dd>
         </div>
         <div>
+          <dt className="text-gray-500 dark:text-gray-400">Kind</dt>
+          <dd className="text-xs text-gray-700 dark:text-gray-300">
+            {row.kind === 'withdrawal' ? 'Withdrawal (admin cash-out)' : 'Order cashback'}
+          </dd>
+        </div>
+        <div>
           <dt className="text-gray-500 dark:text-gray-400">Order</dt>
           <dd className="font-mono text-xs text-gray-700 dark:text-gray-300 break-all">
-            {row.orderId}
+            {row.orderId ?? '—'}
           </dd>
         </div>
         <div>

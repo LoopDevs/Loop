@@ -870,7 +870,14 @@ const AdminPayoutView = registry.register(
   z.object({
     id: z.string().uuid(),
     userId: z.string().uuid(),
-    orderId: z.string().uuid(),
+    orderId: z.string().uuid().nullable().openapi({
+      description:
+        'Source order id for `kind=order_cashback` payouts. NULL for withdrawal-initiated payouts (ADR-024 §2).',
+    }),
+    kind: z.enum(['order_cashback', 'withdrawal']).openapi({
+      description:
+        'Discriminator: `order_cashback` is the legacy order-fulfilment payout; `withdrawal` is the ADR-024 admin-cash-out flow.',
+    }),
     assetCode: z
       .string()
       .openapi({ description: 'LOOP asset code — USDLOOP / GBPLOOP / EURLOOP.' }),

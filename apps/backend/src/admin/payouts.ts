@@ -38,7 +38,14 @@ const log = logger.child({ handler: 'admin-payouts' });
 export interface AdminPayoutView {
   id: string;
   userId: string;
-  orderId: string;
+  /**
+   * ADR-024 §2: NULL for `kind='withdrawal'` rows. Pre-this-ADR every
+   * payout was order-funded so the field was always populated; that's
+   * no longer true.
+   */
+  orderId: string | null;
+  /** ADR-024 §2 discriminator — `order_cashback` or `withdrawal`. */
+  kind: 'order_cashback' | 'withdrawal';
   assetCode: string;
   assetIssuer: string;
   toAddress: string;
@@ -57,7 +64,8 @@ export interface AdminPayoutView {
 interface PayoutRow {
   id: string;
   userId: string;
-  orderId: string;
+  orderId: string | null;
+  kind: 'order_cashback' | 'withdrawal';
   assetCode: string;
   assetIssuer: string;
   toAddress: string;
@@ -78,6 +86,7 @@ function toView(row: PayoutRow): AdminPayoutView {
     id: row.id,
     userId: row.userId,
     orderId: row.orderId,
+    kind: row.kind,
     assetCode: row.assetCode,
     assetIssuer: row.assetIssuer,
     toAddress: row.toAddress,
