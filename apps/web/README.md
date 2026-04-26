@@ -50,7 +50,7 @@ app/
 │                    # by eslint no-restricted-imports. Contents:
 │                    # platform, haptics, clipboard, back-button,
 │                    # keyboard, network, status-bar, share,
-│                    # notifications, screenshot-guard, webview,
+│                    # notifications, task-switcher-overlay, webview,
 │                    # biometrics, app-lock, purchase-storage, and
 │                    # secure-storage (keychain-backed — ADR-006)
 ├── services/        # Typed API client — api-client (auth + coalesced
