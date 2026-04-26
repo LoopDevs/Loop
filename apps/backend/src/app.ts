@@ -21,12 +21,7 @@ import { mountTestEndpoints } from './test-endpoints.js';
 import { mountMerchantRoutes } from './routes/merchants.js';
 import { requireAuth } from './auth/handler.js';
 import { mountAuthRoutes } from './routes/auth.js';
-import { createOrderHandler, listOrdersHandler, getOrderHandler } from './orders/handler.js';
-import {
-  loopCreateOrderHandler,
-  loopGetOrderHandler,
-  loopListOrdersHandler,
-} from './orders/loop-handler.js';
+import { mountOrderRoutes } from './routes/orders.js';
 import { mountMiscRoutes } from './routes/misc.js';
 import { notifyAdminBulkRead } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
@@ -281,54 +276,12 @@ mountPublicRoutes(app);
 // constraint is inseparable from the credential-minting handlers.
 mountAuthRoutes(app);
 
-// ─── Orders (authenticated) ───────────────────────────────────────────────────
-//
-// Per-IP rate limits here are defense in depth beyond requireAuth: a
-// compromised or leaked bearer token would otherwise let the attacker
-// hammer us — creating billable orders upstream (POST), or spamming
-// CTX with list/read traffic (GET). Budgets are tuned against legit
-// usage:
-//   - POST: a user rarely creates more than one order per minute;
-//     10/min leaves room for retry-after-error without enabling abuse.
-//   - GET /api/orders: the Orders page navigates; 60/min is generous.
-//   - GET /api/orders/:id: PaymentStep polls every 3s (~20/min);
-//     120/min accommodates multiple pending orders and a retry burst.
-
-// Force Cache-Control: private, no-store on every response under
-// /api/orders — these contain a specific user's purchase history and
-// gift-card redemption payloads. Without this, a CDN or intermediate
-// proxy keyed on URL alone (not Authorization) could cache one user's
-// `GET /api/orders` response and serve it to another user's next
-// request. Fly.io itself doesn't proxy-cache, but this removes the
-// footgun before any future edge caching is introduced.
-//
-// Registered BEFORE requireAuth so the header still applies on the
-// 401 response requireAuth emits when no Bearer is present — a
-// misbehaving CDN that caches 401s wouldn't then leak the "this URL
-// needs auth" shape across requests.
-app.use('/api/orders', privateNoStoreResponse);
-app.use('/api/orders/*', privateNoStoreResponse);
-
-app.use('/api/orders', requireAuth);
-app.use('/api/orders/*', requireAuth);
-
-app.post('/api/orders', killSwitch('orders'), rateLimit(10, 60_000), createOrderHandler);
-app.get('/api/orders', rateLimit(60, 60_000), listOrdersHandler);
-app.get('/api/orders/:id', rateLimit(120, 60_000), getOrderHandler);
-// Loop-native order creation (ADR 010). Lives at a distinct path so
-// the legacy CTX-proxy flow at POST /api/orders stays live during
-// the migration window. Gated inside the handler on
-// LOOP_AUTH_NATIVE_ENABLED — off → 404.
-app.post('/api/orders/loop', killSwitch('orders'), rateLimit(10, 60_000), loopCreateOrderHandler);
-// Loop-native orders list (ADR 010). Listed before :id so the path
-// param doesn't capture 'list' or similar; rate 60/min matches the
-// legacy /api/orders GET.
-app.get('/api/orders/loop', rateLimit(60, 60_000), loopListOrdersHandler);
-// Loop-native order GET. The UI polls this while an order is
-// pending_payment → paid → procuring → fulfilled, so the rate is
-// generous. Owner-scoped: the handler 404s on a non-owner read so
-// existence isn't leaked.
-app.get('/api/orders/loop/:id', rateLimit(120, 60_000), loopGetOrderHandler);
+// `/api/orders/*` route mounts (legacy CTX-proxy + Loop-native
+// paths) live in `./routes/orders.ts`. Bundles cache-control +
+// requireAuth + handlers together because the mount-order
+// constraint between them (cache-control before auth so 401s
+// also get `private, no-store`) is the contract.
+mountOrderRoutes(app);
 
 // ─── User profile ───────────────────────────────────────────────────────────
 //
