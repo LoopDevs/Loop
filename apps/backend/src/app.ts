@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { requestId } from 'hono/request-id';
-import { runWithRequestContext, getCtxResponseRequestId } from './request-context.js';
 import { sentry, captureException } from '@sentry/hono/node';
 import { scrubSentryEvent } from './sentry-scrubber.js';
 import { env } from './env.js';
@@ -12,8 +11,10 @@ import { imageProxyHandler, evictExpiredImageCache } from './images/proxy.js';
 import { sweepStaleIdempotencyKeys } from './admin/idempotency.js';
 import { getAllCircuitStates } from './circuit-breaker.js';
 import { generateOpenApiSpec } from './openapi.js';
-import { metrics, incrementRequest } from './metrics.js';
+import { metrics } from './metrics.js';
 import { accessLogMiddleware } from './middleware/access-log.js';
+import { requestContextMiddleware } from './middleware/request-context.js';
+import { requestCounterMiddleware } from './middleware/request-counter.js';
 import { corsMiddleware } from './middleware/cors.js';
 import { secureHeadersMiddleware } from './middleware/secure-headers.js';
 import { bodyLimitMiddleware } from './middleware/body-limit.js';
@@ -232,34 +233,12 @@ app.use('*', corsMiddleware);
 app.use('*', secureHeadersMiddleware);
 app.use('*', bodyLimitMiddleware);
 app.use('*', requestId());
-// A2-1305: mount the request ID into an AsyncLocalStorage context so
-// any downstream helper — `operatorFetch`, `CircuitBreaker.fetch`,
-// handler-scope code that doesn't pass `c` around — can read it and
-// propagate it onto outbound CTX fetches as `X-Request-Id`. CTX will
-// then log our id against theirs, letting ops ask "what happened to
-// our request abc123?" without a timestamp-only dig.
-app.use('*', async (c, next) => {
-  const id = c.get('requestId') ?? c.req.header('X-Request-Id') ?? 'unknown';
-  // A2-1305 follow-up: read the captured CTX request ID INSIDE the
-  // AsyncLocalStorage scope — `getCtxResponseRequestId()` only sees
-  // the per-request store while we're still under `als.run`. Reading
-  // it after `runWithRequestContext` returns gets `undefined` because
-  // node has already torn the store back down. The handler chain
-  // (`next()`) runs first, then the read, then the response-header
-  // set, all within the same `als.run` callback.
-  await runWithRequestContext({ requestId: id }, async () => {
-    await next();
-    // `circuit-breaker.ts::wrappedFetch` writes the captured CTX
-    // X-Request-Id onto the per-request store after every CTX
-    // response; the value here is the most recent one (last-write
-    // wins when a single inbound request fires multiple CTX calls,
-    // e.g. circuit half-open retry). Skipped silently when no CTX
-    // call happened — most non-proxy endpoints (health, admin
-    // reads) won't emit the header.
-    const ctxId = getCtxResponseRequestId();
-    if (ctxId !== undefined) c.res.headers.set('X-Ctx-Request-Id', ctxId);
-  });
-});
+// A2-1305 AsyncLocalStorage request-context wrapper lives in
+// `./middleware/request-context.ts`. Must come after Hono's
+// `requestId()` (the wrapper reads `c.get('requestId')`) and
+// before the access logger (the log line reads its `requestId`
+// from the ALS-populated context).
+app.use('*', requestContextMiddleware);
 
 // Pino-backed access logger (audit A-021) lives in
 // `./middleware/access-log.ts`. The mount has to come AFTER
@@ -275,28 +254,11 @@ app.use('*', accessLogMiddleware);
 // `/metrics` Prometheus emitter (lower in this file) can both reach
 // the same singleton without one of them being the carrier module.
 
-// Request counter middleware. Runs after all other middleware + the handler
-// so it observes the final status. Keys are `METHOD:ROUTE:STATUS` with the
-// route being the matched pattern (not the URL) to keep cardinality bounded.
-//
-// Audit A-022: unmatched paths had no routePath, so the fallback emitted
-// the raw URL as the label. A fuzz scan (or an ordinary crawler) could
-// then spray `/api/foo`, `/api/bar`, `/xyz-…` and each would create a
-// fresh metric key, ballooning the Prometheus series cardinality until
-// the map (and the scraper) struggled. Collapse every unmatched route
-// to the single constant label `NOT_FOUND` so cardinality stays O(number
-// of declared routes).
-app.use('*', async (c, next) => {
-  await next();
-  // Skip the metrics endpoint itself so we don't count our own scraper.
-  if (c.req.path === '/metrics') return;
-  // Hono sets routePath to the matched middleware pattern when no route
-  // handler matches (for us, that's the wildcard catch-all '/*' or '*').
-  // Treat both as NOT_FOUND — everything else is a real registered route.
-  const raw = c.req.routePath;
-  const route = raw === undefined || raw === '/*' || raw === '*' ? 'NOT_FOUND' : raw;
-  incrementRequest(c.req.method, route, c.res.status);
-});
+// Request counter middleware (audit A-022 cardinality cap) lives
+// in `./middleware/request-counter.ts`. Runs after the handler so
+// it observes the final status; collapses unmatched routes to
+// `NOT_FOUND` so a URL fuzz can't balloon Prometheus series.
+app.use('*', requestCounterMiddleware);
 
 // `probeGateAllows` (A2-1606 / A2-1607 — bearer-token guard for
 // `/metrics` + `/openapi.json`) lives in `./middleware/probe-gate.ts`.
