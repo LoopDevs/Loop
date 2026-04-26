@@ -368,6 +368,21 @@ export const EnvSchema = z.object({
   // short enough that a crash-loop doesn't silently eat payouts.
   LOOP_PAYOUT_WATCHDOG_STALE_SECONDS: z.coerce.number().int().positive().default(300),
 
+  // A2-1921 fee-bump strategy. Under Stellar network congestion the
+  // SDK default `BASE_FEE` (100 stroops) gets out-bid by user-side
+  // traffic and the tx returns `tx_insufficient_fee`. The worker now
+  // scales the fee per-attempt so a congested period drains naturally:
+  //   attempt 1 → BASE
+  //   attempt 2 → BASE * MULTIPLIER
+  //   attempt 3 → BASE * MULTIPLIER^2
+  //   …capped at CAP
+  // Defaults: 100 → 200 → 400 → 800 → 1600 stroops at MULTIPLIER=2,
+  // CAP=100_000 (any single payout is well under $0.001 of fee even
+  // at the cap, so this is cheap insurance against a stuck row).
+  LOOP_PAYOUT_FEE_BASE_STROOPS: z.coerce.number().int().positive().default(100),
+  LOOP_PAYOUT_FEE_CAP_STROOPS: z.coerce.number().int().positive().default(100_000),
+  LOOP_PAYOUT_FEE_MULTIPLIER: z.coerce.number().positive().default(2),
+
   // Feature flag for the Loop-native order workers (ADR 010). When
   // true at boot, the backend starts the payment watcher and
   // procurement worker intervals. Default false — workers are opt-in
