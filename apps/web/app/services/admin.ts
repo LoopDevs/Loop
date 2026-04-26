@@ -3,10 +3,6 @@ import type {
   LoopAssetCode,
   OrderState,
   PayoutState,
-  OperatorLatencyResponse,
-  OperatorLatencyRow,
-  OperatorStatsResponse,
-  OperatorStatsRow,
   SettlementLagResponse,
   SettlementLagRow,
   SupplierSpendRow,
@@ -281,32 +277,11 @@ export {
   getSupplierSpendActivity,
 } from './admin-supplier-spend';
 
-/**
- * Per-operator order-count / success-count / failure-count breakdown
- * (ADR 013). Complements `SupplierSpendRow` — spend is "what did we
- * pay CTX this window", operator-stats is "which CTX operator actually
- * carried it". `lastOrderAt` is the newest `createdAt` attributed to
- * this operator in the window.
- */
-// A2-1506: moved to `@loop/shared/admin-operator-stats.ts`.
-export type { OperatorStatsResponse, OperatorStatsRow };
-
-/**
- * `GET /api/admin/operator-stats` — per-operator aggregate keyed on
- * `orders.ctxOperatorId`. Rows where the operator is still null (pre-
- * procurement) are skipped server-side. Default window 24h; server
- * clamps `?since=` to 366d.
- */
-export async function getOperatorStats(
-  opts: { since?: string } = {},
-): Promise<OperatorStatsResponse> {
-  const params = new URLSearchParams();
-  if (opts.since !== undefined) params.set('since', opts.since);
-  const qs = params.toString();
-  return authenticatedRequest<OperatorStatsResponse>(
-    `/api/admin/operator-stats${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
+// A2-1165 (slice 8): operator-stats + operator-latency moved to
+// `./admin-operator-stats.ts`. Type definitions remain canonical
+// in `@loop/shared/admin-operator-stats.ts` (per A2-1506). The
+// barrel re-export at the operator-latency anchor below covers
+// both reads + 4 type re-exports.
 
 // A2-1165 (slice 7): operator mix-axis matrix (ADR 023) extracted
 // to `./admin-operator-mixes.ts`. Type definitions remain canonical
@@ -325,28 +300,19 @@ export {
   getUserOperatorMix,
 } from './admin-operator-mixes';
 
-/**
- * Per-operator fulfilment latency row (ADR 013 / 022). One row per
- * operator that had at least one fulfilled order in the window.
- * Percentiles are reported in ms and rounded.
- */
-// A2-1506: moved to `@loop/shared/admin-operator-stats.ts`.
-export type { OperatorLatencyResponse, OperatorLatencyRow };
-
-/**
- * `GET /api/admin/operators/latency` — fleet per-operator p50/p95/p99
- * of `fulfilledAt - paidAt`. Default window 24h; server clamps 366d.
- */
-export async function getOperatorLatency(
-  opts: { since?: string } = {},
-): Promise<OperatorLatencyResponse> {
-  const params = new URLSearchParams();
-  if (opts.since !== undefined) params.set('since', opts.since);
-  const qs = params.toString();
-  return authenticatedRequest<OperatorLatencyResponse>(
-    `/api/admin/operators/latency${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
+// A2-1165 (slice 8): the operator-stats + operator-latency surface
+// (paired ADR 013 fleet-of-CTX-operators reads) lives in
+// `./admin-operator-stats.ts`. Re-export keeps OperatorStatsCard,
+// OperatorLatencyCard, routes/admin.operators.tsx, and paired
+// tests untouched.
+export {
+  type OperatorStatsResponse,
+  type OperatorStatsRow,
+  type OperatorLatencyResponse,
+  type OperatorLatencyRow,
+  getOperatorStats,
+  getOperatorLatency,
+} from './admin-operator-stats';
 
 /** Per-operator per-currency supplier-spend row. Same shape as the
  *  fleet SupplierSpendRow — reused here so the drill page table
