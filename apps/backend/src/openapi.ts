@@ -2858,6 +2858,38 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/api/users/me/dsr/export',
+  summary: 'A2-1906: self-serve data export (DSR / GDPR portability).',
+  description:
+    "Returns every database row Loop holds keyed to the calling user — `users` row, `user_identities`, `user_credits`, `credit_transactions`, `orders`, `pending_payouts`. Versioned schema envelope (`schemaVersion: 1`). Gift card redeem codes / PINs are deliberately excluded — `redeemIssued: boolean` reports whether one was issued, the secret material stays in the in-app order view. Off-host data sources (CTX gift card detail, backend access logs, Sentry events, Discord audit) require a `privacy@loopfinance.io` request — listed in the response's `notes.excluded`. `Content-Disposition: attachment` so the browser saves the JSON directly.",
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Data export envelope',
+      content: { 'application/json': { schema: z.object({}).passthrough() } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    404: {
+      description: 'User row no longer exists (rare — race with hard delete)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (5/hour per IP — non-trivial multi-table scan)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error building the export',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
   path: '/api/users/me/cashback-summary',
   summary: 'Compact lifetime + this-month cashback totals (ADR 009 / 015).',
   description:
