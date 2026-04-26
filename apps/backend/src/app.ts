@@ -140,6 +140,7 @@ import { publicTopCashbackMerchantsHandler } from './public/top-cashback-merchan
 import { publicMerchantHandler } from './public/merchant.js';
 import { publicCashbackPreviewHandler } from './public/cashback-preview.js';
 import {
+  dsrExportHandler,
   getCashbackHistoryHandler,
   getCashbackHistoryCsvHandler,
   getCashbackSummaryHandler,
@@ -1052,6 +1053,14 @@ app.post('/api/users/me/home-currency', rateLimit(10, 60_000), setHomeCurrencyHa
 // wallets is a low-volume action, 10/min is plenty without enabling
 // enumeration.
 app.put('/api/users/me/stellar-address', rateLimit(10, 60_000), setStellarAddressHandler);
+// A2-1906: GET /api/users/me/dsr/export — self-serve data export
+// (GDPR right to portability / CCPA equivalent the privacy policy
+// promises). 5/hour per IP — the export is a non-trivial multi-table
+// scan, but a legitimate user testing their export shouldn't hit a
+// wall on a couple of dry-runs. Each request also writes an
+// info-level log line tagged `area: 'dsr-export'` for the operator
+// audit trail.
+app.get('/api/users/me/dsr/export', rateLimit(5, 60 * 60_000), dsrExportHandler);
 // GET /api/users/me/stellar-trustlines — per-LOOP-asset trustline
 // status for the caller's linked address (ADR 015). Horizon-backed,
 // 30s cache per-address. Powers the /settings/wallet "can I receive
