@@ -899,7 +899,10 @@ export async function getPayoutsByAsset(): Promise<{ rows: PayoutsByAssetRow[] }
 export interface AdminPayoutView {
   id: string;
   userId: string;
-  orderId: string;
+  /** NULL for `kind='withdrawal'` rows (ADR-024 §2). */
+  orderId: string | null;
+  /** ADR-024 §2 discriminator. */
+  kind: 'order_cashback' | 'withdrawal';
   assetCode: string;
   assetIssuer: string;
   toAddress: string;

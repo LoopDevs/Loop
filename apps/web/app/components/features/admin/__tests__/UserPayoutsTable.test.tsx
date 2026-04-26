@@ -43,6 +43,7 @@ function row(overrides: Partial<AdminPayoutView> = {}): AdminPayoutView {
     id: overrides.id ?? 'payout1234',
     userId: 'u1',
     orderId: 'order-1',
+    kind: 'order_cashback',
     assetCode: overrides.assetCode ?? 'GBPLOOP',
     assetIssuer: 'GISSUER',
     toAddress: 'GDEST',
