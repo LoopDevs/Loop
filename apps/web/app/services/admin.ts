@@ -1,9 +1,4 @@
-import type {
-  LoopAssetCode,
-  PayoutState,
-  SettlementLagResponse,
-  SettlementLagRow,
-} from '@loop/shared';
+import type { LoopAssetCode, SettlementLagResponse, SettlementLagRow } from '@loop/shared';
 export type { CreditTransactionType } from '@loop/shared';
 import type { AdminWriteEnvelope } from './admin-write-envelope';
 import { authenticatedRequest } from './api-client';
@@ -353,76 +348,11 @@ export async function getPayoutsByAsset(): Promise<{ rows: PayoutsByAssetRow[] }
   return authenticatedRequest<{ rows: PayoutsByAssetRow[] }>('/api/admin/payouts-by-asset');
 }
 
-export interface AdminPayoutView {
-  id: string;
-  userId: string;
-  /** NULL for `kind='withdrawal'` rows (ADR-024 §2). */
-  orderId: string | null;
-  /** ADR-024 §2 discriminator. */
-  kind: 'order_cashback' | 'withdrawal';
-  assetCode: string;
-  assetIssuer: string;
-  toAddress: string;
-  amountStroops: string;
-  memoText: string;
-  state: PayoutState;
-  txHash: string | null;
-  lastError: string | null;
-  attempts: number;
-  createdAt: string;
-  submittedAt: string | null;
-  confirmedAt: string | null;
-  failedAt: string | null;
-}
-
-/**
- * `GET /api/admin/payouts` — paginated drilldown for the backlog
- * list page. Server validates `state` against the enum, clamps
- * `limit` to 1..100.
- */
-export async function listPayouts(opts: {
-  state?: PayoutState;
-  userId?: string;
-  assetCode?: LoopAssetCode;
-  /** ADR-024 §2 — filter by payout discriminator (order-cashback vs withdrawal). */
-  kind?: 'order_cashback' | 'withdrawal';
-  limit?: number;
-  before?: string;
-}): Promise<{ payouts: AdminPayoutView[] }> {
-  const params = new URLSearchParams();
-  if (opts.state !== undefined) params.set('state', opts.state);
-  if (opts.userId !== undefined) params.set('userId', opts.userId);
-  if (opts.assetCode !== undefined) params.set('assetCode', opts.assetCode);
-  if (opts.kind !== undefined) params.set('kind', opts.kind);
-  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
-  if (opts.before !== undefined) params.set('before', opts.before);
-  const qs = params.toString();
-  return authenticatedRequest<{ payouts: AdminPayoutView[] }>(
-    `/api/admin/payouts${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
-
-/**
- * `GET /api/admin/payouts/:id` — single payout drill-down (ADR 015/016).
- * Permalink for an ops ticket; returns the same `AdminPayoutView`
- * shape as a single row from the list endpoint.
- */
-export async function getAdminPayout(id: string): Promise<AdminPayoutView> {
-  return authenticatedRequest<AdminPayoutView>(`/api/admin/payouts/${encodeURIComponent(id)}`);
-}
-
-/**
- * `GET /api/admin/orders/:orderId/payout` — payout associated with an
- * order. 404 when no payout row exists (cashback hasn't emitted yet,
- * or the payout builder skipped this order). The order detail page
- * uses this to surface "where did the on-chain cashback land?"
- * without making ops search the payouts list.
- */
-export async function getAdminPayoutByOrder(orderId: string): Promise<AdminPayoutView> {
-  return authenticatedRequest<AdminPayoutView>(
-    `/api/admin/orders/${encodeURIComponent(orderId)}/payout`,
-  );
-}
+// A2-1165 (slice 25): payouts surface (AdminPayoutView + listPayouts
+// + getAdminPayout + getAdminPayoutByOrder + retryPayout writer)
+// moved to `./admin-payouts.ts`. Inline shape moved with the
+// functions. The barrel re-export at the retryPayout anchor below
+// covers all 5 exports.
 
 // A2-1165 (slice 16): ADR 017 admin-write envelope primitives
 // (`AdminWriteAudit` + `AdminWriteEnvelope<T>`) moved to
@@ -432,29 +362,21 @@ export async function getAdminPayoutByOrder(orderId: string): Promise<AdminPayou
 // primitives without a circular import back into admin.ts.
 export type { AdminWriteAudit, AdminWriteEnvelope } from './admin-write-envelope';
 
-/**
- * `POST /api/admin/payouts/:id/retry` — flips a failed row back to
- * pending. ADR 017 compliant: caller must supply a reason, and the
- * service generates a per-click `Idempotency-Key` so a double-click
- * produces at most one state transition.
- */
-export async function retryPayout(args: {
-  id: string;
-  reason: string;
-}): Promise<AdminWriteEnvelope<AdminPayoutView>> {
-  const idempotencyKey =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID().replace(/-/g, '')
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-  return authenticatedRequest<AdminWriteEnvelope<AdminPayoutView>>(
-    `/api/admin/payouts/${encodeURIComponent(args.id)}/retry`,
-    {
-      method: 'POST',
-      headers: { 'Idempotency-Key': idempotencyKey },
-      body: { reason: args.reason },
-    },
-  );
-}
+// A2-1165 (slice 25): admin payouts surface lives in
+// `./admin-payouts.ts`. `retryPayout` is the third writer slice
+// after #1125 (cashback-config) and #1127 (user-credits), reusing
+// the same `AdminWriteEnvelope` primitives from slice 16 (#1121).
+// Re-export keeps `AdminPayoutsTable.tsx`,
+// `AdminPayoutDetail.tsx`, `RetryPayoutButton.tsx`,
+// `routes/admin.payouts.tsx`, `routes/admin.payouts.$id.tsx`,
+// paired tests untouched.
+export {
+  type AdminPayoutView,
+  listPayouts,
+  getAdminPayout,
+  getAdminPayoutByOrder,
+  retryPayout,
+} from './admin-payouts';
 
 // A2-1165 (slice 24): orders surface (AdminOrderState alias +
 // AdminOrderView shape + getAdminOrder + listAdminOrders) moved
