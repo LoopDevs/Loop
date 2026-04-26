@@ -1,0 +1,28 @@
+{
+  "name": "Loop — Save money every time you shop",
+  "short_name": "Loop",
+  "description": "Buy discounted gift cards with XLM and earn cashback on every purchase.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#0f172a",
+  "background_color": "#0f172a",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["finance", "shopping"],
+  "icons": [
+    {
+      "src": "/loop-favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    },
+    {
+      "src": "/loop-logo.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "maskable"
+    }
+  ]
+}

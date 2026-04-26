@@ -217,6 +217,11 @@ export const links: Route.LinksFunction = () => [
   // audit window — link to the populated SVG instead so the tab
   // icon actually renders.
   { rel: 'icon', type: 'image/svg+xml', href: '/loop-favicon.svg' },
+  // A2-1106: PWA manifest. Lets the SSR web build install as a PWA on
+  // desktop + Android (theme/background colours, name, icons). Native
+  // mobile uses Capacitor + the App Store / Play Store builds, so the
+  // manifest is purely for browser-installed users.
+  { rel: 'manifest', href: '/manifest.json' },
   { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
   { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossOrigin: 'anonymous' },
   {
