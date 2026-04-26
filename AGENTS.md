@@ -40,6 +40,7 @@
 | `docs/adr/022-admin-drill-triplet-pattern.md`               | Fleet / per-merchant / per-user / self quartet for every metric                                                                                                                                                                        |
 | `docs/adr/023-admin-mix-axis-matrix.md`                     | Mix-axis matrix pattern for `/:scope/:id/<target>-mix` endpoints                                                                                                                                                                       |
 | `docs/adr/024-withdrawal-writer.md`                         | Admin withdrawal writer — USDLOOP debit + payout-queue insert                                                                                                                                                                          |
+| `docs/adr/025-llm-pr-review.md`                             | LLM-assisted PR review — what gets sent to Anthropic + why it's acceptable                                                                                                                                                             |
 
 ---
 
