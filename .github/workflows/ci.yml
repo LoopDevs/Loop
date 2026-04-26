@@ -130,6 +130,27 @@ jobs:
           node-version: '22'
       - run: npm audit --audit-level=high
 
+  # A2-206: secret scanning runs gitleaks on every push + PR with the
+  # default ruleset (covers AWS / GCP / Stripe / Slack / private keys /
+  # JWTs / generic API-key heuristics). On a PR the action only scans
+  # the diff; on push to main it scans the full history. Anything that
+  # does manage to land triggers an audit-trail commit + a CI failure
+  # the next push so the offending secret is at least visible
+  # immediately.
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          # gitleaks needs full history to scan the diff range against
+          # main on a PR and to scan the full history on a push.
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build:
     name: Build verification
     runs-on: ubuntu-latest
@@ -313,7 +334,7 @@ jobs:
     # Include test-e2e so the Discord status matches the actual PR gate. Without
     # it, Discord reported PASSED whenever the fast jobs were green, even if
     # e2e had failed.
-    needs: [quality, test-unit, audit, build, test-e2e, test-e2e-mocked]
+    needs: [quality, test-unit, audit, secret-scan, build, test-e2e, test-e2e-mocked]
     steps:
       - name: Notify Discord
         env:
