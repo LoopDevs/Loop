@@ -140,6 +140,7 @@ import { publicTopCashbackMerchantsHandler } from './public/top-cashback-merchan
 import { publicMerchantHandler } from './public/merchant.js';
 import { publicCashbackPreviewHandler } from './public/cashback-preview.js';
 import {
+  dsrDeleteHandler,
   dsrExportHandler,
   getCashbackHistoryHandler,
   getCashbackHistoryCsvHandler,
@@ -1061,6 +1062,14 @@ app.put('/api/users/me/stellar-address', rateLimit(10, 60_000), setStellarAddres
 // info-level log line tagged `area: 'dsr-export'` for the operator
 // audit trail.
 app.get('/api/users/me/dsr/export', rateLimit(5, 60 * 60_000), dsrExportHandler);
+// A2-1905: POST /api/users/me/dsr/delete — self-serve account
+// anonymisation (DSR / GDPR right of erasure the privacy policy
+// promises). Anonymisation rather than hard delete because ADR-009
+// makes the credit ledger append-only — see `dsr-delete.ts` module
+// header for the full posture. 3/hour per IP — destructive, but
+// must allow legitimate retries on transient 5xx without locking the
+// user out of their own deletion.
+app.post('/api/users/me/dsr/delete', rateLimit(3, 60 * 60_000), dsrDeleteHandler);
 // GET /api/users/me/stellar-trustlines — per-LOOP-asset trustline
 // status for the caller's linked address (ADR 015). Horizon-backed,
 // 30s cache per-address. Powers the /settings/wallet "can I receive

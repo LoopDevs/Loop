@@ -2825,6 +2825,38 @@ const UserCashbackSummary = registry.register(
 );
 
 registry.registerPath({
+  method: 'post',
+  path: '/api/users/me/dsr/delete',
+  summary: 'A2-1905: self-serve account deletion (DSR / GDPR right of erasure).',
+  description:
+    "Anonymises the calling user — email replaced with a synthetic placeholder, OAuth identity links deleted, refresh tokens revoked. Ledger rows (`credit_transactions` / `orders` / `pending_payouts`) are RETAINED for tax / regulatory compliance per ADR 009 (append-only) but no longer link to a real person. Refuses with 409 + a typed `code` (`PENDING_PAYOUTS` or `IN_FLIGHT_ORDERS`) when there's money / fulfilment in flight — see `apps/backend/src/users/dsr-delete.ts` module header for the full posture.",
+  tags: ['Users'],
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: {
+      description: 'Account anonymised — caller session is invalidated',
+      content: { 'application/json': { schema: z.object({ ok: z.literal(true) }) } },
+    },
+    401: {
+      description: 'Missing or invalid bearer',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    409: {
+      description: 'Pre-condition failed: pending payout or in-flight order',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    429: {
+      description: 'Rate limit exceeded (3/hour per IP — destructive)',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+    500: {
+      description: 'Internal error during anonymisation',
+      content: { 'application/json': { schema: ErrorResponse } },
+    },
+  },
+});
+
+registry.registerPath({
   method: 'get',
   path: '/api/users/me/dsr/export',
   summary: 'A2-1906: self-serve data export (DSR / GDPR portability).',
