@@ -1,7 +1,13 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
-import { LOOP_ASSET_CODES, isLoopAssetCode, type LoopAssetCode } from '@loop/shared';
+import {
+  LOOP_ASSET_CODES,
+  PAYOUT_STATES,
+  isLoopAssetCode,
+  type LoopAssetCode,
+  type PayoutState,
+} from '@loop/shared';
 import type { Route } from './+types/admin.assets.$assetCode';
 import { shouldRetry } from '~/hooks/query-retry';
 import {
@@ -51,9 +57,6 @@ function truncPubkey(pk: string): string {
   if (pk.length <= 12) return pk;
   return `${pk.slice(0, 6)}…${pk.slice(-4)}`;
 }
-
-const PAYOUT_STATES = ['pending', 'submitted', 'confirmed', 'failed'] as const;
-type PayoutState = (typeof PAYOUT_STATES)[number];
 
 const STATE_PILL: Record<PayoutState, string> = {
   pending: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
