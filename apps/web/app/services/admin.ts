@@ -9,7 +9,6 @@ import type {
   OperatorStatsRow,
   SettlementLagResponse,
   SettlementLagRow,
-  SupplierSpendRow,
 } from '@loop/shared';
 export type { CreditTransactionType } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
@@ -348,63 +347,21 @@ export async function getOperatorLatency(
   );
 }
 
-/** Per-operator per-currency supplier-spend row. Same shape as the
- *  fleet SupplierSpendRow — reused here so the drill page table
- *  doesn't duplicate the type. */
-export interface OperatorSupplierSpendResponse {
-  operatorId: string;
-  since: string;
-  rows: SupplierSpendRow[];
-}
-
-/**
- * `GET /api/admin/operators/:operatorId/supplier-spend` — per-currency
- * supplier-spend scoped to one operator. Default window 24h; server
- * clamps 366d.
- */
-export async function getOperatorSupplierSpend(
-  operatorId: string,
-  opts: { since?: string } = {},
-): Promise<OperatorSupplierSpendResponse> {
-  const params = new URLSearchParams();
-  if (opts.since !== undefined) params.set('since', opts.since);
-  const qs = params.toString();
-  return authenticatedRequest<OperatorSupplierSpendResponse>(
-    `/api/admin/operators/${encodeURIComponent(operatorId)}/supplier-spend${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
-
-/** Per-operator daily activity row. */
-export interface OperatorActivityDay {
-  day: string;
-  created: number;
-  fulfilled: number;
-  failed: number;
-}
-
-export interface OperatorActivityResponse {
-  operatorId: string;
-  windowDays: number;
-  days: OperatorActivityDay[];
-}
-
-/**
- * `GET /api/admin/operators/:operatorId/activity` — per-day
- * created/fulfilled/failed for one operator over `?days=1-90`
- * (default 7). Response is zero-filled by the backend so a stable
- * N-row chart layout is guaranteed.
- */
-export async function getOperatorActivity(
-  operatorId: string,
-  opts: { days?: number } = {},
-): Promise<OperatorActivityResponse> {
-  const params = new URLSearchParams();
-  if (opts.days !== undefined) params.set('days', String(opts.days));
-  const qs = params.toString();
-  return authenticatedRequest<OperatorActivityResponse>(
-    `/api/admin/operators/${encodeURIComponent(operatorId)}/activity${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
+// A2-1165 (slice 9): per-operator drill (`/operators/:id/supplier-
+// spend` + `/operators/:id/activity`) extracted to
+// `./admin-operator-drill.ts`. The `OperatorSupplierSpendResponse`
+// / `OperatorActivityDay` / `OperatorActivityResponse` shapes were
+// inline here and moved with the functions — they have no other
+// consumers, so promoting them to `@loop/shared` would just add
+// indirection. Re-export keeps the per-operator drill page +
+// paired tests untouched.
+export {
+  type OperatorSupplierSpendResponse,
+  type OperatorActivityDay,
+  type OperatorActivityResponse,
+  getOperatorSupplierSpend,
+  getOperatorActivity,
+} from './admin-operator-drill';
 
 // A2-1165 (slice 2): admin audit-tail types + read extracted to
 // `./admin-audit.ts`. Re-export keeps existing consumers
