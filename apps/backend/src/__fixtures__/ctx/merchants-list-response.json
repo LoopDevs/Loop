@@ -1,0 +1,34 @@
+{
+  "pagination": {
+    "page": 1,
+    "pages": 12,
+    "perPage": 10,
+    "total": 117
+  },
+  "result": [
+    {
+      "id": "synthetic-merchant-target",
+      "name": "Target",
+      "slug": "target",
+      "enabled": true,
+      "country": "US",
+      "currency": "USD"
+    },
+    {
+      "id": "synthetic-merchant-amazon-us",
+      "name": "Amazon",
+      "slug": "amazon",
+      "enabled": true,
+      "country": "US",
+      "currency": "USD"
+    },
+    {
+      "id": "synthetic-merchant-asda",
+      "name": "ASDA",
+      "slug": "asda",
+      "enabled": true,
+      "country": "GB",
+      "currency": "GBP"
+    }
+  ]
+}

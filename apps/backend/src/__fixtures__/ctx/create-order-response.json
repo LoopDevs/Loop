@@ -1,0 +1,8 @@
+{
+  "id": "synthetic-ctx-order-uuid-aaaa-bbbb-cccc-dddd",
+  "paymentCryptoAmount": "12.4567890",
+  "paymentUrls": {
+    "XLM": "web+stellar:pay?destination=GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW&amount=12.4567890&memo=SYNTHETICMEMO012345"
+  },
+  "status": "pending"
+}

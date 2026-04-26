@@ -1,0 +1,26 @@
+{
+  "id": "synthetic-merchant-target",
+  "name": "Target",
+  "slug": "target",
+  "logoUrl": "https://ctx-spend.s3.us-west-2.amazonaws.com/merchants/synthetic/target/logo.png",
+  "cardImageUrl": "https://ctx-spend.s3.us-west-2.amazonaws.com/merchants/synthetic/target/card.png",
+  "mapPinUrl": "https://ctx-spend.s3.us-west-2.amazonaws.com/merchants/synthetic/target/pin.png",
+  "enabled": true,
+  "country": "US",
+  "currency": "USD",
+  "savingsPercentage": 5,
+  "userDiscount": 4.5,
+  "denominationsType": "min-max",
+  "denominations": ["10.00", "500.00"],
+  "denominationValues": ["10.00", "500.00"],
+  "locationCount": 1872,
+  "cachedLocationCount": 1872,
+  "redeemType": "code",
+  "redeemLocation": "in-store",
+  "info": {
+    "description": "Synthetic Target fixture for the A2-1706 CTX contract test.",
+    "instructions": "Synthetic instructions text — not a real merchant entry.",
+    "intro": "Synthetic intro.",
+    "terms": "Synthetic terms-of-redemption text."
+  }
+}

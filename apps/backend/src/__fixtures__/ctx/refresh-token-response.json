@@ -1,0 +1,4 @@
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzeW50aGV0aWMtY3R4LXVzZXItaWQiLCJpYXQiOjE3NzkyMDM2MDAsImV4cCI6MTc3OTIwNzIwMH0.synthetic-signature-for-fixture-only",
+  "refreshToken": "synthetic-rotated-refresh-token-eyJhbGciOiJIUzI1NiJ9"
+}

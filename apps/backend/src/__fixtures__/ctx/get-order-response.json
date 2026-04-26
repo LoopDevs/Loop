@@ -1,0 +1,19 @@
+{
+  "id": "synthetic-ctx-order-uuid-aaaa-bbbb-cccc-dddd",
+  "merchantId": "synthetic-merchant-target",
+  "merchantName": "Target",
+  "cardFiatAmount": "50.00",
+  "cardFiatCurrency": "USD",
+  "paymentCryptoAmount": "12.4567890",
+  "status": "fulfilled",
+  "fulfilmentStatus": "ready",
+  "percentDiscount": "5.00",
+  "redeemType": "code",
+  "redeemUrl": "https://example.invalid/synthetic/redeem",
+  "redeemUrlChallenge": "synthetic-challenge-token",
+  "redeemScripts": {
+    "injectChallenge": "// synthetic — fixture-only inert script body",
+    "scrapeResult": "// synthetic — fixture-only inert script body"
+  },
+  "created": "2026-04-26T12:00:00.000Z"
+}

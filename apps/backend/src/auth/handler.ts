@@ -39,13 +39,15 @@ function allowedClientIds(): ReadonlySet<string> {
   return new Set([env.CTX_CLIENT_ID_WEB, env.CTX_CLIENT_ID_IOS, env.CTX_CLIENT_ID_ANDROID]);
 }
 
-// Upstream response schemas — validate before forwarding to client
-const VerifyOtpUpstreamResponse = z.object({
+// Upstream response schemas — validate before forwarding to client.
+// A2-1706: exported so the contract-test suite can parse recorded
+// CTX fixtures through them at PR-time.
+export const VerifyOtpUpstreamResponse = z.object({
   accessToken: z.string().min(1),
   refreshToken: z.string().min(1),
 });
 
-const RefreshUpstreamResponse = z.object({
+export const RefreshUpstreamResponse = z.object({
   accessToken: z.string().min(1),
   refreshToken: z.string().optional(),
 });

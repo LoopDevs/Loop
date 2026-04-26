@@ -20,7 +20,9 @@ const MAX_URL_LENGTH = 2048;
 const MAX_CURRENCY_LENGTH = 10;
 const MAX_INFO_LENGTH = 50_000;
 
-const UpstreamMerchantSchema = z
+// A2-1706: exported so the contract-test suite can parse recorded
+// CTX fixtures through them at PR-time and detect schema drift.
+export const UpstreamMerchantSchema = z
   .object({
     id: z.string().min(1).max(MAX_ID_LENGTH),
     name: z.string().min(1).max(MAX_NAME_LENGTH),
@@ -55,7 +57,7 @@ type UpstreamMerchant = z.infer<typeof UpstreamMerchantSchema>;
 
 // Wrap individual merchants in .safeParse so one malformed entry does not
 // poison the whole page — we skip it and keep going.
-const UpstreamListResponseSchema = z
+export const UpstreamListResponseSchema = z
   .object({
     pagination: z.object({
       page: z.number().int().nonnegative(),
