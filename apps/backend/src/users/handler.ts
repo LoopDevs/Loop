@@ -38,6 +38,7 @@ import {
 import { resolveLoopAuthenticatedUser } from '../auth/authenticated-user.js';
 import { type User } from '../db/users.js';
 import { logger } from '../logger.js';
+import { buildDsrExport } from './dsr-export.js';
 
 const log = logger.child({ handler: 'users' });
 
@@ -772,5 +773,49 @@ export async function getCashbackSummaryHandler(c: Context): Promise<Response> {
   } catch (err) {
     log.error({ err }, 'Cashback-summary query failed');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load cashback summary' }, 500);
+  }
+}
+
+/**
+ * A2-1906 — `GET /api/users/me/dsr/export`. Self-serve data export
+ * the privacy policy promises. Returns a JSON envelope of every row
+ * Loop holds keyed to the calling user. See `dsr-export.ts` module
+ * header for what's included / excluded and the redaction rationale
+ * for redeem codes.
+ *
+ * Auth: standard Loop-native or CTX-proxy bearer (the same path every
+ * other `/api/users/me/*` endpoint uses). Rate limit on the route
+ * (set in `app.ts`) caps abuse — the export is a non-trivial DB scan.
+ *
+ * Logged at info-level for the operator audit trail since it's a
+ * potential PII-exfiltration vector if a session is hijacked.
+ */
+export async function dsrExportHandler(c: Context): Promise<Response> {
+  let user: User | null;
+  try {
+    user = await resolveCallingUser(c);
+  } catch (err) {
+    log.error({ err }, 'Failed to resolve calling user');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+  }
+  if (user === null) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+  try {
+    const exportPayload = await buildDsrExport(user.id);
+    if (exportPayload === null) {
+      return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
+    }
+    log.info({ userId: user.id, area: 'dsr-export' }, 'DSR export issued');
+    return c.json(exportPayload, 200, {
+      // Make it actually downloadable from the browser without a
+      // round-trip through `URL.createObjectURL` — the client can
+      // window.open the URL with the bearer in fetch and save the
+      // file directly.
+      'Content-Disposition': `attachment; filename="loop-data-export-${user.id}.json"`,
+    });
+  } catch (err) {
+    log.error({ err, userId: user.id }, 'DSR export failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build export' }, 500);
   }
 }
