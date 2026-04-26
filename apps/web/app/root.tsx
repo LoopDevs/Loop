@@ -171,8 +171,13 @@ export function meta(): Route.MetaDescriptors {
 // `docs/adr/005-known-limitations.md` §10. Allowlisted in CSP by
 // `buildSecurityHeaders`. Audit A-032.
 export const links: Route.LinksFunction = () => [
-  { rel: 'icon', href: '/loop-favicon.ico' },
-  { rel: 'icon', type: 'image/png', href: '/loop-favicon.png' },
+  // A2-001 / A2-004: SVG favicon is the canonical icon. Modern
+  // browsers (Chrome 80+, Firefox 41+, Safari 9+) all support
+  // SVG favicons; older fallbacks aren't load-bearing pre-launch.
+  // The .ico / .png variants stayed at 0 bytes for the entire
+  // audit window — link to the populated SVG instead so the tab
+  // icon actually renders.
+  { rel: 'icon', type: 'image/svg+xml', href: '/loop-favicon.svg' },
   { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
   { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossOrigin: 'anonymous' },
   {

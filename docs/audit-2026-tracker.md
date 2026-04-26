@@ -80,48 +80,48 @@ Findings are recorded below their owning phase. Each finding follows the shape f
 
 Complete. Evidence: [phase-0-inventory.md](./audit-2026-evidence/phase-0-inventory.md). Commit SHA at capture: `84fc581`.
 
-#### A2-001 — Favicon files are 0 bytes
+#### A2-001 — ~~Favicon files are 0 bytes~~ resolved-pending-review
 
 | Field       | Value                                                                                                                                                                                                   |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Severity    | **Medium**                                                                                                                                                                                              |
-| Status      | open                                                                                                                                                                                                    |
+| Status      | resolved-pending-review                                                                                                                                                                                 |
 | Files       | `apps/web/public/loop-favicon.ico` (0B), `apps/web/public/loop-favicon.png` (0B), referenced from `apps/web/app/root.tsx:135-136`                                                                       |
 | Evidence    | `wc -c` on the two files returns `0`. `root.tsx` emits `<link rel="icon" href="/loop-favicon.ico">` and `<link rel="icon" type="image/png" href="/loop-favicon.png">`.                                  |
 | Impact      | Browsers fetching the favicon receive an empty response. Tab icon is blank / generic. User-facing polish defect; not a security issue.                                                                  |
 | Remediation | Replace both files with actual favicon binaries exported from `loop-favicon.svg` (which is non-empty), or remove the `<link>` entries and keep only the SVG favicon (supported by all modern browsers). |
 | Owner       | _unassigned_                                                                                                                                                                                            |
 
-#### A2-002 — Unreferenced root-level `looplogo.svg` is a duplicate
+#### A2-002 — ~~Unreferenced root-level `looplogo.svg` is a duplicate~~ resolved-pending-review
 
 | Field       | Value                                                                                                                                                                                                   |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Severity    | **Low**                                                                                                                                                                                                 |
-| Status      | open                                                                                                                                                                                                    |
+| Status      | resolved-pending-review                                                                                                                                                                                 |
 | Files       | `looplogo.svg` (repo root, 1572 bytes)                                                                                                                                                                  |
 | Evidence    | `sha256sum looplogo.svg apps/web/public/loop-logo.svg` → identical hash `a38062762e6d...`. `grep -rn looplogo.svg` across `apps/`, `docs/`, `scripts/`, top-level `.md`/`.ts` files returns no matches. |
 | Impact      | Dead file. Confusing during editing (which logo is canonical?).                                                                                                                                         |
 | Remediation | Delete `looplogo.svg`.                                                                                                                                                                                  |
 | Owner       | _unassigned_                                                                                                                                                                                            |
 
-#### A2-003 — Duplicate PNG logos not referenced from web source
+#### A2-003 — ~~Duplicate PNG logos not referenced from web source~~ resolved-pending-review
 
 | Field       | Value                                                                                                                                                                                                                     |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Severity    | **Low**                                                                                                                                                                                                                   |
-| Status      | open                                                                                                                                                                                                                      |
+| Status      | resolved-pending-review                                                                                                                                                                                                   |
 | Files       | `apps/web/public/loop-logo.png` (19259B), `apps/web/public/loop-logo-square.png` (19259B)                                                                                                                                 |
 | Evidence    | `shasum -a 256` on both files → identical hash `2e3aaa10d321...`. Scoped grep through `apps/web/app/**/*.{ts,tsx,css}` returns zero references (only matches are Android build artifacts that are themselves gitignored). |
 | Impact      | Two files' worth of dead static-asset payload shipped with the web build.                                                                                                                                                 |
 | Remediation | Delete both unless intentionally kept as a public URL consumed outside the app (e.g. og:image for a specific path — confirm with owner before deleting).                                                                  |
 | Owner       | _unassigned_                                                                                                                                                                                                              |
 
-#### A2-004 — `loop-favicon.svg` has content but no reference
+#### A2-004 — ~~`loop-favicon.svg` has content but no reference~~ resolved-pending-review
 
 | Field       | Value                                                                                                                                                                                                                                         |
 | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Severity    | **Low**                                                                                                                                                                                                                                       |
-| Status      | open                                                                                                                                                                                                                                          |
+| Status      | resolved-pending-review                                                                                                                                                                                                                       |
 | Files       | `apps/web/public/loop-favicon.svg` (234 bytes)                                                                                                                                                                                                |
 | Evidence    | `grep -rn loop-favicon.svg apps/` returns no reference from application code (only build artifacts). `root.tsx:135-136` links `.ico` and `.png` but not the `.svg`.                                                                           |
 | Impact      | An intended SVG favicon that was never wired up. Either the file is stale or `root.tsx` is incomplete. Ties in with A2-001 — the SVG may be the fix for A2-001.                                                                               |
