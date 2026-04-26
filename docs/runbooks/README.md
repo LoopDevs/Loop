@@ -19,6 +19,9 @@ split it into a sub-page rather than padding.
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Payouts (Stellar)** | [stuck-payout.md](./stuck-payout.md) — pending_payouts row stuck pending/submitted                                                                                   |
 |                       | [payout-permanent-failure.md](./payout-permanent-failure.md) — `op_no_destination`-class failure → admin compensation flow                                           |
+|                       | [payout-failed-alert.md](./payout-failed-alert.md) — `notifyPayoutFailed` Discord alert triage (A2-1917)                                                             |
+| **Asset drift**       | [asset-drift-alert.md](./asset-drift-alert.md) — `notifyAssetDrift` ok→over alert; over-minted (P0) vs settlement backlog (P1) (A2-1917)                             |
+| **Operator pool**     | [operator-pool-exhausted.md](./operator-pool-exhausted.md) — `notifyOperatorPoolExhausted` — every CTX operator's circuit OPEN simultaneously (A2-1917)              |
 | **Auth**              | [jwt-key-rotation.md](./jwt-key-rotation.md) — rotating `LOOP_JWT_SIGNING_KEY` without invalidating sessions                                                         |
 | **Stellar signer**    | [stellar-operator-rotation.md](./stellar-operator-rotation.md) — quarterly + emergency rotation of `LOOP_STELLAR_OPERATOR_SECRET` (A2-1909)                          |
 | **Mobile signing**    | [mobile-cert-renewal.md](./mobile-cert-renewal.md) — Apple/Google cert + provisioning + key renewal flow (A2-1908)                                                   |
