@@ -8,6 +8,10 @@ import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { nativeRequestOtpHandler, nativeVerifyOtpHandler, nativeRefreshHandler } from './native.js';
 import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
 import { revokeRefreshToken } from './refresh-tokens.js';
+// A2-803 (auth slice): request-body schemas live in the shared
+// `request-schemas.ts` module so both this CTX-proxy path and the
+// Loop-native path (`native.ts`) verify against the same source.
+import { PlatformEnum, RequestOtpBody, VerifyOtpBody, RefreshBody } from './request-schemas.js';
 import { notifyCtxSchemaDrift } from '../discord.js';
 
 /**
@@ -22,15 +26,6 @@ function summariseZodIssues(issues: readonly z.ZodIssue[]): string {
 }
 
 const log = logger.child({ handler: 'auth' });
-
-const PlatformEnum = z.enum(['web', 'ios', 'android']).default('web');
-const RequestOtpBody = z.object({ email: z.string().email(), platform: PlatformEnum });
-const VerifyOtpBody = z.object({
-  email: z.string().email(),
-  otp: z.string().min(1),
-  platform: PlatformEnum,
-});
-const RefreshBody = z.object({ refreshToken: z.string().min(1), platform: PlatformEnum });
 
 /** Maps platform to the upstream CTX client ID. */
 function clientIdForPlatform(platform: 'web' | 'ios' | 'android'): string {
