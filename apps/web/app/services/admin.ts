@@ -7,6 +7,7 @@ import type {
   SettlementLagRow,
 } from '@loop/shared';
 export type { CreditTransactionType } from '@loop/shared';
+import type { AdminPaymentMethod } from './admin-payment-method-share';
 import { authenticatedRequest } from './api-client';
 
 // Re-export so existing `import { LoopAssetCode } from
@@ -121,50 +122,29 @@ export async function getAdminConfigsHistory(
   );
 }
 
-/**
- * Payment-method share response (#585). One entry per
- * `ORDER_PAYMENT_METHODS` value, zero-filled by the backend so the
- * UI layout is stable.
- */
-export interface PaymentMethodShareBucket {
-  orderCount: number;
-  /** Sum of charge_minor for this (state, method) bucket, bigint-as-string. */
-  chargeMinor: string;
-}
-
-export type AdminPaymentMethod = 'xlm' | 'usdc' | 'credit' | 'loop_asset';
-
+// A2-1165 (slice 13): payment-method-share trio (fleet + per-
+// merchant + per-user, ADR 023 mix-axis pattern) moved to
+// `./admin-payment-method-share.ts`. Inline shapes moved with the
+// functions — no other consumers. The barrel re-export below
+// covers all three reads + 5 type re-exports.
+//
 // A2-1166: `AdminOrderState` + `AdminOrderState` used to be two
 // hand-maintained copies of the same six-literal union in this file.
-// Both were identical to `OrderState` from `@loop/shared`; removing
-// the second occurrence here also kept the file in sync with the
-// backend CHECK constraint, which reads from the shared tuple.
-// The type export at the bottom of this file now re-exports
-// `OrderState` under the `AdminOrderState` name for external
-// consumers (`UserOrdersTable`, the admin orders route).
-
-export interface PaymentMethodShareResponse {
-  state: AdminOrderState;
-  totalOrders: number;
-  byMethod: Record<AdminPaymentMethod, PaymentMethodShareBucket>;
-}
-
-/**
- * `GET /api/admin/orders/payment-method-share` — cashback-flywheel
- * metric. Tracks which rails users actually pay with; a rising
- * `loop_asset` share is the signal ADR 015's pivot is working.
- * Default `?state=fulfilled`.
- */
-export async function getPaymentMethodShare(
-  opts: { state?: AdminOrderState } = {},
-): Promise<PaymentMethodShareResponse> {
-  const params = new URLSearchParams();
-  if (opts.state !== undefined) params.set('state', opts.state);
-  const qs = params.toString();
-  return authenticatedRequest<PaymentMethodShareResponse>(
-    `/api/admin/orders/payment-method-share${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
+// Both were identical to `OrderState` from `@loop/shared`. The
+// extracted slice imports `OrderState` directly; the type export
+// at the bottom of this file still re-exports it under the
+// `AdminOrderState` name for external consumers (`UserOrdersTable`,
+// the admin orders route).
+export {
+  type PaymentMethodShareBucket,
+  type AdminPaymentMethod,
+  type PaymentMethodShareResponse,
+  type AdminMerchantPaymentMethodShareResponse,
+  type AdminUserPaymentMethodShareResponse,
+  getPaymentMethodShare,
+  getAdminMerchantPaymentMethodShare,
+  getAdminUserPaymentMethodShare,
+} from './admin-payment-method-share';
 
 // A2-1165 (slice 4): treasury surface extracted to
 // `./admin-treasury.ts`. Type definitions remain canonical in
@@ -1028,55 +1008,10 @@ export async function getAdminMerchantCashbackSummary(
   );
 }
 
-/**
- * Admin per-merchant payment-method share (#627). Merchant-scoped
- * mirror of `PaymentMethodShareResponse` — same `byMethod` shape,
- * filtered via `WHERE merchant_id = :merchantId`.
- */
-export interface AdminMerchantPaymentMethodShareResponse {
-  merchantId: string;
-  state: AdminOrderState;
-  totalOrders: number;
-  byMethod: Record<AdminPaymentMethod, PaymentMethodShareBucket>;
-}
-
-/** `GET /api/admin/merchants/:merchantId/payment-method-share` — rail mix for one merchant. */
-export async function getAdminMerchantPaymentMethodShare(
-  merchantId: string,
-  opts: { state?: AdminOrderState } = {},
-): Promise<AdminMerchantPaymentMethodShareResponse> {
-  const params = new URLSearchParams();
-  if (opts.state !== undefined) params.set('state', opts.state);
-  const qs = params.toString();
-  return authenticatedRequest<AdminMerchantPaymentMethodShareResponse>(
-    `/api/admin/merchants/${encodeURIComponent(merchantId)}/payment-method-share${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
-
-/**
- * Admin per-user payment-method share (#629). User-scoped third
- * sibling of the fleet + per-merchant rail-mix shapes. Same
- * `byMethod` record + zero-filled buckets.
- */
-export interface AdminUserPaymentMethodShareResponse {
-  userId: string;
-  state: AdminOrderState;
-  totalOrders: number;
-  byMethod: Record<AdminPaymentMethod, PaymentMethodShareBucket>;
-}
-
-/** `GET /api/admin/users/:userId/payment-method-share` — rail mix for one user. */
-export async function getAdminUserPaymentMethodShare(
-  userId: string,
-  opts: { state?: AdminOrderState } = {},
-): Promise<AdminUserPaymentMethodShareResponse> {
-  const params = new URLSearchParams();
-  if (opts.state !== undefined) params.set('state', opts.state);
-  const qs = params.toString();
-  return authenticatedRequest<AdminUserPaymentMethodShareResponse>(
-    `/api/admin/users/${encodeURIComponent(userId)}/payment-method-share${qs.length > 0 ? `?${qs}` : ''}`,
-  );
-}
+// A2-1165 (slice 13): per-merchant + per-user payment-method-
+// share also moved to `./admin-payment-method-share.ts`,
+// consolidated with the fleet read so the rail-mix mix-axis lives
+// in one file. The barrel re-export at the top covers all three.
 
 /**
  * Fleet-wide cashback-monthly entry (#592). Identical shape to the
