@@ -1,4 +1,21 @@
+# A2-1105: deny indexing of authenticated surfaces. Crawlers
+# can't reach the rendered HTML anyway (TanStack Query gates the
+# data + auth-gating renders blank without a session) but the
+# explicit Disallow keeps these out of search results entirely.
+#
+# A2-1118: sitemap URL is intentionally pinned to the canonical
+# loopfinance.io domain. Build-target-gated (mobile bundles don't
+# ship robots.txt; only the SSR web build does), so a deploy to
+# a non-prod host that picks up this file is the operator's
+# concern, not the file's.
 User-agent: *
 Allow: /
+Disallow: /admin
+Disallow: /admin/
+Disallow: /settings
+Disallow: /settings/
+Disallow: /orders
+Disallow: /orders/
+Disallow: /onboarding
 
 Sitemap: https://loopfinance.io/sitemap.xml

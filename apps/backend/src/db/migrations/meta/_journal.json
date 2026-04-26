@@ -171,6 +171,13 @@
       "breakpoints": true
     },
     {
+      "idx": 24,
+      "version": "7",
+      "when": 1779300000000,
+      "tag": "0024_pending_payouts_to_address_format",
+      "breakpoints": true
+    },
+    {
       "idx": 25,
       "version": "7",
       "when": 1779400000000,
