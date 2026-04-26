@@ -38,6 +38,7 @@ import {
 import { resolveLoopAuthenticatedUser } from '../auth/authenticated-user.js';
 import { type User } from '../db/users.js';
 import { logger } from '../logger.js';
+import { deleteUserViaAnonymisation } from './dsr-delete.js';
 
 const log = logger.child({ handler: 'users' });
 
@@ -772,5 +773,63 @@ export async function getCashbackSummaryHandler(c: Context): Promise<Response> {
   } catch (err) {
     log.error({ err }, 'Cashback-summary query failed');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load cashback summary' }, 500);
+  }
+}
+
+/**
+ * A2-1905 — `POST /api/users/me/dsr/delete`. The privacy-policy-
+ * promised right of erasure, implemented as anonymisation per
+ * `dsr-delete.ts` (ledger rows can't be hard-deleted, ADR-009).
+ *
+ * Returns 200 on success — the caller's session is revoked at this
+ * point so the next request will 401. Returns 409 with a typed
+ * `code` when there's money / fulfilment in flight.
+ *
+ * No request body — the caller is the user being deleted; no
+ * confirmation token because the front-end is expected to gate this
+ * behind a typed-confirmation modal. Server-side this is a single-
+ * action POST; the client-side guard is the UX layer.
+ *
+ * Logged at warn-level for the operator audit trail since this is a
+ * permanent state change.
+ */
+export async function dsrDeleteHandler(c: Context): Promise<Response> {
+  let user: User | null;
+  try {
+    user = await resolveCallingUser(c);
+  } catch (err) {
+    log.error({ err }, 'Failed to resolve calling user');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+  }
+  if (user === null) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+  }
+  try {
+    const result = await deleteUserViaAnonymisation(user.id);
+    if (!result.ok) {
+      if (result.blockedBy === 'pending_payouts') {
+        return c.json(
+          {
+            code: 'PENDING_PAYOUTS',
+            message:
+              'Cannot delete account while a cashback payout is pending or submitted — wait for it to settle, or contact support.',
+          },
+          409,
+        );
+      }
+      return c.json(
+        {
+          code: 'IN_FLIGHT_ORDERS',
+          message:
+            'Cannot delete account while an order is mid-fulfilment — wait for it to fulfill or expire, or contact support.',
+        },
+        409,
+      );
+    }
+    log.warn({ userId: user.id, area: 'dsr-delete' }, 'User account anonymised via DSR delete');
+    return c.json({ ok: true });
+  } catch (err) {
+    log.error({ err, userId: user.id }, 'DSR delete failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to delete account' }, 500);
   }
 }
