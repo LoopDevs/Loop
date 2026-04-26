@@ -8,6 +8,7 @@ import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
+import { ReasonDialog } from '~/components/features/admin/ReasonDialog';
 import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
 
@@ -119,6 +120,7 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
 
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const [reasonDialogId, setReasonDialogId] = useState<string | null>(null);
   const retryMutation = useMutation({
     mutationFn: retryPayout,
     onSuccess: () => {
@@ -132,21 +134,21 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
     onSettled: () => setRetryingId(null),
   });
 
-  // ADR 017 requires a reason (2..500 chars) on every admin write. The
-  // admin UI prompts for it here so the Discord audit entry has real
-  // context — "ops retry" is a weak reason, "operator funding top-up
-  // complete, retrying failed payouts" is the target.
+  // A2-1107: native <dialog>-backed reason prompt replaces the prior
+  // `window.prompt` so screen-reader / keyboard users get a real
+  // modal with focus trap + ESC dismissal. ADR-017 still requires the
+  // 2–500 char reason on every admin write — `<ReasonDialog>` enforces
+  // the length contract; the mutation only fires on a non-null resolve.
   const handleRetry = (id: string): void => {
-    const reason = window.prompt('Reason for retrying this payout? (2–500 chars, logged in audit)');
-    if (reason === null) return;
-    const trimmed = reason.trim();
-    if (trimmed.length < 2 || trimmed.length > 500) {
-      setRetryError('Reason must be 2–500 characters');
-      return;
-    }
+    setReasonDialogId(id);
+  };
+  const handleReasonResolve = (reason: string | null): void => {
+    const id = reasonDialogId;
+    setReasonDialogId(null);
+    if (id === null || reason === null) return;
     setRetryingId(id);
     setRetryError(null);
-    retryMutation.mutate({ id, reason: trimmed });
+    retryMutation.mutate({ id, reason });
   };
 
   const setState = (next: PayoutState | 'all'): void => {
@@ -167,6 +169,13 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
 
   return (
     <main className="max-w-6xl mx-auto px-6 py-12 space-y-6">
+      <ReasonDialog
+        open={reasonDialogId !== null}
+        title="Reason for retrying this payout?"
+        description="2–500 characters. Logged in the admin audit trail (ADR-017)."
+        confirmLabel="Retry payout"
+        onResolve={handleReasonResolve}
+      />
       <AdminNav />
       <header className="flex items-start justify-between gap-4">
         <div>
