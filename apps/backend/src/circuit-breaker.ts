@@ -1,6 +1,6 @@
 import { logger } from './logger.js';
 import { notifyCircuitBreaker } from './discord.js';
-import { getCurrentRequestId } from './request-context.js';
+import { getCurrentRequestId, setCtxResponseRequestId } from './request-context.js';
 
 export type CircuitState = 'closed' | 'open' | 'half_open';
 
@@ -156,6 +156,17 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
 
     try {
       const response = await fetch(url, outboundInit);
+
+      // A2-1305 follow-up: capture the CTX-side request ID off the
+      // response so the post-handler middleware in app.ts can echo it
+      // back to the client as `X-Ctx-Request-Id`. CTX may use either
+      // `X-Request-Id` or `X-Correlation-Id` depending on which edge
+      // serves the response; check both.
+      const ctxId =
+        response.headers.get('X-Request-Id') ?? response.headers.get('X-Correlation-Id');
+      if (ctxId !== null && ctxId.length > 0) {
+        setCtxResponseRequestId(ctxId);
+      }
 
       // Treat 5xx as upstream failures for circuit-breaker purposes.
       // 4xx are client errors and should NOT trip the circuit.

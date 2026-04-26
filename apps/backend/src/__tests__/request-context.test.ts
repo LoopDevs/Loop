@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { runWithRequestContext, getCurrentRequestId } from '../request-context.js';
+import {
+  runWithRequestContext,
+  getCurrentRequestId,
+  setCtxResponseRequestId,
+  getCtxResponseRequestId,
+} from '../request-context.js';
 
 describe('runWithRequestContext / getCurrentRequestId', () => {
   it('returns undefined outside a request', () => {
@@ -44,5 +49,51 @@ describe('runWithRequestContext / getCurrentRequestId', () => {
   it('resolves the fn return value', async () => {
     const out = await runWithRequestContext({ requestId: 'r' }, () => 42);
     expect(out).toBe(42);
+  });
+});
+
+describe('A2-1305 follow-up — CTX response request ID echo', () => {
+  it('returns undefined outside a request', () => {
+    expect(getCtxResponseRequestId()).toBeUndefined();
+  });
+
+  it('returns undefined when no CTX call has set the id', async () => {
+    await runWithRequestContext({ requestId: 'inbound' }, async () => {
+      expect(getCtxResponseRequestId()).toBeUndefined();
+    });
+  });
+
+  it('records and returns the most recent CTX response id', async () => {
+    await runWithRequestContext({ requestId: 'inbound' }, async () => {
+      setCtxResponseRequestId('ctx-first');
+      expect(getCtxResponseRequestId()).toBe('ctx-first');
+      setCtxResponseRequestId('ctx-second');
+      expect(getCtxResponseRequestId()).toBe('ctx-second');
+    });
+  });
+
+  it('isolates ctx ids across concurrent inbound requests', async () => {
+    const seen: string[] = [];
+    await Promise.all([
+      runWithRequestContext({ requestId: 'a' }, async () => {
+        setCtxResponseRequestId('ctx-a');
+        await new Promise((r) => setTimeout(r, 1));
+        seen.push(`a:${getCtxResponseRequestId() ?? 'none'}`);
+      }),
+      runWithRequestContext({ requestId: 'b' }, async () => {
+        setCtxResponseRequestId('ctx-b');
+        await new Promise((r) => setTimeout(r, 1));
+        seen.push(`b:${getCtxResponseRequestId() ?? 'none'}`);
+      }),
+    ]);
+    expect(seen).toContain('a:ctx-a');
+    expect(seen).toContain('b:ctx-b');
+    expect(seen).not.toContain('a:ctx-b');
+    expect(seen).not.toContain('b:ctx-a');
+  });
+
+  it('setCtxResponseRequestId is a no-op outside a request context', () => {
+    expect(() => setCtxResponseRequestId('orphan')).not.toThrow();
+    expect(getCtxResponseRequestId()).toBeUndefined();
   });
 });
