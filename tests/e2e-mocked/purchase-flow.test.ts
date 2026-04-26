@@ -52,8 +52,16 @@ async function gotoMerchantDetail(page: Page): Promise<string> {
 async function signInInline(page: Page, email = 'e2e-mocked@test.local'): Promise<void> {
   await page.getByLabel(/Email address/).fill(email);
   await page.getByRole('button', { name: 'Continue' }).click();
-  // OTP step appears; text about the code being sent serves as a sync signal.
-  await expect(page.getByText(/We sent a code to/)).toBeVisible();
+  // A2-1704: bump the OTP-step sync wait to 10s. The Continue click
+  // fires `POST /api/auth/request-otp` which proxies to the mock CTX
+  // and only THEN re-renders the OTP step. On a slow CI runner the
+  // round-trip can exceed Playwright's 5s default and produce the
+  // 15+-consecutive-run "toBeVisible flake" the audit flagged. Match
+  // the timeout cadence of other purchase-flow waits (10_000) — the
+  // `Verification code` label is the more reliable signal because it
+  // anchors on the OTP-input element, not interstitial text that can
+  // appear before the input is hooked up.
+  await expect(page.getByLabel('Verification code')).toBeVisible({ timeout: 10_000 });
   await page.getByLabel('Verification code').fill(FIXED_OTP);
   await page.getByRole('button', { name: 'Verify' }).click();
 }
@@ -99,7 +107,9 @@ test.describe('mocked purchase flow', () => {
     await gotoMerchantDetail(page);
     await page.getByLabel(/Email address/).fill('e2e@test.local');
     await page.getByRole('button', { name: 'Continue' }).click();
-    await expect(page.getByText(/We sent a code to/)).toBeVisible();
+    // A2-1704: anchor on the OTP-input label (not the interstitial
+    // text) and bump the timeout to 10s — same fix as `signInInline`.
+    await expect(page.getByLabel('Verification code')).toBeVisible({ timeout: 10_000 });
     await page.getByLabel('Verification code').fill('000000');
     await page.getByRole('button', { name: 'Verify' }).click();
 

@@ -85,6 +85,26 @@ export const UpstreamListResponseSchema = z
 // misconfiguration), we cap iteration instead of looping for hours.
 const MAX_PAGES = 100;
 
+/**
+ * A2-1922: parse `LOOP_MERCHANT_DENYLIST` once per refresh tick. The
+ * list is comma-separated CTX merchant IDs. Whitespace is trimmed;
+ * empty entries are dropped. Returns an empty Set when the env var
+ * is absent or empty. Read every refresh so an ops flip via
+ * `fly secrets set LOOP_MERCHANT_DENYLIST=...` takes effect on the
+ * next 6h tick (or sooner via the admin force-refresh button)
+ * without a restart.
+ */
+function readMerchantDenylist(): ReadonlySet<string> {
+  const raw = env.LOOP_MERCHANT_DENYLIST;
+  if (raw === undefined || raw.trim() === '') return new Set();
+  return new Set(
+    raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+  );
+}
+
 interface MerchantStore {
   merchants: Merchant[];
   merchantsById: Map<string, Merchant>;
@@ -155,6 +175,9 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
   const merchants: Merchant[] = [];
   let page = 1;
   let totalPages = 1;
+  // A2-1922: snapshot the denylist once at refresh start so a mid-
+  // refresh env flip can't half-apply across pages.
+  const denylist = readMerchantDenylist();
 
   try {
     while (page <= totalPages && page <= MAX_PAGES) {
@@ -189,6 +212,17 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
           log.warn(
             { issues: merchantParsed.error.issues },
             'Skipping malformed merchant from upstream',
+          );
+          continue;
+        }
+        // A2-1922: drop denylisted merchants before they enter the
+        // in-memory store. Logged at info-level so an operator can
+        // verify the filter is firing (and that `INCLUDE_DISABLED_MERCHANTS`
+        // dev-mode override hasn't accidentally re-enabled them).
+        if (denylist.has(merchantParsed.data.id)) {
+          log.info(
+            { merchantId: merchantParsed.data.id, merchantName: merchantParsed.data.name },
+            'Merchant filtered by LOOP_MERCHANT_DENYLIST',
           );
           continue;
         }
