@@ -39,6 +39,7 @@ import {
 } from '../credits/pending-payouts.js';
 import { findOutboundPaymentByMemo } from './horizon.js';
 import { submitPayout, PayoutSubmitError } from './payout-submit.js';
+import { feeForAttempt } from './fee-strategy.js';
 import { notifyPayoutFailed } from '../discord.js';
 
 const log = logger.child({ area: 'payout-worker' });
@@ -157,14 +158,15 @@ async function payOne(row: PendingPayout, args: RunPayoutTickArgs): Promise<PayO
   //     staleSeconds. Re-claim with a CAS on attempts so two racing
   //     workers don't both re-submit; bumps attempts + fresh
   //     submittedAt while leaving state in 'submitted'.
+  let claimed: PendingPayout | null;
   if (row.state === 'pending') {
-    const claimed = await markPayoutSubmitted(row.id);
+    claimed = await markPayoutSubmitted(row.id);
     if (claimed === null) {
       return 'skippedRace';
     }
   } else {
     // state === 'submitted' — watchdog re-pick.
-    const claimed = await reclaimSubmittedPayout({
+    claimed = await reclaimSubmittedPayout({
       id: row.id,
       expectedAttempts: row.attempts,
     });
@@ -178,10 +180,21 @@ async function payOne(row: PendingPayout, args: RunPayoutTickArgs): Promise<PayO
   }
 
   try {
+    // A2-1921 fee-bump: scale the fee per attempt so a congested
+    // network drains naturally instead of going terminal at base
+    // fee. `claimed.attempts` is the post-increment counter from
+    // markPayoutSubmitted, so it's already the attempt-number we're
+    // about to make.
+    const feeStroops = feeForAttempt(claimed.attempts, {
+      baseFeeStroops: env.LOOP_PAYOUT_FEE_BASE_STROOPS,
+      capFeeStroops: env.LOOP_PAYOUT_FEE_CAP_STROOPS,
+      multiplier: env.LOOP_PAYOUT_FEE_MULTIPLIER,
+    });
     const { txHash } = await submitPayout({
       secret: args.operatorSecret,
       horizonUrl: args.horizonUrl,
       networkPassphrase: args.networkPassphrase,
+      feeStroops,
       intent: {
         to: row.toAddress,
         assetCode: row.assetCode,
