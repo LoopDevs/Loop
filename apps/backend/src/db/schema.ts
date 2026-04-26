@@ -493,6 +493,28 @@ export const orders = pgTable(
     index('orders_pending_payment')
       .on(t.state, t.createdAt)
       .where(sql`${t.state} = 'pending_payment'`),
+    // A2-708: `sweepStuckProcurement` polls for `state='procuring'
+    // AND procured_at < cutoff`. Without this partial index every
+    // sweep tick scans the full orders table; at scale that blocks
+    // a connection per tick. Partial index keyed on procured_at,
+    // scoped to in-flight procurement only.
+    index('orders_procuring_procured_at')
+      .on(t.procuredAt)
+      .where(sql`${t.state} = 'procuring'`),
+    // A2-709: ~15 admin aggregates (merchant-stats, top-earners,
+    // flywheel-stats, supplier-spend, payment-method-activity,
+    // …) all filter on `state='fulfilled' AND fulfilled_at >= since`,
+    // most additionally on `merchant_id`. Two partial indexes:
+    //   - per-merchant cut → `(merchant_id, fulfilled_at)`
+    //   - fleet cut → `(fulfilled_at)`
+    // Both scoped to fulfilled-only so the index is small enough
+    // that the per-merchant aggregate stays index-only at scale.
+    index('orders_fulfilled_merchant_at')
+      .on(t.merchantId, t.fulfilledAt)
+      .where(sql`${t.state} = 'fulfilled'`),
+    index('orders_fulfilled_at')
+      .on(t.fulfilledAt)
+      .where(sql`${t.state} = 'fulfilled'`),
     // Ops lookup — "did operator X place this order?" — from the
     // admin pool-health surface (ADR 013).
     index('orders_ctx_operator').on(t.ctxOperatorId),
