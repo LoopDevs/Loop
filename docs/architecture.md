@@ -123,6 +123,21 @@ Purchase
 - Tokens are upstream (CTX) tokens — backend proxies without verification
 - Token refresh: POST /api/auth/refresh → proxied to upstream POST /refresh-token
 
+**A2-1615 — CSRF posture (do not regress):** Loop uses **Bearer-only**
+auth. The backend never sets cookies (`grep -rn "Set-Cookie"
+apps/backend/src/` returns zero hits outside tests). CSRF defence is
+implicit-by-construction here: a cross-origin attacker page cannot
+forge a request that carries the user's `Authorization` header — the
+header is added by our own JS, never by the browser auto-sending
+cookies. No CSRF token primitive exists today and none is needed.
+
+**Any future move to cookie-based session auth must add CSRF tokens
+before rollout.** The migration is silently breaking otherwise: every
+authenticated mutation today (orders, withdrawals, admin writes) would
+become forgeable from a malicious origin once cookies start riding
+along. If the migration is even being scoped, treat CSRF tokens as a
+prerequisite, not a follow-up.
+
 ---
 
 ## Image proxy
