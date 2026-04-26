@@ -1,8 +1,4 @@
 import type {
-  AssetCirculationResponse,
-  AssetDriftState,
-  AssetDriftStateResponse,
-  AssetDriftStateRow,
   CashbackRealizationDailyResponse,
   CashbackRealizationDay,
   CashbackRealizationResponse,
@@ -212,28 +208,21 @@ export async function getTreasurySnapshot(): Promise<TreasurySnapshot> {
  * LOOP asset). Safety-critical metric — non-zero drift that isn't
  * explained by in-flight payouts means something's wrong.
  */
-// A2-1506: `AssetCirculationResponse`, `AssetDriftState`,
-// `AssetDriftStateRow`, `AssetDriftStateResponse` moved to
-// `@loop/shared/admin-assets.ts`. Re-exported via `export type` so
-// existing `~/services/admin` call sites keep resolving.
-export type {
-  AssetCirculationResponse,
-  AssetDriftState,
-  AssetDriftStateRow,
-  AssetDriftStateResponse,
-};
-
-/** `GET /api/admin/assets/:assetCode/circulation` */
-export async function getAssetCirculation(assetCode: string): Promise<AssetCirculationResponse> {
-  return authenticatedRequest<AssetCirculationResponse>(
-    `/api/admin/assets/${encodeURIComponent(assetCode)}/circulation`,
-  );
-}
-
-/** `GET /api/admin/asset-drift/state` */
-export async function getAssetDriftState(): Promise<AssetDriftStateResponse> {
-  return authenticatedRequest<AssetDriftStateResponse>('/api/admin/asset-drift/state');
-}
+// A2-1165 (slice 3): asset-circulation + asset-drift extracted to
+// `./admin-assets.ts`. Type definitions remain canonical in
+// `@loop/shared/admin-assets.ts` (per A2-1506); the new file
+// re-exports them alongside the two read endpoints. Re-export here
+// keeps existing consumers (AssetCirculationCard.tsx, AssetDriftBadge
+// .tsx, AssetDriftWatcherCard.tsx, routes/admin.assets.tsx + paired
+// tests) untouched.
+export {
+  type AssetCirculationResponse,
+  type AssetDriftState,
+  type AssetDriftStateRow,
+  type AssetDriftStateResponse,
+  getAssetCirculation,
+  getAssetDriftState,
+} from './admin-assets';
 
 /**
  * Payout settlement-lag SLA (ADR 015 / 016). Percentile latency in
