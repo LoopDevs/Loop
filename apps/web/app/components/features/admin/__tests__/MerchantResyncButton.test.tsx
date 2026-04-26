@@ -14,8 +14,10 @@ const { adminMock } = vi.hoisted(() => ({
   },
 }));
 
-// A2-509: service now takes `{ reason }` and returns an ADR-017
-// envelope. Tests stub the prompt so the button call is deterministic.
+// A2-509: service takes `{ reason }` and returns an ADR-017 envelope.
+// A2-1107: prompt source migrated from window.prompt to the
+// ReasonDialog native-<dialog> component; tests now interact with
+// the dialog form directly.
 vi.mock('~/services/admin', async (importActual) => {
   const actual = (await importActual()) as typeof AdminModule;
   return {
@@ -39,7 +41,22 @@ function envelope<T>(result: T): { result: T; audit: Record<string, unknown> } {
 }
 
 beforeEach(() => {
-  window.prompt = vi.fn(() => 'ops-initiated resync');
+  // jsdom doesn't ship a complete <dialog> implementation: showModal
+  // and close are missing on HTMLDialogElement. Polyfill the minimum
+  // surface ReasonDialog.tsx exercises so the dialog opens / closes
+  // in tests without a heavier vendor dep.
+
+  const proto = HTMLDialogElement.prototype as any;
+  if (typeof proto.showModal !== 'function') {
+    proto.showModal = function (this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    };
+  }
+  if (typeof proto.close !== 'function') {
+    proto.close = function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    };
+  }
 });
 
 function renderButton(): void {
@@ -55,6 +72,30 @@ beforeEach(() => {
   adminMock.resyncMerchants.mockReset();
 });
 
+/**
+ * Open the reason dialog by clicking the "Resync catalog" button,
+ * then enter `reason` in the textarea and submit the form. jsdom's
+ * `<dialog method="dialog">` form-submission semantics aren't
+ * complete — `fireEvent.click` on a type=submit button doesn't
+ * always fire the form's onSubmit. Use `fireEvent.submit` on the
+ * form directly so the React handler runs deterministically.
+ */
+async function submitReasonDialog(reason: string): Promise<void> {
+  // Open dialog
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: /Resync catalog/i }));
+  });
+  const textarea = await screen.findByRole('textbox');
+  await act(async () => {
+    fireEvent.change(textarea, { target: { value: reason } });
+  });
+  const form = textarea.closest('form');
+  if (form === null) throw new Error('reason dialog form not found');
+  await act(async () => {
+    fireEvent.submit(form);
+  });
+}
+
 describe('<MerchantResyncButton />', () => {
   it('flashes the synced merchant count on triggered: true', async () => {
     adminMock.resyncMerchants.mockResolvedValue(
@@ -65,9 +106,7 @@ describe('<MerchantResyncButton />', () => {
       }),
     );
     renderButton();
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /Resync catalog/i }));
-    });
+    await submitReasonDialog('ops-initiated resync');
     await waitFor(() => {
       expect(screen.getByText(/Synced 473 merchants/i)).toBeDefined();
     });
@@ -82,9 +121,7 @@ describe('<MerchantResyncButton />', () => {
       }),
     );
     renderButton();
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /Resync catalog/i }));
-    });
+    await submitReasonDialog('ops-initiated resync');
     await waitFor(() => {
       expect(screen.getByText(/Already in sync/i)).toBeDefined();
     });
@@ -98,9 +135,7 @@ describe('<MerchantResyncButton />', () => {
       }),
     );
     renderButton();
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /Resync catalog/i }));
-    });
+    await submitReasonDialog('ops-initiated resync');
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toMatch(/Upstream CTX refused the sweep/i);
   });
@@ -110,9 +145,7 @@ describe('<MerchantResyncButton />', () => {
       new ApiException(429, { code: 'RATE_LIMITED', message: 'Too many requests' }),
     );
     renderButton();
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /Resync catalog/i }));
-    });
+    await submitReasonDialog('ops-initiated resync');
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toMatch(/Too many resyncs/i);
   });
@@ -125,36 +158,57 @@ describe('<MerchantResyncButton />', () => {
       }),
     );
     renderButton();
-    const button = screen.getByRole('button', { name: /Resync catalog/i }) as HTMLButtonElement;
-    fireEvent.click(button);
+    await submitReasonDialog('ops-initiated resync');
     await waitFor(() => {
-      expect((screen.getByRole('button') as HTMLButtonElement).textContent).toMatch(/Resyncing…/);
+      const triggers = screen
+        .getAllByRole('button', { name: /Resync/i })
+        .filter((b) => b.textContent?.includes('Resyncing…'));
+      expect(triggers.length).toBeGreaterThan(0);
     });
-    expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(true);
+    const triggerBtn = screen
+      .getAllByRole('button')
+      .find((b) => b.textContent?.includes('Resyncing…')) as HTMLButtonElement;
+    expect(triggerBtn.disabled).toBe(true);
     // Let the promise settle so the test harness doesn't hang.
     await act(async () => {
       resolve(envelope({ merchantCount: 0, loadedAt: '2026-01-01T00:00:00Z', triggered: true }));
     });
   });
 
-  // A2-509: prompt-cancelled (null) → no-op, no mutation fires.
-  it('A2-509: does nothing when the reason prompt is cancelled', async () => {
-    window.prompt = vi.fn(() => null);
+  // A2-509 / A2-1107: dialog-cancelled (Cancel button) → no-op, no
+  // mutation fires.
+  it('A2-509: does nothing when the reason dialog is cancelled', async () => {
     renderButton();
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /Resync catalog/i }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Cancel/i }));
     });
     expect(adminMock.resyncMerchants).not.toHaveBeenCalled();
   });
 
   it('A2-509: rejects a too-short reason without firing the mutation', async () => {
-    window.prompt = vi.fn(() => 'x');
     renderButton();
+    // ReasonDialog ignores leading/trailing whitespace, so a single
+    // non-blank char trips the 2-char floor.
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /Resync catalog/i }));
     });
+    const textarea = await screen.findByRole('textbox');
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'x' } });
+    });
+    const form = textarea.closest('form');
+    if (form === null) throw new Error('reason dialog form not found');
+    await act(async () => {
+      fireEvent.submit(form);
+    });
     expect(adminMock.resyncMerchants).not.toHaveBeenCalled();
-    const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toMatch(/2–500/);
+    // ReasonDialog renders its own validation message inside the dialog
+    // form. The dialog already shows the static "2–500 characters"
+    // helper text, so match the specific error sentence the component
+    // emits when validation fails.
+    expect(screen.getByText(/Reason must be 2–500 characters/)).toBeDefined();
   });
 });
