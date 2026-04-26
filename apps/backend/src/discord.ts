@@ -781,6 +781,57 @@ export function notifyPaymentWatcherStuck(args: {
   });
 }
 
+/**
+ * A2-1915: dedup keyed on the surface name so a single CTX endpoint
+ * silently breaking doesn't flood `#monitoring` with one alert per
+ * failed parse. Same 10-minute window as the circuit-breaker dedup.
+ */
+const CTX_SCHEMA_DRIFT_DEDUP_MS = 10 * 60 * 1000;
+const ctxSchemaDriftLastNotified = new Map<string, number>();
+
+/**
+ * A2-1915 — runtime CTX-schema drift detector.
+ *
+ * Fires when an upstream CTX response fails Zod validation on a
+ * surface that has a recorded contract fixture (A2-1706). This is
+ * the runtime companion to the PR-time contract test:
+ *
+ *   - PR-time gate: `apps/backend/src/__tests__/ctx-contract.test.ts`
+ *     blocks our-side narrowings against the recorded fixtures.
+ *   - Runtime detector: this notifier surfaces CTX-side drift when
+ *     a real response no longer matches our expected shape.
+ *
+ * Per-surface dedup means a sustained drift produces one alert per
+ * 10 minutes, not one per failed request. The `surface` arg should
+ * be the same identifier used in the contract test
+ * (`POST /verify-email`, `GET /merchants`, etc.) so ops can grep
+ * back to the fixture / schema pair.
+ */
+export function notifyCtxSchemaDrift(args: { surface: string; issuesSummary: string }): void {
+  const now = Date.now();
+  const last = ctxSchemaDriftLastNotified.get(args.surface);
+  if (last !== undefined && now - last < CTX_SCHEMA_DRIFT_DEDUP_MS) {
+    return;
+  }
+  ctxSchemaDriftLastNotified.set(args.surface, now);
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '⚠️ CTX schema drift detected',
+    description: truncate(
+      `Upstream CTX response no longer matches the expected schema for \`${escapeMarkdown(args.surface)}\`. Cross-check against the recorded fixture in \`apps/backend/src/__fixtures__/ctx/\` (A2-1706) and either update our schema or escalate to CTX.`,
+      DESCRIPTION_MAX,
+    ),
+    color: ORANGE,
+    fields: [
+      { name: 'Surface', value: `\`${escapeMarkdown(args.surface)}\``, inline: true },
+      {
+        name: 'Zod issues',
+        value: truncate(escapeMarkdown(args.issuesSummary), FIELD_VALUE_MAX),
+        inline: false,
+      },
+    ],
+  });
+}
+
 export function notifyOperatorPoolExhausted(args: { poolSize: number; reason: string }): void {
   void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
     title: '🔴 CTX Operator Pool Exhausted',
@@ -819,6 +870,11 @@ const circuitNotifyLastAt = new Map<string, number>();
 /** Test helper — wipe the dedup map so tests can exercise the throttle. */
 export function __resetCircuitNotifyDedupForTests(): void {
   circuitNotifyLastAt.clear();
+}
+
+/** A2-1915: same idea for the CTX-schema-drift dedup map. */
+export function __resetCtxSchemaDriftDedupForTests(): void {
+  ctxSchemaDriftLastNotified.clear();
 }
 
 /**
@@ -1012,6 +1068,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     channel: 'monitoring',
     description:
       'Fires when every operator in the CTX pool is unhealthy — procurement is blocked. Throttled to once per 15 min per deployment so a sustained outage stays loud without flooding the channel (ADR 013).',
+  },
+  {
+    name: 'notifyCtxSchemaDrift',
+    channel: 'monitoring',
+    description:
+      'A2-1915: fires when an upstream CTX response fails Zod validation on a surface with a recorded contract fixture (A2-1706). Runtime companion to the PR-time contract test. Per-surface 10-min dedup so sustained drift produces one alert per surface per ten minutes, not one per failed request.',
   },
   {
     name: 'notifyHealthChange',

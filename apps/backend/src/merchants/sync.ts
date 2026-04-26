@@ -5,6 +5,18 @@ import { logger } from '../logger.js';
 import { env } from '../env.js';
 import { getUpstreamCircuit } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
+import { notifyCtxSchemaDrift } from '../discord.js';
+
+/**
+ * A2-1915: condense a Zod issue array into a compact one-line
+ * summary for the Discord embed.
+ */
+function summariseZodIssues(issues: readonly z.ZodIssue[]): string {
+  return issues
+    .slice(0, 5)
+    .map((i) => `[${i.path.join('.') || '·'}] ${i.code}: ${i.message}`)
+    .join(' | ');
+}
 
 /**
  * Zod schema for upstream CTX merchants. Required fields (id, name, enabled)
@@ -161,6 +173,10 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
       const raw = await response.json();
       const parsed = UpstreamListResponseSchema.safeParse(raw);
       if (!parsed.success) {
+        notifyCtxSchemaDrift({
+          surface: 'GET /merchants',
+          issuesSummary: summariseZodIssues(parsed.error.issues),
+        });
         throw new Error(
           `Upstream merchants response has unexpected shape: ${parsed.error.message}`,
         );
