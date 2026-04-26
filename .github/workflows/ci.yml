@@ -56,7 +56,17 @@ jobs:
           key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
       - name: Install deps
         if: steps.npm-cache.outputs.cache-hit != 'true'
-        run: npm ci
+        # A2-304: `--ignore-scripts` blocks every postinstall hook
+        # (notably `@bufbuild/buf` shelling to `npm install` as its
+        # binary-fetch fallback — supply-chain surface on
+        # `--omit=optional` clones). esbuild ships pre-built binaries
+        # via optional deps + a postinstall that selects the right
+        # platform; `npm rebuild esbuild` regenerates the platform
+        # binary symlink without re-running every other postinstall.
+        # Production Dockerfiles already use this pattern.
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
       # Install flyctl so `lint:docs` can run `flyctl config validate` on
       # every fly.toml in the repo. Without this, a regression like the
       # orphaned `[[services.http_checks]]` block (PR #120) slips through
@@ -103,7 +113,17 @@ jobs:
           key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
       - name: Install deps
         if: steps.npm-cache.outputs.cache-hit != 'true'
-        run: npm ci
+        # A2-304: `--ignore-scripts` blocks every postinstall hook
+        # (notably `@bufbuild/buf` shelling to `npm install` as its
+        # binary-fetch fallback — supply-chain surface on
+        # `--omit=optional` clones). esbuild ships pre-built binaries
+        # via optional deps + a postinstall that selects the right
+        # platform; `npm rebuild esbuild` regenerates the platform
+        # binary symlink without re-running every other postinstall.
+        # Production Dockerfiles already use this pattern.
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
       - name: Run tests with coverage
         run: npm run test:coverage --workspaces --if-present
       - name: Upload coverage
@@ -232,7 +252,17 @@ jobs:
           key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
       - name: Install deps
         if: steps.npm-cache.outputs.cache-hit != 'true'
-        run: npm ci
+        # A2-304: `--ignore-scripts` blocks every postinstall hook
+        # (notably `@bufbuild/buf` shelling to `npm install` as its
+        # binary-fetch fallback — supply-chain surface on
+        # `--omit=optional` clones). esbuild ships pre-built binaries
+        # via optional deps + a postinstall that selects the right
+        # platform; `npm rebuild esbuild` regenerates the platform
+        # binary symlink without re-running every other postinstall.
+        # Production Dockerfiles already use this pattern.
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
       - name: Build backend
         run: npm run build -w @loop/backend
       - name: Build web (SSR)
@@ -335,7 +365,17 @@ jobs:
           key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
       - name: Install deps
         if: steps.npm-cache.outputs.cache-hit != 'true'
-        run: npm ci
+        # A2-304: `--ignore-scripts` blocks every postinstall hook
+        # (notably `@bufbuild/buf` shelling to `npm install` as its
+        # binary-fetch fallback — supply-chain surface on
+        # `--omit=optional` clones). esbuild ships pre-built binaries
+        # via optional deps + a postinstall that selects the right
+        # platform; `npm rebuild esbuild` regenerates the platform
+        # binary symlink without re-running every other postinstall.
+        # Production Dockerfiles already use this pattern.
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
       - name: Cache Playwright browsers
         id: playwright-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -408,7 +448,17 @@ jobs:
           key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
       - name: Install deps
         if: steps.npm-cache.outputs.cache-hit != 'true'
-        run: npm ci
+        # A2-304: `--ignore-scripts` blocks every postinstall hook
+        # (notably `@bufbuild/buf` shelling to `npm install` as its
+        # binary-fetch fallback — supply-chain surface on
+        # `--omit=optional` clones). esbuild ships pre-built binaries
+        # via optional deps + a postinstall that selects the right
+        # platform; `npm rebuild esbuild` regenerates the platform
+        # binary symlink without re-running every other postinstall.
+        # Production Dockerfiles already use this pattern.
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
       - name: Cache Playwright browsers
         id: playwright-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
