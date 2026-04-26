@@ -12,20 +12,15 @@ import { requestCounterMiddleware } from './middleware/request-counter.js';
 import { corsMiddleware } from './middleware/cors.js';
 import { secureHeadersMiddleware } from './middleware/secure-headers.js';
 import { bodyLimitMiddleware } from './middleware/body-limit.js';
-import { noStoreResponse, privateNoStoreResponse } from './middleware/cache-control.js';
+import { privateNoStoreResponse } from './middleware/cache-control.js';
 import { killSwitch } from './middleware/kill-switch.js';
 import { rateLimit } from './middleware/rate-limit.js';
 import { startCleanupInterval } from './cleanup.js';
 import { metricsHandler, openApiHandler } from './observability-handlers.js';
 import { mountTestEndpoints } from './test-endpoints.js';
 import { mountMerchantRoutes } from './routes/merchants.js';
-import {
-  requestOtpHandler,
-  verifyOtpHandler,
-  refreshHandler,
-  logoutHandler,
-  requireAuth,
-} from './auth/handler.js';
+import { requireAuth } from './auth/handler.js';
+import { mountAuthRoutes } from './routes/auth.js';
 import { createOrderHandler, listOrdersHandler, getOrderHandler } from './orders/handler.js';
 import {
   loopCreateOrderHandler,
@@ -33,7 +28,6 @@ import {
   loopListOrdersHandler,
 } from './orders/loop-handler.js';
 import { mountMiscRoutes } from './routes/misc.js';
-import { googleSocialLoginHandler, appleSocialLoginHandler } from './auth/social.js';
 import { notifyAdminBulkRead } from './discord.js';
 import { requireAdmin } from './auth/require-admin.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from './admin/handler.js';
@@ -281,41 +275,11 @@ mountMerchantRoutes(app);
 // where the public surface lands in the middleware chain.
 mountPublicRoutes(app);
 
-// ─── Auth ─────────────────────────────────────────────────────────────────────
-
-// Auth responses carry access + refresh tokens. POST/DELETE aren't cached
-// by standards-compliant caches, but a misconfigured intermediate proxy
-// that treats any HTTP response as cacheable would otherwise hand one
-// user's freshly-minted tokens to the next caller of the same URL. Same
-// defense-in-depth pattern used for /api/orders.
-app.use('/api/auth/*', noStoreResponse);
-
-app.post('/api/auth/request-otp', killSwitch('auth'), rateLimit(5, 60_000), requestOtpHandler);
-// OTP brute-force defense: 10 attempts per minute per IP. With a 6-digit code
-// that caps guesses at ~14,400/day — upstream lockout/expiry happens first.
-app.post('/api/auth/verify-otp', killSwitch('auth'), rateLimit(10, 60_000), verifyOtpHandler);
-// Refresh abuse defense: legit clients refresh once per access-token lifetime,
-// so 30/min per IP leaves plenty of headroom without enabling spray attacks.
-app.post('/api/auth/refresh', rateLimit(30, 60_000), refreshHandler);
-// Social login (ADR 014). Same 10/min cap as verify-otp — both
-// are unauthenticated entry points and both resolve to a minted
-// Loop JWT pair on success.
-app.post(
-  '/api/auth/social/google',
-  killSwitch('auth'),
-  rateLimit(10, 60_000),
-  googleSocialLoginHandler,
-);
-app.post(
-  '/api/auth/social/apple',
-  killSwitch('auth'),
-  rateLimit(10, 60_000),
-  appleSocialLoginHandler,
-);
-// Logout: 20/min per IP. The handler fans out to an upstream revoke, so
-// without a limit an attacker could cheaply spam arbitrary refresh tokens
-// at CTX through us.
-app.delete('/api/auth/session', rateLimit(20, 60_000), logoutHandler);
+// `/api/auth/*` route mounts (OTP / refresh / social / logout +
+// the no-store cache-control mount that gates them all) live in
+// `./routes/auth.ts`. Bundled together because the cache-control
+// constraint is inseparable from the credential-minting handlers.
+mountAuthRoutes(app);
 
 // ─── Orders (authenticated) ───────────────────────────────────────────────────
 //
