@@ -17,7 +17,7 @@
  */
 import type { Context } from 'hono';
 import { UUID_RE } from '../uuid.js';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, lt } from 'drizzle-orm';
 import { CREDIT_TRANSACTION_TYPES } from '@loop/shared';
 import { db } from '../db/client.js';
 import { creditTransactions } from '../db/schema.js';
@@ -89,7 +89,10 @@ export async function adminUserCreditTransactionsHandler(c: Context): Promise<Re
     const conditions = [eq(creditTransactions.userId, userId)];
     if (typeParam !== undefined) conditions.push(eq(creditTransactions.type, typeParam));
     if (before !== undefined) {
-      conditions.push(sql`${creditTransactions.createdAt} < ${before}`);
+      // A2-1610: typed `lt()` instead of raw sql template — postgres-js
+      // can't bind a Date through the sql interpolator. See matching
+      // fixes in `audit-tail-csv.ts` and `adjustments.ts`.
+      conditions.push(lt(creditTransactions.createdAt, before));
     }
 
     const rows = (await db
