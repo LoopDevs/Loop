@@ -22,7 +22,7 @@
  * amountStroops + attempts; ISO-8601 for all timestamps.
  */
 import type { Context } from 'hono';
-import { and, asc, sql } from 'drizzle-orm';
+import { asc, gte } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { pendingPayouts } from '../db/schema.js';
 import { logger } from '../logger.js';
@@ -102,7 +102,8 @@ export async function adminPayoutsCsvHandler(c: Context): Promise<Response> {
     const rows = (await db
       .select()
       .from(pendingPayouts)
-      .where(and(sql`${pendingPayouts.createdAt} >= ${since}`))
+      // A2-1610: typed `gte()` — see matching fix in `audit-tail-csv.ts`.
+      .where(gte(pendingPayouts.createdAt, since))
       .orderBy(asc(pendingPayouts.createdAt))
       .limit(ROW_CAP + 1)) as Row[];
 

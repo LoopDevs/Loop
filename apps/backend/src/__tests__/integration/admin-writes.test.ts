@@ -36,6 +36,9 @@ import { eq } from 'drizzle-orm';
 const RUN_INTEGRATION = process.env['LOOP_E2E_DB'] === '1';
 
 // Discord notifiers fire-and-forget; mocking keeps test logs quiet.
+// `notifyAdminBulkRead` is a vi.fn() (not a noop) so the dedicated
+// admin-read audit middleware test block at the bottom of this file
+// can assert on its call shape without re-mocking.
 vi.mock('../../discord.js', async (importActual) => {
   const actual = (await importActual()) as Record<string, unknown>;
   const noop = vi.fn();
@@ -43,7 +46,7 @@ vi.mock('../../discord.js', async (importActual) => {
     ...actual,
     notifyAdminAudit: noop,
     notifyCashbackConfigChanged: noop,
-    notifyAdminBulkRead: noop,
+    notifyAdminBulkRead: vi.fn(),
   };
 });
 
@@ -51,6 +54,7 @@ import { db } from '../../db/client.js';
 import { users, orders, creditTransactions, userCredits, pendingPayouts } from '../../db/schema.js';
 import { findOrCreateUserByEmail, upsertUserFromCtx } from '../../db/users.js';
 import { app } from '../../app.js';
+import { notifyAdminBulkRead } from '../../discord.js';
 import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
 
 const describeIf = RUN_INTEGRATION ? describe : describe.skip;
@@ -465,5 +469,50 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
       .from(pendingPayouts)
       .where(eq(pendingPayouts.userId, targetUser.id));
     expect(payouts).toHaveLength(0);
+  });
+});
+
+describeIf('routes/admin.ts — admin-read audit middleware (A2-2008)', () => {
+  beforeAll(async () => {
+    await ensureMigrated();
+  });
+
+  beforeEach(async () => {
+    await truncateAllTables();
+    vi.mocked(notifyAdminBulkRead).mockReset();
+  });
+
+  it('fires notifyAdminBulkRead on a 200 GET to a .csv endpoint', async () => {
+    const { bearer } = await seed();
+    // /api/admin/audit-tail.csv handles empty data gracefully (it's
+    // the admin-write audit log; a fresh DB has none). Any 200 GET
+    // ending in .csv triggers the middleware path we want to assert
+    // on; the middleware skips non-200 / non-GET / non-CSV paths.
+    const res = await app.request('http://localhost/api/admin/audit-tail.csv', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${bearer}` },
+    });
+    expect(res.status).toBe(200);
+    expect(notifyAdminBulkRead).toHaveBeenCalledTimes(1);
+    const call = vi.mocked(notifyAdminBulkRead).mock.calls[0]?.[0];
+    expect(call?.endpoint).toBe('GET /api/admin/audit-tail.csv');
+  });
+
+  it('does NOT fire notifyAdminBulkRead on a non-CSV admin GET', async () => {
+    const { bearer } = await seed();
+    const res = await app.request('http://localhost/api/admin/treasury', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${bearer}` },
+    });
+    expect(res.status).toBe(200);
+    expect(notifyAdminBulkRead).not.toHaveBeenCalled();
+  });
+
+  it('does NOT fire notifyAdminBulkRead on an unauth GET (401 short-circuits)', async () => {
+    const res = await app.request('http://localhost/api/admin/audit-tail.csv', {
+      method: 'GET',
+    });
+    expect(res.status).toBe(401);
+    expect(notifyAdminBulkRead).not.toHaveBeenCalled();
   });
 });
