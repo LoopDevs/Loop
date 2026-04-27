@@ -22,6 +22,12 @@ export default defineConfig({
   retries: process.env['CI'] ? 2 : 0,
   reporter: process.env['CI'] ? 'github' : 'html',
 
+  // A2-1705 phase A.2: run drizzle migrations against `loop_test`
+  // BEFORE Playwright spins up the backend. The backend skips
+  // `runMigrations()` under NODE_ENV=test, so this hook is where the
+  // schema actually lands.
+  globalSetup: './tests/e2e-mocked/global-setup.ts',
+
   use: {
     baseURL: 'http://localhost:5174',
     trace: 'on-first-retry',
@@ -63,11 +69,26 @@ export default defineConfig({
         GIFT_CARD_API_BASE_URL: 'http://localhost:9091',
         REFRESH_INTERVAL_HOURS: '6',
         LOCATION_REFRESH_INTERVAL_HOURS: '24',
-        // Placeholder — NODE_ENV=test skips runMigrations in index.ts
-        // and the mocked e2e doesn't exercise admin / credits endpoints,
-        // so no live connection is ever opened. The URL just has to
-        // satisfy env.ts's zod validator.
-        DATABASE_URL: 'postgres://placeholder:placeholder@localhost:5433/loop_test',
+        // A2-1705 phase A.2: real postgres connection. The migrations
+        // are applied by `tests/e2e-mocked/global-setup.ts` before
+        // Playwright boots this webServer, so the backend connects to
+        // a current schema. NODE_ENV=test still skips the backend's
+        // own `runMigrations()` call (idempotent overlap would be
+        // harmless but pointless). The existing CTX-proxy purchase
+        // flow doesn't write to the DB (orders live in mock-CTX's
+        // memory map), so this connection is a harness investment for
+        // future loop-native UI tests rather than a behaviour change
+        // for the current 2-test suite.
+        //
+        // Loop-native auth env (LOOP_AUTH_NATIVE_ENABLED + signing
+        // key + issuer fixtures) is intentionally left unset so the
+        // home page's `/api/config` response stays identical to its
+        // pre-A.2 shape. Flipping it would change SSR-vs-CSR rendering
+        // (the home page has a `loopAuthNativeEnabled` branch) and
+        // cause a hydration mismatch in the existing CTX-proxy tests.
+        // A future flywheel-via-UI test will pin those env vars in a
+        // dedicated `playwright.flywheel.config.ts`.
+        DATABASE_URL: 'postgres://loop:loop@localhost:5433/loop_test',
         // Bypass per-IP rate limits — the suite runs 2 tests with
         // Playwright retries=2 in CI, hitting /api/auth/request-otp
         // up to 6 times in a cold window vs the 5/min limit.
