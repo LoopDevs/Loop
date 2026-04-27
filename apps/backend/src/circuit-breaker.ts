@@ -211,33 +211,10 @@ export class CircuitOpenError extends Error {
 }
 
 // ─── Per-endpoint instances ─────────────────────────────────────────────────
-
-const circuitsByKey = new Map<string, CircuitBreaker>();
-
-/**
- * Returns the circuit breaker for a given upstream endpoint category, lazily
- * creating it on first use. Callers pass a stable key string (e.g. 'login',
- * 'gift-cards', 'merchants'). Each key gets its own independent breaker so
- * that one failing endpoint doesn't trip the circuit for healthy ones —
- * previously `/merchants` sync timing out would have killed auth too.
- */
-export function getUpstreamCircuit(key: string): CircuitBreaker {
-  let cb = circuitsByKey.get(key);
-  if (cb === undefined) {
-    cb = createCircuitBreaker({ name: `upstream:${key}` });
-    circuitsByKey.set(key, cb);
-  }
-  return cb;
-}
-
-/**
- * Snapshot of every known breaker's state. Exposed for the /metrics
- * endpoint; also useful for tests.
- */
-export function getAllCircuitStates(): Record<string, CircuitState> {
-  const out: Record<string, CircuitState> = {};
-  for (const [key, cb] of circuitsByKey) {
-    out[key] = cb.getState();
-  }
-  return out;
-}
+//
+// `getUpstreamCircuit(key)` and `getAllCircuitStates()` live in
+// `./circuit-breaker-registry.ts` — the lazy-instantiated map of
+// named breakers the request handlers dispatch through. Re-exported
+// here so existing import sites against `'./circuit-breaker.js'`
+// keep resolving.
+export { getUpstreamCircuit, getAllCircuitStates } from './circuit-breaker-registry.js';
