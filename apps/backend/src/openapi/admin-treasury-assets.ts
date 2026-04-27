@@ -33,6 +33,7 @@
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
+import { registerAdminAssetDriftStateOpenApi } from './admin-asset-drift-state.js';
 
 type ZodEnumLike = z.ZodEnum<{ readonly [key: string]: string | number }>;
 
@@ -152,33 +153,11 @@ export function registerAdminTreasuryAssetsOpenApi(
     }),
   );
 
-  const AssetDriftStateRow = registry.register(
-    'AssetDriftStateRow',
-    z.object({
-      assetCode: LoopAssetCode,
-      state: z.enum(['unknown', 'ok', 'over']).openapi({
-        description:
-          "`unknown` = watcher hasn't read this asset yet (fresh boot / issuer unconfigured); `ok` = within threshold on last successful tick; `over` = outside threshold.",
-      }),
-      lastDriftStroops: z.string().nullable().openapi({
-        description:
-          'Last drift in stroops (bigint-as-string). Null until the first successful read.',
-      }),
-      lastThresholdStroops: z.string().nullable(),
-      lastCheckedMs: z.number().int().nullable(),
-    }),
-  );
-
-  const AssetDriftStateResponse = registry.register(
-    'AssetDriftStateResponse',
-    z.object({
-      lastTickMs: z.number().int().nullable().openapi({
-        description: 'Unix ms of the last full watcher pass. Null when the watcher never ran.',
-      }),
-      running: z.boolean(),
-      perAsset: z.array(AssetDriftStateRow),
-    }),
-  );
+  // `AssetDriftStateRow` and `AssetDriftStateResponse`, plus the
+  // `/api/admin/asset-drift/state` path that uses them, live in
+  // `./admin-asset-drift-state.ts`. Registered after the two
+  // Horizon-bound paths below so OpenAPI path-registration order
+  // is preserved.
 
   registry.registerPath({
     method: 'get',
@@ -255,31 +234,9 @@ export function registerAdminTreasuryAssetsOpenApi(
     },
   });
 
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/asset-drift/state',
-    summary: 'In-memory snapshot of the asset-drift watcher (ADR 015).',
-    description:
-      "Surfaces the background drift watcher's last-pass per-asset state without forcing a fresh Horizon read. `running: false` means the watcher is not active in this process (no LOOP issuers configured or `LOOP_WORKERS_ENABLED=false`). `perAsset[].state` is `unknown` until the first successful per-asset tick. Cheap enough to poll from the admin landing (120/min rate limit).",
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    responses: {
-      200: {
-        description: 'Watcher state snapshot',
-        content: { 'application/json': { schema: AssetDriftStateResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
+  // The asset-drift watcher-state path lives in
+  // `./admin-asset-drift-state.ts` along with its two
+  // locally-scoped schemas. Same path-registration position as
+  // the original block.
+  registerAdminAssetDriftStateOpenApi(registry, errorResponse, LoopAssetCode);
 }
