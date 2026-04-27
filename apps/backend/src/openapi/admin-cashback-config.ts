@@ -2,21 +2,25 @@
  * Admin cashback-config CRUD OpenAPI registrations (ADR 011 / 017).
  *
  * Lifted out of `apps/backend/src/openapi/admin.ts` to keep that
- * file under the soft cap. This slice owns:
+ * file under the soft cap. This slice owns the read surface
+ * directly (list / CSV / fleet history) and fans the upsert + the
+ * per-merchant history out to topical siblings:
  *
- *   - The six cashback-config schemas (`AdminCashbackConfig`,
- *     `AdminCashbackConfigListResponse`,
- *     `AdminCashbackConfigEnvelope`,
- *     `UpsertCashbackConfigBody`,
- *     `AdminCashbackConfigHistoryRow`,
- *     `AdminCashbackConfigHistoryResponse`).
- *   - The five `/api/admin/merchant-cashback-configs*` paths
- *     (list, CSV, fleet history, per-merchant upsert, per-merchant
- *     history).
+ *   - `AdminCashbackConfig` + `AdminCashbackConfigListResponse`
+ *     declared here; `AdminCashbackConfig` is threaded into the
+ *     upsert sibling so the envelope embeds the same registered
+ *     shape.
+ *   - The list / CSV / fleet-history paths registered directly.
+ *   - The per-merchant upsert (`UpsertCashbackConfigBody` +
+ *     `AdminCashbackConfigEnvelope`) lives in
+ *     `./admin-cashback-config-upsert.ts`.
+ *   - The per-merchant history (`AdminCashbackConfigHistoryRow` +
+ *     `AdminCashbackConfigHistoryResponse`) lives in
+ *     `./admin-cashback-config-history.ts`.
  *
- * None of those six schemas are referenced anywhere else in
- * admin.ts — they travel with the slice. Three dependencies cross
- * the boundary:
+ * The CRUD façade is preserved: callers in `admin.ts` still pass
+ * the same threaded deps in one factory call and the spec output
+ * stays byte-identical. Three dependencies cross the boundary:
  *
  *   - `errorResponse` (shared component from openapi.ts).
  *   - `cashbackPctString` (cross-section schema for the
@@ -34,6 +38,7 @@
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminCashbackConfigHistoryOpenApi } from './admin-cashback-config-history.js';
+import { registerAdminCashbackConfigUpsertOpenApi } from './admin-cashback-config-upsert.js';
 
 /**
  * Registers the cashback-config schemas + the five
@@ -79,36 +84,12 @@ export function registerAdminCashbackConfigOpenApi(
     z.object({ configs: z.array(AdminCashbackConfig) }),
   );
 
-  // A2-502: ADR-017 envelope returned by the upsert endpoint. Mirrors
-  // CreditAdjustmentEnvelope / RefundEnvelope — `result` is the updated
-  // config row, `audit` is the shared admin-write audit shape that every
-  // ADR-017 mutation returns.
-  const AdminCashbackConfigEnvelope = registry.register(
-    'AdminCashbackConfigEnvelope',
-    z.object({
-      result: AdminCashbackConfig,
-      audit: AdminWriteAudit,
-    }),
-  );
-
-  const UpsertCashbackConfigBody = registry.register(
-    'UpsertCashbackConfigBody',
-    z
-      .object({
-        wholesalePct: z.coerce.number().min(0).max(100),
-        userCashbackPct: z.coerce.number().min(0).max(100),
-        loopMarginPct: z.coerce.number().min(0).max(100),
-        active: z.boolean().optional(),
-        reason: z.string().min(2).max(500).openapi({
-          description:
-            'A2-502 / ADR 017: operator-authored rationale for the edit. Fanned out to the admin-audit Discord channel and (A2-908) persisted on any downstream ledger writes — NOT on the config row itself, which carries its own audit trail via the `merchant_cashback_config_history` trigger.',
-        }),
-      })
-      .openapi({
-        description:
-          'The three split percentages are coerced from number-or-numeric-string and must sum to ≤100. `active` defaults to true on initial insert. `reason` is required per ADR 017 admin-write contract.',
-      }),
-  );
+  // The upsert path (PUT /api/admin/merchant-cashback-configs/{id})
+  // and its two locally-scoped schemas (`UpsertCashbackConfigBody`
+  // + `AdminCashbackConfigEnvelope`) live in
+  // `./admin-cashback-config-upsert.ts`. Fanned out below the read
+  // paths so OpenAPI path-registration order matches the
+  // pre-decomposition source.
 
   // `AdminCashbackConfigHistoryRow` and
   // `AdminCashbackConfigHistoryResponse`, plus the per-merchant
@@ -240,52 +221,17 @@ export function registerAdminCashbackConfigOpenApi(
     },
   });
 
-  registry.registerPath({
-    method: 'put',
-    path: '/api/admin/merchant-cashback-configs/{merchantId}',
-    summary: 'Upsert a merchant cashback-split config (ADR 011 / ADR 017).',
-    description:
-      'INSERT on first touch, UPDATE otherwise. A Postgres trigger appends the pre-edit values to `merchant_cashback_config_history` so every change is auditable by `admin_user_id` + timestamp. A2-502: ADR-017 admin-write contract — `Idempotency-Key` header required, `reason` required in the body, response is the standard `{ result, audit }` envelope. A repeat PUT with the same actor+key replays the stored snapshot (`audit.replayed: true`).',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ merchantId: z.string() }),
-      headers: z.object({
-        'idempotency-key': z.string().min(16).max(128).openapi({
-          description:
-            'ADR 017 idempotency key — a UUID or any 16..128-char opaque token the client generates per click.',
-        }),
-      }),
-      body: { content: { 'application/json': { schema: UpsertCashbackConfigBody } } },
-    },
-    responses: {
-      200: {
-        description: 'Updated row wrapped in the ADR-017 {result, audit} envelope',
-        content: { 'application/json': { schema: AdminCashbackConfigEnvelope } },
-      },
-      400: {
-        description:
-          'Invalid body / missing Idempotency-Key / missing reason / percentages out of range / sum > 100 / malformed merchantId',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'DB write failed',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
+  // ADR-017 upsert (the only write in this CRUD surface) lives in
+  // `./admin-cashback-config-upsert.ts`. Threaded with
+  // `errorResponse + AdminCashbackConfig + AdminWriteAudit` so the
+  // envelope still embeds the same registered `AdminCashbackConfig`
+  // shape the read paths above declare.
+  registerAdminCashbackConfigUpsertOpenApi(
+    registry,
+    errorResponse,
+    AdminCashbackConfig,
+    AdminWriteAudit,
+  );
 
   // The trailing per-merchant history path lives in
   // `./admin-cashback-config-history.ts` along with its two
