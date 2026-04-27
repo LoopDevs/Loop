@@ -137,7 +137,7 @@ export async function adminSupplierSpendHandler(c: Context): Promise<Response> {
       FROM ${orders}
       WHERE ${orders.state} = 'fulfilled'
         AND ${orders.fulfilledAt} IS NOT NULL
-        AND ${orders.fulfilledAt} >= ${since}
+        AND ${orders.fulfilledAt} >= ${since.toISOString()}
       GROUP BY ${orders.chargeCurrency}
       ORDER BY ${orders.chargeCurrency} ASC
     `);

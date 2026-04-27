@@ -108,7 +108,7 @@ export async function adminMerchantStatsCsvHandler(c: Context): Promise<Response
       FROM ${orders}
       WHERE ${orders.state} = 'fulfilled'
         AND ${orders.fulfilledAt} IS NOT NULL
-        AND ${orders.fulfilledAt} >= ${since}
+        AND ${orders.fulfilledAt} >= ${since.toISOString()}
       GROUP BY ${orders.merchantId}, ${orders.currency}
       ORDER BY loop_margin_minor DESC, order_count DESC
       LIMIT ${ROW_CAP + 1}

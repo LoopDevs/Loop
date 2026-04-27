@@ -86,7 +86,7 @@ export async function adminUsersRecyclingActivityCsvHandler(c: Context): Promise
       FROM users u
       INNER JOIN orders o ON o.user_id = u.id
       WHERE o.payment_method = 'loop_asset'
-        AND o.created_at >= ${since}
+        AND o.created_at >= ${since.toISOString()}
       GROUP BY u.id, u.email, u.home_currency
       ORDER BY MAX(o.created_at) DESC
       LIMIT ${ROW_CAP + 1}

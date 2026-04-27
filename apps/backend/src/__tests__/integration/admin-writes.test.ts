@@ -515,4 +515,24 @@ describeIf('routes/admin.ts — admin-read audit middleware (A2-2008)', () => {
     expect(res.status).toBe(401);
     expect(notifyAdminBulkRead).not.toHaveBeenCalled();
   });
+
+  // A2-1610 regression coverage — admin reports that bind a Date
+  // through `db.execute(sql\`...\${since}...\`)`. Without the typed
+  // bind, postgres-js throws "The 'string' argument must be of type
+  // string". Each handler is exercised against an empty DB so the
+  // SQL has to actually parse and bind, but the result is small.
+  // Catches the raw-execute variant of the cursor-handler bug fixed
+  // in #1304 / #1306 (both used the `.where(sql\`...\`)` shape).
+  it.each([
+    ['/api/admin/supplier-spend', 'supplier spend'],
+    ['/api/admin/operator-stats', 'operator stats'],
+    ['/api/admin/top-users', 'top users'],
+  ])('admin %s endpoint binds Date params correctly (no 500)', async (path) => {
+    const { bearer } = await seed();
+    const res = await app.request(`http://localhost${path}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${bearer}` },
+    });
+    expect(res.status).toBe(200);
+  });
 });

@@ -98,7 +98,7 @@ export async function adminTopUsersHandler(c: Context): Promise<Response> {
       FROM ${creditTransactions} ct
       JOIN ${users} u ON u.id = ct.user_id
       WHERE ct.type = 'cashback'
-        AND ct.created_at >= ${since}
+        AND ct.created_at >= ${since.toISOString()}
       GROUP BY ct.user_id, u.email, ct.currency
       ORDER BY amount_minor DESC, count DESC
       LIMIT ${limit}
