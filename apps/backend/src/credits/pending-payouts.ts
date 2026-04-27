@@ -141,35 +141,6 @@ export async function reclaimSubmittedPayout(args: {
 }
 
 /**
- * Admin-facing list across any state + cursor pagination. Newest
- * first (admin UI pattern — you want to see the most recent failures
- * first when you open the page). `before` is the ISO `created_at` of
- * the last row the client has rendered; next page fetches rows older
- * than that. Limit clamps 1..100.
- */
-export async function listPayoutsForAdmin(opts: {
-  state?: string;
-  userId?: string;
-  assetCode?: string;
-  /** ADR-024 §2: filter by payout discriminator. Lets treasury split order-cashback from withdrawal flows visually. */
-  kind?: 'order_cashback' | 'withdrawal';
-  before?: Date;
-  limit?: number;
-}): Promise<PendingPayout[]> {
-  const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100);
-  const conditions = [];
-  if (opts.state !== undefined) conditions.push(eq(pendingPayouts.state, opts.state));
-  if (opts.userId !== undefined) conditions.push(eq(pendingPayouts.userId, opts.userId));
-  if (opts.assetCode !== undefined) conditions.push(eq(pendingPayouts.assetCode, opts.assetCode));
-  if (opts.kind !== undefined) conditions.push(eq(pendingPayouts.kind, opts.kind));
-  if (opts.before !== undefined) conditions.push(sql`${pendingPayouts.createdAt} < ${opts.before}`);
-  const where = conditions.length === 0 ? undefined : and(...conditions);
-  const q = db.select().from(pendingPayouts);
-  const filtered = where === undefined ? q : q.where(where);
-  return filtered.orderBy(sql`${pendingPayouts.createdAt} DESC`).limit(limit);
-}
-
-/**
  * State-guarded transition: `pending → submitted`. Bumps `attempts`
  * and stamps `submitted_at`. Returns null when another worker beat us
  * to the row (idempotent).
@@ -256,33 +227,16 @@ export async function resetPayoutToPending(id: string): Promise<PendingPayout | 
   return row ?? null;
 }
 
-/**
- * Single-row lookup for the admin drill-down (complement to the list
- * at `listPayoutsForAdmin`). Returns null when the id matches nothing;
- * the handler turns that into a 404.
- */
-export async function getPayoutForAdmin(id: string): Promise<PendingPayout | null> {
-  const [row] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, id)).limit(1);
-  return row ?? null;
-}
-
-/**
- * Order-id lookup. `pending_payouts.order_id` is UNIQUE, so at most
- * one row matches. Returns null when the order has no payout row yet
- * (e.g. cashback hasn't been issued, the order is still pending, or
- * the payout builder deliberately skipped this order).
- *
- * Ops uses this to jump from an order-support ticket straight to the
- * payout state instead of fishing for the payout id in the list.
- */
-export async function getPayoutByOrderId(orderId: string): Promise<PendingPayout | null> {
-  const [row] = await db
-    .select()
-    .from(pendingPayouts)
-    .where(eq(pendingPayouts.orderId, orderId))
-    .limit(1);
-  return row ?? null;
-}
+// Admin-side `pending_payouts` reads (`listPayoutsForAdmin`,
+// `getPayoutForAdmin`, `getPayoutByOrderId`) live in
+// `./pending-payouts-admin.ts`. Re-exported below so existing
+// import sites keep resolving against
+// `'../credits/pending-payouts.js'`.
+export {
+  listPayoutsForAdmin,
+  getPayoutForAdmin,
+  getPayoutByOrderId,
+} from './pending-payouts-admin.js';
 
 // User-scoped pending-payout reads live in
 // `./pending-payouts-user.ts`. Re-exported here so the wide
