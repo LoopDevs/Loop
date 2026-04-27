@@ -14,7 +14,7 @@ import type { ZodIssue } from 'zod';
  * `notifyCtxSchemaDrift` call sites in this module + auth +
  * merchants.
  */
-function summariseZodIssues(issues: readonly ZodIssue[]): string {
+export function summariseZodIssues(issues: readonly ZodIssue[]): string {
   return issues
     .slice(0, 5)
     .map((i) => `[${i.path.join('.') || '·'}] ${i.code}: ${i.message}`)
@@ -46,7 +46,7 @@ function markFulfilledNotified(orderId: string): void {
 const log = logger.child({ handler: 'orders' });
 
 /** Builds auth headers for upstream requests, including optional X-Client-Id. */
-function upstreamHeaders(c: Context): Record<string, string> {
+export function upstreamHeaders(c: Context): Record<string, string> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${c.get('bearerToken') as string}`,
   };
@@ -115,42 +115,8 @@ export const GetOrderUpstreamResponse = z
   })
   .passthrough();
 
-// Upstream list-orders response — previously cast with `as`, now Zod-validated
-// so an unexpected shape fails fast with a clear 502 instead of corrupting JSON.
-const ListOrdersUpstreamItem = z
-  .object({
-    id: z.string(),
-    merchantId: z.string(),
-    merchantName: z.string().optional(),
-    cardFiatAmount: z.string().optional(),
-    cardFiatCurrency: z.string().optional(),
-    status: z.string().optional(),
-    paymentCryptoAmount: z.string().optional(),
-    percentDiscount: z.string().optional(),
-    redeemType: z.string().optional(),
-    created: z.string().optional(),
-  })
-  .passthrough();
-
-export const ListOrdersUpstreamResponse = z
-  .object({
-    result: z.array(ListOrdersUpstreamItem),
-    pagination: z.object({
-      page: z.number(),
-      pages: z.number(),
-      perPage: z.number(),
-      total: z.number(),
-    }),
-  })
-  .passthrough();
-
-// Only these upstream query params are safe to forward. Blind passthrough
-// would let a client inject upstream-only parameters (e.g. to read another
-// user's data if CTX naively respected a `userId` param).
-const ALLOWED_LIST_QUERY_PARAMS = new Set(['page', 'perPage', 'status']);
-
 /** Maps upstream CTX status values to our normalized OrderStatus. */
-function mapStatus(ctxStatus: string): 'pending' | 'completed' | 'failed' | 'expired' {
+export function mapStatus(ctxStatus: string): 'pending' | 'completed' | 'failed' | 'expired' {
   if (ctxStatus === 'fulfilled') return 'completed';
   if (ctxStatus === 'expired') return 'expired';
   if (ctxStatus === 'refunded') return 'failed';
@@ -174,18 +140,6 @@ function parseMoney(raw: string | undefined): number {
     throw new Error(`Non-numeric money value from upstream: ${JSON.stringify(raw)}`);
   }
   return n;
-}
-
-/**
- * List-safe variant: returns null on non-numeric input. The list handler
- * filters null rows out rather than crashing the whole response — one
- * order with a malformed `cardFiatAmount` should not hide the user's
- * entire purchase history.
- */
-function parseMoneyOrNull(raw: string | undefined): number | null {
-  if (raw === undefined || raw === '') return 0;
-  const n = parseFloat(raw);
-  return Number.isFinite(n) ? n : null;
 }
 
 /**
@@ -356,101 +310,13 @@ export async function createOrderHandler(c: Context): Promise<Response> {
   }
 }
 
-/**
- * GET /api/orders
- * Authenticated. Proxies to upstream GET /gift-cards.
- */
-export async function listOrdersHandler(c: Context): Promise<Response> {
-  // bearerToken + clientId handled by upstreamHeaders(c)
-
-  try {
-    const url = new URL(upstreamUrl('/gift-cards'));
-    for (const [key, value] of Object.entries(c.req.query())) {
-      if (ALLOWED_LIST_QUERY_PARAMS.has(key)) {
-        url.searchParams.set(key, value as string);
-      }
-    }
-
-    const response = await getUpstreamCircuit('gift-cards').fetch(url.toString(), {
-      headers: upstreamHeaders(c),
-      signal: AbortSignal.timeout(15_000),
-    });
-
-    if (response.status === 401) {
-      return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
-    }
-
-    if (!response.ok) {
-      const body = scrubUpstreamBody(await response.text());
-      log.error({ status: response.status, body }, 'Upstream order list failed');
-      return c.json({ code: 'UPSTREAM_ERROR', message: 'Failed to fetch orders' }, 502);
-    }
-
-    const raw = await response.json();
-    const validated = ListOrdersUpstreamResponse.safeParse(raw);
-    if (!validated.success) {
-      log.error(
-        { issues: validated.error.issues },
-        'Upstream order list response did not match expected shape',
-      );
-      notifyCtxSchemaDrift({
-        surface: 'GET /gift-cards',
-        issuesSummary: summariseZodIssues(validated.error.issues),
-      });
-      return c.json(
-        { code: 'UPSTREAM_ERROR', message: 'Unexpected response from order provider' },
-        502,
-      );
-    }
-
-    const orders = validated.data.result.flatMap((item) => {
-      const amount = parseMoneyOrNull(item.cardFiatAmount);
-      if (amount === null) {
-        log.warn(
-          { orderId: item.id, rawAmount: item.cardFiatAmount },
-          'Skipping order with non-numeric cardFiatAmount from upstream',
-        );
-        return [];
-      }
-      return [
-        {
-          id: item.id,
-          merchantId: item.merchantId,
-          merchantName: item.merchantName ?? '',
-          amount,
-          currency: item.cardFiatCurrency ?? 'USD',
-          status: mapStatus(item.status ?? 'unpaid'),
-          xlmAmount: item.paymentCryptoAmount ?? '0',
-          percentDiscount: item.percentDiscount,
-          redeemType: item.redeemType,
-          createdAt: item.created,
-        },
-      ];
-    });
-
-    const { page, pages, perPage, total } = validated.data.pagination;
-    return c.json({
-      orders,
-      pagination: {
-        page,
-        limit: perPage,
-        total,
-        totalPages: pages,
-        hasNext: page < pages,
-        hasPrev: page > 1,
-      },
-    });
-  } catch (err) {
-    if (err instanceof CircuitOpenError) {
-      return c.json(
-        { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' },
-        503,
-      );
-    }
-    log.error({ err }, 'Order list proxy error');
-    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch orders' }, 500);
-  }
-}
+// `listOrdersHandler` (paginated /api/orders proxy) lives in
+// `./list-handler.ts`. Re-exported here so the routes module's
+// existing import block keeps working without re-targeting; the
+// `ListOrdersUpstreamResponse` schema is also re-exported because
+// the ctx-contract test (`__tests__/ctx-contract.test.ts`) parses
+// recorded CTX fixtures through it (A2-1706).
+export { listOrdersHandler, ListOrdersUpstreamResponse } from './list-handler.js';
 
 /**
  * GET /api/orders/:id
