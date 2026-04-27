@@ -30,6 +30,7 @@
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
+import { registerAdminPerMerchantTimeAxisOpenApi } from './admin-per-merchant-drill-time-axis.js';
 
 /**
  * Registers the per-merchant drill (scalars + time-series) paths
@@ -260,111 +261,13 @@ export function registerAdminPerMerchantDrillOpenApi(
     },
   });
 
-  const MerchantFlywheelActivityDay = registry.register(
-    'MerchantFlywheelActivityDay',
-    z.object({
-      day: z.string().openapi({ description: 'YYYY-MM-DD (UTC).' }),
-      recycledCount: z.number().int(),
-      totalCount: z.number().int(),
-      recycledChargeMinor: z.string().openapi({ description: 'bigint-as-string.' }),
-      totalChargeMinor: z.string().openapi({ description: 'bigint-as-string.' }),
-    }),
-  );
-
-  const MerchantFlywheelActivityResponse = registry.register(
-    'MerchantFlywheelActivityResponse',
-    z.object({
-      merchantId: z.string(),
-      days: z.number().int().openapi({ description: 'Window size — default 30, max 180.' }),
-      rows: z.array(MerchantFlywheelActivityDay),
-    }),
-  );
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/merchants/{merchantId}/flywheel-activity',
-    summary: 'Per-merchant daily flywheel trajectory (ADR 011/015).',
-    description:
-      'Time-axis companion to /flywheel-stats — scalar answers "what is the share?", this answers "is it trending up?". generate_series LEFT JOIN zero-fills every day. Bucketed on fulfilled_at::date. Only state=fulfilled counts.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ merchantId: z.string() }),
-      query: z.object({
-        days: z.coerce.number().int().min(1).max(180).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Daily recycled-vs-total series for the merchant',
-        content: { 'application/json': { schema: MerchantFlywheelActivityResponse } },
-      },
-      400: {
-        description: 'Malformed merchantId',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: { description: 'DB error', content: { 'application/json': { schema: errorResponse } } },
-    },
-  });
-
-  const MerchantTopEarnerRow = registry.register(
-    'MerchantTopEarnerRow',
-    z.object({
-      userId: z.string().uuid(),
-      email: z.string(),
-      currency: z.string().length(3),
-      orderCount: z.number().int(),
-      cashbackMinor: z.string().openapi({
-        description: 'SUM(user_cashback_minor) for this (user, currency). bigint-as-string.',
-      }),
-      chargeMinor: z.string().openapi({
-        description: 'SUM(charge_minor) — context for "cashback as % of their spend".',
-      }),
-    }),
-  );
-
-  const MerchantTopEarnersResponse = registry.register(
-    'MerchantTopEarnersResponse',
-    z.object({
-      merchantId: z.string(),
-      since: z.string().datetime(),
-      rows: z.array(MerchantTopEarnerRow),
-    }),
-  );
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/merchants/{merchantId}/top-earners',
-    summary: 'Top cashback earners at a merchant (ADR 009/011/015).',
-    description:
-      'Inverse axis of /api/admin/users/:userId/cashback-by-merchant — answers "who earns at Amazon?" rather than "where does Alice earn?". BD outreach surface. Joins users for email enrichment (admin-gated, PII exposure fine). Multi-currency: one user can appear twice if they have fulfilled orders at the merchant in two charge currencies.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ merchantId: z.string() }),
-      query: z.object({
-        days: z.coerce.number().int().min(1).max(366).optional(),
-        limit: z.coerce.number().int().min(1).max(100).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Ranked list of users by cashback earned at the merchant',
-        content: { 'application/json': { schema: MerchantTopEarnersResponse } },
-      },
-      400: {
-        description: 'Malformed merchantId',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: { description: 'DB error', content: { 'application/json': { schema: errorResponse } } },
-    },
-  });
+  // The two trailing time-axis paths
+  // (`/merchants/{id}/flywheel-activity` and
+  // `/merchants/{id}/top-earners`) plus their four locally-scoped
+  // schemas (`MerchantFlywheelActivityDay`,
+  // `MerchantFlywheelActivityResponse`, `MerchantTopEarnerRow`,
+  // `MerchantTopEarnersResponse`) live in
+  // `./admin-per-merchant-drill-time-axis.ts`. Same path-registration
+  // position as the original block.
+  registerAdminPerMerchantTimeAxisOpenApi(registry, errorResponse);
 }
