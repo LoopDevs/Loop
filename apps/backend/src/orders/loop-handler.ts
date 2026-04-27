@@ -28,8 +28,6 @@ import { ORDER_PAYMENT_METHODS } from '../db/schema.js';
 import { isHomeCurrency, type CreateLoopOrderResponse } from '@loop/shared';
 import { getUserById } from '../db/users.js';
 import { convertMinorUnits } from '../payments/price-feed.js';
-import { payoutAssetFor } from '../credits/payout-asset.js';
-import { notifyCashbackRecycled, notifyFirstCashbackRecycled } from '../discord.js';
 import {
   createOrder,
   findOrderByIdempotencyKey,
@@ -37,6 +35,7 @@ import {
   InsufficientCreditError,
 } from './repo.js';
 import { hasSufficientCredit, isFirstLoopAssetOrder } from './loop-create-checks.js';
+import { buildLoopCreateResponse } from './loop-create-response.js';
 
 const log = logger.child({ handler: 'loop-orders' });
 
@@ -242,94 +241,12 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
       paymentMethod: parsed.data.paymentMethod,
       ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
     });
-    const base = {
-      orderId: order.id,
-    };
-    if (order.paymentMethod === 'credit') {
-      return c.json<OrderPaymentResponse>({
-        ...base,
-        payment: {
-          method: 'credit',
-          // Charge the user pays, in their home currency — matches
-          // what the UI renders on the "confirm order" screen.
-          amountMinor: order.chargeMinor.toString(),
-          currency: order.chargeCurrency,
-        },
-      });
-    }
-    if (order.paymentMethod === 'loop_asset') {
-      // ADR 015 — user is paying with a LOOP-branded asset matching
-      // their home currency. Surface the asset code + issuer so the
-      // client's Stellar tx builder can construct the payment against
-      // the correct `{code, issuer}` pair.
-      const payoutAsset = payoutAssetFor(user.homeCurrency);
-      if (payoutAsset.issuer === null) {
-        // The issuer env isn't set for this currency. We already
-        // wrote the order row; roll back isn't worth the complexity
-        // here since the row will hit the 24h expiry sweep. Log and
-        // 503 so the client can retry later.
-        log.error(
-          { homeCurrency: user.homeCurrency, assetCode: payoutAsset.code },
-          'loop_asset order placed but matching issuer env var not set',
-        );
-        return c.json(
-          {
-            code: 'SERVICE_UNAVAILABLE',
-            message: 'LOOP asset not configured for your region',
-          },
-          503,
-        );
-      }
-      // ADR 015 flywheel signal — a user is paying with LOOP asset
-      // cashback they previously earned. Co-located with the response
-      // rather than post-fulfillment because the signal is about
-      // intent (user opted into the rail) not outcome (order cleared);
-      // a failed loop_asset order still demonstrates flywheel intent
-      // and ops wants to see that in #loop-orders. Fire-and-forget.
-      notifyCashbackRecycled({
-        orderId: order.id,
-        merchantName: merchant.name,
-        amount: Number(order.faceValueMinor) / 100,
-        currency: order.currency,
-        assetCode: payoutAsset.code,
-      });
-      if (firstLoopAsset) {
-        // Milestone alert: this user has just graduated from
-        // earning cashback to spending it. Fire-and-forget;
-        // catalog entry in DISCORD_NOTIFIERS.
-        notifyFirstCashbackRecycled({
-          orderId: order.id,
-          userId: user.id,
-          merchantName: merchant.name,
-          amount: Number(order.faceValueMinor) / 100,
-          currency: order.currency,
-          assetCode: payoutAsset.code,
-        });
-      }
-      return c.json<OrderPaymentResponse>({
-        ...base,
-        payment: {
-          method: 'loop_asset',
-          stellarAddress: env.LOOP_STELLAR_DEPOSIT_ADDRESS!,
-          memo: order.paymentMemo ?? '',
-          amountMinor: order.chargeMinor.toString(),
-          currency: order.chargeCurrency,
-          assetCode: payoutAsset.code,
-          assetIssuer: payoutAsset.issuer,
-        },
-      });
-    }
-    // xlm / usdc — both use Stellar as the rail. LOOP_STELLAR_DEPOSIT_ADDRESS
-    // was validated above.
-    return c.json<OrderPaymentResponse>({
-      ...base,
-      payment: {
-        method: order.paymentMethod as 'xlm' | 'usdc',
-        stellarAddress: env.LOOP_STELLAR_DEPOSIT_ADDRESS!,
-        memo: order.paymentMemo ?? '',
-        amountMinor: order.chargeMinor.toString(),
-        currency: order.chargeCurrency,
-      },
+    return buildLoopCreateResponse(c, {
+      order,
+      userId: user.id,
+      homeCurrency: user.homeCurrency,
+      merchant,
+      firstLoopAsset,
     });
   } catch (err) {
     // A2-2003: a concurrent request raced us through the lookup-first
