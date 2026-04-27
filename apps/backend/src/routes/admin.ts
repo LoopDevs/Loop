@@ -114,14 +114,8 @@ import { adminMerchantCashbackMonthlyHandler } from '../admin/merchant-cashback-
 import { adminMerchantFlywheelActivityHandler } from '../admin/merchant-flywheel-activity.js';
 import { adminMerchantFlywheelActivityCsvHandler } from '../admin/merchant-flywheel-activity-csv.js';
 import { adminMerchantTopEarnersHandler } from '../admin/merchant-top-earners.js';
-import { adminSupplierSpendHandler } from '../admin/supplier-spend.js';
-import { adminSupplierSpendActivityHandler } from '../admin/supplier-spend-activity.js';
-import { adminOperatorSupplierSpendHandler } from '../admin/operator-supplier-spend.js';
-import { adminOperatorActivityHandler } from '../admin/operator-activity.js';
-import { adminOperatorStatsHandler } from '../admin/operator-stats.js';
-import { adminOperatorLatencyHandler } from '../admin/operator-latency.js';
 import { adminMerchantOperatorMixHandler } from '../admin/merchant-operator-mix.js';
-import { adminOperatorMerchantMixHandler } from '../admin/operator-merchant-mix.js';
+import { mountAdminOperatorRoutes } from './admin-operator.js';
 import { adminUserOperatorMixHandler } from '../admin/user-operator-mix.js';
 import { adminUserCreditsHandler } from '../admin/user-credits.js';
 import { adminUserCreditTransactionsHandler } from '../admin/user-credit-transactions.js';
@@ -384,67 +378,12 @@ export function mountAdminRoutes(app: Hono): void {
   // Nested under /orders/:orderId so the UI can link from the order
   // drill-down straight to the payout state without a separate fetch.
   app.get('/api/admin/orders/:orderId/payout', rateLimit(120, 60_000), adminPayoutByOrderHandler);
-  // Supplier-spend snapshot (ADR 013 / 015): per-currency aggregate of
-  // what Loop paid CTX across fulfilled orders in the window. Admin UI
-  // renders this on the treasury page as the "supplier" card next to
-  // outstanding liabilities.
-  app.get('/api/admin/supplier-spend', rateLimit(60, 60_000), adminSupplierSpendHandler);
-  // Supplier-spend activity time-series (ADR 013 / 015) — per-day
-  // per-currency wholesale/face/cashback/margin paid to CTX. The
-  // time-axis of the supplier-spend snapshot. Together with
-  // credit-flow (ledger in) and payouts-activity (chain out) this
-  // completes the three treasury-velocity feeds ops watches to
-  // know money moved as expected today.
-  app.get(
-    '/api/admin/supplier-spend/activity',
-    rateLimit(60, 60_000),
-    adminSupplierSpendActivityHandler,
-  );
-  // Per-operator supplier-spend (#674) — per-currency aggregate
-  // scoped to one CTX operator. Answers "which operator drove the
-  // supplier spend?" — the ADR-022 per-operator axis of the fleet-
-  // wide supplier-spend. Ops uses this to spot load-balancing
-  // drift: one operator suddenly carrying 80% of spend is a
-  // scheduler / circuit-breaker signal.
-  app.get(
-    '/api/admin/operators/:operatorId/supplier-spend',
-    rateLimit(120, 60_000),
-    adminOperatorSupplierSpendHandler,
-  );
-  // Per-operator daily activity time-series (ADR 013 / 022) —
-  // completes the operator-drill quartet alongside operator-stats
-  // (fleet snapshot), operators/latency (fleet percentiles) and
-  // operators/:id/supplier-spend (per-operator cost). Answers "is
-  // this operator degrading?" — a rising `failed` line or a
-  // dropping fulfilled/created ratio is a scheduler-tuning /
-  // CTX-escalation signal before the circuit breaker trips.
-  app.get(
-    '/api/admin/operators/:operatorId/activity',
-    rateLimit(120, 60_000),
-    adminOperatorActivityHandler,
-  );
-  // Per-operator merchant mix (ADR 013 / 022) — dual of the
-  // /merchants/:id/operator-mix endpoint. Answers "which merchants
-  // is THIS operator carrying?" for CTX relationship capacity
-  // reviews ("op-alpha is pulling 40% of its volume from a single
-  // merchant — concentration-risk or SLA lever?").
-  app.get(
-    '/api/admin/operators/:operatorId/merchant-mix',
-    rateLimit(120, 60_000),
-    adminOperatorMerchantMixHandler,
-  );
-  // Per-operator breakdown of which CTX service account carried which
-  // orders (ADR 013). Complements supplier-spend: spend is *what* Loop
-  // paid CTX per currency, operator-stats is *which operator* carried
-  // the traffic — the two answer different questions during an
-  // incident so they live side-by-side on the treasury page.
-  app.get('/api/admin/operator-stats', rateLimit(60, 60_000), adminOperatorStatsHandler);
-  // Per-operator fulfilment latency (ADR 013 / 022): p50/p95/p99 of
-  // `fulfilledAt - paidAt` per operator in the window. Operator-stats
-  // above tells ops *which* operator is busy; this tells them *which
-  // is slow*. A busy operator with rising p95 is the early signal
-  // before the circuit breaker trips.
-  app.get('/api/admin/operators/latency', rateLimit(60, 60_000), adminOperatorLatencyHandler);
+  // Operator + supplier-spend cluster — supplier-spend (+ activity),
+  // per-operator supplier-spend / activity / merchant-mix, fleet
+  // operator-stats + operators/latency. Lifted into ./admin-operator.ts
+  // (mirrors openapi #1172 + #1173).
+  mountAdminOperatorRoutes(app);
+
   // Top users by cashback earned — recognition + concentration-risk
   // view for ops. Ranked, window-bounded; not a drill path.
   app.get('/api/admin/top-users', rateLimit(60, 60_000), adminTopUsersHandler);
