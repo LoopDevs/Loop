@@ -14,14 +14,7 @@ import type { Context } from 'hono';
 import { UUID_RE } from '../uuid.js';
 import { PAYOUT_STATES } from '../db/schema.js';
 import { LOOP_ASSET_CODES } from '../credits/payout-asset.js';
-import {
-  getPayoutByOrderId,
-  getPayoutForAdmin,
-  listPayoutsForAdmin,
-} from '../credits/pending-payouts.js';
-import { logger } from '../logger.js';
-
-const log = logger.child({ handler: 'admin-payouts' });
+import { listPayoutsForAdmin } from '../credits/pending-payouts.js';
 
 export interface AdminPayoutView {
   id: string;
@@ -49,7 +42,7 @@ export interface AdminPayoutView {
   failedAt: string | null;
 }
 
-interface PayoutRow {
+export interface PayoutRow {
   id: string;
   userId: string;
   orderId: string | null;
@@ -69,7 +62,7 @@ interface PayoutRow {
   failedAt: Date | null;
 }
 
-function toView(row: PayoutRow): AdminPayoutView {
+export function toView(row: PayoutRow): AdminPayoutView {
   return {
     id: row.id,
     userId: row.userId,
@@ -167,67 +160,11 @@ export async function adminListPayoutsHandler(c: Context): Promise<Response> {
   return c.json({ payouts: rows.map((r) => toView(r as PayoutRow)) });
 }
 
-/**
- * GET /api/admin/payouts/:id — single-row drill-down. The list
- * endpoint at `/api/admin/payouts` truncates the admin UI at 100 rows
- * and has no per-row permalink; this endpoint is what the admin table
- * links each row to so ops can deep-link a specific stuck payout into
- * a ticket / incident note without hunting for the row in the list.
- *
- * 400 on missing / malformed id (must be a uuid — the column is a uuid
- * pk, so anything else is guaranteed to miss). 404 when the row
- * doesn't exist. 500 on repo throw.
- */
-export async function adminGetPayoutHandler(c: Context): Promise<Response> {
-  const id = c.req.param('id');
-  if (id === undefined || id.length === 0) {
-    return c.json({ code: 'VALIDATION_ERROR', message: 'id is required' }, 400);
-  }
-  if (!UUID_RE.test(id)) {
-    return c.json({ code: 'VALIDATION_ERROR', message: 'id must be a uuid' }, 400);
-  }
-  try {
-    const row = await getPayoutForAdmin(id);
-    if (row === null) {
-      return c.json({ code: 'NOT_FOUND', message: 'Payout not found' }, 404);
-    }
-    return c.json<AdminPayoutView>(toView(row as PayoutRow));
-  } catch (err) {
-    log.error({ err, payoutId: id }, 'Admin payout detail failed');
-    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch payout' }, 500);
-  }
-}
-
-/**
- * GET /api/admin/orders/:orderId/payout — given an order id, return
- * the single pending_payouts row associated with it (UNIQUE on
- * order_id). Ops hits this when a user raises a support ticket
- * quoting an order id — saves them fishing through the payout list
- * for the matching row.
- *
- * 400 on missing / non-uuid order id, 404 when the order has no
- * payout row yet (common — the payout builder only runs once
- * cashback is due). 500 on repo throw.
- */
-export async function adminPayoutByOrderHandler(c: Context): Promise<Response> {
-  const orderId = c.req.param('orderId');
-  if (orderId === undefined || orderId.length === 0) {
-    return c.json({ code: 'VALIDATION_ERROR', message: 'orderId is required' }, 400);
-  }
-  if (!UUID_RE.test(orderId)) {
-    return c.json({ code: 'VALIDATION_ERROR', message: 'orderId must be a uuid' }, 400);
-  }
-  try {
-    const row = await getPayoutByOrderId(orderId);
-    if (row === null) {
-      return c.json({ code: 'NOT_FOUND', message: 'No payout for this order' }, 404);
-    }
-    return c.json<AdminPayoutView>(toView(row as PayoutRow));
-  } catch (err) {
-    log.error({ err, orderId }, 'Admin payout-by-order lookup failed');
-    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch payout' }, 500);
-  }
-}
+// `adminGetPayoutHandler` and `adminPayoutByOrderHandler` (the two
+// single-row drill handlers) live in `./payouts-detail.ts`.
+// Re-exported below so existing import sites against
+// `'../admin/payouts.js'` keep resolving.
+export { adminGetPayoutHandler, adminPayoutByOrderHandler } from './payouts-detail.js';
 
 // `adminRetryPayoutHandler` (POST /api/admin/payouts/:id/retry —
 // the ADR-017 admin write) lives in `./payouts-retry.ts`. Re-
