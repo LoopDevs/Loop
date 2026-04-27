@@ -20,7 +20,7 @@
  * via `replayOrderResponse`, not through `orderToView`.
  */
 import type { Context } from 'hono';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, lt } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { orders } from '../db/schema.js';
 import { env } from '../env.js';
@@ -169,10 +169,12 @@ export async function loopListOrdersHandler(c: Context): Promise<Response> {
     .from(orders)
     .where(
       beforeDate !== null
-        ? and(eq(orders.userId, auth.userId), sql`${orders.createdAt} < ${beforeDate}`)
+        ? // A2-1610: typed `lt()` — postgres-js can't bind a Date
+          // through the raw sql interpolator. See `audit-tail-csv.ts`.
+          and(eq(orders.userId, auth.userId), lt(orders.createdAt, beforeDate))
         : eq(orders.userId, auth.userId),
     )
-    .orderBy(sql`${orders.createdAt} DESC`)
+    .orderBy(desc(orders.createdAt))
     .limit(limit);
 
   return c.json({ orders: rows.map(orderToView) });

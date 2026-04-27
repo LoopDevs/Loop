@@ -13,7 +13,7 @@
  * smaller import surface and keeps user-side query patterns
  * separate from worker race-condition logic.
  */
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { pendingPayouts } from '../db/schema.js';
 import { type PendingPayout } from './pending-payouts.js';
@@ -36,12 +36,14 @@ export async function listPayoutsForUser(
   const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100);
   const conditions = [eq(pendingPayouts.userId, userId)];
   if (opts.state !== undefined) conditions.push(eq(pendingPayouts.state, opts.state));
-  if (opts.before !== undefined) conditions.push(sql`${pendingPayouts.createdAt} < ${opts.before}`);
+  // A2-1610: typed `lt()` + `desc()` — postgres-js can't bind a Date
+  // through the raw sql interpolator. See `audit-tail-csv.ts`.
+  if (opts.before !== undefined) conditions.push(lt(pendingPayouts.createdAt, opts.before));
   return db
     .select()
     .from(pendingPayouts)
     .where(and(...conditions))
-    .orderBy(sql`${pendingPayouts.createdAt} DESC`)
+    .orderBy(desc(pendingPayouts.createdAt))
     .limit(limit);
 }
 

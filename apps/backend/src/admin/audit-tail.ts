@@ -13,7 +13,7 @@
  * path with the original Idempotency-Key.
  */
 import type { Context } from 'hono';
-import { desc, eq, sql } from 'drizzle-orm';
+import { desc, eq, lt } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { adminIdempotencyKeys, users } from '../db/schema.js';
 import { logger } from '../logger.js';
@@ -72,8 +72,11 @@ export async function adminAuditTailHandler(c: Context): Promise<Response> {
       })
       .from(adminIdempotencyKeys)
       .innerJoin(users, eq(adminIdempotencyKeys.adminUserId, users.id));
+    // A2-1610: typed `lt()` — postgres-js can't bind a Date through
+    // the raw sql interpolator. See `audit-tail-csv.ts` for the
+    // matching CSV-side fix that surfaced this pattern class.
     const filtered =
-      before === undefined ? base : base.where(sql`${adminIdempotencyKeys.createdAt} < ${before}`);
+      before === undefined ? base : base.where(lt(adminIdempotencyKeys.createdAt, before));
     const rows = (await filtered
       .orderBy(desc(adminIdempotencyKeys.createdAt))
       .limit(limit)) as DbRow[];

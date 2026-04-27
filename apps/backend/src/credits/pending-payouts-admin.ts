@@ -14,7 +14,7 @@
  * importing from the historical `'../credits/pending-payouts.js'`
  * path without a re-target.
  */
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, lt } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { pendingPayouts } from '../db/schema.js';
 import type { PendingPayout } from './pending-payouts.js';
@@ -42,11 +42,13 @@ export async function listPayoutsForAdmin(opts: {
   if (opts.userId !== undefined) conditions.push(eq(pendingPayouts.userId, opts.userId));
   if (opts.assetCode !== undefined) conditions.push(eq(pendingPayouts.assetCode, opts.assetCode));
   if (opts.kind !== undefined) conditions.push(eq(pendingPayouts.kind, opts.kind));
-  if (opts.before !== undefined) conditions.push(sql`${pendingPayouts.createdAt} < ${opts.before}`);
+  // A2-1610: typed `lt()` + `desc()` — postgres-js can't bind a Date
+  // through the raw sql interpolator. See `audit-tail-csv.ts`.
+  if (opts.before !== undefined) conditions.push(lt(pendingPayouts.createdAt, opts.before));
   const where = conditions.length === 0 ? undefined : and(...conditions);
   const q = db.select().from(pendingPayouts);
   const filtered = where === undefined ? q : q.where(where);
-  return filtered.orderBy(sql`${pendingPayouts.createdAt} DESC`).limit(limit);
+  return filtered.orderBy(desc(pendingPayouts.createdAt)).limit(limit);
 }
 
 /**
