@@ -10,19 +10,23 @@
  * / top-earners). Both halves travel together because they share
  * the same merchantId path parameter and the same drill page.
  *
- * Carries 11 locally-scoped schemas with the slice:
+ * Schemas registered directly here (cashback-flywheel scalars +
+ * the cashback-monthly companion):
  *
  *   - `AdminMerchantFlywheelStats`
  *   - `AdminMerchantCashbackCurrencyBucket`
  *   - `AdminMerchantCashbackSummary`
- *   - `MerchantPaymentMethodShareResponse` (+ inline
- *     `PaymentMethodBucketShape` constant)
  *   - `AdminMerchantCashbackMonthlyEntry`
  *   - `AdminMerchantCashbackMonthlyResponse`
- *   - `MerchantFlywheelActivityDay`
- *   - `MerchantFlywheelActivityResponse`
- *   - `MerchantTopEarnerRow`
- *   - `MerchantTopEarnersResponse`
+ *
+ * Sibling-owned schemas:
+ *
+ *   - `MerchantPaymentMethodShareResponse` (+ inline
+ *     `PaymentMethodBucketShape`) →
+ *     `./admin-per-merchant-payment-method-share.ts`
+ *   - `MerchantFlywheelActivityDay/Response`,
+ *     `MerchantTopEarnerRow/Response` →
+ *     `./admin-per-merchant-drill-time-axis.ts`
  *
  * None of those names are referenced anywhere else in admin.ts —
  * they are all per-merchant-drill internal. Only `errorResponse`
@@ -31,6 +35,7 @@
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminPerMerchantTimeAxisOpenApi } from './admin-per-merchant-drill-time-axis.js';
+import { registerAdminPerMerchantPaymentMethodShareOpenApi } from './admin-per-merchant-payment-method-share.js';
 
 /**
  * Registers the per-merchant drill (scalars + time-series) paths
@@ -149,68 +154,15 @@ export function registerAdminPerMerchantDrillOpenApi(
     },
   });
 
-  const PaymentMethodBucketShape = z.object({
-    orderCount: z.number().int(),
-    chargeMinor: z.string().openapi({
-      description: 'SUM(charge_minor) for this (state, method) bucket. bigint-as-string.',
-    }),
-  });
-
-  const MerchantPaymentMethodShareResponse = registry.register(
-    'MerchantPaymentMethodShareResponse',
-    z.object({
-      merchantId: z.string(),
-      state: z.enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired']),
-      totalOrders: z.number().int(),
-      byMethod: z
-        .object({
-          xlm: PaymentMethodBucketShape,
-          usdc: PaymentMethodBucketShape,
-          credit: PaymentMethodBucketShape,
-          loop_asset: PaymentMethodBucketShape,
-        })
-        .openapi({
-          description:
-            'Zero-filled across every known ORDER_PAYMENT_METHODS value so the admin UI layout stays stable across merchants with incomplete rail coverage.',
-        }),
-    }),
-  );
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/merchants/{merchantId}/payment-method-share',
-    summary: 'Per-merchant rail mix (ADR 010 / 015).',
-    description:
-      'Drives the "rail mix" card on the merchant drill. Merchant-scoped mirror of /api/admin/orders/payment-method-share — same zero-filled byMethod shape, filtered via WHERE merchant_id = :merchantId. Default ?state=fulfilled.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ merchantId: z.string() }),
-      query: z.object({
-        state: z
-          .enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired'])
-          .optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Per-merchant rail mix',
-        content: { 'application/json': { schema: MerchantPaymentMethodShareResponse } },
-      },
-      400: {
-        description: 'Malformed merchantId or invalid ?state',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'DB error',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
+  // ─── Admin per-merchant payment-method-share (ADR 010 / 015) ───────────────
+  //
+  // The merchant-scoped rail-mix path + its locally-scoped
+  // `MerchantPaymentMethodShareResponse` (with the inline
+  // `PaymentMethodBucketShape` constant) live in
+  // `./admin-per-merchant-payment-method-share.ts`. Fanned out
+  // here so the per-merchant drill registers as one factory call
+  // from `admin.ts`.
+  registerAdminPerMerchantPaymentMethodShareOpenApi(registry, errorResponse);
 
   // ─── Admin per-merchant time-series (ADR 011/015/022) ──────────────────────
   //
