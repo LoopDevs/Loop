@@ -4,22 +4,29 @@
  *
  * Lifted out of `apps/backend/src/openapi/admin.ts`. Six paths that
  * back the /admin/payouts surface and the two ADR-017-shaped write
- * actions on the row drill (retry + compensate).
+ * actions on the row drill (retry + compensate). The four read paths
+ * are registered here; the two write paths live in
+ * `./admin-payouts-cluster-writes.ts` and are re-invoked from this
+ * file's factory.
  *
- * Paths in the slice:
+ * Read paths in the slice:
  *   - GET  /api/admin/payouts                     (paginated backlog)
  *   - GET  /api/admin/payouts/{id}                (single-row drill)
  *   - GET  /api/admin/payouts-by-asset            (per-(asset, state) totals)
  *   - GET  /api/admin/payouts/settlement-lag      (percentile SLA)
+ *
+ * Write paths in the sibling file:
  *   - POST /api/admin/payouts/{id}/retry          (ADR 017 retry)
  *   - POST /api/admin/payouts/{id}/compensate     (ADR-024 §5 compensate)
  *
- * Locally-scoped schemas travel with the slice:
+ * Locally-scoped read-side schemas travel with the slice:
  *   - `AdminPayoutListResponse`
  *   - `PerStateBreakdown` / `PayoutsByAssetRow` / `PayoutsByAssetResponse`
  *   - `SettlementLagRow` / `SettlementLagResponse`
- *   - `PayoutRetryBody` / `PayoutRetryEnvelope`
- *   - `PayoutCompensationBody` / `PayoutCompensationResult` / `PayoutCompensationEnvelope`
+ *
+ * Write-side schemas (`PayoutRetryBody` / `PayoutRetryEnvelope` /
+ * `PayoutCompensationBody` / `PayoutCompensationResult` /
+ * `PayoutCompensationEnvelope`) live in the writes sibling.
  *
  * Three deps cross the boundary:
  *
@@ -34,6 +41,7 @@
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
+import { registerAdminPayoutsClusterWritesOpenApi } from './admin-payouts-cluster-writes.js';
 
 /**
  * Registers the payouts-cluster paths + their locally-scoped
@@ -283,156 +291,15 @@ export function registerAdminPayoutsClusterOpenApi(
     },
   });
 
-  const PayoutRetryBody = registry.register(
-    'PayoutRetryBody',
-    z.object({
-      reason: z.string().min(2).max(500),
-    }),
+  // The two write paths (`POST /api/admin/payouts/{id}/retry` and
+  // `POST /api/admin/payouts/{id}/compensate`) plus their body /
+  // envelope schemas live in `./admin-payouts-cluster-writes.ts`.
+  // Same `errorResponse + AdminPayoutView + AdminWriteAudit`
+  // threading pattern as the read paths above.
+  registerAdminPayoutsClusterWritesOpenApi(
+    registry,
+    errorResponse,
+    AdminPayoutView,
+    AdminWriteAudit,
   );
-
-  const PayoutRetryEnvelope = registry.register(
-    'PayoutRetryEnvelope',
-    z.object({
-      result: AdminPayoutView,
-      audit: AdminWriteAudit,
-    }),
-  );
-
-  registry.registerPath({
-    method: 'post',
-    path: '/api/admin/payouts/{id}/retry',
-    summary: 'Flip a failed payout back to pending (ADR 015 / 016 / 017).',
-    description:
-      'Admin-only manual retry: resets a `failed` pending_payouts row to `pending` so the submit worker picks it up on the next tick. 404 when the id matches nothing or the row is in a non-failed state. ADR 017 compliant: `Idempotency-Key` header + `reason` body required; a repeat call returns the stored snapshot with `audit.replayed: true`. Worker enforces memo-idempotency on re-submit (ADR 016) so double-retry never double-pays.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ id: z.string().uuid() }),
-      headers: z.object({
-        'idempotency-key': z.string().min(16).max(128).openapi({
-          description:
-            'Required. Scoped to (admin_user_id, key); repeats replay the stored snapshot.',
-        }),
-      }),
-      body: {
-        content: { 'application/json': { schema: PayoutRetryBody } },
-      },
-    },
-    responses: {
-      200: {
-        description: 'Retry applied (or replayed from snapshot)',
-        content: { 'application/json': { schema: PayoutRetryEnvelope } },
-      },
-      400: {
-        description: 'Missing idempotency key, invalid reason, or malformed id',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description: 'Payout not found or not in failed state',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (20/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error resetting the row',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  const PayoutCompensationBody = registry.register(
-    'PayoutCompensationBody',
-    z.object({
-      reason: z.string().min(2).max(500),
-    }),
-  );
-
-  const PayoutCompensationResult = registry.register(
-    'PayoutCompensationResult',
-    z.object({
-      id: z.string().uuid(),
-      payoutId: z.string().uuid(),
-      userId: z.string().uuid(),
-      currency: z.enum(['USD', 'GBP', 'EUR']),
-      amountMinor: z.string(),
-      priorBalanceMinor: z.string(),
-      newBalanceMinor: z.string(),
-      createdAt: z.string().datetime(),
-    }),
-  );
-
-  const PayoutCompensationEnvelope = registry.register(
-    'PayoutCompensationEnvelope',
-    z.object({
-      result: PayoutCompensationResult,
-      audit: AdminWriteAudit,
-    }),
-  );
-
-  registry.registerPath({
-    method: 'post',
-    path: '/api/admin/payouts/{id}/compensate',
-    summary: 'Compensate a permanently-failed withdrawal payout (ADR-024 §5).',
-    description:
-      'Re-credits the user after their withdrawal payout permanently failed on-chain. Writes a positive `type=adjustment` row referencing the payout id; net result is the original withdrawal debit is offset and the user is back to where they started. Manual-only (Phase 2a) — finance reviews failures before triggering. 400 if the payout is not a withdrawal; 409 if the payout is in any state other than `failed`. ADR 017 compliant: `Idempotency-Key` header + `reason` body required.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ id: z.string().uuid() }),
-      headers: z.object({
-        'idempotency-key': z.string().min(16).max(128).openapi({
-          description:
-            'Required. Scoped to (admin_user_id, key); repeats replay the stored snapshot.',
-        }),
-      }),
-      body: {
-        content: { 'application/json': { schema: PayoutCompensationBody } },
-      },
-    },
-    responses: {
-      200: {
-        description: 'Compensation applied (or replayed from snapshot)',
-        content: { 'application/json': { schema: PayoutCompensationEnvelope } },
-      },
-      400: {
-        description:
-          'Missing idempotency key, invalid reason, malformed id, or payout is not a withdrawal',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description: 'Payout not found',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      409: {
-        description: "Payout is not in 'failed' state — only failed payouts can be compensated",
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (20/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error applying compensation',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
 }
