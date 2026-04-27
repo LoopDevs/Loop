@@ -80,7 +80,7 @@ export async function adminOperatorStatsHandler(c: Context): Promise<Response> {
         MAX(${orders.createdAt}) AS last_order_at
       FROM ${orders}
       WHERE ${orders.ctxOperatorId} IS NOT NULL
-        AND ${orders.createdAt} >= ${since}
+        AND ${orders.createdAt} >= ${since.toISOString()}
       GROUP BY ${orders.ctxOperatorId}
       ORDER BY order_count DESC, operator_id ASC
     `);

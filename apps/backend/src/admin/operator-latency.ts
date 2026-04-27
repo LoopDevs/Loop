@@ -94,7 +94,7 @@ export async function adminOperatorLatencyHandler(c: Context): Promise<Response>
         AND ${orders.ctxOperatorId} IS NOT NULL
         AND ${orders.paidAt} IS NOT NULL
         AND ${orders.fulfilledAt} IS NOT NULL
-        AND ${orders.fulfilledAt} >= ${since}
+        AND ${orders.fulfilledAt} >= ${since.toISOString()}
       GROUP BY ${orders.ctxOperatorId}
       ORDER BY p95_ms DESC NULLS LAST, operator_id ASC
     `);

@@ -131,7 +131,7 @@ export async function adminOperatorsSnapshotCsvHandler(c: Context): Promise<Resp
           MAX(created_at) AS last_order_at
         FROM orders
         WHERE ctx_operator_id IS NOT NULL
-          AND created_at >= ${since}
+          AND created_at >= ${since.toISOString()}
         GROUP BY ctx_operator_id
       ),
       latency AS (
@@ -153,7 +153,7 @@ export async function adminOperatorsSnapshotCsvHandler(c: Context): Promise<Resp
           AND ctx_operator_id IS NOT NULL
           AND paid_at IS NOT NULL
           AND fulfilled_at IS NOT NULL
-          AND fulfilled_at >= ${since}
+          AND fulfilled_at >= ${since.toISOString()}
         GROUP BY ctx_operator_id
       )
       SELECT

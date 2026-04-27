@@ -97,7 +97,7 @@ export async function adminSettlementLagHandler(c: Context): Promise<Response> {
       WHERE ${pendingPayouts.state} = 'confirmed'
         AND ${pendingPayouts.confirmedAt} IS NOT NULL
         AND ${pendingPayouts.createdAt} IS NOT NULL
-        AND ${pendingPayouts.confirmedAt} >= ${since}
+        AND ${pendingPayouts.confirmedAt} >= ${since.toISOString()}
       GROUP BY GROUPING SETS ((${pendingPayouts.assetCode}), ())
       ORDER BY asset_code NULLS FIRST
     `);

@@ -130,7 +130,7 @@ export async function getCashbackByMerchantHandler(c: Context): Promise<Response
         AND ${creditTransactions.type} = 'cashback'
         AND ${creditTransactions.referenceType} = 'order'
         AND ${creditTransactions.currency} = ${user.homeCurrency}
-        AND ${creditTransactions.createdAt} >= ${since}
+        AND ${creditTransactions.createdAt} >= ${since.toISOString()}
       GROUP BY ${orders.merchantId}
       ORDER BY cashback_minor DESC, last_earned_at DESC
       LIMIT ${limit}

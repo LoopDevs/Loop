@@ -128,7 +128,7 @@ export async function adminMerchantTopEarnersHandler(c: Context): Promise<Respon
       WHERE ${orders.merchantId} = ${merchantId}
         AND ${orders.state} = 'fulfilled'
         AND ${orders.fulfilledAt} IS NOT NULL
-        AND ${orders.fulfilledAt} >= ${since}
+        AND ${orders.fulfilledAt} >= ${since.toISOString()}
       GROUP BY ${orders.userId}, ${users.email}, ${orders.chargeCurrency}
       ORDER BY cashback_minor DESC, email ASC
       LIMIT ${limit}

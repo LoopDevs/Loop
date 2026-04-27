@@ -98,7 +98,7 @@ export async function adminMerchantsFlywheelShareCsvHandler(c: Context): Promise
       FROM ${orders}
       WHERE ${orders.state} = 'fulfilled'
         AND ${orders.fulfilledAt} IS NOT NULL
-        AND ${orders.fulfilledAt} >= ${since}
+        AND ${orders.fulfilledAt} >= ${since.toISOString()}
       GROUP BY ${orders.merchantId}
       HAVING COUNT(*) FILTER (WHERE ${orders.paymentMethod} = 'loop_asset') > 0
       ORDER BY
