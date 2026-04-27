@@ -28,6 +28,7 @@
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
+import { registerUsersFlywheelRailOpenApi } from './users-flywheel-rail.js';
 
 /**
  * Registers the user cashback-drill paths + their locally-scoped
@@ -179,107 +180,12 @@ export function registerUsersCashbackDrillOpenApi(
   // These are the self-view counterparts to the admin per-user endpoints
   // — same shapes, keyed on auth context instead of path param.
 
-  const UserFlywheelStats = registry.register(
-    'UserFlywheelStats',
-    z.object({
-      currency: z.string().length(3).openapi({
-        description:
-          "Caller's home_currency — both numerator and denominator scoped to it so the ratio shares a denomination.",
-      }),
-      recycledOrderCount: z.number().int(),
-      recycledChargeMinor: z.string().openapi({ description: 'bigint-as-string.' }),
-      totalFulfilledCount: z.number().int(),
-      totalFulfilledChargeMinor: z.string().openapi({ description: 'bigint-as-string.' }),
-    }),
-  );
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/users/me/flywheel-stats',
-    summary: 'Caller-scoped recycled-vs-total scalar (ADR 015).',
-    description:
-      "Powers the FlywheelChip on /orders and /settings/cashback. Answers the user's question: 'how much of my spend came back to me as cashback I then spent again?'. Home-currency-locked. Zero-recycled users get zeroed fields (not 404) — the chip self-hides on zero via client-side check.",
-    tags: ['Users'],
-    security: [{ bearerAuth: [] }],
-    responses: {
-      200: {
-        description: 'Caller recycled-vs-total flywheel scalar',
-        content: { 'application/json': { schema: UserFlywheelStats } },
-      },
-      401: {
-        description: 'Missing or invalid bearer token',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: { description: 'DB error', content: { 'application/json': { schema: errorResponse } } },
-    },
-  });
-
-  const UserPaymentMethodShareResponseUserSelf = registry.register(
-    'UserPaymentMethodShareResponseSelf',
-    z.object({
-      currency: z.string().length(3),
-      state: z.enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired']),
-      totalOrders: z.number().int(),
-      byMethod: z.object({
-        xlm: z.object({
-          orderCount: z.number().int(),
-          chargeMinor: z.string().openapi({ description: 'bigint-as-string.' }),
-        }),
-        usdc: z.object({
-          orderCount: z.number().int(),
-          chargeMinor: z.string().openapi({ description: 'bigint-as-string.' }),
-        }),
-        credit: z.object({
-          orderCount: z.number().int(),
-          chargeMinor: z.string().openapi({ description: 'bigint-as-string.' }),
-        }),
-        loop_asset: z.object({
-          orderCount: z.number().int(),
-          chargeMinor: z.string().openapi({ description: 'bigint-as-string.' }),
-        }),
-      }),
-    }),
-  );
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/users/me/payment-method-share',
-    summary: "Caller's own rail mix (ADR 010/015).",
-    description:
-      'User-facing self-view of the payment-method-share quartet (fleet / per-merchant / per-user admin / self). Powers the RailMixCard on /settings/cashback. Home-currency-locked. A 0% LOOP-asset share is the clearest nudge to pick LOOP at next checkout so cashback compounds.',
-    tags: ['Users'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        state: z
-          .enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired'])
-          .optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: "Caller's own rail mix",
-        content: {
-          'application/json': { schema: UserPaymentMethodShareResponseUserSelf },
-        },
-      },
-      400: {
-        description: 'Invalid ?state',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer token',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: { description: 'DB error', content: { 'application/json': { schema: errorResponse } } },
-    },
-  });
+  // The two caller-scoped self-view paths
+  // (`/api/users/me/flywheel-stats` and
+  // `/api/users/me/payment-method-share`) plus their two
+  // locally-scoped schemas (`UserFlywheelStats`,
+  // `UserPaymentMethodShareResponseSelf`) live in
+  // `./users-flywheel-rail.ts`. Same path-registration position
+  // as the original block.
+  registerUsersFlywheelRailOpenApi(registry, errorResponse);
 }
