@@ -31,6 +31,7 @@
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
+import { registerUsersPendingPayoutsDrillsOpenApi } from './users-pending-payouts-drills.js';
 
 /**
  * Registers the user pending-payouts paths + their locally-scoped
@@ -181,81 +182,11 @@ export function registerUsersPendingPayoutsOpenApi(
     },
   });
 
-  registry.registerPath({
-    method: 'get',
-    path: '/api/users/me/pending-payouts/{id}',
-    summary: 'Caller-scoped single payout detail (ADR 015 / 016).',
-    description:
-      "Permalink for one of the caller's `pending_payouts` rows. The settings/cashback page deep-links each row so the user can share the URL with support when asking about a stuck payout. Cross-user access returns 404 (not 403) so payout ids aren't enumerable.",
-    tags: ['Users'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ id: z.string().uuid() }),
-    },
-    responses: {
-      200: {
-        description: 'Payout row',
-        content: { 'application/json': { schema: UserPendingPayoutView } },
-      },
-      400: {
-        description: 'Missing or malformed id',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description: 'Payout not found (or owned by a different user)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error resolving the user',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/users/me/orders/{orderId}/payout',
-    summary: 'Per-order cashback settlement drill (ADR 015 / 016).',
-    description:
-      "For one of the caller's own orders, return the single pending-payout row tied to it. Mirror of the admin `/api/admin/orders/{orderId}/payout` but ownership-scoped: (orderId, userId) predicate guarantees cross-user access returns 404 (not 403), so order ids aren't enumerable. Powers the per-order settlement card on `/orders/:id` — users see Stellar-side state (pending / submitted / confirmed / failed) next to the gift-card redemption. Null result when the order has no payout row yet (pre-cashback, credit-only ledger, or order doesn't belong to the caller).",
-    tags: ['Users'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ orderId: z.string().uuid() }),
-    },
-    responses: {
-      200: {
-        description: 'Payout row for the order',
-        content: { 'application/json': { schema: UserPendingPayoutView } },
-      },
-      400: {
-        description: 'Missing or malformed orderId',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description: "No payout row for this order (or order doesn't belong to caller)",
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error resolving the user',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
+  // The two single-row payout drills
+  // (`/api/users/me/pending-payouts/{id}` and
+  // `/api/users/me/orders/{orderId}/payout`) live in
+  // `./users-pending-payouts-drills.ts`. `UserPendingPayoutView`
+  // is threaded in so all three consumers (list response wrapper
+  // + both drills) share the same registered component instance.
+  registerUsersPendingPayoutsDrillsOpenApi(registry, errorResponse, UserPendingPayoutView);
 }
