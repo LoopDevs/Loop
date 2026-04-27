@@ -201,9 +201,20 @@ export async function applyAdminWithdrawal(args: {
  * `code='23505'` (unique_violation) and `constraint_name` populated.
  */
 function isDuplicateWithdrawal(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const e = err as Error & { code?: string; constraint_name?: string };
-  return e.code === '23505' && e.constraint_name === 'credit_transactions_reference_unique';
+  // Drizzle wraps `PostgresError` in `DrizzleQueryError`; walk the
+  // cause chain to find the underlying postgres-js error. Without
+  // this the duplicate-withdrawal attempt 500s instead of surfacing
+  // as 409 WITHDRAWAL_ALREADY_ISSUED — caught by the admin-writes
+  // integration suite.
+  let cur: unknown = err;
+  for (let depth = 0; depth < 4 && cur instanceof Error; depth++) {
+    const e = cur as Error & { code?: string; constraint_name?: string };
+    if (e.code === '23505' && e.constraint_name === 'credit_transactions_reference_unique') {
+      return true;
+    }
+    cur = (e as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 /**
@@ -211,11 +222,19 @@ function isDuplicateWithdrawal(err: unknown): boolean {
  * embedded in the pg error's `detail` field
  * (`Key (type, reference_type, reference_id)=(withdrawal, payout, <id>)`).
  * Extract it for the typed error so the handler can echo it back.
+ * Same cause-chain walk as `isDuplicateWithdrawal` — the `detail`
+ * field lives on the wrapped postgres-js error, not the top-level
+ * `DrizzleQueryError`.
  */
 function extractPayoutId(err: unknown): string | null {
-  if (!(err instanceof Error)) return null;
-  const e = err as Error & { detail?: string };
-  if (e.detail === undefined) return null;
-  const match = /\(withdrawal, payout, ([^)]+)\)/.exec(e.detail);
-  return match?.[1] ?? null;
+  let cur: unknown = err;
+  for (let depth = 0; depth < 4 && cur instanceof Error; depth++) {
+    const e = cur as Error & { detail?: string };
+    if (e.detail !== undefined) {
+      const match = /\(withdrawal, payout, ([^)]+)\)/.exec(e.detail);
+      if (match?.[1] !== undefined) return match[1];
+    }
+    cur = (e as { cause?: unknown }).cause;
+  }
+  return null;
 }

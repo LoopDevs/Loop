@@ -48,9 +48,19 @@ export async function upsertUserFromCtx(args: {
     })
     .onConflictDoUpdate({
       target: users.ctxUserId,
-      // Partial unique index — include the WHERE so Postgres picks
-      // the right index for the upsert. (Mirrors schema.ts.)
-      setWhere: sql`${users.ctxUserId} IS NOT NULL`,
+      // Partial unique index — `targetWhere` is the conflict-arbiter
+      // predicate that mirrors `users_ctx_user_id_unique`'s
+      // `WHERE ctx_user_id IS NOT NULL` in schema.ts. Postgres
+      // requires this on the conflict target (`ON CONFLICT (col) WHERE
+      // <predicate>`) to disambiguate which partial unique index
+      // arbitrates. The previous `setWhere` was incorrect — `setWhere`
+      // filters which existing rows the UPDATE applies to (after the
+      // conflict has already been arbitrated), not which index to
+      // arbiter on. Without `targetWhere`, postgres throws
+      // `there is no unique or exclusion constraint matching the
+      // ON CONFLICT specification` because none of the unconditional
+      // indexes match the implicit arbiter predicate.
+      targetWhere: sql`${users.ctxUserId} IS NOT NULL`,
       set: {
         email: sql`COALESCE(EXCLUDED.email, ${users.email})`,
         isAdmin,

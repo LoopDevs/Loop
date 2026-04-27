@@ -19,7 +19,7 @@
  * erase it; persisting on the ledger row makes the promise hold past
  * the TTL.
  */
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, gte, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { creditTransactions, userCredits } from '../db/schema.js';
 import { env } from '../env.js';
@@ -98,7 +98,16 @@ export async function applyAdminCreditAdjustment(args: {
             eq(creditTransactions.referenceType, 'admin_adjustment'),
             eq(creditTransactions.referenceId, args.adminUserId),
             eq(creditTransactions.currency, args.currency),
-            sql`${creditTransactions.createdAt} >= ${dayStart}`,
+            // A2-1610 / fixup: drizzle's `sql` template can't bind a
+            // raw `Date` against `postgres-js` (it expects
+            // string/Buffer/ArrayBuffer at the wire-bind layer and
+            // throws `The "string" argument must be of type string`
+            // before the query reaches postgres). Use the typed
+            // `gte()` operator instead — drizzle converts the Date
+            // through the column's mapper into the correct timestamp
+            // bind. Caught by the admin-writes integration suite
+            // when ADMIN_DAILY_ADJUSTMENT_CAP_MINOR > 0 (default).
+            gte(creditTransactions.createdAt, dayStart),
           ),
         );
       const used = BigInt(dayRow?.usedMinor ?? '0');
