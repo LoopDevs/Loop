@@ -1,5 +1,4 @@
 import type { Context } from 'hono';
-import { z } from 'zod';
 import { logger } from '../logger.js';
 import { getMerchants } from '../merchants/sync.js';
 import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
@@ -22,12 +21,10 @@ const log = logger.child({ handler: 'orders' });
 
 // Gift card denominations in the wild span roughly $1 to $10k; reject anything
 // outside that band to prevent accidental or malicious orders. `.finite()` blocks
-// Infinity/NaN; `.multipleOf(0.01)` enforces cents-precision so we never send
-// IEEE-754 garbage (0.1 + 0.2 = 0.30000000000000004) to upstream.
-const CreateOrderBody = z.object({
-  merchantId: z.string().min(1).max(128),
-  amount: z.number().finite().positive().min(0.01).max(10_000).multipleOf(0.01),
-});
+// A2-803: the request-body schema lives in `./request-schemas.ts`
+// alongside the auth-slice precedent so both this runtime parser and
+// the openapi factory in `../openapi/orders.ts` resolve to one shape.
+import { CreateOrderBody } from './request-schemas.js';
 
 /**
  * POST /api/orders

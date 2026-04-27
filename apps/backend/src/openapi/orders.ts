@@ -21,6 +21,7 @@ import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerOrdersLoopOpenApi } from './orders-loop.js';
 import { registerOrdersReadsOpenApi } from './orders-reads.js';
+import { CreateOrderBody as CreateOrderBodyRuntime } from '../orders/request-schemas.js';
 
 /**
  * Registers all `/api/orders/*` and `/api/orders/loop/*` schemas
@@ -31,14 +32,17 @@ export function registerOrdersOpenApi(
   errorResponse: ReturnType<OpenAPIRegistry['register']>,
   pagination: ReturnType<OpenAPIRegistry['register']>,
 ): void {
+  // A2-803 (orders slice): the create-body shape lives in
+  // `../orders/request-schemas.ts` as the single source of truth
+  // shared with the runtime parser in `orders/handler.ts`. The
+  // shared module calls `extendZodWithOpenApi(z)` itself so the
+  // imported schema carries `.openapi(...)` regardless of import
+  // order — top-level annotation works.
   const CreateOrderBody = registry.register(
     'CreateOrderBody',
-    z.object({
-      merchantId: z.string().min(1).max(128),
-      amount: z.number().min(0.01).max(10_000).multipleOf(0.01).openapi({
-        description:
-          '2-decimal precision, in merchant currency. Accepted range is 0.01 – 10_000, matching the runtime CreateOrderBody schema in apps/backend/src/orders/handler.ts.',
-      }),
+    CreateOrderBodyRuntime.openapi({
+      description:
+        'POST /api/orders body. `amount` is 2-decimal precision in merchant currency (0.01 – 10_000).',
     }),
   );
 
