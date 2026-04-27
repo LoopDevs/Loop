@@ -31,4 +31,9 @@ paths = [
   # expired / synthetic) — kept as JSON to lock the response shape
   # for contract tests. Real upstream tokens never live in the repo.
   '''__fixtures__/.*\.json$''',
+  # Playwright test configs pin fixture-only signing keys + Stellar
+  # issuer addresses for the loop-native flywheel suite. Same policy
+  # as `__tests__/` fixtures — never real, only used by `tsx` runs
+  # of the backend under `NODE_ENV=test` against `loop_test`.
+  '''(^|/)playwright\..*\.config\.ts$''',
 ]
