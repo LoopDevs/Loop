@@ -78,35 +78,21 @@
 import type { Context, Hono } from 'hono';
 import { logger } from '../logger.js';
 import type { User } from '../db/users.js';
-import { rateLimit } from '../middleware/rate-limit.js';
 import { privateNoStoreResponse } from '../middleware/cache-control.js';
 import { requireAuth } from '../auth/handler.js';
 import { requireAdmin } from '../auth/require-admin.js';
 import { notifyAdminBulkRead } from '../discord.js';
 import { mountAdminCashbackConfigRoutes } from './admin-cashback-config.js';
-import { mountAdminTreasuryRoutes } from './admin-treasury.js';
-import { adminPayoutByOrderHandler } from '../admin/payouts.js';
-import { mountAdminPayoutsRoutes } from './admin-payouts.js';
-import { adminTopUsersHandler } from '../admin/top-users.js';
-import { mountAdminUserClusterRoutes } from './admin-user-cluster.js';
-import { adminAuditTailHandler } from '../admin/audit-tail.js';
-import { adminAuditTailCsvHandler } from '../admin/audit-tail-csv.js';
-import { adminListOrdersHandler } from '../admin/orders.js';
-import { adminMerchantFlowsHandler } from '../admin/merchant-flows.js';
-import { adminDiscordConfigHandler } from '../admin/discord-config.js';
-import { adminUserSearchHandler } from '../admin/user-search.js';
-import { adminUserCreditsCsvHandler } from '../admin/user-credits-csv.js';
-import { adminReconciliationHandler } from '../admin/reconciliation.js';
-import { mountAdminOrderDrillRoutes } from './admin-order-drill.js';
+import { mountAdminCreditWritesRoutes } from './admin-credit-writes.js';
 import { mountAdminDashboardRoutes } from './admin-dashboard.js';
 import { mountAdminFleetMonthlyRoutes } from './admin-fleet-monthly.js';
-import { adminMerchantStatsHandler } from '../admin/merchant-stats.js';
-import { mountAdminPerMerchantRoutes } from './admin-per-merchant.js';
 import { mountAdminOperatorRoutes } from './admin-operator.js';
-import { adminMerchantsResyncHandler } from '../admin/merchants-resync.js';
-import { adminDiscordNotifiersHandler } from '../admin/discord-notifiers.js';
-import { adminDiscordTestHandler } from '../admin/discord-test.js';
-import { mountAdminCreditWritesRoutes } from './admin-credit-writes.js';
+import { mountAdminOpsTailRoutes } from './admin-ops-tail.js';
+import { mountAdminOrderDrillRoutes } from './admin-order-drill.js';
+import { mountAdminPayoutsRoutes } from './admin-payouts.js';
+import { mountAdminPerMerchantRoutes } from './admin-per-merchant.js';
+import { mountAdminTreasuryRoutes } from './admin-treasury.js';
+import { mountAdminUserClusterRoutes } from './admin-user-cluster.js';
 
 /** Mounts all `/api/admin/*` routes on the supplied Hono app. */
 export function mountAdminRoutes(app: Hono): void {
@@ -193,29 +179,15 @@ export function mountAdminRoutes(app: Hono): void {
   // the parent's middleware stack is already in place.
   mountAdminPayoutsRoutes(app);
 
-  // Loop-native orders drill-down (ADR 011 / 015). Paginated, filterable
-  // by state and userId. Ops uses this to triage stuck orders + audit
-  // the cashback split + correlate with operator-pool health.
-  app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
-  // Per-merchant fulfilled-order flow aggregate (ADR 011 / 015). Feeds
-  // the per-row "actual split" display on /admin/cashback next to each
-  // merchant's configured split.
-  app.get('/api/admin/merchant-flows', rateLimit(60, 60_000), adminMerchantFlowsHandler);
-  // Webhook configuration status — read-only companion to the ping
-  // endpoint. Admin panel polls this to render a "configured"/"missing"
-  // badge next to each channel without POSTing.
-  app.get('/api/admin/discord/config', rateLimit(60, 60_000), adminDiscordConfigHandler);
-  // User search by email fragment (ADR 011 — admin panel navigation).
-  // Rate limit matches other reads; the ILIKE query is indexed by the
-  // users_email index so it stays fast even on growth.
-  app.get('/api/admin/users/search', rateLimit(60, 60_000), adminUserSearchHandler);
-  // Tier 3 CSV export of the full user_credits table. Support audit /
-  // liability reconciliation. 20/min matches other admin exports.
-  app.get('/api/admin/user-credits.csv', rateLimit(20, 60_000), adminUserCreditsCsvHandler);
-  // Ledger integrity check (ADR 009 invariant). Left-joins user_credits
-  // against the grouped credit_transactions sum; returns drifted rows.
-  app.get('/api/admin/reconciliation', rateLimit(30, 60_000), adminReconciliationHandler);
-  // Order-drill cluster — orders/activity, orders/payment-method-
+  // Ops-tail residual — orders list, merchant-flows, discord/*,
+  // users/search, user-credits.csv, reconciliation, merchant-stats,
+  // orders/:orderId/payout, top-users, audit-tail (+ .csv),
+  // merchants/resync. Lifted into ./admin-ops-tail.ts (mirrors openapi
+  // #1169 misc-reads + #1180 ops-tail). Mount-order: must precede
+  // mountAdminUserClusterRoutes so /users/search literal registers
+  // before /users/:userId param.
+  mountAdminOpsTailRoutes(app);
+
   // share + activity, orders/:orderId, orders.csv (ADR 010/011/015/019).
   // Lifted into ./admin-order-drill.ts; mount-order discipline preserved
   // (literal-suffix routes register before param-only /:orderId).
@@ -234,41 +206,16 @@ export function mountAdminRoutes(app: Hono): void {
   // for the JSON; CSV companions travel alongside their siblings).
   mountAdminFleetMonthlyRoutes(app);
 
-  // Per-merchant cashback stats — which merchants drive volume /
-  // cashback outlay / margin. Distinct from supplier-spend (currency
-  // grouped) — this one groups by merchant.
-  app.get('/api/admin/merchant-stats', rateLimit(60, 60_000), adminMerchantStatsHandler);
-  // Per-merchant drill cluster + fleet flywheel-share leaderboard
   // (ADR 011/013/015/018/022). Lifted into ./admin-per-merchant.ts.
   // Mount-order: literal /flywheel-share + .csv before the
   // /:merchantId/* family.
   mountAdminPerMerchantRoutes(app);
 
-  // Given an order id, return the single pending_payouts row for it.
-  // Nested under /orders/:orderId so the UI can link from the order
-  // drill-down straight to the payout state without a separate fetch.
-  app.get('/api/admin/orders/:orderId/payout', rateLimit(120, 60_000), adminPayoutByOrderHandler);
-  // Operator + supplier-spend cluster — supplier-spend (+ activity),
   // per-operator supplier-spend / activity / merchant-mix, fleet
   // operator-stats + operators/latency. Lifted into ./admin-operator.ts
   // (mirrors openapi #1172 + #1173).
   mountAdminOperatorRoutes(app);
 
-  // Top users by cashback earned — recognition + concentration-risk
-  // view for ops. Ranked, window-bounded; not a drill path.
-  app.get('/api/admin/top-users', rateLimit(60, 60_000), adminTopUsersHandler);
-  // Newest-first tail of admin_idempotency_keys (ADR 017/018). Powers
-  // the "recent admin activity" card on the /admin landing. Same row
-  // as the Discord audit fanout but persistent + queryable. Actor
-  // email joined in so the UI doesn't need a follow-up lookup.
-  app.get('/api/admin/audit-tail', rateLimit(60, 60_000), adminAuditTailHandler);
-  // Finance / legal CSV export of the admin write-audit trail
-  // (ADR 017 / 018). SOC-2 and finance audits want a month of
-  // rows exportable in a neutral format. 10/min rate-limit mirrors
-  // the other Tier-3 CSV exports — ops runs this manually at
-  // month-end, not on-click from the UI.
-  app.get('/api/admin/audit-tail.csv', rateLimit(10, 60_000), adminAuditTailCsvHandler);
-  // User cluster — directory + lookups + per-user drill
   // (ADR 009/015/022). Lifted into ./admin-user-cluster.ts (mirrors
   // openapi #1176 + the per-user-drill axes from #1168 / #1171).
   // Mount-order: literal lookup paths register before /:userId.
@@ -278,19 +225,4 @@ export function mountAdminRoutes(app: Hono): void {
   // withdrawals (ADR 017/024 + A2-901). Lifted into
   // ./admin-credit-writes.ts (mirrors openapi #1175).
   mountAdminCreditWritesRoutes(app);
-
-  // Manual merchant-catalog resync (ADR 011). Bypasses the 6h
-  // scheduled refresh so ops can apply an upstream catalog change
-  // within seconds. 2/min rate limit — every hit goes to CTX, this
-  // is a manual override not a polled surface.
-  app.post('/api/admin/merchants/resync', rateLimit(2, 60_000), adminMerchantsResyncHandler);
-  // Discord notifier catalog (ADR 018). Static read of the
-  // DISCORD_NOTIFIERS const — the admin UI renders "what signals can
-  // this system send us?" from this list. No DB, no secrets.
-  app.get('/api/admin/discord/notifiers', rateLimit(60, 60_000), adminDiscordNotifiersHandler);
-  // Manual Discord test ping. Admin picks a channel, backend fires a
-  // benign embed at the configured webhook so ops can verify wiring
-  // after rotating env vars. 10/min — this is a manual ops primitive,
-  // spamming looks like webhook enumeration.
-  app.post('/api/admin/discord/test', rateLimit(10, 60_000), adminDiscordTestHandler);
 }
