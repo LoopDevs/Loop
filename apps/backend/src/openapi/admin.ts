@@ -38,6 +38,7 @@ import { registerAdminOperatorFleetOpenApi } from './admin-operator-fleet.js';
 import { registerAdminOperatorMixOpenApi } from './admin-operator-mix.js';
 import { registerAdminPerMerchantDrillOpenApi } from './admin-per-merchant-drill.js';
 import { registerAdminPerUserDrillOpenApi } from './admin-per-user-drill.js';
+import { registerAdminSupplierSpendOpenApi } from './admin-supplier-spend.js';
 
 /**
  * Registers all `/api/admin/*` schemas + paths on the supplied
@@ -619,61 +620,18 @@ export function registerAdminOpenApi(
     }),
   );
 
-  const AdminSupplierSpendResponse = registry.register(
-    'AdminSupplierSpendResponse',
-    z.object({
-      since: z.string().datetime(),
-      rows: z.array(AdminSupplierSpendRow),
-    }),
-  );
+  // ─── Admin supplier-spend & treasury credit-flow (ADR 009/013/015) ──────────
+  //
+  // The "treasury-velocity triplet" — supplier spend, supplier-spend
+  // activity, treasury credit-flow — lives in ./admin-supplier-spend.ts.
+  // Locally-scoped schemas (AdminSupplierSpendResponse,
+  // AdminSupplierSpendActivityDay/Response,
+  // AdminTreasuryCreditFlowDay/Response) travel with the slice.
+  // `AdminSupplierSpendRow` stays here because it is shared with
+  // ./admin-operator-fleet.ts and is threaded into both slices as a
+  // parameter.
+  registerAdminSupplierSpendOpenApi(registry, errorResponse, AdminSupplierSpendRow);
 
-  // ─── Admin — supplier-spend activity (ADR 013 / 015) ───────────────────────
-
-  const AdminSupplierSpendActivityDay = registry.register(
-    'AdminSupplierSpendActivityDay',
-    z.object({
-      day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      currency: z.string().length(3),
-      count: z.number().int().min(0),
-      faceValueMinor: z.string(),
-      wholesaleMinor: z.string(),
-      userCashbackMinor: z.string(),
-      loopMarginMinor: z.string(),
-    }),
-  );
-
-  const AdminSupplierSpendActivityResponse = registry.register(
-    'AdminSupplierSpendActivityResponse',
-    z.object({
-      windowDays: z.number().int().min(1).max(180),
-      currency: z.enum(['USD', 'GBP', 'EUR']).nullable(),
-      days: z.array(AdminSupplierSpendActivityDay),
-    }),
-  );
-
-  // ─── Admin — treasury credit-flow (ADR 009 / 015) ──────────────────────────
-
-  const AdminTreasuryCreditFlowDay = registry.register(
-    'AdminTreasuryCreditFlowDay',
-    z.object({
-      day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      currency: z.string().length(3),
-      creditedMinor: z.string(),
-      debitedMinor: z.string(),
-      netMinor: z.string(),
-    }),
-  );
-
-  const AdminTreasuryCreditFlowResponse = registry.register(
-    'AdminTreasuryCreditFlowResponse',
-    z.object({
-      windowDays: z.number().int().min(1).max(180),
-      currency: z.enum(['USD', 'GBP', 'EUR']).nullable(),
-      days: z.array(AdminTreasuryCreditFlowDay),
-    }),
-  );
-
-  // ─── Admin operator-mix matrix (ADR 013/022/023) ────────────────────────────
   //
   // The three X × operator endpoints (merchants/{id}/operator-mix,
   // operators/{id}/merchant-mix, users/{id}/operator-mix) plus
@@ -1491,135 +1449,6 @@ export function registerAdminOpenApi(
       },
       500: {
         description: 'Internal error reading the row',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/supplier-spend',
-    summary: 'Per-currency supplier-spend snapshot (ADR 013 / 015).',
-    description:
-      'Aggregates fulfilled orders in the window by catalog currency. Each row exposes count, total face value, wholesale cost billed by CTX, user cashback, and loop margin retained — all `bigint`-minor as strings. Default window is the last 24h; pass `?since=<iso-8601>` to walk back. Capped at 366 days to keep the postgres aggregate cheap.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        since: z
-          .string()
-          .datetime()
-          .optional()
-          .openapi({ description: 'ISO-8601 — lower bound on fulfilledAt. Defaults to 24h ago.' }),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Per-currency supplier-spend rows',
-        content: { 'application/json': { schema: AdminSupplierSpendResponse } },
-      },
-      400: {
-        description: 'Invalid `since`',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error computing the aggregate',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/supplier-spend/activity',
-    summary: 'Per-day per-currency supplier-spend time-series (ADR 013 / 015).',
-    description:
-      "Time-axis of `/api/admin/supplier-spend`: per-day aggregate of face/wholesale/cashback/margin for fulfilled orders bucketed by `fulfilled_at::date` (UTC). `?currency=USD|GBP|EUR` zero-fills days via LEFT JOIN; without the filter, only (day, currency) pairs with activity appear. Pairs with `/api/admin/treasury/credit-flow` (ledger in) and `/api/admin/payouts-activity` (chain settle out) as the 'treasury-velocity triplet' ops watches to know money moved as expected today.",
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        days: z.coerce.number().int().min(1).max(180).optional(),
-        currency: z.enum(['USD', 'GBP', 'EUR']).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Per-day per-currency rows',
-        content: { 'application/json': { schema: AdminSupplierSpendActivityResponse } },
-      },
-      400: {
-        description: 'Unknown `currency`',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error computing the aggregate',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/treasury/credit-flow',
-    summary: 'Per-day credited/debited/net ledger flow (ADR 009 / 015).',
-    description:
-      "Per-day × per-currency ledger delta from `credit_transactions`. Answers the treasury question the snapshot can't: 'are we generating liability faster than we settle it?'. A week of net > 0 days means cashback issuance is outpacing user settlement — treasury plans Stellar-side funding ahead of the curve. Credited = sum(amount_minor) for positive-amount types (cashback, interest, refund) + positive adjustments; debited = abs(sum) for negative-amount types (spend, withdrawal). bigint-as-string. `?currency` zero-fills; default 30d, cap 180d.",
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        days: z.coerce.number().int().min(1).max(180).optional(),
-        currency: z.enum(['USD', 'GBP', 'EUR']).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Per-day credit-flow rows',
-        content: { 'application/json': { schema: AdminTreasuryCreditFlowResponse } },
-      },
-      400: {
-        description: 'Unknown `currency`',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error computing the aggregate',
         content: { 'application/json': { schema: errorResponse } },
       },
     },
