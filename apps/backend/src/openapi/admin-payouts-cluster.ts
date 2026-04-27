@@ -9,11 +9,15 @@
  * `./admin-payouts-cluster-writes.ts` and are re-invoked from this
  * file's factory.
  *
- * Read paths in the slice:
+ * Read paths registered directly here:
  *   - GET  /api/admin/payouts                     (paginated backlog)
  *   - GET  /api/admin/payouts/{id}                (single-row drill)
  *   - GET  /api/admin/payouts-by-asset            (per-(asset, state) totals)
- *   - GET  /api/admin/payouts/settlement-lag      (percentile SLA)
+ *
+ * Read path delegated to a sibling slice:
+ *   - GET  /api/admin/payouts/settlement-lag      (percentile SLA;
+ *     `./admin-payouts-settlement-lag.ts` — owns
+ *     `SettlementLagRow` + `SettlementLagResponse`)
  *
  * Write paths in the sibling file:
  *   - POST /api/admin/payouts/{id}/retry          (ADR 017 retry)
@@ -22,7 +26,6 @@
  * Locally-scoped read-side schemas travel with the slice:
  *   - `AdminPayoutListResponse`
  *   - `PerStateBreakdown` / `PayoutsByAssetRow` / `PayoutsByAssetResponse`
- *   - `SettlementLagRow` / `SettlementLagResponse`
  *
  * Write-side schemas (`PayoutRetryBody` / `PayoutRetryEnvelope` /
  * `PayoutCompensationBody` / `PayoutCompensationResult` /
@@ -42,6 +45,7 @@
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminPayoutsClusterWritesOpenApi } from './admin-payouts-cluster-writes.js';
+import { registerAdminPayoutsSettlementLagOpenApi } from './admin-payouts-settlement-lag.js';
 
 /**
  * Registers the payouts-cluster paths + their locally-scoped
@@ -92,30 +96,6 @@ export function registerAdminPayoutsClusterOpenApi(
   const PayoutsByAssetResponse = registry.register(
     'PayoutsByAssetResponse',
     z.object({ rows: z.array(PayoutsByAssetRow) }),
-  );
-
-  // ─── Admin — settlement-lag SLA (ADR 015 / 016) ────────────────────────────
-
-  const SettlementLagRow = registry.register(
-    'SettlementLagRow',
-    z.object({
-      assetCode: z.string().nullable().openapi({
-        description: 'LOOP asset code; `null` for the fleet-wide aggregate row.',
-      }),
-      sampleCount: z.number().int().nonnegative(),
-      p50Seconds: z.number().nonnegative(),
-      p95Seconds: z.number().nonnegative(),
-      maxSeconds: z.number().nonnegative(),
-      meanSeconds: z.number().nonnegative(),
-    }),
-  );
-
-  const SettlementLagResponse = registry.register(
-    'SettlementLagResponse',
-    z.object({
-      since: z.string().datetime(),
-      rows: z.array(SettlementLagRow),
-    }),
   );
 
   registry.registerPath({
@@ -248,48 +228,14 @@ export function registerAdminPayoutsClusterOpenApi(
     },
   });
 
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/payouts/settlement-lag',
-    summary: 'Payout settlement-lag SLA (ADR 015 / 016).',
-    description:
-      "Percentile latency (in seconds) from `pending_payouts` insert (`createdAt`) to on-chain confirmation (`confirmedAt`) for `state='confirmed'` rows in the window. One row per LOOP asset, plus a fleet-wide aggregate where `assetCode: null`. The user-facing SLA: if p95 is minutes we're healthy; hours means the payout worker or Horizon is backed up and users are waiting. Window: `?since=<iso>` (default 24h, cap 366d). Same clamp as the operator-latency endpoint.",
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        since: z.string().datetime().optional().openapi({
-          description: 'ISO-8601 — lower bound on `confirmedAt`. Defaults to 24h ago.',
-        }),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Per-asset rows plus fleet-wide aggregate',
-        content: { 'application/json': { schema: SettlementLagResponse } },
-      },
-      400: {
-        description: 'Malformed `since` or window > 366d',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error computing the aggregate',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
+  // ─── Admin — settlement-lag SLA (ADR 015 / 016) ────────────────────────────
+  //
+  // Path + locally-scoped schemas (`SettlementLagRow`,
+  // `SettlementLagResponse`) live in
+  // `./admin-payouts-settlement-lag.ts`. Fanned out from here so
+  // the payouts-cluster registration in `admin.ts` keeps producing
+  // one factory call for the whole surface.
+  registerAdminPayoutsSettlementLagOpenApi(registry, errorResponse);
 
   // The two write paths (`POST /api/admin/payouts/{id}/retry` and
   // `POST /api/admin/payouts/{id}/compensate`) plus their body /
