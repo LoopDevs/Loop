@@ -47,59 +47,10 @@ const CtxGiftCardResponse = z.object({
   id: z.string().min(1),
 });
 
-/**
- * CTX response shape for GET /gift-cards/:id, narrowed to the
- * redemption fields we surface to the user. All fields are optional
- * — some merchant types redeem by URL + challenge, others by a
- * static code with or without a PIN.
- */
-const CtxGiftCardDetailResponse = z.object({
-  redeemCode: z.string().optional(),
-  redeemPin: z.string().optional(),
-  redeemUrl: z.string().url().optional(),
-  code: z.string().optional(),
-  pin: z.string().optional(),
-  url: z.string().url().optional(),
-});
-
-/**
- * Fetches the gift-card detail from CTX and collapses its various
- * field aliases into our internal `redeemCode / redeemPin / redeemUrl`
- * shape. CTX has been seen to use both `redeemCode` / `code` in the
- * wild depending on endpoint version; accept either.
- */
-async function fetchRedemption(ctxOrderId: string): Promise<{
-  code: string | null;
-  pin: string | null;
-  url: string | null;
-}> {
-  const res = await operatorFetch(upstreamUrl(`/gift-cards/${encodeURIComponent(ctxOrderId)}`), {
-    method: 'GET',
-    headers: { Accept: 'application/json' },
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!res.ok) {
-    log.warn(
-      { ctxOrderId, status: res.status },
-      'CTX gift-card detail fetch returned non-ok; persisting order without redemption payload',
-    );
-    return { code: null, pin: null, url: null };
-  }
-  const raw = await res.json();
-  const parsed = CtxGiftCardDetailResponse.safeParse(raw);
-  if (!parsed.success) {
-    log.warn(
-      { ctxOrderId, issues: parsed.error.issues },
-      'CTX gift-card detail schema mismatch; persisting order without redemption payload',
-    );
-    return { code: null, pin: null, url: null };
-  }
-  return {
-    code: parsed.data.redeemCode ?? parsed.data.code ?? null,
-    pin: parsed.data.redeemPin ?? parsed.data.pin ?? null,
-    url: parsed.data.redeemUrl ?? parsed.data.url ?? null,
-  };
-}
+// `fetchRedemption` (the GET /gift-cards/:id parser + collapse-
+// alias logic) lives in `./procurement-redemption.ts`. Imported
+// back here for the single call site in `procureOne`.
+import { fetchRedemption } from './procurement-redemption.js';
 
 export interface ProcurementTickResult {
   picked: number;
