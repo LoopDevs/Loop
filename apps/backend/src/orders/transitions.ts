@@ -15,13 +15,12 @@
  * whole thing rolls back — the order stays in `procuring` and a
  * retry can re-run the whole transition cleanly.
  */
-import { and, eq, lt, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { orders, creditTransactions, userCredits, users, pendingPayouts } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { isHomeCurrency } from '@loop/shared';
 import { buildPayoutIntent } from '../credits/payout-builder.js';
-import { notifyStuckProcurementSwept } from '../discord.js';
 import type { Order } from './repo.js';
 
 const log = logger.child({ area: 'order-transitions' });
@@ -268,54 +267,12 @@ export async function markOrderFailed(orderId: string, reason: string): Promise<
  * sweep sees the row already failed (null return → caller logs and
  * moves on, no ledger write).
  */
-export async function sweepStuckProcurement(cutoff: Date): Promise<number> {
-  const now = new Date();
-  const rows = await db
-    .update(orders)
-    .set({
-      state: 'failed',
-      failureReason: 'procurement_timeout',
-      failedAt: now,
-    })
-    .where(and(eq(orders.state, 'procuring'), lt(orders.procuredAt, cutoff)))
-    .returning({
-      id: orders.id,
-      userId: orders.userId,
-      merchantId: orders.merchantId,
-      chargeMinor: orders.chargeMinor,
-      chargeCurrency: orders.chargeCurrency,
-      ctxOperatorId: orders.ctxOperatorId,
-      procuredAt: orders.procuredAt,
-    });
-  // A2-621: per-row Discord alert. The sweep's outcome is ambiguous
-  // — we don't know whether CTX minted the gift card (and Loop was
-  // charged) or the POST never landed. Ops needs to reconcile each
-  // row manually before any user-facing refund. Running per-row
-  // (not aggregated) is deliberate: a non-zero sweep is rare, and
-  // when it happens each row needs its own drill-down, not a
-  // "N swept" counter. Fire-and-forget AFTER the commit.
-  for (const row of rows) {
-    notifyStuckProcurementSwept({
-      orderId: row.id,
-      userId: row.userId,
-      merchantId: row.merchantId,
-      chargeMinor: row.chargeMinor.toString(),
-      chargeCurrency: row.chargeCurrency,
-      ctxOperatorId: row.ctxOperatorId,
-      procuredAtMs: row.procuredAt?.getTime() ?? 0,
-    });
-  }
-  return rows.length;
-}
-
-export async function sweepExpiredOrders(cutoff: Date): Promise<number> {
-  const rows = await db
-    .update(orders)
-    .set({
-      state: 'expired',
-      failedAt: new Date(),
-    })
-    .where(and(eq(orders.state, 'pending_payment'), lt(orders.createdAt, cutoff)))
-    .returning({ id: orders.id });
-  return rows.length;
-}
+// `sweepStuckProcurement` (A2-621 ambiguous-outcome ops alert
+// included) and `sweepExpiredOrders` live in
+// `./transitions-sweeps.ts` — they're bulk-state-flipper
+// background sweeps, separate from the per-order transitions
+// above. Re-exported below so `'../orders/transitions.js'`
+// keeps resolving for procurement.ts, payments/watcher.ts, and
+// the test suite (including its dynamic
+// `await import('../transitions.js')`).
+export { sweepStuckProcurement, sweepExpiredOrders } from './transitions-sweeps.js';
