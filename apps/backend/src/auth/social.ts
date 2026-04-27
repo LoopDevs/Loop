@@ -23,13 +23,8 @@ import { env } from '../env.js';
 import { verifyIdToken, type VerifyIdTokenResult } from './id-token.js';
 import { consumeIdToken } from './id-token-replay.js';
 import { resolveOrCreateUserForIdentity } from './identities.js';
-import {
-  signLoopToken,
-  DEFAULT_ACCESS_TTL_SECONDS,
-  DEFAULT_REFRESH_TTL_SECONDS,
-  isLoopAuthConfigured,
-} from './tokens.js';
-import { recordRefreshToken } from './refresh-tokens.js';
+import { isLoopAuthConfigured } from './tokens.js';
+import { issueTokenPair } from './issue-token-pair.js';
 import type { SocialProvider } from '../db/schema.js';
 
 const log = logger.child({ handler: 'auth-social' });
@@ -59,39 +54,10 @@ export interface SocialProviderConfig {
   resolveAudiences: () => string[];
 }
 
-/**
- * Mints + persists an access/refresh pair for `user`. Identical
- * shape to the verify-otp path's issueTokenPair; factored here so
- * social-login calls don't re-import auth/native.ts (which would
- * drag the OTP-specific dependencies into the social module).
- */
-async function issueTokenPair(user: {
-  id: string;
-  email: string;
-}): Promise<{ accessToken: string; refreshToken: string }> {
-  const access = signLoopToken({
-    sub: user.id,
-    email: user.email,
-    typ: 'access',
-    ttlSeconds: DEFAULT_ACCESS_TTL_SECONDS,
-  });
-  const refresh = signLoopToken({
-    sub: user.id,
-    email: user.email,
-    typ: 'refresh',
-    ttlSeconds: DEFAULT_REFRESH_TTL_SECONDS,
-  });
-  if (refresh.claims.jti === undefined) {
-    throw new Error('refresh token missing jti');
-  }
-  await recordRefreshToken({
-    jti: refresh.claims.jti,
-    userId: user.id,
-    token: refresh.token,
-    expiresAt: new Date(refresh.claims.exp * 1000),
-  });
-  return { accessToken: access.token, refreshToken: refresh.token };
-}
+// `issueTokenPair` lives in `./issue-token-pair.ts` — shared with
+// the native verify-otp + refresh handlers in `./native.ts`. Both
+// surfaces previously shipped near-identical local copies; lifting
+// the helper closes the DRY gap.
 
 /**
  * Factory: given a provider config, returns a Hono handler for
@@ -202,7 +168,13 @@ export function makeSocialLoginHandler(config: SocialProviderConfig) {
       // Include email so the client can persist the session without
       // having to decode the Loop access JWT — mirrors what OTP users
       // get back (they typed their email; social users never did).
-      return c.json({ ...pair, email: user.email });
+      // Strip `refreshJti` from the wire response — it's an internal
+      // rotation-chain field, not part of the client contract.
+      return c.json({
+        accessToken: pair.accessToken,
+        refreshToken: pair.refreshToken,
+        email: user.email,
+      });
     } catch (err) {
       log.error({ err, provider: config.provider }, 'Social login failed unexpectedly');
       return c.json({ code: 'INTERNAL_ERROR', message: 'Social sign-in failed' }, 500);

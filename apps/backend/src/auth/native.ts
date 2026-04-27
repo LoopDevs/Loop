@@ -10,16 +10,9 @@ import type { Context } from 'hono';
 import { logger } from '../logger.js';
 import { findLiveOtp, incrementOtpAttempts, markOtpConsumed } from './otps.js';
 import { normalizeEmail, NonAsciiEmailError } from './normalize-email.js';
-import {
-  signLoopToken,
-  verifyLoopToken,
-  DEFAULT_ACCESS_TTL_SECONDS,
-  DEFAULT_REFRESH_TTL_SECONDS,
-  isLoopAuthConfigured,
-} from './tokens.js';
+import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
 import { findOrCreateUserByEmail } from '../db/users.js';
 import {
-  recordRefreshToken,
   findLiveRefreshToken,
   findRefreshTokenRecord,
   revokeRefreshToken,
@@ -41,56 +34,13 @@ export { nativeRequestOtpHandler } from './native-request-otp.js';
 
 const log = logger.child({ handler: 'auth-native' });
 
-interface TokenPair {
-  accessToken: string;
-  refreshToken: string;
-  /**
-   * A2-557: jti of the freshly-minted refresh token. Returned
-   * alongside the token strings so `nativeRefreshHandler` can
-   * populate the `replacedByJti` link on the prior row without
-   * re-verifying the token it just signed. The client contract
-   * (`{ accessToken, refreshToken }`) is unchanged — this field is
-   * internal and stripped at the handler boundary via destructure.
-   */
-  refreshJti: string;
-}
-
-/**
- * Mints a fresh access + refresh pair for `user` and persists the
- * refresh row. Shared by `verify-otp` (first issue) and `refresh`
- * (rotation). Returns the token strings to send to the client plus
- * the refresh `jti` for internal revoke-linking (A2-557).
- */
-async function issueTokenPair(user: { id: string; email: string }): Promise<TokenPair> {
-  const access = signLoopToken({
-    sub: user.id,
-    email: user.email,
-    typ: 'access',
-    ttlSeconds: DEFAULT_ACCESS_TTL_SECONDS,
-  });
-  const refresh = signLoopToken({
-    sub: user.id,
-    email: user.email,
-    typ: 'refresh',
-    ttlSeconds: DEFAULT_REFRESH_TTL_SECONDS,
-  });
-  if (refresh.claims.jti === undefined) {
-    // signLoopToken always sets jti on a refresh; this branch keeps
-    // TS narrowing clean without an `!` assertion.
-    throw new Error('refresh token missing jti');
-  }
-  await recordRefreshToken({
-    jti: refresh.claims.jti,
-    userId: user.id,
-    token: refresh.token,
-    expiresAt: new Date(refresh.claims.exp * 1000),
-  });
-  return {
-    accessToken: access.token,
-    refreshToken: refresh.token,
-    refreshJti: refresh.claims.jti,
-  };
-}
+// `issueTokenPair` (and its `TokenPair` interface) lives in
+// `./issue-token-pair.ts` — shared with the social-login handlers
+// in `./social.ts`, which used to ship a near-identical local copy.
+// Re-exported here so existing import sites against `'./native.js'`
+// keep resolving.
+export { issueTokenPair, type TokenPair } from './issue-token-pair.js';
+import { issueTokenPair } from './issue-token-pair.js';
 
 /**
  * POST /api/auth/verify-otp — native path.
