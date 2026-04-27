@@ -29,6 +29,7 @@
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
+import { registerAdminCsvExportsCashbackOpenApi } from './admin-csv-exports-cashback.js';
 import { registerAdminCsvExportsRawRowsOpenApi } from './admin-csv-exports-raw-rows.js';
 import { registerAdminCsvExportsTreasuryOpenApi } from './admin-csv-exports-treasury.js';
 
@@ -47,57 +48,12 @@ export function registerAdminCsvExportsOpenApi(
   // params + error shapes. ADR 018 conventions: RFC 4180, 10k-row cap with
   // __TRUNCATED__ sentinel, 10/min rate, Cache-Control: private, no-store.
 
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/cashback-realization/daily.csv',
-    summary: 'Daily cashback-realization trend CSV (ADR 009/015/018).',
-    description:
-      'Tier-3 finance export of /api/admin/cashback-realization/daily. Columns: day,currency,earned_minor,spent_minor,recycled_bps. LEFT-JOIN null-currency rows are dropped pre-truncation so the row cap counts real signal. Window: ?days (default 31, cap 366). Row cap 10 000.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        days: z.coerce.number().int().min(1).max(366).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'CSV body',
-        content: { 'text/csv; charset=utf-8': { schema: z.string() } },
-      },
-      429: {
-        description: 'Rate limit exceeded (10/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: { description: 'DB error', content: { 'application/json': { schema: errorResponse } } },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/cashback-activity.csv',
-    summary: 'Daily cashback accrual as RFC 4180 CSV (ADR 009/015/018).',
-    description:
-      'Tier-3 finance export of /api/admin/cashback-activity. Columns: day,currency,cashback_count,cashback_minor. Zero-activity days emit day,,,0,0. Window: ?days (default 31, cap 366). Row cap 10 000.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        days: z.coerce.number().int().min(1).max(366).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'CSV body',
-        content: { 'text/csv; charset=utf-8': { schema: z.string() } },
-      },
-      429: {
-        description: 'Rate limit exceeded (10/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: { description: 'DB error', content: { 'application/json': { schema: errorResponse } } },
-    },
-  });
+  // The two cashback time-series CSVs
+  // (`/api/admin/cashback-realization/daily.csv` and
+  // `/api/admin/cashback-activity.csv`) live in
+  // `./admin-csv-exports-cashback.ts`. Same path-registration
+  // position as the original block.
+  registerAdminCsvExportsCashbackOpenApi(registry, errorResponse);
 
   registry.registerPath({
     method: 'get',
