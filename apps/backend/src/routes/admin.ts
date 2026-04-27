@@ -88,9 +88,7 @@ import { mountAdminTreasuryRoutes } from './admin-treasury.js';
 import { adminPayoutByOrderHandler } from '../admin/payouts.js';
 import { mountAdminPayoutsRoutes } from './admin-payouts.js';
 import { adminTopUsersHandler } from '../admin/top-users.js';
-import { adminTopUsersByPendingPayoutHandler } from '../admin/top-users-by-pending-payout.js';
-import { adminUsersRecyclingActivityHandler } from '../admin/users-recycling-activity.js';
-import { adminUsersRecyclingActivityCsvHandler } from '../admin/users-recycling-activity-csv.js';
+import { mountAdminUserClusterRoutes } from './admin-user-cluster.js';
 import { adminAuditTailHandler } from '../admin/audit-tail.js';
 import { adminAuditTailCsvHandler } from '../admin/audit-tail-csv.js';
 import { adminListOrdersHandler } from '../admin/orders.js';
@@ -105,18 +103,6 @@ import { mountAdminFleetMonthlyRoutes } from './admin-fleet-monthly.js';
 import { adminMerchantStatsHandler } from '../admin/merchant-stats.js';
 import { mountAdminPerMerchantRoutes } from './admin-per-merchant.js';
 import { mountAdminOperatorRoutes } from './admin-operator.js';
-import { adminUserOperatorMixHandler } from '../admin/user-operator-mix.js';
-import { adminUserCreditsHandler } from '../admin/user-credits.js';
-import { adminUserCreditTransactionsHandler } from '../admin/user-credit-transactions.js';
-import { adminUserCreditTransactionsCsvHandler } from '../admin/user-credit-transactions-csv.js';
-import { adminUserCashbackByMerchantHandler } from '../admin/user-cashback-by-merchant.js';
-import { adminUserCashbackSummaryHandler } from '../admin/user-cashback-summary.js';
-import { adminUserFlywheelStatsHandler } from '../admin/user-flywheel-stats.js';
-import { adminUserPaymentMethodShareHandler } from '../admin/user-payment-method-share.js';
-import { adminUserCashbackMonthlyHandler } from '../admin/user-cashback-monthly.js';
-import { adminGetUserHandler } from '../admin/user-detail.js';
-import { adminUserByEmailHandler } from '../admin/user-by-email.js';
-import { adminListUsersHandler } from '../admin/users-list.js';
 import { adminMerchantsResyncHandler } from '../admin/merchants-resync.js';
 import { adminDiscordNotifiersHandler } from '../admin/discord-notifiers.js';
 import { adminDiscordTestHandler } from '../admin/discord-test.js';
@@ -282,130 +268,12 @@ export function mountAdminRoutes(app: Hono): void {
   // the other Tier-3 CSV exports — ops runs this manually at
   // month-end, not on-click from the UI.
   app.get('/api/admin/audit-tail.csv', rateLimit(10, 60_000), adminAuditTailCsvHandler);
-  // Paginated user directory — browse + search for the admin panel.
-  // Complements the exact-by-id drill at /api/admin/users/:userId.
-  app.get('/api/admin/users', rateLimit(60, 60_000), adminListUsersHandler);
-  // Exact-match email lookup — support pastes the full address from a
-  // ticket, gets the user id back in one request. Different lookup
-  // mode from the fragment search above; registered before
-  // /:userId so the literal 'by-email' segment isn't captured as a
-  // uuid param.
-  app.get('/api/admin/users/by-email', rateLimit(60, 60_000), adminUserByEmailHandler);
-  // Ops funding prioritisation — "who's owed the most USDLOOP right
-  // now?". Grouped by (user, asset) over pending + submitted payout
-  // rows; complements /api/admin/top-users (which ranks by lifetime
-  // earnings). Registered before /:userId so the literal
-  // 'top-by-pending-payout' segment isn't treated as a uuid param.
-  app.get(
-    '/api/admin/users/top-by-pending-payout',
-    rateLimit(60, 60_000),
-    adminTopUsersByPendingPayoutHandler,
-  );
-  // "Who's recycling right now?" — 90-day list of users with at least
-  // one loop_asset order, ranked by most-recent recycle. Complement to
-  // /top-users (by cashback earned) and /top-by-pending-payout (by
-  // backlog). Registered before /:userId so the literal segment is
-  // not captured as a uuid.
-  app.get(
-    '/api/admin/users/recycling-activity',
-    rateLimit(60, 60_000),
-    adminUsersRecyclingActivityHandler,
-  );
-  // Tier-3 CSV snapshot of the user recycling leaderboard —
-  // finance-grade export for ops. Registered before /:userId (same
-  // literal-vs-uuid routing constraint as the JSON sibling) and
-  // follows the ADR-018 CSV conventions (10/min rate limit, 10k row
-  // cap with `__TRUNCATED__` sentinel, attachment disposition).
-  app.get(
-    '/api/admin/users/recycling-activity.csv',
-    rateLimit(10, 60_000),
-    adminUsersRecyclingActivityCsvHandler,
-  );
-  // Admin user-detail drill. Entry point for the admin panel's user
-  // page — subsequent drills (credits, credit-transactions, orders)
-  // all key off the id this endpoint returns.
-  app.get('/api/admin/users/:userId', rateLimit(120, 60_000), adminGetUserHandler);
-  // Per-user credit-balance drill-down (ADR 009). Ops opens this from
-  // a support ticket; complements the treasury aggregate which only
-  // gives fleet-wide outstanding.
-  app.get('/api/admin/users/:userId/credits', rateLimit(120, 60_000), adminUserCreditsHandler);
-  // Per-user cashback-by-merchant breakdown — support triage. Answers
-  // "user asks why they haven't earned cashback on merchant X" by
-  // grouping their cashback ledger rows by source-order merchant.
-  // Default window 180d, cap 366d; default limit 25, cap 100.
-  app.get(
-    '/api/admin/users/:userId/cashback-by-merchant',
-    rateLimit(120, 60_000),
-    adminUserCashbackByMerchantHandler,
-  );
-  // Scalar cashback headline for a user — mirrors the user-facing
-  // /api/users/me/cashback-summary but admin-scoped to any userId.
-  // Powers the "£42 lifetime · £3.20 this month" chip on the admin
-  // user drill-down. Single query; 404 when the user id doesn't
-  // exist (LEFT JOIN returns no rows in that case).
-  app.get(
-    '/api/admin/users/:userId/cashback-summary',
-    rateLimit(120, 60_000),
-    adminUserCashbackSummaryHandler,
-  );
-  // Per-user flywheel scalar — admin mirror of /api/users/me/flywheel-
-  // stats. Supports triage questions like "is this user part of the
-  // recycling loop or just top-ups?". Single LEFT JOIN; 404 on unknown
-  // userId, zero counts on an existing user with no fulfilled orders.
-  app.get(
-    '/api/admin/users/:userId/flywheel-stats',
-    rateLimit(120, 60_000),
-    adminUserFlywheelStatsHandler,
-  );
-  // Per-user payment-method share (#628 follow-up) — user-scoped
-  // rail-mix mirror of the fleet + per-merchant siblings. Drives a
-  // "rail mix" card on the user drill alongside the flywheel chip
-  // + cashback-summary. Same zero-fill + state-default conventions
-  // as the other share endpoints.
-  app.get(
-    '/api/admin/users/:userId/payment-method-share',
-    rateLimit(120, 60_000),
-    adminUserPaymentMethodShareHandler,
-  );
-  // Per-user cashback-monthly (#633) — 12-month emission trend for
-  // one user. Sibling of /api/admin/cashback-monthly and
-  // /api/users/me/cashback-monthly. Drives the forthcoming
-  // `UserCashbackMonthlyChart` on the user drill — same visual
-  // primitives as the fleet chart, scoped to one user. 404 on
-  // unknown userId; zero entries for an existing user with no
-  // cashback in the window.
-  app.get(
-    '/api/admin/users/:userId/cashback-monthly',
-    rateLimit(120, 60_000),
-    adminUserCashbackMonthlyHandler,
-  );
-  // Credit-transaction log for a user (ADR 009). Drill-down from the
-  // balance endpoint — shows how the balance got there (cashback,
-  // withdrawals, refunds, adjustments).
-  app.get(
-    '/api/admin/users/:userId/credit-transactions',
-    rateLimit(120, 60_000),
-    adminUserCreditTransactionsHandler,
-  );
-  // Per-user × per-operator attribution (ADR 013 / 022). Completes
-  // the mix-axis matrix: merchant×operator + operator×merchant
-  // (existing) plus user×operator here. Support-triage view: "user
-  // X complains about slow cashback — which CTX operator has been
-  // carrying their recent orders?"
-  app.get(
-    '/api/admin/users/:userId/operator-mix',
-    rateLimit(120, 60_000),
-    adminUserOperatorMixHandler,
-  );
-  // Finance / compliance / support CSV of one user's credit-ledger
-  // history. Same Tier-3 rate-limit cadence as the other CSV
-  // exports — runs at ticket-resolution speed, not on-click from
-  // the admin UI.
-  app.get(
-    '/api/admin/users/:userId/credit-transactions.csv',
-    rateLimit(10, 60_000),
-    adminUserCreditTransactionsCsvHandler,
-  );
+  // User cluster — directory + lookups + per-user drill
+  // (ADR 009/015/022). Lifted into ./admin-user-cluster.ts (mirrors
+  // openapi #1176 + the per-user-drill axes from #1168 / #1171).
+  // Mount-order: literal lookup paths register before /:userId.
+  mountAdminUserClusterRoutes(app);
+
   // Credit-write surfaces — credit-adjustments + refunds +
   // withdrawals (ADR 017/024 + A2-901). Lifted into
   // ./admin-credit-writes.ts (mirrors openapi #1175).
