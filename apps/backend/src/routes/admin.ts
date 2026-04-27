@@ -85,11 +85,7 @@ import { requireAuth } from '../auth/handler.js';
 import { requireAdmin } from '../auth/require-admin.js';
 import { notifyAdminBulkRead } from '../discord.js';
 import { mountAdminCashbackConfigRoutes } from './admin-cashback-config.js';
-import { treasuryHandler } from '../admin/treasury.js';
-import { adminTreasurySnapshotCsvHandler } from '../admin/treasury-snapshot-csv.js';
-import { adminTreasuryCreditFlowHandler } from '../admin/treasury-credit-flow.js';
-import { adminAssetCirculationHandler } from '../admin/asset-circulation.js';
-import { adminAssetDriftStateHandler } from '../admin/asset-drift-state.js';
+import { mountAdminTreasuryRoutes } from './admin-treasury.js';
 import { adminPayoutByOrderHandler } from '../admin/payouts.js';
 import { mountAdminPayoutsRoutes } from './admin-payouts.js';
 import { adminTopUsersHandler } from '../admin/top-users.js';
@@ -231,32 +227,11 @@ export function mountAdminRoutes(app: Hono): void {
   // /:merchantId and /history.
   mountAdminCashbackConfigRoutes(app);
 
-  app.get('/api/admin/treasury', rateLimit(60, 60_000), treasuryHandler);
-  // Tier-3 CSV of the treasury snapshot (ADR 009/015/018). Point-
-  // in-time flat dump for SOC-2 / audit evidence. Long-form CSV
-  // (metric,key,value) — diffable across successive snapshots so
-  // auditors can eyeball "what moved between Monday and Tuesday".
-  // Reuses the JSON snapshot handler; no new DB query.
-  app.get('/api/admin/treasury.csv', rateLimit(10, 60_000), adminTreasurySnapshotCsvHandler);
-  // Treasury credit-flow time-series (ADR 009/015) — per-day credited
-  // vs debited per currency from credit_transactions. Answers "are we
-  // generating liability faster than we settle it?" — the dynamic
-  // view the treasury snapshot can't give.
-  app.get('/api/admin/treasury/credit-flow', rateLimit(60, 60_000), adminTreasuryCreditFlowHandler);
-  // Per-asset circulation drift (ADR 015). Compares Horizon-side
-  // issued circulation against off-chain ledger liability — the
-  // stablecoin-operator safety metric. 30/min: admin drill page,
-  // not a dashboard card; Horizon calls are cached 30s internally.
-  app.get(
-    '/api/admin/assets/:assetCode/circulation',
-    rateLimit(30, 60_000),
-    adminAssetCirculationHandler,
-  );
-  // In-memory snapshot of the asset-drift watcher's per-asset state
-  // (ADR 015). Process-local, no Horizon call; cheap to poll from the
-  // admin UI landing so the "which assets are drifted?" signal reads
-  // without forcing each tab to re-read Horizon.
-  app.get('/api/admin/asset-drift/state', rateLimit(120, 60_000), adminAssetDriftStateHandler);
+  // Treasury + asset-drift cluster — snapshot + .csv +
+  // credit-flow series + per-asset circulation drift + watcher
+  // state (ADR 009/015/016/018). Lifted into ./admin-treasury.ts.
+  mountAdminTreasuryRoutes(app);
+
   // Payouts cluster — list + drill + by-asset + settlement-lag SLA
   // + retry + compensate + CSV (ADR 015/016/017/024). Lifted into
   // ./admin-payouts.ts; the sub-factory mounts these 7 routes after
