@@ -33,6 +33,7 @@
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
+import { registerAdminCashbackConfigHistoryOpenApi } from './admin-cashback-config-history.js';
 
 /**
  * Registers the cashback-config schemas + the five
@@ -109,26 +110,11 @@ export function registerAdminCashbackConfigOpenApi(
       }),
   );
 
-  const AdminCashbackConfigHistoryRow = registry.register(
-    'AdminCashbackConfigHistoryRow',
-    z.object({
-      id: z.string().uuid(),
-      merchantId: z.string(),
-      wholesalePct: CashbackPctString,
-      userCashbackPct: CashbackPctString,
-      loopMarginPct: CashbackPctString,
-      active: z.boolean(),
-      changedBy: z.string().openapi({
-        description: 'Admin user id that triggered the prior-row snapshot.',
-      }),
-      changedAt: z.string().datetime(),
-    }),
-  );
-
-  const AdminCashbackConfigHistoryResponse = registry.register(
-    'AdminCashbackConfigHistoryResponse',
-    z.object({ history: z.array(AdminCashbackConfigHistoryRow) }),
-  );
+  // `AdminCashbackConfigHistoryRow` and
+  // `AdminCashbackConfigHistoryResponse`, plus the per-merchant
+  // history path that uses them, live in
+  // `./admin-cashback-config-history.ts`. Registered at the bottom
+  // of this factory so OpenAPI path-registration order is preserved.
 
   // ─── Admin — cashback-config CRUD (ADR 011) ─────────────────────────────────
 
@@ -301,38 +287,9 @@ export function registerAdminCashbackConfigOpenApi(
     },
   });
 
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/merchant-cashback-configs/{merchantId}/history',
-    summary: 'Audit-log history for one merchant cashback config (ADR 011).',
-    description:
-      'Up to 50 most-recent prior-state snapshots for a single merchant, newest first. Each row captures the exact values at the time of the change and who made it.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ merchantId: z.string() }),
-    },
-    responses: {
-      200: {
-        description: 'History rows (bounded to 50)',
-        content: { 'application/json': { schema: AdminCashbackConfigHistoryResponse } },
-      },
-      400: {
-        description: 'Missing merchantId',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
+  // The trailing per-merchant history path lives in
+  // `./admin-cashback-config-history.ts` along with its two
+  // locally-scoped schemas. Same path-registration position as the
+  // original block.
+  registerAdminCashbackConfigHistoryOpenApi(registry, errorResponse, CashbackPctString);
 }
