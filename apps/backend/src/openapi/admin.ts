@@ -34,6 +34,7 @@ import { registerAdminCashbackConfigOpenApi } from './admin-cashback-config.js';
 import { registerAdminCsvExportsOpenApi } from './admin-csv-exports.js';
 import { registerAdminFleetMonthlyOpenApi } from './admin-fleet-monthly.js';
 import { registerAdminMiscReadsOpenApi } from './admin-misc-reads.js';
+import { registerAdminOperatorFleetOpenApi } from './admin-operator-fleet.js';
 import { registerAdminOperatorMixOpenApi } from './admin-operator-mix.js';
 import { registerAdminPerMerchantDrillOpenApi } from './admin-per-merchant-drill.js';
 import { registerAdminPerUserDrillOpenApi } from './admin-per-user-drill.js';
@@ -681,80 +682,16 @@ export function registerAdminOpenApi(
   // slice boundary.
   registerAdminOperatorMixOpenApi(registry, errorResponse);
 
-  // ─── Admin — operator stats (ADR 013) ──────────────────────────────────────
-
-  const AdminOperatorStatsRow = registry.register(
-    'AdminOperatorStatsRow',
-    z.object({
-      operatorId: z.string(),
-      orderCount: z.number().int().min(0),
-      fulfilledCount: z.number().int().min(0),
-      failedCount: z.number().int().min(0),
-      lastOrderAt: z.string().datetime(),
-    }),
-  );
-
-  const AdminOperatorStatsResponse = registry.register(
-    'AdminOperatorStatsResponse',
-    z.object({
-      since: z.string().datetime(),
-      rows: z.array(AdminOperatorStatsRow),
-    }),
-  );
-
-  // ─── Admin — operator latency (ADR 013 / 022) ──────────────────────────────
-
-  const AdminOperatorLatencyRow = registry.register(
-    'AdminOperatorLatencyRow',
-    z.object({
-      operatorId: z.string(),
-      sampleCount: z.number().int().min(0),
-      p50Ms: z.number().int().min(0),
-      p95Ms: z.number().int().min(0),
-      p99Ms: z.number().int().min(0),
-      meanMs: z.number().int().min(0),
-    }),
-  );
-
-  const AdminOperatorLatencyResponse = registry.register(
-    'AdminOperatorLatencyResponse',
-    z.object({
-      since: z.string().datetime(),
-      rows: z.array(AdminOperatorLatencyRow),
-    }),
-  );
-
-  // ─── Admin — per-operator supplier spend (ADR 013 / 015 / 022) ─────────────
-
-  const AdminOperatorSupplierSpendResponse = registry.register(
-    'AdminOperatorSupplierSpendResponse',
-    z.object({
-      operatorId: z.string(),
-      since: z.string().datetime(),
-      rows: z.array(AdminSupplierSpendRow),
-    }),
-  );
-
-  // ─── Admin — per-operator activity (ADR 013 / 022) ─────────────────────────
-
-  const AdminOperatorActivityDay = registry.register(
-    'AdminOperatorActivityDay',
-    z.object({
-      day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      created: z.number().int().min(0),
-      fulfilled: z.number().int().min(0),
-      failed: z.number().int().min(0),
-    }),
-  );
-
-  const AdminOperatorActivityResponse = registry.register(
-    'AdminOperatorActivityResponse',
-    z.object({
-      operatorId: z.string(),
-      windowDays: z.number().int().min(1).max(90),
-      days: z.array(AdminOperatorActivityDay),
-    }),
-  );
+  // ─── Admin operator-fleet (ADR 013/015/022) ─────────────────────────────────
+  //
+  // Operator-stats / operator-latency / per-operator supplier-spend
+  // / per-operator activity — the four paths backing the
+  // /admin/operators dashboard. Lifted into ./admin-operator-fleet.ts;
+  // the five locally-scoped schemas travel with it. Threaded deps:
+  // shared `errorResponse` plus the upstream `AdminSupplierSpendRow`
+  // (also reused by the fleet supplier-spend section, so passed in
+  // by reference rather than re-declared).
+  registerAdminOperatorFleetOpenApi(registry, errorResponse, AdminSupplierSpendRow);
 
   // ─── Admin — user detail ────────────────────────────────────────────────────
 
@@ -1599,188 +1536,6 @@ export function registerAdminOpenApi(
       },
       500: {
         description: 'Internal error computing the aggregate',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/operator-stats',
-    summary: 'Per-operator order volume + success rate (ADR 013).',
-    description:
-      "Groups orders in the window by `ctx_operator_id`, skipping pre-procurement rows where the operator is still null. Each row carries the total order count, fulfilled count, failed count, and the most-recent createdAt attributed to that operator. Ordered by order_count descending so the top-traffic account surfaces first. Complements `/api/admin/supplier-spend` — that one answers 'what did we pay CTX', this one answers 'which operator actually did the work'. Default window 24h, capped at 366 days.",
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        since: z
-          .string()
-          .datetime()
-          .optional()
-          .openapi({ description: 'ISO-8601 — lower bound on createdAt. Defaults to 24h ago.' }),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Per-operator stats rows',
-        content: { 'application/json': { schema: AdminOperatorStatsResponse } },
-      },
-      400: {
-        description: 'Invalid `since`',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error computing the aggregate',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/operators/latency',
-    summary: 'Per-operator fulfilment latency — p50/p95/p99 ms (ADR 013 / 022).',
-    description:
-      'Percentile fulfilment latency (`fulfilledAt - paidAt`, ms) per `ctx_operator_id` for fulfilled orders in the window. Complements `/api/admin/operator-stats` — stats says which operator is busy; this says which is slow. A busy operator with a rising p95 is the early signal before the circuit breaker trips. Only rows with both timestamps set + non-null operator are aggregated — mid-flight orders would poison the percentiles. Sorted by p95 descending so the slowest operator surfaces first. Default window 24h, capped 366d.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        since: z
-          .string()
-          .datetime()
-          .optional()
-          .openapi({ description: 'ISO-8601 — lower bound on fulfilledAt. Defaults to 24h ago.' }),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Per-operator latency rows',
-        content: { 'application/json': { schema: AdminOperatorLatencyResponse } },
-      },
-      400: {
-        description: 'Invalid or out-of-window `since`',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error computing the aggregate',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/operators/{operatorId}/supplier-spend',
-    summary: 'Per-operator supplier-spend by currency (ADR 013 / 015 / 022).',
-    description:
-      "Per-currency aggregate of what Loop paid CTX for fulfilled orders carried by one specific operator. ADR-022 per-operator axis of the fleet `/api/admin/supplier-spend` — that says 'total across operators', this says 'how much did op-X drive'. Same per-currency row shape (bigint-as-string money). Zero-volume operators return 200 with `rows: []`. Default window 24h, capped 366d.",
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({
-        operatorId: z.string().min(1).max(128),
-      }),
-      query: z.object({
-        since: z
-          .string()
-          .datetime()
-          .optional()
-          .openapi({ description: 'ISO-8601 — lower bound on fulfilledAt. Defaults to 24h ago.' }),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Per-currency supplier-spend rows for the operator',
-        content: { 'application/json': { schema: AdminOperatorSupplierSpendResponse } },
-      },
-      400: {
-        description: 'Malformed `operatorId` or `since`',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error computing the aggregate',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/operators/{operatorId}/activity',
-    summary: 'Per-operator daily activity time-series (ADR 013 / 022).',
-    description:
-      'Per-day created / fulfilled / failed order counts for one operator over the last N calendar days (default 7, cap 90, UTC-bucketed). Zero-filled by the backend (`LEFT JOIN generate_series`) so the layout is stable even when the operator is idle. A rising `failed` line or a dropping `fulfilled / created` ratio is a scheduler-tuning / CTX-escalation signal before the circuit breaker trips.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({
-        operatorId: z.string().min(1).max(128),
-      }),
-      query: z.object({
-        days: z.coerce.number().int().min(1).max(90).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Per-day activity series',
-        content: { 'application/json': { schema: AdminOperatorActivityResponse } },
-      },
-      400: {
-        description: 'Malformed `operatorId`',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error loading activity',
         content: { 'application/json': { schema: errorResponse } },
       },
     },
