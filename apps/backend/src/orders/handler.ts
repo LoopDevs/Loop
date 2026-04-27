@@ -6,34 +6,19 @@ import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { notifyCtxSchemaDrift, notifyOrderCreated } from '../discord.js';
-import type { ZodIssue } from 'zod';
+import {
+  summariseZodIssues,
+  upstreamHeaders,
+  CreateOrderUpstreamResponse,
+  ORDER_EXPIRY_SECONDS,
+  mapStatus,
+} from './handler-shared.js';
 
-/**
- * A2-1915: condense a Zod issue array into a compact one-line
- * summary suitable for a Discord embed field. Used by the
- * `notifyCtxSchemaDrift` call sites in this module + auth +
- * merchants.
- */
-export function summariseZodIssues(issues: readonly ZodIssue[]): string {
-  return issues
-    .slice(0, 5)
-    .map((i) => `[${i.path.join('.') || '·'}] ${i.code}: ${i.message}`)
-    .join(' | ');
-}
+// Re-exported for `list-handler.ts`, `get-handler.ts`, and the
+// CTX contract test which import these from `./handler.js`.
+export { summariseZodIssues, upstreamHeaders, CreateOrderUpstreamResponse, mapStatus };
 
 const log = logger.child({ handler: 'orders' });
-
-/** Builds auth headers for upstream requests, including optional X-Client-Id. */
-export function upstreamHeaders(c: Context): Record<string, string> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${c.get('bearerToken') as string}`,
-  };
-  const clientId = c.get('clientId') as string | undefined;
-  if (clientId) {
-    headers['X-Client-Id'] = clientId;
-  }
-  return headers;
-}
 
 // Gift card denominations in the wild span roughly $1 to $10k; reject anything
 // outside that band to prevent accidental or malicious orders. `.finite()` blocks
@@ -43,43 +28,6 @@ const CreateOrderBody = z.object({
   merchantId: z.string().min(1).max(128),
   amount: z.number().finite().positive().min(0.01).max(10_000).multipleOf(0.01),
 });
-
-// Upstream response schemas — validate before forwarding to client.
-// A2-1706: exported so the contract-test suite can parse recorded
-// CTX fixtures through them at PR-time and detect schema drift before
-// it hits prod.
-export const CreateOrderUpstreamResponse = z
-  .object({
-    id: z.string(),
-    paymentCryptoAmount: z.string(),
-    paymentUrls: z.record(z.string(), z.string()).optional(),
-    status: z.string(),
-  })
-  .passthrough();
-
-/**
- * Seconds the client should consider an order valid for payment. The client
- * used to hardcode this to now() + 30min, which drifted relative to the
- * server under any clock skew — the payment countdown could expire mid-pay or
- * show a bogus value. Now the server computes and returns the expiry, making
- * the backend authoritative for the payment window.
- *
- * If CTX starts returning its own expiry in the `/gift-cards` response we can
- * prefer that; for now the upstream schema doesn't surface one.
- */
-const ORDER_EXPIRY_SECONDS = 30 * 60;
-
-/** Maps upstream CTX status values to our normalized OrderStatus. */
-export function mapStatus(ctxStatus: string): 'pending' | 'completed' | 'failed' | 'expired' {
-  if (ctxStatus === 'fulfilled') return 'completed';
-  if (ctxStatus === 'expired') return 'expired';
-  if (ctxStatus === 'refunded') return 'failed';
-  const known = new Set(['unpaid', 'processing', 'paid', 'pending']);
-  if (!known.has(ctxStatus)) {
-    log.warn({ ctxStatus }, 'Unknown upstream order status — defaulting to pending');
-  }
-  return 'pending';
-}
 
 /**
  * POST /api/orders
