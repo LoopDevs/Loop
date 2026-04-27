@@ -11,17 +11,19 @@
  *
  *   - GET  /api/admin/discord/config       (env-var status badges)
  *   - GET  /api/admin/top-users            (lifetime cashback ranking)
- *   - GET  /api/admin/audit-tail           (admin-write audit feed)
  *   - POST /api/admin/merchants/resync     (force CTX catalog sweep)
- *   - GET  /api/admin/discord/notifiers    (frozen catalog)
- *   - POST /api/admin/discord/test         (manual webhook ping)
  *
- * Locally-scoped schemas travel with the slice (none referenced
- * elsewhere in admin.ts after the prior 16 slices have lifted the
- * rest of the surface):
+ * Two siblings receive the rest:
+ *   - `./admin-audit-tail.ts` — `GET /api/admin/audit-tail`
+ *     (admin-write audit feed, owns
+ *     `AdminAuditTailRow` + `AdminAuditTailResponse`)
+ *   - `./admin-ops-tail-discord-mgmt.ts` —
+ *     `GET /api/admin/discord/notifiers` +
+ *     `POST /api/admin/discord/test`
+ *
+ * Schemas registered directly here:
  *
  *   - `TopUserRow` / `TopUsersResponse`
- *   - `AdminAuditTailRow` / `AdminAuditTailResponse`
  *
  * Only `errorResponse` crosses the slice boundary. The discord-
  * config / discord-notifiers / discord-test / merchants-resync
@@ -34,6 +36,7 @@
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminDiscordMgmtOpenApi } from './admin-ops-tail-discord-mgmt.js';
+import { registerAdminAuditTailOpenApi } from './admin-audit-tail.js';
 
 /**
  * Registers the operations-tail paths + their locally-scoped
@@ -65,25 +68,6 @@ export function registerAdminOpsTailOpenApi(
       since: z.string().datetime(),
       rows: z.array(TopUserRow),
     }),
-  );
-
-  // ─── Admin — audit tail (ADR 017 / 018) ────────────────────────────────────
-
-  const AdminAuditTailRow = registry.register(
-    'AdminAuditTailRow',
-    z.object({
-      actorUserId: z.string().uuid(),
-      actorEmail: z.string().email(),
-      method: z.string(),
-      path: z.string(),
-      status: z.number().int(),
-      createdAt: z.string().datetime(),
-    }),
-  );
-
-  const AdminAuditTailResponse = registry.register(
-    'AdminAuditTailResponse',
-    z.object({ rows: z.array(AdminAuditTailRow) }),
   );
 
   registry.registerPath({
@@ -164,47 +148,13 @@ export function registerAdminOpsTailOpenApi(
     },
   });
 
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/audit-tail',
-    summary: 'Newest-first admin write-audit tail (ADR 017 / 018).',
-    description:
-      "Returns the most recent rows from `admin_idempotency_keys` — the persistent mirror of every admin write. Admin dashboard surfaces this as a 'Recent admin activity' card so ops can review without scrolling the Discord channel. Response body is deliberately stripped (method / path / status / timestamp / actor only) — the audit story is 'who did what, when' not 'here's the stored snapshot'. `?limit=` clamps 1..100, default 25. `?before=<iso>` paginates older rows by `createdAt`.",
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        limit: z.coerce.number().int().min(1).max(100).optional(),
-        before: z.string().datetime().optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Audit rows, newest first',
-        content: { 'application/json': { schema: AdminAuditTailResponse } },
-      },
-      400: {
-        description: '`before` is not a valid ISO-8601 timestamp',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error reading the audit tail',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
+  // ─── Admin — audit tail (ADR 017 / 018) ────────────────────────────────────
+  //
+  // Path + locally-scoped schemas (`AdminAuditTailRow`,
+  // `AdminAuditTailResponse`) live in `./admin-audit-tail.ts`.
+  // Co-located there so the audit-read sits alongside the
+  // ADR-017 write surfaces it mirrors.
+  registerAdminAuditTailOpenApi(registry, errorResponse);
 
   registry.registerPath({
     method: 'post',
