@@ -102,13 +102,7 @@ import { adminUserCreditsCsvHandler } from '../admin/user-credits-csv.js';
 import { adminReconciliationHandler } from '../admin/reconciliation.js';
 import { mountAdminOrderDrillRoutes } from './admin-order-drill.js';
 import { mountAdminDashboardRoutes } from './admin-dashboard.js';
-import { adminCashbackMonthlyHandler } from '../admin/cashback-monthly.js';
-import { adminPayoutsMonthlyHandler } from '../admin/payouts-monthly.js';
-import { adminPayoutsActivityHandler } from '../admin/payouts-activity.js';
-import { adminPayoutsActivityCsvHandler } from '../admin/payouts-activity-csv.js';
-import { adminSupplierSpendActivityCsvHandler } from '../admin/supplier-spend-activity-csv.js';
-import { adminOperatorsSnapshotCsvHandler } from '../admin/operators-snapshot-csv.js';
-import { adminTreasuryCreditFlowCsvHandler } from '../admin/treasury-credit-flow-csv.js';
+import { mountAdminFleetMonthlyRoutes } from './admin-fleet-monthly.js';
 import { adminMerchantStatsHandler } from '../admin/merchant-stats.js';
 import { adminMerchantStatsCsvHandler } from '../admin/merchant-stats-csv.js';
 import { adminMerchantsFlywheelShareHandler } from '../admin/merchants-flywheel-share.js';
@@ -266,57 +260,13 @@ export function mountAdminRoutes(app: Hono): void {
   // Lifted into ./admin-dashboard.ts (mirrors openapi #1174).
   mountAdminDashboardRoutes(app);
 
-  // Fleet-wide monthly-cashback bar chart — per-(month, currency)
-  // emission totals over a fixed 12-month window. Mirrors the user-
-  // facing /api/users/me/cashback-monthly shape so the same chart
-  // component can render either. Single aggregate query.
-  app.get('/api/admin/cashback-monthly', rateLimit(60, 60_000), adminCashbackMonthlyHandler);
-  // Monthly confirmed-payout totals (#631) — settlement-side
-  // counterpart to cashback-monthly. Cashback-monthly measures
-  // liability creation (credits minted); this measures liability
-  // settlement (confirmed on-chain payouts). Pairing the two
-  // answers "is outstanding liability growing or shrinking this
-  // month?". Same 12-month window + oldest-first ordering.
-  app.get('/api/admin/payouts-monthly', rateLimit(60, 60_000), adminPayoutsMonthlyHandler);
-  // Daily payouts-activity (#637) — settlement-side sparkline
-  // counterpart to cashback-activity. Same ?days window (default
-  // 30, max 180), LEFT-JOIN generate_series so zero-days render
-  // as empty byAsset[]. Drives the payout-trend sparkline on
-  // /admin/treasury.
-  app.get('/api/admin/payouts-activity', rateLimit(60, 60_000), adminPayoutsActivityHandler);
-  // Tier-3 CSV export of the same aggregate (#638) — finance runs
-  // this alongside /api/admin/cashback-activity.csv at month-end
-  // to reconcile liability creation vs. settlement. Rate-limited
-  // 10/min per ADR 018.
-  app.get('/api/admin/payouts-activity.csv', rateLimit(10, 60_000), adminPayoutsActivityCsvHandler);
-  // Tier-3 CSV export of supplier-spend activity (ADR 013/015/018) —
-  // finance runs this at month-end to reconcile CTX's invoice: the
-  // wholesale_minor column per (day, currency) should tie to CTX's
-  // line items. Pairs with cashback-activity.csv (what we minted)
-  // and payouts-activity.csv (what we settled).
-  app.get(
-    '/api/admin/supplier-spend/activity.csv',
-    rateLimit(10, 60_000),
-    adminSupplierSpendActivityCsvHandler,
-  );
-  // Tier-3 CSV of the fleet operator snapshot (ADR 013 / 018 / 022)
-  // — joins operator-stats + operator-latency into one row per
-  // operator. Handed to CTX relationship owners for quarterly
-  // review meetings (SLA + volume + success rate on one sheet).
-  app.get(
-    '/api/admin/operators-snapshot.csv',
-    rateLimit(10, 60_000),
-    adminOperatorsSnapshotCsvHandler,
-  );
-  // Tier-3 CSV of the credit-flow time series (ADR 009 / 015 / 018).
-  // Completes the finance-CSV quartet: cashback-activity (minted) +
-  // payouts-activity (settled on-chain) + supplier-spend/activity
-  // (paid to CTX) + this (net ledger movement).
-  app.get(
-    '/api/admin/treasury/credit-flow.csv',
-    rateLimit(10, 60_000),
-    adminTreasuryCreditFlowCsvHandler,
-  );
+  // Fleet-monthly + finance-CSV — cashback-monthly +
+  // payouts-monthly + payouts-activity (+ .csv) + supplier-spend
+  // activity.csv + operators-snapshot.csv + treasury credit-flow
+  // .csv. Lifted into ./admin-fleet-monthly.ts (mirrors openapi #1165
+  // for the JSON; CSV companions travel alongside their siblings).
+  mountAdminFleetMonthlyRoutes(app);
+
   // Per-merchant cashback stats — which merchants drive volume /
   // cashback outlay / margin. Distinct from supplier-spend (currency
   // grouped) — this one groups by merchant.
