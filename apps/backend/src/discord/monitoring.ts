@@ -137,63 +137,11 @@ export function notifyUsdcBelowFloor(args: {
   });
 }
 
-/**
- * Notify: per-asset on-chain ↔ ledger drift has exceeded the
- * configured threshold (ADR 015). The drift-watcher polls the
- * Horizon `/assets` endpoint against the off-chain
- * `user_credits` ledger and fires this when |drift| crosses the
- * threshold. Direction baked into the title + description so ops
- * doesn't have to read the sign byte to know whether we're over-
- * minted (issuer side leaked supply) or behind on settlement.
- */
-export function notifyAssetDrift(args: {
-  assetCode: string;
-  driftStroops: string;
-  thresholdStroops: string;
-  onChainStroops: string;
-  ledgerLiabilityMinor: string;
-}): void {
-  const direction = args.driftStroops.startsWith('-') ? 'Settlement backlog' : 'Over-minted';
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
-    title: '⚠️ Asset Drift Exceeded Threshold',
-    description: `\`${escapeMarkdown(args.assetCode)}\` drift exceeds the configured threshold. Direction: **${direction}**.`,
-    color: ORANGE,
-    fields: [
-      { name: 'Asset', value: `\`${escapeMarkdown(args.assetCode)}\``, inline: true },
-      { name: 'Drift (stroops)', value: escapeMarkdown(args.driftStroops), inline: true },
-      { name: 'Threshold (stroops)', value: escapeMarkdown(args.thresholdStroops), inline: true },
-      { name: 'On-chain (stroops)', value: escapeMarkdown(args.onChainStroops), inline: true },
-      {
-        name: 'Ledger (minor)',
-        value: escapeMarkdown(args.ledgerLiabilityMinor),
-        inline: true,
-      },
-    ],
-  });
-}
-
-/**
- * Notify: a previously-drifting asset has returned within the
- * threshold. Sibling of `notifyAssetDrift` — fires on over→ok so
- * the channel reads as a closed incident rather than an indefinite
- * open alert.
- */
-export function notifyAssetDriftRecovered(args: {
-  assetCode: string;
-  driftStroops: string;
-  thresholdStroops: string;
-}): void {
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
-    title: '🟢 Asset Drift Recovered',
-    description: `\`${escapeMarkdown(args.assetCode)}\` drift is back within the configured threshold.`,
-    color: GREEN,
-    fields: [
-      { name: 'Asset', value: `\`${escapeMarkdown(args.assetCode)}\``, inline: true },
-      { name: 'Drift (stroops)', value: escapeMarkdown(args.driftStroops), inline: true },
-      { name: 'Threshold (stroops)', value: escapeMarkdown(args.thresholdStroops), inline: true },
-    ],
-  });
-}
+// `notifyAssetDrift` and `notifyAssetDriftRecovered` (the paired
+// open-and-close drift-watcher notifiers, ADR 015) live in
+// `./monitoring-asset-drift.ts`. Re-exported below so existing
+// import sites resolve unchanged.
+export { notifyAssetDrift, notifyAssetDriftRecovered } from './monitoring-asset-drift.js';
 
 /**
  * A2-621: notify when a `procuring` order ages out and the recovery
