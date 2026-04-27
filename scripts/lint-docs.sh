@@ -231,7 +231,7 @@ grep -E "^\s*app\.(get|post|put|delete|patch)\(" apps/backend/src/app.ts \
   | sed -E "s/:([a-zA-Z_]+)/{\1}/g" \
   | sort -u > "$app_routes_tmp"
 
-grep -E "path: '/" apps/backend/src/openapi.ts \
+grep -E "path: '/" apps/backend/src/openapi.ts apps/backend/src/openapi/*.ts \
   | grep -oE "'/[^']+'" \
   | sort -u > "$openapi_paths_tmp"
 
