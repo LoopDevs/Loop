@@ -516,18 +516,43 @@ describeIf('routes/admin.ts — admin-read audit middleware (A2-2008)', () => {
     expect(notifyAdminBulkRead).not.toHaveBeenCalled();
   });
 
-  // A2-1610 regression coverage — admin reports that bind a Date
-  // through `db.execute(sql\`...\${since}...\`)`. Without the typed
-  // bind, postgres-js throws "The 'string' argument must be of type
-  // string". Each handler is exercised against an empty DB so the
-  // SQL has to actually parse and bind, but the result is small.
-  // Catches the raw-execute variant of the cursor-handler bug fixed
-  // in #1304 / #1306 (both used the `.where(sql\`...\`)` shape).
+  // Smoke coverage for admin GET endpoints — each is hit on an empty
+  // DB (the per-test truncate) with default query params. Catches:
+  //
+  //   - The Date-binding bug class (PR #1304 / #1306 / #1307) where
+  //     `${since}` against postgres-js throws at bind time.
+  //   - SQL drift bugs where a column rename / migration mismatch
+  //     means the handler can't even parse against current schema.
+  //   - NPE-on-empty-data bugs where a handler maps over an array
+  //     without null-checking.
+  //
+  // A 200 here doesn't prove the handler is correct against real
+  // data — the body might be wrong — but it does prove the SQL
+  // parses + binds + the response builder runs end-to-end. That's
+  // a high-value smoke gate because the failure mode for the
+  // surfaced bugs is "every call 500s in production".
   it.each([
-    ['/api/admin/supplier-spend', 'supplier spend'],
-    ['/api/admin/operator-stats', 'operator stats'],
-    ['/api/admin/top-users', 'top users'],
-  ])('admin %s endpoint binds Date params correctly (no 500)', async (path) => {
+    ['/api/admin/supplier-spend'],
+    ['/api/admin/operator-stats'],
+    ['/api/admin/top-users'],
+    ['/api/admin/operators/latency'],
+    ['/api/admin/treasury'],
+    ['/api/admin/payouts'],
+    ['/api/admin/stuck-orders'],
+    ['/api/admin/stuck-payouts'],
+    ['/api/admin/cashback-activity'],
+    ['/api/admin/cashback-monthly'],
+    ['/api/admin/cashback-realization'],
+    ['/api/admin/merchant-cashback-configs'],
+    ['/api/admin/merchant-flows'],
+    ['/api/admin/merchant-stats'],
+    ['/api/admin/payouts-monthly'],
+    ['/api/admin/payouts-activity'],
+    ['/api/admin/payouts-by-asset'],
+    ['/api/admin/audit-tail'],
+    ['/api/admin/users'],
+    ['/api/admin/orders'],
+  ])('GET %s on empty DB returns 200', async (path) => {
     const { bearer } = await seed();
     const res = await app.request(`http://localhost${path}`, {
       method: 'GET',
