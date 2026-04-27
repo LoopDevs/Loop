@@ -22,6 +22,7 @@ import { z } from 'zod';
 import { ApiErrorCode, type ApiErrorCodeValue } from '@loop/shared';
 import { registerAdminOpenApi } from './openapi/admin.js';
 import { registerAuthOpenApi } from './openapi/auth.js';
+import { registerClustersOpenApi } from './openapi/clusters.js';
 import { registerHealthOpenApi } from './openapi/health.js';
 import { registerMerchantsOpenApi } from './openapi/merchants.js';
 import { registerOrdersOpenApi } from './openapi/orders.js';
@@ -169,112 +170,17 @@ const CashbackPctString = z
 // `./openapi/health.ts`. `registerHealthOpenApi` is called below
 // alongside the other section factories.
 
-// ─── Clustering ─────────────────────────────────────────────────────────────
+// ─── Clusters / images ──────────────────────────────────────────────────────
+//
+// Schemas + path registrations for `GET /api/clusters` and
+// `GET /api/image` live in `./openapi/clusters.ts`.
+// `registerClustersOpenApi` is called below alongside the other
+// section factories.
 
-const ClusterBounds = z.object({
-  west: z.number().min(-180).max(180),
-  south: z.number().min(-90).max(90),
-  east: z.number().min(-180).max(180),
-  north: z.number().min(-90).max(90),
-});
-
-const GeoJsonFeature = z.object({}).openapi({ type: 'object', description: 'GeoJSON feature.' });
-
-const ClusterResponse = registry.register(
-  'ClusterResponse',
-  z.object({
-    locationPoints: z.array(GeoJsonFeature),
-    clusterPoints: z.array(GeoJsonFeature),
-    total: z.number(),
-    zoom: z.number(),
-    loadedAt: z.number(),
-    bounds: ClusterBounds,
-  }),
-);
-
-registry.registerPath({
-  method: 'get',
-  path: '/api/clusters',
-  summary: 'Clustered merchant locations for the given viewport.',
-  tags: ['Clustering'],
-  request: {
-    query: z.object({
-      west: z.coerce.number().min(-180).max(180),
-      south: z.coerce.number().min(-90).max(90),
-      east: z.coerce.number().min(-180).max(180),
-      north: z.coerce.number().min(-90).max(90),
-      zoom: z.coerce.number().int().min(0).max(28),
-    }),
-  },
-  responses: {
-    200: {
-      description: 'Clusters (protobuf preferred via Accept header)',
-      content: {
-        'application/json': { schema: ClusterResponse },
-        'application/x-protobuf': { schema: z.string().openapi({ format: 'binary' }) },
-      },
-    },
-    400: {
-      description: 'Validation error',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    429: {
-      description: 'Rate limit exceeded (60/min per IP)',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-  },
-});
-
-registry.registerPath({
-  method: 'get',
-  path: '/api/image',
-  summary: 'Fetch, resize, and re-encode a remote image (SSRF-validated).',
-  tags: ['Images'],
-  request: {
-    query: z.object({
-      url: z.string().url(),
-      width: z.coerce.number().int().min(1).max(2000).optional(),
-      height: z.coerce.number().int().min(1).max(2000).optional(),
-      quality: z.coerce.number().int().min(1).max(100).optional(),
-    }),
-  },
-  responses: {
-    200: {
-      description: 'Image bytes',
-      content: {
-        'image/jpeg': { schema: z.string().openapi({ format: 'binary' }) },
-        'image/webp': { schema: z.string().openapi({ format: 'binary' }) },
-      },
-    },
-    400: {
-      description: 'Validation / SSRF rejection',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    413: {
-      description: 'Image exceeds 10MB limit',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    429: {
-      description: 'Rate limit exceeded (300/min per IP)',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-    502: {
-      description: 'Upstream image error',
-      content: { 'application/json': { schema: ErrorResponse } },
-    },
-  },
-});
 // ─── Spec generator ─────────────────────────────────────────────────────────
 
-// Register the bearer auth scheme on the registry so the generator emits it
-// A2-505: CSV admin endpoints were missing from the OpenAPI surface
-// even though every other admin export had a registration. Adding
-// them so generated clients (and the /admin-panel Swagger preview)
-// see the complete admin catalogue. All three follow the Tier-3
-// convention from ADR 018: attachment + private cache + RFC 4180
-// body + `__TRUNCATED__` sentinel at the row cap.
-
-// under components.securitySchemes.
+// Register the bearer auth scheme on the registry so the generator
+// emits it under components.securitySchemes.
 registry.registerComponent('securitySchemes', 'bearerAuth', {
   type: 'http',
   scheme: 'bearer',
@@ -294,6 +200,7 @@ registerUsersOpenApi(registry, ErrorResponse, LoopAssetCode, PayoutState);
 registerPublicOpenApi(registry, ErrorResponse);
 registerAdminOpenApi(registry, ErrorResponse, LoopAssetCode, PayoutState, CashbackPctString);
 registerHealthOpenApi(registry, ErrorResponse);
+registerClustersOpenApi(registry, ErrorResponse);
 
 const generator = new OpenApiGeneratorV31(registry.definitions);
 
