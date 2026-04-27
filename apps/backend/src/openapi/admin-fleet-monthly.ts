@@ -31,6 +31,7 @@ import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminMerchantsFlywheelOpenApi } from './admin-fleet-monthly-merchants-flywheel.js';
 import { registerAdminRecyclingActivityOpenApi } from './admin-fleet-monthly-recycling-activity.js';
+import { registerAdminUserCashbackDrillOpenApi } from './admin-fleet-monthly-user-cashback-drill.js';
 
 /**
  * Registers the fleet-wide monthly / daily admin paths + their
@@ -252,82 +253,12 @@ export function registerAdminFleetMonthlyOpenApi(
   // slice is fully self-contained behind `errorResponse`.
   registerAdminMerchantsFlywheelOpenApi(registry, errorResponse);
 
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/users/{userId}/cashback-by-merchant',
-    summary: 'User-drill: cashback earned per merchant (ADR 009).',
-    description:
-      'Per-merchant breakdown of cashback one user has earned in a window. Companion to `/api/users/me/cashback-by-merchant`; admin-scoped by userId param.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ userId: z.string().uuid() }),
-      query: z.object({
-        days: z.coerce.number().int().min(1).max(366).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Per-merchant cashback rows for the target user',
-        content: { 'application/json': { schema: z.unknown() } },
-      },
-      400: {
-        description: 'Malformed userId',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/users/{userId}/cashback-summary',
-    summary: 'User-drill: lifetime + this-month cashback summary (ADR 009 / 015).',
-    description:
-      'Admin-scoped mirror of `/api/users/me/cashback-summary`. Returns lifetime + month-to-date cashback for the target user, denominated in their current home currency. Used on `/admin/users/:userId` as the compact headline above the ledger drill.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ userId: z.string().uuid() }),
-    },
-    responses: {
-      200: {
-        description: 'Cashback summary for the target user',
-        content: { 'application/json': { schema: z.unknown() } },
-      },
-      400: {
-        description: 'Malformed userId',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description: 'Target user not found',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
+  // The two per-user cashback drill paths
+  // (`/users/{userId}/cashback-by-merchant` and
+  // `/users/{userId}/cashback-summary`) live in
+  // `./admin-fleet-monthly-user-cashback-drill.ts`. Same
+  // path-registration position as the original block.
+  registerAdminUserCashbackDrillOpenApi(registry, errorResponse);
 
   // The two recycling-activity paths
   // (`/users/recycling-activity.csv` and
