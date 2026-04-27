@@ -47,6 +47,18 @@ export class InsufficientCreditError extends Error {
 // (orders/handler.ts + tests) keep working without re-targeting.
 export { type CashbackSplit, computeCashbackSplit, generatePaymentMemo } from './cashback-split.js';
 
+// A2-2003 idempotency primitives (error type + pre-write lookup +
+// post-insert conflict resolver) live in `./repo-idempotency.ts`.
+// Re-exported here so the existing import paths used by
+// loop-handler.ts and the test suite keep resolving. Imported back
+// for use inside `createOrder`'s catch arm below.
+import {
+  IdempotentOrderConflictError,
+  findOrderByIdempotencyKey,
+  maybeFetchIdempotentConflict,
+} from './repo-idempotency.js';
+export { IdempotentOrderConflictError, findOrderByIdempotencyKey };
+
 export interface CreateOrderArgs {
   userId: string;
   merchantId: string;
@@ -71,39 +83,6 @@ export interface CreateOrderArgs {
    * the already-created order's response.
    */
   idempotencyKey?: string;
-}
-
-/**
- * A2-2003: thrown by `createOrder` when the (userId, idempotencyKey)
- * pair already exists. Carries the prior order so the caller can
- * build a replay response without a second SELECT round-trip — the
- * row was returned by the same SQL roundtrip that detected the
- * violation, courtesy of the post-insert lookup in the catch arm.
- */
-export class IdempotentOrderConflictError extends Error {
-  readonly existing: Order;
-  constructor(existing: Order) {
-    super('Idempotency-Key already maps to a different order for this user');
-    this.name = 'IdempotentOrderConflictError';
-    this.existing = existing;
-  }
-}
-
-/**
- * A2-2003: lookup the prior order for a given (userId, idempotencyKey)
- * pair. Returns null on miss. Called by the handler before the write
- * so a repeat request short-circuits without holding any locks; the
- * unique-index race is caught by `IdempotentOrderConflictError` from
- * the insert path.
- */
-export async function findOrderByIdempotencyKey(
-  userId: string,
-  idempotencyKey: string,
-): Promise<Order | null> {
-  const row = await db.query.orders.findFirst({
-    where: and(eq(orders.userId, userId), eq(orders.idempotencyKey, idempotencyKey)),
-  });
-  return row ?? null;
 }
 
 /**
@@ -262,27 +241,6 @@ export async function createOrder(args: CreateOrderArgs): Promise<Order> {
     if (conflict !== null) throw new IdempotentOrderConflictError(conflict);
     throw err;
   }
-}
-
-/**
- * A2-2003: when an `INSERT INTO orders` fails, classify the failure as
- * an idempotency-key conflict iff:
- *   - the caller passed an `idempotencyKey`, and
- *   - the error mentions the partial unique index name.
- *
- * Re-fetches the prior order so the caller can build the replay
- * response. Returns null when the failure was something else
- * (CHECK violation, FK violation, connection error) — the original
- * exception bubbles unchanged.
- */
-async function maybeFetchIdempotentConflict(
-  args: CreateOrderArgs,
-  err: unknown,
-): Promise<Order | null> {
-  if (args.idempotencyKey === undefined) return null;
-  const message = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
-  if (!message.includes('orders_user_idempotency_unique')) return null;
-  return await findOrderByIdempotencyKey(args.userId, args.idempotencyKey);
 }
 
 /**
