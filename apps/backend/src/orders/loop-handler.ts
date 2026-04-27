@@ -20,9 +20,6 @@
  */
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { and, eq, sql } from 'drizzle-orm';
-import { db } from '../db/client.js';
-import { orders, userCredits } from '../db/schema.js';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { getMerchants } from '../merchants/sync.js';
@@ -39,6 +36,7 @@ import {
   IdempotentOrderConflictError,
   InsufficientCreditError,
 } from './repo.js';
+import { hasSufficientCredit, isFirstLoopAssetOrder } from './loop-create-checks.js';
 
 const log = logger.child({ handler: 'loop-orders' });
 
@@ -71,46 +69,10 @@ const CreateBody = z.object({
  */
 export type OrderPaymentResponse = CreateLoopOrderResponse;
 
-/**
- * Verifies the user has at least `amountMinor` in `currency`. Returns
- * true when the balance covers the order. Called for credit-funded
- * orders before writing the row — the actual debit happens later on
- * payment watcher transition, inside the same txn as the state move
- * to `paid`.
- */
-async function hasSufficientCredit(
-  userId: string,
-  currency: string,
-  amountMinor: bigint,
-): Promise<boolean> {
-  const row = await db
-    .select({ balance: sql<string>`${userCredits.balanceMinor}::text` })
-    .from(userCredits)
-    .where(and(eq(userCredits.userId, userId), eq(userCredits.currency, currency)));
-  const balanceStr = row[0]?.balance ?? '0';
-  return BigInt(balanceStr) >= amountMinor;
-}
-
 // `replayOrderResponse` (A2-2003 idempotent-replay shaper) lives in
 // `./loop-replay-response.ts`. Imported back here for the two
 // in-handler call sites.
 import { replayOrderResponse } from './loop-replay-response.js';
-
-/**
- * True when the user has zero prior loop_asset orders (any state).
- * Used to distinguish the first-recycle milestone from ongoing
- * recycling, so `notifyFirstCashbackRecycled` only fires once per
- * user. LIMIT 1 so the query is constant-time regardless of how
- * much loop_asset volume the user has accumulated.
- */
-async function isFirstLoopAssetOrder(userId: string): Promise<boolean> {
-  const row = await db
-    .select({ id: orders.id })
-    .from(orders)
-    .where(and(eq(orders.userId, userId), eq(orders.paymentMethod, 'loop_asset')))
-    .limit(1);
-  return row.length === 0;
-}
 
 export async function loopCreateOrderHandler(c: Context): Promise<Response> {
   if (!env.LOOP_AUTH_NATIVE_ENABLED) {
