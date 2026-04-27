@@ -1,0 +1,285 @@
+/**
+ * Admin treasury / asset-drift OpenAPI registrations
+ * (ADR 009 / 011 / 013 / 015).
+ *
+ * Lifted out of `apps/backend/src/openapi/admin.ts`. Three paths
+ * that read together as the ADR-015 ledger ↔ chain reconciliation
+ * surface: the treasury snapshot, the per-asset circulation drift,
+ * and the in-memory drift watcher state.
+ *
+ * Paths in the slice:
+ *   - GET /api/admin/treasury
+ *   - GET /api/admin/assets/{assetCode}/circulation
+ *   - GET /api/admin/asset-drift/state
+ *
+ * Locally-scoped schemas travel with the slice (none referenced
+ * elsewhere in admin.ts after the prior 15 slices have lifted
+ * the rest of the surface):
+ *
+ *   - inline `LoopLiability`, `TreasuryHolding`, `TreasuryOrderFlow`,
+ *     `OperatorHealthEntry` (NOT registered — composed into
+ *     `TreasurySnapshot` only)
+ *   - registered: `TreasurySnapshot`, `AssetCirculationResponse`,
+ *     `AssetDriftStateRow`, `AssetDriftStateResponse`
+ *
+ * Three deps cross the boundary:
+ *
+ *   - `errorResponse` (shared component from openapi.ts)
+ *   - `LoopAssetCode` — cross-section enum, also used by Users
+ *     (LOOP-asset code is the asset-side identifier across the
+ *     whole stablecoin topology).
+ *   - `PayoutState` — cross-section enum, used by `TreasurySnapshot`
+ *     for the per-state payout count map.
+ */
+import { z } from 'zod';
+import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
+
+type ZodEnumLike = z.ZodEnum<{ readonly [key: string]: string | number }>;
+
+/**
+ * Registers the treasury / asset-drift paths + their locally-scoped
+ * schemas on the supplied registry. Called once from
+ * `registerAdminOpenApi`.
+ */
+export function registerAdminTreasuryAssetsOpenApi(
+  registry: OpenAPIRegistry,
+  errorResponse: ReturnType<OpenAPIRegistry['register']>,
+  loopAssetCode: ZodEnumLike,
+  payoutState: ZodEnumLike,
+): void {
+  // Local aliases keep the body syntactically identical to the
+  // pre-decomposition source.
+  const LoopAssetCode = loopAssetCode;
+  const PayoutState = payoutState;
+
+  // ─── Admin (ADR 015 — treasury + payouts) ───────────────────────────────────
+
+  const LoopLiability = z.object({
+    outstandingMinor: z.string().openapi({
+      description:
+        'Outstanding claim in the matching fiat minor units (cents / pence). BigInt as string.',
+    }),
+    issuer: z.string().nullable().openapi({
+      description: 'Stellar issuer account pinned by env for this asset; null when unconfigured.',
+    }),
+  });
+
+  const TreasuryHolding = z.object({
+    stroops: z.string().nullable().openapi({
+      description:
+        'Live on-chain balance in stroops (7 decimals). Null when the operator account is unset or Horizon is temporarily unreachable.',
+    }),
+  });
+
+  const TreasuryOrderFlow = z.object({
+    count: z.string().openapi({
+      description:
+        'Number of fulfilled orders in this charge-currency bucket. BigInt-string count.',
+    }),
+    faceValueMinor: z.string().openapi({
+      description:
+        'Sum of gift-card face values (minor units of the charge currency). BigInt-string.',
+    }),
+    wholesaleMinor: z.string().openapi({
+      description: 'Total paid to CTX (supplier) for this bucket. Minor units, bigint-string.',
+    }),
+    userCashbackMinor: z.string().openapi({
+      description: 'Total cashback credited to users for this bucket. Minor units, bigint-string.',
+    }),
+    loopMarginMinor: z.string().openapi({
+      description: 'Total kept by Loop for this bucket. Minor units, bigint-string.',
+    }),
+  });
+
+  const OperatorHealthEntry = z.object({
+    id: z.string(),
+    state: z.string().openapi({
+      description: 'Circuit state for this operator (closed / half_open / open).',
+    }),
+  });
+
+  const TreasurySnapshot = registry.register(
+    'TreasurySnapshot',
+    z.object({
+      outstanding: z.record(z.string(), z.string()).openapi({
+        description: 'Sum of user_credits.balance_minor per currency, as bigint-strings.',
+      }),
+      totals: z.record(z.string(), z.record(z.string(), z.string())).openapi({
+        description: 'Sum of credit_transactions.amount_minor grouped by (currency, type).',
+      }),
+      liabilities: z.record(LoopAssetCode, LoopLiability).openapi({
+        description:
+          'ADR 015 — per LOOP asset, the outstanding user claim + the configured issuer. Stable shape across all three codes.',
+      }),
+      assets: z.object({
+        USDC: TreasuryHolding,
+        XLM: TreasuryHolding,
+      }),
+      payouts: z.record(PayoutState, z.string()).openapi({
+        description:
+          'ADR 015 — pending_payouts row counts per state. Always returns an entry for each state (zero when empty).',
+      }),
+      orderFlows: z.record(z.string(), TreasuryOrderFlow).openapi({
+        description:
+          'ADR 015 — aggregated economics of fulfilled orders, keyed by charge currency. Surfaces the CTX-supplier split (wholesale / user cashback / Loop margin).',
+      }),
+      operatorPool: z.object({
+        size: z.number().int(),
+        operators: z.array(OperatorHealthEntry),
+      }),
+    }),
+  );
+
+  const AssetCirculationResponse = registry.register(
+    'AssetCirculationResponse',
+    z.object({
+      assetCode: LoopAssetCode,
+      fiatCurrency: z.enum(['USD', 'GBP', 'EUR']),
+      issuer: z.string(),
+      onChainStroops: z.string().openapi({
+        description:
+          'Horizon-issued circulation for (assetCode, issuer). bigint-as-string stroops.',
+      }),
+      ledgerLiabilityMinor: z.string().openapi({
+        description:
+          'Sum of user_credits.balance_minor for the matching fiat. bigint-as-string minor units.',
+      }),
+      driftStroops: z.string().openapi({
+        description:
+          'onChainStroops - ledgerLiabilityMinor × 1e5 (1 minor = 1e5 stroops for a 1:1-pinned LOOP asset). Positive = over-minted; negative = settlement backlog.',
+      }),
+      onChainAsOfMs: z.number().int(),
+    }),
+  );
+
+  const AssetDriftStateRow = registry.register(
+    'AssetDriftStateRow',
+    z.object({
+      assetCode: LoopAssetCode,
+      state: z.enum(['unknown', 'ok', 'over']).openapi({
+        description:
+          "`unknown` = watcher hasn't read this asset yet (fresh boot / issuer unconfigured); `ok` = within threshold on last successful tick; `over` = outside threshold.",
+      }),
+      lastDriftStroops: z.string().nullable().openapi({
+        description:
+          'Last drift in stroops (bigint-as-string). Null until the first successful read.',
+      }),
+      lastThresholdStroops: z.string().nullable(),
+      lastCheckedMs: z.number().int().nullable(),
+    }),
+  );
+
+  const AssetDriftStateResponse = registry.register(
+    'AssetDriftStateResponse',
+    z.object({
+      lastTickMs: z.number().int().nullable().openapi({
+        description: 'Unix ms of the last full watcher pass. Null when the watcher never ran.',
+      }),
+      running: z.boolean(),
+      perAsset: z.array(AssetDriftStateRow),
+    }),
+  );
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/admin/treasury',
+    summary: 'Admin treasury snapshot (ADR 009 / 011 / 015).',
+    description:
+      "Single read-optimised aggregate the admin UI renders without running its own SQL. Covers the credit-ledger outstanding + totals (ADR 009), LOOP-asset liabilities keyed by asset code (ADR 015), Loop's own USDC / XLM holdings, pending-payouts counts per state, and the CTX operator-pool health snapshot (ADR 013). Horizon failures don't 500 this surface — liability counts are authoritative from Postgres; assets fall back to null-stroops when the balance read fails.",
+    tags: ['Admin'],
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: {
+        description: 'Snapshot',
+        content: { 'application/json': { schema: TreasurySnapshot } },
+      },
+      401: {
+        description: 'Missing or invalid bearer',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      403: {
+        description: 'Not an admin',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (60/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/admin/assets/{assetCode}/circulation',
+    summary: 'Per-asset circulation drift — stablecoin safety metric (ADR 015).',
+    description:
+      'Compares Horizon-side issued circulation (via `/assets?asset_code=X&asset_issuer=Y`) against the off-chain ledger liability (`user_credits.balance_minor` for the matching fiat). `driftStroops = onChainStroops - ledgerLiabilityMinor × 1e5` — positive drift means over-minted (investigate now), negative means settlement backlog (expected as the payout worker catches up). Horizon failures surface as 503 rather than 500 so the admin UI keeps the ledger side authoritative. Missing issuer env → 409. 30/min rate limit; Horizon calls cached 30s internally.',
+    tags: ['Admin'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: z.object({ assetCode: LoopAssetCode }),
+    },
+    responses: {
+      200: {
+        description: 'Drift snapshot',
+        content: { 'application/json': { schema: AssetCirculationResponse } },
+      },
+      400: {
+        description: 'Unknown `assetCode`',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      401: {
+        description: 'Missing or invalid bearer',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      403: {
+        description: 'Not an admin',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      409: {
+        description: 'Issuer env not configured for this asset',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (30/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      500: {
+        description: 'Internal error reading ledger liability',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      503: {
+        description: 'Horizon circulation read failed',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/admin/asset-drift/state',
+    summary: 'In-memory snapshot of the asset-drift watcher (ADR 015).',
+    description:
+      "Surfaces the background drift watcher's last-pass per-asset state without forcing a fresh Horizon read. `running: false` means the watcher is not active in this process (no LOOP issuers configured or `LOOP_WORKERS_ENABLED=false`). `perAsset[].state` is `unknown` until the first successful per-asset tick. Cheap enough to poll from the admin landing (120/min rate limit).",
+    tags: ['Admin'],
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: {
+        description: 'Watcher state snapshot',
+        content: { 'application/json': { schema: AssetDriftStateResponse } },
+      },
+      401: {
+        description: 'Missing or invalid bearer',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      403: {
+        description: 'Not an admin',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (120/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+    },
+  });
+}
