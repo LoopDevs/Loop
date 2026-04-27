@@ -38,6 +38,7 @@ import { registerAdminFleetMonthlyOpenApi } from './admin-fleet-monthly.js';
 import { registerAdminMiscReadsOpenApi } from './admin-misc-reads.js';
 import { registerAdminOperatorFleetOpenApi } from './admin-operator-fleet.js';
 import { registerAdminOperatorMixOpenApi } from './admin-operator-mix.js';
+import { registerAdminOrderClusterOpenApi } from './admin-order-cluster.js';
 import { registerAdminPerMerchantDrillOpenApi } from './admin-per-merchant-drill.js';
 import { registerAdminPerUserDrillOpenApi } from './admin-per-user-drill.js';
 import { registerAdminSupplierSpendOpenApi } from './admin-supplier-spend.js';
@@ -422,42 +423,17 @@ export function registerAdminOpenApi(
   // locally-scoped schemas live in ./admin-user-cluster.ts.
   registerAdminUserClusterOpenApi(registry, errorResponse);
 
-  // ─── Admin — Loop-native order view (ADR 011 / 015) ─────────────────────────
+  // ─── Admin order cluster (ADR 010/011/015/019) ─────────────────────────────
+  //
+  // The four order-cluster paths (orders/activity,
+  // orders/payment-method-share, orders/{id}, orders/{id}/payout)
+  // plus their three locally-scoped schemas (AdminOrderState,
+  // AdminOrderPaymentMethod, AdminOrderView) live in
+  // ./admin-order-cluster.ts. The `AdminPayoutView` schema stays
+  // here because it has multiple call sites; threaded as a
+  // parameter to the slice.
+  registerAdminOrderClusterOpenApi(registry, errorResponse, AdminPayoutView);
 
-  const AdminOrderState = z
-    .enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired'])
-    .openapi({ description: 'Mirrors the CHECK constraint on orders.state.' });
-
-  const AdminOrderPaymentMethod = z.enum(['xlm', 'usdc', 'credit', 'loop_asset']);
-
-  const AdminOrderView = registry.register(
-    'AdminOrderView',
-    z.object({
-      id: z.string().uuid(),
-      userId: z.string().uuid(),
-      merchantId: z.string(),
-      state: AdminOrderState,
-      currency: z.string().length(3),
-      faceValueMinor: z.string(),
-      chargeCurrency: z.string().length(3),
-      chargeMinor: z.string(),
-      paymentMethod: AdminOrderPaymentMethod,
-      wholesalePct: z.string(),
-      userCashbackPct: z.string(),
-      loopMarginPct: z.string(),
-      wholesaleMinor: z.string(),
-      userCashbackMinor: z.string(),
-      loopMarginMinor: z.string(),
-      ctxOrderId: z.string().nullable(),
-      ctxOperatorId: z.string().nullable(),
-      failureReason: z.string().nullable(),
-      createdAt: z.string().datetime(),
-      paidAt: z.string().datetime().nullable(),
-      procuredAt: z.string().datetime().nullable(),
-      fulfilledAt: z.string().datetime().nullable(),
-      failedAt: z.string().datetime().nullable(),
-    }),
-  );
   // ─── Admin — cashback-config schemas (ADR 011) ──────────────────────────────
   //
   // Schemas + paths lifted into ./admin-cashback-config.ts; the
@@ -936,208 +912,6 @@ export function registerAdminOpenApi(
       },
       500: {
         description: 'Internal error applying compensation',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/orders/activity',
-    summary: 'Per-day orders created/fulfilled sparkline (ADR 010 / 019 Tier 1).',
-    description:
-      "Last `?days=<N>` (default 7, clamped [1, 90]) of orders created vs fulfilled, UTC-bucketed. Uses `generate_series` + LEFT JOIN so every day in the window appears with zero-filled counts even when no orders crossed on that day — the UI doesn't gap-fill. Oldest-first so a bar chart renders left-to-right without a client-side reverse.",
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        days: z.coerce.number().int().min(1).max(90).optional().openapi({
-          description: 'Window size in calendar days. Default 7, clamped [1, 90].',
-        }),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Activity series',
-        content: {
-          'application/json': {
-            schema: z.object({
-              windowDays: z.number().int().min(1).max(90),
-              days: z.array(
-                z.object({
-                  day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-                  created: z.number().int().nonnegative(),
-                  fulfilled: z.number().int().nonnegative(),
-                }),
-              ),
-            }),
-          },
-        },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error reading activity',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/orders/payment-method-share',
-    summary: 'Payment-method share across orders (ADR 010 / 015).',
-    description:
-      "The cashback-flywheel metric. Single GROUP BY over `orders.payment_method`, zero-filled across every `ORDER_PAYMENT_METHODS` value so a method with no rows still renders as `{ orderCount: 0, chargeMinor: '0' }`. Default `?state=fulfilled` so in-flight orders don't skew the mix while users are still on the checkout page; pass any other `OrderState` to track a different bucket. `totalOrders` is echoed so the UI can render shares without re-summing. A rising `loop_asset` share is the signal ADR 015's cashback-recycle flywheel is working.",
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        state: z
-          .enum(['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired'])
-          .optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Payment-method share snapshot',
-        content: {
-          'application/json': {
-            schema: z.object({
-              state: z.enum([
-                'pending_payment',
-                'paid',
-                'procuring',
-                'fulfilled',
-                'failed',
-                'expired',
-              ]),
-              totalOrders: z.number().int().min(0),
-              byMethod: z.record(
-                z.enum(['xlm', 'usdc', 'credit', 'loop_asset']),
-                z.object({
-                  orderCount: z.number().int().min(0),
-                  chargeMinor: z.string(),
-                }),
-              ),
-            }),
-          },
-        },
-      },
-      400: {
-        description: 'Invalid state',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error computing the share',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/orders/{orderId}',
-    summary: 'Single Loop-native order drill-down (ADR 011 / 015).',
-    description:
-      'Permalink view for one `orders` row. Admin UI deep-links each row from the list page to this endpoint so ops can quote an order id in a ticket or incident note. Gift-card fields (redeem_code / redeem_pin) are omitted — the admin view is for diagnosis, not redemption.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ orderId: z.string().uuid() }),
-    },
-    responses: {
-      200: {
-        description: 'Order row',
-        content: { 'application/json': { schema: AdminOrderView } },
-      },
-      400: {
-        description: 'Missing or malformed orderId',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description: 'Order not found',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error reading the row',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/orders/{orderId}/payout',
-    summary: 'Payout row for a given order (ADR 015).',
-    description:
-      'Nested lookup — given an order id, return the single `pending_payouts` row associated with it (UNIQUE on `order_id`). Used by the admin order drill-down to render payout state without a second round-trip. 404 when the order has no payout row yet (common: payout builder only runs once cashback is due).',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ orderId: z.string().uuid() }),
-    },
-    responses: {
-      200: {
-        description: 'Payout row',
-        content: { 'application/json': { schema: AdminPayoutView } },
-      },
-      400: {
-        description: 'Missing or malformed orderId',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description: 'No payout row for this order',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error reading the row',
         content: { 'application/json': { schema: errorResponse } },
       },
     },
