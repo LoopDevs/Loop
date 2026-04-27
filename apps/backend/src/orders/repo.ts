@@ -17,30 +17,20 @@
  * lands in Loop's margin — errs toward Loop, never toward a user
  * being owed an extra penny we haven't reserved.
  */
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { orders, userCredits, creditTransactions, type OrderPaymentMethod } from '../db/schema.js';
+import { orders, type OrderPaymentMethod } from '../db/schema.js';
 import { computeCashbackSplit, generatePaymentMemo } from './cashback-split.js';
+import { InsufficientCreditError } from './repo-errors.js';
+import { insertCreditOrderTxn } from './repo-credit-order.js';
 
 export type Order = typeof orders.$inferSelect;
 
-/**
- * Raised by `createOrder` when a credit-funded order cannot be paid
- * because the user's live balance (re-read FOR UPDATE inside the
- * same txn that would debit it) is below the charge amount.
- *
- * The caller's prior `hasSufficientCredit` fast-path check is a UX
- * nicety, not a guard — a concurrent admin adjustment or a
- * just-captured spend between the check and the insert can leave
- * the balance insufficient. In that case the txn aborts and nothing
- * is written; callers translate this to a 400.
- */
-export class InsufficientCreditError extends Error {
-  constructor() {
-    super('Loop credit balance is below the order amount');
-    this.name = 'InsufficientCreditError';
-  }
-}
+// `InsufficientCreditError` lives in `./repo-errors.ts` so both this
+// file and the credit-order txn helper can share a single instance
+// without a circular import. Re-exported here so existing import
+// sites (handlers + tests) keep resolving.
+export { InsufficientCreditError } from './repo-errors.js';
 
 // Cashback-split derivation + payment-memo generation lives in
 // `./cashback-split.ts`. Re-exported here so existing import sites
@@ -168,68 +158,7 @@ export async function createOrder(args: CreateOrderArgs): Promise<Order> {
   }
 
   try {
-    return await db.transaction(async (tx) => {
-      const [inserted] = await tx.insert(orders).values(baseValues).returning();
-      if (inserted === undefined) {
-        throw new Error('createOrder: no row returned');
-      }
-
-      // Re-read balance under a FOR UPDATE lock. A concurrent admin
-      // adjustment or another credit order against the same
-      // (user, currency) row serialises through here. This is the
-      // guard — the earlier `hasSufficientCredit` at the handler is a
-      // UX fast-path that can be racy.
-      const fresh = await tx
-        .select({ balanceMinor: userCredits.balanceMinor })
-        .from(userCredits)
-        .where(and(eq(userCredits.userId, args.userId), eq(userCredits.currency, chargeCurrency)))
-        .for('update');
-
-      const balance = fresh[0]?.balanceMinor ?? 0n;
-      if (balance < chargeMinor) {
-        throw new InsufficientCreditError();
-      }
-
-      // Ledger: type='spend' carries a NEGATIVE amount per schema CHECK
-      // (`spend`/`withdrawal` amount<0). Reference this order so
-      // reconciliation can trace the debit back to its cause.
-      await tx.insert(creditTransactions).values({
-        userId: args.userId,
-        type: 'spend',
-        amountMinor: -chargeMinor,
-        currency: chargeCurrency,
-        referenceType: 'order',
-        referenceId: inserted.id,
-      });
-
-      // Balance: subtract via SQL expression rather than JS arithmetic
-      // on the freshly-read value, since the lock already serialises
-      // us and the DB expression is the ledger's own source of truth.
-      await tx
-        .update(userCredits)
-        .set({ balanceMinor: sql`${userCredits.balanceMinor} - ${chargeMinor}` })
-        .where(and(eq(userCredits.userId, args.userId), eq(userCredits.currency, chargeCurrency)));
-
-      // Transition to paid. Mirrors `markOrderPaid`'s shape but stays
-      // within this txn so the debit + state flip commit together.
-      const now = new Date();
-      const [paid] = await tx
-        .update(orders)
-        .set({
-          state: 'paid',
-          paidAt: now,
-          paymentReceivedAt: now,
-        })
-        .where(and(eq(orders.id, inserted.id), eq(orders.state, 'pending_payment')))
-        .returning();
-      if (paid === undefined) {
-        // Unreachable — the row was just inserted above in the same
-        // txn; nothing else can have transitioned it. Throw loudly so
-        // a future refactor that breaks this invariant is obvious.
-        throw new Error('createOrder: credit-order paid-transition lost race with self');
-      }
-      return paid;
-    });
+    return await insertCreditOrderTxn({ ...baseValues, paymentMethod: 'credit', paymentMemo });
   } catch (err) {
     if (err instanceof InsufficientCreditError) throw err;
     // A2-2003: a concurrent caller raced us to the same
