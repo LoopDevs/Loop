@@ -116,14 +116,6 @@ export async function stroopsPerCent(currency: 'USD' | 'GBP' | 'EUR'): Promise<b
   return BigInt(Math.ceil(10_000_000 / minor));
 }
 
-// ─── Fiat FX (USDC against non-USD orders) ───────────────────────────────────
-
-/**
- * Response shape for Frankfurter's /latest endpoint:
- *   `{ "amount": 1, "base": "USD", "date": "...", "rates": { "GBP": 0.78, ... } }`
- * Other self-hosted FX feeds are expected to match this shape; an
- * adapter shim is the path of least resistance for a different API.
- */
 // Fiat FX feed (Frankfurter) + cross-currency conversion helpers
 // (`usdcStroopsPerCent`, `convertMinorUnits`,
 // `__resetFxFeedForTests`) live in `./price-feed-fx.ts`. Re-exported
