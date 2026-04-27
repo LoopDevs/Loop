@@ -8,6 +8,12 @@ export default defineConfig({
     // `env.ts`'s validate-on-load doesn't crash when tests are run
     // without a real .env on disk.
     setupFiles: ['./src/__tests__/vitest-env-setup.ts'],
+    // The real-postgres integration suite (A2-1705) lives under
+    // `__tests__/integration/` and runs via its own config
+    // (`vitest.integration.config.ts`) gated on `LOOP_E2E_DB=1`.
+    // Exclude it here so the default unit run never triggers a real
+    // DB connection.
+    exclude: ['**/node_modules/**', '**/dist/**', 'src/__tests__/integration/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],
