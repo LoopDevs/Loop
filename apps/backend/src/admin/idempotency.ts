@@ -139,6 +139,17 @@ export async function withIdempotencyGuard(
         body = {};
       }
       if (Object.keys(body).length > 0) {
+        // ADR-017 + every admin-write OpenAPI entry promises that
+        // `audit.replayed: true` on the response body indicates a
+        // snapshot replay. The stored body was produced on the first
+        // call with `replayed: false`; mutate it here on the replay
+        // path so the wire contract matches the docs. Doing it in
+        // the guard means every handler using `withIdempotencyGuard`
+        // gets the spec-compliant behaviour without per-handler code.
+        const audit = body['audit'];
+        if (audit !== null && typeof audit === 'object') {
+          (audit as Record<string, unknown>)['replayed'] = true;
+        }
         return { replayed: true, status: prior.status, body };
       }
     }

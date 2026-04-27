@@ -15,7 +15,7 @@
 // CI is wired the same way.
 process.env['DATABASE_URL'] ??= 'postgres://loop:loop@localhost:5433/loop_test';
 process.env['NODE_ENV'] = 'test';
-process.env['LOG_LEVEL'] = 'silent';
+process.env['LOG_LEVEL'] = process.env['LOG_LEVEL'] ?? 'silent';
 
 // Loop-native auth needs a signing key (ADR 013). Pin a 32+ char
 // fixture so `LOOP_AUTH_NATIVE_ENABLED=true` paths work.
@@ -50,3 +50,9 @@ process.env['LOOP_STELLAR_EURLOOP_ISSUER'] ??=
 // Workers stay off — the test drives transitions directly to keep
 // timing deterministic.
 process.env['LOOP_WORKERS_ENABLED'] = 'false';
+
+// Admin allowlist — mints a CTX-style bearer with `sub=test-admin-id`
+// and the admin-handler integration tests assert the full ADR-017
+// ladder (idempotency-guarded write + audit envelope + duplicate-
+// rejection via partial unique indexes) through real postgres.
+process.env['ADMIN_CTX_USER_IDS'] ??= 'test-admin-id';
