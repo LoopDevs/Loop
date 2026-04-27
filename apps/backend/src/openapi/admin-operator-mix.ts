@@ -10,22 +10,27 @@
  * carrying that merchant?" → "what other merchants does that
  * operator carry?".
  *
- * Three paths in the slice:
+ * Two paths registered directly here (the merchant-side pair
+ * — same data viewed from each side of the merchant ↔ operator
+ * relationship):
  *   - GET /api/admin/merchants/{merchantId}/operator-mix
  *   - GET /api/admin/operators/{operatorId}/merchant-mix
- *   - GET /api/admin/users/{userId}/operator-mix
  *
- * Six locally-scoped schemas travel with the slice (none
- * referenced anywhere else in admin.ts):
+ * Path delegated to a sibling slice:
+ *   - GET /api/admin/users/{userId}/operator-mix —
+ *     `./admin-user-operator-mix.ts` (owns
+ *     `AdminUserOperatorMixRow` + `Response`)
+ *
+ * Schemas registered directly here:
  *
  *   - AdminMerchantOperatorMixRow / Response
  *   - AdminOperatorMerchantMixRow / Response
- *   - AdminUserOperatorMixRow / Response
  *
  * Only `errorResponse` crosses the slice boundary.
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
+import { registerAdminUserOperatorMixOpenApi } from './admin-user-operator-mix.js';
 
 /**
  * Registers the operator-mix matrix paths + their locally-scoped
@@ -77,28 +82,6 @@ export function registerAdminOperatorMixOpenApi(
       operatorId: z.string(),
       since: z.string().datetime(),
       rows: z.array(AdminOperatorMerchantMixRow),
-    }),
-  );
-
-  // ─── Admin — user × operator mix (ADR 013 / 022) ───────────────────────────
-
-  const AdminUserOperatorMixRow = registry.register(
-    'AdminUserOperatorMixRow',
-    z.object({
-      operatorId: z.string(),
-      orderCount: z.number().int().min(0),
-      fulfilledCount: z.number().int().min(0),
-      failedCount: z.number().int().min(0),
-      lastOrderAt: z.string().datetime(),
-    }),
-  );
-
-  const AdminUserOperatorMixResponse = registry.register(
-    'AdminUserOperatorMixResponse',
-    z.object({
-      userId: z.string().uuid(),
-      since: z.string().datetime(),
-      rows: z.array(AdminUserOperatorMixRow),
     }),
   );
 
@@ -198,49 +181,12 @@ export function registerAdminOperatorMixOpenApi(
     },
   });
 
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/users/{userId}/operator-mix',
-    summary: 'Per-user × per-operator attribution for support triage (ADR 013 / 022).',
-    description:
-      'Third corner of the mix-axis triangle (alongside /merchants/{id}/operator-mix and /operators/{id}/merchant-mix). Aggregates orders for one user by ctx_operator_id. Support pivots here during per-user complaints: "user X\'s slow cashback → 80% of their orders went through op-beta-02 which has a failing circuit". Zero-mix users return 200 with rows: []. Only rows with non-null `ctx_operator_id` aggregated. Default window 24h, cap 366d.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ userId: z.string().uuid() }),
-      query: z.object({
-        since: z
-          .string()
-          .datetime()
-          .optional()
-          .openapi({ description: 'ISO-8601 — lower bound on createdAt. Defaults to 24h ago.' }),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Per-operator rows scoped to the user',
-        content: { 'application/json': { schema: AdminUserOperatorMixResponse } },
-      },
-      400: {
-        description: 'Malformed `userId` or `since`',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error computing the aggregate',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
+  // ─── Admin — user × operator mix (ADR 013 / 022) ───────────────────────────
+  //
+  // Path + locally-scoped schemas (`AdminUserOperatorMixRow`,
+  // `AdminUserOperatorMixResponse`) live in
+  // `./admin-user-operator-mix.ts`. Fanned out from here so the
+  // mix-axis registration in `admin.ts` keeps producing one factory
+  // call for the entire matrix.
+  registerAdminUserOperatorMixOpenApi(registry, errorResponse);
 }
