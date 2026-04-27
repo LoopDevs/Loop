@@ -101,13 +101,7 @@ import { adminUserSearchHandler } from '../admin/user-search.js';
 import { adminUserCreditsCsvHandler } from '../admin/user-credits-csv.js';
 import { adminReconciliationHandler } from '../admin/reconciliation.js';
 import { mountAdminOrderDrillRoutes } from './admin-order-drill.js';
-import { adminStuckOrdersHandler } from '../admin/stuck-orders.js';
-import { adminStuckPayoutsHandler } from '../admin/stuck-payouts.js';
-import { adminCashbackActivityHandler } from '../admin/cashback-activity.js';
-import { adminCashbackActivityCsvHandler } from '../admin/cashback-activity-csv.js';
-import { adminCashbackRealizationHandler } from '../admin/cashback-realization.js';
-import { adminCashbackRealizationDailyHandler } from '../admin/cashback-realization-daily.js';
-import { adminCashbackRealizationDailyCsvHandler } from '../admin/cashback-realization-daily-csv.js';
+import { mountAdminDashboardRoutes } from './admin-dashboard.js';
 import { adminCashbackMonthlyHandler } from '../admin/cashback-monthly.js';
 import { adminPayoutsMonthlyHandler } from '../admin/payouts-monthly.js';
 import { adminPayoutsActivityHandler } from '../admin/payouts-activity.js';
@@ -266,52 +260,12 @@ export function mountAdminRoutes(app: Hono): void {
   // (literal-suffix routes register before param-only /:orderId).
   mountAdminOrderDrillRoutes(app);
 
-  // Stuck-orders triage. Dashboard pings this every 30-60s — higher
-  // rate limit because the admin UI polls it on a loop to surface
-  // an SLO red-flag card.
-  app.get('/api/admin/stuck-orders', rateLimit(120, 60_000), adminStuckOrdersHandler);
-  // Stuck-payouts triage — pending_payouts rows in pending/submitted
-  // past the SLO threshold (ADR 015/016). Same 120/min polling budget
-  // as stuck-orders since both feed the same dashboard card and often
-  // refetch together.
-  app.get('/api/admin/stuck-payouts', rateLimit(120, 60_000), adminStuckPayoutsHandler);
-  // Daily cashback-accrual time-series for the dashboard sparkline.
-  // Cheap read — single generate_series + LEFT JOIN, bounded at 180
-  // days so the payload can't explode.
-  app.get('/api/admin/cashback-activity', rateLimit(60, 60_000), adminCashbackActivityHandler);
-  // Cashback realization rate — per-currency earned vs spent vs
-  // outstanding, plus a fleet-wide aggregate row. The flywheel-health
-  // KPI: high realization = users recycling cashback into new orders
-  // rather than hoarding or withdrawing (ADR 009/015).
-  app.get(
-    '/api/admin/cashback-realization',
-    rateLimit(60, 60_000),
-    adminCashbackRealizationHandler,
-  );
-  // Daily realization time-series — per-(day, currency) earned +
-  // spent + recycledBps. Drift-over-time companion to the single-point
-  // realization surface above; powers the sparkline on /admin landing.
-  app.get(
-    '/api/admin/cashback-realization/daily',
-    rateLimit(60, 60_000),
-    adminCashbackRealizationDailyHandler,
-  );
-  // Finance-ready CSV of the daily realization trend. Tier-3 10/min
-  // rate limit + `private, no-store` + attachment disposition — same
-  // discipline as the other month-end exports.
-  app.get(
-    '/api/admin/cashback-realization/daily.csv',
-    rateLimit(10, 60_000),
-    adminCashbackRealizationDailyCsvHandler,
-  );
-  // Finance-ready CSV: daily × per-currency cashback accrual. Same
-  // aggregate as the JSON surface, flattened for spreadsheet use.
-  // Tier-3 rate limit — month-end finance use, not polling.
-  app.get(
-    '/api/admin/cashback-activity.csv',
-    rateLimit(10, 60_000),
-    adminCashbackActivityCsvHandler,
-  );
+  // Dashboard cluster — stuck-orders / stuck-payouts /
+  // cashback-activity (+ .csv) / cashback-realization (+ /daily +
+  // /daily.csv) — the operational + flywheel signals on /admin.
+  // Lifted into ./admin-dashboard.ts (mirrors openapi #1174).
+  mountAdminDashboardRoutes(app);
+
   // Fleet-wide monthly-cashback bar chart — per-(month, currency)
   // emission totals over a fixed 12-month window. Mirrors the user-
   // facing /api/users/me/cashback-monthly shape so the same chart
