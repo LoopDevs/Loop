@@ -91,16 +91,8 @@ import { adminTreasurySnapshotCsvHandler } from '../admin/treasury-snapshot-csv.
 import { adminTreasuryCreditFlowHandler } from '../admin/treasury-credit-flow.js';
 import { adminAssetCirculationHandler } from '../admin/asset-circulation.js';
 import { adminAssetDriftStateHandler } from '../admin/asset-drift-state.js';
-import {
-  adminGetPayoutHandler,
-  adminListPayoutsHandler,
-  adminPayoutByOrderHandler,
-  adminRetryPayoutHandler,
-} from '../admin/payouts.js';
-import { adminPayoutsCsvHandler } from '../admin/payouts-csv.js';
-import { adminPayoutCompensationHandler } from '../admin/payout-compensation.js';
-import { adminPayoutsByAssetHandler } from '../admin/payouts-by-asset.js';
-import { adminSettlementLagHandler } from '../admin/settlement-lag.js';
+import { adminPayoutByOrderHandler } from '../admin/payouts.js';
+import { mountAdminPayoutsRoutes } from './admin-payouts.js';
 import { adminTopUsersHandler } from '../admin/top-users.js';
 import { adminTopUsersByPendingPayoutHandler } from '../admin/top-users-by-pending-payout.js';
 import { adminUsersRecyclingActivityHandler } from '../admin/users-recycling-activity.js';
@@ -304,42 +296,12 @@ export function mountAdminRoutes(app: Hono): void {
   // admin UI landing so the "which assets are drifted?" signal reads
   // without forcing each tab to re-read Horizon.
   app.get('/api/admin/asset-drift/state', rateLimit(120, 60_000), adminAssetDriftStateHandler);
-  // Pending-payouts backlog list (ADR 015). Admin UI's "payouts" page
-  // drills into pending/submitted/confirmed/failed rows; counts for the
-  // at-a-glance card come from the treasury snapshot above.
-  app.get('/api/admin/payouts', rateLimit(60, 60_000), adminListPayoutsHandler);
-  // GET /api/admin/payouts/:id — single-row drill-down (permalink for
-  // an ops ticket / incident note). Higher rate limit than the list
-  // because the admin UI deep-links individual rows on every navigation.
-  app.get('/api/admin/payouts/:id', rateLimit(120, 60_000), adminGetPayoutHandler);
-  // Per-asset payout breakdown — crosses asset_code × state for the
-  // LOOP stablecoin triage view (ADR 015/016). Admin UI renders this
-  // on the treasury page as a per-asset table next to the flat payout
-  // list, so an incident in one asset doesn't get lost in the volume
-  // of another.
-  app.get('/api/admin/payouts-by-asset', rateLimit(60, 60_000), adminPayoutsByAssetHandler);
-  // Settlement-lag SLA — p50/p95/max seconds from pending_payouts row
-  // insert to on-chain confirmation, windowed. One row per LOOP asset
-  // plus a fleet-wide aggregate (`assetCode: null`). The SLA signal
-  // operators watch alongside drift: if payouts are taking hours, the
-  // drift number will grow regardless of minting health.
-  app.get('/api/admin/payouts/settlement-lag', rateLimit(60, 60_000), adminSettlementLagHandler);
-  // POST /api/admin/payouts/:id/retry — flip a failed row back to pending.
-  // Lower rate limit: retries should be rare, one-at-a-time ops actions.
-  app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayoutHandler);
-  // POST /api/admin/payouts/:id/compensate — re-credit a user after a
-  // permanently-failed withdrawal payout (ADR-024 §5). Same rate limit
-  // as retry: rare, finance-reviewed, one-at-a-time.
-  app.post(
-    '/api/admin/payouts/:id/compensate',
-    killSwitch('withdrawals'),
-    rateLimit(20, 60_000),
-    adminPayoutCompensationHandler,
-  );
-  // Finance-ready CSV export of pending_payouts rows. Lower rate
-  // limit than the JSON list because exports scan rows 500× the
-  // size of a pagination fetch.
-  app.get('/api/admin/payouts.csv', rateLimit(10, 60_000), adminPayoutsCsvHandler);
+  // Payouts cluster — list + drill + by-asset + settlement-lag SLA
+  // + retry + compensate + CSV (ADR 015/016/017/024). Lifted into
+  // ./admin-payouts.ts; the sub-factory mounts these 7 routes after
+  // the parent's middleware stack is already in place.
+  mountAdminPayoutsRoutes(app);
+
   // Loop-native orders drill-down (ADR 011 / 015). Paginated, filterable
   // by state and userId. Ops uses this to triage stuck orders + audit
   // the cashback split + correlate with operator-pool health.
