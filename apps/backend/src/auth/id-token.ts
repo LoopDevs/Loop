@@ -3,9 +3,9 @@
  *
  * Usable by both Google and Apple: each provider publishes a JWKS
  * at `/.well-known/jwks.json` (or similar), signs id_tokens with
- * RS256, and rotates keys periodically. We fetch + cache the JWKS,
- * verify signatures with `node:crypto`, and enforce `iss` / `aud` /
- * `exp` / optional `email_verified`.
+ * RS256, and rotates keys periodically. The JWKS fetch + per-URL
+ * TTL cache live in `./jwks.ts`; this file consumes the cached
+ * `Jwk[]` and does the signature + claim verification.
  *
  * Dep-free — no `jose` / `@stellar/stellar-sdk` / etc. The surface
  * we need is narrow (one algorithm, a small claim set), and Node's
@@ -13,69 +13,15 @@
  * JWKS key material directly.
  */
 import { createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto';
-import { z } from 'zod';
 import { logger } from '../logger.js';
+import { fetchJwks, invalidateJwks, type Jwk } from './jwks.js';
 
 const log = logger.child({ area: 'id-token' });
 
-/** Shape of a single JWK we care about — RSA signing key. */
-const Jwk = z.object({
-  kid: z.string(),
-  kty: z.literal('RSA'),
-  n: z.string(),
-  e: z.string(),
-  alg: z.string().optional(),
-});
-
-const JwksResponse = z.object({
-  keys: z.array(Jwk.passthrough()),
-});
-
-export type Jwk = z.infer<typeof Jwk>;
-
-interface CacheEntry {
-  keys: Jwk[];
-  expiresAt: number;
-}
-
-/** Per-URL JWKS cache. Google rotates every few hours; Apple less often. */
-const jwksCache = new Map<string, CacheEntry>();
-
-/** Test seam — forgets cached JWKS so the next call re-fetches. */
-export function __resetJwksCacheForTests(): void {
-  jwksCache.clear();
-}
-
-/**
- * Fetches the JWKS from `url`, respecting an in-process cache with
- * a 1h TTL (ADR 014 — cache, don't pin). Schema-drift on the JWKS
- * response is a hard error: if the provider's shape changes, we
- * refuse to verify rather than silently fall back to an empty key
- * set (which would make every id_token look unverified).
- */
-export async function fetchJwks(url: string, opts: { timeoutMs?: number } = {}): Promise<Jwk[]> {
-  const now = Date.now();
-  const cached = jwksCache.get(url);
-  if (cached !== undefined && cached.expiresAt > now) return cached.keys;
-
-  const res = await fetch(url, {
-    headers: { Accept: 'application/json' },
-    signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
-  });
-  if (!res.ok) {
-    log.error({ url, status: res.status }, 'JWKS fetch failed');
-    throw new Error(`JWKS fetch ${res.status} for ${url}`);
-  }
-  const raw = await res.json();
-  const parsed = JwksResponse.safeParse(raw);
-  if (!parsed.success) {
-    log.error({ url, issues: parsed.error.issues }, 'JWKS response failed schema');
-    throw new Error(`JWKS schema drift at ${url}`);
-  }
-  const keys = parsed.data.keys;
-  jwksCache.set(url, { keys, expiresAt: now + 60 * 60 * 1000 });
-  return keys;
-}
+// `fetchJwks` + the `Jwk` type + `__resetJwksCacheForTests` test
+// seam live in `./jwks.ts`. Re-exported here so existing import
+// sites against `'./id-token.js'` keep resolving.
+export { fetchJwks, type Jwk, __resetJwksCacheForTests } from './jwks.js';
 
 export interface IdTokenClaims {
   iss: string;
@@ -199,7 +145,7 @@ export async function verifyIdToken(args: VerifyIdTokenArgs): Promise<VerifyIdTo
     // Key not in cache — could be a recent rotation. Force refetch
     // once to catch up before giving up. Avoids a stuck-cache class
     // of incident.
-    jwksCache.delete(args.jwksUrl);
+    invalidateJwks(args.jwksUrl);
     const refreshed = await fetchJwks(args.jwksUrl);
     const retry = refreshed.find((k) => k.kid === header.kid);
     if (retry === undefined) return { ok: false, reason: 'unknown_kid' };
