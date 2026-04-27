@@ -219,33 +219,11 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
   return { triggered: true };
 }
 
-let refreshInterval: NodeJS.Timeout | null = null;
-
-/** Starts the background refresh timer. Call once at startup. */
-export function startMerchantRefresh(): void {
-  const log = logger.child({ module: 'merchants-sync' });
-  void refreshMerchants();
-
-  const intervalMs = env.REFRESH_INTERVAL_HOURS * 60 * 60 * 1000;
-  const staleMs = intervalMs * 2;
-  refreshInterval = setInterval(() => {
-    if (Date.now() - store.loadedAt > staleMs && store.merchants.length > 0) {
-      log.warn(
-        { ageMs: Date.now() - store.loadedAt, threshold: staleMs },
-        'Merchant data is stale — refresh may be failing',
-      );
-    }
-    void refreshMerchants();
-  }, intervalMs);
-}
-
-/** Stops the background refresh timer. Intended for graceful shutdown. */
-export function stopMerchantRefresh(): void {
-  if (refreshInterval !== null) {
-    clearInterval(refreshInterval);
-    refreshInterval = null;
-  }
-}
+// `startMerchantRefresh` / `stopMerchantRefresh` (the periodic-
+// refresh timer bootstrap) live in `./sync-interval.ts`. Re-
+// exported here so `index.ts` and the graceful-shutdown wiring
+// keep resolving against the historical path.
+export { startMerchantRefresh, stopMerchantRefresh } from './sync-interval.js';
 
 // `mapUpstreamMerchant` (the upstream → internal `Merchant` mapper)
 // lives in `./sync-upstream.ts` alongside the Zod schemas.
