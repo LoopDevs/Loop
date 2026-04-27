@@ -1,50 +1,43 @@
 /**
- * Admin idempotency store (ADR 017).
+ * Admin idempotency guard (ADR 017).
  *
  * Stores `(admin_user_id, key) → response snapshot` for 24h. On a
  * repeat POST with the same pair, the stored snapshot is replayed
  * verbatim so a double-click or a network-retry cannot cause
  * double side-effects (double-credit, double-payout-retry, etc.).
  *
- * Two entry points:
- *   - `lookupIdempotencyKey` — called BEFORE the write. Returns the
- *     prior snapshot if one exists; handler replays it and exits.
- *   - `storeIdempotencyKey` — called AFTER a successful write, with
- *     the status + body the handler is about to return.
+ * This file owns the high-level `withIdempotencyGuard` (advisory-
+ * lock-serialised lookup → write → store) plus the request-edge
+ * helpers (`validateIdempotencyKey`, `idempotencyLockKey`). The
+ * single-row store primitives (`lookupIdempotencyKey`,
+ * `storeIdempotencyKey`, `sweepStaleIdempotencyKeys`) live in
+ * `./idempotency-store.ts`; the constants in
+ * `./idempotency-constants.ts`. Both are re-exported below so the
+ * wide network of existing import sites keeps resolving against
+ * `'../admin/idempotency.js'`.
  *
  * Missing header is rejected at the handler edge with a 400 — it is
  * NOT the store's responsibility to fabricate a key, because then a
  * retry would look like a new request and side-effects would double.
  */
 import { createHash } from 'node:crypto';
-import { and, eq, lt, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { adminIdempotencyKeys } from '../db/schema.js';
-import { logger } from '../logger.js';
+import { IDEMPOTENCY_KEY_MIN, IDEMPOTENCY_KEY_MAX } from './idempotency-constants.js';
 
-const log = logger.child({ area: 'admin-idempotency' });
+export {
+  IDEMPOTENCY_KEY_MIN,
+  IDEMPOTENCY_KEY_MAX,
+  IDEMPOTENCY_TTL_HOURS,
+} from './idempotency-constants.js';
 
-export const IDEMPOTENCY_KEY_MIN = 16;
-export const IDEMPOTENCY_KEY_MAX = 128;
-
-/**
- * A2-500: ADR-017 #6 promised a 24h TTL on admin-idempotency
- * snapshots, but nothing enforced it — rows accumulated forever.
- * The TTL is applied in two places:
- *   - `sweepStaleIdempotencyKeys()` runs hourly from the app-level
- *     cleanup interval and DELETEs rows whose `created_at` is older
- *     than the TTL.
- *   - `lookupIdempotencyKey()` filters expired rows at read time so
- *     a replay within the first sweep window after a restart still
- *     sees the correct behaviour.
- */
-export const IDEMPOTENCY_TTL_HOURS = 24;
-
-export interface IdempotencySnapshot {
-  status: number;
-  body: Record<string, unknown>;
-  createdAt: Date;
-}
+export {
+  lookupIdempotencyKey,
+  storeIdempotencyKey,
+  sweepStaleIdempotencyKeys,
+  type IdempotencySnapshot,
+} from './idempotency-store.js';
 
 export function validateIdempotencyKey(key: string | undefined): key is string {
   if (key === undefined) return false;
@@ -175,99 +168,4 @@ export async function withIdempotencyGuard(
 
     return { replayed: false, status, body };
   });
-}
-
-/**
- * Fetch a prior snapshot for the given (adminUserId, key). Returns
- * null on miss OR on a TTL-expired row. A2-500: expired rows are
- * treated as a miss so replay semantics match the promised 24h
- * window even in the gap between scheduled sweeps (e.g. right after
- * boot, before `sweepStaleIdempotencyKeys()` has fired).
- */
-export async function lookupIdempotencyKey(args: {
-  adminUserId: string;
-  key: string;
-}): Promise<IdempotencySnapshot | null> {
-  const row = await db.query.adminIdempotencyKeys.findFirst({
-    where: and(
-      eq(adminIdempotencyKeys.adminUserId, args.adminUserId),
-      eq(adminIdempotencyKeys.key, args.key),
-    ),
-  });
-  if (row === undefined) return null;
-  // A2-500: TTL gate. A row older than the declared window is
-  // treated as absent; the next write will overwrite it via the
-  // ON CONFLICT path in storeIdempotencyKey.
-  const ageMs = Date.now() - row.createdAt.getTime();
-  if (ageMs > IDEMPOTENCY_TTL_HOURS * 60 * 60 * 1000) return null;
-  let body: Record<string, unknown>;
-  try {
-    body = JSON.parse(row.responseBody) as Record<string, unknown>;
-  } catch {
-    // Stored snapshot is corrupt — treat as a miss. The next write
-    // will overwrite it via insert-on-conflict-do-update.
-    return null;
-  }
-  return { status: row.status, body, createdAt: row.createdAt };
-}
-
-/**
- * A2-500: hourly sweep that DELETEs admin-idempotency snapshots
- * older than the declared TTL. Called from the app-level cleanup
- * interval. Cheap even at steady state because
- * `admin_idempotency_keys_created_at` is indexed.
- */
-export async function sweepStaleIdempotencyKeys(): Promise<number> {
-  try {
-    const cutoff = new Date(Date.now() - IDEMPOTENCY_TTL_HOURS * 60 * 60 * 1000);
-    const result = await db
-      .delete(adminIdempotencyKeys)
-      .where(lt(adminIdempotencyKeys.createdAt, cutoff))
-      .returning({ key: adminIdempotencyKeys.key });
-    if (result.length > 0) {
-      log.info(
-        { deletedCount: result.length, ttlHours: IDEMPOTENCY_TTL_HOURS },
-        'Swept stale admin idempotency snapshots',
-      );
-    }
-    return result.length;
-  } catch (err) {
-    log.error({ err }, 'Admin idempotency sweep failed');
-    return 0;
-  }
-}
-
-/**
- * Persist a completed snapshot. Uses ON CONFLICT DO UPDATE so a
- * re-post with the same key idempotently refreshes the stored
- * response (e.g. after a crash between commit and store).
- */
-export async function storeIdempotencyKey(args: {
-  adminUserId: string;
-  key: string;
-  method: string;
-  path: string;
-  status: number;
-  body: Record<string, unknown>;
-}): Promise<void> {
-  const serialised = JSON.stringify(args.body);
-  await db
-    .insert(adminIdempotencyKeys)
-    .values({
-      adminUserId: args.adminUserId,
-      key: args.key,
-      method: args.method,
-      path: args.path,
-      status: args.status,
-      responseBody: serialised,
-    })
-    .onConflictDoUpdate({
-      target: [adminIdempotencyKeys.adminUserId, adminIdempotencyKeys.key],
-      set: {
-        method: args.method,
-        path: args.path,
-        status: args.status,
-        responseBody: serialised,
-      },
-    });
 }
