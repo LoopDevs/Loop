@@ -28,6 +28,7 @@ export default [
       '**/capacitor.config.ts',
       'playwright.config.ts',
       'playwright.mocked.config.ts',
+      'playwright.flywheel.config.ts',
       'commitlint.config.js',
       // NOTE: tests/ is intentionally NOT listed here. A top-level `ignores`
       // block excludes files from every subsequent config in flat config —
