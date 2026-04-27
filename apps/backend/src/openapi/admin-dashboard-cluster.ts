@@ -4,31 +4,33 @@
  *
  * Lifted out of `apps/backend/src/openapi/admin.ts`. Six paths
  * that read together as the operational + flywheel signals on the
- * /admin landing page:
+ * /admin landing page. Two are registered directly here; the
+ * other four are fanned out to topical siblings:
  *
- *   - GET /api/admin/stuck-orders                  (SLO red flag)
- *   - GET /api/admin/stuck-payouts                 (SLO red flag)
  *   - GET /api/admin/cashback-activity             (daily series)
- *   - GET /api/admin/cashback-realization          (KPI snapshot)
- *   - GET /api/admin/cashback-realization/daily    (drift series)
  *   - GET /api/admin/merchant-stats                (per-merchant)
+ *   - GET /api/admin/stuck-orders / stuck-payouts  →
+ *     `./admin-dashboard-cluster-stuck-rows.ts`
+ *   - GET /api/admin/cashback-realization{,/daily} →
+ *     `./admin-cashback-realization.ts`
  *
- * Twelve locally-scoped schemas travel with the slice (none
- * referenced anywhere else in admin.ts):
- *
+ * Schemas registered directly here:
  *   - MerchantStatsRow / Response
  *   - AdminActivityPerCurrency, CashbackActivityDay /
  *     CashbackActivityResponse
- *   - CashbackRealizationRow / Response,
- *     CashbackRealizationDay / DailyResponse
- *   - StuckOrderRow / StuckOrdersResponse
- *   - StuckPayoutRow / StuckPayoutsResponse
+ *
+ * Sibling-owned schemas:
+ *   - CashbackRealizationRow / Response, CashbackRealizationDay /
+ *     DailyResponse — `./admin-cashback-realization.ts`
+ *   - StuckOrderRow / StuckOrdersResponse, StuckPayoutRow /
+ *     StuckPayoutsResponse — `./admin-dashboard-cluster-stuck-rows.ts`
  *
  * Only `errorResponse` crosses the slice boundary.
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminDashboardStuckRowsOpenApi } from './admin-dashboard-cluster-stuck-rows.js';
+import { registerAdminCashbackRealizationOpenApi } from './admin-cashback-realization.js';
 
 /**
  * Registers the dashboard-cluster paths + their locally-scoped
@@ -92,48 +94,6 @@ export function registerAdminDashboardClusterOpenApi(
     }),
   );
 
-  // ─── Admin — cashback realization (ADR 009 / 015) ──────────────────────────
-
-  const CashbackRealizationRow = registry.register(
-    'CashbackRealizationRow',
-    z.object({
-      currency: z.string().length(3).nullable().openapi({
-        description: 'ISO 4217 code; `null` for the fleet-wide aggregate row.',
-      }),
-      earnedMinor: z.string(),
-      spentMinor: z.string(),
-      withdrawnMinor: z.string(),
-      outstandingMinor: z.string(),
-      recycledBps: z.number().int().nonnegative().max(10_000).openapi({
-        description: 'spent / earned, as basis points (10 000 = 100.00%).',
-      }),
-    }),
-  );
-
-  const CashbackRealizationResponse = registry.register(
-    'CashbackRealizationResponse',
-    z.object({ rows: z.array(CashbackRealizationRow) }),
-  );
-
-  const CashbackRealizationDay = registry.register(
-    'CashbackRealizationDay',
-    z.object({
-      day: z.string().openapi({ description: 'ISO date (YYYY-MM-DD).' }),
-      currency: z.string().length(3),
-      earnedMinor: z.string(),
-      spentMinor: z.string(),
-      recycledBps: z.number().int().nonnegative().max(10_000),
-    }),
-  );
-
-  const CashbackRealizationDailyResponse = registry.register(
-    'CashbackRealizationDailyResponse',
-    z.object({
-      days: z.number().int().min(1).max(180),
-      rows: z.array(CashbackRealizationDay),
-    }),
-  );
-
   // The two SLO red-flag paths (`/api/admin/stuck-orders` and
   // `/api/admin/stuck-payouts`) and their four locally-scoped row /
   // response schemas live in `./admin-dashboard-cluster-stuck-rows.ts`.
@@ -178,74 +138,15 @@ export function registerAdminDashboardClusterOpenApi(
     },
   });
 
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/cashback-realization',
-    summary: 'Cashback realization rate — the flywheel-health KPI (ADR 009 / 015).',
-    description:
-      'Per-currency + fleet-wide aggregate of lifetime cashback emitted, spent on new Loop orders, withdrawn off-ledger, plus outstanding off-chain liability. `recycledBps = spent / earned × 10 000` — the share of emitted cashback that has flowed back into new orders. High realization = flywheel turning; low realization = cashback sitting as stagnant liability. Zero-earned currencies are omitted from per-currency rows but the aggregate row always ships (`currency: null`).',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    responses: {
-      200: {
-        description: 'Per-currency rows + a fleet-wide aggregate',
-        content: { 'application/json': { schema: CashbackRealizationResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error computing the aggregate',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/cashback-realization/daily',
-    summary: 'Daily cashback-realization trend (ADR 009 / 015).',
-    description:
-      "Drift-over-time companion to `/api/admin/cashback-realization`. Per-(day, currency) rows with `earnedMinor`, `spentMinor`, and `recycledBps`. `generate_series` LEFT JOIN emits every day in the window even when zero cashback was earned or spent (so sparkline x-axis doesn't compress on gaps). Window: `?days=30` default, 1..180 clamp.",
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        days: z.coerce.number().int().min(1).max(180).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Daily rows (oldest → newest)',
-        content: { 'application/json': { schema: CashbackRealizationDailyResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error computing the series',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
+  // ─── Admin — cashback realization (ADR 009 / 015) ──────────────────────────
+  //
+  // The two realization paths (snapshot + daily drift) and their
+  // four locally-scoped schemas live in
+  // `./admin-cashback-realization.ts`. Co-located there so the
+  // `recycledBps`/earned/spent framing reads as one slice — kept
+  // out of the dashboard-cluster file so this one stays focused
+  // on stuck rows, daily activity, and merchant-stats.
+  registerAdminCashbackRealizationOpenApi(registry, errorResponse);
 
   registry.registerPath({
     method: 'get',
