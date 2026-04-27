@@ -25,6 +25,7 @@
  */
 import { z } from 'zod';
 import { logger } from '../logger.js';
+import { parseStroops } from './stroops.js';
 
 const log = logger.child({ area: 'horizon-balances' });
 
@@ -56,26 +57,8 @@ const HorizonAccountResponse = z.object({
   balances: z.array(HorizonBalance),
 });
 
-/**
- * Converts a Horizon balance string ("12.3456700") to BigInt stroops.
- * Stellar always returns 7 decimals; we fix a missing decimal point
- * by padding with zeros to keep the parse branch-free.
- *
- * Throws on malformed input — caller's try/catch logs + drops the
- * balance rather than feed a corrupt value into downstream math.
- */
-function parseStroops(balance: string): bigint {
-  const dot = balance.indexOf('.');
-  if (dot === -1) {
-    return BigInt(balance) * 10_000_000n;
-  }
-  const integerPart = balance.slice(0, dot) || '0';
-  const decimalPart = balance
-    .slice(dot + 1)
-    .padEnd(7, '0')
-    .slice(0, 7);
-  return BigInt(integerPart) * 10_000_000n + BigInt(decimalPart);
-}
+// `parseStroops` lives in `./stroops.ts` — shared with
+// `./watcher.ts` so the two Horizon-amount call sites can\'t drift.
 
 export interface AccountBalanceSnapshot {
   /** Native XLM balance in stroops. Null only if the account doesn't exist. */

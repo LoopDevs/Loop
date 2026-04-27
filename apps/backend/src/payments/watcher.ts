@@ -29,31 +29,18 @@ import { listAccountPayments, isMatchingIncomingPayment, type HorizonPayment } f
 import { stroopsPerCent, usdcStroopsPerCent } from './price-feed.js';
 import { configuredLoopPayableAssets, type LoopAssetCode } from '../credits/payout-asset.js';
 import { notifyPaymentWatcherStuck } from '../discord.js';
+import { parseStroops } from './stroops.js';
 
 const log = logger.child({ area: 'payment-watcher' });
 
 /** Opaque name the cursor is persisted under. Stable across deploys. */
 const WATCHER_NAME = 'stellar-deposits';
 
-/**
- * Parses a Horizon payment amount ("10.0000000") into BigInt stroops.
- * Horizon always returns 7 decimals for both XLM and Stellar assets.
- * Throws on malformed input — the watcher treats an unparseable
- * amount as a critical data-integrity issue (the tx went through
- * but we can't reason about value), same tier as schema drift.
- */
-export function parseStroops(amount: string): bigint {
-  const dot = amount.indexOf('.');
-  if (dot === -1) {
-    return BigInt(amount) * 10_000_000n;
-  }
-  const integerPart = amount.slice(0, dot) || '0';
-  const decimalPart = amount
-    .slice(dot + 1)
-    .padEnd(7, '0')
-    .slice(0, 7);
-  return BigInt(integerPart) * 10_000_000n + BigInt(decimalPart);
-}
+// `parseStroops` lives in `./stroops.ts` — shared with
+// `./horizon-balances.ts` to prevent drift between the two call
+// sites. Re-exported here so the watcher's existing public surface
+// (consumed by `./__tests__/watcher.test.ts`) keeps working.
+export { parseStroops };
 
 /**
  * Returns true when `payment.amount` covers the amount the user was
