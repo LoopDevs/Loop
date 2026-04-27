@@ -8,22 +8,16 @@
  * finds no row and returns null. Callers handle null as "already
  * transitioned" and move on.
  *
- * `markOrderFulfilled` doubles as the ADR 009 cashback capture: on
- * fulfillment it writes a `credit_transactions` row and bumps
- * `user_credits.balance_minor` by the pinned `user_cashback_minor`
- * amount, all inside one Drizzle transaction. If any step fails the
- * whole thing rolls back — the order stays in `procuring` and a
- * retry can re-run the whole transition cleanly.
+ * `markOrderFulfilled` (the cashback-capture + payout-intent
+ * transition that fans out across `orders` + `credit_transactions`
+ * + `user_credits` + `pending_payouts` in a single txn) lives in
+ * `./fulfillment.ts` and is re-exported below so existing import
+ * sites keep resolving.
  */
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { orders, creditTransactions, userCredits, users, pendingPayouts } from '../db/schema.js';
-import { logger } from '../logger.js';
-import { isHomeCurrency } from '@loop/shared';
-import { buildPayoutIntent } from '../credits/payout-builder.js';
+import { orders } from '../db/schema.js';
 import type { Order } from './repo.js';
-
-const log = logger.child({ area: 'order-transitions' });
 
 /**
  * Transition: `pending_payment` → `paid`. Called by the payment
@@ -74,145 +68,12 @@ export async function markOrderProcuring(
   return rows[0] ?? null;
 }
 
-/**
- * Transition: `procuring` → `fulfilled`. Writes the cashback ledger
- * entries in the same txn (ADR 009 capture):
- *
- *   1. Update the order row: state, ctx_order_id, fulfilled_at.
- *   2. Insert a `credit_transactions` row (type='cashback',
- *      amount=+user_cashback_minor, reference_type='order',
- *      reference_id=<order-id>).
- *   3. Upsert the user's `user_credits` row for the order's currency,
- *      adding `user_cashback_minor` to the running balance.
- *
- * Returns the fulfilled order or null if the state wasn't `procuring`
- * (which makes the caller treat it as already-fulfilled + a no-op).
- * Zero-cashback orders still transition cleanly — the capture block
- * skips the ledger writes but the order still moves to `fulfilled`.
- */
-export interface RedemptionPayload {
-  code?: string | null;
-  pin?: string | null;
-  url?: string | null;
-}
-
-export async function markOrderFulfilled(
-  orderId: string,
-  opts: { ctxOrderId: string; redemption?: RedemptionPayload },
-): Promise<Order | null> {
-  return db.transaction(async (tx) => {
-    const updated = await tx
-      .update(orders)
-      .set({
-        state: 'fulfilled',
-        ctxOrderId: opts.ctxOrderId,
-        fulfilledAt: new Date(),
-        redeemCode: opts.redemption?.code ?? null,
-        redeemPin: opts.redemption?.pin ?? null,
-        redeemUrl: opts.redemption?.url ?? null,
-      })
-      .where(and(eq(orders.id, orderId), eq(orders.state, 'procuring')))
-      .returning();
-    const order = updated[0];
-    if (order === undefined) return null;
-
-    // Skip ledger writes when the pinned cashback amount is zero —
-    // a cashback=0 row is not meaningful and would fail the
-    // `credit_transactions_amount_sign` CHECK (which requires
-    // cashback > 0).
-    if (order.userCashbackMinor > 0n) {
-      // ADR 015 — write the ledger in the user's home currency
-      // (charge_currency), not the catalog currency (currency).
-      // For same-currency orders this is a no-op (they're equal);
-      // for cross-FX orders this is the correct denomination since
-      // user_cashback_minor is now computed from chargeMinor.
-      await tx.insert(creditTransactions).values({
-        userId: order.userId,
-        type: 'cashback',
-        amountMinor: order.userCashbackMinor,
-        currency: order.chargeCurrency,
-        referenceType: 'order',
-        referenceId: order.id,
-      });
-      // Upsert the balance row: add cashback to existing, or create
-      // a new per-currency row at the cashback amount. Concurrency-
-      // safe via the unique index on (user_id, currency).
-      await tx
-        .insert(userCredits)
-        .values({
-          userId: order.userId,
-          currency: order.chargeCurrency,
-          balanceMinor: order.userCashbackMinor,
-        })
-        .onConflictDoUpdate({
-          target: [userCredits.userId, userCredits.currency],
-          set: {
-            balanceMinor: sql`${userCredits.balanceMinor} + ${order.userCashbackMinor}`,
-            updatedAt: sql`NOW()`,
-          },
-        });
-
-      // ADR 015 — write a pending payout row for the Stellar-side
-      // emission, if the user has a linked wallet + a configured
-      // LOOP issuer for their home currency. The SDK submit worker
-      // reads pending rows and signs + submits each one. Building
-      // + inserting inside the same transaction as the ledger write
-      // means a crash mid-fulfillment either records both or
-      // neither — no orphaned payouts without a matching ledger
-      // entry, no ledger entries the payout worker never sees.
-      const [userRow] = await tx
-        .select({
-          stellarAddress: users.stellarAddress,
-          homeCurrency: users.homeCurrency,
-        })
-        .from(users)
-        .where(eq(users.id, order.userId));
-      if (userRow !== undefined && isHomeCurrency(userRow.homeCurrency)) {
-        // order.chargeCurrency pins the ledger currency. An audit
-        // warning when it doesn't match the user's home currency —
-        // shouldn't happen (loop-handler pins both to home currency
-        // at order creation), but would indicate support-mediated
-        // home-currency change after an order was placed.
-        if (order.chargeCurrency !== userRow.homeCurrency) {
-          log.warn(
-            {
-              orderId: order.id,
-              chargeCurrency: order.chargeCurrency,
-              userHomeCurrency: userRow.homeCurrency,
-            },
-            'Order charge currency diverged from user home currency — on-chain payout skipped',
-          );
-        } else {
-          const decision = buildPayoutIntent({
-            stellarAddress: userRow.stellarAddress,
-            homeCurrency: userRow.homeCurrency,
-            userCashbackMinor: order.userCashbackMinor,
-          });
-          if (decision.kind === 'pay') {
-            await tx
-              .insert(pendingPayouts)
-              .values({
-                userId: order.userId,
-                orderId: order.id,
-                assetCode: decision.intent.assetCode,
-                assetIssuer: decision.intent.assetIssuer,
-                toAddress: decision.intent.to,
-                amountStroops: decision.intent.amountStroops,
-                memoText: decision.intent.memoText,
-              })
-              .onConflictDoNothing({ target: pendingPayouts.orderId });
-          } else {
-            log.info(
-              { orderId: order.id, reason: decision.reason },
-              'Skipping on-chain cashback payout',
-            );
-          }
-        }
-      }
-    }
-    return order;
-  });
-}
+// `markOrderFulfilled` (the cashback-capture + Stellar-payout-
+// intent transition) lives in `./fulfillment.ts`. Re-exported
+// here so existing import sites against `'./transitions.js'` keep
+// resolving — the type also travels for callers that build the
+// redemption payload.
+export { markOrderFulfilled, type RedemptionPayload } from './fulfillment.js';
 
 /**
  * Transition: any non-terminal state → `failed`. Called on a
