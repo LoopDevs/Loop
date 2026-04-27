@@ -45,6 +45,7 @@
   "devDependencies": {
     "@commitlint/cli": "20.5.0",
     "@commitlint/config-conventional": "20.5.0",
+    "@cyclonedx/cyclonedx-npm": "4.2.1",
     "@playwright/test": "1.59.1",
     "@stellar/stellar-sdk": "15.0.1",
     "@typescript-eslint/eslint-plugin": "8.58.2",
