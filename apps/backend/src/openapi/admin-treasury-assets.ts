@@ -7,20 +7,23 @@
  * surface: the treasury snapshot, the per-asset circulation drift,
  * and the in-memory drift watcher state.
  *
- * Paths in the slice:
+ * Path registered directly here:
  *   - GET /api/admin/treasury
- *   - GET /api/admin/assets/{assetCode}/circulation
- *   - GET /api/admin/asset-drift/state
  *
- * Locally-scoped schemas travel with the slice (none referenced
- * elsewhere in admin.ts after the prior 15 slices have lifted
- * the rest of the surface):
+ * Paths delegated to sibling slices:
+ *   - GET /api/admin/assets/{assetCode}/circulation —
+ *     `./admin-asset-circulation.ts` (owns
+ *     `AssetCirculationResponse`)
+ *   - GET /api/admin/asset-drift/state —
+ *     `./admin-asset-drift-state.ts` (owns
+ *     `AssetDriftStateRow` + `AssetDriftStateResponse`)
+ *
+ * Schemas registered directly here:
  *
  *   - inline `LoopLiability`, `TreasuryHolding`, `TreasuryOrderFlow`,
  *     `OperatorHealthEntry` (NOT registered — composed into
  *     `TreasurySnapshot` only)
- *   - registered: `TreasurySnapshot`, `AssetCirculationResponse`,
- *     `AssetDriftStateRow`, `AssetDriftStateResponse`
+ *   - registered: `TreasurySnapshot`
  *
  * Three deps cross the boundary:
  *
@@ -34,6 +37,7 @@
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminAssetDriftStateOpenApi } from './admin-asset-drift-state.js';
+import { registerAdminAssetCirculationOpenApi } from './admin-asset-circulation.js';
 
 type ZodEnumLike = z.ZodEnum<{ readonly [key: string]: string | number }>;
 
@@ -131,28 +135,6 @@ export function registerAdminTreasuryAssetsOpenApi(
     }),
   );
 
-  const AssetCirculationResponse = registry.register(
-    'AssetCirculationResponse',
-    z.object({
-      assetCode: LoopAssetCode,
-      fiatCurrency: z.enum(['USD', 'GBP', 'EUR']),
-      issuer: z.string(),
-      onChainStroops: z.string().openapi({
-        description:
-          'Horizon-issued circulation for (assetCode, issuer). bigint-as-string stroops.',
-      }),
-      ledgerLiabilityMinor: z.string().openapi({
-        description:
-          'Sum of user_credits.balance_minor for the matching fiat. bigint-as-string minor units.',
-      }),
-      driftStroops: z.string().openapi({
-        description:
-          'onChainStroops - ledgerLiabilityMinor × 1e5 (1 minor = 1e5 stroops for a 1:1-pinned LOOP asset). Positive = over-minted; negative = settlement backlog.',
-      }),
-      onChainAsOfMs: z.number().int(),
-    }),
-  );
-
   // `AssetDriftStateRow` and `AssetDriftStateResponse`, plus the
   // `/api/admin/asset-drift/state` path that uses them, live in
   // `./admin-asset-drift-state.ts`. Registered after the two
@@ -187,52 +169,14 @@ export function registerAdminTreasuryAssetsOpenApi(
     },
   });
 
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/assets/{assetCode}/circulation',
-    summary: 'Per-asset circulation drift — stablecoin safety metric (ADR 015).',
-    description:
-      'Compares Horizon-side issued circulation (via `/assets?asset_code=X&asset_issuer=Y`) against the off-chain ledger liability (`user_credits.balance_minor` for the matching fiat). `driftStroops = onChainStroops - ledgerLiabilityMinor × 1e5` — positive drift means over-minted (investigate now), negative means settlement backlog (expected as the payout worker catches up). Horizon failures surface as 503 rather than 500 so the admin UI keeps the ledger side authoritative. Missing issuer env → 409. 30/min rate limit; Horizon calls cached 30s internally.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      params: z.object({ assetCode: LoopAssetCode }),
-    },
-    responses: {
-      200: {
-        description: 'Drift snapshot',
-        content: { 'application/json': { schema: AssetCirculationResponse } },
-      },
-      400: {
-        description: 'Unknown `assetCode`',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      409: {
-        description: 'Issuer env not configured for this asset',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (30/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error reading ledger liability',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      503: {
-        description: 'Horizon circulation read failed',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
+  // ─── Admin — per-asset circulation drift (ADR 015) ─────────────────────────
+  //
+  // Path + locally-scoped `AssetCirculationResponse` schema live
+  // in `./admin-asset-circulation.ts`. Threaded with
+  // `errorResponse` + `LoopAssetCode` so the registered enum
+  // instance is shared across the treasury / circulation /
+  // drift-state surface.
+  registerAdminAssetCirculationOpenApi(registry, errorResponse, LoopAssetCode);
 
   // The asset-drift watcher-state path lives in
   // `./admin-asset-drift-state.ts` along with its two
