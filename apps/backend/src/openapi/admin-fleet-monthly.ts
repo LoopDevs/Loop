@@ -30,6 +30,7 @@
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminMerchantsFlywheelOpenApi } from './admin-fleet-monthly-merchants-flywheel.js';
+import { registerAdminPayoutsAggregatesOpenApi } from './admin-fleet-monthly-payouts.js';
 import { registerAdminRecyclingActivityOpenApi } from './admin-fleet-monthly-recycling-activity.js';
 import { registerAdminUserCashbackDrillOpenApi } from './admin-fleet-monthly-user-cashback-drill.js';
 
@@ -44,96 +45,12 @@ export function registerAdminFleetMonthlyOpenApi(
 ): void {
   // ─── Admin fleet-wide monthly / daily (ADR 015/016) ─────────────────────────
 
-  const AdminPayoutsMonthlyEntry = registry.register(
-    'AdminPayoutsMonthlyEntry',
-    z.object({
-      month: z.string().openapi({ description: '"YYYY-MM" in UTC.' }),
-      assetCode: z.string().openapi({
-        description: 'LOOP asset code — USDLOOP / GBPLOOP / EURLOOP or future additions.',
-      }),
-      paidStroops: z.string().openapi({ description: 'bigint-as-string stroops.' }),
-      payoutCount: z.number().int(),
-    }),
-  );
-
-  const AdminPayoutsMonthlyResponse = registry.register(
-    'AdminPayoutsMonthlyResponse',
-    z.object({ entries: z.array(AdminPayoutsMonthlyEntry) }),
-  );
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/payouts-monthly',
-    summary: 'Settlement counterpart to /cashback-monthly (ADR 015/016).',
-    description:
-      'Fixed 12-month window; filter state=confirmed; bucket on (month, assetCode). Pair with /cashback-monthly to answer "is outstanding LOOP-asset liability growing or shrinking this month?". bigint-as-string on paidStroops.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    responses: {
-      200: {
-        description: 'Per-(month, assetCode) confirmed-payout totals',
-        content: { 'application/json': { schema: AdminPayoutsMonthlyResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: { description: 'DB error', content: { 'application/json': { schema: errorResponse } } },
-    },
-  });
-
-  const PerAssetPayoutAmount = registry.register(
-    'PerAssetPayoutAmount',
-    z.object({
-      assetCode: z.string(),
-      stroops: z.string().openapi({ description: 'bigint-as-string.' }),
-      count: z.number().int(),
-    }),
-  );
-
-  const PayoutsActivityDay = registry.register(
-    'PayoutsActivityDay',
-    z.object({
-      day: z.string().openapi({ description: 'YYYY-MM-DD (UTC).' }),
-      count: z.number().int(),
-      byAsset: z.array(PerAssetPayoutAmount),
-    }),
-  );
-
-  const PayoutsActivityResponse = registry.register(
-    'PayoutsActivityResponse',
-    z.object({
-      days: z.number().int(),
-      rows: z.array(PayoutsActivityDay),
-    }),
-  );
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/payouts-activity',
-    summary:
-      'Daily confirmed-payout sparkline — settlement sibling of cashback-activity (ADR 015/016).',
-    description:
-      'generate_series LEFT JOIN zero-fills every day. Bucketed on confirmed_at::date. ?days default 30, max 180. Per (day, assetCode) so UI can render per-asset sparklines. bigint-as-string on stroops.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        days: z.coerce.number().int().min(1).max(180).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Daily confirmed-payout series',
-        content: { 'application/json': { schema: PayoutsActivityResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: { description: 'DB error', content: { 'application/json': { schema: errorResponse } } },
-    },
-  });
+  // The two confirmed-payout fleet aggregates
+  // (`/api/admin/payouts-monthly` and
+  // `/api/admin/payouts-activity`) plus their five locally-scoped
+  // schemas live in `./admin-fleet-monthly-payouts.ts`. Same path-
+  // registration position as the original block.
+  registerAdminPayoutsAggregatesOpenApi(registry, errorResponse);
 
   // A2-506: 8 non-CSV admin endpoints were missing from the OpenAPI
   // surface. Each handler's own TypeScript response interface is the
