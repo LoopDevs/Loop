@@ -24,6 +24,7 @@ import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { notifyCtxSchemaDrift, notifyOrderFulfilled } from '../discord.js';
 import { mapStatus, summariseZodIssues, upstreamHeaders } from './handler.js';
+import { applyBarcodeFields } from './barcode-fields.js';
 
 const log = logger.child({ handler: 'orders' });
 
@@ -190,45 +191,20 @@ export async function getOrderHandler(c: Context): Promise<Response> {
       order.redeemScripts = validated.data.redeemScripts;
     }
 
-    // Barcode-type fulfilled orders — extract the card `number` + `pin`
-    // directly from the `/gift-cards/:id` response. CTX populates
-    // these fields on the SAME response (via passthrough) once
-    // fulfilmentStatus flips to completed; no separate endpoint is
-    // required. Verified from the observed response keys on
-    // 2026-04-20: ["…","number","pin","barcodeType","barcodeUrl",…].
-    // ADR-005 §2 tracked this as Phase 2 — the frontend's
-    // PurchaseComplete component already renders the code + jsbarcode
-    // canvas whenever `giftCardCode` is present, so once we populate
-    // it here the barcode-merchant purchase flow completes end-to-end.
+    // ADR-005 §2 — barcode merchants: extract card `number` + `pin`
+    // + image URL from the same `/gift-cards/{id}` response (CTX
+    // populates them via passthrough once fulfilmentStatus flips to
+    // completed). The frontend's PurchaseComplete renders the code +
+    // jsbarcode canvas whenever `giftCardCode` is present, so once
+    // we populate it here the barcode-merchant flow completes
+    // end-to-end. Lives in `./barcode-fields.ts`.
     if (status === 'completed' && validated.data.redeemType === 'barcode') {
-      const extras = validated.data as unknown as Record<string, unknown>;
-      const pickString = (...keys: string[]): string | undefined => {
-        for (const key of keys) {
-          const v = extras[key];
-          if (typeof v === 'string' && v.length > 0) return v;
-        }
-        return undefined;
-      };
-
-      const code = pickString('number', 'code', 'cardNumber', 'giftCardCode');
-      const pin = pickString('pin', 'cardPin', 'giftCardPin');
-      const imageUrl = pickString('barcodeUrl', 'imageUrl', 'barcodeImageUrl', 'giftCardImageUrl');
-
-      if (code) order.giftCardCode = code;
-      if (pin) order.giftCardPin = pin;
-      if (imageUrl) order.barcodeImageUrl = imageUrl;
-
-      log.info(
-        {
-          orderId: validated.data.id,
-          extracted: {
-            hasCode: code !== undefined,
-            hasPin: pin !== undefined,
-            hasImageUrl: imageUrl !== undefined,
-          },
-        },
-        'Barcode gift card extracted from /gift-cards/:id response',
-      );
+      applyBarcodeFields({
+        upstream: validated.data as unknown as Record<string, unknown>,
+        orderId: validated.data.id,
+        order,
+        log,
+      });
     }
 
     // Wire up the fulfilled-order Discord notification. This handler is
