@@ -30,6 +30,7 @@
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminMerchantsFlywheelOpenApi } from './admin-fleet-monthly-merchants-flywheel.js';
+import { registerAdminRecyclingActivityOpenApi } from './admin-fleet-monthly-recycling-activity.js';
 
 /**
  * Registers the fleet-wide monthly / daily admin paths + their
@@ -328,114 +329,12 @@ export function registerAdminFleetMonthlyOpenApi(
     },
   });
 
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/users/recycling-activity.csv',
-    summary: 'CSV export of per-user recycling activity (ADR 015).',
-    description:
-      'One row per user in the fleet-wide flywheel view: total charge, recycled charge, cashback, order counts, and most-recent activity timestamp. Default window is 31 days; pass `?days=N` to override (cap 366). Row cap 10 000 with `__TRUNCATED__` sentinel. `Cache-Control: private, no-store` (PII: user ids + emails) + `Content-Disposition: attachment`.',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        days: z.coerce.number().int().min(1).max(366).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'RFC 4180 CSV body',
-        content: {
-          'text/csv': {
-            schema: z.string().openapi({
-              description:
-                'CRLF-terminated. Header row lists every recycling-activity column; bigint charges emitted as strings to survive JSON round-trips in downstream tooling.',
-            }),
-          },
-        },
-      },
-      400: {
-        description: 'Invalid `days` (out of range 1..366)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (10/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error building the export',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  // A2-506 residual — JSON variant of recycling-activity. The CSV
-  // shipped its registration; the JSON-returning sibling at
-  // `app.ts:1585` was missed in the original wave.
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/users/recycling-activity',
-    summary: 'Top-N most-recent flywheel-active users (ADR 015).',
-    description:
-      'Ranked list of users who have placed at least one `loop_asset` paid order in the rolling 90-day window, ordered by most-recent recycle. Zero-recycle users are omitted (the signal is "who is in the loop", not the full directory). `?limit=` clamp 1..100, default 25. `Cache-Control: private, no-store` (per-user data).',
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        limit: z.coerce.number().int().min(1).max(100).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Recycling-activity rows',
-        content: {
-          'application/json': {
-            schema: z
-              .object({
-                since: z.string().openapi({ format: 'date-time' }),
-                rows: z.array(
-                  z.object({
-                    userId: z.string(),
-                    email: z.string(),
-                    lastRecycledAt: z.string().openapi({ format: 'date-time' }),
-                    recycledOrderCount: z.number().int().nonnegative(),
-                    recycledChargeMinor: z.string().openapi({
-                      description:
-                        'Bigint-as-string — sum of charge_minor over loop_asset orders in window.',
-                    }),
-                    currency: z.string(),
-                  }),
-                ),
-              })
-              .openapi('AdminUsersRecyclingActivityResponse'),
-          },
-        },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error reading the aggregate',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
+  // The two recycling-activity paths
+  // (`/users/recycling-activity.csv` and
+  // `/users/recycling-activity`) live in
+  // `./admin-fleet-monthly-recycling-activity.ts`. Same
+  // path-registration position as the original block.
+  registerAdminRecyclingActivityOpenApi(registry, errorResponse);
 
   registry.registerPath({
     method: 'get',
