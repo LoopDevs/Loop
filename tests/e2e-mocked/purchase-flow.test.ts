@@ -101,6 +101,19 @@ test.describe('mocked purchase flow', () => {
 
     // Wait for the Redeem screen — challenge code is a distinct signal.
     await expect(page.getByText(/MOCK-CHALLENGE-/)).toBeVisible({ timeout: 15_000 });
+
+    // A2-1705 phase A.3 nip-in: after redemption, navigate to /orders
+    // and assert the order we just paid for shows up in the list. The
+    // existing happy path stops at the Redeem screen — extending it
+    // here proves the auth tokens persist across a route transition,
+    // /api/orders comes back for the authenticated user, and the row
+    // renders. PageHeader is native-only so the h1 "Orders" doesn't
+    // exist on web; the order's `<Link to="/orders/:id">` row is the
+    // render-success signal we can assert on.
+    await page.goto('/orders');
+    await expect(page).toHaveURL(/\/orders$/);
+    await expect(page.locator('a[href^="/orders/"]').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/Completed/)).toBeVisible();
   });
 
   test('wrong OTP shows an inline error without leaving the OTP step', async ({ page }) => {
