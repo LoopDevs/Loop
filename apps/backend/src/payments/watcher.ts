@@ -24,7 +24,7 @@ import { db } from '../db/client.js';
 import { watcherCursors } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { findPendingOrderByMemo } from '../orders/repo.js';
-import { markOrderPaid, sweepExpiredOrders } from '../orders/transitions.js';
+import { markOrderPaid } from '../orders/transitions.js';
 import { listAccountPayments, isMatchingIncomingPayment } from './horizon.js';
 import { configuredLoopPayableAssets, type LoopAssetCode } from '../credits/payout-asset.js';
 import { parseStroops } from './stroops.js';
@@ -198,103 +198,17 @@ export async function runPaymentWatcherTick(args: {
   return result;
 }
 
-/**
- * Periodic loop wrapper around `runPaymentWatcherTick`. Swallows
- * per-tick errors so a transient Horizon blip doesn't kill the
- * interval — each tick is independent, and the next retry picks up
- * from the last persisted cursor.
- */
-let watcherTimer: ReturnType<typeof setInterval> | null = null;
-let expirySweepTimer: ReturnType<typeof setInterval> | null = null;
-let cursorWatchdogTimer: ReturnType<typeof setInterval> | null = null;
-
-/**
- * How old a `pending_payment` order must be before the expiry sweep
- * transitions it to `expired`. 24h is conservative — on-chain
- * payments typically land in minutes, but a user who drafted an
- * order and walked away should see "expired" the next day rather
- * than a dead-looking row forever.
- */
-const PAYMENT_EXPIRY_MS = 24 * 60 * 60 * 1000;
-
-/** How often the expiry sweep runs. 5 min is generous given 24h horizon. */
-const EXPIRY_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
-
 // Cursor-age watchdog (A2-626) lives in `./cursor-watchdog.ts`.
 // Re-exported here so the test suite (`./__tests__/watcher.test.ts`
 // imports `__resetCursorWatchdogForTests` from `../watcher.js`)
-// keeps working without re-targeting; the runtime call sites
-// (`startPaymentWatcher` below) also import locally.
+// keeps working without re-targeting.
 export { __resetCursorWatchdogForTests } from './cursor-watchdog.js';
-import { runCursorWatchdog, CURSOR_WATCHDOG_INTERVAL_MS } from './cursor-watchdog.js';
 
-export function startPaymentWatcher(args: {
-  account: string;
-  usdcIssuer?: string | undefined;
-  intervalMs: number;
-  limit?: number;
-}): void {
-  if (watcherTimer !== null) return;
-  log.info({ intervalMs: args.intervalMs }, 'Starting payment watcher');
-  const tick = async (): Promise<void> => {
-    try {
-      const r = await runPaymentWatcherTick({
-        account: args.account,
-        ...(args.usdcIssuer !== undefined ? { usdcIssuer: args.usdcIssuer } : {}),
-        ...(args.limit !== undefined ? { limit: args.limit } : {}),
-      });
-      if (r.scanned > 0 || r.paid > 0 || r.skippedAmount > 0) {
-        log.info(r, 'Payment watcher tick complete');
-      }
-    } catch (err) {
-      log.error({ err }, 'Payment watcher tick failed');
-    }
-  };
-  const expirySweep = async (): Promise<void> => {
-    try {
-      const cutoff = new Date(Date.now() - PAYMENT_EXPIRY_MS);
-      const n = await sweepExpiredOrders(cutoff);
-      if (n > 0) {
-        log.info({ swept: n }, 'Marked abandoned pending_payment orders as expired');
-      }
-    } catch (err) {
-      log.error({ err }, 'Expiry sweep failed');
-    }
-  };
-  const watchdog = async (): Promise<void> => {
-    try {
-      await runCursorWatchdog();
-    } catch (err) {
-      log.error({ err }, 'Cursor watchdog failed');
-    }
-  };
-  // Kick off an immediate first tick so restart latency doesn't leave
-  // fresh deposits unprocessed for a full interval.
-  void tick();
-  void expirySweep();
-  watcherTimer = setInterval(() => void tick(), args.intervalMs);
-  watcherTimer.unref();
-  expirySweepTimer = setInterval(() => void expirySweep(), EXPIRY_SWEEP_INTERVAL_MS);
-  expirySweepTimer.unref();
-  // A2-626 — 1-minute cadence cursor-age probe. Fires a Discord
-  // alert once per stuck period if the cursor hasn't moved in the
-  // CURSOR_STALE_MS window (default 10 min). Doesn't fire on a
-  // fresh deployment (no cursor row yet).
-  cursorWatchdogTimer = setInterval(() => void watchdog(), CURSOR_WATCHDOG_INTERVAL_MS);
-  cursorWatchdogTimer.unref();
-}
-
-export function stopPaymentWatcher(): void {
-  if (cursorWatchdogTimer !== null) {
-    clearInterval(cursorWatchdogTimer);
-    cursorWatchdogTimer = null;
-  }
-  if (expirySweepTimer !== null) {
-    clearInterval(expirySweepTimer);
-    expirySweepTimer = null;
-  }
-  if (watcherTimer === null) return;
-  clearInterval(watcherTimer);
-  watcherTimer = null;
-  log.info('Payment watcher stopped');
-}
+// `startPaymentWatcher` / `stopPaymentWatcher` (the periodic-loop
+// bootstrap — deposit-poll tick + expiry-sweep + cursor-age
+// watchdog timers, plus the PAYMENT_EXPIRY_MS /
+// EXPIRY_SWEEP_INTERVAL_MS constants) live in
+// `./watcher-bootstrap.ts`. Re-exported below so
+// `'../payments/watcher.js'` keeps resolving for `index.ts` and
+// the test suite.
+export { startPaymentWatcher, stopPaymentWatcher } from './watcher-bootstrap.js';
