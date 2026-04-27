@@ -79,7 +79,6 @@ import type { Context, Hono } from 'hono';
 import { logger } from '../logger.js';
 import type { User } from '../db/users.js';
 import { rateLimit } from '../middleware/rate-limit.js';
-import { killSwitch } from '../middleware/kill-switch.js';
 import { privateNoStoreResponse } from '../middleware/cache-control.js';
 import { requireAuth } from '../auth/handler.js';
 import { requireAdmin } from '../auth/require-admin.js';
@@ -121,9 +120,7 @@ import { adminListUsersHandler } from '../admin/users-list.js';
 import { adminMerchantsResyncHandler } from '../admin/merchants-resync.js';
 import { adminDiscordNotifiersHandler } from '../admin/discord-notifiers.js';
 import { adminDiscordTestHandler } from '../admin/discord-test.js';
-import { adminCreditAdjustmentHandler } from '../admin/credit-adjustments.js';
-import { adminRefundHandler } from '../admin/refunds.js';
-import { adminWithdrawalHandler } from '../admin/withdrawals.js';
+import { mountAdminCreditWritesRoutes } from './admin-credit-writes.js';
 
 /** Mounts all `/api/admin/*` routes on the supplied Hono app. */
 export function mountAdminRoutes(app: Hono): void {
@@ -409,30 +406,11 @@ export function mountAdminRoutes(app: Hono): void {
     rateLimit(10, 60_000),
     adminUserCreditTransactionsCsvHandler,
   );
-  // Credit-adjustment write (ADR 017). Lower rate limit than reads —
-  // it's an explicit ops action, not a polled surface. Idempotency-Key
-  // header required; missing header is a 400 at the handler edge.
-  app.post(
-    '/api/admin/users/:userId/credit-adjustments',
-    rateLimit(20, 60_000),
-    adminCreditAdjustmentHandler,
-  );
-  // Refund write (A2-901 + ADR 017). Separate surface from credit-
-  // adjustment because refund semantics are positive-only and bind to
-  // an order id, with DB-level dupe rejection via the partial unique
-  // index on (type, reference_type, reference_id) from migration 0013.
-  // Same rate limit and idempotency discipline as the adjustment
-  // write.
-  app.post('/api/admin/users/:userId/refunds', rateLimit(20, 60_000), adminRefundHandler);
-  // ADR-024 / A2-901 — admin-mediated withdrawal: debit user's
-  // cashback balance + queue an on-chain LOOP-asset payout. Same
-  // rate limit + idempotency discipline as refund.
-  app.post(
-    '/api/admin/users/:userId/withdrawals',
-    killSwitch('withdrawals'),
-    rateLimit(20, 60_000),
-    adminWithdrawalHandler,
-  );
+  // Credit-write surfaces — credit-adjustments + refunds +
+  // withdrawals (ADR 017/024 + A2-901). Lifted into
+  // ./admin-credit-writes.ts (mirrors openapi #1175).
+  mountAdminCreditWritesRoutes(app);
+
   // Manual merchant-catalog resync (ADR 011). Bypasses the 6h
   // scheduled refresh so ops can apply an upstream catalog change
   // within seconds. 2/min rate limit — every hit goes to CTX, this
