@@ -28,6 +28,7 @@
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
+import { registerAdminTreasuryCreditFlowOpenApi } from './admin-treasury-credit-flow.js';
 
 /**
  * Registers the supplier-spend / treasury credit-flow paths +
@@ -78,27 +79,13 @@ export function registerAdminSupplierSpendOpenApi(
     }),
   );
 
-  // ─── Admin — treasury credit-flow (ADR 009 / 015) ──────────────────────────
-
-  const AdminTreasuryCreditFlowDay = registry.register(
-    'AdminTreasuryCreditFlowDay',
-    z.object({
-      day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      currency: z.string().length(3),
-      creditedMinor: z.string(),
-      debitedMinor: z.string(),
-      netMinor: z.string(),
-    }),
-  );
-
-  const AdminTreasuryCreditFlowResponse = registry.register(
-    'AdminTreasuryCreditFlowResponse',
-    z.object({
-      windowDays: z.number().int().min(1).max(180),
-      currency: z.enum(['USD', 'GBP', 'EUR']).nullable(),
-      days: z.array(AdminTreasuryCreditFlowDay),
-    }),
-  );
+  // The treasury credit-flow path
+  // (`/api/admin/treasury/credit-flow`) plus its two
+  // locally-scoped schemas (`AdminTreasuryCreditFlowDay`,
+  // `AdminTreasuryCreditFlowResponse`) live in
+  // `./admin-treasury-credit-flow.ts`. Registered after the two
+  // supplier-spend paths below so OpenAPI path-registration order
+  // is preserved.
 
   registry.registerPath({
     method: 'get',
@@ -187,45 +174,9 @@ export function registerAdminSupplierSpendOpenApi(
     },
   });
 
-  registry.registerPath({
-    method: 'get',
-    path: '/api/admin/treasury/credit-flow',
-    summary: 'Per-day credited/debited/net ledger flow (ADR 009 / 015).',
-    description:
-      "Per-day × per-currency ledger delta from `credit_transactions`. Answers the treasury question the snapshot can't: 'are we generating liability faster than we settle it?'. A week of net > 0 days means cashback issuance is outpacing user settlement — treasury plans Stellar-side funding ahead of the curve. Credited = sum(amount_minor) for positive-amount types (cashback, interest, refund) + positive adjustments; debited = abs(sum) for negative-amount types (spend, withdrawal). bigint-as-string. `?currency` zero-fills; default 30d, cap 180d.",
-    tags: ['Admin'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      query: z.object({
-        days: z.coerce.number().int().min(1).max(180).optional(),
-        currency: z.enum(['USD', 'GBP', 'EUR']).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Per-day credit-flow rows',
-        content: { 'application/json': { schema: AdminTreasuryCreditFlowResponse } },
-      },
-      400: {
-        description: 'Unknown `currency`',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      500: {
-        description: 'Internal error computing the aggregate',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
+  // The treasury credit-flow path lives in
+  // `./admin-treasury-credit-flow.ts` along with its two
+  // locally-scoped schemas. Same path-registration position as
+  // the original block.
+  registerAdminTreasuryCreditFlowOpenApi(registry, errorResponse);
 }
