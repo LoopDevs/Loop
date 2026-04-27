@@ -1,8 +1,8 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { desc, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { merchantCashbackConfigs, merchantCashbackConfigHistory } from '../db/schema.js';
+import { merchantCashbackConfigs } from '../db/schema.js';
 import type { User } from '../db/users.js';
 import {
   notifyAdminAudit,
@@ -241,25 +241,8 @@ export async function upsertConfigHandler(c: Context): Promise<Response> {
   return c.json(guardResult.body, guardResult.status as 200 | 400 | 409 | 500);
 }
 
-/** GET /api/admin/merchant-cashback-configs/:merchantId/history */
-export async function configHistoryHandler(c: Context): Promise<Response> {
-  const merchantId = c.req.param('merchantId');
-  if (merchantId === undefined || merchantId.length === 0) {
-    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId required' }, 400);
-  }
-  if (merchantId.length > MERCHANT_ID_MAX || !MERCHANT_ID_RE.test(merchantId)) {
-    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
-  }
-  try {
-    const rows = await db
-      .select()
-      .from(merchantCashbackConfigHistory)
-      .where(eq(merchantCashbackConfigHistory.merchantId, merchantId))
-      .orderBy(desc(merchantCashbackConfigHistory.changedAt))
-      .limit(50);
-    return c.json({ history: rows });
-  } catch (err) {
-    log.error({ err, merchantId }, 'admin config-history query failed');
-    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load config history' }, 500);
-  }
-}
+// `configHistoryHandler` (the read-side audit-log query) lives
+// in `./config-history-handler.ts`. Re-exported here so
+// `routes/admin-cashback-config.ts` and the test suite keep
+// resolving against `'../admin/handler.js'`.
+export { configHistoryHandler } from './config-history-handler.js';
