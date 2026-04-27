@@ -20,6 +20,7 @@
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerOrdersLoopOpenApi } from './orders-loop.js';
+import { registerOrdersReadsOpenApi } from './orders-reads.js';
 
 /**
  * Registers all `/api/orders/*` and `/api/orders/loop/*` schemas
@@ -58,52 +59,10 @@ export function registerOrdersOpenApi(
     }),
   );
 
-  const OrderStatus = z.enum(['pending', 'completed', 'failed', 'expired']);
-
-  const Order = registry.register(
-    'Order',
-    z.object({
-      id: z.string(),
-      merchantId: z.string(),
-      merchantName: z.string(),
-      amount: z.number(),
-      currency: z.string(),
-      status: OrderStatus,
-      xlmAmount: z.string(),
-      percentDiscount: z.string().optional(),
-      redeemType: z.enum(['url', 'barcode']).optional(),
-      giftCardCode: z.string().optional(),
-      giftCardPin: z.string().optional(),
-      redeemUrl: z.string().optional(),
-      redeemChallengeCode: z.string().optional(),
-      // CTX sometimes returns helper scripts for automating
-      // redemption inside the WebView (inject challenge, scrape
-      // result). Present in the handler response and in the
-      // shared `Order` type, previously missing from the OpenAPI
-      // schema — a generated client would have stripped them as
-      // unknown fields.
-      redeemScripts: z
-        .object({
-          injectChallenge: z.string().optional(),
-          scrapeResult: z.string().optional(),
-        })
-        .optional(),
-      createdAt: z.string(),
-    }),
-  );
-
-  const OrderListResponse = registry.register(
-    'OrderListResponse',
-    z.object({ orders: z.array(Order), pagination }),
-  );
-
-  // The GET /api/orders/{id} handler wraps its result as `{ order }`
-  // — see `c.json({ order })` in `apps/backend/src/orders/handler.ts`.
-  // The web client (`services/orders.ts`) also consumes the wrapped
-  // shape. Register the wrapper explicitly so generated OpenAPI
-  // clients parse the same envelope instead of trying to unmarshal
-  // the raw Order type.
-  const OrderDetailResponse = registry.register('OrderDetailResponse', z.object({ order: Order }));
+  // The two CTX-proxy read paths (list + detail) and their three
+  // locally-scoped schemas (`Order`, `OrderListResponse`,
+  // `OrderDetailResponse`) live in `./orders-reads.ts`. Same
+  // path-registration position as the original block.
 
   // Loop-native order surface — POST/GET/GET on /api/orders/loop
   // (ADR 010 / 015). Lifted into ./orders-loop.ts; the slice carries
@@ -150,82 +109,9 @@ export function registerOrdersOpenApi(
     },
   });
 
-  registry.registerPath({
-    method: 'get',
-    path: '/api/orders',
-    summary: 'List orders for the authenticated user.',
-    tags: ['Orders'],
-    security: [{ bearerAuth: [] }],
-    request: {
-      // Only these three are forwarded to upstream; unknown params
-      // are stripped — see `ALLOWED_LIST_QUERY_PARAMS` in
-      // `orders/handler.ts`.
-      query: z.object({
-        page: z.coerce.number().int().min(1).optional(),
-        perPage: z.coerce.number().int().min(1).max(100).optional(),
-        status: z.string().max(32).optional(),
-      }),
-    },
-    responses: {
-      200: {
-        description: 'Orders',
-        content: { 'application/json': { schema: OrderListResponse } },
-      },
-      401: {
-        description: 'Missing or invalid access token',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (60/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      502: {
-        description: 'Upstream error from CTX',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      503: {
-        description: 'Circuit breaker open',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
-    path: '/api/orders/{id}',
-    summary: 'Fetch a single order by id.',
-    tags: ['Orders'],
-    security: [{ bearerAuth: [] }],
-    request: { params: z.object({ id: z.string() }) },
-    responses: {
-      200: {
-        description: 'Order',
-        content: { 'application/json': { schema: OrderDetailResponse } },
-      },
-      400: {
-        description: 'Invalid order id',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      401: {
-        description: 'Missing or invalid access token',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      404: {
-        description: 'Not found',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      429: {
-        description: 'Rate limit exceeded (120/min per IP)',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      502: {
-        description: 'Upstream error from CTX',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      503: {
-        description: 'Circuit breaker open',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-    },
-  });
+  // The CTX-proxy read paths (list + detail) live in
+  // `./orders-reads.ts` along with their three locally-scoped
+  // schemas. Registered after the create path above so OpenAPI
+  // path-registration order is preserved.
+  registerOrdersReadsOpenApi(registry, errorResponse, pagination);
 }
