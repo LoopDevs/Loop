@@ -38,7 +38,6 @@ import {
   findOrderByIdempotencyKey,
   IdempotentOrderConflictError,
   InsufficientCreditError,
-  type Order,
 } from './repo.js';
 
 const log = logger.child({ handler: 'loop-orders' });
@@ -92,79 +91,10 @@ async function hasSufficientCredit(
   return BigInt(balanceStr) >= amountMinor;
 }
 
-/**
- * A2-2003: build the create-order response from an already-persisted
- * row. Two callers:
- *   - lookup-first short-circuit before we even hit `createOrder`
- *     (a repeat post within TTL),
- *   - `IdempotentOrderConflictError` recovery when a concurrent
- *     caller raced us through that lookup.
- *
- * Discord notifications (`notifyCashbackRecycled` / `notifyFirstCashbackRecycled`)
- * are deliberately NOT re-fired here — those are tied to user intent
- * at first creation; firing them again on every retry would dilute
- * the signal and risk per-attempt double-pings on a flaky client.
- */
-function replayOrderResponse(c: Context, order: Order): Response {
-  const base = { orderId: order.id };
-  if (order.paymentMethod === 'credit') {
-    return c.json<OrderPaymentResponse>({
-      ...base,
-      payment: {
-        method: 'credit',
-        amountMinor: order.chargeMinor.toString(),
-        currency: order.chargeCurrency,
-      },
-    });
-  }
-  if (order.paymentMethod === 'loop_asset') {
-    if (!isHomeCurrency(order.chargeCurrency)) {
-      // Defence-in-depth: the DB CHECK constraint pins charge_currency
-      // to the supported set; a stored row that no longer parses means
-      // schema drift. Refuse to replay rather than guess.
-      log.error(
-        { orderId: order.id, chargeCurrency: order.chargeCurrency },
-        'replay: stored loop_asset order has charge_currency outside the home-currency enum',
-      );
-      return c.json({ code: 'INTERNAL_ERROR', message: 'Invalid stored order currency' }, 500);
-    }
-    const payoutAsset = payoutAssetFor(order.chargeCurrency);
-    if (payoutAsset.issuer === null || env.LOOP_STELLAR_DEPOSIT_ADDRESS === undefined) {
-      return c.json(
-        { code: 'SERVICE_UNAVAILABLE', message: 'LOOP asset not configured for your region' },
-        503,
-      );
-    }
-    return c.json<OrderPaymentResponse>({
-      ...base,
-      payment: {
-        method: 'loop_asset',
-        stellarAddress: env.LOOP_STELLAR_DEPOSIT_ADDRESS,
-        memo: order.paymentMemo ?? '',
-        amountMinor: order.chargeMinor.toString(),
-        currency: order.chargeCurrency,
-        assetCode: payoutAsset.code,
-        assetIssuer: payoutAsset.issuer,
-      },
-    });
-  }
-  if (env.LOOP_STELLAR_DEPOSIT_ADDRESS === undefined) {
-    return c.json(
-      { code: 'SERVICE_UNAVAILABLE', message: 'On-chain payment temporarily unavailable' },
-      503,
-    );
-  }
-  return c.json<OrderPaymentResponse>({
-    ...base,
-    payment: {
-      method: order.paymentMethod as 'xlm' | 'usdc',
-      stellarAddress: env.LOOP_STELLAR_DEPOSIT_ADDRESS,
-      memo: order.paymentMemo ?? '',
-      amountMinor: order.chargeMinor.toString(),
-      currency: order.chargeCurrency,
-    },
-  });
-}
+// `replayOrderResponse` (A2-2003 idempotent-replay shaper) lives in
+// `./loop-replay-response.ts`. Imported back here for the two
+// in-handler call sites.
+import { replayOrderResponse } from './loop-replay-response.js';
 
 /**
  * True when the user has zero prior loop_asset orders (any state).
