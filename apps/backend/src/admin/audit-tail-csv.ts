@@ -19,7 +19,7 @@
  * not "here's the prior 200 payload".
  */
 import type { Context } from 'hono';
-import { asc, eq, sql } from 'drizzle-orm';
+import { asc, eq, gte } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { adminIdempotencyKeys, users } from '../db/schema.js';
 import { logger } from '../logger.js';
@@ -90,7 +90,13 @@ export async function adminAuditTailCsvHandler(c: Context): Promise<Response> {
       })
       .from(adminIdempotencyKeys)
       .innerJoin(users, eq(adminIdempotencyKeys.adminUserId, users.id))
-      .where(sql`${adminIdempotencyKeys.createdAt} >= ${since}`)
+      // A2-1610: must use the typed `gte()` operator, not the raw sql
+      // template, because postgres-js can't bind a `Date` instance at
+      // the wire level (`The "string" argument must be of type
+      // string`). `gte()` lets drizzle's column mapper convert through
+      // the timestamp column's mode. Caught by the admin-read audit
+      // middleware integration test in `admin-writes.test.ts`.
+      .where(gte(adminIdempotencyKeys.createdAt, since))
       .orderBy(asc(adminIdempotencyKeys.createdAt))
       .limit(ROW_CAP + 1)) as Row[];
 

@@ -24,7 +24,7 @@
  *   Content-Disposition: attachment; filename="orders-<since>.csv"
  */
 import type { Context } from 'hono';
-import { asc, sql } from 'drizzle-orm';
+import { asc, gte } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { orders } from '../db/schema.js';
 import { logger } from '../logger.js';
@@ -118,7 +118,11 @@ export async function adminOrdersCsvHandler(c: Context): Promise<Response> {
     const rows = (await db
       .select()
       .from(orders)
-      .where(sql`${orders.createdAt} >= ${since}`)
+      // A2-1610: typed `gte()` instead of raw sql template — see
+      // matching fix in `audit-tail-csv.ts`. postgres-js can't bind a
+      // Date object directly through the sql template; the typed
+      // operator routes through the column's timestamp mapper.
+      .where(gte(orders.createdAt, since))
       .orderBy(asc(orders.createdAt))
       .limit(ROW_CAP + 1)) as Row[];
 

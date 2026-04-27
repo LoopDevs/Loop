@@ -21,7 +21,7 @@
  */
 import type { Context } from 'hono';
 import { UUID_RE } from '../uuid.js';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, gte } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { creditTransactions } from '../db/schema.js';
 import { logger } from '../logger.js';
@@ -94,7 +94,8 @@ export async function adminUserCreditTransactionsCsvHandler(c: Context): Promise
       .where(
         and(
           eq(creditTransactions.userId, userId),
-          sql`${creditTransactions.createdAt} >= ${since}`,
+          // A2-1610: typed `gte()` — see matching fix in `audit-tail-csv.ts`.
+          gte(creditTransactions.createdAt, since),
         ),
       )
       .orderBy(asc(creditTransactions.createdAt))
