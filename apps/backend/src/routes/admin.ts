@@ -84,8 +84,7 @@ import { privateNoStoreResponse } from '../middleware/cache-control.js';
 import { requireAuth } from '../auth/handler.js';
 import { requireAdmin } from '../auth/require-admin.js';
 import { notifyAdminBulkRead } from '../discord.js';
-import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '../admin/handler.js';
-import { adminConfigsHistoryHandler } from '../admin/configs-history.js';
+import { mountAdminCashbackConfigRoutes } from './admin-cashback-config.js';
 import { treasuryHandler } from '../admin/treasury.js';
 import { adminTreasurySnapshotCsvHandler } from '../admin/treasury-snapshot-csv.js';
 import { adminTreasuryCreditFlowHandler } from '../admin/treasury-credit-flow.js';
@@ -131,8 +130,6 @@ import { adminMerchantCashbackMonthlyHandler } from '../admin/merchant-cashback-
 import { adminMerchantFlywheelActivityHandler } from '../admin/merchant-flywheel-activity.js';
 import { adminMerchantFlywheelActivityCsvHandler } from '../admin/merchant-flywheel-activity-csv.js';
 import { adminMerchantTopEarnersHandler } from '../admin/merchant-top-earners.js';
-import { adminCashbackConfigsCsvHandler } from '../admin/cashback-configs-csv.js';
-import { adminMerchantsCatalogCsvHandler } from '../admin/merchants-catalog-csv.js';
 import { adminSupplierSpendHandler } from '../admin/supplier-spend.js';
 import { adminSupplierSpendActivityHandler } from '../admin/supplier-spend-activity.js';
 import { adminOperatorSupplierSpendHandler } from '../admin/operator-supplier-spend.js';
@@ -228,45 +225,12 @@ export function mountAdminRoutes(app: Hono): void {
     }
   });
 
-  app.get('/api/admin/merchant-cashback-configs', rateLimit(120, 60_000), listConfigsHandler);
-  // CSV export of merchant_cashback_configs — Tier-3 bulk per ADR 018.
-  // 10/min rate-limit matches the other admin CSVs; ops runs this at
-  // audit cadence, not on-click from the UI. Registered before the
-  // :merchantId routes below so the literal `.csv` segment isn't
-  // treated as a merchantId.
-  app.get(
-    '/api/admin/merchant-cashback-configs.csv',
-    rateLimit(10, 60_000),
-    adminCashbackConfigsCsvHandler,
-  );
-  // Tier-3 CSV export of the full merchant catalog + joined
-  // cashback-config state (#653). Finance / BD runs this to see
-  // every merchant + current commercial terms in one spreadsheet.
-  // Catalog is the source of truth — evicted merchants drop out,
-  // stale config rows are filtered out by the join.
-  app.get(
-    '/api/admin/merchants-catalog.csv',
-    rateLimit(10, 60_000),
-    adminMerchantsCatalogCsvHandler,
-  );
-  // Fleet-wide history feed — "the last N config changes across every
-  // merchant". Registered before /:merchantId/history so the literal
-  // `history` segment isn't captured as a merchantId. ADR 011 / 018.
-  app.get(
-    '/api/admin/merchant-cashback-configs/history',
-    rateLimit(120, 60_000),
-    adminConfigsHistoryHandler,
-  );
-  app.put(
-    '/api/admin/merchant-cashback-configs/:merchantId',
-    rateLimit(60, 60_000),
-    upsertConfigHandler,
-  );
-  app.get(
-    '/api/admin/merchant-cashback-configs/:merchantId/history',
-    rateLimit(120, 60_000),
-    configHistoryHandler,
-  );
+  // Cashback-config CRUD + merchants-catalog CSV (ADR 011/018).
+  // Lifted into ./admin-cashback-config.ts; the sub-factory mounts
+  // these 6 routes preserving the literal-vs-param ordering for
+  // /:merchantId and /history.
+  mountAdminCashbackConfigRoutes(app);
+
   app.get('/api/admin/treasury', rateLimit(60, 60_000), treasuryHandler);
   // Tier-3 CSV of the treasury snapshot (ADR 009/015/018). Point-
   // in-time flat dump for SOC-2 / audit evidence. Long-form CSV
