@@ -22,12 +22,7 @@ import { db } from '../db/client.js';
 import { orders } from '../db/schema.js';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
-import {
-  markOrderProcuring,
-  markOrderFulfilled,
-  markOrderFailed,
-  sweepStuckProcurement,
-} from './transitions.js';
+import { markOrderProcuring, markOrderFulfilled, markOrderFailed } from './transitions.js';
 import type { Order } from './repo.js';
 import { operatorFetch, OperatorPoolUnavailableError } from '../ctx/operator-pool.js';
 import { upstreamUrl } from '../upstream.js';
@@ -262,66 +257,9 @@ export async function runProcurementTick(
   return result;
 }
 
-/**
- * Periodic loop wrapper around `runProcurementTick`. Swallows per-
- * tick errors so a transient DB / pool blip doesn't kill the interval
- * — paid orders remain picked up on the next tick.
- */
-let procurementTimer: ReturnType<typeof setInterval> | null = null;
-let sweepTimer: ReturnType<typeof setInterval> | null = null;
-
-/**
- * How stale a `procuring` order must be before the recovery sweep
- * marks it failed. 15 minutes is plenty — CTX procurement in the
- * happy path completes in a few seconds; anything hanging at the
- * 15-minute mark is a crashed worker or a deep upstream issue the
- * user shouldn't be left waiting on.
- */
-const PROCUREMENT_TIMEOUT_MS = 15 * 60 * 1000;
-
-/** How often the recovery sweep runs. Once a minute is generous. */
-const SWEEP_INTERVAL_MS = 60 * 1000;
-
-export function startProcurementWorker(args: { intervalMs: number; limit?: number }): void {
-  if (procurementTimer !== null) return;
-  log.info({ intervalMs: args.intervalMs }, 'Starting procurement worker');
-  const tick = async (): Promise<void> => {
-    try {
-      const r = await runProcurementTick(args.limit !== undefined ? { limit: args.limit } : {});
-      if (r.picked > 0) {
-        log.info(r, 'Procurement tick complete');
-      }
-    } catch (err) {
-      log.error({ err }, 'Procurement tick failed');
-    }
-  };
-  const sweep = async (): Promise<void> => {
-    try {
-      const cutoff = new Date(Date.now() - PROCUREMENT_TIMEOUT_MS);
-      const n = await sweepStuckProcurement(cutoff);
-      if (n > 0) {
-        log.warn({ swept: n }, 'Marked stuck procuring orders as failed');
-      }
-    } catch (err) {
-      log.error({ err }, 'Stuck-procurement sweep failed');
-    }
-  };
-  void tick();
-  void sweep();
-  procurementTimer = setInterval(() => void tick(), args.intervalMs);
-  procurementTimer.unref();
-  sweepTimer = setInterval(() => void sweep(), SWEEP_INTERVAL_MS);
-  sweepTimer.unref();
-}
-
-export function stopProcurementWorker(): void {
-  if (procurementTimer !== null) {
-    clearInterval(procurementTimer);
-    procurementTimer = null;
-  }
-  if (sweepTimer !== null) {
-    clearInterval(sweepTimer);
-    sweepTimer = null;
-  }
-  log.info('Procurement worker stopped');
-}
+// `startProcurementWorker` / `stopProcurementWorker` (the
+// periodic-loop bootstrap) and the `PROCUREMENT_TIMEOUT_MS` /
+// `SWEEP_INTERVAL_MS` constants live in `./procurement-worker.ts`.
+// Re-exported below so `'../orders/procurement.js'` keeps
+// resolving for `index.ts` and the test suite.
+export { startProcurementWorker, stopProcurementWorker } from './procurement-worker.js';
