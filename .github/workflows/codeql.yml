@@ -47,7 +47,7 @@ jobs:
       # CodeQL covers JS + TS in a single language pass — no need to
       # split into apps/web vs apps/backend matrix entries.
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@4e828ff8d448a8a6e532957b1811f387a63867e8 # v3.30.4
+        uses: github/codeql-action/init@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v3.30.4
         with:
           languages: javascript-typescript
           # `security-and-quality` is the broadest default suite —
@@ -56,6 +56,6 @@ jobs:
           # worth catching too.
           queries: security-and-quality
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@4e828ff8d448a8a6e532957b1811f387a63867e8 # v3.30.4
+        uses: github/codeql-action/analyze@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v3.30.4
         with:
           category: '/language:javascript-typescript'
