@@ -109,6 +109,12 @@ import {
   __resetRateLimitsForTests,
   __resetUpstreamProbeCacheOnlyForTests,
 } from '../app.js';
+import {
+  __resetRuntimeHealthForTests,
+  markWorkerStarted,
+  markWorkerTickSuccess,
+  recordOtpSendFailure,
+} from '../runtime-health.js';
 
 // Mock global fetch for upstream proxy calls
 const mockFetch = vi.fn();
@@ -124,6 +130,7 @@ beforeEach(() => {
   // streak counters + notify cooldown so each test case starts from a
   // known state.
   __resetHealthProbeCacheForTests();
+  __resetRuntimeHealthForTests();
   // A2-1005 body-limit tests need a clean per-IP counter; generally
   // safer to reset between every case so rate-limit state doesn't
   // bleed across describe blocks.
@@ -155,6 +162,24 @@ describe('GET /health', () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.status).toBe('degraded');
     expect(body.upstreamReachable).toBe(false);
+  });
+
+  it('surfaces OTP delivery degradation in /health', async () => {
+    recordOtpSendFailure(new Error('provider down'));
+    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+
+    const res = await app.request('/health');
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      status: string;
+      otpDelivery: { degraded: boolean; lastError: string | null };
+      workers: unknown[];
+    };
+    expect(body.status).toBe('degraded');
+    expect(body.otpDelivery.degraded).toBe(true);
+    expect(body.otpDelivery.lastError).toBe('provider down');
+    expect(Array.isArray(body.workers)).toBe(true);
   });
 
   it('sets Cache-Control: no-store so a CDN in front cannot mask an outage', async () => {
@@ -562,9 +587,10 @@ describe('app-level middleware', () => {
     expect(body.components.securitySchemes?.bearerAuth).toBeDefined();
   });
 
-  it('/openapi.json is cacheable', async () => {
+  it('/openapi.json is private and auth-varying', async () => {
     const res = await app.request('/openapi.json');
-    expect(res.headers.get('Cache-Control')).toBe('public, max-age=3600');
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(res.headers.get('Vary')).toBe('Authorization');
   });
 
   it('/metrics labels unmatched routes as NOT_FOUND (audit A-022)', async () => {
@@ -611,6 +637,24 @@ describe('app-level middleware', () => {
     expect(body).toContain('# TYPE loop_circuit_state gauge');
     // The health request just counted above should appear.
     expect(body).toMatch(/loop_requests_total\{method="GET",route="\/health",status="200"\}/);
+  });
+
+  it('/metrics exposes runtime health gauges for OTP and workers', async () => {
+    recordOtpSendFailure(new Error('provider down'));
+    markWorkerStarted('payout_worker', { staleAfterMs: 60_000 });
+    markWorkerTickSuccess('payout_worker');
+
+    const res = await app.request('/metrics');
+    const body = await res.text();
+
+    expect(body).toContain('# TYPE loop_runtime_surface_degraded gauge');
+    expect(body).toContain('loop_runtime_surface_degraded{surface="otp_delivery"} 1');
+    expect(body).toContain('# TYPE loop_worker_running gauge');
+    expect(body).toContain('loop_worker_running{worker="payout_worker"} 1');
+    expect(body).toContain('# TYPE loop_worker_degraded gauge');
+    expect(body).toContain('loop_worker_degraded{worker="payout_worker"} 0');
+    expect(body).toContain('# TYPE loop_worker_last_success_timestamp_ms gauge');
+    expect(body).toMatch(/loop_worker_last_success_timestamp_ms\{worker="payout_worker"\} \d{13}/);
   });
 
   it('/metrics emits exactly one HELP line per metric (audit A-016)', async () => {

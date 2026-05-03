@@ -84,10 +84,11 @@ vi.mock('../../db/schema.js', () => ({
 
 import {
   idempotencyLockKey,
-  withIdempotencyGuard,
   IDEMPOTENCY_KEY_MIN,
   IDEMPOTENCY_KEY_MAX,
+  IDEMPOTENCY_TTL_HOURS,
   validateIdempotencyKey,
+  withIdempotencyGuard,
 } from '../idempotency.js';
 
 beforeEach(() => {
@@ -167,6 +168,22 @@ describe('withIdempotencyGuard', () => {
     expect(doWrite).not.toHaveBeenCalled();
     expect(r.replayed).toBe(true);
     expect(r.body).toEqual({ result: 'prior' });
+  });
+
+  it('treats an expired prior snapshot as a miss and re-runs doWrite', async () => {
+    state.priorRow = {
+      status: 200,
+      responseBody: JSON.stringify({ result: 'stale' }),
+      createdAt: new Date(Date.now() - (IDEMPOTENCY_TTL_HOURS * 60 * 60 * 1000 + 1_000)),
+    };
+    const doWrite = vi.fn(async () => ({ status: 200, body: { result: 'fresh' } }));
+    const r = await withIdempotencyGuard(
+      { adminUserId: 'a-1', key: 'k-1', method: 'POST', path: '/x' },
+      doWrite,
+    );
+    expect(doWrite).toHaveBeenCalledTimes(1);
+    expect(r.replayed).toBe(false);
+    expect(r.body).toEqual({ result: 'fresh' });
   });
 
   it('treats a corrupt snapshot (invalid JSON) as a miss and re-runs doWrite', async () => {

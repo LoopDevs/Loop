@@ -87,17 +87,18 @@ export function registerAdminWithdrawalWriteOpenApi(
   // A2-901 / ADR-024 — admin withdrawal write. Same ADR-017
   // discipline as refund (Idempotency-Key, audit envelope, Discord
   // notify). Atomic two-row write debits user_credits + queues a
-  // LOOP-asset pending_payouts row. The partial unique index on
-  // (type, reference_type, reference_id) extended in migration 0022
-  // rejects a duplicate withdrawal credit-tx for the same payout id
-  // with 409 WITHDRAWAL_ALREADY_ISSUED.
+  // LOOP-asset pending_payouts row. A semantic unique index on the
+  // active withdrawal intent rejects a second in-flight/failed-
+  // uncompensated withdrawal for the same
+  // (user, asset, issuer, destination, amount) with 409
+  // WITHDRAWAL_ALREADY_ISSUED.
   registry.registerPath({
     method: 'post',
     path: '/api/admin/users/{userId}/withdrawals',
     summary:
       'Issue a withdrawal — debit cashback balance + queue on-chain payout (A2-901 / ADR-024).',
     description:
-      "Writes a negative-amount `credit_transactions` row (`type='withdrawal'`, `reference_type='payout'`, `reference_id=<pending_payouts.id>`), atomically decrements `user_credits.balance_minor`, and queues a LOOP-asset payout row for the on-chain submit worker. Idempotent in two layers: the admin idempotency key replays the stored snapshot on repeat (ADR 017), and the DB partial unique index on (type, reference_type, reference_id) — extended to include 'withdrawal' in migration 0022 — rejects a second credit-tx for the same payout id with 409 `WITHDRAWAL_ALREADY_ISSUED`. Phase 2a is admin-mediated only; user-initiated cash-out is deferred to Phase 2b.",
+      "Writes a negative-amount `credit_transactions` row (`type='withdrawal'`, `reference_type='payout'`, `reference_id=<pending_payouts.id>`), atomically decrements `user_credits.balance_minor`, and queues a LOOP-asset payout row for the on-chain submit worker. Idempotent in two layers: the admin idempotency key replays the stored snapshot on repeat (ADR 017), and the DB active-withdrawal unique index rejects a second unresolved withdrawal for the same user/asset/destination/amount tuple with 409 `WITHDRAWAL_ALREADY_ISSUED`. Phase 2a is admin-mediated only; user-initiated cash-out is deferred to Phase 2b.",
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     request: {
@@ -136,7 +137,7 @@ export function registerAdminWithdrawalWriteOpenApi(
       },
       409: {
         description:
-          'A withdrawal credit-tx already references this payout id (`WITHDRAWAL_ALREADY_ISSUED`)',
+          'A matching active withdrawal already exists for this user/asset/destination/amount (`WITHDRAWAL_ALREADY_ISSUED`)',
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {

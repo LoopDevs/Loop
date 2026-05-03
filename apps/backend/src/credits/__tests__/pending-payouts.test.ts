@@ -6,6 +6,7 @@ vi.mock('../../db/schema.js', () => ({
     userId: 'user_id',
     orderId: 'order_id',
     state: 'state',
+    compensatedAt: 'compensated_at',
     attempts: 'attempts',
     createdAt: 'created_at',
   },

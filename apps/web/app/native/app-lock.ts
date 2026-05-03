@@ -64,42 +64,49 @@ export function registerAppLockGuard(): () => void {
   // mutating DOM.
   let cancelled = false;
 
-  const showLockScreen = (): void => {
+  const showLockScreen = (message: string, unlockable: boolean): void => {
     if (cancelled) return;
-    if (overlay) return;
-    // Match the splash screen's look (background + logo) so the overlay
-    // feels like a natural extension of the app's boot state rather than
-    // a jarring security prompt. Theme follows the html.dark class set by
-    // the inline theme script in root.tsx so it paints correctly on the
-    // very first paint.
-    const isDark = document.documentElement.classList.contains('dark');
-    const bg = isDark ? 'rgb(3, 7, 18)' : 'rgb(249, 250, 251)';
-    const fg = isDark ? 'rgba(255, 255, 255, 0.55)' : 'rgba(17, 24, 39, 0.55)';
-    const logo = isDark ? '/loop-logo-white.svg' : '/loop-logo.svg';
-    overlay = document.createElement('div');
-    overlay.id = 'app-lock-overlay';
-    overlay.style.cssText = [
-      'position:fixed',
-      'inset:0',
-      'z-index:99998',
-      `background:${bg}`,
-      'display:flex',
-      'align-items:center',
-      'justify-content:center',
-      'flex-direction:column',
-      'gap:1.25rem',
-      'opacity:1',
-      'transition:opacity 200ms ease-out',
-      'cursor:pointer',
-    ].join(';');
-    overlay.innerHTML = `
-      <img src="${logo}" alt="Loop" style="height:2.5rem" />
-      <div style="color:${fg};font-size:0.875rem;letter-spacing:0.01em;">Unlock to continue</div>
-    `;
-    overlay.addEventListener('click', () => {
-      void attemptUnlock();
-    });
-    document.body.appendChild(overlay);
+    if (overlay === null) {
+      // Match the splash screen's look (background + logo) so the overlay
+      // feels like a natural extension of the app's boot state rather than
+      // a jarring security prompt. Theme follows the html.dark class set by
+      // the inline theme script in root.tsx so it paints correctly on the
+      // very first paint.
+      const isDark = document.documentElement.classList.contains('dark');
+      const bg = isDark ? 'rgb(3, 7, 18)' : 'rgb(249, 250, 251)';
+      const fg = isDark ? 'rgba(255, 255, 255, 0.55)' : 'rgba(17, 24, 39, 0.55)';
+      const logo = isDark ? '/loop-logo-white.svg' : '/loop-logo.svg';
+      overlay = document.createElement('div');
+      overlay.id = 'app-lock-overlay';
+      overlay.style.cssText = [
+        'position:fixed',
+        'inset:0',
+        'z-index:99998',
+        `background:${bg}`,
+        'display:flex',
+        'align-items:center',
+        'justify-content:center',
+        'flex-direction:column',
+        'gap:1.25rem',
+        'opacity:1',
+        'transition:opacity 200ms ease-out',
+      ].join(';');
+      overlay.innerHTML = `
+        <img src="${logo}" alt="Loop" style="height:2.5rem" />
+        <div data-lock-message style="color:${fg};font-size:0.875rem;letter-spacing:0.01em;text-align:center;max-width:18rem;"></div>
+      `;
+      overlay.addEventListener('click', () => {
+        if (overlay?.dataset.unlockable !== 'true') return;
+        void attemptUnlock();
+      });
+      document.body.appendChild(overlay);
+    }
+    overlay.dataset.unlockable = unlockable ? 'true' : 'false';
+    overlay.style.cursor = unlockable ? 'pointer' : 'default';
+    const messageNode = overlay.querySelector<HTMLElement>('[data-lock-message]');
+    if (messageNode !== null) {
+      messageNode.textContent = message;
+    }
   };
 
   const hideLockScreen = (): void => {
@@ -131,9 +138,13 @@ export function registerAppLockGuard(): () => void {
       skipNextLockCheck = false;
       return;
     }
-    const { available } = await checkBiometrics();
-    if (cancelled || !available) return;
-    showLockScreen();
+    const { available, deviceIsSecure } = await checkBiometrics();
+    if (cancelled) return;
+    if (!available && !deviceIsSecure) {
+      showLockScreen('Turn on a device passcode or biometrics to unlock Loop.', false);
+      return;
+    }
+    showLockScreen(available ? 'Unlock to continue' : 'Use your device passcode to continue', true);
     void attemptUnlock();
   };
 

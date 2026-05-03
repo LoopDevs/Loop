@@ -19,6 +19,7 @@
 | `docs/third-party-licenses.md`                              | OSS attribution — libvips, Leaflet markers, postgres driver                                                                                                                                                                            |
 | `docs/roadmap.md`                                           | What's left for Phase 1, Phase 2, Phase 3                                                                                                                                                                                              |
 | `docs/audit-2026-tracker.md`                                | Working tracker for the 2026-04 adversarial audit (467 findings). Previous pre-2026 audit (`codebase-audit.md` / `audit-checklist.md` / `audit-tracker.md`) is superseded — files kept for history but not the active source of truth. |
+| `docs/audit-2026-04-29/`                                    | Planning + execution scaffold for the new cold adversarial audit launched on 2026-04-29: plan, checklist, tracker, evidence/inventory conventions, operator handoff.                                                                   |
 | `docs/adr/`                                                 | Architecture Decision Records                                                                                                                                                                                                          |
 | `docs/adr/005-known-limitations.md`                         | Items we deliberately do NOT fix in Phase 1                                                                                                                                                                                            |
 | `docs/adr/006-keychain-backed-secure-storage.md`            | Keychain/EncryptedSharedPreferences for refresh tokens                                                                                                                                                                                 |
@@ -44,6 +45,7 @@
 | `docs/adr/026-tax-regulatory-reporting-data-model.md`       | Tax / regulatory reporting data model — Phase-1 CSV exports + Phase-2 jurisdiction tagging                                                                                                                                             |
 | `docs/adr/027-mobile-platform-security.md`                  | Mobile platform security — Phase-1 deferral of SSL pinning / App Attest / Play Integrity / jailbreak-root / binary tamper, with per-control Phase-2 triggers                                                                           |
 | `docs/adr/028-admin-step-up-auth.md`                        | Admin step-up auth design — 5-min `X-Admin-Step-Up` JWT gating credit-adjust / withdrawal / payout-retry; Phase-1 design pinned, implementation deferred                                                                               |
+| `docs/adr/029-repo-managed-ci-clis.md`                      | Why secret-bearing GitHub Actions workflows use lockfile-pinned repo-managed CLIs instead of live npm installs                                                                                                                         |
 
 ---
 
@@ -84,8 +86,8 @@ npm run build                # Build all packages
 cd apps/web && npm run build:mobile   # Static export for Capacitor
 
 # Mobile (after web build)
-cd apps/mobile && npx cap sync && ./scripts/apply-native-overlays.sh && npx cap open ios
-# apply-native-overlays.sh is idempotent; re-run after every cap sync so
+npm run mobile:sync && cd apps/mobile && npx cap open ios
+# `mobile:sync` wraps `cap sync` and re-applies the native overlays so
 # audit A-033 (Android backup rules) and A-034 (NSFaceIDUsageDescription)
 # survive the native-project regeneration (ADR-007).
 

@@ -42,11 +42,11 @@ interface ConfigRow {
   userCashbackPct: string;
 }
 
-let lastKnownGood: PublicTopCashbackMerchantsResponse | null = null;
+const lastKnownGoodByLimit = new Map<number, PublicTopCashbackMerchantsResponse>();
 
 /** Test-only reset. */
 export function __resetPublicTopCashbackMerchantsCache(): void {
-  lastKnownGood = null;
+  lastKnownGoodByLimit.clear();
 }
 
 async function compute(limit: number): Promise<PublicTopCashbackMerchantsResponse> {
@@ -90,14 +90,15 @@ export async function publicTopCashbackMerchantsHandler(c: Context): Promise<Res
 
   try {
     const snapshot = await compute(limit);
-    lastKnownGood = snapshot;
+    lastKnownGoodByLimit.set(limit, snapshot);
     c.header('cache-control', 'public, max-age=300');
     return c.json<PublicTopCashbackMerchantsResponse>(snapshot);
   } catch (err) {
     log.error({ err }, 'Public top-cashback-merchants computation failed — serving fallback');
     c.header('cache-control', 'public, max-age=60');
-    if (lastKnownGood !== null) {
-      return c.json<PublicTopCashbackMerchantsResponse>(lastKnownGood);
+    const fallback = lastKnownGoodByLimit.get(limit);
+    if (fallback !== undefined) {
+      return c.json<PublicTopCashbackMerchantsResponse>(fallback);
     }
     return c.json<PublicTopCashbackMerchantsResponse>({
       merchants: [],

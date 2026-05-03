@@ -1,0 +1,6 @@
+
+> check:bundle-budget
+> ./scripts/check-bundle-budget.sh
+
+Web SSR client total: 2312 KB (budget: 2500 KB)
+OK: all bundle chunks within budget.

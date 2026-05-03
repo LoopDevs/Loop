@@ -32,7 +32,11 @@ No shared state between regions — each instance fetches merchants/locations in
 # root `package.json` / `package-lock.json`, so the docker build
 # context has to be the repo root for those COPYs to resolve. The
 # `--config` + `--dockerfile` flags tell Fly which fly.toml + Dockerfile
-# to use while keeping the build context = cwd (repo root). Audit A2-410.
+# to use while keeping the build context = cwd (repo root). Both app
+# Dockerfiles keep `npm ci --ignore-scripts` in place and only rebuild
+# `esbuild` explicitly in the builder stage; do not replace that with a
+# blanket `npm rebuild` without re-auditing the hook surface. Audit
+# A2-410 / A3-028.
 fly launch --name loopfinance-api --region iad --no-deploy --config apps/backend/fly.toml --dockerfile apps/backend/Dockerfile
 
 # Set secrets (API credentials for /locations endpoint only — the
@@ -311,9 +315,10 @@ fly certs add www.loopfinance.io --config apps/web/fly.toml
    A-033 (Android backup rules) and A-034
    (`NSFaceIDUsageDescription`) survive the regeneration:
    ```bash
-   cd apps/mobile && npx cap sync && ./scripts/apply-native-overlays.sh
+   cd apps/mobile && npm run sync
    ```
-   The overlay script is idempotent — safe to run every time.
+   The overlay script is idempotent and is now part of the sync script,
+   so the hardened native config reapplies on every standard sync.
 
 ### iOS (App Store)
 

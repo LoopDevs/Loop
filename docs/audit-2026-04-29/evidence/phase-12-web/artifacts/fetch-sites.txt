@@ -1,0 +1,10 @@
+apps/web/app/native/share.ts:42:      const response = await fetch(imageUrl);
+apps/web/app/native/share.ts:119:      const response = await fetch(options.imageUrl);
+apps/web/app/hooks/use-orders.ts:52:      void query.refetch();
+apps/web/app/routes/orders.$id.tsx:134:            <Button variant="secondary" onClick={() => void refetch()}>
+apps/web/app/services/config.ts:38:  const res = await fetch(`${API_BASE}/api/config`, {
+apps/web/app/routes/orders.tsx:291:                // cached error instead of refetching. Use `refetch()` so
+apps/web/app/routes/orders.tsx:293:                refetch();
+apps/web/app/services/clusters.ts:38:    response = await fetch(`${API_BASE}/api/clusters?${qs.toString()}`, {
+apps/web/app/services/api-client.ts:78:    response = await fetch(`${API_BASE}${path}`, init);
+apps/web/app/routes/sitemap.tsx:40:    const res = await fetch(

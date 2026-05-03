@@ -1,16 +1,19 @@
 import type { Context } from 'hono';
-import { decodeJwtPayload } from './jwt.js';
-import { upsertUserFromCtx, type User } from '../db/users.js';
+import type { LoopAuthContext } from './handler.js';
+import { getUserById, type User } from '../db/users.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ middleware: 'requireAdmin' });
 
 /**
  * Admin-only middleware. Layered on top of `requireAuth` so the
- * `bearerToken` context value is already set. Decodes the JWT
- * (signature not verified — see `jwt.ts` for rationale), upserts
- * the corresponding Loop user row, and rejects the request with
- * 403 if the user isn't flagged as admin.
+ * `auth` context value is already set. Only Loop-verified auth
+ * contexts are eligible for local admin authorization; legacy CTX
+ * pass-through bearers are not cryptographically anchored on this
+ * service and must not drive local admin decisions. Once the caller
+ * is Loop-authenticated, resolve the already-materialized Loop user
+ * row by internal UUID and reject the request if the row is missing
+ * or not admin.
  *
  * On success: `c.get('user')` returns the upserted User row.
  *
@@ -24,25 +27,28 @@ export async function requireAdmin(
   c: Context,
   next: () => Promise<void>,
 ): Promise<Response | void> {
-  const bearer = c.get('bearerToken') as string | undefined;
-  if (bearer === undefined) {
+  const auth = c.get('auth') as LoopAuthContext | undefined;
+  if (auth === undefined) {
     // requireAuth should have run before us. If it didn't, fail
     // closed — an admin endpoint must never be reachable without
     // auth state on the context.
     return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
-  const claims = decodeJwtPayload(bearer);
-  if (claims === null) {
-    return c.json({ code: 'UNAUTHORIZED', message: 'Invalid bearer token' }, 401);
+  if (auth.kind !== 'loop') {
+    return c.json(
+      { code: 'UNAUTHORIZED', message: 'Loop-authenticated admin session required' },
+      401,
+    );
   }
   let user: User;
   try {
-    user = await upsertUserFromCtx({
-      ctxUserId: claims.sub,
-      email: typeof claims['email'] === 'string' ? claims['email'] : undefined,
-    });
+    const resolved = await getUserById(auth.userId);
+    if (resolved === null) {
+      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired token' }, 401);
+    }
+    user = resolved;
   } catch (err) {
-    log.error({ err, ctxUserId: claims.sub }, 'Failed to upsert admin user');
+    log.error({ err, userId: auth.userId }, 'Failed to resolve admin user');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
   }
   if (!user.isAdmin) {

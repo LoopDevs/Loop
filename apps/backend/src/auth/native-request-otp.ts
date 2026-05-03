@@ -16,6 +16,11 @@
 import type { Context } from 'hono';
 import { logger } from '../logger.js';
 import {
+  recordOtpSendFailure,
+  recordOtpSendSuccess,
+  setOtpDeliveryEnabled,
+} from '../runtime-health.js';
+import {
   createOtp,
   generateOtpCode,
   countRecentOtpsForEmail,
@@ -39,6 +44,7 @@ const log = logger.child({ handler: 'auth-native' });
  * rotating IPs can't still flood one inbox.
  */
 export async function nativeRequestOtpHandler(c: Context): Promise<Response> {
+  setOtpDeliveryEnabled(true);
   const parsed = RequestOtpBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'Valid email is required' }, 400);
@@ -71,12 +77,14 @@ export async function nativeRequestOtpHandler(c: Context): Promise<Response> {
 
     try {
       await getEmailProvider().sendOtpEmail({ to: email, code, expiresAt });
+      recordOtpSendSuccess();
     } catch (err) {
       // The OTP row is already written. If the email send fails the
       // user won't receive the code; they'll hit `request-otp` again
       // and land on a fresh row. Log at error so on-call notices a
       // provider incident; do not surface the failure to the client
       // (enumeration defence).
+      recordOtpSendFailure(err);
       log.error({ err, email }, 'OTP email send failed');
     }
 

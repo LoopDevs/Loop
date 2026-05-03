@@ -19,6 +19,7 @@ import { useSessionRestore } from '~/hooks/use-session-restore';
 import { setStatusBarOverlay, setStatusBarStyle } from '~/native/status-bar';
 import { registerBackButton } from '~/native/back-button';
 import { registerAppLockGuard } from '~/native/app-lock';
+import { enableTaskSwitcherPrivacyOverlay } from '~/native/task-switcher-overlay';
 import { getPlatform } from '~/native/platform';
 import { setupNotificationChannels } from '~/native/notifications';
 import { setKeyboardAccessoryBarVisible } from '~/native/keyboard';
@@ -413,6 +414,14 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
     const cleanupAppLock = registerAppLockGuard();
     return () => {
       cleanupAppLock();
+    };
+  }, [isNative]);
+
+  useEffect(() => {
+    if (!isNative) return;
+    const cleanupPrivacyOverlay = enableTaskSwitcherPrivacyOverlay();
+    return () => {
+      cleanupPrivacyOverlay();
     };
   }, [isNative]);
 

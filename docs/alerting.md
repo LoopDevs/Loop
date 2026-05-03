@@ -16,11 +16,11 @@ title: Alerting tiers and paging policy
 **Single tier, single surface.** All alerts land in Discord via three
 webhooks configured at deploy time:
 
-| Channel       | Env var                       | What fires there                                             |
-| ------------- | ----------------------------- | ------------------------------------------------------------ |
-| `orders`      | `DISCORD_WEBHOOK_ORDERS`      | Every order created / fulfilled + cashback credit / recycle  |
-| `monitoring`  | `DISCORD_WEBHOOK_MONITORING`  | Health flips, circuit breakers, payout failures, asset drift |
-| `admin-audit` | `DISCORD_WEBHOOK_ADMIN_AUDIT` | Every admin-panel mutation (ADR 017 / 018)                   |
+| Channel       | Env var                       | What fires there                                                                                |
+| ------------- | ----------------------------- | ----------------------------------------------------------------------------------------------- |
+| `orders`      | `DISCORD_WEBHOOK_ORDERS`      | Every order created / fulfilled + cashback credit / recycle                                     |
+| `monitoring`  | `DISCORD_WEBHOOK_MONITORING`  | Health flips, worker stalls, payout failures/backlogs, circuit breakers, asset drift, CTX drift |
+| `admin-audit` | `DISCORD_WEBHOOK_ADMIN_AUDIT` | Every admin-panel mutation (ADR 017 / 018)                                                      |
 
 Full notifier catalogue: `DISCORD_NOTIFIERS` in `apps/backend/src/discord.ts`.
 

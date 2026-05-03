@@ -2,7 +2,7 @@
 
 ## Symptom
 
-- Discord `#ops-alerts` ping from `payout-watchdog`: a `pending_payouts`
+- Discord `#ops-alerts` ping from `notifyStuckPayouts`: a `pending_payouts`
   row has been in `state='pending'` or `state='submitted'` for longer
   than the watchdog window (default 5 min).
 - A user-support ticket: "I haven't received my cashback yet" with an
@@ -61,7 +61,7 @@ errors exhausted), see [`payout-permanent-failure.md`](./payout-permanent-failur
 ## Post-mortem
 
 - ≥20 stuck rows simultaneously → P1 → write a post-mortem.
-- Operator-funding drained without alert → product gap (alerting), not
-  just a stuck payout. File a ticket against the alerting docs.
+- Operator-funding drained without alert is now a regression. File it as
+  an observability bug, not a documentation gap.
 - Same row needs manual retry twice → escalate; idempotency is supposed
   to make this a no-op.

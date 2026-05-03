@@ -36,7 +36,9 @@ Vitest unit + integration tests covering:
 ### Web (`apps/web`)
 
 Vitest defaults to the **node** environment (see ADR-005 §7 for the
-tradeoff); most UI is covered by Playwright e2e. Purchase-flow
+tradeoff); route coverage is intentionally split across unit tests,
+targeted route tests, and a small number of Playwright journeys rather
+than claiming blanket browser coverage. Purchase-flow
 components override the environment per-file with
 `// @vitest-environment jsdom` so `@testing-library/react` can render
 the amount-input → payment-step → completion state machine without
@@ -206,15 +208,21 @@ in each workspace — the config files are the source of truth.
 ### Web coverage scope
 
 `apps/web/vitest.config.ts` excludes `app/routes/**` and `app/root.tsx`
-from coverage on purpose — those surfaces are exercised by Playwright
-e2e (`tests/e2e`, `tests/e2e-mocked`), not by unit tests. Double-counting
-them would make the number look better without adding confidence.
+from unit-coverage on purpose — the metric is meant to track shared
+modules (`services/`, `stores/`, `hooks/`, `utils/`, `native/`, leaf
+components), not route assemblies. Some route journeys are exercised by
+Playwright (`tests/e2e`, `tests/e2e-mocked`) and a handful of direct
+route tests exist under `app/routes/**/__tests__`, but that coverage is
+partial, not comprehensive. Excluding routes here is not evidence that
+all routes are otherwise covered.
 
 The 37–45% web unit figure reflects the fact that most user-facing UI
 is route-level; everything unit-tested today is `services/`, `stores/`,
 `hooks/`, `utils/`, `native/`, and leaf `components/`. When moving
 route-only logic out into a unit-testable module, add the unit test and
-ratchet the threshold up.
+ratchet the threshold up. When a route itself carries high-risk logic,
+add a direct route test or Playwright coverage instead of relying on the
+coverage exclusion as a proxy.
 
 ### Backend coverage scope
 

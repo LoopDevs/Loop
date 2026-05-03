@@ -1,14 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Context } from 'hono';
 
-const upsertMock = vi.fn();
-const decodeMock = vi.fn();
+const getUserByIdMock = vi.fn();
 
 vi.mock('../../db/users.js', () => ({
-  upsertUserFromCtx: (args: unknown) => upsertMock(args),
-}));
-vi.mock('../jwt.js', () => ({
-  decodeJwtPayload: (token: string) => decodeMock(token),
+  getUserById: (id: string) => getUserByIdMock(id),
 }));
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -19,16 +15,16 @@ vi.mock('../../logger.js', () => ({
 import { requireAdmin } from '../require-admin.js';
 
 interface FakeCtx {
-  bearer: string | undefined;
+  auth: unknown;
   userSet: unknown;
   ctx: Context;
 }
 
-function makeCtx(bearer: string | undefined): FakeCtx {
+function makeCtx(auth: unknown): FakeCtx {
   const store = new Map<string, unknown>();
-  if (bearer !== undefined) store.set('bearerToken', bearer);
+  if (auth !== undefined) store.set('auth', auth);
   const fake: FakeCtx = {
-    bearer,
+    auth,
     userSet: undefined,
     ctx: {
       get: (k: string) => store.get(k),
@@ -47,12 +43,11 @@ function makeCtx(bearer: string | undefined): FakeCtx {
 }
 
 beforeEach(() => {
-  upsertMock.mockReset();
-  decodeMock.mockReset();
+  getUserByIdMock.mockReset();
 });
 
 describe('requireAdmin', () => {
-  it('401 when no bearer token is present on context', async () => {
+  it('401 when no auth context is present', async () => {
     const { ctx } = makeCtx(undefined);
     const res = (await requireAdmin(ctx, async () => {})) as Response;
     expect(res.status).toBe(401);
@@ -60,46 +55,41 @@ describe('requireAdmin', () => {
     expect(body.code).toBe('UNAUTHORIZED');
   });
 
-  it('401 when the bearer token cannot be decoded', async () => {
-    decodeMock.mockReturnValue(null);
-    const { ctx } = makeCtx('garbage');
+  it('401 when the auth context is legacy ctx pass-through', async () => {
+    const { ctx } = makeCtx({ kind: 'ctx', bearerToken: 'header.payload.sig' });
     const res = (await requireAdmin(ctx, async () => {})) as Response;
     expect(res.status).toBe(401);
   });
 
-  it('500 when the user upsert throws', async () => {
-    decodeMock.mockReturnValue({ sub: 'u1', email: 'a@b.com' });
-    upsertMock.mockRejectedValue(new Error('db down'));
-    const { ctx } = makeCtx('tok');
+  it('401 when the verified loop token points at no user row', async () => {
+    getUserByIdMock.mockResolvedValue(null);
+    const { ctx } = makeCtx({ kind: 'loop', userId: 'u1', email: 'a@b.com', bearerToken: 'tok' });
+    const res = (await requireAdmin(ctx, async () => {})) as Response;
+    expect(res.status).toBe(401);
+  });
+
+  it('500 when user lookup throws', async () => {
+    getUserByIdMock.mockRejectedValue(new Error('db down'));
+    const { ctx } = makeCtx({ kind: 'loop', userId: 'u1', email: 'a@b.com', bearerToken: 'tok' });
     const res = (await requireAdmin(ctx, async () => {})) as Response;
     expect(res.status).toBe(500);
   });
 
   it('404 (not 403) when the user is authenticated but not admin', async () => {
-    decodeMock.mockReturnValue({ sub: 'u1' });
-    upsertMock.mockResolvedValue({ id: 'uuid', ctxUserId: 'u1', isAdmin: false });
-    const { ctx } = makeCtx('tok');
+    getUserByIdMock.mockResolvedValue({ id: 'uuid', isAdmin: false });
+    const { ctx } = makeCtx({ kind: 'loop', userId: 'u1', email: 'a@b.com', bearerToken: 'tok' });
     const res = (await requireAdmin(ctx, async () => {})) as Response;
     expect(res.status).toBe(404);
   });
 
   it('calls next and sets user on context when admin', async () => {
-    const user = { id: 'uuid', ctxUserId: 'u1', isAdmin: true };
-    decodeMock.mockReturnValue({ sub: 'u1', email: 'a@b.com' });
-    upsertMock.mockResolvedValue(user);
+    const user = { id: 'uuid', isAdmin: true };
+    getUserByIdMock.mockResolvedValue(user);
     const next = vi.fn().mockResolvedValue(undefined);
-    const fake = makeCtx('tok');
+    const fake = makeCtx({ kind: 'loop', userId: 'u1', email: 'a@b.com', bearerToken: 'tok' });
     await requireAdmin(fake.ctx, next);
     expect(next).toHaveBeenCalledOnce();
     expect(fake.userSet).toEqual(user);
-    expect(upsertMock).toHaveBeenCalledWith({ ctxUserId: 'u1', email: 'a@b.com' });
-  });
-
-  it('passes undefined email when the claim is missing or non-string', async () => {
-    decodeMock.mockReturnValue({ sub: 'u1', email: 42 });
-    upsertMock.mockResolvedValue({ id: 'uuid', ctxUserId: 'u1', isAdmin: true });
-    const { ctx } = makeCtx('tok');
-    await requireAdmin(ctx, async () => {});
-    expect(upsertMock).toHaveBeenCalledWith({ ctxUserId: 'u1', email: undefined });
+    expect(getUserByIdMock).toHaveBeenCalledWith('u1');
   });
 });

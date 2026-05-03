@@ -51,7 +51,7 @@ app/
 
 ## Key patterns
 
-**Data fetching:** Always via TanStack Query hooks in `hooks/`. Never in loaders (pure API client).
+**Data fetching:** Always via TanStack Query and never in loaders (pure API client). Reusable domain fetchers still belong in `hooks/`, but route/component-local `useQuery` is allowed when the query is genuinely local to one surface. In both cases the rules are the same: call only `services/*`, use the flat query-key taxonomy below, set an explicit `staleTime`, use `shouldRetry` unless the surface has a documented reason not to, and keep invalidation logic in the same file or `utils/admin-cache.ts`.
 
 **Query-key taxonomy:** flat hyphenated strings — `['admin-treasury']`, `['admin-user-credits', userId]`, `['merchants']`, `['me', 'credits']` (me-surface only uses a 2-element array because the first element is a scope selector, not a module name). Never add a hierarchical admin key like `['admin', 'treasury']` — it overlaps cosmetically with me-surface keys and defeats the flat convention. For the rare case where a mutation invalidates a broad admin surface, `utils/admin-cache.ts::invalidateAllAdminQueries(queryClient)` sweeps every `admin-*` key via predicate.
 
@@ -78,7 +78,7 @@ app/
 
 1. Add the typed function in `app/services/` (use `apiRequest` or `authenticatedRequest`)
 2. If it returns new types, add them to `packages/shared/src/`
-3. Create a hook in `app/hooks/` if it's used reactively (TanStack Query)
+3. Create a hook in `app/hooks/` when the query is reusable across multiple surfaces or needs shared invalidation policy. One-off route/component queries can stay local as long as they still go through `services/*`, use flat query keys, and spell out `staleTime` / `retry`.
 4. Never call `fetch()` directly from components
 
 ## Recipe: Add a Capacitor plugin

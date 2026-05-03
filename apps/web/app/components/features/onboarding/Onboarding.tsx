@@ -51,7 +51,7 @@ const COPY: Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, ScreenCopy> = {
   },
   7: {
     title: 'One-tap sign in',
-    sub: 'Use biometrics to unlock Loop and confirm purchases. Your biometric data never leaves the device.',
+    sub: 'Use biometrics to lock Loop on app launch. If biometrics are unavailable later, Loop can fall back to your device passcode. Your biometric data never leaves the device.',
   },
   8: {
     eyebrow: 'Stellar wallet',
@@ -113,6 +113,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
   const [biometrics, setBiometrics] = useState<BiometricResult>({
     available: false,
     biometryType: 'none',
+    deviceIsSecure: false,
   });
   const [biometricsChecked, setBiometricsChecked] = useState(false);
   useEffect(() => {

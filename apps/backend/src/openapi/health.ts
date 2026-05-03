@@ -98,6 +98,34 @@ export function registerHealthOpenApi(
       merchantsStale: z.boolean(),
       locationsStale: z.boolean(),
       upstreamReachable: z.boolean(),
+      otpDelivery: z.object({
+        enabled: z.boolean(),
+        degraded: z.boolean(),
+        lastSuccessAtMs: z.number().int().nullable(),
+        lastFailureAtMs: z.number().int().nullable(),
+        lastError: z.string().nullable(),
+      }),
+      workers: z.array(
+        z.object({
+          name: z.enum([
+            'asset_drift_watcher',
+            'interest_scheduler',
+            'payment_watcher',
+            'payout_worker',
+            'procurement_worker',
+          ]),
+          required: z.boolean(),
+          running: z.boolean(),
+          degraded: z.boolean(),
+          stale: z.boolean(),
+          blockedReason: z.string().nullable(),
+          startedAtMs: z.number().int().nullable(),
+          lastSuccessAtMs: z.number().int().nullable(),
+          lastErrorAtMs: z.number().int().nullable(),
+          lastError: z.string().nullable(),
+          staleAfterMs: z.number().int().nullable(),
+        }),
+      ),
     }),
   );
 

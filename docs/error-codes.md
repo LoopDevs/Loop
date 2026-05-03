@@ -41,23 +41,22 @@ client switch-ladders tracked drift informally in code review.
 | `UNAUTHORIZED` | 401    | `requireAuth` middleware, admin handlers without actor context                                                                        | Retryable after re-auth. Trigger refresh-token rotation, then retry once. If still 401, sign the user out.                               |
 | `NOT_FOUND`    | 404    | Merchant / order / payout not found. Also: feature-flag-off (`LOOP_AUTH_NATIVE_ENABLED=false` surfaces the Loop-native routes as 404) | Terminal. Don't retry — the resource doesn't exist or the caller isn't authorised to see it (enumeration-defence masks the distinction). |
 
-## Resource-state family (409 / 503)
+## Resource-state family (409)
 
-| Code                     | Status | Where                                                                                      | Client guidance                                                                                          |
-| ------------------------ | ------ | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `ALREADY_COMPENSATED`    | 409    | `POST /api/admin/payouts/:id/compensate` (ADR-024 §5)                                      | Terminal. The failed payout already has a compensation adjustment row.                                   |
-| `NOT_A_WITHDRAWAL`       | 409    | Same endpoint — payout is `kind='order_cashback'` not `'withdrawal'`                       | Terminal. Compensation is strictly for admin withdrawals.                                                |
-| `PAYOUT_NOT_FAILED`      | 409    | Same endpoint — payout is in a non-failed state                                            | Terminal. Wait for the retry worker to transition the payout, or act through the retry endpoint instead. |
-| `ASSET_NOT_CONFIGURED`   | 503    | `POST /api/admin/users/:userId/withdrawals` without a matching `LOOP_STELLAR_*_ISSUER` env | Retryable after ops sets the env var. Not a user-driven error.                                           |
-| `SERVICE_UNAVAILABLE`    | 503    | Circuit-breaker open (non-auth upstreams); `verify-otp` when upstream is degraded          | Retryable with backoff (minutes, not seconds). The breaker's cooldown window is 30s.                     |
-| `WEBHOOK_NOT_CONFIGURED` | 503    | `POST /api/admin/discord/config/*/test` when the target webhook env var is unset           | Retryable after ops sets the webhook URL.                                                                |
-| `NOT_CONFIGURED`         | 503    | Generic version of the above — a required config is missing                                | Same as above.                                                                                           |
+| Code                        | Status | Where                                                                                     | Client guidance                                                                                                   |
+| --------------------------- | ------ | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `ALREADY_COMPENSATED`       | 409    | `POST /api/admin/payouts/:id/compensate` (ADR-024 §5)                                     | Terminal. The failed payout already has a compensation marker; don't compensate it again.                         |
+| `PAYOUT_NOT_COMPENSABLE`    | 409    | Same endpoint — payout is `kind='order_cashback'` or not currently a retryable failed row | Terminal. Compensation is strictly for failed withdrawal payouts.                                                 |
+| `WITHDRAWAL_ALREADY_ISSUED` | 409    | `POST /api/admin/users/:userId/withdrawals` (ADR-024)                                     | Terminal for the attempted duplicate. Reuse or resolve the existing active withdrawal instead of issuing another. |
+| `PENDING_PAYOUTS`           | 409    | `POST /api/users/me/dsr/delete` while cashback payout rows are still pending/submitted    | Terminal until the payout settles or support intervenes.                                                          |
+| `IN_FLIGHT_ORDERS`          | 409    | `POST /api/users/me/dsr/delete` while an order is still pending/paid/procuring            | Terminal until fulfilment or expiry completes.                                                                    |
 
 ## Rate-limit family (429)
 
-| Code           | Status | Where                                                              | Client guidance                                                                                                                                   |
-| -------------- | ------ | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RATE_LIMITED` | 429    | Every rate-limited route (see AGENTS.md middleware stack entry #6) | Retryable. Respect `Retry-After`. The limiter uses a fixed-window counter per IP — a burst that hits the limit waits the remainder of the window. |
+| Code                   | Status | Where                                                                                      | Client guidance                                                                                                                                   |
+| ---------------------- | ------ | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RATE_LIMITED`         | 429    | Every rate-limited route (see AGENTS.md middleware stack entry #6)                         | Retryable. Respect `Retry-After`. The limiter uses a fixed-window counter per IP — a burst that hits the limit waits the remainder of the window. |
+| `DAILY_LIMIT_EXCEEDED` | 429    | `POST /api/admin/users/:userId/credit-adjustments` business-rule cap on signed adjustments | Terminal for the current UTC day unless an operator raises the cap; retrying the same write will not help.                                        |
 
 ## Image-proxy family (413 / 502)
 
@@ -69,11 +68,15 @@ client switch-ladders tracked drift informally in code review.
 
 ## Upstream family (502 / 503)
 
-| Code                   | Status | Where                                                                                                  | Client guidance                                                                                                      |
-| ---------------------- | ------ | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `UPSTREAM_ERROR`       | 502    | Every CTX-proxying handler when the upstream returned a non-auth non-5xx but the response didn't parse | Retryable with backoff (human-scale — upstream shape drift is an ops-level issue, not a flaky-network issue).        |
-| `UPSTREAM_UNAVAILABLE` | 503    | Upstream circuit-breaker is open                                                                       | Retryable. Cooldown window typically < 1 min.                                                                        |
-| `INTERNAL_ERROR`       | 500    | The catch-all. Indicates a bug — ops should be paged.                                                  | Retryable once; if it repeats, surface "we hit an issue, please try again in a bit" rather than a technical message. |
+| Code                     | Status | Where                                                                                                  | Client guidance                                                                                                                  |
+| ------------------------ | ------ | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `UPSTREAM_ERROR`         | 502    | Every CTX-proxying handler when the upstream returned a non-auth non-5xx but the response didn't parse | Retryable with backoff (human-scale — upstream shape drift is an ops-level issue, not a flaky-network issue).                    |
+| `UPSTREAM_UNAVAILABLE`   | 503    | Upstream circuit-breaker is open                                                                       | Retryable. Cooldown window typically < 1 min.                                                                                    |
+| `SERVICE_UNAVAILABLE`    | 503    | `verify-otp`/`refresh` on proxy-path circuit-open; social-login JWKS/anti-replay infra degradation     | Retryable with backoff (minutes, not seconds). The breaker cooldown window is 30s; social-login 503s are provider/infra outages. |
+| `SUBSYSTEM_DISABLED`     | 503    | Runtime kill switch on `auth`, `orders`, or `withdrawals` surfaces                                     | Retryable only after operators reopen the subsystem. Honour `Retry-After` when present.                                          |
+| `NOT_CONFIGURED`         | 503    | Required server config missing, including admin withdrawals without a configured LOOP issuer           | Retryable after ops fixes configuration. Not a user-input problem.                                                               |
+| `WEBHOOK_NOT_CONFIGURED` | 503    | `POST /api/admin/discord/config/*/test` when the target webhook env var is unset                       | Retryable after ops sets the webhook URL.                                                                                        |
+| `INTERNAL_ERROR`         | 500    | The catch-all. Indicates a bug — ops should be paged.                                                  | Retryable once; if it repeats, surface "we hit an issue, please try again in a bit" rather than a technical message.             |
 
 ## Client-only codes (never sent by the backend)
 

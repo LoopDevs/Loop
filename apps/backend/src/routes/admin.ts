@@ -78,6 +78,7 @@
 import type { Context, Hono } from 'hono';
 import { logger } from '../logger.js';
 import type { User } from '../db/users.js';
+import { sanitizeAdminReadQueryString } from '../admin/read-audit.js';
 import { privateNoStoreResponse } from '../middleware/cache-control.js';
 import { requireAuth } from '../auth/handler.js';
 import { requireAdmin } from '../auth/require-admin.js';
@@ -138,7 +139,7 @@ export function mountAdminRoutes(app: Hono): void {
     if (actor === undefined) return;
 
     const path = c.req.path;
-    const query = c.req.url.split('?')[1] ?? '';
+    const query = sanitizeAdminReadQueryString(c.req.url.split('?')[1] ?? '');
     const isCsv = path.endsWith('.csv');
 
     logger.info(
@@ -147,7 +148,7 @@ export function mountAdminRoutes(app: Hono): void {
         actorUserId: actor.id,
         method: c.req.method,
         path,
-        query: query.length > 0 ? query.slice(0, 200) : undefined,
+        query: query !== undefined ? query.slice(0, 200) : undefined,
         isBulk: isCsv,
       },
       'Admin read',
@@ -157,7 +158,7 @@ export function mountAdminRoutes(app: Hono): void {
       notifyAdminBulkRead({
         actorUserId: actor.id,
         endpoint: `${c.req.method} ${path}`,
-        ...(query.length > 0 ? { queryString: query } : {}),
+        ...(query !== undefined ? { queryString: query } : {}),
       });
     }
   });

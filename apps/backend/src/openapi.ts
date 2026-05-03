@@ -185,7 +185,7 @@ registry.registerComponent('securitySchemes', 'bearerAuth', {
   type: 'http',
   scheme: 'bearer',
   description:
-    'Upstream CTX access token. Obtain via POST /api/auth/verify-otp and refresh via POST /api/auth/refresh.',
+    'Bearer access token for the Loop API. When Loop-native auth is enabled, POST /api/auth/verify-otp and the social-login endpoints mint Loop-signed JWTs; otherwise the OTP endpoints proxy CTX-issued tokens through unchanged. Refresh via POST /api/auth/refresh.',
 });
 
 // Per-domain section registrations (A2-1165-style decomposition of
@@ -211,7 +211,7 @@ export function generateOpenApiSpec(): ReturnType<typeof generator.generateDocum
       title: 'Loop API',
       version: '1.0.0',
       description:
-        'Loop backend API. Proxies the upstream CTX gift-card provider and serves cached merchant/location data. Auth tokens are upstream tokens passed through — this API does not issue JWTs of its own. See docs/architecture.md for full context.',
+        'Loop backend API. Proxies the upstream CTX gift-card provider for gift-card/catalog surfaces and serves cached merchant/location data. Auth runs in two modes: with Loop-native auth enabled, Loop issues its own JWTs for OTP and social login; otherwise the OTP endpoints proxy CTX-issued tokens through unchanged during the migration window. See docs/architecture.md for full context.',
       contact: { name: 'Loop', url: 'https://loopfinance.io' },
     },
     servers: [
@@ -220,7 +220,11 @@ export function generateOpenApiSpec(): ReturnType<typeof generator.generateDocum
     ],
     tags: [
       { name: 'Meta', description: 'Liveness, metrics, and misc.' },
-      { name: 'Auth', description: 'OTP request / verify / refresh (proxied to upstream).' },
+      {
+        name: 'Auth',
+        description:
+          'Dual-path auth surface: OTP request / verify / refresh run on the Loop-native path when enabled, otherwise the OTP trio proxy CTX. Social login is Loop-native only.',
+      },
       { name: 'Merchants', description: 'Merchant catalog, cached from upstream.' },
       { name: 'Orders', description: 'Gift card orders.' },
       {

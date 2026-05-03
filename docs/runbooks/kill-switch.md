@@ -27,7 +27,10 @@ don't, trace via:
 
 1. **Discord.** `#ops-alerts` will usually have the upstream signal.
 2. **`/health`.** `curl https://api.loopfinance.io/health | jq` —
-   shows circuit-breaker states, worker enabled flags, last sync times.
+   confirms what it actually exposes today: merchant/location last-sync
+   timestamps, staleness booleans, and whether the broad upstream probe
+   is reachable. It does **not** expose per-breaker state or worker
+   enablement flags; use Fly logs / env for those.
 3. **`/admin/audit-tail`.** If admin writes are misbehaving, the
    per-action ledger is the fastest read.
 
@@ -81,7 +84,10 @@ doesn't show stale flags.
 `LOOP_WORKERS_ENABLED=false` is the existing kill switch for the
 on-chain payout worker (ADR 016) — separate from the user-facing
 endpoints above. Flip it independently if you need to halt Stellar
-submission while keeping new orders / withdrawals queueable.
+submission while keeping new orders / withdrawals queueable. Verify the
+current setting with `fly ssh console -a loopfinance-api -C 'printenv LOOP_WORKERS_ENABLED'`
+or the secret manager you use for the app; `/health` does not currently
+echo worker-enabled flags.
 
 ## Post-mortem
 

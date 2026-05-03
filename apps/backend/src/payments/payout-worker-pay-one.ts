@@ -93,13 +93,14 @@ export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayO
   } catch (err) {
     log.warn(
       { err, payoutId: row.id },
-      'Idempotency pre-check failed — proceeding to submit anyway',
+      'Idempotency pre-check failed — leaving payout untouched for a later retry',
     );
-    // A Horizon read failure on the pre-check isn't terminal — the
-    // submit itself will either succeed or throw with its own
-    // classification. Worst case: we submit + the prior landed too,
-    // but Horizon dedupes on the signed envelope so the duplicate
-    // resolves to the same tx hash.
+    // Fail closed. Without a trustworthy idempotency read we cannot
+    // safely distinguish "needs first submit" from "prior submit
+    // landed and the read path is degraded". Leaving the row in its
+    // current state avoids the double-pay path; observability and
+    // stale-row handling decide when an operator needs to intervene.
+    return 'retriedLater';
   }
 
   // Claim the row before re-submitting. Two paths:

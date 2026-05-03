@@ -6,15 +6,16 @@
  * Admin-mediated only (Phase 2a); user-initiated cash-out is
  * deferred to Phase 2b.
  *
- * Two-layer idempotency mirrors the refund handler:
+ * Two-layer idempotency mirrors the credit-adjustment / refund
+ * handlers:
  *
- *   - Admin idempotency key (ADR 017) — actor+key snapshot replay,
- *     covers "support agent double-clicked submit" + retries.
- *   - DB partial unique index on
- *     (type='withdrawal', reference_type='payout', reference_id) from
- *     migration 0022 — catches "two admins both fire a withdrawal
- *     against the same payout id" race. Surfaces as 409
- *     WITHDRAWAL_ALREADY_ISSUED.
+ *   - Admin idempotency key (ADR 017) — advisory-lock-serialised
+ *     actor+key snapshot replay, covers double-clicks and retried
+ *     POSTs with the same key.
+ *   - DB semantic uniqueness fence on active withdrawal intents
+ *     (`pending_payouts_active_withdrawal_unique`) — catches the
+ *     "fresh key, same user/asset/address/amount" race. Surfaces as
+ *     409 WITHDRAWAL_ALREADY_ISSUED.
  *
  * Response envelope matches the refund handler's shape so the admin
  * UI can share the post-action renderer.
@@ -35,9 +36,8 @@ import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js
 import {
   IDEMPOTENCY_KEY_MIN,
   IDEMPOTENCY_KEY_MAX,
-  lookupIdempotencyKey,
-  storeIdempotencyKey,
   validateIdempotencyKey,
+  withIdempotencyGuard,
 } from './idempotency.js';
 
 const log = logger.child({ handler: 'admin-withdrawal' });
@@ -132,7 +132,8 @@ export async function adminWithdrawalHandler(c: Context): Promise<Response> {
   // GBP→GBPLOOP, EUR→EURLOOP). Issuer absent in env → return 503
   // NOT_CONFIGURED so ops sees the misconfiguration loud.
   const asset = payoutAssetFor(parsed.data.currency as HomeCurrency);
-  if (asset.issuer === null) {
+  const assetIssuer = asset.issuer;
+  if (assetIssuer === null) {
     return c.json(
       {
         code: 'NOT_CONFIGURED',
@@ -142,47 +143,58 @@ export async function adminWithdrawalHandler(c: Context): Promise<Response> {
     );
   }
 
-  // Replay path — return stored snapshot verbatim with replayed:true.
-  const prior = await lookupIdempotencyKey({
-    adminUserId: actor.id,
-    key: idempotencyKey,
-  });
-  if (prior !== null) {
-    const priorResult = (prior.body as { result?: WithdrawalResponse }).result;
-    notifyAdminAudit({
-      actorUserId: actor.id,
-      endpoint: `POST /api/admin/users/${userId}/withdrawals`,
-      targetUserId: userId,
-      ...(priorResult?.amountMinor !== undefined ? { amountMinor: priorResult.amountMinor } : {}),
-      ...(priorResult?.currency !== undefined ? { currency: priorResult.currency } : {}),
-      reason: parsed.data.reason,
-      idempotencyKey,
-      replayed: true,
-    });
-    return c.json(prior.body, prior.status as 200 | 400 | 404 | 409 | 500 | 503);
-  }
-
   // Convert the minor-unit balance amount into Stellar stroops.
   // 1 minor unit = 100,000 stroops (1:1 peg, 7 decimals — same as
   // payout-builder.ts:122 for order-cashback rows).
   const amountMinor = BigInt(parsed.data.amountMinor);
   const amountStroops = amountMinor * 100_000n;
 
-  let applied;
+  let guardResult;
   try {
-    applied = await applyAdminWithdrawal({
-      userId,
-      currency: parsed.data.currency,
-      amountMinor,
-      intent: {
-        assetCode: asset.code,
-        assetIssuer: asset.issuer,
-        toAddress: parsed.data.destinationAddress,
-        amountStroops,
-        memoText: generatePayoutMemo(),
+    guardResult = await withIdempotencyGuard(
+      {
+        adminUserId: actor.id,
+        key: idempotencyKey,
+        method: 'POST',
+        path: `/api/admin/users/${userId}/withdrawals`,
       },
-      reason: parsed.data.reason,
-    });
+      async () => {
+        const applied = await applyAdminWithdrawal({
+          userId,
+          currency: parsed.data.currency,
+          amountMinor,
+          intent: {
+            assetCode: asset.code,
+            assetIssuer,
+            toAddress: parsed.data.destinationAddress,
+            amountStroops,
+            memoText: generatePayoutMemo(),
+          },
+          reason: parsed.data.reason,
+        });
+
+        const result: WithdrawalResponse = {
+          id: applied.id,
+          payoutId: applied.payoutId,
+          userId: applied.userId,
+          currency: applied.currency,
+          amountMinor: applied.amountMinor.toString(),
+          destinationAddress: parsed.data.destinationAddress,
+          priorBalanceMinor: applied.priorBalanceMinor.toString(),
+          newBalanceMinor: applied.newBalanceMinor.toString(),
+          createdAt: applied.createdAt.toISOString(),
+        };
+
+        const envelope: AdminAuditEnvelope<WithdrawalResponse> = buildAuditEnvelope({
+          result,
+          actor,
+          idempotencyKey,
+          appliedAt: applied.createdAt,
+          replayed: false,
+        });
+        return { status: 200, body: envelope as unknown as Record<string, unknown> };
+      },
+    );
   } catch (err) {
     if (err instanceof InsufficientBalanceError) {
       return c.json(
@@ -206,52 +218,18 @@ export async function adminWithdrawalHandler(c: Context): Promise<Response> {
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to apply withdrawal' }, 500);
   }
 
-  const result: WithdrawalResponse = {
-    id: applied.id,
-    payoutId: applied.payoutId,
-    userId: applied.userId,
-    currency: applied.currency,
-    amountMinor: applied.amountMinor.toString(),
-    destinationAddress: parsed.data.destinationAddress,
-    priorBalanceMinor: applied.priorBalanceMinor.toString(),
-    newBalanceMinor: applied.newBalanceMinor.toString(),
-    createdAt: applied.createdAt.toISOString(),
-  };
-
-  const envelope: AdminAuditEnvelope<WithdrawalResponse> = buildAuditEnvelope({
-    result,
-    actor,
-    idempotencyKey,
-    appliedAt: applied.createdAt,
-    replayed: false,
-  });
-
-  try {
-    await storeIdempotencyKey({
-      adminUserId: actor.id,
-      key: idempotencyKey,
-      method: 'POST',
-      path: `/api/admin/users/${userId}/withdrawals`,
-      status: 200,
-      body: envelope as unknown as Record<string, unknown>,
-    });
-  } catch (err) {
-    log.warn(
-      { err, adminUserId: actor.id, key: idempotencyKey },
-      'Failed to persist idempotency snapshot; retry will replay as new write',
-    );
-  }
+  const priorResult = (guardResult.body as { result?: WithdrawalResponse }).result;
 
   notifyAdminAudit({
     actorUserId: actor.id,
     endpoint: `POST /api/admin/users/${userId}/withdrawals`,
     targetUserId: userId,
-    amountMinor: result.amountMinor,
-    currency: result.currency,
+    ...(priorResult?.amountMinor !== undefined ? { amountMinor: priorResult.amountMinor } : {}),
+    ...(priorResult?.currency !== undefined ? { currency: priorResult.currency } : {}),
     reason: parsed.data.reason,
     idempotencyKey,
-    replayed: false,
+    replayed: guardResult.replayed,
   });
 
-  return c.json(envelope, 200);
+  return c.json(guardResult.body, guardResult.status as 200);
 }

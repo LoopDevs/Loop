@@ -1,4 +1,5 @@
 import { Link } from 'react-router';
+import { useEffect, useState } from 'react';
 import type { Route } from './+types/home';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
 import { useAuth } from '~/hooks/use-auth';
@@ -35,6 +36,7 @@ export function links(): Route.LinkDescriptors {
 
 /** Thin wrapper that owns the QueryClient for this route tree. */
 function HomeContent(): React.JSX.Element {
+  const [hydrated, setHydrated] = useState(false);
   const { isNative } = useNativePlatform();
   const { isAuthenticated } = useAuth();
   const { merchants, isLoading, isError } = useAllMerchants();
@@ -63,6 +65,13 @@ function HomeContent(): React.JSX.Element {
     })
     .slice(0, 6)
     .map(({ m }) => m);
+  const visibleMerchants = hydrated ? merchants : [];
+  const visibleFeatured = hydrated ? featured : [];
+  const visibleLoading = !hydrated || isLoading;
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   return (
     <div>
@@ -195,7 +204,7 @@ function HomeContent(): React.JSX.Element {
           {!isAuthenticated && <HowItWorksStrip />}
 
           {/* Featured */}
-          {featured.length > 0 && (
+          {visibleFeatured.length > 0 && (
             <section className="mb-16">
               <div className="text-center mb-12">
                 <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
@@ -206,7 +215,7 @@ function HomeContent(): React.JSX.Element {
                 </p>
               </div>
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-                {featured.map((merchant, i) => (
+                {visibleFeatured.map((merchant, i) => (
                   <MerchantCard
                     key={merchant.id}
                     merchant={merchant}
@@ -229,7 +238,7 @@ function HomeContent(): React.JSX.Element {
                 Browse our complete collection of gift cards
               </p>
             </div>
-            {isLoading ? (
+            {visibleLoading ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 px-4 sm:px-6">
                 {Array.from({ length: 8 }).map((_, i) => (
                   <MerchantCardSkeleton key={i} />
@@ -237,7 +246,7 @@ function HomeContent(): React.JSX.Element {
               </div>
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
-                {merchants.map((merchant, i) => (
+                {visibleMerchants.map((merchant, i) => (
                   <MerchantCard
                     key={merchant.id}
                     merchant={merchant}

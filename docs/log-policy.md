@@ -17,9 +17,11 @@ The Loop backend logs:
 'admin-write' })` etc.).
 - **Admin read audit lines** (A2-2008). Every admin GET that returns
   200 emits a structured line tagged `area: 'admin-read-audit'`
-  with `actorUserId`, `path`, `query`, `isBulk`. The line-item read
-  trail ships off-host so a malicious admin deleting DB rows can't
-  cover the read trail.
+  with `actorUserId`, `path`, `query`, `isBulk`. Query strings keep
+  parameter names, but the PII-bearing admin search inputs `email`
+  and `q` are rewritten to `[REDACTED]` before they leave the
+  process. The line-item read trail ships off-host so a malicious
+  admin deleting DB rows can't cover the read trail.
 - **Errors** with stack + redacted context.
 
 The Loop web app SSR layer follows the same pattern — Pino under the
@@ -44,10 +46,13 @@ Categories:
   these should never touch the backend in the first place; the
   redaction is a backstop against a bug logging the wrong object.
 
-**Email is intentionally NOT redacted.** Operators need to know
-which user an auth failure or admin write applied to; redacting
-emails would defeat the audit story. The trade-off is documented
-inline in `logger.ts:10-11`.
+**Email is intentionally NOT redacted in ordinary structured
+fields.** Operators need to know which user an auth failure or admin
+write applied to; redacting emails would defeat the audit story. The
+trade-off is documented inline in `logger.ts:10-11`. The exception
+is admin read-audit query strings: search terms are treated as extra
+retention, not required identity context, so `email` and `q` params
+are redacted before off-host shipping.
 
 Sentry has a parallel scrubber (`apps/backend/src/sentry-init.ts` /
 `apps/web/app/sentry.client.ts`) that strips JWT-shaped substrings

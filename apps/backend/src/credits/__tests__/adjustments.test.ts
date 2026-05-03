@@ -37,6 +37,7 @@ const { dbMock, state } = vi.hoisted(() => {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
   chain['select'] = vi.fn(() => chain);
   chain['from'] = vi.fn(() => chain);
+  chain['execute'] = vi.fn(async () => []);
   // Both the cap-sum SELECT and the FOR UPDATE row land through `.where(...)`.
   // The daily-cap query terminates with the awaited `where` result (it does
   // not call `.for('update')`); the balance lock query chains `.for('update')`
@@ -113,6 +114,7 @@ beforeEach(() => {
   state.updateSets = [];
   state.returnedCreditRow = null;
   envMock.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 0n;
+  dbMock['execute']?.mockClear();
 });
 
 describe('applyAdminCreditAdjustment', () => {
@@ -254,6 +256,7 @@ describe('applyAdminCreditAdjustment', () => {
         reason: 'still under cap',
       });
       expect(result.newBalanceMinor).toBe(500_000n);
+      expect(dbMock['execute']!).toHaveBeenCalledOnce();
     });
 
     it('rejects with DailyAdjustmentLimitError when |amount| + used > cap (positive delta)', async () => {

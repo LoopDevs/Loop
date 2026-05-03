@@ -10,13 +10,37 @@ import type { Context } from 'hono';
  * shape, and the Discord audit fanout.
  */
 
-const { applyMock, lookupMock, storeMock, notifyMock, getPayoutMock } = vi.hoisted(() => ({
-  applyMock: vi.fn(),
-  lookupMock: vi.fn(async () => null as null | { body: unknown; status: number }),
-  storeMock: vi.fn(async () => undefined),
-  notifyMock: vi.fn(),
-  getPayoutMock: vi.fn(),
-}));
+const {
+  applyMock,
+  lookupMock,
+  storeMock,
+  notifyMock,
+  getPayoutMock,
+  AlreadyCompensatedError,
+  PayoutNotCompensableError,
+} = vi.hoisted(() => {
+  class AlreadyCompensatedError extends Error {
+    constructor(public readonly payoutId: string) {
+      super(`Payout ${payoutId} has already been compensated`);
+      this.name = 'AlreadyCompensatedError';
+    }
+  }
+  class PayoutNotCompensableError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'PayoutNotCompensableError';
+    }
+  }
+  return {
+    applyMock: vi.fn(),
+    lookupMock: vi.fn(async () => null as null | { body: unknown; status: number }),
+    storeMock: vi.fn(async () => undefined),
+    notifyMock: vi.fn(),
+    getPayoutMock: vi.fn(),
+    AlreadyCompensatedError,
+    PayoutNotCompensableError,
+  };
+});
 
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -35,6 +59,8 @@ vi.mock('../idempotency.js', () => ({
 
 vi.mock('../../credits/payout-compensation.js', () => ({
   applyAdminPayoutCompensation: applyMock,
+  AlreadyCompensatedError,
+  PayoutNotCompensableError,
 }));
 
 vi.mock('../../credits/pending-payouts.js', () => ({
@@ -319,6 +345,32 @@ describe('adminPayoutCompensationHandler — ADR-017 + ADR-024 §5 invariants', 
     expect(applyMock).not.toHaveBeenCalled();
     expect(storeMock).not.toHaveBeenCalled();
     expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({ replayed: true }));
+  });
+
+  it('409 ALREADY_COMPENSATED when the ledger layer sees a late duplicate', async () => {
+    applyMock.mockRejectedValueOnce(new AlreadyCompensatedError(VALID_PAYOUT_ID));
+    const res = await adminPayoutCompensationHandler(
+      makeCtx({ payoutId: VALID_PAYOUT_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
+    );
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('ALREADY_COMPENSATED');
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('409 PAYOUT_NOT_COMPENSABLE when the payout changed state after the initial read', async () => {
+    applyMock.mockRejectedValueOnce(
+      new PayoutNotCompensableError(
+        "Payout is in state 'pending'; only 'failed' payouts can be compensated",
+      ),
+    );
+    const res = await adminPayoutCompensationHandler(
+      makeCtx({ payoutId: VALID_PAYOUT_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
+    );
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('PAYOUT_NOT_COMPENSABLE');
+    expect(notifyMock).not.toHaveBeenCalled();
   });
 
   it('500 INTERNAL_ERROR on unexpected ledger-layer failure', async () => {

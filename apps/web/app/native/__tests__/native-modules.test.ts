@@ -409,6 +409,49 @@ describe('share', () => {
     expect(result).toBe(false);
   });
 
+  it('nativeShare attaches data-url images as files on web', async () => {
+    const shareFn = vi.fn().mockResolvedValue(undefined);
+    const canShareFn = vi.fn().mockReturnValue(true);
+    Object.assign(navigator, { share: shareFn, canShare: canShareFn });
+
+    const result = await nativeShare({
+      title: 'Loop',
+      text: 'Check out Loop!',
+      imageUrl: 'data:image/png;base64,SGVsbG8=',
+      imageFilename: 'card.png',
+    });
+
+    expect(result).toBe(true);
+    expect(canShareFn).toHaveBeenCalled();
+    expect(shareFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Loop',
+        text: 'Check out Loop!',
+        files: [expect.any(File)],
+      }),
+    );
+  });
+
+  it('nativeShare refuses remote image URLs and falls back to text-only share', async () => {
+    const shareFn = vi.fn().mockResolvedValue(undefined);
+    const canShareFn = vi.fn().mockReturnValue(true);
+    const fetchSpy = vi.fn();
+    Object.assign(navigator, { share: shareFn, canShare: canShareFn });
+    Object.assign(globalThis, { fetch: fetchSpy });
+
+    const result = await nativeShare({
+      title: 'Loop',
+      text: 'Check out Loop!',
+      imageUrl: 'https://example.com/share.png',
+      imageFilename: 'card.png',
+    });
+
+    expect(result).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(canShareFn).not.toHaveBeenCalled();
+    expect(shareFn).toHaveBeenCalledWith({ title: 'Loop', text: 'Check out Loop!' });
+  });
+
   it('nativeShare returns false on error', async () => {
     Object.assign(navigator, {
       share: vi.fn().mockRejectedValue(new Error('User cancelled')),
@@ -424,9 +467,9 @@ describe('share', () => {
 // 10. Biometrics
 // ────────────────────────────────────────────────────────────
 describe('biometrics', () => {
-  it('checkBiometrics returns { available: false, biometryType: "none" } on web', async () => {
+  it('checkBiometrics returns the empty web shape on web', async () => {
     const result = await checkBiometrics();
-    expect(result).toEqual({ available: false, biometryType: 'none' });
+    expect(result).toEqual({ available: false, biometryType: 'none', deviceIsSecure: false });
   });
 
   it('authenticateWithBiometrics returns false on web', async () => {

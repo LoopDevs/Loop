@@ -1,0 +1,37 @@
+
+> test
+> npm run test -w @loop/backend -w @loop/web
+
+
+> @loop/backend@0.0.1 test
+> vitest run
+
+
+ RUN  v4.1.4 /Users/ash/code/loop-app/apps/backend
+
+{"level":30,"time":1777463222521,"service":"loop-backend","env":"test","area":"email","to":"a@b.com","code":"[REDACTED]","expiresAt":"2026-04-29T11:48:02.513Z","msg":"OTP email (console stub) — this provider is dev-only"}
+{"level":50,"time":1777463227402,"service":"loop-backend","env":"test","area":"horizon-circulation","status":500,"assetCode":"USDLOOP","issuer":"GABC","msg":"Horizon /assets read failed"}
+{"level":50,"time":1777463227403,"service":"loop-backend","env":"test","area":"horizon-circulation","issues":[{"expected":"object","code":"invalid_type","path":["_embedded"],"message":"Invalid input: expected object, received undefined"}],"assetCode":"USDLOOP","issuer":"GABC","msg":"Horizon /assets response failed schema validation"}
+{"level":50,"time":1777463227406,"service":"loop-backend","env":"test","area":"horizon-trustlines","status":500,"account":"GOOPS","msg":"Horizon /accounts read failed"}
+{"level":50,"time":1777463227408,"service":"loop-backend","env":"test","area":"horizon-trustlines","issues":[{"expected":"string","code":"invalid_type","path":["account_id"],"message":"Invalid input: expected string, received undefined"},{"expected":"array","code":"invalid_type","path":["balances"],"message":"Invalid input: expected array, received undefined"}],"account":"GBAD","msg":"Horizon /accounts schema drift"}
+
+ Test Files  170 passed (170)
+      Tests  1856 passed (1856)
+   Start at  12:47:00
+   Duration  8.59s (transform 8.22s, setup 1.05s, import 43.80s, tests 6.95s, environment 10ms)
+
+
+> @loop/web@0.0.1 test
+> vitest run
+
+
+ RUN  v4.1.4 /Users/ash/code/loop-app/apps/web
+
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+
+ Test Files  122 passed (122)
+      Tests  955 passed (955)
+   Start at  12:47:09
+   Duration  12.34s (transform 6.35s, setup 0ms, import 24.89s, tests 16.98s, environment 52.79s)
+

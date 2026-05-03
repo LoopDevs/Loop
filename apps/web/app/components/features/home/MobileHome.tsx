@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router';
 import type { Merchant } from '@loop/shared';
@@ -33,6 +33,7 @@ import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
  * system), "streak" stat (no backend metric).
  */
 export function MobileHome(): React.JSX.Element {
+  const [hydrated, setHydrated] = useState(false);
   const { merchants, isLoading: merchantsLoading } = useAllMerchants();
   // Bulk cashback-rate map (ADR 011 / 015). One fetch covers every
   // cell in the directory grid; each DirectoryCell then does an O(1)
@@ -42,6 +43,8 @@ export function MobileHome(): React.JSX.Element {
   const { orders } = useOrders(1, isAuthenticated);
   const navigate = useNavigate();
   const { isNative } = useNativePlatform();
+  const visibleMerchants = useMemo(() => (hydrated ? merchants : []), [hydrated, merchants]);
+  const visibleMerchantsLoading = !hydrated || merchantsLoading;
 
   // Greeting name — email local-part, title-cased first char. Falls
   // back to "there" for unauth / no-email visitors.
@@ -73,7 +76,7 @@ export function MobileHome(): React.JSX.Element {
   // errored so the hero doesn't flash "$0.00" on a cold load.
   const { fallbackCents, ordersCount } = useMemo(() => {
     const completed = orders.filter((o) => o.status === 'completed');
-    const byId = new Map(merchants.map((m) => [m.id, m]));
+    const byId = new Map(visibleMerchants.map((m) => [m.id, m]));
     let total = 0;
     for (const o of completed) {
       const pct = byId.get(o.merchantId)?.savingsPercentage;
@@ -81,7 +84,7 @@ export function MobileHome(): React.JSX.Element {
       total += Math.round(o.amount * 100 * (pct / 100));
     }
     return { fallbackCents: total, ordersCount: completed.length };
-  }, [orders, merchants]);
+  }, [orders, visibleMerchants]);
 
   // `lifetimeMinor` is already pence / cents (bigint-as-string).
   // Coerce through Number — ledger totals fit into safe-integer
@@ -96,19 +99,22 @@ export function MobileHome(): React.JSX.Element {
   // row reads as populated.
   const quickBuy = useMemo(
     () =>
-      merchants
+      visibleMerchants
         .filter((m) => m.enabled !== false && m.logoUrl !== undefined)
         .slice()
         .sort((a, b) => (b.savingsPercentage ?? 0) - (a.savingsPercentage ?? 0))
         .slice(0, 6),
-    [merchants],
+    [visibleMerchants],
   );
 
   // Pending orders are hidden from Recent activity — a blank row
   // with no cashback reads as noise on the home screen. Matches the
   // same filter on /orders.
   const recent = orders.filter((o) => o.status !== 'pending').slice(0, 3);
-  const merchantById = useMemo(() => new Map(merchants.map((m) => [m.id, m])), [merchants]);
+  const merchantById = useMemo(
+    () => new Map(visibleMerchants.map((m) => [m.id, m])),
+    [visibleMerchants],
+  );
 
   // Search + directory. Query folds for diacritics using the same
   // util the backend + Navbar search use, so "cafe" matches "Café"
@@ -116,13 +122,17 @@ export function MobileHome(): React.JSX.Element {
   const [query, setQuery] = useState('');
   const foldedQuery = foldForSearch(query.trim());
   const grid = useMemo(() => {
-    const enabled = merchants.filter((m) => m.enabled !== false);
+    const enabled = visibleMerchants.filter((m) => m.enabled !== false);
     const filtered =
       foldedQuery.length > 0
         ? enabled.filter((m) => foldForSearch(m.name).includes(foldedQuery))
         : enabled;
     return filtered.slice().sort((a, b) => (b.savingsPercentage ?? 0) - (a.savingsPercentage ?? 0));
-  }, [merchants, foldedQuery]);
+  }, [visibleMerchants, foldedQuery]);
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   return (
     <div
@@ -162,7 +172,7 @@ export function MobileHome(): React.JSX.Element {
 
       {/* Quick buy ---------------------------------------------- */}
       <SectionHeader title="Quick buy" actionLabel="Browse all" actionHref="#mobile-home-grid" />
-      {merchantsLoading && quickBuy.length === 0 ? (
+      {visibleMerchantsLoading && quickBuy.length === 0 ? (
         <div className="flex gap-2.5 px-5 pb-1 overflow-x-auto">
           {Array.from({ length: 6 }).map((_, i) => (
             <div
@@ -281,7 +291,7 @@ export function MobileHome(): React.JSX.Element {
           back under the hero. The tab bar clearance below sits
           inside NativeShell, so this min-h is clean content. */}
       <div id="mobile-home-grid" className="px-5 pb-6 grid grid-cols-2 gap-2.5 min-h-[70vh]">
-        {merchantsLoading && grid.length === 0 ? (
+        {visibleMerchantsLoading && grid.length === 0 ? (
           Array.from({ length: 6 }).map((_, i) => <MerchantCardSkeleton key={i} />)
         ) : grid.length > 0 ? (
           grid.map((m) => (

@@ -130,7 +130,7 @@ export function registerAdminPayoutsClusterWritesOpenApi(
     path: '/api/admin/payouts/{id}/compensate',
     summary: 'Compensate a permanently-failed withdrawal payout (ADR-024 §5).',
     description:
-      'Re-credits the user after their withdrawal payout permanently failed on-chain. Writes a positive `type=adjustment` row referencing the payout id; net result is the original withdrawal debit is offset and the user is back to where they started. Manual-only (Phase 2a) — finance reviews failures before triggering. 400 if the payout is not a withdrawal; 409 if the payout is in any state other than `failed`. ADR 017 compliant: `Idempotency-Key` header + `reason` body required.',
+      'Re-credits the user after their withdrawal payout permanently failed on-chain. Writes a positive `type=adjustment` row referencing the payout id; net result is the original withdrawal debit is offset and the user is back to where they started. Manual-only (Phase 2a) — finance reviews failures before triggering. 400 if the payout is not a withdrawal; 409 if the payout is already compensated or is in any state other than `failed`. ADR 017 compliant: `Idempotency-Key` header + `reason` body required.',
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     request: {
@@ -168,7 +168,8 @@ export function registerAdminPayoutsClusterWritesOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       409: {
-        description: "Payout is not in 'failed' state — only failed payouts can be compensated",
+        description:
+          "Payout is already compensated or is not in 'failed' state (`ALREADY_COMPENSATED` / `PAYOUT_NOT_COMPENSABLE`)",
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {

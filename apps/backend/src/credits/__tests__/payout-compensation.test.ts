@@ -1,0 +1,181 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { dbMock, state } = vi.hoisted(() => {
+  interface State {
+    forUpdateResults: unknown[][];
+    insertCreditCalls: unknown[];
+    insertUserCreditsCalls: unknown[];
+    updateCalls: Array<{ table: string | undefined; values: unknown }>;
+    returnedCreditRow: unknown;
+  }
+  const s: State = {
+    forUpdateResults: [],
+    insertCreditCalls: [],
+    insertUserCreditsCalls: [],
+    updateCalls: [],
+    returnedCreditRow: null,
+  };
+
+  const chain: Record<string, ReturnType<typeof vi.fn>> = {};
+  chain['select'] = vi.fn(() => chain);
+  chain['from'] = vi.fn(() => chain);
+  chain['where'] = vi.fn(() => chain);
+  chain['for'] = vi.fn(async () => s.forUpdateResults.shift() ?? []);
+  chain['insert'] = vi.fn((table: unknown) => {
+    const name = (table as Record<string, unknown>)['__name'];
+    (chain as unknown as { _lastInsert: string | undefined })._lastInsert =
+      typeof name === 'string' ? name : undefined;
+    return chain;
+  });
+  chain['values'] = vi.fn((values: unknown) => {
+    const last = (chain as unknown as { _lastInsert: string | undefined })._lastInsert;
+    if (last === 'creditTransactions') s.insertCreditCalls.push(values);
+    if (last === 'userCredits') s.insertUserCreditsCalls.push(values);
+    return chain;
+  });
+  chain['returning'] = vi.fn(async () => [s.returnedCreditRow]);
+  chain['update'] = vi.fn((table: unknown) => {
+    const name = (table as Record<string, unknown>)['__name'];
+    (chain as unknown as { _lastUpdate: string | undefined })._lastUpdate =
+      typeof name === 'string' ? name : undefined;
+    return chain;
+  });
+  chain['set'] = vi.fn((values: unknown) => {
+    s.updateCalls.push({
+      table: (chain as unknown as { _lastUpdate: string | undefined })._lastUpdate,
+      values,
+    });
+    return chain;
+  });
+  chain['transaction'] = vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(chain));
+
+  return { dbMock: chain, state: s };
+});
+
+vi.mock('../../db/client.js', () => ({ db: dbMock }));
+vi.mock('../../db/schema.js', () => ({
+  creditTransactions: { __name: 'creditTransactions' },
+  pendingPayouts: {
+    __name: 'pendingPayouts',
+    id: 'id',
+    compensatedAt: 'compensated_at',
+  },
+  userCredits: {
+    __name: 'userCredits',
+    userId: 'user_id',
+    currency: 'currency',
+  },
+}));
+
+import {
+  AlreadyCompensatedError,
+  applyAdminPayoutCompensation,
+  PayoutNotCompensableError,
+} from '../payout-compensation.js';
+
+beforeEach(() => {
+  state.forUpdateResults = [];
+  state.insertCreditCalls = [];
+  state.insertUserCreditsCalls = [];
+  state.updateCalls = [];
+  state.returnedCreditRow = { id: 'ct-1', createdAt: new Date('2026-04-29T00:00:00Z') };
+});
+
+describe('applyAdminPayoutCompensation', () => {
+  it('locks the payout, writes the adjustment, bumps balance, and marks compensatedAt', async () => {
+    state.forUpdateResults = [
+      [
+        {
+          id: 'p-1',
+          kind: 'withdrawal',
+          state: 'failed',
+          compensatedAt: null,
+        },
+      ],
+      [{ userId: 'u-1', currency: 'USD', balanceMinor: 100n }],
+    ];
+
+    const result = await applyAdminPayoutCompensation({
+      userId: 'u-1',
+      currency: 'USD',
+      amountMinor: 500n,
+      payoutId: 'p-1',
+      reason: 'manual compensation',
+    });
+
+    expect(result).toMatchObject({
+      id: 'ct-1',
+      payoutId: 'p-1',
+      priorBalanceMinor: 100n,
+      newBalanceMinor: 600n,
+    });
+    expect(state.insertCreditCalls[0]).toMatchObject({
+      userId: 'u-1',
+      type: 'adjustment',
+      amountMinor: 500n,
+      referenceType: 'payout',
+      referenceId: 'p-1',
+      reason: 'manual compensation',
+    });
+    expect(state.updateCalls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: 'userCredits',
+          values: expect.objectContaining({ balanceMinor: 600n }),
+        }),
+        expect.objectContaining({
+          table: 'pendingPayouts',
+          values: expect.objectContaining({ compensatedAt: expect.anything() }),
+        }),
+      ]),
+    );
+  });
+
+  it('throws AlreadyCompensatedError when the payout is already marked compensated', async () => {
+    state.forUpdateResults = [
+      [
+        {
+          id: 'p-1',
+          kind: 'withdrawal',
+          state: 'failed',
+          compensatedAt: new Date('2026-04-29T00:00:00Z'),
+        },
+      ],
+    ];
+
+    await expect(
+      applyAdminPayoutCompensation({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 500n,
+        payoutId: 'p-1',
+        reason: 'manual compensation',
+      }),
+    ).rejects.toBeInstanceOf(AlreadyCompensatedError);
+    expect(state.insertCreditCalls).toHaveLength(0);
+  });
+
+  it('throws PayoutNotCompensableError when the payout is not a failed withdrawal', async () => {
+    state.forUpdateResults = [
+      [
+        {
+          id: 'p-1',
+          kind: 'order_cashback',
+          state: 'failed',
+          compensatedAt: null,
+        },
+      ],
+    ];
+
+    await expect(
+      applyAdminPayoutCompensation({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 500n,
+        payoutId: 'p-1',
+        reason: 'manual compensation',
+      }),
+    ).rejects.toBeInstanceOf(PayoutNotCompensableError);
+    expect(state.insertCreditCalls).toHaveLength(0);
+  });
+});

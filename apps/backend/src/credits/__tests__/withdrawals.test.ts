@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const { dbMock, state } = vi.hoisted(() => {
   interface State {
     forUpdateRows: unknown[];
+    selectRows: unknown[];
     insertCreditCalls: unknown[];
     insertUserCreditsCalls: unknown[];
     insertPayoutCalls: unknown[];
@@ -17,9 +18,11 @@ const { dbMock, state } = vi.hoisted(() => {
     returnedCreditRow: unknown;
     returnedPayoutRow: unknown;
     creditInsertError: Error | null;
+    payoutInsertError: Error | null;
   }
   const s: State = {
     forUpdateRows: [],
+    selectRows: [],
     insertCreditCalls: [],
     insertUserCreditsCalls: [],
     insertPayoutCalls: [],
@@ -27,6 +30,7 @@ const { dbMock, state } = vi.hoisted(() => {
     returnedCreditRow: null,
     returnedPayoutRow: null,
     creditInsertError: null,
+    payoutInsertError: null,
   };
 
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
@@ -34,6 +38,7 @@ const { dbMock, state } = vi.hoisted(() => {
   chain['from'] = vi.fn(() => chain);
   chain['where'] = vi.fn(() => chain);
   chain['for'] = vi.fn(async () => s.forUpdateRows);
+  chain['limit'] = vi.fn(async () => s.selectRows);
   chain['insert'] = vi.fn((table: unknown) => {
     const name = (table as Record<string, unknown>)['__name'];
     (chain as unknown as { _lastInsert: string | undefined })['_lastInsert'] =
@@ -54,6 +59,7 @@ const { dbMock, state } = vi.hoisted(() => {
       return [s.returnedCreditRow];
     }
     if (last === 'pendingPayouts') {
+      if (s.payoutInsertError !== null) throw s.payoutInsertError;
       return [s.returnedPayoutRow];
     }
     return [s.returnedCreditRow];
@@ -76,7 +82,19 @@ vi.mock('../../db/schema.js', () => ({
     currency: 'currency',
     __name: 'userCredits',
   },
-  pendingPayouts: { __name: 'pendingPayouts', orderId: 'order_id' },
+  pendingPayouts: {
+    __name: 'pendingPayouts',
+    id: 'id',
+    userId: 'user_id',
+    orderId: 'order_id',
+    kind: 'kind',
+    assetCode: 'asset_code',
+    assetIssuer: 'asset_issuer',
+    toAddress: 'to_address',
+    amountStroops: 'amount_stroops',
+    state: 'state',
+    compensatedAt: 'compensated_at',
+  },
 }));
 
 import { applyAdminWithdrawal, WithdrawalAlreadyIssuedError } from '../withdrawals.js';
@@ -92,6 +110,7 @@ const intent = {
 
 beforeEach(() => {
   state.forUpdateRows = [];
+  state.selectRows = [];
   state.insertCreditCalls = [];
   state.insertUserCreditsCalls = [];
   state.insertPayoutCalls = [];
@@ -99,11 +118,13 @@ beforeEach(() => {
   state.returnedCreditRow = null;
   state.returnedPayoutRow = null;
   state.creditInsertError = null;
+  state.payoutInsertError = null;
 });
 
 describe('applyAdminWithdrawal (A2-901 / ADR-024)', () => {
   it('happy path: queues payout + writes negative credit-tx + decrements balance', async () => {
     state.forUpdateRows = [{ userId: 'u-1', currency: 'USD', balanceMinor: 2000n }];
+    state.selectRows = [];
     state.returnedPayoutRow = { id: 'p-1' };
     state.returnedCreditRow = { id: 'ct-1', createdAt: new Date('2026-04-25') };
     const result = await applyAdminWithdrawal({
@@ -148,6 +169,7 @@ describe('applyAdminWithdrawal (A2-901 / ADR-024)', () => {
 
   it('rejects when balance < amount with InsufficientBalanceError', async () => {
     state.forUpdateRows = [{ userId: 'u-1', currency: 'USD', balanceMinor: 100n }];
+    state.selectRows = [];
     state.returnedPayoutRow = { id: 'p-x' };
     state.returnedCreditRow = { id: 'ct-x', createdAt: new Date() };
     await expect(
@@ -166,6 +188,7 @@ describe('applyAdminWithdrawal (A2-901 / ADR-024)', () => {
 
   it('rejects when no balance row exists at all (treated as 0 balance)', async () => {
     state.forUpdateRows = [];
+    state.selectRows = [];
     await expect(
       applyAdminWithdrawal({
         userId: 'u-new',
@@ -200,6 +223,7 @@ describe('applyAdminWithdrawal (A2-901 / ADR-024)', () => {
 
   it('A2-901 / ADR-024 §4: maps unique-violation on credit-tx to WithdrawalAlreadyIssuedError', async () => {
     state.forUpdateRows = [{ userId: 'u-1', currency: 'USD', balanceMinor: 2000n }];
+    state.selectRows = [];
     state.returnedPayoutRow = { id: 'p-dup' };
     state.creditInsertError = Object.assign(new Error('duplicate key'), {
       code: '23505',
@@ -220,6 +244,7 @@ describe('applyAdminWithdrawal (A2-901 / ADR-024)', () => {
 
   it('extracts the payout id from the unique-violation detail', async () => {
     state.forUpdateRows = [{ userId: 'u-1', currency: 'USD', balanceMinor: 2000n }];
+    state.selectRows = [];
     state.returnedPayoutRow = { id: 'p-extract' };
     state.creditInsertError = Object.assign(new Error('duplicate'), {
       code: '23505',
@@ -244,6 +269,7 @@ describe('applyAdminWithdrawal (A2-901 / ADR-024)', () => {
 
   it('rethrows unrelated pg errors as-is', async () => {
     state.forUpdateRows = [{ userId: 'u-1', currency: 'USD', balanceMinor: 2000n }];
+    state.selectRows = [];
     state.returnedPayoutRow = { id: 'p-fk' };
     state.creditInsertError = Object.assign(new Error('fk violation'), {
       code: '23503',
@@ -262,6 +288,7 @@ describe('applyAdminWithdrawal (A2-901 / ADR-024)', () => {
 
   it('persists operator reason on the credit-tx row (A2-908)', async () => {
     state.forUpdateRows = [{ userId: 'u-1', currency: 'USD', balanceMinor: 2000n }];
+    state.selectRows = [];
     state.returnedPayoutRow = { id: 'p-r' };
     state.returnedCreditRow = { id: 'ct-r', createdAt: new Date() };
     await applyAdminWithdrawal({
@@ -274,5 +301,21 @@ describe('applyAdminWithdrawal (A2-901 / ADR-024)', () => {
     expect(state.insertCreditCalls[0]).toMatchObject({
       reason: 'manual cash-out per ops ticket #1234',
     });
+  });
+
+  it('rejects a matching active withdrawal before inserting a fresh payout row', async () => {
+    state.forUpdateRows = [{ userId: 'u-1', currency: 'USD', balanceMinor: 2000n }];
+    state.selectRows = [{ id: 'p-existing' }];
+    await expect(
+      applyAdminWithdrawal({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 500n,
+        intent,
+        reason: 'r',
+      }),
+    ).rejects.toMatchObject({ payoutId: 'p-existing' });
+    expect(state.insertPayoutCalls).toHaveLength(0);
+    expect(state.insertCreditCalls).toHaveLength(0);
   });
 });

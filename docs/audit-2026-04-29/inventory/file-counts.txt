@@ -1,0 +1,7 @@
+backend src files: 548
+web app files: 345
+mobile files: 1305
+shared src files: 28
+docs files: 108
+github files: 12
+scripts files: 7

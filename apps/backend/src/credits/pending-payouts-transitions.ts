@@ -141,7 +141,13 @@ export async function resetPayoutToPending(id: string): Promise<PendingPayout | 
       failedAt: null,
       lastError: null,
     })
-    .where(and(eq(pendingPayouts.id, id), eq(pendingPayouts.state, 'failed')))
+    .where(
+      and(
+        eq(pendingPayouts.id, id),
+        eq(pendingPayouts.state, 'failed'),
+        sql`${pendingPayouts.compensatedAt} IS NULL`,
+      ),
+    )
     .returning();
   return row ?? null;
 }

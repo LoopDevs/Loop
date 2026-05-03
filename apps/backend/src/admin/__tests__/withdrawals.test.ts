@@ -13,8 +13,7 @@ import type { Context } from 'hono';
 
 const {
   applyMock,
-  lookupMock,
-  storeMock,
+  guardMock,
   notifyMock,
   getUserByIdMock,
   payoutAssetForMock,
@@ -40,8 +39,7 @@ const {
   }
   return {
     applyMock: vi.fn(),
-    lookupMock: vi.fn(async () => null as null | { body: unknown; status: number }),
-    storeMock: vi.fn(async () => undefined),
+    guardMock: vi.fn(),
     notifyMock: vi.fn(),
     getUserByIdMock: vi.fn(),
     payoutAssetForMock: vi.fn(),
@@ -62,8 +60,7 @@ vi.mock('../idempotency.js', () => ({
   IDEMPOTENCY_KEY_MAX: 128,
   validateIdempotencyKey: (k: string | undefined): k is string =>
     k !== undefined && k.length >= 16 && k.length <= 128,
-  lookupIdempotencyKey: lookupMock,
-  storeIdempotencyKey: storeMock,
+  withIdempotencyGuard: guardMock,
 }));
 
 vi.mock('../../credits/withdrawals.js', () => ({
@@ -153,8 +150,18 @@ function makeCtx(opts: {
 
 beforeEach(() => {
   applyMock.mockReset();
-  lookupMock.mockReset().mockResolvedValue(null);
-  storeMock.mockReset().mockResolvedValue(undefined);
+  guardMock.mockReset().mockImplementation(
+    async (
+      _args: unknown,
+      doWrite: () => Promise<{
+        status: number;
+        body: Record<string, unknown>;
+      }>,
+    ) => {
+      const result = await doWrite();
+      return { ...result, replayed: false };
+    },
+  );
   notifyMock.mockReset();
   getUserByIdMock.mockReset().mockResolvedValue({ id: VALID_USER_ID, email: 'u@loop.test' });
   payoutAssetForMock.mockReset().mockReturnValue({ code: 'USDLOOP', issuer: 'GISSUER123' });
@@ -277,7 +284,7 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
     expect(applyMock).not.toHaveBeenCalled();
   });
 
-  it('200 + envelope on happy path; converts minor→stroops, store + notify fire once', async () => {
+  it('200 + envelope on happy path; converts minor→stroops, guard + notify fire once', async () => {
     applyMock.mockResolvedValueOnce(APPLIED);
     const res = await adminWithdrawalHandler(
       makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
@@ -314,7 +321,7 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
     expect(callArg.intent.assetIssuer).toBe('GISSUER123');
     expect(callArg.intent.toAddress).toBe(VALID_DEST);
 
-    expect(storeMock).toHaveBeenCalledOnce();
+    expect(guardMock).toHaveBeenCalledOnce();
     expect(notifyMock).toHaveBeenCalledOnce();
     expect(notifyMock).toHaveBeenCalledWith(
       expect.objectContaining({ replayed: false, reason: GOOD_BODY.reason }),
@@ -334,16 +341,15 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
         newBalanceMinor: '500',
         createdAt: APPLIED.createdAt.toISOString(),
       },
-      audit: { replayed: false },
+      audit: { replayed: true },
     };
-    lookupMock.mockResolvedValueOnce({ body: priorEnvelope, status: 200 });
+    guardMock.mockResolvedValueOnce({ replayed: true, status: 200, body: priorEnvelope });
 
     const res = await adminWithdrawalHandler(
       makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
     );
     expect(res.status).toBe(200);
     expect(applyMock).not.toHaveBeenCalled();
-    expect(storeMock).not.toHaveBeenCalled();
     expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({ replayed: true }));
   });
 
@@ -355,11 +361,10 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('INSUFFICIENT_BALANCE');
-    expect(storeMock).not.toHaveBeenCalled();
     expect(notifyMock).not.toHaveBeenCalled();
   });
 
-  it('409 WITHDRAWAL_ALREADY_ISSUED when the partial-unique index trips', async () => {
+  it('409 WITHDRAWAL_ALREADY_ISSUED when the semantic duplicate guard trips', async () => {
     applyMock.mockRejectedValueOnce(new WithdrawalAlreadyIssuedError('payout-uuid'));
     const res = await adminWithdrawalHandler(
       makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
@@ -367,7 +372,6 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
     expect(res.status).toBe(409);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('WITHDRAWAL_ALREADY_ISSUED');
-    expect(storeMock).not.toHaveBeenCalled();
     expect(notifyMock).not.toHaveBeenCalled();
   });
 

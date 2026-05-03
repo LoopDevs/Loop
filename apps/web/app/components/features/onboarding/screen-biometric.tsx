@@ -75,7 +75,7 @@ export function BiometricSetup({
       if (done || scanning || available !== true) return;
       void (async () => {
         setScanning(true);
-        const ok = await authenticateWithBiometrics('Enable quick sign-in');
+        const ok = await authenticateWithBiometrics('Enable app lock');
         if (!ok) {
           setScanning(false);
           return;
@@ -106,10 +106,10 @@ export function BiometricSetup({
         ? 'Not available'
         : 'Use Face ID';
   const statusSub = done
-    ? 'You\u2019ll use Face ID to sign in and confirm purchases.'
+    ? 'You\u2019ll use Face ID or your device passcode to unlock Loop on app launch.'
     : available === false
       ? 'We\u2019ll skip this \u2014 you can turn it on later from your account.'
-      : 'Unlock Loop instantly and confirm purchases without a passcode.';
+      : 'Lock Loop on app launch and fall back to your device passcode if biometrics are unavailable.';
 
   return (
     <div className="flex-1 flex flex-col justify-center gap-6 px-6 py-6">

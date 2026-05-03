@@ -279,7 +279,7 @@ npm run test:coverage    # vitest run --coverage across workspaces
 npm run test:e2e         # Playwright e2e — self-contained mocked suite (alias)
 npm run test:e2e:mocked  # Playwright e2e — same mocked suite, explicit name
 npm run test:e2e:real    # Playwright e2e — against a running real-CTX backend
-npm run audit            # npm audit --audit-level=high
+npm run audit            # explicit audit policy gate: fail on any high/critical or unapproved moderate advisory
 npm run build            # production build across all workspaces
 npm run proto:generate   # buf generate → packages/shared/src/proto/
 npm run verify           # typecheck + lint + format:check + lint:docs + test — the
@@ -322,26 +322,22 @@ cd apps/mobile
 npx cap add ios                        # once per checkout
 npx cap add android                    # once per checkout
 
-npx cap sync                           # copy web build + sync plugins
-./scripts/apply-native-overlays.sh     # MUST run after every `cap add`
-                                       # or `cap sync` — re-applies the
-                                       # audited A-033 / A-034 config
-                                       # that regeneration would drop
+npm run sync                           # wraps `cap sync` + native overlays
 npx cap open ios                       # open Xcode
 npx cap open android                   # open Android Studio
 ```
 
-Rerun `./scripts/apply-native-overlays.sh` after any `cap add` or
-`cap sync` to keep the A-033 backup exclusions and the A-034 Face ID
-usage description in place — both are enforced by overlay files in
-`apps/mobile/native-overlays/`. See `docs/mobile-native-ux.md`
+`npm run sync` is the required path after any `cap add` or web-build
+change. It runs `cap sync` and then re-applies the A-033 / A-034
+overlay files from `apps/mobile/native-overlays/` so regeneration
+cannot silently drop them. See `docs/mobile-native-ux.md`
 §Native-config overlays.
 
 **Live reload during mobile development:**
 
 1. Edit `apps/mobile/capacitor.config.ts` — temporarily add `server: { url: 'http://<local-ip>:5173' }`
 2. `cd apps/web && npm run dev`
-3. `cd apps/mobile && npx cap sync && ./scripts/apply-native-overlays.sh && npx cap open ios`
+3. `cd apps/mobile && npm run sync && npx cap open ios`
 4. Remove `server.url` before committing
 
 ---

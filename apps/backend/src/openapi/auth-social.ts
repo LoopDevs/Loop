@@ -60,7 +60,7 @@ export function registerAuthSocialOpenApi(
     path: '/api/auth/social/google',
     summary: 'Sign in with a Google id_token (ADR 014).',
     description:
-      "Server-side verification: the id_token is checked against Google's JWKS, the audience is matched against the configured client id per platform, and the verified email + sub are used to upsert the Loop user row. Returns the same access + refresh shape as /api/auth/verify-otp.",
+      "Loop-native only. Server-side verification checks the id_token against Google's JWKS, matches audience against the configured client id per platform, and uses the verified email + sub to resolve or create the Loop user row. On success, Loop mints the same access + refresh shape as `/api/auth/verify-otp`.",
     tags: ['Auth'],
     request: { body: { content: { 'application/json': { schema: SocialLoginBody } } } },
     responses: {
@@ -76,6 +76,11 @@ export function registerAuthSocialOpenApi(
         description: 'id_token invalid, expired, or audience mismatch',
         content: { 'application/json': { schema: errorResponse } },
       },
+      404: {
+        description:
+          'Loop-native auth disabled or Google audiences not configured in this deployment (`NOT_FOUND`)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
       429: {
         description: 'Rate limit exceeded (10/min per IP)',
         content: { 'application/json': { schema: errorResponse } },
@@ -86,7 +91,8 @@ export function registerAuthSocialOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       503: {
-        description: 'Google JWKS unreachable — retry-safe',
+        description:
+          'Auth subsystem disabled by runtime kill switch (`SUBSYSTEM_DISABLED`) or Google/JWKS auth infrastructure temporarily unavailable (`SERVICE_UNAVAILABLE`)',
         content: { 'application/json': { schema: errorResponse } },
       },
     },
@@ -97,7 +103,7 @@ export function registerAuthSocialOpenApi(
     path: '/api/auth/social/apple',
     summary: 'Sign in with an Apple id_token (ADR 014).',
     description:
-      "Server-side verification: the id_token is checked against Apple's JWKS, the audience is matched against the configured Apple client id, and the verified email + sub are used to upsert the Loop user row. Returns the same access + refresh shape as /api/auth/verify-otp.",
+      "Loop-native only. Server-side verification checks the id_token against Apple's JWKS, matches audience against the configured Apple client id, and uses the verified email + sub to resolve or create the Loop user row. On success, Loop mints the same access + refresh shape as `/api/auth/verify-otp`.",
     tags: ['Auth'],
     request: { body: { content: { 'application/json': { schema: SocialLoginBody } } } },
     responses: {
@@ -113,6 +119,11 @@ export function registerAuthSocialOpenApi(
         description: 'id_token invalid, expired, or audience mismatch',
         content: { 'application/json': { schema: errorResponse } },
       },
+      404: {
+        description:
+          'Loop-native auth disabled or Apple Sign In is not configured in this deployment (`NOT_FOUND`)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
       429: {
         description: 'Rate limit exceeded (10/min per IP)',
         content: { 'application/json': { schema: errorResponse } },
@@ -123,7 +134,8 @@ export function registerAuthSocialOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       503: {
-        description: 'Apple JWKS unreachable — retry-safe',
+        description:
+          'Auth subsystem disabled by runtime kill switch (`SUBSYSTEM_DISABLED`) or Apple/JWKS auth infrastructure temporarily unavailable (`SERVICE_UNAVAILABLE`)',
         content: { 'application/json': { schema: errorResponse } },
       },
     },

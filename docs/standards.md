@@ -382,6 +382,22 @@ violation. Flag it in review.
 }
 ```
 
+### TanStack Query ownership
+
+Query placement is by reuse boundary, not by ideology:
+
+- Put the query in `apps/web/app/hooks/` when multiple surfaces share it
+  or when invalidation policy needs one obvious home.
+- Keep the query in the route/component when it is genuinely local to a
+  single screen or card.
+
+In both cases the requirements are the same:
+
+- Query functions call only `apps/web/app/services/*`.
+- Keys follow the flat taxonomy documented in `apps/web/AGENTS.md`.
+- `staleTime` is explicit.
+- `retry` is `shouldRetry` unless the surface has a documented exception.
+
 ### ESLint rules (non-exhaustive — see `eslint.config.js` for full config)
 
 ```
@@ -1011,12 +1027,32 @@ structure:
 jobs:
   quality: # typecheck + lint + format:check + lint:docs (flyctl validate)
   test-unit: # vitest run --coverage on backend and web
-  audit: # npm audit --audit-level=high
+  audit: # repo audit policy gate (high/critical always fail; moderate set must be explicitly accepted)
   build: # backend tsup + web SSR build + web mobile static export
   test-e2e-mocked: # playwright mocked suite — runs on every push (audit A-003)
   test-e2e: # playwright real-upstream suite — PR-only
   notify: # Discord status — always, depends on all of the above
 ```
+
+### Security audit policy
+
+- `npm run audit` is the only supported dependency-audit gate.
+- High and critical advisories always fail the gate.
+- Moderate advisories do **not** pass silently. The checked-in script
+  [scripts/check-audit-policy.mjs](/Users/ash/code/loop-app/scripts/check-audit-policy.mjs)
+  pins the currently accepted moderate set exactly; a new moderate, or a
+  removed one that leaves stale policy behind, fails CI until the policy
+  is reviewed and updated.
+- Current accepted moderates:
+  - `@esbuild-kit/core-utils`
+  - `@esbuild-kit/esm-loader`
+  - `drizzle-kit`
+  - `esbuild`
+  - `postcss`
+- The `drizzle-kit` / `@esbuild-kit/*` cluster remains accepted only
+  because the available fix path is a major-version move that needs a
+  deliberate migration. `postcss` remains accepted until the transitive
+  bump lands. Neither is a blanket waiver for future moderate findings.
 
 ### Branch protection on `main`
 
