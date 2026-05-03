@@ -27,10 +27,6 @@ const ACCEPTED_MODERATE_VULNS = new Map([
     'esbuild',
     'Only the deprecated drizzle-kit sub-tree lands on the vulnerable range; repo policy tracks it explicitly.',
   ],
-  [
-    'postcss',
-    'Transitive moderate advisory currently tolerated pending a deliberate dependency bump.',
-  ],
 ]);
 
 function runAuditJson() {
