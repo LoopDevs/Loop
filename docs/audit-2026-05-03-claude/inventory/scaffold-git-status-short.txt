@@ -1,0 +1,1 @@
+Expected Claude scaffold status after edits: docs/audit-2026-05-03-claude/** created for independent Claude audit execution.

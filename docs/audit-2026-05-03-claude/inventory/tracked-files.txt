@@ -1097,10 +1097,6 @@ docs/audit-2026-04-29/inventory/phase-map.md
 docs/audit-2026-04-29/plan.md
 docs/audit-2026-04-29/remediation-plan.md
 docs/audit-2026-04-29/tracker.md
-docs/audit-2026-05-03/inventory/directory-map.txt
-docs/audit-2026-05-03/inventory/git-status-short.txt
-docs/audit-2026-05-03/inventory/tracked-files.txt
-docs/audit-2026-05-03/inventory/workspace-files.txt
 docs/audit-2026-admin-handoff.md
 docs/audit-2026-adversarial-plan.md
 docs/audit-2026-evidence/README.md
