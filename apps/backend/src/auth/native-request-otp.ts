@@ -90,9 +90,14 @@ export async function nativeRequestOtpHandler(c: Context): Promise<Response> {
 
     return c.json({ message: 'Verification code sent' });
   } catch (err) {
+    // A4-002: match the CTX-proxy enumeration-defense response shape.
+    // The CTX-proxy `requestOtpHandler` collapses every internal
+    // failure into a generic 200 envelope so an attacker probing the
+    // endpoint can't distinguish "user not found / DB happy" (200)
+    // from "DB outage / queue saturation" (500). The native path was
+    // lifted out without copying the policy; this restores parity.
+    // log.error so ops still sees the incident.
     log.error({ err, email }, 'Native request-otp failed unexpectedly');
-    // Surface a 500 on DB failures so the client can back off. A
-    // malicious caller learns nothing beyond "backend is unwell".
-    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to send verification code' }, 500);
+    return c.json({ message: 'Verification code sent' });
   }
 }

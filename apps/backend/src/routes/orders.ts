@@ -57,25 +57,29 @@ export function mountOrderRoutes(app: Hono): void {
   app.use('/api/orders', requireAuth);
   app.use('/api/orders/*', requireAuth);
 
-  // Legacy CTX-proxy order paths.
+  // A4-075: literal routes BEFORE parameter siblings, otherwise
+  // Hono's TrieRouter resolves `/api/orders/loop` against the
+  // `:id` pattern with `id="loop"` (calling getOrderHandler with
+  // a non-uuid). `routes/merchants.ts` already follows this
+  // discipline; `routes/orders.ts` did not until this fix.
+  //
+  // POST first: collisions only matter within the same method,
+  // but we also keep semantically related routes co-located.
   app.post('/api/orders', killSwitch('orders'), rateLimit(10, 60_000), createOrderHandler);
-  app.get('/api/orders', rateLimit(60, 60_000), listOrdersHandler);
-  app.get('/api/orders/:id', rateLimit(120, 60_000), getOrderHandler);
-
-  // Loop-native order creation (ADR 010). Distinct path so the
-  // legacy CTX-proxy flow at POST /api/orders stays live during
-  // the migration window. Gated inside the handler on
-  // `LOOP_AUTH_NATIVE_ENABLED` — off → 404.
   app.post('/api/orders/loop', killSwitch('orders'), rateLimit(10, 60_000), loopCreateOrderHandler);
 
-  // Loop-native orders list (ADR 010). Listed before :id so the
-  // path param doesn't capture 'list' or similar; rate 60/min
-  // matches the legacy /api/orders GET.
+  // GET literals BEFORE GET parameter routes.
+  app.get('/api/orders', rateLimit(60, 60_000), listOrdersHandler);
+  // Loop-native orders list (ADR 010). Must register before
+  // `/api/orders/:id` so a request for `/api/orders/loop` lands
+  // on this handler instead of being captured as `id='loop'`.
   app.get('/api/orders/loop', rateLimit(60, 60_000), loopListOrdersHandler);
 
+  // GET parameter routes — registered AFTER all literal siblings.
   // Loop-native order GET. The UI polls this while an order is
   // `pending_payment → paid → procuring → fulfilled`, so the
   // rate is generous. Owner-scoped: the handler 404s on a
   // non-owner read so existence isn't leaked.
   app.get('/api/orders/loop/:id', rateLimit(120, 60_000), loopGetOrderHandler);
+  app.get('/api/orders/:id', rateLimit(120, 60_000), getOrderHandler);
 }

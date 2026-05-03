@@ -44,9 +44,6 @@ vi.mock('../../db/users.js', () => ({
 const { jwtState } = vi.hoisted(() => ({
   jwtState: { claims: null as Record<string, unknown> | null },
 }));
-vi.mock('../../auth/jwt.js', () => ({
-  decodeJwtPayload: () => jwtState.claims,
-}));
 
 vi.mock('../../logger.js', () => ({
   logger: {

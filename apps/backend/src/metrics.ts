@@ -11,17 +11,36 @@
  * because vitest can clear the singleton from a `beforeEach`
  * without dependency injection scaffolding.
  *
- * `requestsTotal` is keyed by `METHOD:ROUTE:STATUS` (e.g.
- * `GET:/api/clusters:200`). Audit A-022 collapses unmatched routes
- * to a constant `NOT_FOUND` label so cardinality stays O(declared
- * routes) rather than O(observed URLs) — see the request-counter
- * middleware in `app.ts` for the labelling rule.
+ * `requestsTotal` is keyed by `METHOD<US>ROUTE<US>STATUS` where
+ * `<US>` is the ASCII Unit Separator character (`\x1f`). Earlier
+ * versions used `:` as the delimiter, which collided with Hono's
+ * parameter-route syntax (`/api/orders/:id`) — `key.split(':')`
+ * then truncated the route at `:id` and assigned the parameter
+ * name as the status label. The Unit Separator is a control
+ * character that cannot appear in HTTP method names, route
+ * patterns, or status codes, so the split is unambiguous (A4-076).
+ *
+ * Audit A-022 collapses unmatched routes to a constant `NOT_FOUND`
+ * label so cardinality stays O(declared routes) rather than
+ * O(observed URLs) — see the request-counter middleware in
+ * `app.ts` for the labelling rule.
  */
+
+/**
+ * A4-076: ASCII Unit Separator. Cannot appear in any HTTP method,
+ * route pattern, or status code, so it's safe as a multi-segment
+ * key delimiter. Exported for the exposition handler in
+ * `observability-handlers.ts` so both sides agree on the shape.
+ */
+export const METRIC_KEY_SEPARATOR = '\x1f';
 
 export interface Metrics {
   /** Total 429 responses issued by the rate-limiter, fleet-wide. */
   rateLimitHitsTotal: number;
-  /** Counter map keyed by `METHOD:ROUTE:STATUS`. */
+  /**
+   * Counter map keyed by `METHOD<US>ROUTE<US>STATUS` (Unit
+   * Separator delimiter; see `METRIC_KEY_SEPARATOR`).
+   */
   requestsTotal: Map<string, number>;
 }
 
@@ -40,12 +59,12 @@ export function incrementRateLimitHit(): void {
 }
 
 /**
- * Increments the per-request counter for `METHOD:ROUTE:STATUS`.
+ * Increments the per-request counter for `METHOD<US>ROUTE<US>STATUS`.
  * Called by the request-counter middleware after the handler has
  * resolved, so the recorded status is final.
  */
 export function incrementRequest(method: string, route: string, status: number): void {
-  const key = `${method}:${route}:${status}`;
+  const key = `${method}${METRIC_KEY_SEPARATOR}${route}${METRIC_KEY_SEPARATOR}${status}`;
   metrics.requestsTotal.set(key, (metrics.requestsTotal.get(key) ?? 0) + 1);
 }
 

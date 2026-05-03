@@ -203,19 +203,32 @@ export async function healthHandler(c: Context): Promise<Response> {
   // is the safe default even though Fly's own probe path doesn't
   // cache.
   c.header('Cache-Control', 'no-store');
-  return c.json({
-    status: degraded ? 'degraded' : 'healthy',
-    locationCount: locations.length,
-    locationsLoading: isLocationLoading(),
-    merchantCount: merchants.length,
-    merchantsLoadedAt: new Date(merLoadedAt).toISOString(),
-    locationsLoadedAt: new Date(locLoadedAt).toISOString(),
-    merchantsStale,
-    locationsStale,
-    upstreamReachable,
-    otpDelivery: runtime.otpDelivery,
-    workers: runtime.workers,
-  });
+  // A4-035 / A4-073: HTTP status reflects degradation so Docker
+  // HEALTHCHECK + Fly's [[http_service.checks]] probe + third-party
+  // uptime monitors (StatusCake, Pingdom) all see the truth without
+  // having to parse the JSON body. 503 SERVICE_UNAVAILABLE is the
+  // standard signal for "I'm up but my dependencies aren't" — Fly
+  // will cycle the machine, Docker will mark unhealthy, and external
+  // probes flip to incident state. Returning 200 with status:
+  // 'degraded' in the body kept the orchestrator blind to dependency
+  // outages.
+  const httpStatus = degraded ? 503 : 200;
+  return c.json(
+    {
+      status: degraded ? 'degraded' : 'healthy',
+      locationCount: locations.length,
+      locationsLoading: isLocationLoading(),
+      merchantCount: merchants.length,
+      merchantsLoadedAt: new Date(merLoadedAt).toISOString(),
+      locationsLoadedAt: new Date(locLoadedAt).toISOString(),
+      merchantsStale,
+      locationsStale,
+      upstreamReachable,
+      otpDelivery: runtime.otpDelivery,
+      workers: runtime.workers,
+    },
+    httpStatus,
+  );
 }
 
 /**

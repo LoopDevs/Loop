@@ -108,6 +108,24 @@ export const REDACT_PATHS: readonly string[] = [
   '*.DISCORD_WEBHOOK_ORDERS',
   '*.DISCORD_WEBHOOK_MONITORING',
   '*.DISCORD_WEBHOOK_ADMIN_AUDIT',
+  // A4-040: admin-write idempotency keys (ADR-017). They're mint-
+  // by-the-handler tokens that key snapshot replay in
+  // admin_idempotency_keys; a leaked key plus a stale admin
+  // session lets an attacker fake a replay envelope. Both the
+  // header shape (`idempotency-key`) and the camelCase body
+  // shape (`idempotencyKey`) are logged by handlers — redact at
+  // every nesting depth pino's path syntax can express. Pair with
+  // the Sentry scrubber regex (sentry-scrubber.ts SENSITIVE_KEY_RE,
+  // A4-039) so neither pipe leaks.
+  'idempotencyKey',
+  '*.idempotencyKey',
+  '*.*.idempotencyKey',
+  'idempotency-key',
+  '*.idempotency-key',
+  '*.*.idempotency-key',
+  'Idempotency-Key',
+  '*.Idempotency-Key',
+  '*.*.Idempotency-Key',
 ];
 
 const basePinoOptions = {

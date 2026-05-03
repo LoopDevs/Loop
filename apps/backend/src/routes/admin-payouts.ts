@@ -42,22 +42,28 @@ export function mountAdminPayoutsRoutes(app: Hono): void {
   // drills into pending/submitted/confirmed/failed rows; counts for the
   // at-a-glance card come from the treasury snapshot above.
   app.get('/api/admin/payouts', rateLimit(60, 60_000), adminListPayoutsHandler);
-  // GET /api/admin/payouts/:id — single-row drill-down (permalink for
-  // an ops ticket / incident note). Higher rate limit than the list
-  // because the admin UI deep-links individual rows on every navigation.
-  app.get('/api/admin/payouts/:id', rateLimit(120, 60_000), adminGetPayoutHandler);
   // Per-asset payout breakdown — crosses asset_code × state for the
   // LOOP stablecoin triage view (ADR 015/016). Admin UI renders this
   // on the treasury page as a per-asset table next to the flat payout
   // list, so an incident in one asset doesn't get lost in the volume
   // of another.
   app.get('/api/admin/payouts-by-asset', rateLimit(60, 60_000), adminPayoutsByAssetHandler);
+  // A4-075: literal routes BEFORE parameter siblings, otherwise
+  // Hono's TrieRouter resolves `/api/admin/payouts/settlement-lag`
+  // against the `:id` pattern with `id='settlement-lag'`, calling
+  // adminGetPayoutHandler (uuid validation rejects). The literal
+  // settlement-lag handler must register before `/:id`.
   // Settlement-lag SLA — p50/p95/max seconds from pending_payouts row
   // insert to on-chain confirmation, windowed. One row per LOOP asset
   // plus a fleet-wide aggregate (`assetCode: null`). The SLA signal
   // operators watch alongside drift: if payouts are taking hours, the
   // drift number will grow regardless of minting health.
   app.get('/api/admin/payouts/settlement-lag', rateLimit(60, 60_000), adminSettlementLagHandler);
+  // GET /api/admin/payouts/:id — single-row drill-down (permalink for
+  // an ops ticket / incident note). Higher rate limit than the list
+  // because the admin UI deep-links individual rows on every navigation.
+  // Registered AFTER /settlement-lag literal per A4-075.
+  app.get('/api/admin/payouts/:id', rateLimit(120, 60_000), adminGetPayoutHandler);
   // POST /api/admin/payouts/:id/retry — flip a failed row back to pending.
   // Lower rate limit: retries should be rare, one-at-a-time ops actions.
   app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayoutHandler);

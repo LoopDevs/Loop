@@ -157,11 +157,19 @@ describe('nativeRequestOtpHandler', () => {
     expect(createOtpMock).toHaveBeenCalled();
   });
 
-  it('returns 500 when the OTP row write fails', async () => {
+  it('returns generic 200 envelope when the OTP row write fails (A4-002 enumeration defense)', async () => {
+    // A4-002: the native path used to return 500 on a DB failure,
+    // contradicting the CTX-proxy path which collapses every
+    // internal failure into the same `{ message: 'Verification
+    // code sent' }` 200 envelope so an attacker probing both
+    // paths can't distinguish "user not found / DB happy" from
+    // "DB outage / queue saturation". Native now matches.
     createOtpMock.mockRejectedValue(new Error('db down'));
     const { ctx } = makeCtx({ email: 'a@b.com' });
     const res = await nativeRequestOtpHandler(ctx);
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({ message: 'Verification code sent' });
   });
 });
 

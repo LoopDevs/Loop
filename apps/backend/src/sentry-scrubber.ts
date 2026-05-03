@@ -18,9 +18,20 @@
  * there must also land here — Sentry bypasses the logger.
  */
 
-/** Field names whose value must be redacted anywhere in the event. */
+/**
+ * Field names whose value must be redacted anywhere in the event.
+ *
+ * A4-039: idempotency keys are admin-write identifiers that must
+ * not land in Sentry breadcrumbs. The web UI mints them via
+ * `crypto.randomUUID()` and the backend keys snapshot replay on
+ * `(adminUserId, key)`; an attacker with leaked keys + an admin
+ * session can replay a stored response or fabricate an
+ * `audit.replayed: true` envelope. Match both the camelCase shape
+ * (`idempotencyKey`) used in handler bodies and the header shape
+ * (`idempotency-key` / `Idempotency-Key`).
+ */
 const SENSITIVE_KEY_RE =
-  /^(authorization|cookie|accesstoken|refreshtoken|otp|password|apikey|apisecret|secret|privatekey|secretkey|seedphrase|mnemonic|operatorsecret|loop_jwt_signing_key(_previous)?|gift_card_api_(key|secret)|database_url|sentry_dsn|discord_webhook_(orders|monitoring|admin_audit))$/i;
+  /^(authorization|cookie|accesstoken|refreshtoken|otp|password|apikey|apisecret|secret|privatekey|secretkey|seedphrase|mnemonic|operatorsecret|loop_jwt_signing_key(_previous)?|gift_card_api_(key|secret)|database_url|sentry_dsn|discord_webhook_(orders|monitoring|admin_audit)|idempotencykey|idempotency-key)$/i;
 
 /** Minimal subset of the Sentry event shape that we read. */
 export interface SentryEventLike {

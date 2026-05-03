@@ -48,10 +48,6 @@ vi.mock('../../db/users.js', () => ({
   upsertUserFromCtx: vi.fn(async () => userState.byId),
 }));
 
-vi.mock('../../auth/jwt.js', () => ({
-  decodeJwtPayload: () => null,
-}));
-
 vi.mock('../../logger.js', () => ({
   logger: {
     child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),

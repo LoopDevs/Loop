@@ -42,6 +42,11 @@ export function startCleanupInterval(): void {
   if (env.NODE_ENV === 'test') return;
   if (cleanupInterval !== null) return;
   cleanupInterval = setInterval(runCleanup, CLEANUP_INTERVAL_MS);
+  // A4-006: don't pin the event loop on this timer. Match the
+  // .unref() pattern the worker timers (payout-worker.ts:160,
+  // index.ts:159 force-exit) already use so a process-shutdown
+  // path that misses stopCleanupInterval() can still exit cleanly.
+  cleanupInterval.unref?.();
 }
 
 /** Stops the periodic cleanup interval. Intended for graceful shutdown. */

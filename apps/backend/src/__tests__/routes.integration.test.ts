@@ -153,23 +153,28 @@ describe('GET /health', () => {
     expect(body.upstreamReachable).toBe(true);
   });
 
-  it('returns degraded when upstream is unreachable', async () => {
+  it('returns degraded with HTTP 503 when upstream is unreachable', async () => {
     mockFetch.mockRejectedValueOnce(new Error('connection refused'));
 
     const res = await app.request('/health');
-    expect(res.status).toBe(200);
+    // A4-035 / A4-073: degraded responses now flip the HTTP
+    // status to 503 so Docker HEALTHCHECK + Fly probes + external
+    // uptime monitors all see the truth without parsing JSON.
+    expect(res.status).toBe(503);
 
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.status).toBe('degraded');
     expect(body.upstreamReachable).toBe(false);
   });
 
-  it('surfaces OTP delivery degradation in /health', async () => {
+  it('surfaces OTP delivery degradation in /health with HTTP 503', async () => {
     recordOtpSendFailure(new Error('provider down'));
     mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
 
     const res = await app.request('/health');
-    expect(res.status).toBe(200);
+    // A4-035 / A4-073: a degraded OTP-delivery surface counts as
+    // a degraded backend; orchestrator sees 503.
+    expect(res.status).toBe(503);
 
     const body = (await res.json()) as {
       status: string;

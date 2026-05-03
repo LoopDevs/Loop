@@ -11,7 +11,7 @@
  */
 import type { Context } from 'hono';
 import { env } from './env.js';
-import { metrics } from './metrics.js';
+import { METRIC_KEY_SEPARATOR, metrics } from './metrics.js';
 import { getAllCircuitStates } from './circuit-breaker.js';
 import { generateOpenApiSpec } from './openapi.js';
 import { probeGateAllows } from './middleware/probe-gate.js';
@@ -50,8 +50,19 @@ export function metricsHandler(c: Context): Response {
   lines.push('# HELP loop_requests_total Total HTTP requests by method/route/status.');
   lines.push('# TYPE loop_requests_total counter');
   for (const [key, count] of metrics.requestsTotal) {
-    const [method, route, status] = key.split(':');
-    const labels = `method="${method}",route="${route}",status="${status}"`;
+    // A4-076: split on the Unit Separator (\x1f) used by
+    // `incrementRequest` so route patterns containing `:` (Hono's
+    // parameter syntax, e.g. `/api/orders/:id`) round-trip
+    // correctly. Earlier code split on `:` and truncated the route
+    // at the parameter, mislabelling the status as the parameter
+    // name. Escape Prometheus label values defensively so a route
+    // name with a `"` or `\` wouldn't break the line — none does
+    // today, but the cost is one regex per emit.
+    const [method, route, status] = key.split(METRIC_KEY_SEPARATOR);
+    const labels =
+      `method="${escapePromLabel(method ?? '')}",` +
+      `route="${escapePromLabel(route ?? '')}",` +
+      `status="${escapePromLabel(status ?? '')}"`;
     lines.push(`loop_requests_total{${labels}} ${count}`);
   }
   lines.push('');
@@ -134,4 +145,16 @@ export function openApiHandler(c: Context): Response {
     return gateRejection(c, env.OPENAPI_BEARER_TOKEN);
   }
   return c.json(openApiSpec, 200, probeScopedHeaders());
+}
+
+/**
+ * A4-076: escape a Prometheus exposition label value per
+ * https://prometheus.io/docs/instrumenting/exposition_formats/.
+ * Only `\\`, `"`, and `\n` need escaping inside a quoted label.
+ * Defensive: route patterns from Hono never contain these today,
+ * but a future router or a regression that put raw URL chunks into
+ * the label would otherwise break the line format.
+ */
+function escapePromLabel(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 }

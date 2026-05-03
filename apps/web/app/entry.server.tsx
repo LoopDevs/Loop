@@ -84,10 +84,20 @@ export default function handleRequest(
         ? 'onAllReady'
         : 'onShellReady';
 
-    const timeoutId: ReturnType<typeof setTimeout> | undefined = setTimeout(
-      () => abort(),
-      streamTimeout + 1000,
-    );
+    // A4-054: clear on every terminal path so the timer never
+    // outlives the request. Without this every successful SSR
+    // render leaks a pending abort() call that fires later
+    // against an already-completed pipe stream — harmless but
+    // a fd/timer leak the cleanup contract didn't assert.
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const clearAbortTimer = (): void => {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+
+    timeoutId = setTimeout(() => abort(), streamTimeout + 1000);
 
     const { pipe, abort } = renderToPipeableStream(
       <ServerRouter context={routerContext} url={request.url} />,
@@ -106,8 +116,10 @@ export default function handleRequest(
           );
 
           pipe(body);
+          clearAbortTimer();
         },
         onShellError(error: unknown) {
+          clearAbortTimer();
           reject(error);
         },
         onError(error: unknown) {
@@ -119,9 +131,5 @@ export default function handleRequest(
         },
       },
     );
-
-    if (timeoutId !== undefined) {
-      void timeoutId;
-    }
   });
 }
