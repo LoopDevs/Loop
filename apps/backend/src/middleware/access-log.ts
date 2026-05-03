@@ -66,7 +66,11 @@ export async function accessLogMiddleware(c: Context, next: () => Promise<void>)
       path: c.req.path,
       status,
       durationMs: ms,
-      requestId: c.get('requestId') ?? c.req.header('X-Request-Id'),
+      // A4-008: read only from the context (server-minted UUID).
+      // Dropped the `?? c.req.header('X-Request-Id')` fallback so
+      // an attacker can't substitute a chosen string in the access
+      // log — the server-side mint is the only source of truth.
+      requestId: c.get('requestId'),
       ...(clientVersion !== undefined ? { clientVersion } : {}),
       ...(clientId !== undefined ? { clientId } : {}),
     },

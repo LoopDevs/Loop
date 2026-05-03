@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A4-079: production network-security policy. Capacitor's default
+  template ships this file with cleartext-localhost / 10.0.2.2
+  exemptions intended for `cap run` against a dev server, but the
+  same exemption shipped to production lets a malicious app on the
+  same device run an HTTP listener on localhost and intercept any
+  webview request that hits a localhost URL. Combined with the CORS
+  allowlist already removing `http://localhost` (audit A2-1009 in
+  apps/backend/src/middleware/cors.ts), production user impact is
+  bounded — but the exemption is one buggy code path away from
+  exploitable.
+
+  Production posture: NO cleartext exemption. Android API 28+
+  defaults `cleartextTrafficPermitted` to false, so the network-
+  security config can simply omit any cleartext domain-config and
+  rely on the OS default. HTTPS-only across every webview request.
+
+  Local development against a cleartext localhost backend is a
+  separate concern. If a dev needs the exemption, swap in a
+  `src/debug/res/xml/network_security_config.xml` Gradle build
+  variant locally — that variant overrides `src/main` only for the
+  `debug` build type, so release / store builds remain strict.
+
+  The overlay script copies this file on every `cap sync` so
+  Capacitor's permissive default doesn't return.
+-->
+<network-security-config>
+    <!-- Empty: defaults apply (HTTPS required, no cleartext). -->
+</network-security-config>

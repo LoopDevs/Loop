@@ -17,8 +17,25 @@ COPY packages/shared/ packages/shared/
 COPY apps/web/ apps/web/
 
 # Build web (SSR)
+#
+# A4-072: every VITE_* the web bundle reads at runtime must be
+# baked at BUILD time (Vite freezes `import.meta.env.VITE_*`
+# values when the static assets are emitted). The production
+# Sentry init at root.tsx:42 is gated on `VITE_SENTRY_DSN` —
+# absent at build → undefined in the bundle → Sentry.init never
+# fires → frontend errors invisible to ops. Plumb every Sentry-
+# adjacent env through Dockerfile ARG + ENV, and mirror them in
+# `apps/web/fly.toml` `[build.args]`. Defaults are empty so a
+# local `docker build` without the args still produces a
+# functional bundle (Sentry just stays off, same as before).
 ARG VITE_API_URL=https://api.loopfinance.io
 ENV VITE_API_URL=$VITE_API_URL
+ARG VITE_SENTRY_DSN=
+ENV VITE_SENTRY_DSN=$VITE_SENTRY_DSN
+ARG VITE_SENTRY_RELEASE=
+ENV VITE_SENTRY_RELEASE=$VITE_SENTRY_RELEASE
+ARG VITE_LOOP_ENV=
+ENV VITE_LOOP_ENV=$VITE_LOOP_ENV
 RUN npm run build -w @loop/web
 
 # --- Production image ---

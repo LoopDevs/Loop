@@ -52,15 +52,25 @@ export function mountAuthRoutes(app: Hono): void {
   // jsdoc above for rationale.
   app.use('/api/auth/*', noStoreResponse);
 
-  app.post('/api/auth/request-otp', killSwitch('auth'), rateLimit(5, 60_000), requestOtpHandler);
+  app.post(
+    '/api/auth/request-otp',
+    killSwitch('auth'),
+    rateLimit('POST /api/auth/request-otp', 5, 60_000),
+    requestOtpHandler,
+  );
   // OTP brute-force defense: 10 attempts per minute per IP. With
   // a 6-digit code that caps guesses at ~14,400/day — upstream
   // lockout/expiry happens first.
-  app.post('/api/auth/verify-otp', killSwitch('auth'), rateLimit(10, 60_000), verifyOtpHandler);
+  app.post(
+    '/api/auth/verify-otp',
+    killSwitch('auth'),
+    rateLimit('POST /api/auth/verify-otp', 10, 60_000),
+    verifyOtpHandler,
+  );
   // Refresh abuse defense: legit clients refresh once per
   // access-token lifetime, so 30/min per IP leaves plenty of
   // headroom without enabling spray attacks.
-  app.post('/api/auth/refresh', rateLimit(30, 60_000), refreshHandler);
+  app.post('/api/auth/refresh', rateLimit('POST /api/auth/refresh', 30, 60_000), refreshHandler);
 
   // Social login (ADR 014). Same 10/min cap as verify-otp — both
   // are unauthenticated entry points and both resolve to a minted
@@ -68,18 +78,18 @@ export function mountAuthRoutes(app: Hono): void {
   app.post(
     '/api/auth/social/google',
     killSwitch('auth'),
-    rateLimit(10, 60_000),
+    rateLimit('POST /api/auth/social/google', 10, 60_000),
     googleSocialLoginHandler,
   );
   app.post(
     '/api/auth/social/apple',
     killSwitch('auth'),
-    rateLimit(10, 60_000),
+    rateLimit('POST /api/auth/social/apple', 10, 60_000),
     appleSocialLoginHandler,
   );
 
   // Logout: 20/min per IP. The handler fans out to an upstream
   // revoke, so without a limit an attacker could cheaply spam
   // arbitrary refresh tokens at CTX through us.
-  app.delete('/api/auth/session', rateLimit(20, 60_000), logoutHandler);
+  app.delete('/api/auth/session', rateLimit('DELETE /api/auth/session', 20, 60_000), logoutHandler);
 }

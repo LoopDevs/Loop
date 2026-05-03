@@ -62,6 +62,15 @@ if [ -d "$ANDROID_DIR" ]; then
   # provider down to `<cache>/share/` only — the single dir share-image
   # PNGs land in (apps/web/app/native/share.ts).
   cp_if_changed "$OVERLAY_DIR/android/app/src/main/res/xml/file_paths.xml" "$ANDROID_XML_DIR/file_paths.xml"
+  # A4-079: production network-security policy. Capacitor's default
+  # ships cleartext-localhost / 10.0.2.2 exemptions intended for
+  # dev workflow but inherited by production. The overlay drops the
+  # cleartext exemption entirely so the OS default (HTTPS-only on
+  # API 28+) applies. Devs who need cleartext-localhost should use
+  # a `src/debug/res/xml/network_security_config.xml` Gradle build
+  # variant locally — that variant overrides `src/main` only for
+  # debug builds, leaving release / store builds strict.
+  cp_if_changed "$OVERLAY_DIR/android/app/src/main/res/xml/network_security_config.xml" "$ANDROID_XML_DIR/network_security_config.xml"
 
   # MainActivity override — disables WebView overscroll so the fixed
   # tab bar isn't dragged by the visual viewport during rubber-band.

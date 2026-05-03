@@ -61,67 +61,123 @@ export function mountAdminOpsTailRoutes(app: Hono): void {
   // Loop-native orders drill-down (ADR 011 / 015). Paginated, filterable
   // by state and userId. Ops uses this to triage stuck orders + audit
   // the cashback split + correlate with operator-pool health.
-  app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+  app.get(
+    '/api/admin/orders',
+    rateLimit('GET /api/admin/orders', 60, 60_000),
+    adminListOrdersHandler,
+  );
   // Per-merchant fulfilled-order flow aggregate (ADR 011 / 015). Feeds
   // the per-row "actual split" display on /admin/cashback next to each
   // merchant's configured split.
-  app.get('/api/admin/merchant-flows', rateLimit(60, 60_000), adminMerchantFlowsHandler);
+  app.get(
+    '/api/admin/merchant-flows',
+    rateLimit('GET /api/admin/merchant-flows', 60, 60_000),
+    adminMerchantFlowsHandler,
+  );
   // Webhook configuration status — read-only companion to the ping
   // endpoint. Admin panel polls this to render a "configured"/"missing"
   // badge next to each channel without POSTing.
-  app.get('/api/admin/discord/config', rateLimit(60, 60_000), adminDiscordConfigHandler);
+  app.get(
+    '/api/admin/discord/config',
+    rateLimit('GET /api/admin/discord/config', 60, 60_000),
+    adminDiscordConfigHandler,
+  );
   // User search by email fragment (ADR 011 — admin panel navigation).
   // Rate limit matches other reads; the ILIKE query is indexed by the
   // users_email index so it stays fast even on growth.
-  app.get('/api/admin/users/search', rateLimit(60, 60_000), adminUserSearchHandler);
+  app.get(
+    '/api/admin/users/search',
+    rateLimit('GET /api/admin/users/search', 60, 60_000),
+    adminUserSearchHandler,
+  );
   // Tier 3 CSV export of the full user_credits table. Support audit /
   // liability reconciliation. 20/min matches other admin exports.
-  app.get('/api/admin/user-credits.csv', rateLimit(20, 60_000), adminUserCreditsCsvHandler);
+  app.get(
+    '/api/admin/user-credits.csv',
+    rateLimit('GET /api/admin/user-credits.csv', 20, 60_000),
+    adminUserCreditsCsvHandler,
+  );
   // Ledger integrity check (ADR 009 invariant). Left-joins user_credits
   // against the grouped credit_transactions sum; returns drifted rows.
-  app.get('/api/admin/reconciliation', rateLimit(30, 60_000), adminReconciliationHandler);
+  app.get(
+    '/api/admin/reconciliation',
+    rateLimit('GET /api/admin/reconciliation', 30, 60_000),
+    adminReconciliationHandler,
+  );
   // Order-drill cluster — orders/activity, orders/payment-method-
 
   // Per-merchant cashback stats — which merchants drive volume /
   // cashback outlay / margin. Distinct from supplier-spend (currency
   // grouped) — this one groups by merchant.
-  app.get('/api/admin/merchant-stats', rateLimit(60, 60_000), adminMerchantStatsHandler);
+  app.get(
+    '/api/admin/merchant-stats',
+    rateLimit('GET /api/admin/merchant-stats', 60, 60_000),
+    adminMerchantStatsHandler,
+  );
   // Per-merchant drill cluster + fleet flywheel-share leaderboard
 
   // Given an order id, return the single pending_payouts row for it.
   // Nested under /orders/:orderId so the UI can link from the order
   // drill-down straight to the payout state without a separate fetch.
-  app.get('/api/admin/orders/:orderId/payout', rateLimit(120, 60_000), adminPayoutByOrderHandler);
+  app.get(
+    '/api/admin/orders/:orderId/payout',
+    rateLimit('GET /api/admin/orders/:orderId/payout', 120, 60_000),
+    adminPayoutByOrderHandler,
+  );
   // Operator + supplier-spend cluster — supplier-spend (+ activity),
 
   // Top users by cashback earned — recognition + concentration-risk
   // view for ops. Ranked, window-bounded; not a drill path.
-  app.get('/api/admin/top-users', rateLimit(60, 60_000), adminTopUsersHandler);
+  app.get(
+    '/api/admin/top-users',
+    rateLimit('GET /api/admin/top-users', 60, 60_000),
+    adminTopUsersHandler,
+  );
   // Newest-first tail of admin_idempotency_keys (ADR 017/018). Powers
   // the "recent admin activity" card on the /admin landing. Same row
   // as the Discord audit fanout but persistent + queryable. Actor
   // email joined in so the UI doesn't need a follow-up lookup.
-  app.get('/api/admin/audit-tail', rateLimit(60, 60_000), adminAuditTailHandler);
+  app.get(
+    '/api/admin/audit-tail',
+    rateLimit('GET /api/admin/audit-tail', 60, 60_000),
+    adminAuditTailHandler,
+  );
   // Finance / legal CSV export of the admin write-audit trail
   // (ADR 017 / 018). SOC-2 and finance audits want a month of
   // rows exportable in a neutral format. 10/min rate-limit mirrors
   // the other Tier-3 CSV exports — ops runs this manually at
   // month-end, not on-click from the UI.
-  app.get('/api/admin/audit-tail.csv', rateLimit(10, 60_000), adminAuditTailCsvHandler);
+  app.get(
+    '/api/admin/audit-tail.csv',
+    rateLimit('GET /api/admin/audit-tail.csv', 10, 60_000),
+    adminAuditTailCsvHandler,
+  );
   // User cluster — directory + lookups + per-user drill
 
   // Manual merchant-catalog resync (ADR 011). Bypasses the 6h
   // scheduled refresh so ops can apply an upstream catalog change
   // within seconds. 2/min rate limit — every hit goes to CTX, this
   // is a manual override not a polled surface.
-  app.post('/api/admin/merchants/resync', rateLimit(2, 60_000), adminMerchantsResyncHandler);
+  app.post(
+    '/api/admin/merchants/resync',
+    rateLimit('POST /api/admin/merchants/resync', 2, 60_000),
+    adminMerchantsResyncHandler,
+  );
   // Discord notifier catalog (ADR 018). Static read of the
   // DISCORD_NOTIFIERS const — the admin UI renders "what signals can
   // this system send us?" from this list. No DB, no secrets.
-  app.get('/api/admin/discord/notifiers', rateLimit(60, 60_000), adminDiscordNotifiersHandler);
+  app.get(
+    '/api/admin/discord/notifiers',
+    rateLimit('GET /api/admin/discord/notifiers', 60, 60_000),
+    adminDiscordNotifiersHandler,
+  );
   // Manual Discord test ping. Admin picks a channel, backend fires a
   // benign embed at the configured webhook so ops can verify wiring
   // after rotating env vars. 10/min — this is a manual ops primitive,
   // spamming looks like webhook enumeration.
-  app.post('/api/admin/discord/test', rateLimit(10, 60_000), adminDiscordTestHandler);
+  app.post(
+    '/api/admin/discord/test',
+    rateLimit('POST /api/admin/discord/test', 10, 60_000),
+    adminDiscordTestHandler,
+  );
 }

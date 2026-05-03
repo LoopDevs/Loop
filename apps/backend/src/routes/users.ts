@@ -83,63 +83,111 @@ export function mountUserRoutes(app: Hono): void {
   app.use('/api/users/me/*', requireAuth);
 
   // ── Profile ─────────────────────────────────────────────────
-  app.get('/api/users/me', rateLimit(60, 60_000), getMeHandler);
-  app.post('/api/users/me/home-currency', rateLimit(10, 60_000), setHomeCurrencyHandler);
-  app.put('/api/users/me/stellar-address', rateLimit(10, 60_000), setStellarAddressHandler);
+  app.get('/api/users/me', rateLimit('GET /api/users/me', 60, 60_000), getMeHandler);
+  app.post(
+    '/api/users/me/home-currency',
+    rateLimit('POST /api/users/me/home-currency', 10, 60_000),
+    setHomeCurrencyHandler,
+  );
+  app.put(
+    '/api/users/me/stellar-address',
+    rateLimit('PUT /api/users/me/stellar-address', 10, 60_000),
+    setStellarAddressHandler,
+  );
 
   // ── DSR self-serve (GDPR / CCPA) ────────────────────────────
   // Each handler writes an info-level audit log line. 5/h export,
   // 3/h delete — destructive but must tolerate legit retries on
   // transient 5xx without locking the user out of their own
   // deletion (A2-1905 / A2-1906).
-  app.get('/api/users/me/dsr/export', rateLimit(5, 60 * 60_000), dsrExportHandler);
-  app.post('/api/users/me/dsr/delete', rateLimit(3, 60 * 60_000), dsrDeleteHandler);
+  app.get(
+    '/api/users/me/dsr/export',
+    rateLimit('GET /api/users/me/dsr/export', 5, 60 * 60_000),
+    dsrExportHandler,
+  );
+  app.post(
+    '/api/users/me/dsr/delete',
+    rateLimit('POST /api/users/me/dsr/delete', 3, 60 * 60_000),
+    dsrDeleteHandler,
+  );
 
   // ── Stellar / payouts ───────────────────────────────────────
   app.get(
     '/api/users/me/stellar-trustlines',
-    rateLimit(30, 60_000),
+    rateLimit('GET /api/users/me/stellar-trustlines', 30, 60_000),
     getUserStellarTrustlinesHandler,
   );
-  app.get('/api/users/me/pending-payouts', rateLimit(60, 60_000), getUserPendingPayoutsHandler);
+  app.get(
+    '/api/users/me/pending-payouts',
+    rateLimit('GET /api/users/me/pending-payouts', 60, 60_000),
+    getUserPendingPayoutsHandler,
+  );
   app.get(
     '/api/users/me/pending-payouts/summary',
-    rateLimit(60, 60_000),
+    rateLimit('GET /api/users/me/pending-payouts/summary', 60, 60_000),
     getUserPendingPayoutsSummaryHandler,
   );
   // Cross-user access returns 404 (not 403) so payout ids aren't
   // enumerable.
   app.get(
     '/api/users/me/pending-payouts/:id',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/users/me/pending-payouts/:id', 120, 60_000),
     getUserPendingPayoutDetailHandler,
   );
   app.get(
     '/api/users/me/orders/:orderId/payout',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/users/me/orders/:orderId/payout', 120, 60_000),
     getUserPayoutByOrderHandler,
   );
 
   // ── Cashback ledger ─────────────────────────────────────────
-  app.get('/api/users/me/cashback-history', rateLimit(60, 60_000), getCashbackHistoryHandler);
+  app.get(
+    '/api/users/me/cashback-history',
+    rateLimit('GET /api/users/me/cashback-history', 60, 60_000),
+    getCashbackHistoryHandler,
+  );
   // Tighter limit: query is unbounded in size.
-  app.get('/api/users/me/cashback-history.csv', rateLimit(6, 60_000), getCashbackHistoryCsvHandler);
-  app.get('/api/users/me/credits', rateLimit(60, 60_000), getUserCreditsHandler);
-  app.get('/api/users/me/cashback-summary', rateLimit(60, 60_000), getCashbackSummaryHandler);
+  app.get(
+    '/api/users/me/cashback-history.csv',
+    rateLimit('GET /api/users/me/cashback-history.csv', 6, 60_000),
+    getCashbackHistoryCsvHandler,
+  );
+  app.get(
+    '/api/users/me/credits',
+    rateLimit('GET /api/users/me/credits', 60, 60_000),
+    getUserCreditsHandler,
+  );
+  app.get(
+    '/api/users/me/cashback-summary',
+    rateLimit('GET /api/users/me/cashback-summary', 60, 60_000),
+    getCashbackSummaryHandler,
+  );
   app.get(
     '/api/users/me/cashback-by-merchant',
-    rateLimit(60, 60_000),
+    rateLimit('GET /api/users/me/cashback-by-merchant', 60, 60_000),
     getCashbackByMerchantHandler,
   );
-  app.get('/api/users/me/cashback-monthly', rateLimit(60, 60_000), getCashbackMonthlyHandler);
+  app.get(
+    '/api/users/me/cashback-monthly',
+    rateLimit('GET /api/users/me/cashback-monthly', 60, 60_000),
+    getCashbackMonthlyHandler,
+  );
 
   // ── Orders + flywheel ───────────────────────────────────────
-  app.get('/api/users/me/orders/summary', rateLimit(60, 60_000), getUserOrdersSummaryHandler);
-  app.get('/api/users/me/flywheel-stats', rateLimit(60, 60_000), getUserFlywheelStatsHandler);
+  app.get(
+    '/api/users/me/orders/summary',
+    rateLimit('GET /api/users/me/orders/summary', 60, 60_000),
+    getUserOrdersSummaryHandler,
+  );
+  app.get(
+    '/api/users/me/flywheel-stats',
+    rateLimit('GET /api/users/me/flywheel-stats', 60, 60_000),
+    getUserFlywheelStatsHandler,
+  );
   // #643 — user-side mirror of /api/admin/orders/payment-method-share.
   app.get(
     '/api/users/me/payment-method-share',
-    rateLimit(60, 60_000),
+    rateLimit('GET /api/users/me/payment-method-share', 60, 60_000),
     getUserPaymentMethodShareHandler,
   );
 }

@@ -34,7 +34,11 @@ import { adminMerchantsCatalogCsvHandler } from '../admin/merchants-catalog-csv.
  * after the admin middleware stack is in place.
  */
 export function mountAdminCashbackConfigRoutes(app: Hono): void {
-  app.get('/api/admin/merchant-cashback-configs', rateLimit(120, 60_000), listConfigsHandler);
+  app.get(
+    '/api/admin/merchant-cashback-configs',
+    rateLimit('GET /api/admin/merchant-cashback-configs', 120, 60_000),
+    listConfigsHandler,
+  );
   // CSV export of merchant_cashback_configs — Tier-3 bulk per ADR 018.
   // 10/min rate-limit matches the other admin CSVs; ops runs this at
   // audit cadence, not on-click from the UI. Registered before the
@@ -42,7 +46,7 @@ export function mountAdminCashbackConfigRoutes(app: Hono): void {
   // treated as a merchantId.
   app.get(
     '/api/admin/merchant-cashback-configs.csv',
-    rateLimit(10, 60_000),
+    rateLimit('GET /api/admin/merchant-cashback-configs.csv', 10, 60_000),
     adminCashbackConfigsCsvHandler,
   );
   // Tier-3 CSV export of the full merchant catalog + joined
@@ -52,7 +56,7 @@ export function mountAdminCashbackConfigRoutes(app: Hono): void {
   // stale config rows are filtered out by the join.
   app.get(
     '/api/admin/merchants-catalog.csv',
-    rateLimit(10, 60_000),
+    rateLimit('GET /api/admin/merchants-catalog.csv', 10, 60_000),
     adminMerchantsCatalogCsvHandler,
   );
   // Fleet-wide history feed — "the last N config changes across every
@@ -60,17 +64,17 @@ export function mountAdminCashbackConfigRoutes(app: Hono): void {
   // `history` segment isn't captured as a merchantId. ADR 011 / 018.
   app.get(
     '/api/admin/merchant-cashback-configs/history',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/merchant-cashback-configs/history', 120, 60_000),
     adminConfigsHistoryHandler,
   );
   app.put(
     '/api/admin/merchant-cashback-configs/:merchantId',
-    rateLimit(60, 60_000),
+    rateLimit('PUT /api/admin/merchant-cashback-configs/:merchantId', 60, 60_000),
     upsertConfigHandler,
   );
   app.get(
     '/api/admin/merchant-cashback-configs/:merchantId/history',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/merchant-cashback-configs/:merchantId/history', 120, 60_000),
     configHistoryHandler,
   );
 }

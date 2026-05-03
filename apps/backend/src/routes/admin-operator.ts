@@ -48,7 +48,11 @@ export function mountAdminOperatorRoutes(app: Hono): void {
   // what Loop paid CTX across fulfilled orders in the window. Admin UI
   // renders this on the treasury page as the "supplier" card next to
   // outstanding liabilities.
-  app.get('/api/admin/supplier-spend', rateLimit(60, 60_000), adminSupplierSpendHandler);
+  app.get(
+    '/api/admin/supplier-spend',
+    rateLimit('GET /api/admin/supplier-spend', 60, 60_000),
+    adminSupplierSpendHandler,
+  );
   // Supplier-spend activity time-series (ADR 013 / 015) — per-day
   // per-currency wholesale/face/cashback/margin paid to CTX. The
   // time-axis of the supplier-spend snapshot. Together with
@@ -57,7 +61,7 @@ export function mountAdminOperatorRoutes(app: Hono): void {
   // know money moved as expected today.
   app.get(
     '/api/admin/supplier-spend/activity',
-    rateLimit(60, 60_000),
+    rateLimit('GET /api/admin/supplier-spend/activity', 60, 60_000),
     adminSupplierSpendActivityHandler,
   );
   // Per-operator supplier-spend (#674) — per-currency aggregate
@@ -68,7 +72,7 @@ export function mountAdminOperatorRoutes(app: Hono): void {
   // scheduler / circuit-breaker signal.
   app.get(
     '/api/admin/operators/:operatorId/supplier-spend',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/operators/:operatorId/supplier-spend', 120, 60_000),
     adminOperatorSupplierSpendHandler,
   );
   // Per-operator daily activity time-series (ADR 013 / 022) —
@@ -80,7 +84,7 @@ export function mountAdminOperatorRoutes(app: Hono): void {
   // CTX-escalation signal before the circuit breaker trips.
   app.get(
     '/api/admin/operators/:operatorId/activity',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/operators/:operatorId/activity', 120, 60_000),
     adminOperatorActivityHandler,
   );
   // Per-operator merchant mix (ADR 013 / 022) — dual of the
@@ -90,7 +94,7 @@ export function mountAdminOperatorRoutes(app: Hono): void {
   // merchant — concentration-risk or SLA lever?").
   app.get(
     '/api/admin/operators/:operatorId/merchant-mix',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/operators/:operatorId/merchant-mix', 120, 60_000),
     adminOperatorMerchantMixHandler,
   );
   // Per-operator breakdown of which CTX service account carried which
@@ -98,11 +102,19 @@ export function mountAdminOperatorRoutes(app: Hono): void {
   // paid CTX per currency, operator-stats is *which operator* carried
   // the traffic — the two answer different questions during an
   // incident so they live side-by-side on the treasury page.
-  app.get('/api/admin/operator-stats', rateLimit(60, 60_000), adminOperatorStatsHandler);
+  app.get(
+    '/api/admin/operator-stats',
+    rateLimit('GET /api/admin/operator-stats', 60, 60_000),
+    adminOperatorStatsHandler,
+  );
   // Per-operator fulfilment latency (ADR 013 / 022): p50/p95/p99 of
   // `fulfilledAt - paidAt` per operator in the window. Operator-stats
   // above tells ops *which* operator is busy; this tells them *which
   // is slow*. A busy operator with rising p95 is the early signal
   // before the circuit breaker trips.
-  app.get('/api/admin/operators/latency', rateLimit(60, 60_000), adminOperatorLatencyHandler);
+  app.get(
+    '/api/admin/operators/latency',
+    rateLimit('GET /api/admin/operators/latency', 60, 60_000),
+    adminOperatorLatencyHandler,
+  );
 }

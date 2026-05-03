@@ -58,6 +58,15 @@ jobs:
           LOG_LEVEL: info
           GIFT_CARD_API_BASE_URL: https://spend.ctx.com
           INCLUDE_DISABLED_MERCHANTS: 'false'
+          # A4-118: env.ts requires DATABASE_URL even when
+          # NODE_ENV=test, and `index.ts` skips migrations under
+          # test but still imports the validated env. Without a
+          # placeholder here the backend boot fails before /health
+          # is reachable. The script under `scripts/e2e-real.mjs`
+          # only exercises the CTX-proxy purchase flow (no DB-backed
+          # endpoints), so an unreachable placeholder is fine —
+          # matches the PR-time `test-e2e` job which does the same.
+          DATABASE_URL: 'postgresql://placeholder:placeholder@127.0.0.1:5433/placeholder'
       - name: Wait for backend
         run: npx wait-on http://localhost:8080/health --timeout 60000
       - name: Run real purchase workflow

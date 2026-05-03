@@ -65,21 +65,35 @@ export function mountOrderRoutes(app: Hono): void {
   //
   // POST first: collisions only matter within the same method,
   // but we also keep semantically related routes co-located.
-  app.post('/api/orders', killSwitch('orders'), rateLimit(10, 60_000), createOrderHandler);
-  app.post('/api/orders/loop', killSwitch('orders'), rateLimit(10, 60_000), loopCreateOrderHandler);
+  app.post(
+    '/api/orders',
+    killSwitch('orders'),
+    rateLimit('POST /api/orders', 10, 60_000),
+    createOrderHandler,
+  );
+  app.post(
+    '/api/orders/loop',
+    killSwitch('orders'),
+    rateLimit('POST /api/orders/loop', 10, 60_000),
+    loopCreateOrderHandler,
+  );
 
   // GET literals BEFORE GET parameter routes.
-  app.get('/api/orders', rateLimit(60, 60_000), listOrdersHandler);
+  app.get('/api/orders', rateLimit('GET /api/orders', 60, 60_000), listOrdersHandler);
   // Loop-native orders list (ADR 010). Must register before
   // `/api/orders/:id` so a request for `/api/orders/loop` lands
   // on this handler instead of being captured as `id='loop'`.
-  app.get('/api/orders/loop', rateLimit(60, 60_000), loopListOrdersHandler);
+  app.get('/api/orders/loop', rateLimit('GET /api/orders/loop', 60, 60_000), loopListOrdersHandler);
 
   // GET parameter routes — registered AFTER all literal siblings.
   // Loop-native order GET. The UI polls this while an order is
   // `pending_payment → paid → procuring → fulfilled`, so the
   // rate is generous. Owner-scoped: the handler 404s on a
   // non-owner read so existence isn't leaked.
-  app.get('/api/orders/loop/:id', rateLimit(120, 60_000), loopGetOrderHandler);
-  app.get('/api/orders/:id', rateLimit(120, 60_000), getOrderHandler);
+  app.get(
+    '/api/orders/loop/:id',
+    rateLimit('GET /api/orders/loop/:id', 120, 60_000),
+    loopGetOrderHandler,
+  );
+  app.get('/api/orders/:id', rateLimit('GET /api/orders/:id', 120, 60_000), getOrderHandler);
 }

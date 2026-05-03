@@ -33,7 +33,7 @@ import { imageProxyHandler } from '../images/proxy.js';
  * supplied Hono app.
  */
 export function mountMiscRoutes(app: Hono): void {
-  app.get('/api/clusters', rateLimit(60, 60_000), clustersHandler);
-  app.get('/api/config', rateLimit(120, 60_000), configHandler);
-  app.get('/api/image', rateLimit(300, 60_000), imageProxyHandler);
+  app.get('/api/clusters', rateLimit('GET /api/clusters', 60, 60_000), clustersHandler);
+  app.get('/api/config', rateLimit('GET /api/config', 120, 60_000), configHandler);
+  app.get('/api/image', rateLimit('GET /api/image', 300, 60_000), imageProxyHandler);
 }

@@ -529,14 +529,20 @@ describe('A2-2003 idempotency on createOrder', () => {
     // violation. The catch arm re-fetches the prior row via
     // `findOrderByIdempotencyKey` and re-throws with the existing
     // attached.
+    //
+    // A4-026: detector now walks `err.cause` for `code='23505'`
+    // + `constraint_name`, matching refunds.ts + withdrawals.ts.
+    // Forge a postgres-js-shaped error with both fields so the
+    // walker recognises it.
     const priorRow = {
       id: 'o-prior',
       userId: 'u-1',
       idempotencyKey: 'key-1234567890ab',
     };
     state.orderByMemo = priorRow;
-    const dupErr = new Error(
-      'duplicate key value violates unique constraint "orders_user_idempotency_unique"',
+    const dupErr = Object.assign(
+      new Error('duplicate key value violates unique constraint "orders_user_idempotency_unique"'),
+      { code: '23505', constraint_name: 'orders_user_idempotency_unique' },
     );
     dbMock['returning']!.mockRejectedValueOnce(dupErr);
     await expect(

@@ -786,12 +786,24 @@ jobs:
           SERVER_URL: ${{ github.server_url }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
+          # A4-036: also surface skipped jobs as a NOT-PASSED signal
+          # on push events. `test-e2e` is gated to PR-only via an
+          # `if:` condition, so on a push to main it always reports
+          # `skipped`, which is NOT in the `failure` set. The notify
+          # job then claimed PASSED even when no real-CTX e2e ran.
+          # Treating skipped as not-passing on a push surface the
+          # actual coverage truth without changing PR semantics
+          # (PRs deliberately run e2e).
           FAILED: ${{ contains(needs.*.result, 'failure') }}
+          SKIPPED_ON_PUSH: ${{ github.event_name == 'push' && contains(needs.*.result, 'skipped') }}
         run: |
           set -euo pipefail
           if [ "$FAILED" = "true" ]; then
             STATUS="❌ FAILED"
             COLOR=15158332
+          elif [ "$SKIPPED_ON_PUSH" = "true" ]; then
+            STATUS="⚠️ INCOMPLETE (one or more jobs skipped on push)"
+            COLOR=15105570
           else
             STATUS="✅ PASSED"
             COLOR=3066993

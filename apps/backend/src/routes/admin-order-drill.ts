@@ -36,7 +36,11 @@ export function mountAdminOrderDrillRoutes(app: Hono): void {
   // generate_series + LEFT JOIN; every day in the window appears with
   // zero-filled counts when no orders crossed. Registered before
   // `/:orderId` so the literal `/activity` matches first.
-  app.get('/api/admin/orders/activity', rateLimit(60, 60_000), adminOrdersActivityHandler);
+  app.get(
+    '/api/admin/orders/activity',
+    rateLimit('GET /api/admin/orders/activity', 60, 60_000),
+    adminOrdersActivityHandler,
+  );
   // Payment-method share aggregate — the cashback-flywheel metric.
   // Tracks the proportion of orders paid with each rail (xlm / usdc /
   // credit / loop_asset). ADR 010 / 015's strategy assumes a rising
@@ -45,7 +49,7 @@ export function mountAdminOrderDrillRoutes(app: Hono): void {
   // 'payment-method-share' doesn't get captured as an orderId.
   app.get(
     '/api/admin/orders/payment-method-share',
-    rateLimit(60, 60_000),
+    rateLimit('GET /api/admin/orders/payment-method-share', 60, 60_000),
     adminPaymentMethodShareHandler,
   );
   // Time-series complement to /payment-method-share. Same four-rail
@@ -55,15 +59,23 @@ export function mountAdminOrderDrillRoutes(app: Hono): void {
   // /:orderId for the same literal-vs-param reason as its sibling.
   app.get(
     '/api/admin/orders/payment-method-activity',
-    rateLimit(60, 60_000),
+    rateLimit('GET /api/admin/orders/payment-method-activity', 60, 60_000),
     adminPaymentMethodActivityHandler,
   );
   // Single-order drill-down (ADR 011 / 015). Permalink for an ops
   // ticket or incident note. Higher rate-limit than the list because
   // the admin UI re-fetches detail on every navigation.
-  app.get('/api/admin/orders/:orderId', rateLimit(120, 60_000), adminGetOrderHandler);
+  app.get(
+    '/api/admin/orders/:orderId',
+    rateLimit('GET /api/admin/orders/:orderId', 120, 60_000),
+    adminGetOrderHandler,
+  );
   // Finance-ready CSV export of Loop-native orders. Same rate-limit
   // cadence as other Tier-3 exports — ops runs it manually at month-end,
   // not on-click from the UI.
-  app.get('/api/admin/orders.csv', rateLimit(10, 60_000), adminOrdersCsvHandler);
+  app.get(
+    '/api/admin/orders.csv',
+    rateLimit('GET /api/admin/orders.csv', 10, 60_000),
+    adminOrdersCsvHandler,
+  );
 }

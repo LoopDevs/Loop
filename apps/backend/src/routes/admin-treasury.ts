@@ -32,30 +32,42 @@ import { adminAssetDriftStateHandler } from '../admin/asset-drift-state.js';
  * middleware stack is in place.
  */
 export function mountAdminTreasuryRoutes(app: Hono): void {
-  app.get('/api/admin/treasury', rateLimit(60, 60_000), treasuryHandler);
+  app.get('/api/admin/treasury', rateLimit('GET /api/admin/treasury', 60, 60_000), treasuryHandler);
   // Tier-3 CSV of the treasury snapshot (ADR 009/015/018). Point-
   // in-time flat dump for SOC-2 / audit evidence. Long-form CSV
   // (metric,key,value) — diffable across successive snapshots so
   // auditors can eyeball "what moved between Monday and Tuesday".
   // Reuses the JSON snapshot handler; no new DB query.
-  app.get('/api/admin/treasury.csv', rateLimit(10, 60_000), adminTreasurySnapshotCsvHandler);
+  app.get(
+    '/api/admin/treasury.csv',
+    rateLimit('GET /api/admin/treasury.csv', 10, 60_000),
+    adminTreasurySnapshotCsvHandler,
+  );
   // Treasury credit-flow time-series (ADR 009/015) — per-day credited
   // vs debited per currency from credit_transactions. Answers "are we
   // generating liability faster than we settle it?" — the dynamic
   // view the treasury snapshot can't give.
-  app.get('/api/admin/treasury/credit-flow', rateLimit(60, 60_000), adminTreasuryCreditFlowHandler);
+  app.get(
+    '/api/admin/treasury/credit-flow',
+    rateLimit('GET /api/admin/treasury/credit-flow', 60, 60_000),
+    adminTreasuryCreditFlowHandler,
+  );
   // Per-asset circulation drift (ADR 015). Compares Horizon-side
   // issued circulation against off-chain ledger liability — the
   // stablecoin-operator safety metric. 30/min: admin drill page,
   // not a dashboard card; Horizon calls are cached 30s internally.
   app.get(
     '/api/admin/assets/:assetCode/circulation',
-    rateLimit(30, 60_000),
+    rateLimit('GET /api/admin/assets/:assetCode/circulation', 30, 60_000),
     adminAssetCirculationHandler,
   );
   // In-memory snapshot of the asset-drift watcher's per-asset state
   // (ADR 015). Process-local, no Horizon call; cheap to poll from the
   // admin UI landing so the "which assets are drifted?" signal reads
   // without forcing each tab to re-read Horizon.
-  app.get('/api/admin/asset-drift/state', rateLimit(120, 60_000), adminAssetDriftStateHandler);
+  app.get(
+    '/api/admin/asset-drift/state',
+    rateLimit('GET /api/admin/asset-drift/state', 120, 60_000),
+    adminAssetDriftStateHandler,
+  );
 }

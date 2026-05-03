@@ -226,7 +226,15 @@ openapi_exceptions=(
 app_routes_tmp=$(mktemp)
 openapi_paths_tmp=$(mktemp)
 
-grep -E "^\s*app\.(get|post|put|delete|patch)\(" apps/backend/src/app.ts \
+# A4-077: scan both app.ts AND every routes/*.ts module. The
+# admin / auth / orders / users / public / merchants / misc routes
+# all live in routes/* per the route-module decomposition; the
+# original detector saw only the ~5 routes still mounted directly
+# in app.ts (/health, /metrics, /openapi.json, /__test__/reset).
+# Mirrors the §2 architecture-parity extractor which already
+# walks routes/*.ts.
+grep -E "^\s*app\.(get|post|put|delete|patch)\(" \
+  apps/backend/src/app.ts apps/backend/src/routes/*.ts \
   | grep -oE "'/[^']+'" \
   | sed -E "s/:([a-zA-Z_]+)/{\1}/g" \
   | sort -u > "$app_routes_tmp"

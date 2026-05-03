@@ -66,7 +66,21 @@ export async function findOrderByIdempotencyKey(
  * partial-unique-index violation that the A2-2003 race produces:
  *
  *   - the caller passed an `idempotencyKey`, and
- *   - the error mentions the partial unique index name.
+ *   - the error walks back to a postgres-js `PostgresError` with
+ *     `code='23505'` (unique_violation) and `constraint_name`
+ *     equal to `orders_user_idempotency_unique`.
+ *
+ * **A4-026:** the prior implementation matched on
+ * `err.message.includes('orders_user_idempotency_unique')`. Drizzle
+ * wraps the raw `PostgresError` in a `DrizzleQueryError`, and the
+ * wrapper format isn't part of either library's stable contract —
+ * a Drizzle / postgres-js upgrade that changed the wrapper's
+ * `.toString()` output would silently turn a duplicate-Idempotency-
+ * Key conflict into a 500 + a stranded order row + (for credit
+ * orders) a stranded debit. Walk the cause chain for the SQLSTATE +
+ * constraint_name, matching the pattern used by
+ * `credits/refunds.ts:isDuplicateRefund` and
+ * `credits/withdrawals.ts:isDuplicateWithdrawal`.
  *
  * Re-fetches the prior order so the caller can build the replay
  * response. Returns null when the failure was something else
@@ -78,7 +92,24 @@ export async function maybeFetchIdempotentConflict(
   err: unknown,
 ): Promise<Order | null> {
   if (args.idempotencyKey === undefined) return null;
-  const message = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
-  if (!message.includes('orders_user_idempotency_unique')) return null;
+  if (!isOrderIdempotencyConflict(err)) return null;
   return await findOrderByIdempotencyKey(args.userId, args.idempotencyKey);
+}
+
+/**
+ * A4-026: walks the cause chain (Drizzle's `DrizzleQueryError` wraps
+ * postgres-js's `PostgresError`) for the
+ * `orders_user_idempotency_unique` partial-unique-index violation.
+ * Cap the walk depth at 4 to bound the cost on a non-matching error.
+ */
+function isOrderIdempotencyConflict(err: unknown): boolean {
+  let cur: unknown = err;
+  for (let depth = 0; depth < 4 && cur instanceof Error; depth++) {
+    const e = cur as Error & { code?: string; constraint_name?: string };
+    if (e.code === '23505' && e.constraint_name === 'orders_user_idempotency_unique') {
+      return true;
+    }
+    cur = (e as { cause?: unknown }).cause;
+  }
+  return false;
 }

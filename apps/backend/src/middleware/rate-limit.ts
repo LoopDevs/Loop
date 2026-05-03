@@ -1,18 +1,28 @@
 /**
- * Per-IP rate limiter pulled out of `app.ts`. Three exports:
+ * Per-IP per-route rate limiter pulled out of `app.ts`. Three
+ * exports:
  *
  * - `clientIpFor(c)` — resolves the IP the limiter keys on, with
  *   `env.TRUST_PROXY` deciding whether `X-Forwarded-For` is
  *   trusted (audit A-023, A2-1526). Exported so the trust-proxy
  *   tests can drive the predicate end-to-end without spinning up
  *   a real rate-limited endpoint.
- * - `rateLimit(max, windowMs)` — Hono middleware factory. Returns
- *   429 with `Retry-After` when the per-IP budget is exceeded,
- *   bumping `incrementRateLimitHit()` so the counter shows up on
- *   `/metrics`. Honours `env.DISABLE_RATE_LIMITING` as the e2e
- *   harness escape hatch.
+ * - `rateLimit(name, max, windowMs)` — Hono middleware factory.
+ *   Returns 429 with `Retry-After` when the per-IP-per-route
+ *   budget is exceeded, bumping `incrementRateLimitHit()` so the
+ *   counter shows up on `/metrics`. Honours
+ *   `env.DISABLE_RATE_LIMITING` as the e2e harness escape hatch.
  * - `__resetRateLimitsForTests()` — clears the in-process map
  *   between vitest cases.
+ *
+ * **A4-001 — bucket key is `${name}:${ip}`.** Earlier the bucket
+ * was keyed on `ip` alone, so a high-budget route (clusters
+ * 60/min) burned down the budget for low-budget routes
+ * (request-otp 5/min) from the same IP — locking legitimate
+ * users out of auth after a handful of map-page polls.
+ * The factory now requires an explicit `name` per mount so each
+ * (route, ip) pair gets an independent bucket, matching the
+ * per-route limits documented in CLAUDE.md / AGENTS.md.
  *
  * The `rateLimitMap` is module-local; `RATE_LIMIT_MAP_MAX = 10_000`
  * caps it so an attacker spraying requests from fresh IPs can't
@@ -98,8 +108,21 @@ export function sweepExpiredRateLimits(now: number = Date.now()): void {
   }
 }
 
-/** Simple per-IP rate limiter. Returns 429 if limit exceeded within the window. */
+/**
+ * Per-IP per-route rate limiter. Returns 429 if the budget for
+ * `(name, ip)` is exceeded within `windowMs`.
+ *
+ * **A4-001:** `name` scopes the bucket so each protected route
+ * gets an independent counter. Pass a stable identifier per
+ * mount; route patterns work fine (`/api/auth/request-otp`,
+ * `/api/clusters`, etc.). The map key is `${name}:${ip}`.
+ *
+ * Conventional naming (recommended): `${METHOD} ${routePattern}`
+ * for routes that share a path across methods (e.g. `GET /api/orders/:id`
+ * vs `POST /api/orders/:id/retry`).
+ */
 export function rateLimit(
+  name: string,
   maxRequests: number,
   windowMs: number,
 ): (c: Context, next: () => Promise<void>) => Promise<void | Response> {
@@ -116,8 +139,9 @@ export function rateLimit(
       return;
     }
     const ip = clientIpFor(c);
+    const key = `${name}:${ip}`;
     const now = Date.now();
-    const entry = rateLimitMap.get(ip);
+    const entry = rateLimitMap.get(key);
 
     if (entry === undefined || now > entry.resetAt) {
       // Evict the oldest entry if we're at capacity. Map iteration
@@ -127,7 +151,7 @@ export function rateLimit(
         const oldest = rateLimitMap.keys().next().value;
         if (oldest !== undefined) rateLimitMap.delete(oldest);
       }
-      rateLimitMap.set(ip, { count: 1, resetAt: now + windowMs });
+      rateLimitMap.set(key, { count: 1, resetAt: now + windowMs });
     } else {
       entry.count++;
       if (entry.count > maxRequests) {

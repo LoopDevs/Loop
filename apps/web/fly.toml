@@ -2,8 +2,29 @@ app = "loop-web"
 primary_region = "iad"
 
 [build]
+  # A4-072: VITE_SENTRY_DSN / VITE_SENTRY_RELEASE / VITE_LOOP_ENV
+  # must be supplied at BUILD time so the Vite-frozen
+  # `import.meta.env.VITE_*` values exist in the production bundle.
+  # Pass them in via Fly secrets at deploy time:
+  #
+  #   fly secrets set VITE_SENTRY_DSN=https://...@sentry.io/...
+  #   fly secrets set VITE_SENTRY_RELEASE=$(git rev-parse HEAD)
+  #   fly secrets set VITE_LOOP_ENV=production    # or staging
+  #
+  # The `[build.args]` block here pins compile-time defaults; Fly
+  # overlays Fly secrets onto the build args automatically when
+  # deploying via `flyctl deploy --build-arg`. Leaving any of the
+  # Sentry args unset = Sentry stays off in the resulting bundle
+  # (no init call), same behaviour as the pre-A4-072 baseline.
   [build.args]
     VITE_API_URL = "https://api.loopfinance.io"
+    # Empty defaults so an operator who hasn't yet plumbed the
+    # secret still gets a working bundle. Production deploys MUST
+    # override via `--build-arg VITE_SENTRY_DSN=...` for Sentry to
+    # initialise on the web side.
+    VITE_SENTRY_DSN = ""
+    VITE_SENTRY_RELEASE = ""
+    VITE_LOOP_ENV = ""
 
 [env]
   PORT = "3000"

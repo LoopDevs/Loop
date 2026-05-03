@@ -45,25 +45,41 @@ export function mountAdminFleetMonthlyRoutes(app: Hono): void {
   // emission totals over a fixed 12-month window. Mirrors the user-
   // facing /api/users/me/cashback-monthly shape so the same chart
   // component can render either. Single aggregate query.
-  app.get('/api/admin/cashback-monthly', rateLimit(60, 60_000), adminCashbackMonthlyHandler);
+  app.get(
+    '/api/admin/cashback-monthly',
+    rateLimit('GET /api/admin/cashback-monthly', 60, 60_000),
+    adminCashbackMonthlyHandler,
+  );
   // Monthly confirmed-payout totals (#631) — settlement-side
   // counterpart to cashback-monthly. Cashback-monthly measures
   // liability creation (credits minted); this measures liability
   // settlement (confirmed on-chain payouts). Pairing the two
   // answers "is outstanding liability growing or shrinking this
   // month?". Same 12-month window + oldest-first ordering.
-  app.get('/api/admin/payouts-monthly', rateLimit(60, 60_000), adminPayoutsMonthlyHandler);
+  app.get(
+    '/api/admin/payouts-monthly',
+    rateLimit('GET /api/admin/payouts-monthly', 60, 60_000),
+    adminPayoutsMonthlyHandler,
+  );
   // Daily payouts-activity (#637) — settlement-side sparkline
   // counterpart to cashback-activity. Same ?days window (default
   // 30, max 180), LEFT-JOIN generate_series so zero-days render
   // as empty byAsset[]. Drives the payout-trend sparkline on
   // /admin/treasury.
-  app.get('/api/admin/payouts-activity', rateLimit(60, 60_000), adminPayoutsActivityHandler);
+  app.get(
+    '/api/admin/payouts-activity',
+    rateLimit('GET /api/admin/payouts-activity', 60, 60_000),
+    adminPayoutsActivityHandler,
+  );
   // Tier-3 CSV export of the same aggregate (#638) — finance runs
   // this alongside /api/admin/cashback-activity.csv at month-end
   // to reconcile liability creation vs. settlement. Rate-limited
   // 10/min per ADR 018.
-  app.get('/api/admin/payouts-activity.csv', rateLimit(10, 60_000), adminPayoutsActivityCsvHandler);
+  app.get(
+    '/api/admin/payouts-activity.csv',
+    rateLimit('GET /api/admin/payouts-activity.csv', 10, 60_000),
+    adminPayoutsActivityCsvHandler,
+  );
   // Tier-3 CSV export of supplier-spend activity (ADR 013/015/018) —
   // finance runs this at month-end to reconcile CTX's invoice: the
   // wholesale_minor column per (day, currency) should tie to CTX's
@@ -71,7 +87,7 @@ export function mountAdminFleetMonthlyRoutes(app: Hono): void {
   // and payouts-activity.csv (what we settled).
   app.get(
     '/api/admin/supplier-spend/activity.csv',
-    rateLimit(10, 60_000),
+    rateLimit('GET /api/admin/supplier-spend/activity.csv', 10, 60_000),
     adminSupplierSpendActivityCsvHandler,
   );
   // Tier-3 CSV of the fleet operator snapshot (ADR 013 / 018 / 022)
@@ -80,7 +96,7 @@ export function mountAdminFleetMonthlyRoutes(app: Hono): void {
   // review meetings (SLA + volume + success rate on one sheet).
   app.get(
     '/api/admin/operators-snapshot.csv',
-    rateLimit(10, 60_000),
+    rateLimit('GET /api/admin/operators-snapshot.csv', 10, 60_000),
     adminOperatorsSnapshotCsvHandler,
   );
   // Tier-3 CSV of the credit-flow time series (ADR 009 / 015 / 018).
@@ -89,7 +105,7 @@ export function mountAdminFleetMonthlyRoutes(app: Hono): void {
   // (paid to CTX) + this (net ledger movement).
   app.get(
     '/api/admin/treasury/credit-flow.csv',
-    rateLimit(10, 60_000),
+    rateLimit('GET /api/admin/treasury/credit-flow.csv', 10, 60_000),
     adminTreasuryCreditFlowCsvHandler,
   );
 }
