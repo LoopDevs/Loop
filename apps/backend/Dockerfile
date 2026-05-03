@@ -60,4 +60,7 @@ ENV PORT=8080 NODE_ENV=production
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "require('http').get('http://127.0.0.1:' + (process.env.PORT || 8080) + '/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
-CMD ["node", "apps/backend/dist/index.js"]
+# `--import ./instrument.js` runs Sentry's `init()` before any other
+# module loads — required by @sentry/hono ≥ 10.51's split-init pattern
+# so OpenTelemetry's auto-instrumentation can patch http/https first.
+CMD ["node", "--import", "./apps/backend/dist/instrument.js", "apps/backend/dist/index.js"]
