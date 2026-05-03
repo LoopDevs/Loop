@@ -7,6 +7,7 @@ import {
   type CreditAdjustmentResult,
 } from '~/services/admin';
 import { ReplayedBadge } from './ReplayedBadge';
+import { ConfirmDialog } from './ConfirmDialog';
 
 const CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
 type Currency = (typeof CURRENCIES)[number];
@@ -67,6 +68,16 @@ export function CreditAdjustmentForm({ userId, defaultCurrency }: Props): React.
     result: CreditAdjustmentResult;
     replayed: boolean;
   } | null>(null);
+  // A4-052: gate the destructive write behind a second-step
+  // confirmation dialog. The reason is already captured inline (see
+  // textarea below) — this dialog re-displays the parsed amount so
+  // an operator can spot a fat-finger before the ledger updates.
+  const [pendingPayload, setPendingPayload] = useState<{
+    amountMinor: string;
+    amountMinorBigInt: bigint;
+    currency: Currency;
+    reason: string;
+  } | null>(null);
 
   const mutation = useMutation({
     mutationFn: applyCreditAdjustment,
@@ -111,19 +122,55 @@ export function CreditAdjustmentForm({ userId, defaultCurrency }: Props): React.
       return;
     }
 
-    mutation.mutate({
-      userId,
+    setPendingPayload({
       amountMinor: parsed.minorString,
+      amountMinorBigInt: parsed.minorBigInt,
       currency,
       reason: trimmedReason,
     });
   };
+
+  const handleConfirm = (confirmed: boolean): void => {
+    const payload = pendingPayload;
+    setPendingPayload(null);
+    if (!confirmed || payload === null) return;
+    mutation.mutate({
+      userId,
+      amountMinor: payload.amountMinor,
+      currency: payload.currency,
+      reason: payload.reason,
+    });
+  };
+
+  const dialogBody =
+    pendingPayload !== null ? (
+      <div className="space-y-2">
+        <p>
+          Apply{' '}
+          <strong className="tabular-nums">
+            {formatMinorCurrency(pendingPayload.amountMinor, pendingPayload.currency)}
+          </strong>{' '}
+          {pendingPayload.amountMinorBigInt < 0n ? 'debit' : 'credit'} to user{' '}
+          <code className="font-mono text-xs">{userId}</code>?
+        </p>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          This is logged in the audit trail and will fire a Discord notification.
+        </p>
+      </div>
+    ) : null;
 
   return (
     <form className="space-y-4" onSubmit={handleSubmit} aria-labelledby="credit-adjustment-heading">
       <p id="credit-adjustment-heading" className="sr-only">
         Apply credit adjustment
       </p>
+      <ConfirmDialog
+        open={pendingPayload !== null}
+        title="Confirm credit adjustment"
+        body={dialogBody}
+        confirmLabel="Apply adjustment"
+        onResolve={handleConfirm}
+      />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <label className="space-y-1 sm:col-span-1">
           <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
