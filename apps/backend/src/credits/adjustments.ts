@@ -19,6 +19,7 @@
  * erase it; persisting on the ledger row makes the promise hold past
  * the TTL.
  */
+import { createHash } from 'node:crypto';
 import { and, eq, gte, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { creditTransactions, userCredits } from '../db/schema.js';
@@ -66,6 +67,22 @@ export interface CreditAdjustment {
   createdAt: Date;
 }
 
+function adjustmentCapLockKey(adminUserId: string, currency: string, dayStartUtc: Date): bigint {
+  const digest = createHash('sha256')
+    .update(`${adminUserId}:${currency}:${dayStartUtc.toISOString()}`)
+    .digest();
+  const raw =
+    (BigInt(digest[0]!) << 56n) |
+    (BigInt(digest[1]!) << 48n) |
+    (BigInt(digest[2]!) << 40n) |
+    (BigInt(digest[3]!) << 32n) |
+    (BigInt(digest[4]!) << 24n) |
+    (BigInt(digest[5]!) << 16n) |
+    (BigInt(digest[6]!) << 8n) |
+    BigInt(digest[7]!);
+  return BigInt.asIntN(64, raw);
+}
+
 export async function applyAdminCreditAdjustment(args: {
   userId: string;
   currency: string;
@@ -77,16 +94,17 @@ export async function applyAdminCreditAdjustment(args: {
     // A2-1610: pre-flight daily cap check. Sum of absolute adjustment
     // values for this admin in this currency since UTC-start-of-day.
     // Adding |args.amountMinor| must not exceed the configured cap.
-    // Runs inside the txn so concurrent writes serialise against the
-    // same day-so-far total via the `user_credits` FOR UPDATE lock
-    // below (same admin hitting the same user bucket funnel through
-    // that lock; different users / admins don't need serialisation
-    // because a per-admin race is only dangerous against ONE admin's
-    // own writes).
+    // Runs inside the txn. A per-admin/day advisory lock below
+    // serialises the cap read/update across different target users;
+    // the user_credits FOR UPDATE lock later still protects the
+    // target balance row itself.
     const capMinor = env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR;
     if (capMinor > 0n) {
       const dayStart = new Date();
       dayStart.setUTCHours(0, 0, 0, 0);
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${adjustmentCapLockKey(args.adminUserId, args.currency, dayStart)})`,
+      );
       const [dayRow] = await tx
         .select({
           usedMinor: sql<string>`COALESCE(SUM(ABS(${creditTransactions.amountMinor}))::text, '0')`,

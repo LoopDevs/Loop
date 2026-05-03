@@ -163,7 +163,8 @@ export function registerAdminCreditWritesOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {
-        description: 'Rate limit exceeded (20/min per IP)',
+        description:
+          'Rate limit exceeded (20/min per IP) or per-admin per-currency UTC-day adjustment cap hit (`DAILY_LIMIT_EXCEEDED`)',
         content: { 'application/json': { schema: errorResponse } },
       },
       500: {

@@ -1,0 +1,177 @@
+
+> test:e2e:mocked
+> playwright test --config=playwright.mocked.config.ts
+
+[1A[2K[2m[WebServer] [22m(node:70925) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1A[2K[2m[WebServer] [22m(node:71053) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1A[2K[2m[WebServer] [22m(node:71089) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1A[2K[2m[WebServer] [22m(node:71091) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1A[2K[2m[WebServer] [22m(node:71091) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1A[2K[2m[WebServer] [22m(node:71147) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1A[2K[2m[WebServer] [22m(node:71186) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+
+{
+  severity_local: 'NOTICE',
+  severity: 'NOTICE',
+  code: '42P06',
+  message: 'schema "drizzle" already exists, skipping',
+  file: 'schemacmds.c',
+  line: '132',
+  routine: 'CreateSchemaCommand'
+}
+{
+  severity_local: 'NOTICE',
+  severity: 'NOTICE',
+  code: '42P07',
+  message: 'relation "__drizzle_migrations" already exists, skipping',
+  file: 'parse_utilcmd.c',
+  line: '207',
+  routine: 'transformCreateStmt'
+}
+
+Running 2 tests using 1 worker
+
+[1A[2K(node:71337) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:71337) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[1/2] [chromium] › tests/e2e-mocked/purchase-flow.test.ts:74:3 › mocked purchase flow › happy path — email → OTP → amount → payment → redeem (URL)
+[1A[2K[2m[WebServer] [22m12:47:11 PM [vite] (client) [Unhandled error] Error: Hydration failed because the server rendered text didn't match the client. As a result this tree will be regenerated on the client. This can happen if a SSR-ed Client Component used:
+[2m[WebServer] [22m
+[2m[WebServer] [22m- A server/client branch `if (typeof window !== 'undefined')`.
+[2m[WebServer] [22m- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+[2m[WebServer] [22m- Date formatting in a user's locale which doesn't match the server.
+[2m[WebServer] [22m- External changing data without sending a snapshot of it along with the HTML.
+[2m[WebServer] [22m- Invalid HTML tag nesting.
+[2m[WebServer] [22m
+[2m[WebServer] [22mIt can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+[2m[WebServer] [22m
+[2m[WebServer] [22mhttps://react.dev/link/hydration-mismatch
+[2m[WebServer] [22m
+[2m[WebServer] [22m  ...
+[2m[WebServer] [22m    <QueryClientProvider client={{}}>
+[2m[WebServer] [22m      <NativeShell>
+[2m[WebServer] [22m        <OfflineBanner>
+[2m[WebServer] [22m        <NativeBackButton>
+[2m[WebServer] [22m        <ToastContainer>
+[2m[WebServer] [22m        <div className="lg:pb-0 pb-16">
+[2m[WebServer] [22m          <Outlet>
+[2m[WebServer] [22m            <RenderErrorBoundary location={{pathname:"/", ...}} revalidation="idle" component={<WithErrorBoundaryProps2>} ...>
+[2m[WebServer] [22m              <RenderedRoute match={{params:{}, ...}} routeContext={{outlet:null, ...}}>
+[2m[WebServer] [22m                <WithComponentProps2>
+[2m[WebServer] [22m                  <Home params={{}} loaderData={null} actionData={undefined} matches={[...]}>
+[2m[WebServer] [22m                    <HomeContent>
+[2m[WebServer] [22m                      <div>
+[2m[WebServer] [22m                        <Navbar>
+[2m[WebServer] [22m                        <div className="hidden md:...">
+[2m[WebServer] [22m                          <div>
+[2m[WebServer] [22m                          <div className="container ...">
+[2m[WebServer] [22m                            <div>
+[2m[WebServer] [22m                            <HowItWorksStrip>
+[2m[WebServer] [22m                            <section
+[2m[WebServer] [22m+                             className="mb-16"
+[2m[WebServer] [22m-                             className={null}
+[2m[WebServer] [22m                            >
+[2m[WebServer] [22m                              <div className="text-cente...">
+[2m[WebServer] [22m                                <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+[2m[WebServer] [22m+                                 Top cashback rates
+[2m[WebServer] [22m-                                 All Merchants
+[2m[WebServer] [22m                                ...
+[2m[WebServer] [22m                              ...
+[2m[WebServer] [22m                            ...
+[2m[WebServer] [22m                          ...
+[2m[WebServer] [22m                        ...
+[2m[WebServer] [22m        ...
+[2m[WebServer] [22m
+[2m[WebServer] [22m > throwOnHydrationMismatch ../../node_modules/react-dom/cjs/react-dom-client.development.js:5238:10
+[2m[WebServer] [22m > prepareToHydrateHostInstance ../../node_modules/react-dom/cjs/react-dom-client.development.js:5334:20
+[2m[WebServer] [22m > completeWork ../../node_modules/react-dom/cjs/react-dom-client.development.js:12553:14
+[2m[WebServer] [22m > runWithFiberInDEV ../../node_modules/react-dom/cjs/react-dom-client.development.js:871:29
+[2m[WebServer] [22m > completeUnitOfWork ../../node_modules/react-dom/cjs/react-dom-client.development.js:17777:18
+[2m[WebServer] [22m > performUnitOfWork ../../node_modules/react-dom/cjs/react-dom-client.development.js:17658:10
+[2m[WebServer] [22m > workLoopConcurrentByScheduler ../../node_modules/react-dom/cjs/react-dom-client.development.js:17635:8
+[2m[WebServer] [22m > renderRootConcurrent ../../node_modules/react-dom/cjs/react-dom-client.development.js:17617:14
+[2m[WebServer] [22m > performWorkOnRoot ../../node_modules/react-dom/cjs/react-dom-client.development.js:16503:10
+[2m[WebServer] [22m > performWorkOnRootViaSchedulerTask ../../node_modules/react-dom/cjs/react-dom-client.development.js:18957:6
+[2m[WebServer] [22m > MessagePort.performWorkUntilDeadline ../../node_modules/scheduler/cjs/scheduler.development.js:45:47
+[2m[WebServer] [22m
+
+[1A[2K[2/2] [chromium] › tests/e2e-mocked/purchase-flow.test.ts:119:3 › mocked purchase flow › wrong OTP shows an inline error without leaving the OTP step
+[1A[2K[2m[WebServer] [22m12:47:16 PM [vite] (client) [Unhandled error] Error: Hydration failed because the server rendered text didn't match the client. As a result this tree will be regenerated on the client. This can happen if a SSR-ed Client Component used:
+[2m[WebServer] [22m
+[2m[WebServer] [22m- A server/client branch `if (typeof window !== 'undefined')`.
+[2m[WebServer] [22m- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+[2m[WebServer] [22m- Date formatting in a user's locale which doesn't match the server.
+[2m[WebServer] [22m- External changing data without sending a snapshot of it along with the HTML.
+[2m[WebServer] [22m- Invalid HTML tag nesting.
+[2m[WebServer] [22m
+[2m[WebServer] [22mIt can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+[2m[WebServer] [22m
+[2m[WebServer] [22mhttps://react.dev/link/hydration-mismatch
+[2m[WebServer] [22m
+[2m[WebServer] [22m  ...
+[2m[WebServer] [22m    <QueryClientProvider client={{}}>
+[2m[WebServer] [22m      <NativeShell>
+[2m[WebServer] [22m        <OfflineBanner>
+[2m[WebServer] [22m        <NativeBackButton>
+[2m[WebServer] [22m        <ToastContainer>
+[2m[WebServer] [22m        <div className="lg:pb-0 pb-16">
+[2m[WebServer] [22m          <Outlet>
+[2m[WebServer] [22m            <RenderErrorBoundary location={{pathname:"/", ...}} revalidation="idle" component={<WithErrorBoundaryProps2>} ...>
+[2m[WebServer] [22m              <RenderedRoute match={{params:{}, ...}} routeContext={{outlet:null, ...}}>
+[2m[WebServer] [22m                <WithComponentProps2>
+[2m[WebServer] [22m                  <Home params={{}} loaderData={null} actionData={undefined} matches={[...]}>
+[2m[WebServer] [22m                    <HomeContent>
+[2m[WebServer] [22m                      <div>
+[2m[WebServer] [22m                        <Navbar>
+[2m[WebServer] [22m                        <div className="hidden md:...">
+[2m[WebServer] [22m                          <div>
+[2m[WebServer] [22m                          <div className="container ...">
+[2m[WebServer] [22m                            <div>
+[2m[WebServer] [22m                            <HowItWorksStrip>
+[2m[WebServer] [22m                            <section
+[2m[WebServer] [22m+                             className="mb-16"
+[2m[WebServer] [22m-                             className={null}
+[2m[WebServer] [22m                            >
+[2m[WebServer] [22m                              <div className="text-cente...">
+[2m[WebServer] [22m                                <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+[2m[WebServer] [22m+                                 Top cashback rates
+[2m[WebServer] [22m-                                 All Merchants
+[2m[WebServer] [22m                                ...
+[2m[WebServer] [22m                              ...
+[2m[WebServer] [22m                            ...
+[2m[WebServer] [22m                          ...
+[2m[WebServer] [22m                        ...
+[2m[WebServer] [22m        ...
+[2m[WebServer] [22m
+[2m[WebServer] [22m > throwOnHydrationMismatch ../../node_modules/react-dom/cjs/react-dom-client.development.js:5238:10
+[2m[WebServer] [22m > prepareToHydrateHostInstance ../../node_modules/react-dom/cjs/react-dom-client.development.js:5334:20
+[2m[WebServer] [22m > completeWork ../../node_modules/react-dom/cjs/react-dom-client.development.js:12553:14
+[2m[WebServer] [22m > runWithFiberInDEV ../../node_modules/react-dom/cjs/react-dom-client.development.js:871:29
+[2m[WebServer] [22m > completeUnitOfWork ../../node_modules/react-dom/cjs/react-dom-client.development.js:17777:18
+[2m[WebServer] [22m > performUnitOfWork ../../node_modules/react-dom/cjs/react-dom-client.development.js:17658:10
+[2m[WebServer] [22m > workLoopConcurrentByScheduler ../../node_modules/react-dom/cjs/react-dom-client.development.js:17635:8
+[2m[WebServer] [22m > renderRootConcurrent ../../node_modules/react-dom/cjs/react-dom-client.development.js:17617:14
+[2m[WebServer] [22m > performWorkOnRoot ../../node_modules/react-dom/cjs/react-dom-client.development.js:16503:10
+[2m[WebServer] [22m > performWorkOnRootViaSchedulerTask ../../node_modules/react-dom/cjs/react-dom-client.development.js:18957:6
+[2m[WebServer] [22m > MessagePort.performWorkUntilDeadline ../../node_modules/scheduler/cjs/scheduler.development.js:45:47
+[2m[WebServer] [22m
+
+[1A[2K  2 passed (17.9s)

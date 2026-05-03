@@ -25,6 +25,12 @@
  * suite keeps working unchanged.
  */
 import { logger } from '../logger.js';
+import {
+  markWorkerStarted,
+  markWorkerStopped,
+  markWorkerTickFailure,
+  markWorkerTickSuccess,
+} from '../runtime-health.js';
 import { sweepExpiredOrders } from '../orders/transitions.js';
 import { runCursorWatchdog, CURSOR_WATCHDOG_INTERVAL_MS } from './cursor-watchdog.js';
 import { runPaymentWatcherTick } from './watcher.js';
@@ -60,6 +66,7 @@ export function startPaymentWatcher(args: {
   limit?: number;
 }): void {
   if (watcherTimer !== null) return;
+  markWorkerStarted('payment_watcher', { staleAfterMs: Math.max(args.intervalMs * 3, 60_000) });
   log.info({ intervalMs: args.intervalMs }, 'Starting payment watcher');
   const tick = async (): Promise<void> => {
     try {
@@ -71,7 +78,9 @@ export function startPaymentWatcher(args: {
       if (r.scanned > 0 || r.paid > 0 || r.skippedAmount > 0) {
         log.info(r, 'Payment watcher tick complete');
       }
+      markWorkerTickSuccess('payment_watcher');
     } catch (err) {
+      markWorkerTickFailure('payment_watcher', err);
       log.error({ err }, 'Payment watcher tick failed');
     }
   };
@@ -121,5 +130,6 @@ export function stopPaymentWatcher(): void {
   if (watcherTimer === null) return;
   clearInterval(watcherTimer);
   watcherTimer = null;
+  markWorkerStopped('payment_watcher');
   log.info('Payment watcher stopped');
 }

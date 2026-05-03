@@ -72,6 +72,56 @@ interface DbRow {
   submittedAt: Date | null;
 }
 
+export async function listStuckPayoutRows(args?: {
+  thresholdMinutes?: number;
+  limit?: number;
+}): Promise<StuckPayoutRow[]> {
+  const thresholdMinutes = Math.min(
+    Math.max(args?.thresholdMinutes ?? DEFAULT_THRESHOLD_MINUTES, 1),
+    MAX_THRESHOLD_MINUTES,
+  );
+  const limit = Math.min(Math.max(args?.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
+  const cutoff = new Date(Date.now() - thresholdMinutes * 60 * 1000);
+  const rows = (await db
+    .select({
+      id: pendingPayouts.id,
+      userId: pendingPayouts.userId,
+      orderId: pendingPayouts.orderId,
+      assetCode: pendingPayouts.assetCode,
+      amountStroops: pendingPayouts.amountStroops,
+      state: pendingPayouts.state,
+      attempts: pendingPayouts.attempts,
+      createdAt: pendingPayouts.createdAt,
+      submittedAt: pendingPayouts.submittedAt,
+    })
+    .from(pendingPayouts)
+    .where(
+      and(
+        inArray(pendingPayouts.state, STUCK_STATES as unknown as string[]),
+        lt(pendingPayouts.createdAt, cutoff),
+      ),
+    )
+    .orderBy(asc(pendingPayouts.createdAt))
+    .limit(limit)) as DbRow[];
+
+  const nowMs = Date.now();
+  return rows.map((r) => {
+    const anchor = r.state === 'submitted' ? (r.submittedAt ?? r.createdAt) : r.createdAt;
+    const ageMinutes = Math.floor((nowMs - anchor.getTime()) / 60_000);
+    return {
+      id: r.id,
+      userId: r.userId,
+      orderId: r.orderId,
+      assetCode: r.assetCode,
+      amountStroops: r.amountStroops.toString(),
+      state: r.state,
+      stuckSince: anchor.toISOString(),
+      ageMinutes,
+      attempts: r.attempts,
+    };
+  });
+}
+
 export async function adminStuckPayoutsHandler(c: Context): Promise<Response> {
   const thresholdRaw = c.req.query('thresholdMinutes');
   const parsedThreshold = Number.parseInt(thresholdRaw ?? `${DEFAULT_THRESHOLD_MINUTES}`, 10);
@@ -87,53 +137,15 @@ export async function adminStuckPayoutsHandler(c: Context): Promise<Response> {
     MAX_LIMIT,
   );
 
-  const cutoff = new Date(Date.now() - thresholdMinutes * 60 * 1000);
-
   try {
     // Key the cutoff on createdAt — the submit worker picks the
     // oldest pending row first, so a submitted row that's past the
     // threshold by createdAt is also past-SLO by submittedAt (submit
     // can't happen before create). Keeps the query single-index.
-    const rows = (await db
-      .select({
-        id: pendingPayouts.id,
-        userId: pendingPayouts.userId,
-        orderId: pendingPayouts.orderId,
-        assetCode: pendingPayouts.assetCode,
-        amountStroops: pendingPayouts.amountStroops,
-        state: pendingPayouts.state,
-        attempts: pendingPayouts.attempts,
-        createdAt: pendingPayouts.createdAt,
-        submittedAt: pendingPayouts.submittedAt,
-      })
-      .from(pendingPayouts)
-      .where(
-        and(
-          inArray(pendingPayouts.state, STUCK_STATES as unknown as string[]),
-          lt(pendingPayouts.createdAt, cutoff),
-        ),
-      )
-      .orderBy(asc(pendingPayouts.createdAt))
-      .limit(limit)) as DbRow[];
-
-    const nowMs = Date.now();
+    const rows = await listStuckPayoutRows({ thresholdMinutes, limit });
     const body: StuckPayoutsResponse = {
       thresholdMinutes,
-      rows: rows.map((r) => {
-        const anchor = r.state === 'submitted' ? (r.submittedAt ?? r.createdAt) : r.createdAt;
-        const ageMinutes = Math.floor((nowMs - anchor.getTime()) / 60_000);
-        return {
-          id: r.id,
-          userId: r.userId,
-          orderId: r.orderId,
-          assetCode: r.assetCode,
-          amountStroops: r.amountStroops.toString(),
-          state: r.state,
-          stuckSince: anchor.toISOString(),
-          ageMinutes,
-          attempts: r.attempts,
-        };
-      }),
+      rows,
     };
     return c.json(body);
   } catch (err) {

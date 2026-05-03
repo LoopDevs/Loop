@@ -2,7 +2,7 @@
 
 Status: Accepted
 Date: 2026-04-24
-Implemented: 2026-04-25 onwards. Schema: migration 0018 generalised `pending_payouts` for `kind='withdrawal'`; migration 0022 extended `credit_transactions_reference_unique` to include `withdrawal`. Withdrawal flow: `applyAdminWithdrawal` ledger primitive in `apps/backend/src/credits/withdrawals.ts`; `POST /api/admin/users/:userId/withdrawals` admin handler in `apps/backend/src/admin/withdrawals.ts`; web client `applyAdminWithdrawal` in `apps/web/app/services/admin.ts`; admin form `AdminWithdrawalForm` in `apps/web/app/components/features/admin/`; mounted on `/admin/users/:userId`. Compensation flow (ADR §5): `applyAdminPayoutCompensation` primitive in `apps/backend/src/credits/payout-compensation.ts`; `POST /api/admin/payouts/:id/compensate` handler in `apps/backend/src/admin/payout-compensation.ts`. Both flows ADR-017 compliant — idempotency-key + audit envelope + Discord fanout + handler-level test coverage.
+Implemented: 2026-04-25 onwards. Schema: migration 0018 generalised `pending_payouts` for `kind='withdrawal'`; migration 0022 extended `credit_transactions_reference_unique` to include `withdrawal`; migration 0028 added `pending_payouts.compensated_at` plus an active-withdrawal semantic unique index. Withdrawal flow: `applyAdminWithdrawal` ledger primitive in `apps/backend/src/credits/withdrawals.ts`; `POST /api/admin/users/:userId/withdrawals` admin handler in `apps/backend/src/admin/withdrawals.ts`; web client `applyAdminWithdrawal` in `apps/web/app/services/admin.ts`; admin form `AdminWithdrawalForm` in `apps/web/app/components/features/admin/`; mounted on `/admin/users/:userId`. Compensation flow (ADR §5): `applyAdminPayoutCompensation` primitive in `apps/backend/src/credits/payout-compensation.ts`; `POST /api/admin/payouts/:id/compensate` handler in `apps/backend/src/admin/payout-compensation.ts`. Both flows ADR-017 compliant — idempotency-key + audit envelope + Discord fanout + handler-level test coverage.
 Related: ADR 009 (credits ledger), ADR 013 (Loop-owned auth), ADR 015 (stablecoin topology), ADR 016 (payout submit worker), ADR 017 (admin write primitives)
 Resolves: A2-901 residual (`withdrawal` writer), migration 0013 §28
 
@@ -131,10 +131,11 @@ balance decrement in the same `db.transaction(async (tx) => …)`
 block — all-or-nothing. The "payout first" ordering is just within
 the txn, for the reference-id dependency.
 
-### 4. Partial unique index on `(type='withdrawal', reference_type='payout', reference_id)`
+### 4. Semantic uniqueness for active withdrawals
 
 A new migration extends the 0013 partial unique index to cover
-withdrawals:
+withdrawals and adds a stronger semantic fence on active withdrawal
+intents:
 
 ```sql
 DROP INDEX credit_transactions_reference_unique;
@@ -143,16 +144,25 @@ CREATE UNIQUE INDEX credit_transactions_reference_unique
   WHERE type IN ('cashback', 'refund', 'spend', 'withdrawal')
     AND reference_type IS NOT NULL
     AND reference_id IS NOT NULL;
+
+CREATE UNIQUE INDEX pending_payouts_active_withdrawal_unique
+  ON pending_payouts (user_id, asset_code, asset_issuer, to_address, amount_stroops)
+  WHERE kind = 'withdrawal'
+    AND state IN ('pending', 'submitted', 'failed')
+    AND compensated_at IS NULL;
 ```
 
-Semantics: at most one withdrawal credit-tx per payout id. A retry
-of the admin endpoint with the same `Idempotency-Key` replays via
-ADR-017; a concurrent second admin accidentally issuing a parallel
-withdrawal for the same payout would hit the DB layer.
+Semantics:
 
-`pending_payouts.id` is a fresh UUID per call, so "same payout
-twice" is not a naturally-occurring concern — the index exists to
-catch operator-error retries that bypass the idempotency layer.
+- at most one withdrawal credit-tx per payout id, if some secondary
+  code path ever tries to re-use an already-created payout row
+- at most one active unresolved withdrawal intent for the same
+  `(user, asset, issuer, destination, amount)` tuple
+
+A retry of the admin endpoint with the same `Idempotency-Key`
+replays via ADR-017. A concurrent second admin accidentally issuing
+the same withdrawal with a fresh key now hits the DB layer even
+though the new request would otherwise get a fresh payout UUID.
 
 ### 5. Compensation on permanent payout failure
 
@@ -179,7 +189,11 @@ We compensate with a `type='adjustment'` row rather than a
 The compensation row references the same payout id with
 `reference_type='payout'`, which is inert from the index's point
 of view (the index only constrains `refund`, `cashback`, `spend`,
-and — post-this-ADR — `withdrawal`).
+and — post-this-ADR — `withdrawal`). The payout row itself is marked
+`compensated_at = NOW()`, which prevents admin retry from moving the
+same failed row back to `pending` and excludes the row from the
+active-withdrawal uniqueness fence so support can deliberately
+re-issue a replacement withdrawal later.
 
 Compensation is triggered by a scheduled job, not automatically
 from the worker, so finance has a chance to review before the
@@ -211,15 +225,15 @@ The envelope is wrapped by `buildAuditEnvelope` and stored in
 
 ### 7. Error ladder
 
-| Code                        | Status | Condition                                                    |
-| --------------------------- | ------ | ------------------------------------------------------------ |
-| `VALIDATION_ERROR`          | 400    | body shape / UUID / destination-address format               |
-| `IDEMPOTENCY_KEY_REQUIRED`  | 400    | missing or malformed header                                  |
-| `INSUFFICIENT_BALANCE`      | 400    | `balanceMinor < amountMinor` at FOR-UPDATE read              |
-| `UNAUTHORIZED`              | 401    | not an admin (shouldn't happen — middleware rejects earlier) |
-| `USER_NOT_FOUND`            | 404    | userId does not resolve                                      |
-| `WITHDRAWAL_ALREADY_ISSUED` | 409    | partial unique index violation — matches the refund ladder   |
-| `INTERNAL_ERROR`            | 500    | unexpected DB / transaction failure                          |
+| Code                        | Status | Condition                                                              |
+| --------------------------- | ------ | ---------------------------------------------------------------------- |
+| `VALIDATION_ERROR`          | 400    | body shape / UUID / destination-address format                         |
+| `IDEMPOTENCY_KEY_REQUIRED`  | 400    | missing or malformed header                                            |
+| `INSUFFICIENT_BALANCE`      | 400    | `balanceMinor < amountMinor` at FOR-UPDATE read                        |
+| `UNAUTHORIZED`              | 401    | not an admin (shouldn't happen — middleware rejects earlier)           |
+| `USER_NOT_FOUND`            | 404    | userId does not resolve                                                |
+| `WITHDRAWAL_ALREADY_ISSUED` | 409    | matching active withdrawal already exists for the same semantic intent |
+| `INTERNAL_ERROR`            | 500    | unexpected DB / transaction failure                                    |
 
 The 409 is vestigial in the admin path (Idempotency-Key catches
 retries) but becomes load-bearing once Phase 2b adds user-initiated

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { triggerHapticNotification } from '~/native/haptics';
 import { copyToClipboard } from '~/native/clipboard';
-import { enableTaskSwitcherPrivacyOverlay } from '~/native/task-switcher-overlay';
 import { nativeShare } from '~/native/share';
 import { getImageProxyUrl } from '~/utils/image';
 import { composeGiftCardShareImage } from '~/utils/share-image';
@@ -61,7 +60,7 @@ export function PurchaseComplete({
       barcodeCanvas: useCanvas ? (canvasRef.current ?? undefined) : undefined,
       barcodeImageUrl:
         !useCanvas && barcodeImageUrl !== undefined
-          ? getImageProxyUrl(barcodeImageUrl, 640)
+          ? getImageProxyUrl(barcodeImageUrl, 640, 80, { mode: 'private' })
           : undefined,
     });
     const safeName = merchantName.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
@@ -78,14 +77,6 @@ export function PurchaseComplete({
 
   useEffect(() => {
     void triggerHapticNotification('success');
-  }, []);
-
-  // A2-1207: blur the iOS task-switcher snapshot of the gift card
-  // code. This is privacy theatre on Android (the recents thumbnail
-  // is still captured before the pause event fires); the underlying
-  // platform-native protections are deferred — see ADR-005.
-  useEffect(() => {
-    return enableTaskSwitcherPrivacyOverlay();
   }, []);
 
   useEffect(() => {
@@ -157,7 +148,7 @@ export function PurchaseComplete({
               />
             ) : (
               <img
-                src={getImageProxyUrl(barcodeImageUrl ?? '', 640)}
+                src={getImageProxyUrl(barcodeImageUrl ?? '', 640, 80, { mode: 'private' })}
                 alt={`Barcode for gift card code ${code}`}
                 onError={() => setImageFailed(true)}
                 className="max-h-full max-w-full"

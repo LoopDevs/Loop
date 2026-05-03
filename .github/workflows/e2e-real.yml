@@ -33,7 +33,13 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - name: Install deps
-        run: npm ci
+        run: |
+          # Match the hardened install posture used by the main CI
+          # workflow: block arbitrary postinstall hooks, then
+          # explicitly restore esbuild's platform binary selector so
+          # tsx/vite-backed tooling still works on the runner.
+          npm ci --ignore-scripts
+          npm rebuild esbuild
       # The `dev` script uses `tsx watch --env-file=.env`, which would error in
       # CI since no `.env` exists. Run tsx directly against the source so only
       # the workflow `env:` block applies. Redirect stdout+stderr to a file so

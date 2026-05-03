@@ -26,11 +26,10 @@
  * rolls back the payout row too — no orphaned credit-tx, no
  * orphaned payout.
  *
- * The partial unique index extended in migration 0022
- * (`credit_transactions_reference_unique` scoped to include
- * `type='withdrawal'`) catches operator-error retries that bypass
- * the ADR-017 idempotency layer — surfaces as
- * `WithdrawalAlreadyIssuedError`.
+ * A semantic uniqueness fence on `pending_payouts` plus the admin
+ * idempotency guard together catch operator-error retries that would
+ * otherwise create a second active withdrawal with a fresh payout UUID
+ * — surfaces as `WithdrawalAlreadyIssuedError`.
  */
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
@@ -39,7 +38,7 @@ import { InsufficientBalanceError } from './adjustments.js';
 
 export class WithdrawalAlreadyIssuedError extends Error {
   constructor(public readonly payoutId: string) {
-    super(`A withdrawal credit-tx has already been issued for payout ${payoutId}`);
+    super(`A matching active withdrawal already exists for payout ${payoutId}`);
     this.name = 'WithdrawalAlreadyIssuedError';
   }
 }
@@ -79,8 +78,8 @@ export interface WithdrawalResult {
  *
  * Throws:
  *   - `InsufficientBalanceError` — balance < requested amount.
- *   - `WithdrawalAlreadyIssuedError` — partial-unique index says
- *     a credit-tx already references this payout id.
+ *   - `WithdrawalAlreadyIssuedError` — a matching active withdrawal
+ *     already exists for the same user/asset/address/amount.
  *   - generic Error — `Withdrawal amount must be positive` if the
  *     caller passes 0 or negative; the schema CHECK enforces this
  *     too but we fail fast with a typed message.
@@ -113,6 +112,26 @@ export async function applyAdminWithdrawal(args: {
         throw new InsufficientBalanceError(args.currency, priorBalance, args.amountMinor);
       }
 
+      const [priorPayout] = await tx
+        .select({ id: pendingPayouts.id })
+        .from(pendingPayouts)
+        .where(
+          and(
+            eq(pendingPayouts.userId, args.userId),
+            eq(pendingPayouts.kind, 'withdrawal'),
+            eq(pendingPayouts.assetCode, args.intent.assetCode),
+            eq(pendingPayouts.assetIssuer, args.intent.assetIssuer),
+            eq(pendingPayouts.toAddress, args.intent.toAddress),
+            eq(pendingPayouts.amountStroops, args.intent.amountStroops),
+            sql`${pendingPayouts.state} IN ('pending', 'submitted', 'failed')`,
+            sql`${pendingPayouts.compensatedAt} IS NULL`,
+          ),
+        )
+        .limit(1);
+      if (priorPayout !== undefined) {
+        throw new WithdrawalAlreadyIssuedError(priorPayout.id);
+      }
+
       // Step 1 of the two-row write: queue the on-chain payout.
       // `kind='withdrawal'` + `order_id` NULL — schema CHECK
       // rejects the wrong combinations.
@@ -133,9 +152,9 @@ export async function applyAdminWithdrawal(args: {
       }
 
       // Step 2: ledger entry referencing the just-queued payout.
-      // The partial unique index on
-      // (type='withdrawal', reference_type='payout', reference_id)
-      // — migration 0022 — catches operator-error retries.
+      // `credit_transactions_reference_unique` still pins "one debit
+      // row per payout id" if any secondary code path ever tries to
+      // re-use the same payout row.
       const [creditTx] = await tx
         .insert(creditTransactions)
         .values({
@@ -186,19 +205,23 @@ export async function applyAdminWithdrawal(args: {
     });
   } catch (err) {
     if (isDuplicateWithdrawal(err)) {
-      // The credit-tx insert hit the partial unique index. The
-      // payout row was inserted in the same txn and rolled back
-      // alongside, so there's no orphan to clean up.
-      throw new WithdrawalAlreadyIssuedError(extractPayoutId(err) ?? '<unknown>');
+      const existingPayoutId =
+        extractPayoutId(err) ??
+        (await findMatchingActiveWithdrawal({
+          userId: args.userId,
+          intent: args.intent,
+        }));
+      throw new WithdrawalAlreadyIssuedError(existingPayoutId ?? '<unknown>');
     }
     throw err;
   }
 }
 
 /**
- * Best-effort detection of the partial-unique-index violation from
- * migration 0022. postgres-js surfaces a Postgres error with
- * `code='23505'` (unique_violation) and `constraint_name` populated.
+ * Best-effort detection of the unique-violation paths that should
+ * surface as WITHDRAWAL_ALREADY_ISSUED. postgres-js surfaces a
+ * Postgres error with `code='23505'` (unique_violation) and
+ * `constraint_name` populated.
  */
 function isDuplicateWithdrawal(err: unknown): boolean {
   // Drizzle wraps `PostgresError` in `DrizzleQueryError`; walk the
@@ -209,7 +232,11 @@ function isDuplicateWithdrawal(err: unknown): boolean {
   let cur: unknown = err;
   for (let depth = 0; depth < 4 && cur instanceof Error; depth++) {
     const e = cur as Error & { code?: string; constraint_name?: string };
-    if (e.code === '23505' && e.constraint_name === 'credit_transactions_reference_unique') {
+    if (
+      e.code === '23505' &&
+      (e.constraint_name === 'credit_transactions_reference_unique' ||
+        e.constraint_name === 'pending_payouts_active_withdrawal_unique')
+    ) {
       return true;
     }
     cur = (e as { cause?: unknown }).cause;
@@ -218,7 +245,7 @@ function isDuplicateWithdrawal(err: unknown): boolean {
 }
 
 /**
- * On a partial-unique violation, the payout id we tried to write is
+ * On a `credit_transactions_reference_unique` violation, the payout id we tried to write is
  * embedded in the pg error's `detail` field
  * (`Key (type, reference_type, reference_id)=(withdrawal, payout, <id>)`).
  * Extract it for the typed error so the handler can echo it back.
@@ -237,4 +264,27 @@ function extractPayoutId(err: unknown): string | null {
     cur = (e as { cause?: unknown }).cause;
   }
   return null;
+}
+
+async function findMatchingActiveWithdrawal(args: {
+  userId: string;
+  intent: WithdrawalIntent;
+}): Promise<string | null> {
+  const [row] = await db
+    .select({ id: pendingPayouts.id })
+    .from(pendingPayouts)
+    .where(
+      and(
+        eq(pendingPayouts.userId, args.userId),
+        eq(pendingPayouts.kind, 'withdrawal'),
+        eq(pendingPayouts.assetCode, args.intent.assetCode),
+        eq(pendingPayouts.assetIssuer, args.intent.assetIssuer),
+        eq(pendingPayouts.toAddress, args.intent.toAddress),
+        eq(pendingPayouts.amountStroops, args.intent.amountStroops),
+        sql`${pendingPayouts.state} IN ('pending', 'submitted', 'failed')`,
+        sql`${pendingPayouts.compensatedAt} IS NULL`,
+      ),
+    )
+    .limit(1);
+  return row?.id ?? null;
 }

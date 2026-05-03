@@ -22,6 +22,12 @@
  * test suite keeps working unchanged.
  */
 import { logger } from '../logger.js';
+import {
+  markWorkerStarted,
+  markWorkerStopped,
+  markWorkerTickFailure,
+  markWorkerTickSuccess,
+} from '../runtime-health.js';
 import { sweepStuckProcurement } from './transitions.js';
 import { runProcurementTick } from './procurement.js';
 
@@ -44,6 +50,9 @@ const SWEEP_INTERVAL_MS = 60 * 1000;
 
 export function startProcurementWorker(args: { intervalMs: number; limit?: number }): void {
   if (procurementTimer !== null) return;
+  markWorkerStarted('procurement_worker', {
+    staleAfterMs: Math.max(args.intervalMs * 3, 60_000),
+  });
   log.info({ intervalMs: args.intervalMs }, 'Starting procurement worker');
   const tick = async (): Promise<void> => {
     try {
@@ -51,7 +60,9 @@ export function startProcurementWorker(args: { intervalMs: number; limit?: numbe
       if (r.picked > 0) {
         log.info(r, 'Procurement tick complete');
       }
+      markWorkerTickSuccess('procurement_worker');
     } catch (err) {
+      markWorkerTickFailure('procurement_worker', err);
       log.error({ err }, 'Procurement tick failed');
     }
   };
@@ -83,5 +94,6 @@ export function stopProcurementWorker(): void {
     clearInterval(sweepTimer);
     sweepTimer = null;
   }
+  markWorkerStopped('procurement_worker');
   log.info('Procurement worker stopped');
 }

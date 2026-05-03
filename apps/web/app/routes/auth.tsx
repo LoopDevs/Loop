@@ -144,7 +144,7 @@ function BiometricLockRow(): React.JSX.Element | null {
       }}
       className="w-full flex items-center justify-between px-4 py-3 min-h-[44px] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg text-sm"
     >
-      <span className="text-gray-700 dark:text-gray-300">{biometryType} Lock</span>
+      <span className="text-gray-700 dark:text-gray-300">{biometryType} App Lock</span>
       <span className={`text-sm font-medium ${enabled ? 'text-green-600' : 'text-gray-400'}`}>
         {enabled ? 'On' : 'Off'}
       </span>

@@ -199,6 +199,15 @@ describe('runPayoutTick', () => {
     expect(sdkMock.submitPayout).not.toHaveBeenCalled();
   });
 
+  it('pre-check failure fails closed and does not submit a payout', async () => {
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
+    horizonMock.findOutboundPaymentByMemo.mockRejectedValue(new Error('horizon down'));
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.retriedLater).toBe(1);
+    expect(repoMocks.markPayoutSubmitted).not.toHaveBeenCalled();
+    expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+  });
+
   it('transient_horizon under the attempts cap → retriedLater, no markFailed', async () => {
     repoMocks.listClaimablePayouts.mockResolvedValue([makeRow({ attempts: 1 })]);
     sdkMock.submitPayout.mockRejectedValue(new PayoutSubmitErrorMock('transient_horizon', 'blip'));
@@ -274,12 +283,13 @@ describe('runPayoutTick', () => {
     expect(discordMock.notifyPayoutFailed).not.toHaveBeenCalled();
   });
 
-  it('pre-check throw does not block the submit — logs + proceeds', async () => {
+  it('pre-check throw leaves the row untouched for a later retry', async () => {
     repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
     horizonMock.findOutboundPaymentByMemo.mockRejectedValue(new Error('Horizon 502'));
     const r = await runPayoutTick(BASE_ARGS);
-    expect(r.confirmed).toBe(1);
-    expect(sdkMock.submitPayout).toHaveBeenCalledTimes(1);
+    expect(r.retriedLater).toBe(1);
+    expect(repoMocks.markPayoutSubmitted).not.toHaveBeenCalled();
+    expect(sdkMock.submitPayout).not.toHaveBeenCalled();
   });
 
   it('confirm race after submit counts as skippedRace (payment did land)', async () => {

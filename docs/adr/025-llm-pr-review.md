@@ -8,8 +8,9 @@ Resolves: A2-1413
 
 `.github/workflows/pr-review.yml` runs a "Claude PR Review" job on
 every non-draft PR. The job posts the PR diff to Anthropic's API
-(`@anthropic-ai/claude-code`, pinned by SHA + version per audit
-A-031) and writes the review back as a PR comment.
+(`@anthropic-ai/claude-code`, pinned in the repo lockfile per ADR 029
+and version-pinned per audit A-031) and writes the review back as a PR
+comment.
 
 A2-1413 flagged that the practice was undocumented — sending source
 diffs to a third-party LLM is a non-trivial decision, and the lack of
@@ -27,9 +28,11 @@ This ADR pins the decision so the next reviewer landing on
   job. Draft PRs are excluded.
 - The runner clones the repo with `fetch-depth: 0` so the action can
   read the full diff against `base.sha`.
-- `@anthropic-ai/claude-code@<pinned-version>` is invoked with
-  `ANTHROPIC_API_KEY` (a Fly-managed Actions secret) and posts a
-  comment back to the PR via `GITHUB_TOKEN`.
+- the runner installs repo-managed dependencies with
+  `npm ci --ignore-scripts`, then explicitly runs Claude Code's own
+  platform installer before invoking the pinned CLI with
+  `ANTHROPIC_API_KEY` (a Fly-managed Actions secret)
+- the CLI posts a comment back to the PR via `GITHUB_TOKEN`
 - The bot **comments only** — it cannot approve, request changes, or
   merge. Required-status-checks (Quality / Unit / Security audit /
   Build / E2E mocked) are independent and remain the only merge gate.
@@ -104,9 +107,9 @@ or trains on the data.
   secret + 1Password.
 - To disable temporarily during an investigation:
   `gh workflow disable "Claude PR Review" --repo LoopDevs/Loop`.
-- The pinned `@anthropic-ai/claude-code@2.1.114` (or current pin) is
-  the sole package the action installs; bumping it is a deliberate
-  PR like any other dep update.
+- The pinned `@anthropic-ai/claude-code@2.1.114` (or current pin) now
+  lives in root `devDependencies`, so version bumps land through the
+  normal lockfile + Dependabot path instead of an inline workflow edit.
 
 ## References
 
@@ -115,3 +118,4 @@ or trains on the data.
 - A2-105 — repo went public; that closure is what makes this ADR's
   Phase-1 stance defensible.
 - A-031 — the Claude Code CLI is SHA-pinned (predecessor finding).
+- ADR 029 — repo-managed CI CLIs for secret-bearing workflows.

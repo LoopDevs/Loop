@@ -25,10 +25,10 @@
  * real ledger. Mirrors the flywheel.test.ts harness — same
  * `LOOP_E2E_DB=1` gate, same fork pool, same per-test truncate.
  *
- * What's mocked: discord notifiers (fire-and-forget after commit).
- * What's REAL: every postgres CHECK + every partial unique index +
- * the advisory-lock txn semantics + Hono routing + the legacy
- * CTX-anchored admin auth path (`requireAuth` + `requireAdmin`).
+ * What’s mocked: discord notifiers (fire-and-forget after commit).
+ * What’s REAL: every postgres CHECK + every partial unique index +
+ * the advisory-lock txn semantics + Hono routing + the Loop-signed
+ * admin auth path (`requireAuth` + `requireAdmin`).
  */
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
@@ -53,25 +53,13 @@ vi.mock('../../discord.js', async (importActual) => {
 import { db } from '../../db/client.js';
 import { users, orders, creditTransactions, userCredits, pendingPayouts } from '../../db/schema.js';
 import { findOrCreateUserByEmail, upsertUserFromCtx } from '../../db/users.js';
-import { app } from '../../app.js';
+import { app, __resetRateLimitsForTests } from '../../app.js';
 import { notifyAdminBulkRead } from '../../discord.js';
+import { signLoopToken } from '../../auth/tokens.js';
+import { env } from '../../env.js';
 import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
 
 const describeIf = RUN_INTEGRATION ? describe : describe.skip;
-
-/**
- * Mints a CTX-style bearer (legacy `decodeJwtPayload` path —
- * unverified base64url JSON payload). The admin middleware uses
- * `decodeJwtPayload(bearer).sub` to look up the user; setting `sub`
- * to the admin's `ctx_user_id` is enough to land on the admin row
- * via `upsertUserFromCtx`. Signature segment is junk (`x`) — the
- * decode path doesn't verify.
- */
-function mintCtxBearer(sub: string, email: string): string {
-  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
-  const payload = Buffer.from(JSON.stringify({ sub, email })).toString('base64url');
-  return `${header}.${payload}.x`;
-}
 
 /** Random idempotency key (28 base64url chars — well above the 16 floor). */
 function idemKey(): string {
@@ -85,17 +73,72 @@ interface SeededState {
   orderId: string;
 }
 
+async function seedCashbackBalance(args: {
+  userId: string;
+  currency?: 'USD' | 'GBP' | 'EUR';
+  amountMinor: bigint;
+}): Promise<void> {
+  const currency = args.currency ?? 'USD';
+  await db.insert(creditTransactions).values({
+    userId: args.userId,
+    type: 'cashback',
+    amountMinor: args.amountMinor,
+    currency,
+    referenceType: 'order',
+    referenceId: crypto.randomUUID(),
+  });
+  await db.insert(userCredits).values({
+    userId: args.userId,
+    currency,
+    balanceMinor: args.amountMinor,
+  });
+}
+
+async function seedFailedWithdrawalPayout(args: {
+  userId: string;
+  assetCode?: string;
+  assetIssuer?: string;
+  toAddress?: string;
+  amountStroops: bigint;
+}): Promise<string> {
+  const [row] = await db
+    .insert(pendingPayouts)
+    .values({
+      userId: args.userId,
+      kind: 'withdrawal',
+      assetCode: args.assetCode ?? 'USDLOOP',
+      assetIssuer: args.assetIssuer ?? 'GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      toAddress: args.toAddress ?? 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      amountStroops: args.amountStroops,
+      memoText: 'withdrawal-test',
+      state: 'failed',
+      lastError: 'seeded failed payout',
+      failedAt: new Date(),
+      attempts: 1,
+    })
+    .returning({ id: pendingPayouts.id });
+  if (row === undefined) throw new Error('seedFailedWithdrawalPayout: insert returned no row');
+  return row.id;
+}
+
 /**
  * Inserts an admin user, a target user, and a fulfilled order so
  * refund tests have something to bind to. Returns the IDs the tests
  * need.
  */
 async function seed(): Promise<SeededState> {
-  // Admin: ctx_user_id matches `ADMIN_CTX_USER_IDS` env (test-admin-id
-  // pinned in vitest-integration-setup.ts) so isAdmin=true.
+  // Admin: seed through the CTX allowlist so the stored user row has
+  // `isAdmin=true`, then mint a Loop-signed access token for the
+  // actual request path under test.
   const admin = await upsertUserFromCtx({
     ctxUserId: 'test-admin-id',
     email: 'admin@test.local',
+  });
+  const { token } = signLoopToken({
+    sub: admin.id,
+    email: admin.email,
+    typ: 'access',
+    ttlSeconds: 300,
   });
   const target = await findOrCreateUserByEmail('target@test.local');
   await db.update(users).set({ homeCurrency: 'USD' }).where(eq(users.id, target.id));
@@ -129,7 +172,7 @@ async function seed(): Promise<SeededState> {
   return {
     adminUserId: admin.id,
     targetUser: { id: target.id, email: target.email },
-    bearer: mintCtxBearer('test-admin-id', 'admin@test.local'),
+    bearer: token,
     orderId: orderRow.id,
   };
 }
@@ -257,6 +300,55 @@ describeIf('admin credit-adjustment write — real postgres ladder', () => {
       .from(creditTransactions)
       .where(eq(creditTransactions.userId, targetUser.id));
     expect(txRows).toHaveLength(0);
+  });
+
+  it('serialises the daily adjustment cap across concurrent writes to different users', async () => {
+    const previousCap = env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR;
+    env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 500n;
+    try {
+      const { bearer, targetUser } = await seed();
+      const secondTarget = await findOrCreateUserByEmail('target-2@test.local');
+      await db.update(users).set({ homeCurrency: 'USD' }).where(eq(users.id, secondTarget.id));
+
+      const makeRequest = (
+        userId: string,
+        amountMinor: string,
+        reason: string,
+        key: string,
+      ): Promise<Response> =>
+        Promise.resolve(
+          app.request(`http://localhost/api/admin/users/${userId}/credit-adjustments`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${bearer}`,
+              'idempotency-key': key,
+            },
+            body: JSON.stringify({
+              amountMinor,
+              currency: 'USD',
+              reason,
+            }),
+          }),
+        );
+
+      const [first, second] = await Promise.all([
+        makeRequest(targetUser.id, '400', 'concurrent cap test first', `${idemKey()}-a`),
+        makeRequest(secondTarget.id, '400', 'concurrent cap test second', `${idemKey()}-b`),
+      ]);
+
+      const statuses = [first.status, second.status].sort((a, b) => a - b);
+      expect(statuses).toEqual([200, 429]);
+
+      const txRows = await db
+        .select()
+        .from(creditTransactions)
+        .where(eq(creditTransactions.referenceType, 'admin_adjustment'));
+      expect(txRows).toHaveLength(1);
+      expect(txRows[0]!.amountMinor).toBe(400n);
+    } finally {
+      env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = previousCap;
+    }
   });
 });
 
@@ -437,6 +529,120 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
     expect(credit?.balanceMinor).toBe(1500n);
   });
 
+  it('rejects a second semantic duplicate withdrawal with a fresh idempotency key', async () => {
+    const { targetUser, bearer } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
+
+    const destinationAddress = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    const url = `http://localhost/api/admin/users/${targetUser.id}/withdrawals`;
+    const body = JSON.stringify({
+      amountMinor: '500',
+      currency: 'USD',
+      destinationAddress,
+      reason: 'integration duplicate withdrawal',
+    });
+
+    const first = await app.request(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${bearer}`,
+        'idempotency-key': idemKey(),
+      },
+      body,
+    });
+    expect(first.status).toBe(200);
+
+    const second = await app.request(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${bearer}`,
+        'idempotency-key': idemKey(),
+      },
+      body,
+    });
+    expect(second.status).toBe(409);
+    const secondBody = (await second.json()) as { code: string };
+    expect(secondBody.code).toBe('WITHDRAWAL_ALREADY_ISSUED');
+
+    const payouts = await db
+      .select()
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.userId, targetUser.id));
+    expect(payouts).toHaveLength(1);
+
+    const txRows = await db
+      .select()
+      .from(creditTransactions)
+      .where(eq(creditTransactions.userId, targetUser.id));
+    expect(txRows).toHaveLength(2);
+    expect(txRows.filter((row) => row.type === 'withdrawal')).toHaveLength(1);
+
+    const [credit] = await db
+      .select()
+      .from(userCredits)
+      .where(eq(userCredits.userId, targetUser.id));
+    expect(credit?.balanceMinor).toBe(1500n);
+  });
+
+  it('serialises concurrent same-key withdrawal requests into one write plus one replay', async () => {
+    const { targetUser, bearer } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
+
+    const idempotencyKey = idemKey();
+    const destinationAddress = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    const url = `http://localhost/api/admin/users/${targetUser.id}/withdrawals`;
+    const body = JSON.stringify({
+      amountMinor: '500',
+      currency: 'USD',
+      destinationAddress,
+      reason: 'same-key contention test',
+    });
+    const headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${bearer}`,
+      'idempotency-key': idempotencyKey,
+    };
+
+    const [first, second] = await Promise.all([
+      Promise.resolve(app.request(url, { method: 'POST', headers, body })),
+      Promise.resolve(app.request(url, { method: 'POST', headers, body })),
+    ]);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+
+    const firstBody = (await first.json()) as {
+      audit: { replayed: boolean };
+      result: { payoutId: string };
+    };
+    const secondBody = (await second.json()) as {
+      audit: { replayed: boolean };
+      result: { payoutId: string };
+    };
+    expect([firstBody.audit.replayed, secondBody.audit.replayed].sort()).toEqual([false, true]);
+    expect(firstBody.result.payoutId).toBe(secondBody.result.payoutId);
+
+    const payouts = await db
+      .select()
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.userId, targetUser.id));
+    expect(payouts).toHaveLength(1);
+
+    const txRows = await db
+      .select()
+      .from(creditTransactions)
+      .where(eq(creditTransactions.userId, targetUser.id));
+    expect(txRows.filter((row) => row.type === 'withdrawal')).toHaveLength(1);
+
+    const [credit] = await db
+      .select()
+      .from(userCredits)
+      .where(eq(userCredits.userId, targetUser.id));
+    expect(credit?.balanceMinor).toBe(1500n);
+  });
+
   it('rejects a withdrawal exceeding the balance with 400 INSUFFICIENT_BALANCE', async () => {
     const { targetUser, bearer } = await seed();
     // No prior balance. Try to withdraw $5.
@@ -470,6 +676,83 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
       .where(eq(pendingPayouts.userId, targetUser.id));
     expect(payouts).toHaveLength(0);
   });
+
+  it('keeps retry and compensation at-most-once when both hit the same failed payout', async () => {
+    const { targetUser, bearer } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 1500n });
+    const payoutId = await seedFailedWithdrawalPayout({
+      userId: targetUser.id,
+      amountStroops: 500n * 100_000n,
+    });
+    await db.insert(creditTransactions).values({
+      userId: targetUser.id,
+      type: 'withdrawal',
+      amountMinor: -500n,
+      currency: 'USD',
+      referenceType: 'payout',
+      referenceId: payoutId,
+      reason: 'seeded withdrawal backing failed payout',
+    });
+
+    const [retryRes, compensateRes] = await Promise.all([
+      Promise.resolve(
+        app.request(`http://localhost/api/admin/payouts/${payoutId}/retry`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${bearer}`,
+            'idempotency-key': idemKey(),
+          },
+          body: JSON.stringify({ reason: 'race retry' }),
+        }),
+      ),
+      Promise.resolve(
+        app.request(`http://localhost/api/admin/payouts/${payoutId}/compensate`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${bearer}`,
+            'idempotency-key': idemKey(),
+          },
+          body: JSON.stringify({ reason: 'race compensate' }),
+        }),
+      ),
+    ]);
+
+    const [payout] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, payoutId));
+    expect(payout).toBeDefined();
+
+    const adjustmentRows = await db
+      .select()
+      .from(creditTransactions)
+      .where(eq(creditTransactions.referenceId, payoutId));
+    const compensationRows = adjustmentRows.filter((row) => row.type === 'adjustment');
+
+    const [credit] = await db
+      .select()
+      .from(userCredits)
+      .where(eq(userCredits.userId, targetUser.id));
+
+    const retryBody = (await retryRes.json()) as { code?: string };
+    const compensateBody = (await compensateRes.json()) as { code?: string };
+
+    if (retryRes.status === 200) {
+      expect(compensateRes.status).toBe(409);
+      expect(compensateBody.code).toBe('PAYOUT_NOT_COMPENSABLE');
+      expect(payout?.state).toBe('pending');
+      expect(payout?.compensatedAt).toBeNull();
+      expect(compensationRows).toHaveLength(0);
+      expect(credit?.balanceMinor).toBe(1500n);
+    } else {
+      expect(retryRes.status).toBe(404);
+      expect(retryBody.code).toBe('NOT_FOUND');
+      expect(compensateRes.status).toBe(200);
+      expect(payout?.state).toBe('failed');
+      expect(payout?.compensatedAt).not.toBeNull();
+      expect(compensationRows).toHaveLength(1);
+      expect(credit?.balanceMinor).toBe(2000n);
+    }
+  });
 });
 
 describeIf('routes/admin.ts — admin-read audit middleware (A2-2008)', () => {
@@ -479,6 +762,7 @@ describeIf('routes/admin.ts — admin-read audit middleware (A2-2008)', () => {
 
   beforeEach(async () => {
     await truncateAllTables();
+    __resetRateLimitsForTests();
     vi.mocked(notifyAdminBulkRead).mockReset();
   });
 

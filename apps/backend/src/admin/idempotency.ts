@@ -24,7 +24,11 @@ import { createHash } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { adminIdempotencyKeys } from '../db/schema.js';
-import { IDEMPOTENCY_KEY_MIN, IDEMPOTENCY_KEY_MAX } from './idempotency-constants.js';
+import {
+  IDEMPOTENCY_KEY_MIN,
+  IDEMPOTENCY_KEY_MAX,
+  IDEMPOTENCY_TTL_HOURS,
+} from './idempotency-constants.js';
 
 export {
   IDEMPOTENCY_KEY_MIN,
@@ -100,7 +104,10 @@ export interface IdempotencyGuardResult {
  *   1. Open a transaction and acquire `pg_advisory_xact_lock` keyed
  *      by hash(adminUserId, key). Concurrent callers block here.
  *   2. Re-read the snapshot inside the locked txn — if one exists,
- *      return it as a replay (the other caller finished first).
+ *      return it as a replay (the other caller finished first). The
+ *      same TTL gate as `lookupIdempotencyKey()` applies here so the
+ *      bounded replay window cannot drift between guarded and manual
+ *      paths.
  *   3. Otherwise call `doWrite()`. Its own internal transaction
  *      becomes a SAVEPOINT of the outer txn, so a failure cleanly
  *      rolls back without releasing the lock.
@@ -130,27 +137,30 @@ export async function withIdempotencyGuard(
       ),
     });
     if (prior !== undefined) {
-      let body: Record<string, unknown>;
-      try {
-        body = JSON.parse(prior.responseBody) as Record<string, unknown>;
-      } catch {
-        // Corrupt stored snapshot — treat as miss and re-run. Falls
-        // through into the write path below.
-        body = {};
-      }
-      if (Object.keys(body).length > 0) {
-        // ADR-017 + every admin-write OpenAPI entry promises that
-        // `audit.replayed: true` on the response body indicates a
-        // snapshot replay. The stored body was produced on the first
-        // call with `replayed: false`; mutate it here on the replay
-        // path so the wire contract matches the docs. Doing it in
-        // the guard means every handler using `withIdempotencyGuard`
-        // gets the spec-compliant behaviour without per-handler code.
-        const audit = body['audit'];
-        if (audit !== null && typeof audit === 'object') {
-          (audit as Record<string, unknown>)['replayed'] = true;
+      const ageMs = Date.now() - prior.createdAt.getTime();
+      if (ageMs <= IDEMPOTENCY_TTL_HOURS * 60 * 60 * 1000) {
+        let body: Record<string, unknown>;
+        try {
+          body = JSON.parse(prior.responseBody) as Record<string, unknown>;
+        } catch {
+          // Corrupt stored snapshot — treat as miss and re-run. Falls
+          // through into the write path below.
+          body = {};
         }
-        return { replayed: true, status: prior.status, body };
+        if (Object.keys(body).length > 0) {
+          // ADR-017 + every admin-write OpenAPI entry promises that
+          // `audit.replayed: true` on the response body indicates a
+          // snapshot replay. The stored body was produced on the first
+          // call with `replayed: false`; mutate it here on the replay
+          // path so the wire contract matches the docs. Doing it in
+          // the guard means every handler using `withIdempotencyGuard`
+          // gets the spec-compliant behaviour without per-handler code.
+          const audit = body['audit'];
+          if (audit !== null && typeof audit === 'object') {
+            (audit as Record<string, unknown>)['replayed'] = true;
+          }
+          return { replayed: true, status: prior.status, body };
+        }
       }
     }
 

@@ -48,4 +48,12 @@ describe('getImageProxyUrl', () => {
     expect(parsed.searchParams.get('width')).toBe('300');
     expect(parsed.searchParams.get('quality')).toBe('90');
   });
+
+  it('includes private mode when requested', () => {
+    const url = getImageProxyUrl('https://cdn.example.com/barcode.png', 640, 80, {
+      mode: 'private',
+    });
+    const parsed = new URL(url);
+    expect(parsed.searchParams.get('mode')).toBe('private');
+  });
 });

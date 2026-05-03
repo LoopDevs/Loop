@@ -26,6 +26,7 @@ export {
   notifyAssetDriftRecovered,
   notifyStuckProcurementSwept,
   notifyPaymentWatcherStuck,
+  notifyStuckPayouts,
   notifyCtxSchemaDrift,
   notifyOperatorPoolExhausted,
   notifyCircuitBreaker,

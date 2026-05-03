@@ -20,23 +20,22 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'lcov'],
       include: ['app/**/*.ts', 'app/**/*.tsx'],
-      // Routes and `root.tsx` are exercised via Playwright (tests/e2e,
-      // tests/e2e-mocked); excluding them here prevents coverage from
-      // accounting for the same code twice across test suites. This is the
-      // single best place to record the boundary between unit-tested and
-      // e2e-tested code. Everything else — services, stores, hooks,
-      // utils, native wrappers, components — is in scope for unit
-      // coverage. When adding a route-independent piece of logic,
-      // factor it out of the route and add a unit test.
+      // Routes and `root.tsx` are excluded from UNIT coverage so this
+      // metric stays focused on shared modules. Some route journeys are
+      // exercised via Playwright and a few routes have direct tests, but
+      // that coverage is partial — this exclusion is not a blanket claim
+      // that every route is covered elsewhere. When a route owns risky
+      // logic, add a route test or Playwright coverage explicitly.
       exclude: [
         'app/**/__tests__/**',
         'app/routes/**',
         'app/root.tsx',
         // Route-level presentation: MobileHome is the mobile variant of
         // the home route, and the onboarding flow is a 5-component
-        // assembly rendered by a single route. Both are exercised via
-        // Playwright e2e — same rationale as the `app/routes/**`
-        // exclusion. Keep reusable UI (components/ui/**, atoms) IN.
+        // assembly rendered by a single route. They follow the same
+        // route-level exclusion boundary as `app/routes/**`; that is a
+        // unit-coverage choice, not a blanket browser-coverage claim.
+        // Keep reusable UI (components/ui/**, atoms) IN.
         'app/components/features/home/**',
         'app/components/features/onboarding/**',
       ],

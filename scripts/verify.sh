@@ -14,6 +14,6 @@ echo "=== Lint ==="      && npm run lint
 echo "=== Format ==="    && npm run format:check
 echo "=== Docs ==="      && ./scripts/lint-docs.sh
 echo "=== Test ==="      && npm test
-echo "=== Audit ==="     && npm audit --audit-level=high
+echo "=== Audit ==="     && npm run audit
 echo ""
 echo "ALL CHECKS PASSED"

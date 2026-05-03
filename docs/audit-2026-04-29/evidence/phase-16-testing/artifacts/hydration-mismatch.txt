@@ -1,0 +1,10 @@
+56:[WebServer] Hydration failed because the server rendered text didn\t match the client
+89:+                             className="mb-16"
+90:-                             className={null}
+94:+                                 Top cashback rates
+95:-                                 All Merchants
+117:[WebServer] Hydration failed because the server rendered text didn\t match the client
+150:+                             className="mb-16"
+151:-                             className={null}
+155:+                                 Top cashback rates
+156:-                                 All Merchants

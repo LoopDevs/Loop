@@ -5,13 +5,12 @@ interface ShareOptions {
   text: string;
   /**
    * Image to include in the share sheet — e.g. the composited
-   * gift-card face. Accepts either a `data:image/png;base64,...`
-   * URL or a fetch-able HTTP URL. On native we write it to
-   * `Directory.Cache` via `@capacitor/filesystem` and hand the
-   * resulting URI to the Share plugin (the plugin's `files`
-   * field rejects blob / data URIs directly). On web we stream
-   * the blob into a `File` and use `navigator.share({ files })`
-   * when the browser supports it.
+   * gift-card face. Must be a `data:image/...;base64,...` URL.
+   * On native we write it to `Directory.Cache` via
+   * `@capacitor/filesystem` and hand the resulting URI to the
+   * Share plugin (the plugin's `files` field rejects blob / data
+   * URIs directly). On web we decode it into a `File` and use
+   * `navigator.share({ files })` when the browser supports it.
    */
   imageUrl?: string | undefined;
   /** Alt text / filename the share sheet will display. */
@@ -19,44 +18,18 @@ interface ShareOptions {
 }
 
 /**
- * Materialises an image URL / data URL as a PNG file in the
- * OS-managed cache directory and returns its addressable URI. Used
- * to hand an image to `@capacitor/share`'s `files` field, which
- * rejects data / blob URIs directly. Only called on native —
- * `Directory.Cache` on web falls through to IndexedDB which the
- * share intent can't reach anyway.
+ * Materialises a base64 data URL as a PNG file in the OS-managed
+ * cache directory and returns its addressable URI. Used to hand an
+ * image to `@capacitor/share`'s `files` field, which rejects data /
+ * blob URIs directly. Only called on native — `Directory.Cache` on
+ * web falls through to IndexedDB which the share intent can't reach
+ * anyway.
  */
 async function writeTempShareImage(imageUrl: string, filename: string): Promise<string | null> {
   try {
     const { Filesystem, Directory } = await import('@capacitor/filesystem');
-    // Accept either a data URL (already-base64) or an HTTP URL
-    // that we fetch and re-encode. The CTX-hosted barcode images
-    // come as HTTP via the image proxy; the canvas-composited
-    // share image comes as data:image/png;base64,...
-    let base64: string;
-    if (imageUrl.startsWith('data:')) {
-      const comma = imageUrl.indexOf(',');
-      if (comma < 0) return null;
-      base64 = imageUrl.slice(comma + 1);
-    } else {
-      const response = await fetch(imageUrl);
-      if (!response.ok) return null;
-      const blob = await response.blob();
-      base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = () => reject(reader.error ?? new Error('FileReader failed'));
-        reader.onload = () => {
-          const dataUrl = reader.result;
-          if (typeof dataUrl !== 'string') {
-            reject(new Error('FileReader produced non-string result'));
-            return;
-          }
-          const comma = dataUrl.indexOf(',');
-          resolve(comma < 0 ? '' : dataUrl.slice(comma + 1));
-        };
-        reader.readAsDataURL(blob);
-      });
-    }
+    const parsed = parseBase64DataUrl(imageUrl);
+    if (parsed === null) return null;
     // A2-1213: prefix the filename with `share/` so it lands in
     // `<cache>/share/`, the only directory the Android FileProvider
     // grants access to (see `apps/mobile/native-overlays/android/app/
@@ -69,7 +42,7 @@ async function writeTempShareImage(imageUrl: string, filename: string): Promise<
     // write the base64 string as literal text instead of decoding.
     await Filesystem.writeFile({
       path: scopedPath,
-      data: base64,
+      data: parsed.base64,
       directory: Directory.Cache,
       recursive: true,
     });
@@ -116,12 +89,8 @@ export async function nativeShare(options: ShareOptions): Promise<boolean> {
     if (options.imageUrl === undefined) return false;
     if (typeof navigator === 'undefined' || navigator.share === undefined) return false;
     try {
-      const response = await fetch(options.imageUrl);
-      if (!response.ok) return false;
-      const blob = await response.blob();
-      if (blob.size === 0) return false;
-      const filename = options.imageFilename ?? 'share.png';
-      const file = new File([blob], filename, { type: blob.type || 'image/png' });
+      const file = dataUrlToFile(options.imageUrl, options.imageFilename ?? 'share.png');
+      if (file === null || file.size === 0) return false;
       if (typeof navigator.canShare === 'function' && !navigator.canShare({ files: [file] })) {
         return false;
       }
@@ -141,5 +110,29 @@ export async function nativeShare(options: ShareOptions): Promise<boolean> {
     return false;
   } catch {
     return false;
+  }
+}
+
+function parseBase64DataUrl(dataUrl: string): { mimeType: string; base64: string } | null {
+  const match = /^data:([^;,]+);base64,(.+)$/s.exec(dataUrl);
+  if (match === null) return null;
+  return {
+    mimeType: match[1] ?? 'image/png',
+    base64: match[2] ?? '',
+  };
+}
+
+function dataUrlToFile(dataUrl: string, filename: string): File | null {
+  const parsed = parseBase64DataUrl(dataUrl);
+  if (parsed === null) return null;
+  try {
+    const binary = atob(parsed.base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new File([bytes], filename, { type: parsed.mimeType || 'image/png' });
+  } catch {
+    return null;
   }
 }

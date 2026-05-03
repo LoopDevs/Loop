@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "sync": "cap sync",
+    "sync": "cap sync && ./scripts/apply-native-overlays.sh",
     "open:ios": "cap open ios",
     "open:android": "cap open android"
   },

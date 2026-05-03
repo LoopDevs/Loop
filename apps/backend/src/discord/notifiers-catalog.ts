@@ -122,6 +122,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       'Fires when the sweep flips a stuck `procuring` order to `failed` (A2-621). Per-row so ops can reconcile individually — each row might be a CTX-minted-but-we-lost-track case where refunding the user would double-spend.',
   },
   {
+    name: 'notifyStuckPayouts',
+    channel: 'monitoring',
+    description:
+      'Fires when one or more `pending_payouts` rows exceed the watchdog age window. Complements the admin `/stuck-payouts` page with a proactive page instead of requiring manual polling.',
+  },
+  {
     name: 'notifyPaymentWatcherStuck',
     channel: 'monitoring',
     description:

@@ -30,6 +30,16 @@
 import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { listClaimablePayouts } from '../credits/pending-payouts.js';
+import {
+  runStuckPayoutWatchdog,
+  STUCK_PAYOUT_WATCHDOG_INTERVAL_MS,
+} from './stuck-payout-watchdog.js';
+import {
+  markWorkerStarted,
+  markWorkerStopped,
+  markWorkerTickFailure,
+  markWorkerTickSuccess,
+} from '../runtime-health.js';
 import { payOne } from './payout-worker-pay-one.js';
 
 const log = logger.child({ area: 'payout-worker' });
@@ -94,6 +104,7 @@ export async function runPayoutTick(args: RunPayoutTickArgs): Promise<PayoutTick
 // ─── Interval loop ────────────────────────────────────────────────────────
 
 let payoutTimer: ReturnType<typeof setInterval> | null = null;
+let stuckPayoutWatchdogTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
  * Starts the periodic payout worker. Gated at the caller by
@@ -113,6 +124,7 @@ export function startPayoutWorker(args: {
   watchdogStaleSeconds?: number;
 }): void {
   if (payoutTimer !== null) return;
+  markWorkerStarted('payout_worker', { staleAfterMs: Math.max(args.intervalMs * 3, 60_000) });
   log.info({ intervalMs: args.intervalMs }, 'Starting payout worker');
   const tick = async (): Promise<void> => {
     try {
@@ -129,24 +141,45 @@ export function startPayoutWorker(args: {
       if (r.picked > 0) {
         log.info(r, 'Payout tick complete');
       }
+      markWorkerTickSuccess('payout_worker');
     } catch (err) {
+      markWorkerTickFailure('payout_worker', err);
       log.error({ err }, 'Payout tick failed');
     }
   };
+  const watchdog = async (): Promise<void> => {
+    try {
+      await runStuckPayoutWatchdog();
+    } catch (err) {
+      log.error({ err }, 'Stuck-payout watchdog failed');
+    }
+  };
   void tick();
+  void watchdog();
   payoutTimer = setInterval(() => void tick(), args.intervalMs);
   payoutTimer.unref();
+  stuckPayoutWatchdogTimer = setInterval(() => void watchdog(), STUCK_PAYOUT_WATCHDOG_INTERVAL_MS);
+  stuckPayoutWatchdogTimer.unref();
 }
 
 export function stopPayoutWorker(): void {
+  if (stuckPayoutWatchdogTimer !== null) {
+    clearInterval(stuckPayoutWatchdogTimer);
+    stuckPayoutWatchdogTimer = null;
+  }
   if (payoutTimer === null) return;
   clearInterval(payoutTimer);
   payoutTimer = null;
+  markWorkerStopped('payout_worker');
   log.info('Payout worker stopped');
 }
 
 /** Test seam: returns undefined. Kept to mirror other worker files. */
 export function __resetPayoutWorkerForTests(): void {
+  if (stuckPayoutWatchdogTimer !== null) {
+    clearInterval(stuckPayoutWatchdogTimer);
+    stuckPayoutWatchdogTimer = null;
+  }
   if (payoutTimer !== null) {
     clearInterval(payoutTimer);
     payoutTimer = null;

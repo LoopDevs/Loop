@@ -64,13 +64,14 @@ export async function imageProxyHandler(c: Context): Promise<Response> {
   const width = clampDimension(parseInt(c.req.query('width') ?? '0', 10));
   const height = clampDimension(parseInt(c.req.query('height') ?? '0', 10));
   const quality = clampQuality(parseInt(c.req.query('quality') ?? '80', 10));
+  const mode = c.req.query('mode') === 'private' ? 'private' : 'public';
 
   const key = cacheKey(imageUrl, width, height, quality);
 
-  const cached = cache.get(key);
+  const cached = mode === 'public' ? cache.get(key) : undefined;
   if (cached !== undefined && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
     cached.lastUsed = Date.now();
-    return imageResponse(cached.data, cached.mimeType);
+    return imageResponse(cached.data, cached.mimeType, mode);
   }
 
   try {
@@ -144,7 +145,7 @@ export async function imageProxyHandler(c: Context): Promise<Response> {
     const mimeType = hasAlpha ? 'image/webp' : 'image/jpeg';
     const output = new Uint8Array(data);
 
-    if (output.byteLength <= MAX_CACHE_BYTES) {
+    if (mode === 'public' && output.byteLength <= MAX_CACHE_BYTES) {
       evictLruUntilFits(output.byteLength);
       cache.set(key, {
         data: output,
@@ -160,7 +161,7 @@ export async function imageProxyHandler(c: Context): Promise<Response> {
       { url: imageUrl, width: info.width, height: info.height, bytes: output.byteLength },
       'Image processed',
     );
-    return imageResponse(output, mimeType);
+    return imageResponse(output, mimeType, mode);
   } catch (err) {
     log.error({ err, url: imageUrl }, 'Image proxy error');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to process image' }, 500);
@@ -178,11 +179,12 @@ export function evictExpiredImageCache(): void {
   }
 }
 
-function imageResponse(data: Uint8Array, mimeType: string): Response {
+function imageResponse(data: Uint8Array, mimeType: string, mode: 'public' | 'private'): Response {
   return new Response(data, {
     headers: {
       'Content-Type': mimeType,
-      'Cache-Control': 'public, max-age=604800, immutable',
+      'Cache-Control':
+        mode === 'private' ? 'private, no-store' : 'public, max-age=604800, immutable',
     },
   });
 }

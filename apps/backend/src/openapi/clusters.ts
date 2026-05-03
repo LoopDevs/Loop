@@ -96,6 +96,7 @@ export function registerClustersOpenApi(
         width: z.coerce.number().int().min(1).max(2000).optional(),
         height: z.coerce.number().int().min(1).max(2000).optional(),
         quality: z.coerce.number().int().min(1).max(100).optional(),
+        mode: z.enum(['public', 'private']).optional(),
       }),
     },
     responses: {

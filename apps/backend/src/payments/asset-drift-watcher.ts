@@ -31,6 +31,12 @@ import { sumOutstandingLiability } from '../credits/liabilities.js';
 import { getLoopAssetCirculation } from './horizon-circulation.js';
 import { notifyAssetDrift, notifyAssetDriftRecovered } from '../discord.js';
 import { logger } from '../logger.js';
+import {
+  markWorkerStarted,
+  markWorkerStopped,
+  markWorkerTickFailure,
+  markWorkerTickSuccess,
+} from '../runtime-health.js';
 import type { HomeCurrency } from '@loop/shared';
 
 const log = logger.child({ area: 'asset-drift-watcher' });
@@ -225,6 +231,9 @@ export function startAssetDriftWatcher(args: {
   thresholdStroops: bigint;
 }): void {
   if (driftTimer !== null) return;
+  markWorkerStarted('asset_drift_watcher', {
+    staleAfterMs: Math.max(args.intervalMs * 3, 60_000),
+  });
   log.info(
     { intervalMs: args.intervalMs, thresholdStroops: args.thresholdStroops.toString() },
     'Starting asset drift watcher',
@@ -242,7 +251,9 @@ export function startAssetDriftWatcher(args: {
           'Asset drift tick complete',
         );
       }
+      markWorkerTickSuccess('asset_drift_watcher');
     } catch (err) {
+      markWorkerTickFailure('asset_drift_watcher', err);
       log.error({ err }, 'Asset drift tick failed');
     }
   };
@@ -255,6 +266,7 @@ export function stopAssetDriftWatcher(): void {
   if (driftTimer === null) return;
   clearInterval(driftTimer);
   driftTimer = null;
+  markWorkerStopped('asset_drift_watcher');
   log.info('Asset drift watcher stopped');
 }
 

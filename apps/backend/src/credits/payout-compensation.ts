@@ -20,23 +20,32 @@
  *     (idempotency handled at the API boundary by the admin
  *     idempotency-key store, ADR-017).
  *
- * The handler that wraps this primitive enforces the ADR-024 §5
- * preconditions: the payout must be `kind='withdrawal'` and
- * `state='failed'`. We do not re-derive those here because the credit-
- * layer primitive should not couple to the on-chain payout state
- * machine; the handler is the integration point.
+ * The handler still does an early read for user-friendly 404 / asset
+ * derivation, but this primitive now re-checks the ADR-024 §5
+ * preconditions under `SELECT ... FOR UPDATE` so a stale handler read
+ * cannot race an admin retry into a double-benefit path.
  *
- * Scope deliberately excludes:
- *   - Marking the payout as compensated. Phase 2a leaves the row
- *     `state='failed'` so the same payout can't be silently double-
- *     compensated by an operator forgetting they already filed; the
- *     ADR-017 idempotency snapshot is the at-most-once gate.
- *   - Auto-detection of permanent-vs-retryable failure. Manual review
- *     by finance is the Phase 2a workflow per ADR-024 §5.
+ * Scope deliberately excludes auto-detection of permanent-vs-
+ * retryable failure. Manual review by finance is the Phase 2a
+ * workflow per ADR-024 §5.
  */
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { creditTransactions, userCredits } from '../db/schema.js';
+import { creditTransactions, pendingPayouts, userCredits } from '../db/schema.js';
+
+export class PayoutNotCompensableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PayoutNotCompensableError';
+  }
+}
+
+export class AlreadyCompensatedError extends Error {
+  constructor(public readonly payoutId: string) {
+    super(`Payout ${payoutId} has already been compensated`);
+    this.name = 'AlreadyCompensatedError';
+  }
+}
 
 export interface PayoutCompensationResult {
   /** credit_transactions.id of the compensation row. */
@@ -59,15 +68,14 @@ export interface PayoutCompensationResult {
  * `type='adjustment'` row referencing the failed payout and bump the
  * user's `user_credits` balance by the same magnitude.
  *
- * Preconditions (caller-enforced):
- *   - `payoutId` exists, has `kind='withdrawal'`, and `state='failed'`.
+ * Preconditions (re-checked under row lock here):
+ *   - `payoutId` exists, has `kind='withdrawal'`, `state='failed'`,
+ *     and `compensated_at IS NULL`.
  *   - `amountMinor` matches the original withdrawal magnitude (the
  *     handler converts stroops → minor with the same `/100_000n`
  *     factor `applyAdminWithdrawal` used in reverse).
  *
- * The function itself only enforces the schema-side guard
- * (`amountMinor > 0`); the handler is the integration point that
- * loads + checks the payout row.
+ * The function also enforces the schema-side guard (`amountMinor > 0`).
  */
 export async function applyAdminPayoutCompensation(args: {
   userId: string;
@@ -81,6 +89,28 @@ export async function applyAdminPayoutCompensation(args: {
   }
 
   return await db.transaction(async (tx) => {
+    const [payout] = await tx
+      .select()
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.id, args.payoutId))
+      .for('update');
+    if (payout === undefined) {
+      throw new PayoutNotCompensableError('Payout not found');
+    }
+    if (payout.kind !== 'withdrawal') {
+      throw new PayoutNotCompensableError(
+        'Compensation only applies to withdrawal payouts; order-cashback failures use a different flow',
+      );
+    }
+    if (payout.compensatedAt !== null) {
+      throw new AlreadyCompensatedError(args.payoutId);
+    }
+    if (payout.state !== 'failed') {
+      throw new PayoutNotCompensableError(
+        `Payout is in state '${payout.state}'; only 'failed' payouts can be compensated`,
+      );
+    }
+
     const [existing] = await tx
       .select()
       .from(userCredits)
@@ -118,6 +148,11 @@ export async function applyAdminPayoutCompensation(args: {
         .set({ balanceMinor: newBalance, updatedAt: sql`NOW()` })
         .where(and(eq(userCredits.userId, args.userId), eq(userCredits.currency, args.currency)));
     }
+
+    await tx
+      .update(pendingPayouts)
+      .set({ compensatedAt: sql`NOW()` })
+      .where(eq(pendingPayouts.id, args.payoutId));
 
     return {
       id: creditTx.id,

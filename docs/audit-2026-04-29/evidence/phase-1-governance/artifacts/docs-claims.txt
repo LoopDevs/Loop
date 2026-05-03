@@ -1,0 +1,13 @@
+branch-protection docs claims:
+- **Never push directly to `main`** — all changes via PR. Branch protection is now enforced by GitHub (audit A-037 closed after the repo went public): required passing status checks are `Quality (typecheck, lint, format, docs)`, `Unit tests`, `Security audit`, `Build verification`, `E2E tests (mocked CTX)`; force-push and branch deletion are blocked; stale reviews dismiss on new commits. The `gh api repos/LoopDevs/Loop/branches/main/protection` endpoint now returns the active ruleset. Admins can still squash-merge without a required approval because the project is pre-team, but the passing-checks gate is non-negotiable.
+- The **real-upstream** e2e suite (`test-e2e`, Playwright against a running backend pointed at spend.ctx.com) is **PR-only**. The self-contained **mocked** e2e suite (`test-e2e-mocked`, boots mock-ctx + backend + web on isolated ports) runs on every push to main and every PR (audit A-003). So a direct push to main still gets the deterministic mocked flow, but not the upstream contract check.
+
+
+standards claims:
+- **`main` is mechanically protected.** No direct pushes. All changes via PR. GitHub branch protection is live (audit A-037 closed after the repo went public): required passing checks are `Quality`, `Unit tests`, `Security audit`, `Build verification`, and `E2E tests (mocked CTX)`; force-push and branch deletion are blocked; stale reviews dismiss on new commits. See §15 CI/CD for the exact ruleset and the API pointer.
+- **Feature branches are short-lived.** Target < 2 days from branch to merge. If it takes longer, the change is too large — split it.
+- **One concern per branch.** A branch that touches both the map clustering and the auth flow needs to be split.
+- **Rebase, don't merge.** Keep a linear history. Rebase feature branches onto current `main` before raising a PR.
+- **Squash merge to `main`.** Each PR becomes one commit on `main`. The commit message is the PR title (which must be a valid Conventional Commit).
+- **Delete branches after merge.** No branch graveyard.
+- **No long-lived branches.** There is no `develop` or `staging` branch. Environment differences are handled by configuration, not branching.

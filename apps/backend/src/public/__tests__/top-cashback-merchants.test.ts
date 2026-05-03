@@ -194,4 +194,26 @@ describe('publicTopCashbackMerchantsHandler', () => {
     expect(body.merchants).toHaveLength(1);
     expect(body.merchants[0]!['name']).toBe('Argos');
   });
+
+  it('keys fallback snapshots by effective limit', async () => {
+    state.configRows = Array.from({ length: 5 }, (_, i) => ({
+      merchantId: `m-${i}`,
+      userCashbackPct: `${(50 - i).toString()}.00`,
+    }));
+    for (let i = 0; i < 5; i += 1) {
+      state.merchants.set(`m-${i}`, { id: `m-${i}`, name: `M${i}`, enabled: true });
+    }
+
+    const first = await publicTopCashbackMerchantsHandler(makeCtx({ limit: '5' }));
+    expect(first.status).toBe(200);
+
+    state.throwErr = new Error('db exploded');
+    const fallback = await publicTopCashbackMerchantsHandler(makeCtx({ limit: '2' }));
+    expect(fallback.status).toBe(200);
+    expect(fallback.headers.get('cache-control')).toBe('public, max-age=60');
+    const body = (await fallback.json()) as {
+      merchants: Array<Record<string, unknown>>;
+    };
+    expect(body.merchants).toEqual([]);
+  });
 });

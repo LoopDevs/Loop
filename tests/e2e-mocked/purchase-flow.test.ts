@@ -38,9 +38,18 @@ async function markOrderFulfilled(
 
 /** Starts at home, navigates to a merchant detail page, returns that merchant's name. */
 async function gotoMerchantDetail(page: Page): Promise<string> {
+  const hydrationErrors: string[] = [];
+  page.on('console', (msg) => {
+    if (msg.type() !== 'error') return;
+    const text = msg.text();
+    if (/Hydration failed because the server rendered text didn't match the client/i.test(text)) {
+      hydrationErrors.push(text);
+    }
+  });
   await page.goto('/');
   const merchantLink = page.locator('a[href^="/gift-card/"]').first();
   await expect(merchantLink).toBeVisible();
+  expect(hydrationErrors).toHaveLength(0);
   // The card's h3 carries the merchant name; read it for later assertions.
   const name = await merchantLink.locator('h3').first().innerText();
   await merchantLink.click();

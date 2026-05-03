@@ -28,6 +28,12 @@
  */
 import { accrueOnePeriod, type AccrualPeriod } from './accrue-interest.js';
 import { logger } from '../logger.js';
+import {
+  markWorkerStarted,
+  markWorkerStopped,
+  markWorkerTickFailure,
+  markWorkerTickSuccess,
+} from '../runtime-health.js';
 
 const log = logger.child({ area: 'interest-scheduler' });
 
@@ -89,11 +95,13 @@ export async function tickInterestAccrual(config: InterestSchedulerConfig): Prom
       },
       'Interest accrual tick complete',
     );
+    markWorkerTickSuccess('interest_scheduler');
   } catch (err) {
     // Uncaught throws from `accrueOnePeriod` are infrastructure-level
     // (DB unreachable, schema mismatch). Log at error but swallow —
     // the interval keeps ticking so a transient DB blip doesn't
     // permanently disable accrual.
+    markWorkerTickFailure('interest_scheduler', err);
     log.error({ err, cursor }, 'Interest accrual tick failed');
   } finally {
     tickInFlight = false;
@@ -126,6 +134,9 @@ export function startInterestScheduler(config: InterestSchedulerConfig): void {
     },
     'Interest accrual scheduler starting',
   );
+  markWorkerStarted('interest_scheduler', {
+    staleAfterMs: Math.max(config.intervalMs * 3, 60_000),
+  });
   // First tick fires on the next macrotask so the serve() handshake
   // isn't blocked by a DB sweep — the batch can take a few seconds
   // on a large user base.
@@ -146,4 +157,5 @@ export function stopInterestScheduler(): void {
     clearInterval(timer);
     timer = null;
   }
+  markWorkerStopped('interest_scheduler');
 }

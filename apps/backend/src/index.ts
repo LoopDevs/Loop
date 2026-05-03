@@ -16,6 +16,7 @@ import {
 import { startAssetDriftWatcher, stopAssetDriftWatcher } from './payments/asset-drift-watcher.js';
 import { configuredLoopPayableAssets } from './credits/payout-asset.js';
 import { startInterestScheduler, stopInterestScheduler } from './credits/interest-scheduler.js';
+import { markWorkerBlocked, markWorkerDisabled } from './runtime-health.js';
 
 // Apply any pending DB migrations before accepting traffic (ADR 012).
 // Awaited so `serve()` below only runs after the schema is up-to-date —
@@ -42,6 +43,10 @@ const locationStartTimer = setTimeout(() => {
 // error — log loudly but don't crash, so operators can still hit /health.
 if (env.LOOP_WORKERS_ENABLED) {
   if (env.LOOP_STELLAR_DEPOSIT_ADDRESS === undefined) {
+    markWorkerBlocked('payment_watcher', {
+      reason: 'LOOP_STELLAR_DEPOSIT_ADDRESS is unset',
+      staleAfterMs: env.LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS * 3000,
+    });
     logger.error(
       'LOOP_WORKERS_ENABLED=true but LOOP_STELLAR_DEPOSIT_ADDRESS is unset — payment watcher will not start',
     );
@@ -62,6 +67,10 @@ if (env.LOOP_WORKERS_ENABLED) {
   // which case pending_payouts rows stay pending until ops plumbs it.
   const payoutConfig = resolvePayoutConfig();
   if (payoutConfig === null) {
+    markWorkerBlocked('payout_worker', {
+      reason: 'LOOP_STELLAR_OPERATOR_SECRET is unset',
+      staleAfterMs: env.LOOP_PAYOUT_WORKER_INTERVAL_SECONDS * 3000,
+    });
     logger.warn(
       'LOOP_WORKERS_ENABLED=true but LOOP_STELLAR_OPERATOR_SECRET is unset — payout worker will not start; pending_payouts rows will queue until configured',
     );
@@ -77,6 +86,8 @@ if (env.LOOP_WORKERS_ENABLED) {
       intervalMs: env.LOOP_ASSET_DRIFT_WATCHER_INTERVAL_SECONDS * 1000,
       thresholdStroops: env.LOOP_ASSET_DRIFT_THRESHOLD_STROOPS,
     });
+  } else {
+    markWorkerDisabled('asset_drift_watcher', 'no LOOP issuers configured');
   }
 
   // A2-905 / ADR 009: interest accrual scheduler. Zero bps →
@@ -91,7 +102,15 @@ if (env.LOOP_WORKERS_ENABLED) {
       },
       intervalMs: env.INTEREST_TICK_INTERVAL_HOURS * 60 * 60 * 1000,
     });
+  } else {
+    markWorkerDisabled('interest_scheduler', 'interest APY is zero');
   }
+} else {
+  markWorkerDisabled('payment_watcher', 'LOOP_WORKERS_ENABLED is false');
+  markWorkerDisabled('procurement_worker', 'LOOP_WORKERS_ENABLED is false');
+  markWorkerDisabled('payout_worker', 'LOOP_WORKERS_ENABLED is false');
+  markWorkerDisabled('asset_drift_watcher', 'LOOP_WORKERS_ENABLED is false');
+  markWorkerDisabled('interest_scheduler', 'LOOP_WORKERS_ENABLED is false');
 }
 
 logger.info({ port: env.PORT }, 'Loop backend starting');

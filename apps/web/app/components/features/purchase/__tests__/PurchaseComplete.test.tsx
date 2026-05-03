@@ -13,7 +13,6 @@ const mockShare =
     }) => Promise<boolean>
   >();
 const mockHaptic = vi.fn<(type: 'success' | 'warning' | 'error') => Promise<void>>();
-const mockTaskSwitcherOverlay = vi.fn(() => () => undefined);
 
 vi.mock('~/native/clipboard', () => ({
   copyToClipboard: (t: string) => mockCopy(t),
@@ -24,9 +23,6 @@ vi.mock('~/native/share', () => ({
 }));
 vi.mock('~/native/haptics', () => ({
   triggerHapticNotification: (t: 'success' | 'warning' | 'error') => mockHaptic(t),
-}));
-vi.mock('~/native/task-switcher-overlay', () => ({
-  enableTaskSwitcherPrivacyOverlay: () => mockTaskSwitcherOverlay(),
 }));
 // jsbarcode is dynamically imported inside the component; the test env has
 // no canvas, so mock the module to a harmless no-op.
@@ -67,19 +63,6 @@ describe('PurchaseComplete', () => {
   it('fires a success haptic on mount', () => {
     render(<PurchaseComplete merchantName="Target" code="CODE" />);
     expect(mockHaptic).toHaveBeenCalledWith('success');
-  });
-
-  it('enables the screenshot guard on mount', () => {
-    render(<PurchaseComplete merchantName="Target" code="CODE" />);
-    expect(mockTaskSwitcherOverlay).toHaveBeenCalledTimes(1);
-  });
-
-  it('disables the screenshot guard on unmount', () => {
-    const cleanupFn = vi.fn();
-    mockTaskSwitcherOverlay.mockReturnValueOnce(cleanupFn);
-    const { unmount } = render(<PurchaseComplete merchantName="Target" code="CODE" />);
-    unmount();
-    expect(cleanupFn).toHaveBeenCalled();
   });
 
   it('copies the code when the copy button is clicked', async () => {
@@ -148,5 +131,17 @@ describe('PurchaseComplete', () => {
     const canvas = container.querySelector('canvas');
     expect(canvas).not.toBeNull();
     expect(canvas!.getAttribute('aria-label')).toBe('Barcode for gift card code CODE-ABC');
+  });
+
+  it('uses private proxy mode for upstream barcode images', () => {
+    render(
+      <PurchaseComplete
+        merchantName="Target"
+        code="CODE-ABC"
+        barcodeImageUrl="https://cdn.example.com/barcode.png"
+      />,
+    );
+    const image = screen.getByRole('img', { name: 'Barcode for gift card code CODE-ABC' });
+    expect(image.getAttribute('src')).toContain('mode=private');
   });
 });

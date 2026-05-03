@@ -40,6 +40,7 @@ import { env } from './env.js';
 import { logger } from './logger.js';
 import { getLocations, isLocationLoading } from './clustering/data-store.js';
 import { getMerchants } from './merchants/sync.js';
+import { getRuntimeHealthSnapshot } from './runtime-health.js';
 import { upstreamUrl } from './upstream.js';
 import { notifyHealthChange } from './discord.js';
 
@@ -127,8 +128,9 @@ export async function healthHandler(c: Context): Promise<Response> {
   const locationsStale = now - locLoadedAt > locationStaleMs;
 
   const upstreamReachable = await probeUpstream();
+  const runtime = getRuntimeHealthSnapshot();
 
-  const degraded = merchantsStale || locationsStale || !upstreamReachable;
+  const degraded = merchantsStale || locationsStale || !upstreamReachable || runtime.degraded;
 
   // Raw reading → rolling window. Keep the last N readings, flip
   // when a supermajority agrees. Shifts out the oldest reading
@@ -151,7 +153,20 @@ export async function healthHandler(c: Context): Promise<Response> {
     degradedInWindow >= HEALTH_FLIP_TO_DEGRADED_THRESHOLD
   ) {
     lastHealthStatus = 'degraded';
-    const why = `Merchants stale: ${merchantsStale}, Locations stale: ${locationsStale}, Upstream: ${upstreamReachable ? 'up' : 'DOWN'}`;
+    const runtimeReasons: string[] = [];
+    if (runtime.otpDelivery.degraded) runtimeReasons.push('otp_delivery');
+    const degradedWorkers = runtime.workers
+      .filter((worker) => worker.degraded)
+      .map((worker) => worker.name);
+    if (degradedWorkers.length > 0) {
+      runtimeReasons.push(`workers=${degradedWorkers.join(',')}`);
+    }
+    const why = [
+      `Merchants stale: ${merchantsStale}`,
+      `Locations stale: ${locationsStale}`,
+      `Upstream: ${upstreamReachable ? 'up' : 'DOWN'}`,
+      `Runtime: ${runtimeReasons.length > 0 ? runtimeReasons.join('; ') : 'ok'}`,
+    ].join(', ');
     healthLog.warn(
       {
         degradedInWindow,
@@ -160,6 +175,7 @@ export async function healthHandler(c: Context): Promise<Response> {
         merchantsStale,
         locationsStale,
         upstreamReachable,
+        runtimeDegraded: runtime.degraded,
       },
       'Health flip → degraded',
     );
@@ -197,6 +213,8 @@ export async function healthHandler(c: Context): Promise<Response> {
     merchantsStale,
     locationsStale,
     upstreamReachable,
+    otpDelivery: runtime.otpDelivery,
+    workers: runtime.workers,
   });
 }
 

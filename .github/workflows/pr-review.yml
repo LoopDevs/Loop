@@ -33,13 +33,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Claude Code
-        # Audit A-031: pin to a specific published version so an upstream
-        # @anthropic-ai/claude-code tag bump can't silently change review
-        # behaviour (or, worst case, pull in a compromised release). Bump
-        # deliberately — bumping this line is the only way review semantics
-        # should change.
-        run: npm install -g @anthropic-ai/claude-code@2.1.114
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install repo-managed review deps
+        # A3-030 / ADR-029: keep the review CLI inside the repo lockfile
+        # instead of resolving it live from npm in a privileged workflow.
+        # We still block global postinstall execution, then re-enable only
+        # Claude Code's own platform installer explicitly.
+        run: |
+          npm ci --ignore-scripts
+          node node_modules/@anthropic-ai/claude-code/install.cjs
 
       - name: Review PR
         env:
@@ -108,7 +114,7 @@ jobs:
               printf '<user_data>\n'
               printf '%s\n' "$DIFF"
               printf '</user_data>\n'
-            } | claude -p --print "$PROMPT" 2>/dev/null || echo ""
+            } | ./node_modules/.bin/claude -p --print "$PROMPT" 2>/dev/null || echo ""
           )
 
           if [ -n "$REVIEW" ]; then

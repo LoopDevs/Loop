@@ -6,9 +6,10 @@ COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/
 COPY packages/shared/package.json packages/shared/
 
-# Install all dependencies
-# Use --ignore-scripts to skip husky, then run package postinstalls manually
-RUN npm ci --ignore-scripts && npm rebuild
+# Install all dependencies (need devDeps for build). Keep the hardened
+# --ignore-scripts posture, then explicitly re-enable only esbuild's
+# platform-binary selector — same supply-chain boundary as backend.
+RUN npm ci --ignore-scripts && npm rebuild esbuild
 
 # Copy source
 COPY tsconfig.base.json ./

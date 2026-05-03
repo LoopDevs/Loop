@@ -17,15 +17,20 @@ split it into a sub-page rather than padding.
 
 | Surface               | Runbooks                                                                                                                                                             |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Payouts (Stellar)** | [stuck-payout.md](./stuck-payout.md) — pending_payouts row stuck pending/submitted                                                                                   |
+| **Health / core ops** | [health-degraded.md](./health-degraded.md) — `notifyHealthChange` degraded alert, including OTP-delivery and worker-state triage                                     |
+| **Payouts (Stellar)** | [stuck-payout.md](./stuck-payout.md) — `notifyStuckPayouts` or manual triage for pending/submitted payout backlog                                                    |
 |                       | [payout-permanent-failure.md](./payout-permanent-failure.md) — `op_no_destination`-class failure → admin compensation flow                                           |
 |                       | [payout-failed-alert.md](./payout-failed-alert.md) — `notifyPayoutFailed` Discord alert triage (A2-1917)                                                             |
 | **Asset drift**       | [asset-drift-alert.md](./asset-drift-alert.md) — `notifyAssetDrift` ok→over alert; over-minted (P0) vs settlement backlog (P1) (A2-1917)                             |
+| **Treasury floor**    | [usdc-below-floor.md](./usdc-below-floor.md) — `notifyUsdcBelowFloor` reserve-floor alert                                                                            |
 | **Operator pool**     | [operator-pool-exhausted.md](./operator-pool-exhausted.md) — `notifyOperatorPoolExhausted` — every CTX operator's circuit OPEN simultaneously (A2-1917)              |
+| **Watcher liveness**  | [payment-watcher-stuck.md](./payment-watcher-stuck.md) — `notifyPaymentWatcherStuck` cursor-stall alert                                                              |
+| **Procurement sweep** | [stuck-procurement-swept.md](./stuck-procurement-swept.md) — `notifyStuckProcurementSwept` per-row reconcile-before-refund alert                                     |
 | **Auth**              | [jwt-key-rotation.md](./jwt-key-rotation.md) — rotating `LOOP_JWT_SIGNING_KEY` without invalidating sessions                                                         |
 | **Stellar signer**    | [stellar-operator-rotation.md](./stellar-operator-rotation.md) — quarterly + emergency rotation of `LOOP_STELLAR_OPERATOR_SECRET` (A2-1909)                          |
 | **Mobile signing**    | [mobile-cert-renewal.md](./mobile-cert-renewal.md) — Apple/Google cert + provisioning + key renewal flow (A2-1908)                                                   |
 | **Upstream (CTX)**    | [ctx-circuit-open.md](./ctx-circuit-open.md) — circuit breaker tripped on a CTX endpoint                                                                             |
+|                       | [ctx-schema-drift.md](./ctx-schema-drift.md) — `notifyCtxSchemaDrift` contract-drift alert                                                                           |
 | **Ledger**            | [ledger-drift.md](./ledger-drift.md) — `/api/admin/reconciliation` reports drift > threshold                                                                         |
 |                       | [monthly-reconciliation.md](./monthly-reconciliation.md) — first-business-day procedure: CTX invoice ⇄ Loop `orders` ledger; per-merchant cross-check (A2-1914)      |
 |                       | [deployed-state-spotcheck.md](./deployed-state-spotcheck.md) — gating check before invoice approval / tax filing / Monday dashboards (A2-1924)                       |

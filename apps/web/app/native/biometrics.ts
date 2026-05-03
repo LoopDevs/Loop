@@ -3,12 +3,13 @@ import { Capacitor } from '@capacitor/core';
 export interface BiometricResult {
   available: boolean;
   biometryType: 'face' | 'fingerprint' | 'iris' | 'none';
+  deviceIsSecure: boolean;
 }
 
 /** Checks if biometric authentication is available on this device. */
 export async function checkBiometrics(): Promise<BiometricResult> {
   if (!Capacitor.isNativePlatform()) {
-    return { available: false, biometryType: 'none' };
+    return { available: false, biometryType: 'none', deviceIsSecure: false };
   }
 
   try {
@@ -19,9 +20,9 @@ export async function checkBiometrics(): Promise<BiometricResult> {
     if (result.biometryType === 1) biometryType = 'fingerprint';
     else if (result.biometryType === 2) biometryType = 'face';
     else if (result.biometryType === 3) biometryType = 'iris';
-    return { available, biometryType };
+    return { available, biometryType, deviceIsSecure: result.deviceIsSecure === true };
   } catch {
-    return { available: false, biometryType: 'none' };
+    return { available: false, biometryType: 'none', deviceIsSecure: false };
   }
 }
 
@@ -42,6 +43,8 @@ export async function authenticateWithBiometrics(reason: string): Promise<boolea
     await BiometricAuth.authenticate({
       reason,
       cancelTitle: 'Cancel',
+      allowDeviceCredential: true,
+      iosFallbackTitle: 'Use Passcode',
       androidConfirmationRequired: false,
     });
     return true;

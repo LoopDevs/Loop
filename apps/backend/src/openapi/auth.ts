@@ -96,13 +96,13 @@ export function registerAuthOpenApi(
     path: '/api/auth/request-otp',
     summary: 'Request a one-time password be emailed to the given address.',
     description:
-      'Email-enumeration defense: returns 200 with "Verification code sent" even when upstream responds with 4xx (e.g. "no such user"). Clients cannot distinguish "email was accepted" from "email was rejected as unknown" by the response status. Only 5xx upstream errors surface as 502 so legitimate users are not left waiting on real outages.',
+      'Dual-path endpoint. With `LOOP_AUTH_NATIVE_ENABLED=true`, Loop writes the OTP row and sends the email itself; otherwise it proxies CTX `/login`. Email-enumeration defense applies in both modes: the route returns 200 with `Verification code sent` even when the upstream/native path rejects the email or the proxy auth circuit is open. The only documented 503 on this route is the explicit auth kill switch middleware.',
     tags: ['Auth'],
     request: { body: { content: { 'application/json': { schema: RequestOtpBody } } } },
     responses: {
       200: {
         description:
-          'OTP queued upstream — OR, by design, email rejected upstream with a 4xx (see description for enumeration-defense rationale).',
+          'OTP accepted on the native path, queued via CTX on the proxy path, or intentionally flattened from a rejection into the generic enumeration-safe envelope.',
         content: { 'application/json': { schema: z.object({ message: z.string() }) } },
       },
       400: {
@@ -123,7 +123,7 @@ export function registerAuthOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       503: {
-        description: 'Upstream auth circuit open',
+        description: 'Auth subsystem disabled by runtime kill switch (`SUBSYSTEM_DISABLED`)',
         content: { 'application/json': { schema: errorResponse } },
       },
     },
@@ -133,6 +133,8 @@ export function registerAuthOpenApi(
     method: 'post',
     path: '/api/auth/verify-otp',
     summary: 'Exchange an emailed OTP for an access + refresh token pair.',
+    description:
+      'Dual-path endpoint. With `LOOP_AUTH_NATIVE_ENABLED=true`, Loop consumes a local OTP row and mints a Loop-signed access/refresh pair. Otherwise it proxies CTX `/verify-email` and forwards the CTX-issued pair after response validation.',
     tags: ['Auth'],
     request: { body: { content: { 'application/json': { schema: VerifyOtpBody } } } },
     responses: {
@@ -162,7 +164,8 @@ export function registerAuthOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       503: {
-        description: 'Upstream auth circuit open',
+        description:
+          'Auth subsystem disabled by runtime kill switch (`SUBSYSTEM_DISABLED`) or CTX auth circuit open on the proxy path (`SERVICE_UNAVAILABLE`)',
         content: { 'application/json': { schema: errorResponse } },
       },
     },
@@ -172,6 +175,8 @@ export function registerAuthOpenApi(
     method: 'post',
     path: '/api/auth/refresh',
     summary: 'Exchange a refresh token for a new access token (and possibly a rotated refresh).',
+    description:
+      'Dual-path endpoint. With `LOOP_AUTH_NATIVE_ENABLED=true`, Loop verifies and rotates a Loop-signed refresh JWT. Otherwise it proxies CTX `/refresh-token` and validates the CTX response before forwarding it.',
     tags: ['Auth'],
     request: { body: { content: { 'application/json': { schema: RefreshBody } } } },
     responses: {

@@ -61,4 +61,19 @@ describe('pending_payouts schema (A2-901 / ADR-024 §2)', () => {
     // invariant tested is the assignability above.
     expect([cashbackKind, withdrawalKind]).toHaveLength(2);
   });
+
+  it('compensatedAt is nullable on the row type and optional on insert', () => {
+    expectTypeOf<PendingPayoutRow['compensatedAt']>().toEqualTypeOf<Date | null>();
+
+    const withdrawalInsert: PendingPayoutInsert = {
+      userId: '00000000-0000-0000-0000-000000000000',
+      kind: 'withdrawal',
+      assetCode: 'USDLOOP',
+      assetIssuer: 'GAAA',
+      toAddress: 'GBBB',
+      amountStroops: 1n,
+      memoText: 'withdraw',
+    };
+    expect(withdrawalInsert.compensatedAt).toBeUndefined();
+  });
 });

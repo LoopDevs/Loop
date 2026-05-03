@@ -32,7 +32,11 @@ import { z } from 'zod';
 import { isLoopAssetCode, currencyForLoopAsset } from '@loop/shared';
 import { UUID_RE } from '../uuid.js';
 import { getPayoutForAdmin } from '../credits/pending-payouts.js';
-import { applyAdminPayoutCompensation } from '../credits/payout-compensation.js';
+import {
+  AlreadyCompensatedError,
+  applyAdminPayoutCompensation,
+  PayoutNotCompensableError,
+} from '../credits/payout-compensation.js';
 import type { User } from '../db/users.js';
 import { notifyAdminAudit } from '../discord.js';
 import { logger } from '../logger.js';
@@ -178,6 +182,24 @@ export async function adminPayoutCompensationHandler(c: Context): Promise<Respon
       reason: parsed.data.reason,
     });
   } catch (err) {
+    if (err instanceof AlreadyCompensatedError) {
+      return c.json(
+        {
+          code: 'ALREADY_COMPENSATED',
+          message: err.message,
+        },
+        409,
+      );
+    }
+    if (err instanceof PayoutNotCompensableError) {
+      return c.json(
+        {
+          code: 'PAYOUT_NOT_COMPENSABLE',
+          message: err.message,
+        },
+        409,
+      );
+    }
     log.error({ err, payoutId: id, adminUserId: actor.id }, 'Compensation failed');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to apply compensation' }, 500);
   }

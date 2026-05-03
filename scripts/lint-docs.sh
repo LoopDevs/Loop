@@ -64,7 +64,7 @@ done <<< "$arch_route_listings"
 
 echo "Checking for stale references to deleted files..."
 for stale in \
-  "auth/otp.ts" "auth/jwt.ts" "auth/mailer.ts" \
+  "auth/otp.ts" "auth/mailer.ts" \
   "nodemailer" "JWT_SECRET" "SMTP_HOST" \
   "claude-audit.md" "RESEARCH.md" "ctx.postman_collection.json" \
   "dashdirect"; do

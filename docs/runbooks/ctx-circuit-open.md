@@ -37,10 +37,13 @@
 3. Read recent `#deployments` and `#ops-alerts` for related events.
    CTX may have posted maintenance, or our last deploy may have
    changed the request shape.
-4. Pull the breaker state via `/health`:
+4. Use `/health` only for the signals it actually exports:
    ```bash
-   curl -s https://api.loopfinance.io/health | jq '.upstream'
+   curl -s https://api.loopfinance.io/health | jq '{upstreamReachable, merchantsStale, locationsStale, merchantsLoadedAt, locationsLoadedAt}'
    ```
+   This confirms whether CTX is broadly reachable and whether catalog
+   refresh is falling behind, but it does **not** expose per-endpoint
+   breaker state. Treat Fly logs as the breaker source of truth.
 
 ## Mitigation
 

@@ -52,7 +52,9 @@ failure. The accepted shapes are, in order of preference:
 
 1. **Last-known-good snapshot.** Cache the most recent successful
    response in-process. Serve it on the next failure with a shorter
-   `max-age` so the CDN re-asks soon.
+   `max-age` so the CDN re-asks soon. If the endpoint varies by request
+   shape (`?limit=`, slug, id, etc.), key the snapshot by that effective
+   shape rather than one global slot.
 2. **Zero-shape bootstrap.** If no prior snapshot exists (cold start
    - immediate DB failure), serve a well-formed response with
      zero-valued counters, empty arrays, `asOf = now()`. The landing

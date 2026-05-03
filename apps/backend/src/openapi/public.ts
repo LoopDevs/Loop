@@ -164,7 +164,7 @@ export function registerPublicOpenApi(
     path: '/api/public/top-cashback-merchants',
     summary: 'Top-N merchants by active cashback rate (ADR 011 / 020).',
     description:
-      'Unauthenticated, CDN-friendly. Landing-page "best cashback" band. `?limit=` clamped 1..50 (default 10). Merchants whose row has been evicted from the in-memory catalog (ADR 021 Rule B) are dropped from the response so the list never links to about-to-vanish merchants. `Cache-Control: public, max-age=300` on the happy path; `max-age=60` on the fallback path. Never 500.',
+      'Unauthenticated, CDN-friendly. Landing-page "best cashback" band. `?limit=` clamped 1..50 (default 10). Merchants whose row has been evicted from the in-memory catalog (ADR 021 Rule B) are dropped from the response so the list never links to about-to-vanish merchants. The fallback snapshot is keyed by effective `limit`, so a degraded response preserves the caller-requested shape. `Cache-Control: public, max-age=300` on the happy path; `max-age=60` on the fallback path. Never 500.',
     tags: ['Public'],
     request: {
       query: z.object({

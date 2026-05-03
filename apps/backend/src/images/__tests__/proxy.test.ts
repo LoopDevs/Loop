@@ -353,6 +353,16 @@ describe('GET /api/image — upstream hardening', () => {
     expect(res.headers.get('Content-Type')).toBe('image/jpeg');
   });
 
+  it('private mode disables public caching for sensitive images', async () => {
+    mockFetch.mockResolvedValueOnce(fakeImageResponse());
+
+    const res = await app.request(
+      `/api/image?url=${encodeURIComponent('https://cdn.example.com/card.jpg')}&mode=private`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store');
+  });
+
   it('rejects upstream Content-Length exceeding 10MB', async () => {
     mockFetch.mockResolvedValueOnce(
       new Response(new Uint8Array([0xff, 0xd8]), {

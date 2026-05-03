@@ -112,3 +112,39 @@ export function notifyPaymentWatcherStuck(args: {
     ],
   });
 }
+
+export function notifyStuckPayouts(args: {
+  rowCount: number;
+  thresholdMinutes: number;
+  oldestAgeMinutes: number;
+  pendingCount: number;
+  submittedCount: number;
+  payoutId: string | null;
+  assetCode: string | null;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🔴 Stuck Payout Backlog Detected',
+    description: truncate(
+      `One or more payout rows have exceeded the ${args.thresholdMinutes}-minute watchdog window. Check the payout worker, Horizon reachability, and operator funding before manually retrying anything.`,
+      DESCRIPTION_MAX,
+    ),
+    color: RED,
+    fields: [
+      { name: 'Rows', value: String(args.rowCount), inline: true },
+      { name: 'Pending', value: String(args.pendingCount), inline: true },
+      { name: 'Submitted', value: String(args.submittedCount), inline: true },
+      { name: 'Oldest age (min)', value: String(args.oldestAgeMinutes), inline: true },
+      { name: 'Threshold (min)', value: String(args.thresholdMinutes), inline: true },
+      {
+        name: 'Example payout',
+        value: args.payoutId === null ? '_none_' : `\`${escapeMarkdown(args.payoutId)}\``,
+        inline: true,
+      },
+      {
+        name: 'Example asset',
+        value: args.assetCode === null ? '_unknown_' : escapeMarkdown(args.assetCode),
+        inline: true,
+      },
+    ],
+  });
+}

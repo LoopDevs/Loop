@@ -195,11 +195,13 @@ export const creditTransactions = pgTable(
     // writer types (cashback, refund, spend, withdrawal). Two CTX
     // webhook retries landing the same cashback payload would
     // otherwise insert two rows; a duplicate refund would
-    // double-credit; a parallel admin issuing the same withdrawal
-    // payout twice would double-debit. Scope excludes 'adjustment'
-    // (idempotency handled by admin_idempotency_keys, ADR 017) and
-    // 'interest' (its own partial unique above). 'withdrawal' was
-    // added in migration 0022 alongside the ADR-024 writer.
+    // double-credit; and a second code path trying to write another
+    // withdrawal debit against the same payout row would double-
+    // debit. Scope excludes 'adjustment' (idempotency handled by
+    // admin_idempotency_keys, ADR 017) and 'interest' (its own
+    // partial unique above). The admin withdrawal path also has a
+    // stronger semantic fence on `pending_payouts` for "same active
+    // withdrawal intent" races.
     uniqueIndex('credit_transactions_reference_unique')
       .on(t.type, t.referenceType, t.referenceId)
       .where(
@@ -701,6 +703,12 @@ export const pendingPayouts = pgTable(
     /** Error message from the most recent failed submit attempt. Bounded. */
     lastError: text('last_error'),
     attempts: integer('attempts').notNull().default(0),
+    // ADR-024 §5 / A3-006: compensation is an operator-only overlay
+    // on a failed withdrawal payout. Keep the public state enum
+    // stable (`failed`) and record compensation separately so retry
+    // can refuse already-compensated rows without widening every
+    // payout-state consumer to a fifth value.
+    compensatedAt: timestamp('compensated_at', { withTimezone: true }),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     submittedAt: timestamp('submitted_at', { withTimezone: true }),
@@ -719,6 +727,17 @@ export const pendingPayouts = pgTable(
     // `pending_payouts_user` index — the composite covers every
     // single-column lookup as well.
     index('pending_payouts_user_created').on(t.userId, t.createdAt),
+    // A3-007: "same semantic withdrawal twice" must not create a
+    // second active payout row just because the new request gets a
+    // fresh UUID. Confirmed payouts are excluded so a later
+    // legitimate repeat withdrawal can happen; compensated failures
+    // are excluded so support can deliberately re-issue after making
+    // the user whole.
+    uniqueIndex('pending_payouts_active_withdrawal_unique')
+      .on(t.userId, t.assetCode, t.assetIssuer, t.toAddress, t.amountStroops)
+      .where(
+        sql`${t.kind} = 'withdrawal' AND ${t.state} IN ('pending', 'submitted', 'failed') AND ${t.compensatedAt} IS NULL`,
+      ),
     check(
       'pending_payouts_state_known',
       sql`${t.state} IN ('pending', 'submitted', 'confirmed', 'failed')`,

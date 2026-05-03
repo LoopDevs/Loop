@@ -75,17 +75,19 @@ window so the doc and the code agree.
 These are the numbers `admin.stuck-orders.tsx` / `admin.stuck-payouts.tsx`
 were hinting at without ever pinning:
 
-| Surface              | Threshold                                   | Paging                                                       |
-| -------------------- | ------------------------------------------- | ------------------------------------------------------------ |
-| Stuck order          | > 15 min in `procuring` or `paid`           | Discord `monitoring` via `notifyStuckProcurementSwept` sweep |
-| Stuck payout         | > 30 min in `submitted` without `confirmed` | Discord `monitoring`                                         |
-| Operator pool health | ≥ 1 operator in `closed` state              | Discord `monitoring` via `notifyOperatorPoolExhausted`       |
-| USDC reserve floor   | `balance < LOOP_USDC_FLOOR_STROOPS`         | Discord `monitoring` via `notifyUsdcBelowFloor`              |
+| Surface              | Threshold                           | Paging                                                       |
+| -------------------- | ----------------------------------- | ------------------------------------------------------------ |
+| Stuck order          | > 15 min in `procuring` or `paid`   | Discord `monitoring` via `notifyStuckProcurementSwept` sweep |
+| Stuck payout         | > 5 min in `pending` or `submitted` | Discord `monitoring` via `notifyStuckPayouts`                |
+| Operator pool health | ≥ 1 operator in `closed` state      | Discord `monitoring` via `notifyOperatorPoolExhausted`       |
+| USDC reserve floor   | `balance < LOOP_USDC_FLOOR_STROOPS` | Discord `monitoring` via `notifyUsdcBelowFloor`              |
 
 The admin UI slider (5 / 15 / 60 min on `stuck-orders`) is
 **exploratory** — ops uses narrower windows for triage. The 15-min
 paging threshold is the documented default that the sweep worker
-enforces.
+enforces. `/health` now also exposes `otpDelivery` and per-worker
+state so auth-delivery failures and money-moving worker stalls show up
+as first-class degraded signals instead of log-only symptoms.
 
 ## Settlement (ADR 015)
 
