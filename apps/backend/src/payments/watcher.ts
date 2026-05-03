@@ -24,7 +24,7 @@ import { db } from '../db/client.js';
 import { watcherCursors } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { findPendingOrderByMemo } from '../orders/repo.js';
-import { markOrderPaid } from '../orders/transitions.js';
+import { markOrderPaid, LoopAssetMissingCreditRowError } from '../orders/transitions.js';
 import { listAccountPayments, isMatchingIncomingPayment } from './horizon.js';
 import { configuredLoopPayableAssets, type LoopAssetCode } from '../credits/payout-asset.js';
 import { parseStroops } from './stroops.js';
@@ -172,7 +172,31 @@ export async function runPaymentWatcherTick(args: {
       continue;
     }
 
-    const transitioned = await markOrderPaid(order.id);
+    let transitioned;
+    try {
+      transitioned = await markOrderPaid(order.id);
+    } catch (err) {
+      if (err instanceof LoopAssetMissingCreditRowError) {
+        // A4-110 defence: state corruption (user holds on-chain
+        // LOOP without matching off-chain user_credits row).
+        // Order stays in pending_payment; the next watcher tick
+        // re-evaluates. Surface to ops via log + skipped counter
+        // so the row doesn't silently sit forever.
+        log.error(
+          {
+            orderId: err.orderId,
+            userId: err.userId,
+            currency: err.currency,
+            paymentId: p.id,
+            memo,
+          },
+          'LOOP-asset payment arrived but user has no matching user_credits row — order left pending_payment for ops investigation',
+        );
+        result.skippedAmount++;
+        continue;
+      }
+      throw err;
+    }
     if (transitioned !== null) {
       result.paid++;
       log.info(

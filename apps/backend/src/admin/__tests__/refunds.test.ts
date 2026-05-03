@@ -23,8 +23,10 @@ const { applyMock, lookupMock, storeMock, notifyMock, RefundAlreadyIssuedError }
     }
     return {
       applyMock: vi.fn(),
-      lookupMock: vi.fn(async () => null as null | { body: unknown; status: number }),
-      storeMock: vi.fn(async () => undefined),
+      lookupMock: vi.fn(
+        async (_args?: unknown): Promise<null | { body: unknown; status: number }> => null,
+      ),
+      storeMock: vi.fn(async (_args?: unknown): Promise<void> => undefined),
       notifyMock: vi.fn(),
       RefundAlreadyIssuedError,
     };

@@ -283,17 +283,11 @@ describe('loopCreateOrderHandler', () => {
     expect(createOrderMock).toHaveBeenCalledWith(expect.objectContaining({ currency: 'GBP' }));
   });
 
-  it('credit path — rejects with 400 when balance is insufficient', async () => {
-    balanceState.rows = [{ balance: '500' }];
-    createOrderMock.mockResolvedValue({
-      id: 'order-uuid',
-      faceValueMinor: 10_000n,
-      currency: 'GBP',
-      chargeMinor: 10_000n,
-      chargeCurrency: 'GBP',
-      paymentMethod: 'credit',
-      paymentMemo: null,
-    });
+  it('credit path — rejects with 400 PAYMENT_METHOD_DISABLED (A4-110b)', async () => {
+    // A4-110(b): credit-method spend is rejected at the loop-handler
+    // until source-bucketing of user_credits lands. Was the
+    // INSUFFICIENT_CREDIT path; now the gate fires before the
+    // balance check ever runs (createOrder must NOT be called).
     const { ctx } = makeCtx({
       auth: LOOP_AUTH,
       body: {
@@ -306,7 +300,7 @@ describe('loopCreateOrderHandler', () => {
     const res = await loopCreateOrderHandler(ctx);
     expect(res.status).toBe(400);
     const body = (await res.json()) as { code: string };
-    expect(body.code).toBe('INSUFFICIENT_CREDIT');
+    expect(body.code).toBe('PAYMENT_METHOD_DISABLED');
     expect(createOrderMock).not.toHaveBeenCalled();
   });
 
@@ -411,17 +405,12 @@ describe('loopCreateOrderHandler', () => {
     expect(body.message).toMatch(/USD, GBP, or EUR/);
   });
 
-  it('credit path — creates order when balance covers the amount', async () => {
-    balanceState.rows = [{ balance: '20000' }];
-    createOrderMock.mockResolvedValue({
-      id: 'order-uuid',
-      faceValueMinor: 10_000n,
-      currency: 'GBP',
-      chargeMinor: 10_000n,
-      chargeCurrency: 'GBP',
-      paymentMethod: 'credit',
-      paymentMemo: null,
-    });
+  it('credit path — also rejected with 400 when balance is sufficient (A4-110b)', async () => {
+    // A4-110(b): credit-method orders are blocked unconditionally
+    // until source-bucketing lands. The balance pre-check is now
+    // bypassed; the gate fires regardless of how much credit the
+    // user holds. Re-enable once user_credits supports tagging
+    // cashback-source vs non-cashback-source liabilities.
     const { ctx } = makeCtx({
       auth: LOOP_AUTH,
       body: {
@@ -432,9 +421,10 @@ describe('loopCreateOrderHandler', () => {
       },
     });
     const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { payment: { method: string } };
-    expect(body.payment.method).toBe('credit');
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('PAYMENT_METHOD_DISABLED');
+    expect(createOrderMock).not.toHaveBeenCalled();
   });
 
   it('loop_asset path — returns deposit address + memo + asset code + issuer', async () => {

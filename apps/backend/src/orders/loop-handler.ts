@@ -34,7 +34,7 @@ import {
   IdempotentOrderConflictError,
   InsufficientCreditError,
 } from './repo.js';
-import { hasSufficientCredit, isFirstLoopAssetOrder } from './loop-create-checks.js';
+import { isFirstLoopAssetOrder } from './loop-create-checks.js';
 import { buildLoopCreateResponse } from './loop-create-response.js';
 
 const log = logger.child({ handler: 'loop-orders' });
@@ -190,26 +190,55 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     );
   }
 
-  // Credit-funded orders need an upfront balance check against the
-  // user's home-currency balance (the ledger is home-currency keyed,
-  // ADR 015). The actual debit happens on the `paid` transition.
+  // A4-110 (b): credit-method spend drains user_credits without
+  // requiring inbound on-chain LOOP-asset, contradicting the
+  // redemption-rule confirmed 2026-05-03 ("to spend cashback the
+  // user must send their on-chain LOOP back to Loop"). Off-chain
+  // user_credits is fungible across all positive sources
+  // (cashback, refund, adjustment, interest); the credit-method
+  // path can therefore drain the cashback-tagged portion of the
+  // balance even though the user is still holding the matching
+  // on-chain LOOP-asset, which they could then spend separately
+  // via loop_asset method or via withdrawal.
+  //
+  // The proper fix requires bucketing user_credits into
+  // "cashback-source" (redeemable only via on-chain return) vs
+  // "non-cashback-source" (refund/adjustment/interest, drainable
+  // via credit method). That's a schema-level migration tracked
+  // separately. Until then, reject `paymentMethod='credit'`
+  // entirely so the redemption rule is held strictly:
+  //   - cashback → user receives on-chain LOOP → spends via
+  //     loop_asset (which now debits user_credits, A4-110 a)
+  //   - non-cashback credit (refunds, adjustments) → currently
+  //     un-redeemable through the order surface; ops handles
+  //     manually until the bucketing design lands.
+  //
+  // The web UI already hardcodes paymentMethod='usdc' (A4-121),
+  // so no shipping client breaks. The CRITICAL_DOUBLE_SPEND
+  // error code makes the gate explicit so a staging environment
+  // that tries credit-method gets a clear signal.
   if (parsed.data.paymentMethod === 'credit') {
-    const ok = await hasSufficientCredit(auth.userId, user.homeCurrency, chargeMinor);
-    if (!ok) {
-      return c.json(
-        {
-          code: 'INSUFFICIENT_CREDIT',
-          message: 'Loop credit balance is below the order amount',
-        },
-        400,
-      );
-    }
+    log.warn(
+      { userId: auth.userId, merchantId: parsed.data.merchantId },
+      'credit-method order rejected pending A4-110(b) cashback/refund credit-source bucketing',
+    );
+    return c.json(
+      {
+        code: 'PAYMENT_METHOD_DISABLED',
+        message:
+          'credit-method spend is temporarily disabled. Use loop_asset (send your LOOP-asset to the deposit address) to spend cashback.',
+      },
+      400,
+    );
   }
 
-  // XLM / USDC orders need a configured deposit address; without one
-  // the watcher has nowhere to see payments, so we must reject before
-  // writing the row (the row's memo would be written but orphaned).
-  if (parsed.data.paymentMethod !== 'credit' && env.LOOP_STELLAR_DEPOSIT_ADDRESS === undefined) {
+  // XLM / USDC / loop_asset orders need a configured deposit
+  // address; without one the watcher has nowhere to see payments,
+  // so we must reject before writing the row (the row's memo
+  // would be written but orphaned). With A4-110(b) the credit
+  // method is rejected upstream, so the only remaining methods
+  // here are on-chain.
+  if (env.LOOP_STELLAR_DEPOSIT_ADDRESS === undefined) {
     log.error('LOOP_STELLAR_DEPOSIT_ADDRESS unset — refusing on-chain order');
     return c.json(
       {

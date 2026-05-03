@@ -99,6 +99,13 @@ export const ApiErrorCode = {
   PAYOUT_NOT_COMPENSABLE: 'PAYOUT_NOT_COMPENSABLE',
   NOT_CONFIGURED: 'NOT_CONFIGURED',
   WEBHOOK_NOT_CONFIGURED: 'WEBHOOK_NOT_CONFIGURED',
+  // A4-110(b): credit-method spend gate. Returned by
+  // `loopCreateOrderHandler` when `paymentMethod='credit'` is
+  // requested but the cashback/refund credit-source bucketing
+  // hasn't shipped yet. Guard is removed once `user_credits`
+  // gains a source-tag column so the credit method can drain
+  // only the non-cashback portion safely.
+  PAYMENT_METHOD_DISABLED: 'PAYMENT_METHOD_DISABLED',
 } as const;
 
 export type ApiErrorCodeValue = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];

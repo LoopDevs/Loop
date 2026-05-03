@@ -36,11 +36,13 @@ const {
     // A4-099: lookupMock now drives the simulated snapshot-replay
     // path inside the withIdempotencyGuard mock below — when it
     // returns a value, the guard skips doWrite and replays.
-    lookupMock: vi.fn(async () => null as null | { body: unknown; status: number }),
+    lookupMock: vi.fn(
+      async (_args?: unknown): Promise<null | { body: unknown; status: number }> => null,
+    ),
     // A4-099: storeMock is invoked by the guard mock after a fresh
     // doWrite to persist the snapshot. Tests assert it's called
     // with the right shape.
-    storeMock: vi.fn(async () => undefined),
+    storeMock: vi.fn(async (_args?: unknown): Promise<void> => undefined),
     notifyMock: vi.fn(),
     getPayoutMock: vi.fn(),
     AlreadyCompensatedError,
