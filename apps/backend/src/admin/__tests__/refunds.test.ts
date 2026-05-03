@@ -37,13 +37,39 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
+// A4-019: handler now uses withIdempotencyGuard. The mock here
+// emulates the production guard: lookup snapshot via lookupMock;
+// if hit, return as replay; otherwise run doWrite and persist via
+// storeMock. This preserves the lookupMock/storeMock test surface
+// so existing assertions keep applying.
 vi.mock('../idempotency.js', () => ({
   IDEMPOTENCY_KEY_MIN: 16,
   IDEMPOTENCY_KEY_MAX: 128,
   validateIdempotencyKey: (k: string | undefined): k is string =>
     k !== undefined && k.length >= 16 && k.length <= 128,
-  lookupIdempotencyKey: lookupMock,
-  storeIdempotencyKey: storeMock,
+  withIdempotencyGuard: async (
+    args: { adminUserId: string; key: string; method: string; path: string },
+    doWrite: () => Promise<{ status: number; body: Record<string, unknown> }>,
+  ): Promise<{ replayed: boolean; status: number; body: Record<string, unknown> }> => {
+    const prior = await lookupMock(args);
+    if (prior !== null) {
+      const body = prior.body as { audit?: Record<string, unknown> };
+      if (body.audit !== null && typeof body.audit === 'object') {
+        body.audit['replayed'] = true;
+      }
+      return { replayed: true, status: prior.status, body: prior.body as Record<string, unknown> };
+    }
+    const { status, body } = await doWrite();
+    await storeMock({
+      adminUserId: args.adminUserId,
+      key: args.key,
+      method: args.method,
+      path: args.path,
+      status,
+      body,
+    });
+    return { replayed: false, status, body };
+  },
 }));
 
 vi.mock('../../credits/refunds.js', () => ({

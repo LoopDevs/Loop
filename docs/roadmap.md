@@ -188,8 +188,9 @@ below is either shipped or an explicit "not yet started".
 
 ### Observability
 
-- [x] ~~Request correlation logging~~ — already implemented via Hono requestId() middleware
-- [ ] Prometheus metrics endpoint
+- [x] ~~Request correlation logging~~ — already implemented via Hono requestId() middleware (A4-008: server-mints, ignores inbound to defeat log-poisoning)
+- [x] ~~Prometheus metrics endpoint~~ — `/metrics` mounted in `apps/backend/src/app.ts`; full exposition in `apps/backend/src/observability-handlers.ts` (rate-limit hits, per-route request totals, per-endpoint circuit-breaker state, runtime-health gauges, worker running state). Bearer-gated in production via `METRICS_BEARER_TOKEN`.
+- [ ] Prometheus scraping infrastructure + dashboards + alert rules (the endpoint exists; the upstream scraping/storage/alerting tier does not yet)
 - [ ] Analytics (privacy-respecting, no PII in events)
 - [ ] Performance monitoring (Core Web Vitals, API latency)
 

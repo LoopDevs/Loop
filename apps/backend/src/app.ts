@@ -187,7 +187,13 @@ app.notFound((c) => {
 // having to cross-reference Sentry timestamps.
 app.onError((err, c) => {
   captureException(err);
-  const requestId = c.get('requestId') ?? c.req.header('X-Request-Id');
+  // A4-008: use the server-minted requestId from the context; the
+  // requestIdMiddleware in middleware/request-id.ts always sets it
+  // before routes run. The inbound-header fallback was dropped to
+  // close the log-poisoning sidechannel.
+  const requestId = (c as unknown as { get(key: 'requestId'): string | undefined }).get(
+    'requestId',
+  );
   return c.json(
     { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred', requestId },
     500,
