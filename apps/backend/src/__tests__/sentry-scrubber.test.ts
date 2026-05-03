@@ -33,7 +33,11 @@ describe('scrubSentryEvent (A2-1308)', () => {
     expect(data.otp).toBe('[REDACTED]');
     const user = data.user as Record<string, unknown>;
     expect(user.refreshToken).toBe('[REDACTED]');
-    expect(user.email).toBe('u@example.com');
+    // A4-074: emails are now scrubbed via the free-text regex pass
+    // even at non-sensitive key names (was previously left intact).
+    // The scrubber walks string values applying EMAIL_RE / BEARER_RE
+    // / STELLAR_SECRET_RE / LONG_HEX_RE.
+    expect(user.email).toBe('[REDACTED_EMAIL]');
   });
 
   it('redacts env-named secrets under extra / contexts', () => {
@@ -65,14 +69,16 @@ describe('scrubSentryEvent (A2-1308)', () => {
     expect(env.NODE_ENV).toBe('production');
   });
 
-  it('leaves non-sensitive fields intact', () => {
+  it('leaves non-PII non-sensitive fields intact (A4-074: emails / bearers / Stellar secrets / long hex still scrubbed)', () => {
     const out = scrubSentryEvent({
       extra: { merchantId: 'amazon', amountMinor: '1000', email: 'u@example.com' },
     });
     expect(out.extra).toEqual({
       merchantId: 'amazon',
       amountMinor: '1000',
-      email: 'u@example.com',
+      // A4-074: free-text regex pass — emails redacted regardless
+      // of the field name they live under.
+      email: '[REDACTED_EMAIL]',
     });
   });
 

@@ -28,6 +28,7 @@
  */
 import type * as SentryType from '@sentry/react';
 import { ApiException } from '@loop/shared';
+import { scrubErrorForSentry } from './sentry-error-scrubber';
 
 /** Sentry.captureException contract surface actually used here. */
 export type SentryLike = Pick<typeof SentryType, 'captureException'>;
@@ -77,8 +78,25 @@ export function forwardQueryErrorToSentry(
   if (err instanceof ApiException && err.requestId !== undefined) {
     tags.backendRequestId = err.requestId;
   }
-  sentry.captureException(err, {
+  // A4-051 / A4-074: route every captureException through
+  // `scrubErrorForSentry` so Response/Request bodies, email-shaped
+  // strings in error messages, bearer tokens, and Stellar secret
+  // keys don't reach Sentry. The `Sentry.init({ beforeSend })`
+  // hook in root.tsx walks `event.extra/tags/etc` but not
+  // `event.exception.values[].value` — that's where
+  // `Error.message` lands. Pre-scrubbing the error message before
+  // capture closes the gap. Pair with the backend's matching fix
+  // in `apps/backend/src/sentry-scrubber.ts:scrubSentryEvent` so
+  // both pipes scrub the same shapes.
+  // A4-058: `key` (TanStack queryKey) often includes user
+  // identifiers (admin user-drill keys carry the userId UUID).
+  // Forward only the surface — the source + the depth — not the
+  // raw key array, so per-user identifiers don't reach Sentry
+  // extras. Operators investigating a Sentry event can pivot to
+  // the backend log via `tags.backendRequestId` if they need
+  // request-scoped detail.
+  sentry.captureException(scrubErrorForSentry(err), {
     tags,
-    extra: { key: args.key ?? null },
+    extra: { keySource: args.source, keyDepth: args.key?.length ?? 0 },
   });
 }

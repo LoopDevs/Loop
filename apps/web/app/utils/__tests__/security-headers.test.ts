@@ -35,10 +35,14 @@ describe('buildSecurityHeaders', () => {
     expect(h['Strict-Transport-Security']).toMatch(/includeSubDomains/);
   });
 
-  it('sets a restrictive Permissions-Policy', () => {
+  it('sets a restrictive Permissions-Policy (A4-050: geolocation=(self))', () => {
     expect(h['Permissions-Policy']).toMatch(/camera=\(\)/);
     expect(h['Permissions-Policy']).toMatch(/microphone=\(\)/);
-    expect(h['Permissions-Policy']).toMatch(/geolocation=\(\)/);
+    // A4-050: ClusterMap "Locate me" reads navigator.geolocation;
+    // blanket geolocation=() revoked the capability from same-
+    // origin documents too. self-only allows the Loop origin
+    // while still blocking iframe / cross-origin geolocation.
+    expect(h['Permissions-Policy']).toMatch(/geolocation=\(self\)/);
   });
 
   it('sets cross-origin isolation headers', () => {

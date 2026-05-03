@@ -53,6 +53,21 @@ vi.mock('../images/proxy.js', async (importOriginal) => {
   return { ...(orig as Record<string, unknown>), evictExpiredImageCache: vi.fn() };
 });
 
+// A4-034: /health now SELECT 1's the DB. Mock db.execute so the
+// integration suite (which has no live Postgres) sees a happy
+// probe by default; individual tests can override via the
+// dbExecuteMock if they want to exercise the degraded path.
+const dbExecuteMock = vi.hoisted(() => vi.fn(async () => [{ '?column?': 1 }]));
+vi.mock('../db/client.js', async (importOriginal) => {
+  const orig = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...orig,
+    db: {
+      execute: dbExecuteMock,
+    },
+  };
+});
+
 // Mock clustering handler to avoid proto import
 vi.mock('../clustering/handler.js', () => ({
   clustersHandler: vi.fn(async (c: { json: (data: unknown) => Response }) =>
