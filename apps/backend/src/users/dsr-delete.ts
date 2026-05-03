@@ -45,7 +45,7 @@
  * code path that does `select(u where email=?)` keeps working
  * without special-casing the deletion sentinel.
  */
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { orders, pendingPayouts, userIdentities, users } from '../db/schema.js';
 import type { PAYOUT_STATES, ORDER_STATES } from '../db/schema.js';
@@ -57,7 +57,26 @@ import { revokeAllRefreshTokensForUser } from '../auth/refresh-tokens.js';
  * client can render targeted UX ("your withdrawal is pending — try
  * again once it settles").
  */
-export type DsrDeleteBlockReason = 'pending_payouts' | 'in_flight_orders';
+/**
+ * A4-078: extended block reasons.
+ *
+ *   - `pending_payouts`: a pending or submitted payout — money in
+ *     flight on chain.
+ *   - `in_flight_orders`: an order in pending_payment / paid /
+ *     procuring — purchase being fulfilled.
+ *   - `failed_uncompensated_withdrawals`: a withdrawal payout in
+ *     state='failed' with `compensated_at IS NULL`. The user owes
+ *     themselves money; admin compensation needs to fire OR a
+ *     manual recovery path. Anonymising in this window orphans
+ *     the user_credits balance — admin compensation re-credits a
+ *     row whose email is now `deleted-{uuid}@…`, the user's new
+ *     account (re-signup with the original email) gets a fresh
+ *     user_id and never sees the recovered balance.
+ */
+export type DsrDeleteBlockReason =
+  | 'pending_payouts'
+  | 'in_flight_orders'
+  | 'failed_uncompensated_withdrawals';
 
 export interface DsrDeleteResult {
   /** True when the anonymisation succeeded; the caller's session is dead. */
@@ -103,6 +122,32 @@ export async function deleteUserViaAnonymisation(userId: string): Promise<DsrDel
     .limit(1);
   if (blockingPayouts.length > 0) {
     return { ok: false, blockedBy: 'pending_payouts' };
+  }
+
+  // A4-078: a failed withdrawal payout with compensated_at IS
+  // NULL means the user_credits debit landed but the on-chain
+  // payout never did, and no admin compensation has re-credited
+  // the balance yet. The user owes themselves money. Anonymising
+  // in this window severs the recovery path: admin compensation
+  // re-credits the (now-anonymised) user_id; if the user
+  // re-signs up with the same email they get a fresh user_id and
+  // can't see the recovered balance. Block until either the
+  // compensation lands (compensated_at != NULL) or ops decides
+  // to write the balance off via a separate admin path.
+  const failedUncompensated = await db
+    .select({ id: pendingPayouts.id })
+    .from(pendingPayouts)
+    .where(
+      and(
+        eq(pendingPayouts.userId, userId),
+        eq(pendingPayouts.state, 'failed' as (typeof PAYOUT_STATES)[number]),
+        eq(pendingPayouts.kind, 'withdrawal'),
+        sql`${pendingPayouts.compensatedAt} IS NULL`,
+      ),
+    )
+    .limit(1);
+  if (failedUncompensated.length > 0) {
+    return { ok: false, blockedBy: 'failed_uncompensated_withdrawals' };
   }
 
   // Block: orders mid-fulfilment. ADR 010 transitions are

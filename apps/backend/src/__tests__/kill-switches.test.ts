@@ -28,9 +28,16 @@ describe('isKilled — A2-1907 runtime kill switches', () => {
     }
   });
 
-  it('returns false on unrecognised strings (fail-open)', () => {
+  it('returns true on unrecognised strings (A4-047 fail-CLOSED)', () => {
+    // A4-047: was fail-open. Operators typing `disabled`, `kill`,
+    // or any other non-canonical value previously got silent
+    // fail-open (kill not engaged). Now fails closed so the
+    // typo surfaces as a visible-but-recoverable subsystem
+    // outage instead of silently leaving the surface live.
     process.env.LOOP_KILL_ORDERS = 'maybe';
-    expect(isKilled('orders')).toBe(false);
+    expect(isKilled('orders')).toBe(true);
+    process.env.LOOP_KILL_ORDERS = 'disabled';
+    expect(isKilled('orders')).toBe(true);
   });
 
   it('reads process.env at call-time so a mid-process flip takes effect', () => {

@@ -351,7 +351,7 @@ jobs:
           set -euo pipefail
           docker run --rm \
             -v "$HOME/.cache/trivy:/root/.cache/" \
-            aquasec/trivy:0.55.2 \
+            aquasec/trivy:0.55.2@sha256:addfb8fd6b9e520c25b22c61d8aa5d58ecd7879177aa959f952bf4734f4e3f60 \
             image \
             --pkg-types os \
             --severity HIGH,CRITICAL \
@@ -370,7 +370,7 @@ jobs:
           docker run --rm \
             -v "$GITHUB_WORKSPACE":/repo \
             -w /repo \
-            aquasec/trivy:0.55.2 \
+            aquasec/trivy:0.55.2@sha256:addfb8fd6b9e520c25b22c61d8aa5d58ecd7879177aa959f952bf4734f4e3f60 \
             config \
             --severity HIGH,CRITICAL \
             --exit-code 1 \
@@ -401,7 +401,7 @@ jobs:
           docker run --rm \
             -v "$GITHUB_WORKSPACE":/repo \
             -w /repo \
-            zricethezav/gitleaks:v8.30.1 \
+            zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
             detect \
             --source=/repo \
             --config=/repo/.gitleaks.toml \

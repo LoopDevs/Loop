@@ -21,10 +21,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A4-042: gitleaks gate runs BEFORE the diff reaches Anthropic.
+  # Previously the review job piped `gh pr diff` straight to
+  # `claude -p` so a PR introducing a hardcoded secret had it sent
+  # to api.anthropic.com before the parallel ci.yml secret-scan
+  # job could block the merge. Pinning the gate here means a
+  # leaked-secret PR fails the secret-scan first and the review
+  # job never runs (and never exfiltrates the diff). Runs the
+  # same gitleaks Docker image as ci.yml's secret-scan; SHA-pinned
+  # per A4-087 so a tag move can't subvert the gate.
+  secret-scan:
+    name: Secret scan (gitleaks) — pre-review gate
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks
+        # A4-087: same image + SHA pin as ci.yml's secret-scan job
+        # so both call sites share the same supply-chain trust
+        # boundary. A tag move on `zricethezav/gitleaks:v8.30.1`
+        # cannot subvert this gate without the digest also moving,
+        # which Docker Hub doesn't permit — `@sha256:...` is
+        # immutable. Bump the digest in BOTH workflows together
+        # whenever you upgrade gitleaks.
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/repo" \
+            zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            detect --source /repo --verbose --redact \
+            --config /repo/.gitleaks.toml || \
+            (echo "::error::gitleaks found secrets in this PR — review job will not run; rotate the secret + force-push to remove from history"; exit 1)
+
   review:
     name: AI Code Review
     runs-on: ubuntu-latest
     if: github.event.pull_request.draft == false
+    # A4-042: don't run if gitleaks found secrets.
+    needs: secret-scan
     permissions:
       contents: read
       pull-requests: write

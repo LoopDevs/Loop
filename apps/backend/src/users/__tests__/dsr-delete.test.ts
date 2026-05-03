@@ -13,6 +13,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const { state } = vi.hoisted(() => {
   const s: {
     payoutBlockingRows: Array<{ id: string }>;
+    /**
+     * A4-078: rows the second pendingPayouts query (failed-
+     * uncompensated withdrawals) should return. Empty by default
+     * so existing tests pass through to the order-block check.
+     */
+    failedUncompensatedRows: Array<{ id: string }>;
+    payoutQueryCount: number;
     orderBlockingRows: Array<{ id: string }>;
     /** Captures of writes for assertions. */
     deletedFromIdentitiesUserId: string | null;
@@ -22,6 +29,8 @@ const { state } = vi.hoisted(() => {
     txnRan: boolean;
   } = {
     payoutBlockingRows: [],
+    failedUncompensatedRows: [],
+    payoutQueryCount: 0,
     orderBlockingRows: [],
     deletedFromIdentitiesUserId: null,
     updatedUserSet: null,
@@ -33,7 +42,13 @@ const { state } = vi.hoisted(() => {
 });
 
 vi.mock('../../db/schema.js', () => ({
-  pendingPayouts: { __tag: 'pendingPayouts', userId: 'userId', state: 'state' },
+  pendingPayouts: {
+    __tag: 'pendingPayouts',
+    userId: 'userId',
+    state: 'state',
+    kind: 'kind',
+    compensatedAt: 'compensated_at',
+  },
   orders: { __tag: 'orders', userId: 'userId', state: 'state' },
   userIdentities: { __tag: 'userIdentities', userId: 'userId' },
   users: { __tag: 'users', id: 'id' },
@@ -45,6 +60,9 @@ vi.mock('drizzle-orm', () => ({
   and: (...args: unknown[]) => ({ __and: args }),
   eq: (col: unknown, value: unknown) => ({ __eq: col, value }),
   inArray: (col: unknown, values: unknown[]) => ({ __inArray: col, values }),
+  // A4-078: dsr-delete uses sql`... IS NULL` for the
+  // failed-uncompensated check; mock returns a tagged sentinel.
+  sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({ __sql: strings.raw, values }),
 }));
 
 vi.mock('../../auth/refresh-tokens.js', () => ({
@@ -63,7 +81,17 @@ vi.mock('../../db/client.js', () => {
       from: (t) => ({
         where: () => ({
           limit: async () => {
-            if (t.__tag === 'pendingPayouts') return state.payoutBlockingRows;
+            if (t.__tag === 'pendingPayouts') {
+              // A4-078: dsr-delete now issues TWO pendingPayouts
+              // queries — the first for pending/submitted block,
+              // the second for failed-uncompensated. Track the
+              // call order so each test can drive both states
+              // independently.
+              const idx = state.payoutQueryCount++;
+              if (idx === 0) return state.payoutBlockingRows;
+              if (idx === 1) return state.failedUncompensatedRows;
+              return [];
+            }
             if (t.__tag === 'orders') return state.orderBlockingRows;
             return [];
           },
@@ -116,6 +144,8 @@ import { deleteUserViaAnonymisation, deletedEmailFor } from '../dsr-delete.js';
 
 beforeEach(() => {
   state.payoutBlockingRows = [];
+  state.failedUncompensatedRows = [];
+  state.payoutQueryCount = 0;
   state.orderBlockingRows = [];
   state.deletedFromIdentitiesUserId = null;
   state.updatedUserSet = null;
@@ -137,6 +167,18 @@ describe('deleteUserViaAnonymisation (A2-1905)', () => {
     state.orderBlockingRows = [{ id: 'o-1' }];
     const out = await deleteUserViaAnonymisation('u-1');
     expect(out).toEqual({ ok: false, blockedBy: 'in_flight_orders' });
+    expect(state.txnRan).toBe(false);
+    expect(state.revokedForUserId).toBeNull();
+  });
+
+  it('refuses with blockedBy=failed_uncompensated_withdrawals when an admin withdrawal is failed but not yet compensated (A4-078)', async () => {
+    // A4-078: a failed kind=withdrawal payout with
+    // compensated_at IS NULL means user_credits was debited but
+    // no on-chain transfer / fiat reached the user. Anonymising
+    // here orphans the recovery path.
+    state.failedUncompensatedRows = [{ id: 'p-failed-1' }];
+    const out = await deleteUserViaAnonymisation('u-1');
+    expect(out).toEqual({ ok: false, blockedBy: 'failed_uncompensated_withdrawals' });
     expect(state.txnRan).toBe(false);
     expect(state.revokedForUserId).toBeNull();
   });
