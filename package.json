@@ -50,7 +50,7 @@
     "@commitlint/config-conventional": "20.5.0",
     "@cyclonedx/cyclonedx-npm": "4.2.1",
     "@playwright/test": "1.59.1",
-    "@sentry/cli": "2.49.0",
+    "@sentry/cli": "3.4.1",
     "@stellar/stellar-sdk": "15.0.1",
     "@typescript-eslint/eslint-plugin": "8.58.2",
     "@typescript-eslint/parser": "8.58.2",
