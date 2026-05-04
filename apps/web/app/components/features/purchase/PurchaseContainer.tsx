@@ -58,6 +58,12 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
   // onto the Loop response. Keep the store as the legacy path's
   // contract until ADR 013 Phase C retires it.
   const [loopCreate, setLoopCreate] = useState<CreateLoopOrderResponse | null>(null);
+  // A4-040: payment-rail selection for Loop-native orders. Tranche 1
+  // ships with USDC + XLM only; LOOP-asset (cashback recycle) and
+  // credit are gated behind `phase1Only=false` because they belong
+  // to the Tranche 2 cashback flywheel. Default USDC because the
+  // marketing copy + treasury docs lead with it.
+  const [paymentMethod, setPaymentMethod] = useState<'usdc' | 'xlm'>('usdc');
 
   // Cashback-rate preview (ADR 011 / 015). Null when the merchant
   // has no active config or the fetch fails — in both cases we just
@@ -327,7 +333,10 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
             merchantId: merchant.id,
             amountMinor: Math.round(amount * 100),
             currency: merchant.denominations?.currency ?? 'USD',
-            paymentMethod: 'usdc',
+            // A4-040: was hardcoded to 'usdc'; user now picks USDC or XLM
+            // before confirming. Tranche 2 will widen this to credit /
+            // loop_asset once `phase1Only=false` exposes those rails.
+            paymentMethod,
           },
           { idempotencyKey: idempotencyKeyRef.current },
         );
@@ -376,6 +385,33 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
           </span>
         )}
       </div>
+
+      {config.loopOrdersEnabled && (
+        <fieldset className="mb-4">
+          <legend className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Pay with
+          </legend>
+          <div role="radiogroup" aria-label="Payment rail" className="grid grid-cols-2 gap-2">
+            {(['usdc', 'xlm'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="radio"
+                aria-checked={paymentMethod === m}
+                onClick={() => setPaymentMethod(m)}
+                disabled={isCreatingOrder}
+                className={`py-3 px-4 min-h-[44px] rounded-lg border text-sm font-semibold transition-colors ${
+                  paymentMethod === m
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                    : 'border-gray-200 dark:border-gray-700 hover:border-blue-400'
+                }`}
+              >
+                {m.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      )}
 
       <AmountSelection
         merchant={merchant}
