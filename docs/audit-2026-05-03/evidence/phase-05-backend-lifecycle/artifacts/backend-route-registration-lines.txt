@@ -1,0 +1,243 @@
+apps/backend/src/app.ts:14:import { mountMerchantRoutes } from './routes/merchants.js';
+apps/backend/src/app.ts:15:import { mountAuthRoutes } from './routes/auth.js';
+apps/backend/src/app.ts:16:import { mountOrderRoutes } from './routes/orders.js';
+apps/backend/src/app.ts:17:import { mountMiscRoutes } from './routes/misc.js';
+apps/backend/src/app.ts:18:import { mountPublicRoutes } from './routes/public.js';
+apps/backend/src/app.ts:19:import { mountUserRoutes } from './routes/users.js';
+apps/backend/src/app.ts:20:import { mountAdminRoutes } from './routes/admin.js';
+apps/backend/src/app.ts:30:  app.use(sentry(app));
+apps/backend/src/app.ts:62:app.use('*', corsMiddleware);
+apps/backend/src/app.ts:67:app.use('*', secureHeadersMiddleware);
+apps/backend/src/app.ts:68:app.use('*', bodyLimitMiddleware);
+apps/backend/src/app.ts:69:app.use('*', requestId());
+apps/backend/src/app.ts:72:// `requestId()` (the wrapper reads `c.get('requestId')`) and
+apps/backend/src/app.ts:75:app.use('*', requestContextMiddleware);
+apps/backend/src/app.ts:81:app.use('*', accessLogMiddleware);
+apps/backend/src/app.ts:95:app.use('*', requestCounterMiddleware);
+apps/backend/src/app.ts:101:app.get('/metrics', metricsHandler);
+apps/backend/src/app.ts:102:app.get('/openapi.json', openApiHandler);
+apps/backend/src/app.ts:119:app.get('/health', healthHandler);
+apps/backend/src/app.ts:124:mountMiscRoutes(app);
+apps/backend/src/app.ts:132:mountMerchantRoutes(app);
+apps/backend/src/app.ts:138:mountPublicRoutes(app);
+apps/backend/src/app.ts:144:mountAuthRoutes(app);
+apps/backend/src/app.ts:151:mountOrderRoutes(app);
+apps/backend/src/app.ts:160:mountUserRoutes(app);
+apps/backend/src/app.ts:166:mountAdminRoutes(app);
+apps/backend/src/app.ts:183:  const requestId = c.get('requestId') ?? c.req.header('X-Request-Id');
+apps/backend/src/routes/admin-operator.ts:26: * Mount-order semantics shared with `mountAdminRoutes`: this
+apps/backend/src/routes/admin-operator.ts:43: * Hono app. Called once from `mountAdminRoutes` after the admin
+apps/backend/src/routes/admin-operator.ts:46:export function mountAdminOperatorRoutes(app: Hono): void {
+apps/backend/src/routes/admin-operator.ts:51:  app.get('/api/admin/supplier-spend', rateLimit(60, 60_000), adminSupplierSpendHandler);
+apps/backend/src/routes/admin-operator.ts:58:  app.get(
+apps/backend/src/routes/admin-operator.ts:69:  app.get(
+apps/backend/src/routes/admin-operator.ts:81:  app.get(
+apps/backend/src/routes/admin-operator.ts:91:  app.get(
+apps/backend/src/routes/admin-operator.ts:101:  app.get('/api/admin/operator-stats', rateLimit(60, 60_000), adminOperatorStatsHandler);
+apps/backend/src/routes/admin-operator.ts:107:  app.get('/api/admin/operators/latency', rateLimit(60, 60_000), adminOperatorLatencyHandler);
+apps/backend/src/routes/auth.ts:49:export function mountAuthRoutes(app: Hono): void {
+apps/backend/src/routes/auth.ts:53:  app.use('/api/auth/*', noStoreResponse);
+apps/backend/src/routes/auth.ts:55:  app.post('/api/auth/request-otp', killSwitch('auth'), rateLimit(5, 60_000), requestOtpHandler);
+apps/backend/src/routes/auth.ts:59:  app.post('/api/auth/verify-otp', killSwitch('auth'), rateLimit(10, 60_000), verifyOtpHandler);
+apps/backend/src/routes/auth.ts:63:  app.post('/api/auth/refresh', rateLimit(30, 60_000), refreshHandler);
+apps/backend/src/routes/auth.ts:68:  app.post(
+apps/backend/src/routes/auth.ts:74:  app.post(
+apps/backend/src/routes/auth.ts:84:  app.delete('/api/auth/session', rateLimit(20, 60_000), logoutHandler);
+apps/backend/src/routes/public.ts:37:export function mountPublicRoutes(app: Hono): void {
+apps/backend/src/routes/public.ts:42:  app.get('/api/public/cashback-stats', rateLimit(60, 60_000), publicCashbackStatsHandler);
+apps/backend/src/routes/public.ts:47:  app.get(
+apps/backend/src/routes/public.ts:58:  app.get('/api/public/merchants/:id', rateLimit(60, 60_000), publicMerchantHandler);
+apps/backend/src/routes/public.ts:66:  app.get('/api/public/cashback-preview', rateLimit(60, 60_000), publicCashbackPreviewHandler);
+apps/backend/src/routes/public.ts:72:  app.get('/api/public/loop-assets', rateLimit(60, 60_000), publicLoopAssetsHandler);
+apps/backend/src/routes/public.ts:79:  app.get('/api/public/flywheel-stats', rateLimit(60, 60_000), publicFlywheelStatsHandler);
+apps/backend/src/routes/misc.ts:23: * around one app.get call.
+apps/backend/src/routes/misc.ts:35:export function mountMiscRoutes(app: Hono): void {
+apps/backend/src/routes/misc.ts:36:  app.get('/api/clusters', rateLimit(60, 60_000), clustersHandler);
+apps/backend/src/routes/misc.ts:37:  app.get('/api/config', rateLimit(120, 60_000), configHandler);
+apps/backend/src/routes/misc.ts:38:  app.get('/api/image', rateLimit(300, 60_000), imageProxyHandler);
+apps/backend/src/routes/users.ts:76:export function mountUserRoutes(app: Hono): void {
+apps/backend/src/routes/users.ts:79:  app.use('/api/users/me', privateNoStoreResponse);
+apps/backend/src/routes/users.ts:80:  app.use('/api/users/me/*', privateNoStoreResponse);
+apps/backend/src/routes/users.ts:82:  app.use('/api/users/me', requireAuth);
+apps/backend/src/routes/users.ts:83:  app.use('/api/users/me/*', requireAuth);
+apps/backend/src/routes/users.ts:86:  app.get('/api/users/me', rateLimit(60, 60_000), getMeHandler);
+apps/backend/src/routes/users.ts:87:  app.post('/api/users/me/home-currency', rateLimit(10, 60_000), setHomeCurrencyHandler);
+apps/backend/src/routes/users.ts:88:  app.put('/api/users/me/stellar-address', rateLimit(10, 60_000), setStellarAddressHandler);
+apps/backend/src/routes/users.ts:95:  app.get('/api/users/me/dsr/export', rateLimit(5, 60 * 60_000), dsrExportHandler);
+apps/backend/src/routes/users.ts:96:  app.post('/api/users/me/dsr/delete', rateLimit(3, 60 * 60_000), dsrDeleteHandler);
+apps/backend/src/routes/users.ts:99:  app.get(
+apps/backend/src/routes/users.ts:104:  app.get('/api/users/me/pending-payouts', rateLimit(60, 60_000), getUserPendingPayoutsHandler);
+apps/backend/src/routes/users.ts:105:  app.get(
+apps/backend/src/routes/users.ts:112:  app.get(
+apps/backend/src/routes/users.ts:117:  app.get(
+apps/backend/src/routes/users.ts:124:  app.get('/api/users/me/cashback-history', rateLimit(60, 60_000), getCashbackHistoryHandler);
+apps/backend/src/routes/users.ts:126:  app.get('/api/users/me/cashback-history.csv', rateLimit(6, 60_000), getCashbackHistoryCsvHandler);
+apps/backend/src/routes/users.ts:127:  app.get('/api/users/me/credits', rateLimit(60, 60_000), getUserCreditsHandler);
+apps/backend/src/routes/users.ts:128:  app.get('/api/users/me/cashback-summary', rateLimit(60, 60_000), getCashbackSummaryHandler);
+apps/backend/src/routes/users.ts:129:  app.get(
+apps/backend/src/routes/users.ts:134:  app.get('/api/users/me/cashback-monthly', rateLimit(60, 60_000), getCashbackMonthlyHandler);
+apps/backend/src/routes/users.ts:137:  app.get('/api/users/me/orders/summary', rateLimit(60, 60_000), getUserOrdersSummaryHandler);
+apps/backend/src/routes/users.ts:138:  app.get('/api/users/me/flywheel-stats', rateLimit(60, 60_000), getUserFlywheelStatsHandler);
+apps/backend/src/routes/users.ts:140:  app.get(
+apps/backend/src/routes/admin-credit-writes.ts:18: * Mount-order semantics shared with `mountAdminRoutes`: this
+apps/backend/src/routes/admin-credit-writes.ts:36: * Called once from `mountAdminRoutes` after the admin middleware
+apps/backend/src/routes/admin-credit-writes.ts:39:export function mountAdminCreditWritesRoutes(app: Hono): void {
+apps/backend/src/routes/admin-credit-writes.ts:43:  app.post(
+apps/backend/src/routes/admin-credit-writes.ts:54:  app.post('/api/admin/users/:userId/refunds', rateLimit(20, 60_000), adminRefundHandler);
+apps/backend/src/routes/admin-credit-writes.ts:58:  app.post(
+apps/backend/src/routes/orders.ts:51:export function mountOrderRoutes(app: Hono): void {
+apps/backend/src/routes/orders.ts:54:  app.use('/api/orders', privateNoStoreResponse);
+apps/backend/src/routes/orders.ts:55:  app.use('/api/orders/*', privateNoStoreResponse);
+apps/backend/src/routes/orders.ts:57:  app.use('/api/orders', requireAuth);
+apps/backend/src/routes/orders.ts:58:  app.use('/api/orders/*', requireAuth);
+apps/backend/src/routes/orders.ts:61:  app.post('/api/orders', killSwitch('orders'), rateLimit(10, 60_000), createOrderHandler);
+apps/backend/src/routes/orders.ts:62:  app.get('/api/orders', rateLimit(60, 60_000), listOrdersHandler);
+apps/backend/src/routes/orders.ts:63:  app.get('/api/orders/:id', rateLimit(120, 60_000), getOrderHandler);
+apps/backend/src/routes/orders.ts:69:  app.post('/api/orders/loop', killSwitch('orders'), rateLimit(10, 60_000), loopCreateOrderHandler);
+apps/backend/src/routes/orders.ts:74:  app.get('/api/orders/loop', rateLimit(60, 60_000), loopListOrdersHandler);
+apps/backend/src/routes/orders.ts:80:  app.get('/api/orders/loop/:id', rateLimit(120, 60_000), loopGetOrderHandler);
+apps/backend/src/routes/admin-per-merchant.ts:35: * Mount-order semantics shared with `mountAdminRoutes`: this
+apps/backend/src/routes/admin-per-merchant.ts:56: * supplied Hono app. Called once from `mountAdminRoutes` after the
+apps/backend/src/routes/admin-per-merchant.ts:59:export function mountAdminPerMerchantRoutes(app: Hono): void {
+apps/backend/src/routes/admin-per-merchant.ts:66:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:74:  app.get('/api/admin/merchant-stats.csv', rateLimit(10, 60_000), adminMerchantStatsCsvHandler);
+apps/backend/src/routes/admin-per-merchant.ts:79:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:88:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:98:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:108:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:119:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:130:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:141:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:151:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:164:  app.get(
+apps/backend/src/routes/admin-fleet-monthly.ts:23: * Mount-order semantics shared with `mountAdminRoutes`: this
+apps/backend/src/routes/admin-fleet-monthly.ts:40: * Hono app. Called once from `mountAdminRoutes` after the admin
+apps/backend/src/routes/admin-fleet-monthly.ts:43:export function mountAdminFleetMonthlyRoutes(app: Hono): void {
+apps/backend/src/routes/admin-fleet-monthly.ts:48:  app.get('/api/admin/cashback-monthly', rateLimit(60, 60_000), adminCashbackMonthlyHandler);
+apps/backend/src/routes/admin-fleet-monthly.ts:55:  app.get('/api/admin/payouts-monthly', rateLimit(60, 60_000), adminPayoutsMonthlyHandler);
+apps/backend/src/routes/admin-fleet-monthly.ts:61:  app.get('/api/admin/payouts-activity', rateLimit(60, 60_000), adminPayoutsActivityHandler);
+apps/backend/src/routes/admin-fleet-monthly.ts:66:  app.get('/api/admin/payouts-activity.csv', rateLimit(10, 60_000), adminPayoutsActivityCsvHandler);
+apps/backend/src/routes/admin-fleet-monthly.ts:72:  app.get(
+apps/backend/src/routes/admin-fleet-monthly.ts:81:  app.get(
+apps/backend/src/routes/admin-fleet-monthly.ts:90:  app.get(
+apps/backend/src/routes/admin.ts:24: *    if missing, gates on `is_admin`, sets `c.get('user')` for the
+apps/backend/src/routes/admin.ts:86:import { mountAdminCashbackConfigRoutes } from './admin-cashback-config.js';
+apps/backend/src/routes/admin.ts:87:import { mountAdminCreditWritesRoutes } from './admin-credit-writes.js';
+apps/backend/src/routes/admin.ts:88:import { mountAdminDashboardRoutes } from './admin-dashboard.js';
+apps/backend/src/routes/admin.ts:89:import { mountAdminFleetMonthlyRoutes } from './admin-fleet-monthly.js';
+apps/backend/src/routes/admin.ts:90:import { mountAdminOperatorRoutes } from './admin-operator.js';
+apps/backend/src/routes/admin.ts:91:import { mountAdminOpsTailRoutes } from './admin-ops-tail.js';
+apps/backend/src/routes/admin.ts:92:import { mountAdminOrderDrillRoutes } from './admin-order-drill.js';
+apps/backend/src/routes/admin.ts:93:import { mountAdminPayoutsRoutes } from './admin-payouts.js';
+apps/backend/src/routes/admin.ts:94:import { mountAdminPerMerchantRoutes } from './admin-per-merchant.js';
+apps/backend/src/routes/admin.ts:95:import { mountAdminTreasuryRoutes } from './admin-treasury.js';
+apps/backend/src/routes/admin.ts:96:import { mountAdminUserClusterRoutes } from './admin-user-cluster.js';
+apps/backend/src/routes/admin.ts:99:export function mountAdminRoutes(app: Hono): void {
+apps/backend/src/routes/admin.ts:104:  // gate on is_admin, and set c.get('user'). Rate-limited same as the
+apps/backend/src/routes/admin.ts:120:  app.use('/api/admin/*', privateNoStoreResponse);
+apps/backend/src/routes/admin.ts:122:  app.use('/api/admin/*', requireAuth);
+apps/backend/src/routes/admin.ts:123:  app.use('/api/admin/*', requireAdmin);
+apps/backend/src/routes/admin.ts:134:  app.use('/api/admin/*', async (c, next) => {
+apps/backend/src/routes/admin.ts:138:    const actor = (c as unknown as Context).get('user') as User | undefined;
+apps/backend/src/routes/admin.ts:170:  mountAdminCashbackConfigRoutes(app);
+apps/backend/src/routes/admin.ts:175:  mountAdminTreasuryRoutes(app);
+apps/backend/src/routes/admin.ts:181:  mountAdminPayoutsRoutes(app);
+apps/backend/src/routes/admin.ts:188:  // mountAdminUserClusterRoutes so /users/search literal registers
+apps/backend/src/routes/admin.ts:190:  mountAdminOpsTailRoutes(app);
+apps/backend/src/routes/admin.ts:195:  mountAdminOrderDrillRoutes(app);
+apps/backend/src/routes/admin.ts:201:  mountAdminDashboardRoutes(app);
+apps/backend/src/routes/admin.ts:208:  mountAdminFleetMonthlyRoutes(app);
+apps/backend/src/routes/admin.ts:213:  mountAdminPerMerchantRoutes(app);
+apps/backend/src/routes/admin.ts:218:  mountAdminOperatorRoutes(app);
+apps/backend/src/routes/admin.ts:223:  mountAdminUserClusterRoutes(app);
+apps/backend/src/routes/admin.ts:228:  mountAdminCreditWritesRoutes(app);
+apps/backend/src/routes/admin-treasury.ts:16: * Mount-order semantics shared with `mountAdminRoutes`: this
+apps/backend/src/routes/admin-treasury.ts:31: * app. Called once from `mountAdminRoutes` after the admin
+apps/backend/src/routes/admin-treasury.ts:34:export function mountAdminTreasuryRoutes(app: Hono): void {
+apps/backend/src/routes/admin-treasury.ts:35:  app.get('/api/admin/treasury', rateLimit(60, 60_000), treasuryHandler);
+apps/backend/src/routes/admin-treasury.ts:41:  app.get('/api/admin/treasury.csv', rateLimit(10, 60_000), adminTreasurySnapshotCsvHandler);
+apps/backend/src/routes/admin-treasury.ts:46:  app.get('/api/admin/treasury/credit-flow', rateLimit(60, 60_000), adminTreasuryCreditFlowHandler);
+apps/backend/src/routes/admin-treasury.ts:51:  app.get(
+apps/backend/src/routes/admin-treasury.ts:60:  app.get('/api/admin/asset-drift/state', rateLimit(120, 60_000), adminAssetDriftStateHandler);
+apps/backend/src/routes/admin-user-cluster.ts:35: * Mount-order semantics shared with `mountAdminRoutes`: this
+apps/backend/src/routes/admin-user-cluster.ts:60: * once from `mountAdminRoutes` after the admin middleware stack is
+apps/backend/src/routes/admin-user-cluster.ts:63:export function mountAdminUserClusterRoutes(app: Hono): void {
+apps/backend/src/routes/admin-user-cluster.ts:66:  app.get('/api/admin/users', rateLimit(60, 60_000), adminListUsersHandler);
+apps/backend/src/routes/admin-user-cluster.ts:72:  app.get('/api/admin/users/by-email', rateLimit(60, 60_000), adminUserByEmailHandler);
+apps/backend/src/routes/admin-user-cluster.ts:78:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:88:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:98:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:106:  app.get('/api/admin/users/:userId', rateLimit(120, 60_000), adminGetUserHandler);
+apps/backend/src/routes/admin-user-cluster.ts:110:  app.get('/api/admin/users/:userId/credits', rateLimit(120, 60_000), adminUserCreditsHandler);
+apps/backend/src/routes/admin-user-cluster.ts:115:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:125:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:134:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:144:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:156:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:164:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:174:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:183:  app.get(
+apps/backend/src/routes/admin-order-drill.ts:15: * Mount-order semantics shared with `mountAdminRoutes`: this
+apps/backend/src/routes/admin-order-drill.ts:30: * supplied Hono app. Called once from `mountAdminRoutes` after
+apps/backend/src/routes/admin-order-drill.ts:33:export function mountAdminOrderDrillRoutes(app: Hono): void {
+apps/backend/src/routes/admin-order-drill.ts:39:  app.get('/api/admin/orders/activity', rateLimit(60, 60_000), adminOrdersActivityHandler);
+apps/backend/src/routes/admin-order-drill.ts:46:  app.get(
+apps/backend/src/routes/admin-order-drill.ts:56:  app.get(
+apps/backend/src/routes/admin-order-drill.ts:64:  app.get('/api/admin/orders/:orderId', rateLimit(120, 60_000), adminGetOrderHandler);
+apps/backend/src/routes/admin-order-drill.ts:68:  app.get('/api/admin/orders.csv', rateLimit(10, 60_000), adminOrdersCsvHandler);
+apps/backend/src/routes/admin-cashback-config.ts:19: * Mount-order semantics shared with `mountAdminRoutes`: this
+apps/backend/src/routes/admin-cashback-config.ts:33: * on the supplied Hono app. Called once from `mountAdminRoutes`
+apps/backend/src/routes/admin-cashback-config.ts:36:export function mountAdminCashbackConfigRoutes(app: Hono): void {
+apps/backend/src/routes/admin-cashback-config.ts:37:  app.get('/api/admin/merchant-cashback-configs', rateLimit(120, 60_000), listConfigsHandler);
+apps/backend/src/routes/admin-cashback-config.ts:43:  app.get(
+apps/backend/src/routes/admin-cashback-config.ts:53:  app.get(
+apps/backend/src/routes/admin-cashback-config.ts:61:  app.get(
+apps/backend/src/routes/admin-cashback-config.ts:66:  app.put(
+apps/backend/src/routes/admin-cashback-config.ts:71:  app.get(
+apps/backend/src/routes/merchants.ts:39:export function mountMerchantRoutes(app: Hono): void {
+apps/backend/src/routes/merchants.ts:48:  app.get('/api/merchants', rateLimit(180, 60_000), merchantListHandler);
+apps/backend/src/routes/merchants.ts:51:  app.get('/api/merchants/all', rateLimit(60, 60_000), merchantAllHandler);
+apps/backend/src/routes/merchants.ts:53:  app.get('/api/merchants/by-slug/:slug', rateLimit(120, 60_000), merchantBySlugHandler);
+apps/backend/src/routes/merchants.ts:62:  app.get('/api/merchants/cashback-rates', rateLimit(120, 60_000), merchantsCashbackRatesHandler);
+apps/backend/src/routes/merchants.ts:70:  app.get(
+apps/backend/src/routes/merchants.ts:81:  app.use('/api/merchants/:id', requireAuth);
+apps/backend/src/routes/merchants.ts:91:  app.get('/api/merchants/:id', rateLimit(120, 60_000), merchantDetailHandler);
+apps/backend/src/routes/admin-ops-tail.ts:28: * `mountAdminUserClusterRoutes`, because the `/users/search` literal
+apps/backend/src/routes/admin-ops-tail.ts:34: * Mount-order semantics shared with `mountAdminRoutes`: this factory
+apps/backend/src/routes/admin-ops-tail.ts:57: * Called once from `mountAdminRoutes` after the admin middleware
+apps/backend/src/routes/admin-ops-tail.ts:58: * stack is in place AND before `mountAdminUserClusterRoutes`.
+apps/backend/src/routes/admin-ops-tail.ts:60:export function mountAdminOpsTailRoutes(app: Hono): void {
+apps/backend/src/routes/admin-ops-tail.ts:64:  app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+apps/backend/src/routes/admin-ops-tail.ts:68:  app.get('/api/admin/merchant-flows', rateLimit(60, 60_000), adminMerchantFlowsHandler);
+apps/backend/src/routes/admin-ops-tail.ts:72:  app.get('/api/admin/discord/config', rateLimit(60, 60_000), adminDiscordConfigHandler);
+apps/backend/src/routes/admin-ops-tail.ts:76:  app.get('/api/admin/users/search', rateLimit(60, 60_000), adminUserSearchHandler);
+apps/backend/src/routes/admin-ops-tail.ts:79:  app.get('/api/admin/user-credits.csv', rateLimit(20, 60_000), adminUserCreditsCsvHandler);
+apps/backend/src/routes/admin-ops-tail.ts:82:  app.get('/api/admin/reconciliation', rateLimit(30, 60_000), adminReconciliationHandler);
+apps/backend/src/routes/admin-ops-tail.ts:88:  app.get('/api/admin/merchant-stats', rateLimit(60, 60_000), adminMerchantStatsHandler);
+apps/backend/src/routes/admin-ops-tail.ts:94:  app.get('/api/admin/orders/:orderId/payout', rateLimit(120, 60_000), adminPayoutByOrderHandler);
+apps/backend/src/routes/admin-ops-tail.ts:99:  app.get('/api/admin/top-users', rateLimit(60, 60_000), adminTopUsersHandler);
+apps/backend/src/routes/admin-ops-tail.ts:104:  app.get('/api/admin/audit-tail', rateLimit(60, 60_000), adminAuditTailHandler);
+apps/backend/src/routes/admin-ops-tail.ts:110:  app.get('/api/admin/audit-tail.csv', rateLimit(10, 60_000), adminAuditTailCsvHandler);
+apps/backend/src/routes/admin-ops-tail.ts:117:  app.post('/api/admin/merchants/resync', rateLimit(2, 60_000), adminMerchantsResyncHandler);
+apps/backend/src/routes/admin-ops-tail.ts:121:  app.get('/api/admin/discord/notifiers', rateLimit(60, 60_000), adminDiscordNotifiersHandler);
+apps/backend/src/routes/admin-ops-tail.ts:126:  app.post('/api/admin/discord/test', rateLimit(10, 60_000), adminDiscordTestHandler);
+apps/backend/src/routes/admin-dashboard.ts:13: * Mount-order semantics shared with `mountAdminRoutes`: this
+apps/backend/src/routes/admin-dashboard.ts:30: * Called once from `mountAdminRoutes` after the admin middleware
+apps/backend/src/routes/admin-dashboard.ts:33:export function mountAdminDashboardRoutes(app: Hono): void {
+apps/backend/src/routes/admin-dashboard.ts:37:  app.get('/api/admin/stuck-orders', rateLimit(120, 60_000), adminStuckOrdersHandler);
+apps/backend/src/routes/admin-dashboard.ts:42:  app.get('/api/admin/stuck-payouts', rateLimit(120, 60_000), adminStuckPayoutsHandler);
+apps/backend/src/routes/admin-dashboard.ts:46:  app.get('/api/admin/cashback-activity', rateLimit(60, 60_000), adminCashbackActivityHandler);
+apps/backend/src/routes/admin-dashboard.ts:51:  app.get(
+apps/backend/src/routes/admin-dashboard.ts:59:  app.get(
+apps/backend/src/routes/admin-dashboard.ts:67:  app.get(
+apps/backend/src/routes/admin-dashboard.ts:75:  app.get(
+apps/backend/src/routes/admin-payouts.ts:17: * Mount-order semantics shared with `mountAdminRoutes`: this
+apps/backend/src/routes/admin-payouts.ts:37: * app. Called once from `mountAdminRoutes` after the admin
+apps/backend/src/routes/admin-payouts.ts:40:export function mountAdminPayoutsRoutes(app: Hono): void {
+apps/backend/src/routes/admin-payouts.ts:44:  app.get('/api/admin/payouts', rateLimit(60, 60_000), adminListPayoutsHandler);
+apps/backend/src/routes/admin-payouts.ts:48:  app.get('/api/admin/payouts/:id', rateLimit(120, 60_000), adminGetPayoutHandler);
+apps/backend/src/routes/admin-payouts.ts:54:  app.get('/api/admin/payouts-by-asset', rateLimit(60, 60_000), adminPayoutsByAssetHandler);
+apps/backend/src/routes/admin-payouts.ts:60:  app.get('/api/admin/payouts/settlement-lag', rateLimit(60, 60_000), adminSettlementLagHandler);
+apps/backend/src/routes/admin-payouts.ts:63:  app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayoutHandler);
+apps/backend/src/routes/admin-payouts.ts:67:  app.post(
+apps/backend/src/routes/admin-payouts.ts:76:  app.get('/api/admin/payouts.csv', rateLimit(10, 60_000), adminPayoutsCsvHandler);

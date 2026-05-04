@@ -1,0 +1,28 @@
+OpenAPI route parity pass, 2026-05-03.
+
+Scope:
+- apps/backend/src/openapi.ts
+- apps/backend/src/openapi/*.ts
+- Backend route mounts in apps/backend/src/routes/*.ts plus direct app.ts mounts.
+
+Commands run:
+- find apps/backend/src/openapi -maxdepth 1 -type f -name '*.ts'
+- rg over apps/backend/src/openapi* for registerPath/path/status/response markers.
+- node scanner extracting app.METHOD("path") from route factories and app.ts.
+- node scanner extracting registry.registerPath({ method, path }) from OpenAPI modules.
+- Normalized route params from :id to {id} before comparing route and OpenAPI sets.
+
+Verified observations:
+- OpenAPI modules: 68 files under apps/backend/src/openapi plus the root apps/backend/src/openapi.ts aggregator.
+- Unique runtime routes/app mounts found by the scanner: 136.
+- Unique OpenAPI registerPath entries found by the scanner: 135.
+- The only runtime path not represented as an OpenAPI registerPath entry is GET /openapi.json itself. This is an introspection endpoint and not a customer/API-domain route.
+- No OpenAPI registerPath entry was found without a matching runtime route/app mount after path-param normalization.
+- The route set includes all current major families: auth, merchants, config/image/clusters, legacy orders, Loop-native orders, user profile/DSR/cashback/payouts, public marketing APIs, admin reads/writes/CSVs, health, metrics, and openapi.json.
+- Existing OpenAPI/runtime defects remain separately filed:
+  - A4-004: docs lint OpenAPI drift check only scans app.ts and can miss modular route drift.
+  - A4-014: /api/image can return an undocumented 500 response.
+  - A4-016: Loop-native order OpenAPI drift for read-side loop_asset and create-side statuses.
+
+Disposition:
+- OpenAPI registration files are dispositioned against this parity evidence, preserving existing A4-014/A4-016 finding references where applicable.

@@ -1,0 +1,8 @@
+336:        # aquasec/trivy is the upstream maintainer image. `image`
+352:          docker run --rm \
+354:            aquasec/trivy:0.55.2 \
+370:          docker run --rm \
+373:            aquasec/trivy:0.55.2 \
+395:        # zricethezav/gitleaks is the upstream maintainer image.
+401:          docker run --rm \
+404:            zricethezav/gitleaks:v8.30.1 \

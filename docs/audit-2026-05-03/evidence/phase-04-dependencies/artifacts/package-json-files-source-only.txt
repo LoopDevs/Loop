@@ -1,0 +1,5 @@
+./apps/backend/package.json
+./apps/mobile/package.json
+./apps/web/package.json
+./package.json
+./packages/shared/package.json

@@ -1,0 +1,12 @@
+.github/CODEOWNERS
+.github/ISSUE_TEMPLATE/bug.yml
+.github/ISSUE_TEMPLATE/config.yml
+.github/ISSUE_TEMPLATE/feature.yml
+.github/dependabot.yml
+.github/labeler.yml
+.github/pull_request_template.md
+.github/workflows/ci.yml
+.github/workflows/codeql.yml
+.github/workflows/e2e-real.yml
+.github/workflows/pr-automation.yml
+.github/workflows/pr-review.yml

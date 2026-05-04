@@ -1,0 +1,23 @@
+Web boundary rule scan
+Date: 2026-05-03
+Scope: apps/web/app current source.
+
+Scans:
+
+- Direct fetch calls:
+  - apps/web/app/services/config.ts
+  - apps/web/app/services/clusters.ts
+  - apps/web/app/services/api-client.ts
+  - apps/web/app/routes/sitemap.tsx
+- Capacitor/native plugin imports:
+  - all matches are under apps/web/app/native/**
+- Loader exports:
+  - apps/web/app/routes/sitemap.tsx
+  - apps/web/app/routes/not-found-ssr.tsx
+
+Interpretation:
+
+- Direct fetches are contained in service wrappers, except sitemap.tsx which is the documented SSR XML exception.
+- Capacitor plugin usage is contained in the native wrapper directory. No direct plugin imports were found in route/component/service files outside apps/web/app/native.
+- Loader usage matches documented exceptions: sitemap XML and SSR-only 404 status propagation. No additional server-side data loaders were found.
+- No new finding was filed from this scan.

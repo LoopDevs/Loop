@@ -1,0 +1,25 @@
+{"level":30,"time":1777834337034,"service":"loop-backend","env":"test","component":"access","method":"GET","path":"/api/merchants/example-id","status":401,"durationMs":1,"requestId":"971ba404-493f-411c-8e38-eb2472cb2a95","msg":"GET /api/merchants/example-id 401 1ms"}
+# HELP loop_rate_limit_hits_total Total 429 responses issued.
+# TYPE loop_rate_limit_hits_total counter
+loop_rate_limit_hits_total 0
+
+# HELP loop_requests_total Total HTTP requests by method/route/status.
+# TYPE loop_requests_total counter
+loop_requests_total{method="GET",route="/api/merchants/",status="id"} 1
+
+# HELP loop_circuit_state Circuit breaker state per upstream endpoint (0=closed, 1=half_open, 2=open).
+# TYPE loop_circuit_state gauge
+
+# HELP loop_runtime_surface_degraded Runtime surface degradation state (1=degraded, 0=healthy).
+# TYPE loop_runtime_surface_degraded gauge
+loop_runtime_surface_degraded{surface="otp_delivery"} 0
+
+# HELP loop_worker_running Worker process state (1=running, 0=not running).
+# TYPE loop_worker_running gauge
+
+# HELP loop_worker_degraded Worker health state (1=degraded, 0=healthy).
+# TYPE loop_worker_degraded gauge
+
+# HELP loop_worker_last_success_timestamp_ms Unix timestamp in ms of the worker's last successful tick.
+# TYPE loop_worker_last_success_timestamp_ms gauge
+

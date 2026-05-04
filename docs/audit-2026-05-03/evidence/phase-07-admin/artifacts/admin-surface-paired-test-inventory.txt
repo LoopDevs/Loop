@@ -1,0 +1,39 @@
+Admin surface paired implementation/test inventory, 2026-05-03.
+
+Scope:
+- apps/backend/src/admin/*.ts
+- apps/backend/src/admin/__tests__/*.test.ts
+- Route mounts under apps/backend/src/routes/admin*.ts were covered separately in phase-23 api-route-service-parity.txt.
+
+Commands run:
+- node inventory over apps/backend/src/admin/*.ts to list exported handlers, same-name tests, and DB operation markers.
+- node comparison of admin implementation basenames against admin test basenames.
+- npm test -w @loop/backend -- --run src/admin/__tests__
+
+Test result:
+- 85 admin test files passed.
+- 760 admin tests passed.
+- Duration reported by Vitest: 3.23s.
+
+Implementation/test pairing observations:
+- 93 implementation files exist directly under apps/backend/src/admin.
+- 85 same-name admin test files exist under apps/backend/src/admin/__tests__.
+- The following implementation files have no same-name test file, but are covered indirectly by handler/barrel tests or caller tests:
+  - config-history-handler: covered by handler.test.ts via handler.ts re-export.
+  - csv-escape: covered through CSV export handler tests that assert CSV quoting/headers/content.
+  - idempotency-constants: covered by idempotency.test.ts and admin write handler tests.
+  - idempotency-store: covered by idempotency.test.ts.
+  - orders-detail: covered by orders.test.ts via orders.ts re-export.
+  - payouts-detail: covered by payouts.test.ts via payouts.ts re-export.
+  - payouts-retry: covered by payouts.test.ts via payouts.ts re-export.
+  - treasury-builders: covered by treasury/treasury CSV tests through treasury handler outputs.
+  - upsert-config-handler: covered by handler.test.ts via handler.ts re-export.
+- idempotency-ttl.test.ts has no same-name implementation file because it targets TTL behavior in the idempotency module/store pair.
+
+Control observations:
+- Admin read namespace middleware ordering is captured in routes/admin.ts and phase-23 parity evidence: private no-store, requireAuth, requireAdmin, then read-audit middleware.
+- Admin write idempotency is not uniformly implemented. This remains filed as A4-013 for refunds, payout retry, and payout compensation manual lookup/store paths.
+- Admin stuck-payout freshness gap remains filed as A4-022.
+- Admin wire-shape duplication outside @loop/shared remains filed as A4-028.
+
+No new finding was filed from this paired test inventory because the uncovered same-name files are covered by indirect tests, and the substantive defects found in this surface were already independently filed with direct code evidence.

@@ -1,0 +1,16 @@
+
+> typecheck
+> npm run typecheck -w @loop/backend -w @loop/web -w @loop/shared
+
+
+> @loop/backend@0.0.1 typecheck
+> tsc --noEmit
+
+
+> @loop/web@0.0.1 typecheck
+> react-router typegen && tsc --noEmit
+
+
+> @loop/shared@0.0.1 typecheck
+> tsc --noEmit
+

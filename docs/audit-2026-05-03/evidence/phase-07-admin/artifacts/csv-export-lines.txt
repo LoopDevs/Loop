@@ -1,0 +1,320 @@
+apps/backend/src/users/handler.ts:182:// /cashback-history list + .csv export + /credits balance) live
+apps/backend/src/admin/supplier-spend-activity-csv.ts:2: * Admin supplier-spend activity CSV export (ADR 013 / 015 / 018).
+apps/backend/src/admin/supplier-spend-activity-csv.ts:4: * `GET /api/admin/supplier-spend/activity.csv` — daily × per-currency
+apps/backend/src/admin/supplier-spend-activity-csv.ts:5: * supplier-spend aggregate as RFC 4180 CSV. Finance runs this at
+apps/backend/src/admin/supplier-spend-activity-csv.ts:27:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/supplier-spend-activity-csv.ts:29:const log = logger.child({ handler: 'admin-supplier-spend-activity-csv' });
+apps/backend/src/admin/supplier-spend-activity-csv.ts:45:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/supplier-spend-activity-csv.ts:46:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/supplier-spend-activity-csv.ts:82:    // currency mixed them. `currency` CSV column name preserved for
+apps/backend/src/admin/supplier-spend-activity-csv.ts:122:        csvRow([
+apps/backend/src/admin/supplier-spend-activity-csv.ts:137:        'Admin supplier-spend-activity CSV truncated — narrow the window',
+apps/backend/src/admin/supplier-spend-activity-csv.ts:139:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/supplier-spend-activity-csv.ts:144:    const filename = `supplier-spend-activity-${today}.csv`;
+apps/backend/src/admin/supplier-spend-activity-csv.ts:148:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/supplier-spend-activity-csv.ts:154:    log.error({ err }, 'Admin supplier-spend-activity CSV failed');
+apps/backend/src/admin/supplier-spend-activity-csv.ts:155:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/audit-tail.ts:76:    // the raw sql interpolator. See `audit-tail-csv.ts` for the
+apps/backend/src/admin/audit-tail.ts:77:    // matching CSV-side fix that surfaced this pattern class.
+apps/backend/src/users/cashback-history-handler.ts:9: *   - GET /api/users/me/cashback-history.csv   → getCashbackHistoryCsvHandler
+apps/backend/src/users/cashback-history-handler.ts:110: * `GET /api/users/me/cashback-history.csv` — full credit-ledger
+apps/backend/src/users/cashback-history-handler.ts:111: * stream for the caller as a downloadable CSV. Unlike the paginated
+apps/backend/src/users/cashback-history-handler.ts:114: * attachments). Caps at `CSV_EXPORT_ROW_LIMIT` rows so a
+apps/backend/src/users/cashback-history-handler.ts:117:const CSV_EXPORT_ROW_LIMIT = 10_000;
+apps/backend/src/users/cashback-history-handler.ts:136:    .limit(CSV_EXPORT_ROW_LIMIT);
+apps/backend/src/users/cashback-history-handler.ts:138:  if (rows.length >= CSV_EXPORT_ROW_LIMIT) {
+apps/backend/src/users/cashback-history-handler.ts:140:      { userId: user.id, limit: CSV_EXPORT_ROW_LIMIT },
+apps/backend/src/users/cashback-history-handler.ts:141:      'Cashback CSV export hit the row cap — user has more history than the dump captures',
+apps/backend/src/users/cashback-history-handler.ts:156:      return cols.map(csvField).join(',');
+apps/backend/src/users/cashback-history-handler.ts:160:  c.header('Content-Type', 'text/csv; charset=utf-8');
+apps/backend/src/users/cashback-history-handler.ts:161:  c.header('Content-Disposition', 'attachment; filename="loop-cashback-history.csv"');
+apps/backend/src/users/cashback-history-handler.ts:168: * RFC 4180 CSV field encoder. Wraps in double quotes + doubles internal
+apps/backend/src/users/cashback-history-handler.ts:171:function csvField(value: string): string {
+apps/backend/src/admin/merchants-catalog-csv.ts:2: * Admin merchants-catalog CSV export (ADR 011 / 018).
+apps/backend/src/admin/merchants-catalog-csv.ts:4: * `GET /api/admin/merchants-catalog.csv` — every merchant in the
+apps/backend/src/admin/merchants-catalog-csv.ts:23: *   - RFC 4180 CSV: CRLF line endings, comma escape, quote-double
+apps/backend/src/admin/merchants-catalog-csv.ts:27: *   - Content-Disposition: attachment; filename=merchants-catalog-YYYY-MM-DD.csv
+apps/backend/src/admin/merchants-catalog-csv.ts:35:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/merchants-catalog-csv.ts:37:const log = logger.child({ handler: 'admin-merchants-catalog-csv' });
+apps/backend/src/admin/merchants-catalog-csv.ts:51:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/merchants-catalog-csv.ts:52:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/merchants-catalog-csv.ts:104:        csvRow([
+apps/backend/src/admin/merchants-catalog-csv.ts:119:        'Admin merchants-catalog CSV truncated — catalog exceeded row cap',
+apps/backend/src/admin/merchants-catalog-csv.ts:121:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/merchants-catalog-csv.ts:129:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/merchants-catalog-csv.ts:131:        'content-disposition': `attachment; filename="merchants-catalog-${today}.csv"`,
+apps/backend/src/admin/merchants-catalog-csv.ts:135:    log.error({ err }, 'Admin merchants-catalog CSV failed');
+apps/backend/src/admin/merchants-catalog-csv.ts:136:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/users/dsr-handler.ts:67:      'Content-Disposition': `attachment; filename="loop-data-export-${user.id}.json"`,
+apps/backend/src/admin/treasury-snapshot-csv.ts:2: * Admin treasury snapshot CSV (ADR 009/015/018).
+apps/backend/src/admin/treasury-snapshot-csv.ts:4: * `GET /api/admin/treasury.csv` — point-in-time flat dump of the
+apps/backend/src/admin/treasury-snapshot-csv.ts:32:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/treasury-snapshot-csv.ts:34:const log = logger.child({ handler: 'admin-treasury-snapshot-csv' });
+apps/backend/src/admin/treasury-snapshot-csv.ts:38:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/treasury-snapshot-csv.ts:39:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/treasury-snapshot-csv.ts:58:    // slice adds a new metric to the snapshot, this CSV picks it
+apps/backend/src/admin/treasury-snapshot-csv.ts:68:    lines.push(csvRow(['snapshot_taken_at', '', new Date().toISOString()]));
+apps/backend/src/admin/treasury-snapshot-csv.ts:72:      lines.push(csvRow(['outstanding', currency, value]));
+apps/backend/src/admin/treasury-snapshot-csv.ts:78:        lines.push(csvRow(['ledger_total', `${currency}:${type}`, value]));
+apps/backend/src/admin/treasury-snapshot-csv.ts:84:      lines.push(csvRow(['liability', code, row.outstandingMinor]));
+apps/backend/src/admin/treasury-snapshot-csv.ts:85:      lines.push(csvRow(['liability_issuer', code, row.issuer ?? '']));
+apps/backend/src/admin/treasury-snapshot-csv.ts:90:      lines.push(csvRow(['asset_stroops', code, holding.stroops ?? '']));
+apps/backend/src/admin/treasury-snapshot-csv.ts:95:      lines.push(csvRow(['payout_state', state, count]));
+apps/backend/src/admin/treasury-snapshot-csv.ts:99:    lines.push(csvRow(['operator_pool_size', '', String(snapshot.operatorPool.size)]));
+apps/backend/src/admin/treasury-snapshot-csv.ts:102:      lines.push(csvRow(['operator', op.id, op.state]));
+apps/backend/src/admin/treasury-snapshot-csv.ts:107:    const filename = `treasury-snapshot-${today}.csv`;
+apps/backend/src/admin/treasury-snapshot-csv.ts:111:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/treasury-snapshot-csv.ts:117:    log.error({ err }, 'Admin treasury snapshot CSV failed');
+apps/backend/src/admin/treasury-snapshot-csv.ts:118:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/payouts-csv.ts:2: * Admin pending-payouts CSV export (ADR 015).
+apps/backend/src/admin/payouts-csv.ts:4: * `GET /api/admin/payouts.csv` — finance-ready CSV of pending_payouts
+apps/backend/src/admin/payouts-csv.ts:16: *   Content-Type: text/csv; charset=utf-8
+apps/backend/src/admin/payouts-csv.ts:18: *   Content-Disposition: attachment; filename="payouts-<since>.csv"
+apps/backend/src/admin/payouts-csv.ts:29:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/payouts-csv.ts:31:const log = logger.child({ handler: 'admin-payouts-csv' });
+apps/backend/src/admin/payouts-csv.ts:56:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/payouts-csv.ts:57:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/payouts-csv.ts:105:      // A2-1610: typed `gte()` — see matching fix in `audit-tail-csv.ts`.
+apps/backend/src/admin/payouts-csv.ts:116:        csvRow([
+apps/backend/src/admin/payouts-csv.ts:140:        'Admin payouts CSV truncated — narrow the window',
+apps/backend/src/admin/payouts-csv.ts:142:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/payouts-csv.ts:146:    const filename = `payouts-${since.toISOString().slice(0, 10)}.csv`;
+apps/backend/src/admin/payouts-csv.ts:150:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/payouts-csv.ts:156:    log.error({ err }, 'Admin payouts CSV failed');
+apps/backend/src/admin/payouts-csv.ts:157:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/treasury-credit-flow-csv.ts:2: * Admin treasury credit-flow CSV export (ADR 009 / 015 / 018).
+apps/backend/src/admin/treasury-credit-flow-csv.ts:4: * `GET /api/admin/treasury/credit-flow.csv?days=31&currency=USD` —
+apps/backend/src/admin/treasury-credit-flow-csv.ts:5: * RFC 4180 CSV form of the credit-flow time series (per-day × per-
+apps/backend/src/admin/treasury-credit-flow-csv.ts:8: * Completes the finance-CSV quartet next to the existing exports:
+apps/backend/src/admin/treasury-credit-flow-csv.ts:9: *   - cashback-activity.csv         — what Loop minted
+apps/backend/src/admin/treasury-credit-flow-csv.ts:10: *   - payouts-activity.csv          — what Loop settled on-chain
+apps/backend/src/admin/treasury-credit-flow-csv.ts:11: *   - supplier-spend/activity.csv   — what Loop paid CTX
+apps/backend/src/admin/treasury-credit-flow-csv.ts:12: *   - treasury/credit-flow.csv      — net ledger movement (this file)
+apps/backend/src/admin/treasury-credit-flow-csv.ts:34:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/treasury-credit-flow-csv.ts:36:const log = logger.child({ handler: 'admin-treasury-credit-flow-csv' });
+apps/backend/src/admin/treasury-credit-flow-csv.ts:44:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/treasury-credit-flow-csv.ts:45:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/treasury-credit-flow-csv.ts:154:        csvRow([
+apps/backend/src/admin/treasury-credit-flow-csv.ts:167:        'Admin treasury credit-flow CSV truncated — narrow the window',
+apps/backend/src/admin/treasury-credit-flow-csv.ts:169:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/treasury-credit-flow-csv.ts:174:    const filename = `treasury-credit-flow-${today}.csv`;
+apps/backend/src/admin/treasury-credit-flow-csv.ts:178:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/treasury-credit-flow-csv.ts:184:    log.error({ err }, 'Admin treasury credit-flow CSV failed');
+apps/backend/src/admin/treasury-credit-flow-csv.ts:185:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/payouts-activity-csv.ts:2: * Admin payouts-activity CSV export (ADR 015 / 016 / 018).
+apps/backend/src/admin/payouts-activity-csv.ts:4: * `GET /api/admin/payouts-activity.csv` — daily × per-asset
+apps/backend/src/admin/payouts-activity-csv.ts:5: * confirmed-payout aggregate as RFC 4180 CSV. Finance runs this
+apps/backend/src/admin/payouts-activity-csv.ts:6: * alongside `/api/admin/cashback-activity.csv` at month-end to
+apps/backend/src/admin/payouts-activity-csv.ts:16: * Same convention as cashback-activity.csv.
+apps/backend/src/admin/payouts-activity-csv.ts:30:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/payouts-activity-csv.ts:32:const log = logger.child({ handler: 'admin-payouts-activity-csv' });
+apps/backend/src/admin/payouts-activity-csv.ts:40:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/payouts-activity-csv.ts:41:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/payouts-activity-csv.ts:106:        csvRow([
+apps/backend/src/admin/payouts-activity-csv.ts:118:        'Admin payouts-activity CSV truncated — narrow the window',
+apps/backend/src/admin/payouts-activity-csv.ts:120:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/payouts-activity-csv.ts:125:    const filename = `payouts-activity-${today}.csv`;
+apps/backend/src/admin/payouts-activity-csv.ts:129:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/payouts-activity-csv.ts:135:    log.error({ err }, 'Admin payouts-activity CSV failed');
+apps/backend/src/admin/payouts-activity-csv.ts:136:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/orders-csv.ts:2: * Admin orders CSV export (ADR 011 / 015).
+apps/backend/src/admin/orders-csv.ts:4: * `GET /api/admin/orders.csv` — finance-ready RFC 4180 CSV of
+apps/backend/src/admin/orders-csv.ts:22: *   Content-Type: text/csv; charset=utf-8
+apps/backend/src/admin/orders-csv.ts:24: *   Content-Disposition: attachment; filename="orders-<since>.csv"
+apps/backend/src/admin/orders-csv.ts:31:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/orders-csv.ts:33:const log = logger.child({ handler: 'admin-orders-csv' });
+apps/backend/src/admin/orders-csv.ts:65:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/orders-csv.ts:66:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/orders-csv.ts:122:      // matching fix in `audit-tail-csv.ts`. postgres-js can't bind a
+apps/backend/src/admin/orders-csv.ts:135:        csvRow([
+apps/backend/src/admin/orders-csv.ts:166:        'Admin orders CSV truncated — narrow the window',
+apps/backend/src/admin/orders-csv.ts:168:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/orders-csv.ts:172:    const filename = `orders-${since.toISOString().slice(0, 10)}.csv`;
+apps/backend/src/admin/orders-csv.ts:176:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/orders-csv.ts:182:    log.error({ err }, 'Admin orders CSV failed');
+apps/backend/src/admin/orders-csv.ts:183:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:2: * Admin merchants-flywheel-share CSV export (ADR 011 / 015 / 018).
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:4: * `GET /api/admin/merchants/flywheel-share.csv` — finance-grade
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:7: * Complement to the existing `/api/admin/merchant-stats.csv` — that
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:20: * app.ts; Tier-3 10/min rate limit matches every other admin CSV.
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:27:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:29:const log = logger.child({ handler: 'admin-merchants-flywheel-share-csv' });
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:43:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:44:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:122:        csvRow([
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:135:        'Admin merchants-flywheel-share CSV truncated — narrow the window',
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:137:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:141:    const filename = `merchants-flywheel-share-${since.toISOString().slice(0, 10)}.csv`;
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:145:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:151:    log.error({ err }, 'Admin merchants-flywheel-share CSV failed');
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:152:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/merchant-stats-csv.ts:2: * Admin merchant-stats CSV export (ADR 011 / 015 / 018).
+apps/backend/src/admin/merchant-stats-csv.ts:4: * `GET /api/admin/merchant-stats.csv` — finance / negotiation export
+apps/backend/src/admin/merchant-stats-csv.ts:24:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/merchant-stats-csv.ts:26:const log = logger.child({ handler: 'admin-merchant-stats-csv' });
+apps/backend/src/admin/merchant-stats-csv.ts:44:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/merchant-stats-csv.ts:45:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/merchant-stats-csv.ts:129:        csvRow([
+apps/backend/src/admin/merchant-stats-csv.ts:146:        'Admin merchant-stats CSV truncated — narrow the window',
+apps/backend/src/admin/merchant-stats-csv.ts:148:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/merchant-stats-csv.ts:152:    const filename = `merchant-stats-${since.toISOString().slice(0, 10)}.csv`;
+apps/backend/src/admin/merchant-stats-csv.ts:156:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/merchant-stats-csv.ts:162:    log.error({ err }, 'Admin merchant-stats CSV failed');
+apps/backend/src/admin/merchant-stats-csv.ts:163:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/users-recycling-activity-csv.ts:2: * Admin users-recycling-activity CSV export (ADR 011 / 015 / 018).
+apps/backend/src/admin/users-recycling-activity-csv.ts:4: * `GET /api/admin/users/recycling-activity.csv` — finance-grade
+apps/backend/src/admin/users-recycling-activity-csv.ts:9: * Complement to the sibling admin CSV exports:
+apps/backend/src/admin/users-recycling-activity-csv.ts:10: *   - /api/admin/payouts.csv              (backlog)
+apps/backend/src/admin/users-recycling-activity-csv.ts:11: *   - /api/admin/users/:id/credit-transactions.csv (per-user ledger)
+apps/backend/src/admin/users-recycling-activity-csv.ts:12: *   - /api/admin/merchants/flywheel-share.csv (merchant axis)
+apps/backend/src/admin/users-recycling-activity-csv.ts:15: * Same Tier-3 contract as every other admin CSV:
+apps/backend/src/admin/users-recycling-activity-csv.ts:21: *   - bigint columns as strings; RFC-4180 CSV escape for email
+apps/backend/src/admin/users-recycling-activity-csv.ts:31:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/users-recycling-activity-csv.ts:33:const log = logger.child({ handler: 'admin-users-recycling-activity-csv' });
+apps/backend/src/admin/users-recycling-activity-csv.ts:47:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/users-recycling-activity-csv.ts:48:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/users-recycling-activity-csv.ts:107:        csvRow([
+apps/backend/src/admin/users-recycling-activity-csv.ts:121:        'Admin users-recycling-activity CSV truncated — narrow the window',
+apps/backend/src/admin/users-recycling-activity-csv.ts:123:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/users-recycling-activity-csv.ts:127:    const filename = `users-recycling-activity-${new Date().toISOString().slice(0, 10)}.csv`;
+apps/backend/src/admin/users-recycling-activity-csv.ts:131:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/users-recycling-activity-csv.ts:137:    log.error({ err }, 'Admin users-recycling-activity CSV failed');
+apps/backend/src/admin/users-recycling-activity-csv.ts:138:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/operators-snapshot-csv.ts:2: * Admin operators snapshot CSV export (ADR 013 / 018 / 022).
+apps/backend/src/admin/operators-snapshot-csv.ts:4: * `GET /api/admin/operators-snapshot.csv?since=<iso>` — flattens
+apps/backend/src/admin/operators-snapshot-csv.ts:5: * per-operator stats + fulfilment-latency into one RFC 4180 CSV
+apps/backend/src/admin/operators-snapshot-csv.ts:19: * CSV contracts (payouts-activity, supplier-spend-activity).
+apps/backend/src/admin/operators-snapshot-csv.ts:25:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/operators-snapshot-csv.ts:27:const log = logger.child({ handler: 'admin-operators-snapshot-csv' });
+apps/backend/src/admin/operators-snapshot-csv.ts:47:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/operators-snapshot-csv.ts:48:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/operators-snapshot-csv.ts:190:        csvRow([
+apps/backend/src/admin/operators-snapshot-csv.ts:209:        'Admin operators-snapshot CSV truncated — narrow the window',
+apps/backend/src/admin/operators-snapshot-csv.ts:211:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/operators-snapshot-csv.ts:216:    const filename = `operators-snapshot-${today}.csv`;
+apps/backend/src/admin/operators-snapshot-csv.ts:220:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/operators-snapshot-csv.ts:226:    log.error({ err }, 'Admin operators-snapshot CSV failed');
+apps/backend/src/admin/operators-snapshot-csv.ts:227:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/user-credit-transactions-csv.ts:2: * Admin per-user credit-transactions CSV export (ADR 009 / 015).
+apps/backend/src/admin/user-credit-transactions-csv.ts:4: * `GET /api/admin/users/:userId/credit-transactions.csv` — finance /
+apps/backend/src/admin/user-credit-transactions-csv.ts:5: * compliance / support CSV of one user's full credit-ledger history
+apps/backend/src/admin/user-credit-transactions-csv.ts:8: * Mirrors the JSON endpoint at the same path (without `.csv`) but
+apps/backend/src/admin/user-credit-transactions-csv.ts:9: * emits RFC 4180 CSV with the standard attachment headers.
+apps/backend/src/admin/user-credit-transactions-csv.ts:28:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/user-credit-transactions-csv.ts:30:const log = logger.child({ handler: 'admin-user-credit-transactions-csv' });
+apps/backend/src/admin/user-credit-transactions-csv.ts:46:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/user-credit-transactions-csv.ts:47:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/user-credit-transactions-csv.ts:97:          // A2-1610: typed `gte()` — see matching fix in `audit-tail-csv.ts`.
+apps/backend/src/admin/user-credit-transactions-csv.ts:110:        csvRow([
+apps/backend/src/admin/user-credit-transactions-csv.ts:125:        'Admin user credit-transactions CSV truncated — narrow the window',
+apps/backend/src/admin/user-credit-transactions-csv.ts:127:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/user-credit-transactions-csv.ts:131:    const filename = `credit-transactions-${userId.slice(0, 8)}-${since.toISOString().slice(0, 10)}.csv`;
+apps/backend/src/admin/user-credit-transactions-csv.ts:135:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/user-credit-transactions-csv.ts:141:    log.error({ err, userId }, 'Admin user credit-transactions CSV failed');
+apps/backend/src/admin/user-credit-transactions-csv.ts:142:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/cashback-configs-csv.ts:2: * Admin cashback-configs CSV export (ADR 011 / 018).
+apps/backend/src/admin/cashback-configs-csv.ts:4: * `GET /api/admin/merchant-cashback-configs.csv` — Tier-3 bulk
+apps/backend/src/admin/cashback-configs-csv.ts:29: * `"`, `,`, or newline, `Content-Disposition: attachment`,
+apps/backend/src/admin/cashback-configs-csv.ts:34: * admin CSVs so the behaviour is uniform.
+apps/backend/src/admin/cashback-configs-csv.ts:42:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/cashback-configs-csv.ts:44:const log = logger.child({ handler: 'admin-cashback-configs-csv' });
+apps/backend/src/admin/cashback-configs-csv.ts:59:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/cashback-configs-csv.ts:60:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/cashback-configs-csv.ts:100:        csvRow([
+apps/backend/src/admin/cashback-configs-csv.ts:116:        'Admin cashback-configs CSV truncated — merchant_cashback_configs grew past the row cap',
+apps/backend/src/admin/cashback-configs-csv.ts:118:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/cashback-configs-csv.ts:122:    const filename = `cashback-configs-${new Date().toISOString().slice(0, 10)}.csv`;
+apps/backend/src/admin/cashback-configs-csv.ts:126:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/cashback-configs-csv.ts:132:    log.error({ err }, 'Admin cashback-configs CSV failed');
+apps/backend/src/admin/cashback-configs-csv.ts:133:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/read-audit.ts:10:export function sanitizeAdminReadQueryString(queryString: string): string | undefined {
+apps/backend/src/admin/user-credits-csv.ts:2: * Admin user-credits CSV export (ADR 009 / 019 Tier 3).
+apps/backend/src/admin/user-credits-csv.ts:4: * `GET /api/admin/user-credits.csv` — one row per `(user_id, currency)`
+apps/backend/src/admin/user-credits-csv.ts:12: * Tier 3 conventions per ADR 019: text/csv + attachment,
+apps/backend/src/admin/user-credits-csv.ts:21:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/user-credits-csv.ts:23:const log = logger.child({ handler: 'admin-user-credits-csv' });
+apps/backend/src/admin/user-credits-csv.ts:29:function csvRow(fields: readonly (string | number | bigint | Date | null)[]): string {
+apps/backend/src/admin/user-credits-csv.ts:33:      if (f instanceof Date) return csvEscape(f.toISOString());
+apps/backend/src/admin/user-credits-csv.ts:35:      return csvEscape(String(f));
+apps/backend/src/admin/user-credits-csv.ts:61:      log.warn({ rowCount: rows.length }, 'User-credits CSV hit row cap');
+apps/backend/src/admin/user-credits-csv.ts:64:    const lines: string[] = [csvRow(HEADER)];
+apps/backend/src/admin/user-credits-csv.ts:66:      lines.push(csvRow([r.userId, r.email, r.currency, r.balanceMinor, r.updatedAt]));
+apps/backend/src/admin/user-credits-csv.ts:69:      // A2-510: route the sentinel through csvRow so the truncation
+apps/backend/src/admin/user-credits-csv.ts:70:      // shape matches every other Tier-3 admin export (payouts-csv,
+apps/backend/src/admin/user-credits-csv.ts:71:      // merchants-catalog-csv, supplier-spend-activity-csv). Output
+apps/backend/src/admin/user-credits-csv.ts:74:      // drift-free if the sentinel or csvRow format ever changes.
+apps/backend/src/admin/user-credits-csv.ts:75:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/user-credits-csv.ts:82:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/user-credits-csv.ts:83:        'content-disposition': 'attachment; filename="loop-user-credits.csv"',
+apps/backend/src/admin/user-credits-csv.ts:88:    log.error({ err }, 'User-credits CSV failed');
+apps/backend/src/admin/user-credits-csv.ts:89:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to export user-credits CSV' }, 500);
+apps/backend/src/admin/audit-tail-csv.ts:2: * Admin audit-tail CSV export (ADR 017 / 018).
+apps/backend/src/admin/audit-tail-csv.ts:4: * `GET /api/admin/audit-tail.csv` — finance-ready CSV of admin
+apps/backend/src/admin/audit-tail-csv.ts:26:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/audit-tail-csv.ts:28:const log = logger.child({ handler: 'admin-audit-tail-csv' });
+apps/backend/src/admin/audit-tail-csv.ts:44:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/audit-tail-csv.ts:45:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/audit-tail-csv.ts:109:        csvRow([
+apps/backend/src/admin/audit-tail-csv.ts:124:        'Admin audit-tail CSV truncated — narrow the window',
+apps/backend/src/admin/audit-tail-csv.ts:126:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/audit-tail-csv.ts:130:    const filename = `admin-audit-${since.toISOString().slice(0, 10)}.csv`;
+apps/backend/src/admin/audit-tail-csv.ts:134:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/audit-tail-csv.ts:140:    log.error({ err }, 'Admin audit-tail CSV failed');
+apps/backend/src/admin/audit-tail-csv.ts:141:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/user-credit-transactions.ts:94:      // fixes in `audit-tail-csv.ts` and `adjustments.ts`.
+apps/backend/src/admin/cashback-realization-daily-csv.ts:2: * Admin cashback-realization daily trend CSV (ADR 009 / 015 / 018).
+apps/backend/src/admin/cashback-realization-daily-csv.ts:4: * `GET /api/admin/cashback-realization/daily.csv` — Tier-3 finance
+apps/backend/src/admin/cashback-realization-daily-csv.ts:6: * Paired with `/api/admin/cashback-activity.csv`: cashback-activity
+apps/backend/src/admin/cashback-realization-daily-csv.ts:20: * `recycledBps()` helper so the CSV can't disagree with what the
+apps/backend/src/admin/cashback-realization-daily-csv.ts:25: * disposition — standard Tier-3 CSV discipline.
+apps/backend/src/admin/cashback-realization-daily-csv.ts:32:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/cashback-realization-daily-csv.ts:34:const log = logger.child({ handler: 'admin-cashback-realization-daily-csv' });
+apps/backend/src/admin/cashback-realization-daily-csv.ts:42:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/cashback-realization-daily-csv.ts:43:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/cashback-realization-daily-csv.ts:124:        csvRow([
+apps/backend/src/admin/cashback-realization-daily-csv.ts:137:        'Admin cashback-realization daily CSV truncated — narrow the window',
+apps/backend/src/admin/cashback-realization-daily-csv.ts:139:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/cashback-realization-daily-csv.ts:144:    const filename = `cashback-realization-daily-${today}.csv`;
+apps/backend/src/admin/cashback-realization-daily-csv.ts:148:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/cashback-realization-daily-csv.ts:154:    log.error({ err }, 'Admin cashback-realization daily CSV failed');
+apps/backend/src/admin/cashback-realization-daily-csv.ts:155:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:2: * Admin merchant-flywheel-activity CSV export (ADR 011/015/018).
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:4: * `GET /api/admin/merchants/:merchantId/flywheel-activity.csv` —
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:5: * Tier-3 CSV sibling of the JSON flywheel-activity endpoint
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:18: * cashback-activity.csv + payouts-activity.csv convention.
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:29:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:31:const log = logger.child({ handler: 'admin-merchant-flywheel-activity-csv' });
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:47:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:48:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:129:        csvRow([
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:142:        'Admin merchant flywheel-activity CSV truncated — narrow the window',
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:144:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:149:    const filename = `${merchantId}-flywheel-activity-${today}.csv`;
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:153:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:159:    log.error({ err, merchantId }, 'Admin merchant flywheel-activity CSV failed');
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:160:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/csv-escape.ts:2: * CSV escaping for admin exporters (A2-1602).
+apps/backend/src/admin/csv-escape.ts:5: * marker — are documented in `docs/admin-csv-conventions.md`
+apps/backend/src/admin/csv-escape.ts:21: * Shared because 18 admin CSV exporters previously each declared a
+apps/backend/src/admin/csv-escape.ts:26: * opens a CSV in an elevated-privilege context.
+apps/backend/src/admin/csv-escape.ts:31:export function csvEscape(value: string | null | undefined): string {
+apps/backend/src/admin/csv-escape.ts:50: * Joins a row of already-cell-normalised values into a CSV row.
+apps/backend/src/admin/csv-escape.ts:51: * Every exporter has its own `csvRow` that typically coerces
+apps/backend/src/admin/csv-escape.ts:57:export function csvRow(fields: readonly (string | null | undefined)[]): string {
+apps/backend/src/admin/csv-escape.ts:58:  return fields.map(csvEscape).join(',');
+apps/backend/src/admin/cashback-activity-csv.ts:2: * Admin cashback-activity CSV export (ADR 009 / 015 / 018).
+apps/backend/src/admin/cashback-activity-csv.ts:4: * `GET /api/admin/cashback-activity.csv` — daily × per-currency
+apps/backend/src/admin/cashback-activity-csv.ts:5: * cashback accrual as RFC 4180 CSV. Finance runs this month-end
+apps/backend/src/admin/cashback-activity-csv.ts:10: * CSV keeps them flat for spreadsheet consumption.
+apps/backend/src/admin/cashback-activity-csv.ts:27:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/cashback-activity-csv.ts:29:const log = logger.child({ handler: 'admin-cashback-activity-csv' });
+apps/backend/src/admin/cashback-activity-csv.ts:37:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/cashback-activity-csv.ts:38:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/cashback-activity-csv.ts:70:    // Ordering is day ASC then currency ASC so the CSV reads as
+apps/backend/src/admin/cashback-activity-csv.ts:106:        csvRow([
+apps/backend/src/admin/cashback-activity-csv.ts:118:        'Admin cashback-activity CSV truncated — narrow the window',
+apps/backend/src/admin/cashback-activity-csv.ts:120:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/cashback-activity-csv.ts:125:    const filename = `cashback-activity-${today}.csv`;
+apps/backend/src/admin/cashback-activity-csv.ts:129:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/cashback-activity-csv.ts:135:    log.error({ err }, 'Admin cashback-activity CSV failed');
+apps/backend/src/admin/cashback-activity-csv.ts:136:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);

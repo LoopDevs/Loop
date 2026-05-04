@@ -1,0 +1,15 @@
+Cold audit reasoning artifact: admin write idempotency inconsistency.
+
+ADR-017 comments and routes describe admin writes as requiring Idempotency-Key and snapshot replay. The hardened helper withIdempotencyGuard serializes lookup -> write -> snapshot store under pg_advisory_xact_lock.
+
+Current split:
+- credit-adjustments: withIdempotencyGuard
+- withdrawals: withIdempotencyGuard
+- merchant cashback config upsert and resync also use withIdempotencyGuard in their modules
+- refunds: manual lookupIdempotencyKey before applyAdminRefund, then storeIdempotencyKey after side-effect
+- payout retry: manual lookup before resetPayoutToPending, then store after side-effect
+- payout compensation: manual lookup before applyAdminPayoutCompensation, then store after side-effect
+
+Manual lookup/store does not serialize concurrent same-key requests. A second request can miss the snapshot while the first is between lookup and store. Depending on the primitive it may return 404/409 instead of replay, overwrite the snapshot, or perform a side effect if the body/target differs while the same actor/key pair is reused.
+
+Expected invariant: once a handler accepts an idempotency key, same actor+key should have one serialized first writer and all later contenders should replay the stored result for the idempotency window.

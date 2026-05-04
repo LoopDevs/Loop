@@ -1,0 +1,34 @@
+Backend infrastructure and merchant slice test run, 2026-05-03.
+
+Scope:
+- apps/backend/src/merchants
+- apps/backend/src/__fixtures__/ctx
+- apps/backend/src/circuit-breaker*.ts
+- apps/backend/src/discord*.ts and apps/backend/src/discord/*.ts
+- apps/backend/src/middleware/*.ts
+- apps/backend/src/logger.ts
+- apps/backend/src/request-context.ts
+- apps/backend/src/sentry-scrubber.ts
+- apps/backend/src/upstream*.ts
+- apps/backend/src/kill-switches.ts
+- apps/backend/src/uuid.ts
+- apps/backend/src/instrument.ts
+- apps/backend/src/cleanup.ts
+- apps/backend/src/test-endpoints.ts
+- apps/backend/src/scripts/check-ledger-invariant.ts
+
+Command run:
+- npm test -w @loop/backend -- --run src/merchants/__tests__ src/__tests__/circuit-breaker.test.ts src/__tests__/discord.test.ts src/__tests__/logger.test.ts src/__tests__/request-context.test.ts src/__tests__/sentry-scrubber.test.ts src/__tests__/trust-proxy.test.ts src/__tests__/trust-proxy-trusted.test.ts src/__tests__/upstream.test.ts src/__tests__/upstream-body-scrub.test.ts src/__tests__/kill-switches.test.ts src/__tests__/ctx-contract.test.ts
+
+Result:
+- 13 test files passed.
+- 175 tests passed.
+- Duration reported by Vitest: 1.67s.
+
+Verified observations:
+- Merchant handlers/sync tests cover catalog reads and sync behavior.
+- CTX fixture contract test covers checked-in CTX fixture shapes used by the proxy contract tests.
+- Circuit breaker, logger, request-context, trust-proxy, upstream, upstream-body scrubber, Sentry scrubber, Discord, and kill-switch tests passed as a focused infrastructure slice.
+- Existing findings tied to this area remain open where relevant: rate-limit keying A4-009, metrics label corruption A4-011, image/OpenAPI drift A4-014, and health/readiness A4-032/A4-033.
+
+No new finding was filed from this test run itself.

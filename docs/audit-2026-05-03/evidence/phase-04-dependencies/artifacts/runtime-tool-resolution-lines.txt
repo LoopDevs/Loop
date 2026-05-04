@@ -1,0 +1,68 @@
+package.json:30:    "proto:generate": "cd apps/backend && npx buf generate && cd ../.. && prettier --write 'packages/shared/src/proto/**/*.ts'",
+.github/workflows/ci.yml:37:      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+.github/workflows/ci.yml:44:      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+.github/workflows/ci.yml:50:        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+.github/workflows/ci.yml:79:        uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
+.github/workflows/ci.yml:93:        run: npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
+.github/workflows/ci.yml:100:      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+.github/workflows/ci.yml:101:      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+.github/workflows/ci.yml:107:        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+.github/workflows/ci.yml:131:        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+.github/workflows/ci.yml:174:      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+.github/workflows/ci.yml:175:      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+.github/workflows/ci.yml:181:        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+.github/workflows/ci.yml:207:      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+.github/workflows/ci.yml:210:      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+.github/workflows/ci.yml:244:      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+.github/workflows/ci.yml:245:      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+.github/workflows/ci.yml:251:        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+.github/workflows/ci.yml:268:        # `npx --no-install` blocks any postinstall behaviour from
+.github/workflows/ci.yml:278:          npx --no-install @cyclonedx/cyclonedx-npm \
+.github/workflows/ci.yml:290:        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v3.0.0
+.github/workflows/ci.yml:294:        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+.github/workflows/ci.yml:309:        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+.github/workflows/ci.yml:334:      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+.github/workflows/ci.yml:352:          docker run --rm \
+.github/workflows/ci.yml:370:          docker run --rm \
+.github/workflows/ci.yml:390:      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+.github/workflows/ci.yml:401:          docker run --rm \
+.github/workflows/ci.yml:418:      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+.github/workflows/ci.yml:419:      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+.github/workflows/ci.yml:425:        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+.github/workflows/ci.yml:520:        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+.github/workflows/ci.yml:533:      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+.github/workflows/ci.yml:534:      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+.github/workflows/ci.yml:540:        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+.github/workflows/ci.yml:562:        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+.github/workflows/ci.yml:568:        run: npx playwright install --with-deps chromium
+.github/workflows/ci.yml:571:        run: npx playwright install-deps chromium
+.github/workflows/ci.yml:575:        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+.github/workflows/ci.yml:595:        run: npx wait-on http://localhost:8080/health --timeout 30000
+.github/workflows/ci.yml:602:        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+.github/workflows/ci.yml:638:      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+.github/workflows/ci.yml:639:      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+.github/workflows/ci.yml:645:        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+.github/workflows/ci.yml:667:        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+.github/workflows/ci.yml:673:        run: npx playwright install --with-deps chromium
+.github/workflows/ci.yml:676:        run: npx playwright install-deps chromium
+.github/workflows/ci.yml:683:        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+.github/workflows/ci.yml:716:      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+.github/workflows/ci.yml:717:      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+.github/workflows/ci.yml:723:        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+.github/workflows/ci.yml:737:        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+.github/workflows/ci.yml:743:        run: npx playwright install --with-deps chromium
+.github/workflows/ci.yml:746:        run: npx playwright install-deps chromium
+.github/workflows/ci.yml:751:        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+.github/workflows/ci.yml:831:          curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK" || true
+.github/workflows/e2e-real.yml:30:      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+.github/workflows/e2e-real.yml:31:      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+.github/workflows/e2e-real.yml:52:          nohup npm exec -w @loop/backend -- tsx src/index.ts \
+.github/workflows/e2e-real.yml:62:        run: npx wait-on http://localhost:8080/health --timeout 60000
+.github/workflows/pr-automation.yml:20:      - uses: actions/labeler@634933edcd8ababfe52f92936142cc22ac488b1b # v6
+.github/workflows/pr-automation.yml:35:      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+scripts/check-admin-bundle-split.sh:78:  echo "Likely causes:"
+.github/workflows/codeql.yml:46:      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+.github/workflows/codeql.yml:50:        uses: github/codeql-action/init@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v3.30.4
+.github/workflows/codeql.yml:59:        uses: github/codeql-action/analyze@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v3.30.4
+.github/workflows/pr-review.yml:32:      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+.github/workflows/pr-review.yml:36:      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0

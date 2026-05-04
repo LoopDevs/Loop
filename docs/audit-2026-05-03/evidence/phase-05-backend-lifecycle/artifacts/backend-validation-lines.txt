@@ -1,0 +1,124 @@
+apps/backend/src/merchants/sync.ts:3:import type { z } from 'zod';
+apps/backend/src/merchants/sync.ts:8:import { notifyCtxSchemaDrift } from '../discord.js';
+apps/backend/src/merchants/sync.ts:10:  UpstreamMerchantSchema,
+apps/backend/src/merchants/sync.ts:11:  UpstreamListResponseSchema,
+apps/backend/src/merchants/sync.ts:17:export { UpstreamMerchantSchema, UpstreamListResponseSchema };
+apps/backend/src/merchants/sync.ts:143:      const parsed = UpstreamListResponseSchema.safeParse(raw);
+apps/backend/src/merchants/sync.ts:145:        notifyCtxSchemaDrift({
+apps/backend/src/merchants/sync.ts:156:        const merchantParsed = UpstreamMerchantSchema.safeParse(item);
+apps/backend/src/orders/list-handler.ts:19:import { z } from 'zod';
+apps/backend/src/orders/list-handler.ts:24:import { notifyCtxSchemaDrift } from '../discord.js';
+apps/backend/src/orders/list-handler.ts:50:    pagination: z.object({
+apps/backend/src/orders/list-handler.ts:109:    const validated = ListOrdersUpstreamResponse.safeParse(raw);
+apps/backend/src/orders/list-handler.ts:115:      notifyCtxSchemaDrift({
+apps/backend/src/merchants/sync-upstream.ts:10: * `UpstreamMerchantSchema` and `UpstreamListResponseSchema` are
+apps/backend/src/merchants/sync-upstream.ts:16:import { z } from 'zod';
+apps/backend/src/merchants/sync-upstream.ts:37:export const UpstreamMerchantSchema = z
+apps/backend/src/merchants/sync-upstream.ts:68:export type UpstreamMerchant = z.infer<typeof UpstreamMerchantSchema>;
+apps/backend/src/merchants/sync-upstream.ts:70:// Wrap individual merchants in .safeParse so one malformed entry does not
+apps/backend/src/merchants/sync-upstream.ts:72:export const UpstreamListResponseSchema = z
+apps/backend/src/merchants/sync-upstream.ts:74:    pagination: z.object({
+apps/backend/src/merchants/handler.ts:2:import { z } from 'zod';
+apps/backend/src/merchants/handler.ts:165:      const parsed = UpstreamMerchantDetailResponse.safeParse(raw);
+apps/backend/src/orders/handler.ts:7:import { notifyCtxSchemaDrift, notifyOrderCreated } from '../discord.js';
+apps/backend/src/orders/handler.ts:34:  const parsed = CreateOrderBody.safeParse(await c.req.json().catch(() => null));
+apps/backend/src/orders/handler.ts:83:    const validated = CreateOrderUpstreamResponse.safeParse(raw);
+apps/backend/src/orders/handler.ts:89:      notifyCtxSchemaDrift({
+apps/backend/src/clustering/data-store.ts:2:import { z } from 'zod';
+apps/backend/src/clustering/data-store.ts:14:const UpstreamLocationSchema = z
+apps/backend/src/clustering/data-store.ts:19:    latLong: z.object({
+apps/backend/src/clustering/data-store.ts:27:const UpstreamLocationsResponseSchema = z
+apps/backend/src/clustering/data-store.ts:29:    pagination: z.object({
+apps/backend/src/clustering/data-store.ts:115:      const parsed = UpstreamLocationsResponseSchema.safeParse(raw);
+apps/backend/src/clustering/data-store.ts:128:        const itemParsed = UpstreamLocationSchema.safeParse(rawItem);
+apps/backend/src/orders/get-handler.ts:20:import { z } from 'zod';
+apps/backend/src/orders/get-handler.ts:25:import { notifyCtxSchemaDrift, notifyOrderFulfilled } from '../discord.js';
+apps/backend/src/orders/get-handler.ts:128:    const validated = GetOrderUpstreamResponse.safeParse(raw);
+apps/backend/src/orders/get-handler.ts:134:      notifyCtxSchemaDrift({
+apps/backend/src/orders/request-schemas.ts:8: * zod object verbatim — the openapi version's own description even
+apps/backend/src/orders/request-schemas.ts:14: * Pure zod, no `.openapi()` annotations — same posture as
+apps/backend/src/orders/request-schemas.ts:22: * on the same canonical zod) is a separate Phase-2 lift —
+apps/backend/src/orders/request-schemas.ts:23: * `@loop/shared` is currently type-only and would need a `zod`
+apps/backend/src/orders/request-schemas.ts:26:import { z } from 'zod';
+apps/backend/src/orders/request-schemas.ts:27:import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
+apps/backend/src/orders/request-schemas.ts:29:// `extendZodWithOpenApi(z)` patches `.openapi(...)` onto every zod
+apps/backend/src/orders/request-schemas.ts:48:export const CreateOrderBody = z.object({
+apps/backend/src/users/stellar-address-handler.ts:17:import { z } from 'zod';
+apps/backend/src/users/stellar-address-handler.ts:31:const SetStellarAddressBody = z.object({
+apps/backend/src/users/stellar-address-handler.ts:45:  const parsed = SetStellarAddressBody.safeParse(await c.req.json().catch(() => null));
+apps/backend/src/orders/loop-handler.ts:22:import { z } from 'zod';
+apps/backend/src/orders/loop-handler.ts:50:const CreateBody = z.object({
+apps/backend/src/orders/loop-handler.ts:93:  const parsed = CreateBody.safeParse(await c.req.json().catch(() => null));
+apps/backend/src/auth/id-token-verify-with-key.ts:50:    parsed = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+apps/backend/src/auth/native.ts:64:  const parsed = VerifyOtpBody.safeParse(await c.req.json().catch(() => null));
+apps/backend/src/auth/native.ts:114:  const parsed = RefreshBody.safeParse(await c.req.json().catch(() => null));
+apps/backend/src/auth/social.ts:20:import { z } from 'zod';
+apps/backend/src/auth/social.ts:32:const Body = z.object({
+apps/backend/src/auth/social.ts:85:    const parsed = Body.safeParse(await c.req.json().catch(() => null));
+apps/backend/src/orders/procurement-redemption.ts:17:import { z } from 'zod';
+apps/backend/src/orders/procurement-redemption.ts:30:const CtxGiftCardDetailResponse = z.object({
+apps/backend/src/orders/procurement-redemption.ts:63:  const parsed = CtxGiftCardDetailResponse.safeParse(raw);
+apps/backend/src/auth/logout-handler.ts:15:import { z } from 'zod';
+apps/backend/src/auth/logout-handler.ts:33:const LogoutBody = z.object({
+apps/backend/src/auth/logout-handler.ts:48:  const parsed = LogoutBody.safeParse(await c.req.json().catch(() => ({})));
+apps/backend/src/users/handler.ts:19:import { z } from 'zod';
+apps/backend/src/users/handler.ts:95:const SetHomeCurrencyBody = z.object({
+apps/backend/src/users/handler.ts:105:  const parsed = SetHomeCurrencyBody.safeParse(await c.req.json().catch(() => null));
+apps/backend/src/auth/id-token.ts:100:    const parsed = JSON.parse(json) as unknown;
+apps/backend/src/orders/procure-one.ts:12:import { z } from 'zod';
+apps/backend/src/orders/procure-one.ts:37:const CtxGiftCardResponse = z.object({
+apps/backend/src/orders/procure-one.ts:139:    const parsed = CtxGiftCardResponse.safeParse(raw);
+apps/backend/src/auth/jwks.ts:10: * Schema-drift on the JWKS response is a hard error: if a provider's
+apps/backend/src/auth/jwks.ts:17:import { z } from 'zod';
+apps/backend/src/auth/jwks.ts:23:const Jwk = z.object({
+apps/backend/src/auth/jwks.ts:31:const JwksResponse = z.object({
+apps/backend/src/auth/jwks.ts:62: * a 1h TTL (ADR 014 — cache, don't pin). Schema-drift on the JWKS
+apps/backend/src/auth/jwks.ts:81:  const parsed = JwksResponse.safeParse(raw);
+apps/backend/src/admin/withdrawals.ts:24:import { z } from 'zod';
+apps/backend/src/admin/withdrawals.ts:52:const BodySchema = z.object({
+apps/backend/src/admin/withdrawals.ts:111:  const parsed = BodySchema.safeParse(body);
+apps/backend/src/auth/tokens.ts:164:    parsed = JSON.parse(b64urlDecode(payload).toString('utf8'));
+apps/backend/src/auth/native-request-otp.ts:48:  const parsed = RequestOtpBody.safeParse(await c.req.json().catch(() => null));
+apps/backend/src/auth/jwt.ts:34:    const parsed = JSON.parse(json) as unknown;
+apps/backend/src/admin/upsert-config-handler.ts:18:import { z } from 'zod';
+apps/backend/src/admin/upsert-config-handler.ts:114:  const parsed = UpsertBody.safeParse(body);
+apps/backend/src/auth/request-schemas.ts:7: * `RequestOtpBody` / `VerifyOtpBody` / `RefreshBody` zod schemas
+apps/backend/src/auth/request-schemas.ts:10: * server-only (no `@loop/shared` zod-dep churn) while giving both
+apps/backend/src/auth/request-schemas.ts:17:import { z } from 'zod';
+apps/backend/src/auth/request-schemas.ts:21:export const RequestOtpBody = z.object({
+apps/backend/src/auth/request-schemas.ts:26:export const VerifyOtpBody = z.object({
+apps/backend/src/auth/request-schemas.ts:32:export const RefreshBody = z.object({
+apps/backend/src/admin/merchants-resync.ts:23:import { z } from 'zod';
+apps/backend/src/admin/merchants-resync.ts:47:const BodySchema = z.object({
+apps/backend/src/admin/merchants-resync.ts:77:  const parsed = BodySchema.safeParse(body);
+apps/backend/src/admin/discord-test.ts:23:import { z } from 'zod';
+apps/backend/src/admin/discord-test.ts:29:const BodySchema = z.object({
+apps/backend/src/admin/discord-test.ts:40:  const parsed = BodySchema.safeParse(raw);
+apps/backend/src/admin/payout-compensation.ts:31:import { z } from 'zod';
+apps/backend/src/admin/payout-compensation.ts:54:const BodySchema = z.object({
+apps/backend/src/admin/payout-compensation.ts:97:  const parsed = BodySchema.safeParse(body);
+apps/backend/src/admin/refunds.ts:20:import { z } from 'zod';
+apps/backend/src/admin/refunds.ts:44:const BodySchema = z.object({
+apps/backend/src/admin/refunds.ts:100:  const parsed = BodySchema.safeParse(body);
+apps/backend/src/admin/payouts-retry.ts:18:import { z } from 'zod';
+apps/backend/src/admin/payouts-retry.ts:92:const RetryBodySchema = z.object({
+apps/backend/src/admin/payouts-retry.ts:132:  const parsed = RetryBodySchema.safeParse(body);
+apps/backend/src/orders/handler-shared.ts:28:import { z } from 'zod';
+apps/backend/src/orders/handler-shared.ts:29:import type { ZodIssue } from 'zod';
+apps/backend/src/orders/handler-shared.ts:37: * `notifyCtxSchemaDrift` call sites in this module + auth +
+apps/backend/src/admin/idempotency.ts:144:          body = JSON.parse(prior.responseBody) as Record<string, unknown>;
+apps/backend/src/admin/credit-adjustments.ts:18:import { z } from 'zod';
+apps/backend/src/admin/credit-adjustments.ts:44:const BodySchema = z.object({
+apps/backend/src/admin/credit-adjustments.ts:100:  const parsed = BodySchema.safeParse(body);
+apps/backend/src/auth/handler.ts:2:import { z } from 'zod';
+apps/backend/src/auth/handler.ts:13:import { notifyCtxSchemaDrift } from '../discord.js';
+apps/backend/src/auth/handler.ts:38:export const VerifyOtpUpstreamResponse = z.object({
+apps/backend/src/auth/handler.ts:43:export const RefreshUpstreamResponse = z.object({
+apps/backend/src/auth/handler.ts:61:  const parsed = RequestOtpBody.safeParse(await c.req.json().catch(() => null));
+apps/backend/src/auth/handler.ts:128:  const parsed = VerifyOtpBody.safeParse(await c.req.json().catch(() => null));
+apps/backend/src/auth/handler.ts:162:    const validated = VerifyOtpUpstreamResponse.safeParse(raw);
+apps/backend/src/auth/handler.ts:168:      notifyCtxSchemaDrift({
+apps/backend/src/auth/handler.ts:204:  const parsed = RefreshBody.safeParse(await c.req.json().catch(() => null));
+apps/backend/src/auth/handler.ts:243:    const validated = RefreshUpstreamResponse.safeParse(raw);
+apps/backend/src/auth/handler.ts:249:      notifyCtxSchemaDrift({
+apps/backend/src/admin/idempotency-store.ts:60:    body = JSON.parse(row.responseBody) as Record<string, unknown>;

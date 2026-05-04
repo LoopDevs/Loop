@@ -1,0 +1,27 @@
+Cold evidence: stuck-payout query selects submitted rows by `created_at` but reports age from `submitted_at`.
+
+Current code:
+
+- apps/backend/src/admin/stuck-payouts.ts:84-95
+  - The SQL query selects pending/submitted rows with:
+    - `state IN ('pending', 'submitted')`
+    - `created_at < cutoff`
+  - It does not branch the cutoff by state.
+
+- apps/backend/src/admin/stuck-payouts.ts:100-105
+  - The returned row uses `submittedAt` as `stuckSince` for `state='submitted'`.
+  - `ageMinutes` is computed from `submittedAt` for submitted rows.
+
+- apps/backend/src/admin/stuck-payouts.ts:129-133
+  - The handler comment says a submitted row past threshold by `createdAt` is also past-SLO by `submittedAt` because submit cannot happen before create.
+
+Reasoning:
+
+The comment is backwards. `submitted_at` cannot be before `created_at`, so `created_at < cutoff` does not imply `submitted_at < cutoff`. A payout can sit pending for longer than the threshold, then be submitted successfully, and still match the query immediately because its `created_at` is old. The response will then show a submitted row with `ageMinutes` near zero. The `runStuckPayoutWatchdog` consumes this list and can notify on rows that are not actually stale in the submitted state.
+
+The query should use state-specific cutoffs:
+
+- pending rows: `created_at < cutoff`
+- submitted rows: `submitted_at < cutoff`
+
+Rows with `state='submitted' AND submitted_at IS NULL` can be treated as corrupt/stuck from `created_at`, but that should be explicit.

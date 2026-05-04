@@ -1,0 +1,24 @@
+apps/backend/src/admin/payouts-retry.ts:6: * compliant: actor from `requireAdmin`, `Idempotency-Key` header
+apps/backend/src/admin/payouts-retry.ts:7: * required, `reason` body (2-500 chars), snapshot replay on
+apps/backend/src/admin/payouts-retry.ts:98: * applies: actor from `requireAdmin`, Idempotency-Key header required,
+apps/backend/src/admin/payouts-retry.ts:99: * `reason` body (2..500 chars), snapshot replay on repeat, Discord
+apps/backend/src/admin/payouts-retry.ts:115:        message: `Idempotency-Key header required (${IDEMPOTENCY_KEY_MIN}-${IDEMPOTENCY_KEY_MAX} chars)`,
+apps/backend/src/admin/refunds.ts:9: *     replay, covers the "support agent double-clicked submit" case.
+apps/backend/src/admin/refunds.ts:83:        message: `Idempotency-Key header required (${IDEMPOTENCY_KEY_MIN}-${IDEMPOTENCY_KEY_MAX} chars)`,
+apps/backend/src/admin/idempotency.ts:6: * verbatim so a double-click or a network-retry cannot cause
+apps/backend/src/admin/idempotency.ts:7: * double side-effects (double-credit, double-payout-retry, etc.).
+apps/backend/src/admin/idempotency.ts:9: * This file owns the high-level `withIdempotencyGuard` (advisory-
+apps/backend/src/admin/idempotency.ts:10: * lock-serialised lookup → write → store) plus the request-edge
+apps/backend/src/admin/idempotency.ts:21: * retry would look like a new request and side-effects would double.
+apps/backend/src/admin/idempotency.ts:54: * `withIdempotencyGuard` to serialise the lookup → write → store
+apps/backend/src/admin/idempotency.ts:57: * both store a snapshot — which would double-credit the user.
+apps/backend/src/admin/idempotency.ts:95: * A2-2001: serialises the entire lookup → write → store sequence for
+apps/backend/src/admin/idempotency.ts:100: * underlying side-effects (double credit_transactions rows, double
+apps/backend/src/admin/idempotency.ts:125:export async function withIdempotencyGuard(
+apps/backend/src/admin/idempotency.ts:153:          // snapshot replay. The stored body was produced on the first
+apps/backend/src/admin/idempotency.ts:156:          // the guard means every handler using `withIdempotencyGuard`
+apps/backend/src/routes/admin-credit-writes.ts:9: *   - `Idempotency-Key` header (16-128 char opaque token)
+apps/backend/src/routes/admin-credit-writes.ts:41:  // it's an explicit ops action, not a polled surface. Idempotency-Key
+apps/backend/src/admin/payout-compensation.ts:20: *     not be compensated; that would double-credit a user whose
+apps/backend/src/admin/payout-compensation.ts:24: *   - Idempotency-Key required; replay returns the stored snapshot.
+apps/backend/src/admin/payout-compensation.ts:80:        message: `Idempotency-Key header required (${IDEMPOTENCY_KEY_MIN}-${IDEMPOTENCY_KEY_MAX} chars)`,

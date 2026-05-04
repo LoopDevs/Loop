@@ -1,0 +1,12 @@
+184 components
+53 services
+49 routes
+18 utils
+18 native
+12 hooks
+7 stores
+1 routes.ts
+1 root.tsx
+1 entry.server.tsx
+1 app.css
+1 __tests__

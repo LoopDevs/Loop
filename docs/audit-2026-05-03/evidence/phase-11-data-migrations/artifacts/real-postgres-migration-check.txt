@@ -1,0 +1,73 @@
+Phase 11 real-Postgres migration verification.
+
+Environment:
+
+- Docker Compose service `loop-postgres` was running and healthy on port 5433.
+- Backend integration command uses `LOOP_E2E_DB=1` and `vitest.integration.config.ts`.
+
+Command:
+
+  npm run test:integration -w @loop/backend
+
+Result:
+
+  Test Files  7 passed (7)
+  Tests  65 passed (65)
+
+This path calls `ensureMigrated()` in `apps/backend/src/__tests__/integration/db-test-setup.ts`, which applies migrations from `new URL('../../db/migrations', import.meta.url).pathname` against the real `loop_test` database.
+
+Post-migration database inventory from `docker exec loop-postgres psql -U loop -d loop_test`:
+
+Public tables:
+
+- admin_idempotency_keys
+- credit_transactions
+- merchant_cashback_config_history
+- merchant_cashback_configs
+- orders
+- otps
+- pending_payouts
+- refresh_tokens
+- social_id_token_uses
+- user_credits
+- user_identities
+- users
+- watcher_cursors
+
+Migration journal table:
+
+- `select count(*) from drizzle.__drizzle_migrations;` returned `29`, matching SQL files 0000 through 0028.
+
+Trigger/function check:
+
+- `record_merchant_cashback_config_history` exists in `public`.
+- `merchant_cashback_configs|merchant_cashback_configs_audit|O` is present in `pg_trigger`.
+
+Index presence sampled from `pg_indexes`:
+
+- `credit_transactions_interest_period_unique`
+- `credit_transactions_reference_unique`
+- `orders_fulfilled_at`
+- `orders_fulfilled_merchant_at`
+- `orders_procuring_procured_at`
+- `orders_user_idempotency_unique`
+- `pending_payouts_active_withdrawal_unique`
+- `pending_payouts_user_created`
+- `users_email_loop_native_unique`
+
+Constraint presence sampled from `pg_constraint`:
+
+- `credit_transactions_amount_sign`
+- `credit_transactions_currency_known`
+- `credit_transactions_period_cursor_interest_only`
+- `orders_payment_memo_coherence`
+- `orders_payment_method_known`
+- `pending_payouts_kind_shape`
+- `pending_payouts_to_address_format`
+- `user_credits_currency_known`
+- `user_identities_provider_known`
+- `users_home_currency_known`
+
+Conclusion:
+
+Source migrations apply cleanly to the local real-Postgres test database. This does not invalidate A4-023, which concerns production build packaging and runtime migration asset visibility after bundling.

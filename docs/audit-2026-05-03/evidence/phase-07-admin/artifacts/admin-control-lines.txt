@@ -1,0 +1,1279 @@
+apps/backend/src/routes/admin-payouts.ts:7: * breakdown + settlement-lag SLA + retry + compensate + CSV
+apps/backend/src/routes/admin-payouts.ts:14: * before the literal-suffix `/payouts/:id/retry|compensate` so
+apps/backend/src/routes/admin-payouts.ts:19: * (cache-control / requireAuth / requireAdmin / audit middleware)
+apps/backend/src/routes/admin-payouts.ts:30:import { adminPayoutsCsvHandler } from '../admin/payouts-csv.js';
+apps/backend/src/routes/admin-payouts.ts:61:  // POST /api/admin/payouts/:id/retry — flip a failed row back to pending.
+apps/backend/src/routes/admin-payouts.ts:63:  app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayoutHandler);
+apps/backend/src/routes/admin-payouts.ts:64:  // POST /api/admin/payouts/:id/compensate — re-credit a user after a
+apps/backend/src/routes/admin-payouts.ts:65:  // permanently-failed withdrawal payout (ADR-024 §5). Same rate limit
+apps/backend/src/routes/admin-payouts.ts:66:  // as retry: rare, finance-reviewed, one-at-a-time.
+apps/backend/src/routes/admin-payouts.ts:68:    '/api/admin/payouts/:id/compensate',
+apps/backend/src/routes/admin-payouts.ts:69:    killSwitch('withdrawals'),
+apps/backend/src/routes/admin-payouts.ts:73:  // Finance-ready CSV export of pending_payouts rows. Lower rate
+apps/backend/src/routes/admin-payouts.ts:76:  app.get('/api/admin/payouts.csv', rateLimit(10, 60_000), adminPayoutsCsvHandler);
+apps/backend/src/routes/admin-treasury.ts:11: *   - GET /api/admin/treasury.csv                   (Tier-3 CSV)
+apps/backend/src/routes/admin-treasury.ts:12: *   - GET /api/admin/treasury/credit-flow           (per-day series)
+apps/backend/src/routes/admin-treasury.ts:18: * (cache-control / requireAuth / requireAdmin / audit middleware)
+apps/backend/src/routes/admin-treasury.ts:24:import { adminTreasurySnapshotCsvHandler } from '../admin/treasury-snapshot-csv.js';
+apps/backend/src/routes/admin-treasury.ts:25:import { adminTreasuryCreditFlowHandler } from '../admin/treasury-credit-flow.js';
+apps/backend/src/routes/admin-treasury.ts:36:  // Tier-3 CSV of the treasury snapshot (ADR 009/015/018). Point-
+apps/backend/src/routes/admin-treasury.ts:37:  // in-time flat dump for SOC-2 / audit evidence. Long-form CSV
+apps/backend/src/routes/admin-treasury.ts:39:  // auditors can eyeball "what moved between Monday and Tuesday".
+apps/backend/src/routes/admin-treasury.ts:41:  app.get('/api/admin/treasury.csv', rateLimit(10, 60_000), adminTreasurySnapshotCsvHandler);
+apps/backend/src/routes/admin-treasury.ts:42:  // Treasury credit-flow time-series (ADR 009/015) — per-day credited
+apps/backend/src/routes/admin-treasury.ts:43:  // vs debited per currency from credit_transactions. Answers "are we
+apps/backend/src/routes/admin-treasury.ts:46:  app.get('/api/admin/treasury/credit-flow', rateLimit(60, 60_000), adminTreasuryCreditFlowHandler);
+apps/backend/src/routes/admin-per-merchant.ts:16: *     share + .csv travel here for the same mount-contiguity reason.
+apps/backend/src/routes/admin-per-merchant.ts:21: *   - GET /api/admin/merchants/flywheel-share.csv          (literal)
+apps/backend/src/routes/admin-per-merchant.ts:27: *   - GET /api/admin/merchants/:merchantId/flywheel-activity.csv
+apps/backend/src/routes/admin-per-merchant.ts:31: * `/merchants/flywheel-share` + `.csv` paths register BEFORE the
+apps/backend/src/routes/admin-per-merchant.ts:37: * (cache-control / requireAuth / requireAdmin / audit middleware)
+apps/backend/src/routes/admin-per-merchant.ts:43:import { adminMerchantStatsCsvHandler } from '../admin/merchant-stats-csv.js';
+apps/backend/src/routes/admin-per-merchant.ts:45:import { adminMerchantsFlywheelShareCsvHandler } from '../admin/merchants-flywheel-share-csv.js';
+apps/backend/src/routes/admin-per-merchant.ts:51:import { adminMerchantFlywheelActivityCsvHandler } from '../admin/merchant-flywheel-activity-csv.js';
+apps/backend/src/routes/admin-per-merchant.ts:71:  // Finance / negotiation CSV — flattened per-merchant stats for
+apps/backend/src/routes/admin-per-merchant.ts:73:  // other admin CSV exports.
+apps/backend/src/routes/admin-per-merchant.ts:74:  app.get('/api/admin/merchant-stats.csv', rateLimit(10, 60_000), adminMerchantStatsCsvHandler);
+apps/backend/src/routes/admin-per-merchant.ts:84:  // Tier-3 CSV snapshot of the merchant flywheel leaderboard —
+apps/backend/src/routes/admin-per-merchant.ts:87:  // every other admin CSV.
+apps/backend/src/routes/admin-per-merchant.ts:89:    '/api/admin/merchants/flywheel-share.csv',
+apps/backend/src/routes/admin-per-merchant.ts:96:  // `/flywheel-share` + `.csv` paths so Hono's matcher resolves
+apps/backend/src/routes/admin-per-merchant.ts:107:  // `.csv` paths so Hono resolves static > dynamic.
+apps/backend/src/routes/admin-per-merchant.ts:146:  // Tier-3 CSV export of the same per-merchant flywheel-activity
+apps/backend/src/routes/admin-per-merchant.ts:152:    '/api/admin/merchants/:merchantId/flywheel-activity.csv',
+apps/backend/src/routes/admin-order-drill.ts:17: * (cache-control / requireAuth / requireAdmin / audit middleware)
+apps/backend/src/routes/admin-order-drill.ts:26:import { adminOrdersCsvHandler } from '../admin/orders-csv.js';
+apps/backend/src/routes/admin-order-drill.ts:42:  // credit / loop_asset). ADR 010 / 015's strategy assumes a rising
+apps/backend/src/routes/admin-order-drill.ts:65:  // Finance-ready CSV export of Loop-native orders. Same rate-limit
+apps/backend/src/routes/admin-order-drill.ts:68:  app.get('/api/admin/orders.csv', rateLimit(10, 60_000), adminOrdersCsvHandler);
+apps/backend/src/routes/admin-ops-tail.ts:5: * fleet-monthly / operator / cashback-config / credit-writes).
+apps/backend/src/routes/admin-ops-tail.ts:17: *   - GET  /api/admin/user-credits.csv
+apps/backend/src/routes/admin-ops-tail.ts:22: *   - GET  /api/admin/audit-tail (+ .csv)
+apps/backend/src/routes/admin-ops-tail.ts:36: * requireAuth / requireAdmin / audit middleware) is in place.
+apps/backend/src/routes/admin-ops-tail.ts:44:import { adminUserCreditsCsvHandler } from '../admin/user-credits-csv.js';
+apps/backend/src/routes/admin-ops-tail.ts:49:import { adminAuditTailHandler } from '../admin/audit-tail.js';
+apps/backend/src/routes/admin-ops-tail.ts:50:import { adminAuditTailCsvHandler } from '../admin/audit-tail-csv.js';
+apps/backend/src/routes/admin-ops-tail.ts:62:  // by state and userId. Ops uses this to triage stuck orders + audit
+apps/backend/src/routes/admin-ops-tail.ts:77:  // Tier 3 CSV export of the full user_credits table. Support audit /
+apps/backend/src/routes/admin-ops-tail.ts:79:  app.get('/api/admin/user-credits.csv', rateLimit(20, 60_000), adminUserCreditsCsvHandler);
+apps/backend/src/routes/admin-ops-tail.ts:80:  // Ledger integrity check (ADR 009 invariant). Left-joins user_credits
+apps/backend/src/routes/admin-ops-tail.ts:81:  // against the grouped credit_transactions sum; returns drifted rows.
+apps/backend/src/routes/admin-ops-tail.ts:100:  // Newest-first tail of admin_idempotency_keys (ADR 017/018). Powers
+apps/backend/src/routes/admin-ops-tail.ts:102:  // as the Discord audit fanout but persistent + queryable. Actor
+apps/backend/src/routes/admin-ops-tail.ts:104:  app.get('/api/admin/audit-tail', rateLimit(60, 60_000), adminAuditTailHandler);
+apps/backend/src/routes/admin-ops-tail.ts:105:  // Finance / legal CSV export of the admin write-audit trail
+apps/backend/src/routes/admin-ops-tail.ts:106:  // (ADR 017 / 018). SOC-2 and finance audits want a month of
+apps/backend/src/routes/admin-ops-tail.ts:108:  // the other Tier-3 CSV exports — ops runs this manually at
+apps/backend/src/routes/admin-ops-tail.ts:110:  app.get('/api/admin/audit-tail.csv', rateLimit(10, 60_000), adminAuditTailCsvHandler);
+apps/backend/src/routes/admin-operator.ts:28: * (cache-control / requireAuth / requireAdmin / audit middleware)
+apps/backend/src/routes/admin-operator.ts:55:  // credit-flow (ledger in) and payouts-activity (chain out) this
+apps/backend/src/routes/admin-fleet-monthly.ts:2: * `/api/admin/*` fleet-monthly + finance-CSV route mounts
+apps/backend/src/routes/admin-fleet-monthly.ts:12: *   - GET /api/admin/payouts-activity.csv               (Tier-3)
+apps/backend/src/routes/admin-fleet-monthly.ts:13: *   - GET /api/admin/supplier-spend/activity.csv        (Tier-3)
+apps/backend/src/routes/admin-fleet-monthly.ts:14: *   - GET /api/admin/operators-snapshot.csv             (Tier-3)
+apps/backend/src/routes/admin-fleet-monthly.ts:15: *   - GET /api/admin/treasury/credit-flow.csv           (Tier-3)
+apps/backend/src/routes/admin-fleet-monthly.ts:18: * three JSON aggregates; the four Tier-3 CSV companions live next
+apps/backend/src/routes/admin-fleet-monthly.ts:25: * (cache-control / requireAuth / requireAdmin / audit middleware)
+apps/backend/src/routes/admin-fleet-monthly.ts:33:import { adminPayoutsActivityCsvHandler } from '../admin/payouts-activity-csv.js';
+apps/backend/src/routes/admin-fleet-monthly.ts:34:import { adminSupplierSpendActivityCsvHandler } from '../admin/supplier-spend-activity-csv.js';
+apps/backend/src/routes/admin-fleet-monthly.ts:35:import { adminOperatorsSnapshotCsvHandler } from '../admin/operators-snapshot-csv.js';
+apps/backend/src/routes/admin-fleet-monthly.ts:36:import { adminTreasuryCreditFlowCsvHandler } from '../admin/treasury-credit-flow-csv.js';
+apps/backend/src/routes/admin-fleet-monthly.ts:39: * Mounts the fleet-monthly + finance-CSV routes on the supplied
+apps/backend/src/routes/admin-fleet-monthly.ts:51:  // liability creation (credits minted); this measures liability
+apps/backend/src/routes/admin-fleet-monthly.ts:62:  // Tier-3 CSV export of the same aggregate (#638) — finance runs
+apps/backend/src/routes/admin-fleet-monthly.ts:63:  // this alongside /api/admin/cashback-activity.csv at month-end
+apps/backend/src/routes/admin-fleet-monthly.ts:66:  app.get('/api/admin/payouts-activity.csv', rateLimit(10, 60_000), adminPayoutsActivityCsvHandler);
+apps/backend/src/routes/admin-fleet-monthly.ts:67:  // Tier-3 CSV export of supplier-spend activity (ADR 013/015/018) —
+apps/backend/src/routes/admin-fleet-monthly.ts:70:  // line items. Pairs with cashback-activity.csv (what we minted)
+apps/backend/src/routes/admin-fleet-monthly.ts:71:  // and payouts-activity.csv (what we settled).
+apps/backend/src/routes/admin-fleet-monthly.ts:73:    '/api/admin/supplier-spend/activity.csv',
+apps/backend/src/routes/admin-fleet-monthly.ts:77:  // Tier-3 CSV of the fleet operator snapshot (ADR 013 / 018 / 022)
+apps/backend/src/routes/admin-fleet-monthly.ts:82:    '/api/admin/operators-snapshot.csv',
+apps/backend/src/routes/admin-fleet-monthly.ts:86:  // Tier-3 CSV of the credit-flow time series (ADR 009 / 015 / 018).
+apps/backend/src/routes/admin-fleet-monthly.ts:87:  // Completes the finance-CSV quartet: cashback-activity (minted) +
+apps/backend/src/routes/admin-fleet-monthly.ts:91:    '/api/admin/treasury/credit-flow.csv',
+apps/backend/src/routes/admin-dashboard.ts:9: * `cashback-realization/daily.csv` Tier-3 companion which travels
+apps/backend/src/routes/admin-dashboard.ts:11: * the all-CSV cluster (mirror of the route-mount contiguity).
+apps/backend/src/routes/admin-dashboard.ts:15: * (cache-control / requireAuth / requireAdmin / audit middleware)
+apps/backend/src/routes/admin-dashboard.ts:23:import { adminCashbackActivityCsvHandler } from '../admin/cashback-activity-csv.js';
+apps/backend/src/routes/admin-dashboard.ts:26:import { adminCashbackRealizationDailyCsvHandler } from '../admin/cashback-realization-daily-csv.js';
+apps/backend/src/routes/admin-dashboard.ts:50:  // rather than hoarding or withdrawing (ADR 009/015).
+apps/backend/src/routes/admin-dashboard.ts:64:  // Finance-ready CSV of the daily realization trend. Tier-3 10/min
+apps/backend/src/routes/admin-dashboard.ts:68:    '/api/admin/cashback-realization/daily.csv',
+apps/backend/src/routes/admin-dashboard.ts:72:  // Finance-ready CSV: daily × per-currency cashback accrual. Same
+apps/backend/src/routes/admin-dashboard.ts:76:    '/api/admin/cashback-activity.csv',
+apps/backend/src/routes/admin-credit-writes.ts:2: * `/api/admin/users/:userId/{credit-adjustments,refunds,withdrawals}`
+apps/backend/src/routes/admin-credit-writes.ts:9: *   - `Idempotency-Key` header (16-128 char opaque token)
+apps/backend/src/routes/admin-credit-writes.ts:11: *   - append-only `credit_transactions` row
+apps/backend/src/routes/admin-credit-writes.ts:12: *   - Discord audit fanout AFTER commit
+apps/backend/src/routes/admin-credit-writes.ts:13: *   - uniform `{ result, audit }` response envelope
+apps/backend/src/routes/admin-credit-writes.ts:15: * Mirrors the openapi/admin-credit-writes.ts split (#1175). Same
+apps/backend/src/routes/admin-credit-writes.ts:20: * (cache-control / requireAuth / requireAdmin / audit middleware)
+apps/backend/src/routes/admin-credit-writes.ts:22: * withdrawal route also wears the `withdrawals` killSwitch — the
+apps/backend/src/routes/admin-credit-writes.ts:30:import { adminCreditAdjustmentHandler } from '../admin/credit-adjustments.js';
+apps/backend/src/routes/admin-credit-writes.ts:31:import { adminRefundHandler } from '../admin/refunds.js';
+apps/backend/src/routes/admin-credit-writes.ts:32:import { adminWithdrawalHandler } from '../admin/withdrawals.js';
+apps/backend/src/routes/admin-credit-writes.ts:35: * Mounts the admin credit-write routes on the supplied Hono app.
+apps/backend/src/routes/admin-credit-writes.ts:41:  // it's an explicit ops action, not a polled surface. Idempotency-Key
+apps/backend/src/routes/admin-credit-writes.ts:44:    '/api/admin/users/:userId/credit-adjustments',
+apps/backend/src/routes/admin-credit-writes.ts:48:  // Refund write (A2-901 + ADR 017). Separate surface from credit-
+apps/backend/src/routes/admin-credit-writes.ts:49:  // adjustment because refund semantics are positive-only and bind to
+apps/backend/src/routes/admin-credit-writes.ts:52:  // Same rate limit and idempotency discipline as the adjustment
+apps/backend/src/routes/admin-credit-writes.ts:54:  app.post('/api/admin/users/:userId/refunds', rateLimit(20, 60_000), adminRefundHandler);
+apps/backend/src/routes/admin-credit-writes.ts:55:  // ADR-024 / A2-901 — admin-mediated withdrawal: debit user's
+apps/backend/src/routes/admin-credit-writes.ts:57:  // rate limit + idempotency discipline as refund.
+apps/backend/src/routes/admin-credit-writes.ts:59:    '/api/admin/users/:userId/withdrawals',
+apps/backend/src/routes/admin-credit-writes.ts:60:    killSwitch('withdrawals'),
+apps/backend/src/routes/admin-cashback-config.ts:6: * related merchants-catalog CSV export — same routes the openapi
+apps/backend/src/routes/admin-cashback-config.ts:8: * five routes) and `./openapi/admin-csv-exports.ts` (the
+apps/backend/src/routes/admin-cashback-config.ts:9: * merchants-catalog.csv lives alongside the other Tier-3 CSVs there).
+apps/backend/src/routes/admin-cashback-config.ts:13: *   - the `.csv` literal endpoints register BEFORE the
+apps/backend/src/routes/admin-cashback-config.ts:15: *     capture `.csv` as a merchantId.
+apps/backend/src/routes/admin-cashback-config.ts:21: * (cache-control / requireAuth / requireAdmin / audit middleware)
+apps/backend/src/routes/admin-cashback-config.ts:28:import { adminCashbackConfigsCsvHandler } from '../admin/cashback-configs-csv.js';
+apps/backend/src/routes/admin-cashback-config.ts:29:import { adminMerchantsCatalogCsvHandler } from '../admin/merchants-catalog-csv.js';
+apps/backend/src/routes/admin-cashback-config.ts:32: * Mounts the cashback-config CRUD + merchants-catalog CSV routes
+apps/backend/src/routes/admin-cashback-config.ts:38:  // CSV export of merchant_cashback_configs — Tier-3 bulk per ADR 018.
+apps/backend/src/routes/admin-cashback-config.ts:39:  // 10/min rate-limit matches the other admin CSVs; ops runs this at
+apps/backend/src/routes/admin-cashback-config.ts:40:  // audit cadence, not on-click from the UI. Registered before the
+apps/backend/src/routes/admin-cashback-config.ts:41:  // :merchantId routes below so the literal `.csv` segment isn't
+apps/backend/src/routes/admin-cashback-config.ts:44:    '/api/admin/merchant-cashback-configs.csv',
+apps/backend/src/routes/admin-cashback-config.ts:48:  // Tier-3 CSV export of the full merchant catalog + joined
+apps/backend/src/routes/admin-cashback-config.ts:54:    '/api/admin/merchants-catalog.csv',
+apps/web/app/routes/admin.merchants.tsx:7:import { shouldRetry } from '~/hooks/query-retry';
+apps/web/app/routes/admin.merchants.tsx:56:    retry: shouldRetry,
+apps/web/app/routes/admin.merchants.tsx:100:          path="/api/admin/merchants-catalog.csv"
+apps/web/app/routes/admin.merchants.tsx:101:          filename={`merchants-catalog-${new Date().toISOString().slice(0, 10)}.csv`}
+apps/web/app/routes/admin.merchants.tsx:102:          label="Catalog CSV"
+apps/web/app/routes/admin.cashback.tsx:16:import { shouldRetry } from '~/hooks/query-retry';
+apps/web/app/routes/admin.cashback.tsx:46: * of truth (see `requireAdmin` in the backend).
+apps/web/app/routes/admin.cashback.tsx:64:    retry: shouldRetry,
+apps/web/app/routes/admin.cashback.tsx:75:    retry: shouldRetry,
+apps/web/app/routes/admin.cashback.tsx:99:  // row with the most-recent 50 audit snapshots. The drawer is a
+apps/web/app/routes/admin.cashback.tsx:195:        description="2–500 characters. Logged in the cashback-config audit trail (ADR-011)."
+apps/web/app/routes/admin.cashback.tsx:225:          {/* Tier-3 CSV snapshot of current commercial terms
+apps/web/app/routes/admin.cashback.tsx:227:              audit reviews — the JSON list above is the live view,
+apps/web/app/routes/admin.cashback.tsx:230:            path="/api/admin/merchant-cashback-configs.csv"
+apps/web/app/routes/admin.cashback.tsx:231:            filename={`cashback-configs-${new Date().toISOString().slice(0, 10)}.csv`}
+apps/web/app/routes/admin.cashback.tsx:232:            label="Configs CSV"
+apps/web/app/routes/admin.cashback.tsx:318:                        has been written; there's no prior-row audit
+apps/web/app/routes/admin.cashback.tsx:363:              path="/api/admin/cashback-activity.csv"
+apps/web/app/routes/admin.cashback.tsx:364:              filename={`cashback-activity-${new Date().toISOString().slice(0, 10)}.csv`}
+apps/web/app/routes/admin.cashback.tsx:365:              label="Daily accrual CSV"
+apps/web/app/routes/admin.cashback.tsx:368:              path="/api/admin/merchant-stats.csv"
+apps/web/app/routes/admin.cashback.tsx:369:              filename={`merchant-stats-${new Date().toISOString().slice(0, 10)}.csv`}
+apps/web/app/routes/admin.cashback.tsx:370:              label="Per-merchant CSV"
+apps/web/app/routes/admin.cashback.tsx:398:          {/* Tier-3 CSV export (#613). Finance-grade snapshot of the
+apps/web/app/routes/admin.cashback.tsx:399:              ranking — matches the per-merchant stats CSV below
+apps/web/app/routes/admin.cashback.tsx:403:            path="/api/admin/merchants/flywheel-share.csv"
+apps/web/app/routes/admin.cashback.tsx:404:            filename={`merchants-flywheel-share-${new Date().toISOString().slice(0, 10)}.csv`}
+apps/web/app/routes/admin.cashback.tsx:405:            label="Flywheel CSV"
+apps/web/app/routes/admin.cashback.tsx:432:    retry: shouldRetry,
+apps/web/app/routes/admin.cashback.tsx:441:            <Spinner /> Loading audit trail…
+apps/web/app/routes/admin._index.tsx:5:import { shouldRetry } from '~/hooks/query-retry';
+apps/web/app/routes/admin._index.tsx:86:      'Outstanding credit, LOOP liabilities, operator pool health, payout counts, per-asset breakdown.',
+apps/web/app/routes/admin._index.tsx:91:    description: 'Stellar cashback backlog (ADR 015/016). Retry failed rows with Discord audit.',
+apps/web/app/routes/admin._index.tsx:101:    description: 'Per-merchant wholesale / cashback / margin config + audit trail (ADR 011).',
+apps/web/app/routes/admin._index.tsx:106:    description: 'Paginated user directory with email search + credit drill-down (ADR 009/017).',
+apps/web/app/routes/admin._index.tsx:112:      'Searchable catalog index with cashback-config state per merchant. Exports the catalog as CSV for BD / finance.',
+apps/web/app/routes/admin._index.tsx:133:    href: '/admin/audit',
+apps/web/app/routes/admin._index.tsx:136:      'Admin write-audit trail (ADR 017/018) — every POST/PUT/DELETE with actor email and result.',
+apps/web/app/routes/admin._index.tsx:166:    retry: shouldRetry,
+apps/web/app/routes/admin.audit.tsx:2: * `/admin/audit` — full admin write-audit trail (ADR 017 / 018).
+apps/web/app/routes/admin.audit.tsx:5: * store but caps at 100 rows. One active afternoon of credit
+apps/web/app/routes/admin.audit.tsx:18:import type { Route } from './+types/admin.audit';
+apps/web/app/routes/admin.audit.tsx:19:import { shouldRetry } from '~/hooks/query-retry';
+apps/web/app/routes/admin.audit.tsx:21:import { auditRowLink, fmtRelative } from '~/components/features/admin/AdminAuditTail';
+apps/web/app/routes/admin.audit.tsx:67:            <code className="font-mono">admin_idempotency_keys</code> store. Same rows as the
+apps/web/app/routes/admin.audit.tsx:68:            Discord audit channel — this is the durable mirror.
+apps/web/app/routes/admin.audit.tsx:71:        {/* Finance / legal CSV export — ops hands this to SOC-2 auditors
+apps/web/app/routes/admin.audit.tsx:76:          path="/api/admin/audit-tail.csv"
+apps/web/app/routes/admin.audit.tsx:77:          filename={`admin-audit-${new Date().toISOString().slice(0, 10)}.csv`}
+apps/web/app/routes/admin.audit.tsx:107:    queryKey: ['admin-audit', cursor ?? null, PAGE_SIZE],
+apps/web/app/routes/admin.audit.tsx:113:    retry: shouldRetry,
+apps/web/app/routes/admin.audit.tsx:131:        {denied ? 'Only admins can view the audit trail.' : 'Failed to load audit rows.'}
+apps/web/app/routes/admin.audit.tsx:166:              const to = auditRowLink(row.method, row.path);
+apps/web/app/routes/admin.merchants.$merchantId.tsx:8: * only way to see "current config + recent audit trail + recent
+apps/web/app/routes/admin.merchants.$merchantId.tsx:15: *   - Config audit trail                → `cashbackConfigHistory`
+apps/web/app/routes/admin.merchants.$merchantId.tsx:27:import { shouldRetry } from '~/hooks/query-retry';
+apps/web/app/routes/admin.merchants.$merchantId.tsx:71:    retry: shouldRetry,
+apps/web/app/routes/admin.merchants.$merchantId.tsx:79:    retry: shouldRetry,
+apps/web/app/routes/admin.merchants.$merchantId.tsx:87:    retry: shouldRetry,
+apps/web/app/routes/admin.merchants.$merchantId.tsx:168:        {/* Tier-3 CSV export (#645). Day-by-day flywheel series
+apps/web/app/routes/admin.merchants.$merchantId.tsx:175:            path={`/api/admin/merchants/${encodeURIComponent(merchantId)}/flywheel-activity.csv?days=366`}
+apps/web/app/routes/admin.merchants.$merchantId.tsx:176:            filename={`${merchantId}-flywheel-activity-${new Date().toISOString().slice(0, 10)}.csv`}
+apps/web/app/routes/admin.merchants.$merchantId.tsx:177:            label="Flywheel CSV (1y)"
+apps/web/app/routes/admin.merchants.$merchantId.tsx:198:            creates a new audit row — in-flight orders keep their earlier split.
+apps/web/app/routes/admin.merchants.$merchantId.tsx:224:          current-config card (what the split *is*) and the audit
+apps/web/app/routes/admin.merchants.$merchantId.tsx:264:      {/* Config audit trail (ADR 011). Newest first, last 50 rows
+apps/web/app/routes/admin.assets.$assetCode.tsx:12:import { shouldRetry } from '~/hooks/query-retry';
+apps/web/app/routes/admin.assets.$assetCode.tsx:107:    retry: shouldRetry,
+apps/web/app/routes/admin.assets.$assetCode.tsx:115:    retry: shouldRetry,
+apps/web/app/routes/admin.assets.$assetCode.tsx:123:    retry: shouldRetry,
+apps/web/app/routes/admin.assets.$assetCode.tsx:131:    retry: shouldRetry,
+apps/web/app/routes/admin.assets.$assetCode.tsx:194:          What Loop owes users denominated in this asset — sum of user-credit balances in {fiat},
+apps/web/app/routes/admin.assets.tsx:6:import { shouldRetry } from '~/hooks/query-retry';
+apps/web/app/routes/admin.assets.tsx:94:    retry: shouldRetry,
+apps/web/app/routes/admin.assets.tsx:101:    retry: shouldRetry,
+apps/backend/src/routes/admin-user-cluster.ts:8: * directory/lookup/credit reads, plus the per-user-drill axes that
+apps/backend/src/routes/admin-user-cluster.ts:18: *   - GET /api/admin/users/recycling-activity (+ .csv)  (literal flywheel feed)
+apps/backend/src/routes/admin-user-cluster.ts:20: *   - GET /api/admin/users/:userId/credits
+apps/backend/src/routes/admin-user-cluster.ts:26: *   - GET /api/admin/users/:userId/credit-transactions (+ .csv)
+apps/backend/src/routes/admin-user-cluster.ts:31: * `/users/recycling-activity`, `/users/recycling-activity.csv`
+apps/backend/src/routes/admin-user-cluster.ts:37: * (cache-control / requireAuth / requireAdmin / audit middleware)
+apps/backend/src/routes/admin-user-cluster.ts:47:import { adminUsersRecyclingActivityCsvHandler } from '../admin/users-recycling-activity-csv.js';
+apps/backend/src/routes/admin-user-cluster.ts:48:import { adminUserCreditsHandler } from '../admin/user-credits.js';
+apps/backend/src/routes/admin-user-cluster.ts:54:import { adminUserCreditTransactionsHandler } from '../admin/user-credit-transactions.js';
+apps/backend/src/routes/admin-user-cluster.ts:55:import { adminUserCreditTransactionsCsvHandler } from '../admin/user-credit-transactions-csv.js';
+apps/backend/src/routes/admin-user-cluster.ts:93:  // Tier-3 CSV snapshot of the user recycling leaderboard —
+apps/backend/src/routes/admin-user-cluster.ts:96:  // follows the ADR-018 CSV conventions (10/min rate limit, 10k row
+apps/backend/src/routes/admin-user-cluster.ts:99:    '/api/admin/users/recycling-activity.csv',
+apps/backend/src/routes/admin-user-cluster.ts:104:  // page — subsequent drills (credits, credit-transactions, orders)
+apps/backend/src/routes/admin-user-cluster.ts:107:  // Per-user credit-balance drill-down (ADR 009). Ops opens this from
+apps/backend/src/routes/admin-user-cluster.ts:110:  app.get('/api/admin/users/:userId/credits', rateLimit(120, 60_000), adminUserCreditsHandler);
+apps/backend/src/routes/admin-user-cluster.ts:163:  // withdrawals, refunds, adjustments).
+apps/backend/src/routes/admin-user-cluster.ts:165:    '/api/admin/users/:userId/credit-transactions',
+apps/backend/src/routes/admin-user-cluster.ts:179:  // Finance / compliance / support CSV of one user's credit-ledger
+apps/backend/src/routes/admin-user-cluster.ts:180:  // history. Same Tier-3 rate-limit cadence as the other CSV
+apps/backend/src/routes/admin-user-cluster.ts:184:    '/api/admin/users/:userId/credit-transactions.csv',
+apps/web/app/routes/admin.users.tsx:12:import { shouldRetry } from '~/hooks/query-retry';
+apps/web/app/routes/admin.users.tsx:38: * slice along with the drill-down endpoint's credit-adjustment UI.
+apps/web/app/routes/admin.users.tsx:80:    retry: shouldRetry,
+apps/web/app/routes/admin.users.tsx:296:            Ranked by cashback-type credit_transactions accrued in the last 30 days (ADR 009/015).
+apps/backend/src/routes/admin.ts:11: *    emitted by `requireAuth` / `requireAdmin`. A2-1010 — every
+apps/backend/src/routes/admin.ts:13: *    (treasury snapshots, per-user credit history, audit events,
+apps/backend/src/routes/admin.ts:14: *    CSV exports of the ledger). A CDN keyed on URL alone — not
+apps/backend/src/routes/admin.ts:20: *    attached before `requireAdmin` checks it. Order matters:
+apps/backend/src/routes/admin.ts:21: *    requireAdmin runs AFTER requireAuth so an unauth'd request
+apps/backend/src/routes/admin.ts:23: * 3. **`requireAdmin`** mounts THIRD — upserts the Loop user row
+apps/backend/src/routes/admin.ts:25: *    audit-log middleware below.
+apps/backend/src/routes/admin.ts:26: * 4. **Admin read audit middleware** (A2-2008) mounts FOURTH —
+apps/backend/src/routes/admin.ts:27: *    runs AFTER requireAuth/requireAdmin so the actor identity is
+apps/backend/src/routes/admin.ts:30: *    tagged `audit-read`; bulk reads (CSV downloads) additionally
+apps/backend/src/routes/admin.ts:31: *    fire a Discord ping in #admin-audit. Single-row drills stay
+apps/backend/src/routes/admin.ts:37: * - **Cashback config (4)** — list, CSV, fleet history, per-merchant
+apps/backend/src/routes/admin.ts:39: * - **Treasury (3)** — snapshot, snapshot CSV, credit-flow time
+apps/backend/src/routes/admin.ts:44: *   settlement-lag SLA, retry, compensation, CSV, monthly,
+apps/backend/src/routes/admin.ts:45: *   activity, activity CSV.
+apps/backend/src/routes/admin.ts:46: * - **Orders (~6)** — list, drill, CSV, activity, payment-method
+apps/backend/src/routes/admin.ts:50: *   wide cashback metrics + finance CSVs (ADR 009 / 015).
+apps/backend/src/routes/admin.ts:56: *   — fleet stats + CSV, flywheel-share leaderboard + CSV,
+apps/backend/src/routes/admin.ts:61: *   exact, top-by-pending-payout, recycling-activity (+ CSV),
+apps/backend/src/routes/admin.ts:62: *   per-user detail / credits / cashback-by-merchant /
+apps/backend/src/routes/admin.ts:64: *   cashback-monthly / credit-transactions (+ CSV) / operator-
+apps/backend/src/routes/admin.ts:65: *   mix, plus writes (refunds / credit-adjustments / withdrawals)
+apps/backend/src/routes/admin.ts:66: *   each gated by ADR-017 idempotency.
+apps/backend/src/routes/admin.ts:69: * - **Audit tail (2)** — admin write-audit tail (ADR 017 / 018)
+apps/backend/src/routes/admin.ts:70: *   and finance / legal CSV export.
+apps/backend/src/routes/admin.ts:81:import { sanitizeAdminReadQueryString } from '../admin/read-audit.js';
+apps/backend/src/routes/admin.ts:84:import { requireAdmin } from '../auth/require-admin.js';
+apps/backend/src/routes/admin.ts:87:import { mountAdminCreditWritesRoutes } from './admin-credit-writes.js';
+apps/backend/src/routes/admin.ts:103:  // attach the bearer, then requireAdmin to upsert the Loop user row,
+apps/backend/src/routes/admin.ts:109:  // visible data (treasury snapshots, per-user credit history, audit
+apps/backend/src/routes/admin.ts:110:  // events, CSV exports of the ledger), so a CDN / intermediate proxy
+apps/backend/src/routes/admin.ts:113:  // individual CSV handlers already set it on the happy path, but this
+apps/backend/src/routes/admin.ts:123:  app.use('/api/admin/*', requireAdmin);
+apps/backend/src/routes/admin.ts:125:  // A2-2008: admin read audit. Every admin GET emits a Pino access-log
+apps/backend/src/routes/admin.ts:126:  // line tagged `audit-read` so the line-item read trail survives off
+apps/backend/src/routes/admin.ts:128:  // than a DB row). Bulk reads (CSV downloads + sufficiently-large list
+apps/backend/src/routes/admin.ts:129:  // pulls) additionally fire a Discord ping in #admin-audit so a human
+apps/backend/src/routes/admin.ts:143:    const isCsv = path.endsWith('.csv');
+apps/backend/src/routes/admin.ts:147:        area: 'admin-read-audit',
+apps/backend/src/routes/admin.ts:166:  // Cashback-config CRUD + merchants-catalog CSV (ADR 011/018).
+apps/backend/src/routes/admin.ts:172:  // Treasury + asset-drift cluster — snapshot + .csv +
+apps/backend/src/routes/admin.ts:173:  // credit-flow series + per-asset circulation drift + watcher
+apps/backend/src/routes/admin.ts:178:  // + retry + compensate + CSV (ADR 015/016/017/024). Lifted into
+apps/backend/src/routes/admin.ts:184:  // users/search, user-credits.csv, reconciliation, merchant-stats,
+apps/backend/src/routes/admin.ts:185:  // orders/:orderId/payout, top-users, audit-tail (+ .csv),
+apps/backend/src/routes/admin.ts:192:  // share + activity, orders/:orderId, orders.csv (ADR 010/011/015/019).
+apps/backend/src/routes/admin.ts:198:  // cashback-activity (+ .csv) / cashback-realization (+ /daily +
+apps/backend/src/routes/admin.ts:199:  // /daily.csv) — the operational + flywheel signals on /admin.
+apps/backend/src/routes/admin.ts:203:  // Fleet-monthly + finance-CSV — cashback-monthly +
+apps/backend/src/routes/admin.ts:204:  // payouts-monthly + payouts-activity (+ .csv) + supplier-spend
+apps/backend/src/routes/admin.ts:205:  // activity.csv + operators-snapshot.csv + treasury credit-flow
+apps/backend/src/routes/admin.ts:206:  // .csv. Lifted into ./admin-fleet-monthly.ts (mirrors openapi #1165
+apps/backend/src/routes/admin.ts:207:  // for the JSON; CSV companions travel alongside their siblings).
+apps/backend/src/routes/admin.ts:211:  // Mount-order: literal /flywheel-share + .csv before the
+apps/backend/src/routes/admin.ts:225:  // Credit-write surfaces — credit-adjustments + refunds +
+apps/backend/src/routes/admin.ts:226:  // withdrawals (ADR 017/024 + A2-901). Lifted into
+apps/backend/src/routes/admin.ts:227:  // ./admin-credit-writes.ts (mirrors openapi #1175).
+apps/web/app/routes/admin.treasury.tsx:6:import { shouldRetry } from '~/hooks/query-retry';
+apps/web/app/routes/admin.treasury.tsx:94:const KNOWN_TYPES = ['cashback', 'interest', 'refund', 'spend', 'withdrawal', 'adjustment'];
+apps/web/app/routes/admin.treasury.tsx:97: * `/admin/treasury` — admin-only snapshot of the credits ledger
+apps/web/app/routes/admin.treasury.tsx:116:    retry: shouldRetry,
+apps/web/app/routes/admin.treasury.tsx:117:    // Treasury is read-mostly but changes as new orders / credits
+apps/web/app/routes/admin.treasury.tsx:157:          Snapshot of the credits ledger and the CTX supplier pool.
+apps/web/app/routes/admin.treasury.tsx:163:          Outstanding credit
+apps/web/app/routes/admin.treasury.tsx:169:          <p className="text-sm text-gray-500 dark:text-gray-400">No credit ledger activity yet.</p>
+apps/web/app/routes/admin.treasury.tsx:241:            30-day credit flow
+apps/web/app/routes/admin.treasury.tsx:244:            Per-day credited vs. debited from the ledger, one currency at a time (ADR 009/015).
+apps/web/app/routes/admin.treasury.tsx:417:          review each row and retry, or investigate the classification.
+apps/web/app/routes/admin.treasury.tsx:477:          {/* Tier-3 CSV export (#615). Pairs with the merchants
+apps/web/app/routes/admin.treasury.tsx:478:              flywheel-share CSV on /admin/cashback so ops can pull
+apps/web/app/routes/admin.treasury.tsx:482:            path="/api/admin/users/recycling-activity.csv"
+apps/web/app/routes/admin.treasury.tsx:483:            filename={`users-recycling-activity-${new Date().toISOString().slice(0, 10)}.csv`}
+apps/web/app/routes/admin.treasury.tsx:484:            label="Recycling CSV"
+apps/web/app/routes/admin.treasury.tsx:506:          <code className="text-xs">usdc</code>, <code className="text-xs">credit</code>) read as
+apps/web/app/routes/admin.treasury.tsx:525:          Per-currency cashback Loop has credited to users per calendar month (ADR 009/015). The
+apps/web/app/routes/admin.treasury.tsx:541:          liability we create when we credit a user; settled is the liability we extinguish when a
+apps/web/app/routes/admin.treasury.tsx:550:      {/* Finance-exports row (#640). Daily granularity CSVs for
+apps/web/app/routes/admin.treasury.tsx:552:          close. Cashback side was Tier-3 CSV since #615; payouts
+apps/web/app/routes/admin.treasury.tsx:556:          CSV buttons scattered across the page. */}
+apps/web/app/routes/admin.treasury.tsx:562:          Daily-granularity CSVs for both sides of the reconciliation above (ADR 018 Tier-3).
+apps/web/app/routes/admin.treasury.tsx:568:            path="/api/admin/cashback-activity.csv"
+apps/web/app/routes/admin.treasury.tsx:569:            filename={`cashback-activity-${new Date().toISOString().slice(0, 10)}.csv`}
+apps/web/app/routes/admin.treasury.tsx:570:            label="Cashback activity CSV"
+apps/web/app/routes/admin.treasury.tsx:573:            path="/api/admin/payouts-activity.csv"
+apps/web/app/routes/admin.treasury.tsx:574:            filename={`payouts-activity-${new Date().toISOString().slice(0, 10)}.csv`}
+apps/web/app/routes/admin.treasury.tsx:575:            label="Payouts activity CSV"
+apps/web/app/routes/admin.treasury.tsx:578:            path="/api/admin/supplier-spend/activity.csv"
+apps/web/app/routes/admin.treasury.tsx:579:            filename={`supplier-spend-activity-${new Date().toISOString().slice(0, 10)}.csv`}
+apps/web/app/routes/admin.treasury.tsx:580:            label="Supplier-spend activity CSV"
+apps/web/app/routes/admin.treasury.tsx:583:            path="/api/admin/treasury/credit-flow.csv"
+apps/web/app/routes/admin.treasury.tsx:584:            filename={`treasury-credit-flow-${new Date().toISOString().slice(0, 10)}.csv`}
+apps/web/app/routes/admin.treasury.tsx:585:            label="Credit-flow CSV"
+apps/web/app/routes/admin.treasury.tsx:588:            path="/api/admin/treasury.csv"
+apps/web/app/routes/admin.treasury.tsx:589:            filename={`treasury-snapshot-${new Date().toISOString().slice(0, 10)}.csv`}
+apps/web/app/routes/admin.treasury.tsx:590:            label="Treasury snapshot CSV"
+apps/web/app/routes/admin.orders.tsx:7: * (state=paid with no ctxOrderId is a procurement stall) and audit
+apps/web/app/routes/admin.orders.tsx:26:import { shouldRetry } from '~/hooks/query-retry';
+apps/web/app/routes/admin.orders.tsx:56:const PAYMENT_METHODS: ReadonlyArray<AdminPaymentMethod> = ['xlm', 'usdc', 'credit', 'loop_asset'];
+apps/web/app/routes/admin.orders.tsx:146:          path="/api/admin/orders.csv"
+apps/web/app/routes/admin.orders.tsx:147:          filename={`loop-orders-${new Date().toISOString().slice(0, 10)}.csv`}
+apps/web/app/routes/admin.orders.tsx:359:    retry: shouldRetry,
+apps/web/app/routes/admin.stuck-orders.tsx:4:import { shouldRetry } from '~/hooks/query-retry';
+apps/web/app/routes/admin.stuck-orders.tsx:56:    retry: shouldRetry,
+apps/web/app/routes/admin.stuck-orders.tsx:143:                      debug trail than a stuck xlm/usdc/credit). The
+apps/web/app/routes/admin.stuck-orders.tsx:208:    retry: shouldRetry,
+apps/web/app/routes/admin.stuck-orders.tsx:222:          issuer before retrying.
+apps/web/app/routes/admin.users.$userId.tsx:5:import { shouldRetry } from '~/hooks/query-retry';
+apps/web/app/routes/admin.users.$userId.tsx:33: * `/admin/users/:userId` — user detail + credit-balance drill.
+apps/web/app/routes/admin.users.$userId.tsx:36: * and the per-currency credit balances (for the balance table).
+apps/web/app/routes/admin.users.$userId.tsx:40: * The credit-adjustment form + the credit-transactions log are
+apps/web/app/routes/admin.users.$userId.tsx:59:    retry: shouldRetry,
+apps/web/app/routes/admin.users.$userId.tsx:63:  const creditsQuery = useQuery({
+apps/web/app/routes/admin.users.$userId.tsx:64:    queryKey: ['admin-user-credits', userId ?? null],
+apps/web/app/routes/admin.users.$userId.tsx:67:    retry: shouldRetry,
+apps/web/app/routes/admin.users.$userId.tsx:72:  // credits fetch (shouldn't happen if the user exists, but handle
+apps/web/app/routes/admin.users.$userId.tsx:126:              facts rather than buried next to the credits table. */}
+apps/web/app/routes/admin.users.$userId.tsx:170:            form below and land as signed <code className="font-mono">credit_transactions</code>{' '}
+apps/web/app/routes/admin.users.$userId.tsx:174:        {creditsQuery.isPending ? (
+apps/web/app/routes/admin.users.$userId.tsx:178:        ) : creditsQuery.isError ? (
+apps/web/app/routes/admin.users.$userId.tsx:180:            Failed to load credit balances.
+apps/web/app/routes/admin.users.$userId.tsx:182:        ) : creditsQuery.data.rows.length === 0 ? (
+apps/web/app/routes/admin.users.$userId.tsx:184:            No credit balances for this user yet.
+apps/web/app/routes/admin.users.$userId.tsx:201:              {creditsQuery.data.rows.map((c: AdminUserCreditRow) => (
+apps/web/app/routes/admin.users.$userId.tsx:229:              Positive amount credits the user; negative amount debits. A debit that would drive the
+apps/web/app/routes/admin.users.$userId.tsx:231:              InsufficientBalanceError. Every submission is idempotent on the browser-generated key
+apps/web/app/routes/admin.users.$userId.tsx:232:              and fires a Discord audit after commit.
+apps/web/app/routes/admin.users.$userId.tsx:250:              Queue withdrawal (ADR 024)
+apps/web/app/routes/admin.users.$userId.tsx:256:              WITHDRAWAL_ALREADY_ISSUED. Idempotent on the browser-generated key + Discord-audited
+apps/web/app/routes/admin.users.$userId.tsx:301:              detail for tx hash + Stellar Expert + retry controls.
+apps/web/app/routes/admin.users.$userId.tsx:386:                CSV download for a compliance / subject-access export of the last 366 days.
+apps/web/app/routes/admin.users.$userId.tsx:390:              path={`/api/admin/users/${encodeURIComponent(userId)}/credit-transactions.csv`}
+apps/web/app/routes/admin.users.$userId.tsx:391:              filename={`credit-transactions-${userId.slice(0, 8)}-${new Date().toISOString().slice(0, 10)}.csv`}
+apps/web/app/routes/admin.payouts.$id.tsx:6:import { shouldRetry } from '~/hooks/query-retry';
+apps/web/app/routes/admin.payouts.$id.tsx:9:  retryPayout,
+apps/web/app/routes/admin.payouts.$id.tsx:67: * transcript when failed, retry button on failed rows (ADR 017
+apps/web/app/routes/admin.payouts.$id.tsx:68: * compliant — prompts for reason, generates an Idempotency-Key).
+apps/web/app/routes/admin.payouts.$id.tsx:87:    retry: shouldRetry,
+apps/web/app/routes/admin.payouts.$id.tsx:91:  const [retrying, setRetrying] = useState(false);
+apps/web/app/routes/admin.payouts.$id.tsx:92:  const [retryError, setRetryError] = useState<string | null>(null);
+apps/web/app/routes/admin.payouts.$id.tsx:93:  const [retryDialogId, setRetryDialogId] = useState<string | null>(null);
+apps/web/app/routes/admin.payouts.$id.tsx:94:  const retryMutation = useMutation({
+apps/web/app/routes/admin.payouts.$id.tsx:95:    mutationFn: retryPayout,
+apps/web/app/routes/admin.payouts.$id.tsx:108:  // A2-1107: ReasonDialog replaces window.prompt for the retry-payout
+apps/web/app/routes/admin.payouts.$id.tsx:115:    const id = retryDialogId;
+apps/web/app/routes/admin.payouts.$id.tsx:120:    retryMutation.mutate({ id, reason });
+apps/web/app/routes/admin.payouts.$id.tsx:128:        open={retryDialogId !== null}
+apps/web/app/routes/admin.payouts.$id.tsx:129:        title="Reason for retrying this payout?"
+apps/web/app/routes/admin.payouts.$id.tsx:130:        description="2–500 characters. Logged in the admin audit trail (ADR-017)."
+apps/web/app/routes/admin.payouts.$id.tsx:163:          {retryError !== null ? (
+apps/web/app/routes/admin.payouts.$id.tsx:168:              Retry failed: {retryError}
+apps/web/app/routes/admin.payouts.$id.tsx:176:              disabled={retrying}
+apps/web/app/routes/admin.payouts.$id.tsx:179:              {retrying ? 'Retrying…' : 'Retry payout'}
+apps/web/app/routes/admin.payouts.$id.tsx:228:            {row.kind === 'withdrawal' ? 'Withdrawal (admin cash-out)' : 'Order cashback'}
+apps/web/app/routes/admin.operators.$operatorId.tsx:4:import { shouldRetry } from '~/hooks/query-retry';
+apps/web/app/routes/admin.operators.$operatorId.tsx:70:    retry: shouldRetry,
+apps/web/app/routes/admin.operators.$operatorId.tsx:77:    retry: shouldRetry,
+apps/web/app/routes/admin.operators.$operatorId.tsx:85:    retry: shouldRetry,
+apps/web/app/routes/admin.operators.$operatorId.tsx:93:    retry: shouldRetry,
+apps/web/app/routes/admin.orders.$orderId.tsx:5:import { shouldRetry } from '~/hooks/query-retry';
+apps/web/app/routes/admin.orders.$orderId.tsx:74:    retry: shouldRetry,
+apps/web/app/routes/admin.orders.$orderId.tsx:128:    retry: shouldRetry,
+apps/web/app/routes/admin.operators.tsx:5:import { shouldRetry } from '~/hooks/query-retry';
+apps/web/app/routes/admin.operators.tsx:120:    retry: shouldRetry,
+apps/web/app/routes/admin.operators.tsx:127:    retry: shouldRetry,
+apps/web/app/routes/admin.operators.tsx:152:        {/* Tier-3 CSV of the joined snapshot for CTX quarterly
+apps/web/app/routes/admin.operators.tsx:155:          path="/api/admin/operators-snapshot.csv"
+apps/web/app/routes/admin.operators.tsx:156:          filename={`operators-snapshot-${new Date().toISOString().slice(0, 10)}.csv`}
+apps/web/app/routes/admin.operators.tsx:157:          label="Snapshot CSV"
+apps/web/app/routes/admin.payouts.tsx:6:import { listPayouts, retryPayout, type AdminPayoutView, type PayoutState } from '~/services/admin';
+apps/web/app/routes/admin.payouts.tsx:7:import { shouldRetry } from '~/hooks/query-retry';
+apps/web/app/routes/admin.payouts.tsx:28:// is the legacy order-fulfilment payout; `withdrawal` is the admin cash-out
+apps/web/app/routes/admin.payouts.tsx:31:const KINDS = ['all', 'order_cashback', 'withdrawal'] as const;
+apps/web/app/routes/admin.payouts.tsx:101:  // ADR-024 §2 kind filter — `?kind=order_cashback` or `?kind=withdrawal`.
+apps/web/app/routes/admin.payouts.tsx:117:    retry: shouldRetry,
+apps/web/app/routes/admin.payouts.tsx:121:  const [retryingId, setRetryingId] = useState<string | null>(null);
+apps/web/app/routes/admin.payouts.tsx:122:  const [retryError, setRetryError] = useState<string | null>(null);
+apps/web/app/routes/admin.payouts.tsx:124:  const retryMutation = useMutation({
+apps/web/app/routes/admin.payouts.tsx:125:    mutationFn: retryPayout,
+apps/web/app/routes/admin.payouts.tsx:151:    retryMutation.mutate({ id, reason });
+apps/web/app/routes/admin.payouts.tsx:174:        title="Reason for retrying this payout?"
+apps/web/app/routes/admin.payouts.tsx:175:        description="2–500 characters. Logged in the admin audit trail (ADR-017)."
+apps/web/app/routes/admin.payouts.tsx:184:            Stellar cashback emissions (ADR 015/016). Filter by state; retry failed rows with the
+apps/web/app/routes/admin.payouts.tsx:189:          path="/api/admin/payouts.csv"
+apps/web/app/routes/admin.payouts.tsx:190:          filename={`loop-payouts-${new Date().toISOString().slice(0, 10)}.csv`}
+apps/web/app/routes/admin.payouts.tsx:252:      {retryError !== null ? (
+apps/web/app/routes/admin.payouts.tsx:257:          Retry failed: {retryError}
+apps/web/app/routes/admin.payouts.tsx:313:                    {p.kind === 'withdrawal' ? 'Withdrawal' : 'Cashback'}
+apps/web/app/routes/admin.payouts.tsx:355:                        disabled={retryingId === p.id}
+apps/web/app/routes/admin.payouts.tsx:358:                        {retryingId === p.id ? 'Retrying…' : 'Retry'}
+apps/backend/src/admin/supplier-spend-activity-csv.ts:2: * Admin supplier-spend activity CSV export (ADR 013 / 015 / 018).
+apps/backend/src/admin/supplier-spend-activity-csv.ts:4: * `GET /api/admin/supplier-spend/activity.csv` — daily × per-currency
+apps/backend/src/admin/supplier-spend-activity-csv.ts:5: * supplier-spend aggregate as RFC 4180 CSV. Finance runs this at
+apps/backend/src/admin/supplier-spend-activity-csv.ts:27:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/supplier-spend-activity-csv.ts:29:const log = logger.child({ handler: 'admin-supplier-spend-activity-csv' });
+apps/backend/src/admin/supplier-spend-activity-csv.ts:45:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/supplier-spend-activity-csv.ts:46:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/supplier-spend-activity-csv.ts:82:    // currency mixed them. `currency` CSV column name preserved for
+apps/backend/src/admin/supplier-spend-activity-csv.ts:122:        csvRow([
+apps/backend/src/admin/supplier-spend-activity-csv.ts:137:        'Admin supplier-spend-activity CSV truncated — narrow the window',
+apps/backend/src/admin/supplier-spend-activity-csv.ts:139:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/supplier-spend-activity-csv.ts:144:    const filename = `supplier-spend-activity-${today}.csv`;
+apps/backend/src/admin/supplier-spend-activity-csv.ts:148:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/supplier-spend-activity-csv.ts:154:    log.error({ err }, 'Admin supplier-spend-activity CSV failed');
+apps/backend/src/admin/supplier-spend-activity-csv.ts:155:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/audit-tail.ts:2: * Admin audit tail (ADR 017 / 018).
+apps/backend/src/admin/audit-tail.ts:4: * Newest-first snapshot of `admin_idempotency_keys` — the store
+apps/backend/src/admin/audit-tail.ts:10: * Response intentionally omits the stored response body: audit is
+apps/backend/src/admin/audit-tail.ts:13: * path with the original Idempotency-Key.
+apps/backend/src/admin/audit-tail.ts:18:import { adminIdempotencyKeys, users } from '../db/schema.js';
+apps/backend/src/admin/audit-tail.ts:21:const log = logger.child({ handler: 'admin-audit-tail' });
+apps/backend/src/admin/audit-tail.ts:45:export async function adminAuditTailHandler(c: Context): Promise<Response> {
+apps/backend/src/admin/audit-tail.ts:66:        adminUserId: adminIdempotencyKeys.adminUserId,
+apps/backend/src/admin/audit-tail.ts:67:        method: adminIdempotencyKeys.method,
+apps/backend/src/admin/audit-tail.ts:68:        path: adminIdempotencyKeys.path,
+apps/backend/src/admin/audit-tail.ts:69:        status: adminIdempotencyKeys.status,
+apps/backend/src/admin/audit-tail.ts:70:        createdAt: adminIdempotencyKeys.createdAt,
+apps/backend/src/admin/audit-tail.ts:73:      .from(adminIdempotencyKeys)
+apps/backend/src/admin/audit-tail.ts:74:      .innerJoin(users, eq(adminIdempotencyKeys.adminUserId, users.id));
+apps/backend/src/admin/audit-tail.ts:76:    // the raw sql interpolator. See `audit-tail-csv.ts` for the
+apps/backend/src/admin/audit-tail.ts:77:    // matching CSV-side fix that surfaced this pattern class.
+apps/backend/src/admin/audit-tail.ts:79:      before === undefined ? base : base.where(lt(adminIdempotencyKeys.createdAt, before));
+apps/backend/src/admin/audit-tail.ts:81:      .orderBy(desc(adminIdempotencyKeys.createdAt))
+apps/backend/src/admin/audit-tail.ts:95:    log.error({ err }, 'Admin audit tail failed');
+apps/backend/src/admin/audit-tail.ts:96:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load audit tail' }, 500);
+apps/backend/src/admin/merchants-catalog-csv.ts:2: * Admin merchants-catalog CSV export (ADR 011 / 018).
+apps/backend/src/admin/merchants-catalog-csv.ts:4: * `GET /api/admin/merchants-catalog.csv` — every merchant in the
+apps/backend/src/admin/merchants-catalog-csv.ts:23: *   - RFC 4180 CSV: CRLF line endings, comma escape, quote-double
+apps/backend/src/admin/merchants-catalog-csv.ts:27: *   - Content-Disposition: attachment; filename=merchants-catalog-YYYY-MM-DD.csv
+apps/backend/src/admin/merchants-catalog-csv.ts:35:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/merchants-catalog-csv.ts:37:const log = logger.child({ handler: 'admin-merchants-catalog-csv' });
+apps/backend/src/admin/merchants-catalog-csv.ts:51:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/merchants-catalog-csv.ts:52:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/merchants-catalog-csv.ts:104:        csvRow([
+apps/backend/src/admin/merchants-catalog-csv.ts:119:        'Admin merchants-catalog CSV truncated — catalog exceeded row cap',
+apps/backend/src/admin/merchants-catalog-csv.ts:121:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/merchants-catalog-csv.ts:129:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/merchants-catalog-csv.ts:131:        'content-disposition': `attachment; filename="merchants-catalog-${today}.csv"`,
+apps/backend/src/admin/merchants-catalog-csv.ts:135:    log.error({ err }, 'Admin merchants-catalog CSV failed');
+apps/backend/src/admin/merchants-catalog-csv.ts:136:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/withdrawals.ts:2: * Admin withdrawal endpoint (ADR-024 / A2-901).
+apps/backend/src/admin/withdrawals.ts:4: * `POST /api/admin/users/:userId/withdrawals` — debits the user's
+apps/backend/src/admin/withdrawals.ts:9: * Two-layer idempotency mirrors the credit-adjustment / refund
+apps/backend/src/admin/withdrawals.ts:12: *   - Admin idempotency key (ADR 017) — advisory-lock-serialised
+apps/backend/src/admin/withdrawals.ts:15: *   - DB semantic uniqueness fence on active withdrawal intents
+apps/backend/src/admin/withdrawals.ts:16: *     (`pending_payouts_active_withdrawal_unique`) — catches the
+apps/backend/src/admin/withdrawals.ts:20: * Response envelope matches the refund handler's shape so the admin
+apps/backend/src/admin/withdrawals.ts:29:import { payoutAssetFor } from '../credits/payout-asset.js';
+apps/backend/src/admin/withdrawals.ts:30:import { generatePayoutMemo } from '../credits/payout-builder.js';
+apps/backend/src/admin/withdrawals.ts:31:import { applyAdminWithdrawal, WithdrawalAlreadyIssuedError } from '../credits/withdrawals.js';
+apps/backend/src/admin/withdrawals.ts:32:import { InsufficientBalanceError } from '../credits/adjustments.js';
+apps/backend/src/admin/withdrawals.ts:35:import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
+apps/backend/src/admin/withdrawals.ts:39:  validateIdempotencyKey,
+apps/backend/src/admin/withdrawals.ts:40:  withIdempotencyGuard,
+apps/backend/src/admin/withdrawals.ts:41:} from './idempotency.js';
+apps/backend/src/admin/withdrawals.ts:43:const log = logger.child({ handler: 'admin-withdrawal' });
+apps/backend/src/admin/withdrawals.ts:47: * 10,000,000 cap as refund/adjustment. `destinationAddress` is the
+apps/backend/src/admin/withdrawals.ts:89:  const idempotencyKey = c.req.header('idempotency-key');
+apps/backend/src/admin/withdrawals.ts:90:  if (!validateIdempotencyKey(idempotencyKey)) {
+apps/backend/src/admin/withdrawals.ts:94:        message: `Idempotency-Key header required (${IDEMPOTENCY_KEY_MIN}-${IDEMPOTENCY_KEY_MAX} chars)`,
+apps/backend/src/admin/withdrawals.ts:124:  // a credit-tx referencing a missing user_id.
+apps/backend/src/admin/withdrawals.ts:154:    guardResult = await withIdempotencyGuard(
+apps/backend/src/admin/withdrawals.ts:157:        key: idempotencyKey,
+apps/backend/src/admin/withdrawals.ts:159:        path: `/api/admin/users/${userId}/withdrawals`,
+apps/backend/src/admin/withdrawals.ts:191:          idempotencyKey,
+apps/backend/src/admin/withdrawals.ts:218:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to apply withdrawal' }, 500);
+apps/backend/src/admin/withdrawals.ts:225:    endpoint: `POST /api/admin/users/${userId}/withdrawals`,
+apps/backend/src/admin/withdrawals.ts:230:    idempotencyKey,
+apps/backend/src/admin/upsert-config-handler.ts:6: * ADR-017 idempotency-guarded ladder, pre-edit snapshot for the
+apps/backend/src/admin/upsert-config-handler.ts:7: * Discord diff, and post-commit audit fanout — sits in its own file
+apps/backend/src/admin/upsert-config-handler.ts:11: * UPDATEd and the audit trigger captures the pre-edit values into
+apps/backend/src/admin/upsert-config-handler.ts:30:import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
+apps/backend/src/admin/upsert-config-handler.ts:34:  validateIdempotencyKey,
+apps/backend/src/admin/upsert-config-handler.ts:35:  withIdempotencyGuard,
+apps/backend/src/admin/upsert-config-handler.ts:36:} from './idempotency.js';
+apps/backend/src/admin/upsert-config-handler.ts:47:    // to carry a rationale so the audit trail answers "why" without
+apps/backend/src/admin/upsert-config-handler.ts:49:    // adjustment + refund handlers.
+apps/backend/src/admin/upsert-config-handler.ts:79: * `Idempotency-Key` header required (replay safe); `reason` required
+apps/backend/src/admin/upsert-config-handler.ts:80: * in the body; response envelope is `{ result, audit }`; Discord
+apps/backend/src/admin/upsert-config-handler.ts:84: * UPDATEd and the audit trigger captures the pre-edit values into
+apps/backend/src/admin/upsert-config-handler.ts:96:  const idempotencyKey = c.req.header('idempotency-key');
+apps/backend/src/admin/upsert-config-handler.ts:97:  if (!validateIdempotencyKey(idempotencyKey)) {
+apps/backend/src/admin/upsert-config-handler.ts:101:        message: `Idempotency-Key header required (${IDEMPOTENCY_KEY_MIN}-${IDEMPOTENCY_KEY_MAX} chars)`,
+apps/backend/src/admin/upsert-config-handler.ts:109:    // `requireAdmin` should have populated this — fail closed.
+apps/backend/src/admin/upsert-config-handler.ts:125:    guardResult = await withIdempotencyGuard(
+apps/backend/src/admin/upsert-config-handler.ts:128:        key: idempotencyKey,
+apps/backend/src/admin/upsert-config-handler.ts:133:        // Snapshot the pre-edit row for the Discord audit diff (ADR 018).
+apps/backend/src/admin/upsert-config-handler.ts:135:        // and the write-audit signal is more valuable than the
+apps/backend/src/admin/upsert-config-handler.ts:192:          idempotencyKey,
+apps/backend/src/admin/upsert-config-handler.ts:206:  // generic admin-audit notifier renders the standard one-line write
+apps/backend/src/admin/upsert-config-handler.ts:207:  // event for the audit channel. Both run on replay too so ops still
+apps/backend/src/admin/upsert-config-handler.ts:230:    idempotencyKey,
+apps/backend/src/admin/merchants-resync.ts:28:import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
+apps/backend/src/admin/merchants-resync.ts:32:  validateIdempotencyKey,
+apps/backend/src/admin/merchants-resync.ts:33:  withIdempotencyGuard,
+apps/backend/src/admin/merchants-resync.ts:34:} from './idempotency.js';
+apps/backend/src/admin/merchants-resync.ts:49:  // resync so the audit feed answers the question later without
+apps/backend/src/admin/merchants-resync.ts:55:  const idempotencyKey = c.req.header('idempotency-key');
+apps/backend/src/admin/merchants-resync.ts:56:  if (!validateIdempotencyKey(idempotencyKey)) {
+apps/backend/src/admin/merchants-resync.ts:60:        message: `Idempotency-Key header required (${IDEMPOTENCY_KEY_MIN}-${IDEMPOTENCY_KEY_MAX} chars)`,
+apps/backend/src/admin/merchants-resync.ts:87:    guardResult = await withIdempotencyGuard(
+apps/backend/src/admin/merchants-resync.ts:90:        key: idempotencyKey,
+apps/backend/src/admin/merchants-resync.ts:105:          idempotencyKey,
+apps/backend/src/admin/merchants-resync.ts:127:    idempotencyKey,
+apps/backend/src/admin/discord-test.ts:5: * (`orders` / `monitoring` / `admin-audit`), backend fires a benign
+apps/backend/src/admin/discord-test.ts:19: * so the audit trail in the channel itself correlates pings to the
+apps/backend/src/admin/discord-test.ts:30:  channel: z.enum(['orders', 'monitoring', 'admin-audit']),
+apps/backend/src/admin/discord-test.ts:45:        message: 'channel must be one of: orders, monitoring, admin-audit',
+apps/backend/src/admin/discord-test.ts:52:  // requireAdmin sets `user` context with the resolved admin row.
+apps/backend/src/admin/discord-test.ts:53:  // The handler only needs the id for embed correlation; full audit
+apps/backend/src/admin/asset-circulation.ts:6: * off-chain ledger liability (`user_credits.balance_minor` for
+apps/backend/src/admin/asset-circulation.ts:23: *     are never exactly in lockstep with credit writes.
+apps/backend/src/admin/asset-circulation.ts:40:import { payoutAssetFor } from '../credits/payout-asset.js';
+apps/backend/src/admin/asset-circulation.ts:41:import { sumOutstandingLiability } from '../credits/liabilities.js';
+apps/backend/src/admin/merchant-cashback-summary.ts:7: * "how much have we credited to users for spending at Amazon?"
+apps/backend/src/admin/merchant-cashback-summary.ts:16: * `credit_transactions`. Cashback is pinned at order creation, minted
+apps/backend/src/admin/merchant-cashback-summary.ts:19: * the aggregate that never drifts from the cashback-config audit
+apps/backend/src/admin/merchant-cashback-summary.ts:20: * trail even if the `credit_transactions` row for an order hasn't
+apps/backend/src/admin/handler.ts:3: * `requireAuth` + `requireAdmin` to have run; the admin's User row
+apps/backend/src/admin/handler.ts:7: * idempotency-guarded ladder, pre-edit snapshot for the Discord
+apps/backend/src/admin/handler.ts:8: * diff, and post-commit audit fanout) lives in
+apps/backend/src/admin/handler.ts:36:// `upsertConfigHandler` (the ADR-017 admin write — idempotency-
+apps/backend/src/admin/handler.ts:37:// guarded ladder, pre-edit snapshot, post-commit audit fanout)
+apps/backend/src/admin/handler.ts:43:// `configHistoryHandler` (the read-side audit-log query) lives
+apps/backend/src/admin/payouts-activity-csv.ts:2: * Admin payouts-activity CSV export (ADR 015 / 016 / 018).
+apps/backend/src/admin/payouts-activity-csv.ts:4: * `GET /api/admin/payouts-activity.csv` — daily × per-asset
+apps/backend/src/admin/payouts-activity-csv.ts:5: * confirmed-payout aggregate as RFC 4180 CSV. Finance runs this
+apps/backend/src/admin/payouts-activity-csv.ts:6: * alongside `/api/admin/cashback-activity.csv` at month-end to
+apps/backend/src/admin/payouts-activity-csv.ts:16: * Same convention as cashback-activity.csv.
+apps/backend/src/admin/payouts-activity-csv.ts:30:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/payouts-activity-csv.ts:32:const log = logger.child({ handler: 'admin-payouts-activity-csv' });
+apps/backend/src/admin/payouts-activity-csv.ts:40:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/payouts-activity-csv.ts:41:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/payouts-activity-csv.ts:106:        csvRow([
+apps/backend/src/admin/payouts-activity-csv.ts:118:        'Admin payouts-activity CSV truncated — narrow the window',
+apps/backend/src/admin/payouts-activity-csv.ts:120:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/payouts-activity-csv.ts:125:    const filename = `payouts-activity-${today}.csv`;
+apps/backend/src/admin/payouts-activity-csv.ts:129:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/payouts-activity-csv.ts:135:    log.error({ err }, 'Admin payouts-activity CSV failed');
+apps/backend/src/admin/payouts-activity-csv.ts:136:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/idempotency-store.ts:2: * Admin idempotency store — the single-row CRUD layer (ADR 017).
+apps/backend/src/admin/idempotency-store.ts:4: * Lifted out of `./idempotency.ts`. Three persistence helpers that
+apps/backend/src/admin/idempotency-store.ts:5: * operate directly on the `admin_idempotency_keys` table:
+apps/backend/src/admin/idempotency-store.ts:7: *   - `lookupIdempotencyKey` — read snapshot, TTL-aware
+apps/backend/src/admin/idempotency-store.ts:8: *   - `storeIdempotencyKey`  — write snapshot (ON CONFLICT DO UPDATE)
+apps/backend/src/admin/idempotency-store.ts:9: *   - `sweepStaleIdempotencyKeys` — TTL sweep, called from the
+apps/backend/src/admin/idempotency-store.ts:12: * The higher-level `withIdempotencyGuard` (which serialises
+apps/backend/src/admin/idempotency-store.ts:18: * Re-exported from `./idempotency.ts` so the wide network of
+apps/backend/src/admin/idempotency-store.ts:23:import { adminIdempotencyKeys } from '../db/schema.js';
+apps/backend/src/admin/idempotency-store.ts:25:import { IDEMPOTENCY_TTL_HOURS } from './idempotency-constants.js';
+apps/backend/src/admin/idempotency-store.ts:27:const log = logger.child({ area: 'admin-idempotency' });
+apps/backend/src/admin/idempotency-store.ts:29:export interface IdempotencySnapshot {
+apps/backend/src/admin/idempotency-store.ts:40: * boot, before `sweepStaleIdempotencyKeys()` has fired).
+apps/backend/src/admin/idempotency-store.ts:42:export async function lookupIdempotencyKey(args: {
+apps/backend/src/admin/idempotency-store.ts:45:}): Promise<IdempotencySnapshot | null> {
+apps/backend/src/admin/idempotency-store.ts:46:  const row = await db.query.adminIdempotencyKeys.findFirst({
+apps/backend/src/admin/idempotency-store.ts:48:      eq(adminIdempotencyKeys.adminUserId, args.adminUserId),
+apps/backend/src/admin/idempotency-store.ts:49:      eq(adminIdempotencyKeys.key, args.key),
+apps/backend/src/admin/idempotency-store.ts:55:  // ON CONFLICT path in storeIdempotencyKey.
+apps/backend/src/admin/idempotency-store.ts:70: * A2-500: hourly sweep that DELETEs admin-idempotency snapshots
+apps/backend/src/admin/idempotency-store.ts:73: * `admin_idempotency_keys_created_at` is indexed.
+apps/backend/src/admin/idempotency-store.ts:75:export async function sweepStaleIdempotencyKeys(): Promise<number> {
+apps/backend/src/admin/idempotency-store.ts:79:      .delete(adminIdempotencyKeys)
+apps/backend/src/admin/idempotency-store.ts:80:      .where(lt(adminIdempotencyKeys.createdAt, cutoff))
+apps/backend/src/admin/idempotency-store.ts:81:      .returning({ key: adminIdempotencyKeys.key });
+apps/backend/src/admin/idempotency-store.ts:85:        'Swept stale admin idempotency snapshots',
+apps/backend/src/admin/idempotency-store.ts:90:    log.error({ err }, 'Admin idempotency sweep failed');
+apps/backend/src/admin/idempotency-store.ts:97: * re-post with the same key idempotently refreshes the stored
+apps/backend/src/admin/idempotency-store.ts:100:export async function storeIdempotencyKey(args: {
+apps/backend/src/admin/idempotency-store.ts:110:    .insert(adminIdempotencyKeys)
+apps/backend/src/admin/idempotency-store.ts:120:      target: [adminIdempotencyKeys.adminUserId, adminIdempotencyKeys.key],
+apps/backend/src/admin/user-detail.ts:6: * (`/credits` for balances, `/credit-transactions` for ledger) — this
+apps/backend/src/admin/reconciliation.ts:4: * `GET /api/admin/reconciliation` joins `user_credits` against the
+apps/backend/src/admin/reconciliation.ts:5: * grouped sum of `credit_transactions` for each (user_id, currency)
+apps/backend/src/admin/reconciliation.ts:9: *     credit_transactions rows; reconcilable by replay as an audit
+apps/backend/src/admin/reconciliation.ts:14: * refund), the number of paths that mutate `user_credits` has
+apps/backend/src/admin/reconciliation.ts:24: * A2-907: `rowCount` counts `user_credits` rows — a user with
+apps/backend/src/admin/reconciliation.ts:35:import { computeLedgerDriftSql } from '../credits/ledger-invariant.js';
+apps/backend/src/admin/reconciliation.ts:45:  /** Materialised balance from `user_credits.balance_minor`. */
+apps/backend/src/admin/reconciliation.ts:47:  /** Sum of the user's `credit_transactions.amount_minor` in this currency. */
+apps/backend/src/admin/reconciliation.ts:55:   * Total `user_credits` rows across all users and currencies. A
+apps/backend/src/admin/reconciliation.ts:69:    // A2-1519: the drift SQL lives in `credits/ledger-invariant.ts`
+apps/backend/src/admin/reconciliation.ts:76:    // Total user_credits count — just an aggregate, no filter. Used by
+apps/backend/src/admin/reconciliation.ts:95:        'Ledger drift detected — some user_credits rows disagree with their credit_transactions sum',
+apps/backend/src/admin/top-users.ts:18:import { creditTransactions, users } from '../db/schema.js';
+apps/backend/src/admin/top-users.ts:98:      FROM ${creditTransactions} ct
+apps/backend/src/admin/treasury-snapshot-csv.ts:2: * Admin treasury snapshot CSV (ADR 009/015/018).
+apps/backend/src/admin/treasury-snapshot-csv.ts:4: * `GET /api/admin/treasury.csv` — point-in-time flat dump of the
+apps/backend/src/admin/treasury-snapshot-csv.ts:6: * compliance / SOC-2 / audit evidence. Diff-friendly **long
+apps/backend/src/admin/treasury-snapshot-csv.ts:8: * snapshots line up in diff tooling and auditors can eyeball which
+apps/backend/src/admin/treasury-snapshot-csv.ts:32:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/treasury-snapshot-csv.ts:34:const log = logger.child({ handler: 'admin-treasury-snapshot-csv' });
+apps/backend/src/admin/treasury-snapshot-csv.ts:38:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/treasury-snapshot-csv.ts:39:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/treasury-snapshot-csv.ts:58:    // slice adds a new metric to the snapshot, this CSV picks it
+apps/backend/src/admin/treasury-snapshot-csv.ts:68:    lines.push(csvRow(['snapshot_taken_at', '', new Date().toISOString()]));
+apps/backend/src/admin/treasury-snapshot-csv.ts:72:      lines.push(csvRow(['outstanding', currency, value]));
+apps/backend/src/admin/treasury-snapshot-csv.ts:78:        lines.push(csvRow(['ledger_total', `${currency}:${type}`, value]));
+apps/backend/src/admin/treasury-snapshot-csv.ts:84:      lines.push(csvRow(['liability', code, row.outstandingMinor]));
+apps/backend/src/admin/treasury-snapshot-csv.ts:85:      lines.push(csvRow(['liability_issuer', code, row.issuer ?? '']));
+apps/backend/src/admin/treasury-snapshot-csv.ts:90:      lines.push(csvRow(['asset_stroops', code, holding.stroops ?? '']));
+apps/backend/src/admin/treasury-snapshot-csv.ts:95:      lines.push(csvRow(['payout_state', state, count]));
+apps/backend/src/admin/treasury-snapshot-csv.ts:99:    lines.push(csvRow(['operator_pool_size', '', String(snapshot.operatorPool.size)]));
+apps/backend/src/admin/treasury-snapshot-csv.ts:102:      lines.push(csvRow(['operator', op.id, op.state]));
+apps/backend/src/admin/treasury-snapshot-csv.ts:107:    const filename = `treasury-snapshot-${today}.csv`;
+apps/backend/src/admin/treasury-snapshot-csv.ts:111:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/treasury-snapshot-csv.ts:117:    log.error({ err }, 'Admin treasury snapshot CSV failed');
+apps/backend/src/admin/treasury-snapshot-csv.ts:118:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/users-recycling-activity-csv.ts:2: * Admin users-recycling-activity CSV export (ADR 011 / 015 / 018).
+apps/backend/src/admin/users-recycling-activity-csv.ts:4: * `GET /api/admin/users/recycling-activity.csv` — finance-grade
+apps/backend/src/admin/users-recycling-activity-csv.ts:9: * Complement to the sibling admin CSV exports:
+apps/backend/src/admin/users-recycling-activity-csv.ts:10: *   - /api/admin/payouts.csv              (backlog)
+apps/backend/src/admin/users-recycling-activity-csv.ts:11: *   - /api/admin/users/:id/credit-transactions.csv (per-user ledger)
+apps/backend/src/admin/users-recycling-activity-csv.ts:12: *   - /api/admin/merchants/flywheel-share.csv (merchant axis)
+apps/backend/src/admin/users-recycling-activity-csv.ts:15: * Same Tier-3 contract as every other admin CSV:
+apps/backend/src/admin/users-recycling-activity-csv.ts:21: *   - bigint columns as strings; RFC-4180 CSV escape for email
+apps/backend/src/admin/users-recycling-activity-csv.ts:31:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/users-recycling-activity-csv.ts:33:const log = logger.child({ handler: 'admin-users-recycling-activity-csv' });
+apps/backend/src/admin/users-recycling-activity-csv.ts:47:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/users-recycling-activity-csv.ts:48:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/users-recycling-activity-csv.ts:107:        csvRow([
+apps/backend/src/admin/users-recycling-activity-csv.ts:121:        'Admin users-recycling-activity CSV truncated — narrow the window',
+apps/backend/src/admin/users-recycling-activity-csv.ts:123:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/users-recycling-activity-csv.ts:127:    const filename = `users-recycling-activity-${new Date().toISOString().slice(0, 10)}.csv`;
+apps/backend/src/admin/users-recycling-activity-csv.ts:131:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/users-recycling-activity-csv.ts:137:    log.error({ err }, 'Admin users-recycling-activity CSV failed');
+apps/backend/src/admin/users-recycling-activity-csv.ts:138:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/cashback-activity-csv.ts:2: * Admin cashback-activity CSV export (ADR 009 / 015 / 018).
+apps/backend/src/admin/cashback-activity-csv.ts:4: * `GET /api/admin/cashback-activity.csv` — daily × per-currency
+apps/backend/src/admin/cashback-activity-csv.ts:5: * cashback accrual as RFC 4180 CSV. Finance runs this month-end
+apps/backend/src/admin/cashback-activity-csv.ts:7: * in `credit_transactions`. The JSON endpoint at
+apps/backend/src/admin/cashback-activity-csv.ts:10: * CSV keeps them flat for spreadsheet consumption.
+apps/backend/src/admin/cashback-activity-csv.ts:27:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/cashback-activity-csv.ts:29:const log = logger.child({ handler: 'admin-cashback-activity-csv' });
+apps/backend/src/admin/cashback-activity-csv.ts:37:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/cashback-activity-csv.ts:38:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/cashback-activity-csv.ts:70:    // Ordering is day ASC then currency ASC so the CSV reads as
+apps/backend/src/admin/cashback-activity-csv.ts:86:      LEFT JOIN credit_transactions ct
+apps/backend/src/admin/cashback-activity-csv.ts:106:        csvRow([
+apps/backend/src/admin/cashback-activity-csv.ts:118:        'Admin cashback-activity CSV truncated — narrow the window',
+apps/backend/src/admin/cashback-activity-csv.ts:120:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/cashback-activity-csv.ts:125:    const filename = `cashback-activity-${today}.csv`;
+apps/backend/src/admin/cashback-activity-csv.ts:129:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/cashback-activity-csv.ts:135:    log.error({ err }, 'Admin cashback-activity CSV failed');
+apps/backend/src/admin/cashback-activity-csv.ts:136:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/cashback-monthly.ts:22: *   - Filtered to `type='cashback'` so spend / withdrawal /
+apps/backend/src/admin/cashback-monthly.ts:30:import { creditTransactions } from '../db/schema.js';
+apps/backend/src/admin/cashback-monthly.ts:73:        DATE_TRUNC('month', ${creditTransactions.createdAt} AT TIME ZONE 'UTC') AS month,
+apps/backend/src/admin/cashback-monthly.ts:74:        ${creditTransactions.currency}                                           AS currency,
+apps/backend/src/admin/cashback-monthly.ts:75:        COALESCE(SUM(${creditTransactions.amountMinor}), 0)::bigint              AS cashback_minor
+apps/backend/src/admin/cashback-monthly.ts:76:      FROM ${creditTransactions}
+apps/backend/src/admin/cashback-monthly.ts:77:      WHERE ${creditTransactions.type} = 'cashback'
+apps/backend/src/admin/cashback-monthly.ts:78:        AND ${creditTransactions.createdAt} >= DATE_TRUNC('month', NOW() AT TIME ZONE 'UTC') - INTERVAL '11 months'
+apps/backend/src/admin/user-cashback-by-merchant.ts:9: * by `requireAdmin` at the route level.
+apps/backend/src/admin/user-cashback-by-merchant.ts:11: * Same join path — `credit_transactions.reference_id::uuid =
+apps/backend/src/admin/user-cashback-by-merchant.ts:25:import { creditTransactions, orders, users } from '../db/schema.js';
+apps/backend/src/admin/user-cashback-by-merchant.ts:110:        SUM(${creditTransactions.amountMinor})::bigint AS cashback_minor,
+apps/backend/src/admin/user-cashback-by-merchant.ts:112:        MAX(${creditTransactions.createdAt}) AS last_earned_at
+apps/backend/src/admin/user-cashback-by-merchant.ts:113:      FROM ${creditTransactions}
+apps/backend/src/admin/user-cashback-by-merchant.ts:115:        ON ${orders.id} = ${creditTransactions.referenceId}::uuid
+apps/backend/src/admin/user-cashback-by-merchant.ts:116:      WHERE ${creditTransactions.userId} = ${userId}
+apps/backend/src/admin/user-cashback-by-merchant.ts:117:        AND ${creditTransactions.type} = 'cashback'
+apps/backend/src/admin/user-cashback-by-merchant.ts:118:        AND ${creditTransactions.referenceType} = 'order'
+apps/backend/src/admin/user-cashback-by-merchant.ts:119:        AND ${creditTransactions.currency} = ${userRow.homeCurrency}
+apps/backend/src/admin/user-cashback-by-merchant.ts:120:        AND ${creditTransactions.createdAt} >= ${since.toISOString()}
+apps/backend/src/admin/payouts-activity.ts:7: *   - cashback-activity tracks *creation* (credit_transactions
+apps/backend/src/admin/user-credit-transactions-csv.ts:2: * Admin per-user credit-transactions CSV export (ADR 009 / 015).
+apps/backend/src/admin/user-credit-transactions-csv.ts:4: * `GET /api/admin/users/:userId/credit-transactions.csv` — finance /
+apps/backend/src/admin/user-credit-transactions-csv.ts:5: * compliance / support CSV of one user's full credit-ledger history
+apps/backend/src/admin/user-credit-transactions-csv.ts:8: * Mirrors the JSON endpoint at the same path (without `.csv`) but
+apps/backend/src/admin/user-credit-transactions-csv.ts:9: * emits RFC 4180 CSV with the standard attachment headers.
+apps/backend/src/admin/user-credit-transactions-csv.ts:26:import { creditTransactions } from '../db/schema.js';
+apps/backend/src/admin/user-credit-transactions-csv.ts:28:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/user-credit-transactions-csv.ts:30:const log = logger.child({ handler: 'admin-user-credit-transactions-csv' });
+apps/backend/src/admin/user-credit-transactions-csv.ts:46:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/user-credit-transactions-csv.ts:47:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/user-credit-transactions-csv.ts:93:      .from(creditTransactions)
+apps/backend/src/admin/user-credit-transactions-csv.ts:96:          eq(creditTransactions.userId, userId),
+apps/backend/src/admin/user-credit-transactions-csv.ts:97:          // A2-1610: typed `gte()` — see matching fix in `audit-tail-csv.ts`.
+apps/backend/src/admin/user-credit-transactions-csv.ts:98:          gte(creditTransactions.createdAt, since),
+apps/backend/src/admin/user-credit-transactions-csv.ts:101:      .orderBy(asc(creditTransactions.createdAt))
+apps/backend/src/admin/user-credit-transactions-csv.ts:110:        csvRow([
+apps/backend/src/admin/user-credit-transactions-csv.ts:125:        'Admin user credit-transactions CSV truncated — narrow the window',
+apps/backend/src/admin/user-credit-transactions-csv.ts:127:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/user-credit-transactions-csv.ts:131:    const filename = `credit-transactions-${userId.slice(0, 8)}-${since.toISOString().slice(0, 10)}.csv`;
+apps/backend/src/admin/user-credit-transactions-csv.ts:135:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/user-credit-transactions-csv.ts:141:    log.error({ err, userId }, 'Admin user credit-transactions CSV failed');
+apps/backend/src/admin/user-credit-transactions-csv.ts:142:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/orders.ts:8: *   - audit how cashback is being split (wholesale / user / margin)
+apps/backend/src/admin/orders.ts:29:// state added in shared (e.g. a future `refunded`) would silently
+apps/backend/src/admin/orders.ts:50:  paymentMethod: 'xlm' | 'usdc' | 'credit' | 'loop_asset';
+apps/backend/src/admin/user-cashback-monthly.ts:13: * full credit-transactions ledger.
+apps/backend/src/admin/user-cashback-monthly.ts:31:import { creditTransactions, users } from '../db/schema.js';
+apps/backend/src/admin/user-cashback-monthly.ts:95:        DATE_TRUNC('month', ${creditTransactions.createdAt} AT TIME ZONE 'UTC') AS month,
+apps/backend/src/admin/user-cashback-monthly.ts:96:        ${creditTransactions.currency}                                           AS currency,
+apps/backend/src/admin/user-cashback-monthly.ts:97:        COALESCE(SUM(${creditTransactions.amountMinor}), 0)::bigint              AS cashback_minor
+apps/backend/src/admin/user-cashback-monthly.ts:98:      FROM ${creditTransactions}
+apps/backend/src/admin/user-cashback-monthly.ts:99:      WHERE ${creditTransactions.userId} = ${userId}
+apps/backend/src/admin/user-cashback-monthly.ts:100:        AND ${creditTransactions.type} = 'cashback'
+apps/backend/src/admin/user-cashback-monthly.ts:101:        AND ${creditTransactions.createdAt} >= DATE_TRUNC('month', NOW() AT TIME ZONE 'UTC') - INTERVAL '11 months'
+apps/backend/src/admin/stuck-orders.ts:40:   * / usdc order is a Stellar-watcher incident; a stuck credit order
+apps/backend/src/admin/merchant-stats-csv.ts:2: * Admin merchant-stats CSV export (ADR 011 / 015 / 018).
+apps/backend/src/admin/merchant-stats-csv.ts:4: * `GET /api/admin/merchant-stats.csv` — finance / negotiation export
+apps/backend/src/admin/merchant-stats-csv.ts:24:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/merchant-stats-csv.ts:26:const log = logger.child({ handler: 'admin-merchant-stats-csv' });
+apps/backend/src/admin/merchant-stats-csv.ts:44:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/merchant-stats-csv.ts:45:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/merchant-stats-csv.ts:129:        csvRow([
+apps/backend/src/admin/merchant-stats-csv.ts:146:        'Admin merchant-stats CSV truncated — narrow the window',
+apps/backend/src/admin/merchant-stats-csv.ts:148:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/merchant-stats-csv.ts:152:    const filename = `merchant-stats-${since.toISOString().slice(0, 10)}.csv`;
+apps/backend/src/admin/merchant-stats-csv.ts:156:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/merchant-stats-csv.ts:162:    log.error({ err }, 'Admin merchant-stats CSV failed');
+apps/backend/src/admin/merchant-stats-csv.ts:163:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/merchant-top-earners.ts:20: * — avoids a JOIN through credit_transactions and keeps the
+apps/backend/src/admin/cashback-configs-csv.ts:2: * Admin cashback-configs CSV export (ADR 011 / 018).
+apps/backend/src/admin/cashback-configs-csv.ts:4: * `GET /api/admin/merchant-cashback-configs.csv` — Tier-3 bulk
+apps/backend/src/admin/cashback-configs-csv.ts:5: * export per ADR 018 so admins can audit the commercial-terms table
+apps/backend/src/admin/cashback-configs-csv.ts:34: * admin CSVs so the behaviour is uniform.
+apps/backend/src/admin/cashback-configs-csv.ts:42:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/cashback-configs-csv.ts:44:const log = logger.child({ handler: 'admin-cashback-configs-csv' });
+apps/backend/src/admin/cashback-configs-csv.ts:59:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/cashback-configs-csv.ts:60:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/cashback-configs-csv.ts:100:        csvRow([
+apps/backend/src/admin/cashback-configs-csv.ts:116:        'Admin cashback-configs CSV truncated — merchant_cashback_configs grew past the row cap',
+apps/backend/src/admin/cashback-configs-csv.ts:118:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/cashback-configs-csv.ts:122:    const filename = `cashback-configs-${new Date().toISOString().slice(0, 10)}.csv`;
+apps/backend/src/admin/cashback-configs-csv.ts:126:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/cashback-configs-csv.ts:132:    log.error({ err }, 'Admin cashback-configs CSV failed');
+apps/backend/src/admin/cashback-configs-csv.ts:133:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/refunds.ts:2: * Admin refund endpoint (ADR 017 + A2-901).
+apps/backend/src/admin/refunds.ts:4: * `POST /api/admin/users/:userId/refunds` — issues a positive-amount
+apps/backend/src/admin/refunds.ts:5: * `credit_transactions` row of `type='refund'` bound to an order.
+apps/backend/src/admin/refunds.ts:6: * The write is idempotent in two layers:
+apps/backend/src/admin/refunds.ts:8: *   - Admin idempotency key (ADR 017) — the usual actor+key snapshot
+apps/backend/src/admin/refunds.ts:12: *     refund for the same order" race. Surfaces as 409
+apps/backend/src/admin/refunds.ts:15: * Response envelope matches the credit-adjustments handler so the
+apps/backend/src/admin/refunds.ts:23:import { applyAdminRefund, RefundAlreadyIssuedError } from '../credits/refunds.js';
+apps/backend/src/admin/refunds.ts:26:import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
+apps/backend/src/admin/refunds.ts:30:  lookupIdempotencyKey,
+apps/backend/src/admin/refunds.ts:31:  storeIdempotencyKey,
+apps/backend/src/admin/refunds.ts:32:  validateIdempotencyKey,
+apps/backend/src/admin/refunds.ts:33:} from './idempotency.js';
+apps/backend/src/admin/refunds.ts:35:const log = logger.child({ handler: 'admin-refund' });
+apps/backend/src/admin/refunds.ts:41: * adjustment handler — refunds above that should go through a
+apps/backend/src/admin/refunds.ts:78:  const idempotencyKey = c.req.header('idempotency-key');
+apps/backend/src/admin/refunds.ts:79:  if (!validateIdempotencyKey(idempotencyKey)) {
+apps/backend/src/admin/refunds.ts:83:        message: `Idempotency-Key header required (${IDEMPOTENCY_KEY_MIN}-${IDEMPOTENCY_KEY_MAX} chars)`,
+apps/backend/src/admin/refunds.ts:112:  const prior = await lookupIdempotencyKey({
+apps/backend/src/admin/refunds.ts:114:    key: idempotencyKey,
+apps/backend/src/admin/refunds.ts:120:      endpoint: `POST /api/admin/users/${userId}/refunds`,
+apps/backend/src/admin/refunds.ts:125:      idempotencyKey,
+apps/backend/src/admin/refunds.ts:153:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to apply refund' }, 500);
+apps/backend/src/admin/refunds.ts:170:    idempotencyKey,
+apps/backend/src/admin/refunds.ts:176:    await storeIdempotencyKey({
+apps/backend/src/admin/refunds.ts:178:      key: idempotencyKey,
+apps/backend/src/admin/refunds.ts:180:      path: `/api/admin/users/${userId}/refunds`,
+apps/backend/src/admin/refunds.ts:186:      { err, adminUserId: actor.id, key: idempotencyKey },
+apps/backend/src/admin/refunds.ts:187:      'Failed to persist idempotency snapshot; retry will replay as new write',
+apps/backend/src/admin/refunds.ts:193:    endpoint: `POST /api/admin/users/${userId}/refunds`,
+apps/backend/src/admin/refunds.ts:198:    idempotencyKey,
+apps/backend/src/admin/user-cashback-summary.ts:12: * credit-transactions ledger. Complements the existing drill-downs:
+apps/backend/src/admin/user-cashback-summary.ts:13: *   - /credits                — current per-currency balance
+apps/backend/src/admin/user-cashback-summary.ts:14: *   - /credit-transactions    — full ledger feed
+apps/backend/src/admin/user-cashback-summary.ts:18: * Single query: a LEFT JOIN `users → credit_transactions` so a user
+apps/backend/src/admin/user-cashback-summary.ts:28:import { creditTransactions, users } from '../db/schema.js';
+apps/backend/src/admin/user-cashback-summary.ts:62:        COALESCE(SUM(${creditTransactions.amountMinor}), 0)::bigint AS "lifetimeMinor",
+apps/backend/src/admin/user-cashback-summary.ts:64:          SUM(${creditTransactions.amountMinor}) FILTER (
+apps/backend/src/admin/user-cashback-summary.ts:65:            WHERE ${creditTransactions.createdAt}
+apps/backend/src/admin/user-cashback-summary.ts:71:      LEFT JOIN ${creditTransactions} ON
+apps/backend/src/admin/user-cashback-summary.ts:72:        ${creditTransactions.userId} = u.id
+apps/backend/src/admin/user-cashback-summary.ts:73:        AND ${creditTransactions.type} = 'cashback'
+apps/backend/src/admin/user-cashback-summary.ts:74:        AND ${creditTransactions.currency} = u.home_currency
+apps/backend/src/admin/payouts-detail.ts:24:import { getPayoutByOrderId, getPayoutForAdmin } from '../credits/pending-payouts.js';
+apps/backend/src/admin/audit-envelope.ts:5: *   `{ result, audit: { actorUserId, actorEmail, idempotencyKey,
+apps/backend/src/admin/audit-envelope.ts:17:  audit: {
+apps/backend/src/admin/audit-envelope.ts:20:    idempotencyKey: string;
+apps/backend/src/admin/audit-envelope.ts:29:  idempotencyKey: string;
+apps/backend/src/admin/audit-envelope.ts:35:    audit: {
+apps/backend/src/admin/audit-envelope.ts:38:      idempotencyKey: args.idempotencyKey,
+apps/backend/src/admin/payment-method-activity.ts:6: * (xlm / usdc / credit / loop_asset). Turns the scalar
+apps/backend/src/admin/payment-method-activity.ts:12: * up, because that means cashback credited yesterday was spent back
+apps/backend/src/admin/orders-csv.ts:2: * Admin orders CSV export (ADR 011 / 015).
+apps/backend/src/admin/orders-csv.ts:4: * `GET /api/admin/orders.csv` — finance-ready RFC 4180 CSV of
+apps/backend/src/admin/orders-csv.ts:8: *   - user-cashback totals against the credit-ledger accrual feed
+apps/backend/src/admin/orders-csv.ts:22: *   Content-Type: text/csv; charset=utf-8
+apps/backend/src/admin/orders-csv.ts:24: *   Content-Disposition: attachment; filename="orders-<since>.csv"
+apps/backend/src/admin/orders-csv.ts:31:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/orders-csv.ts:33:const log = logger.child({ handler: 'admin-orders-csv' });
+apps/backend/src/admin/orders-csv.ts:65:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/orders-csv.ts:66:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/orders-csv.ts:122:      // matching fix in `audit-tail-csv.ts`. postgres-js can't bind a
+apps/backend/src/admin/orders-csv.ts:135:        csvRow([
+apps/backend/src/admin/orders-csv.ts:166:        'Admin orders CSV truncated — narrow the window',
+apps/backend/src/admin/orders-csv.ts:168:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/orders-csv.ts:172:    const filename = `orders-${since.toISOString().slice(0, 10)}.csv`;
+apps/backend/src/admin/orders-csv.ts:176:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/orders-csv.ts:182:    log.error({ err }, 'Admin orders CSV failed');
+apps/backend/src/admin/orders-csv.ts:183:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/cashback-realization-daily.ts:102:      LEFT JOIN credit_transactions ct
+apps/backend/src/admin/audit-tail-csv.ts:2: * Admin audit-tail CSV export (ADR 017 / 018).
+apps/backend/src/admin/audit-tail-csv.ts:4: * `GET /api/admin/audit-tail.csv` — finance-ready CSV of admin
+apps/backend/src/admin/audit-tail-csv.ts:5: * write-audit rows (`admin_idempotency_keys` joined to `users` for
+apps/backend/src/admin/audit-tail-csv.ts:7: * SOC-2 auditors want a month of admin-write history exportable in
+apps/backend/src/admin/audit-tail-csv.ts:16: * Response body is the audit envelope without the stored response
+apps/backend/src/admin/audit-tail-csv.ts:18: * mirrors the JSON tail's contract: audit is "who did what, when",
+apps/backend/src/admin/audit-tail-csv.ts:24:import { adminIdempotencyKeys, users } from '../db/schema.js';
+apps/backend/src/admin/audit-tail-csv.ts:26:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/audit-tail-csv.ts:28:const log = logger.child({ handler: 'admin-audit-tail-csv' });
+apps/backend/src/admin/audit-tail-csv.ts:40:  'idempotency_key',
+apps/backend/src/admin/audit-tail-csv.ts:44:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/audit-tail-csv.ts:45:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/audit-tail-csv.ts:58:export async function adminAuditTailCsvHandler(c: Context): Promise<Response> {
+apps/backend/src/admin/audit-tail-csv.ts:83:        adminUserId: adminIdempotencyKeys.adminUserId,
+apps/backend/src/admin/audit-tail-csv.ts:84:        method: adminIdempotencyKeys.method,
+apps/backend/src/admin/audit-tail-csv.ts:85:        path: adminIdempotencyKeys.path,
+apps/backend/src/admin/audit-tail-csv.ts:86:        status: adminIdempotencyKeys.status,
+apps/backend/src/admin/audit-tail-csv.ts:87:        key: adminIdempotencyKeys.key,
+apps/backend/src/admin/audit-tail-csv.ts:88:        createdAt: adminIdempotencyKeys.createdAt,
+apps/backend/src/admin/audit-tail-csv.ts:91:      .from(adminIdempotencyKeys)
+apps/backend/src/admin/audit-tail-csv.ts:92:      .innerJoin(users, eq(adminIdempotencyKeys.adminUserId, users.id))
+apps/backend/src/admin/audit-tail-csv.ts:97:      // the timestamp column's mode. Caught by the admin-read audit
+apps/backend/src/admin/audit-tail-csv.ts:99:      .where(gte(adminIdempotencyKeys.createdAt, since))
+apps/backend/src/admin/audit-tail-csv.ts:100:      .orderBy(asc(adminIdempotencyKeys.createdAt))
+apps/backend/src/admin/audit-tail-csv.ts:109:        csvRow([
+apps/backend/src/admin/audit-tail-csv.ts:124:        'Admin audit-tail CSV truncated — narrow the window',
+apps/backend/src/admin/audit-tail-csv.ts:126:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/audit-tail-csv.ts:130:    const filename = `admin-audit-${since.toISOString().slice(0, 10)}.csv`;
+apps/backend/src/admin/audit-tail-csv.ts:134:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/audit-tail-csv.ts:140:    log.error({ err }, 'Admin audit-tail CSV failed');
+apps/backend/src/admin/audit-tail-csv.ts:141:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/idempotency.ts:2: * Admin idempotency guard (ADR 017).
+apps/backend/src/admin/idempotency.ts:6: * verbatim so a double-click or a network-retry cannot cause
+apps/backend/src/admin/idempotency.ts:7: * double side-effects (double-credit, double-payout-retry, etc.).
+apps/backend/src/admin/idempotency.ts:9: * This file owns the high-level `withIdempotencyGuard` (advisory-
+apps/backend/src/admin/idempotency.ts:11: * helpers (`validateIdempotencyKey`, `idempotencyLockKey`). The
+apps/backend/src/admin/idempotency.ts:12: * single-row store primitives (`lookupIdempotencyKey`,
+apps/backend/src/admin/idempotency.ts:13: * `storeIdempotencyKey`, `sweepStaleIdempotencyKeys`) live in
+apps/backend/src/admin/idempotency.ts:14: * `./idempotency-store.ts`; the constants in
+apps/backend/src/admin/idempotency.ts:15: * `./idempotency-constants.ts`. Both are re-exported below so the
+apps/backend/src/admin/idempotency.ts:17: * `'../admin/idempotency.js'`.
+apps/backend/src/admin/idempotency.ts:21: * retry would look like a new request and side-effects would double.
+apps/backend/src/admin/idempotency.ts:26:import { adminIdempotencyKeys } from '../db/schema.js';
+apps/backend/src/admin/idempotency.ts:31:} from './idempotency-constants.js';
+apps/backend/src/admin/idempotency.ts:37:} from './idempotency-constants.js';
+apps/backend/src/admin/idempotency.ts:40:  lookupIdempotencyKey,
+apps/backend/src/admin/idempotency.ts:41:  storeIdempotencyKey,
+apps/backend/src/admin/idempotency.ts:42:  sweepStaleIdempotencyKeys,
+apps/backend/src/admin/idempotency.ts:43:  type IdempotencySnapshot,
+apps/backend/src/admin/idempotency.ts:44:} from './idempotency-store.js';
+apps/backend/src/admin/idempotency.ts:46:export function validateIdempotencyKey(key: string | undefined): key is string {
+apps/backend/src/admin/idempotency.ts:54: * `withIdempotencyGuard` to serialise the lookup → write → store
+apps/backend/src/admin/idempotency.ts:55: * sequence so two concurrent callers with the same idempotency key
+apps/backend/src/admin/idempotency.ts:57: * both store a snapshot — which would double-credit the user.
+apps/backend/src/admin/idempotency.ts:65:export function idempotencyLockKey(adminUserId: string, key: string): bigint {
+apps/backend/src/admin/idempotency.ts:81:export interface IdempotencyGuardArgs {
+apps/backend/src/admin/idempotency.ts:88:export interface IdempotencyGuardResult {
+apps/backend/src/admin/idempotency.ts:100: * underlying side-effects (double credit_transactions rows, double
+apps/backend/src/admin/idempotency.ts:108: *      same TTL gate as `lookupIdempotencyKey()` applies here so the
+apps/backend/src/admin/idempotency.ts:119: * Side-effect contract: `doWrite` MUST be idempotent at the DB layer
+apps/backend/src/admin/idempotency.ts:122: * The handler uses storeIdempotencyKey → advisory lock → applyAdmin…
+apps/backend/src/admin/idempotency.ts:125:export async function withIdempotencyGuard(
+apps/backend/src/admin/idempotency.ts:126:  args: IdempotencyGuardArgs,
+apps/backend/src/admin/idempotency.ts:128:): Promise<IdempotencyGuardResult> {
+apps/backend/src/admin/idempotency.ts:129:  const lockKey = idempotencyLockKey(args.adminUserId, args.key);
+apps/backend/src/admin/idempotency.ts:133:    const prior = await tx.query.adminIdempotencyKeys.findFirst({
+apps/backend/src/admin/idempotency.ts:135:        eq(adminIdempotencyKeys.adminUserId, args.adminUserId),
+apps/backend/src/admin/idempotency.ts:136:        eq(adminIdempotencyKeys.key, args.key),
+apps/backend/src/admin/idempotency.ts:152:          // `audit.replayed: true` on the response body indicates a
+apps/backend/src/admin/idempotency.ts:156:          // the guard means every handler using `withIdempotencyGuard`
+apps/backend/src/admin/idempotency.ts:158:          const audit = body['audit'];
+apps/backend/src/admin/idempotency.ts:159:          if (audit !== null && typeof audit === 'object') {
+apps/backend/src/admin/idempotency.ts:160:            (audit as Record<string, unknown>)['replayed'] = true;
+apps/backend/src/admin/idempotency.ts:171:      .insert(adminIdempotencyKeys)
+apps/backend/src/admin/idempotency.ts:181:        target: [adminIdempotencyKeys.adminUserId, adminIdempotencyKeys.key],
+apps/backend/src/admin/cashback-activity.ts:34:  /** Count of cashback-type credit_transactions on this day. */
+apps/backend/src/admin/cashback-activity.ts:76:    // generate_series(today - days, today) LEFT JOIN credit_transactions
+apps/backend/src/admin/cashback-activity.ts:94:      LEFT JOIN credit_transactions ct
+apps/backend/src/admin/treasury-builders.ts:19: *   - `buildLiabilities(outstanding)` — re-keys the credit-ledger
+apps/backend/src/admin/treasury-builders.ts:38:import { payoutAssetFor, type LoopAssetCode } from '../credits/payout-asset.js';
+apps/backend/src/admin/treasury-builders.ts:79: * in the credits ledger, not here.
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:2: * Admin merchants-flywheel-share CSV export (ADR 011 / 015 / 018).
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:4: * `GET /api/admin/merchants/flywheel-share.csv` — finance-grade
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:7: * Complement to the existing `/api/admin/merchant-stats.csv` — that
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:20: * app.ts; Tier-3 10/min rate limit matches every other admin CSV.
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:27:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:29:const log = logger.child({ handler: 'admin-merchants-flywheel-share-csv' });
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:43:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:44:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:122:        csvRow([
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:135:        'Admin merchants-flywheel-share CSV truncated — narrow the window',
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:137:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:141:    const filename = `merchants-flywheel-share-${since.toISOString().slice(0, 10)}.csv`;
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:145:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:151:    log.error({ err }, 'Admin merchants-flywheel-share CSV failed');
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:152:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/treasury-credit-flow.ts:2: * Admin treasury credit-flow time-series (ADR 009 / 015).
+apps/backend/src/admin/treasury-credit-flow.ts:4: * `GET /api/admin/treasury/credit-flow?days=30&currency=USD` —
+apps/backend/src/admin/treasury-credit-flow.ts:5: * per-day sum of **credits issued vs debits settled** from the
+apps/backend/src/admin/treasury-credit-flow.ts:6: * `credit_transactions` ledger, by currency.
+apps/backend/src/admin/treasury-credit-flow.ts:16: *   (cashback, interest, refund) + positive adjustments.
+apps/backend/src/admin/treasury-credit-flow.ts:18: *   (spend, withdrawal) + absolute negative adjustments.
+apps/backend/src/admin/treasury-credit-flow.ts:19: * Net      = credited - debited (the day's liability delta).
+apps/backend/src/admin/treasury-credit-flow.ts:33:import { creditTransactions, HOME_CURRENCIES, type HomeCurrency } from '../db/schema.js';
+apps/backend/src/admin/treasury-credit-flow.ts:37:const log = logger.child({ handler: 'admin-treasury-credit-flow' });
+apps/backend/src/admin/treasury-credit-flow.ts:51:  credited_minor: string | bigint | number;
+apps/backend/src/admin/treasury-credit-flow.ts:97:              SUM(${creditTransactions.amountMinor})
+apps/backend/src/admin/treasury-credit-flow.ts:98:                FILTER (WHERE ${creditTransactions.amountMinor} > 0),
+apps/backend/src/admin/treasury-credit-flow.ts:100:            )::text AS credited_minor,
+apps/backend/src/admin/treasury-credit-flow.ts:102:              -SUM(${creditTransactions.amountMinor})
+apps/backend/src/admin/treasury-credit-flow.ts:103:                FILTER (WHERE ${creditTransactions.amountMinor} < 0),
+apps/backend/src/admin/treasury-credit-flow.ts:107:          LEFT JOIN ${creditTransactions}
+apps/backend/src/admin/treasury-credit-flow.ts:108:            ON DATE_TRUNC('day', ${creditTransactions.createdAt} AT TIME ZONE 'UTC') = days.day
+apps/backend/src/admin/treasury-credit-flow.ts:109:           AND ${creditTransactions.currency} = ${currencyFilter}
+apps/backend/src/admin/treasury-credit-flow.ts:115:            TO_CHAR(DATE_TRUNC('day', ${creditTransactions.createdAt} AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
+apps/backend/src/admin/treasury-credit-flow.ts:116:            ${creditTransactions.currency} AS currency,
+apps/backend/src/admin/treasury-credit-flow.ts:118:              SUM(${creditTransactions.amountMinor})
+apps/backend/src/admin/treasury-credit-flow.ts:119:                FILTER (WHERE ${creditTransactions.amountMinor} > 0),
+apps/backend/src/admin/treasury-credit-flow.ts:121:            )::text AS credited_minor,
+apps/backend/src/admin/treasury-credit-flow.ts:123:              -SUM(${creditTransactions.amountMinor})
+apps/backend/src/admin/treasury-credit-flow.ts:124:                FILTER (WHERE ${creditTransactions.amountMinor} < 0),
+apps/backend/src/admin/treasury-credit-flow.ts:127:          FROM ${creditTransactions}
+apps/backend/src/admin/treasury-credit-flow.ts:128:          WHERE ${creditTransactions.createdAt} >=
+apps/backend/src/admin/treasury-credit-flow.ts:130:          GROUP BY DATE_TRUNC('day', ${creditTransactions.createdAt} AT TIME ZONE 'UTC'),
+apps/backend/src/admin/treasury-credit-flow.ts:131:                   ${creditTransactions.currency}
+apps/backend/src/admin/treasury-credit-flow.ts:140:      const credited = BigInt(String(r.credited_minor));
+apps/backend/src/admin/treasury-credit-flow.ts:142:      const net = credited - debited;
+apps/backend/src/admin/treasury-credit-flow.ts:146:        creditedMinor: credited.toString(),
+apps/backend/src/admin/treasury-credit-flow.ts:158:    log.error({ err }, 'Treasury credit-flow query failed');
+apps/backend/src/admin/treasury-credit-flow.ts:159:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load treasury credit flow' }, 500);
+apps/backend/src/admin/cashback-realization-daily-csv.ts:2: * Admin cashback-realization daily trend CSV (ADR 009 / 015 / 018).
+apps/backend/src/admin/cashback-realization-daily-csv.ts:4: * `GET /api/admin/cashback-realization/daily.csv` — Tier-3 finance
+apps/backend/src/admin/cashback-realization-daily-csv.ts:6: * Paired with `/api/admin/cashback-activity.csv`: cashback-activity
+apps/backend/src/admin/cashback-realization-daily-csv.ts:20: * `recycledBps()` helper so the CSV can't disagree with what the
+apps/backend/src/admin/cashback-realization-daily-csv.ts:25: * disposition — standard Tier-3 CSV discipline.
+apps/backend/src/admin/cashback-realization-daily-csv.ts:32:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/cashback-realization-daily-csv.ts:34:const log = logger.child({ handler: 'admin-cashback-realization-daily-csv' });
+apps/backend/src/admin/cashback-realization-daily-csv.ts:42:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/cashback-realization-daily-csv.ts:43:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/cashback-realization-daily-csv.ts:99:      LEFT JOIN credit_transactions ct
+apps/backend/src/admin/cashback-realization-daily-csv.ts:124:        csvRow([
+apps/backend/src/admin/cashback-realization-daily-csv.ts:137:        'Admin cashback-realization daily CSV truncated — narrow the window',
+apps/backend/src/admin/cashback-realization-daily-csv.ts:139:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/cashback-realization-daily-csv.ts:144:    const filename = `cashback-realization-daily-${today}.csv`;
+apps/backend/src/admin/cashback-realization-daily-csv.ts:148:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/cashback-realization-daily-csv.ts:154:    log.error({ err }, 'Admin cashback-realization daily CSV failed');
+apps/backend/src/admin/cashback-realization-daily-csv.ts:155:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/credit-adjustments.ts:2: * Admin credit-adjustment endpoint (ADR 017).
+apps/backend/src/admin/credit-adjustments.ts:4: * `POST /api/admin/users/:userId/credit-adjustments` — writes a
+apps/backend/src/admin/credit-adjustments.ts:5: * signed `credit_transactions` row (`type='adjustment'`) and
+apps/backend/src/admin/credit-adjustments.ts:6: * atomically bumps `user_credits.balance_minor`. First endpoint to
+apps/backend/src/admin/credit-adjustments.ts:9: *   2. Idempotency-Key required; repeat → snapshot replay.
+apps/backend/src/admin/credit-adjustments.ts:12: *   5. Discord audit fanout AFTER commit, fire-and-forget.
+apps/backend/src/admin/credit-adjustments.ts:14: * Response envelope: `{ result, audit }` per ADR 017.
+apps/backend/src/admin/credit-adjustments.ts:25:} from '../credits/adjustments.js';
+apps/backend/src/admin/credit-adjustments.ts:28:import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
+apps/backend/src/admin/credit-adjustments.ts:32:  validateIdempotencyKey,
+apps/backend/src/admin/credit-adjustments.ts:33:  withIdempotencyGuard,
+apps/backend/src/admin/credit-adjustments.ts:34:} from './idempotency.js';
+apps/backend/src/admin/credit-adjustments.ts:36:const log = logger.child({ handler: 'admin-credit-adjustment' });
+apps/backend/src/admin/credit-adjustments.ts:76:  const idempotencyKey = c.req.header('idempotency-key');
+apps/backend/src/admin/credit-adjustments.ts:77:  if (!validateIdempotencyKey(idempotencyKey)) {
+apps/backend/src/admin/credit-adjustments.ts:81:        message: `Idempotency-Key header required (${IDEMPOTENCY_KEY_MIN}-${IDEMPOTENCY_KEY_MAX} chars)`,
+apps/backend/src/admin/credit-adjustments.ts:89:    // requireAdmin should have populated this. Fail closed rather
+apps/backend/src/admin/credit-adjustments.ts:112:  // lock keyed by (actor, idempotencyKey). Two concurrent requests
+apps/backend/src/admin/credit-adjustments.ts:116:  // double-credit the user.
+apps/backend/src/admin/credit-adjustments.ts:120:    guardResult = await withIdempotencyGuard(
+apps/backend/src/admin/credit-adjustments.ts:123:        key: idempotencyKey,
+apps/backend/src/admin/credit-adjustments.ts:125:        path: `/api/admin/users/${userId}/credit-adjustments`,
+apps/backend/src/admin/credit-adjustments.ts:147:          idempotencyKey,
+apps/backend/src/admin/credit-adjustments.ts:167:      // today, cap is Y" and escalate or wait rather than retrying
+apps/backend/src/admin/credit-adjustments.ts:168:      // blind. Discord audit fanout below still fires for the
+apps/backend/src/admin/credit-adjustments.ts:188:    endpoint: `POST /api/admin/users/${userId}/credit-adjustments`,
+apps/backend/src/admin/credit-adjustments.ts:193:    idempotencyKey,
+apps/backend/src/admin/payment-method-share.ts:6: * every known method (`xlm`, `usdc`, `credit`, `loop_asset`).
+apps/backend/src/admin/user-credits-csv.ts:2: * Admin user-credits CSV export (ADR 009 / 019 Tier 3).
+apps/backend/src/admin/user-credits-csv.ts:4: * `GET /api/admin/user-credits.csv` — one row per `(user_id, currency)`
+apps/backend/src/admin/user-credits-csv.ts:5: * balance, joined to `users` for email. Support uses this to audit
+apps/backend/src/admin/user-credits-csv.ts:12: * Tier 3 conventions per ADR 019: text/csv + attachment,
+apps/backend/src/admin/user-credits-csv.ts:21:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/user-credits-csv.ts:23:const log = logger.child({ handler: 'admin-user-credits-csv' });
+apps/backend/src/admin/user-credits-csv.ts:29:function csvRow(fields: readonly (string | number | bigint | Date | null)[]): string {
+apps/backend/src/admin/user-credits-csv.ts:33:      if (f instanceof Date) return csvEscape(f.toISOString());
+apps/backend/src/admin/user-credits-csv.ts:35:      return csvEscape(String(f));
+apps/backend/src/admin/user-credits-csv.ts:43:    // currency then balance desc so a "top holders" audit is the
+apps/backend/src/admin/user-credits-csv.ts:61:      log.warn({ rowCount: rows.length }, 'User-credits CSV hit row cap');
+apps/backend/src/admin/user-credits-csv.ts:64:    const lines: string[] = [csvRow(HEADER)];
+apps/backend/src/admin/user-credits-csv.ts:66:      lines.push(csvRow([r.userId, r.email, r.currency, r.balanceMinor, r.updatedAt]));
+apps/backend/src/admin/user-credits-csv.ts:69:      // A2-510: route the sentinel through csvRow so the truncation
+apps/backend/src/admin/user-credits-csv.ts:70:      // shape matches every other Tier-3 admin export (payouts-csv,
+apps/backend/src/admin/user-credits-csv.ts:71:      // merchants-catalog-csv, supplier-spend-activity-csv). Output
+apps/backend/src/admin/user-credits-csv.ts:74:      // drift-free if the sentinel or csvRow format ever changes.
+apps/backend/src/admin/user-credits-csv.ts:75:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/user-credits-csv.ts:82:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/user-credits-csv.ts:83:        'content-disposition': 'attachment; filename="loop-user-credits.csv"',
+apps/backend/src/admin/user-credits-csv.ts:88:    log.error({ err }, 'User-credits CSV failed');
+apps/backend/src/admin/user-credits-csv.ts:89:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to export user-credits CSV' }, 500);
+apps/backend/src/admin/supplier-spend-activity.ts:13: *   - credit-flow       — per-day ledger delta (liability in)
+apps/backend/src/admin/user-credits.ts:2: * Admin per-user credit-balance drill-down (ADR 009 / 015).
+apps/backend/src/admin/user-credits.ts:4: * `GET /api/admin/users/:userId/credits` — lists every
+apps/backend/src/admin/user-credits.ts:5: * `user_credits` row for a user. Ops opens this from a support
+apps/backend/src/admin/user-credits.ts:12: * renders the result next to the user's recent credit_transactions
+apps/backend/src/admin/user-credits.ts:25:const log = logger.child({ handler: 'admin-user-credits' });
+apps/backend/src/admin/user-credits.ts:74:    log.error({ err, userId }, 'Admin user-credits lookup failed');
+apps/backend/src/admin/user-credits.ts:75:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch user credits' }, 500);
+apps/backend/src/admin/csv-escape.ts:2: * CSV escaping for admin exporters (A2-1602).
+apps/backend/src/admin/csv-escape.ts:5: * marker — are documented in `docs/admin-csv-conventions.md`
+apps/backend/src/admin/csv-escape.ts:21: * Shared because 18 admin CSV exporters previously each declared a
+apps/backend/src/admin/csv-escape.ts:26: * opens a CSV in an elevated-privilege context.
+apps/backend/src/admin/csv-escape.ts:31:export function csvEscape(value: string | null | undefined): string {
+apps/backend/src/admin/csv-escape.ts:50: * Joins a row of already-cell-normalised values into a CSV row.
+apps/backend/src/admin/csv-escape.ts:51: * Every exporter has its own `csvRow` that typically coerces
+apps/backend/src/admin/csv-escape.ts:57:export function csvRow(fields: readonly (string | null | undefined)[]): string {
+apps/backend/src/admin/csv-escape.ts:58:  return fields.map(csvEscape).join(',');
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:2: * Admin merchant-flywheel-activity CSV export (ADR 011/015/018).
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:4: * `GET /api/admin/merchants/:merchantId/flywheel-activity.csv` —
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:5: * Tier-3 CSV sibling of the JSON flywheel-activity endpoint
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:18: * cashback-activity.csv + payouts-activity.csv convention.
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:29:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:31:const log = logger.child({ handler: 'admin-merchant-flywheel-activity-csv' });
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:47:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:48:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:129:        csvRow([
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:142:        'Admin merchant flywheel-activity CSV truncated — narrow the window',
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:144:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:149:    const filename = `${merchantId}-flywheel-activity-${today}.csv`;
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:153:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:159:    log.error({ err, merchantId }, 'Admin merchant flywheel-activity CSV failed');
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:160:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/user-credit-transactions.ts:2: * Admin per-user credit-transaction log (ADR 009).
+apps/backend/src/admin/user-credit-transactions.ts:4: * `GET /api/admin/users/:userId/credit-transactions` — paginated
+apps/backend/src/admin/user-credit-transactions.ts:5: * list of `credit_transactions` rows for the given user, newest
+apps/backend/src/admin/user-credit-transactions.ts:7: * `/api/admin/users/:userId/credits` tells ops *what* is owed;
+apps/backend/src/admin/user-credit-transactions.ts:9: * accruals, withdrawals, refunds, adjustments).
+apps/backend/src/admin/user-credit-transactions.ts:16: * for spend/withdrawal, positive for cashback/interest/refund).
+apps/backend/src/admin/user-credit-transactions.ts:23:import { creditTransactions } from '../db/schema.js';
+apps/backend/src/admin/user-credit-transactions.ts:26:const log = logger.child({ handler: 'admin-user-credit-transactions' });
+apps/backend/src/admin/user-credit-transactions.ts:89:    const conditions = [eq(creditTransactions.userId, userId)];
+apps/backend/src/admin/user-credit-transactions.ts:90:    if (typeParam !== undefined) conditions.push(eq(creditTransactions.type, typeParam));
+apps/backend/src/admin/user-credit-transactions.ts:94:      // fixes in `audit-tail-csv.ts` and `adjustments.ts`.
+apps/backend/src/admin/user-credit-transactions.ts:95:      conditions.push(lt(creditTransactions.createdAt, before));
+apps/backend/src/admin/user-credit-transactions.ts:100:      .from(creditTransactions)
+apps/backend/src/admin/user-credit-transactions.ts:102:      .orderBy(desc(creditTransactions.createdAt))
+apps/backend/src/admin/user-credit-transactions.ts:117:    log.error({ err, userId }, 'Admin user credit-transactions lookup failed');
+apps/backend/src/admin/user-credit-transactions.ts:118:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch credit transactions' }, 500);
+apps/backend/src/admin/merchant-flows.ts:38:  /** Total cashback credited to users for this bucket. */
+apps/backend/src/admin/payout-compensation.ts:4: * `POST /api/admin/payouts/:id/compensate` — re-credits the user's
+apps/backend/src/admin/payout-compensation.ts:5: * cashback balance after their queued withdrawal payout permanently
+apps/backend/src/admin/payout-compensation.ts:8: * user's balance where it was before the doomed withdrawal attempt.
+apps/backend/src/admin/payout-compensation.ts:17: *   - `kind='withdrawal'` — order-cashback failures are a separate
+apps/backend/src/admin/payout-compensation.ts:20: *     not be compensated; that would double-credit a user whose
+apps/backend/src/admin/payout-compensation.ts:24: *   - Idempotency-Key required; replay returns the stored snapshot.
+apps/backend/src/admin/payout-compensation.ts:25: *   - Reason 2..500 chars, persisted on the credit_transactions row
+apps/backend/src/admin/payout-compensation.ts:26: *     and echoed in the Discord audit fanout.
+apps/backend/src/admin/payout-compensation.ts:27: *   - Same `{ result, audit }` envelope as refund / adjustment / retry
+apps/backend/src/admin/payout-compensation.ts:34:import { getPayoutForAdmin } from '../credits/pending-payouts.js';
+apps/backend/src/admin/payout-compensation.ts:39:} from '../credits/payout-compensation.js';
+apps/backend/src/admin/payout-compensation.ts:43:import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
+apps/backend/src/admin/payout-compensation.ts:47:  lookupIdempotencyKey,
+apps/backend/src/admin/payout-compensation.ts:48:  storeIdempotencyKey,
+apps/backend/src/admin/payout-compensation.ts:49:  validateIdempotencyKey,
+apps/backend/src/admin/payout-compensation.ts:50:} from './idempotency.js';
+apps/backend/src/admin/payout-compensation.ts:75:  const idempotencyKey = c.req.header('idempotency-key');
+apps/backend/src/admin/payout-compensation.ts:76:  if (!validateIdempotencyKey(idempotencyKey)) {
+apps/backend/src/admin/payout-compensation.ts:80:        message: `Idempotency-Key header required (${IDEMPOTENCY_KEY_MIN}-${IDEMPOTENCY_KEY_MAX} chars)`,
+apps/backend/src/admin/payout-compensation.ts:108:  const endpointPath = `/api/admin/payouts/${id}/compensate`;
+apps/backend/src/admin/payout-compensation.ts:112:  // visible in the audit channel.
+apps/backend/src/admin/payout-compensation.ts:113:  const prior = await lookupIdempotencyKey({
+apps/backend/src/admin/payout-compensation.ts:115:    key: idempotencyKey,
+apps/backend/src/admin/payout-compensation.ts:126:      idempotencyKey,
+apps/backend/src/admin/payout-compensation.ts:137:  if (payout.kind !== 'withdrawal') {
+apps/backend/src/admin/payout-compensation.ts:142:          'Compensation only applies to withdrawal payouts; order-cashback failures use a different flow',
+apps/backend/src/admin/payout-compensation.ts:152:        message: `Payout is in state '${payout.state}'; only 'failed' payouts can be compensated`,
+apps/backend/src/admin/payout-compensation.ts:221:    idempotencyKey,
+apps/backend/src/admin/payout-compensation.ts:227:    await storeIdempotencyKey({
+apps/backend/src/admin/payout-compensation.ts:229:      key: idempotencyKey,
+apps/backend/src/admin/payout-compensation.ts:237:      { err, adminUserId: actor.id, key: idempotencyKey },
+apps/backend/src/admin/payout-compensation.ts:238:      'Failed to persist idempotency snapshot; retry will replay as new write',
+apps/backend/src/admin/payout-compensation.ts:249:    idempotencyKey,
+apps/backend/src/admin/config-history-handler.ts:2: * `configHistoryHandler` — read-side audit-log handler for the
+apps/backend/src/admin/config-history-handler.ts:6: * read-side audit-log query lives in its own focused module
+apps/backend/src/admin/config-history-handler.ts:8: * (ADR-017-shaped write with idempotency-guard machinery) in the
+apps/backend/src/admin/treasury.ts:4: * Aggregates the credit ledger into a single read-optimised snapshot
+apps/backend/src/admin/treasury.ts:7: *   - outstanding[currency] — sum of `user_credits.balance_minor`
+apps/backend/src/admin/treasury.ts:9: *   - totals[currency][type] — sum of `credit_transactions.amount_minor`
+apps/backend/src/admin/treasury.ts:10: *     grouped by (currency, type): "cashback credited all-time" vs
+apps/backend/src/admin/treasury.ts:11: *     "withdrawals paid" vs "interest accrued" etc.
+apps/backend/src/admin/treasury.ts:37:import { userCredits, creditTransactions } from '../db/schema.js';
+apps/backend/src/admin/treasury.ts:64:      currency: creditTransactions.currency,
+apps/backend/src/admin/treasury.ts:65:      type: creditTransactions.type,
+apps/backend/src/admin/treasury.ts:66:      total: sql<string>`COALESCE(SUM(${creditTransactions.amountMinor}), 0)::text`,
+apps/backend/src/admin/treasury.ts:68:    .from(creditTransactions)
+apps/backend/src/admin/treasury.ts:69:    .groupBy(creditTransactions.currency, creditTransactions.type);
+apps/backend/src/admin/read-audit.ts:6: * process via log shipping or Discord audit notifies. We keep the
+apps/backend/src/admin/discord-config.ts:22:   * Admin-write audit feed (notifyAdminAudit, ADR 017). A2-501 —
+apps/backend/src/admin/discord-config.ts:26:   * audit trail was wired up.
+apps/backend/src/admin/discord-config.ts:28:  adminAudit: 'configured' | 'missing';
+apps/backend/src/admin/discord-config.ts:39:    adminAudit: statusOf(env.DISCORD_WEBHOOK_ADMIN_AUDIT),
+apps/backend/src/admin/payouts.ts:16:import { LOOP_ASSET_CODES } from '../credits/payout-asset.js';
+apps/backend/src/admin/payouts.ts:17:import { listPayoutsForAdmin } from '../credits/pending-payouts.js';
+apps/backend/src/admin/payouts.ts:23:   * ADR-024 §2: NULL for `kind='withdrawal'` rows. Pre-this-ADR every
+apps/backend/src/admin/payouts.ts:28:  /** ADR-024 §2 discriminator — `order_cashback` or `withdrawal`. */
+apps/backend/src/admin/payouts.ts:29:  kind: 'order_cashback' | 'withdrawal';
+apps/backend/src/admin/payouts.ts:49:  kind: 'order_cashback' | 'withdrawal';
+apps/backend/src/admin/payouts.ts:140:  // withdrawal (admin cash-out from balance) flows visually.
+apps/backend/src/admin/payouts.ts:142:  if (kindParam !== undefined && kindParam !== 'order_cashback' && kindParam !== 'withdrawal') {
+apps/backend/src/admin/payouts.ts:146:        message: 'kind must be one of: order_cashback, withdrawal',
+apps/backend/src/admin/payouts.ts:169:// `adminRetryPayoutHandler` (POST /api/admin/payouts/:id/retry —
+apps/backend/src/admin/payouts.ts:170:// the ADR-017 admin write) lives in `./payouts-retry.ts`. Re-
+apps/backend/src/admin/payouts.ts:173:export { adminRetryPayoutHandler } from './payouts-retry.js';
+apps/backend/src/admin/cashback-realization.ts:8: * back on Loop rather than withdrawing or hoarding it.
+apps/backend/src/admin/cashback-realization.ts:10: * Aggregates `credit_transactions` by `currency`:
+apps/backend/src/admin/cashback-realization.ts:13: *   - `withdrawnMinor` = ABS(SUM(amount_minor)) WHERE type='withdrawal'
+apps/backend/src/admin/cashback-realization.ts:14: *   - `outstandingMinor` = SUM(balance_minor) in user_credits
+apps/backend/src/admin/cashback-realization.ts:29:import { creditTransactions, userCredits } from '../db/schema.js';
+apps/backend/src/admin/cashback-realization.ts:42:  withdrawn: string | null;
+apps/backend/src/admin/cashback-realization.ts:68:        ${creditTransactions.currency} AS currency,
+apps/backend/src/admin/cashback-realization.ts:70:          SUM(CASE WHEN ${creditTransactions.type} = 'cashback' THEN ${creditTransactions.amountMinor} ELSE 0 END),
+apps/backend/src/admin/cashback-realization.ts:75:            SUM(CASE WHEN ${creditTransactions.type} = 'spend' THEN ${creditTransactions.amountMinor} ELSE 0 END),
+apps/backend/src/admin/cashback-realization.ts:81:            SUM(CASE WHEN ${creditTransactions.type} = 'withdrawal' THEN ${creditTransactions.amountMinor} ELSE 0 END),
+apps/backend/src/admin/cashback-realization.ts:84:        )::text AS withdrawn
+apps/backend/src/admin/cashback-realization.ts:85:      FROM ${creditTransactions}
+apps/backend/src/admin/cashback-realization.ts:86:      GROUP BY GROUPING SETS ((${creditTransactions.currency}), ())
+apps/backend/src/admin/cashback-realization.ts:125:        withdrawnMinor: toBigIntSafe(r.withdrawn).toString(),
+apps/backend/src/admin/idempotency-constants.ts:2: * Admin idempotency constants (ADR 017).
+apps/backend/src/admin/idempotency-constants.ts:5: * (`./idempotency.ts`) and the single-row store layer
+apps/backend/src/admin/idempotency-constants.ts:6: * (`./idempotency-store.ts`) can share the 24h TTL without a
+apps/backend/src/admin/idempotency-constants.ts:7: * circular import. Re-exported from `./idempotency.ts` so existing
+apps/backend/src/admin/idempotency-constants.ts:15: * A2-500: ADR-017 #6 promised a 24h TTL on admin-idempotency
+apps/backend/src/admin/idempotency-constants.ts:18: *   - `sweepStaleIdempotencyKeys()` runs hourly from the app-level
+apps/backend/src/admin/idempotency-constants.ts:21: *   - `lookupIdempotencyKey()` filters expired rows at read time so
+apps/backend/src/admin/payouts-retry.ts:2: * `POST /api/admin/payouts/:id/retry` — admin-only retry of a
+apps/backend/src/admin/payouts-retry.ts:6: * compliant: actor from `requireAdmin`, `Idempotency-Key` header
+apps/backend/src/admin/payouts-retry.ts:8: * repeat, Discord audit fanout AFTER commit. Response envelope is
+apps/backend/src/admin/payouts-retry.ts:9: * `{ result, audit }` to match the credit-adjustment write so the
+apps/backend/src/admin/payouts-retry.ts:12: * Pulled out of the read-only payouts handler file because retry
+apps/backend/src/admin/payouts-retry.ts:14: * idempotency-key + audit-envelope plumbing the four other handlers
+apps/backend/src/admin/payouts-retry.ts:20:import { resetPayoutToPending } from '../credits/pending-payouts.js';
+apps/backend/src/admin/payouts-retry.ts:24:import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
+apps/backend/src/admin/payouts-retry.ts:28:  lookupIdempotencyKey,
+apps/backend/src/admin/payouts-retry.ts:29:  storeIdempotencyKey,
+apps/backend/src/admin/payouts-retry.ts:30:  validateIdempotencyKey,
+apps/backend/src/admin/payouts-retry.ts:31:} from './idempotency.js';
+apps/backend/src/admin/payouts-retry.ts:34:const log = logger.child({ handler: 'admin-payouts-retry' });
+apps/backend/src/admin/payouts-retry.ts:43:  kind: 'order_cashback' | 'withdrawal';
+apps/backend/src/admin/payouts-retry.ts:82: * POST /api/admin/payouts/:id/retry — flip a `failed` row back to
+apps/backend/src/admin/payouts-retry.ts:84: * use only: unbounded-retry from the worker itself would mask real
+apps/backend/src/admin/payouts-retry.ts:85: * issues, so retry is a manual ops action with an audit trail via
+apps/backend/src/admin/payouts-retry.ts:86: * the admin user context (set by `requireAdmin`).
+apps/backend/src/admin/payouts-retry.ts:97: * ADR 017 compliant. Payout retry is an admin write — every invariant
+apps/backend/src/admin/payouts-retry.ts:98: * applies: actor from `requireAdmin`, Idempotency-Key header required,
+apps/backend/src/admin/payouts-retry.ts:100: * audit fanout AFTER commit. Response envelope is `{ result, audit }`
+apps/backend/src/admin/payouts-retry.ts:101: * to match the credit-adjustment write so the admin UI renders both
+apps/backend/src/admin/payouts-retry.ts:110:  const idempotencyKey = c.req.header('idempotency-key');
+apps/backend/src/admin/payouts-retry.ts:111:  if (!validateIdempotencyKey(idempotencyKey)) {
+apps/backend/src/admin/payouts-retry.ts:115:        message: `Idempotency-Key header required (${IDEMPOTENCY_KEY_MIN}-${IDEMPOTENCY_KEY_MAX} chars)`,
+apps/backend/src/admin/payouts-retry.ts:143:  const endpointPath = `/api/admin/payouts/${id}/retry`;
+apps/backend/src/admin/payouts-retry.ts:145:  // Replay path: snapshot hit -> return stored response + audit-fanout
+apps/backend/src/admin/payouts-retry.ts:147:  const prior = await lookupIdempotencyKey({
+apps/backend/src/admin/payouts-retry.ts:149:    key: idempotencyKey,
+apps/backend/src/admin/payouts-retry.ts:158:      idempotencyKey,
+apps/backend/src/admin/payouts-retry.ts:164:  // Fresh retry.
+apps/backend/src/admin/payouts-retry.ts:169:    log.error({ err, payoutId: id }, 'Admin retry failed');
+apps/backend/src/admin/payouts-retry.ts:170:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to retry payout' }, 500);
+apps/backend/src/admin/payouts-retry.ts:178:  log.info({ payoutId: id, adminUserId: actor.id }, 'Payout reset to pending by admin retry');
+apps/backend/src/admin/payouts-retry.ts:184:    idempotencyKey,
+apps/backend/src/admin/payouts-retry.ts:190:    await storeIdempotencyKey({
+apps/backend/src/admin/payouts-retry.ts:192:      key: idempotencyKey,
+apps/backend/src/admin/payouts-retry.ts:200:      { err, adminUserId: actor.id, key: idempotencyKey },
+apps/backend/src/admin/payouts-retry.ts:201:      'Failed to persist idempotency snapshot; retry will replay as new write',
+apps/backend/src/admin/payouts-retry.ts:210:    idempotencyKey,
+apps/backend/src/admin/operators-snapshot-csv.ts:2: * Admin operators snapshot CSV export (ADR 013 / 018 / 022).
+apps/backend/src/admin/operators-snapshot-csv.ts:4: * `GET /api/admin/operators-snapshot.csv?since=<iso>` — flattens
+apps/backend/src/admin/operators-snapshot-csv.ts:5: * per-operator stats + fulfilment-latency into one RFC 4180 CSV
+apps/backend/src/admin/operators-snapshot-csv.ts:19: * CSV contracts (payouts-activity, supplier-spend-activity).
+apps/backend/src/admin/operators-snapshot-csv.ts:25:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/operators-snapshot-csv.ts:27:const log = logger.child({ handler: 'admin-operators-snapshot-csv' });
+apps/backend/src/admin/operators-snapshot-csv.ts:47:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/operators-snapshot-csv.ts:48:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/operators-snapshot-csv.ts:190:        csvRow([
+apps/backend/src/admin/operators-snapshot-csv.ts:209:        'Admin operators-snapshot CSV truncated — narrow the window',
+apps/backend/src/admin/operators-snapshot-csv.ts:211:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/operators-snapshot-csv.ts:216:    const filename = `operators-snapshot-${today}.csv`;
+apps/backend/src/admin/operators-snapshot-csv.ts:220:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/operators-snapshot-csv.ts:226:    log.error({ err }, 'Admin operators-snapshot CSV failed');
+apps/backend/src/admin/operators-snapshot-csv.ts:227:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/payouts-monthly.ts:8: * cashback-monthly tracks liability creation (user_credit +
+apps/backend/src/admin/payouts-csv.ts:2: * Admin pending-payouts CSV export (ADR 015).
+apps/backend/src/admin/payouts-csv.ts:4: * `GET /api/admin/payouts.csv` — finance-ready CSV of pending_payouts
+apps/backend/src/admin/payouts-csv.ts:16: *   Content-Type: text/csv; charset=utf-8
+apps/backend/src/admin/payouts-csv.ts:18: *   Content-Disposition: attachment; filename="payouts-<since>.csv"
+apps/backend/src/admin/payouts-csv.ts:29:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/payouts-csv.ts:31:const log = logger.child({ handler: 'admin-payouts-csv' });
+apps/backend/src/admin/payouts-csv.ts:56:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/payouts-csv.ts:57:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/payouts-csv.ts:105:      // A2-1610: typed `gte()` — see matching fix in `audit-tail-csv.ts`.
+apps/backend/src/admin/payouts-csv.ts:116:        csvRow([
+apps/backend/src/admin/payouts-csv.ts:140:        'Admin payouts CSV truncated — narrow the window',
+apps/backend/src/admin/payouts-csv.ts:142:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/payouts-csv.ts:146:    const filename = `payouts-${since.toISOString().slice(0, 10)}.csv`;
+apps/backend/src/admin/payouts-csv.ts:150:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/payouts-csv.ts:156:    log.error({ err }, 'Admin payouts CSV failed');
+apps/backend/src/admin/payouts-csv.ts:157:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/discord-notifiers.ts:16: * `monitoring`, `admin-audit`), not the webhook URL.
+apps/backend/src/admin/treasury-credit-flow-csv.ts:2: * Admin treasury credit-flow CSV export (ADR 009 / 015 / 018).
+apps/backend/src/admin/treasury-credit-flow-csv.ts:4: * `GET /api/admin/treasury/credit-flow.csv?days=31&currency=USD` —
+apps/backend/src/admin/treasury-credit-flow-csv.ts:5: * RFC 4180 CSV form of the credit-flow time series (per-day × per-
+apps/backend/src/admin/treasury-credit-flow-csv.ts:6: * currency credited / debited / net from `credit_transactions`).
+apps/backend/src/admin/treasury-credit-flow-csv.ts:8: * Completes the finance-CSV quartet next to the existing exports:
+apps/backend/src/admin/treasury-credit-flow-csv.ts:9: *   - cashback-activity.csv         — what Loop minted
+apps/backend/src/admin/treasury-credit-flow-csv.ts:10: *   - payouts-activity.csv          — what Loop settled on-chain
+apps/backend/src/admin/treasury-credit-flow-csv.ts:11: *   - supplier-spend/activity.csv   — what Loop paid CTX
+apps/backend/src/admin/treasury-credit-flow-csv.ts:12: *   - treasury/credit-flow.csv      — net ledger movement (this file)
+apps/backend/src/admin/treasury-credit-flow-csv.ts:15: *   day,currency,credited_minor,debited_minor,net_minor
+apps/backend/src/admin/treasury-credit-flow-csv.ts:34:import { csvEscape } from './csv-escape.js';
+apps/backend/src/admin/treasury-credit-flow-csv.ts:36:const log = logger.child({ handler: 'admin-treasury-credit-flow-csv' });
+apps/backend/src/admin/treasury-credit-flow-csv.ts:42:const HEADERS = ['day', 'currency', 'credited_minor', 'debited_minor', 'net_minor'] as const;
+apps/backend/src/admin/treasury-credit-flow-csv.ts:44:function csvRow(values: Array<string | null | undefined>): string {
+apps/backend/src/admin/treasury-credit-flow-csv.ts:45:  return values.map((v) => csvEscape(v ?? null)).join(',');
+apps/backend/src/admin/treasury-credit-flow-csv.ts:51:  credited_minor: string | number | bigint;
+apps/backend/src/admin/treasury-credit-flow-csv.ts:106:            )::text AS credited_minor,
+apps/backend/src/admin/treasury-credit-flow-csv.ts:112:          LEFT JOIN credit_transactions ct
+apps/backend/src/admin/treasury-credit-flow-csv.ts:126:            )::text AS credited_minor,
+apps/backend/src/admin/treasury-credit-flow-csv.ts:131:          FROM credit_transactions ct
+apps/backend/src/admin/treasury-credit-flow-csv.ts:150:      const credited = toBigInt(r.credited_minor);
+apps/backend/src/admin/treasury-credit-flow-csv.ts:152:      const net = credited - debited;
+apps/backend/src/admin/treasury-credit-flow-csv.ts:154:        csvRow([
+apps/backend/src/admin/treasury-credit-flow-csv.ts:157:          credited.toString(),
+apps/backend/src/admin/treasury-credit-flow-csv.ts:167:        'Admin treasury credit-flow CSV truncated — narrow the window',
+apps/backend/src/admin/treasury-credit-flow-csv.ts:169:      lines.push(csvRow(['__TRUNCATED__']));
+apps/backend/src/admin/treasury-credit-flow-csv.ts:174:    const filename = `treasury-credit-flow-${today}.csv`;
+apps/backend/src/admin/treasury-credit-flow-csv.ts:178:        'content-type': 'text/csv; charset=utf-8',
+apps/backend/src/admin/treasury-credit-flow-csv.ts:184:    log.error({ err }, 'Admin treasury credit-flow CSV failed');
+apps/backend/src/admin/treasury-credit-flow-csv.ts:185:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/merchant-cashback-monthly.ts:13: * `credit_transactions` (same choice as the scalar merchant-
+apps/backend/src/admin/merchant-cashback-monthly.ts:15: * credit_transactions row is delayed and matches the cashback-
+apps/backend/src/admin/merchant-cashback-monthly.ts:16: * config audit trail the config was pinned against — no
+apps/backend/src/admin/merchant-cashback-monthly.ts:17: * credit_transactions JOIN through `orders`.

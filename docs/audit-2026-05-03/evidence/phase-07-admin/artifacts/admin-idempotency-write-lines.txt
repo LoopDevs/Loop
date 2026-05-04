@@ -1,0 +1,29 @@
+apps/backend/src/admin/credit-adjustments.ts:33:  withIdempotencyGuard,
+apps/backend/src/admin/credit-adjustments.ts:120:    guardResult = await withIdempotencyGuard(
+apps/backend/src/admin/payout-compensation.ts:47:  lookupIdempotencyKey,
+apps/backend/src/admin/payout-compensation.ts:48:  storeIdempotencyKey,
+apps/backend/src/admin/payout-compensation.ts:69:export async function adminPayoutCompensationHandler(c: Context): Promise<Response> {
+apps/backend/src/admin/payout-compensation.ts:113:  const prior = await lookupIdempotencyKey({
+apps/backend/src/admin/payout-compensation.ts:227:    await storeIdempotencyKey({
+apps/backend/src/admin/withdrawals.ts:40:  withIdempotencyGuard,
+apps/backend/src/admin/withdrawals.ts:154:    guardResult = await withIdempotencyGuard(
+apps/backend/src/admin/payouts-retry.ts:28:  lookupIdempotencyKey,
+apps/backend/src/admin/payouts-retry.ts:29:  storeIdempotencyKey,
+apps/backend/src/admin/payouts-retry.ts:104:export async function adminRetryPayoutHandler(c: Context): Promise<Response> {
+apps/backend/src/admin/payouts-retry.ts:147:  const prior = await lookupIdempotencyKey({
+apps/backend/src/admin/payouts-retry.ts:190:    await storeIdempotencyKey({
+apps/backend/src/admin/idempotency.ts:9: * This file owns the high-level `withIdempotencyGuard` (advisory-
+apps/backend/src/admin/idempotency.ts:12: * single-row store primitives (`lookupIdempotencyKey`,
+apps/backend/src/admin/idempotency.ts:13: * `storeIdempotencyKey`, `sweepStaleIdempotencyKeys`) live in
+apps/backend/src/admin/idempotency.ts:40:  lookupIdempotencyKey,
+apps/backend/src/admin/idempotency.ts:41:  storeIdempotencyKey,
+apps/backend/src/admin/idempotency.ts:54: * `withIdempotencyGuard` to serialise the lookup → write → store
+apps/backend/src/admin/idempotency.ts:108: *      same TTL gate as `lookupIdempotencyKey()` applies here so the
+apps/backend/src/admin/idempotency.ts:122: * The handler uses storeIdempotencyKey → advisory lock → applyAdmin…
+apps/backend/src/admin/idempotency.ts:125:export async function withIdempotencyGuard(
+apps/backend/src/admin/idempotency.ts:156:          // the guard means every handler using `withIdempotencyGuard`
+apps/backend/src/admin/refunds.ts:30:  lookupIdempotencyKey,
+apps/backend/src/admin/refunds.ts:31:  storeIdempotencyKey,
+apps/backend/src/admin/refunds.ts:72:export async function adminRefundHandler(c: Context): Promise<Response> {
+apps/backend/src/admin/refunds.ts:112:  const prior = await lookupIdempotencyKey({
+apps/backend/src/admin/refunds.ts:176:    await storeIdempotencyKey({

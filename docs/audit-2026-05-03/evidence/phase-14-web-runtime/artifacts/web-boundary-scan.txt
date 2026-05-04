@@ -1,0 +1,58 @@
+Web architecture boundary scan
+
+Loader usage:
+apps/web/app/routes/sitemap.tsx:71:export async function loader(): Promise<Response> {
+apps/web/app/routes/not-found-ssr.tsx:12:export function loader(_: Route.LoaderArgs): never {
+
+Direct fetch usage:
+apps/web/app/services/config.ts:38:  const res = await fetch(`${API_BASE}/api/config`, {
+apps/web/app/services/clusters.ts:38:    response = await fetch(`${API_BASE}/api/clusters?${qs.toString()}`, {
+apps/web/app/services/api-client.ts:78:    response = await fetch(`${API_BASE}${path}`, init);
+apps/web/app/hooks/use-orders.ts:52:      void query.refetch();
+apps/web/app/routes/sitemap.tsx:40:    const res = await fetch(
+apps/web/app/routes/orders.$id.tsx:134:            <Button variant="secondary" onClick={() => void refetch()}>
+apps/web/app/routes/orders.tsx:291:                // cached error instead of refetching. Use `refetch()` so
+apps/web/app/routes/orders.tsx:293:                refetch();
+
+Capacitor/native plugin imports outside app/native (expected none):
+
+Capacitor/native plugin imports inside app/native:
+apps/web/app/native/secure-storage.ts:1:import { Capacitor } from '@capacitor/core';
+apps/web/app/native/secure-storage.ts:45:  const mod = await import('@aparajita/capacitor-secure-storage');
+apps/web/app/native/secure-storage.ts:55:  const mod = await import('@capacitor/preferences');
+apps/web/app/native/biometrics.ts:1:import { Capacitor } from '@capacitor/core';
+apps/web/app/native/biometrics.ts:16:    const { BiometricAuth } = await import('@aparajita/capacitor-biometric-auth');
+apps/web/app/native/biometrics.ts:34:    const { BiometricAuth } = await import('@aparajita/capacitor-biometric-auth');
+apps/web/app/native/haptics.ts:1:import { Capacitor } from '@capacitor/core';
+apps/web/app/native/haptics.ts:6:    const { Haptics, ImpactStyle } = await import('@capacitor/haptics');
+apps/web/app/native/haptics.ts:14:    const { Haptics, ImpactStyle } = await import('@capacitor/haptics');
+apps/web/app/native/haptics.ts:24:    const { Haptics, NotificationType } = await import('@capacitor/haptics');
+apps/web/app/native/platform.ts:1:import { Capacitor } from '@capacitor/core';
+apps/web/app/native/app-lock.ts:1:import { Capacitor } from '@capacitor/core';
+apps/web/app/native/app-lock.ts:10:    const { Preferences } = await import('@capacitor/preferences');
+apps/web/app/native/app-lock.ts:21:  const { Preferences } = await import('@capacitor/preferences');
+apps/web/app/native/back-button.ts:1:import { Capacitor } from '@capacitor/core';
+apps/web/app/native/back-button.ts:2:import type { PluginListenerHandle } from '@capacitor/core';
+apps/web/app/native/back-button.ts:21:    const { App } = await import('@capacitor/app');
+apps/web/app/native/share.ts:1:import { Capacitor } from '@capacitor/core';
+apps/web/app/native/share.ts:30:    const { Filesystem, Directory } = await import('@capacitor/filesystem');
+apps/web/app/native/share.ts:70:      const { Share } = await import('@capacitor/share');
+apps/web/app/native/status-bar.ts:1:import { Capacitor } from '@capacitor/core';
+apps/web/app/native/status-bar.ts:6:    const { StatusBar, Style } = await import('@capacitor/status-bar');
+apps/web/app/native/status-bar.ts:14:    const { StatusBar } = await import('@capacitor/status-bar');
+apps/web/app/native/network.ts:1:import { Capacitor } from '@capacitor/core';
+apps/web/app/native/network.ts:17:      const { Network } = await import('@capacitor/network');
+apps/web/app/native/notifications.ts:1:import { Capacitor } from '@capacitor/core';
+apps/web/app/native/notifications.ts:8:    const { PushNotifications } = await import('@capacitor/push-notifications');
+apps/web/app/native/webview.ts:1:import { Capacitor } from '@capacitor/core';
+apps/web/app/native/webview.ts:62:      const { InAppBrowser, ToolBarType } = await import('@capgo/inappbrowser');
+apps/web/app/native/purchase-storage.ts:1:import { Capacitor } from '@capacitor/core';
+apps/web/app/native/purchase-storage.ts:27:    const { Preferences } = await import('@capacitor/preferences');
+apps/web/app/native/purchase-storage.ts:43:    const { Preferences } = await import('@capacitor/preferences');
+apps/web/app/native/purchase-storage.ts:73:    const { Preferences } = await import('@capacitor/preferences');
+apps/web/app/native/clipboard.ts:1:import { Capacitor } from '@capacitor/core';
+apps/web/app/native/clipboard.ts:8:      const { Clipboard } = await import('@capacitor/clipboard');
+apps/web/app/native/clipboard.ts:32:      const { Clipboard } = await import('@capacitor/clipboard');
+apps/web/app/native/task-switcher-overlay.ts:1:import { Capacitor } from '@capacitor/core';
+apps/web/app/native/keyboard.ts:1:import { Capacitor } from '@capacitor/core';
+apps/web/app/native/keyboard.ts:16:    const { Keyboard } = await import('@capacitor/keyboard');

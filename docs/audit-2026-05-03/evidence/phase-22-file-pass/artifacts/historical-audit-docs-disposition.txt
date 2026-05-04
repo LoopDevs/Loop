@@ -1,0 +1,19 @@
+Historical audit material disposition
+Date: 2026-05-03
+Scope: docs/audit-2026-04-29/**, docs/audit-2026-evidence/**, docs/archive/**
+
+Disposition rule:
+
+These files are tracked, but they are historical audit/research output rather than current application source, current configuration, current documentation contract, or current operator runbook. Per cold-audit rules, they must not be used as findings truth. They are dispositioned as external-output-excluded or historical archive reviewed for inventory presence only.
+
+Verification performed:
+
+- Enumerated file paths to ensure they are included in tracked-file accounting.
+- Did not use historical findings, notes, evidence, or conclusions as proof for current A4 findings.
+- Current A4 findings are tied to fresh code/config/docs/runtime evidence captured under docs/audit-2026-05-03.
+
+Disposition:
+
+- docs/audit-2026-04-29/**: external-output-excluded from current evidence truth; retained as historical baseline scaffold only.
+- docs/audit-2026-evidence/**: external-output-excluded from current evidence truth; retained as historical audit evidence only.
+- docs/archive/**: dead-or-archive reviewed; retained as historical context, not active product truth.

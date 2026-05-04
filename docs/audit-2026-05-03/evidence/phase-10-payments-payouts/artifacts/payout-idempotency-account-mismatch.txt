@@ -1,0 +1,29 @@
+Cold evidence: payout idempotency lookup can search the wrong Stellar account.
+
+Current code:
+
+- apps/backend/src/payments/payout-worker-pay-one.ts:52-70
+  - `payOne` performs the Horizon idempotency pre-check before submit.
+  - The comment says the lookup account should be the operator pubkey signed with by `submitPayout`, but then reuses `row.assetIssuer` as the lookup account.
+  - The code calls:
+    - `findOutboundPaymentByMemo({ account: row.assetIssuer, to: row.toAddress, memo: row.memoText })`
+
+- apps/backend/src/payments/payout-submit.ts:115-142
+  - `submitPayout` derives the real sending account from `Keypair.fromSecret(args.secret)`.
+  - It loads sequence/account state with `server.loadAccount(keypair.publicKey())`.
+  - The payment operation uses `assetIssuer` only to identify the asset being sent, not the source account.
+
+- apps/backend/src/env.ts:288-323
+  - `LOOP_STELLAR_USDLOOP_ISSUER`, `LOOP_STELLAR_GBPLOOP_ISSUER`, and `LOOP_STELLAR_EURLOOP_ISSUER` are independent public-key env vars.
+  - `LOOP_STELLAR_OPERATOR_SECRET` is an independent secret-key env var.
+  - No env schema check derives the operator public key and requires equality with the configured issuer(s), and no separate `LOOP_STELLAR_OPERATOR_ACCOUNT` exists.
+
+- docs/adr/016-stellar-sdk-payout-submit.md:108-120
+  - The design says the idempotency pre-check queries Horizon for payments from the operator account.
+  - The design says sequence numbers are fetched from `Server.loadAccount(operator)`.
+
+Reasoning:
+
+If the operator secret public key differs from the LOOP asset issuer account, the idempotency pre-check scans `/accounts/<issuer>/payments` and filters `p.from === <issuer>`. A prior payout sent from the actual operator account will not be found. On a retry after an ambiguous transient submit outcome, the worker can then reclaim the payout and sign a fresh transaction from the operator account, creating a duplicate outbound payout with the same memo/to/asset.
+
+The code comment documents the hidden invariant ("operator account IS the issuer"), but the configuration model and docs describe separate issuer and operator settings. A hidden invariant is not enough for a money-movement idempotency guarantee.

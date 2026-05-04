@@ -1,0 +1,4 @@
+apps/backend/src/routes/orders.ts:63:  app.get('/api/orders/:id', rateLimit(120, 60_000), getOrderHandler);
+apps/backend/src/routes/orders.ts:74:  app.get('/api/orders/loop', rateLimit(60, 60_000), loopListOrdersHandler);
+apps/backend/src/routes/admin-payouts.ts:48:  app.get('/api/admin/payouts/:id', rateLimit(120, 60_000), adminGetPayoutHandler);
+apps/backend/src/routes/admin-payouts.ts:60:  app.get('/api/admin/payouts/settlement-lag', rateLimit(60, 60_000), adminSettlementLagHandler);

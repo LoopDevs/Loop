@@ -1,0 +1,25 @@
+Cold evidence: payment-watcher cursor watchdog can false-alert during normal idle periods.
+
+Current code:
+
+- apps/backend/src/payments/watcher.ts:187-197
+  - After processing a Horizon page, the watcher writes the cursor only when:
+    - at least one record exists, using the last record's `paging_token`; or
+    - the page is empty but Horizon returned `nextCursor`.
+  - When Horizon returns `{ records: [], nextCursor: null }`, the watcher returns without writing `watcher_cursors`.
+
+- apps/backend/src/payments/cursor-watchdog.ts:39-45
+  - The watchdog comment says a clean empty-page tick needs no cursor change beyond an existing row's `updated_at`.
+  - It treats a cursor row whose `updated_at` is older than 10 minutes as stuck and emits `notifyPaymentWatcherStuck`.
+
+- apps/backend/src/payments/cursor-watchdog.ts:69-83
+  - The implementation only reads `watcher_cursors.updated_at`; it has no separate heartbeat table/field.
+
+- apps/backend/src/payments/__tests__/watcher.test.ts:335-342
+  - Unit tests explicitly assert `no records -> no cursor writes`.
+
+Reasoning:
+
+Once the watcher has processed at least one payment and created the `stellar-deposits` cursor row, a later period with no new payments leaves `updated_at` unchanged. The scheduled watcher can continue ticking successfully every 10 seconds, but after 10 minutes the watchdog will see the old cursor timestamp and alert as if the watcher is stuck. This makes the stuck-watcher alert noisy during normal low-volume periods and trains operators to distrust the page.
+
+The code comments and the implementation disagree: the watchdog expects empty healthy ticks to refresh `updated_at`, while `runPaymentWatcherTick` deliberately does not write on empty pages.

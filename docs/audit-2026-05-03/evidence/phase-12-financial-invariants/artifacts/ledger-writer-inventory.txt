@@ -1,0 +1,31 @@
+Phase 12 ledger writer inventory from current source.
+
+Positive credit writers:
+
+- `orders/fulfillment.ts`: `type='cashback'`, positive `amountMinor`, `referenceType='order'`, increases `user_credits`.
+- `credits/accrue-interest.ts`: `type='interest'`, positive `amountMinor`, `periodCursor`, increases `user_credits`; partial unique index prevents duplicate period accrual.
+- `credits/refunds.ts`: `type='refund'`, positive `amountMinor`, `referenceType='order'`, increases `user_credits`; partial unique index prevents duplicate order refund.
+- `credits/adjustments.ts`: `type='adjustment'`, signed `amountMinor`, `referenceType='admin_adjustment'`, updates `user_credits`; daily cap guarded by advisory transaction lock.
+
+Negative debit writers:
+
+- `orders/repo-credit-order.ts`: `type='spend'`, negative `amountMinor`, `referenceType='order'`, decreases `user_credits` under row lock.
+- `credits/withdrawals.ts`: `type='withdrawal'`, negative `amountMinor`, `referenceType='payout'`, decreases `user_credits` and queues a withdrawal payout in the same transaction.
+- `credits/adjustments.ts`: negative `type='adjustment'`, decreases `user_credits` after nonnegative-balance check.
+
+Read/reconciliation surfaces reviewed in this pass:
+
+- `credits/ledger-invariant.ts`: compares `user_credits.balance_minor` to `SUM(credit_transactions.amount_minor)` per `(user_id, currency)`, including orphan transaction rows.
+- `admin/reconciliation.ts`: exposes the shared ledger invariant SQL and row count.
+- `credits/liabilities.ts`: sums outstanding `user_credits` per home currency.
+- `admin/treasury.ts` and `admin/treasury-builders.ts`: aggregate outstanding balances, ledger totals, payout counts, fulfilled-order flows, and live Stellar holdings.
+- `admin/cashback-realization.ts`: computes earned/spent/withdrawn/outstanding aggregates from `credit_transactions` and `user_credits`.
+
+Tests/commands relevant to this pass:
+
+- `npm run test:integration -w @loop/backend`: 7 files / 65 tests passed against real Postgres.
+- Existing unit/integration tests cover credit order debits, withdrawal debits, refunds, adjustments, interest idempotency, ledger-invariant pure rows, and admin financial read shapes.
+
+Important coverage gap:
+
+- The existing ledger invariant does not include confirmed `pending_payouts.kind='order_cashback'` as a debit or non-spendable liability. Therefore the invariant can pass while A4-024 is present.

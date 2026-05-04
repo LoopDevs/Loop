@@ -1,0 +1,31 @@
+Command/evidence date: 2026-05-03
+Scope: Codex cold audit only. Claude audit workspace excluded from evidence.
+Redaction: no secrets captured.
+
+Files inspected:
+
+- README.md
+- docs/roadmap.md
+- apps/backend/src/orders/fulfillment.ts
+- apps/backend/src/payments/payout-worker.ts
+- apps/web/app/routes/settings.wallet.tsx
+- apps/backend/src/observability-handlers.ts
+- apps/backend/src/app.ts
+
+Drift 1: README says cashback-to-Stellar is not shipped.
+
+- README.md line 3: "Cashback-to-Stellar is a Phase 2 feature on the roadmap — not yet shipped."
+- docs/roadmap.md lines 91-126 says Phase 2 reshaped into the ADR 015/016 cashback-app switch and that work is code-complete.
+- apps/backend/src/orders/fulfillment.ts inserts `pending_payouts` rows when a user has a linked wallet and a configured LOOP issuer.
+- apps/backend/src/payments/payout-worker.ts starts the payout worker and submits pending payouts when configured.
+- apps/web/app/routes/settings.wallet.tsx implements `/settings/wallet` for linking/unlinking a Stellar address to receive LOOP-branded cashback.
+
+Conclusion: the top-level README gives a stale product-state summary and can mislead new contributors/operators about current money-moving code.
+
+Drift 2: roadmap still lists the Prometheus metrics endpoint as not done.
+
+- docs/roadmap.md line 192 has unchecked "- [ ] Prometheus metrics endpoint".
+- apps/backend/src/app.ts mounts `app.get('/metrics', metricsHandler)`.
+- apps/backend/src/observability-handlers.ts implements Prometheus text exposition for rate limits, request totals, circuit state, runtime surface degradation, and worker gauges.
+
+Conclusion: the roadmap's observability checklist is stale for `/metrics`.

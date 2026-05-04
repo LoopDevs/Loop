@@ -1,0 +1,17 @@
+4:  push:
+6:  pull_request:
+16:  contents: read
+19:  group: ci-${{ github.ref }}
+20:  cancel-in-progress: true
+32:  quality:
+95:  test-unit:
+149:  flywheel-integration:
+202:  audit:
+232:  sbom:
+329:  container-cve-scan:
+385:  secret-scan:
+413:  build:
+526:  test-e2e:
+608:  test-e2e-mocked:
+689:  test-e2e-flywheel:
+757:  notify:

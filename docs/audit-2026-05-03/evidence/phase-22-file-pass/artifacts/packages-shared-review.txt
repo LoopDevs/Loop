@@ -1,0 +1,51 @@
+packages/shared bottom-up review
+Date: 2026-05-03
+Scope: packages/shared tracked files.
+
+Reviewed files:
+
+- packages/shared/AGENTS.md
+- packages/shared/README.md
+- packages/shared/package.json
+- packages/shared/tsconfig.json
+- packages/shared/src/admin-assets.ts
+- packages/shared/src/admin-cashback-realization.ts
+- packages/shared/src/admin-operator-mixes.ts
+- packages/shared/src/admin-operator-stats.ts
+- packages/shared/src/admin-settlement-lag.ts
+- packages/shared/src/admin-supplier-spend.ts
+- packages/shared/src/admin-treasury.ts
+- packages/shared/src/api.ts
+- packages/shared/src/assert-never.ts
+- packages/shared/src/cashback-realization.ts
+- packages/shared/src/credit-transaction-type.ts
+- packages/shared/src/index.ts
+- packages/shared/src/loop-asset.ts
+- packages/shared/src/loop-orders.ts
+- packages/shared/src/merchants.ts
+- packages/shared/src/money-format.ts
+- packages/shared/src/order-state.ts
+- packages/shared/src/orders.ts
+- packages/shared/src/payout-state.ts
+- packages/shared/src/proto/clustering_pb.ts
+- packages/shared/src/public-cashback-preview.ts
+- packages/shared/src/public-cashback-stats.ts
+- packages/shared/src/public-merchant.ts
+- packages/shared/src/public-top-cashback-merchants.ts
+- packages/shared/src/search.ts
+- packages/shared/src/slugs.ts
+- packages/shared/src/stellar.ts
+- packages/shared/src/users-me.ts
+
+Verification notes:
+
+- Shared package exports are present through src/index.ts and package export map; package/package-json disposition was already reviewed in Phase 16.
+- Generated protobuf module shape mismatch is already captured by A4-029.
+- Admin wire-shape coverage is partially centralized here, but duplicated remaining admin contracts are captured by A4-028.
+- Public API types are imported by current backend producers and web consumers; no new public contract finding from shared files.
+- Order/payment/payout/home-currency unions match current Drizzle check literals in apps/backend/src/db/schema.ts. Schema literals still require manual migration updates when tuples change, but no current enum drift was found.
+- No `any`, `@ts-ignore`, or runtime Node/React imports were found in shared source.
+
+Disposition:
+
+Shared files are dispositioned either reviewed-no-finding or reviewed-with-finding for A4-028/A4-029 where applicable.

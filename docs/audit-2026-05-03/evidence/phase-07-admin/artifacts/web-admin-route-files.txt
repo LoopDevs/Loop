@@ -1,0 +1,17 @@
+apps/web/app/routes/admin._index.tsx
+apps/web/app/routes/admin.assets.$assetCode.tsx
+apps/web/app/routes/admin.assets.tsx
+apps/web/app/routes/admin.audit.tsx
+apps/web/app/routes/admin.cashback.tsx
+apps/web/app/routes/admin.merchants.$merchantId.tsx
+apps/web/app/routes/admin.merchants.tsx
+apps/web/app/routes/admin.operators.$operatorId.tsx
+apps/web/app/routes/admin.operators.tsx
+apps/web/app/routes/admin.orders.$orderId.tsx
+apps/web/app/routes/admin.orders.tsx
+apps/web/app/routes/admin.payouts.$id.tsx
+apps/web/app/routes/admin.payouts.tsx
+apps/web/app/routes/admin.stuck-orders.tsx
+apps/web/app/routes/admin.treasury.tsx
+apps/web/app/routes/admin.users.$userId.tsx
+apps/web/app/routes/admin.users.tsx

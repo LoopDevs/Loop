@@ -1,0 +1,437 @@
+apps/backend/src/auth/otps.ts:2: * OTP repository (ADR 013). Owns code generation, hashing, and the
+apps/backend/src/auth/otps.ts:3: * database writes against the `otps` table. Handlers consume this;
+apps/backend/src/auth/otps.ts:8: * POST body of `verify-otp`. Attempts are capped per-row; the handler
+apps/backend/src/auth/otps.ts:15:import { otps } from '../db/schema.js';
+apps/backend/src/auth/otps.ts:17:/** OTP code length. Matches CTX's current UX so the overlap window is consistent. */
+apps/backend/src/auth/otps.ts:18:export const OTP_LENGTH = 6;
+apps/backend/src/auth/otps.ts:20:/** OTP lifetime — 10 min, the upper end of what users tolerate without another "send". */
+apps/backend/src/auth/otps.ts:21:export const OTP_TTL_MS = 10 * 60 * 1000;
+apps/backend/src/auth/otps.ts:23:/** Per-OTP-row bad-code ceiling. At 5 tries × 10⁶ codes, online brute force is not viable. */
+apps/backend/src/auth/otps.ts:24:export const OTP_MAX_ATTEMPTS = 5;
+apps/backend/src/auth/otps.ts:26:/** Per-email per-minute `request-otp` cap (app.ts rate-limit uses a separate per-IP cap). */
+apps/backend/src/auth/otps.ts:27:export const OTP_REQUESTS_PER_EMAIL_PER_MINUTE = 3;
+apps/backend/src/auth/otps.ts:31:  // randomInt is uniform in [0, 10**OTP_LENGTH). Avoids the modulo
+apps/backend/src/auth/otps.ts:33:  const n = randomInt(0, 10 ** OTP_LENGTH);
+apps/backend/src/auth/otps.ts:34:  return String(n).padStart(OTP_LENGTH, '0');
+apps/backend/src/auth/otps.ts:42:/** Insert a fresh OTP for `email`. Returns the row for handler logging / response. */
+apps/backend/src/auth/otps.ts:49:  const expiresAt = new Date(issuedAt.getTime() + OTP_TTL_MS);
+apps/backend/src/auth/otps.ts:51:    .insert(otps)
+apps/backend/src/auth/otps.ts:57:    .returning({ id: otps.id, expiresAt: otps.expiresAt });
+apps/backend/src/auth/otps.ts:65: * Counts OTP rows issued for `email` within the trailing `windowMs`.
+apps/backend/src/auth/otps.ts:66: * Used by `request-otp` to apply a per-email cap on top of the per-IP
+apps/backend/src/auth/otps.ts:77:    .from(otps)
+apps/backend/src/auth/otps.ts:78:    .where(and(eq(otps.email, args.email), gt(otps.createdAt, windowStart)));
+apps/backend/src/auth/otps.ts:83: * Finds the most recent unconsumed, unexpired OTP row for an email whose
+apps/backend/src/auth/otps.ts:95:    .select({ id: otps.id, attempts: otps.attempts })
+apps/backend/src/auth/otps.ts:96:    .from(otps)
+apps/backend/src/auth/otps.ts:99:        eq(otps.email, args.email),
+apps/backend/src/auth/otps.ts:100:        eq(otps.codeHash, codeHash),
+apps/backend/src/auth/otps.ts:101:        isNull(otps.consumedAt),
+apps/backend/src/auth/otps.ts:102:        gt(otps.expiresAt, now),
+apps/backend/src/auth/otps.ts:103:        // A2-560: strict less-than (`lt`) so OTP_MAX_ATTEMPTS is the
+apps/backend/src/auth/otps.ts:108:        lt(otps.attempts, OTP_MAX_ATTEMPTS),
+apps/backend/src/auth/otps.ts:111:    .orderBy(desc(otps.createdAt))
+apps/backend/src/auth/otps.ts:116:/** Marks the OTP row consumed. Called inside the verify-otp txn on success. */
+apps/backend/src/auth/otps.ts:119:    .update(otps)
+apps/backend/src/auth/otps.ts:121:    .where(eq(otps.id, id));
+apps/backend/src/auth/otps.ts:126: * the row locks itself out after `OTP_MAX_ATTEMPTS`.
+apps/backend/src/auth/otps.ts:145:    .update(otps)
+apps/backend/src/auth/otps.ts:146:    .set({ attempts: sql`${otps.attempts} + 1` })
+apps/backend/src/auth/otps.ts:148:      sql`${otps.id} = (
+apps/backend/src/auth/otps.ts:149:        SELECT ${otps.id}
+apps/backend/src/auth/otps.ts:150:        FROM ${otps}
+apps/backend/src/auth/otps.ts:151:        WHERE ${otps.email} = ${args.email}
+apps/backend/src/auth/otps.ts:152:          AND ${otps.consumedAt} IS NULL
+apps/backend/src/auth/otps.ts:153:          AND ${otps.expiresAt} > ${nowExpr}
+apps/backend/src/auth/otps.ts:154:        ORDER BY ${otps.createdAt} DESC
+apps/backend/src/auth/social.ts:11: *      row — identical to the OTP path's final leg (ADR 013).
+apps/backend/src/auth/social.ts:58:// the native verify-otp + refresh handlers in `./native.ts`. Both
+apps/backend/src/auth/social.ts:74:      log.error('LOOP_AUTH_NATIVE_ENABLED without LOOP_JWT_SIGNING_KEY');
+apps/backend/src/auth/social.ts:169:      // having to decode the Loop access JWT — mirrors what OTP users
+apps/backend/src/auth/social.ts:174:        accessToken: pair.accessToken,
+apps/backend/src/auth/social.ts:175:        refreshToken: pair.refreshToken,
+apps/backend/src/auth/handler.ts:39:  accessToken: z.string().min(1),
+apps/backend/src/auth/handler.ts:40:  refreshToken: z.string().min(1),
+apps/backend/src/auth/handler.ts:44:  accessToken: z.string().min(1),
+apps/backend/src/auth/handler.ts:45:  refreshToken: z.string().optional(),
+apps/backend/src/auth/handler.ts:49: * POST /api/auth/request-otp
+apps/backend/src/auth/handler.ts:54: * `otps` row — CTX is bypassed for user identity.
+apps/backend/src/auth/handler.ts:103:      log.warn('request-otp upstream circuit open — returning generic 200 envelope');
+apps/backend/src/auth/handler.ts:116: * POST /api/auth/verify-otp
+apps/backend/src/auth/handler.ts:120: * which consumes a local OTP row, upserts the user, and mints a
+apps/backend/src/auth/handler.ts:130:    return c.json({ code: 'VALIDATION_ERROR', message: 'email and otp are required' }, 400);
+apps/backend/src/auth/handler.ts:139:        code: parsed.data.otp,
+apps/backend/src/auth/handler.ts:195: * which verifies the Loop-signed refresh JWT, checks the
+apps/backend/src/auth/handler.ts:206:    return c.json({ code: 'VALIDATION_ERROR', message: 'refreshToken is required' }, 400);
+apps/backend/src/auth/handler.ts:216:          refreshToken: parsed.data.refreshToken,
+apps/backend/src/auth/handler.ts:271:// `logoutHandler` (DELETE /api/auth/session — best-effort upstream
+apps/backend/src/auth/handler.ts:273:// `./logout-handler.ts`. Re-exported here so existing import sites
+apps/backend/src/auth/handler.ts:275:export { logoutHandler } from './logout-handler.js';
+apps/web/app/services/auth.ts:8:  await apiRequest<{ message: string }>('/api/auth/request-otp', {
+apps/web/app/services/auth.ts:15: * Verifies the OTP. Returns { accessToken, refreshToken } for all clients.
+apps/web/app/services/auth.ts:16: * The caller is responsible for storing the refresh token via secure-storage.
+apps/web/app/services/auth.ts:18:export async function verifyOtp(email: string, otp: string): Promise<VerifyOtpResponse> {
+apps/web/app/services/auth.ts:19:  const body: VerifyOtpRequest = { email, otp, platform: getPlatform() };
+apps/web/app/services/auth.ts:20:  return apiRequest<VerifyOtpResponse>('/api/auth/verify-otp', {
+apps/web/app/services/auth.ts:27: * Shape returned by the Loop-native auth endpoints. Social + OTP
+apps/web/app/services/auth.ts:30: * never typed it (OTP knows it from the form).
+apps/web/app/services/auth.ts:33:  accessToken: string;
+apps/web/app/services/auth.ts:34:  refreshToken: string;
+apps/web/app/services/auth.ts:65: * Signals logout to the server so it can revoke the refresh token upstream.
+apps/web/app/services/auth.ts:70:export async function logout(): Promise<void> {
+apps/web/app/services/auth.ts:71:  const { getRefreshToken } = await import('~/native/secure-storage');
+apps/web/app/services/auth.ts:72:  const refreshToken = await getRefreshToken();
+apps/web/app/services/auth.ts:76:      // Only include refreshToken if we have one; backend accepts absence.
+apps/web/app/services/auth.ts:79:        ...(refreshToken !== null ? { refreshToken } : {}),
+apps/web/app/services/auth.ts:83:    // Swallow — local clear in the caller (useAuth.logout) runs in finally.
+apps/backend/src/auth/request-schemas.ts:28:  otp: z.string().min(1),
+apps/backend/src/auth/request-schemas.ts:33:  refreshToken: z.string().min(1),
+apps/backend/src/auth/native.ts:6: * Ships the full Loop-native trio: request-otp, verify-otp, refresh.
+apps/backend/src/auth/native.ts:11:import { findLiveOtp, incrementOtpAttempts, markOtpConsumed } from './otps.js';
+apps/backend/src/auth/native.ts:29:// `nativeRequestOtpHandler` (POST /api/auth/request-otp — native
+apps/backend/src/auth/native.ts:30:// path) lives in `./native-request-otp.ts`. Re-exported here so
+apps/backend/src/auth/native.ts:33:export { nativeRequestOtpHandler } from './native-request-otp.js';
+apps/backend/src/auth/native.ts:46: * POST /api/auth/verify-otp — native path.
+apps/backend/src/auth/native.ts:48: * Consumes the OTP row (single-use), creates-or-finds the Loop user
+apps/backend/src/auth/native.ts:50: * row. Returns `{ accessToken, refreshToken }` — identical shape to
+apps/backend/src/auth/native.ts:54: * `OTP_MAX_ATTEMPTS` the row is excluded from `findLiveOtp` and
+apps/backend/src/auth/native.ts:61:    log.error('LOOP_AUTH_NATIVE_ENABLED without LOOP_JWT_SIGNING_KEY');
+apps/backend/src/auth/native.ts:66:    return c.json({ code: 'VALIDATION_ERROR', message: 'email and otp are required' }, 400);
+apps/backend/src/auth/native.ts:73:      // A2-2002: same generic shape as request-otp. Verify shouldn't
+apps/backend/src/auth/native.ts:75:      return c.json({ code: 'VALIDATION_ERROR', message: 'email and otp are required' }, 400);
+apps/backend/src/auth/native.ts:81:    const hit = await findLiveOtp({ email, code: parsed.data.otp });
+apps/backend/src/auth/native.ts:92:    // stays `{ accessToken, refreshToken }`.
+apps/backend/src/auth/native.ts:93:    return c.json({ accessToken: pair.accessToken, refreshToken: pair.refreshToken });
+apps/backend/src/auth/native.ts:95:    log.error({ err, email }, 'Native verify-otp failed unexpectedly');
+apps/backend/src/auth/native.ts:103: * Rotates the refresh token: verifies the JWT signature + typ, checks
+apps/backend/src/auth/native.ts:111:    log.error('LOOP_AUTH_NATIVE_ENABLED without LOOP_JWT_SIGNING_KEY');
+apps/backend/src/auth/native.ts:116:    return c.json({ code: 'VALIDATION_ERROR', message: 'refreshToken is required' }, 400);
+apps/backend/src/auth/native.ts:120:    const verified = verifyLoopToken(parsed.data.refreshToken, 'refresh');
+apps/backend/src/auth/native.ts:130:      token: parsed.data.refreshToken,
+apps/backend/src/auth/native.ts:163:    // client — the wire contract stays `{ accessToken, refreshToken }`.
+apps/backend/src/auth/native.ts:164:    return c.json({ accessToken: pair.accessToken, refreshToken: pair.refreshToken });
+apps/backend/src/auth/logout-handler.ts:2: * `DELETE /api/auth/session` — best-effort logout.
+apps/backend/src/auth/logout-handler.ts:6: * unlike `request-otp` / `verify-otp` / `refresh`, it does not have
+apps/backend/src/auth/logout-handler.ts:34:  refreshToken: z.string().min(1).optional(),
+apps/backend/src/auth/logout-handler.ts:47:export async function logoutHandler(c: Context): Promise<Response> {
+apps/backend/src/auth/logout-handler.ts:49:  if (!parsed.success || parsed.data.refreshToken === undefined) {
+apps/backend/src/auth/logout-handler.ts:62:    const verified = verifyLoopToken(parsed.data.refreshToken, 'refresh');
+apps/backend/src/auth/logout-handler.ts:76:    const response = await getUpstreamCircuit('logout').fetch(upstreamUrl('/logout'), {
+apps/backend/src/auth/logout-handler.ts:80:        refreshToken: parsed.data.refreshToken,
+apps/backend/src/auth/logout-handler.ts:88:        'Upstream logout returned non-success — token may still be valid upstream',
+apps/backend/src/auth/tokens.ts:2: * Loop-signed JWT sign + verify (ADR 013).
+apps/backend/src/auth/tokens.ts:4: * Minted by Loop against `LOOP_JWT_SIGNING_KEY` (HS256). Kept
+apps/backend/src/auth/tokens.ts:10: * `LOOP_JWT_SIGNING_KEY_PREVIOUS` so a rotation can overlap for the
+apps/backend/src/auth/tokens.ts:19: * JWT `iss` (issuer) — identifies the minting service (A2-1600).
+apps/backend/src/auth/tokens.ts:24:export const LOOP_JWT_ISSUER = 'loop-api';
+apps/backend/src/auth/tokens.ts:27: * JWT `aud` (audience) — identifies the resource server. Paired with
+apps/backend/src/auth/tokens.ts:31:export const LOOP_JWT_AUDIENCE = 'loop-clients';
+apps/backend/src/auth/tokens.ts:77:  const k = env.LOOP_JWT_SIGNING_KEY;
+apps/backend/src/auth/tokens.ts:79:    throw new Error('LOOP_JWT_SIGNING_KEY is not configured — Loop-native auth is disabled');
+apps/backend/src/auth/tokens.ts:85: * Signs a Loop JWT. Caller supplies the type + TTL; this module owns
+apps/backend/src/auth/tokens.ts:98:    iss: LOOP_JWT_ISSUER,
+apps/backend/src/auth/tokens.ts:99:    aud: LOOP_JWT_AUDIENCE,
+apps/backend/src/auth/tokens.ts:106:  const header = b64urlEncode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+apps/backend/src/auth/tokens.ts:127: * Verifies a Loop JWT. Checks signature against the current key first,
+apps/backend/src/auth/tokens.ts:153:  const keys = [env.LOOP_JWT_SIGNING_KEY, env.LOOP_JWT_SIGNING_KEY_PREVIOUS].filter(
+apps/backend/src/auth/tokens.ts:192:  if (obj['iss'] !== LOOP_JWT_ISSUER) {
+apps/backend/src/auth/tokens.ts:195:  if (obj['aud'] !== LOOP_JWT_AUDIENCE) {
+apps/backend/src/auth/tokens.ts:211:/** True when `LOOP_JWT_SIGNING_KEY` is configured. */
+apps/backend/src/auth/tokens.ts:213:  return typeof env.LOOP_JWT_SIGNING_KEY === 'string' && env.LOOP_JWT_SIGNING_KEY.length > 0;
+apps/backend/src/auth/refresh-tokens.ts:6: * The plaintext refresh JWT is never stored — we persist SHA-256 of
+apps/backend/src/auth/refresh-tokens.ts:15:import { refreshTokens } from '../db/schema.js';
+apps/backend/src/auth/refresh-tokens.ts:17:export type RefreshTokenRow = typeof refreshTokens.$inferSelect;
+apps/backend/src/auth/refresh-tokens.ts:26: * JWT's `jti` claim — enforced by callers via `signLoopToken`.
+apps/backend/src/auth/refresh-tokens.ts:34:  await db.insert(refreshTokens).values({
+apps/backend/src/auth/refresh-tokens.ts:58:  const row = await db.query.refreshTokens.findFirst({
+apps/backend/src/auth/refresh-tokens.ts:60:      eq(refreshTokens.jti, args.jti),
+apps/backend/src/auth/refresh-tokens.ts:61:      isNull(refreshTokens.revokedAt),
+apps/backend/src/auth/refresh-tokens.ts:62:      gt(refreshTokens.expiresAt, now),
+apps/backend/src/auth/refresh-tokens.ts:81:  const row = await db.query.refreshTokens.findFirst({
+apps/backend/src/auth/refresh-tokens.ts:82:    where: eq(refreshTokens.jti, jti),
+apps/backend/src/auth/refresh-tokens.ts:99:    .update(refreshTokens)
+apps/backend/src/auth/refresh-tokens.ts:105:    .where(eq(refreshTokens.jti, args.jti));
+apps/backend/src/auth/refresh-tokens.ts:116:    .update(refreshTokens)
+apps/backend/src/auth/refresh-tokens.ts:118:    .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
+apps/backend/src/auth/identities.ts:12: * The middle step is deliberate: a user who signed up with OTP and
+apps/backend/src/auth/identities.ts:94:  // `findOrCreateUserByEmail` (A2-706) for OTP signup.
+apps/backend/src/auth/identities.ts:138: * account page. Empty array is a fresh Loop-OTP-only user.
+apps/backend/src/auth/id-token.ts:92: * Decodes (but doesn't verify) the JWT header. Used to look up the
+apps/backend/src/auth/email.ts:2: * Transactional email — currently just the OTP send (ADR 013). Kept
+apps/backend/src/auth/email.ts:38: * Sentry read the code from the DB row (`auth_otps`) or the API's
+apps/backend/src/auth/email.ts:39: * test-only verify-otp response rather than through the log.
+apps/backend/src/auth/email.ts:52:        // serves its "grab the OTP from the log" purpose.
+apps/backend/src/auth/email.ts:57:        ? 'OTP email (console stub) — code redacted because SENTRY_DSN is set; read from DB'
+apps/backend/src/auth/email.ts:58:        : 'OTP email (console stub) — this provider is dev-only',
+apps/backend/src/auth/email.ts:75:    // A2-571: the console provider logs plaintext OTPs to stdout and
+apps/backend/src/auth/email.ts:79:    // `EMAIL_PROVIDER=console` would silently leak OTPs into
+apps/backend/src/auth/email.ts:83:        `EMAIL_PROVIDER=${configured ?? '<unset>'} is not permitted in production — the console stub logs plaintext OTPs`,
+apps/backend/src/auth/email.ts:91:  // silently fall back to the console stub (which would leak OTP
+apps/backend/src/auth/require-auth.ts:7: * handlers (request-otp / verify-otp / refresh / logout). The
+apps/backend/src/auth/require-auth.ts:9: * outside the JWT verify), and lives next to the token /
+apps/backend/src/auth/require-auth.ts:25: * that `requireAuth` previously echoed whatever `X-Client-Id` a client sent
+apps/backend/src/auth/require-auth.ts:50:      /** Loop-signed access JWT. Not forwardable to CTX. */
+apps/backend/src/auth/require-auth.ts:63: * access token (verified in-process against `LOOP_JWT_SIGNING_KEY`)
+apps/backend/src/auth/require-auth.ts:72: *   - `c.set('clientId', platform)` when a trusted `X-Client-Id` is
+apps/backend/src/auth/require-auth.ts:77: * nor a plausible CTX JWT still gets the same 401 — we don't leak
+apps/backend/src/auth/require-auth.ts:81:  const authHeader = c.req.header('Authorization');
+apps/backend/src/auth/require-auth.ts:82:  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+apps/backend/src/auth/require-auth.ts:88:  // Try Loop-signed JWT first — cheap in-process verify, no network.
+apps/backend/src/auth/require-auth.ts:106:    // from "this isn't our JWT" — the latter falls through to the CTX
+apps/backend/src/auth/require-auth.ts:108:    // parse as a CTX JWT later would be rejected upstream anyway.
+apps/backend/src/auth/require-auth.ts:113:    // through below; a genuine CTX bearer is malformed as a Loop JWT.
+apps/backend/src/auth/require-auth.ts:123:  // Forward X-Client-Id if present — CTX uses this to determine entity
+apps/backend/src/auth/require-auth.ts:128:  const clientId = c.req.header('X-Client-Id');
+apps/backend/src/auth/require-auth.ts:132:    log.warn({ clientId }, 'Rejected untrusted X-Client-Id value on authenticated request');
+apps/backend/src/auth/jwt.ts:2: * Bearer-token introspection. Decodes the payload of a JWT without
+apps/backend/src/auth/jwt.ts:10: * A malformed / truncated / non-JWT string resolves to `null` rather
+apps/backend/src/auth/jwt.ts:21: * Returns the decoded JWT payload, or `null` if the token can't be
+apps/backend/src/auth/jwt.ts:22: * parsed as a JWT. Never verifies the signature.
+apps/backend/src/auth/issue-token-pair.ts:12: *   - `nativeVerifyOtpHandler` (first issue on OTP success)
+apps/backend/src/auth/issue-token-pair.ts:17: *     mirroring the OTP first-issue path)
+apps/backend/src/auth/issue-token-pair.ts:32:  accessToken: string;
+apps/backend/src/auth/issue-token-pair.ts:33:  refreshToken: string;
+apps/backend/src/auth/issue-token-pair.ts:39:   * (`{ accessToken, refreshToken }`) is unchanged — first-issue
+apps/backend/src/auth/issue-token-pair.ts:75:    accessToken: access.token,
+apps/backend/src/auth/issue-token-pair.ts:76:    refreshToken: refresh.token,
+apps/web/app/services/admin-csv.ts:10: *   `Authorization` header that admin CSV endpoints require.
+apps/backend/src/auth/native-request-otp.ts:2: * Loop-native `POST /api/auth/request-otp` (ADR 013).
+apps/backend/src/auth/native-request-otp.ts:8: * the handler bodies share no helpers and pulling request-otp
+apps/backend/src/auth/native-request-otp.ts:10: * on the token-issuance pair (verify-otp + refresh) that share
+apps/backend/src/auth/native-request-otp.ts:27:  OTP_REQUESTS_PER_EMAIL_PER_MINUTE,
+apps/backend/src/auth/native-request-otp.ts:28:} from './otps.js';
+apps/backend/src/auth/native-request-otp.ts:36: * POST /api/auth/request-otp — native path.
+apps/backend/src/auth/native-request-otp.ts:67:    if (recent >= OTP_REQUESTS_PER_EMAIL_PER_MINUTE) {
+apps/backend/src/auth/native-request-otp.ts:71:      log.warn({ email }, 'OTP request skipped — per-email cap hit');
+apps/backend/src/auth/native-request-otp.ts:82:      // The OTP row is already written. If the email send fails the
+apps/backend/src/auth/native-request-otp.ts:83:      // user won't receive the code; they'll hit `request-otp` again
+apps/backend/src/auth/native-request-otp.ts:88:      log.error({ err, email }, 'OTP email send failed');
+apps/backend/src/auth/native-request-otp.ts:93:    log.error({ err, email }, 'Native request-otp failed unexpectedly');
+apps/web/app/components/features/Navbar.tsx:224:  const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
+apps/web/app/components/features/Navbar.tsx:366: * SSR (store default) and client (localStorage-restored theme).
+apps/web/app/components/features/onboarding/screen-biometric.tsx:2:import { authenticateWithBiometrics } from '~/native/biometrics';
+apps/web/app/components/features/onboarding/screen-biometric.tsx:10:  /** Called once the user has successfully enabled biometrics. */
+apps/web/app/components/features/onboarding/screen-biometric.tsx:13:   * Parent can fire this to start the biometric prompt — the footer
+apps/web/app/components/features/onboarding/screen-biometric.tsx:25: * app-lock preference on success. If biometrics aren't available on
+apps/web/app/components/features/onboarding/screen-biometric.tsx:57:  // If the device can't do biometrics at all, slip past this step
+apps/web/app/components/features/onboarding/screen-biometric.tsx:109:    ? 'You\u2019ll use Face ID or your device passcode to unlock Loop on app launch.'
+apps/web/app/components/features/onboarding/screen-biometric.tsx:112:      : 'Lock Loop on app launch and fall back to your device passcode if biometrics are unavailable.';
+apps/web/app/components/features/onboarding/screen-biometric.tsx:142:              (scanning ? 'animate-[loop-onboard-biometric-spin_2s_linear_infinite] ' : '') +
+apps/web/app/components/features/onboarding/screen-biometric.tsx:228:      <style>{`@keyframes loop-onboard-biometric-spin { to { transform: rotate(360deg); } }`}</style>
+apps/web/app/hooks/use-session-restore.ts:7:// secure-storage read + /refresh network call here, before any
+apps/web/app/hooks/use-session-restore.ts:16:      const { getRefreshToken, getEmail } = await import('~/native/secure-storage');
+apps/web/app/hooks/use-session-restore.ts:17:      const [refreshToken, email] = await Promise.all([getRefreshToken(), getEmail()]);
+apps/web/app/hooks/use-session-restore.ts:18:      if (refreshToken === null) return;
+apps/web/app/hooks/use-session-restore.ts:20:      const accessToken = await tryRefresh();
+apps/web/app/hooks/use-session-restore.ts:21:      if (accessToken !== null) {
+apps/web/app/hooks/use-session-restore.ts:22:        useAuthStore.getState().setAccessToken(accessToken);
+apps/web/app/hooks/use-session-restore.ts:31:      // wipe the refresh token from Keychain / sessionStorage and
+apps/web/app/hooks/use-session-restore.ts:34:      // The auth store's accessToken was already null before boot
+apps/web/app/hooks/use-session-restore.ts:56:    if (store.accessToken !== null) {
+apps/web/app/components/features/onboarding/signup-tail.tsx:106:  otp: string;
+apps/web/app/components/features/onboarding/signup-tail.tsx:111:   * Fired when the user completes the 6th digit. The completed OTP
+apps/web/app/components/features/onboarding/signup-tail.tsx:113:   * closure — the parent's `otp` state hasn't committed yet in the
+apps/web/app/components/features/onboarding/signup-tail.tsx:116:   * `otp.length === 6` guard.
+apps/web/app/components/features/onboarding/signup-tail.tsx:118:  onVerified: (otp: string) => void;
+apps/web/app/components/features/onboarding/signup-tail.tsx:122: * Six-box OTP entry. Digits auto-advance on input and backspace
+apps/web/app/components/features/onboarding/signup-tail.tsx:133:  otp,
+apps/web/app/components/features/onboarding/signup-tail.tsx:143:      otp
+apps/web/app/components/features/onboarding/signup-tail.tsx:145:        .concat(Array(6 - otp.length).fill(''))
+apps/web/app/components/features/onboarding/signup-tail.tsx:147:    [otp],
+apps/web/app/components/features/onboarding/signup-tail.tsx:155:    const idx = Math.min(otp.length, 5);
+apps/web/app/components/features/onboarding/signup-tail.tsx:157:  }, [active, otp.length]);
+apps/web/app/components/features/onboarding/signup-tail.tsx:204:    const next = otp.split('');
+apps/web/app/components/features/onboarding/signup-tail.tsx:245:      {clipboardCode !== null && otp.length === 0 && (
+apps/web/app/components/features/onboarding/signup-tail.tsx:438:  otpError: string | null;
+apps/web/app/components/features/onboarding/signup-tail.tsx:441:  verify: (email: string, otp: string) => Promise<boolean>;
+apps/web/app/components/features/onboarding/signup-tail.tsx:447:  const [otpError, setOtpError] = useState<string | null>(null);
+apps/web/app/components/features/onboarding/signup-tail.tsx:463:  const verify = async (email: string, otp: string): Promise<boolean> => {
+apps/web/app/components/features/onboarding/signup-tail.tsx:467:      const { accessToken, refreshToken } = await verifyOtp(email, otp);
+apps/web/app/components/features/onboarding/signup-tail.tsx:468:      useAuthStore.getState().setSession(email, accessToken, refreshToken ?? null);
+apps/web/app/components/features/onboarding/signup-tail.tsx:483:  return { sendingOtp, verifyingOtp, otpError, emailError, sendOtp, verify, clearErrors };
+apps/web/app/components/features/onboarding/Onboarding.tsx:3:import { checkBiometrics } from '~/native/biometrics';
+apps/web/app/components/features/onboarding/Onboarding.tsx:4:import type { BiometricResult } from '~/native/biometrics';
+apps/web/app/components/features/onboarding/Onboarding.tsx:10:import { BiometricSetup } from './screen-biometric';
+apps/web/app/components/features/onboarding/Onboarding.tsx:21:// email copy swapped in (Loop auth is email-OTP, not phone). Bank
+apps/web/app/components/features/onboarding/Onboarding.tsx:23:// we end on Welcome-in right after OTP verify. Step 6 is an
+apps/web/app/components/features/onboarding/Onboarding.tsx:24:// optional biometric-enable step between OTP and Welcome-in; it
+apps/web/app/components/features/onboarding/Onboarding.tsx:25:// self-skips on devices without biometrics.
+apps/web/app/components/features/onboarding/Onboarding.tsx:54:    sub: 'Use biometrics to lock Loop on app launch. If biometrics are unavailable later, Loop can fall back to your device passcode. Your biometric data never leaves the device.',
+apps/web/app/components/features/onboarding/Onboarding.tsx:71: *   0 Welcome · 1 How it works · 2 Brands · 3 Email · 4 OTP
+apps/web/app/components/features/onboarding/Onboarding.tsx:77: * home currency (ADR 015). Step 6 enables biometric unlock (skips
+apps/web/app/components/features/onboarding/Onboarding.tsx:103:  const [otp, setOtp] = useState('');
+apps/web/app/components/features/onboarding/Onboarding.tsx:113:  const [biometrics, setBiometrics] = useState<BiometricResult>({
+apps/web/app/components/features/onboarding/Onboarding.tsx:118:  const [biometricsChecked, setBiometricsChecked] = useState(false);
+apps/web/app/components/features/onboarding/Onboarding.tsx:130:  const biometricTriggerRef = useRef<(() => void) | null>(null);
+apps/web/app/components/features/onboarding/Onboarding.tsx:132:  const { sendingOtp, verifyingOtp, emailError, otpError, sendOtp, verify, clearErrors } =
+apps/web/app/components/features/onboarding/Onboarding.tsx:149:  // email or OTP fields keeps working).
+apps/web/app/components/features/onboarding/Onboarding.tsx:183:  const otpValid = otp.length === 6;
+apps/web/app/components/features/onboarding/Onboarding.tsx:195:    // Prefer the value passed in from the OTP-entry auto-submit
+apps/web/app/components/features/onboarding/Onboarding.tsx:197:    // that moment, so relying on `otp` here would short-circuit
+apps/web/app/components/features/onboarding/Onboarding.tsx:200:    const value = code ?? otp;
+apps/web/app/components/features/onboarding/Onboarding.tsx:247:  // CTA label for the biometric step. Always "Enable Face ID" so
+apps/web/app/components/features/onboarding/Onboarding.tsx:251:  // so the OS-level prompt is correct. When biometrics aren't
+apps/web/app/components/features/onboarding/Onboarding.tsx:253:  const biometricCtaLabel = !biometricsChecked
+apps/web/app/components/features/onboarding/Onboarding.tsx:255:    : !biometrics.available
+apps/web/app/components/features/onboarding/Onboarding.tsx:273:      enabled: otpValid && !verifyingOtp,
+apps/web/app/components/features/onboarding/Onboarding.tsx:281:      label: biometricCtaLabel,
+apps/web/app/components/features/onboarding/Onboarding.tsx:282:      // When biometrics are available, hand off to the screen's
+apps/web/app/components/features/onboarding/Onboarding.tsx:288:        if (!biometrics.available) {
+apps/web/app/components/features/onboarding/Onboarding.tsx:292:        biometricTriggerRef.current?.();
+apps/web/app/components/features/onboarding/Onboarding.tsx:294:      enabled: biometricsChecked,
+apps/web/app/components/features/onboarding/Onboarding.tsx:334:          otp={otp}
+apps/web/app/components/features/onboarding/Onboarding.tsx:336:          error={otpError}
+apps/web/app/components/features/onboarding/Onboarding.tsx:356:          available={biometricsChecked ? biometrics.available : null}
+apps/web/app/components/features/onboarding/Onboarding.tsx:358:          triggerRef={biometricTriggerRef}
+apps/web/app/components/features/onboarding/Onboarding.tsx:369:            // The user is already authenticated (verify-otp ran at
+apps/web/app/hooks/use-merchants.ts:114: * + X-Client-Id) to enrich the cached list record with long-form
+apps/web/app/hooks/use-auth.ts:10:  logout,
+apps/web/app/hooks/use-auth.ts:16:  accessToken: string | null;
+apps/web/app/hooks/use-auth.ts:18:  /** Request an OTP to be sent to the given email. Throws with user-facing message on failure. */
+apps/web/app/hooks/use-auth.ts:20:  /** Verify an OTP. Stores tokens on success. Throws with user-facing message on failure. */
+apps/web/app/hooks/use-auth.ts:21:  verifyOtp: (email: string, otp: string) => Promise<void>;
+apps/web/app/hooks/use-auth.ts:27:  logout: () => Promise<void>;
+apps/web/app/hooks/use-auth.ts:35: * - 401 means "wrong or expired OTP" on auth endpoints. `friendlyError`
+apps/web/app/hooks/use-auth.ts:63:    accessToken: store.accessToken,
+apps/web/app/hooks/use-auth.ts:64:    isAuthenticated: store.accessToken !== null,
+apps/web/app/hooks/use-auth.ts:76:    verifyOtp: async (email: string, otp: string) => {
+apps/web/app/hooks/use-auth.ts:78:        const { accessToken, refreshToken } = await verifyOtp(email, otp);
+apps/web/app/hooks/use-auth.ts:79:        store.setSession(email, accessToken, refreshToken ?? null);
+apps/web/app/hooks/use-auth.ts:88:        store.setSession(pair.email ?? '', pair.accessToken, pair.refreshToken);
+apps/web/app/hooks/use-auth.ts:97:        store.setSession(pair.email ?? '', pair.accessToken, pair.refreshToken);
+apps/web/app/hooks/use-auth.ts:103:    logout: async () => {
+apps/web/app/hooks/use-auth.ts:105:        await logout();
+apps/web/app/components/features/onboarding/screen-currency.tsx:4: * Mounted between OTP verify and the biometric-setup step. The user
+apps/web/app/root.tsx:120:// Persist the last-known response to localStorage so the home route
+apps/web/app/root.tsx:139:    const raw = localStorage.getItem(MERCHANTS_CACHE_KEY);
+apps/web/app/root.tsx:169:        localStorage.setItem(MERCHANTS_CACHE_KEY, JSON.stringify(entry));
+apps/web/app/root.tsx:246:        return localStorage.getItem('theme');
+apps/web/app/root.tsx:308:            __html: `(function(){try{var t=localStorage.getItem('theme');var d=window.matchMedia('(prefers-color-scheme: dark)').matches;var isDark=(t==='dark')||(t!=='light'&&d);document.documentElement.classList.add(isDark?'dark':'light');}catch(e){document.documentElement.classList.add('light');}})();`,
+apps/web/app/root.tsx:411:  // Register biometric app lock guard on native
+apps/web/app/root.tsx:495:  const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
+apps/web/app/root.tsx:497:  // `setSession` (fired by the OTP-verify step) doesn't flip the
+apps/web/app/root.tsx:535:    // the OTP-success render so the user sees the welcome-in payoff
+apps/web/app/utils/sentry-scrubber.ts:8: * server-side) but DOES see accessToken / refreshToken / otp values
+apps/web/app/utils/sentry-scrubber.ts:10: * Authorization header goes over the wire in every authenticated
+apps/web/app/utils/sentry-scrubber.ts:16:  /^(authorization|cookie|accesstoken|refreshtoken|otp|password|apikey|apisecret|secret|privatekey|secretkey|seedphrase|mnemonic|operatorsecret|loop_jwt_signing_key(_previous)?|gift_card_api_(key|secret)|database_url|sentry_dsn|discord_webhook_(orders|monitoring|admin_audit))$/i;
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:26:type AuthStep = 'email' | 'otp';
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:34:  const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:186:        setAuthStep('otp');
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:198:        const { accessToken, refreshToken } = await verifyOtp(authEmail, authOtp);
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:199:        useAuthStore.getState().setSession(authEmail, accessToken, refreshToken ?? null);
+apps/backend/src/auth/require-admin.ts:23: * CTX-anchored auth with Loop-issued JWTs, the upsert migrates into
+apps/web/app/components/features/purchase/PurchaseComplete.tsx:162:          mirroring the in-app pattern from the onboarding OTP
+apps/web/app/routes/onboarding.tsx:10: * works, brands, email, OTP, welcome-in). Rendered full-bleed — the
+apps/web/app/services/api-client.ts:112: * 401 (stale token) and the UI ends up in a forced-logout state despite a
+apps/web/app/services/api-client.ts:138:  const { getRefreshToken } = await import('~/native/secure-storage');
+apps/web/app/services/api-client.ts:139:  const refreshToken = await getRefreshToken();
+apps/web/app/services/api-client.ts:140:  if (refreshToken === null) return null;
+apps/web/app/services/api-client.ts:146:    const body: RefreshRequest = { refreshToken, platform };
+apps/web/app/services/api-client.ts:147:    const res = await apiRequest<{ accessToken: string; refreshToken?: string }>(
+apps/web/app/services/api-client.ts:154:    if (res.refreshToken) {
+apps/web/app/services/api-client.ts:155:      const { storeRefreshToken } = await import('~/native/secure-storage');
+apps/web/app/services/api-client.ts:159:      await storeRefreshToken(res.refreshToken);
+apps/web/app/services/api-client.ts:161:    return res.accessToken;
+apps/web/app/services/api-client.ts:173:        const { clearRefreshToken } = await import('~/native/secure-storage');
+apps/web/app/services/api-client.ts:194:  let token = store.accessToken;
+apps/web/app/services/api-client.ts:219:      headers: { ...options.headers, Authorization: `Bearer ${token}`, 'X-Client-Id': clientId },
+apps/web/app/services/api-client.ts:231:            Authorization: `Bearer ${newToken}`,
+apps/web/app/services/api-client.ts:232:            'X-Client-Id': clientId,
+apps/web/app/utils/error-messages.ts:61:  // It's context-sensitive — OTP verify surfaces want "Invalid code",
+apps/web/app/utils/error-messages.ts:64:  // owns the OTP case; every other caller's fallback string ends up
+apps/web/app/stores/auth.store.ts:2:import { storeRefreshToken, storeEmail, clearRefreshToken } from '~/native/secure-storage';
+apps/web/app/stores/auth.store.ts:6:// token — but we can stash a non-sensitive breadcrumb in localStorage
+apps/web/app/stores/auth.store.ts:13:    if (v) localStorage.setItem(WAS_AUTHED_KEY, 'true');
+apps/web/app/stores/auth.store.ts:14:    else localStorage.removeItem(WAS_AUTHED_KEY);
+apps/web/app/stores/auth.store.ts:21:    return localStorage.getItem(WAS_AUTHED_KEY) === 'true';
+apps/web/app/stores/auth.store.ts:30:  accessToken: string | null;
+apps/web/app/stores/auth.store.ts:34:  setSession: (email: string, accessToken: string, refreshToken: string | null) => void;
+apps/web/app/stores/auth.store.ts:45: * `@aparajita/capacitor-secure-storage` (audit A-024, ADR-006),
+apps/web/app/stores/auth.store.ts:46: * sessionStorage on web.
+apps/web/app/stores/auth.store.ts:50:  accessToken: null,
+apps/web/app/stores/auth.store.ts:52:  setSession: (email, accessToken, refreshToken) => {
+apps/web/app/stores/auth.store.ts:53:    if (refreshToken !== null) {
+apps/web/app/stores/auth.store.ts:54:      void storeRefreshToken(refreshToken);
+apps/web/app/stores/auth.store.ts:58:    set({ email, accessToken });
+apps/web/app/stores/auth.store.ts:63:    set({ accessToken: token });
+apps/web/app/stores/auth.store.ts:69:    set({ email: null, accessToken: null });
+apps/web/app/stores/ui.store.ts:10: *   1. `loadPreference()` must not throw when `localStorage` is
+apps/web/app/stores/ui.store.ts:11: *      undefined. It wraps the `localStorage.getItem` in a try
+apps/web/app/stores/ui.store.ts:72:    const stored = localStorage.getItem('theme');
+apps/web/app/stores/ui.store.ts:75:    // localStorage unavailable
+apps/web/app/stores/ui.store.ts:82:    localStorage.setItem('theme', pref);
+apps/web/app/stores/ui.store.ts:84:    // localStorage unavailable
+apps/web/app/stores/ui.store.ts:118:    // store's own loadPreference (e.g. a localStorage hiccup, a
+apps/web/app/stores/purchase.store.ts:80: * Synchronous sessionStorage restore for initial web state.
+apps/web/app/stores/purchase.store.ts:84: * of it — otherwise a corrupted (or attacker-set) sessionStorage value
+apps/web/app/stores/purchase.store.ts:92:    const raw = sessionStorage.getItem(PENDING_ORDER_KEY);
+apps/web/app/stores/purchase.store.ts:97:    sessionStorage.removeItem(PENDING_ORDER_KEY);
+apps/web/app/stores/purchase.store.ts:99:    /* sessionStorage unavailable (native or SSR) or invalid JSON */
+apps/web/app/components/features/onboarding/screens-trust.tsx:183: * localStorage-seeded cache on cold start, so this renders with
+apps/web/app/components/features/onboarding/screen-wallet-intro.tsx:4: * Mounted after biometric setup and before the final Welcome-in so the
+apps/web/app/utils/admin-cache.ts:26: * are left alone. Callers that need a full wipe — logout, for instance —
+apps/web/app/routes/privacy.tsx:65:              OTP delivery), purchase history (orders you place through Loop), and on-chain activity
+apps/web/app/routes/privacy.tsx:144:              state. Authentication metadata is held in your browser&apos;s sessionStorage on the
+apps/web/app/native/app-lock.ts:2:import { checkBiometrics, authenticateWithBiometrics } from './biometrics';
+apps/web/app/native/app-lock.ts:26:// after the user authenticates with biometrics to enable app-lock,
+apps/web/app/native/app-lock.ts:35: * Called from the onboarding biometric step after a successful
+apps/web/app/native/app-lock.ts:44: * Prompts for biometrics once on cold start when app-lock is enabled.
+apps/web/app/native/app-lock.ts:133:    // biometric-enable step doesn't immediately trigger a second
+apps/web/app/native/app-lock.ts:144:      showLockScreen('Turn on a device passcode or biometrics to unlock Loop.', false);
+apps/web/app/native/app-lock.ts:147:    showLockScreen(available ? 'Unlock to continue' : 'Use your device passcode to continue', true);
+apps/web/app/native/app-lock.ts:153:  // firing the biometric prompt immediately makes the overlay appear over
+apps/web/app/native/purchase-storage.ts:5: * can read the same key from sessionStorage on synchronous init without
+apps/web/app/native/purchase-storage.ts:31:      sessionStorage.setItem(PENDING_ORDER_KEY, json);
+apps/web/app/native/purchase-storage.ts:33:      /* sessionStorage unavailable */
+apps/web/app/native/purchase-storage.ts:48:      raw = sessionStorage.getItem(PENDING_ORDER_KEY);
+apps/web/app/native/purchase-storage.ts:50:      /* sessionStorage unavailable */
+apps/web/app/native/purchase-storage.ts:77:      sessionStorage.removeItem(PENDING_ORDER_KEY);
+apps/web/app/native/purchase-storage.ts:79:      /* sessionStorage unavailable */
+apps/web/app/native/biometrics.ts:9:/** Checks if biometric authentication is available on this device. */
+apps/web/app/native/biometrics.ts:16:    const { BiometricAuth } = await import('@aparajita/capacitor-biometric-auth');
+apps/web/app/native/biometrics.ts:29:/** Prompts for biometric authentication. Returns true if verified. */
+apps/web/app/native/biometrics.ts:34:    const { BiometricAuth } = await import('@aparajita/capacitor-biometric-auth');
+apps/web/app/native/biometrics.ts:36:    // biometric match (face on most Android devices), skip the extra
+apps/web/app/native/biometrics.ts:42:    // biometric is friction reduction, not the secret's custodian.
+apps/web/app/routes/auth.tsx:16:import { checkBiometrics, authenticateWithBiometrics } from '~/native/biometrics';
+apps/web/app/routes/auth.tsx:30:type AuthStep = 'email' | 'otp';
+apps/web/app/routes/auth.tsx:125:    // Disabling must require biometrics too, not just enabling. Otherwise a
+apps/web/app/routes/auth.tsx:344:    logout,
+apps/web/app/routes/auth.tsx:354:  const [otp, setOtp] = useState('');
+apps/web/app/routes/auth.tsx:456:                    await logout();
+apps/web/app/routes/auth.tsx:477:      setStep('otp');
+apps/web/app/routes/auth.tsx:491:      await verifyAndStore(email, otp);
+apps/web/app/routes/auth.tsx:513:          {step === 'otp' && (
+apps/web/app/routes/auth.tsx:572:              value={otp}
+apps/web/app/routes/auth.tsx:577:              // A2-1100: iOS surfaces the OTP from the notification
+apps/web/app/routes/auth.tsx:591:                // Clear OTP + error state alongside the step flip —
+apps/web/app/routes/auth.tsx:594:                // OTP-step error leak onto the email form, and the
+apps/web/app/routes/auth.tsx:595:                // stale OTP buffer would be submitted alongside the
+apps/web/app/utils/sentry-error-scrubber.ts:30:// Bearer tokens, Stellar secret keys (starting S + 55 base32 chars),
+apps/web/app/utils/sentry-error-scrubber.ts:31:// and raw Authorization headers. The 16+ hex rule avoids nuking a
+apps/web/app/utils/sentry-error-scrubber.ts:33:const BEARER_RE = /Bearer\s+[A-Za-z0-9_.\-+/=]{16,}/g;
+apps/web/app/native/secure-storage.ts:8: * via `@aparajita/capacitor-secure-storage`, which is Keychain-backed
+apps/web/app/native/secure-storage.ts:14: * `docs/adr/006-keychain-backed-secure-storage.md`.
+apps/web/app/native/secure-storage.ts:17: * SecureStorage on first read post-upgrade, so existing logged-in
+apps/web/app/native/secure-storage.ts:20: * Web still uses `sessionStorage` — the audit was mobile-only, the
+apps/web/app/native/secure-storage.ts:25:type SecureStorageModule = {
+apps/web/app/native/secure-storage.ts:42:// `"SecureStorage.then()" is not implemented on android`. Wrap the
+apps/web/app/native/secure-storage.ts:44:async function loadSecureStorage(): Promise<SecureStorageModule> {
+apps/web/app/native/secure-storage.ts:45:  const mod = await import('@aparajita/capacitor-secure-storage');
+apps/web/app/native/secure-storage.ts:46:  const impl = mod.SecureStorage as unknown as SecureStorageModule;
+apps/web/app/native/secure-storage.ts:65: * Read a native-side value: consult SecureStorage first, then one-shot
+apps/web/app/native/secure-storage.ts:70:  const secure = await loadSecureStorage();
+apps/web/app/native/secure-storage.ts:89: *   `@aparajita/capacitor-secure-storage` (audit A-024).
+apps/web/app/native/secure-storage.ts:90: * - Web: sessionStorage (session-scoped, cleared on tab close).
+apps/web/app/native/secure-storage.ts:94:    const secure = await loadSecureStorage();
+apps/web/app/native/secure-storage.ts:99:    sessionStorage.setItem(REFRESH_TOKEN_KEY, token);
+apps/web/app/native/secure-storage.ts:101:    // sessionStorage unavailable (e.g. cross-origin iframe) — skip
+apps/web/app/native/secure-storage.ts:111:    return sessionStorage.getItem(REFRESH_TOKEN_KEY);
+apps/web/app/native/secure-storage.ts:120:    const secure = await loadSecureStorage();
+apps/web/app/native/secure-storage.ts:131:    sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+apps/web/app/native/secure-storage.ts:132:    sessionStorage.removeItem(EMAIL_KEY);
+apps/web/app/native/secure-storage.ts:141:    const secure = await loadSecureStorage();
+apps/web/app/native/secure-storage.ts:146:    sessionStorage.setItem(EMAIL_KEY, email);
+apps/web/app/native/secure-storage.ts:148:    // sessionStorage unavailable
+apps/web/app/native/secure-storage.ts:158:    return sessionStorage.getItem(EMAIL_KEY);
+apps/web/app/components/features/home/MobileHome.tsx:23: * - merchants via `useAllMerchants` (localStorage-seeded so the grid

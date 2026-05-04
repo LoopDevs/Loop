@@ -1,0 +1,818 @@
+Web query/mutation/admin scan
+
+apps/web/app/hooks/use-app-config.ts:10:import { useQuery } from '@tanstack/react-query';
+apps/web/app/hooks/use-app-config.ts:25:  const query = useQuery({
+apps/web/app/hooks/use-app-config.ts:26:    queryKey: ['app-config'],
+apps/web/app/hooks/use-app-config.ts:33:    retry: false,
+apps/web/app/services/admin-activity.ts:30:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-activity.ts:96:  return authenticatedRequest<OrdersActivityResponse>(`/api/admin/orders/activity${qs}`);
+apps/web/app/services/admin-activity.ts:102:  return authenticatedRequest<CashbackActivityResponse>(`/api/admin/cashback-activity${qs}`);
+apps/web/app/services/admin-activity.ts:108:  return authenticatedRequest<PayoutsActivityResponse>(`/api/admin/payouts-activity${qs}`);
+apps/web/app/routes/admin.users.tsx:2:import { useQuery, useMutation } from '@tanstack/react-query';
+apps/web/app/routes/admin.users.tsx:57:  const byEmailMutation = useMutation<AdminUserDetail, unknown, string>({
+apps/web/app/routes/admin.users.tsx:72:  const query = useQuery({
+apps/web/app/routes/admin.users.tsx:73:    queryKey: ['admin-users', q, before ?? null],
+apps/web/app/routes/admin.users.tsx:80:    retry: shouldRetry,
+apps/web/app/hooks/query-retry.ts:9: * Used by every useQuery hook in the app for uniform retry behaviour.
+apps/web/app/services/admin-cashback-realization.ts:26:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-cashback-realization.ts:37:  return authenticatedRequest<CashbackRealizationResponse>('/api/admin/cashback-realization');
+apps/web/app/services/admin-cashback-realization.ts:45:  return authenticatedRequest<CashbackRealizationDailyResponse>(
+apps/web/app/routes/admin.merchants.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/admin.merchants.tsx:53:  const configsQuery = useQuery({
+apps/web/app/routes/admin.merchants.tsx:54:    queryKey: ['admin-cashback-configs'],
+apps/web/app/routes/admin.merchants.tsx:56:    retry: shouldRetry,
+apps/web/app/services/admin-user-fleet-activity.ts:32:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-user-fleet-activity.ts:77:  return authenticatedRequest<TopUsersByPendingPayoutResponse>(
+apps/web/app/services/admin-user-fleet-activity.ts:89:  return authenticatedRequest<UsersRecyclingActivityResponse>(
+apps/web/app/services/auth.ts:3:import { apiRequest } from './api-client';
+apps/web/app/services/auth.ts:8:  await apiRequest<{ message: string }>('/api/auth/request-otp', {
+apps/web/app/services/auth.ts:20:  return apiRequest<VerifyOtpResponse>('/api/auth/verify-otp', {
+apps/web/app/services/auth.ts:46:  return apiRequest<LoopAuthPair>('/api/auth/social/google', {
+apps/web/app/services/auth.ts:58:  return apiRequest<LoopAuthPair>('/api/auth/social/apple', {
+apps/web/app/services/auth.ts:74:    await apiRequest<{ message: string }>('/api/auth/session', {
+apps/web/app/services/admin-stuck.ts:27:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-stuck.ts:77:  return authenticatedRequest<StuckOrdersResponse>('/api/admin/stuck-orders');
+apps/web/app/services/admin-stuck.ts:82:  return authenticatedRequest<StuckPayoutsResponse>('/api/admin/stuck-payouts');
+apps/web/app/hooks/__tests__/query-retry.test.ts:5:describe('query retry policy (used by every useQuery hook)', () => {
+apps/web/app/routes/trustlines.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/trustlines.tsx:48:  const query = useQuery({
+apps/web/app/routes/trustlines.tsx:49:    queryKey: ['public-loop-assets'],
+apps/web/app/routes/trustlines.tsx:51:    retry: shouldRetry,
+apps/web/app/services/user.ts:38:import { authenticatedRequest } from './api-client';
+apps/web/app/services/user.ts:79:  return authenticatedRequest<UserMeView>('/api/users/me/home-currency', {
+apps/web/app/services/user.ts:87:  return authenticatedRequest<UserMeView>('/api/users/me');
+apps/web/app/services/user.ts:97:  return authenticatedRequest<UserMeView>('/api/users/me/stellar-address', {
+apps/web/app/services/user.ts:115:  return authenticatedRequest<CashbackHistoryResponse>(
+apps/web/app/services/user.ts:134:  return authenticatedRequest<UserPendingPayoutsResponse>(
+apps/web/app/services/user.ts:141:  return authenticatedRequest<UserPendingPayoutsSummaryResponse>(
+apps/web/app/services/user.ts:148:  return authenticatedRequest<StellarTrustlinesResponse>('/api/users/me/stellar-trustlines');
+apps/web/app/services/user.ts:161:    return await authenticatedRequest<UserPendingPayoutView>(
+apps/web/app/services/user.ts:172:  return authenticatedRequest<UserCreditsResponse>('/api/users/me/credits');
+apps/web/app/services/user.ts:177:  return authenticatedRequest<UserCashbackSummary>('/api/users/me/cashback-summary');
+apps/web/app/services/user.ts:192:  return authenticatedRequest<CashbackByMerchantResponse>(
+apps/web/app/services/user.ts:203:  return authenticatedRequest<CashbackMonthlyResponse>('/api/users/me/cashback-monthly');
+apps/web/app/services/user.ts:212:  return authenticatedRequest<UserOrdersSummary>('/api/users/me/orders/summary');
+apps/web/app/services/user.ts:217:  return authenticatedRequest<UserFlywheelStats>('/api/users/me/flywheel-stats');
+apps/web/app/services/user.ts:227:  return authenticatedRequest<UserPaymentMethodShareResponse>(
+apps/web/app/services/admin-orders.ts:36:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-orders.ts:79:  return authenticatedRequest<AdminOrderView>(`/api/admin/orders/${encodeURIComponent(orderId)}`);
+apps/web/app/services/admin-orders.ts:103:  return authenticatedRequest<{ orders: AdminOrderView[] }>(
+apps/web/app/hooks/__tests__/use-auth.test.tsx:106:    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/hooks/__tests__/use-auth.test.tsx:141:    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/routes/admin.operators.$operatorId.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/admin.operators.$operatorId.tsx:67:  const statsQuery = useQuery({
+apps/web/app/routes/admin.operators.$operatorId.tsx:68:    queryKey: ['admin-operator-stats'],
+apps/web/app/routes/admin.operators.$operatorId.tsx:70:    retry: shouldRetry,
+apps/web/app/routes/admin.operators.$operatorId.tsx:74:  const latencyQuery = useQuery({
+apps/web/app/routes/admin.operators.$operatorId.tsx:75:    queryKey: ['admin-operator-latency'],
+apps/web/app/routes/admin.operators.$operatorId.tsx:77:    retry: shouldRetry,
+apps/web/app/routes/admin.operators.$operatorId.tsx:81:  const spendQuery = useQuery({
+apps/web/app/routes/admin.operators.$operatorId.tsx:82:    queryKey: ['admin-operator-supplier-spend', operatorId],
+apps/web/app/routes/admin.operators.$operatorId.tsx:85:    retry: shouldRetry,
+apps/web/app/routes/admin.operators.$operatorId.tsx:89:  const activityQuery = useQuery({
+apps/web/app/routes/admin.operators.$operatorId.tsx:90:    queryKey: ['admin-operator-activity', operatorId, 30],
+apps/web/app/routes/admin.operators.$operatorId.tsx:93:    retry: shouldRetry,
+apps/web/app/services/admin-supplier-spend.ts:28:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-supplier-spend.ts:44:  return authenticatedRequest<SupplierSpendResponse>(
+apps/web/app/services/admin-supplier-spend.ts:57:  return authenticatedRequest<SupplierSpendActivityResponse>(
+apps/web/app/services/admin-treasury.ts:26:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-treasury.ts:40:  return authenticatedRequest<TreasurySnapshot>('/api/admin/treasury');
+apps/web/app/services/admin-treasury.ts:55:  return authenticatedRequest<TreasuryCreditFlowResponse>(
+apps/web/app/hooks/use-orders.ts:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/hooks/use-orders.ts:29:  const query = useQuery<OrderListResponse, Error>({
+apps/web/app/hooks/use-orders.ts:30:    queryKey: ['orders', { page }],
+apps/web/app/hooks/use-orders.ts:39:    retry: shouldRetry,
+apps/web/app/hooks/use-orders.ts:68:  const query = useQuery<{ order: Order }, Error>({
+apps/web/app/hooks/use-orders.ts:69:    queryKey: ['order', normalized],
+apps/web/app/hooks/use-orders.ts:74:    retry: shouldRetry,
+apps/web/app/routes/orders.$id.tsx:3:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/orders.$id.tsx:57:  const { data, isLoading, error, refetch } = useQuery<{ order: Order }, Error>({
+apps/web/app/routes/orders.$id.tsx:58:    queryKey: ['order', id],
+apps/web/app/routes/orders.$id.tsx:61:    retry: shouldRetry,
+apps/web/app/services/admin-payment-method-share.ts:32:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-payment-method-share.ts:80:  return authenticatedRequest<PaymentMethodShareResponse>(
+apps/web/app/services/admin-payment-method-share.ts:93:  return authenticatedRequest<AdminMerchantPaymentMethodShareResponse>(
+apps/web/app/services/admin-payment-method-share.ts:106:  return authenticatedRequest<AdminUserPaymentMethodShareResponse>(
+apps/web/app/services/orders-loop.ts:23:import { authenticatedRequest } from './api-client';
+apps/web/app/services/orders-loop.ts:32: * `Idempotency-Key`. The backend dedups against (user_id, key) so a
+apps/web/app/services/orders-loop.ts:62:  return authenticatedRequest<CreateLoopOrderResponse>('/api/orders/loop', {
+apps/web/app/services/orders-loop.ts:66:      'Idempotency-Key': options.idempotencyKey ?? freshOrderIdempotencyKey(),
+apps/web/app/services/orders-loop.ts:73:  return authenticatedRequest<LoopOrderView>(`/api/orders/loop/${encodeURIComponent(id)}`);
+apps/web/app/services/orders-loop.ts:89:  return authenticatedRequest<LoopOrderListResponse>(
+apps/web/app/hooks/use-merchants.ts:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/hooks/use-merchants.ts:34:  const query = useQuery<MerchantListResponse, Error>({
+apps/web/app/hooks/use-merchants.ts:35:    queryKey: ['merchants', { page, limit, q }],
+apps/web/app/hooks/use-merchants.ts:40:    retry: shouldRetry,
+apps/web/app/hooks/use-merchants.ts:67:  const query = useQuery<MerchantAllResponse, Error>({
+apps/web/app/hooks/use-merchants.ts:68:    queryKey: ['merchants-all'],
+apps/web/app/hooks/use-merchants.ts:73:    retry: shouldRetry,
+apps/web/app/hooks/use-merchants.ts:94:  const query = useQuery<{ merchant: Merchant }, Error>({
+apps/web/app/hooks/use-merchants.ts:95:    queryKey: ['merchant-by-slug', normalized],
+apps/web/app/hooks/use-merchants.ts:100:    retry: shouldRetry,
+apps/web/app/hooks/use-merchants.ts:130:  const query = useQuery<{ merchant: Merchant }, Error>({
+apps/web/app/hooks/use-merchants.ts:131:    queryKey: ['merchant', normalized],
+apps/web/app/hooks/use-merchants.ts:136:    retry: shouldRetry,
+apps/web/app/hooks/use-merchants.ts:162:  const query = useQuery<MerchantCashbackRateResponse, Error>({
+apps/web/app/hooks/use-merchants.ts:163:    queryKey: ['merchant-cashback-rate', normalized],
+apps/web/app/hooks/use-merchants.ts:167:    retry: shouldRetry,
+apps/web/app/hooks/use-merchants.ts:183:  const query = useQuery<MerchantsCashbackRatesResponse, Error>({
+apps/web/app/hooks/use-merchants.ts:184:    queryKey: ['merchants-cashback-rates'],
+apps/web/app/hooks/use-merchants.ts:187:    retry: shouldRetry,
+apps/web/app/services/admin-users-list.ts:26:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-users-list.ts:60:  return authenticatedRequest<{ users: AdminUserRow[] }>(
+apps/web/app/services/admin-users-list.ts:67:  return authenticatedRequest<AdminUserDetail>(`/api/admin/users/${encodeURIComponent(userId)}`);
+apps/web/app/services/admin-users-list.ts:76:  return authenticatedRequest<AdminUserDetail>(
+apps/web/app/services/admin-operator-mixes.ts:32:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-operator-mixes.ts:51:  return authenticatedRequest<MerchantOperatorMixResponse>(
+apps/web/app/services/admin-operator-mixes.ts:64:  return authenticatedRequest<OperatorMerchantMixResponse>(
+apps/web/app/services/admin-operator-mixes.ts:77:  return authenticatedRequest<UserOperatorMixResponse>(
+apps/web/app/hooks/use-auth.ts:2:import { useQueryClient } from '@tanstack/react-query';
+apps/web/app/hooks/use-auth.ts:59:  const queryClient = useQueryClient();
+apps/web/app/components/features/orders/__tests__/OrdersSummaryHeader.test.tsx:32:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/services/admin-payouts-by-asset.ts:19:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-payouts-by-asset.ts:41:  return authenticatedRequest<{ rows: PayoutsByAssetRow[] }>('/api/admin/payouts-by-asset');
+apps/web/app/services/admin-settlement-lag.ts:21:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-settlement-lag.ts:28:  return authenticatedRequest<SettlementLagResponse>(`/api/admin/payouts/settlement-lag${qs}`);
+apps/web/app/services/merchants.ts:7:import { apiRequest, authenticatedRequest } from './api-client';
+apps/web/app/services/merchants.ts:19:  return apiRequest<MerchantListResponse>(`/api/merchants${query ? `?${query}` : ''}`);
+apps/web/app/services/merchants.ts:29:  return apiRequest<MerchantAllResponse>('/api/merchants/all');
+apps/web/app/services/merchants.ts:40:  return authenticatedRequest<MerchantDetailResponse>(`/api/merchants/${encodeURIComponent(id)}`);
+apps/web/app/services/merchants.ts:49:  return apiRequest<MerchantDetailResponse>(`/api/merchants/by-slug/${encodeURIComponent(slug)}`);
+apps/web/app/services/merchants.ts:68:  return apiRequest<MerchantCashbackRateResponse>(
+apps/web/app/services/merchants.ts:89:  return apiRequest<MerchantsCashbackRatesResponse>('/api/merchants/cashback-rates');
+apps/web/app/routes/admin.users.$userId.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/admin.users.$userId.tsx:55:  const userQuery = useQuery({
+apps/web/app/routes/admin.users.$userId.tsx:56:    queryKey: ['admin-user', userId ?? null],
+apps/web/app/routes/admin.users.$userId.tsx:59:    retry: shouldRetry,
+apps/web/app/routes/admin.users.$userId.tsx:63:  const creditsQuery = useQuery({
+apps/web/app/routes/admin.users.$userId.tsx:64:    queryKey: ['admin-user-credits', userId ?? null],
+apps/web/app/routes/admin.users.$userId.tsx:67:    retry: shouldRetry,
+apps/web/app/services/admin-user-credits.ts:11: *   generates the `Idempotency-Key` so a double-submit can't
+apps/web/app/services/admin-user-credits.ts:18: *   reason. The service generates the `Idempotency-Key` so a
+apps/web/app/services/admin-user-credits.ts:36:import { generateIdempotencyKey, type AdminWriteEnvelope } from './admin-write-envelope';
+apps/web/app/services/admin-user-credits.ts:37:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-user-credits.ts:84:  return authenticatedRequest<AdminWriteEnvelope<CreditAdjustmentResult>>(
+apps/web/app/services/admin-user-credits.ts:88:      headers: { 'Idempotency-Key': generateIdempotencyKey() },
+apps/web/app/services/admin-user-credits.ts:109:  return authenticatedRequest<AdminWriteEnvelope<WithdrawalResult>>(
+apps/web/app/services/admin-user-credits.ts:113:      headers: { 'Idempotency-Key': generateIdempotencyKey() },
+apps/web/app/services/admin-user-credits.ts:136:  return authenticatedRequest<{ transactions: AdminCreditTransactionView[] }>(
+apps/web/app/services/admin-payment-method-activity.ts:26:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-payment-method-activity.ts:52:  return authenticatedRequest<AdminPaymentMethodActivityResponse>(
+apps/web/app/services/admin-user-drill.ts:28:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-user-drill.ts:71:  return authenticatedRequest<AdminUserCreditsResponse>(
+apps/web/app/services/admin-user-drill.ts:80:  return authenticatedRequest<AdminUserCashbackSummary>(
+apps/web/app/services/admin-user-drill.ts:87:  return authenticatedRequest<AdminUserFlywheelStats>(
+apps/web/app/services/admin-user-cashback-by-merchant.ts:24:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-user-cashback-by-merchant.ts:50:  return authenticatedRequest<AdminUserCashbackByMerchantResponse>(
+apps/web/app/services/admin-merchants-resync.ts:11: *   reason, the service generates a per-click `Idempotency-Key`,
+apps/web/app/services/admin-merchants-resync.ts:26:import { generateIdempotencyKey, type AdminWriteEnvelope } from './admin-write-envelope';
+apps/web/app/services/admin-merchants-resync.ts:27:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-merchants-resync.ts:41: * an immediate CTX catalog sweep. Service-generated `Idempotency-Key`
+apps/web/app/services/admin-merchants-resync.ts:47:  return authenticatedRequest<AdminWriteEnvelope<AdminMerchantResyncResponse>>(
+apps/web/app/services/admin-merchants-resync.ts:51:      headers: { 'Idempotency-Key': generateIdempotencyKey() },
+apps/web/app/services/admin-monthly.ts:30:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-monthly.ts:105:  return authenticatedRequest<AdminCashbackMonthlyResponse>('/api/admin/cashback-monthly');
+apps/web/app/services/admin-monthly.ts:110:  return authenticatedRequest<AdminPayoutsMonthlyResponse>('/api/admin/payouts-monthly');
+apps/web/app/services/admin-monthly.ts:117:  return authenticatedRequest<AdminUserCashbackMonthlyResponse>(
+apps/web/app/services/admin-monthly.ts:126:  return authenticatedRequest<AdminMerchantCashbackMonthlyResponse>(
+apps/web/app/services/admin-merchant-stats.ts:28:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-merchant-stats.ts:79:  return authenticatedRequest<MerchantStatsResponse>(
+apps/web/app/services/admin-merchant-stats.ts:92:  return authenticatedRequest<MerchantsFlywheelShareResponse>(
+apps/web/app/services/__tests__/config.test.ts:4: * A2-1702 — `config.ts` does NOT use `apiRequest` because it runs at
+apps/web/app/services/admin-discord.ts:16:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-discord.ts:36:  return authenticatedRequest<AdminDiscordNotifiersResponse>('/api/admin/discord/notifiers');
+apps/web/app/services/admin-discord.ts:57:  return authenticatedRequest<AdminDiscordTestResponse>('/api/admin/discord/test', {
+apps/web/app/services/admin-merchant-activity.ts:28:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-merchant-activity.ts:81:  return authenticatedRequest<AdminMerchantFlywheelActivityResponse>(
+apps/web/app/services/admin-merchant-activity.ts:95:  return authenticatedRequest<AdminMerchantTopEarnersResponse>(
+apps/web/app/services/admin-payouts.ts:26: *   per-click `Idempotency-Key` so a double-click produces at
+apps/web/app/services/admin-payouts.ts:40:import { generateIdempotencyKey, type AdminWriteEnvelope } from './admin-write-envelope';
+apps/web/app/services/admin-payouts.ts:41:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-payouts.ts:84:  return authenticatedRequest<{ payouts: AdminPayoutView[] }>(
+apps/web/app/services/admin-payouts.ts:91:  return authenticatedRequest<AdminPayoutView>(`/api/admin/payouts/${encodeURIComponent(id)}`);
+apps/web/app/services/admin-payouts.ts:99:  return authenticatedRequest<AdminPayoutView>(
+apps/web/app/services/admin-payouts.ts:106: * failed row back to pending. Service-generated `Idempotency-Key`
+apps/web/app/services/admin-payouts.ts:113:  return authenticatedRequest<AdminWriteEnvelope<AdminPayoutView>>(
+apps/web/app/services/admin-payouts.ts:117:      headers: { 'Idempotency-Key': generateIdempotencyKey() },
+apps/web/app/services/admin-write-envelope.ts:11: * for the supplied `Idempotency-Key` and returned the stored
+apps/web/app/services/admin-write-envelope.ts:48: * keyed by `Idempotency-Key` and returns the stored response
+apps/web/app/services/admin-write-envelope.ts:57:export function generateIdempotencyKey(): string {
+apps/web/app/components/features/admin/MerchantsFlywheelShareCard.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/MerchantsFlywheelShareCard.tsx:30:  const query = useQuery({
+apps/web/app/components/features/admin/MerchantsFlywheelShareCard.tsx:31:    queryKey: ['admin-merchants-flywheel-share'],
+apps/web/app/components/features/admin/MerchantsFlywheelShareCard.tsx:33:    retry: shouldRetry,
+apps/web/app/services/admin-merchant-flows.ts:18:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-merchant-flows.ts:38:  return authenticatedRequest<{ flows: MerchantFlow[] }>(`/api/admin/merchant-flows`);
+apps/web/app/services/admin-cashback-config.ts:12: *   `Idempotency-Key` so a double-submit of the form can't
+apps/web/app/services/admin-cashback-config.ts:34:import { generateIdempotencyKey, type AdminWriteEnvelope } from './admin-write-envelope';
+apps/web/app/services/admin-cashback-config.ts:35:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-cashback-config.ts:82:  return authenticatedRequest<{ configs: MerchantCashbackConfig[] }>(
+apps/web/app/services/admin-cashback-config.ts:89: * admin write. Service generates a per-click `Idempotency-Key` so
+apps/web/app/services/admin-cashback-config.ts:103:  return authenticatedRequest<AdminWriteEnvelope<MerchantCashbackConfig>>(
+apps/web/app/services/admin-cashback-config.ts:107:      headers: { 'Idempotency-Key': generateIdempotencyKey() },
+apps/web/app/services/admin-cashback-config.ts:117:  return authenticatedRequest<{ history: MerchantCashbackConfigHistoryEntry[] }>(
+apps/web/app/services/admin-cashback-config.ts:134:  return authenticatedRequest<AdminConfigHistoryResponse>(
+apps/web/app/services/admin-assets.ts:21:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-assets.ts:32:  return authenticatedRequest<AssetCirculationResponse>(
+apps/web/app/services/admin-assets.ts:39:  return authenticatedRequest<AssetDriftStateResponse>('/api/admin/asset-drift/state');
+apps/web/app/components/features/orders/__tests__/LoopOrdersList.test.tsx:27:    defaultOptions: { queries: { retry: false } },
+apps/web/app/components/features/admin/TreasuryReconciliationChart.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/TreasuryReconciliationChart.tsx:65:  const cashbackQuery = useQuery({
+apps/web/app/components/features/admin/TreasuryReconciliationChart.tsx:66:    queryKey: ['admin-cashback-monthly'],
+apps/web/app/components/features/admin/TreasuryReconciliationChart.tsx:68:    retry: shouldRetry,
+apps/web/app/components/features/admin/TreasuryReconciliationChart.tsx:71:  const payoutsQuery = useQuery({
+apps/web/app/components/features/admin/TreasuryReconciliationChart.tsx:72:    queryKey: ['admin-payouts-monthly'],
+apps/web/app/components/features/admin/TreasuryReconciliationChart.tsx:74:    retry: shouldRetry,
+apps/web/app/services/admin-audit.ts:12:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-audit.ts:50:  return authenticatedRequest<AdminAuditTailResponse>(
+apps/web/app/services/__tests__/public-stats.test.ts:4:  apiRequest: vi.fn(),
+apps/web/app/services/__tests__/public-stats.test.ts:15:import { apiRequest } from '../api-client';
+apps/web/app/services/__tests__/public-stats.test.ts:17:const mockApiRequest = vi.mocked(apiRequest);
+apps/web/app/services/__tests__/public-stats.test.ts:24: * A2-1702 — every public-stats fetcher is a thin `apiRequest` wrapper.
+apps/web/app/routes/orders.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/orders.tsx:197:  const payoutsQuery = useQuery({
+apps/web/app/routes/orders.tsx:198:    queryKey: ['me', 'pending-payouts'],
+apps/web/app/routes/orders.tsx:201:    retry: shouldRetry,
+apps/web/app/routes/orders.tsx:290:                // the queryKey stays the same so TanStack Query serves the
+apps/web/app/components/features/admin/UserOperatorMixCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/UserOperatorMixCard.tsx:44:  const query = useQuery({
+apps/web/app/components/features/admin/UserOperatorMixCard.tsx:45:    queryKey: ['admin-user-operator-mix', userId, WINDOW_HOURS],
+apps/web/app/components/features/admin/UserOperatorMixCard.tsx:47:    retry: shouldRetry,
+apps/web/app/services/__tests__/user.test.ts:5:  authenticatedRequest: vi.fn(),
+apps/web/app/services/__tests__/user.test.ts:25:import { authenticatedRequest } from '../api-client';
+apps/web/app/services/__tests__/user.test.ts:27:const mockAuth = vi.mocked(authenticatedRequest);
+apps/web/app/services/__tests__/user.test.ts:35: * `authenticatedRequest`. The risk is a silent path / body / query
+apps/web/app/services/admin-merchant-drill.ts:31:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-merchant-drill.ts:73:  return authenticatedRequest<AdminMerchantFlywheelStats>(
+apps/web/app/services/admin-merchant-drill.ts:82:  return authenticatedRequest<AdminMerchantCashbackSummary>(
+apps/web/app/components/features/admin/DiscordNotifiersCard.tsx:2:import { useMutation, useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/DiscordNotifiersCard.tsx:41:  const query = useQuery({
+apps/web/app/components/features/admin/DiscordNotifiersCard.tsx:42:    queryKey: ['admin-discord-notifiers'],
+apps/web/app/components/features/admin/DiscordNotifiersCard.tsx:44:    retry: shouldRetry,
+apps/web/app/components/features/admin/DiscordNotifiersCard.tsx:145:  const mutation = useMutation<AdminDiscordTestResponse>({
+apps/web/app/services/public-stats.ts:8:import { apiRequest } from './api-client';
+apps/web/app/services/public-stats.ts:28:  return apiRequest<PublicCashbackStats>('/api/public/cashback-stats');
+apps/web/app/services/public-stats.ts:43:  return apiRequest<PublicTopCashbackMerchantsResponse>(
+apps/web/app/services/public-stats.ts:56:  return apiRequest<PublicMerchantDetail>(`/api/public/merchants/${encodeURIComponent(idOrSlug)}`);
+apps/web/app/services/public-stats.ts:79:  return apiRequest<PublicCashbackPreview>(`/api/public/cashback-preview?${qs}`);
+apps/web/app/services/public-stats.ts:109:  return apiRequest<PublicLoopAssetsResponse>('/api/public/loop-assets');
+apps/web/app/services/public-stats.ts:134:  return apiRequest<PublicFlywheelStats>('/api/public/flywheel-stats');
+apps/web/app/components/features/admin/PayoutsByAssetTable.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/PayoutsByAssetTable.tsx:52:  const query = useQuery({
+apps/web/app/components/features/admin/PayoutsByAssetTable.tsx:53:    queryKey: ['admin-payouts-by-asset'],
+apps/web/app/components/features/admin/PayoutsByAssetTable.tsx:55:    retry: shouldRetry,
+apps/web/app/services/__tests__/orders.test.ts:5:  apiRequest: vi.fn(),
+apps/web/app/services/__tests__/orders.test.ts:6:  authenticatedRequest: vi.fn(),
+apps/web/app/services/__tests__/orders.test.ts:10:import { authenticatedRequest } from '../api-client';
+apps/web/app/services/__tests__/orders.test.ts:12:const mockAuthRequest = vi.mocked(authenticatedRequest);
+apps/web/app/services/__tests__/merchants.test.ts:5:  apiRequest: vi.fn(),
+apps/web/app/services/__tests__/merchants.test.ts:6:  authenticatedRequest: vi.fn(),
+apps/web/app/services/__tests__/merchants.test.ts:10:import { apiRequest, authenticatedRequest } from '../api-client';
+apps/web/app/services/__tests__/merchants.test.ts:12:const mockApiRequest = vi.mocked(apiRequest);
+apps/web/app/services/__tests__/merchants.test.ts:13:const mockAuthenticatedRequest = vi.mocked(authenticatedRequest);
+apps/web/app/services/__tests__/merchants.test.ts:62:    // so it goes through `authenticatedRequest`, not `apiRequest`.
+apps/web/app/services/__tests__/auth.test.ts:5:  apiRequest: vi.fn(),
+apps/web/app/services/__tests__/auth.test.ts:16:import { apiRequest } from '../api-client';
+apps/web/app/services/__tests__/auth.test.ts:19:const mockApiRequest = vi.mocked(apiRequest);
+apps/web/app/services/admin-operator-drill.ts:25:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-operator-drill.ts:60:  return authenticatedRequest<OperatorSupplierSpendResponse>(
+apps/web/app/services/admin-operator-drill.ts:73:  return authenticatedRequest<OperatorActivityResponse>(
+apps/web/app/components/features/admin/TopUsersTable.tsx:3:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/TopUsersTable.tsx:49:  const query = useQuery({
+apps/web/app/components/features/admin/TopUsersTable.tsx:50:    queryKey: ['admin-top-users', windowDays, LIMIT],
+apps/web/app/components/features/admin/TopUsersTable.tsx:52:    retry: shouldRetry,
+apps/web/app/components/features/admin/UserCashbackByMerchantTable.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/UserCashbackByMerchantTable.tsx:52:  const query = useQuery({
+apps/web/app/components/features/admin/UserCashbackByMerchantTable.tsx:53:    queryKey: ['admin-user-cashback-by-merchant', userId],
+apps/web/app/components/features/admin/UserCashbackByMerchantTable.tsx:56:    retry: shouldRetry,
+apps/web/app/components/features/orders/LoopOrdersList.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/orders/LoopOrdersList.tsx:20:  const query = useQuery({
+apps/web/app/components/features/orders/LoopOrdersList.tsx:21:    queryKey: ['loop-orders'],
+apps/web/app/components/features/orders/LoopOrdersList.tsx:24:    retry: shouldRetry,
+apps/web/app/services/__tests__/api-client.test.ts:6:// Mocks that authenticatedRequest / tryRefresh dynamically import. The
+apps/web/app/services/__tests__/api-client.test.ts:25:import { apiRequest, authenticatedRequest, tryRefresh } from '../api-client';
+apps/web/app/services/__tests__/api-client.test.ts:29:describe('apiRequest', () => {
+apps/web/app/services/__tests__/api-client.test.ts:40:    const result = await apiRequest('/api/merchants');
+apps/web/app/services/__tests__/api-client.test.ts:52:    await apiRequest('/api/merchants');
+apps/web/app/services/__tests__/api-client.test.ts:63:    await apiRequest('/api/merchants', { headers: { 'X-Client-Version': '9.9.9' } });
+apps/web/app/services/__tests__/api-client.test.ts:74:    await apiRequest('/api/auth/request-otp', {
+apps/web/app/services/__tests__/api-client.test.ts:90:    await expect(apiRequest('/api/missing')).rejects.toThrow(ApiException);
+apps/web/app/services/__tests__/api-client.test.ts:98:    await expect(apiRequest('/api/missing')).rejects.toMatchObject({
+apps/web/app/services/__tests__/api-client.test.ts:109:    await expect(apiRequest('/api/broken')).rejects.toMatchObject({
+apps/web/app/services/__tests__/api-client.test.ts:119:    const result = await apiRequest('/api/image', { binary: true });
+apps/web/app/services/__tests__/api-client.test.ts:126:    await apiRequest('/api/merchants');
+apps/web/app/services/__tests__/api-client.test.ts:137:    await expect(apiRequest('/api/slow')).rejects.toMatchObject({
+apps/web/app/services/__tests__/api-client.test.ts:147:    await expect(apiRequest('/api/broken')).rejects.toMatchObject({
+apps/web/app/services/__tests__/api-client.test.ts:157:    await apiRequest('/api/slow-on-purpose', { timeoutMs: 0 });
+apps/web/app/services/__tests__/api-client.test.ts:171:    await expect(apiRequest('/api/broken')).rejects.toMatchObject({
+apps/web/app/services/__tests__/api-client.test.ts:182:    await expect(apiRequest('/api/broken')).rejects.toMatchObject({
+apps/web/app/services/__tests__/api-client.test.ts:306:describe('authenticatedRequest', () => {
+apps/web/app/services/__tests__/api-client.test.ts:317:    await expect(authenticatedRequest('/api/orders')).rejects.toMatchObject({
+apps/web/app/services/__tests__/api-client.test.ts:329:    await authenticatedRequest('/api/orders');
+apps/web/app/services/__tests__/api-client.test.ts:348:    const res = await authenticatedRequest<{ ok: boolean }>('/api/orders');
+apps/web/app/services/__tests__/api-client.test.ts:375:    const res = await authenticatedRequest<{ ok: boolean }>('/api/orders');
+apps/web/app/services/__tests__/api-client.test.ts:394:    await expect(authenticatedRequest('/api/orders')).rejects.toMatchObject({ status: 401 });
+apps/web/app/services/__tests__/api-client.test.ts:405:    await authenticatedRequest('/api/orders');
+apps/web/app/services/admin-csv.ts:20:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-csv.ts:29:  const buf = await authenticatedRequest<ArrayBuffer>(path, { binary: true });
+apps/web/app/components/features/admin/OrdersSparkline.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/OrdersSparkline.tsx:15:  const query = useQuery({
+apps/web/app/components/features/admin/OrdersSparkline.tsx:16:    queryKey: ['admin-orders-activity', WINDOW_DAYS],
+apps/web/app/components/features/admin/OrdersSparkline.tsx:18:    retry: shouldRetry,
+apps/web/app/components/features/admin/AdminNav.tsx:27:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/AdminNav.tsx:175:  const snapshotQuery = useQuery<TreasurySnapshot, Error>({
+apps/web/app/components/features/admin/AdminNav.tsx:176:    queryKey: ['admin-treasury'],
+apps/web/app/components/features/admin/AdminNav.tsx:180:    retry: shouldRetry,
+apps/web/app/services/admin-top-users.ts:20:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-top-users.ts:48:  return authenticatedRequest<TopUsersResponse>(
+apps/web/app/routes/admin.stuck-orders.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/admin.stuck-orders.tsx:53:  const query = useQuery({
+apps/web/app/routes/admin.stuck-orders.tsx:54:    queryKey: ['admin-stuck-orders'],
+apps/web/app/routes/admin.stuck-orders.tsx:56:    retry: shouldRetry,
+apps/web/app/routes/admin.stuck-orders.tsx:58:    refetchInterval: 30_000,
+apps/web/app/routes/admin.stuck-orders.tsx:205:  const query = useQuery({
+apps/web/app/routes/admin.stuck-orders.tsx:206:    queryKey: ['admin-stuck-payouts'],
+apps/web/app/routes/admin.stuck-orders.tsx:208:    retry: shouldRetry,
+apps/web/app/routes/admin.stuck-orders.tsx:210:    refetchInterval: 30_000,
+apps/web/app/services/api-client.ts:43:export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+apps/web/app/services/api-client.ts:147:    const res = await apiRequest<{ accessToken: string; refreshToken?: string }>(
+apps/web/app/services/api-client.ts:186:export async function authenticatedRequest<T>(
+apps/web/app/services/api-client.ts:217:    return await apiRequest<T>(path, {
+apps/web/app/services/api-client.ts:227:        return apiRequest<T>(path, {
+apps/web/app/components/features/admin/CreditTransactionsTable.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/CreditTransactionsTable.tsx:74:  const query = useQuery({
+apps/web/app/components/features/admin/CreditTransactionsTable.tsx:75:    queryKey: ['admin-user-credit-transactions', userId, typeFilter, beforeCursor],
+apps/web/app/components/features/admin/CreditTransactionsTable.tsx:83:    retry: shouldRetry,
+apps/web/app/services/orders.ts:7:import { authenticatedRequest } from './api-client';
+apps/web/app/services/orders.ts:11:  return authenticatedRequest<CreateOrderResponse>('/api/orders', {
+apps/web/app/services/orders.ts:19:  return authenticatedRequest<OrderListResponse>(`/api/orders?page=${page}`);
+apps/web/app/services/orders.ts:24:  return authenticatedRequest<{ order: Order }>(`/api/orders/${encodeURIComponent(id)}`);
+apps/web/app/routes/admin.treasury.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/admin.treasury.tsx:113:  const query = useQuery({
+apps/web/app/routes/admin.treasury.tsx:114:    queryKey: ['admin-treasury'],
+apps/web/app/routes/admin.treasury.tsx:116:    retry: shouldRetry,
+apps/web/app/components/features/orders/OrdersSummaryHeader.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/orders/OrdersSummaryHeader.tsx:26:  const query = useQuery({
+apps/web/app/components/features/orders/OrdersSummaryHeader.tsx:27:    queryKey: ['me', 'orders', 'summary'],
+apps/web/app/components/features/orders/OrdersSummaryHeader.tsx:30:    retry: shouldRetry,
+apps/web/app/services/admin-operator-stats.ts:29:import { authenticatedRequest } from './api-client';
+apps/web/app/services/admin-operator-stats.ts:45:  return authenticatedRequest<OperatorStatsResponse>(
+apps/web/app/services/admin-operator-stats.ts:57:  return authenticatedRequest<OperatorLatencyResponse>(
+apps/web/app/components/features/order/__tests__/OrderPayoutCard.test.tsx:27:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/order/__tests__/OrderPayoutCard.test.tsx:40:        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+apps/web/app/components/features/order/__tests__/OrderPayoutCard.test.tsx:58:        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+apps/web/app/components/features/admin/CreditAdjustmentForm.tsx:2:import { useMutation, useQueryClient } from '@tanstack/react-query';
+apps/web/app/components/features/admin/CreditAdjustmentForm.tsx:57:  const queryClient = useQueryClient();
+apps/web/app/components/features/admin/CreditAdjustmentForm.tsx:71:  const mutation = useMutation({
+apps/web/app/components/features/admin/CreditAdjustmentForm.tsx:78:      void queryClient.invalidateQueries({ queryKey: ['admin-user-credits', userId] });
+apps/web/app/components/features/admin/CreditAdjustmentForm.tsx:79:      void queryClient.invalidateQueries({ queryKey: ['admin-treasury'] });
+apps/web/app/routes/calculator.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/calculator.tsx:43:  const query = useQuery({
+apps/web/app/routes/calculator.tsx:44:    queryKey: ['public-top-cashback-merchants', 50],
+apps/web/app/routes/calculator.tsx:46:    retry: shouldRetry,
+apps/web/app/components/features/home/FlywheelStatsBand.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/home/FlywheelStatsBand.tsx:26:  const query = useQuery({
+apps/web/app/components/features/home/FlywheelStatsBand.tsx:27:    queryKey: ['public-flywheel-stats'],
+apps/web/app/components/features/home/FlywheelStatsBand.tsx:33:    retry: false,
+apps/web/app/components/features/order/OrderPayoutCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/order/OrderPayoutCard.tsx:59:  const query = useQuery({
+apps/web/app/components/features/order/OrderPayoutCard.tsx:60:    queryKey: ['order', orderId, 'payout'],
+apps/web/app/components/features/order/OrderPayoutCard.tsx:63:    retry: shouldRetry,
+apps/web/app/components/features/order/OrderPayoutCard.tsx:65:    refetchInterval: 30_000,
+apps/web/app/components/features/home/MobileHome.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/home/MobileHome.tsx:65:  const summaryQuery = useQuery({
+apps/web/app/components/features/home/MobileHome.tsx:66:    queryKey: ['me', 'cashback-summary'],
+apps/web/app/components/features/home/MobileHome.tsx:69:    retry: shouldRetry,
+apps/web/app/components/features/admin/UsersRecyclingActivityCard.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/UsersRecyclingActivityCard.tsx:27:  const query = useQuery({
+apps/web/app/components/features/admin/UsersRecyclingActivityCard.tsx:28:    queryKey: ['admin-users-recycling-activity'],
+apps/web/app/components/features/admin/UsersRecyclingActivityCard.tsx:30:    retry: shouldRetry,
+apps/web/app/components/features/admin/PaymentMethodActivityChart.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/PaymentMethodActivityChart.tsx:54:  const query = useQuery({
+apps/web/app/components/features/admin/PaymentMethodActivityChart.tsx:55:    queryKey: ['admin-payment-method-activity', 30],
+apps/web/app/components/features/admin/PaymentMethodActivityChart.tsx:57:    retry: shouldRetry,
+apps/web/app/components/features/admin/UserRailMixCard.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/UserRailMixCard.tsx:55:  const query = useQuery({
+apps/web/app/components/features/admin/UserRailMixCard.tsx:56:    queryKey: ['admin-user-payment-method-share', userId, 'fulfilled'],
+apps/web/app/components/features/admin/UserRailMixCard.tsx:59:    retry: shouldRetry,
+apps/web/app/components/features/admin/UserRailMixCard.tsx:84:  query: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getAdminUserPaymentMethodShare>>>>;
+apps/web/app/components/features/cashback/CashbackByMerchantCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/cashback/CashbackByMerchantCard.tsx:44:  const query = useQuery({
+apps/web/app/components/features/cashback/CashbackByMerchantCard.tsx:45:    queryKey: ['me', 'cashback-by-merchant'],
+apps/web/app/components/features/cashback/CashbackByMerchantCard.tsx:48:    retry: shouldRetry,
+apps/web/app/components/features/home/CashbackStatsBand.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/home/CashbackStatsBand.tsx:54:  const query = useQuery({
+apps/web/app/components/features/home/CashbackStatsBand.tsx:55:    queryKey: ['public-cashback-stats'],
+apps/web/app/components/features/home/CashbackStatsBand.tsx:61:    retry: false,
+apps/web/app/components/features/home/__tests__/FlywheelStatsBand.test.tsx:25:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/ConfigsHistoryCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/ConfigsHistoryCard.tsx:24:  const query = useQuery({
+apps/web/app/components/features/admin/ConfigsHistoryCard.tsx:25:    queryKey: ['admin-configs-history', LIMIT],
+apps/web/app/components/features/admin/ConfigsHistoryCard.tsx:27:    retry: shouldRetry,
+apps/web/app/components/features/cashback/PendingCashbackChip.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/cashback/PendingCashbackChip.tsx:78:  const query = useQuery({
+apps/web/app/components/features/cashback/PendingCashbackChip.tsx:79:    queryKey: ['me', 'pending-payouts-summary'],
+apps/web/app/components/features/cashback/PendingCashbackChip.tsx:82:    retry: shouldRetry,
+apps/web/app/components/features/cashback/PendingCashbackChip.tsx:84:    refetchInterval: 30_000,
+apps/web/app/components/features/home/__tests__/CashbackStatsBand.test.tsx:25:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/home/__tests__/CashbackStatsBand.test.tsx:71:        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+apps/web/app/components/features/home/__tests__/CashbackStatsBand.test.tsx:88:        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+apps/web/app/components/features/admin/AdminMonthlyCashbackChart.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/AdminMonthlyCashbackChart.tsx:40:  const query = useQuery({
+apps/web/app/components/features/admin/AdminMonthlyCashbackChart.tsx:45:    queryKey: ['admin-cashback-monthly'],
+apps/web/app/components/features/admin/AdminMonthlyCashbackChart.tsx:47:    retry: shouldRetry,
+apps/web/app/components/features/admin/RequireAdmin.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/RequireAdmin.tsx:34:  const me = useQuery<UserMeView, Error>({
+apps/web/app/components/features/admin/RequireAdmin.tsx:35:    queryKey: ['me'],
+apps/web/app/components/features/admin/RequireAdmin.tsx:38:    retry: shouldRetry,
+apps/web/app/components/features/admin/UserPayoutsTable.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/UserPayoutsTable.tsx:44:  const query = useQuery({
+apps/web/app/components/features/admin/UserPayoutsTable.tsx:45:    queryKey: ['admin-user-payouts', userId, LIMIT],
+apps/web/app/components/features/admin/UserPayoutsTable.tsx:47:    retry: shouldRetry,
+apps/web/app/components/features/admin/CashbackSummaryChip.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/CashbackSummaryChip.tsx:22:  const query = useQuery({
+apps/web/app/components/features/admin/CashbackSummaryChip.tsx:23:    queryKey: ['admin-user-cashback-summary', userId],
+apps/web/app/components/features/admin/CashbackSummaryChip.tsx:26:    retry: shouldRetry,
+apps/web/app/components/features/admin/StuckPayoutsCard.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/StuckPayoutsCard.tsx:30:  const query = useQuery({
+apps/web/app/components/features/admin/StuckPayoutsCard.tsx:31:    queryKey: ['admin-stuck-payouts'],
+apps/web/app/components/features/admin/StuckPayoutsCard.tsx:33:    retry: shouldRetry,
+apps/web/app/components/features/admin/MerchantFlywheelActivityChart.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/MerchantFlywheelActivityChart.tsx:35:  const query = useQuery({
+apps/web/app/components/features/admin/MerchantFlywheelActivityChart.tsx:36:    queryKey: ['admin-merchant-flywheel-activity', merchantId, WINDOW_DAYS],
+apps/web/app/components/features/admin/MerchantFlywheelActivityChart.tsx:39:    retry: shouldRetry,
+apps/web/app/routes/admin._index.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/admin._index.tsx:163:  const snapshotQuery = useQuery<TreasurySnapshot, Error>({
+apps/web/app/routes/admin._index.tsx:164:    queryKey: ['admin-treasury'],
+apps/web/app/routes/admin._index.tsx:166:    retry: shouldRetry,
+apps/web/app/components/features/admin/PayoutsSparkline.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/PayoutsSparkline.tsx:45:  const query = useQuery({
+apps/web/app/components/features/admin/PayoutsSparkline.tsx:46:    queryKey: ['admin-payouts-activity', WINDOW_DAYS],
+apps/web/app/components/features/admin/PayoutsSparkline.tsx:48:    retry: shouldRetry,
+apps/web/app/components/features/admin/UserCashbackMonthlyChart.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/UserCashbackMonthlyChart.tsx:29:  const query = useQuery({
+apps/web/app/components/features/admin/UserCashbackMonthlyChart.tsx:30:    queryKey: ['admin-user-cashback-monthly', userId],
+apps/web/app/components/features/admin/UserCashbackMonthlyChart.tsx:33:    retry: shouldRetry,
+apps/web/app/components/features/cashback/__tests__/MonthlyCashbackChart.test.tsx:38:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/AssetDriftWatcherCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/AssetDriftWatcherCard.tsx:23:  const query = useQuery<AssetDriftStateResponse, Error>({
+apps/web/app/components/features/admin/AssetDriftWatcherCard.tsx:24:    queryKey: ['admin-asset-drift-state'],
+apps/web/app/components/features/admin/AssetDriftWatcherCard.tsx:26:    retry: shouldRetry,
+apps/web/app/components/features/admin/AssetDriftWatcherCard.tsx:28:    refetchInterval: 60_000,
+apps/web/app/components/features/admin/AssetDriftBadge.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/AssetDriftBadge.tsx:53:  const query = useQuery({
+apps/web/app/components/features/admin/AssetDriftBadge.tsx:54:    queryKey: ['admin-asset-circulation', assetCode],
+apps/web/app/components/features/admin/AssetDriftBadge.tsx:56:    retry: shouldRetry,
+apps/web/app/components/features/admin/OperatorStatsCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/OperatorStatsCard.tsx:46:  const query = useQuery({
+apps/web/app/components/features/admin/OperatorStatsCard.tsx:47:    queryKey: ['admin-operator-stats', WINDOW_HOURS],
+apps/web/app/components/features/admin/OperatorStatsCard.tsx:49:    retry: shouldRetry,
+apps/web/app/components/features/admin/StuckOrdersCard.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/StuckOrdersCard.tsx:26:  const query = useQuery({
+apps/web/app/components/features/admin/StuckOrdersCard.tsx:27:    queryKey: ['admin-stuck-orders'],
+apps/web/app/components/features/admin/StuckOrdersCard.tsx:29:    retry: shouldRetry,
+apps/web/app/components/features/admin/SupplierSpendCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/SupplierSpendCard.tsx:25:  const query = useQuery({
+apps/web/app/components/features/admin/SupplierSpendCard.tsx:26:    queryKey: ['admin-supplier-spend', WINDOW_HOURS],
+apps/web/app/components/features/admin/SupplierSpendCard.tsx:28:    retry: shouldRetry,
+apps/web/app/components/features/admin/AssetCirculationCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/AssetCirculationCard.tsx:85:  const query = useQuery({
+apps/web/app/components/features/admin/AssetCirculationCard.tsx:86:    queryKey: ['admin-asset-circulation', assetCode],
+apps/web/app/components/features/admin/AssetCirculationCard.tsx:88:    retry: shouldRetry,
+apps/web/app/components/features/admin/OperatorMerchantMixCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/OperatorMerchantMixCard.tsx:48:  const query = useQuery({
+apps/web/app/components/features/admin/OperatorMerchantMixCard.tsx:49:    queryKey: ['admin-operator-merchant-mix', operatorId, WINDOW_HOURS],
+apps/web/app/components/features/admin/OperatorMerchantMixCard.tsx:51:    retry: shouldRetry,
+apps/web/app/routes/admin.payouts.tsx:2:import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+apps/web/app/routes/admin.payouts.tsx:107:  const queryClient = useQueryClient();
+apps/web/app/routes/admin.payouts.tsx:108:  const query = useQuery({
+apps/web/app/routes/admin.payouts.tsx:109:    queryKey: ['admin-payouts', activeState, assetCodeFilter ?? null, activeKind],
+apps/web/app/routes/admin.payouts.tsx:117:    retry: shouldRetry,
+apps/web/app/routes/admin.payouts.tsx:124:  const retryMutation = useMutation({
+apps/web/app/routes/admin.payouts.tsx:127:      void queryClient.invalidateQueries({ queryKey: ['admin-payouts'] });
+apps/web/app/routes/admin.payouts.tsx:128:      void queryClient.invalidateQueries({ queryKey: ['admin-treasury'] });
+apps/web/app/components/features/admin/MerchantStatsTable.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/MerchantStatsTable.tsx:30:  const query = useQuery({
+apps/web/app/components/features/admin/MerchantStatsTable.tsx:31:    queryKey: ['admin-merchant-stats'],
+apps/web/app/components/features/admin/MerchantStatsTable.tsx:33:    retry: shouldRetry,
+apps/web/app/components/features/cashback/__tests__/PendingPayoutsCard.test.tsx:32:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/routes/settings.wallet.tsx:2:import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+apps/web/app/routes/settings.wallet.tsx:44:  const queryClient = useQueryClient();
+apps/web/app/routes/settings.wallet.tsx:46:  const meQuery = useQuery({
+apps/web/app/routes/settings.wallet.tsx:47:    queryKey: ['me'],
+apps/web/app/routes/settings.wallet.tsx:50:    retry: shouldRetry,
+apps/web/app/routes/settings.wallet.tsx:58:  const linkMutation = useMutation({
+apps/web/app/routes/settings.wallet.tsx:71:  const currencyMutation = useMutation({
+apps/web/app/components/features/admin/CashbackRealizationCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/CashbackRealizationCard.tsx:24:  const query = useQuery<CashbackRealizationResponse, Error>({
+apps/web/app/components/features/admin/CashbackRealizationCard.tsx:25:    queryKey: ['admin-cashback-realization'],
+apps/web/app/components/features/admin/CashbackRealizationCard.tsx:27:    retry: shouldRetry,
+apps/web/app/components/features/admin/CashbackRealizationCard.tsx:29:    refetchInterval: 120_000,
+apps/web/app/components/features/admin/UserOrdersTable.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/UserOrdersTable.tsx:35:  const query = useQuery({
+apps/web/app/components/features/admin/UserOrdersTable.tsx:36:    queryKey: ['admin-user-orders', userId, LIMIT],
+apps/web/app/components/features/admin/UserOrdersTable.tsx:38:    retry: shouldRetry,
+apps/web/app/components/features/admin/TopUsersByPendingPayoutCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/TopUsersByPendingPayoutCard.tsx:43:  const query = useQuery({
+apps/web/app/components/features/admin/TopUsersByPendingPayoutCard.tsx:44:    queryKey: ['admin-top-users-by-pending-payout', DEFAULT_LIMIT],
+apps/web/app/components/features/admin/TopUsersByPendingPayoutCard.tsx:46:    retry: shouldRetry,
+apps/web/app/components/features/cashback/__tests__/RailMixCard.test.tsx:33:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/MerchantRailMixCard.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/MerchantRailMixCard.tsx:61:  const query = useQuery({
+apps/web/app/components/features/admin/MerchantRailMixCard.tsx:62:    queryKey: ['admin-merchant-payment-method-share', merchantId, 'fulfilled'],
+apps/web/app/components/features/admin/MerchantRailMixCard.tsx:65:    retry: shouldRetry,
+apps/web/app/components/features/admin/MerchantRailMixCard.tsx:91:    typeof useQuery<Awaited<ReturnType<typeof getAdminMerchantPaymentMethodShare>>>
+apps/web/app/components/features/admin/SettlementLagCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/SettlementLagCard.tsx:22:  const query = useQuery<SettlementLagResponse, Error>({
+apps/web/app/components/features/admin/SettlementLagCard.tsx:23:    queryKey: ['admin-settlement-lag'],
+apps/web/app/components/features/admin/SettlementLagCard.tsx:25:    retry: shouldRetry,
+apps/web/app/components/features/admin/SettlementLagCard.tsx:27:    refetchInterval: 120_000,
+apps/web/app/components/features/admin/RealizationSparkline.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/RealizationSparkline.tsx:65:  const query = useQuery({
+apps/web/app/components/features/admin/RealizationSparkline.tsx:66:    queryKey: ['admin-cashback-realization-daily', WINDOW_DAYS],
+apps/web/app/components/features/admin/RealizationSparkline.tsx:68:    retry: shouldRetry,
+apps/web/app/components/features/admin/PaymentMethodShareCard.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/PaymentMethodShareCard.tsx:60:  const query = useQuery({
+apps/web/app/components/features/admin/PaymentMethodShareCard.tsx:61:    queryKey: ['admin-payment-method-share', 'fulfilled'],
+apps/web/app/components/features/admin/PaymentMethodShareCard.tsx:63:    retry: shouldRetry,
+apps/web/app/components/features/cashback/__tests__/CashbackCalculator.test.tsx:26:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/routes/__tests__/admin.stuck-orders.test.tsx:65:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/CreditFlowChart.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/CreditFlowChart.tsx:47:  const query = useQuery({
+apps/web/app/components/features/admin/CreditFlowChart.tsx:48:    queryKey: ['admin-treasury-credit-flow', currency, 30],
+apps/web/app/components/features/admin/CreditFlowChart.tsx:50:    retry: shouldRetry,
+apps/web/app/routes/__tests__/settings.wallet.test.tsx:92:    defaultOptions: { queries: { retry: false } },
+apps/web/app/components/features/admin/ReplayedBadge.tsx:3: * the backend matched an Idempotency-Key against a stored snapshot
+apps/web/app/components/features/admin/ReplayedBadge.tsx:26:      title="This Idempotency-Key matched a prior request. The backend returned the stored snapshot; your new reason/body was NOT re-applied (ADR 017 §5)."
+apps/web/app/components/features/admin/AdminUserFlywheelChip.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/AdminUserFlywheelChip.tsx:31:  const query = useQuery({
+apps/web/app/components/features/admin/AdminUserFlywheelChip.tsx:32:    queryKey: ['admin-user-flywheel-stats', userId],
+apps/web/app/components/features/admin/AdminUserFlywheelChip.tsx:35:    retry: shouldRetry,
+apps/web/app/components/features/admin/MerchantCashbackMonthlyChart.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/MerchantCashbackMonthlyChart.tsx:37:  const query = useQuery({
+apps/web/app/components/features/admin/MerchantCashbackMonthlyChart.tsx:38:    queryKey: ['admin-merchant-cashback-monthly', merchantId],
+apps/web/app/components/features/admin/MerchantCashbackMonthlyChart.tsx:41:    retry: shouldRetry,
+apps/web/app/components/features/admin/MerchantFlywheelChip.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/MerchantFlywheelChip.tsx:34:  const query = useQuery({
+apps/web/app/components/features/admin/MerchantFlywheelChip.tsx:35:    queryKey: ['admin-merchant-flywheel-stats', merchantId],
+apps/web/app/components/features/admin/MerchantFlywheelChip.tsx:38:    retry: shouldRetry,
+apps/web/app/components/features/admin/AdminAuditTail.tsx:3:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/AdminAuditTail.tsx:67:  const query = useQuery({
+apps/web/app/components/features/admin/AdminAuditTail.tsx:68:    queryKey: ['admin-audit-tail', limit],
+apps/web/app/components/features/admin/AdminAuditTail.tsx:70:    retry: shouldRetry,
+apps/web/app/routes/__tests__/calculator.test.tsx:40:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/AdminWithdrawalForm.tsx:2:import { useMutation, useQueryClient } from '@tanstack/react-query';
+apps/web/app/components/features/admin/AdminWithdrawalForm.tsx:40:  const queryClient = useQueryClient();
+apps/web/app/components/features/admin/AdminWithdrawalForm.tsx:51:  const mutation = useMutation({
+apps/web/app/components/features/admin/AdminWithdrawalForm.tsx:58:      void queryClient.invalidateQueries({ queryKey: ['admin-user-credits', userId] });
+apps/web/app/components/features/admin/AdminWithdrawalForm.tsx:59:      void queryClient.invalidateQueries({ queryKey: ['admin-treasury'] });
+apps/web/app/components/features/admin/AdminWithdrawalForm.tsx:60:      void queryClient.invalidateQueries({ queryKey: ['admin-payouts'] });
+apps/web/app/components/features/admin/__tests__/CreditFlowChart.test.tsx:28:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/MerchantOperatorMixCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/MerchantOperatorMixCard.tsx:47:  const query = useQuery({
+apps/web/app/components/features/admin/MerchantOperatorMixCard.tsx:48:    queryKey: ['admin-merchant-operator-mix', merchantId, WINDOW_HOURS],
+apps/web/app/components/features/admin/MerchantOperatorMixCard.tsx:50:    retry: shouldRetry,
+apps/web/app/components/features/admin/MerchantTopEarnersCard.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/MerchantTopEarnersCard.tsx:36:  const query = useQuery({
+apps/web/app/components/features/admin/MerchantTopEarnersCard.tsx:37:    queryKey: ['admin-merchant-top-earners', merchantId, WINDOW_DAYS, LIMIT],
+apps/web/app/components/features/admin/MerchantTopEarnersCard.tsx:40:    retry: shouldRetry,
+apps/web/app/components/features/admin/MerchantTopEarnersCard.tsx:66:  query: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getAdminMerchantTopEarners>>>>;
+apps/web/app/routes/__tests__/admin.audit.test.tsx:67:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/UsersRecyclingActivityCard.test.tsx:29:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/cashback/RailMixCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/cashback/RailMixCard.tsx:52:  const query = useQuery({
+apps/web/app/components/features/cashback/RailMixCard.tsx:53:    queryKey: ['me', 'payment-method-share', 'fulfilled'],
+apps/web/app/components/features/cashback/RailMixCard.tsx:56:    retry: shouldRetry,
+apps/web/app/components/features/admin/__tests__/SupplierSpendActivityChart.test.tsx:28:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/CashbackSparkline.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/CashbackSparkline.tsx:37:  const query = useQuery({
+apps/web/app/components/features/admin/CashbackSparkline.tsx:38:    queryKey: ['admin-cashback-activity', WINDOW_DAYS],
+apps/web/app/components/features/admin/CashbackSparkline.tsx:40:    retry: shouldRetry,
+apps/web/app/components/features/admin/FleetFlywheelHeadline.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/FleetFlywheelHeadline.tsx:23:  const query = useQuery({
+apps/web/app/components/features/admin/FleetFlywheelHeadline.tsx:24:    queryKey: ['admin-payment-method-share', 'fulfilled'],
+apps/web/app/components/features/admin/FleetFlywheelHeadline.tsx:26:    retry: shouldRetry,
+apps/web/app/routes/__tests__/admin.operators.test.tsx:60:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/MerchantCashbackPaidCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/MerchantCashbackPaidCard.tsx:30:  const query = useQuery({
+apps/web/app/components/features/admin/MerchantCashbackPaidCard.tsx:31:    queryKey: ['admin-merchant-cashback-summary', merchantId],
+apps/web/app/components/features/admin/MerchantCashbackPaidCard.tsx:34:    retry: shouldRetry,
+apps/web/app/components/features/admin/MerchantCashbackPaidCard.tsx:58:  query: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getAdminMerchantCashbackSummary>>>>;
+apps/web/app/components/features/admin/__tests__/CashbackSummaryChip.test.tsx:29:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/CashbackSummaryChip.test.tsx:72:        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+apps/web/app/components/features/admin/__tests__/CashbackSummaryChip.test.tsx:118:        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+apps/web/app/routes/__tests__/admin.users.test.tsx:63:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/cashback/PendingPayoutsCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/cashback/PendingPayoutsCard.tsx:30:  const query = useQuery({
+apps/web/app/components/features/cashback/PendingPayoutsCard.tsx:31:    queryKey: ['me', 'pending-payouts'],
+apps/web/app/components/features/cashback/PendingPayoutsCard.tsx:34:    retry: shouldRetry,
+apps/web/app/components/features/cashback/PendingPayoutsCard.tsx:36:    refetchInterval: 30_000,
+apps/web/app/components/features/cashback/CashbackEarningsHeadline.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/cashback/CashbackEarningsHeadline.tsx:38:  const query = useQuery({
+apps/web/app/components/features/cashback/CashbackEarningsHeadline.tsx:39:    queryKey: ['me', 'cashback-summary'],
+apps/web/app/components/features/cashback/CashbackEarningsHeadline.tsx:42:    retry: shouldRetry,
+apps/web/app/components/features/admin/SupplierSpendActivityChart.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/admin/SupplierSpendActivityChart.tsx:45:  const query = useQuery({
+apps/web/app/components/features/admin/SupplierSpendActivityChart.tsx:46:    queryKey: ['admin-supplier-spend-activity', currency, 30],
+apps/web/app/components/features/admin/SupplierSpendActivityChart.tsx:48:    retry: shouldRetry,
+apps/web/app/routes/__tests__/settings.cashback.test.tsx:50:    defaultOptions: { queries: { retry: false } },
+apps/web/app/components/features/admin/__tests__/StuckOrdersCard.test.tsx:31:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/cashback/__tests__/PendingCashbackChip.test.tsx:30:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/cashback/LinkWalletNudge.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/cashback/LinkWalletNudge.tsx:41:  const meQuery = useQuery({
+apps/web/app/components/features/cashback/LinkWalletNudge.tsx:42:    queryKey: ['me'],
+apps/web/app/components/features/cashback/LinkWalletNudge.tsx:45:    retry: shouldRetry,
+apps/web/app/components/features/cashback/LinkWalletNudge.tsx:48:  const creditsQuery = useQuery({
+apps/web/app/components/features/cashback/LinkWalletNudge.tsx:49:    queryKey: ['me', 'credits'],
+apps/web/app/components/features/cashback/LinkWalletNudge.tsx:52:    retry: shouldRetry,
+apps/web/app/components/features/admin/__tests__/DiscordNotifiersCard.test.tsx:35:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/routes/__tests__/admin.assets.$assetCode.test.tsx:56:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/MerchantResyncButton.test.tsx:63:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/cashback/__tests__/CashbackByMerchantCard.test.tsx:45:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/cashback/CashbackCalculator.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/cashback/CashbackCalculator.tsx:67:  const query = useQuery<PublicCashbackPreview, Error>({
+apps/web/app/components/features/cashback/CashbackCalculator.tsx:68:    queryKey: ['public-cashback-preview', merchantId, amountMinor],
+apps/web/app/components/features/cashback/CashbackCalculator.tsx:70:    retry: shouldRetry,
+apps/web/app/components/features/cashback/FlywheelChip.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/cashback/FlywheelChip.tsx:32:  const query = useQuery({
+apps/web/app/components/features/cashback/FlywheelChip.tsx:33:    queryKey: ['me', 'flywheel-stats'],
+apps/web/app/components/features/cashback/FlywheelChip.tsx:36:    retry: shouldRetry,
+apps/web/app/components/features/cashback/__tests__/CashbackEarningsHeadline.test.tsx:34:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/RealizationSparkline.test.tsx:25:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/CashbackSparkline.test.tsx:31:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/cashback/__tests__/CashbackBalanceCard.test.tsx:34:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/cashback/__tests__/CashbackBalanceCard.test.tsx:83:        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+apps/web/app/routes/admin.merchants.$merchantId.tsx:22:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/admin.merchants.$merchantId.tsx:68:  const configsQuery = useQuery({
+apps/web/app/routes/admin.merchants.$merchantId.tsx:69:    queryKey: ['admin-cashback-configs'],
+apps/web/app/routes/admin.merchants.$merchantId.tsx:71:    retry: shouldRetry,
+apps/web/app/routes/admin.merchants.$merchantId.tsx:75:  const historyQuery = useQuery({
+apps/web/app/routes/admin.merchants.$merchantId.tsx:76:    queryKey: ['admin-cashback-config-history', merchantId],
+apps/web/app/routes/admin.merchants.$merchantId.tsx:79:    retry: shouldRetry,
+apps/web/app/routes/admin.merchants.$merchantId.tsx:83:  const ordersQuery = useQuery({
+apps/web/app/routes/admin.merchants.$merchantId.tsx:84:    queryKey: ['admin-merchant-orders', merchantId],
+apps/web/app/routes/admin.merchants.$merchantId.tsx:87:    retry: shouldRetry,
+apps/web/app/routes/__tests__/admin.assets.test.tsx:54:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/routes/admin.assets.$assetCode.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/admin.assets.$assetCode.tsx:103:  const snapshotQuery = useQuery({
+apps/web/app/routes/admin.assets.$assetCode.tsx:104:    queryKey: ['admin-treasury'],
+apps/web/app/routes/admin.assets.$assetCode.tsx:107:    retry: shouldRetry,
+apps/web/app/routes/admin.assets.$assetCode.tsx:111:  const byAssetQuery = useQuery({
+apps/web/app/routes/admin.assets.$assetCode.tsx:112:    queryKey: ['admin-payouts-by-asset'],
+apps/web/app/routes/admin.assets.$assetCode.tsx:115:    retry: shouldRetry,
+apps/web/app/routes/admin.assets.$assetCode.tsx:119:  const topUsersQuery = useQuery({
+apps/web/app/routes/admin.assets.$assetCode.tsx:120:    queryKey: ['admin-top-users-by-pending-payout', 50],
+apps/web/app/routes/admin.assets.$assetCode.tsx:123:    retry: shouldRetry,
+apps/web/app/routes/admin.assets.$assetCode.tsx:127:  const activityQuery = useQuery({
+apps/web/app/routes/admin.assets.$assetCode.tsx:128:    queryKey: ['admin-payouts-activity', 30],
+apps/web/app/routes/admin.assets.$assetCode.tsx:131:    retry: shouldRetry,
+apps/web/app/components/features/cashback/__tests__/LinkWalletNudge.test.tsx:37:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/cashback/CashbackBalanceCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/cashback/CashbackBalanceCard.tsx:38:  const query = useQuery({
+apps/web/app/components/features/cashback/CashbackBalanceCard.tsx:39:    queryKey: ['me', 'credits'],
+apps/web/app/components/features/cashback/CashbackBalanceCard.tsx:42:    retry: shouldRetry,
+apps/web/app/components/features/admin/MerchantResyncButton.tsx:2:import { useMutation, useQueryClient } from '@tanstack/react-query';
+apps/web/app/components/features/admin/MerchantResyncButton.tsx:34:  const queryClient = useQueryClient();
+apps/web/app/components/features/admin/MerchantResyncButton.tsx:42:  const mutation = useMutation<AdminWriteEnvelope<AdminMerchantResyncResponse>, Error, string>({
+apps/web/app/components/features/admin/MerchantResyncButton.tsx:51:      void queryClient.invalidateQueries({ queryKey: ['merchants'] });
+apps/web/app/components/features/admin/MerchantResyncButton.tsx:52:      void queryClient.invalidateQueries({ queryKey: ['admin-merchant-stats'] });
+apps/web/app/routes/admin.audit.tsx:15:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/admin.audit.tsx:106:  const query = useQuery({
+apps/web/app/routes/admin.audit.tsx:107:    queryKey: ['admin-audit', cursor ?? null, PAGE_SIZE],
+apps/web/app/routes/admin.audit.tsx:113:    retry: shouldRetry,
+apps/web/app/components/features/cashback/__tests__/FlywheelChip.test.tsx:33:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/routes/admin.cashback.tsx:3:import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+apps/web/app/routes/admin.cashback.tsx:59:  const queryClient = useQueryClient();
+apps/web/app/routes/admin.cashback.tsx:61:  const configsQuery = useQuery({
+apps/web/app/routes/admin.cashback.tsx:62:    queryKey: ['admin-cashback-configs'],
+apps/web/app/routes/admin.cashback.tsx:64:    retry: shouldRetry,
+apps/web/app/routes/admin.cashback.tsx:72:  const flowsQuery = useQuery({
+apps/web/app/routes/admin.cashback.tsx:73:    queryKey: ['admin-merchant-flows'],
+apps/web/app/routes/admin.cashback.tsx:75:    retry: shouldRetry,
+apps/web/app/routes/admin.cashback.tsx:118:  const saveMutation = useMutation({
+apps/web/app/routes/admin.cashback.tsx:132:      await queryClient.invalidateQueries({ queryKey: ['admin-cashback-configs'] });
+apps/web/app/routes/admin.cashback.tsx:429:  const query = useQuery({
+apps/web/app/routes/admin.cashback.tsx:430:    queryKey: ['admin-cashback-history', merchantId],
+apps/web/app/routes/admin.cashback.tsx:432:    retry: shouldRetry,
+apps/web/app/components/features/admin/__tests__/ConfigsHistoryCard.test.tsx:28:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/routes/admin.orders.$orderId.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/admin.orders.$orderId.tsx:70:  const query = useQuery({
+apps/web/app/routes/admin.orders.$orderId.tsx:71:    queryKey: ['admin-order', orderId ?? null],
+apps/web/app/routes/admin.orders.$orderId.tsx:74:    retry: shouldRetry,
+apps/web/app/routes/admin.orders.$orderId.tsx:125:  const query = useQuery({
+apps/web/app/routes/admin.orders.$orderId.tsx:126:    queryKey: ['admin-order-payout', orderId],
+apps/web/app/routes/admin.orders.$orderId.tsx:128:    retry: shouldRetry,
+apps/web/app/routes/admin.operators.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/admin.operators.tsx:117:  const statsQuery = useQuery({
+apps/web/app/routes/admin.operators.tsx:118:    queryKey: ['admin-operator-stats'],
+apps/web/app/routes/admin.operators.tsx:120:    retry: shouldRetry,
+apps/web/app/routes/admin.operators.tsx:124:  const latencyQuery = useQuery({
+apps/web/app/routes/admin.operators.tsx:125:    queryKey: ['admin-operator-latency'],
+apps/web/app/routes/admin.operators.tsx:127:    retry: shouldRetry,
+apps/web/app/components/features/admin/__tests__/AdminMonthlyCashbackChart.test.tsx:27:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/routes/auth.tsx:3:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/auth.tsx:362:  const meQuery = useQuery({
+apps/web/app/routes/auth.tsx:363:    queryKey: ['me'],
+apps/web/app/routes/auth.tsx:366:    retry: shouldRetry,
+apps/web/app/routes/auth.tsx:376:  const historyQuery = useQuery({
+apps/web/app/routes/auth.tsx:377:    queryKey: ['me', 'cashback-history'],
+apps/web/app/routes/auth.tsx:380:    retry: shouldRetry,
+apps/web/app/routes/__tests__/admin.payouts.$id.test.tsx:65:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/routes/cashback.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/cashback.tsx:47:  const query = useQuery({
+apps/web/app/routes/cashback.tsx:48:    queryKey: ['public-top-cashback-merchants', LIMIT],
+apps/web/app/routes/cashback.tsx:50:    retry: shouldRetry,
+apps/web/app/components/features/admin/__tests__/PaymentMethodActivityChart.test.tsx:28:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/routes/admin.orders.tsx:15:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/admin.orders.tsx:338:  const query = useQuery({
+apps/web/app/routes/admin.orders.tsx:339:    queryKey: [
+apps/web/app/routes/admin.orders.tsx:359:    retry: shouldRetry,
+apps/web/app/routes/cashback.$slug.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/cashback.$slug.tsx:79:  const query = useQuery({
+apps/web/app/routes/cashback.$slug.tsx:80:    queryKey: ['public-merchant', slug],
+apps/web/app/routes/cashback.$slug.tsx:83:    retry: shouldRetry,
+apps/web/app/routes/admin.payouts.$id.tsx:2:import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+apps/web/app/routes/admin.payouts.$id.tsx:68: * compliant — prompts for reason, generates an Idempotency-Key).
+apps/web/app/routes/admin.payouts.$id.tsx:81:  const queryClient = useQueryClient();
+apps/web/app/routes/admin.payouts.$id.tsx:83:  const query = useQuery({
+apps/web/app/routes/admin.payouts.$id.tsx:84:    queryKey: ['admin-payout', id ?? null],
+apps/web/app/routes/admin.payouts.$id.tsx:87:    retry: shouldRetry,
+apps/web/app/routes/admin.payouts.$id.tsx:94:  const retryMutation = useMutation({
+apps/web/app/routes/admin.payouts.$id.tsx:97:      void queryClient.invalidateQueries({ queryKey: ['admin-payout'] });
+apps/web/app/routes/admin.payouts.$id.tsx:98:      void queryClient.invalidateQueries({ queryKey: ['admin-payouts'] });
+apps/web/app/routes/admin.payouts.$id.tsx:99:      void queryClient.invalidateQueries({ queryKey: ['admin-treasury'] });
+apps/web/app/routes/__tests__/admin.operators.$operatorId.test.tsx:58:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/cashback/MonthlyCashbackChart.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/cashback/MonthlyCashbackChart.tsx:36:  const query = useQuery({
+apps/web/app/components/features/cashback/MonthlyCashbackChart.tsx:37:    queryKey: ['me', 'cashback-monthly'],
+apps/web/app/components/features/cashback/MonthlyCashbackChart.tsx:40:    retry: shouldRetry,
+apps/web/app/components/features/admin/__tests__/TopUsersByPendingPayoutCard.test.tsx:29:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/AdminUserFlywheelChip.test.tsx:28:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/AssetCirculationCard.test.tsx:26:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/AssetCirculationCard.test.tsx:121:    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/StuckPayoutsCard.test.tsx:31:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/AssetDriftBadge.test.tsx:26:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/AssetDriftBadge.test.tsx:98:    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/MerchantStatsTable.test.tsx:30:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/wallet/__tests__/TrustlineSetupCard.test.tsx:27:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:2:import { useQueryClient } from '@tanstack/react-query';
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:36:  const queryClient = useQueryClient();
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:312:        void queryClient.invalidateQueries({ queryKey: ['loop-orders'] });
+apps/web/app/components/features/admin/__tests__/AdminAuditTail.test.tsx:30:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/MerchantOperatorMixCard.test.tsx:29:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/MerchantFlywheelChip.test.tsx:29:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/MerchantTopEarnersCard.test.tsx:30:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/routes/settings.cashback.tsx:11: * `useQuery` keyed on the cursor so TanStack caches them independently.
+apps/web/app/routes/settings.cashback.tsx:14:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/settings.cashback.tsx:195:  const query = useQuery<CashbackHistoryResponse>({
+apps/web/app/routes/settings.cashback.tsx:196:    queryKey: ['me', 'cashback-history', cursor ?? null, PAGE_SIZE],
+apps/web/app/routes/settings.cashback.tsx:202:    retry: shouldRetry,
+apps/web/app/components/features/admin/__tests__/OperatorMerchantMixCard.test.tsx:36:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/routes/admin.assets.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/routes/admin.assets.tsx:91:  const snapshotQuery = useQuery({
+apps/web/app/routes/admin.assets.tsx:92:    queryKey: ['admin-treasury'],
+apps/web/app/routes/admin.assets.tsx:94:    retry: shouldRetry,
+apps/web/app/routes/admin.assets.tsx:98:  const byAssetQuery = useQuery({
+apps/web/app/routes/admin.assets.tsx:99:    queryKey: ['admin-payouts-by-asset'],
+apps/web/app/routes/admin.assets.tsx:101:    retry: shouldRetry,
+apps/web/app/components/features/admin/__tests__/UserRailMixCard.test.tsx:34:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/wallet/__tests__/StellarTrustlineStatus.test.tsx:25:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/UserPayoutsTable.test.tsx:31:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/routes/__tests__/admin.orders.$orderId.test.tsx:65:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/TopUsersTable.test.tsx:30:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/AdminNav.test.tsx:71:  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/OperatorStatsCard.test.tsx:30:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/OrdersSparkline.test.tsx:30:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/MerchantCashbackMonthlyChart.test.tsx:29:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/wallet/StellarTrustlineStatus.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/wallet/StellarTrustlineStatus.tsx:29:  const query = useQuery({
+apps/web/app/components/features/wallet/StellarTrustlineStatus.tsx:30:    queryKey: ['me', 'stellar-trustlines'],
+apps/web/app/components/features/wallet/StellarTrustlineStatus.tsx:32:    retry: shouldRetry,
+apps/web/app/components/features/wallet/StellarTrustlineStatus.tsx:34:    refetchInterval: 60_000,
+apps/web/app/components/features/admin/__tests__/AssetDriftWatcherCard.test.tsx:25:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/UserCashbackMonthlyChart.test.tsx:30:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/UserOperatorMixCard.test.tsx:30:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/MerchantFlywheelActivityChart.test.tsx:30:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/wallet/TrustlineSetupCard.tsx:1:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/wallet/TrustlineSetupCard.tsx:27:  const query = useQuery({
+apps/web/app/components/features/wallet/TrustlineSetupCard.tsx:28:    queryKey: ['public-loop-assets'],
+apps/web/app/components/features/wallet/TrustlineSetupCard.tsx:30:    retry: shouldRetry,
+apps/web/app/components/features/admin/__tests__/TreasuryReconciliationChart.test.tsx:29:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/UserCashbackByMerchantTable.test.tsx:33:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:21:    defaultOptions: { queries: { retry: false } },
+apps/web/app/components/features/admin/__tests__/SupplierSpendCard.test.tsx:30:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/FleetFlywheelHeadline.test.tsx:27:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/MerchantCashbackPaidCard.test.tsx:29:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/PayoutsSparkline.test.tsx:29:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/UserOrdersTable.test.tsx:31:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/SettlementLagCard.test.tsx:25:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/MerchantRailMixCard.test.tsx:32:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/purchase/__tests__/EarnedCashbackCard.test.tsx:22:  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/CashbackRealizationCard.test.tsx:25:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/MerchantsFlywheelShareCard.test.tsx:29:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/admin/__tests__/PaymentMethodShareCard.test.tsx:28:  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+apps/web/app/components/features/purchase/LoopPaymentStep.tsx:2:import { useQuery } from '@tanstack/react-query';
+apps/web/app/components/features/purchase/LoopPaymentStep.tsx:35:  const orderQuery = useQuery({
+apps/web/app/components/features/purchase/LoopPaymentStep.tsx:36:    queryKey: ['loop-order', create.orderId],
+apps/web/app/components/features/purchase/LoopPaymentStep.tsx:38:    retry: shouldRetry,
+apps/web/app/components/features/purchase/LoopPaymentStep.tsx:41:    refetchInterval: (query) => {

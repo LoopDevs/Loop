@@ -1,0 +1,16 @@
+
+> format:check
+> prettier --check .
+
+Checking formatting...
+[warn] <isolated Claude audit workspace paths redacted; not used as Codex evidence>
+[warn] docs/audit-2026-05-03/admin-handoff.md
+[warn] docs/audit-2026-05-03/evidence/phase-01-governance/artifacts/branch-protection.json
+[warn] docs/audit-2026-05-03/evidence/phase-01-governance/artifacts/codeowners-team.json
+[warn] docs/audit-2026-05-03/evidence/phase-01-governance/artifacts/required-pull-request-reviews.json
+[warn] docs/audit-2026-05-03/findings/register.md
+[warn] docs/audit-2026-05-03/findings/remediation-queue.md
+[warn] docs/audit-2026-05-03/findings/template.md
+[warn] docs/audit-2026-05-03/plan.md
+[warn] docs/audit-2026-05-03/tracker.md
+[warn] Code style issues found in 16 files. Run Prettier with --write to fix.

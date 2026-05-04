@@ -1,0 +1,9 @@
+npm error code ELSPROBLEMS
+npm error extraneous: @emnapi/core@1.10.0 /Users/ash/code/loop-app/node_modules/@emnapi/core
+npm error extraneous: @emnapi/runtime@1.10.0 /Users/ash/code/loop-app/node_modules/@emnapi/runtime
+npm error extraneous: @emnapi/wasi-threads@1.2.1 /Users/ash/code/loop-app/node_modules/@emnapi/wasi-threads
+npm error extraneous: @napi-rs/wasm-runtime@1.1.4 /Users/ash/code/loop-app/node_modules/@napi-rs/wasm-runtime
+npm error extraneous: @tybys/wasm-util@0.10.1 /Users/ash/code/loop-app/node_modules/@tybys/wasm-util
+npm error invalid: vitest@4.1.4 /Users/ash/code/loop-app/apps/backend/node_modules/vitest
+npm error invalid: vitest@4.1.4 /Users/ash/code/loop-app/apps/web/node_modules/vitest
+npm error A complete log of this run can be found in: /Users/ash/.npm/_logs/2026-05-03T18_43_44_886Z-debug-0.log

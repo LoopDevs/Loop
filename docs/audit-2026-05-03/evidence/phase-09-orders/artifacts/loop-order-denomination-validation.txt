@@ -1,0 +1,232 @@
+Loop-native amount/denomination validation evidence
+apps/backend/src/merchants/sync.ts:40: * next 6h tick (or sooner via the admin force-refresh button)
+apps/backend/src/merchants/sync.ts:79: * Outcome of a forced admin-triggered merchant refresh.
+apps/backend/src/merchants/sync.ts:85: *   this call coalesced into it. The admin sees the post-sync
+apps/backend/src/merchants/sync.ts:86: *   `loadedAt` regardless. (Two admins clicking the button at the
+apps/backend/src/merchants/sync.ts:97: * this form; admin handlers call `forceRefreshMerchants()` to get the
+apps/backend/src/merchants/sync.ts:105: * Admin-triggered variant. Returns `{ triggered }` so the caller can
+apps/backend/src/merchants/sync-upstream.ts:15:import type { Merchant, MerchantDenominations } from '@loop/shared';
+apps/backend/src/merchants/sync-upstream.ts:39:    id: z.string().min(1).max(MAX_ID_LENGTH),
+apps/backend/src/merchants/sync-upstream.ts:40:    name: z.string().min(1).max(MAX_NAME_LENGTH),
+apps/backend/src/merchants/sync-upstream.ts:41:    slug: z.string().max(MAX_NAME_LENGTH).optional(),
+apps/backend/src/merchants/sync-upstream.ts:42:    logoUrl: z.string().max(MAX_URL_LENGTH).optional(),
+apps/backend/src/merchants/sync-upstream.ts:43:    cardImageUrl: z.string().max(MAX_URL_LENGTH).optional(),
+apps/backend/src/merchants/sync-upstream.ts:44:    mapPinUrl: z.string().max(MAX_URL_LENGTH).optional(),
+apps/backend/src/merchants/sync-upstream.ts:46:    country: z.string().max(MAX_CURRENCY_LENGTH).optional(),
+apps/backend/src/merchants/sync-upstream.ts:47:    currency: z.string().max(MAX_CURRENCY_LENGTH).optional(),
+apps/backend/src/merchants/sync-upstream.ts:50:    denominationsType: z.enum(['fixed', 'min-max']).optional(),
+apps/backend/src/merchants/sync-upstream.ts:51:    denominations: z.array(z.string().max(32)).optional(),
+apps/backend/src/merchants/sync-upstream.ts:52:    denominationValues: z.array(z.string().max(32)).optional(),
+apps/backend/src/merchants/sync-upstream.ts:55:    redeemType: z.string().max(64).optional(),
+apps/backend/src/merchants/sync-upstream.ts:56:    redeemLocation: z.string().max(64).optional(),
+apps/backend/src/merchants/sync-upstream.ts:59:        description: z.string().max(MAX_INFO_LENGTH).optional(),
+apps/backend/src/merchants/sync-upstream.ts:60:        instructions: z.string().max(MAX_INFO_LENGTH).optional(),
+apps/backend/src/merchants/sync-upstream.ts:61:        intro: z.string().max(MAX_INFO_LENGTH).optional(),
+apps/backend/src/merchants/sync-upstream.ts:62:        terms: z.string().max(MAX_INFO_LENGTH).optional(),
+apps/backend/src/merchants/sync-upstream.ts:94:  // Parse denominations from the flat upstream fields
+apps/backend/src/merchants/sync-upstream.ts:95:  let denominations: MerchantDenominations | undefined;
+apps/backend/src/merchants/sync-upstream.ts:98:  if (item.denominationsType === 'fixed' && item.denominations?.length) {
+apps/backend/src/merchants/sync-upstream.ts:99:    denominations = {
+apps/backend/src/merchants/sync-upstream.ts:100:      type: 'fixed',
+apps/backend/src/merchants/sync-upstream.ts:101:      denominations: item.denominations,
+apps/backend/src/merchants/sync-upstream.ts:104:  } else if (item.denominationsType === 'min-max' && item.denominations?.length) {
+apps/backend/src/merchants/sync-upstream.ts:105:    // Upstream sends min-max as denominations array: ["5", "200"] = [$5, $200]
+apps/backend/src/merchants/sync-upstream.ts:106:    const values = item.denominations
+apps/backend/src/merchants/sync-upstream.ts:110:    denominations = {
+apps/backend/src/merchants/sync-upstream.ts:111:      type: 'min-max',
+apps/backend/src/merchants/sync-upstream.ts:112:      denominations: item.denominations,
+apps/backend/src/merchants/sync-upstream.ts:114:      ...(values[0] !== undefined ? { min: values[0] } : {}),
+apps/backend/src/merchants/sync-upstream.ts:115:      ...(values[values.length - 1] !== undefined ? { max: values[values.length - 1] } : {}),
+apps/backend/src/merchants/sync-upstream.ts:135:    ...(denominations !== undefined ? { denominations } : {}),
+apps/web/app/components/features/purchase/AmountSelection.tsx:7:interface AmountSelectionProps {
+apps/web/app/components/features/purchase/AmountSelection.tsx:50:/** Renders fixed denomination buttons or a free-amount input based on merchant config. */
+apps/web/app/components/features/purchase/AmountSelection.tsx:51:export function AmountSelection({
+apps/web/app/components/features/purchase/AmountSelection.tsx:56:}: AmountSelectionProps): React.JSX.Element {
+apps/web/app/components/features/purchase/AmountSelection.tsx:57:  const denominations = merchant.denominations;
+apps/web/app/components/features/purchase/AmountSelection.tsx:62:  const symbol = currencySymbol(denominations?.currency ?? 'USD');
+apps/web/app/components/features/purchase/AmountSelection.tsx:103:    if (denominations?.type === 'min-max') {
+apps/web/app/components/features/purchase/AmountSelection.tsx:104:      const min = denominations.min ?? BACKEND_MIN;
+apps/web/app/components/features/purchase/AmountSelection.tsx:105:      const max = denominations.max ?? BACKEND_MAX;
+apps/web/app/components/features/purchase/AmountSelection.tsx:106:      if (amount < min || amount > max) {
+apps/web/app/components/features/purchase/AmountSelection.tsx:107:        setValidationError(`Amount must be between ${symbol}${min} and ${symbol}${max}.`);
+apps/web/app/components/features/purchase/AmountSelection.tsx:117:  // Fixed-denomination path: use the selected chip. Custom-amount path:
+apps/web/app/components/features/purchase/AmountSelection.tsx:128:  if (denominations?.type === 'fixed' && denominations.denominations.length > 0) {
+apps/web/app/components/features/purchase/AmountSelection.tsx:132:          Select amount ({denominations.currency})
+apps/web/app/components/features/purchase/AmountSelection.tsx:135:          {denominations.denominations.map((d) => (
+apps/web/app/components/features/purchase/AmountSelection.tsx:143:              className={`py-3 px-4 min-h-[44px] rounded-lg border text-sm font-semibold transition-colors ${selected === d ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'border-gray-200 dark:border-gray-700 hover:border-blue-400'}`}
+apps/web/app/components/features/purchase/AmountSelection.tsx:169:  const min = denominations?.min;
+apps/web/app/components/features/purchase/AmountSelection.tsx:170:  const max = denominations?.max;
+apps/web/app/components/features/purchase/AmountSelection.tsx:171:  const currency = denominations?.currency ?? 'USD';
+apps/web/app/components/features/purchase/AmountSelection.tsx:179:        // (£, €, $…). The standalone "Min X, max Y" hint below was
+apps/web/app/components/features/purchase/AmountSelection.tsx:183:          min !== undefined && max !== undefined
+apps/web/app/components/features/purchase/AmountSelection.tsx:184:            ? `${symbol}${min} – ${symbol}${max}`
+apps/web/app/components/features/purchase/AmountSelection.tsx:193:        min={min}
+apps/web/app/components/features/purchase/AmountSelection.tsx:194:        max={max}
+apps/backend/src/orders/procure-one.ts:38:  id: z.string().min(1),
+apps/backend/src/orders/procure-one.ts:125:        // CTX expects fiatAmount as a decimal string in the major unit.
+apps/backend/src/orders/procure-one.ts:126:        fiatAmount: (Number(order.faceValueMinor) / 100).toFixed(2),
+apps/backend/src/orders/procure-one.ts:175:        amountMinor: fulfilled.userCashbackMinor.toString(),
+apps/backend/src/orders/procure-one.ts:185:      // a terminal order failure. The next tick retries. An
+apps/backend/src/orders/loop-handler.ts:43: * A2-2003: bounds match the admin idempotency contract
+apps/backend/src/orders/loop-handler.ts:44: * (`apps/backend/src/admin/idempotency.ts`) — a single mental model
+apps/backend/src/orders/loop-handler.ts:51:  merchantId: z.string().min(1),
+apps/backend/src/orders/loop-handler.ts:52:  /** Face value the user pays for / the gift card is worth, in minor units. */
+apps/backend/src/orders/loop-handler.ts:53:  amountMinor: z
+apps/backend/src/orders/loop-handler.ts:78:    // Mirror the admin handler's 404 policy — don't leak that the
+apps/backend/src/orders/loop-handler.ts:140:    return c.json({ code: 'VALIDATION_ERROR', message: 'Unknown or disabled merchant' }, 400);
+apps/backend/src/orders/loop-handler.ts:178:      parsed.data.amountMinor,
+apps/backend/src/orders/loop-handler.ts:234:    const order = await createOrder({
+apps/backend/src/orders/loop-handler.ts:237:      faceValueMinor: parsed.data.amountMinor,
+
+Shared merchant denomination shape and DB amount checks
+/** Denomination configuration for a merchant's gift cards. */
+export interface MerchantDenominations {
+  type: 'fixed' | 'min-max';
+  /** Fixed denomination values (e.g. ["10", "25", "50"]). Present when type is "fixed". */
+  denominations: string[];
+  currency: string;
+  min?: number | undefined;
+  max?: number | undefined;
+}
+
+/** Core merchant record returned by the backend. */
+export interface Merchant {
+  id: string;
+  name: string;
+  logoUrl?: string | undefined;
+  cardImageUrl?: string | undefined;
+  /** Savings as a percentage for display (e.g. 4.0 means 4% off). */
+  savingsPercentage?: number | undefined;
+  denominations?: MerchantDenominations | undefined;
+  description?: string | undefined;
+  instructions?: string | undefined;
+  terms?: string | undefined;
+  enabled: boolean;
+  locationCount?: number | undefined;
+}
+
+/** Paginated response for the merchant list endpoint. */
+export interface MerchantListResponse {
+  merchants: Merchant[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    hasNext: boolean;
+    hasPrev: boolean;
+  };
+}
+
+/** Single merchant detail response. */
+export interface MerchantDetailResponse {
+  merchant: Merchant;
+}
+
+/**
+ * Full catalog response for `GET /api/merchants/all`. Used by UI surfaces
+ * that need every merchant in one shot (home directory, map popups, navbar
+ * search) without paginating. Total reflects the array length at fetch
+ * time — intentionally no `pagination` envelope, since /all returns the
+ * entire cached slice.
+ */
+export interface MerchantAllResponse {
+  merchants: Merchant[];
+  total: number;
+}
+
+/** Query params for GET /api/merchants. */
+export interface MerchantListParams {
+  page?: number | undefined;
+  limit?: number | undefined;
+  q?: string | undefined;
+}
+
+/** Geographic location point for a single merchant location. */
+export interface LocationPoint {
+  type: 'Feature';
+  properties: {
+    cluster: false;
+    merchantId: string;
+    mapPinUrl: string;
+  };
+  geometry: {
+    type: 'Point';
+    coordinates: {
+      longitude: number;
+      latitude: number;
+    };
+  };
+}
+
+    // sweep tick scans the full orders table; at scale that blocks
+    // a connection per tick. Partial index keyed on procured_at,
+    // scoped to in-flight procurement only.
+    index('orders_procuring_procured_at')
+      .on(t.procuredAt)
+      .where(sql`${t.state} = 'procuring'`),
+    // A2-709: ~15 admin aggregates (merchant-stats, top-earners,
+    // flywheel-stats, supplier-spend, payment-method-activity,
+    // …) all filter on `state='fulfilled' AND fulfilled_at >= since`,
+    // most additionally on `merchant_id`. Two partial indexes:
+    //   - per-merchant cut → `(merchant_id, fulfilled_at)`
+    //   - fleet cut → `(fulfilled_at)`
+    // Both scoped to fulfilled-only so the index is small enough
+    // that the per-merchant aggregate stays index-only at scale.
+    index('orders_fulfilled_merchant_at')
+      .on(t.merchantId, t.fulfilledAt)
+      .where(sql`${t.state} = 'fulfilled'`),
+    index('orders_fulfilled_at')
+      .on(t.fulfilledAt)
+      .where(sql`${t.state} = 'fulfilled'`),
+    // Ops lookup — "did operator X place this order?" — from the
+    // admin pool-health surface (ADR 013).
+    index('orders_ctx_operator').on(t.ctxOperatorId),
+    check(
+      'orders_state_known',
+      sql`${t.state} IN ('pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired')`,
+    ),
+    check(
+      'orders_payment_method_known',
+      sql`${t.paymentMethod} IN ('xlm', 'usdc', 'credit', 'loop_asset')`,
+    ),
+    check('orders_charge_currency_known', sql`${t.chargeCurrency} IN ('USD', 'GBP', 'EUR')`),
+    // A2-705: catalog-side currency (what CTX denominates the gift
+    // card in). Paired with `orders_charge_currency_known` — both
+    // currencies on this row must be one of the three Loop-asset
+    // currencies. Adding a fourth is a deliberate migration against
+    // this CHECK and `user_credits_currency_known`.
+    check('orders_currency_known', sql`${t.currency} IN ('USD', 'GBP', 'EUR')`),
+    check(
+      'orders_percentages_sum',
+      sql`${t.wholesalePct} + ${t.userCashbackPct} + ${t.loopMarginPct} <= 100`,
+    ),
+    // Nonneg guards across the minor-unit columns. A negative face
+    // value or charge is a bug; so is any split going the wrong way.
+    check(
+      'orders_minor_amounts_non_negative',
+      sql`
+        ${t.faceValueMinor} >= 0
+        AND ${t.chargeMinor} >= 0
+        AND ${t.wholesaleMinor} >= 0
+        AND ${t.userCashbackMinor} >= 0
+        AND ${t.loopMarginMinor} >= 0
+      `,
+    ),
+    // A2-714: payment_memo nullability is correlated with payment
+    // method. On-chain methods (xlm / usdc / loop_asset) all
+    // require a memo so the payment watcher can match incoming
+    // deposits to the order; credit-funded orders skip the memo
+    // entirely (no chain transit). The repo enforces this in code,
+    // the CHECK enforces it at the DB layer against a manual
+    // INSERT.
+    check(
+      'orders_payment_memo_coherence',
+      sql`${t.paymentMethod} = 'credit' OR ${t.paymentMemo} IS NOT NULL`,
+    ),
+    // A2-2003: see `idempotencyKey` column comment. Partial unique
+    // index because legacy rows + non-idempotent clients persist
+    // NULL and would otherwise all collide on a single key.
+    uniqueIndex('orders_user_idempotency_unique')
+      .on(t.userId, t.idempotencyKey)
+      .where(sql`${t.idempotencyKey} IS NOT NULL`),

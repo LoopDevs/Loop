@@ -1,0 +1,108 @@
+Scoped evidence: Loop-native web purchase payment-method coverage
+
+docs/error-codes.md:32:| `INSUFFICIENT_CREDIT`      | 400    | `POST /api/orders/loop` with `paymentMethod=credit`     | Terminal. User's cashback balance is below the order amount. Prompt them to top up via another method.                           |
+apps/web/app/services/admin-stuck.ts:8: *   supplier incidents before users notice. `paymentMethod`
+apps/web/app/services/admin-stuck.ts:41:  paymentMethod: string;
+docs/runbooks/stellar-operator-rotation.md:12:  operator-funded LOOP balances on Stellar — high-impact, so rotation
+apps/web/app/services/admin-orders.ts:20: *   / `paymentMethod` / `ctxOperatorId`). Cursor via
+apps/web/app/services/admin-orders.ts:55:  paymentMethod: 'xlm' | 'usdc' | 'credit' | 'loop_asset';
+apps/web/app/services/admin-orders.ts:88:  paymentMethod?: AdminPaymentMethod;
+apps/web/app/services/admin-orders.ts:98:  if (opts.paymentMethod !== undefined) params.set('paymentMethod', opts.paymentMethod);
+docs/architecture.md:343:GET  /api/admin/orders                                  [admin — Loop-native orders drill-down + ?state/?userId/?merchantId/?chargeCurrency/?paymentMethod/?ctxOperatorId filters, ADR 011/013/015]
+docs/adr/015-stablecoin-topology-and-payment-rails.md:129:  strengthen wants to move their GBPLOOP balance into USDLOOP.
+docs/adr/015-stablecoin-topology-and-payment-rails.md:248:  _and_ GBPLOOP _and_ EURLOOP balances simultaneously. The
+apps/web/app/components/features/admin/MerchantsFlywheelShareCard.tsx:24: * Each row deep-links to `/admin/orders?merchantId=<slug>&paymentMethod=
+apps/web/app/components/features/admin/MerchantsFlywheelShareCard.tsx:97:  const drillHref = `/admin/orders?merchantId=${encodeURIComponent(row.merchantId)}&paymentMethod=loop_asset&state=fulfilled`;
+apps/web/app/components/features/admin/PaymentMethodShareCard.tsx:113:            // Drill-in: /admin/orders?paymentMethod=<m>&state=fulfilled.
+apps/web/app/components/features/admin/PaymentMethodShareCard.tsx:117:            const drillHref = `/admin/orders?paymentMethod=${encodeURIComponent(m)}&state=fulfilled`;
+apps/web/app/components/features/admin/UserRailMixCard.tsx:121:            const drillHref = `/admin/orders?userId=${encodeURIComponent(userId)}&paymentMethod=${encodeURIComponent(
+apps/web/app/routes/admin.stuck-orders.tsx:148:                        row.paymentMethod === 'loop_asset'
+apps/web/app/routes/admin.stuck-orders.tsx:153:                      {row.paymentMethod}
+apps/web/app/components/features/admin/MerchantRailMixCard.tsx:130:            // paymentMethod + state=fulfilled, the same framing
+apps/web/app/components/features/admin/MerchantRailMixCard.tsx:134:            )}&paymentMethod=${encodeURIComponent(m)}&state=fulfilled`;
+apps/web/app/components/features/admin/__tests__/UserRailMixCard.test.tsx:91:  it('drill links include userId + paymentMethod + state=fulfilled', async () => {
+apps/web/app/components/features/admin/__tests__/UserRailMixCard.test.tsx:109:      `/admin/orders?userId=${VALID_UUID}&paymentMethod=loop_asset&state=fulfilled`,
+apps/web/app/components/features/cashback/PendingCashbackChip.tsx:49:    // USDLOOP balances. Same behaviour on jsdom test runs.
+apps/web/app/routes/admin.orders.$orderId.tsx:239:            {row.paymentMethod === 'loop_asset' ? (
+apps/web/app/routes/admin.orders.$orderId.tsx:251:                {row.paymentMethod}
+apps/web/app/routes/admin.orders.$orderId.tsx:255:                {row.paymentMethod}
+apps/web/app/components/features/orders/LoopOrdersList.tsx:84:  const isRecycled = order.paymentMethod === 'loop_asset';
+apps/web/app/components/features/orders/__tests__/LoopOrdersList.test.tsx:41:    paymentMethod: 'usdc',
+apps/web/app/components/features/orders/__tests__/LoopOrdersList.test.tsx:156:  it('shows the "Recycled" pill when paymentMethod is loop_asset', async () => {
+apps/web/app/components/features/orders/__tests__/LoopOrdersList.test.tsx:158:      orders: [mkOrder({ paymentMethod: 'loop_asset' })],
+apps/web/app/components/features/orders/__tests__/LoopOrdersList.test.tsx:170:      orders: [mkOrder({ paymentMethod: 'loop_asset', state: 'pending_payment' })],
+apps/web/app/components/features/orders/__tests__/LoopOrdersList.test.tsx:179:      orders: [mkOrder({ paymentMethod: 'usdc' })],
+apps/web/app/routes/__tests__/admin.stuck-orders.test.tsx:81:    paymentMethod: overrides.paymentMethod ?? 'xlm',
+apps/web/app/routes/terms.tsx:93:              Gift-card orders are paid in XLM, USDC, or your existing LOOP- asset balance. Cashback
+apps/web/app/routes/cashback.tsx:101:            <li>Pick a merchant and buy a gift card — pay in XLM, USDC, or your LOOP balance.</li>
+apps/web/app/routes/admin.merchants.$merchantId.tsx:421:          order.paymentMethod === 'loop_asset'
+apps/web/app/routes/admin.merchants.$merchantId.tsx:426:        {order.paymentMethod === 'loop_asset' ? '♻️ ' : ''}
+apps/web/app/routes/admin.merchants.$merchantId.tsx:427:        {order.paymentMethod}
+apps/web/app/routes/admin.orders.tsx:107:  const paymentMethodRaw = searchParams.get('paymentMethod');
+apps/web/app/routes/admin.orders.tsx:111:  const paymentMethodFilter: AdminPaymentMethod | undefined =
+apps/web/app/routes/admin.orders.tsx:112:    paymentMethodRaw !== null &&
+apps/web/app/routes/admin.orders.tsx:113:    (PAYMENT_METHODS as ReadonlyArray<string>).includes(paymentMethodRaw)
+apps/web/app/routes/admin.orders.tsx:114:      ? (paymentMethodRaw as AdminPaymentMethod)
+apps/web/app/routes/admin.orders.tsx:236:      {/* Active payment-method filter — sourced from `?paymentMethod=`.
+apps/web/app/routes/admin.orders.tsx:241:      {paymentMethodFilter !== undefined ? (
+apps/web/app/routes/admin.orders.tsx:247:            Paid with <code className="font-mono text-xs">{paymentMethodFilter}</code>
+apps/web/app/routes/admin.orders.tsx:254:                next.delete('paymentMethod');
+apps/web/app/routes/admin.orders.tsx:305:            paymentMethod={paymentMethodFilter}
+apps/web/app/routes/admin.orders.tsx:323:  paymentMethod,
+apps/web/app/routes/admin.orders.tsx:332:  paymentMethod: AdminPaymentMethod | undefined;
+apps/web/app/routes/admin.orders.tsx:344:      paymentMethod ?? null,
+apps/web/app/routes/admin.orders.tsx:355:        ...(paymentMethod !== undefined ? { paymentMethod } : {}),
+apps/web/app/routes/admin.orders.tsx:507:        {row.paymentMethod === 'loop_asset' ? (
+apps/web/app/routes/admin.orders.tsx:509:            to={`/admin/orders?paymentMethod=${encodeURIComponent(row.paymentMethod)}`}
+apps/web/app/routes/admin.orders.tsx:515:            {row.paymentMethod}
+apps/web/app/routes/admin.orders.tsx:519:            to={`/admin/orders?paymentMethod=${encodeURIComponent(row.paymentMethod)}`}
+apps/web/app/routes/admin.orders.tsx:521:            aria-label={`Filter to ${row.paymentMethod} orders`}
+apps/web/app/routes/admin.orders.tsx:523:            {row.paymentMethod}
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:306:          paymentMethod: 'usdc',
+apps/web/app/routes/home.tsx:322:          body="Pay with XLM, USDC, or your existing LOOP-asset balance. We check out at the merchant on your behalf — same brand, same card."
+apps/web/app/routes/cashback.$slug.tsx:122:            <li>Buy a gift card and pay with XLM, USDC, or your existing LOOP-asset balance.</li>
+apps/web/app/routes/__tests__/admin.orders.$orderId.test.tsx:86:  paymentMethod: 'credit' as const,
+apps/web/app/routes/__tests__/admin.orders.$orderId.test.tsx:188:  it('renders the green "♻️ Recycled" pill when paymentMethod is loop_asset', async () => {
+apps/web/app/routes/__tests__/admin.orders.$orderId.test.tsx:191:      paymentMethod: 'loop_asset' as const,
+apps/web/app/routes/__tests__/admin.orders.$orderId.test.tsx:209:      paymentMethod: 'xlm' as const,
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:62:    paymentMethod: 'usdc',
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:223:      mkOrder({ state: 'paid', paymentMethod: 'credit', paymentMemo: null, stellarAddress: null }),
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:235:        paymentMethod: 'credit',
+apps/web/app/components/features/admin/__tests__/PaymentMethodShareCard.test.tsx:120:  it('deep-links each rail to /admin/orders with paymentMethod + state=fulfilled', async () => {
+apps/web/app/components/features/admin/__tests__/PaymentMethodShareCard.test.tsx:134:      '/admin/orders?paymentMethod=loop_asset&state=fulfilled',
+apps/web/app/components/features/admin/__tests__/PaymentMethodShareCard.test.tsx:137:    expect(xlmLink?.getAttribute('href')).toBe('/admin/orders?paymentMethod=xlm&state=fulfilled');
+apps/web/app/components/features/admin/__tests__/StuckOrdersCard.test.tsx:47:    paymentMethod: 'xlm',
+apps/web/app/components/features/admin/__tests__/UserOrdersTable.test.tsx:51:    paymentMethod: 'credit',
+apps/web/app/components/features/admin/__tests__/MerchantsFlywheelShareCard.test.tsx:116:      '/admin/orders?merchantId=amazon_us&paymentMethod=loop_asset&state=fulfilled',
+apps/web/app/components/features/purchase/LoopPaymentStep.tsx:179:  /** Payment rail: native XLM, USDC trustline, or a LOOP-branded stablecoin. */
+apps/web/app/components/features/admin/__tests__/MerchantRailMixCard.test.tsx:95:  it('drill links include merchantId + paymentMethod + state=fulfilled', async () => {
+apps/web/app/components/features/admin/__tests__/MerchantRailMixCard.test.tsx:113:      '/admin/orders?merchantId=amazon_us&paymentMethod=loop_asset&state=fulfilled',
+
+Backend accepted payment method enum and create schema:
+packages/shared/src/loop-orders.ts:23: * - `paymentMethod` accepts the full `ORDER_PAYMENT_METHODS` union,
+apps/backend/src/db/schema.ts:582:  ORDER_PAYMENT_METHODS,
+apps/backend/src/orders/loop-read-handlers.ts:80:    // column to `ORDER_PAYMENT_METHODS`. A2-1504 widened this from
+apps/backend/src/orders/loop-read-handlers.ts:86:      row.paymentMethod === 'credit' ? null : (env.LOOP_STELLAR_DEPOSIT_ADDRESS ?? null),
+apps/backend/src/orders/loop-create-response.ts:53:  if (order.paymentMethod === 'credit') {
+apps/backend/src/orders/loop-create-response.ts:65:  if (order.paymentMethod === 'loop_asset') {
+apps/backend/src/orders/loop-replay-response.ts:54:  if (order.paymentMethod === 'credit') {
+apps/backend/src/orders/loop-replay-response.ts:64:  if (order.paymentMethod === 'loop_asset') {
+apps/backend/src/orders/repo.ts:120:    args.paymentMemo ?? (args.paymentMethod === 'credit' ? null : generatePaymentMemo());
+apps/backend/src/orders/repo.ts:143:  if (args.paymentMethod !== 'credit') {
+apps/backend/src/orders/loop-handler.ts:27:import { ORDER_PAYMENT_METHODS } from '../db/schema.js';
+apps/backend/src/orders/loop-handler.ts:61:  paymentMethod: z.enum(ORDER_PAYMENT_METHODS),
+apps/backend/src/orders/loop-handler.ts:196:  if (parsed.data.paymentMethod === 'credit') {
+apps/backend/src/orders/loop-handler.ts:212:  if (parsed.data.paymentMethod !== 'credit' && env.LOOP_STELLAR_DEPOSIT_ADDRESS === undefined) {
+apps/backend/src/orders/loop-handler.ts:231:    parsed.data.paymentMethod === 'loop_asset' ? await isFirstLoopAssetOrder(auth.userId) : false;
+
+Config surfaces no payment-method availability, web type omits loopAssets returned by backend:
+apps/web/app/services/config.ts:24:export interface AppConfig {
+apps/web/app/services/config.ts:26:  loopOrdersEnabled: boolean;
+apps/web/app/hooks/use-app-config.ts:13:const DEFAULT_CONFIG: AppConfig = {
+apps/web/app/hooks/use-app-config.ts:15:  loopOrdersEnabled: false,
+apps/web/app/hooks/use-app-config.ts:36:    config: query.data ?? DEFAULT_CONFIG,
+apps/backend/src/config/handler.ts:34:export interface AppConfig {
+apps/backend/src/config/handler.ts:38:  loopOrdersEnabled: boolean;
+apps/backend/src/config/handler.ts:45:  loopAssets: {
+apps/backend/src/config/handler.ts:75:    loopOrdersEnabled:
+apps/backend/src/config/handler.ts:79:    loopAssets: {

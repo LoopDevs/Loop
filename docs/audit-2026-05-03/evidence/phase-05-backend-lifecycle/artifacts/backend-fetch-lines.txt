@@ -1,0 +1,24 @@
+apps/backend/src/merchants/sync.ts:134:      const response = await getUpstreamCircuit('merchants').fetch(url.toString(), {
+apps/backend/src/merchants/handler.ts:158:    const response = await getUpstreamCircuit('merchants').fetch(upstreamUrl(`/merchants/${id}`), {
+apps/backend/src/ctx/operator-pool.ts:227:      const res = await op.breaker.fetch(url, { ...init, headers, signal });
+apps/backend/src/health.ts:106:      const res = await fetch(upstreamUrl('/status'), {
+apps/backend/src/orders/list-handler.ts:93:    const response = await getUpstreamCircuit('gift-cards').fetch(url.toString(), {
+apps/backend/src/circuit-breaker.ts:158:      const response = await fetch(url, outboundInit);
+apps/backend/src/orders/handler.ts:54:    const response = await getUpstreamCircuit('gift-cards').fetch(upstreamUrl('/gift-cards'), {
+apps/backend/src/orders/get-handler.ts:105:    const response = await getUpstreamCircuit('gift-cards').fetch(
+apps/backend/src/clustering/data-store.ts:96:      const response = await getUpstreamCircuit('locations').fetch(url.toString(), {
+apps/backend/src/payments/price-feed-fx.ts:64:  const res = await fetch(url, {
+apps/backend/src/images/proxy.ts:87:    const upstream = await fetch(imageUrl, {
+apps/backend/src/discord/shared.ts:70:    const response = await fetch(webhookUrl, {
+apps/backend/src/payments/price-feed.ts:61:  const res = await fetch(url, {
+apps/backend/src/payments/horizon-circulation.ts:121:  const res = await fetch(url.toString(), {
+apps/backend/src/payments/horizon.ts:107:  const res = await fetch(url, {
+apps/backend/src/auth/handler.ts:67:    const response = await getUpstreamCircuit('login').fetch(upstreamUrl('/login'), {
+apps/backend/src/auth/handler.ts:134:    const response = await getUpstreamCircuit('verify-email').fetch(upstreamUrl('/verify-email'), {
+apps/backend/src/auth/handler.ts:210:    const response = await getUpstreamCircuit('refresh-token').fetch(
+apps/backend/src/payments/horizon-find-outbound.ts:51:    const res = await fetch(url, {
+apps/backend/src/payments/horizon-trustlines.ts:100:  const res = await fetch(url, {
+apps/backend/src/payments/horizon-balances.ts:114:  const res = await fetch(url, {
+apps/backend/src/auth/jwks.ts:72:  const res = await fetch(url, {
+apps/backend/src/images/ssrf-guard.ts:39: * We validate the resolved IPs here, but `fetch()` below performs its own
+apps/backend/src/auth/logout-handler.ts:76:    const response = await getUpstreamCircuit('logout').fetch(upstreamUrl('/logout'), {

@@ -1,0 +1,14 @@
+apps/web/app/components/features/onboarding/screen-biometric.tsx
+apps/web/app/hooks/__tests__/use-auth.test.tsx
+apps/web/app/hooks/__tests__/use-session-restore-a2-1150.test.tsx
+apps/web/app/hooks/__tests__/use-session-restore.test.ts
+apps/web/app/hooks/use-auth.ts
+apps/web/app/hooks/use-session-restore.ts
+apps/web/app/native/__tests__/secure-storage-native.test.ts
+apps/web/app/native/biometrics.ts
+apps/web/app/native/secure-storage.ts
+apps/web/app/routes/auth.tsx
+apps/web/app/services/__tests__/auth.test.ts
+apps/web/app/services/auth.ts
+apps/web/app/stores/__tests__/auth.store.test.ts
+apps/web/app/stores/auth.store.ts

@@ -1,0 +1,220 @@
+
+> build
+> npm run build -w @loop/backend -w @loop/web
+
+
+> @loop/backend@0.0.1 build
+> tsup
+
+CLI Building entry: src/index.ts, src/instrument.ts, src/migrate-cli.ts
+CLI Using tsconfig: tsconfig.json
+CLI tsup v8.5.1
+CLI Using tsup config: /Users/ash/code/loop-app/apps/backend/tsup.config.ts
+CLI Target: node22
+CLI Cleaning output folder
+ESM Build start
+ESM dist/instrument.js                 2.88 KB
+ESM dist/clustering_pb-7DLZNM42.js     2.23 KB
+ESM dist/chunk-LIJ22RWS.js             33.37 KB
+ESM dist/migrate-cli.js                596.00 B
+ESM dist/chunk-PZ5AY32C.js             233.00 B
+ESM dist/chunk-QWUGS3C2.js             29.04 KB
+ESM dist/index.js                      827.18 KB
+ESM dist/clustering_pb-7DLZNM42.js.map 7.78 KB
+ESM dist/instrument.js.map             7.08 KB
+ESM dist/chunk-PZ5AY32C.js.map         71.00 B
+ESM dist/chunk-LIJ22RWS.js.map         58.75 KB
+ESM dist/chunk-QWUGS3C2.js.map         56.97 KB
+ESM dist/migrate-cli.js.map            1.97 KB
+ESM dist/index.js.map                  2.18 MB
+ESM ⚡️ Build success in 111ms
+
+> @loop/web@0.0.1 build
+> react-router build
+
+vite v8.0.10 building client environment for production...
+[2Ktransforming...✓ 1822 modules transformed.
+rendering chunks...
+computing gzip size...
+build/client/.vite/manifest.json                              51.61 kB │ gzip:   5.14 kB
+build/client/assets/leaflet-vh-t_kPv.css                      15.09 kB │ gzip:   6.36 kB
+build/client/assets/root-CaQ843W7.css                        104.54 kB │ gzip:  15.95 kB
+build/client/assets/sitemap-BlMrTIBj.js                        0.00 kB │ gzip:   0.02 kB
+build/client/assets/clustering_pb-COINAGMc.js                  0.00 kB │ gzip:   0.02 kB
+build/client/assets/locale-C6aMHgbx.js                         0.02 kB │ gzip:   0.04 kB
+build/client/assets/stellar-XISmS1M7.js                        0.03 kB │ gzip:   0.05 kB
+build/client/assets/payout-state-cZ79AIZN.js                   0.06 kB │ gzip:   0.08 kB
+build/client/assets/slugs-G29IYSQU.js                          0.09 kB │ gzip:   0.10 kB
+build/client/assets/search-Dlsd-pSZ.js                         0.10 kB │ gzip:   0.11 kB
+build/client/assets/esm-Dawbymqk.js                            0.10 kB │ gzip:   0.10 kB
+build/client/assets/definitions-DocTlQKP.js                    0.18 kB │ gzip:   0.16 kB
+build/client/assets/onboarding-CbwqKznw.js                     0.22 kB │ gzip:   0.18 kB
+build/client/assets/platform-BgZGwJgl.js                       0.23 kB │ gzip:   0.17 kB
+build/client/assets/esm-BUJEIaQa.js                            0.24 kB │ gzip:   0.19 kB
+build/client/assets/esm-BljjW-yX.js                            0.25 kB │ gzip:   0.20 kB
+build/client/assets/loop-asset-EiBT9vug.js                     0.25 kB │ gzip:   0.16 kB
+build/client/assets/web-utils-eA7RTatz.js                      0.30 kB │ gzip:   0.19 kB
+build/client/assets/image-D2kfBf26.js                          0.33 kB │ gzip:   0.24 kB
+build/client/assets/esm-Utk5FIEq.js                            0.34 kB │ gzip:   0.24 kB
+build/client/assets/esm-BUeMEYfZ.js                            0.35 kB │ gzip:   0.25 kB
+build/client/assets/definitions-CpbiWl7v.js                    0.35 kB │ gzip:   0.25 kB
+build/client/assets/esm-BhF4zhQZ.js                            0.36 kB │ gzip:   0.25 kB
+build/client/assets/web-By-zGflH.js                            0.36 kB │ gzip:   0.24 kB
+build/client/assets/use-app-config-B3jurgUa.js                 0.39 kB │ gzip:   0.28 kB
+build/client/assets/esm-Ccfop8ke.js                            0.39 kB │ gzip:   0.27 kB
+build/client/assets/merchants-CaXwYDu_.js                      0.43 kB │ gzip:   0.20 kB
+build/client/assets/base-DkC8Wzfr.js                           0.46 kB │ gzip:   0.31 kB
+build/client/assets/esm-B4AcpuRs.js                            0.47 kB │ gzip:   0.30 kB
+build/client/assets/auth.store-Cxq-zT1a.js                     0.50 kB │ gzip:   0.31 kB
+build/client/assets/definitions-BJdNFFWJ.js                    0.55 kB │ gzip:   0.27 kB
+build/client/assets/money-format-COJgGYwH.js                   0.56 kB │ gzip:   0.35 kB
+build/client/assets/ReplayedBadge-bUveKwIM.js                  0.59 kB │ gzip:   0.41 kB
+build/client/assets/orders-DM5lQ4Nv.js                         0.62 kB │ gzip:   0.34 kB
+build/client/assets/esm-3l4wjQLM.js                            0.63 kB │ gzip:   0.40 kB
+build/client/assets/react-mZapMgkt.js                          0.67 kB │ gzip:   0.41 kB
+build/client/assets/public-stats-DwXDn9ob.js                   0.68 kB │ gzip:   0.34 kB
+build/client/assets/chunk-St_33S0l.js                          0.69 kB │ gzip:   0.42 kB
+build/client/assets/native-tw9n0hN9.js                         0.70 kB │ gzip:   0.34 kB
+build/client/assets/native-BFqnUKtP.js                         0.72 kB │ gzip:   0.33 kB
+build/client/assets/web-DeibK8Sv.js                            0.76 kB │ gzip:   0.38 kB
+build/client/assets/Spinner-C7ChOwSc.js                        0.76 kB │ gzip:   0.49 kB
+build/client/assets/esm-qJccuiiW.js                            0.80 kB │ gzip:   0.37 kB
+build/client/assets/web-Dav9jM29.js                            0.84 kB │ gzip:   0.40 kB
+build/client/assets/orders-loop-CP19ZZBa.js                    0.84 kB │ gzip:   0.46 kB
+build/client/assets/haptics-CSc6qfIS.js                        0.87 kB │ gzip:   0.41 kB
+build/client/assets/LazyImage-CpAHWnSZ.js                      0.90 kB │ gzip:   0.48 kB
+build/client/assets/esm-BzedrKXI.js                            0.90 kB │ gzip:   0.39 kB
+build/client/assets/web-Vz8M-nvN.js                            0.93 kB │ gzip:   0.47 kB
+build/client/assets/not-found-ssr-BFBGjPuk.js                  0.94 kB │ gzip:   0.49 kB
+build/client/assets/CsvDownloadButton-BWx16ezl.js              0.95 kB │ gzip:   0.57 kB
+build/client/assets/clipboard-zUr8XGQ7.js                      0.96 kB │ gzip:   0.45 kB
+build/client/assets/definitions-CtOxPjJl.js                    1.02 kB │ gzip:   0.47 kB
+build/client/assets/OrdersSparkline-BiftWdnY.js                1.03 kB │ gzip:   0.56 kB
+build/client/assets/esm-Dr98WLAy.js                            1.06 kB │ gzip:   0.54 kB
+build/client/assets/web-OlrvL31Y.js                            1.12 kB │ gzip:   0.54 kB
+build/client/assets/web-oVGor5KY.js                            1.19 kB │ gzip:   0.54 kB
+build/client/assets/preload-helper-Cal6NHrz.js                 1.19 kB │ gzip:   0.68 kB
+build/client/assets/PageHeader-CLL3H1Cf.js                     1.22 kB │ gzip:   0.71 kB
+build/client/assets/Footer-Cn3iDLxi.js                         1.26 kB │ gzip:   0.48 kB
+build/client/assets/use-merchants-CkbYvdO_.js                  1.28 kB │ gzip:   0.51 kB
+build/client/assets/AssetDriftBadge-CsTQYyzI.js                1.28 kB │ gzip:   0.68 kB
+build/client/assets/use-auth-SBf2fQtU.js                       1.31 kB │ gzip:   0.59 kB
+build/client/assets/FlywheelChip-CXyj8wcT.js                   1.46 kB │ gzip:   0.74 kB
+build/client/assets/purchase-storage-DxiohD_P.js               1.48 kB │ gzip:   0.61 kB
+build/client/assets/use-orders-6kuP3Fde.js                     1.50 kB │ gzip:   0.64 kB
+build/client/assets/ui.store-DNXR7Hqm.js                       1.52 kB │ gzip:   0.76 kB
+build/client/assets/LinkWalletNudge-DqBJRfiv.js                1.54 kB │ gzip:   0.80 kB
+build/client/assets/esm-DgeOW2NP.js                            1.67 kB │ gzip:   0.63 kB
+build/client/assets/secure-storage-C22ISZ2T.js                 1.77 kB │ gzip:   0.67 kB
+build/client/assets/Button-C33nrKV7.js                         1.81 kB │ gzip:   0.95 kB
+build/client/assets/Sparkline-BgQeC4rh.js                      1.84 kB │ gzip:   0.79 kB
+build/client/assets/CopyButton-D8_qW5hL.js                     1.86 kB │ gzip:   0.95 kB
+build/client/assets/user-CUTMhnvC.js                           1.89 kB │ gzip:   0.59 kB
+build/client/assets/web-BN8PsoAc.js                            1.95 kB │ gzip:   0.84 kB
+build/client/assets/Input-Q8cXNsZb.js                          1.96 kB │ gzip:   0.91 kB
+build/client/assets/web-DwL3pIj4.js                            2.06 kB │ gzip:   0.82 kB
+build/client/assets/purchase.store-C9pc7FnF.js                 2.09 kB │ gzip:   0.84 kB
+build/client/assets/ReasonDialog-CLsMPpT8.js                   2.13 kB │ gzip:   1.05 kB
+build/client/assets/useMutation-CckbGLDO.js                    2.31 kB │ gzip:   0.96 kB
+build/client/assets/base-BDW1t107.js                           2.54 kB │ gzip:   0.92 kB
+build/client/assets/PendingPayoutsCard-Cfd62CPl.js             2.74 kB │ gzip:   1.29 kB
+build/client/assets/PaymentMethodActivityChart-DI_b6uc_.js     2.77 kB │ gzip:   1.26 kB
+build/client/assets/calculator-C1Gw6Hx2.js                     2.88 kB │ gzip:   1.38 kB
+build/client/assets/CashbackCalculator-D8KeMOxP.js             2.94 kB │ gzip:   1.21 kB
+build/client/assets/error-messages-Wa_JIF1X.js                 3.10 kB │ gzip:   1.45 kB
+build/client/assets/OperatorStatsCard-BIwbPS3S.js              3.17 kB │ gzip:   1.20 kB
+build/client/assets/mutation-B8NbxYwx.js                       3.38 kB │ gzip:   1.14 kB
+build/client/assets/react-dom-CxoAW3ww.js                      3.56 kB │ gzip:   1.35 kB
+build/client/assets/app-lock-DqXdUDM_.js                       3.57 kB │ gzip:   1.56 kB
+build/client/assets/AdminAuditTail-B8mE2Pxm.js                 3.95 kB │ gzip:   1.60 kB
+build/client/assets/admin.audit-BuZYNFdW.js                    4.07 kB │ gzip:   1.72 kB
+build/client/assets/cashback-_8-xRlQe.js                       4.17 kB │ gzip:   1.64 kB
+build/client/assets/admin.assets-AlYWvjno.js                   4.37 kB │ gzip:   1.62 kB
+build/client/assets/admin.merchants-CQ5bWP8J.js                4.67 kB │ gzip:   1.74 kB
+build/client/assets/api-client-FCJNz2Kj.js                     4.71 kB │ gzip:   1.79 kB
+build/client/assets/cashback._slug-BXM-UhkI.js                 4.90 kB │ gzip:   1.93 kB
+build/client/assets/admin.operators-HHcZxwwr.js                5.21 kB │ gzip:   1.89 kB
+build/client/assets/terms-DRdfnWxb.js                          5.24 kB │ gzip:   1.85 kB
+build/client/assets/map-DecqkI96.js                            5.31 kB │ gzip:   2.22 kB
+build/client/assets/RequireAdmin-n7CWlkOe.js                   5.65 kB │ gzip:   2.17 kB
+build/client/assets/PaymentMethodShareCard-DJEI_yca.js         5.77 kB │ gzip:   2.21 kB
+build/client/assets/trustlines-DEK8TD3P.js                     5.85 kB │ gzip:   2.02 kB
+build/client/assets/privacy-BkX5PySz.js                        6.61 kB │ gzip:   2.40 kB
+build/client/assets/Navbar-Dr5qZWvL.js                         7.00 kB │ gzip:   2.77 kB
+build/client/assets/react-Bye4L-vP.js                          7.52 kB │ gzip:   2.87 kB
+build/client/assets/dist-BTN-O2Dw.js                           7.75 kB │ gzip:   3.08 kB
+build/client/assets/admin.payouts-BjDXWNEU.js                  7.98 kB │ gzip:   2.83 kB
+build/client/assets/admin.stuck-orders-CGbMAhOK.js             8.05 kB │ gzip:   1.98 kB
+build/client/assets/admin.payouts._id-BnZZdggi.js              8.15 kB │ gzip:   2.65 kB
+build/client/assets/web-IMSnrhP0.js                            8.48 kB │ gzip:   2.84 kB
+build/client/assets/orders._id-CQmHem43.js                     8.69 kB │ gzip:   3.14 kB
+build/client/assets/useQuery-DfMIgu1-.js                       8.83 kB │ gzip:   3.23 kB
+build/client/assets/admin.orders._orderId-Cc2B83NP.js         10.27 kB │ gzip:   2.52 kB
+build/client/assets/admin.users-DrAw0pGk.js                   10.51 kB │ gzip:   3.12 kB
+build/client/assets/admin-Bx4HAVLR.js                         10.76 kB │ gzip:   1.94 kB
+build/client/assets/settings.cashback-DEKx1-Xx.js             10.98 kB │ gzip:   3.23 kB
+build/client/assets/gift-card._name-CHxwRsGO.js               11.15 kB │ gzip:   3.28 kB
+build/client/assets/admin.orders-CsavOONK.js                  11.52 kB │ gzip:   3.29 kB
+build/client/assets/settings.wallet-DnQ89hRH.js               11.62 kB │ gzip:   3.45 kB
+build/client/assets/ClusterMap-Bw7PB_PW.js                    12.26 kB │ gzip:   4.80 kB
+build/client/assets/admin.operators._operatorId-D6mkW2vB.js   13.23 kB │ gzip:   3.50 kB
+build/client/assets/redeem-challenge-bar-_FmYWi4g.js          13.42 kB │ gzip:   5.11 kB
+build/client/assets/query-retry-Hu4dzFiV.js                   14.00 kB │ gzip:   4.85 kB
+build/client/assets/orders-CBHrEcZS.js                        14.22 kB │ gzip:   4.25 kB
+build/client/assets/admin.assets._assetCode-DN8oND7n.js       14.34 kB │ gzip:   4.11 kB
+build/client/assets/auth-DFD4sF_D.js                          14.68 kB │ gzip:   5.06 kB
+build/client/assets/admin.cashback-DlCRJRqR.js                18.03 kB │ gzip:   4.95 kB
+build/client/assets/PurchaseContainer-BPZCMKib.js             21.46 kB │ gzip:   6.70 kB
+build/client/assets/browser-BbXht7R1.js                       23.46 kB │ gzip:   8.84 kB
+build/client/assets/admin._index-BDw-dkY2.js                  24.36 kB │ gzip:   5.91 kB
+build/client/assets/home-o3HaDur2.js                          25.87 kB │ gzip:   7.69 kB
+build/client/assets/admin.merchants._merchantId-qfPCy1Qf.js   28.63 kB │ gzip:   6.21 kB
+build/client/assets/root-DzO2Z-FD.js                          29.46 kB │ gzip:  10.46 kB
+build/client/assets/Onboarding-DlidOJlK.js                    31.66 kB │ gzip:   9.16 kB
+build/client/assets/admin.users._userId-DABmcKBI.js           44.80 kB │ gzip:   8.52 kB
+build/client/assets/admin.treasury-DJNC-T8C.js                47.24 kB │ gzip:   9.67 kB
+build/client/assets/JsBarcode-DJSDKr1H.js                     64.21 kB │ gzip:  11.31 kB
+build/client/assets/jsx-runtime-Bvxt8rvu.js                  119.06 kB │ gzip:  39.06 kB
+build/client/assets/leaflet-src-6kwDLg4B.js                  148.81 kB │ gzip:  43.38 kB
+build/client/assets/entry.client-BWcLHJ5y.js                 183.20 kB │ gzip:  58.01 kB
+build/client/assets/esm-ZQfRAYRj.js                          549.69 kB │ gzip: 179.25 kB
+
+✓ built in 1.33s
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+vite v8.0.10 building ssr environment for production...
+[2Ktransforming...✓ 252 modules transformed.
+rendering chunks...
+
+✓ 2 assets cleaned from React Router server build.
+build/client/assets/leaflet-vh-t_kPv.css
+build/server/assets/server-build-CaQ843W7.css
+
+computing gzip size...
+build/server/.vite/manifest.json                    4.72 kB │ gzip:   0.86 kB
+build/server/assets/leaflet-vh-t_kPv.css           15.09 kB │ gzip:   6.36 kB
+build/server/assets/server-build-CaQ843W7.css     104.54 kB │ gzip:  15.95 kB
+build/server/assets/clustering_pb-D5R1Lxxw.js       0.01 kB │ gzip:   0.03 kB
+build/server/assets/Onboarding-Bcf-jLk8.js          0.08 kB │ gzip:   0.08 kB
+build/server/assets/api-client-XjXZig2O.js          0.08 kB │ gzip:   0.08 kB
+build/server/assets/platform-BBKtB0KH.js            0.08 kB │ gzip:   0.08 kB
+build/server/assets/auth.store-DxLCt5ln.js          0.08 kB │ gzip:   0.08 kB
+build/server/assets/purchase.store-CYskLLhN.js      0.09 kB │ gzip:   0.09 kB
+build/server/assets/purchase-storage-D3j5kC_h.js    0.10 kB │ gzip:   0.10 kB
+build/server/assets/secure-storage-DpCsJ0q0.js      0.20 kB │ gzip:   0.13 kB
+build/server/assets/platform-B8TM5nkX.js            0.38 kB │ gzip:   0.21 kB
+build/server/assets/slugs-BtSrsO8b.js               0.50 kB │ gzip:   0.35 kB
+build/server/assets/auth.store-DnowfUFc.js          1.20 kB │ gzip:   0.60 kB
+build/server/assets/purchase-storage-Cm6kPcYi.js    2.30 kB │ gzip:   0.94 kB
+build/server/assets/secure-storage-4ZKQb0wI.js      3.14 kB │ gzip:   1.00 kB
+build/server/assets/purchase.store-mmBEXzls.js      4.43 kB │ gzip:   1.71 kB
+build/server/assets/image-BMotg6H8.js               7.14 kB │ gzip:   2.54 kB
+build/server/assets/api-client-CmQBJjDs.js          9.93 kB │ gzip:   3.87 kB
+build/server/assets/ClusterMap-GLZAM8S-.js         18.69 kB │ gzip:   6.14 kB
+build/server/assets/Onboarding-CNZcMzOh.js         70.17 kB │ gzip:  19.58 kB
+build/server/index.js                             956.54 kB │ gzip: 201.71 kB
+
+✓ built in 376ms

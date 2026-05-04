@@ -1,0 +1,14 @@
+Bottom-up disposition counts as of 2026-05-03 follow-up pass.
+
+Source: docs/audit-2026-05-03/inventory/file-disposition.tsv
+
+Total tracked files: 1226
+Final disposition complete: 1226
+Unresolved disposition gaps: 0
+
+Disposition counts:
+binary-reviewed	31
+dead-or-orphaned	3
+external-output-excluded	85
+reviewed-no-finding	956
+reviewed-with-finding	151

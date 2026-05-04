@@ -1,0 +1,3 @@
+apps/backend/src/auth/__tests__/native.test.ts:225:    // Record-not-found case: no reuse, just forged / cleaned-up
+apps/backend/src/auth/__tests__/native.test.ts:232:  it('A2-1608: refresh-token reuse (revoked row exists) → revokes the entire family', async () => {
+apps/backend/src/auth/__tests__/native.test.ts:253:  it('rotates: revokes the old jti, issues a new pair', async () => {

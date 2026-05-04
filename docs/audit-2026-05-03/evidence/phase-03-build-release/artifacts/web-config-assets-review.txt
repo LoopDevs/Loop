@@ -1,0 +1,27 @@
+Web package config and public asset review, 2026-05-03.
+
+Scope:
+- apps/web/.env.production
+- apps/web/Dockerfile
+- apps/web/fly.toml
+- apps/web/react-router.config.ts
+- apps/web/vite.config.ts
+- apps/web/vitest.config.ts
+- apps/web/public/*
+
+Verified observations:
+- Web Dockerfile pins node:22-alpine by digest for builder and runtime stages, installs with npm ci --ignore-scripts, explicitly rebuilds esbuild in the builder, and runs production as the non-root node user.
+- Web Dockerfile healthcheck probes / on localhost PORT and fails non-200 responses.
+- apps/web/fly.toml sets force_https=true, min_machines_running=1, request concurrency limits, and a GET / health check.
+- apps/web/.env.production contains only VITE_API_URL=https://api.loopfinance.io and no secret-bearing values.
+- react-router.config.ts enables SSR unless BUILD_TARGET=mobile, matching the mobile static-export constraint.
+- vite.config.ts uses React Router/Tailwind plugins, tsconfig path resolution, client-version define, and a dev proxy pointed at VITE_API_URL or production API fallback.
+- vitest.config.ts sets node environment, alias, v8 coverage, explicit route/root exclusions, and low-but-enforced coverage thresholds; testing-doc drift remains tracked separately as A4-031.
+- manifest.json advertises the app with standalone display and SVG icons. It still says "Buy discounted gift cards with XLM", which is narrower than backend-supported/planned payment rails; this is covered by A4-040 planned/current payment-rail drift.
+- robots.txt disallows authenticated/admin/order/settings/onboarding surfaces and pins the sitemap to https://loopfinance.io/sitemap.xml.
+- Public image assets are valid file types:
+  - hero.webp: WebP VP8, 1400x700.
+  - Leaflet marker PNGs: 50x82, 25x41, 41x41.
+  - loop favicon/logo SVGs are static inline SVGs with no script tags.
+
+No new finding was filed from this pass. Existing related findings remain A4-031 and A4-040.

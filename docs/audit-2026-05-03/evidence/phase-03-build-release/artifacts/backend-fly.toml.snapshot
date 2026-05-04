@@ -1,0 +1,62 @@
+app = "loopfinance-api"
+primary_region = "iad"
+
+[build]
+
+# A2-407: run pending Drizzle migrations in a one-shot release
+# machine BEFORE the new version takes traffic. A failing migration
+# aborts the deploy — the old machines keep serving — instead of
+# rolling out a new binary against a not-yet-migrated DB. The
+# boot-time `runMigrations()` in `src/index.ts` is kept as a
+# belt-and-braces safety net (drizzle's migrator is idempotent on an
+# up-to-date DB, so the second call is a no-op).
+[deploy]
+  release_command = "node apps/backend/dist/migrate-cli.js"
+
+[env]
+  PORT = "8080"
+  NODE_ENV = "production"
+  GIFT_CARD_API_BASE_URL = "https://spend.ctx.com"
+  LOG_LEVEL = "info"
+  # Audit A-025: image-proxy SSRF allowlist is enforced in production.
+  # `spend.ctx.com` hosts merchant card / logo URLs; the S3 bucket hosts
+  # the raw image blobs CTX links from. Anything outside this list gets
+  # 403'd by `validateImageUrl()` before any fetch.
+  IMAGE_PROXY_ALLOWED_HOSTS = "spend.ctx.com,ctx-spend.s3.us-west-2.amazonaws.com"
+  # Audit A-023 — Fly.io fronts each machine with its own edge proxy that
+  # populates X-Forwarded-For. Turn trust on here so the rate limiter
+  # keys on the actual client IP instead of the edge's single address.
+  TRUST_PROXY = "true"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 250
+    soft_limit = 200
+
+  # HTTP health check attached to the [http_service] block (modern Fly
+  # syntax). Previously this was a top-level `[[services.http_checks]]`
+  # block without a parent `[[services]]` — which `flyctl config
+  # validate` reported as an orphaned `services` block and the scheduler
+  # silently ignored. Effect: no HTTP health probes were running, so an
+  # instance stuck at 500 would keep serving traffic until a deploy or
+  # manual restart. Also see `scripts/lint-docs.sh` §8, which guards
+  # against regression by running `flyctl config validate` on every
+  # fly.toml on every push.
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

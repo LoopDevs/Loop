@@ -1,0 +1,89 @@
+apps/backend/src/images/proxy.ts:78:    // Deliberately bare `fetch`, NOT `getUpstreamCircuit('...').fetch`.
+apps/backend/src/images/proxy.ts:88:      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+apps/backend/src/orders/list-handler.ts:21:import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
+apps/backend/src/orders/list-handler.ts:22:import { upstreamUrl } from '../upstream.js';
+apps/backend/src/orders/list-handler.ts:86:    const url = new URL(upstreamUrl('/gift-cards'));
+apps/backend/src/orders/list-handler.ts:93:    const response = await getUpstreamCircuit('gift-cards').fetch(url.toString(), {
+apps/backend/src/orders/list-handler.ts:95:      signal: AbortSignal.timeout(15_000),
+apps/backend/src/orders/list-handler.ts:163:    if (err instanceof CircuitOpenError) {
+apps/backend/src/orders/procurement-redemption.ts:20:import { upstreamUrl } from '../upstream.js';
+apps/backend/src/orders/procurement-redemption.ts:50:  const res = await operatorFetch(upstreamUrl(`/gift-cards/${encodeURIComponent(ctxOrderId)}`), {
+apps/backend/src/orders/procurement-redemption.ts:53:    signal: AbortSignal.timeout(30_000),
+apps/backend/src/orders/handler.ts:4:import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
+apps/backend/src/orders/handler.ts:5:import { upstreamUrl } from '../upstream.js';
+apps/backend/src/orders/handler.ts:54:    const response = await getUpstreamCircuit('gift-cards').fetch(upstreamUrl('/gift-cards'), {
+apps/backend/src/orders/handler.ts:66:      signal: AbortSignal.timeout(30_000),
+apps/backend/src/orders/handler.ts:186:    if (err instanceof CircuitOpenError) {
+apps/backend/src/orders/procure-one.ts:18:import { upstreamUrl } from '../upstream.js';
+apps/backend/src/orders/procure-one.ts:107:    const res = await operatorFetch(upstreamUrl('/gift-cards'), {
+apps/backend/src/orders/procure-one.ts:129:      signal: AbortSignal.timeout(30_000),
+apps/backend/src/auth/handler.ts:5:import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
+apps/backend/src/auth/handler.ts:6:import { upstreamUrl } from '../upstream.js';
+apps/backend/src/auth/handler.ts:67:    const response = await getUpstreamCircuit('login').fetch(upstreamUrl('/login'), {
+apps/backend/src/auth/handler.ts:74:      signal: AbortSignal.timeout(15_000),
+apps/backend/src/auth/handler.ts:94:    if (err instanceof CircuitOpenError) {
+apps/backend/src/auth/handler.ts:134:    const response = await getUpstreamCircuit('verify-email').fetch(upstreamUrl('/verify-email'), {
+apps/backend/src/auth/handler.ts:142:      signal: AbortSignal.timeout(15_000),
+apps/backend/src/auth/handler.ts:179:    if (err instanceof CircuitOpenError) {
+apps/backend/src/auth/handler.ts:210:    const response = await getUpstreamCircuit('refresh-token').fetch(
+apps/backend/src/auth/handler.ts:211:      upstreamUrl('/refresh-token'),
+apps/backend/src/auth/handler.ts:219:        signal: AbortSignal.timeout(15_000),
+apps/backend/src/auth/handler.ts:260:    if (err instanceof CircuitOpenError) {
+apps/backend/src/discord/shared.ts:83:      signal: AbortSignal.timeout(5000),
+apps/backend/src/payments/horizon-circulation.ts:123:    signal: AbortSignal.timeout(10_000),
+apps/backend/src/health.ts:44:import { upstreamUrl } from './upstream.js';
+apps/backend/src/health.ts:97:      // Deliberately bare `fetch`, NOT `getUpstreamCircuit('status').fetch`.
+apps/backend/src/health.ts:101:      // circuit to CircuitOpenError and /health would keep reporting
+apps/backend/src/health.ts:106:      const res = await fetch(upstreamUrl('/status'), {
+apps/backend/src/health.ts:107:        signal: AbortSignal.timeout(UPSTREAM_PROBE_TIMEOUT_MS),
+apps/backend/src/ctx/operator-pool.ts:23:import { createCircuitBreaker, CircuitOpenError } from '../circuit-breaker.js';
+apps/backend/src/ctx/operator-pool.ts:170: * docstring. Before, only `CircuitOpenError` triggered a retry, so a
+apps/backend/src/ctx/operator-pool.ts:204:    init?.signal ?? AbortSignal.timeout(OPERATOR_FETCH_DEFAULT_TIMEOUT_MS);
+apps/backend/src/ctx/operator-pool.ts:247:      if (err instanceof CircuitOpenError) {
+apps/backend/src/payments/horizon-balances.ts:116:    signal: AbortSignal.timeout(10_000),
+apps/backend/src/auth/logout-handler.ts:18:import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
+apps/backend/src/auth/logout-handler.ts:19:import { upstreamUrl } from '../upstream.js';
+apps/backend/src/auth/logout-handler.ts:76:    const response = await getUpstreamCircuit('logout').fetch(upstreamUrl('/logout'), {
+apps/backend/src/auth/logout-handler.ts:83:      signal: AbortSignal.timeout(10_000),
+apps/backend/src/auth/logout-handler.ts:92:    if (err instanceof CircuitOpenError) {
+apps/backend/src/orders/get-handler.ts:22:import { getUpstreamCircuit, CircuitOpenError } from '../circuit-breaker.js';
+apps/backend/src/orders/get-handler.ts:23:import { upstreamUrl } from '../upstream.js';
+apps/backend/src/orders/get-handler.ts:105:    const response = await getUpstreamCircuit('gift-cards').fetch(
+apps/backend/src/orders/get-handler.ts:106:      upstreamUrl(`/gift-cards/${orderId}`),
+apps/backend/src/orders/get-handler.ts:109:        signal: AbortSignal.timeout(15_000),
+apps/backend/src/orders/get-handler.ts:229:    if (err instanceof CircuitOpenError) {
+apps/backend/src/auth/jwks.ts:74:    signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
+apps/backend/src/payments/horizon.ts:109:    signal: AbortSignal.timeout(args.timeoutMs ?? 10_000),
+apps/backend/src/circuit-breaker.ts:17:   * subsequent request would fail with `CircuitOpenError` even after the
+apps/backend/src/circuit-breaker.ts:44: * - OPEN: requests are immediately rejected with a `CircuitOpenError` for `cooldownMs`.
+apps/backend/src/circuit-breaker.ts:127:        throw new CircuitOpenError();
+apps/backend/src/circuit-breaker.ts:135:        throw new CircuitOpenError();
+apps/backend/src/circuit-breaker.ts:206:export class CircuitOpenError extends Error {
+apps/backend/src/circuit-breaker.ts:209:    this.name = 'CircuitOpenError';
+apps/backend/src/circuit-breaker.ts:215:// `getUpstreamCircuit(key)` and `getAllCircuitStates()` live in
+apps/backend/src/circuit-breaker.ts:220:export { getUpstreamCircuit, getAllCircuitStates } from './circuit-breaker-registry.js';
+apps/backend/src/payments/horizon-trustlines.ts:102:    signal: AbortSignal.timeout(10_000),
+apps/backend/src/payments/price-feed.ts:63:    signal: AbortSignal.timeout(10_000),
+apps/backend/src/circuit-breaker-registry.ts:30:export function getUpstreamCircuit(key: string): CircuitBreaker {
+apps/backend/src/payments/horizon-find-outbound.ts:53:      signal: AbortSignal.timeout(10_000),
+apps/backend/src/merchants/sync.ts:6:import { getUpstreamCircuit } from '../circuit-breaker.js';
+apps/backend/src/merchants/sync.ts:7:import { upstreamUrl } from '../upstream.js';
+apps/backend/src/merchants/sync.ts:130:      const url = new URL(upstreamUrl('/merchants'));
+apps/backend/src/merchants/sync.ts:134:      const response = await getUpstreamCircuit('merchants').fetch(url.toString(), {
+apps/backend/src/merchants/sync.ts:135:        signal: AbortSignal.timeout(30_000),
+apps/backend/src/merchants/handler.ts:5:import { getUpstreamCircuit } from '../circuit-breaker.js';
+apps/backend/src/merchants/handler.ts:6:import { upstreamUrl } from '../upstream.js';
+apps/backend/src/merchants/handler.ts:158:    const response = await getUpstreamCircuit('merchants').fetch(upstreamUrl(`/merchants/${id}`), {
+apps/backend/src/merchants/handler.ts:160:      signal: AbortSignal.timeout(10_000),
+apps/backend/src/upstream.ts:19:export function upstreamUrl(path: string): string {
+apps/backend/src/upstream.ts:21:    throw new Error(`upstreamUrl: path must start with '/', got ${JSON.stringify(path)}`);
+apps/backend/src/upstream.ts:27:    throw new Error('upstreamUrl: path must not start with // (protocol-relative)');
+apps/backend/src/upstream.ts:34:    throw new Error('upstreamUrl: path contains control characters');
+apps/backend/src/upstream.ts:37:    throw new Error('upstreamUrl: path contains traversal segments');
+apps/backend/src/upstream.ts:44:    throw new Error('upstreamUrl: path contains percent-encoded traversal segments');
+apps/backend/src/payments/price-feed-fx.ts:66:    signal: AbortSignal.timeout(10_000),
+apps/backend/src/clustering/data-store.ts:5:import { getUpstreamCircuit } from '../circuit-breaker.js';
+apps/backend/src/clustering/data-store.ts:6:import { upstreamUrl } from '../upstream.js';
+apps/backend/src/clustering/data-store.ts:84:      const url = new URL(upstreamUrl('/locations'));
+apps/backend/src/clustering/data-store.ts:96:      const response = await getUpstreamCircuit('locations').fetch(url.toString(), {
+apps/backend/src/clustering/data-store.ts:98:        signal: AbortSignal.timeout(30_000),

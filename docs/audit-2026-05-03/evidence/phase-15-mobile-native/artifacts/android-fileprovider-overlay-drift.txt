@@ -1,0 +1,94 @@
+Android FileProvider current generated project vs overlay evidence
+
+Current generated file_paths.xml:
+     1	<?xml version="1.0" encoding="utf-8"?>
+     2	<paths xmlns:android="http://schemas.android.com/apk/res/android">
+     3	    <external-path name="my_images" path="." />
+     4	    <cache-path name="my_cache_images" path="." />
+     5	</paths>
+Versioned overlay file_paths.xml:
+     1	<?xml version="1.0" encoding="utf-8"?>
+     2	<!--
+     3	  A2-1213: scoped FileProvider authority. Capacitor's default
+     4	  file_paths.xml grants whole-root access to both <external-path> and
+     5	  <cache-path>:
+     6	
+     7	      <external-path name="my_images" path="." />
+     8	      <cache-path    name="my_cache_images" path="." />
+     9	
+    10	  That hands every receiving Activity access to the entire cache and
+    11	  external-storage tree. Loop only uses the FileProvider for share-image
+    12	  PNGs that `apps/web/app/native/share.ts` writes via
+    13	  `Filesystem.writeFile(... directory: Directory.Cache)`. Two tightenings:
+    14	
+    15	  1. Removed `<external-path>` entirely — Loop never writes to the
+    16	     external-storage tree, so granting any access there is gratuitous.
+    17	  2. Narrowed `<cache-path>` to the `share/` subdirectory; share.ts now
+    18	     prefixes every share-image filename with `share/` to land in scope.
+    19	
+    20	  The overlay script rewrites this on every `cap sync` so Capacitor's
+    21	  permissive default doesn't return.
+    22	-->
+    23	<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    24	  <cache-path name="share" path="share/" />
+    25	</paths>
+
+Overlay script copy lines:
+    55	  say "Copying backup rules XML into $ANDROID_XML_DIR"
+    56	  mkdir -p "$ANDROID_XML_DIR"
+    57	  cp_if_changed "$OVERLAY_DIR/android/app/src/main/res/xml/backup_rules.xml" "$ANDROID_XML_DIR/backup_rules.xml"
+    58	  cp_if_changed "$OVERLAY_DIR/android/app/src/main/res/xml/data_extraction_rules.xml" "$ANDROID_XML_DIR/data_extraction_rules.xml"
+    59	  # A2-1213: tightened FileProvider scope. Capacitor's default
+    60	  # file_paths.xml grants whole-root access (`path="."`) to both
+    61	  # external-storage and the cache directory. The overlay scopes the
+    62	  # provider down to `<cache>/share/` only — the single dir share-image
+    63	  # PNGs land in (apps/web/app/native/share.ts).
+    64	  cp_if_changed "$OVERLAY_DIR/android/app/src/main/res/xml/file_paths.xml" "$ANDROID_XML_DIR/file_paths.xml"
+    65	
+    66	  # MainActivity override — disables WebView overscroll so the fixed
+
+Native share write path lines:
+    24	 * blob URIs directly. Only called on native — `Directory.Cache` on
+    25	 * web falls through to IndexedDB which the share intent can't reach
+    26	 * anyway.
+    27	 */
+    28	async function writeTempShareImage(imageUrl: string, filename: string): Promise<string | null> {
+    29	  try {
+    30	    const { Filesystem, Directory } = await import('@capacitor/filesystem');
+    31	    const parsed = parseBase64DataUrl(imageUrl);
+    32	    if (parsed === null) return null;
+    33	    // A2-1213: prefix the filename with `share/` so it lands in
+    34	    // `<cache>/share/`, the only directory the Android FileProvider
+    35	    // grants access to (see `apps/mobile/native-overlays/android/app/
+    36	    // src/main/res/xml/file_paths.xml`). Capacitor's writeFile creates
+    37	    // intermediate directories automatically.
+    38	    const scopedPath = `share/${filename}`;
+    39	    // No `encoding` field — the plugin interprets the data as
+    40	    // base64 when the option is omitted, which is exactly what we
+    41	    // want for binary PNG payloads. Passing `Encoding.UTF8` would
+    42	    // write the base64 string as literal text instead of decoding.
+    43	    await Filesystem.writeFile({
+    44	      path: scopedPath,
+    45	      data: parsed.base64,
+    46	      directory: Directory.Cache,
+    47	      recursive: true,
+    48	    });
+    49	    const { uri } = await Filesystem.getUri({
+    50	      path: scopedPath,
+    51	      directory: Directory.Cache,
+    52	    });
+    53	    return uri;
+    54	  } catch {
+    55	    return null;
+    56	  }
+    57	}
+    58	
+    59	/**
+    60	 * Opens the native share sheet with optional file attachment. On
+    61	 * Capacitor native we write the image to `Directory.Cache` and
+    62	 * pass the URI to `@capacitor/share`'s `files` field (the only
+
+Git tracking status:
+apps/mobile/native-overlays/android/app/src/main/res/xml/file_paths.xml
+apps/mobile/scripts/apply-native-overlays.sh
+apps/web/app/native/share.ts

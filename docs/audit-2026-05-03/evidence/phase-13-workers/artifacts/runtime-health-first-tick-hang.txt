@@ -1,0 +1,52 @@
+Phase 13 evidence: runtime health does not mark a required worker stale until after its first successful tick.
+
+Runtime health state:
+
+apps/backend/src/runtime-health.ts:119-128
+  markWorkerStarted(...) sets:
+    required = true
+    running = true
+    staleAfterMs = args.staleAfterMs
+    startedAtMs = Date.now()
+  It does not set `lastSuccessAtMs`.
+
+apps/backend/src/runtime-health.ts:161-166
+  const stale =
+    state.required &&
+    state.running &&
+    state.staleAfterMs !== null &&
+    state.lastSuccessAtMs !== null &&
+    now - state.lastSuccessAtMs > state.staleAfterMs;
+
+apps/backend/src/runtime-health.ts:167-172
+  const degraded =
+    state.required &&
+    (state.blockedReason !== null ||
+      !state.running ||
+      stale ||
+      (state.lastSuccessAtMs === null && state.lastErrorAtMs !== null));
+
+Result:
+
+- A worker with `required=true`, `running=true`, `lastSuccessAtMs=null`, and `lastErrorAtMs=null` is neither stale nor degraded, regardless of `startedAtMs` age.
+
+Worker startup pattern:
+
+- `payments/watcher-bootstrap.ts` calls `markWorkerStarted('payment_watcher', ...)` and then starts an async first tick with `void tick()`.
+- `orders/procurement-worker.ts` calls `markWorkerStarted('procurement_worker', ...)` and then starts an async first tick with `void tick()`.
+- `payments/payout-worker.ts` calls `markWorkerStarted('payout_worker', ...)` and then starts an async first tick with `void tick()`.
+- `payments/asset-drift-watcher.ts` calls `markWorkerStarted('asset_drift_watcher', ...)` and then starts an async first tick with `void tick()`.
+- `credits/interest-scheduler.ts` calls `markWorkerStarted('interest_scheduler', ...)` and then starts the first tick on `setImmediate`.
+
+Existing test coverage:
+
+apps/backend/src/__tests__/runtime-health.test.ts:51-64 verifies stale detection only after:
+
+  markWorkerStarted('payout_worker', { staleAfterMs: 1_000 });
+  markWorkerTickSuccess('payout_worker');
+
+There is no test for "started, no success, no failure, older than staleAfterMs".
+
+Impact reasoning:
+
+If a required worker's first tick hangs before success/failure is recorded, `/health` can continue to report that worker as running and non-degraded forever. This can hide a startup-time deadlock or unbounded upstream/database call in the exact period where operators most need deploy health to catch failed workers.
