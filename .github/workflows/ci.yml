@@ -287,6 +287,16 @@ jobs:
         # the GitHub-hosted attestation log + Sigstore Rekor; the
         # workflow's GitHub OIDC token is the signer (no key mgmt).
         # Verify externally via `gh attestation verify`.
+        #
+        # A4-044 (medium, open): the subject is the SBOM file
+        # itself, NOT the deploy artifacts (backend Docker image
+        # built by Fly.io, web SSR bundle, mobile native builds).
+        # A verified-SBOM doesn't prove the deployed image
+        # matches. Closing this requires integrating image
+        # attestation into the deploy pipeline (Fly.io builds
+        # the image at deploy-time outside this workflow), which
+        # is operator work. Re-attest the deploy image with the
+        # same provenance action once the deploy job lands.
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v3.0.0
         with:
           subject-path: sbom.cdx.json
