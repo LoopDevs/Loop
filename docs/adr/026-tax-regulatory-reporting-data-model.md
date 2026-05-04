@@ -130,12 +130,16 @@ each citing this ADR + its respective tracker ID.
       `docs/runbooks/monthly-reconciliation.md` (A2-1914)
 - [x] Home-currency-as-jurisdiction-proxy limitation documented
       with the Phase-2 migration path
-- [ ] Phase 1: CSV export emitter at `scripts/reports/quarterly-tax.ts`
-      driven by `npm --workspace=@loop/backend run report:quarterly-tax -- --quarter=YYYY-Q`
-- [ ] Phase 1: each CSV header line carries the report ID + quarter +
-      generation timestamp + a note about home_currency-as-proxy
-- [ ] Phase 1: output writes to `tmp/reports/<quarter>/` (gitignored;
-      operator uploads from there)
+- [x] Phase 1: CSV export emitter at
+      `apps/backend/src/scripts/quarterly-tax.ts` driven by
+      `npm --workspace=@loop/backend run report:quarterly-tax -- --quarter=YYYY-Q`
+      (A4-062, 2026-05-04). Three CSVs per quarter: `gift-card-sales`,
+      `cashback-rebates`, `crypto-payouts`.
+- [x] Phase 1: each CSV header lines (5 `#`-prefixed metadata rows)
+      carry report id, quarter, window, generation timestamp, and the
+      home_currency-as-proxy note.
+- [x] Phase 1: output writes to `tmp/reports/<quarter>/` at the repo
+      root (gitignored; operator uploads from there).
 - [ ] Phase 2: schema migration adding `users.tax_residence_country` +
       `orders.tax_jurisdiction`
 - [ ] Phase 2: backfill + UI prompt at first threshold crossing
