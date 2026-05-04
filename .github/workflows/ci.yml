@@ -598,6 +598,28 @@ jobs:
     timeout-minutes: 20
     if: github.event_name == 'pull_request'
     needs: [quality, test-unit, build]
+    services:
+      # /health now SELECT 1's the DB and returns 503 on critical
+      # degradation. The e2e backend used to point DATABASE_URL at a
+      # placeholder host because the suite never touches db-backed
+      # endpoints, but `wait-on /health --timeout 30000` now never
+      # passes — orchestrator-grade health is the right default for
+      # production but breaks the placeholder pattern. Provision a
+      # real postgres so /health returns 200 and the e2e suite
+      # boots.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: loop
+          POSTGRES_PASSWORD: loop
+          POSTGRES_DB: loop_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U loop -d loop_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -656,10 +678,12 @@ jobs:
           NODE_ENV: test
           GIFT_CARD_API_BASE_URL: https://spend.ctx.com
           INCLUDE_DISABLED_MERCHANTS: 'true'
-          # Required by env.ts zod validator but never connected to —
-          # NODE_ENV=test skips runMigrations and the e2e suite does
-          # not exercise db-backed admin/credits endpoints.
-          DATABASE_URL: postgres://placeholder:placeholder@localhost:5433/loop_test
+          # /health probes the DB now (SELECT 1, 503 on failure), so the
+          # placeholder DATABASE_URL pattern would block wait-on. Point
+          # at the postgres service this job provisions; e2e tests
+          # still don't exercise db-backed admin/credits endpoints, the
+          # connection just needs to be reachable.
+          DATABASE_URL: postgres://loop:loop@localhost:5433/loop_test
       - name: Wait for backend
         run: npx wait-on http://localhost:8080/health --timeout 30000
       - name: Run e2e tests (real CTX)
