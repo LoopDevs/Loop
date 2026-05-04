@@ -188,18 +188,42 @@ export async function healthHandler(c: Context): Promise<Response> {
   const [upstreamReachable, databaseReachable] = await Promise.all([probeUpstream(), probeDb()]);
   const runtime = getRuntimeHealthSnapshot();
 
-  const degraded =
-    merchantsStale ||
-    locationsStale ||
-    !upstreamReachable ||
-    !databaseReachable ||
-    runtime.degraded;
+  // Two-tier degradation. Critical = "the backend itself is in
+  // trouble; orchestrator should cycle this machine". Soft = "an
+  // external dependency we proxy is slow; we still want it visible
+  // in monitoring but the machine is functional and shouldn't
+  // cycle".
+  //
+  // Why split: a flapping upstream `/status` (CTX latency near our
+  // probe timeout) used to push `/health` to 503 → Fly cycles the
+  // machine → fresh process resets the in-memory notify cooldown →
+  // next state transition fires Discord again. Result: monitoring
+  // channel shows degraded↔healthy oscillation every couple of
+  // minutes during a CTX latency incident, even though Loop's own
+  // surfaces (DB, workers, in-memory caches) are fine.
+  //
+  // After this split:
+  //   - DB unreachable / required worker degraded → 503, Fly cycles.
+  //   - Upstream slow / catalog stale → 200 with `degraded: true`
+  //     in the body and `softDegradedReasons` listing causes. Fly
+  //     keeps the machine; monitoring dashboards still see truth;
+  //     Discord stays quiet on upstream blips.
+  const criticalDegraded = !databaseReachable || runtime.degraded;
+  const softDegraded = merchantsStale || locationsStale || !upstreamReachable;
+  const degraded = criticalDegraded || softDegraded;
 
   // Raw reading → rolling window. Keep the last N readings, flip
   // when a supermajority agrees. Shifts out the oldest reading
   // once the window is full so the detector always reflects
   // recent state.
-  const rawReading: 'degraded' | 'healthy' = degraded ? 'degraded' : 'healthy';
+  //
+  // Notification-flap fix: only critical degradation (DB / worker)
+  // contributes to the notify-window. Soft degradation (upstream
+  // slow, catalog stale) is reflected in the response body and the
+  // dashboard but doesn't toggle the Discord paging state. A CTX
+  // latency incident no longer flips the monitoring channel
+  // every 90 seconds.
+  const rawReading: 'degraded' | 'healthy' = criticalDegraded ? 'degraded' : 'healthy';
   healthReadings.push(rawReading);
   if (healthReadings.length > HEALTH_WINDOW_SIZE) healthReadings.shift();
 
@@ -266,16 +290,17 @@ export async function healthHandler(c: Context): Promise<Response> {
   // is the safe default even though Fly's own probe path doesn't
   // cache.
   c.header('Cache-Control', 'no-store');
-  // A4-035 / A4-073: HTTP status reflects degradation so Docker
-  // HEALTHCHECK + Fly's [[http_service.checks]] probe + third-party
-  // uptime monitors (StatusCake, Pingdom) all see the truth without
-  // having to parse the JSON body. 503 SERVICE_UNAVAILABLE is the
-  // standard signal for "I'm up but my dependencies aren't" — Fly
-  // will cycle the machine, Docker will mark unhealthy, and external
-  // probes flip to incident state. Returning 200 with status:
-  // 'degraded' in the body kept the orchestrator blind to dependency
-  // outages.
-  const httpStatus = degraded ? 503 : 200;
+  // Only critical degradation (DB / required worker) returns 503
+  // and triggers Fly machine cycling. Soft degradation (upstream
+  // slow, catalogs stale) still surfaces in the body so dashboards
+  // see the truth, but the orchestrator keeps the machine — Loop
+  // can serve cached merchants + place Loop-native orders
+  // independent of CTX `/status` latency.
+  const httpStatus = criticalDegraded ? 503 : 200;
+  const softDegradedReasons: string[] = [];
+  if (merchantsStale) softDegradedReasons.push('merchants_stale');
+  if (locationsStale) softDegradedReasons.push('locations_stale');
+  if (!upstreamReachable) softDegradedReasons.push('upstream_unreachable');
   return c.json(
     {
       status: degraded ? 'degraded' : 'healthy',
@@ -290,6 +315,9 @@ export async function healthHandler(c: Context): Promise<Response> {
       // A4-034: DB readiness component. False = pool exhausted /
       // credentials rotated / network partition / DB hard-down.
       databaseReachable,
+      criticalDegraded,
+      softDegraded,
+      softDegradedReasons,
       otpDelivery: runtime.otpDelivery,
       workers: runtime.workers,
     },
