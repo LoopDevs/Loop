@@ -21,6 +21,11 @@ npm install          # installs all workspaces
 cp apps/backend/.env.example apps/backend/.env
 cp apps/web/.env.local.example apps/web/.env.local
 # Edit both files with real values
+# A4-116: lock down permissions — these files carry GIFT_CARD_API_*,
+# DISCORD_WEBHOOK_*, VITE_SENTRY_DSN, etc. Default `cp` mode is 644
+# (world-readable) on most umasks; tighten so only your account can
+# read them.
+chmod 600 apps/backend/.env apps/web/.env.local
 
 # 3. Generate protobuf types (only needed if proto files changed)
 npm run proto:generate

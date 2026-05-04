@@ -106,22 +106,36 @@ export function previewCashbackMinor(amountMinor: bigint, bps: number): bigint {
 }
 
 export async function publicCashbackPreviewHandler(c: Context): Promise<Response> {
+  // A4-094: even validation-failure 4xx envelopes carry a short
+  // public Cache-Control header. Hono's default is no Cache-Control,
+  // so a CDN keyed on URL alone could otherwise either NOT cache
+  // (most safe defaults) or cache an error envelope past the source
+  // of the typo. A 60s public TTL on bad-input matches the 200 path
+  // and gives the CDN a stable cacheability signal.
+  const setShortPublicCache = (): void => {
+    c.header('cache-control', 'public, max-age=60');
+  };
+
   const merchantIdRaw = c.req.query('merchantId');
   if (merchantIdRaw === undefined || merchantIdRaw.length === 0) {
+    setShortPublicCache();
     return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is required' }, 400);
   }
   if (merchantIdRaw.length > MERCHANT_ID_MAX || !MERCHANT_ID_RE.test(merchantIdRaw)) {
+    setShortPublicCache();
     return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
   }
 
   const amountRaw = c.req.query('amountMinor');
   if (amountRaw === undefined || amountRaw.length === 0) {
+    setShortPublicCache();
     return c.json({ code: 'VALIDATION_ERROR', message: 'amountMinor is required' }, 400);
   }
   // Only accept non-negative integer strings so "1e5", "0x10", and
   // bigint-smuggling "99999999999999999999" (past JS-number precision
   // AND the ceiling) all fail validation uniformly.
   if (!/^\d+$/.test(amountRaw)) {
+    setShortPublicCache();
     return c.json(
       { code: 'VALIDATION_ERROR', message: 'amountMinor must be a non-negative integer' },
       400,
@@ -131,14 +145,17 @@ export async function publicCashbackPreviewHandler(c: Context): Promise<Response
   try {
     amountMinor = BigInt(amountRaw);
   } catch {
+    setShortPublicCache();
     return c.json({ code: 'VALIDATION_ERROR', message: 'amountMinor is malformed' }, 400);
   }
   if (amountMinor <= 0n || amountMinor > BigInt(AMOUNT_MINOR_MAX)) {
+    setShortPublicCache();
     return c.json({ code: 'VALIDATION_ERROR', message: 'amountMinor is out of range' }, 400);
   }
 
   const resolved = resolveMerchant(merchantIdRaw);
   if (resolved === null) {
+    setShortPublicCache();
     return c.json({ code: 'NOT_FOUND', message: 'Merchant not found' }, 404);
   }
 
