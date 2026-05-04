@@ -157,6 +157,9 @@ vi.mock('../../discord.js', () => ({
   notifyCashbackRecycled: vi.fn(),
   notifyFirstCashbackRecycled: vi.fn(),
   notifyOrderCreated: vi.fn(),
+  // A4-023: peg-break notifier called from fulfillment.ts when
+  // chargeCurrency diverges from user.home_currency.
+  notifyPegBreakOnFulfillment: vi.fn(),
 }));
 // Payout-intent builder — default: "pay" when userCashbackMinor > 0,
 // with a fixed issuer/asset/address. Tests that need skip paths can

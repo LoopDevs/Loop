@@ -22,6 +22,7 @@ export {
   notifyHealthChange,
   notifyPayoutFailed,
   notifyUsdcBelowFloor,
+  notifyPegBreakOnFulfillment,
   notifyAssetDrift,
   notifyAssetDriftRecovered,
   notifyStuckProcurementSwept,

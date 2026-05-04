@@ -27,6 +27,7 @@ import { orders, creditTransactions, userCredits, users, pendingPayouts } from '
 import { logger } from '../logger.js';
 import { isHomeCurrency } from '@loop/shared';
 import { buildPayoutIntent } from '../credits/payout-builder.js';
+import { notifyPegBreakOnFulfillment } from '../discord.js';
 import type { Order } from './repo.js';
 
 const log = logger.child({ area: 'order-transitions' });
@@ -131,14 +132,29 @@ export async function markOrderFulfilled(
         // at order creation), but would indicate support-mediated
         // home-currency change after an order was placed.
         if (order.chargeCurrency !== userRow.homeCurrency) {
+          // A4-023: peg break. Off-chain cashback already wrote
+          // (above), but on-chain payout is skipped. Surface
+          // beyond a log line — emit a Discord alert so ops can
+          // manually compensate the on-chain side and restore
+          // the 1:1 invariant. Fire-and-forget after the txn
+          // commits implicitly (notifyPegBreakOnFulfillment is
+          // also fire-and-forget); a Discord blip never blocks
+          // the order's transition.
           log.warn(
             {
               orderId: order.id,
               chargeCurrency: order.chargeCurrency,
               userHomeCurrency: userRow.homeCurrency,
             },
-            'Order charge currency diverged from user home currency — on-chain payout skipped',
+            'A4-023: order charge currency diverged from user home currency — on-chain payout skipped, peg break Discord notification sent',
           );
+          notifyPegBreakOnFulfillment({
+            orderId: order.id,
+            userId: order.userId,
+            chargeCurrency: order.chargeCurrency,
+            userHomeCurrency: userRow.homeCurrency,
+            cashbackMinor: order.userCashbackMinor.toString(),
+          });
         } else {
           const decision = buildPayoutIntent({
             stellarAddress: userRow.stellarAddress,

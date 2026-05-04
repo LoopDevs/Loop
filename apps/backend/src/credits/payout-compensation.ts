@@ -111,6 +111,31 @@ export async function applyAdminPayoutCompensation(args: {
       );
     }
 
+    // A4-022: cross-check the locked payout's `userId` and the
+    // requesting user. A misuse from a future internal caller
+    // (cron / retry / a wrong-arg admin handler bug) that compensates
+    // user B for user A's failed payout would silently credit the
+    // wrong account. The lock above is `id`-scoped so we have the
+    // canonical row in hand; assert it.
+    if (payout.userId !== args.userId) {
+      throw new PayoutNotCompensableError(
+        `Payout userId '${payout.userId}' does not match args.userId '${args.userId}'`,
+      );
+    }
+
+    // A4-021: verify `amountMinor` equals the payout's outstanding
+    // stroops, divided by the LOOP-asset 100_000 stroops/minor
+    // ratio. The handler computes this correctly today, but the
+    // primitive should not trust the caller; over-compensation
+    // would silently inflate the user's balance vs. what was
+    // actually owed.
+    const expectedAmountMinor = payout.amountStroops / 100_000n;
+    if (args.amountMinor !== expectedAmountMinor) {
+      throw new PayoutNotCompensableError(
+        `Compensation amount '${args.amountMinor}' does not match payout outstanding '${expectedAmountMinor}' (stroops=${payout.amountStroops})`,
+      );
+    }
+
     const [existing] = await tx
       .select()
       .from(userCredits)

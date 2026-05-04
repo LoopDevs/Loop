@@ -116,6 +116,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       'Fires when a pending_payouts row flips to `failed` (ADR 015/016). Embed carries asset code + user id + lastError preview.',
   },
   {
+    name: 'notifyPegBreakOnFulfillment',
+    channel: 'monitoring',
+    description:
+      "A4-023: fires when an order's pinned chargeCurrency diverges from the user's home_currency at fulfillment time. Off-chain cashback ledger row writes; on-chain payout is skipped. Ops gets a paging-grade signal so the 1:1 LOOP-asset peg can be restored manually before reconciliation drift accumulates.",
+  },
+  {
     name: 'notifyStuckProcurementSwept',
     channel: 'monitoring',
     description:

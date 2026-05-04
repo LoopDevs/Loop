@@ -87,6 +87,10 @@ describe('applyAdminPayoutCompensation', () => {
       [
         {
           id: 'p-1',
+          // A4-022/021: primitive now asserts userId match and
+          // amountMinor equals payout.amountStroops / 100_000n.
+          userId: 'u-1',
+          amountStroops: 50_000_000n,
           kind: 'withdrawal',
           state: 'failed',
           compensatedAt: null,
@@ -172,6 +176,57 @@ describe('applyAdminPayoutCompensation', () => {
         userId: 'u-1',
         currency: 'USD',
         amountMinor: 500n,
+        payoutId: 'p-1',
+        reason: 'manual compensation',
+      }),
+    ).rejects.toBeInstanceOf(PayoutNotCompensableError);
+    expect(state.insertCreditCalls).toHaveLength(0);
+  });
+
+  it('A4-022: throws when args.userId does not match the locked payout.userId', async () => {
+    state.forUpdateResults = [
+      [
+        {
+          id: 'p-1',
+          userId: 'u-other',
+          amountStroops: 50_000_000n,
+          kind: 'withdrawal',
+          state: 'failed',
+          compensatedAt: null,
+        },
+      ],
+    ];
+    await expect(
+      applyAdminPayoutCompensation({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 500n,
+        payoutId: 'p-1',
+        reason: 'manual compensation',
+      }),
+    ).rejects.toBeInstanceOf(PayoutNotCompensableError);
+    expect(state.insertCreditCalls).toHaveLength(0);
+  });
+
+  it('A4-021: throws when args.amountMinor does not equal payout.amountStroops / 100_000n', async () => {
+    state.forUpdateResults = [
+      [
+        {
+          id: 'p-1',
+          userId: 'u-1',
+          // 50_000_000 stroops = 500 minor; caller asks for 600 — mismatch.
+          amountStroops: 50_000_000n,
+          kind: 'withdrawal',
+          state: 'failed',
+          compensatedAt: null,
+        },
+      ],
+    ];
+    await expect(
+      applyAdminPayoutCompensation({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 600n,
         payoutId: 'p-1',
         reason: 'manual compensation',
       }),
