@@ -29,6 +29,7 @@ import { ToastContainer } from '~/components/ui/ToastContainer';
 import { useAuthStore } from '~/stores/auth.store';
 import { useUiStore } from '~/stores/ui.store';
 import { buildSecurityHeaders } from '~/utils/security-headers';
+import { THEME_INIT_SCRIPT } from '~/utils/theme-init-script';
 import { shouldRetry } from '~/hooks/query-retry';
 import { NativeTabBar } from '~/components/features/NativeTabBar';
 import { fetchAllMerchants } from '~/services/merchants';
@@ -302,10 +303,16 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
          * accidentally zooming just reflows cleanly. `viewport-fit=cover`
          * stays so safe-area insets still work on notched devices. */}
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-        {/* Inline theme init prevents flash of unstyled content */}
+        {/* Inline theme init prevents flash of unstyled content. A4-057:
+            authorised by its SHA-256 hash in `script-src`, so the CSP
+            no longer needs `'unsafe-inline'` on script-src. The body
+            + hash live in `utils/theme-init-script.ts` and any edit
+            invalidates the hash; a unit test re-derives the hash on
+            every run so a forgotten update fails CI rather than
+            silently breaking the page. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('theme');var d=window.matchMedia('(prefers-color-scheme: dark)').matches;var isDark=(t==='dark')||(t!=='light'&&d);document.documentElement.classList.add(isDark?'dark':'light');}catch(e){document.documentElement.classList.add('light');}})();`,
+            __html: THEME_INIT_SCRIPT,
           }}
         />
         <Meta />

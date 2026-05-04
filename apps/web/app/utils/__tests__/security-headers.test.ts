@@ -27,6 +27,21 @@ describe('buildSecurityHeaders', () => {
     expect(csp).toContain('ingest.sentry.io');
   });
 
+  it('A4-057: script-src lists the theme-init SHA-256 hash, not unsafe-inline', () => {
+    const csp = h['Content-Security-Policy'] ?? '';
+    // The script-src directive must NOT carry `'unsafe-inline'` —
+    // any inline script outside the documented theme-init must be
+    // blocked by the browser. Also assert the script-src hash is
+    // the exact one paired with `theme-init-script.ts`'s body.
+    const scriptSrc = csp
+      .split(';')
+      .map((d) => d.trim())
+      .find((d) => d.startsWith('script-src '));
+    expect(scriptSrc).toBeDefined();
+    expect(scriptSrc).not.toContain("'unsafe-inline'");
+    expect(scriptSrc).toContain("'sha256-");
+  });
+
   it('sets anti-clickjacking + MIME-sniff + referrer + HSTS headers', () => {
     expect(h['X-Frame-Options']).toBe('DENY');
     expect(h['X-Content-Type-Options']).toBe('nosniff');

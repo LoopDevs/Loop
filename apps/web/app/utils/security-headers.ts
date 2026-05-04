@@ -15,8 +15,10 @@
  *     `root.tsx`'s `Layout`; the rest are expected at the deploy edge.
  *
  * CSP notes, keep in sync when editing:
- *   - `'unsafe-inline'` on script-src is required for the inline theme
- *     script in root.tsx that runs before hydration to prevent FOUC.
+ *   - script-src lists exactly the SHA-256 hash of the inline theme-init
+ *     script (A4-057). No `'unsafe-inline'` on script-src, so any
+ *     accidentally-added inline `<script>` (e.g. an attacker-injected
+ *     XSS) is blocked by the browser's CSP enforcement.
  *   - Tailwind inlines styles at build time, so `'unsafe-inline'` on
  *     style-src is unavoidable.
  *   - fonts.googleapis.com + fonts.gstatic.com — Google Fonts (accepted
@@ -28,6 +30,8 @@
  *   - `blob:` + `data:` on img-src — Leaflet internal markers and
  *     inline SVG data URIs.
  */
+import { THEME_INIT_SCRIPT_HASH } from './theme-init-script';
+
 export interface SecurityHeadersOptions {
   /** API origin the web app talks to. Used in CSP connect-src + img-src. */
   apiOrigin?: string;
@@ -40,7 +44,10 @@ export function buildSecurityHeaders(options: SecurityHeadersOptions = {}): Reco
     // accounts.google.com/gsi/client: Google Identity Services SDK
     // loaded on demand when the sign-in route mounts and the
     // deployment has a Google client id configured (ADR 014).
-    `script-src 'self' 'unsafe-inline' https://accounts.google.com`,
+    // A4-057: the only inline script Loop ships is the theme-init
+    // FOUC guard in root.tsx; authorise it by its SHA-256 hash so
+    // any other inline script is blocked outright.
+    `script-src 'self' ${THEME_INIT_SCRIPT_HASH} https://accounts.google.com`,
     `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com`,
     `font-src 'self' https://fonts.gstatic.com`,
     // `https://basemaps.cartocdn.com` only matches that exact hostname;
