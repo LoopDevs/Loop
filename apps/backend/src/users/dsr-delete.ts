@@ -96,6 +96,15 @@ export function deletedEmailFor(userId: string): string {
 }
 
 /**
+ * A4-123: synthetic well-formed Stellar pubkey used to scrub
+ * `pending_payouts.to_address` on terminal rows during DSR
+ * anonymisation. Matches the `pending_payouts_to_address_format`
+ * CHECK regex (`^G[A-Z2-7]{55}$`) but does not correspond to a
+ * derivable account. Exposed so tests can assert the exact value.
+ */
+export const SCRUBBED_TO_ADDRESS = `G${'A'.repeat(55)}`;
+
+/**
  * Anonymises the user identified by `userId`. Refuses (returns
  * `ok: false`) when there's money or a fulfilment in flight.
  *
@@ -188,6 +197,38 @@ export async function deleteUserViaAnonymisation(userId: string): Promise<DsrDel
         stellarAddress: null,
       })
       .where(eq(users.id, userId));
+
+    // A4-123: terminal payout rows (state IN ('confirmed', 'failed'))
+    // retain `to_address` — the user's Stellar destination — by
+    // default. The privacy policy promises identifier removal where
+    // retention isn't legally required; an on-chain wallet address is
+    // identifying and linkable, and we keep `tx_hash` + the totals
+    // for accounting reconciliation, so scrubbing the address alone
+    // preserves the ledger trail without continuing to advertise the
+    // user's wallet.
+    //
+    // The schema's `pending_payouts_to_address_format` CHECK pins
+    // `to_address` to `^G[A-Z2-7]{55}$`, so we replace with a
+    // synthetic well-formed sentinel rather than NULL or empty. The
+    // sentinel doesn't decode to a real account; combined with the
+    // user-row email scrub above, the row no longer links a real
+    // person to a real Stellar address.
+    //
+    // Pending/submitted rows are blocked above so they cannot reach
+    // this scrub; we only ever clear addresses on rows that are
+    // already terminal.
+    await tx
+      .update(pendingPayouts)
+      .set({ toAddress: SCRUBBED_TO_ADDRESS })
+      .where(
+        and(
+          eq(pendingPayouts.userId, userId),
+          inArray(pendingPayouts.state, [
+            'confirmed',
+            'failed',
+          ] satisfies (typeof PAYOUT_STATES)[number][]),
+        ),
+      );
   });
 
   // Sessions: revoke after the txn so a partial failure doesn't

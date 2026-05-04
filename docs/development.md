@@ -120,8 +120,15 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 
 # ── Observability (A2-1606 / A2-1607 / A2-1310 / A2-1327) ────────────
 # Shared-secret bearer tokens. Set either → endpoint requires
-# `Authorization: Bearer <token>` on every request. Absent → endpoint
-# is public. Use 32+ random chars.
+# `Authorization: Bearer <token>` on every request.
+#
+# A4-120: closed-by-default in production. When NODE_ENV=production
+# and the corresponding *_BEARER_TOKEN is unset, the endpoint
+# returns 404 (probe-gate.ts) so a misconfigured prod doesn't
+# silently expose Prometheus metrics or the OpenAPI spec. In
+# development the endpoint is public when unset, which keeps local
+# Grafana / Bruno workflows working without forcing a token.
+# Use 32+ random chars.
 # METRICS_BEARER_TOKEN=<32+ random chars>      # gates /metrics
 # OPENAPI_BEARER_TOKEN=<32+ random chars>      # gates /openapi.json
 

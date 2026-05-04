@@ -27,6 +27,14 @@ const { state } = vi.hoisted(() => {
     updatedUserWhereId: string | null;
     revokedForUserId: string | null;
     txnRan: boolean;
+    /**
+     * A4-123: capture of the `pending_payouts` scrub update —
+     * separate from `updatedUserSet` because the txn fires both
+     * (users + pending_payouts) and the test should see each call
+     * independently.
+     */
+    pendingPayoutsScrubSet: Record<string, unknown> | null;
+    pendingPayoutsScrubFired: boolean;
   } = {
     payoutBlockingRows: [],
     failedUncompensatedRows: [],
@@ -37,6 +45,8 @@ const { state } = vi.hoisted(() => {
     updatedUserWhereId: null,
     revokedForUserId: null,
     txnRan: false,
+    pendingPayoutsScrubSet: null,
+    pendingPayoutsScrubFired: false,
   };
   return { state: s };
 });
@@ -123,6 +133,9 @@ vi.mock('../../db/client.js', () => {
             if (t.__tag === 'users') {
               state.updatedUserSet = setBody;
               state.updatedUserWhereId = (where as { value?: string }).value ?? null;
+            } else if (t.__tag === 'pendingPayouts') {
+              state.pendingPayoutsScrubSet = setBody;
+              state.pendingPayoutsScrubFired = true;
             }
           },
         }),
@@ -140,7 +153,7 @@ vi.mock('../../db/client.js', () => {
   };
 });
 
-import { deleteUserViaAnonymisation, deletedEmailFor } from '../dsr-delete.js';
+import { deleteUserViaAnonymisation, deletedEmailFor, SCRUBBED_TO_ADDRESS } from '../dsr-delete.js';
 
 beforeEach(() => {
   state.payoutBlockingRows = [];
@@ -152,6 +165,8 @@ beforeEach(() => {
   state.updatedUserWhereId = null;
   state.revokedForUserId = null;
   state.txnRan = false;
+  state.pendingPayoutsScrubSet = null;
+  state.pendingPayoutsScrubFired = false;
 });
 
 describe('deleteUserViaAnonymisation (A2-1905)', () => {
@@ -202,6 +217,17 @@ describe('deleteUserViaAnonymisation (A2-1905)', () => {
     state.orderBlockingRows = [{ id: 'o-1' }];
     const out = await deleteUserViaAnonymisation('u-1');
     expect(out.blockedBy).toBe('pending_payouts');
+  });
+
+  it('A4-123: scrubs to_address on terminal payout rows during anonymisation', async () => {
+    const out = await deleteUserViaAnonymisation('u-1');
+    expect(out).toEqual({ ok: true });
+    expect(state.pendingPayoutsScrubFired).toBe(true);
+    expect(state.pendingPayoutsScrubSet).toMatchObject({ toAddress: SCRUBBED_TO_ADDRESS });
+    // The synthetic placeholder must satisfy the schema CHECK regex
+    // pinned in 0024_pending_payouts_to_address_format so the
+    // production UPDATE doesn't bounce.
+    expect(SCRUBBED_TO_ADDRESS).toMatch(/^G[A-Z2-7]{55}$/);
   });
 
   it('deletedEmailFor produces a unique synthetic email per userId', () => {
