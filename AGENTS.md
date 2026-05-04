@@ -69,6 +69,8 @@ upstream API     CTX gift card provider at spend.ctx.com — merchant catalog, a
 
 **Auth has two paths.** Loop-native (ADR 013, default once `LOOP_AUTH_NATIVE_ENABLED=true`): backend mints its own HS256 JWTs, generates OTPs, and sends email via the configured provider. Legacy CTX-proxy: backend forwards request-otp / verify-otp / refresh / logout to upstream `spend.ctx.com` and tokens are upstream-issued. Both paths coexist while the identity takeover rolls out. See `docs/architecture.md` + ADR-013 for the full auth flow.
 
+**Orders have two paths.** Loop-native (ADR 010, default once `LOOP_AUTH_NATIVE_ENABLED=true` and the merchant catalog has been synced): `POST /api/orders/loop` creates the order in the off-chain ledger and the user pays via XLM / USDC / LOOP-asset against the Stellar deposit address. Loop is the merchant of record (principal switch). Legacy CTX-proxy: `POST /api/orders` forwards order creation to upstream CTX and the user pays CTX directly. Loop-native is the principal-switch path; the legacy path stays alive until the takeover rolls out fully.
+
 ---
 
 ## Quick commands
