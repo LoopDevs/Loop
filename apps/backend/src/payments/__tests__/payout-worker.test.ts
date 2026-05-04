@@ -91,6 +91,12 @@ import { runPayoutTick } from '../payout-worker.js';
 
 const BASE_ARGS = {
   operatorSecret: 'SXXX',
+  // A4-104: explicit operator pubkey for the Horizon idempotency
+  // pre-check. Distinct from `assetIssuer` (`GISSUER` in
+  // `makeRow`) so a regression on the lookup-account fix would
+  // immediately surface as the prior-payment scan querying the
+  // wrong account.
+  operatorAccount: 'GOPERATOR',
   horizonUrl: 'https://horizon.example',
   networkPassphrase: 'PUBLIC_NETWORK',
   maxAttempts: 5,
@@ -160,6 +166,25 @@ describe('runPayoutTick', () => {
       }),
     );
     expect(repoMocks.markPayoutConfirmed).toHaveBeenCalledWith({ id: 'p-1', txHash: 'tx-hash' });
+  });
+
+  it('A4-104: pre-check scans the operator account, NOT the asset issuer', async () => {
+    // A treasury topology that splits issuer (cold) from operator
+    // (hot) is intended to be supported. The earlier code reused
+    // `row.assetIssuer` for the lookup account; this test pins the
+    // fix so a regression to that behaviour is caught here.
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
+    await runPayoutTick(BASE_ARGS);
+    expect(horizonMock.findOutboundPaymentByMemo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        account: 'GOPERATOR',
+        to: 'GDESTINATION',
+        memo: 'order-abc',
+      }),
+    );
+    expect(horizonMock.findOutboundPaymentByMemo).not.toHaveBeenCalledWith(
+      expect.objectContaining({ account: 'GISSUER' }),
+    );
   });
 
   it('idempotency pre-check finds prior submit → converges to confirmed without re-submitting', async () => {

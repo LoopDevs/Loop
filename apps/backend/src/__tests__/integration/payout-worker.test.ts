@@ -79,6 +79,7 @@ const DEFAULT_TICK_ARGS = {
   // the SDK's Keypair.fromSecret would reject it but we never get
   // that far.
   operatorSecret: 'STESTSECRET',
+  operatorAccount: 'GTESTOPERATOR',
   horizonUrl: 'https://horizon-test.stellar.org',
   networkPassphrase: 'Test SDF Network ; September 2015',
   maxAttempts: 5,
