@@ -431,7 +431,14 @@ export const orders = pgTable(
     // face_value_minor and charge_currency = currency via the
     // migration's UPDATE — true when the user bought in their own
     // region, which was every order before home-currency landed.
-    chargeMinor: bigint('charge_minor', { mode: 'bigint' }).notNull(),
+    //
+    // A4-030: `.default(0n)` mirrors the migration's
+    // `DEFAULT 0` so a future `drizzle-kit generate` doesn't emit a
+    // spurious `DROP DEFAULT`. The default is harmless in practice
+    // because `.notNull()` on a non-nullable insert never falls
+    // through to the default — handlers always supply a value —
+    // but the schema/migration parity matters for migration drift.
+    chargeMinor: bigint('charge_minor', { mode: 'bigint' }).notNull().default(0n),
     chargeCurrency: char('charge_currency', { length: 3 }).notNull(),
 
     // Payment source:

@@ -13,9 +13,19 @@
  *
  * Integer-arithmetic only: face value is already minor units; we
  * multiply by the percentage × 100 (two decimals → hundredths-of-a-
- * percent as an int) and divide, flooring. The rounding residual
- * lands in Loop's margin — errs toward Loop, never toward a user
- * being owed an extra penny we haven't reserved.
+ * percent as an int) and divide, flooring.
+ *
+ * A4-018: rounding-residual policy. `cashback-split.ts` computes
+ * `userCashbackMinor` (floor) and `loopMarginMinor` (floor) from
+ * the configured percentages, then derives
+ * `wholesaleMinor = faceValue - userCashback - loopMargin`. So
+ * the residual after both floors lands in `wholesaleMinor` —
+ * what Loop pays CTX. Loop's margin is exact; the user's cashback
+ * is exact-floored; Loop "absorbs" the 0–3 minor-unit residual on
+ * the wholesale side. This is the conservative direction (the
+ * user is never short, Loop never over-quotes its own margin).
+ * The on-chain settlement to CTX is the one that runs slightly
+ * higher — operationally a non-issue at single-order granularity.
  */
 import { and, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
