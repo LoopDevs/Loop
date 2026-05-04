@@ -27,6 +27,7 @@
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
 import { killSwitch } from '../middleware/kill-switch.js';
+import { requireAdminStepUp } from '../auth/admin-step-up-middleware.js';
 import { adminCreditAdjustmentHandler } from '../admin/credit-adjustments.js';
 import { adminRefundHandler } from '../admin/refunds.js';
 import { adminWithdrawalHandler } from '../admin/withdrawals.js';
@@ -40,9 +41,12 @@ export function mountAdminCreditWritesRoutes(app: Hono): void {
   // Credit-adjustment write (ADR 017). Lower rate limit than reads —
   // it's an explicit ops action, not a polled surface. Idempotency-Key
   // header required; missing header is a 400 at the handler edge.
+  // ADR-028 / A4-063: gated behind the step-up auth middleware so a
+  // captured bearer token alone can't issue credit adjustments.
   app.post(
     '/api/admin/users/:userId/credit-adjustments',
     rateLimit('POST /api/admin/users/:userId/credit-adjustments', 20, 60_000),
+    requireAdminStepUp(),
     adminCreditAdjustmentHandler,
   );
   // Refund write (A2-901 + ADR 017). Separate surface from credit-
@@ -58,11 +62,14 @@ export function mountAdminCreditWritesRoutes(app: Hono): void {
   );
   // ADR-024 / A2-901 — admin-mediated withdrawal: debit user's
   // cashback balance + queue an on-chain LOOP-asset payout. Same
-  // rate limit + idempotency discipline as refund.
+  // rate limit + idempotency discipline as refund. ADR-028 / A4-063
+  // step-up gate also applies — a stolen bearer must NOT be able to
+  // issue an outbound on-chain payout to an attacker-chosen address.
   app.post(
     '/api/admin/users/:userId/withdrawals',
     killSwitch('withdrawals'),
     rateLimit('POST /api/admin/users/:userId/withdrawals', 20, 60_000),
+    requireAdminStepUp(),
     adminWithdrawalHandler,
   );
 }

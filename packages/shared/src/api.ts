@@ -106,6 +106,15 @@ export const ApiErrorCode = {
   // gains a source-tag column so the credit method can drain
   // only the non-cashback portion safely.
   PAYMENT_METHOD_DISABLED: 'PAYMENT_METHOD_DISABLED',
+  // ADR-028 / A4-063 admin step-up auth. Distinct codes so the
+  // admin UI can branch: REQUIRED → prompt for password modal;
+  // INVALID → re-prompt (token expired or signature failed);
+  // SUBJECT_MISMATCH → log out (different admin's token replayed);
+  // UNAVAILABLE → ops error (operator hasn't generated the key).
+  STEP_UP_REQUIRED: 'STEP_UP_REQUIRED',
+  STEP_UP_INVALID: 'STEP_UP_INVALID',
+  STEP_UP_SUBJECT_MISMATCH: 'STEP_UP_SUBJECT_MISMATCH',
+  STEP_UP_UNAVAILABLE: 'STEP_UP_UNAVAILABLE',
 } as const;
 
 export type ApiErrorCodeValue = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];

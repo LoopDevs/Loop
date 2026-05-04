@@ -1,10 +1,24 @@
 # ADR-028 — Admin step-up authentication for destructive actions
 
-**Status:** Accepted (Phase-1 design pinned, implementation deferred)
+**Status:** Accepted (Phase-1 backend implemented 2026-05-04 / A4-063; web modal pending)
 **Date:** 2026-04-26
-**Audit ref:** A2-1609
+**Audit ref:** A2-1609 (pin), A4-063 (implementation)
 **Supersedes:** none
 **Superseded by:** none
+
+## Implementation status
+
+- **2026-05-04** Phase-1 backend slice landed (commits on `fix/audit-2026-05-03-tranche-2`):
+  - `LOOP_ADMIN_STEP_UP_SIGNING_KEY` env var (separate from `LOOP_JWT_SIGNING_KEY` per the original design).
+  - `apps/backend/src/auth/admin-step-up.ts` — sign + verify helpers.
+  - `apps/backend/src/auth/admin-step-up-middleware.ts` — `requireAdminStepUp()`.
+  - `apps/backend/src/admin/step-up-handler.ts` — `POST /api/admin/step-up` (OTP variant, `kind: 'otp'`).
+  - Wired on `/api/admin/users/:userId/credit-adjustments`,
+    `/api/admin/users/:userId/withdrawals`, `/api/admin/payouts/:id/retry`.
+  - Tests: 12 unit tests covering sign/verify/middleware error paths.
+- **Pending**: web modal (`StepUpModal` component + `useStepUpToken` hook). The
+  backend endpoints will return `STEP_UP_REQUIRED` when the modal isn't wired
+  yet, so the operator can ship the backend independently of the UI.
 
 ## Context
 

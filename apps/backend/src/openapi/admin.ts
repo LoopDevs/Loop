@@ -156,6 +156,69 @@ export function registerAdminOpenApi(
   // slices as a parameter.
   registerAdminCreditWritesOpenApi(registry, errorResponse, AdminWriteAudit);
 
+  // ADR-028 / A4-063: admin step-up auth.
+  const StepUpBody = registry.register(
+    'AdminStepUpBody',
+    z.object({
+      otp: z.string().min(1).max(20).openapi({
+        description:
+          'OTP code received via POST /api/auth/request-otp. Phase-1 supports OTP only; Phase-2 widens to password / WebAuthn.',
+      }),
+      kind: z.literal('otp').optional().openapi({
+        description: 'Reserved for ADR-028 Phase-2. Defaults to "otp".',
+      }),
+    }),
+  );
+  const StepUpResponse = registry.register(
+    'AdminStepUpResponse',
+    z.object({
+      stepUpToken: z.string().openapi({
+        description:
+          'JWT to send as `X-Admin-Step-Up` on destructive admin endpoints. 5-minute TTL. Hold in memory only — never localStorage.',
+      }),
+      expiresAt: z.string().datetime(),
+    }),
+  );
+  registry.registerPath({
+    method: 'post',
+    path: '/api/admin/step-up',
+    summary: 'Mint a 5-minute admin step-up token (ADR 028).',
+    description:
+      'Re-verifies the admin (currently via OTP) and returns a short-lived `X-Admin-Step-Up` JWT the admin must present on credit-adjust / refund / withdrawal / payout-retry. Stateless — verified by HS256 signature against `LOOP_ADMIN_STEP_UP_SIGNING_KEY`. The bearer access token alone is insufficient by design — see ADR-028.',
+    tags: ['Admin'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      body: { content: { 'application/json': { schema: StepUpBody } } },
+    },
+    responses: {
+      200: {
+        description: 'Step-up token minted',
+        content: { 'application/json': { schema: StepUpResponse } },
+      },
+      400: {
+        description: 'Invalid body (missing otp)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      401: {
+        description: 'Wrong OTP, expired, or wrong auth kind (Loop-native required)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (30/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      500: {
+        description: 'Internal error',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      503: {
+        description:
+          'Admin step-up not configured on this deployment (LOOP_ADMIN_STEP_UP_SIGNING_KEY unset)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+    },
+  });
+
   // ─── Admin payouts cluster (ADR 015/016/017/024) ───────────────────────────
   //
   // Six paths backing /admin/payouts (list, single-row drill,
