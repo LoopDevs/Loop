@@ -63,20 +63,16 @@ Finding status:
 
 ### Findings by Status
 
-Status updated 2026-05-04 after Tranche 1 launch remediation cycle.
-See [findings/remediation-queue.md](./findings/remediation-queue.md)
-for per-finding disposition. Many "already fixed" entries reference
-commits from the earlier 2026-04-29 audit cycle that closed the
-same defect before this cold audit was filed.
+Status updated 2026-05-04 after the multi-tranche remediation cycle. Codex audit findings A4-001..A4-042 substantially overlap with the parallel Claude audit (Claude numbers ≥ A4-095). Most originally-"open" entries here have been closed by Claude-numbered commits; the cross-reference is in [findings/remediation-queue.md](./findings/remediation-queue.md). The remaining `accepted-risk` entries are operator-owned (branch protection / CODEOWNERS team) or accepted policy (npm advisories with no available fix).
 
 | Status              | Count |
 | ------------------- | ----: |
-| open                |    17 |
+| open                |     0 |
 | triaged             |     0 |
 | in-remediation      |     0 |
-| resolved            |    16 |
+| resolved            |    37 |
 | accepted-risk       |     5 |
-| deferred            |     4 |
+| deferred            |     0 |
 | duplicate           |     0 |
 | blocked-on-operator |     0 |
 | Total               |    42 |
