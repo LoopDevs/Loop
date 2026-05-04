@@ -146,8 +146,13 @@ below is either shipped or an explicit "not yet started".
 - [ ] Self-serve home-currency change — currently support-mediated.
 - [ ] SEP-24 / off-platform withdrawal UX for LOOP assets.
 - [ ] Defindex deposit automation — currently manual ops top-up.
-- [ ] Trustline-probe before payout submit — MVP takes `op_no_trust`
-      as a terminal + admin-retry path (ADR 016 open question).
+- [x] ~~Trustline-probe before payout submit~~ — `payOne` reads the
+      destination account's trustlines from Horizon (cached 30s)
+      before claiming the row (2026-05-04). Missing trustline →
+      row stays `pending`, throttled Discord ping
+      (`notifyPayoutAwaitingTrustline`), next tick re-probes
+      automatically once the user adds the trustline. Closes the
+      ADR-016 open question.
 - [ ] Hardware signing (HSM) for the operator secret — software
       signing adequate for launch volume.
 

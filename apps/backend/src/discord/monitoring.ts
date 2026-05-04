@@ -108,6 +108,53 @@ export function notifyPayoutFailed(args: {
 }
 
 /**
+ * Notify: a payout's destination account is missing the required
+ * trustline (ADR 015 / ADR 016 §"trustline-probe before payout
+ * submit"). The payout-worker holds the row in `pending` rather
+ * than burning it on `op_no_trust`; ops is paged so the user can
+ * be nudged to add the trustline.
+ *
+ * Throttled to once per (userId, assetCode) per process so a stuck
+ * row that the worker re-probes every tick doesn't flood the
+ * channel. Reset by `__resetAwaitingTrustlineDedupForTests`.
+ */
+const awaitingTrustlineFired = new Set<string>();
+export function __resetAwaitingTrustlineDedupForTests(): void {
+  awaitingTrustlineFired.clear();
+}
+export function notifyPayoutAwaitingTrustline(args: {
+  payoutId: string;
+  userId: string;
+  account: string;
+  assetCode: string;
+  assetIssuer: string;
+  accountExists: boolean;
+}): void {
+  const key = `${args.userId}::${args.assetCode}`;
+  if (awaitingTrustlineFired.has(key)) return;
+  awaitingTrustlineFired.add(key);
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🟡 Payout awaiting trustline',
+    description: truncate(
+      `User ${args.userId.slice(-8)} has linked ${args.account.slice(0, 8)}…${args.account.slice(-4)} but ${
+        args.accountExists
+          ? `the account has no trustline to ${args.assetCode}`
+          : `the account is not yet activated on Stellar (no balance reserve)`
+      }. Payout ${args.payoutId.slice(-8)} stays in \`pending\` and will submit on the next worker tick after the trustline is added.`,
+      DESCRIPTION_MAX,
+    ),
+    color: ORANGE,
+    fields: [
+      { name: 'User', value: `\`${args.userId.slice(-8)}\``, inline: true },
+      { name: 'Asset', value: escapeMarkdown(args.assetCode), inline: true },
+      { name: 'Issuer', value: `\`${args.assetIssuer.slice(0, 8)}…\``, inline: true },
+      { name: 'Account exists?', value: args.accountExists ? 'yes' : 'no', inline: true },
+      { name: 'Payout', value: `\`${args.payoutId.slice(-8)}\``, inline: true },
+    ],
+  });
+}
+
+/**
  * Notify: operator USDC balance has dropped below the configured
  * floor (ADR 015). Procurement is now paying CTX in XLM until the
  * reserve is topped up. Ops needs to know because XLM is the
