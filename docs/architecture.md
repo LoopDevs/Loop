@@ -250,15 +250,22 @@ CLOSED ──(N consecutive failures)──→ OPEN ──(cooldown elapsed)─�
 
 ## Phase 2 — Stellar wallet + cashback
 
-2-of-3 multisig per user:
+A4-096: the actually-shipped model is **external-wallet linking**
+(ADR 015) plus a **backend operator account** that signs outbound
+LOOP-asset payouts (ADR 016).
 
-| Key          | Location                                    | Signs when                         |
-| ------------ | ------------------------------------------- | ---------------------------------- |
-| Device key   | iOS Keychain / Android Keystore (biometric) | On-device after Face ID / Touch ID |
-| Server key   | Backend env (encrypted reference)           | Every transaction as co-signer     |
-| Recovery key | Third-party custodian                       | Account recovery only              |
+| Component       | Location                                              | Role                                                                                                                                              |
+| --------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| User wallet     | External (user-controlled)                            | User links a Stellar pubkey to `users.stellar_address`. Backend never holds the private key. Trustline opt-in is user-side.                       |
+| Operator secret | Backend env (`LOOP_STELLAR_OPERATOR_SECRET`)          | Backend signs outbound LOOP-asset payments using `Keypair.fromSecret(...)`. See `payments/payout-submit.ts`.                                      |
+| Issuers         | Backend env (`LOOP_STELLAR_<USD/GBP/EUR>LOOP_ISSUER`) | Per-currency issuer pubkeys for USDLOOP / GBPLOOP / EURLOOP. The asset-drift watcher reconciles on-chain circulation against off-chain liability. |
 
-Device key never leaves the device. Backend never sees the private key.
+The earlier 2-of-3 multisig design (Device key in Keychain + Server
+co-signer + recovery custodian) was **descoped** before launch in
+favour of external linking, which matches the gift-card-cashback UX
+better (no on-device key custody needed; users can rotate wallets
+freely). See `docs/adr/015-stablecoin-topology-and-payment-rails.md`
+for the rationale.
 
 ---
 
