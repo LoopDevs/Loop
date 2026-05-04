@@ -27,15 +27,22 @@
  * our own scraper.
  */
 import type { Context } from 'hono';
-import { incrementRequest } from '../metrics.js';
+import { incrementRequest, recordRequestDuration } from '../metrics.js';
 
 export async function requestCounterMiddleware(
   c: Context,
   next: () => Promise<void>,
 ): Promise<void> {
+  // A4-048: capture wall-clock for the latency histogram. `performance.now()`
+  // is monotonic (no Date.now skew) and resolves in fractional ms.
+  // Compute duration AFTER `next()` resolves so the recorded value
+  // reflects the full middleware-and-handler chain, matching the
+  // request-counter's post-handler observation point.
+  const startMs = performance.now();
   await next();
   if (c.req.path === '/metrics') return;
   const raw = c.req.routePath;
   const route = raw === undefined || raw === '/*' || raw === '*' ? 'NOT_FOUND' : raw;
   incrementRequest(c.req.method, route, c.res.status);
+  recordRequestDuration(c.req.method, route, (performance.now() - startMs) / 1000);
 }

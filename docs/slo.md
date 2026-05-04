@@ -50,12 +50,29 @@ window.
 
 ## Latency
 
-| Flow                      | SLI                              | Target                   | Window | Surface                                             |
-| ------------------------- | -------------------------------- | ------------------------ | ------ | --------------------------------------------------- |
-| `/api/merchants` (cached) | p95 duration                     | ≤ 200ms                  | 7d     | access log `durationMs`                             |
-| `/api/orders` create      | p95 round-trip (client-observed) | ≤ 1500ms                 | 7d     | access log + web `forwardQueryErrorToSentry` on 5xx |
-| `/api/admin/treasury`     | p95 duration                     | ≤ 800ms                  | 7d     | access log                                          |
-| CTX `/status` probe       | p95 response time                | ≤ 3 seconds (5s timeout) | 24h    | `probeUpstream` cache + Discord health              |
+A4-048 (2026-05-04): the latency SLIs below are now computable from a
+real Prometheus histogram. The backend emits
+`loop_request_duration_seconds_bucket{method,route,le}` /
+`_sum` / `_count` from `/metrics`. Standard PromQL gives:
+
+```promql
+# p95 duration over the last 7d, per route
+histogram_quantile(0.95,
+  sum by (le, method, route) (
+    rate(loop_request_duration_seconds_bucket[7d])))
+
+# 5xx error rate over the last 7d, per route
+sum by (method, route) (rate(loop_requests_total{status=~"5.."}[7d]))
+  /
+sum by (method, route) (rate(loop_requests_total[7d]))
+```
+
+| Flow                      | SLI                              | Target                   | Window | Surface                                            |
+| ------------------------- | -------------------------------- | ------------------------ | ------ | -------------------------------------------------- |
+| `/api/merchants` (cached) | p95 duration                     | ≤ 200ms                  | 7d     | `loop_request_duration_seconds` histogram          |
+| `/api/orders` create      | p95 round-trip (client-observed) | ≤ 1500ms                 | 7d     | histogram + web `forwardQueryErrorToSentry` on 5xx |
+| `/api/admin/treasury`     | p95 duration                     | ≤ 800ms                  | 7d     | `loop_request_duration_seconds` histogram          |
+| CTX `/status` probe       | p95 response time                | ≤ 3 seconds (5s timeout) | 24h    | `probeUpstream` cache + Discord health             |
 
 ## Freshness — background data the app shows
 
