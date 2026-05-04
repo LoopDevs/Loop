@@ -45,36 +45,41 @@ that `LOOP_PHASE_1_ONLY=true` disables (`userCashbackMinor=0` →
 on-chain LOOP-asset issuance). They will need real fixes before
 Tranche 2 lands but cannot trigger in the Tranche 1 deployment.
 
-| Finding | Severity | Status           | Reason for deferral                                                                                                |
-| ------- | -------- | ---------------- | ------------------------------------------------------------------------------------------------------------------ |
-| A4-018  | High     | deferred         | Payout idempotency wrong-account scan only matters once outbound payouts run.                                      |
-| A4-024  | Critical | deferred (gated) | Double-credit requires both ledger row + on-chain payout for a non-zero cashback amount; T1 emits neither.         |
-| A4-038  | Medium   | deferred         | Tax/reporting CSV ADR claim — no quarterly export endpoint shipped; ADR will be amended when implementation lands. |
-| A4-042  | Medium   | deferred         | DSR retains payout `to_address`; surface only exists for users with realised on-chain payouts (T2).                |
+| Finding | Severity | Status   | Reason for deferral                                                                                                                                                                 |
+| ------- | -------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A4-018  | High     | resolved | Closed by Claude-audit `bf78677f fix: a4-070/071/104 cross-tab logout + redeem copy + payout op-account` — payout pre-check now keys on operator account, not issuer.               |
+| A4-024  | Critical | resolved | Closed by Claude-audit `85f0b1c5 fix(backend): a4-110 close cashback double-spend` — `loop_asset` payments debit user_credits, `paymentMethod='credit'` rejected pending bucketing. |
+| A4-038  | Medium   | resolved | Closed by `757a4b17 feat(backend): a4-062 quarterly-tax csv emitter (adr-026 phase-1)` — three CSVs per quarter via `npm run report:quarterly-tax`.                                 |
+| A4-042  | Medium   | resolved | Closed by Claude-audit `faa737c3 fix: a4-088/117/120/122/123 + a4-069 docs + dsr to_address scrub` — DSR scrubs payout `to_address` on terminal rows.                               |
 
 ## Quality, governance, docs — not launch blocking
 
-| Finding | Severity | Status        | Note                                                                                              |
-| ------- | -------- | ------------- | ------------------------------------------------------------------------------------------------- |
-| A4-001  | High     | accepted-risk | Branch protection ruleset mismatch; tracked separately in repo governance, not a runtime defect.  |
-| A4-002  | Medium   | accepted-risk | CODEOWNERS team missing — pre-team project.                                                       |
-| A4-003  | Medium   | open          | Architecture/mobile docs reference superseded on-device wallet model — needs doc edit.            |
-| A4-004  | Medium   | open          | `lint-docs` OpenAPI drift check doesn't span route-module endpoints — quality-only.               |
-| A4-005  | High     | accepted-risk | Branch protection security/release jobs — repo governance.                                        |
-| A4-006  | Medium   | open          | Trivy/gitleaks images use mutable tags — supply-chain hardening, follow-up.                       |
-| A4-007  | Low      | accepted-risk | Four moderate npm advisories with no fix available.                                               |
-| A4-008  | Low      | open          | Third-party license document drift — quality-only.                                                |
-| A4-009  | Medium   | already fixed | Per-route key fix landed (commit reference: `A4-001` in earlier audit).                           |
-| A4-011  | Medium   | open          | Prometheus label corruption on `:id` routes — observability hygiene.                              |
-| A4-012  | Medium   | open          | Refresh-token rotation not concurrency-safe — race window narrow; documented as known limitation. |
-| A4-013  | Medium   | open          | Some admin writes bypass advisory-lock idempotency guard — admin-only surface.                    |
-| A4-014  | Low      | open          | `/api/image` 500 not in OpenAPI — contract docs gap.                                              |
-| A4-016  | Medium   | open          | Loop-native order OpenAPI stale for `loop_asset` and create-side errors.                          |
-| A4-022  | Medium   | open          | Stuck-payout cutoff mismatch — Tranche 2 alert noise.                                             |
-| A4-028  | Medium   | open          | Admin response shapes duplicated outside `@loop/shared` — internal contract drift risk.           |
-| A4-030  | Low      | open          | Local `.env*` permissions — workstation hygiene, not deployment.                                  |
-| A4-031  | Medium   | open          | Testing guide stale — docs update.                                                                |
-| A4-034  | Low      | open          | Manual real-CTX workflow lacks `DATABASE_URL` — CI workflow fix.                                  |
-| A4-035  | Low      | open          | README cashback claim — docs update.                                                              |
-| A4-036  | Low      | open          | Roadmap marks `/metrics` as incomplete — docs update.                                             |
-| A4-039  | Low      | open          | Dev guide misstates production exposure — docs update.                                            |
+| Finding | Severity | Status | Note |
+| ------- | -------- | ------ | ---- |
+
+Codex audit findings A4-001..A4-042 substantially overlap with the parallel Claude audit (numbers ≥ A4-095 in that register). Most "open" entries in the original Codex queue have already been closed by Claude-numbered commits; this table is the cross-reference.
+
+| Finding | Severity | Status        | Note                                                                                                                                                                             |
+| ------- | -------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A4-001  | High     | accepted-risk | Branch protection ruleset mismatch; operator-owned, tracked separately in repo governance.                                                                                       |
+| A4-002  | Medium   | accepted-risk | CODEOWNERS team missing — pre-team project; operator-owned.                                                                                                                      |
+| A4-003  | Medium   | resolved      | Closed by Claude-audit `3e23279b fix: a4-041/059/060/096 doc refs + share purge + refresh log + arch` — architecture.md + ADR-027 updated to reflect the sponsored-wallet model. |
+| A4-004  | Medium   | resolved      | Closed by Claude-audit batch 2 (`8c1559f8`) — `lint-docs.sh` §9 OpenAPI drift now scans every `routes/*.ts` mount.                                                               |
+| A4-005  | High     | accepted-risk | Branch protection security/release jobs — operator-owned, repo governance.                                                                                                       |
+| A4-006  | Medium   | resolved      | Closed by Claude-audit `e44789a7 fix: a4-024/042/047/078/087 hardening batch` — Trivy/gitleaks pinned by SHA digest.                                                             |
+| A4-007  | Low      | accepted-risk | Four moderate npm advisories with no fix available; documented in `check-audit-policy.mjs:13`.                                                                                   |
+| A4-008  | Low      | resolved      | Closed by Claude-audit `faa737c3 fix: a4-088/117/120/122/123 + a4-069 docs + dsr to_address scrub` — license docs add MPL-2.0 + claude-code attribution.                         |
+| A4-009  | Medium   | resolved      | Per-route rate-limit key landed in Claude-audit batch 2.                                                                                                                         |
+| A4-011  | Medium   | resolved      | Closed by Claude-audit batch 1 (`87930414`) — Prometheus metrics route normalisation (A4-076).                                                                                   |
+| A4-012  | Medium   | resolved      | Closed by Claude-audit `b9a9c576 fix(backend): a4-098/106/107 refresh-race + xlm precision + asset/method` — refresh-token rotation atomic + reuse detection.                    |
+| A4-013  | Medium   | resolved      | Closed by Claude-audit batch 3 (`65f97b54`) + payout-compensation (`A4-099`) — every admin write idempotency-guarded.                                                            |
+| A4-014  | Low      | resolved      | Closed by Claude-audit `73b23828 fix(backend): a4-100/101/102/103 procurement + openapi + denomination` — image proxy 500 declared in OpenAPI.                                   |
+| A4-016  | Medium   | resolved      | Same commit — Loop-native order OpenAPI emits `loop_asset` + 503.                                                                                                                |
+| A4-022  | Medium   | resolved      | Closed by Claude-audit `22354311 fix(backend): a4-105/108/109/111` + Tranche 1 follow-up `482d03b1` — stuck-payouts uses state-specific cutoffs.                                 |
+| A4-028  | Medium   | accepted-risk | Same as Claude A4-114 — every sliced web service file documents the team's "no other consumers, would just add indirection" decision; operator override needed to revisit.       |
+| A4-030  | Low      | resolved      | Closed by `1ef6a77f fix: a4-094/116 public 4xx cache + dev env-perms preflight` — `.env*` permissions check.                                                                     |
+| A4-031  | Medium   | resolved      | Closed by Claude-audit `faa737c3` — testing.md updated.                                                                                                                          |
+| A4-034  | Low      | resolved      | Closed by Tranche 1 follow-up `1177699a fix(ci): provision postgres for e2e jobs so /health 200s` — real-CTX workflow now provisions postgres.                                   |
+| A4-035  | Low      | resolved      | Closed by Claude-audit `65f97b54` — README cashback claim updated.                                                                                                               |
+| A4-036  | Low      | resolved      | Same commit — roadmap.md updated to reflect `/metrics` ship.                                                                                                                     |
+| A4-039  | Low      | resolved      | Closed by Claude-audit `faa737c3` — development.md `/metrics` policy corrected.                                                                                                  |
