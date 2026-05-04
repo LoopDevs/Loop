@@ -41,6 +41,7 @@ const TABLES_TO_TRUNCATE = [
   'admin_idempotency_keys',
   'social_id_token_uses',
   'user_identities',
+  'user_favorite_merchants',
   'refresh_tokens',
   'otps',
   'users',

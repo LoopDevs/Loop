@@ -71,6 +71,11 @@ import { getCashbackMonthlyHandler } from '../users/cashback-monthly.js';
 import { getUserOrdersSummaryHandler } from '../users/orders-summary.js';
 import { getUserFlywheelStatsHandler } from '../users/flywheel-stats.js';
 import { getUserPaymentMethodShareHandler } from '../users/payment-method-share.js';
+import {
+  addFavoriteHandler,
+  listFavoritesHandler,
+  removeFavoriteHandler,
+} from '../users/favorites-handler.js';
 
 /** Mounts all `/api/users/me/*` routes on the supplied Hono app. */
 export function mountUserRoutes(app: Hono): void {
@@ -189,5 +194,25 @@ export function mountUserRoutes(app: Hono): void {
     '/api/users/me/payment-method-share',
     rateLimit('GET /api/users/me/payment-method-share', 60, 60_000),
     getUserPaymentMethodShareHandler,
+  );
+
+  // ── Favourites ──────────────────────────────────────────────
+  // Per-user pin list of merchants for the home grid. Read is
+  // higher-volume (every home render); writes are infrequent. 50
+  // is the per-user cap (favorites-handler.ts MAX_FAVORITES_PER_USER).
+  app.get(
+    '/api/users/me/favorites',
+    rateLimit('GET /api/users/me/favorites', 60, 60_000),
+    listFavoritesHandler,
+  );
+  app.post(
+    '/api/users/me/favorites',
+    rateLimit('POST /api/users/me/favorites', 20, 60_000),
+    addFavoriteHandler,
+  );
+  app.delete(
+    '/api/users/me/favorites/:merchantId',
+    rateLimit('DELETE /api/users/me/favorites/:merchantId', 20, 60_000),
+    removeFavoriteHandler,
   );
 }

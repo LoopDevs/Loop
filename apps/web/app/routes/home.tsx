@@ -7,6 +7,7 @@ import { useNativePlatform } from '~/hooks/use-native-platform';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
 import { MerchantCard } from '~/components/features/MerchantCard';
+import { FavoritesStrip } from '~/components/features/FavoritesStrip';
 import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
 import { MobileHome } from '~/components/features/home/MobileHome';
 import { CashbackStatsBand } from '~/components/features/home/CashbackStatsBand';
@@ -202,6 +203,12 @@ function HomeContent(): React.JSX.Element {
               only when not authenticated (signed-in users already
               know the flow; the band would be just noise). */}
           {!isAuthenticated && <HowItWorksStrip />}
+
+          {/* Per-user "Your favourites" strip — self-gates on
+              isAuthenticated + favorites.length > 0, so signed-out
+              and never-favourited users see the existing layout
+              unchanged. */}
+          <FavoritesStrip variant="desktop" />
 
           {/* Featured */}
           {visibleFeatured.length > 0 && (

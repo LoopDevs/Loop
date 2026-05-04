@@ -124,6 +124,9 @@ export const ApiErrorCode = {
   HOME_CURRENCY_HAS_LIVE_BALANCE: 'HOME_CURRENCY_HAS_LIVE_BALANCE',
   HOME_CURRENCY_HAS_IN_FLIGHT_PAYOUTS: 'HOME_CURRENCY_HAS_IN_FLIGHT_PAYOUTS',
   CONCURRENT_CHANGE: 'CONCURRENT_CHANGE',
+  // User favourites (per-user merchant pin list).
+  MERCHANT_NOT_FOUND: 'MERCHANT_NOT_FOUND',
+  FAVORITES_LIMIT_EXCEEDED: 'FAVORITES_LIMIT_EXCEEDED',
 } as const;
 
 export type ApiErrorCodeValue = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];

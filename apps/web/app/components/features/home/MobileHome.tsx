@@ -12,6 +12,7 @@ import { getCashbackSummary } from '~/services/user';
 import { getImageProxyUrl } from '~/utils/image';
 import { formatMoney } from '~/utils/money';
 import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
+import { FavoritesStrip } from '~/components/features/FavoritesStrip';
 
 /**
  * Mobile home — native and web narrow widths. Combines the dashboard
@@ -277,6 +278,13 @@ export function MobileHome(): React.JSX.Element {
           )}
         </div>
       </div>
+
+      {/* Per-user "Your favourites" strip — self-gates on
+          isAuthenticated + favorites.length > 0; renders nothing
+          for fresh users so the layout is unchanged. Sits above
+          the directory grid so a returning user lands on their
+          pinned merchants without scrolling. */}
+      <FavoritesStrip variant="mobile" />
 
       {/* Directory grid ----------------------------------------- */}
       <SectionHeader
