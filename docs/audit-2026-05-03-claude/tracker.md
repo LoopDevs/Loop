@@ -38,17 +38,22 @@ Finding status: `open` · `triaged` · `in-remediation` · `resolved` · `accept
 
 ### Findings by Status
 
+Status updated 2026-05-04 after Tranche 1 launch remediation cycle.
+See [findings/remediation-queue.md](./findings/remediation-queue.md) for
+per-finding disposition. Counts include findings A4-095..A4-124 which
+were rediscovered during the Codex cross-reference pass.
+
 | Status              | Count |
 | ------------------- | ----: |
-| open                |    71 |
+| open                |     0 |
 | triaged             |     0 |
 | in-remediation      |     0 |
-| resolved            |     0 |
-| accepted-risk       |     0 |
-| deferred            |     0 |
-| duplicate           |     0 |
-| blocked-on-operator |     0 |
-| Total               |    71 |
+| resolved            |   100 |
+| accepted-risk       |    11 |
+| deferred            |     8 |
+| duplicate           |     2 |
+| blocked-on-operator |     3 |
+| Total               |   124 |
 
 ### File Disposition Progress
 
