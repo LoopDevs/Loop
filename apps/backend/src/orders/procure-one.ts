@@ -12,7 +12,12 @@
 import { z } from 'zod';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
-import { markOrderProcuring, markOrderFulfilled, markOrderFailed } from './transitions.js';
+import {
+  markOrderProcuring,
+  markOrderFulfilled,
+  markOrderFailed,
+  revertOrderProcuringToPaid,
+} from './transitions.js';
 import type { Order } from './repo.js';
 import { operatorFetch, OperatorPoolUnavailableError } from '../ctx/operator-pool.js';
 import { upstreamUrl } from '../upstream.js';
@@ -180,11 +185,18 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
     return 'fulfilled';
   } catch (err) {
     if (err instanceof OperatorPoolUnavailableError) {
-      log.warn({ orderId: order.id }, 'Operator pool unavailable — leaving order procuring');
-      // Do NOT mark failed; operator-pool transient outage is not
-      // a terminal order failure. The next tick retries. An
-      // operator-recovery sweep (deferred) will flip genuinely
-      // stuck rows to failed.
+      // A4-101: revert state back to `paid` so the next
+      // procurement tick re-picks the order. Earlier behaviour
+      // left the row in `procuring`, but `runProcurementTick`
+      // only selects `state='paid'` rows — so the order sat
+      // there until the stuck-sweep marked it `failed`
+      // (~15 min later) under what is fundamentally a transient
+      // ops-pool outage with no CTX call ever made.
+      await revertOrderProcuringToPaid(order.id);
+      log.warn(
+        { orderId: order.id },
+        'Operator pool unavailable — reverted procuring → paid for retry',
+      );
       return 'skipped';
     }
     log.error({ err, orderId: order.id }, 'Procurement threw unexpectedly');

@@ -73,6 +73,55 @@ export type OrderPaymentResponse = CreateLoopOrderResponse;
 // in-handler call sites.
 import { replayOrderResponse } from './loop-replay-response.js';
 
+/**
+ * A4-103: validate the requested amount against the merchant's
+ * denomination contract from the synced catalog. Pure / exported so
+ * tests can pin the parsing rules without going through the
+ * handler.
+ *
+ * Returns null when valid, or a user-facing message when the amount
+ * is out-of-range or a fixed-denomination merchant rejects the
+ * value. Currency mismatch falls through (merchant catalog currency
+ * differs from the user's home currency at FX-pinning time, which
+ * the handler already converts).
+ *
+ * `denominations.denominations[]` is a string array of major-unit
+ * decimal values (e.g. "10", "25.00") — parse to minor-unit
+ * comparison via `Math.round(major * 100)` to avoid float drift.
+ */
+import type { MerchantDenominations } from '@loop/shared';
+export function validateMerchantDenomination(
+  amountMinor: bigint,
+  requestedCurrency: string,
+  denominations: MerchantDenominations | undefined,
+): string | null {
+  if (denominations === undefined) return null;
+  if (denominations.currency.toUpperCase() !== requestedCurrency.toUpperCase()) {
+    return `currency must be ${denominations.currency} for this merchant`;
+  }
+  if (denominations.type === 'min-max') {
+    const minMinor =
+      denominations.min !== undefined ? BigInt(Math.round(denominations.min * 100)) : null;
+    const maxMinor =
+      denominations.max !== undefined ? BigInt(Math.round(denominations.max * 100)) : null;
+    if (minMinor !== null && amountMinor < minMinor) {
+      return `amount below merchant minimum (${denominations.min} ${denominations.currency})`;
+    }
+    if (maxMinor !== null && amountMinor > maxMinor) {
+      return `amount above merchant maximum (${denominations.max} ${denominations.currency})`;
+    }
+    return null;
+  }
+  // Fixed-denomination: amount must match one of the configured values.
+  const allowedMinor = denominations.denominations
+    .map((d) => Number.parseFloat(d))
+    .filter((n) => Number.isFinite(n) && n > 0)
+    .map((n) => BigInt(Math.round(n * 100)));
+  if (allowedMinor.length === 0) return null;
+  if (allowedMinor.some((m) => m === amountMinor)) return null;
+  return `amount must be one of merchant's fixed denominations: ${denominations.denominations.join(', ')} ${denominations.currency}`;
+}
+
 export async function loopCreateOrderHandler(c: Context): Promise<Response> {
   if (!env.LOOP_AUTH_NATIVE_ENABLED) {
     // Mirror the admin handler's 404 policy — don't leak that the
@@ -138,6 +187,23 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
   const merchant = getMerchants().merchantsById.get(parsed.data.merchantId);
   if (merchant === undefined || merchant.enabled === false) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'Unknown or disabled merchant' }, 400);
+  }
+
+  // A4-103: enforce merchant min/max/fixed denomination limits
+  // server-side. The web client gates the amount-input UX
+  // (AmountSelection.tsx), but a hand-crafted POST can pass any
+  // amount through, including a face value the merchant doesn't
+  // support — we'd then place the CTX wholesale purchase blind on
+  // an unsupported denomination, which CTX may reject mid-flow
+  // after the user has already paid. The merchant cache is the
+  // source of truth (synced from upstream catalog).
+  const denominationError = validateMerchantDenomination(
+    parsed.data.amountMinor,
+    parsed.data.currency,
+    merchant.denominations,
+  );
+  if (denominationError !== null) {
+    return c.json({ code: 'VALIDATION_ERROR', message: denominationError }, 400);
   }
 
   // ADR 015: resolve the user's home currency so we can pin the

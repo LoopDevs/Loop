@@ -187,6 +187,31 @@ export async function markOrderProcuring(
   return rows[0] ?? null;
 }
 
+/**
+ * A4-101: revert `procuring` → `paid`. Used when a transient
+ * pre-CTX-call failure (e.g. operator pool unavailable) means we
+ * picked the row but never actually attempted the wholesale
+ * purchase, so the order is safe to re-pick on the next tick.
+ * Without this, the row sat in `procuring` until the stuck-sweep
+ * marked it `failed` ~15 min later — a paid order silently
+ * failing under a transient outage.
+ *
+ * Guarded on `state='procuring'` so we never roll back a row that
+ * has already advanced past procurement.
+ */
+export async function revertOrderProcuringToPaid(orderId: string): Promise<Order | null> {
+  const rows = await db
+    .update(orders)
+    .set({
+      state: 'paid',
+      ctxOperatorId: null,
+      procuredAt: null,
+    })
+    .where(and(eq(orders.id, orderId), eq(orders.state, 'procuring')))
+    .returning();
+  return rows[0] ?? null;
+}
+
 // `markOrderFulfilled` (the cashback-capture + Stellar-payout-
 // intent transition) lives in `./fulfillment.ts`. Re-exported
 // here so existing import sites against `'./transitions.js'` keep

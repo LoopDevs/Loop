@@ -121,7 +121,7 @@ vi.mock('../../credits/payout-asset.js', () => ({
   }),
 }));
 
-import { loopCreateOrderHandler } from '../loop-handler.js';
+import { loopCreateOrderHandler, validateMerchantDenomination } from '../loop-handler.js';
 
 interface FakeCtx {
   store: Map<string, unknown>;
@@ -643,6 +643,80 @@ describe('loopCreateOrderHandler', () => {
         expect.not.objectContaining({ idempotencyKey: expect.anything() }),
       );
     });
+  });
+});
+
+describe('validateMerchantDenomination (A4-103)', () => {
+  it('passes when merchant has no denomination contract', () => {
+    expect(validateMerchantDenomination(1000n, 'GBP', undefined)).toBeNull();
+  });
+
+  it('rejects mismatched currency', () => {
+    expect(
+      validateMerchantDenomination(1000n, 'EUR', {
+        type: 'min-max',
+        denominations: [],
+        currency: 'GBP',
+        min: 5,
+        max: 100,
+      }),
+    ).toMatch(/currency must be GBP/);
+  });
+
+  it('rejects under min on min-max', () => {
+    expect(
+      validateMerchantDenomination(400n, 'GBP', {
+        type: 'min-max',
+        denominations: [],
+        currency: 'GBP',
+        min: 5,
+        max: 100,
+      }),
+    ).toMatch(/below merchant minimum/);
+  });
+
+  it('rejects over max on min-max', () => {
+    expect(
+      validateMerchantDenomination(15_000n, 'GBP', {
+        type: 'min-max',
+        denominations: [],
+        currency: 'GBP',
+        min: 5,
+        max: 100,
+      }),
+    ).toMatch(/above merchant maximum/);
+  });
+
+  it('passes inside min-max range', () => {
+    expect(
+      validateMerchantDenomination(2_500n, 'GBP', {
+        type: 'min-max',
+        denominations: [],
+        currency: 'GBP',
+        min: 5,
+        max: 100,
+      }),
+    ).toBeNull();
+  });
+
+  it('rejects amount not in fixed denominations', () => {
+    expect(
+      validateMerchantDenomination(2_500n, 'USD', {
+        type: 'fixed',
+        denominations: ['10', '50', '100'],
+        currency: 'USD',
+      }),
+    ).toMatch(/fixed denominations/);
+  });
+
+  it('passes amount matching fixed denomination (decimal)', () => {
+    expect(
+      validateMerchantDenomination(2_500n, 'USD', {
+        type: 'fixed',
+        denominations: ['25.00', '50'],
+        currency: 'USD',
+      }),
+    ).toBeNull();
   });
 });
 
