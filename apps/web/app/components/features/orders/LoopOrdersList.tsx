@@ -57,7 +57,12 @@ export function LoopOrdersList({ enabled }: { enabled: boolean }): React.JSX.Ele
 }
 
 function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
-  const [expanded, setExpanded] = useState(false);
+  // A4-026: pending_payment rows must surface the deposit address +
+  // memo + amount on every render of the orders list, even after a
+  // page refresh / app restart that wipes the in-memory create
+  // response. Auto-expand so the user doesn't have to know to click
+  // the row to recover their payment instructions.
+  const [expanded, setExpanded] = useState(order.state === 'pending_payment');
   const { merchants } = useAllMerchants();
   const merchantName = merchants.find((m) => m.id === order.merchantId)?.name ?? order.merchantId;
   const amount = formatMinor(order.faceValueMinor);
@@ -188,7 +193,41 @@ function StateBanner({ order }: { order: LoopOrderView }): React.JSX.Element | n
       </div>
     );
   }
+  // A4-026: render the deposit address + memo + amount + asset for
+  // pending_payment orders so a user who refreshed mid-purchase can
+  // resume by sending the same crypto to the same memo. The PurchaseContainer
+  // local state is gone after a refresh, but `GET /api/orders/loop` still
+  // exposes paymentMemo + stellarAddress + chargeMinor on the row.
+  if (order.state === 'pending_payment') {
+    return <PendingPaymentRecoveryPanel order={order} />;
+  }
   return null;
+}
+
+function PendingPaymentRecoveryPanel({
+  order,
+}: {
+  order: LoopOrderView;
+}): React.JSX.Element | null {
+  if (order.stellarAddress === null || order.paymentMemo === null) return null;
+  const assetLabel =
+    order.paymentMethod === 'usdc'
+      ? 'USDC'
+      : order.paymentMethod === 'xlm'
+        ? 'XLM'
+        : order.paymentMethod === 'loop_asset'
+          ? `${order.chargeCurrency.toUpperCase()}LOOP`
+          : order.paymentMethod;
+  return (
+    <div className="rounded-lg border border-yellow-200 dark:border-yellow-900/40 bg-yellow-50 dark:bg-yellow-900/20 p-3 text-xs text-yellow-900 dark:text-yellow-100 space-y-2">
+      <p className="font-medium">
+        Awaiting payment. Send {formatMinor(order.chargeMinor)} {order.chargeCurrency} of{' '}
+        {assetLabel} to the address below with the memo, then this row will move to Paid.
+      </p>
+      <RedemptionField label="Address" value={order.stellarAddress} />
+      <RedemptionField label="Memo" value={order.paymentMemo} />
+    </div>
+  );
 }
 
 function RedemptionField({ label, value }: { label: string; value: string }): React.JSX.Element {

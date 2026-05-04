@@ -183,6 +183,45 @@ describe('LoopOrdersList', () => {
     expect(screen.queryByLabelText(/Paid with recycled cashback/i)).toBeNull();
   });
 
+  it('A4-026: pending_payment row auto-expands and exposes deposit address + memo for recovery', async () => {
+    listMock.mockResolvedValue({
+      orders: [
+        mkOrder({
+          state: 'pending_payment',
+          paymentMemo: 'MEMO-RECOVERY',
+          stellarAddress: 'GABCDEF',
+          chargeMinor: '2500',
+          chargeCurrency: 'USD',
+          paymentMethod: 'usdc',
+          redeemCode: null,
+          redeemPin: null,
+        }),
+      ],
+    });
+    render(wrap(<LoopOrdersList enabled={true} />));
+    // Auto-expanded — no click required.
+    await waitFor(() => screen.getByText('MEMO-RECOVERY'));
+    expect(screen.getByText('GABCDEF')).toBeDefined();
+    expect(screen.getByText(/Send 25\.00 USD of USDC/i)).toBeDefined();
+  });
+
+  it('A4-026: pending_payment without stellarAddress / memo renders no panel (no NPE)', async () => {
+    listMock.mockResolvedValue({
+      orders: [
+        mkOrder({
+          state: 'pending_payment',
+          paymentMemo: null,
+          stellarAddress: null,
+          redeemCode: null,
+          redeemPin: null,
+        }),
+      ],
+    });
+    render(wrap(<LoopOrdersList enabled={true} />));
+    await waitFor(() => screen.getByText('Target'));
+    expect(screen.queryByText(/Send /i)).toBeNull();
+  });
+
   it('shows the redeem URL anchor with noopener when present', async () => {
     listMock.mockResolvedValue({
       orders: [
