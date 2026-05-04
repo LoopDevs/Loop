@@ -351,6 +351,7 @@ POST /api/admin/users/:userId/home-currency              [admin — change home_
 GET  /api/users/me/favorites                            [user — favourite merchants, newest first; joined to in-memory catalog]
 POST /api/users/me/favorites                            [user — add a merchant to favourites; idempotent on (user_id, merchant_id)]
 DELETE /api/users/me/favorites/:merchantId              [user — remove a merchant from favourites; idempotent]
+GET  /api/users/me/recently-purchased                   [user — distinct merchants from purchased orders, most-recent first]
 POST /api/admin/step-up                                 [admin — mint 5-min step-up token, ADR-028 / A4-063]
 GET  /api/admin/payouts.csv                            [admin — finance-ready CSV export, ADR 015]
 GET  /api/admin/orders                                  [admin — Loop-native orders drill-down + ?state/?userId/?merchantId/?chargeCurrency/?paymentMethod/?ctxOperatorId filters, ADR 011/013/015]

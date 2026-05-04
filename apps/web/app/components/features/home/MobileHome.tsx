@@ -13,6 +13,7 @@ import { getImageProxyUrl } from '~/utils/image';
 import { formatMoney } from '~/utils/money';
 import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
 import { FavoritesStrip } from '~/components/features/FavoritesStrip';
+import { RecentlyPurchasedStrip } from '~/components/features/RecentlyPurchasedStrip';
 
 /**
  * Mobile home — native and web narrow widths. Combines the dashboard
@@ -279,11 +280,13 @@ export function MobileHome(): React.JSX.Element {
         </div>
       </div>
 
-      {/* Per-user "Your favourites" strip — self-gates on
-          isAuthenticated + favorites.length > 0; renders nothing
-          for fresh users so the layout is unchanged. Sits above
-          the directory grid so a returning user lands on their
-          pinned merchants without scrolling. */}
+      {/* Returning-buyer shortcuts — recently-purchased then
+          favourites. Both self-gate on isAuthenticated + a non-empty
+          list, so fresh accounts see the directory grid alone.
+          Recently-purchased renders first because a returning buyer
+          is most likely to want to repeat-purchase before they
+          revisit pinned-but-unused merchants. */}
+      <RecentlyPurchasedStrip variant="mobile" />
       <FavoritesStrip variant="mobile" />
 
       {/* Directory grid ----------------------------------------- */}

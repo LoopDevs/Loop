@@ -199,7 +199,7 @@ below is either shipped or an explicit "not yet started".
 
 - [x] ~~Order history page~~ — `/orders` route with pagination, status badges, sign-in prompt. Navbar link added.
 - [x] ~~Favourites~~ — `/api/users/me/favorites` list/add/remove with a 50-per-user cap, surfaced as a heart-toggle on every `MerchantCard` and a "Your favourites" strip on the home page (mobile + desktop). Catalog-evicted favourites surface as `merchant: null` so the row stays restorable while the UI hides the entry. Recently-purchased is a separate read on top of the orders ledger and stays open.
-- [ ] Recently purchased merchants
+- [x] ~~Recently purchased merchants~~ — `GET /api/users/me/recently-purchased` derives distinct merchants from `orders` in `state IN ('paid', 'procuring', 'fulfilled')`, ordered by MAX(created_at) DESC. Surfaces as a "Recently purchased" strip above the home grid (mobile + desktop), rendered before the Favourites strip so a returning buyer lands on repeat-purchase shortcuts before browsing pinned merchants.
 - [ ] Referral program
 
 ### Observability
