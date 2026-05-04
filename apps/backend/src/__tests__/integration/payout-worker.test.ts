@@ -52,12 +52,46 @@ vi.mock('../../payments/horizon.js', async (importActual) => {
   };
 });
 
+// The Phase-2 trustline pre-check ships in `payout-worker-pay-one.ts`
+// (paired with `notifyPayoutAwaitingTrustline`). Integration test
+// destinations are synthetic G-addresses with no Stellar account, so
+// the live Horizon read would 404 and stall every submit. Stub it
+// to "every trustline is established" so the existing pre-check /
+// claim / submit / confirm tests still exercise the post-trustline
+// path. The dedicated missing-trustline tests live in the unit
+// suite (`payout-worker.test.ts`) where the mock can flip per-test.
+class AlwaysTrustingMap extends Map<
+  string,
+  { code: string; issuer: string; balanceStroops: bigint; limitStroops: bigint }
+> {
+  override get(
+    key: string,
+  ): { code: string; issuer: string; balanceStroops: bigint; limitStroops: bigint } | undefined {
+    const [code, issuer] = key.split('::');
+    if (code === undefined || issuer === undefined) return undefined;
+    return { code, issuer, balanceStroops: 0n, limitStroops: 1_000_000_000_000_000n };
+  }
+}
+vi.mock('../../payments/horizon-trustlines.js', async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return {
+    ...actual,
+    getAccountTrustlines: vi.fn(async (account: string) => ({
+      account,
+      accountExists: true,
+      trustlines: new AlwaysTrustingMap(),
+      asOfMs: Date.now(),
+    })),
+  };
+});
+
 vi.mock('../../discord.js', async (importActual) => {
   const actual = (await importActual()) as Record<string, unknown>;
   const noop = vi.fn();
   return {
     ...actual,
     notifyPayoutFailed: noop,
+    notifyPayoutAwaitingTrustline: noop,
     notifyAdminAudit: noop,
   };
 });
