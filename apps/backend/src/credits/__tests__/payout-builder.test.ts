@@ -104,6 +104,54 @@ describe('buildPayoutIntent', () => {
     });
     expect(d).toEqual({ kind: 'skip', reason: 'no_cashback' });
   });
+
+  it('synthesises a memo when the caller omits memoText', () => {
+    payoutAssetMock.USD.issuer = 'GISSUERUSD';
+    const d = buildPayoutIntent({
+      stellarAddress: 'GDESTINATION',
+      homeCurrency: 'USD',
+      userCashbackMinor: 100n,
+    });
+    expect(d.kind).toBe('pay');
+    if (d.kind !== 'pay') return;
+    expect(d.intent.memoText).toMatch(/^[A-Z2-7]{20}$/);
+  });
+});
+
+describe('generatePayoutMemo', () => {
+  it('produces a 20-char base32 memo (Crockford alphabet excluding 0/1/8/9)', async () => {
+    const { generatePayoutMemo } = await import('../payout-builder.js');
+    const memo = generatePayoutMemo();
+    expect(memo).toHaveLength(20);
+    expect(memo).toMatch(/^[A-Z2-7]{20}$/);
+  });
+
+  it('emits distinct memos across calls (CSPRNG-backed; collision astronomically unlikely)', async () => {
+    const { generatePayoutMemo } = await import('../payout-builder.js');
+    const memos = new Set<string>();
+    for (let i = 0; i < 50; i += 1) memos.add(generatePayoutMemo());
+    expect(memos.size).toBe(50);
+  });
+});
+
+describe('A4-029 unsupported asset code guard', () => {
+  it('throws when the resolved asset code is outside the LOOP-asset set', async () => {
+    // Force the asset resolver to claim a non-LOOP code.
+    const original = payoutAssetMock.USD;
+    payoutAssetMock.USD = { code: 'USDC' as 'USDLOOP', issuer: 'GISSUER' };
+    try {
+      expect(() =>
+        buildPayoutIntent({
+          stellarAddress: 'GDEST',
+          homeCurrency: 'USD',
+          userCashbackMinor: 100n,
+          memoText: 'm',
+        }),
+      ).toThrow(/unsupported asset code 'USDC'/);
+    } finally {
+      payoutAssetMock.USD = original;
+    }
+  });
 });
 
 function beforeEach_resetIssuers(): void {
