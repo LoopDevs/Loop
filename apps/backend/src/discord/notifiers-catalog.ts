@@ -116,6 +116,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       'Fires when a pending_payouts row flips to `failed` (ADR 015/016). Embed carries asset code + user id + lastError preview.',
   },
   {
+    name: 'notifyPayoutAwaitingTrustline',
+    channel: 'monitoring',
+    description:
+      'Fires when the payout-worker pre-flight detects the destination account is missing the required trustline (ADR-015 / ADR-016 Phase-2 trustline-probe). Throttled to once per (userId, assetCode) per process. Row stays in `pending` and submits on the next tick once the trustline is added — no admin retry needed.',
+  },
+  {
     name: 'notifyPegBreakOnFulfillment',
     channel: 'monitoring',
     description:

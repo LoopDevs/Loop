@@ -53,6 +53,40 @@ vi.mock('../horizon.js', () => ({
   findOutboundPaymentByMemo: (args: unknown) => horizonMock.findOutboundPaymentByMemo(args),
 }));
 
+// Trustline pre-check (A4-062 follow-up — Phase-2 trustline-probe).
+// Default: every destination has the matching trustline. Tests that
+// exercise the missing-trustline path override the implementation.
+const { trustlinesMock } = vi.hoisted(() => ({
+  trustlinesMock: {
+    getAccountTrustlines: vi.fn<
+      (account: string) => Promise<{
+        account: string;
+        accountExists: boolean;
+        trustlines: Map<string, { code: string; issuer: string }>;
+        asOfMs: number;
+      }>
+    >(async (account: string) => ({
+      account,
+      accountExists: true,
+      // The mock "always trusts everything" — runPayoutTick reads
+      // the row's `${assetCode}::${assetIssuer}` key, so giving it
+      // a Map with that exact key short-circuits the missing-
+      // trustline branch on every default test path. Tests that
+      // need to assert against the missing-trustline branch
+      // override `mockImplementationOnce` to return an empty Map.
+      trustlines: new Map([
+        ['USDLOOP::GISSUER', { code: 'USDLOOP', issuer: 'GISSUER' }],
+        ['GBPLOOP::GISSUER', { code: 'GBPLOOP', issuer: 'GISSUER' }],
+        ['EURLOOP::GISSUER', { code: 'EURLOOP', issuer: 'GISSUER' }],
+      ]),
+      asOfMs: Date.now(),
+    })),
+  },
+}));
+vi.mock('../horizon-trustlines.js', () => ({
+  getAccountTrustlines: (account: string) => trustlinesMock.getAccountTrustlines(account),
+}));
+
 const { sdkMock, PayoutSubmitErrorMock } = vi.hoisted(() => {
   class PayoutSubmitErrorMock extends Error {
     readonly kind: string;
@@ -81,10 +115,12 @@ vi.mock('../payout-submit.js', () => ({
 const { discordMock } = vi.hoisted(() => ({
   discordMock: {
     notifyPayoutFailed: vi.fn<(args: unknown) => void>(() => undefined),
+    notifyPayoutAwaitingTrustline: vi.fn<(args: unknown) => void>(() => undefined),
   },
 }));
 vi.mock('../../discord.js', () => ({
   notifyPayoutFailed: (args: unknown) => discordMock.notifyPayoutFailed(args),
+  notifyPayoutAwaitingTrustline: (args: unknown) => discordMock.notifyPayoutAwaitingTrustline(args),
 }));
 
 import { runPayoutTick } from '../payout-worker.js';
@@ -151,6 +187,64 @@ describe('runPayoutTick', () => {
   it('no pending rows → zero counts, no calls', async () => {
     const r = await runPayoutTick(BASE_ARGS);
     expect(r.picked).toBe(0);
+    expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+  });
+
+  // ───────────────────────── trustline pre-check ─────────────────────────
+  // (Phase-2 trustline-probe; ADR-015/016 §"trustline-probe before
+  // payout submit"). Default is "trustline exists" via the hoisted
+  // mock; these tests override `mockImplementationOnce` to flip
+  // through the missing-trustline + Horizon-degraded branches.
+
+  it('missing trustline → retriedLater, no submit, no claim, ops notified', async () => {
+    trustlinesMock.getAccountTrustlines.mockImplementationOnce(async () => ({
+      account: 'GDESTINATION',
+      accountExists: true,
+      trustlines: new Map(), // ← no trustlines at all
+      asOfMs: Date.now(),
+    }));
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.confirmed).toBe(0);
+    expect(r.failed).toBe(0);
+    expect(r.retriedLater).toBe(1);
+    expect(repoMocks.markPayoutSubmitted).not.toHaveBeenCalled();
+    expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+    expect(discordMock.notifyPayoutAwaitingTrustline).toHaveBeenCalledTimes(1);
+    expect(discordMock.notifyPayoutAwaitingTrustline).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payoutId: 'p-1',
+        userId: 'u-1',
+        account: 'GDESTINATION',
+        assetCode: 'GBPLOOP',
+        accountExists: true,
+      }),
+    );
+  });
+
+  it('trustline read failure → retriedLater (fail-closed) without submitting', async () => {
+    trustlinesMock.getAccountTrustlines.mockRejectedValueOnce(new Error('horizon 503'));
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.retriedLater).toBe(1);
+    expect(repoMocks.markPayoutSubmitted).not.toHaveBeenCalled();
+    expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+  });
+
+  it('trustline exists but for a different issuer → still missing, no submit', async () => {
+    // The row is for GBPLOOP::GISSUER but the destination only
+    // trusts GBPLOOP::GDIFFERENT_ISSUER. Per CSP-shaped logic the
+    // (code, issuer) pair must match exactly — partial matches
+    // would let an attacker substitute their own issuer.
+    trustlinesMock.getAccountTrustlines.mockImplementationOnce(async () => ({
+      account: 'GDESTINATION',
+      accountExists: true,
+      trustlines: new Map([['GBPLOOP::GDIFFERENT', { code: 'GBPLOOP', issuer: 'GDIFFERENT' }]]),
+      asOfMs: Date.now(),
+    }));
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.retriedLater).toBe(1);
     expect(sdkMock.submitPayout).not.toHaveBeenCalled();
   });
 

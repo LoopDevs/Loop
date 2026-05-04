@@ -22,9 +22,10 @@ import {
   type PendingPayout,
 } from '../credits/pending-payouts.js';
 import { findOutboundPaymentByMemo } from './horizon.js';
+import { getAccountTrustlines } from './horizon-trustlines.js';
 import { submitPayout, PayoutSubmitError } from './payout-submit.js';
 import { feeForAttempt } from './fee-strategy.js';
-import { notifyPayoutFailed } from '../discord.js';
+import { notifyPayoutFailed, notifyPayoutAwaitingTrustline } from '../discord.js';
 
 const log = logger.child({ area: 'payout-worker' });
 
@@ -58,6 +59,57 @@ export interface PayOneArgs {
 }
 
 export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayOutcome> {
+  // Pre-flight: does the destination account have a trustline to
+  // this asset? Without it, `submitPayout` will get `op_no_trust`
+  // back and the row will be marked `failed`, which is the wrong
+  // outcome for the most common case (user linked a wallet but
+  // forgot to add the LOOP-asset trustline). Instead: probe the
+  // trustline first; if it's missing, leave the row in `pending`,
+  // notify the user via Discord (throttled), and let the next
+  // tick re-probe. The user can add the trustline at any moment
+  // and the payout submits without admin intervention.
+  //
+  // Probe is cached at 30s TTL inside getAccountTrustlines, so
+  // many pending payouts to the same address share one Horizon
+  // round-trip per 30s. ADR-015 / ADR-016 §"trustline-probe before
+  // payout submit" was the open Phase-1 question; this closes it.
+  const trustlineSnapshot = await getAccountTrustlines(row.toAddress).catch((err: unknown) => {
+    // Horizon read-degraded path: don't burn the row, retry next
+    // tick. Same posture as the idempotency pre-check below — fail
+    // closed.
+    log.warn(
+      { err, payoutId: row.id, account: row.toAddress },
+      'Trustline pre-check Horizon read failed — leaving payout in pending for retry',
+    );
+    return null;
+  });
+  if (trustlineSnapshot === null) {
+    return 'retriedLater';
+  }
+  const trustlineKey = `${row.assetCode}::${row.assetIssuer}`;
+  const trustline = trustlineSnapshot.trustlines.get(trustlineKey);
+  if (trustline === undefined) {
+    log.warn(
+      {
+        payoutId: row.id,
+        userId: row.userId,
+        account: row.toAddress,
+        assetCode: row.assetCode,
+        accountExists: trustlineSnapshot.accountExists,
+      },
+      'Destination has no trustline — leaving payout in pending until user adds it',
+    );
+    notifyPayoutAwaitingTrustline({
+      payoutId: row.id,
+      userId: row.userId,
+      account: row.toAddress,
+      assetCode: row.assetCode,
+      assetIssuer: row.assetIssuer,
+      accountExists: trustlineSnapshot.accountExists,
+    });
+    return 'retriedLater';
+  }
+
   // Idempotency pre-check (ADR 016). If the prior submit landed
   // async between the last tick and this one, we observe the
   // payment in Horizon history and converge without issuing a
