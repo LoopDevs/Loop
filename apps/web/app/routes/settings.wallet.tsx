@@ -17,6 +17,7 @@ import { PendingPayoutsCard } from '~/components/features/cashback/PendingPayout
 import { TrustlineSetupCard } from '~/components/features/wallet/TrustlineSetupCard';
 import { StellarTrustlineStatus } from '~/components/features/wallet/StellarTrustlineStatus';
 import { copyToClipboard } from '~/native/clipboard';
+import { Phase2Gate } from '~/components/Phase2Gate';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Wallet — Loop' }];
@@ -39,6 +40,14 @@ export function meta(): Route.MetaDescriptors {
  * is gated on a linked address.
  */
 export default function SettingsWalletRoute(): React.JSX.Element {
+  return (
+    <Phase2Gate>
+      <SettingsWalletBody />
+    </Phase2Gate>
+  );
+}
+
+function SettingsWalletBody(): React.JSX.Element {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
   const queryClient = useQueryClient();

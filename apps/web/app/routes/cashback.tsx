@@ -6,6 +6,7 @@ import { getPublicTopCashbackMerchants, type TopCashbackMerchant } from '~/servi
 import { shouldRetry } from '~/hooks/query-retry';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
+import { Phase2Gate } from '~/components/Phase2Gate';
 import { Spinner } from '~/components/ui/Spinner';
 import { LazyImage } from '~/components/ui/LazyImage';
 import { getImageProxyUrl } from '~/utils/image';
@@ -44,6 +45,14 @@ export function meta(): Route.MetaDescriptors {
 }
 
 export default function CashbackIndexRoute(): React.JSX.Element {
+  return (
+    <Phase2Gate>
+      <CashbackIndexBody />
+    </Phase2Gate>
+  );
+}
+
+function CashbackIndexBody(): React.JSX.Element {
   const query = useQuery({
     queryKey: ['public-top-cashback-merchants', LIMIT],
     queryFn: () => getPublicTopCashbackMerchants({ limit: LIMIT }),

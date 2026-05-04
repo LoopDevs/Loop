@@ -6,6 +6,7 @@ import { foldForSearch, merchantSlug } from '@loop/shared';
 import { useUiStore } from '~/stores/ui.store';
 import { useAuthStore } from '~/stores/auth.store';
 import { useNativePlatform } from '~/hooks/use-native-platform';
+import { useAppConfig } from '~/hooks/use-app-config';
 import { getImageProxyUrl } from '~/utils/image';
 
 interface NavbarProps {
@@ -222,6 +223,11 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
   const { toggleTheme } = useUiStore();
   const { isNative } = useNativePlatform();
   const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
+  const { config } = useAppConfig();
+  // Tranche 1 (MVP) launch — hide cashback nav links until v1.1.
+  // Discount badges on merchant cards stay visible (they're the
+  // Tranche 1 user proposition).
+  const showCashbackNav = !config.phase1Only;
 
   const handleSelect = (r: SearchResult): void => {
     void navigate(`/gift-card/${merchantSlug(r.name)}`);
@@ -323,20 +329,18 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
             <Link to="/map" className={navLinkClass('/map')}>
               Map
             </Link>
-            {/* Public cashback rates index (#649). Always visible —
-                the main acquisition funnel for unauthenticated
-                visitors and a quick rate-check for signed-in users.
-                Matches the dedicated navbar path for "Cashback"
-                (below, authenticated) so the two surfaces read as
-                related (rates list / your balance) rather than
-                unrelated side trips. */}
-            <Link to="/cashback" className={navLinkClass('/cashback')}>
-              Rates
-            </Link>
+            {/* Public cashback rates index (#649). Hidden in
+                Tranche 1 (MVP) launch — cashback isn't live until
+                Tranche 2 ships the Stellar passkey wallet. */}
+            {showCashbackNav && (
+              <Link to="/cashback" className={navLinkClass('/cashback')}>
+                Rates
+              </Link>
+            )}
             <Link to="/orders" className={navLinkClass('/orders')}>
               Orders
             </Link>
-            {isAuthenticated ? (
+            {isAuthenticated && showCashbackNav ? (
               <Link to="/settings/cashback" className={navLinkClass('/settings/cashback')}>
                 Cashback
               </Link>

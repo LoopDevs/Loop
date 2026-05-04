@@ -244,6 +244,24 @@ export const EnvSchema = z.object({
   // false → the legacy CTX-proxy auth path stays in place.
   LOOP_AUTH_NATIVE_ENABLED: envBoolean.default(false),
 
+  // Phase 1 launch gate. When true, the public + onboarding surfaces
+  // hide every Phase 2 cashback / wallet / LOOP-asset element so the
+  // app reads as a pure XLM-via-CTX gift-card store. The Phase 2
+  // backend code paths (workers, payout submit, asset-drift watcher,
+  // interest accrual) are independently gated on
+  // LOOP_WORKERS_ENABLED / LOOP_AUTH_NATIVE_ENABLED /
+  // INTEREST_APY_BASIS_POINTS — those should also be off in a Phase 1
+  // deployment. This flag is the *UI-side* equivalent: hides
+  // /cashback, /settings/wallet, /settings/cashback, the navbar
+  // links, the cashback rate badges on merchant cards, the
+  // currency picker + wallet-intro onboarding screens, and any
+  // "you've earned X" surfaces.
+  //
+  // Set to false (default) once the operator is ready to launch
+  // cashback as v1.1 — flipping the flag is server-side only;
+  // no app-store resubmission needed.
+  LOOP_PHASE_1_ONLY: envBoolean.default(false),
+
   // Social login — Google (ADR 014). One client id per platform;
   // at least one must be set to activate the Google endpoint. The
   // id_token's `aud` must match one of these values. Generate in

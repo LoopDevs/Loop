@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getMe } from '~/services/user';
 import { getMyCredits, type UserCreditRow } from '~/services/user';
 import { useAuth } from '~/hooks/use-auth';
+import { useAppConfig } from '~/hooks/use-app-config';
 import { shouldRetry } from '~/hooks/query-retry';
 
 /**
@@ -38,6 +39,7 @@ export function LinkWalletNudge(): React.JSX.Element | null {
   // A2-1156: auth-gate both queries so cold-start doesn't fire before
   // session restore finishes.
   const { isAuthenticated } = useAuth();
+  const { config } = useAppConfig();
   const meQuery = useQuery({
     queryKey: ['me'],
     queryFn: getMe,
@@ -53,6 +55,9 @@ export function LinkWalletNudge(): React.JSX.Element | null {
     staleTime: 30_000,
   });
 
+  // Tranche 1 (MVP): nothing to nudge until the Stellar wallet
+  // flow is live. Hooks above stay called for stable order.
+  if (config.phase1Only) return null;
   if (meQuery.isPending || creditsQuery.isPending) return null;
   if (meQuery.isError || creditsQuery.isError) return null;
   if (meQuery.data.stellarAddress !== null) return null;

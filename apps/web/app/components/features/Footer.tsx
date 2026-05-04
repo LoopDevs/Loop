@@ -1,6 +1,11 @@
 import { Link } from 'react-router';
+import { useAppConfig } from '~/hooks/use-app-config';
 
 export function Footer(): React.JSX.Element {
+  const { config } = useAppConfig();
+  // Tranche 1 (MVP): hide the cashback / trustlines footer links
+  // until Tranche 2 turns on the Stellar wallet.
+  const showCashback = !config.phase1Only;
   return (
     <footer className="bg-gray-950 text-gray-400 py-12 mt-16">
       <div className="container mx-auto px-4">
@@ -15,12 +20,16 @@ export function Footer(): React.JSX.Element {
             <Link to="/map" className="hover:text-white transition-colors">
               Map
             </Link>
-            <Link to="/cashback" className="hover:text-white transition-colors">
-              Cashback rates
-            </Link>
-            <Link to="/trustlines" className="hover:text-white transition-colors">
-              Trustlines
-            </Link>
+            {showCashback && (
+              <>
+                <Link to="/cashback" className="hover:text-white transition-colors">
+                  Cashback rates
+                </Link>
+                <Link to="/trustlines" className="hover:text-white transition-colors">
+                  Trustlines
+                </Link>
+              </>
+            )}
             <Link to="/privacy" className="hover:text-white transition-colors">
               Privacy
             </Link>
