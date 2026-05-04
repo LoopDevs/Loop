@@ -48,13 +48,38 @@ export function __resetJwksCacheForTests(): void {
 }
 
 /**
+ * A4-084: per-URL debounce window for `invalidateJwks`. An attacker
+ * sending unknown-kid tokens would otherwise force a JWKS refetch
+ * on every attempt (bounded only by the social-login route's 10/min
+ * IP rate limit). One refetch per minute per URL is the upper
+ * bound on rotation-detection, which is well within the actual
+ * rotation cadence (Google: hours; Apple: days).
+ */
+const INVALIDATE_DEBOUNCE_MS = 60_000;
+const lastInvalidatedAtMs = new Map<string, number>();
+
+/** Test seam — forgets the per-URL invalidate-debounce timestamps. */
+export function __resetJwksInvalidateDebounceForTests(): void {
+  lastInvalidatedAtMs.clear();
+}
+
+/**
  * Drops one URL's cached JWKS so the next `fetchJwks(url)` re-pulls.
  * Used by the verifier when an id_token's `kid` isn't in the cached
  * key set — the provider may have just rotated, and a single forced
  * refetch is cheaper than 60 minutes of failed verifies.
+ *
+ * A4-084: returns `false` (and skips the cache delete) when called
+ * within `INVALIDATE_DEBOUNCE_MS` of the prior invalidation for the
+ * same URL. The caller can then choose to skip the retry-fetch too.
  */
-export function invalidateJwks(url: string): void {
+export function invalidateJwks(url: string): boolean {
+  const now = Date.now();
+  const last = lastInvalidatedAtMs.get(url) ?? 0;
+  if (now - last < INVALIDATE_DEBOUNCE_MS) return false;
+  lastInvalidatedAtMs.set(url, now);
   jwksCache.delete(url);
+  return true;
 }
 
 /**
