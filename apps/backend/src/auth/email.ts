@@ -5,9 +5,9 @@
  *
  * The dev default is `console` — it writes the code to stdout so
  * `npm run dev:backend` works end-to-end without SMTP credentials.
- * Production deploys set `EMAIL_PROVIDER=<real>` and the relevant
- * API key env vars (not yet implemented — landing with the first
- * real provider PR).
+ * Production deploys set `EMAIL_PROVIDER=resend` (or another real
+ * provider) plus the matching API-key env var. The `resend`
+ * implementation lives below.
  */
 import { logger } from '../logger.js';
 import { env } from '../env.js';
@@ -60,6 +60,96 @@ class ConsoleEmailProvider implements EmailProvider {
   }
 }
 
+/**
+ * Resend transactional-email provider. Posts the OTP body to
+ * `https://api.resend.com/emails` with the operator's
+ * `RESEND_API_KEY`.
+ *
+ * Two operator-tunable env vars beyond the API key:
+ *   - `EMAIL_FROM_ADDRESS` — the sender. Resend requires this
+ *     domain to be verified (DKIM / SPF) in their dashboard
+ *     before delivery succeeds. Defaults to `noreply@loopfinance.io`
+ *     to make the launch path the no-touch case.
+ *   - `EMAIL_FROM_NAME` — the human-readable display name.
+ *     Defaults to `Loop`.
+ *
+ * Network failure / non-2xx responses throw — the caller (OTP
+ * handler) maps the throw to a 503 so the user retries rather than
+ * silently submitting a code that was never sent.
+ */
+class ResendEmailProvider implements EmailProvider {
+  readonly name = 'resend';
+
+  constructor(
+    private readonly apiKey: string,
+    private readonly from: string,
+  ) {}
+
+  async sendOtpEmail(input: OtpEmailInput): Promise<void> {
+    const subject = `Your Loop verification code: ${input.code}`;
+    const expiresAtIso = input.expiresAt.toISOString();
+    const minutes = Math.max(1, Math.round((input.expiresAt.getTime() - Date.now()) / 60_000));
+    const text = [
+      `Your Loop verification code is ${input.code}`,
+      '',
+      `Enter this code to sign in. It expires in ${minutes} minutes (${expiresAtIso}).`,
+      '',
+      "If you didn't request this, you can ignore this email.",
+    ].join('\n');
+    const html = [
+      `<p>Your Loop verification code is</p>`,
+      `<p style="font-size:24px;font-weight:700;letter-spacing:0.1em;">${escapeHtml(input.code)}</p>`,
+      `<p>Enter this code to sign in. It expires in ${minutes} minutes.</p>`,
+      `<p style="color:#888;font-size:12px;">If you didn't request this, you can ignore this email.</p>`,
+    ].join('');
+
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        from: this.from,
+        to: input.to,
+        subject,
+        text,
+        html,
+      }),
+      // 10s — short enough that a hung Resend doesn't lock up the
+      // OTP request beyond what the user would tolerate; the OTP
+      // handler's circuit / retry plumbing covers transient blips
+      // on the next attempt.
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) {
+      const body = await safeReadBody(res);
+      log.error(
+        { status: res.status, to: input.to, body: body.slice(0, 300) },
+        'Resend email send failed',
+      );
+      throw new Error(`Resend ${res.status} on /emails`);
+    }
+  }
+}
+
+async function safeReadBody(res: Response): Promise<string> {
+  try {
+    return await res.text();
+  } catch {
+    return '';
+  }
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 let cached: EmailProvider | null = null;
 
 /**
@@ -86,10 +176,20 @@ export function getEmailProvider(): EmailProvider {
     cached = new ConsoleEmailProvider();
     return cached;
   }
-  // Future providers land here. Keeping the throw minimal so an
-  // operator setting EMAIL_PROVIDER to an unknown value doesn't
-  // silently fall back to the console stub (which would leak OTP
-  // codes to stdout in production).
+  if (configured === 'resend') {
+    const apiKey = process.env['RESEND_API_KEY'];
+    if (apiKey === undefined || apiKey.length === 0) {
+      throw new Error('EMAIL_PROVIDER=resend requires RESEND_API_KEY to be set');
+    }
+    const fromAddress = process.env['EMAIL_FROM_ADDRESS'] ?? 'noreply@loopfinance.io';
+    const fromName = process.env['EMAIL_FROM_NAME'] ?? 'Loop';
+    cached = new ResendEmailProvider(apiKey, `${fromName} <${fromAddress}>`);
+    return cached;
+  }
+  // Keeping the throw minimal so an operator setting
+  // EMAIL_PROVIDER to an unknown value doesn't silently fall back
+  // to the console stub (which would leak OTP codes to stdout in
+  // production).
   throw new Error(`Unsupported EMAIL_PROVIDER: ${configured}`);
 }
 

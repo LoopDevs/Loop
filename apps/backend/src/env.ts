@@ -378,6 +378,26 @@ export const EnvSchema = z.object({
   // raise it.
   LOOP_INTEREST_POOL_MIN_DAYS_COVER: z.coerce.number().int().min(1).max(365).default(7),
 
+  // Transactional email provider (ADR 013). When unset / `console`
+  // the dev-only stub fires; production refuses to start with the
+  // console value (see auth/email.ts). Add a real provider before
+  // flipping `LOOP_AUTH_NATIVE_ENABLED=true` in production.
+  // Currently supported: `resend`. Each provider has its own
+  // API-key + from-address envs.
+  EMAIL_PROVIDER: z.enum(['console', 'resend']).optional(),
+
+  // Resend API key (https://resend.com). Required when
+  // EMAIL_PROVIDER=resend. Format is `re_...` — never log this.
+  RESEND_API_KEY: z.string().optional(),
+
+  // Sender address used by the email provider. Must be a domain
+  // the operator has verified DKIM/SPF for at the provider's
+  // dashboard. Defaults to `noreply@loopfinance.io` if unset.
+  EMAIL_FROM_ADDRESS: z.string().email().optional(),
+
+  // Display name for the From header. Defaults to `Loop`.
+  EMAIL_FROM_NAME: z.string().optional(),
+
   // Network passphrase for payout signing. PUBLIC mainnet is the
   // default; operators override with TESTNET string for staging.
   // Anything non-empty is accepted so a self-hosted network can

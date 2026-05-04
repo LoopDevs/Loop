@@ -29,6 +29,7 @@
  */
 import { and, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
+import { env } from '../env.js';
 import { orders, type OrderPaymentMethod } from '../db/schema.js';
 import { computeCashbackSplit, generatePaymentMemo } from './cashback-split.js';
 import { InsufficientCreditError } from './repo-errors.js';
@@ -120,12 +121,40 @@ export async function createOrder(args: CreateOrderArgs): Promise<Order> {
   // what Loop pays CTX, derived at the same FX rate (via
   // chargeMinor) — actual CTX settlement uses the catalog-currency
   // face value at procurement time.
-  const chargeMinor = args.chargeMinor ?? args.faceValueMinor;
+  const requestedChargeMinor = args.chargeMinor ?? args.faceValueMinor;
   const chargeCurrency = args.chargeCurrency ?? args.currency;
   const split = await computeCashbackSplit({
     merchantId: args.merchantId,
-    faceValueMinor: chargeMinor,
+    faceValueMinor: requestedChargeMinor,
   });
+
+  // Tranche 1 (MVP) discount mode. When `LOOP_PHASE_1_ONLY=true`,
+  // the cashback portion of the configured split is applied as
+  // an INSTANT DISCOUNT at order-creation time rather than emitted
+  // as a post-purchase Stellar payout. Math:
+  //
+  //   - Pre-discount charge = requestedChargeMinor
+  //   - Discount delivered  = split.userCashbackMinor
+  //   - User actually pays  = requestedChargeMinor − discount
+  //   - userCashbackMinor stored = 0 (nothing to emit later)
+  //   - wholesaleMinor + loopMarginMinor unchanged (Loop still pays
+  //     CTX the same wholesale; Loop's margin is the same)
+  //
+  // Fulfillment.ts already gates `pending_payouts` insertion on
+  // `userCashbackMinor > 0n`, so zeroing it here also turns off the
+  // on-chain emission for free. Discount badges on merchant cards
+  // (the Tranche 1 user proposition) are driven by
+  // `merchant_cashback_configs.user_cashback_pct` and stay accurate
+  // because the pct itself isn't changing — only the delivery
+  // channel is.
+  //
+  // Tranche 2 flips `LOOP_PHASE_1_ONLY=false` and the cashback
+  // becomes a Stellar payout again. No schema change.
+  const tranche1Discount = env.LOOP_PHASE_1_ONLY ? split.userCashbackMinor : 0n;
+  const chargeMinor = requestedChargeMinor - tranche1Discount;
+  const userCashbackMinorOnRow = env.LOOP_PHASE_1_ONLY ? 0n : split.userCashbackMinor;
+  const userCashbackPctOnRow = env.LOOP_PHASE_1_ONLY ? '0.00' : split.userCashbackPct;
+
   const paymentMemo =
     args.paymentMemo ?? (args.paymentMethod === 'credit' ? null : generatePaymentMemo());
 
@@ -139,10 +168,10 @@ export async function createOrder(args: CreateOrderArgs): Promise<Order> {
     paymentMethod: args.paymentMethod,
     paymentMemo,
     wholesalePct: split.wholesalePct,
-    userCashbackPct: split.userCashbackPct,
+    userCashbackPct: userCashbackPctOnRow,
     loopMarginPct: split.loopMarginPct,
     wholesaleMinor: split.wholesaleMinor,
-    userCashbackMinor: split.userCashbackMinor,
+    userCashbackMinor: userCashbackMinorOnRow,
     loopMarginMinor: split.loopMarginMinor,
     idempotencyKey: args.idempotencyKey ?? null,
   };

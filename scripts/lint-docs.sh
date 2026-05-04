@@ -146,9 +146,11 @@ fi
 # ─── 6. No removed credentials in source (outside tests) ────────────────────
 
 echo "Checking for removed credential references..."
-# GIFT_CARD_API_KEY and GIFT_CARD_API_SECRET are legitimate — used for /locations endpoint
-# Check for truly removed credentials only
-removed_creds=$(grep -rn "JWT_SECRET\|JWT_REFRESH_SECRET\|SMTP_HOST\|SMTP_PORT\|SMTP_USER\|SMTP_PASS\|EMAIL_FROM" apps/backend/src/ apps/web/app/ packages/shared/src/ 2>/dev/null | grep -v "node_modules\|__tests__" || true)
+# GIFT_CARD_API_KEY and GIFT_CARD_API_SECRET are legitimate — used for /locations endpoint.
+# EMAIL_FROM_ADDRESS / EMAIL_FROM_NAME are legitimate (transactional email, ADR 013); the
+# truly-removed credential was an unscoped EMAIL_FROM. The grep below tolerates the suffix
+# names while still catching a reintroduction of the bare EMAIL_FROM env.
+removed_creds=$(grep -rn "JWT_SECRET\|JWT_REFRESH_SECRET\|SMTP_HOST\|SMTP_PORT\|SMTP_USER\|SMTP_PASS\|EMAIL_FROM\b" apps/backend/src/ apps/web/app/ packages/shared/src/ 2>/dev/null | grep -v "node_modules\|__tests__\|EMAIL_FROM_ADDRESS\|EMAIL_FROM_NAME" || true)
 if [ -n "$removed_creds" ]; then
   err "Reference to removed credential (JWT/SMTP) found in source"
 fi

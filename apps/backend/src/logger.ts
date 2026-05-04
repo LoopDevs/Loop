@@ -94,6 +94,9 @@ export const REDACT_PATHS: readonly string[] = [
   'GIFT_CARD_API_SECRET',
   '*.GIFT_CARD_API_KEY',
   '*.GIFT_CARD_API_SECRET',
+  //   Transactional email provider API key (ADR 013):
+  'RESEND_API_KEY',
+  '*.RESEND_API_KEY',
   //   Postgres connection string (includes password):
   'DATABASE_URL',
   '*.DATABASE_URL',
