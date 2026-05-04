@@ -454,20 +454,24 @@ jobs:
           npm rebuild esbuild
       - name: Build backend
         run: npm run build -w @loop/backend
-      # A4-109: tsup only emits JS into dist/. The Dockerfile copies
-      # src/db/migrations into dist/migrations so Drizzle's migrator
-      # can find the SQL + meta/_journal.json at runtime. Pin the
-      # invariant in CI so a regression to "migrations folder
-      # missing in production image" trips before deploy. We assert
-      # in the build job's working tree instead of building the
-      # Docker image because the failure mode is the migration files
-      # going missing from src/, not the COPY itself.
-      - name: Verify backend migrations are tracked under src/
+      # A4-023 / A4-109: Drizzle's migrator reads `migrationsFolder`
+      # at runtime, so the bundled `dist` must ship `meta/_journal.json`
+      # and every journaled SQL file alongside `migrate-cli.js`. tsup's
+      # `onSuccess` hook copies `src/db/migrations` into `dist/migrations`
+      # on build; the Dockerfile then ships the dist tree as-is. Pin
+      # both invariants here so a regression — either source files
+      # disappearing or the build no longer copying — trips before deploy.
+      - name: Verify backend migrations ship in dist/
         run: |
           set -euo pipefail
+          # Source must contain the journaled set tsup will copy.
           test -f apps/backend/src/db/migrations/meta/_journal.json
-          # Ensure at least one .sql migration exists alongside the journal.
-          test "$(find apps/backend/src/db/migrations -maxdepth 1 -name '*.sql' | wc -l)" -gt 0
+          src_sql=$(find apps/backend/src/db/migrations -maxdepth 1 -name '*.sql' | wc -l | tr -d ' ')
+          test "$src_sql" -gt 0
+          # Build output must mirror it so production runtime resolves.
+          test -f apps/backend/dist/migrations/meta/_journal.json
+          dist_sql=$(find apps/backend/dist/migrations -maxdepth 1 -name '*.sql' | wc -l | tr -d ' ')
+          test "$dist_sql" -eq "$src_sql"
       - name: Build web (SSR)
         run: npm run build -w @loop/web
         env:

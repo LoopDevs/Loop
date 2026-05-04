@@ -1,3 +1,4 @@
+import { cpSync, existsSync } from 'node:fs';
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
@@ -18,4 +19,20 @@ export default defineConfig({
   sourcemap: true,
   // Bundle @loop/shared into the output so no monorepo path issues at runtime
   noExternal: ['@loop/shared'],
+  // A4-023: copy drizzle migrations into dist alongside the bundled JS
+  // so `node dist/migrate-cli.js` resolves `./migrations` relative to
+  // the running script (Drizzle's `migrationsFolder` is path-based).
+  // The Dockerfile previously did the copy in the production stage,
+  // but a local `npm run build` then `node dist/migrate-cli.js` would
+  // throw `_journal.json not found`. Doing the copy here keeps prod
+  // and local-dev runtimes symmetric and gives CI a single artifact
+  // to assert against.
+  onSuccess: async () => {
+    const src = 'src/db/migrations';
+    const dest = 'dist/migrations';
+    if (!existsSync(src)) {
+      throw new Error(`tsup onSuccess: migrations source ${src} missing`);
+    }
+    cpSync(src, dest, { recursive: true });
+  },
 });

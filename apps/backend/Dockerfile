@@ -33,17 +33,15 @@ COPY apps/backend/package.json apps/backend/
 # Install production deps only
 RUN npm ci --omit=dev --ignore-scripts
 
-# Copy bundled output (single file, no monorepo path issues)
+# Copy bundled output. A4-023: tsup `onSuccess` already copies
+# `src/db/migrations` into `dist/migrations`, so the production
+# image gets `_journal.json` + SQL files via this single COPY.
+# Drizzle's migrator resolves `migrationsFolder` relative to the
+# running script's directory (see db/client.ts `runMigrations`),
+# so `dist/migrations` lands where the Fly `release_command`
+# (`node apps/backend/dist/migrate-cli.js`) and boot-time
+# `runMigrations()` look.
 COPY --from=builder /app/apps/backend/dist apps/backend/dist
-# A4-109: drizzle migration SQL + meta files. Drizzle's migrator
-# resolves `migrationsFolder` relative to the running script's
-# directory (see db/client.ts `runMigrations`). tsup only emits
-# JS to dist/, so without this copy the production image starts
-# without `dist/migrations/meta/_journal.json` and the Fly
-# `release_command = node apps/backend/dist/migrate-cli.js`
-# throws before traffic shifts. Boot-time `runMigrations()` in
-# index.ts also relies on this.
-COPY --from=builder /app/apps/backend/src/db/migrations apps/backend/dist/migrations
 
 # Run as the non-root `node` user that node:*-alpine ships with. The default
 # is root — meaning any RCE in a dep would land with full container
