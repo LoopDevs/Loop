@@ -105,7 +105,11 @@ export async function listStuckPayoutRows(args?: {
         and(
           eq(pendingPayouts.state, 'submitted'),
           isNotNull(pendingPayouts.submittedAt),
-          sql`${pendingPayouts.submittedAt} < ${cutoff}`,
+          // postgres-js refuses to bind a Date through `sql\`\``: only the
+          // type-aware Drizzle helpers (eq/lt/...) marshal columns. ISO
+          // string keeps the timezone unambiguous and is what the column
+          // type accepts in raw SQL too.
+          sql`${pendingPayouts.submittedAt} < ${cutoff.toISOString()}`,
         ),
       ),
     )

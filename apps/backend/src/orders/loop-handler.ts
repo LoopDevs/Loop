@@ -125,6 +125,13 @@ export function validateMerchantDenomination(
     return null;
   }
   // Fixed-denomination: amount must match one of the configured values.
+  // Defense in depth: a malformed merchant cache entry (CTX schema drift,
+  // a hand-edited fixture missing `denominations[]`) used to throw
+  // `Cannot read properties of undefined (reading 'map')` here and the
+  // global onError caught it as a 500. Fall through to "no denomination
+  // contract" rather than crash — the global face-value cap still
+  // bounds the amount.
+  if (!Array.isArray(denominations.denominations)) return null;
   const allowedMinor = denominations.denominations
     .map((d) => Number.parseFloat(d))
     .filter((n) => Number.isFinite(n) && n > 0)

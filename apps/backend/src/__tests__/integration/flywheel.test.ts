@@ -77,7 +77,13 @@ vi.mock('../../merchants/sync.js', async (importActual) => {
     name: 'Amazon',
     slug: 'amazon',
     enabled: true,
-    denominations: { currency: 'USD', kind: 'min-max' as const, min: 1, max: 1000 },
+    denominations: {
+      currency: 'USD',
+      type: 'min-max' as const,
+      denominations: [],
+      min: 1,
+      max: 1000,
+    },
     logo: null,
     locations: [],
   };

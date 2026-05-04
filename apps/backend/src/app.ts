@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { sentry, captureException } from '@sentry/hono/node';
 import { env } from './env.js';
+import { logger } from './logger.js';
 import { accessLogMiddleware } from './middleware/access-log.js';
 import { requestContextMiddleware } from './middleware/request-context.js';
 import { requestCounterMiddleware } from './middleware/request-counter.js';
@@ -194,6 +195,11 @@ app.onError((err, c) => {
   const requestId = (c as unknown as { get(key: 'requestId'): string | undefined }).get(
     'requestId',
   );
+  // Emit to logger so a 500 has a forensic trail beyond Sentry —
+  // captureException sinks to Sentry only and the access log only
+  // records status. Without this line, a local or CI run that
+  // returns 500 has no stack trace anywhere.
+  logger.error({ err, requestId }, 'Unhandled error in request handler');
   return c.json(
     { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred', requestId },
     500,
