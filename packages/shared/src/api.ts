@@ -115,6 +115,15 @@ export const ApiErrorCode = {
   STEP_UP_INVALID: 'STEP_UP_INVALID',
   STEP_UP_SUBJECT_MISMATCH: 'STEP_UP_SUBJECT_MISMATCH',
   STEP_UP_UNAVAILABLE: 'STEP_UP_UNAVAILABLE',
+  // Admin home-currency change (ADR 015 deferred § support-mediated
+  // change). USER_NOT_FOUND is shared with other lookups but the
+  // home-currency-set handler is the first to surface it from an
+  // admin write surface; the four below are unique to that handler.
+  USER_NOT_FOUND: 'USER_NOT_FOUND',
+  HOME_CURRENCY_UNCHANGED: 'HOME_CURRENCY_UNCHANGED',
+  HOME_CURRENCY_HAS_LIVE_BALANCE: 'HOME_CURRENCY_HAS_LIVE_BALANCE',
+  HOME_CURRENCY_HAS_IN_FLIGHT_PAYOUTS: 'HOME_CURRENCY_HAS_IN_FLIGHT_PAYOUTS',
+  CONCURRENT_CHANGE: 'CONCURRENT_CHANGE',
 } as const;
 
 export type ApiErrorCodeValue = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];

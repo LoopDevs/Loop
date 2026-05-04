@@ -11,6 +11,7 @@ import { CashbackSummaryChip } from '~/components/features/admin/CashbackSummary
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { CreditAdjustmentForm } from '~/components/features/admin/CreditAdjustmentForm';
 import { AdminWithdrawalForm } from '~/components/features/admin/AdminWithdrawalForm';
+import { HomeCurrencyForm } from '~/components/features/admin/HomeCurrencyForm';
 import { CreditTransactionsTable } from '~/components/features/admin/CreditTransactionsTable';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { UserCashbackByMerchantTable } from '~/components/features/admin/UserCashbackByMerchantTable';
@@ -261,6 +262,31 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
             <AdminWithdrawalForm
               userId={userId}
               defaultCurrency={
+                isHomeCurrency(userQuery.data.homeCurrency) ? userQuery.data.homeCurrency : 'USD'
+              }
+            />
+          </div>
+        </section>
+      ) : null}
+
+      {userQuery.data !== undefined && !userNotFound && userId !== undefined ? (
+        <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+          <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
+            <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+              Change home currency (ADR 015)
+            </h2>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Support-mediated only. The backend rejects the change with{' '}
+              <code className="font-mono">409</code> if the user has a non-zero credit balance in
+              the current currency or any in-flight payouts — zero those out via a credit-adjustment
+              and let pending payouts settle first. Idempotent + Discord-audited like every other
+              admin write.
+            </p>
+          </header>
+          <div className="px-6 py-5">
+            <HomeCurrencyForm
+              userId={userId}
+              currentHomeCurrency={
                 isHomeCurrency(userQuery.data.homeCurrency) ? userQuery.data.homeCurrency : 'USD'
               }
             />

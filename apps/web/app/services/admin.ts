@@ -475,6 +475,12 @@ export {
   listAdminUserCreditTransactions,
 } from './admin-user-credits';
 
+// Admin home-currency change (ADR 015 deferred § support-mediated
+// change). Same `AdminWriteEnvelope` + step-up + idempotency-key
+// discipline as the credit writes; lives in its own slice because
+// it isn't a credit/refund/withdrawal.
+export { type HomeCurrencySetResult, setUserHomeCurrency } from './admin-user-home-currency';
+
 // A2-1165 (slice 24): admin orders surface lives in
 // `./admin-orders.ts`. Re-export keeps `AdminOrdersTable.tsx`,
 // `UserOrdersTable.tsx`, `routes/admin.orders.tsx`, paired

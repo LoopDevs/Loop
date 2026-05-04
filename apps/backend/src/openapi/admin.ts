@@ -32,6 +32,7 @@ import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminCashbackConfigOpenApi } from './admin-cashback-config.js';
 import { registerAdminCreditWritesOpenApi } from './admin-credit-writes.js';
+import { registerAdminUserWritesOpenApi } from './admin-user-writes.js';
 import { registerAdminCsvExportsOpenApi } from './admin-csv-exports.js';
 import { registerAdminDashboardClusterOpenApi } from './admin-dashboard-cluster.js';
 import { registerAdminFleetMonthlyOpenApi } from './admin-fleet-monthly.js';
@@ -155,6 +156,11 @@ export function registerAdminOpenApi(
   // with ./admin-cashback-config.ts and is threaded into both
   // slices as a parameter.
   registerAdminCreditWritesOpenApi(registry, errorResponse, AdminWriteAudit);
+
+  // Admin user-property writes — currently just the home-currency
+  // flip (ADR 015 deferred). Same audit-envelope contract; lives
+  // in its own slice because it isn't a credit/refund/withdrawal.
+  registerAdminUserWritesOpenApi(registry, errorResponse, AdminWriteAudit);
 
   // ADR-028 / A4-063: admin step-up auth.
   const StepUpBody = registry.register(

@@ -143,7 +143,7 @@ below is either shipped or an explicit "not yet started".
 - [ ] In-app LOOP-asset swap — UX layer over Stellar path-payment.
       Out-of-scope for MVP; users who want it today withdraw +
       swap on SDEX.
-- [ ] Self-serve home-currency change — currently support-mediated.
+- [x] ~~Admin-mediated home-currency change~~ — `POST /api/admin/users/:userId/home-currency` (2026-05-04). Step-up gated; preflight rejects if the user has a non-zero credit balance in the old currency or any in-flight payouts. Self-serve remains deliberately out of scope: the safety invariants (orphaned credits / mid-flight payouts) are the same, so the support-mediated path is the one that gets exercised under audit.
 - [ ] SEP-24 / off-platform withdrawal UX for LOOP assets.
 - [ ] Defindex deposit automation — currently manual ops top-up.
 - [x] ~~Trustline-probe before payout submit~~ — `payOne` reads the
