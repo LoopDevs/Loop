@@ -85,6 +85,7 @@ import { requireAdmin } from '../auth/require-admin.js';
 import { notifyAdminBulkRead } from '../discord.js';
 import { mountAdminCashbackConfigRoutes } from './admin-cashback-config.js';
 import { mountAdminCreditWritesRoutes } from './admin-credit-writes.js';
+import { mountAdminUserWritesRoutes } from './admin-user-writes.js';
 import { rateLimit } from '../middleware/rate-limit.js';
 import { adminStepUpHandler } from '../admin/step-up-handler.js';
 import { mountAdminDashboardRoutes } from './admin-dashboard.js';
@@ -228,6 +229,13 @@ export function mountAdminRoutes(app: Hono): void {
   // withdrawals (ADR 017/024 + A2-901). Lifted into
   // ./admin-credit-writes.ts (mirrors openapi #1175).
   mountAdminCreditWritesRoutes(app);
+
+  // Admin user-property writes — currently just the home-currency
+  // flip (ADR 015 deferred § "self-serve home-currency change —
+  // currently support-mediated"). Same step-up + idempotency
+  // discipline as the credit writes; lives in its own file because
+  // it isn't a credit/refund/withdrawal.
+  mountAdminUserWritesRoutes(app);
 
   // ADR-028 / A4-063: step-up token endpoint. Mounted under the
   // standard admin middleware stack (cache-control / requireAuth /

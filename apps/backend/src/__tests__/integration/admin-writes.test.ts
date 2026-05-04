@@ -871,3 +871,259 @@ describeIf('routes/admin.ts — admin-read audit middleware (A2-2008)', () => {
     expect(res.status).toBe(200);
   });
 });
+
+describeIf('admin home-currency write — real postgres ladder + safety preflight', () => {
+  beforeAll(async () => {
+    await ensureMigrated();
+  });
+
+  beforeEach(async () => {
+    await truncateAllTables();
+  });
+
+  it('happy path: flips home_currency, returns envelope, persists updated_at', async () => {
+    const { targetUser, bearer, stepUp } = await seed();
+    const before = await db.select().from(users).where(eq(users.id, targetUser.id));
+    expect(before[0]?.homeCurrency).toBe('USD');
+
+    const key = idemKey();
+    const res = await app.request(
+      `http://localhost/api/admin/users/${targetUser.id}/home-currency`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bearer}`,
+          'idempotency-key': key,
+          'X-Admin-Step-Up': stepUp,
+        },
+        body: JSON.stringify({ homeCurrency: 'GBP', reason: 'support ticket #42' }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      result: { priorHomeCurrency: string; newHomeCurrency: string; updatedAt: string };
+      audit: { replayed: boolean; idempotencyKey: string };
+    };
+    expect(body.result.priorHomeCurrency).toBe('USD');
+    expect(body.result.newHomeCurrency).toBe('GBP');
+    expect(body.audit.replayed).toBe(false);
+    expect(body.audit.idempotencyKey).toBe(key);
+
+    const after = await db.select().from(users).where(eq(users.id, targetUser.id));
+    expect(after[0]?.homeCurrency).toBe('GBP');
+  });
+
+  it('replays the stored snapshot on idempotency-key reuse without re-running the preflight', async () => {
+    const { targetUser, bearer, stepUp } = await seed();
+    const key = idemKey();
+    const headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${bearer}`,
+      'idempotency-key': key,
+      'X-Admin-Step-Up': stepUp,
+    };
+    const url = `http://localhost/api/admin/users/${targetUser.id}/home-currency`;
+    const body = JSON.stringify({ homeCurrency: 'GBP', reason: 'idempotent retry' });
+
+    const first = await app.request(url, { method: 'POST', headers, body });
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as { audit: { replayed: boolean }; result: unknown };
+    expect(firstBody.audit.replayed).toBe(false);
+
+    // Seed a balance in the now-old USD currency. A live preflight would
+    // reject; the snapshot replay must NOT re-run the preflight.
+    await seedCashbackBalance({
+      userId: targetUser.id,
+      currency: 'USD',
+      amountMinor: 250n,
+    });
+
+    const second = await app.request(url, { method: 'POST', headers, body });
+    expect(second.status).toBe(200);
+    const secondBody = (await second.json()) as {
+      audit: { replayed: boolean };
+      result: unknown;
+    };
+    expect(secondBody.audit.replayed).toBe(true);
+    expect(secondBody.result).toEqual(firstBody.result);
+
+    // Critical: only one transition; the user is still on GBP.
+    const after = await db.select().from(users).where(eq(users.id, targetUser.id));
+    expect(after[0]?.homeCurrency).toBe('GBP');
+  });
+
+  it('409 HOME_CURRENCY_UNCHANGED when new currency equals current', async () => {
+    const { targetUser, bearer, stepUp } = await seed();
+    const res = await app.request(
+      `http://localhost/api/admin/users/${targetUser.id}/home-currency`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bearer}`,
+          'idempotency-key': idemKey(),
+          'X-Admin-Step-Up': stepUp,
+        },
+        body: JSON.stringify({ homeCurrency: 'USD', reason: 'no-op' }),
+      },
+    );
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('HOME_CURRENCY_UNCHANGED');
+  });
+
+  it('409 HOME_CURRENCY_HAS_LIVE_BALANCE when user has non-zero credits in old currency', async () => {
+    const { targetUser, bearer, stepUp } = await seed();
+    await seedCashbackBalance({
+      userId: targetUser.id,
+      currency: 'USD',
+      amountMinor: 1234n,
+    });
+
+    const res = await app.request(
+      `http://localhost/api/admin/users/${targetUser.id}/home-currency`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bearer}`,
+          'idempotency-key': idemKey(),
+          'X-Admin-Step-Up': stepUp,
+        },
+        body: JSON.stringify({ homeCurrency: 'GBP', reason: 'should fail' }),
+      },
+    );
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('HOME_CURRENCY_HAS_LIVE_BALANCE');
+    expect(body.message).toContain('1234');
+
+    // No transition happened.
+    const after = await db.select().from(users).where(eq(users.id, targetUser.id));
+    expect(after[0]?.homeCurrency).toBe('USD');
+  });
+
+  it('allows the change when user has a zero-balance row in the old currency', async () => {
+    const { targetUser, bearer, stepUp } = await seed();
+    // Insert a zero-balance row directly — `seedCashbackBalance` would
+    // also write a credit_transactions row (which the schema CHECK
+    // forbids at amount=0 for `cashback`). The row exists from a
+    // prior settled cashback that was later debited to zero.
+    await db.insert(userCredits).values({
+      userId: targetUser.id,
+      currency: 'USD',
+      balanceMinor: 0n,
+    });
+
+    const res = await app.request(
+      `http://localhost/api/admin/users/${targetUser.id}/home-currency`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bearer}`,
+          'idempotency-key': idemKey(),
+          'X-Admin-Step-Up': stepUp,
+        },
+        body: JSON.stringify({ homeCurrency: 'EUR', reason: 'zero-balance ok' }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const after = await db.select().from(users).where(eq(users.id, targetUser.id));
+    expect(after[0]?.homeCurrency).toBe('EUR');
+  });
+
+  it('409 HOME_CURRENCY_HAS_IN_FLIGHT_PAYOUTS when user has a pending payout', async () => {
+    const { targetUser, bearer, stepUp, orderId } = await seed();
+    await db.insert(pendingPayouts).values({
+      userId: targetUser.id,
+      kind: 'order_cashback',
+      assetCode: 'USDLOOP',
+      assetIssuer: 'GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      toAddress: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      amountStroops: 10_000_000n,
+      memoText: 'inflight-test',
+      orderId,
+      state: 'pending',
+    });
+
+    const res = await app.request(
+      `http://localhost/api/admin/users/${targetUser.id}/home-currency`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bearer}`,
+          'idempotency-key': idemKey(),
+          'X-Admin-Step-Up': stepUp,
+        },
+        body: JSON.stringify({ homeCurrency: 'GBP', reason: 'should fail' }),
+      },
+    );
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('HOME_CURRENCY_HAS_IN_FLIGHT_PAYOUTS');
+  });
+
+  it('allows the change when user has only failed payouts (already off the worker hot path)', async () => {
+    const { targetUser, bearer, stepUp } = await seed();
+    await seedFailedWithdrawalPayout({
+      userId: targetUser.id,
+      amountStroops: 5_000_000n,
+    });
+    const res = await app.request(
+      `http://localhost/api/admin/users/${targetUser.id}/home-currency`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bearer}`,
+          'idempotency-key': idemKey(),
+          'X-Admin-Step-Up': stepUp,
+        },
+        body: JSON.stringify({ homeCurrency: 'EUR', reason: 'failed payouts ok' }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const after = await db.select().from(users).where(eq(users.id, targetUser.id));
+    expect(after[0]?.homeCurrency).toBe('EUR');
+  });
+
+  it('404 USER_NOT_FOUND when target user does not exist', async () => {
+    const { bearer, stepUp } = await seed();
+    const res = await app.request(
+      `http://localhost/api/admin/users/aaaaaaaa-bbbb-cccc-dddd-000000000000/home-currency`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bearer}`,
+          'idempotency-key': idemKey(),
+          'X-Admin-Step-Up': stepUp,
+        },
+        body: JSON.stringify({ homeCurrency: 'GBP', reason: 'no such user' }),
+      },
+    );
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('USER_NOT_FOUND');
+  });
+
+  it('401 STEP_UP_REQUIRED without an X-Admin-Step-Up header', async () => {
+    const { targetUser, bearer } = await seed();
+    const res = await app.request(
+      `http://localhost/api/admin/users/${targetUser.id}/home-currency`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bearer}`,
+          'idempotency-key': idemKey(),
+        },
+        body: JSON.stringify({ homeCurrency: 'GBP', reason: 'no step-up' }),
+      },
+    );
+    expect(res.status).toBe(401);
+  });
+});
