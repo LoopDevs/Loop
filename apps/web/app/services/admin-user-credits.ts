@@ -91,6 +91,8 @@ export async function applyCreditAdjustment(args: {
         currency: args.currency,
         reason: args.reason,
       },
+      // ADR-028 / A4-063: gated by step-up auth.
+      withStepUp: true,
     },
   );
 }
@@ -117,6 +119,8 @@ export async function applyAdminWithdrawal(args: {
         destinationAddress: args.destinationAddress,
         reason: args.reason,
       },
+      // ADR-028 / A4-063: gated by step-up auth.
+      withStepUp: true,
     },
   );
 }

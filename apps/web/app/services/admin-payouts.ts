@@ -116,6 +116,8 @@ export async function retryPayout(args: {
       method: 'POST',
       headers: { 'Idempotency-Key': generateIdempotencyKey() },
       body: { reason: args.reason },
+      // ADR-028 / A4-063: gated by step-up auth.
+      withStepUp: true,
     },
   );
 }

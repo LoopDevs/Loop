@@ -34,6 +34,16 @@ interface RequestOptions {
   timeoutMs?: number;
   /** Pass-through AbortSignal for caller-controlled cancellation. */
   signal?: AbortSignal;
+  /**
+   * ADR-028 / A4-063: opt in to the admin step-up gate. When true,
+   * `authenticatedRequest` reads the held step-up token from
+   * `useAdminStepUpStore` and adds it as `X-Admin-Step-Up`. The
+   * mutation hook (`withAdminStepUp` in
+   * `apps/web/app/hooks/use-admin-step-up.ts`) is responsible for
+   * minting a fresh token before this call when the store is
+   * empty / expired.
+   */
+  withStepUp?: boolean;
 }
 
 /**
@@ -228,10 +238,30 @@ export async function authenticatedRequest<T>(
     }
   }
 
+  // ADR-028 / A4-063: opt-in step-up header. The mutation hook
+  // mints / refreshes the token; this layer just plumbs it through.
+  // If the caller asked for step-up but the store is empty, pass an
+  // empty string — the backend rejects empty / missing equally with
+  // 401 STEP_UP_REQUIRED, which the mutation hook handles by
+  // prompting the modal and retrying.
+  let stepUpHeader: Record<string, string> = {};
+  if (options.withStepUp === true) {
+    const { useAdminStepUpStore } = await import('~/stores/admin-step-up.store');
+    const stepUpToken = useAdminStepUpStore.getState().token;
+    if (stepUpToken !== null && stepUpToken.length > 0) {
+      stepUpHeader = { 'X-Admin-Step-Up': stepUpToken };
+    }
+  }
+
   try {
     return await apiRequest<T>(path, {
       ...options,
-      headers: { ...options.headers, Authorization: `Bearer ${token}`, 'X-Client-Id': clientId },
+      headers: {
+        ...options.headers,
+        Authorization: `Bearer ${token}`,
+        'X-Client-Id': clientId,
+        ...stepUpHeader,
+      },
     });
   } catch (err) {
     // On 401, attempt one silent refresh and retry
@@ -245,6 +275,7 @@ export async function authenticatedRequest<T>(
             ...options.headers,
             Authorization: `Bearer ${newToken}`,
             'X-Client-Id': clientId,
+            ...stepUpHeader,
           },
         });
       }

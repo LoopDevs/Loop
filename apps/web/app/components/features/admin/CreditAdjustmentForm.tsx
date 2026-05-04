@@ -6,8 +6,10 @@ import {
   type AdminWriteEnvelope,
   type CreditAdjustmentResult,
 } from '~/services/admin';
+import { useAdminStepUp } from '~/hooks/use-admin-step-up';
 import { ReplayedBadge } from './ReplayedBadge';
 import { ConfirmDialog } from './ConfirmDialog';
+import { StepUpModal } from './StepUpModal';
 
 const CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
 type Currency = (typeof CURRENCIES)[number];
@@ -79,8 +81,15 @@ export function CreditAdjustmentForm({ userId, defaultCurrency }: Props): React.
     reason: string;
   } | null>(null);
 
+  // ADR-028 / A4-063: wraps the mutationFn so the step-up auth dance
+  // is transparent — if the backend returns 401 STEP_UP_REQUIRED on
+  // the first try, the modal opens, mints a fresh token, and the
+  // mutation retries.
+  const stepUp = useAdminStepUp();
+
   const mutation = useMutation({
-    mutationFn: applyCreditAdjustment,
+    mutationFn: (args: Parameters<typeof applyCreditAdjustment>[0]) =>
+      stepUp.runWithStepUp(() => applyCreditAdjustment(args)),
     onSuccess: (envelope: AdminWriteEnvelope<CreditAdjustmentResult>) => {
       setLastApplied({ result: envelope.result, replayed: envelope.audit.replayed });
       setAmountMajor('');
@@ -171,6 +180,9 @@ export function CreditAdjustmentForm({ userId, defaultCurrency }: Props): React.
         confirmLabel="Apply adjustment"
         onResolve={handleConfirm}
       />
+      {stepUp.modalOpen && (
+        <StepUpModal onConfirm={stepUp.handleStepUpConfirm} onCancel={stepUp.handleStepUpCancel} />
+      )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <label className="space-y-1 sm:col-span-1">
           <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
