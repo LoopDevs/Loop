@@ -47,6 +47,18 @@ const log = logger.child({ handler: 'loop-orders' });
 const ORDER_IDEMPOTENCY_KEY_MIN = 16;
 const ORDER_IDEMPOTENCY_KEY_MAX = 128;
 
+/**
+ * A4-017: hard ceiling on order face value, in minor units. Defence
+ * in depth past the merchant denomination check — most merchants in
+ * the catalog declare fixed/min-max denominations and the per-merchant
+ * validator rejects out-of-range amounts, but a merchant that ships
+ * without `denominations` would otherwise let a hand-crafted POST
+ * request a $1M+ order. $50k cap covers the realistic gift-card
+ * upper end (high-denomination travel/luxury cards top out around
+ * $25k–$50k) without restricting any merchant we've onboarded.
+ */
+const ORDER_MAX_FACE_VALUE_MINOR = 50_000_00n;
+
 const CreateBody = z.object({
   merchantId: z.string().min(1),
   /** Face value the user pays for / the gift card is worth, in minor units. */
@@ -178,6 +190,19 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     if (prior !== null) {
       return replayOrderResponse(c, prior);
     }
+  }
+
+  // A4-017: global face-value ceiling. Caught here before we do any
+  // merchant/FX/balance work so a malformed bigint request can't
+  // burn cycles or upstream calls.
+  if (parsed.data.amountMinor > ORDER_MAX_FACE_VALUE_MINOR) {
+    return c.json(
+      {
+        code: 'VALIDATION_ERROR',
+        message: `amount exceeds maximum order value (${ORDER_MAX_FACE_VALUE_MINOR / 100n} ${parsed.data.currency})`,
+      },
+      400,
+    );
   }
 
   // Validate the merchant exists + is enabled in the in-memory cache.

@@ -646,6 +646,56 @@ describe('loopCreateOrderHandler', () => {
   });
 });
 
+describe('loopCreateOrderHandler — A4-017 global face-value cap', () => {
+  it('rejects amounts above the 50,000-major hard ceiling', async () => {
+    const fake = makeCtx({
+      auth: LOOP_AUTH,
+      body: {
+        merchantId: 'm1',
+        amountMinor: '5000001', // $50,000.01 — one cent past the cap
+        currency: 'GBP',
+        paymentMethod: 'xlm',
+      },
+    });
+    const res = await loopCreateOrderHandler(fake.ctx);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.message).toMatch(/exceeds maximum order value/);
+    expect(createOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('accepts amounts at the cap when merchant denominations allow', async () => {
+    getMerchantsMock.mockReturnValue({
+      merchantsById: new Map([
+        [
+          'm1',
+          {
+            id: 'm1',
+            name: 'Target',
+            enabled: true,
+            denominations: { type: 'min-max', denominations: [], currency: 'GBP', max: 50000 },
+          },
+        ],
+      ]),
+    });
+    const fake = makeCtx({
+      auth: LOOP_AUTH,
+      body: {
+        merchantId: 'm1',
+        amountMinor: '5000000', // $50,000.00 — exactly at the cap
+        currency: 'GBP',
+        paymentMethod: 'xlm',
+      },
+    });
+    const res = await loopCreateOrderHandler(fake.ctx);
+    expect(res.status).toBe(200);
+    expect(createOrderMock).toHaveBeenCalledWith(
+      expect.objectContaining({ faceValueMinor: 5_000_000n }),
+    );
+  });
+});
+
 describe('validateMerchantDenomination (A4-103)', () => {
   it('passes when merchant has no denomination contract', () => {
     expect(validateMerchantDenomination(1000n, 'GBP', undefined)).toBeNull();

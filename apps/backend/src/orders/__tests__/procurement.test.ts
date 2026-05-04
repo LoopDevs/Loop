@@ -266,6 +266,42 @@ describe('runProcurementTick', () => {
     });
   });
 
+  it('A4-017: serialises fiatAmount via bigint-safe formatter (no Number coerce)', async () => {
+    // 1_000_000_000_000n cents = $10,000,000,000.00 — well past
+    // 2^53 cents, so Number(faceValueMinor) would silently lose
+    // precision before the .toFixed(2). Bigint-safe formatting must
+    // emit the exact decimal string regardless of magnitude.
+    state.paid = [
+      makeOrder({
+        id: 'o-bigint',
+        merchantId: 'target',
+        currency: 'USD',
+        faceValueMinor: 1_000_000_000_000n,
+      }),
+    ];
+    mockProcureAndFetch('ctx-bigint');
+    await runProcurementTick();
+    const init = operatorFetchMock.mock.calls[0]![1] as RequestInit;
+    const body = JSON.parse(String(init.body));
+    expect(body.fiatAmount).toBe('10000000000.00');
+  });
+
+  it('A4-017: serialises sub-dollar amounts with leading zero in the fractional part', async () => {
+    state.paid = [
+      makeOrder({
+        id: 'o-cents',
+        merchantId: 'target',
+        currency: 'USD',
+        faceValueMinor: 5n,
+      }),
+    ];
+    mockProcureAndFetch('ctx-cents');
+    await runProcurementTick();
+    const init = operatorFetchMock.mock.calls[0]![1] as RequestInit;
+    const body = JSON.parse(String(init.body));
+    expect(body.fiatAmount).toBe('0.05');
+  });
+
   it('A2-1508: pins the CTX procurement POST with an Idempotency-Key = order id', async () => {
     state.paid = [makeOrder({ id: 'order_abc123' })];
     mockProcureAndFetch('ctx-1');

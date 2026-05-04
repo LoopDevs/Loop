@@ -44,6 +44,21 @@ const CtxGiftCardResponse = z.object({
 });
 
 /**
+ * A4-017: bigint-safe minor → major decimal string. Bigints lose
+ * precision when coerced through `Number(...)` past 2^53; `1234n`
+ * cents must always serialize as `"12.34"`. Pads the fractional
+ * part to two digits so `5n` becomes `"0.05"` rather than `"0.5"`.
+ */
+function formatMinorToMajor(minor: bigint): string {
+  const negative = minor < 0n;
+  const abs = negative ? -minor : minor;
+  const cents = abs % 100n;
+  const dollars = abs / 100n;
+  const fractional = cents.toString().padStart(2, '0');
+  return `${negative ? '-' : ''}${dollars.toString()}.${fractional}`;
+}
+
+/**
  * Attempts procurement on a single order. Returns the outcome label
  * so callers can increment their batch counters.
  */
@@ -127,8 +142,12 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
       body: JSON.stringify({
         cryptoCurrency,
         fiatCurrency: order.currency,
-        // CTX expects fiatAmount as a decimal string in the major unit.
-        fiatAmount: (Number(order.faceValueMinor) / 100).toFixed(2),
+        // A4-017: bigint-safe major-unit formatting. `Number(faceValueMinor)`
+        // would silently lose precision past 2^53 (~$9e13). Even though
+        // realistic gift-card values stay under $10k, the boundary is
+        // financial; format the bigint directly so the wire string is
+        // exact regardless of magnitude.
+        fiatAmount: formatMinorToMajor(order.faceValueMinor),
         merchantId: order.merchantId,
       }),
       signal: AbortSignal.timeout(30_000),
