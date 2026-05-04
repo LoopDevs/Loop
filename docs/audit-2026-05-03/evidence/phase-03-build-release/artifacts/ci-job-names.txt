@@ -1,0 +1,12 @@
+33:    name: Quality (typecheck, lint, format, docs)
+96:    name: Unit tests
+150:    name: Flywheel integration (real postgres)
+203:    name: Security audit
+233:    name: SBOM + provenance + signing
+330:    name: Container CVE scan (trivy)
+386:    name: Secret scan (gitleaks)
+414:    name: Build verification
+527:    name: E2E tests
+609:    name: E2E tests (mocked CTX)
+690:    name: E2E tests (loop-native flywheel)
+758:    name: Discord notification

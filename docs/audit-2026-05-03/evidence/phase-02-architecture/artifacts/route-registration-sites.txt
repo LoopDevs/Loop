@@ -1,0 +1,171 @@
+apps/backend/src/app.ts:101:app.get('/metrics', metricsHandler);
+apps/backend/src/app.ts:102:app.get('/openapi.json', openApiHandler);
+apps/backend/src/app.ts:119:app.get('/health', healthHandler);
+apps/web/app/routes.ts:8:  process.env.BUILD_TARGET === 'mobile' ? [] : [route('sitemap.xml', 'routes/sitemap.tsx')];
+apps/web/app/routes.ts:16:    ? route('*', 'routes/not-found.tsx')
+apps/web/app/routes.ts:17:    : route('*', 'routes/not-found-ssr.tsx');
+apps/web/app/routes.ts:21:  route('map', 'routes/map.tsx'),
+apps/web/app/routes.ts:22:  route('gift-card/:name', 'routes/gift-card.$name.tsx'),
+apps/web/app/routes.ts:23:  route('cashback', 'routes/cashback.tsx'),
+apps/web/app/routes.ts:24:  route('cashback/:slug', 'routes/cashback.$slug.tsx'),
+apps/web/app/routes.ts:25:  route('calculator', 'routes/calculator.tsx'),
+apps/web/app/routes.ts:26:  route('trustlines', 'routes/trustlines.tsx'),
+apps/web/app/routes.ts:27:  route('privacy', 'routes/privacy.tsx'),
+apps/web/app/routes.ts:28:  route('terms', 'routes/terms.tsx'),
+apps/web/app/routes.ts:30:  route('auth', 'routes/auth.tsx'),
+apps/web/app/routes.ts:31:  route('onboarding', 'routes/onboarding.tsx'),
+apps/web/app/routes.ts:32:  route('orders', 'routes/orders.tsx'),
+apps/web/app/routes.ts:33:  route('orders/:id', 'routes/orders.$id.tsx'),
+apps/web/app/routes.ts:34:  route('settings/wallet', 'routes/settings.wallet.tsx'),
+apps/web/app/routes.ts:35:  route('settings/cashback', 'routes/settings.cashback.tsx'),
+apps/web/app/routes.ts:36:  route('admin', 'routes/admin._index.tsx'),
+apps/web/app/routes.ts:37:  route('admin/cashback', 'routes/admin.cashback.tsx'),
+apps/web/app/routes.ts:38:  route('admin/treasury', 'routes/admin.treasury.tsx'),
+apps/web/app/routes.ts:39:  route('admin/payouts', 'routes/admin.payouts.tsx'),
+apps/web/app/routes.ts:40:  route('admin/payouts/:id', 'routes/admin.payouts.$id.tsx'),
+apps/web/app/routes.ts:41:  route('admin/orders', 'routes/admin.orders.tsx'),
+apps/web/app/routes.ts:42:  route('admin/orders/:orderId', 'routes/admin.orders.$orderId.tsx'),
+apps/web/app/routes.ts:43:  route('admin/stuck-orders', 'routes/admin.stuck-orders.tsx'),
+apps/web/app/routes.ts:44:  route('admin/merchants', 'routes/admin.merchants.tsx'),
+apps/web/app/routes.ts:45:  route('admin/merchants/:merchantId', 'routes/admin.merchants.$merchantId.tsx'),
+apps/web/app/routes.ts:46:  route('admin/users', 'routes/admin.users.tsx'),
+apps/web/app/routes.ts:47:  route('admin/users/:userId', 'routes/admin.users.$userId.tsx'),
+apps/web/app/routes.ts:48:  route('admin/operators', 'routes/admin.operators.tsx'),
+apps/web/app/routes.ts:49:  route('admin/operators/:operatorId', 'routes/admin.operators.$operatorId.tsx'),
+apps/web/app/routes.ts:50:  route('admin/assets', 'routes/admin.assets.tsx'),
+apps/web/app/routes.ts:51:  route('admin/assets/:assetCode', 'routes/admin.assets.$assetCode.tsx'),
+apps/web/app/routes.ts:52:  route('admin/audit', 'routes/admin.audit.tsx'),
+apps/backend/src/routes/admin-operator.ts:51:  app.get('/api/admin/supplier-spend', rateLimit(60, 60_000), adminSupplierSpendHandler);
+apps/backend/src/routes/admin-operator.ts:58:  app.get(
+apps/backend/src/routes/admin-operator.ts:69:  app.get(
+apps/backend/src/routes/admin-operator.ts:81:  app.get(
+apps/backend/src/routes/admin-operator.ts:91:  app.get(
+apps/backend/src/routes/admin-operator.ts:101:  app.get('/api/admin/operator-stats', rateLimit(60, 60_000), adminOperatorStatsHandler);
+apps/backend/src/routes/admin-operator.ts:107:  app.get('/api/admin/operators/latency', rateLimit(60, 60_000), adminOperatorLatencyHandler);
+apps/backend/src/routes/auth.ts:55:  app.post('/api/auth/request-otp', killSwitch('auth'), rateLimit(5, 60_000), requestOtpHandler);
+apps/backend/src/routes/auth.ts:59:  app.post('/api/auth/verify-otp', killSwitch('auth'), rateLimit(10, 60_000), verifyOtpHandler);
+apps/backend/src/routes/auth.ts:63:  app.post('/api/auth/refresh', rateLimit(30, 60_000), refreshHandler);
+apps/backend/src/routes/auth.ts:68:  app.post(
+apps/backend/src/routes/auth.ts:74:  app.post(
+apps/backend/src/routes/auth.ts:84:  app.delete('/api/auth/session', rateLimit(20, 60_000), logoutHandler);
+apps/backend/src/routes/public.ts:42:  app.get('/api/public/cashback-stats', rateLimit(60, 60_000), publicCashbackStatsHandler);
+apps/backend/src/routes/public.ts:47:  app.get(
+apps/backend/src/routes/public.ts:58:  app.get('/api/public/merchants/:id', rateLimit(60, 60_000), publicMerchantHandler);
+apps/backend/src/routes/public.ts:66:  app.get('/api/public/cashback-preview', rateLimit(60, 60_000), publicCashbackPreviewHandler);
+apps/backend/src/routes/public.ts:72:  app.get('/api/public/loop-assets', rateLimit(60, 60_000), publicLoopAssetsHandler);
+apps/backend/src/routes/public.ts:79:  app.get('/api/public/flywheel-stats', rateLimit(60, 60_000), publicFlywheelStatsHandler);
+apps/backend/src/routes/misc.ts:23: * around one app.get call.
+apps/backend/src/routes/misc.ts:36:  app.get('/api/clusters', rateLimit(60, 60_000), clustersHandler);
+apps/backend/src/routes/misc.ts:37:  app.get('/api/config', rateLimit(120, 60_000), configHandler);
+apps/backend/src/routes/misc.ts:38:  app.get('/api/image', rateLimit(300, 60_000), imageProxyHandler);
+apps/backend/src/routes/users.ts:86:  app.get('/api/users/me', rateLimit(60, 60_000), getMeHandler);
+apps/backend/src/routes/users.ts:87:  app.post('/api/users/me/home-currency', rateLimit(10, 60_000), setHomeCurrencyHandler);
+apps/backend/src/routes/users.ts:88:  app.put('/api/users/me/stellar-address', rateLimit(10, 60_000), setStellarAddressHandler);
+apps/backend/src/routes/users.ts:95:  app.get('/api/users/me/dsr/export', rateLimit(5, 60 * 60_000), dsrExportHandler);
+apps/backend/src/routes/users.ts:96:  app.post('/api/users/me/dsr/delete', rateLimit(3, 60 * 60_000), dsrDeleteHandler);
+apps/backend/src/routes/users.ts:99:  app.get(
+apps/backend/src/routes/users.ts:104:  app.get('/api/users/me/pending-payouts', rateLimit(60, 60_000), getUserPendingPayoutsHandler);
+apps/backend/src/routes/users.ts:105:  app.get(
+apps/backend/src/routes/users.ts:112:  app.get(
+apps/backend/src/routes/users.ts:117:  app.get(
+apps/backend/src/routes/users.ts:124:  app.get('/api/users/me/cashback-history', rateLimit(60, 60_000), getCashbackHistoryHandler);
+apps/backend/src/routes/users.ts:126:  app.get('/api/users/me/cashback-history.csv', rateLimit(6, 60_000), getCashbackHistoryCsvHandler);
+apps/backend/src/routes/users.ts:127:  app.get('/api/users/me/credits', rateLimit(60, 60_000), getUserCreditsHandler);
+apps/backend/src/routes/users.ts:128:  app.get('/api/users/me/cashback-summary', rateLimit(60, 60_000), getCashbackSummaryHandler);
+apps/backend/src/routes/users.ts:129:  app.get(
+apps/backend/src/routes/users.ts:134:  app.get('/api/users/me/cashback-monthly', rateLimit(60, 60_000), getCashbackMonthlyHandler);
+apps/backend/src/routes/users.ts:137:  app.get('/api/users/me/orders/summary', rateLimit(60, 60_000), getUserOrdersSummaryHandler);
+apps/backend/src/routes/users.ts:138:  app.get('/api/users/me/flywheel-stats', rateLimit(60, 60_000), getUserFlywheelStatsHandler);
+apps/backend/src/routes/users.ts:140:  app.get(
+apps/backend/src/routes/admin-credit-writes.ts:43:  app.post(
+apps/backend/src/routes/admin-credit-writes.ts:54:  app.post('/api/admin/users/:userId/refunds', rateLimit(20, 60_000), adminRefundHandler);
+apps/backend/src/routes/admin-credit-writes.ts:58:  app.post(
+apps/backend/src/routes/orders.ts:61:  app.post('/api/orders', killSwitch('orders'), rateLimit(10, 60_000), createOrderHandler);
+apps/backend/src/routes/orders.ts:62:  app.get('/api/orders', rateLimit(60, 60_000), listOrdersHandler);
+apps/backend/src/routes/orders.ts:63:  app.get('/api/orders/:id', rateLimit(120, 60_000), getOrderHandler);
+apps/backend/src/routes/orders.ts:69:  app.post('/api/orders/loop', killSwitch('orders'), rateLimit(10, 60_000), loopCreateOrderHandler);
+apps/backend/src/routes/orders.ts:74:  app.get('/api/orders/loop', rateLimit(60, 60_000), loopListOrdersHandler);
+apps/backend/src/routes/orders.ts:80:  app.get('/api/orders/loop/:id', rateLimit(120, 60_000), loopGetOrderHandler);
+apps/backend/src/routes/admin-per-merchant.ts:66:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:74:  app.get('/api/admin/merchant-stats.csv', rateLimit(10, 60_000), adminMerchantStatsCsvHandler);
+apps/backend/src/routes/admin-per-merchant.ts:79:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:88:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:98:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:108:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:119:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:130:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:141:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:151:  app.get(
+apps/backend/src/routes/admin-per-merchant.ts:164:  app.get(
+apps/backend/src/routes/admin-fleet-monthly.ts:48:  app.get('/api/admin/cashback-monthly', rateLimit(60, 60_000), adminCashbackMonthlyHandler);
+apps/backend/src/routes/admin-fleet-monthly.ts:55:  app.get('/api/admin/payouts-monthly', rateLimit(60, 60_000), adminPayoutsMonthlyHandler);
+apps/backend/src/routes/admin-fleet-monthly.ts:61:  app.get('/api/admin/payouts-activity', rateLimit(60, 60_000), adminPayoutsActivityHandler);
+apps/backend/src/routes/admin-fleet-monthly.ts:66:  app.get('/api/admin/payouts-activity.csv', rateLimit(10, 60_000), adminPayoutsActivityCsvHandler);
+apps/backend/src/routes/admin-fleet-monthly.ts:72:  app.get(
+apps/backend/src/routes/admin-fleet-monthly.ts:81:  app.get(
+apps/backend/src/routes/admin-fleet-monthly.ts:90:  app.get(
+apps/backend/src/routes/admin-treasury.ts:35:  app.get('/api/admin/treasury', rateLimit(60, 60_000), treasuryHandler);
+apps/backend/src/routes/admin-treasury.ts:41:  app.get('/api/admin/treasury.csv', rateLimit(10, 60_000), adminTreasurySnapshotCsvHandler);
+apps/backend/src/routes/admin-treasury.ts:46:  app.get('/api/admin/treasury/credit-flow', rateLimit(60, 60_000), adminTreasuryCreditFlowHandler);
+apps/backend/src/routes/admin-treasury.ts:51:  app.get(
+apps/backend/src/routes/admin-treasury.ts:60:  app.get('/api/admin/asset-drift/state', rateLimit(120, 60_000), adminAssetDriftStateHandler);
+apps/backend/src/routes/admin-user-cluster.ts:66:  app.get('/api/admin/users', rateLimit(60, 60_000), adminListUsersHandler);
+apps/backend/src/routes/admin-user-cluster.ts:72:  app.get('/api/admin/users/by-email', rateLimit(60, 60_000), adminUserByEmailHandler);
+apps/backend/src/routes/admin-user-cluster.ts:78:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:88:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:98:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:106:  app.get('/api/admin/users/:userId', rateLimit(120, 60_000), adminGetUserHandler);
+apps/backend/src/routes/admin-user-cluster.ts:110:  app.get('/api/admin/users/:userId/credits', rateLimit(120, 60_000), adminUserCreditsHandler);
+apps/backend/src/routes/admin-user-cluster.ts:115:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:125:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:134:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:144:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:156:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:164:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:174:  app.get(
+apps/backend/src/routes/admin-user-cluster.ts:183:  app.get(
+apps/backend/src/routes/admin-order-drill.ts:39:  app.get('/api/admin/orders/activity', rateLimit(60, 60_000), adminOrdersActivityHandler);
+apps/backend/src/routes/admin-order-drill.ts:46:  app.get(
+apps/backend/src/routes/admin-order-drill.ts:56:  app.get(
+apps/backend/src/routes/admin-order-drill.ts:64:  app.get('/api/admin/orders/:orderId', rateLimit(120, 60_000), adminGetOrderHandler);
+apps/backend/src/routes/admin-order-drill.ts:68:  app.get('/api/admin/orders.csv', rateLimit(10, 60_000), adminOrdersCsvHandler);
+apps/backend/src/routes/merchants.ts:48:  app.get('/api/merchants', rateLimit(180, 60_000), merchantListHandler);
+apps/backend/src/routes/merchants.ts:51:  app.get('/api/merchants/all', rateLimit(60, 60_000), merchantAllHandler);
+apps/backend/src/routes/merchants.ts:53:  app.get('/api/merchants/by-slug/:slug', rateLimit(120, 60_000), merchantBySlugHandler);
+apps/backend/src/routes/merchants.ts:62:  app.get('/api/merchants/cashback-rates', rateLimit(120, 60_000), merchantsCashbackRatesHandler);
+apps/backend/src/routes/merchants.ts:70:  app.get(
+apps/backend/src/routes/merchants.ts:91:  app.get('/api/merchants/:id', rateLimit(120, 60_000), merchantDetailHandler);
+apps/backend/src/routes/admin-ops-tail.ts:64:  app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+apps/backend/src/routes/admin-ops-tail.ts:68:  app.get('/api/admin/merchant-flows', rateLimit(60, 60_000), adminMerchantFlowsHandler);
+apps/backend/src/routes/admin-ops-tail.ts:72:  app.get('/api/admin/discord/config', rateLimit(60, 60_000), adminDiscordConfigHandler);
+apps/backend/src/routes/admin-ops-tail.ts:76:  app.get('/api/admin/users/search', rateLimit(60, 60_000), adminUserSearchHandler);
+apps/backend/src/routes/admin-ops-tail.ts:79:  app.get('/api/admin/user-credits.csv', rateLimit(20, 60_000), adminUserCreditsCsvHandler);
+apps/backend/src/routes/admin-ops-tail.ts:82:  app.get('/api/admin/reconciliation', rateLimit(30, 60_000), adminReconciliationHandler);
+apps/backend/src/routes/admin-ops-tail.ts:88:  app.get('/api/admin/merchant-stats', rateLimit(60, 60_000), adminMerchantStatsHandler);
+apps/backend/src/routes/admin-ops-tail.ts:94:  app.get('/api/admin/orders/:orderId/payout', rateLimit(120, 60_000), adminPayoutByOrderHandler);
+apps/backend/src/routes/admin-ops-tail.ts:99:  app.get('/api/admin/top-users', rateLimit(60, 60_000), adminTopUsersHandler);
+apps/backend/src/routes/admin-ops-tail.ts:104:  app.get('/api/admin/audit-tail', rateLimit(60, 60_000), adminAuditTailHandler);
+apps/backend/src/routes/admin-ops-tail.ts:110:  app.get('/api/admin/audit-tail.csv', rateLimit(10, 60_000), adminAuditTailCsvHandler);
+apps/backend/src/routes/admin-ops-tail.ts:117:  app.post('/api/admin/merchants/resync', rateLimit(2, 60_000), adminMerchantsResyncHandler);
+apps/backend/src/routes/admin-ops-tail.ts:121:  app.get('/api/admin/discord/notifiers', rateLimit(60, 60_000), adminDiscordNotifiersHandler);
+apps/backend/src/routes/admin-ops-tail.ts:126:  app.post('/api/admin/discord/test', rateLimit(10, 60_000), adminDiscordTestHandler);
+apps/backend/src/routes/admin-dashboard.ts:37:  app.get('/api/admin/stuck-orders', rateLimit(120, 60_000), adminStuckOrdersHandler);
+apps/backend/src/routes/admin-dashboard.ts:42:  app.get('/api/admin/stuck-payouts', rateLimit(120, 60_000), adminStuckPayoutsHandler);
+apps/backend/src/routes/admin-dashboard.ts:46:  app.get('/api/admin/cashback-activity', rateLimit(60, 60_000), adminCashbackActivityHandler);
+apps/backend/src/routes/admin-dashboard.ts:51:  app.get(
+apps/backend/src/routes/admin-dashboard.ts:59:  app.get(
+apps/backend/src/routes/admin-dashboard.ts:67:  app.get(
+apps/backend/src/routes/admin-dashboard.ts:75:  app.get(
+apps/backend/src/routes/admin-payouts.ts:44:  app.get('/api/admin/payouts', rateLimit(60, 60_000), adminListPayoutsHandler);
+apps/backend/src/routes/admin-payouts.ts:48:  app.get('/api/admin/payouts/:id', rateLimit(120, 60_000), adminGetPayoutHandler);
+apps/backend/src/routes/admin-payouts.ts:54:  app.get('/api/admin/payouts-by-asset', rateLimit(60, 60_000), adminPayoutsByAssetHandler);
+apps/backend/src/routes/admin-payouts.ts:60:  app.get('/api/admin/payouts/settlement-lag', rateLimit(60, 60_000), adminSettlementLagHandler);
+apps/backend/src/routes/admin-payouts.ts:63:  app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayoutHandler);
+apps/backend/src/routes/admin-payouts.ts:67:  app.post(
+apps/backend/src/routes/admin-payouts.ts:76:  app.get('/api/admin/payouts.csv', rateLimit(10, 60_000), adminPayoutsCsvHandler);
+apps/backend/src/routes/admin-cashback-config.ts:37:  app.get('/api/admin/merchant-cashback-configs', rateLimit(120, 60_000), listConfigsHandler);
+apps/backend/src/routes/admin-cashback-config.ts:43:  app.get(
+apps/backend/src/routes/admin-cashback-config.ts:53:  app.get(
+apps/backend/src/routes/admin-cashback-config.ts:61:  app.get(
+apps/backend/src/routes/admin-cashback-config.ts:66:  app.put(
+apps/backend/src/routes/admin-cashback-config.ts:71:  app.get(

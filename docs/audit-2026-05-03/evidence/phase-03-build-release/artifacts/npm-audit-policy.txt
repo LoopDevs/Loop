@@ -1,0 +1,10 @@
+
+> audit
+> node ./scripts/check-audit-policy.mjs
+
+npm audit policy passed.
+Accepted moderate advisories (4):
+- @esbuild-kit/core-utils: Transitive via drizzle-kit deprecated loader chain; fix requires a major drizzle-kit move.
+- @esbuild-kit/esm-loader: Transitive via drizzle-kit deprecated loader chain; fix requires a major drizzle-kit move.
+- drizzle-kit: Direct package affected through the deprecated esbuild-kit chain; audited major upgrade deferred.
+- esbuild: Only the deprecated drizzle-kit sub-tree lands on the vulnerable range; repo policy tracks it explicitly.

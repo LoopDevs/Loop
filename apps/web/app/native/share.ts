@@ -57,6 +57,25 @@ async function writeTempShareImage(imageUrl: string, filename: string): Promise<
 }
 
 /**
+ * A4-059: opportunistic purge of the share image after the user
+ * has dismissed the share sheet (or after a timeout). Each share
+ * writes a PNG containing the merchant brand + redeem code +
+ * barcode to `<cache>/share/`; without an app-side purge those
+ * accumulate until the OS evicts the cache directory (unbounded).
+ *
+ * Best-effort: a failure here is silent. Worst case the OS handles
+ * the eviction itself.
+ */
+async function purgeShareImage(scopedPath: string): Promise<void> {
+  try {
+    const { Filesystem, Directory } = await import('@capacitor/filesystem');
+    await Filesystem.deleteFile({ path: scopedPath, directory: Directory.Cache });
+  } catch {
+    /* ignored — OS-level cache eviction is the fallback */
+  }
+}
+
+/**
  * Opens the native share sheet with optional file attachment. On
  * Capacitor native we write the image to `Directory.Cache` and
  * pass the URI to `@capacitor/share`'s `files` field (the only
@@ -72,7 +91,18 @@ export async function nativeShare(options: ShareOptions): Promise<boolean> {
         const filename = options.imageFilename ?? 'share.png';
         const uri = await writeTempShareImage(options.imageUrl, filename);
         if (uri !== null) {
-          await Share.share({ title: options.title, text: options.text, files: [uri] });
+          const scopedPath = `share/${filename}`;
+          try {
+            await Share.share({ title: options.title, text: options.text, files: [uri] });
+          } finally {
+            // A4-059: purge the share-image PNG once the share
+            // sheet has been dismissed (the share extension has
+            // already read + cached its own copy by this point).
+            // Every share otherwise accumulates a PNG under
+            // <cache>/share/ that survives until OS-driven cache
+            // eviction.
+            void purgeShareImage(scopedPath);
+          }
           return true;
         }
       }

@@ -45,11 +45,12 @@
  * code path that does `select(u where email=?)` keeps working
  * without special-casing the deletion sentinel.
  */
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { orders, pendingPayouts, userIdentities, users } from '../db/schema.js';
 import type { PAYOUT_STATES, ORDER_STATES } from '../db/schema.js';
 import { revokeAllRefreshTokensForUser } from '../auth/refresh-tokens.js';
+import { logger } from '../logger.js';
 
 /**
  * Pre-condition check: which user states would block deletion. The
@@ -57,7 +58,26 @@ import { revokeAllRefreshTokensForUser } from '../auth/refresh-tokens.js';
  * client can render targeted UX ("your withdrawal is pending — try
  * again once it settles").
  */
-export type DsrDeleteBlockReason = 'pending_payouts' | 'in_flight_orders';
+/**
+ * A4-078: extended block reasons.
+ *
+ *   - `pending_payouts`: a pending or submitted payout — money in
+ *     flight on chain.
+ *   - `in_flight_orders`: an order in pending_payment / paid /
+ *     procuring — purchase being fulfilled.
+ *   - `failed_uncompensated_withdrawals`: a withdrawal payout in
+ *     state='failed' with `compensated_at IS NULL`. The user owes
+ *     themselves money; admin compensation needs to fire OR a
+ *     manual recovery path. Anonymising in this window orphans
+ *     the user_credits balance — admin compensation re-credits a
+ *     row whose email is now `deleted-{uuid}@…`, the user's new
+ *     account (re-signup with the original email) gets a fresh
+ *     user_id and never sees the recovered balance.
+ */
+export type DsrDeleteBlockReason =
+  | 'pending_payouts'
+  | 'in_flight_orders'
+  | 'failed_uncompensated_withdrawals';
 
 export interface DsrDeleteResult {
   /** True when the anonymisation succeeded; the caller's session is dead. */
@@ -75,6 +95,15 @@ export interface DsrDeleteResult {
 export function deletedEmailFor(userId: string): string {
   return `deleted-${userId}@deleted.loopfinance.io`;
 }
+
+/**
+ * A4-123: synthetic well-formed Stellar pubkey used to scrub
+ * `pending_payouts.to_address` on terminal rows during DSR
+ * anonymisation. Matches the `pending_payouts_to_address_format`
+ * CHECK regex (`^G[A-Z2-7]{55}$`) but does not correspond to a
+ * derivable account. Exposed so tests can assert the exact value.
+ */
+export const SCRUBBED_TO_ADDRESS = `G${'A'.repeat(55)}`;
 
 /**
  * Anonymises the user identified by `userId`. Refuses (returns
@@ -103,6 +132,32 @@ export async function deleteUserViaAnonymisation(userId: string): Promise<DsrDel
     .limit(1);
   if (blockingPayouts.length > 0) {
     return { ok: false, blockedBy: 'pending_payouts' };
+  }
+
+  // A4-078: a failed withdrawal payout with compensated_at IS
+  // NULL means the user_credits debit landed but the on-chain
+  // payout never did, and no admin compensation has re-credited
+  // the balance yet. The user owes themselves money. Anonymising
+  // in this window severs the recovery path: admin compensation
+  // re-credits the (now-anonymised) user_id; if the user
+  // re-signs up with the same email they get a fresh user_id and
+  // can't see the recovered balance. Block until either the
+  // compensation lands (compensated_at != NULL) or ops decides
+  // to write the balance off via a separate admin path.
+  const failedUncompensated = await db
+    .select({ id: pendingPayouts.id })
+    .from(pendingPayouts)
+    .where(
+      and(
+        eq(pendingPayouts.userId, userId),
+        eq(pendingPayouts.state, 'failed' as (typeof PAYOUT_STATES)[number]),
+        eq(pendingPayouts.kind, 'withdrawal'),
+        sql`${pendingPayouts.compensatedAt} IS NULL`,
+      ),
+    )
+    .limit(1);
+  if (failedUncompensated.length > 0) {
+    return { ok: false, blockedBy: 'failed_uncompensated_withdrawals' };
   }
 
   // Block: orders mid-fulfilment. ADR 010 transitions are
@@ -143,12 +198,60 @@ export async function deleteUserViaAnonymisation(userId: string): Promise<DsrDel
         stellarAddress: null,
       })
       .where(eq(users.id, userId));
+
+    // A4-123: terminal payout rows (state IN ('confirmed', 'failed'))
+    // retain `to_address` — the user's Stellar destination — by
+    // default. The privacy policy promises identifier removal where
+    // retention isn't legally required; an on-chain wallet address is
+    // identifying and linkable, and we keep `tx_hash` + the totals
+    // for accounting reconciliation, so scrubbing the address alone
+    // preserves the ledger trail without continuing to advertise the
+    // user's wallet.
+    //
+    // The schema's `pending_payouts_to_address_format` CHECK pins
+    // `to_address` to `^G[A-Z2-7]{55}$`, so we replace with a
+    // synthetic well-formed sentinel rather than NULL or empty. The
+    // sentinel doesn't decode to a real account; combined with the
+    // user-row email scrub above, the row no longer links a real
+    // person to a real Stellar address.
+    //
+    // Pending/submitted rows are blocked above so they cannot reach
+    // this scrub; we only ever clear addresses on rows that are
+    // already terminal.
+    await tx
+      .update(pendingPayouts)
+      .set({ toAddress: SCRUBBED_TO_ADDRESS })
+      .where(
+        and(
+          eq(pendingPayouts.userId, userId),
+          inArray(pendingPayouts.state, [
+            'confirmed',
+            'failed',
+          ] satisfies (typeof PAYOUT_STATES)[number][]),
+        ),
+      );
   });
 
   // Sessions: revoke after the txn so a partial failure doesn't
   // leave the user logged-out without their data anonymised. The
   // refresh-token revoke is idempotent.
-  await revokeAllRefreshTokensForUser(userId);
+  //
+  // A4-086: surface a revoke failure loudly. The anonymisation
+  // already committed, so we cannot roll back; but a stale
+  // refresh token against an anonymised row is a privacy
+  // regression we want operators to know about and remediate
+  // (running revokeAllRefreshTokensForUser manually). Without
+  // this log line, a transient DB blip during the revoke would
+  // silently leave the row anonymised but sessions live.
+  try {
+    await revokeAllRefreshTokensForUser(userId);
+  } catch (err) {
+    logger.error(
+      { err, userId },
+      'A4-086: DSR anonymisation succeeded but refresh-token revoke failed — rerun revokeAllRefreshTokensForUser manually',
+    );
+    throw err;
+  }
 
   return { ok: true };
 }

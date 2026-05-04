@@ -1,0 +1,96 @@
+Loop-native order runtime response/status/enum evidence
+apps/backend/src/db/schema.ts:443:    paymentMethod: text('payment_method').notNull(),
+apps/backend/src/db/schema.ts:529:      sql`${t.paymentMethod} IN ('xlm', 'usdc', 'credit', 'loop_asset')`,
+apps/backend/src/db/schema.ts:555:    // method. On-chain methods (xlm / usdc / loop_asset) all
+apps/backend/src/db/schema.ts:563:      sql`${t.paymentMethod} = 'credit' OR ${t.paymentMemo} IS NOT NULL`,
+apps/backend/src/db/schema.ts:582:  ORDER_PAYMENT_METHODS,
+packages/shared/src/loop-orders.ts:9: * the `loop_asset` payment variant. Both sides now import from here.
+packages/shared/src/loop-orders.ts:23: * - `paymentMethod` accepts the full `ORDER_PAYMENT_METHODS` union,
+packages/shared/src/loop-orders.ts:24: *   including `loop_asset` (recycled LOOP-branded stablecoin, ADR 015).
+packages/shared/src/loop-orders.ts:31:  paymentMethod: OrderPaymentMethod;
+packages/shared/src/loop-orders.ts:39: * - `loop_asset`: recycled LOOP-branded stablecoin. Same address + memo
+packages/shared/src/loop-orders.ts:55:        method: 'loop_asset';
+packages/shared/src/loop-orders.ts:88:   * The rail the user funded the order on. Includes `loop_asset`
+packages/shared/src/loop-orders.ts:92:  paymentMethod: OrderPaymentMethod;
+packages/shared/src/order-state.ts:42: * - `loop_asset`: a LOOP-branded stablecoin (USDLOOP / GBPLOOP /
+packages/shared/src/order-state.ts:46:export const ORDER_PAYMENT_METHODS = ['xlm', 'usdc', 'credit', 'loop_asset'] as const;
+packages/shared/src/order-state.ts:47:export type OrderPaymentMethod = (typeof ORDER_PAYMENT_METHODS)[number];
+packages/shared/src/order-state.ts:50:  return (ORDER_PAYMENT_METHODS as readonly string[]).includes(s);
+apps/backend/src/orders/loop-handler.ts:27:import { ORDER_PAYMENT_METHODS } from '../db/schema.js';
+apps/backend/src/orders/loop-handler.ts:38:import { buildLoopCreateResponse } from './loop-create-response.js';
+apps/backend/src/orders/loop-handler.ts:61:  paymentMethod: z.enum(ORDER_PAYMENT_METHODS),
+apps/backend/src/orders/loop-handler.ts:80:    return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
+apps/backend/src/orders/loop-handler.ts:84:    return c.json(
+apps/backend/src/orders/loop-handler.ts:95:    return c.json(
+apps/backend/src/orders/loop-handler.ts:116:      return c.json(
+apps/backend/src/orders/loop-handler.ts:140:    return c.json({ code: 'VALIDATION_ERROR', message: 'Unknown or disabled merchant' }, 400);
+apps/backend/src/orders/loop-handler.ts:149:    return c.json({ code: 'UNAUTHORIZED', message: 'User record not found' }, 401);
+apps/backend/src/orders/loop-handler.ts:159:    return c.json({ code: 'INTERNAL_ERROR', message: 'Invalid account currency' }, 500);
+apps/backend/src/orders/loop-handler.ts:162:    return c.json(
+apps/backend/src/orders/loop-handler.ts:184:    return c.json(
+apps/backend/src/orders/loop-handler.ts:186:        code: 'SERVICE_UNAVAILABLE',
+apps/backend/src/orders/loop-handler.ts:196:  if (parsed.data.paymentMethod === 'credit') {
+apps/backend/src/orders/loop-handler.ts:199:      return c.json(
+apps/backend/src/orders/loop-handler.ts:201:          code: 'INSUFFICIENT_CREDIT',
+apps/backend/src/orders/loop-handler.ts:212:  if (parsed.data.paymentMethod !== 'credit' && env.LOOP_STELLAR_DEPOSIT_ADDRESS === undefined) {
+apps/backend/src/orders/loop-handler.ts:214:    return c.json(
+apps/backend/src/orders/loop-handler.ts:216:        code: 'SERVICE_UNAVAILABLE',
+apps/backend/src/orders/loop-handler.ts:223:  // Compute the "is this user's first loop_asset order?" flag
+apps/backend/src/orders/loop-handler.ts:226:  // loop_asset insert would fire two "first" notifications; the
+apps/backend/src/orders/loop-handler.ts:229:  // non-loop_asset payment methods.
+apps/backend/src/orders/loop-handler.ts:231:    parsed.data.paymentMethod === 'loop_asset' ? await isFirstLoopAssetOrder(auth.userId) : false;
+apps/backend/src/orders/loop-handler.ts:241:      paymentMethod: parsed.data.paymentMethod,
+apps/backend/src/orders/loop-handler.ts:244:    return buildLoopCreateResponse(c, {
+apps/backend/src/orders/loop-handler.ts:264:      return c.json(
+apps/backend/src/orders/loop-handler.ts:265:        { code: 'INSUFFICIENT_CREDIT', message: 'Loop credit balance is below the order amount' },
+apps/backend/src/orders/loop-handler.ts:270:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to create order' }, 500);
+apps/backend/src/orders/loop-create-response.ts:10: *   - `loop_asset` → Stellar deposit address + memo + LOOP-asset
+apps/backend/src/orders/loop-create-response.ts:15: * The `loop_asset` branch additionally fails closed (503) when the
+apps/backend/src/orders/loop-create-response.ts:21: * fanout that travels with `loop_asset`) lives in one place.
+apps/backend/src/orders/loop-create-response.ts:36: * caller's first-ever `loop_asset` order — gates the milestone
+apps/backend/src/orders/loop-create-response.ts:39:export function buildLoopCreateResponse(
+apps/backend/src/orders/loop-create-response.ts:53:  if (order.paymentMethod === 'credit') {
+apps/backend/src/orders/loop-create-response.ts:54:    return c.json<CreateLoopOrderResponse>({
+apps/backend/src/orders/loop-create-response.ts:65:  if (order.paymentMethod === 'loop_asset') {
+apps/backend/src/orders/loop-create-response.ts:78:        'loop_asset order placed but matching issuer env var not set',
+apps/backend/src/orders/loop-create-response.ts:80:      return c.json(
+apps/backend/src/orders/loop-create-response.ts:82:          code: 'SERVICE_UNAVAILABLE',
+apps/backend/src/orders/loop-create-response.ts:92:    // a failed loop_asset order still demonstrates flywheel intent
+apps/backend/src/orders/loop-create-response.ts:114:    return c.json<CreateLoopOrderResponse>({
+apps/backend/src/orders/loop-create-response.ts:117:        method: 'loop_asset',
+apps/backend/src/orders/loop-create-response.ts:129:  return c.json<CreateLoopOrderResponse>({
+apps/backend/src/orders/loop-create-response.ts:132:      method: order.paymentMethod as 'xlm' | 'usdc',
+apps/backend/src/orders/loop-read-handlers.ts:36: * The shared view also widens `paymentMethod` to include `loop_asset`
+apps/backend/src/orders/loop-read-handlers.ts:55:  paymentMethod: string;
+apps/backend/src/orders/loop-read-handlers.ts:80:    // column to `ORDER_PAYMENT_METHODS`. A2-1504 widened this from
+apps/backend/src/orders/loop-read-handlers.ts:81:    // `'xlm' | 'usdc' | 'credit'` because `loop_asset` rows do reach
+apps/backend/src/orders/loop-read-handlers.ts:83:    paymentMethod: row.paymentMethod as OrderPaymentMethod,
+apps/backend/src/orders/loop-read-handlers.ts:86:      row.paymentMethod === 'credit' ? null : (env.LOOP_STELLAR_DEPOSIT_ADDRESS ?? null),
+apps/backend/src/orders/loop-read-handlers.ts:112:    return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
+apps/backend/src/orders/loop-read-handlers.ts:116:    return c.json({ code: 'UNAUTHORIZED', message: 'Loop-native authentication required' }, 401);
+apps/backend/src/orders/loop-read-handlers.ts:120:    return c.json({ code: 'VALIDATION_ERROR', message: 'id is required' }, 400);
+apps/backend/src/orders/loop-read-handlers.ts:127:    return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);
+apps/backend/src/orders/loop-read-handlers.ts:130:  return c.json(orderToView(row));
+apps/backend/src/orders/loop-read-handlers.ts:146:    return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
+apps/backend/src/orders/loop-read-handlers.ts:150:    return c.json({ code: 'UNAUTHORIZED', message: 'Loop-native authentication required' }, 401);
+apps/backend/src/orders/loop-read-handlers.ts:161:    return c.json(
+apps/backend/src/orders/loop-read-handlers.ts:180:  return c.json({ orders: rows.map(orderToView) });
+
+OpenAPI loop-native declarations
+apps/backend/src/openapi/orders-loop-reads.ts:53:      paymentMethod: z.enum(['xlm', 'usdc', 'credit']).openapi({
+apps/backend/src/openapi/orders-loop-reads.ts:55:          'Payment rail used to pay the order. `loop_asset` maps to `credit` on the view since the user-visible shape is identical (no Stellar address to display post-pay).',
+apps/backend/src/openapi/orders-loop-reads.ts:81:    path: '/api/orders/loop',
+apps/backend/src/openapi/orders-loop-reads.ts:93:    responses: {
+apps/backend/src/openapi/orders-loop-reads.ts:126:    responses: {
+apps/backend/src/openapi/orders-loop.ts:14: *   - `LoopPaymentMethod` enum (xlm / usdc / credit / loop_asset)
+apps/backend/src/openapi/orders-loop.ts:49:  // methods (xlm, usdc, credit, loop_asset) plus the cashback-
+apps/backend/src/openapi/orders-loop.ts:52:  const LoopPaymentMethod = registry.register(
+apps/backend/src/openapi/orders-loop.ts:53:    'LoopPaymentMethod',
+apps/backend/src/openapi/orders-loop.ts:54:    z.enum(['xlm', 'usdc', 'credit', 'loop_asset']),
+apps/backend/src/openapi/orders-loop.ts:69:      paymentMethod: LoopPaymentMethod,
+apps/backend/src/openapi/orders-loop.ts:74:  // /api/orders/loop`. On-chain methods (xlm / usdc / loop_asset)
+apps/backend/src/openapi/orders-loop.ts:89:    method: z.literal('loop_asset'),
+apps/backend/src/openapi/orders-loop.ts:126:    path: '/api/orders/loop',
+apps/backend/src/openapi/orders-loop.ts:129:      "Creates an order under the Loop-native auth path. Returns per-method payment instructions: on-chain methods (`xlm`, `usdc`, `loop_asset`) include the destination address + memo the client uses to build the outbound payment; `credit` returns only the amount we'll debit from the user's cashback balance on the paid-state transition. Optional `Idempotency-Key` header (16-128 chars) — when present, a repeat post replays the prior order's response instead of creating a duplicate (A2-2003).",
+apps/backend/src/openapi/orders-loop.ts:145:    responses: {
+apps/backend/src/openapi/orders-loop.ts:159:      402: {

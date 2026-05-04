@@ -156,10 +156,6 @@ export function registerOrdersLoopOpenApi(
         description: 'Missing or non-Loop auth context',
         content: { 'application/json': { schema: errorResponse } },
       },
-      402: {
-        description: 'Credit-funded order with insufficient balance',
-        content: { 'application/json': { schema: errorResponse } },
-      },
       404: {
         description: 'Loop-native auth disabled (LOOP_AUTH_NATIVE_ENABLED=false)',
         content: { 'application/json': { schema: errorResponse } },
@@ -170,6 +166,15 @@ export function registerOrdersLoopOpenApi(
       },
       500: {
         description: 'Invalid account currency or unexpected server error',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      // A4-102: handler emits 503 for FX / deposit-config / asset-config
+      // failures (loop-handler.ts) — the route was previously declaring
+      // 402 (which is never emitted; insufficient credit returns 400
+      // INSUFFICIENT_CREDITS).
+      503: {
+        description:
+          'FX feed unavailable, deposit address unconfigured, or LOOP-asset issuer not configured for the requested currency',
         content: { 'application/json': { schema: errorResponse } },
       },
     },

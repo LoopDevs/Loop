@@ -1,0 +1,21 @@
+apps/backend/package.json:31:    "postgres": "3.4.9",
+docs/third-party-licenses.md:13:Before the public launch at `loopfinance.io/licenses`, ship a page
+docs/third-party-licenses.md:18:### libvips (via `sharp` image processing) — LGPL-3.0-or-later
+docs/third-party-licenses.md:20:**Package:** `@img/sharp-libvips-*` prebuilt binaries (`^1.2.4` at
+docs/third-party-licenses.md:25:`jpeg(...)`. libvips is the native C library doing the actual pixel
+docs/third-party-licenses.md:31:prebuilt package's README (`node_modules/@img/sharp-libvips-<platform>/README.md`).
+docs/third-party-licenses.md:36:1. Listing libvips in this document.
+docs/third-party-licenses.md:38:3. Linking to the upstream source (`https://www.libvips.org/`) and
+docs/third-party-licenses.md:41:**Note on dynamic linking:** sharp uses libvips via dlopen against a
+docs/third-party-licenses.md:43:"runtime relinking" clause. We do not statically link libvips, so no
+docs/third-party-licenses.md:46:### Leaflet default marker images — BSD-2-Clause
+docs/third-party-licenses.md:54:**Upstream:** `https://github.com/Leaflet/Leaflet`. BSD-2-Clause
+docs/third-party-licenses.md:55:licence; copyright belongs to the Leaflet contributors.
+docs/third-party-licenses.md:58:Capacitor static-export build strips `node_modules` assets at bundle
+docs/third-party-licenses.md:59:time, and Leaflet expects its defaults at a path it controls on the
+docs/third-party-licenses.md:64:equivalent): the Leaflet copyright notice is preserved in this
+docs/third-party-licenses.md:66:`LICENSE` text from the Leaflet repository reads:
+docs/third-party-licenses.md:72:### postgres (driver) — Unlicense
+docs/third-party-licenses.md:74:**Package:** `postgres@3.4.9` (aka `postgres-js`).
+docs/third-party-licenses.md:76:**Used for:** Drizzle ORM's underlying Postgres driver for the
+docs/third-party-licenses.md:79:**Licence:** The Unlicense — a public-domain dedication with no

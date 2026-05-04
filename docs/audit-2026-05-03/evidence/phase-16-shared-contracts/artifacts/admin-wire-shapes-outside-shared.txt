@@ -1,0 +1,39 @@
+Phase 16 artifact: admin wire shapes still duplicated outside @loop/shared
+Date: 2026-05-03
+Scope: current code only; Claude audit workspace excluded.
+
+Shared-package policy verified:
+- packages/shared/AGENTS.md:38-44 says all code used by both web and backend must live in @loop/shared, never duplicate, and new types must export from src/index.ts.
+- packages/shared/src/index.ts:1-26 exports existing centralized contracts, including several admin/public/user contracts.
+
+Verified duplicated backend/web wire-shape pairs:
+
+1. Admin activity time series
+- apps/web/app/services/admin-activity.ts:20-28 says the response shapes have no other consumers and should not be promoted to @loop/shared.
+- apps/web/app/services/admin-activity.ts:37-90 declares OrdersActivityResponse, CashbackActivityResponse, and PayoutsActivityResponse for client calls.
+- apps/backend/src/admin/orders-activity.ts:23-35 declares equivalent ActivityDay/AdminOrdersActivityResponse.
+- apps/backend/src/admin/cashback-activity.ts:26-42 declares equivalent PerCurrencyAmount/CashbackActivityDay/CashbackActivityResponse.
+- apps/backend/src/admin/payouts-activity.ts:37-56 declares equivalent PerAssetAmount/PayoutsActivityDay/PayoutsActivityResponse.
+
+2. Admin payment-method share matrix
+- apps/web/app/services/admin-payment-method-share.ts:19-29 says the response shapes have no other consumers and should not be promoted to @loop/shared.
+- apps/web/app/services/admin-payment-method-share.ts:38-70 declares PaymentMethodShareBucket, AdminPaymentMethod, and fleet/merchant/user response shapes.
+- apps/backend/src/admin/payment-method-share.ts:47-57 declares the fleet response shape.
+- apps/backend/src/admin/merchant-payment-method-share.ts:41-52 declares the merchant response shape.
+- apps/backend/src/admin/user-payment-method-share.ts:37-48 declares the user response shape.
+- packages/shared/src/users-me.ts:214-224 already has the self-user payment-method response shape, proving this contract family is split between shared and duplicated admin-only copies.
+
+3. Admin users directory/detail
+- apps/web/app/services/admin-users-list.ts:18-24 says the AdminUserRow/AdminUserDetail shapes have no other consumers and should not be promoted to @loop/shared.
+- apps/web/app/services/admin-users-list.ts:29-47 declares the client list/detail shapes.
+- apps/backend/src/admin/users-list.ts:21-30 declares the list response shape.
+- apps/backend/src/admin/user-detail.ts:23-32 declares the detail response shape.
+- apps/backend/src/admin/user-by-email.ts:37-46 declares a second duplicate detail response shape.
+
+Breadth indicator:
+- rg found the same "promoting them to @loop/shared would just add indirection" pattern in multiple web service files: admin-activity, admin-merchant-drill, admin-user-fleet-activity, admin-stuck, admin-payment-method-activity, admin-cashback-config, admin-user-credits, admin-payouts-by-asset, admin-top-users, admin-merchant-stats, admin-payment-method-share, admin-monthly, admin-user-drill, admin-users-list, admin-user-cashback-by-merchant, and admin-merchant-activity.
+
+Reasoning:
+- These are not frontend-only types; they are response bodies produced by backend handlers and consumed by web service wrappers.
+- Because backend and web compile against independent local interfaces, a backend field rename/type change can pass backend compilation and a web local type can remain stale until runtime/tests catch it.
+- This contradicts the current shared-package rule and the surrounding pattern where admin treasury/assets/supplier/operator contracts were centralized in @loop/shared.

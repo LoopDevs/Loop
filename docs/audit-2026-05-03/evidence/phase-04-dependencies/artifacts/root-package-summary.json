@@ -1,0 +1,52 @@
+{
+  "name": "loop-app",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "concurrently -n web,backend -c cyan,green \"npm run dev:web\" \"npm run dev:backend\"",
+    "dev:web": "npm run dev -w @loop/web",
+    "dev:backend": "npm run dev -w @loop/backend",
+    "mobile:sync": "npm run sync -w @loop/mobile",
+    "typecheck": "npm run typecheck -w @loop/backend -w @loop/web -w @loop/shared",
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "npm run test -w @loop/backend -w @loop/web",
+    "test:coverage": "npm run test:coverage --workspaces --if-present",
+    "test:e2e": "playwright test --config=playwright.mocked.config.ts",
+    "test:e2e:mocked": "playwright test --config=playwright.mocked.config.ts",
+    "test:e2e:flywheel": "playwright test --config=playwright.flywheel.config.ts",
+    "test:e2e:real": "playwright test",
+    "verify": "./scripts/verify.sh",
+    "lint:docs": "./scripts/lint-docs.sh",
+    "check:bundle-budget": "./scripts/check-bundle-budget.sh",
+    "audit": "node ./scripts/check-audit-policy.mjs",
+    "build": "npm run build -w @loop/backend -w @loop/web",
+    "proto:generate": "cd apps/backend && npx buf generate && cd ../.. && prettier --write 'packages/shared/src/proto/**/*.ts'",
+    "prepare": "husky"
+  },
+  "dependencies": null,
+  "devDependencies": {
+    "@anthropic-ai/claude-code": "2.1.114",
+    "@commitlint/cli": "20.5.0",
+    "@commitlint/config-conventional": "20.5.0",
+    "@cyclonedx/cyclonedx-npm": "4.2.1",
+    "@playwright/test": "1.59.1",
+    "@sentry/cli": "2.49.0",
+    "@stellar/stellar-sdk": "15.0.1",
+    "@typescript-eslint/eslint-plugin": "8.58.2",
+    "@typescript-eslint/parser": "8.58.2",
+    "concurrently": "9.2.1",
+    "eslint": "10.3.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "husky": "9.1.7",
+    "lint-staged": "16.4.0",
+    "prettier": "3.8.3",
+    "typescript": "6.0.3",
+    "wait-on": "9.0.5"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

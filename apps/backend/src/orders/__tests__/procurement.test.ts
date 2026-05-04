@@ -13,12 +13,14 @@ vi.mock('../../upstream.js', () => ({
 const markProcuringMock = vi.fn();
 const markFulfilledMock = vi.fn();
 const markFailedMock = vi.fn();
+const revertProcuringMock = vi.fn();
 const operatorFetchMock = vi.fn();
 
 vi.mock('../transitions.js', () => ({
   markOrderProcuring: (id: string, o: unknown) => markProcuringMock(id, o),
   markOrderFulfilled: (id: string, o: unknown) => markFulfilledMock(id, o),
   markOrderFailed: (id: string, reason: string) => markFailedMock(id, reason),
+  revertOrderProcuringToPaid: (id: string) => revertProcuringMock(id),
 }));
 vi.mock('../../ctx/operator-pool.js', () => {
   class OperatorPoolUnavailableError extends Error {
@@ -155,6 +157,8 @@ beforeEach(() => {
   markProcuringMock.mockReset();
   markFulfilledMock.mockReset();
   markFailedMock.mockReset();
+  revertProcuringMock.mockReset();
+  revertProcuringMock.mockResolvedValue({ id: 'o-1' });
   operatorFetchMock.mockReset();
   getBalancesMock.mockClear();
   discordMock.notifyUsdcBelowFloor.mockClear();
@@ -262,6 +266,42 @@ describe('runProcurementTick', () => {
     });
   });
 
+  it('A4-017: serialises fiatAmount via bigint-safe formatter (no Number coerce)', async () => {
+    // 1_000_000_000_000n cents = $10,000,000,000.00 — well past
+    // 2^53 cents, so Number(faceValueMinor) would silently lose
+    // precision before the .toFixed(2). Bigint-safe formatting must
+    // emit the exact decimal string regardless of magnitude.
+    state.paid = [
+      makeOrder({
+        id: 'o-bigint',
+        merchantId: 'target',
+        currency: 'USD',
+        faceValueMinor: 1_000_000_000_000n,
+      }),
+    ];
+    mockProcureAndFetch('ctx-bigint');
+    await runProcurementTick();
+    const init = operatorFetchMock.mock.calls[0]![1] as RequestInit;
+    const body = JSON.parse(String(init.body));
+    expect(body.fiatAmount).toBe('10000000000.00');
+  });
+
+  it('A4-017: serialises sub-dollar amounts with leading zero in the fractional part', async () => {
+    state.paid = [
+      makeOrder({
+        id: 'o-cents',
+        merchantId: 'target',
+        currency: 'USD',
+        faceValueMinor: 5n,
+      }),
+    ];
+    mockProcureAndFetch('ctx-cents');
+    await runProcurementTick();
+    const init = operatorFetchMock.mock.calls[0]![1] as RequestInit;
+    const body = JSON.parse(String(init.body));
+    expect(body.fiatAmount).toBe('0.05');
+  });
+
   it('A2-1508: pins the CTX procurement POST with an Idempotency-Key = order id', async () => {
     state.paid = [makeOrder({ id: 'order_abc123' })];
     mockProcureAndFetch('ctx-1');
@@ -302,13 +342,17 @@ describe('runProcurementTick', () => {
     expect(markFailedMock).toHaveBeenCalledWith('o-1', expect.stringMatching(/schema drift/));
   });
 
-  it('operator pool unavailable → order stays procuring, skipped (no mark-failed)', async () => {
+  it('operator pool unavailable → reverts to paid for retry, skipped (no mark-failed) [A4-101]', async () => {
     state.paid = [makeOrder({ id: 'o-1' })];
     operatorFetchMock.mockRejectedValue(new OperatorPoolUnavailableError('pool exhausted'));
     const r = await runProcurementTick();
     expect(r.skipped).toBe(1);
     expect(r.failed).toBe(0);
     expect(markFailedMock).not.toHaveBeenCalled();
+    // A4-101: row is reverted from `procuring` back to `paid` so
+    // the next tick re-picks it. Earlier behaviour left it
+    // procuring and the stuck-sweep failed it ~15 min later.
+    expect(revertProcuringMock).toHaveBeenCalledWith('o-1');
   });
 
   it('unexpected throw → markOrderFailed with message', async () => {

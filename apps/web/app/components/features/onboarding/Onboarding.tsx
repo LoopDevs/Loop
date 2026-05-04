@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { checkBiometrics } from '~/native/biometrics';
 import type { BiometricResult } from '~/native/biometrics';
 import { setHomeCurrency } from '~/services/user';
+import { useAppConfig } from '~/hooks/use-app-config';
 import { ApiException } from '@loop/shared';
 import { Dots } from './atoms';
 import { TrustWelcome, TrustHowItWorks, TrustMerchants } from './screens-trust';
@@ -98,6 +99,12 @@ interface OnboardingProps {
 
 export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Element {
   const navigate = useNavigate();
+  const { config } = useAppConfig();
+  // Tranche 1 (MVP) launch: skip steps 5 (CurrencyPicker — needs
+  // multi-currency cashback) and 7 (WalletIntro — needs the
+  // Stellar passkey wallet that ships in Tranche 2). Auto-advance
+  // when we render those indices so users see only steps 0-4, 6, 8.
+  const phase1Only = config.phase1Only;
   const [step, setStep] = useState(0);
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
@@ -307,6 +314,20 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
     if (step !== 3 && step !== 4) clearErrors();
     if (step !== 5) setCurrencyError(null);
   }, [step, clearErrors]);
+
+  // Tranche 1 auto-advance for the cashback-related steps. Done in
+  // an effect so React commits the intermediate render before we
+  // setStep — avoids "Cannot update during render" warnings.
+  useEffect(() => {
+    if (!phase1Only) return;
+    if (step === 5 || step === 7) {
+      // Skip forward by one. Forward-only — these indices are only
+      // ever reached via `next()`, and a user pressing Back from
+      // step 6 would land on step 4 (Otp) per the existing
+      // navigation, never on step 5.
+      setStep((s) => s + 1);
+    }
+  }, [step, phase1Only]);
 
   const currentCta = stepCta[step]!;
 

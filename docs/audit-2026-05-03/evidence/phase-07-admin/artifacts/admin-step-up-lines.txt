@@ -1,0 +1,262 @@
+docs/roadmap.md:137:- [ ] SEP-24 / off-platform withdrawal UX for LOOP assets.
+docs/architecture.md:159:authenticated mutation today (orders, withdrawals, admin writes) would
+docs/architecture.md:334:POST /api/admin/payouts/:id/compensate                 [admin — re-credit user after permanently failed withdrawal payout, ADR 024 §5]
+docs/architecture.md:339:POST /api/admin/users/:userId/credit-adjustments        [admin — signed credit adjustment, ADR 017]
+docs/architecture.md:341:POST /api/admin/users/:userId/withdrawals               [admin — debit cashback balance + queue on-chain payout, ADR-024 / A2-901]
+docs/adr/028-admin-step-up-auth.md:1:# ADR-028 — Admin step-up authentication for destructive actions
+docs/adr/028-admin-step-up-auth.md:3:**Status:** Accepted (Phase-1 design pinned, implementation deferred)
+docs/adr/028-admin-step-up-auth.md:11:The admin surface (`apps/web/app/routes/admin*.tsx` + `apps/backend/src/admin/*`) carries a number of destructive primitives: credit adjustments (ADR-017), withdrawal writes (ADR-024), cashback-config edits (ADR-011), payout retries, supplier order replays, and the planned merchant-blacklist controls. Each is gated on the admin's bearer token + the per-action `Idempotency-Key` ADR-017 contract — which protects against replays and accidental double-fires, but **not** against an attacker who has already captured a live bearer token.
+docs/adr/028-admin-step-up-auth.md:13:A2-1609 pins the threat: a 15-minute admin access token, exfiltrated from a compromised laptop / clipboard / browser extension, can issue **unlimited** credit adjustments inside its TTL window. The per-day cap (A2-1610, `ADMIN_DAILY_ADJUSTMENT_CAP_MINOR`) caps the dollar magnitude but not the count or the destructive variety. The `ADMIN_DAILY_ADJUSTMENT_CAP_MINOR` is a circuit-breaker, not a mitigation against active session theft.
+docs/adr/028-admin-step-up-auth.md:19:**Phase 1: pin the design; ship a minimal slice for credit-adjust + withdrawal only. Phase 2: expand.**
+docs/adr/028-admin-step-up-auth.md:21:The Phase-1 step-up surface is:
+docs/adr/028-admin-step-up-auth.md:24:- `POST /api/admin/withdrawals` (ADR-024 withdrawal writer)
+docs/adr/028-admin-step-up-auth.md:36:Step-up token = a short-lived (5-minute) JWT minted by `POST /api/admin/step-up` after the admin re-presents their **password / OTP** (Loop-native auth) or **OAuth re-auth** (Google / Apple, ADR-014). The step-up JWT is independent of the bearer access token — it's stamped with `purpose: 'admin-step-up'` and `audience: 'admin-write'`, and verified separately by the gated handlers.
+docs/adr/028-admin-step-up-auth.md:39:POST /api/admin/step-up
+docs/adr/028-admin-step-up-auth.md:47:    X-Admin-Step-Up: <stepUpToken>                ← NEW
+docs/adr/028-admin-step-up-auth.md:53:5-minute TTL is the trade-off: short enough that a stolen token can't be used for a meaningful spree, long enough that an admin doesn't re-auth between every line of a 20-row CSV import.
+docs/adr/028-admin-step-up-auth.md:57:Step-up tokens are **stateless** — verified by HS256 signature against `LOOP_STEP_UP_SIGNING_KEY` (separate from `LOOP_JWT_SIGNING_KEY` so a JWT-key compromise doesn't widen to step-up). No DB row per issued token; the 5-minute TTL is enforced by the `exp` claim. A keepalive endpoint is **not** offered — admins re-auth on expiry, not extend.
+docs/adr/028-admin-step-up-auth.md:64:2. Frontend opens a "Confirm with your password" modal, POSTs `/api/admin/step-up`.
+docs/adr/028-admin-step-up-auth.md:65:3. On success, the step-up token is held in memory (Zustand, like the access token — never localStorage). The original action is replayed with `X-Admin-Step-Up`.
+docs/adr/028-admin-step-up-auth.md:68:The step-up modal is a single component reused across all gated surfaces.
+docs/adr/028-admin-step-up-auth.md:74:- A captured bearer token alone is insufficient for credit-adjust / withdrawal / payout-retry. The attacker needs the password too — which is in 1Password / Apple Keychain, not in the browser session.
+docs/adr/028-admin-step-up-auth.md:80:- Admin UX: one extra modal per action. Mitigated by the 5-minute window and a single shared component.
+docs/adr/028-admin-step-up-auth.md:86:- The step-up signing key joins `LOOP_JWT_SIGNING_KEY` in the rotation runbook (ADR-016 / `docs/runbooks/jwt-key-rotation.md`). Same staged-rotation pattern.
+docs/adr/028-admin-step-up-auth.md:93:2. **Hardware key (WebAuthn)** as an alternative to password — admins can opt in via Settings; the step-up flow accepts either.
+docs/adr/028-admin-step-up-auth.md:94:3. **Per-amount thresholds** on the ADR-017 cap — adjustments above e.g. £10K require a second admin's step-up co-signature (4-eyes principle).
+docs/adr/028-admin-step-up-auth.md:95:4. **Mobile fallback** if the admin panel ever ships to native — TouchID / FaceID as a step-up factor through the existing biometric plugin.
+docs/adr/028-admin-step-up-auth.md:99:- ADR-013 (Loop-owned auth) — the password / OTP path that step-up reuses.
+docs/adr/028-admin-step-up-auth.md:101:- ADR-017 (Admin credit primitives) — the existing audit-trail layer that step-up sits on top of.
+docs/adr/028-admin-step-up-auth.md:103:- A2-1610 — daily-adjustment magnitude cap (the in-place amount control that step-up complements).
+docs/adr/028-admin-step-up-auth.md:104:- A2-1611 — credit-adjustment audit trail (the in-place actor-attribution control).
+apps/backend/src/credits/withdrawals.ts:2: * Admin withdrawal writer (A2-901 / ADR-024).
+apps/backend/src/credits/withdrawals.ts:5: * 'withdrawal' since day one but no production code emitted one — a
+apps/backend/src/credits/withdrawals.ts:10: * fanout + idempotency wrapper live in `admin/withdrawals.ts` (the
+apps/backend/src/credits/withdrawals.ts:18: *       3. INSERT pending_payouts (kind='withdrawal', order_id NULL,
+apps/backend/src/credits/withdrawals.ts:20: *       4. INSERT credit_transactions (type='withdrawal', amount=
+apps/backend/src/credits/withdrawals.ts:31: * otherwise create a second active withdrawal with a fresh payout UUID
+apps/backend/src/credits/withdrawals.ts:41:    super(`A matching active withdrawal already exists for payout ${payoutId}`);
+apps/backend/src/credits/withdrawals.ts:76: * Apply an admin-initiated withdrawal: debit the user's off-chain
+apps/backend/src/credits/withdrawals.ts:81: *   - `WithdrawalAlreadyIssuedError` — a matching active withdrawal
+apps/backend/src/credits/withdrawals.ts:121:            eq(pendingPayouts.kind, 'withdrawal'),
+apps/backend/src/credits/withdrawals.ts:136:      // `kind='withdrawal'` + `order_id` NULL — schema CHECK
+apps/backend/src/credits/withdrawals.ts:142:          kind: 'withdrawal',
+apps/backend/src/credits/withdrawals.ts:162:          type: 'withdrawal',
+apps/backend/src/credits/withdrawals.ts:163:          // Negative — schema CHECK rejects positive `withdrawal`.
+apps/backend/src/credits/withdrawals.ts:229:  // this the duplicate-withdrawal attempt 500s instead of surfacing
+apps/backend/src/credits/withdrawals.ts:238:        e.constraint_name === 'pending_payouts_active_withdrawal_unique')
+apps/backend/src/credits/withdrawals.ts:250: * (`Key (type, reference_type, reference_id)=(withdrawal, payout, <id>)`).
+apps/backend/src/credits/withdrawals.ts:261:      const match = /\(withdrawal, payout, ([^)]+)\)/.exec(e.detail);
+apps/backend/src/credits/withdrawals.ts:279:        eq(pendingPayouts.kind, 'withdrawal'),
+apps/backend/src/credits/pending-payouts-admin.ts:34:  /** ADR-024 §2: filter by payout discriminator. Lets treasury split order-cashback from withdrawal flows visually. */
+apps/backend/src/credits/pending-payouts-admin.ts:35:  kind?: 'order_cashback' | 'withdrawal';
+apps/backend/src/credits/payout-compensation.ts:4: * When a queued withdrawal's on-chain payout permanently fails (the
+apps/backend/src/credits/payout-compensation.ts:9: * the user's off-chain balance so the withdrawal becomes a no-op end-
+apps/backend/src/credits/payout-compensation.ts:72: *   - `payoutId` exists, has `kind='withdrawal'`, `state='failed'`,
+apps/backend/src/credits/payout-compensation.ts:74: *   - `amountMinor` matches the original withdrawal magnitude (the
+apps/backend/src/credits/payout-compensation.ts:100:    if (payout.kind !== 'withdrawal') {
+apps/backend/src/credits/payout-compensation.ts:102:        'Compensation only applies to withdrawal payouts; order-cashback failures use a different flow',
+apps/web/app/services/admin-payouts.ts:9: *   `withdrawal`), the asset code + issuer, the destination
+apps/web/app/services/admin-payouts.ts:47:  /** NULL for `kind='withdrawal'` rows (ADR-024 §2). */
+apps/web/app/services/admin-payouts.ts:50:  kind: 'order_cashback' | 'withdrawal';
+apps/web/app/services/admin-payouts.ts:71:  /** ADR-024 §2 — filter by payout discriminator (order-cashback vs withdrawal). */
+apps/web/app/services/admin-payouts.ts:72:  kind?: 'order_cashback' | 'withdrawal';
+apps/web/app/services/admin.ts:460:// adjust write + withdrawal write + ledger read) moved to
+apps/web/app/services/public-stats.ts:106: * configured. 5-minute Cache-Control on the happy path.
+apps/backend/src/public/flywheel-stats.ts:29: *     than waiting out the 5-minute TTL.
+apps/backend/src/users/pending-payouts-handler.ts:45:  /** Null for `kind='withdrawal'` payouts (A2-901 / ADR-024 §2). */
+apps/backend/src/merchants/handler.ts:88: * the cached slice and costs no upstream call. 5-minute public cache
+apps/web/app/routes/admin.users.tsx:38: * slice along with the drill-down endpoint's credit-adjustment UI.
+apps/backend/src/users/cashback-history-handler.ts:35: * earnings, interest accrual, and withdrawals on the Account view.
+apps/backend/src/users/cashback-history-handler.ts:43:  /** bigint as string — pence/cents in `currency`. Positive for cashback/interest/refund, negative for spend/withdrawal. */
+apps/web/app/services/admin-user-credits.ts:7: * - `POST /api/admin/users/:userId/credit-adjustments` — ADR
+apps/web/app/services/admin-user-credits.ts:13: * - `POST /api/admin/users/:userId/withdrawals` — ADR 024
+apps/web/app/services/admin-user-credits.ts:39:/** Result shape from a successful credit-adjustment write (ADR 017). */
+apps/web/app/services/admin-user-credits.ts:50:/** Result shape from a successful admin withdrawal (ADR 024). */
+apps/web/app/services/admin-user-credits.ts:75: * `POST /api/admin/users/:userId/credit-adjustments` — ADR 017 admin
+apps/web/app/services/admin-user-credits.ts:85:    `/api/admin/users/${encodeURIComponent(args.userId)}/credit-adjustments`,
+apps/web/app/services/admin-user-credits.ts:99: * `POST /api/admin/users/:userId/withdrawals` — ADR 024 admin write.
+apps/web/app/services/admin-user-credits.ts:110:    `/api/admin/users/${encodeURIComponent(args.userId)}/withdrawals`,
+apps/backend/src/users/cashback-monthly.ts:18: *   - Filtered to `type='cashback'` — spend / withdrawal / adjustment
+apps/backend/src/users/cashback-summary-handler.ts:37: * the user actually *earned* — spend / adjustment / withdrawal don't
+apps/backend/src/merchants/cashback-rate-handlers.ts:42: * 5-minute public Cache-Control matches the merchant-catalog
+apps/backend/src/users/dsr-delete.ts:57: * client can render targeted UX ("your withdrawal is pending — try
+apps/backend/src/routes/admin-credit-writes.ts:2: * `/api/admin/users/:userId/{credit-adjustments,refunds,withdrawals}`
+apps/backend/src/routes/admin-credit-writes.ts:22: * withdrawal route also wears the `withdrawals` killSwitch — the
+apps/backend/src/routes/admin-credit-writes.ts:30:import { adminCreditAdjustmentHandler } from '../admin/credit-adjustments.js';
+apps/backend/src/routes/admin-credit-writes.ts:32:import { adminWithdrawalHandler } from '../admin/withdrawals.js';
+apps/backend/src/routes/admin-credit-writes.ts:44:    '/api/admin/users/:userId/credit-adjustments',
+apps/backend/src/routes/admin-credit-writes.ts:55:  // ADR-024 / A2-901 — admin-mediated withdrawal: debit user's
+apps/backend/src/routes/admin-credit-writes.ts:59:    '/api/admin/users/:userId/withdrawals',
+apps/backend/src/routes/admin-credit-writes.ts:60:    killSwitch('withdrawals'),
+apps/backend/src/routes/admin-payouts.ts:65:  // permanently-failed withdrawal payout (ADR-024 §5). Same rate limit
+apps/backend/src/routes/admin-payouts.ts:69:    killSwitch('withdrawals'),
+apps/backend/src/routes/admin-user-cluster.ts:163:  // withdrawals, refunds, adjustments).
+apps/backend/src/routes/admin.ts:65: *   mix, plus writes (refunds / credit-adjustments / withdrawals)
+apps/backend/src/routes/admin.ts:225:  // Credit-write surfaces — credit-adjustments + refunds +
+apps/backend/src/routes/admin.ts:226:  // withdrawals (ADR 017/024 + A2-901). Lifted into
+apps/backend/src/kill-switches.ts:14: *   - `withdrawals`   → blocks `POST /api/admin/users/:userId/withdrawals`
+apps/backend/src/kill-switches.ts:32:export type KillSwitch = 'orders' | 'auth' | 'withdrawals';
+apps/backend/src/kill-switches.ts:37:  withdrawals: 'LOOP_KILL_WITHDRAWALS',
+apps/web/app/routes/admin.users.$userId.tsx:40: * The credit-adjustment form + the credit-transactions log are
+apps/web/app/routes/admin.users.$userId.tsx:250:              Queue withdrawal (ADR 024)
+apps/backend/src/openapi/admin-treasury-credit-flow.ts:61:      "Per-day × per-currency ledger delta from `credit_transactions`. Answers the treasury question the snapshot can't: 'are we generating liability faster than we settle it?'. A week of net > 0 days means cashback issuance is outpacing user settlement — treasury plans Stellar-side funding ahead of the curve. Credited = sum(amount_minor) for positive-amount types (cashback, interest, refund) + positive adjustments; debited = abs(sum) for negative-amount types (spend, withdrawal). bigint-as-string. `?currency` zero-fills; default 30d, cap 180d.",
+apps/web/app/routes/admin.treasury.tsx:94:const KNOWN_TYPES = ['cashback', 'interest', 'refund', 'spend', 'withdrawal', 'adjustment'];
+apps/backend/src/orders/repo-credit-order.ts:82:    // (`spend`/`withdrawal` amount<0). Reference this order so
+apps/web/app/components/features/wallet/TrustlineSetupCard.tsx:31:    // Public endpoint already serves Cache-Control: 300. 5-minute
+apps/backend/src/openapi/admin-user-cluster-drill.ts:65:    .enum(['cashback', 'interest', 'spend', 'withdrawal', 'refund', 'adjustment'])
+apps/backend/src/openapi/admin-user-cluster-drill.ts:75:          'bigint-as-string, signed. Positive for cashback/interest/refund, negative for spend/withdrawal; adjustment can be either.',
+apps/web/app/routes/settings.cashback.tsx:44:  withdrawal: 'Withdrawal',
+apps/backend/src/openapi/admin-cashback-config-upsert.ts:29: *     threading pattern as the credit-write / withdrawal slices
+apps/web/app/routes/admin.payouts.tsx:28:// is the legacy order-fulfilment payout; `withdrawal` is the admin cash-out
+apps/web/app/routes/admin.payouts.tsx:31:const KINDS = ['all', 'order_cashback', 'withdrawal'] as const;
+apps/web/app/routes/admin.payouts.tsx:101:  // ADR-024 §2 kind filter — `?kind=order_cashback` or `?kind=withdrawal`.
+apps/web/app/routes/admin.payouts.tsx:313:                    {p.kind === 'withdrawal' ? 'Withdrawal' : 'Cashback'}
+apps/backend/src/openapi/users-cashback-history.ts:43:        .enum(['cashback', 'interest', 'spend', 'withdrawal', 'refund', 'adjustment'])
+apps/backend/src/openapi/users-cashback-history.ts:47:          'Pence / cents in `currency`, as a bigint-string. Positive for cashback / interest / refund, negative for spend / withdrawal, either for adjustment.',
+apps/backend/src/openapi/users-cashback-history.ts:70:      "Paginated cashback / interest / spend / withdrawal / refund / adjustment rows for the authenticated user. Page older rows with `?before=<iso-8601>`; cap the page size with `?limit=` (default 20, hard-capped at 100). Always scoped to the caller — admins use the separate `/api/admin/*` surfaces to inspect other users' ledgers.",
+apps/web/app/components/features/admin/AdminMonthlyCashbackChart.tsx:36: * 5-minute stale time matches the user side; the monthly aggregate
+apps/web/app/routes/auth.tsx:237:  withdrawal: 'Withdrawal',
+apps/web/app/routes/admin.payouts.$id.tsx:228:            {row.kind === 'withdrawal' ? 'Withdrawal (admin cash-out)' : 'Order cashback'}
+apps/backend/src/openapi/admin-payouts-cluster-writes.ts:131:    summary: 'Compensate a permanently-failed withdrawal payout (ADR-024 §5).',
+apps/backend/src/openapi/admin-payouts-cluster-writes.ts:133:      'Re-credits the user after their withdrawal payout permanently failed on-chain. Writes a positive `type=adjustment` row referencing the payout id; net result is the original withdrawal debit is offset and the user is back to where they started. Manual-only (Phase 2a) — finance reviews failures before triggering. 400 if the payout is not a withdrawal; 409 if the payout is already compensated or is in any state other than `failed`. ADR 017 compliant: `Idempotency-Key` header + `reason` body required.',
+apps/backend/src/openapi/admin-payouts-cluster-writes.ts:155:          'Missing idempotency key, invalid reason, malformed id, or payout is not a withdrawal',
+apps/backend/src/openapi/admin-withdrawal-write.ts:2: * Admin withdrawal-write OpenAPI registration (ADR-024 / A2-901).
+apps/backend/src/openapi/admin-withdrawal-write.ts:10: * ledger writes (adjustment + refund) and lets withdrawal carry its
+apps/backend/src/openapi/admin-withdrawal-write.ts:15: *   - POST /api/admin/users/{userId}/withdrawals
+apps/backend/src/openapi/admin-withdrawal-write.ts:28: * Registers the admin withdrawal write path + its locally-scoped
+apps/backend/src/openapi/admin-withdrawal-write.ts:39:  // ─── Admin — withdrawal write (ADR-024 / A2-901) ──────────────────────────
+apps/backend/src/openapi/admin-withdrawal-write.ts:87:  // A2-901 / ADR-024 — admin withdrawal write. Same ADR-017
+apps/backend/src/openapi/admin-withdrawal-write.ts:91:  // active withdrawal intent rejects a second in-flight/failed-
+apps/backend/src/openapi/admin-withdrawal-write.ts:92:  // uncompensated withdrawal for the same
+apps/backend/src/openapi/admin-withdrawal-write.ts:97:    path: '/api/admin/users/{userId}/withdrawals',
+apps/backend/src/openapi/admin-withdrawal-write.ts:99:      'Issue a withdrawal — debit cashback balance + queue on-chain payout (A2-901 / ADR-024).',
+apps/backend/src/openapi/admin-withdrawal-write.ts:101:      "Writes a negative-amount `credit_transactions` row (`type='withdrawal'`, `reference_type='payout'`, `reference_id=<pending_payouts.id>`), atomically decrements `user_credits.balance_minor`, and queues a LOOP-asset payout row for the on-chain submit worker. Idempotent in two layers: the admin idempotency key replays the stored snapshot on repeat (ADR 017), and the DB active-withdrawal unique index rejects a second unresolved withdrawal for the same user/asset/destination/amount tuple with 409 `WITHDRAWAL_ALREADY_ISSUED`. Phase 2a is admin-mediated only; user-initiated cash-out is deferred to Phase 2b.",
+apps/backend/src/openapi/admin-withdrawal-write.ts:140:          'A matching active withdrawal already exists for this user/asset/destination/amount (`WITHDRAWAL_ALREADY_ISSUED`)',
+apps/backend/src/openapi/admin-withdrawal-write.ts:148:        description: 'Internal error applying the withdrawal',
+apps/backend/src/openapi/merchants-cashback-rates.ts:14: * 5-minute public cache and the 120/min per-IP rate limit. They
+apps/backend/src/openapi/merchants-cashback-rates.ts:42:      'Returns a `{ merchantId → userCashbackPct }` map of every merchant with an active cashback config. Lets catalog / list / map views render "X% cashback" badges per card without N+1-ing the per-merchant endpoint. Merchants without an active config are omitted — clients should treat missing keys as "no cashback" and hide the badge. Values are `numeric(5,2)` strings (e.g. `"2.50"`). 5-minute public cache matches the merchant-catalog endpoints.',
+apps/backend/src/openapi/merchants-cashback-rates.ts:70:      "Public surface — no auth. Returns the merchant's active `user_cashback_pct` as a bigint-shaped `numeric(5,2)` string, or `null` when the merchant has no cashback config (or it's inactive). Clients should hide the cashback badge on `null`. 5-minute public cache matches the merchant-catalog endpoints.",
+apps/backend/src/openapi/admin-audit-tail.ts:6: * every credit-adjustment / refund / withdrawal / cashback-config
+apps/backend/src/openapi/admin-audit-tail.ts:13: * sibling slice — credit-writes, withdrawal-write, cashback-config-
+apps/backend/src/openapi/admin-credit-writes.ts:6: * admin-mediated write surfaces — credit-adjustment, refund,
+apps/backend/src/openapi/admin-credit-writes.ts:7: * withdrawal — share the ADR-017 admin-write contract: actor
+apps/backend/src/openapi/admin-credit-writes.ts:14: * / withdrawal as one row of three buttons.
+apps/backend/src/openapi/admin-credit-writes.ts:17: *   - POST /api/admin/users/{userId}/credit-adjustments
+apps/backend/src/openapi/admin-credit-writes.ts:24: * The third write — withdrawal (ADR-024) — has its own slice in
+apps/backend/src/openapi/admin-credit-writes.ts:25: * `./admin-withdrawal-write.ts` and is fanned out via the
+apps/backend/src/openapi/admin-credit-writes.ts:39:import { registerAdminWithdrawalWriteOpenApi } from './admin-withdrawal-write.js';
+apps/backend/src/openapi/admin-credit-writes.ts:126:    path: '/api/admin/users/{userId}/credit-adjustments',
+apps/backend/src/openapi/admin-credit-writes.ts:234:  // ─── Admin — withdrawal write (ADR-024 / A2-901) ──────────────────────────
+apps/backend/src/openapi/admin-credit-writes.ts:237:  // live in `./admin-withdrawal-write.ts`. Fanned out from here so
+apps/backend/src/openapi/users-pending-payouts.ts:60:          "Origin order id for order-fulfilment cashback payouts; null for kind='withdrawal' (A2-901 / ADR-024 §2).",
+apps/backend/src/admin/withdrawals.ts:2: * Admin withdrawal endpoint (ADR-024 / A2-901).
+apps/backend/src/admin/withdrawals.ts:4: * `POST /api/admin/users/:userId/withdrawals` — debits the user's
+apps/backend/src/admin/withdrawals.ts:9: * Two-layer idempotency mirrors the credit-adjustment / refund
+apps/backend/src/admin/withdrawals.ts:15: *   - DB semantic uniqueness fence on active withdrawal intents
+apps/backend/src/admin/withdrawals.ts:16: *     (`pending_payouts_active_withdrawal_unique`) — catches the
+apps/backend/src/admin/withdrawals.ts:31:import { applyAdminWithdrawal, WithdrawalAlreadyIssuedError } from '../credits/withdrawals.js';
+apps/backend/src/admin/withdrawals.ts:43:const log = logger.child({ handler: 'admin-withdrawal' });
+apps/backend/src/admin/withdrawals.ts:159:        path: `/api/admin/users/${userId}/withdrawals`,
+apps/backend/src/admin/withdrawals.ts:218:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to apply withdrawal' }, 500);
+apps/backend/src/admin/withdrawals.ts:225:    endpoint: `POST /api/admin/users/${userId}/withdrawals`,
+apps/web/app/components/features/admin/AdminWithdrawalForm.tsx:110:    <form className="space-y-4" onSubmit={handleSubmit} aria-labelledby="admin-withdrawal-heading">
+apps/web/app/components/features/admin/AdminWithdrawalForm.tsx:111:      <p id="admin-withdrawal-heading" className="sr-only">
+apps/web/app/components/features/admin/AdminWithdrawalForm.tsx:112:        Apply admin withdrawal
+apps/web/app/components/features/admin/AdminWithdrawalForm.tsx:150:            {mutation.isPending ? 'Queueing…' : 'Queue withdrawal'}
+apps/backend/src/orders/procurement-asset-picker.ts:32: * doesn't spam the monitoring channel every tick. 15-minute window
+apps/backend/src/openapi/admin-payouts-cluster.ts:102:        kind: z.enum(['order_cashback', 'withdrawal']).optional().openapi({
+apps/backend/src/openapi/admin-payouts-cluster.ts:104:            'ADR-024 §2 discriminator filter. `order_cashback` = legacy order-fulfilment payout; `withdrawal` = admin cash-out from balance. Omitted → both.',
+apps/backend/src/openapi/admin-cashback-config.ts:31: *     adjustment / withdrawal / refund envelopes).
+apps/web/app/components/features/admin/AdminAuditTail.tsx:19:  // /api/admin/users/:userId/credit-adjustments (POST)
+apps/web/app/components/features/admin/AdminAuditTail.tsx:20:  const credit = /^\/api\/admin\/users\/([0-9a-f-]{36})\/credit-adjustments$/i.exec(path);
+apps/backend/src/admin/treasury.ts:11: *     "withdrawals paid" vs "interest accrued" etc.
+apps/backend/src/admin/user-credit-transactions.ts:9: * accruals, withdrawals, refunds, adjustments).
+apps/backend/src/admin/user-credit-transactions.ts:16: * for spend/withdrawal, positive for cashback/interest/refund).
+apps/backend/src/openapi/admin.ts:97:          'Source order id for `kind=order_cashback` payouts. NULL for withdrawal-initiated payouts (ADR-024 §2).',
+apps/backend/src/openapi/admin.ts:99:      kind: z.enum(['order_cashback', 'withdrawal']).openapi({
+apps/backend/src/openapi/admin.ts:101:          'Discriminator: `order_cashback` is the legacy order-fulfilment payout; `withdrawal` is the ADR-024 admin-cash-out flow.',
+apps/backend/src/openapi/admin.ts:135:  // ─── Admin — credit-adjustment write (ADR 017) ─────────────────────────────
+apps/backend/src/openapi/admin.ts:150:  // The three admin-mediated writes — credit-adjustment, refund,
+apps/backend/src/openapi/admin.ts:151:  // withdrawal — share the ADR-017 contract (idempotency key,
+apps/backend/src/orders/procurement-worker.ts:43: * 15-minute mark is a crashed worker or a deep upstream issue the
+apps/backend/src/ctx/operator-pool.ts:59: * the 15-minute cadence used by `notifyUsdcBelowFloor` in procurement —
+apps/backend/src/admin/refunds.ts:15: * Response envelope matches the credit-adjustments handler so the
+apps/backend/src/admin/payout-compensation.ts:5: * cashback balance after their queued withdrawal payout permanently
+apps/backend/src/admin/payout-compensation.ts:8: * user's balance where it was before the doomed withdrawal attempt.
+apps/backend/src/admin/payout-compensation.ts:17: *   - `kind='withdrawal'` — order-cashback failures are a separate
+apps/backend/src/admin/payout-compensation.ts:137:  if (payout.kind !== 'withdrawal') {
+apps/backend/src/admin/payout-compensation.ts:142:          'Compensation only applies to withdrawal payouts; order-cashback failures use a different flow',
+apps/backend/src/admin/idempotency.ts:7: * double side-effects (double-credit, double-payout-retry, etc.).
+apps/web/app/components/features/admin/CreditTransactionsTable.tsx:20:  'withdrawal',
+apps/web/app/components/features/admin/CreditTransactionsTable.tsx:49:    case 'withdrawal':
+apps/web/app/components/features/admin/CreditAdjustmentForm.tsx:123:    <form className="space-y-4" onSubmit={handleSubmit} aria-labelledby="credit-adjustment-heading">
+apps/web/app/components/features/admin/CreditAdjustmentForm.tsx:124:      <p id="credit-adjustment-heading" className="sr-only">
+apps/backend/src/admin/payouts.ts:23:   * ADR-024 §2: NULL for `kind='withdrawal'` rows. Pre-this-ADR every
+apps/backend/src/admin/payouts.ts:28:  /** ADR-024 §2 discriminator — `order_cashback` or `withdrawal`. */
+apps/backend/src/admin/payouts.ts:29:  kind: 'order_cashback' | 'withdrawal';
+apps/backend/src/admin/payouts.ts:49:  kind: 'order_cashback' | 'withdrawal';
+apps/backend/src/admin/payouts.ts:140:  // withdrawal (admin cash-out from balance) flows visually.
+apps/backend/src/admin/payouts.ts:142:  if (kindParam !== undefined && kindParam !== 'order_cashback' && kindParam !== 'withdrawal') {
+apps/backend/src/admin/payouts.ts:146:        message: 'kind must be one of: order_cashback, withdrawal',
+apps/backend/src/db/migrations/0013_ledger_constraints.sql:28:-- 'withdrawal' — no writer exists yet (Phase 2). When it lands the
+apps/backend/src/admin/credit-adjustments.ts:2: * Admin credit-adjustment endpoint (ADR 017).
+apps/backend/src/admin/credit-adjustments.ts:4: * `POST /api/admin/users/:userId/credit-adjustments` — writes a
+apps/backend/src/admin/credit-adjustments.ts:36:const log = logger.child({ handler: 'admin-credit-adjustment' });
+apps/backend/src/admin/credit-adjustments.ts:125:        path: `/api/admin/users/${userId}/credit-adjustments`,
+apps/backend/src/admin/credit-adjustments.ts:188:    endpoint: `POST /api/admin/users/${userId}/credit-adjustments`,
+apps/backend/src/db/schema.ts:148: * id for cashback / spend / refund, payout id for withdrawals, null
+apps/backend/src/db/schema.ts:195:    // writer types (cashback, refund, spend, withdrawal). Two CTX
+apps/backend/src/db/schema.ts:199:    // withdrawal debit against the same payout row would double-
+apps/backend/src/db/schema.ts:202:    // partial unique above). The admin withdrawal path also has a
+apps/backend/src/db/schema.ts:204:    // withdrawal intent" races.
+apps/backend/src/db/schema.ts:208:        sql`${t.type} IN ('cashback', 'refund', 'spend', 'withdrawal') AND ${t.referenceType} IS NOT NULL AND ${t.referenceId} IS NOT NULL`,
+apps/backend/src/db/schema.ts:212:      sql`${t.type} IN ('cashback', 'interest', 'spend', 'withdrawal', 'refund', 'adjustment')`,
+apps/backend/src/db/schema.ts:228:    // row is accidentally negative or a withdrawal positive.
+apps/backend/src/db/schema.ts:233:        OR (${t.type} IN ('spend', 'withdrawal') AND ${t.amountMinor} < 0)
+apps/backend/src/db/schema.ts:673:    // A2-901 / ADR-024 §2: nullable for withdrawal-initiated payouts.
+apps/backend/src/db/schema.ts:675:    // this; withdrawal (`kind='withdrawal'`) rows leave it NULL. The
+apps/backend/src/db/schema.ts:685:    kind: text('kind').notNull().default('order_cashback').$type<'order_cashback' | 'withdrawal'>(),
+apps/backend/src/db/schema.ts:707:    // on a failed withdrawal payout. Keep the public state enum
+apps/backend/src/db/schema.ts:730:    // A3-007: "same semantic withdrawal twice" must not create a
+apps/backend/src/db/schema.ts:733:    // legitimate repeat withdrawal can happen; compensated failures
+apps/backend/src/db/schema.ts:736:    uniqueIndex('pending_payouts_active_withdrawal_unique')
+apps/backend/src/db/schema.ts:739:        sql`${t.kind} = 'withdrawal' AND ${t.state} IN ('pending', 'submitted', 'failed') AND ${t.compensatedAt} IS NULL`,
+apps/backend/src/db/schema.ts:756:    check('pending_payouts_kind_known', sql`${t.kind} IN ('order_cashback', 'withdrawal')`),
+apps/backend/src/db/schema.ts:761:        OR (${t.kind} = 'withdrawal' AND ${t.orderId} IS NULL)
+apps/backend/src/db/migrations/0028_pending_payouts_compensation_and_withdrawal_uniqueness.sql:3:-- 1. `compensated_at` records that a failed withdrawal payout was
+apps/backend/src/db/migrations/0028_pending_payouts_compensation_and_withdrawal_uniqueness.sql:7:-- 2. `pending_payouts_active_withdrawal_unique` enforces semantic
+apps/backend/src/db/migrations/0028_pending_payouts_compensation_and_withdrawal_uniqueness.sql:8:--    uniqueness for active withdrawal intents. The old
+apps/backend/src/db/migrations/0028_pending_payouts_compensation_and_withdrawal_uniqueness.sql:12:--    active withdrawal.
+apps/backend/src/db/migrations/0028_pending_payouts_compensation_and_withdrawal_uniqueness.sql:17:CREATE UNIQUE INDEX pending_payouts_active_withdrawal_unique
+apps/backend/src/db/migrations/0028_pending_payouts_compensation_and_withdrawal_uniqueness.sql:19:  WHERE kind = 'withdrawal'
+apps/backend/src/db/migrations/meta/_journal.json:163:      "tag": "0022_credit_tx_withdrawal_unique",
+apps/backend/src/db/migrations/meta/_journal.json:205:      "tag": "0028_pending_payouts_compensation_and_withdrawal_uniqueness",
+apps/backend/src/discord/admin-audit.ts:7: *      017/018 mutation log. Every credit-adjustment, withdrawal,
+apps/backend/src/discord/admin-audit.ts:8: *      payout-retry, config-edit, etc. emits one of these
+apps/backend/src/db/migrations/meta/0000_snapshot.json:123:          "value": "\"credit_transactions\".\"type\" IN ('cashback', 'interest', 'spend', 'withdrawal', 'refund', 'adjustment')"
+apps/backend/src/db/migrations/meta/0000_snapshot.json:127:          "value": "\n        (\"credit_transactions\".\"type\" IN ('cashback', 'interest', 'refund') AND \"credit_transactions\".\"amount_minor\" > 0)\n        OR (\"credit_transactions\".\"type\" IN ('spend', 'withdrawal') AND \"credit_transactions\".\"amount_minor\" < 0)\n        OR (\"credit_transactions\".\"type\" = 'adjustment')\n      "
+apps/backend/src/db/migrations/0022_credit_tx_withdrawal_unique.sql:2:-- to include `type='withdrawal'` so the at-most-once invariant matches
+apps/backend/src/db/migrations/0022_credit_tx_withdrawal_unique.sql:7:-- withdrawal writer didn't exist yet. The note in 0013 said:
+apps/backend/src/db/migrations/0022_credit_tx_withdrawal_unique.sql:9:--   'withdrawal' — no writer exists yet (Phase 2). When it lands the
+apps/backend/src/db/migrations/0022_credit_tx_withdrawal_unique.sql:13:-- The withdrawal writer (`applyAdminWithdrawal` in the next PR)
+apps/backend/src/db/migrations/0022_credit_tx_withdrawal_unique.sql:14:-- writes a `type='withdrawal'` credit-tx referencing the
+apps/backend/src/db/migrations/0022_credit_tx_withdrawal_unique.sql:20:-- withdrawals for the same already-issued payout id).
+apps/backend/src/db/migrations/0022_credit_tx_withdrawal_unique.sql:32:  WHERE type IN ('cashback', 'refund', 'spend', 'withdrawal')
+apps/backend/src/discord/monitoring.ts:72:  /** Null for `kind='withdrawal'` payouts (A2-901 / ADR-024 §2). */
+apps/backend/src/discord/monitoring.ts:97:        value: args.orderId === null ? '_withdrawal_' : `\`${args.orderId.slice(-8)}\``,
+apps/backend/src/discord/monitoring.ts:168: * Paired with a 15-minute throttle at the call site so sustained
+apps/backend/src/db/migrations/0018_pending_payouts_generalise.sql:3:-- shape) and (b) withdrawal payouts keyed to a credit_transactions
+apps/backend/src/db/migrations/0018_pending_payouts_generalise.sql:9:--    to populate it; withdrawal rows leave it NULL.
+apps/backend/src/db/migrations/0018_pending_payouts_generalise.sql:28:--    existing-rows backfill. Withdrawals write 'withdrawal'.
+apps/backend/src/db/migrations/0018_pending_payouts_generalise.sql:30:-- 4. A per-kind shape CHECK pins the invariant so `kind='withdrawal'
+apps/backend/src/db/migrations/0018_pending_payouts_generalise.sql:42:  CHECK (kind IN ('order_cashback', 'withdrawal'));
+apps/backend/src/db/migrations/0018_pending_payouts_generalise.sql:48:    OR (kind = 'withdrawal' AND order_id IS NULL)
+apps/backend/src/admin/cashback-monthly.ts:22: *   - Filtered to `type='cashback'` so spend / withdrawal /
+apps/backend/src/admin/treasury-credit-flow.ts:18: *   (spend, withdrawal) + absolute negative adjustments.
+apps/backend/src/db/migrations/0000_initial_schema.sql:10:	CONSTRAINT "credit_transactions_type_known" CHECK ("credit_transactions"."type" IN ('cashback', 'interest', 'spend', 'withdrawal', 'refund', 'adjustment')),
+apps/backend/src/db/migrations/0000_initial_schema.sql:13:        OR ("credit_transactions"."type" IN ('spend', 'withdrawal') AND "credit_transactions"."amount_minor" < 0)
+apps/backend/src/admin/payouts-retry.ts:9: * `{ result, audit }` to match the credit-adjustment write so the
+apps/backend/src/admin/payouts-retry.ts:43:  kind: 'order_cashback' | 'withdrawal';
+apps/backend/src/admin/payouts-retry.ts:101: * to match the credit-adjustment write so the admin UI renders both
+apps/backend/src/admin/cashback-realization.ts:13: *   - `withdrawnMinor` = ABS(SUM(amount_minor)) WHERE type='withdrawal'
+apps/backend/src/admin/cashback-realization.ts:81:            SUM(CASE WHEN ${creditTransactions.type} = 'withdrawal' THEN ${creditTransactions.amountMinor} ELSE 0 END),

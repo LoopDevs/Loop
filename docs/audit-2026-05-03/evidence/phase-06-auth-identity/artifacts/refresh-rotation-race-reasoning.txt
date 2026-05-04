@@ -1,0 +1,11 @@
+Cold audit reasoning artifact: Loop-native refresh rotation race.
+
+Current sequence in nativeRefreshHandler:
+1. verify refresh JWT signature and jti.
+2. findLiveRefreshToken(jti, token) reads a live row where revoked_at is null and hash matches.
+3. issueTokenPair(user) signs and records a new refresh token row.
+4. revokeRefreshToken(old jti, replacedByJti=new jti) marks the old row revoked.
+
+There is no DB transaction, row lock, conditional update on revoked_at is null, or successor uniqueness constraint. Two concurrent requests with the same old refresh token can both complete step 2 before either completes step 4. Both then insert distinct successor refresh rows and both return 200. The old row ends revoked at the end, but multiple successor tokens remain live.
+
+Expected invariant for refresh-token rotation: a refresh token should be single-use under concurrency, producing at most one live successor. Reuse should be detected or one request should fail.

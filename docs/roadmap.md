@@ -1,8 +1,18 @@
 # Roadmap
 
-What remains to ship Loop Phase 1 and what comes after.
+What remains to ship Loop and what comes after.
 
 The original migration plan (now at `docs/archive/migration.md`, historical only) covered getting the monorepo to a working state. This document tracks what's left to reach production and beyond.
+
+## Deliverable tranches
+
+The contract-level deliverables are tracked as three tranches:
+
+- **Tranche 1 — MVP.** Cross-platform mobile app for crypto gift card purchases. Discounted gift cards (NOT cashback). Crypto checkout. US/Europe/Canada/UK coverage. Acceptance: install from app stores/TestFlight, purchase a discounted gift card with XLM (USDC follow-on, see runbook), redeem at merchant. Operator runbook + flag matrix in [`tranche-1-launch.md`](./tranche-1-launch.md).
+- **Tranche 2 — Testnet.** Integrated Stellar passkey wallet, gift cards award cashback (replacing the discount model), Defindex testnet yield. Acceptance: install testnet build, purchase mock gift card, verify cashback to Stellar testnet wallet, verify yield from held funds.
+- **Tranche 3 — Mainnet.** Plaid SDK for open-banking USD/GBP/EUR/CAD payments, mainnet, virtual cashback Visa/Mastercard, full Stellar passkey wallet (Secp256r1 / derived Ed25519). Acceptance: real bank/crypto purchase, real gift-card redemption, verify cashback + USDC yield receipt.
+
+The Phase 1 / Phase 2 / Phase 3 sections below are the engineering-level decomposition that backs those tranches — same code, finer-grained granularity. Tranche 1 ≈ Phase 1; Tranche 2 ≈ Phase 2; Tranche 3 ≈ extended Phase 2 + Phase 3. The web client gates Phase 2 surfaces behind `LOOP_PHASE_1_ONLY=true` so Tranche 1 launches without a Tranche 2 surface bleed; flipping to `false` later is server-side only, no app-store resubmission.
 
 Known limitations we are **consciously not fixing** in the current phase are tracked separately in [ADR-005 — Known Limitations](adr/005-known-limitations.md). Check there before filing a bug for Stellar, barcode redemption, `eslint-plugin-react`, distributed rate limiting, DNS rebinding, probe timeouts, jsdom coverage, proto drift, metrics scraping, third-party fonts / tile hosts, or upstream token passthrough.
 
@@ -188,8 +198,9 @@ below is either shipped or an explicit "not yet started".
 
 ### Observability
 
-- [x] ~~Request correlation logging~~ — already implemented via Hono requestId() middleware
-- [ ] Prometheus metrics endpoint
+- [x] ~~Request correlation logging~~ — already implemented via Hono requestId() middleware (A4-008: server-mints, ignores inbound to defeat log-poisoning)
+- [x] ~~Prometheus metrics endpoint~~ — `/metrics` mounted in `apps/backend/src/app.ts`; full exposition in `apps/backend/src/observability-handlers.ts` (rate-limit hits, per-route request totals, per-endpoint circuit-breaker state, runtime-health gauges, worker running state). Bearer-gated in production via `METRICS_BEARER_TOKEN`.
+- [ ] Prometheus scraping infrastructure + dashboards + alert rules (the endpoint exists; the upstream scraping/storage/alerting tier does not yet)
 - [ ] Analytics (privacy-respecting, no PII in events)
 - [ ] Performance monitoring (Core Web Vitals, API latency)
 

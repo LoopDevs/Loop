@@ -1,0 +1,20 @@
+Mobile native overlay bottom-up review
+Date: 2026-05-03
+Scope: apps/mobile versioned config and native-overlays; generated ios/android trees are gitignored and treated as runtime/generated state, except previously captured generated FileProvider drift.
+
+Reviewed surfaces:
+
+- Capacitor config and mobile package dependency/plugin parity.
+- Native overlay script and README workflow for applying overlays after cap sync.
+- Android MainActivity overscroll override.
+- Android splash theme, icon/vector/animated-vector XML, and launcher/splash PNG asset buckets.
+- Android backup_rules.xml, data_extraction_rules.xml, and scoped file_paths.xml overlays.
+- iOS Info.plist additions guidance and release.xcconfig overlay.
+
+Verification notes:
+
+- Current generated Android FileProvider drift remains captured by A4-027; the versioned overlay source itself is scoped to cache/share.
+- Android backup/data-extraction overlays exclude CapacitorStorage for pre-Android-12 and Android-12+ backup paths; already reviewed in Phase 15.
+- iOS Face ID usage-description and release debug overlay guidance were already reviewed in Phase 15.
+- Remaining PNG assets are static brand/splash/launcher binaries; dispositioned as binary-reviewed based on location, naming, and overlay usage. No code or secret-bearing data found in those binary paths.
+- No additional mobile finding was filed in this pass.

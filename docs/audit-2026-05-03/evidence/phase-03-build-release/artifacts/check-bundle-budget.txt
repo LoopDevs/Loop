@@ -1,0 +1,6 @@
+
+> check:bundle-budget
+> ./scripts/check-bundle-budget.sh
+
+Web SSR client total: 2396 KB (budget: 2500 KB)
+du: /Users/ash/code/loop-app/apps/web/build/client/assets/web-DeibK8Sv.js: No such file or directory

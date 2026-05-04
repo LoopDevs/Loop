@@ -1,0 +1,107 @@
+Phase 12 evidence: order cashback can be credited off-chain and paid on-chain without a balancing debit.
+
+Fulfillment writes the off-chain credit:
+
+apps/backend/src/orders/fulfillment.ts:86-93
+  await tx.insert(creditTransactions).values({
+    userId: order.userId,
+    type: 'cashback',
+    amountMinor: order.userCashbackMinor,
+    currency: order.chargeCurrency,
+    referenceType: 'order',
+    referenceId: order.id,
+  });
+
+apps/backend/src/orders/fulfillment.ts:97-109
+  await tx
+    .insert(userCredits)
+    .values({
+      userId: order.userId,
+      currency: order.chargeCurrency,
+      balanceMinor: order.userCashbackMinor,
+    })
+    .onConflictDoUpdate({
+      target: [userCredits.userId, userCredits.currency],
+      set: {
+        balanceMinor: sql`${userCredits.balanceMinor} + ${order.userCashbackMinor}`,
+        updatedAt: sql`NOW()`,
+      },
+    });
+
+The same fulfillment transaction also queues an on-chain payout when the user has an eligible Stellar address:
+
+apps/backend/src/orders/fulfillment.ts:143-160
+  const decision = buildPayoutIntent({
+    stellarAddress: userRow.stellarAddress,
+    homeCurrency: userRow.homeCurrency,
+    userCashbackMinor: order.userCashbackMinor,
+  });
+  if (decision.kind === 'pay') {
+    await tx
+      .insert(pendingPayouts)
+      .values({
+        userId: order.userId,
+        orderId: order.id,
+        assetCode: decision.intent.assetCode,
+        assetIssuer: decision.intent.assetIssuer,
+        toAddress: decision.intent.to,
+        amountStroops: decision.intent.amountStroops,
+        memoText: decision.intent.memoText,
+      })
+
+Payout confirmation only updates `pending_payouts`; it does not insert a withdrawal/spend/debit ledger row and does not decrement `user_credits`:
+
+apps/backend/src/credits/pending-payouts-transitions.ts:85-99
+  export async function markPayoutConfirmed(args: { id: string; txHash: string; }): Promise<PendingPayout | null> {
+    const [row] = await db
+      .update(pendingPayouts)
+      .set({
+        state: 'confirmed',
+        confirmedAt: sql`NOW()`,
+        txHash: args.txHash,
+        lastError: null,
+      })
+      .where(and(eq(pendingPayouts.id, args.id), eq(pendingPayouts.state, 'submitted')))
+      .returning();
+    return row ?? null;
+  }
+
+The normal credit-spend path later accepts the still-present `user_credits` balance and debits it for a gift-card order:
+
+apps/backend/src/orders/repo-credit-order.ts:68-88
+  const fresh = await tx
+    .select({ balanceMinor: userCredits.balanceMinor })
+    .from(userCredits)
+    .where(and(eq(userCredits.userId, values.userId), eq(userCredits.currency, values.chargeCurrency)))
+    .for('update');
+  const balance = fresh[0]?.balanceMinor ?? 0n;
+  if (balance < values.chargeMinor) throw new InsufficientCreditError();
+  await tx.insert(creditTransactions).values({
+    userId: values.userId,
+    type: 'spend',
+    amountMinor: -values.chargeMinor,
+
+Withdrawal has a balancing debit, proving the repo has a distinct debit pattern for on-chain cash-out:
+
+apps/backend/src/credits/withdrawals.ts:158-164
+  const [creditTx] = await tx
+    .insert(creditTransactions)
+    .values({
+      userId: args.userId,
+      type: 'withdrawal',
+      amountMinor: -args.amountMinor,
+
+Search result:
+
+- `markPayoutConfirmed` is the only payout-success transition.
+- The only `type: 'withdrawal'` production writer is `credits/withdrawals.ts`, which is for admin-initiated withdrawals and not order-cashback payout confirmation.
+- No production code inserts a negative ledger row for `kind='order_cashback'` payout confirmation.
+
+Current unit tests encode the double-write side of fulfillment:
+
+apps/backend/src/orders/__tests__/transitions.test.ts:271-298 asserts fulfillment writes `type='cashback'` and upserts `user_credits`.
+apps/backend/src/orders/__tests__/transitions.test.ts:321-334 asserts the same qualifying fulfillment also inserts a pending payout row.
+
+Impact reasoning:
+
+A user with a linked Stellar address can receive a LOOP asset payout for order cashback while the same cashback remains in `user_credits`. That off-chain balance is returned in `/api/users/me` and can later fund a credit order or an admin withdrawal. The ledger invariant checker still passes because it only compares `user_credits` to `credit_transactions`; it does not reconcile confirmed `order_cashback` payouts as debits.

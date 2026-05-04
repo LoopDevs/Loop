@@ -1,0 +1,694 @@
+apps/backend/src/credits/withdrawals.ts:96:    throw new Error('Withdrawal amount must be positive');
+apps/backend/src/credits/withdrawals.ts:112:        throw new InsufficientBalanceError(args.currency, priorBalance, args.amountMinor);
+apps/backend/src/credits/withdrawals.ts:132:        throw new WithdrawalAlreadyIssuedError(priorPayout.id);
+apps/backend/src/credits/withdrawals.ts:151:        throw new Error('pending_payouts insert returned no row');
+apps/backend/src/credits/withdrawals.ts:172:        throw new Error('credit_transactions insert returned no row');
+apps/backend/src/credits/withdrawals.ts:214:      throw new WithdrawalAlreadyIssuedError(existingPayoutId ?? '<unknown>');
+apps/backend/src/credits/accrue-interest.ts:106:    throw new Error('accrueOnePeriod: periodCursor must be a non-empty string');
+apps/backend/src/credits/refunds.ts:65:    throw new Error('Refund amount must be positive');
+apps/backend/src/credits/refunds.ts:94:        throw new Error('credit_transactions insert returned no row');
+apps/backend/src/credits/refunds.ts:126:      throw new RefundAlreadyIssuedError(args.orderId);
+apps/backend/src/credits/adjustments.ts:134:        throw new DailyAdjustmentLimitError(args.currency, dayStart, used, capMinor, attempt);
+apps/backend/src/credits/adjustments.ts:152:      throw new InsufficientBalanceError(args.currency, priorBalance, args.amountMinor);
+apps/backend/src/credits/adjustments.ts:174:      throw new Error('credit_transactions insert returned no row');
+apps/backend/src/credits/payout-compensation.ts:88:    throw new Error('Compensation amount must be positive');
+apps/backend/src/credits/payout-compensation.ts:98:      throw new PayoutNotCompensableError('Payout not found');
+apps/backend/src/credits/payout-compensation.ts:101:      throw new PayoutNotCompensableError(
+apps/backend/src/credits/payout-compensation.ts:106:      throw new AlreadyCompensatedError(args.payoutId);
+apps/backend/src/credits/payout-compensation.ts:109:      throw new PayoutNotCompensableError(
+apps/backend/src/credits/payout-compensation.ts:135:      throw new Error('credit_transactions insert returned no row');
+apps/backend/src/observability-handlers.ts:23:    ? c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404, probeScopedHeaders())
+apps/backend/src/observability-handlers.ts:24:    : c.json({ code: 'UNAUTHORIZED', message: 'Bearer token required' }, 401, probeScopedHeaders());
+apps/backend/src/observability-handlers.ts:111:  return c.text(lines.join('\n') + '\n', 200, {
+apps/backend/src/observability-handlers.ts:136:  return c.json(openApiSpec, 200, probeScopedHeaders());
+apps/backend/src/ctx/operator-pool.ts:106:    throw new Error('CTX_OPERATOR_POOL is not valid JSON');
+apps/backend/src/ctx/operator-pool.ts:111:    throw new Error('CTX_OPERATOR_POOL failed schema validation');
+apps/backend/src/ctx/operator-pool.ts:195:    throw new OperatorPoolUnavailableError(
+apps/backend/src/ctx/operator-pool.ts:274:  throw new OperatorPoolUnavailableError(reason);
+apps/backend/src/users/flywheel-stats.ts:84:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/flywheel-stats.ts:87:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/users/flywheel-stats.ts:123:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute flywheel stats' }, 500);
+apps/backend/src/users/stellar-trustlines.ts:68:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/stellar-trustlines.ts:71:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/users/stellar-trustlines.ts:113:    return c.json({ code: 'UPSTREAM_UNAVAILABLE', message: 'Trustline check unavailable' }, 503);
+apps/backend/src/public/flywheel-stats.ts:110:    return c.json(body);
+apps/backend/src/merchants/sync.ts:139:        throw new Error(`Upstream merchants API returned ${response.status}`);
+apps/backend/src/merchants/sync.ts:149:        throw new Error(
+apps/backend/src/env.ts:467:    throw new Error(`Invalid environment variables — ${details}`);
+apps/backend/src/env.ts:534:    throw new Error(
+apps/backend/src/env.ts:552:    throw new Error(
+apps/backend/src/env.ts:566:    throw new Error(
+apps/backend/src/users/handler.ts:87:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/handler.ts:90:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/users/handler.ts:107:    return c.json(
+apps/backend/src/users/handler.ts:120:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/handler.ts:123:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/users/handler.ts:164:    return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
+apps/backend/src/users/handler.ts:166:  return c.json(
+apps/backend/src/users/stellar-address-handler.ts:47:    return c.json(
+apps/backend/src/users/stellar-address-handler.ts:61:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/stellar-address-handler.ts:64:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/users/stellar-address-handler.ts:75:    return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
+apps/backend/src/public/merchant.ts:100:    return c.json({ code: 'VALIDATION_ERROR', message: 'id is required' }, 400);
+apps/backend/src/public/merchant.ts:103:    return c.json({ code: 'VALIDATION_ERROR', message: 'id is malformed' }, 400);
+apps/backend/src/public/merchant.ts:108:    return c.json({ code: 'NOT_FOUND', message: 'Merchant not found' }, 404);
+apps/backend/src/upstream-body-scrub.ts:5: * Multiple handlers log truncated upstream bodies (`text().slice(0, 500)`)
+apps/backend/src/health.ts:206:  return c.json({
+apps/backend/src/users/pending-payouts-detail.ts:52:    return c.json({ code: 'VALIDATION_ERROR', message: 'id is required' }, 400);
+apps/backend/src/users/pending-payouts-detail.ts:55:    return c.json({ code: 'VALIDATION_ERROR', message: 'id must be a uuid' }, 400);
+apps/backend/src/users/pending-payouts-detail.ts:63:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/pending-payouts-detail.ts:66:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/users/pending-payouts-detail.ts:71:    return c.json({ code: 'NOT_FOUND', message: 'Payout not found' }, 404);
+apps/backend/src/users/pending-payouts-detail.ts:106:    return c.json({ code: 'VALIDATION_ERROR', message: 'orderId is required' }, 400);
+apps/backend/src/users/pending-payouts-detail.ts:109:    return c.json({ code: 'VALIDATION_ERROR', message: 'orderId must be a uuid' }, 400);
+apps/backend/src/users/pending-payouts-detail.ts:117:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/pending-payouts-detail.ts:120:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/users/pending-payouts-detail.ts:125:    return c.json({ code: 'NOT_FOUND', message: 'No payout for this order' }, 404);
+apps/backend/src/merchants/handler.ts:64:  return c.json({
+apps/backend/src/merchants/handler.ts:94:  return c.json({ merchants, total: merchants.length });
+apps/backend/src/merchants/handler.ts:115:    return c.json({ code: 'NOT_FOUND', message: 'Merchant not found' }, 404);
+apps/backend/src/merchants/handler.ts:119:  return c.json({ merchant });
+apps/backend/src/merchants/handler.ts:140:    return c.json({ code: 'VALIDATION_ERROR', message: 'Invalid merchant ID' }, 400);
+apps/backend/src/merchants/handler.ts:146:    return c.json({ code: 'NOT_FOUND', message: 'Merchant not found' }, 404);
+apps/backend/src/merchants/handler.ts:190:  return c.json({ merchant });
+apps/backend/src/orders/list-handler.ts:99:      return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/orders/list-handler.ts:103:      const body = scrubUpstreamBody(await response.text());
+apps/backend/src/orders/list-handler.ts:105:      return c.json({ code: 'UPSTREAM_ERROR', message: 'Failed to fetch orders' }, 502);
+apps/backend/src/orders/list-handler.ts:119:      return c.json(
+apps/backend/src/orders/list-handler.ts:151:    return c.json({
+apps/backend/src/orders/list-handler.ts:164:      return c.json(
+apps/backend/src/orders/list-handler.ts:170:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch orders' }, 500);
+apps/backend/src/test-endpoints.ts:48:    return c.json({ message: 'reset' });
+apps/backend/src/test-endpoints.ts:75:      return c.json({ error: 'invalid body', detail: parsed.error.format() }, 400);
+apps/backend/src/test-endpoints.ts:79:    return c.json({
+apps/backend/src/users/cashback-by-merchant.ts:81:      return c.json(
+apps/backend/src/users/cashback-by-merchant.ts:91:    return c.json(
+apps/backend/src/users/cashback-by-merchant.ts:109:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/cashback-by-merchant.ts:112:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/users/cashback-by-merchant.ts:163:    return c.json(body);
+apps/backend/src/users/cashback-by-merchant.ts:166:    return c.json(
+apps/backend/src/users/pending-payouts-handler.ts:70:    return c.json(
+apps/backend/src/users/pending-payouts-handler.ts:88:      return c.json(
+apps/backend/src/users/pending-payouts-handler.ts:101:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/pending-payouts-handler.ts:104:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/users/pending-payouts-handler.ts:164:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/pending-payouts-handler.ts:167:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/orders/loop-read-handlers.ts:112:    return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
+apps/backend/src/orders/loop-read-handlers.ts:116:    return c.json({ code: 'UNAUTHORIZED', message: 'Loop-native authentication required' }, 401);
+apps/backend/src/orders/loop-read-handlers.ts:120:    return c.json({ code: 'VALIDATION_ERROR', message: 'id is required' }, 400);
+apps/backend/src/orders/loop-read-handlers.ts:127:    return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);
+apps/backend/src/orders/loop-read-handlers.ts:130:  return c.json(orderToView(row));
+apps/backend/src/orders/loop-read-handlers.ts:146:    return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
+apps/backend/src/orders/loop-read-handlers.ts:150:    return c.json({ code: 'UNAUTHORIZED', message: 'Loop-native authentication required' }, 401);
+apps/backend/src/orders/loop-read-handlers.ts:161:    return c.json(
+apps/backend/src/orders/loop-read-handlers.ts:180:  return c.json({ orders: rows.map(orderToView) });
+apps/backend/src/circuit-breaker.ts:127:        throw new CircuitOpenError();
+apps/backend/src/circuit-breaker.ts:135:        throw new CircuitOpenError();
+apps/backend/src/public/cashback-preview.ts:111:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is required' }, 400);
+apps/backend/src/public/cashback-preview.ts:114:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
+apps/backend/src/public/cashback-preview.ts:119:    return c.json({ code: 'VALIDATION_ERROR', message: 'amountMinor is required' }, 400);
+apps/backend/src/public/cashback-preview.ts:125:    return c.json(
+apps/backend/src/public/cashback-preview.ts:134:    return c.json({ code: 'VALIDATION_ERROR', message: 'amountMinor is malformed' }, 400);
+apps/backend/src/public/cashback-preview.ts:137:    return c.json({ code: 'VALIDATION_ERROR', message: 'amountMinor is out of range' }, 400);
+apps/backend/src/public/cashback-preview.ts:142:    return c.json({ code: 'NOT_FOUND', message: 'Merchant not found' }, 404);
+apps/backend/src/images/proxy.ts:55:    return c.json({ code: 'VALIDATION_ERROR', message: 'url is required' }, 400);
+apps/backend/src/images/proxy.ts:61:    return c.json({ code: 'VALIDATION_ERROR', message: urlError }, 400);
+apps/backend/src/images/proxy.ts:95:      return c.json(
+apps/backend/src/images/proxy.ts:102:      return c.json(
+apps/backend/src/images/proxy.ts:110:      return c.json({ code: 'NOT_AN_IMAGE', message: 'Upstream response is not an image' }, 502);
+apps/backend/src/images/proxy.ts:115:      return c.json({ code: 'IMAGE_TOO_LARGE', message: 'Image exceeds 10 MB limit' }, 413);
+apps/backend/src/images/proxy.ts:120:      return c.json({ code: 'IMAGE_TOO_LARGE', message: 'Image exceeds 10 MB limit' }, 413);
+apps/backend/src/images/proxy.ts:167:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to process image' }, 500);
+apps/backend/src/images/proxy.ts:183:  return new Response(data, {
+apps/backend/src/public/loop-assets.ts:63:    return c.json(body);
+apps/backend/src/db/users.ts:75:    throw new Error('upsertUserFromCtx: no row returned');
+apps/backend/src/db/users.ts:131:    throw new Error('findOrCreateUserByEmail: no row returned after conflict');
+apps/backend/src/users/cashback-monthly.ts:89:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/cashback-monthly.ts:92:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/users/cashback-monthly.ts:128:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute cashback-monthly' }, 500);
+apps/backend/src/orders/repo-credit-order.ts:60:      throw new Error('createOrder: no row returned');
+apps/backend/src/orders/repo-credit-order.ts:78:      throw new InsufficientCreditError();
+apps/backend/src/orders/repo-credit-order.ts:119:      throw new Error('createOrder: credit-order paid-transition lost race with self');
+apps/backend/src/users/cashback-summary-handler.ts:67:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/cashback-summary-handler.ts:70:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/users/cashback-summary-handler.ts:101:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load cashback summary' }, 500);
+apps/backend/src/users/payment-method-share.ts:96:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/payment-method-share.ts:99:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/users/payment-method-share.ts:104:    return c.json(
+apps/backend/src/users/payment-method-share.ts:160:    return c.json(
+apps/backend/src/users/orders-summary.ts:87:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/orders-summary.ts:90:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/users/orders-summary.ts:127:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load orders summary' }, 500);
+apps/backend/src/users/dsr-handler.ts:51:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/dsr-handler.ts:54:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/users/dsr-handler.ts:59:      return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
+apps/backend/src/users/dsr-handler.ts:62:    return c.json(exportPayload, 200, {
+apps/backend/src/users/dsr-handler.ts:71:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build export' }, 500);
+apps/backend/src/users/dsr-handler.ts:98:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/dsr-handler.ts:101:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/users/dsr-handler.ts:107:        return c.json(
+apps/backend/src/users/dsr-handler.ts:116:      return c.json(
+apps/backend/src/users/dsr-handler.ts:126:    return c.json({ ok: true });
+apps/backend/src/users/dsr-handler.ts:129:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to delete account' }, 500);
+apps/backend/src/users/cashback-history-handler.ts:67:      return c.json(
+apps/backend/src/users/cashback-history-handler.ts:80:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/cashback-history-handler.ts:83:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/users/cashback-history-handler.ts:125:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/cashback-history-handler.ts:128:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/users/cashback-history-handler.ts:209:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/users/cashback-history-handler.ts:212:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/admin/supplier-spend-activity-csv.ts:145:    return new Response(body, {
+apps/backend/src/admin/supplier-spend-activity-csv.ts:155:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/orders/handler.ts:36:    return c.json(
+apps/backend/src/orders/handler.ts:49:    return c.json({ code: 'NOT_FOUND', message: 'Merchant not found' }, 404);
+apps/backend/src/orders/handler.ts:70:      return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/orders/handler.ts:77:      const body = scrubUpstreamBody(await response.text());
+apps/backend/src/orders/handler.ts:79:      return c.json({ code: 'UPSTREAM_ERROR', message: 'Order creation failed' }, 502);
+apps/backend/src/orders/handler.ts:93:      return c.json(
+apps/backend/src/orders/handler.ts:109:      return c.json(
+apps/backend/src/orders/handler.ts:128:      return c.json(
+apps/backend/src/orders/handler.ts:146:      return c.json(
+apps/backend/src/orders/handler.ts:162:      return c.json({ code: 'UPSTREAM_ERROR', message: 'Order payment URL missing memo' }, 502);
+apps/backend/src/orders/handler.ts:174:    return c.json(
+apps/backend/src/orders/handler.ts:187:      return c.json(
+apps/backend/src/orders/handler.ts:193:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to create order' }, 500);
+apps/backend/src/auth/otps.ts:59:    throw new Error('createOtp: no row returned');
+apps/backend/src/merchants/cashback-rate-handlers.ts:64:    return c.json({ rates: {} });
+apps/backend/src/merchants/cashback-rate-handlers.ts:76:  return c.json({ rates });
+apps/backend/src/merchants/cashback-rate-handlers.ts:98:    return c.json({ code: 'VALIDATION_ERROR', message: 'Invalid merchant ID' }, 400);
+apps/backend/src/merchants/cashback-rate-handlers.ts:105:    return c.json({ code: 'NOT_FOUND', message: 'Merchant not found' }, 404);
+apps/backend/src/merchants/cashback-rate-handlers.ts:122:    return c.json({ merchantId: id, userCashbackPct: null });
+apps/backend/src/merchants/cashback-rate-handlers.ts:126:  return c.json({
+apps/backend/src/config/handler.ts:95:  return c.json(body);
+apps/backend/src/admin/audit-tail.ts:55:      return c.json(
+apps/backend/src/admin/audit-tail.ts:96:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load audit tail' }, 500);
+apps/backend/src/auth/social.ts:71:      return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
+apps/backend/src/auth/social.ts:75:      return c.json({ code: 'INTERNAL_ERROR', message: 'Auth not configured' }, 500);
+apps/backend/src/auth/social.ts:82:      return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
+apps/backend/src/auth/social.ts:87:      return c.json({ code: 'VALIDATION_ERROR', message: 'idToken required' }, 400);
+apps/backend/src/auth/social.ts:104:      return c.json(
+apps/backend/src/auth/social.ts:111:      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid id_token' }, 401);
+apps/backend/src/auth/social.ts:130:      return c.json(
+apps/backend/src/auth/social.ts:136:      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid id_token' }, 401);
+apps/backend/src/auth/social.ts:147:      return c.json({ code: 'UNAUTHORIZED', message: 'Provider did not share email' }, 401);
+apps/backend/src/auth/social.ts:158:      return c.json({ code: 'UNAUTHORIZED', message: 'Email not verified by provider' }, 401);
+apps/backend/src/auth/social.ts:173:      return c.json({
+apps/backend/src/auth/social.ts:180:      return c.json({ code: 'INTERNAL_ERROR', message: 'Social sign-in failed' }, 500);
+apps/backend/src/middleware/rate-limit.ts:139:        return c.json({ code: 'RATE_LIMITED', message: 'Too many requests' }, 429);
+apps/backend/src/auth/native.ts:62:    return c.json({ code: 'INTERNAL_ERROR', message: 'Auth not configured' }, 500);
+apps/backend/src/auth/native.ts:66:    return c.json({ code: 'VALIDATION_ERROR', message: 'email and otp are required' }, 400);
+apps/backend/src/auth/native.ts:75:      return c.json({ code: 'VALIDATION_ERROR', message: 'email and otp are required' }, 400);
+apps/backend/src/auth/native.ts:86:      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired verification code' }, 401);
+apps/backend/src/auth/native.ts:93:    return c.json({ accessToken: pair.accessToken, refreshToken: pair.refreshToken });
+apps/backend/src/auth/native.ts:96:    return c.json({ code: 'INTERNAL_ERROR', message: 'Verification failed' }, 500);
+apps/backend/src/auth/native.ts:112:    return c.json({ code: 'INTERNAL_ERROR', message: 'Auth not configured' }, 500);
+apps/backend/src/auth/native.ts:116:    return c.json({ code: 'VALIDATION_ERROR', message: 'refreshToken is required' }, 400);
+apps/backend/src/auth/native.ts:122:      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid refresh token' }, 401);
+apps/backend/src/auth/native.ts:126:      return c.json({ code: 'UNAUTHORIZED', message: 'Refresh token missing jti' }, 401);
+apps/backend/src/auth/native.ts:150:      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid refresh token' }, 401);
+apps/backend/src/auth/native.ts:164:    return c.json({ accessToken: pair.accessToken, refreshToken: pair.refreshToken });
+apps/backend/src/auth/native.ts:167:    return c.json({ code: 'INTERNAL_ERROR', message: 'Refresh failed' }, 500);
+apps/backend/src/admin/operator-stats.ts:55:      return c.json(
+apps/backend/src/admin/operator-stats.ts:67:    return c.json(
+apps/backend/src/admin/operator-stats.ts:106:    return c.json(body);
+apps/backend/src/admin/operator-stats.ts:109:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute operator stats' }, 500);
+apps/backend/src/auth/handler.ts:63:    return c.json({ code: 'VALIDATION_ERROR', message: 'Valid email is required' }, 400);
+apps/backend/src/auth/handler.ts:81:      const body = scrubUpstreamBody(await response.text());
+apps/backend/src/auth/handler.ts:87:        return c.json({ message: 'Verification code sent' });
+apps/backend/src/auth/handler.ts:89:      return c.json({ code: 'UPSTREAM_ERROR', message: 'Failed to send verification code' }, 502);
+apps/backend/src/auth/handler.ts:92:    return c.json({ message: 'Verification code sent' });
+apps/backend/src/auth/handler.ts:104:      return c.json({ message: 'Verification code sent' });
+apps/backend/src/auth/handler.ts:111:    return c.json({ message: 'Verification code sent' });
+apps/backend/src/auth/handler.ts:130:    return c.json({ code: 'VALIDATION_ERROR', message: 'email and otp are required' }, 400);
+apps/backend/src/auth/handler.ts:148:        return c.json(
+apps/backend/src/auth/handler.ts:156:      const body = scrubUpstreamBody(await response.text());
+apps/backend/src/auth/handler.ts:158:      return c.json({ code: 'UPSTREAM_ERROR', message: 'Verification failed' }, 502);
+apps/backend/src/auth/handler.ts:172:      return c.json(
+apps/backend/src/auth/handler.ts:177:    return c.json(validated.data);
+apps/backend/src/auth/handler.ts:180:      return c.json(
+apps/backend/src/auth/handler.ts:186:    return c.json({ code: 'INTERNAL_ERROR', message: 'Verification failed' }, 500);
+apps/backend/src/auth/handler.ts:206:    return c.json({ code: 'VALIDATION_ERROR', message: 'refreshToken is required' }, 400);
+apps/backend/src/auth/handler.ts:233:        return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired refresh token' }, 401);
+apps/backend/src/auth/handler.ts:237:      const body = scrubUpstreamBody(await response.text());
+apps/backend/src/auth/handler.ts:239:      return c.json({ code: 'UPSTREAM_ERROR', message: 'Token refresh failed' }, 502);
+apps/backend/src/auth/handler.ts:253:      return c.json(
+apps/backend/src/auth/handler.ts:258:    return c.json(validated.data);
+apps/backend/src/auth/handler.ts:261:      return c.json(
+apps/backend/src/auth/handler.ts:267:    return c.json({ code: 'INTERNAL_ERROR', message: 'Token refresh failed' }, 500);
+apps/backend/src/auth/logout-handler.ts:52:    return c.json({ message: 'Logged out' });
+apps/backend/src/auth/logout-handler.ts:100:  return c.json({ message: 'Logged out' });
+apps/backend/src/orders/loop-create-response.ts:80:      return c.json(
+apps/backend/src/auth/identities.ts:110:        throw new Error('resolveOrCreateUserForIdentity: insert + re-select both empty');
+apps/backend/src/admin/merchants-catalog-csv.ts:126:    return new Response(body, {
+apps/backend/src/admin/merchants-catalog-csv.ts:136:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/middleware/request-context.ts:45:  await runWithRequestContext({ requestId: id }, async () => {
+apps/backend/src/auth/jwks.ts:78:    throw new Error(`JWKS fetch ${res.status} for ${url}`);
+apps/backend/src/auth/jwks.ts:84:    throw new Error(`JWKS schema drift at ${url}`);
+apps/backend/src/admin/credit-adjustments.ts:73:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
+apps/backend/src/admin/credit-adjustments.ts:78:    return c.json(
+apps/backend/src/admin/credit-adjustments.ts:91:    return c.json({ code: 'UNAUTHORIZED', message: 'Admin context missing' }, 401);
+apps/backend/src/admin/credit-adjustments.ts:98:    return c.json({ code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON' }, 400);
+apps/backend/src/admin/credit-adjustments.ts:102:    return c.json(
+apps/backend/src/admin/credit-adjustments.ts:156:      return c.json(
+apps/backend/src/admin/credit-adjustments.ts:170:      return c.json(
+apps/backend/src/admin/credit-adjustments.ts:179:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to apply adjustment' }, 500);
+apps/backend/src/admin/credit-adjustments.ts:197:  return c.json(guardResult.body, guardResult.status as 200 | 400 | 409 | 500);
+apps/backend/src/discord/shared.ts:98:        body = scrubUpstreamBody(await response.text());
+apps/backend/src/admin/users-recycling-activity.ts:125:    return c.json(
+apps/backend/src/auth/email.ts:82:      throw new Error(
+apps/backend/src/auth/email.ts:93:  throw new Error(`Unsupported EMAIL_PROVIDER: ${configured}`);
+apps/backend/src/admin/config-history-handler.ts:38:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId required' }, 400);
+apps/backend/src/admin/config-history-handler.ts:41:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
+apps/backend/src/admin/config-history-handler.ts:50:    return c.json({ history: rows });
+apps/backend/src/admin/config-history-handler.ts:53:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load config history' }, 500);
+apps/backend/src/admin/users-list.ts:54:      return c.json({ code: 'VALIDATION_ERROR', message: 'q is too long' }, 400);
+apps/backend/src/admin/users-list.ts:68:      return c.json(
+apps/backend/src/admin/users-list.ts:108:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to list users' }, 500);
+apps/backend/src/auth/tokens.ts:79:    throw new Error('LOOP_JWT_SIGNING_KEY is not configured — Loop-native auth is disabled');
+apps/backend/src/orders/loop-replay-response.ts:73:      return c.json({ code: 'INTERNAL_ERROR', message: 'Invalid stored order currency' }, 500);
+apps/backend/src/orders/loop-replay-response.ts:77:      return c.json(
+apps/backend/src/orders/loop-replay-response.ts:96:    return c.json(
+apps/backend/src/middleware/kill-switch.ts:31:      return c.json(
+apps/backend/src/admin/withdrawals.ts:86:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
+apps/backend/src/admin/withdrawals.ts:91:    return c.json(
+apps/backend/src/admin/withdrawals.ts:102:    return c.json({ code: 'UNAUTHORIZED', message: 'Admin context missing' }, 401);
+apps/backend/src/admin/withdrawals.ts:109:    return c.json({ code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON' }, 400);
+apps/backend/src/admin/withdrawals.ts:113:    return c.json(
+apps/backend/src/admin/withdrawals.ts:127:    return c.json({ code: 'NOT_FOUND', message: 'Target user not found' }, 404);
+apps/backend/src/admin/withdrawals.ts:137:    return c.json(
+apps/backend/src/admin/withdrawals.ts:200:      return c.json(
+apps/backend/src/admin/withdrawals.ts:209:      return c.json(
+apps/backend/src/admin/withdrawals.ts:218:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to apply withdrawal' }, 500);
+apps/backend/src/admin/withdrawals.ts:234:  return c.json(guardResult.body, guardResult.status as 200);
+apps/backend/src/openapi/orders-reads.ts:83:  // — see `c.json({ order })` in `apps/backend/src/orders/handler.ts`.
+apps/backend/src/auth/require-admin.ts:35:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/auth/require-admin.ts:38:    return c.json(
+apps/backend/src/auth/require-admin.ts:47:      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired token' }, 401);
+apps/backend/src/auth/require-admin.ts:52:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to resolve user' }, 500);
+apps/backend/src/auth/require-admin.ts:58:    return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
+apps/backend/src/admin/asset-drift-state.ts:45:  return c.json(body);
+apps/backend/src/admin/upsert-config-handler.ts:90:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId required' }, 400);
+apps/backend/src/admin/upsert-config-handler.ts:93:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
+apps/backend/src/admin/upsert-config-handler.ts:98:    return c.json(
+apps/backend/src/admin/upsert-config-handler.ts:110:    return c.json({ code: 'UNAUTHORIZED', message: 'Admin context missing' }, 401);
+apps/backend/src/admin/upsert-config-handler.ts:116:    return c.json(
+apps/backend/src/admin/upsert-config-handler.ts:177:          throw new Error('merchant_cashback_configs upsert returned no row');
+apps/backend/src/admin/upsert-config-handler.ts:201:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to upsert cashback config' }, 500);
+apps/backend/src/admin/upsert-config-handler.ts:234:  return c.json(guardResult.body, guardResult.status as 200 | 400 | 409 | 500);
+apps/backend/src/admin/payment-method-share.ts:88:    return c.json(
+apps/backend/src/admin/payment-method-share.ts:141:    return c.json(
+apps/backend/src/payments/price-feed-fx.ts:69:    throw new Error(`FX feed ${res.status} from ${url}`);
+apps/backend/src/payments/price-feed-fx.ts:75:    throw new Error('FX feed schema drift');
+apps/backend/src/payments/price-feed-fx.ts:78:    throw new Error(`FX feed base is ${parsed.data.base}, expected USD`);
+apps/backend/src/payments/price-feed-fx.ts:125:    throw new Error(`FX feed has no rate for USD→${target}`);
+apps/backend/src/payments/price-feed-fx.ts:128:    throw new Error(`FX feed returned non-positive rate for ${target}: ${rate}`);
+apps/backend/src/payments/price-feed-fx.ts:158:    throw new Error(`convertMinorUnits: negative amount not supported (${amount})`);
+apps/backend/src/payments/price-feed-fx.ts:174:      throw new Error(`convertMinorUnits: rate USD→${from} rounded to zero (${rate})`);
+apps/backend/src/admin/supplier-spend.ts:100:      return c.json(
+apps/backend/src/admin/supplier-spend.ts:116:    return c.json(
+apps/backend/src/admin/supplier-spend.ts:166:    return c.json(body);
+apps/backend/src/admin/supplier-spend.ts:169:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute supplier spend' }, 500);
+apps/backend/src/admin/operator-supplier-spend.ts:82:    return c.json({ code: 'VALIDATION_ERROR', message: 'operatorId is required' }, 400);
+apps/backend/src/admin/operator-supplier-spend.ts:85:    return c.json({ code: 'VALIDATION_ERROR', message: 'operatorId is malformed' }, 400);
+apps/backend/src/admin/operator-supplier-spend.ts:93:      return c.json(
+apps/backend/src/admin/operator-supplier-spend.ts:104:    return c.json(
+apps/backend/src/admin/operator-supplier-spend.ts:156:    return c.json(
+apps/backend/src/admin/merchants-resync.ts:57:    return c.json(
+apps/backend/src/admin/merchants-resync.ts:68:    return c.json({ code: 'UNAUTHORIZED', message: 'Admin context missing' }, 401);
+apps/backend/src/admin/merchants-resync.ts:75:    return c.json({ code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON' }, 400);
+apps/backend/src/admin/merchants-resync.ts:79:    return c.json(
+apps/backend/src/admin/merchants-resync.ts:114:    return c.json(
+apps/backend/src/admin/merchants-resync.ts:131:  return c.json(guardResult.body, guardResult.status as 200 | 400 | 500);
+apps/backend/src/admin/merchant-cashback-monthly.ts:83:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is required' }, 400);
+apps/backend/src/admin/merchant-cashback-monthly.ts:86:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
+apps/backend/src/admin/merchant-cashback-monthly.ts:122:    return c.json(
+apps/backend/src/admin/discord-test.ts:38:    return c.json({ code: 'VALIDATION_ERROR', message: 'body must be JSON' }, 400);
+apps/backend/src/admin/discord-test.ts:42:    return c.json(
+apps/backend/src/admin/discord-test.ts:57:    return c.json({ code: 'UNAUTHORIZED', message: 'Admin context missing' }, 401);
+apps/backend/src/admin/discord-test.ts:62:    return c.json(
+apps/backend/src/admin/discord-test.ts:72:  return c.json({ status: 'delivered', channel });
+apps/backend/src/auth/native-request-otp.ts:50:    return c.json({ code: 'VALIDATION_ERROR', message: 'Valid email is required' }, 400);
+apps/backend/src/auth/native-request-otp.ts:60:      return c.json({ code: 'VALIDATION_ERROR', message: 'Valid email is required' }, 400);
+apps/backend/src/auth/native-request-otp.ts:72:      return c.json({ message: 'Verification code sent' });
+apps/backend/src/auth/native-request-otp.ts:91:    return c.json({ message: 'Verification code sent' });
+apps/backend/src/auth/native-request-otp.ts:96:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to send verification code' }, 500);
+apps/backend/src/payments/price-feed.ts:66:    throw new Error(`Price feed ${res.status} from ${url}`);
+apps/backend/src/payments/price-feed.ts:72:    throw new Error('Price feed schema drift');
+apps/backend/src/payments/price-feed.ts:105:    throw new Error(`Price feed has no rate for ${currency}`);
+apps/backend/src/payments/price-feed.ts:110:    throw new Error(`Price feed returned non-positive rate for ${currency}: ${minor}`);
+apps/backend/src/admin/user-by-email.ts:62:    return c.json({ code: 'VALIDATION_ERROR', message: 'email is required' }, 400);
+apps/backend/src/admin/user-by-email.ts:65:    return c.json(
+apps/backend/src/admin/user-by-email.ts:71:    return c.json({ code: 'VALIDATION_ERROR', message: 'email must look like an email' }, 400);
+apps/backend/src/admin/user-by-email.ts:91:      return c.json({ code: 'NOT_FOUND', message: 'No user with that email' }, 404);
+apps/backend/src/admin/user-by-email.ts:105:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to look up user' }, 500);
+apps/backend/src/orders/get-handler.ts:68:    throw new Error(`Non-numeric money value from upstream: ${JSON.stringify(raw)}`);
+apps/backend/src/orders/get-handler.ts:101:    return c.json({ code: 'VALIDATION_ERROR', message: 'Invalid order ID' }, 400);
+apps/backend/src/orders/get-handler.ts:114:      return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);
+apps/backend/src/orders/get-handler.ts:118:      return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/orders/get-handler.ts:122:      const body = scrubUpstreamBody(await response.text());
+apps/backend/src/orders/get-handler.ts:124:      return c.json({ code: 'UPSTREAM_ERROR', message: 'Failed to fetch order' }, 502);
+apps/backend/src/orders/get-handler.ts:138:      return c.json(
+apps/backend/src/orders/get-handler.ts:227:    return c.json({ order });
+apps/backend/src/orders/get-handler.ts:230:      return c.json(
+apps/backend/src/orders/get-handler.ts:236:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch order' }, 500);
+apps/backend/src/admin/asset-circulation.ts:64:  throw new Error(`Unknown fiat for asset ${code}`);
+apps/backend/src/admin/asset-circulation.ts:70:    return c.json({ code: 'VALIDATION_ERROR', message: 'assetCode is required' }, 400);
+apps/backend/src/admin/asset-circulation.ts:74:    return c.json(
+apps/backend/src/admin/asset-circulation.ts:85:    return c.json(
+apps/backend/src/admin/asset-circulation.ts:101:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to read ledger liability' }, 500);
+apps/backend/src/admin/asset-circulation.ts:112:    return c.json(
+apps/backend/src/admin/asset-circulation.ts:133:  return c.json(body);
+apps/backend/src/middleware/body-limit.ts:20:    c.json({ code: 'PAYLOAD_TOO_LARGE', message: 'Request body exceeds 1 MB limit' }, 413),
+apps/backend/src/payments/horizon-find-outbound.ts:60:      throw new Error(`Horizon ${res.status} on ${url.pathname}`);
+apps/backend/src/payments/horizon-find-outbound.ts:69:      throw new Error('Horizon schema drift on /payments');
+apps/backend/src/admin/user-cashback-summary.ts:52:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId is required' }, 400);
+apps/backend/src/admin/user-cashback-summary.ts:55:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
+apps/backend/src/admin/user-cashback-summary.ts:83:      return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
+apps/backend/src/admin/user-cashback-summary.ts:94:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load user cashback summary' }, 500);
+apps/backend/src/admin/discord-notifiers.ts:29:  return c.json(body);
+apps/backend/src/admin/merchant-operator-mix.ts:67:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is required' }, 400);
+apps/backend/src/admin/merchant-operator-mix.ts:70:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
+apps/backend/src/admin/merchant-operator-mix.ts:78:      return c.json(
+apps/backend/src/admin/merchant-operator-mix.ts:90:    return c.json(
+apps/backend/src/admin/merchant-operator-mix.ts:136:    return c.json(body);
+apps/backend/src/admin/merchant-operator-mix.ts:139:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute operator mix' }, 500);
+apps/backend/src/admin/merchant-cashback-summary.ts:68:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is required' }, 400);
+apps/backend/src/admin/merchant-cashback-summary.ts:71:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
+apps/backend/src/admin/merchant-cashback-summary.ts:106:    return c.json(
+apps/backend/src/admin/cashback-realization-daily-csv.ts:145:    return new Response(body, {
+apps/backend/src/admin/cashback-realization-daily-csv.ts:155:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/payments/horizon-balances.ts:129:    throw new Error(`Horizon ${res.status} on /accounts/${account}`);
+apps/backend/src/payments/horizon-balances.ts:138:    throw new Error('Horizon schema drift on /accounts');
+apps/backend/src/admin/treasury-credit-flow-csv.ts:79:      return c.json(
+apps/backend/src/admin/treasury-credit-flow-csv.ts:175:    return new Response(body, {
+apps/backend/src/admin/treasury-credit-flow-csv.ts:185:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/auth/require-auth.ts:85:    return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
+apps/backend/src/auth/require-auth.ts:110:      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired token' }, 401);
+apps/backend/src/payments/horizon.ts:113:    throw new Error(`Horizon ${res.status} on ${url.pathname}`);
+apps/backend/src/payments/horizon.ts:119:    throw new Error('Horizon schema drift on /payments');
+apps/backend/src/orders/repo.ts:147:        throw new Error('createOrder: no row returned');
+apps/backend/src/orders/repo.ts:155:      if (conflict !== null) throw new IdempotentOrderConflictError(conflict);
+apps/backend/src/orders/repo.ts:170:    if (conflict !== null) throw new IdempotentOrderConflictError(conflict);
+apps/backend/src/admin/merchant-flywheel-stats.ts:73:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is required' }, 400);
+apps/backend/src/admin/merchant-flywheel-stats.ts:78:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
+apps/backend/src/admin/merchant-flywheel-stats.ts:119:    return c.json(
+apps/backend/src/admin/orders-activity.ts:90:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load orders activity' }, 500);
+apps/backend/src/auth/issue-token-pair.ts:66:    throw new Error('refresh token missing jti');
+apps/backend/src/admin/payout-compensation.ts:72:    return c.json({ code: 'VALIDATION_ERROR', message: 'id must be a uuid' }, 400);
+apps/backend/src/admin/payout-compensation.ts:77:    return c.json(
+apps/backend/src/admin/payout-compensation.ts:88:    return c.json({ code: 'UNAUTHORIZED', message: 'Admin context missing' }, 401);
+apps/backend/src/admin/payout-compensation.ts:95:    return c.json({ code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON' }, 400);
+apps/backend/src/admin/payout-compensation.ts:99:    return c.json(
+apps/backend/src/admin/payout-compensation.ts:129:    return c.json(prior.body, prior.status as 200 | 400 | 404 | 409 | 500);
+apps/backend/src/admin/payout-compensation.ts:134:    return c.json({ code: 'NOT_FOUND', message: 'Payout not found' }, 404);
+apps/backend/src/admin/payout-compensation.ts:138:    return c.json(
+apps/backend/src/admin/payout-compensation.ts:149:    return c.json(
+apps/backend/src/admin/payout-compensation.ts:163:    return c.json(
+apps/backend/src/admin/payout-compensation.ts:186:      return c.json(
+apps/backend/src/admin/payout-compensation.ts:195:      return c.json(
+apps/backend/src/admin/payout-compensation.ts:204:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to apply compensation' }, 500);
+apps/backend/src/admin/payout-compensation.ts:253:  return c.json(envelope, 200);
+apps/backend/src/admin/operators-snapshot-csv.ts:101:      return c.json(
+apps/backend/src/admin/operators-snapshot-csv.ts:113:    return c.json(
+apps/backend/src/admin/operators-snapshot-csv.ts:217:    return new Response(body, {
+apps/backend/src/admin/operators-snapshot-csv.ts:227:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/payments/horizon-trustlines.ts:117:    throw new Error(`Horizon ${res.status} on /accounts/${account}`);
+apps/backend/src/payments/horizon-trustlines.ts:124:    throw new Error('Horizon schema drift on /accounts');
+apps/backend/src/admin/users-recycling-activity-csv.ts:128:    return new Response(body, {
+apps/backend/src/admin/users-recycling-activity-csv.ts:138:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/user-payment-method-share.ts:79:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId is required' }, 400);
+apps/backend/src/admin/user-payment-method-share.ts:82:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
+apps/backend/src/admin/user-payment-method-share.ts:87:    return c.json(
+apps/backend/src/admin/user-payment-method-share.ts:141:    return c.json(
+apps/backend/src/orders/loop-handler.ts:80:    return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
+apps/backend/src/orders/loop-handler.ts:84:    return c.json(
+apps/backend/src/orders/loop-handler.ts:95:    return c.json(
+apps/backend/src/orders/loop-handler.ts:116:      return c.json(
+apps/backend/src/orders/loop-handler.ts:140:    return c.json({ code: 'VALIDATION_ERROR', message: 'Unknown or disabled merchant' }, 400);
+apps/backend/src/orders/loop-handler.ts:149:    return c.json({ code: 'UNAUTHORIZED', message: 'User record not found' }, 401);
+apps/backend/src/orders/loop-handler.ts:159:    return c.json({ code: 'INTERNAL_ERROR', message: 'Invalid account currency' }, 500);
+apps/backend/src/orders/loop-handler.ts:162:    return c.json(
+apps/backend/src/orders/loop-handler.ts:184:    return c.json(
+apps/backend/src/orders/loop-handler.ts:199:      return c.json(
+apps/backend/src/orders/loop-handler.ts:214:    return c.json(
+apps/backend/src/orders/loop-handler.ts:264:      return c.json(
+apps/backend/src/orders/loop-handler.ts:270:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to create order' }, 500);
+apps/backend/src/payments/payout-submit.ts:119:    throw new PayoutSubmitError(
+apps/backend/src/payments/payout-submit.ts:129:    throw new PayoutSubmitError(
+apps/backend/src/payments/payout-submit.ts:143:    throw new PayoutSubmitError(
+apps/backend/src/payments/payout-submit.ts:162:      .addMemo(Memo.text(args.intent.memoText))
+apps/backend/src/payments/payout-submit.ts:167:    throw new PayoutSubmitError(
+apps/backend/src/auth/normalize-email.ts:61:    throw new NonAsciiEmailError(raw);
+apps/backend/src/admin/orders.ts:111:    return c.json(
+apps/backend/src/admin/orders.ts:127:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a UUID' }, 400);
+apps/backend/src/admin/orders.ts:140:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
+apps/backend/src/admin/orders.ts:148:    return c.json(
+apps/backend/src/admin/orders.ts:164:    return c.json(
+apps/backend/src/admin/orders.ts:183:    return c.json({ code: 'VALIDATION_ERROR', message: 'ctxOperatorId is malformed' }, 400);
+apps/backend/src/admin/orders.ts:195:      return c.json(
+apps/backend/src/admin/orders.ts:220:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to list orders' }, 500);
+apps/backend/src/payments/horizon-circulation.ts:89:    throw new Error(`Malformed Horizon amount: ${amount}`);
+apps/backend/src/payments/horizon-circulation.ts:127:    throw new Error(`Horizon ${res.status} on /assets`);
+apps/backend/src/payments/horizon-circulation.ts:136:    throw new Error('Horizon schema drift on /assets');
+apps/backend/src/admin/payment-method-activity.ts:133:    return c.json(
+apps/backend/src/admin/stuck-payouts.ts:150:    return c.json(body);
+apps/backend/src/admin/stuck-payouts.ts:153:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute stuck payouts' }, 500);
+apps/backend/src/orders/procure-one.ts:133:      const body = scrubUpstreamBody(await res.text());
+apps/backend/src/admin/operator-activity.ts:68:    return c.json({ code: 'VALIDATION_ERROR', message: 'operatorId is required' }, 400);
+apps/backend/src/admin/operator-activity.ts:71:    return c.json({ code: 'VALIDATION_ERROR', message: 'operatorId is malformed' }, 400);
+apps/backend/src/admin/operator-activity.ts:126:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load operator activity' }, 500);
+apps/backend/src/admin/user-search.ts:64:    return c.json(
+apps/backend/src/admin/user-search.ts:73:    return c.json(
+apps/backend/src/admin/user-search.ts:120:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to search users' }, 500);
+apps/backend/src/clustering/handler.ts:25:    return c.json(
+apps/backend/src/clustering/handler.ts:47:    return c.json({ code: 'VALIDATION_ERROR', message: 'bounds are outside the globe' }, 400);
+apps/backend/src/clustering/handler.ts:50:    return c.json({ code: 'VALIDATION_ERROR', message: 'south must be <= north' }, 400);
+apps/backend/src/clustering/handler.ts:157:      return new Response(bytes, {
+apps/backend/src/clustering/handler.ts:174:  return c.json({
+apps/backend/src/clustering/data-store.ts:106:        const body = await response.text().catch(() => '');
+apps/backend/src/clustering/data-store.ts:111:        throw new Error(`Upstream locations API returned ${response.status}`);
+apps/backend/src/clustering/data-store.ts:117:        throw new Error(
+apps/backend/src/admin/operator-latency.ts:59:      return c.json(
+apps/backend/src/admin/operator-latency.ts:71:    return c.json(
+apps/backend/src/admin/operator-latency.ts:118:    return c.json(body);
+apps/backend/src/admin/operator-latency.ts:121:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute operator latency' }, 500);
+apps/backend/src/admin/user-credits-csv.ts:79:    return new Response(body, {
+apps/backend/src/admin/user-credits-csv.ts:89:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to export user-credits CSV' }, 500);
+apps/backend/src/app.ts:173:  return c.json({ code: 'NOT_FOUND', message: 'Route not found' }, 404);
+apps/backend/src/app.ts:184:  return c.json(
+apps/backend/src/admin/cashback-configs-csv.ts:123:    return new Response(body, {
+apps/backend/src/admin/cashback-configs-csv.ts:133:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/handler.ts:26:    return c.json({ configs: rows });
+apps/backend/src/admin/handler.ts:32:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load cashback configs' }, 500);
+apps/backend/src/admin/treasury.ts:104:  return c.json(snapshot);
+apps/backend/src/admin/cashback-activity.ts:131:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute activity' }, 500);
+apps/backend/src/admin/user-flywheel-stats.ts:72:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId is required' }, 400);
+apps/backend/src/admin/user-flywheel-stats.ts:75:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
+apps/backend/src/admin/user-flywheel-stats.ts:120:      return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
+apps/backend/src/admin/user-flywheel-stats.ts:133:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load user flywheel stats' }, 500);
+apps/backend/src/admin/audit-tail-csv.ts:64:      return c.json(
+apps/backend/src/admin/audit-tail-csv.ts:74:    return c.json(
+apps/backend/src/admin/audit-tail-csv.ts:131:    return new Response(body, {
+apps/backend/src/admin/audit-tail-csv.ts:141:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/db/schema.ts:58:    ctxUserId: text('ctx_user_id'),
+apps/backend/src/db/schema.ts:59:    email: text('email').notNull(),
+apps/backend/src/db/schema.ts:68:    stellarAddress: text('stellar_address'),
+apps/backend/src/db/schema.ts:162:    type: text('type').notNull(),
+apps/backend/src/db/schema.ts:165:    referenceType: text('reference_type'),
+apps/backend/src/db/schema.ts:166:    referenceId: text('reference_id'),
+apps/backend/src/db/schema.ts:174:    reason: text('reason'),
+apps/backend/src/db/schema.ts:181:    periodCursor: text('period_cursor'),
+apps/backend/src/db/schema.ts:254:    merchantId: text('merchant_id').primaryKey(),
+apps/backend/src/db/schema.ts:259:    updatedBy: text('updated_by').notNull(),
+apps/backend/src/db/schema.ts:301:    merchantId: text('merchant_id').notNull(),
+apps/backend/src/db/schema.ts:306:    changedBy: text('changed_by').notNull(),
+apps/backend/src/db/schema.ts:333:    email: text('email').notNull(),
+apps/backend/src/db/schema.ts:334:    codeHash: text('code_hash').notNull(),
+apps/backend/src/db/schema.ts:364:    jti: text('jti').primaryKey(),
+apps/backend/src/db/schema.ts:368:    tokenHash: text('token_hash').notNull(),
+apps/backend/src/db/schema.ts:371:    replacedByJti: text('replaced_by_jti'),
+apps/backend/src/db/schema.ts:409:    merchantId: text('merchant_id').notNull(),
+apps/backend/src/db/schema.ts:443:    paymentMethod: text('payment_method').notNull(),
+apps/backend/src/db/schema.ts:444:    paymentMemo: text('payment_memo'),
+apps/backend/src/db/schema.ts:456:    ctxOrderId: text('ctx_order_id'),
+apps/backend/src/db/schema.ts:457:    ctxOperatorId: text('ctx_operator_id'),
+apps/backend/src/db/schema.ts:467:    redeemCode: text('redeem_code'),
+apps/backend/src/db/schema.ts:468:    redeemPin: text('redeem_pin'),
+apps/backend/src/db/schema.ts:469:    redeemUrl: text('redeem_url'),
+apps/backend/src/db/schema.ts:472:    state: text('state').notNull().default('pending_payment'),
+apps/backend/src/db/schema.ts:473:    failureReason: text('failure_reason'),
+apps/backend/src/db/schema.ts:481:    idempotencyKey: text('idempotency_key'),
+apps/backend/src/db/schema.ts:595:  name: text('name').primaryKey(),
+apps/backend/src/db/schema.ts:596:  cursor: text('cursor'),
+apps/backend/src/db/schema.ts:624:    provider: text('provider').notNull(),
+apps/backend/src/db/schema.ts:625:    providerSub: text('provider_sub').notNull(),
+apps/backend/src/db/schema.ts:626:    emailAtLink: text('email_at_link').notNull(),
+apps/backend/src/db/schema.ts:685:    kind: text('kind').notNull().default('order_cashback').$type<'order_cashback' | 'withdrawal'>(),
+apps/backend/src/db/schema.ts:690:    assetCode: text('asset_code').notNull(),
+apps/backend/src/db/schema.ts:691:    assetIssuer: text('asset_issuer').notNull(),
+apps/backend/src/db/schema.ts:696:    toAddress: text('to_address').notNull(),
+apps/backend/src/db/schema.ts:698:    memoText: text('memo_text').notNull(),
+apps/backend/src/db/schema.ts:700:    state: text('state').notNull().default('pending'),
+apps/backend/src/db/schema.ts:702:    txHash: text('tx_hash'),
+apps/backend/src/db/schema.ts:704:    lastError: text('last_error'),
+apps/backend/src/db/schema.ts:785:    key: text('key').notNull(),
+apps/backend/src/db/schema.ts:786:    method: text('method').notNull(),
+apps/backend/src/db/schema.ts:787:    path: text('path').notNull(),
+apps/backend/src/db/schema.ts:789:    responseBody: text('response_body').notNull(),
+apps/backend/src/db/schema.ts:819:    tokenHash: text('token_hash').primaryKey(),
+apps/backend/src/db/schema.ts:820:    provider: text('provider').notNull(),
+apps/backend/src/admin/cashback-activity-csv.ts:126:    return new Response(body, {
+apps/backend/src/admin/cashback-activity-csv.ts:136:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/upstream.ts:21:    throw new Error(`upstreamUrl: path must start with '/', got ${JSON.stringify(path)}`);
+apps/backend/src/upstream.ts:27:    throw new Error('upstreamUrl: path must not start with // (protocol-relative)');
+apps/backend/src/upstream.ts:34:    throw new Error('upstreamUrl: path contains control characters');
+apps/backend/src/upstream.ts:37:    throw new Error('upstreamUrl: path contains traversal segments');
+apps/backend/src/upstream.ts:44:    throw new Error('upstreamUrl: path contains percent-encoded traversal segments');
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:74:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is required' }, 400);
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:77:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:150:    return new Response(body, {
+apps/backend/src/admin/merchant-flywheel-activity-csv.ts:160:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/user-credit-transactions.ts:51:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId is required' }, 400);
+apps/backend/src/admin/user-credit-transactions.ts:54:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
+apps/backend/src/admin/user-credit-transactions.ts:62:    return c.json(
+apps/backend/src/admin/user-credit-transactions.ts:80:      return c.json(
+apps/backend/src/admin/user-credit-transactions.ts:115:    return c.json({ transactions });
+apps/backend/src/admin/user-credit-transactions.ts:118:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch credit transactions' }, 500);
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:67:      return c.json(
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:77:    return c.json(
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:142:    return new Response(body, {
+apps/backend/src/admin/merchants-flywheel-share-csv.ts:152:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/payouts-activity-csv.ts:126:    return new Response(body, {
+apps/backend/src/admin/payouts-activity-csv.ts:136:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/settlement-lag.ts:62:      return c.json(
+apps/backend/src/admin/settlement-lag.ts:74:    return c.json(
+apps/backend/src/admin/settlement-lag.ts:121:    return c.json(body);
+apps/backend/src/admin/settlement-lag.ts:124:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute settlement lag' }, 500);
+apps/backend/src/admin/operator-merchant-mix.ts:69:    return c.json({ code: 'VALIDATION_ERROR', message: 'operatorId is required' }, 400);
+apps/backend/src/admin/operator-merchant-mix.ts:72:    return c.json({ code: 'VALIDATION_ERROR', message: 'operatorId is malformed' }, 400);
+apps/backend/src/admin/operator-merchant-mix.ts:80:      return c.json(
+apps/backend/src/admin/operator-merchant-mix.ts:92:    return c.json(
+apps/backend/src/admin/operator-merchant-mix.ts:134:    return c.json(body);
+apps/backend/src/admin/operator-merchant-mix.ts:137:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute merchant mix' }, 500);
+apps/backend/src/admin/treasury-credit-flow.ts:68:      return c.json(
+apps/backend/src/admin/treasury-credit-flow.ts:159:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load treasury credit flow' }, 500);
+apps/backend/src/admin/orders-detail.ts:46:    return c.json({ code: 'VALIDATION_ERROR', message: 'orderId is required' }, 400);
+apps/backend/src/admin/orders-detail.ts:49:    return c.json({ code: 'VALIDATION_ERROR', message: 'orderId must be a uuid' }, 400);
+apps/backend/src/admin/orders-detail.ts:54:      return c.json({ code: 'NOT_FOUND', message: 'Order not found' }, 404);
+apps/backend/src/admin/orders-detail.ts:59:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch order' }, 500);
+apps/backend/src/admin/user-operator-mix.ts:68:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId is required' }, 400);
+apps/backend/src/admin/user-operator-mix.ts:71:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a UUID' }, 400);
+apps/backend/src/admin/user-operator-mix.ts:79:      return c.json(
+apps/backend/src/admin/user-operator-mix.ts:91:    return c.json(
+apps/backend/src/admin/user-operator-mix.ts:137:    return c.json(body);
+apps/backend/src/admin/user-operator-mix.ts:140:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute operator mix' }, 500);
+apps/backend/src/admin/merchant-payment-method-share.ts:83:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is required' }, 400);
+apps/backend/src/admin/merchant-payment-method-share.ts:86:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
+apps/backend/src/admin/merchant-payment-method-share.ts:91:    return c.json(
+apps/backend/src/admin/merchant-payment-method-share.ts:145:    return c.json(
+apps/backend/src/admin/user-detail.ts:48:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId is required' }, 400);
+apps/backend/src/admin/user-detail.ts:51:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
+apps/backend/src/admin/user-detail.ts:69:      return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
+apps/backend/src/admin/user-detail.ts:83:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch user' }, 500);
+apps/backend/src/admin/payouts-csv.ts:85:      return c.json(
+apps/backend/src/admin/payouts-csv.ts:95:    return c.json(
+apps/backend/src/admin/payouts-csv.ts:147:    return new Response(body, {
+apps/backend/src/admin/payouts-csv.ts:157:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/merchant-stats.ts:98:      return c.json(
+apps/backend/src/admin/merchant-stats.ts:108:    return c.json(
+apps/backend/src/admin/merchant-stats.ts:157:    return c.json(body);
+apps/backend/src/admin/merchant-stats.ts:160:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute merchant stats' }, 500);
+apps/backend/src/admin/merchants-flywheel-share.ts:84:      return c.json(
+apps/backend/src/admin/merchants-flywheel-share.ts:98:      return c.json({ code: 'VALIDATION_ERROR', message: 'since must not be in the future' }, 400);
+apps/backend/src/admin/merchants-flywheel-share.ts:157:    return c.json(
+apps/backend/src/admin/treasury-snapshot-csv.ts:108:    return new Response(body, {
+apps/backend/src/admin/treasury-snapshot-csv.ts:118:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/user-cashback-monthly.ts:71:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId is required' }, 400);
+apps/backend/src/admin/user-cashback-monthly.ts:74:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
+apps/backend/src/admin/user-cashback-monthly.ts:90:      return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
+apps/backend/src/admin/user-cashback-monthly.ts:121:    return c.json(
+apps/backend/src/admin/cashback-monthly.ts:98:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute cashback-monthly' }, 500);
+apps/backend/src/admin/reconciliation.ts:99:    return c.json(response);
+apps/backend/src/admin/reconciliation.ts:106:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute reconciliation' }, 500);
+apps/backend/src/admin/orders-csv.ts:101:      return c.json(
+apps/backend/src/admin/orders-csv.ts:111:    return c.json(
+apps/backend/src/admin/orders-csv.ts:173:    return new Response(body, {
+apps/backend/src/admin/orders-csv.ts:183:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/payouts-retry.ts:107:    return c.json({ code: 'VALIDATION_ERROR', message: 'id must be a uuid' }, 400);
+apps/backend/src/admin/payouts-retry.ts:112:    return c.json(
+apps/backend/src/admin/payouts-retry.ts:123:    return c.json({ code: 'UNAUTHORIZED', message: 'Admin context missing' }, 401);
+apps/backend/src/admin/payouts-retry.ts:130:    return c.json({ code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON' }, 400);
+apps/backend/src/admin/payouts-retry.ts:134:    return c.json(
+apps/backend/src/admin/payouts-retry.ts:161:    return c.json(prior.body, prior.status as 200 | 400 | 404 | 500);
+apps/backend/src/admin/payouts-retry.ts:170:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to retry payout' }, 500);
+apps/backend/src/admin/payouts-retry.ts:176:    return c.json({ code: 'NOT_FOUND', message: 'Payout not found or not in failed state' }, 404);
+apps/backend/src/admin/payouts-retry.ts:214:  return c.json(envelope, 200);
+apps/backend/src/admin/merchant-flows.ts:84:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load merchant flows' }, 500);
+apps/backend/src/admin/cashback-realization.ts:138:    return c.json(body);
+apps/backend/src/admin/cashback-realization.ts:141:    return c.json(
+apps/backend/src/admin/payouts-by-asset.ts:102:    return c.json(response);
+apps/backend/src/admin/payouts-by-asset.ts:105:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute payouts by asset' }, 500);
+apps/backend/src/admin/merchant-stats-csv.ts:80:      return c.json(
+apps/backend/src/admin/merchant-stats-csv.ts:90:    return c.json(
+apps/backend/src/admin/merchant-stats-csv.ts:153:    return new Response(body, {
+apps/backend/src/admin/merchant-stats-csv.ts:163:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/refunds.ts:75:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
+apps/backend/src/admin/refunds.ts:80:    return c.json(
+apps/backend/src/admin/refunds.ts:91:    return c.json({ code: 'UNAUTHORIZED', message: 'Admin context missing' }, 401);
+apps/backend/src/admin/refunds.ts:98:    return c.json({ code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON' }, 400);
+apps/backend/src/admin/refunds.ts:102:    return c.json(
+apps/backend/src/admin/refunds.ts:128:    return c.json(prior.body, prior.status as 200 | 400 | 409 | 500);
+apps/backend/src/admin/refunds.ts:144:      return c.json(
+apps/backend/src/admin/refunds.ts:153:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to apply refund' }, 500);
+apps/backend/src/admin/refunds.ts:202:  return c.json(envelope, 200);
+apps/backend/src/admin/top-users-by-pending-payout.ts:104:    return c.json(body);
+apps/backend/src/admin/top-users-by-pending-payout.ts:107:    return c.json(
+apps/backend/src/admin/cashback-realization-daily.ts:131:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute realization trend' }, 500);
+apps/backend/src/admin/payouts-monthly.ts:120:    return c.json(
+apps/backend/src/admin/configs-history.ts:98:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to read config history' }, 500);
+apps/backend/src/admin/payouts-activity.ts:146:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute payouts activity' }, 500);
+apps/backend/src/admin/supplier-spend-activity.ts:67:      return c.json(
+apps/backend/src/admin/supplier-spend-activity.ts:149:    return c.json(
+apps/backend/src/admin/user-credits.ts:47:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId is required' }, 400);
+apps/backend/src/admin/user-credits.ts:50:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
+apps/backend/src/admin/user-credits.ts:72:    return c.json(body);
+apps/backend/src/admin/user-credits.ts:75:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch user credits' }, 500);
+apps/backend/src/admin/merchant-flywheel-activity.ts:99:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is required' }, 400);
+apps/backend/src/admin/merchant-flywheel-activity.ts:102:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
+apps/backend/src/admin/merchant-flywheel-activity.ts:161:    return c.json(
+apps/backend/src/admin/payouts.ts:90:    return c.json(
+apps/backend/src/admin/payouts.ts:108:      return c.json(
+apps/backend/src/admin/payouts.ts:118:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
+apps/backend/src/admin/payouts.ts:129:    return c.json(
+apps/backend/src/admin/payouts.ts:143:    return c.json(
+apps/backend/src/admin/payouts.ts:160:  return c.json({ payouts: rows.map((r) => toView(r as PayoutRow)) });
+apps/backend/src/admin/stuck-orders.ts:137:    return c.json(body);
+apps/backend/src/admin/stuck-orders.ts:140:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute stuck orders' }, 500);
+apps/backend/src/admin/merchant-top-earners.ts:95:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is required' }, 400);
+apps/backend/src/admin/merchant-top-earners.ts:98:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
+apps/backend/src/admin/merchant-top-earners.ts:159:    return c.json(
+apps/backend/src/admin/top-users.ts:67:      return c.json(
+apps/backend/src/admin/top-users.ts:77:    return c.json(
+apps/backend/src/admin/top-users.ts:123:    return c.json(body);
+apps/backend/src/admin/top-users.ts:126:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute top users' }, 500);
+apps/backend/src/admin/user-cashback-by-merchant.ts:59:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId is required' }, 400);
+apps/backend/src/admin/user-cashback-by-merchant.ts:62:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
+apps/backend/src/admin/user-cashback-by-merchant.ts:70:      return c.json(
+apps/backend/src/admin/user-cashback-by-merchant.ts:80:    return c.json(
+apps/backend/src/admin/user-cashback-by-merchant.ts:104:      return c.json({ code: 'NOT_FOUND', message: 'User not found' }, 404);
+apps/backend/src/admin/user-cashback-by-merchant.ts:151:    return c.json(body);
+apps/backend/src/admin/user-cashback-by-merchant.ts:154:    return c.json(
+apps/backend/src/admin/user-credit-transactions-csv.ts:63:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId is required' }, 400);
+apps/backend/src/admin/user-credit-transactions-csv.ts:66:    return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
+apps/backend/src/admin/user-credit-transactions-csv.ts:74:      return c.json(
+apps/backend/src/admin/user-credit-transactions-csv.ts:84:    return c.json(
+apps/backend/src/admin/user-credit-transactions-csv.ts:132:    return new Response(body, {
+apps/backend/src/admin/user-credit-transactions-csv.ts:142:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to build CSV' }, 500);
+apps/backend/src/admin/payouts-detail.ts:44:    return c.json({ code: 'VALIDATION_ERROR', message: 'id is required' }, 400);
+apps/backend/src/admin/payouts-detail.ts:47:    return c.json({ code: 'VALIDATION_ERROR', message: 'id must be a uuid' }, 400);
+apps/backend/src/admin/payouts-detail.ts:52:      return c.json({ code: 'NOT_FOUND', message: 'Payout not found' }, 404);
+apps/backend/src/admin/payouts-detail.ts:57:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch payout' }, 500);
+apps/backend/src/admin/payouts-detail.ts:75:    return c.json({ code: 'VALIDATION_ERROR', message: 'orderId is required' }, 400);
+apps/backend/src/admin/payouts-detail.ts:78:    return c.json({ code: 'VALIDATION_ERROR', message: 'orderId must be a uuid' }, 400);
+apps/backend/src/admin/payouts-detail.ts:83:      return c.json({ code: 'NOT_FOUND', message: 'No payout for this order' }, 404);
+apps/backend/src/admin/payouts-detail.ts:88:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to fetch payout' }, 500);

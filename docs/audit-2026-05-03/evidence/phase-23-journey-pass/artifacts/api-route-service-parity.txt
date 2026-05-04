@@ -1,0 +1,35 @@
+API route/service parity and route-order pass, 2026-05-03.
+
+Scope:
+- Backend route factories under apps/backend/src/routes/*.ts.
+- Web API service wrappers under apps/web/app/services/*.ts.
+- Direct web fetch boundary under apps/web/app outside tests.
+- Dynamic HTML / inline-handler scan under apps/web/app outside tests.
+
+Commands run:
+- node route-order scanner over apps/backend/src/routes/*.ts looking for earlier parameter routes that shadow later same-method literal routes.
+- rg "fetch\\(" apps/web/app --glob '!**/__tests__/**'
+- rg "dangerouslySetInnerHTML|innerHTML|document.write|eval\\(|new Function|setTimeout\\(\\s*['\\\"]|setInterval\\(\\s*['\\\"]" apps/web/app apps/backend/src --glob '!**/__tests__/**'
+- rg "onmouseover|onmouseout|onclick|on[a-z]+=" apps/web/app --glob '!**/__tests__/**'
+- rg service wrappers for apiRequest/authenticatedRequest/fetch usage under apps/web/app/services.
+
+Verified observations:
+- Backend route-order scanner found exactly two same-method shadow risks:
+  - apps/backend/src/routes/admin-payouts.ts: GET /api/admin/payouts/:id before /api/admin/payouts/settlement-lag.
+  - apps/backend/src/routes/orders.ts: GET /api/orders/:id before /api/orders/loop.
+- Both route-order defects are already captured by A4-010; no additional same-depth literal-after-param route shadow was detected in the current route factories.
+- Web direct fetches outside tests are confined to service/config/cluster API modules and the documented sitemap loader exception:
+  - apps/web/app/services/api-client.ts fetches API_BASE + path.
+  - apps/web/app/services/config.ts fetches /api/config before auth/client bootstrap.
+  - apps/web/app/services/clusters.ts fetches /api/clusters with protobuf Accept.
+  - apps/web/app/routes/sitemap.tsx fetches public merchants for XML sitemap generation.
+- Admin/web service wrappers use authenticatedRequest/apiRequest path builders rather than component-level fetches; the pass did not find direct component fetch bypasses.
+- Dynamic HTML sinks outside tests are limited to:
+  - root.tsx inline theme script via dangerouslySetInnerHTML.
+  - native/app-lock.ts static overlay markup with dynamic text assigned by textContent.
+  - ClusterMap Leaflet popup/divIcon HTML with escaped merchant names, image-proxy URLs, and encoded route hrefs.
+- ClusterMap is the only current source file with inline HTML event attributes (`onmouseover`, `onmouseout`), and they are static style changes. Because web CSP currently allows script-src 'unsafe-inline' for the theme script, inline handlers are not blocked by policy; no current injection path was found in this pass, but this remains a fragile area to keep under future review if ClusterMap popup data sources expand.
+
+Disposition:
+- Backend route factory coverage moved to reviewed-no-finding except existing A4-010/A4-009/A4-008/A4-014 scoped rows.
+- Web service wrapper coverage moved to reviewed-no-finding or existing A4-028/A4-029/A4-040/A4-041 scoped rows depending on the file.

@@ -1,5 +1,7 @@
 # Loop — Cold Adversarial Audit (2026-04) — Tracker
 
+> ⚠️ **A4-068: superseded.** Numbers in this tracker disagree with the section bodies (summary lists 467 open while ~210 are marked resolved-pending-review). The current source-of-truth audit is [`docs/audit-2026-05-03-claude/`](./audit-2026-05-03-claude/) (Claude register) and [`docs/audit-2026-05-03/`](./audit-2026-05-03/) (Codex register). This file is kept for historical context only — do NOT treat its counts or row statuses as live.
+>
 > Source of truth for audit status. See [`audit-2026-adversarial-plan.md`](./audit-2026-adversarial-plan.md) for the plan.
 >
 > **This tracker is live-updated during execution.** The plan is frozen; this tracker is the state.

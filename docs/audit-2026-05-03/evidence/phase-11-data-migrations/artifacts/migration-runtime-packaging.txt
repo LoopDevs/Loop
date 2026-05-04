@@ -1,0 +1,68 @@
+Command/source evidence captured during Phase 11 from current code and build output.
+
+Relevant source:
+
+apps/backend/src/db/client.ts:54-57
+  export async function runMigrations(): Promise<void> {
+    log.info('Applying database migrations');
+    await migrate(db, { migrationsFolder: new URL('./migrations', import.meta.url).pathname });
+    log.info('Migrations up to date');
+  }
+
+Bundled output after `npm run build -w @loop/backend`:
+
+apps/backend/dist/chunk-LIJ22RWS.js:719-722
+  async function runMigrations() {
+    log.info("Applying database migrations");
+    await migrate(db, { migrationsFolder: new URL("./migrations", import.meta.url).pathname });
+    log.info("Migrations up to date");
+  }
+
+Built dist inventory:
+
+apps/backend/dist/chunk-LIJ22RWS.js
+apps/backend/dist/chunk-LIJ22RWS.js.map
+apps/backend/dist/chunk-PZ5AY32C.js
+apps/backend/dist/chunk-PZ5AY32C.js.map
+apps/backend/dist/chunk-QWUGS3C2.js
+apps/backend/dist/chunk-QWUGS3C2.js.map
+apps/backend/dist/clustering_pb-7DLZNM42.js
+apps/backend/dist/clustering_pb-7DLZNM42.js.map
+apps/backend/dist/index.js
+apps/backend/dist/index.js.map
+apps/backend/dist/instrument.js
+apps/backend/dist/instrument.js.map
+apps/backend/dist/migrate-cli.js
+apps/backend/dist/migrate-cli.js.map
+
+Negative existence checks:
+
+ls apps/backend/dist/migrations
+  ls: apps/backend/dist/migrations: No such file or directory
+
+ls apps/backend/dist/db/migrations
+  ls: apps/backend/dist/db/migrations: No such file or directory
+
+Docker production image:
+
+apps/backend/Dockerfile:36-37
+  COPY --from=builder /app/apps/backend/dist apps/backend/dist
+
+No Dockerfile instruction copies `apps/backend/src/db/migrations` or any migration assets into the production image.
+
+Deploy path:
+
+apps/backend/fly.toml:13-14
+  [deploy]
+    release_command = "node apps/backend/dist/migrate-cli.js"
+
+apps/backend/src/migrate-cli.ts:29
+  await runMigrations();
+
+Drizzle migrator behavior:
+
+node_modules/drizzle-orm/migrator.js reads `${migrationsFolder}/meta/_journal.json` and throws `Can't find meta/_journal.json file` when that path does not exist.
+
+Conclusion:
+
+In the built production artifact, `new URL("./migrations", import.meta.url)` resolves next to the bundled chunk in `apps/backend/dist`, but the required `migrations/meta/_journal.json` and SQL files are not present. The Fly release command and boot-time migration path both call this same runtime migration function.

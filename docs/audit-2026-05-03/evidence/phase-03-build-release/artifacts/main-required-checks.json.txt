@@ -1,0 +1,29 @@
+[
+  "Quality (typecheck, lint, format, docs)",
+  "Unit tests",
+  "Security audit",
+  "Build verification",
+  "E2E tests (mocked CTX)"
+]
+[
+  {
+    "context": "Quality (typecheck, lint, format, docs)",
+    "app_id": 15368
+  },
+  {
+    "context": "Unit tests",
+    "app_id": 15368
+  },
+  {
+    "context": "Security audit",
+    "app_id": 15368
+  },
+  {
+    "context": "Build verification",
+    "app_id": 15368
+  },
+  {
+    "context": "E2E tests (mocked CTX)",
+    "app_id": 15368
+  }
+]

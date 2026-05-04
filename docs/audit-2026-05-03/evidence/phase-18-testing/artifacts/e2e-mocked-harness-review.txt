@@ -1,0 +1,14 @@
+Mocked e2e harness file review, 2026-05-03.
+
+Scope:
+- tests/e2e-mocked/global-setup.ts
+- tests/e2e-mocked/fixtures/mock-ctx.mjs
+
+Verified observations:
+- global-setup.ts migrates the checked-in backend migrations against `DATABASE_URL` or the local `loop_test` default, then truncates stateful tables in dependency-safe order with RESTART IDENTITY CASCADE.
+- The mocked CTX server implements deterministic `/status`, `/login`, `/verify-email`, `/refresh-token`, `/logout`, `/merchants`, `/locations`, and gift-card order paths.
+- The mock OTP is intentionally fixed at `123456`, documented in comments, and scoped to the mocked e2e server only.
+- The mock uses in-memory state and random UUIDs; no secret-bearing values are embedded.
+- The global setup behavior aligns with the CI mocked e2e harness assumption reviewed in the testing phase.
+
+No new finding was filed from these two files.

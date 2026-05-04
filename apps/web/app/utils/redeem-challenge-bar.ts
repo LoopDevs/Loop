@@ -53,6 +53,15 @@ export function buildChallengeBarScript(code: string): string {
         btn.textContent = 'Copied';
         setTimeout(function(){ btn.textContent = 'Copy'; }, 2000);
       };
+      // A4-071: surface a visible failure label when neither path
+      // works. Older WebViews that reject the async clipboard API
+      // also commonly reject execCommand('copy') without a user
+      // gesture; previously both arms swallowed and the operator
+      // saw nothing change.
+      var failed = function(){
+        btn.textContent = 'Copy failed';
+        setTimeout(function(){ btn.textContent = 'Copy'; }, 2500);
+      };
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
           navigator.clipboard.writeText(code).then(done, fallback);
@@ -68,10 +77,10 @@ export function buildChallengeBarScript(code: string): string {
           ta.style.opacity = '0';
           document.body.appendChild(ta);
           ta.select();
-          document.execCommand('copy');
+          var ok = document.execCommand('copy');
           document.body.removeChild(ta);
-          done();
-        } catch (e) {}
+          if (ok) { done(); } else { failed(); }
+        } catch (e) { failed(); }
       }
     });
     bar.appendChild(eyebrow);

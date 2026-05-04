@@ -27,6 +27,7 @@
  * the payment watcher + procurement worker once an operator has
  * dry-run on testnet.
  */
+import { Keypair } from '@stellar/stellar-sdk';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { listClaimablePayouts } from '../credits/pending-payouts.js';
@@ -58,6 +59,16 @@ export interface PayoutTickResult {
 
 export interface RunPayoutTickArgs {
   operatorSecret: string;
+  /**
+   * A4-104: explicit operator account public key used for the
+   * idempotency pre-check (`findOutboundPaymentByMemo`'s `account`
+   * filter). Previously the pre-check reused `row.assetIssuer`,
+   * which silently double-pays if a treasury topology splits
+   * issuer (cold) from operator (hot). Derived from `operatorSecret`
+   * in `resolvePayoutConfig` so callers don't have to reproduce the
+   * keypair derivation.
+   */
+  operatorAccount: string;
   horizonUrl: string;
   networkPassphrase: string;
   maxAttempts: number;
@@ -116,6 +127,7 @@ let stuckPayoutWatchdogTimer: ReturnType<typeof setInterval> | null = null;
  */
 export function startPayoutWorker(args: {
   operatorSecret: string;
+  operatorAccount: string;
   horizonUrl: string;
   networkPassphrase: string;
   intervalMs: number;
@@ -130,6 +142,7 @@ export function startPayoutWorker(args: {
     try {
       const r = await runPayoutTick({
         operatorSecret: args.operatorSecret,
+        operatorAccount: args.operatorAccount,
         horizonUrl: args.horizonUrl,
         networkPassphrase: args.networkPassphrase,
         maxAttempts: args.maxAttempts,
@@ -189,6 +202,14 @@ export function __resetPayoutWorkerForTests(): void {
 /** Derives the effective operator config from env. Null when not live. */
 export function resolvePayoutConfig(): {
   operatorSecret: string;
+  /**
+   * A4-104: operator account pubkey derived from the secret at
+   * resolve-time. Used for the Horizon idempotency pre-check so
+   * the lookup runs against the account that signs (operator),
+   * not the issuer of the asset (which may be a separate cold
+   * key in production treasury topologies).
+   */
+  operatorAccount: string;
   horizonUrl: string;
   networkPassphrase: string;
   maxAttempts: number;
@@ -201,8 +222,19 @@ export function resolvePayoutConfig(): {
     process.env['LOOP_STELLAR_HORIZON_URL'].length > 0
       ? process.env['LOOP_STELLAR_HORIZON_URL']
       : 'https://horizon.stellar.org';
+  let operatorAccount: string;
+  try {
+    operatorAccount = Keypair.fromSecret(env.LOOP_STELLAR_OPERATOR_SECRET).publicKey();
+  } catch (err) {
+    log.error(
+      { err },
+      'LOOP_STELLAR_OPERATOR_SECRET is not a valid Stellar secret — payout worker disabled',
+    );
+    return null;
+  }
   return {
     operatorSecret: env.LOOP_STELLAR_OPERATOR_SECRET,
+    operatorAccount,
     horizonUrl,
     networkPassphrase: env.LOOP_STELLAR_NETWORK_PASSPHRASE,
     maxAttempts: env.LOOP_PAYOUT_MAX_ATTEMPTS,

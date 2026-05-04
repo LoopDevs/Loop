@@ -1,0 +1,46 @@
+Root and CI/config bottom-up review
+Date: 2026-05-03
+Scope: current tracked root files and .github files only; Claude audit workspace excluded.
+
+Reviewed files:
+
+- .dockerignore
+- .github/CODEOWNERS
+- .github/ISSUE_TEMPLATE/bug.yml
+- .github/ISSUE_TEMPLATE/config.yml
+- .github/ISSUE_TEMPLATE/feature.yml
+- .github/dependabot.yml
+- .github/labeler.yml
+- .github/pull_request_template.md
+- .github/workflows/codeql.yml
+- .github/workflows/pr-automation.yml
+- .github/workflows/pr-review.yml
+- .gitleaks.toml
+- .npmrc
+- .prettierrc
+- AGENTS.md
+- CHANGELOG.md
+- CLAUDE.md
+- CODE_OF_CONDUCT.md
+- CONTRIBUTING.md
+- LICENSE
+- SECURITY.md
+- commitlint.config.js
+- docker-compose.yml
+- eslint.config.js
+- tsconfig.base.json
+
+Verification notes:
+
+- CODEOWNERS coverage and missing team/enforcement are already captured by A4-002.
+- Branch protection/check enforcement drift is already captured by A4-001 and A4-005. The local ci-watch helper also hardcodes the same five required checks.
+- CodeQL workflow uses SHA-pinned GitHub actions, least-privilege permissions, and a weekly schedule. No new finding beyond branch-protection omission in A4-005.
+- PR automation workflow uses SHA-pinned actions, narrow permissions, and does not execute repository code beyond checkout plus GitHub CLI metadata operations. No new finding.
+- PR review workflow uses SHA-pinned actions and lockfile-managed Claude Code install per ADR-029. It sends PR diffs to Anthropic by design; no new finding beyond the documented ADR-025 policy surface.
+- Dependabot config has no stale missing-team reviewer entry; CODEOWNERS handles routing by convention, already captured as unenforced by A4-002.
+- Issue templates and PR template route security reports away from public issues and encode docs/security checklist expectations. No new finding.
+- Root config files were reviewed for unexpected secret patterns, broad ignores, and dangerous script behavior. No new finding beyond existing local-env permission finding A4-030.
+
+Disposition:
+
+These files can be marked reviewed with either no new finding or the existing finding references above.

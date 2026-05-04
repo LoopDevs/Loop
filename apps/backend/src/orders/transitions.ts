@@ -16,7 +16,7 @@
  */
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { orders } from '../db/schema.js';
+import { orders, creditTransactions, userCredits } from '../db/schema.js';
 import type { Order } from './repo.js';
 
 /**
@@ -25,22 +25,141 @@ import type { Order } from './repo.js';
  * orders the watcher transitions inside the same tx that debits the
  * user's balance (so a crashed watcher leaves the balance untouched);
  * that tx uses this helper's shape but inlines the debit alongside.
+ *
+ * **A4-110 (Critical):** when the on-chain payment arrived in a LOOP-
+ * asset (`paymentMethod = 'loop_asset'`), the user is spending the
+ * cashback they previously accrued. The redemption model (per ADR
+ * 015 + operator clarification 2026-05-03):
+ *
+ *   - Cashback fulfilment writes BOTH the off-chain `user_credits`
+ *     liability AND issues an on-chain LOOP-asset payout to the
+ *     user's wallet. Both halves exist for reconciliation.
+ *   - To redeem (gift card OR fiat withdrawal), the user MUST send
+ *     their on-chain LOOP back to Loop, which extinguishes BOTH
+ *     halves: Loop debits `user_credits` and routes the inbound
+ *     LOOP-asset to a treasury / burn account.
+ *
+ * Before this fix, the watcher accepted the inbound LOOP-asset and
+ * flipped the order state but never debited `user_credits`, so the
+ * user's off-chain liability stayed full. They could then spend the
+ * still-spendable off-chain X via `paymentMethod='credit'` for a
+ * second gift card OR have an admin issue a withdrawal that paid X
+ * more LOOP back to them. Net: 2X economic value for one cashback.
+ *
+ * The fix runs inside a single Drizzle transaction:
+ *   1. UPDATE orders SET state='paid' WHERE state='pending_payment'
+ *   2. (loop_asset only) FOR UPDATE lock on user_credits
+ *   3. (loop_asset only) INSERT credit_transactions
+ *      type='spend' amount = -chargeMinor reference=(order, orderId)
+ *   4. (loop_asset only) UPDATE user_credits SET balance -= chargeMinor
+ *
+ * Other payment methods (`xlm`, `usdc`) are pre-cashback purchases —
+ * they have no off-chain liability to extinguish, so the state flip
+ * is the only side-effect. Credit-funded orders never reach this
+ * path; they go through `repo-credit-order.ts:insertCreditOrderTxn`
+ * which inlines the debit at order-creation time.
  */
 export async function markOrderPaid(
   orderId: string,
   opts: { paymentReceivedAt?: Date } = {},
 ): Promise<Order | null> {
   const now = new Date();
-  const rows = await db
-    .update(orders)
-    .set({
-      state: 'paid',
-      paidAt: now,
-      paymentReceivedAt: opts.paymentReceivedAt ?? now,
-    })
-    .where(and(eq(orders.id, orderId), eq(orders.state, 'pending_payment')))
-    .returning();
-  return rows[0] ?? null;
+  const paymentReceivedAt = opts.paymentReceivedAt ?? now;
+  return db.transaction(async (tx) => {
+    const [paid] = await tx
+      .update(orders)
+      .set({
+        state: 'paid',
+        paidAt: now,
+        paymentReceivedAt,
+      })
+      .where(and(eq(orders.id, orderId), eq(orders.state, 'pending_payment')))
+      .returning();
+    if (paid === undefined) return null;
+
+    // A4-110: extinguish the off-chain liability when the user's
+    // own on-chain LOOP-asset funded the order. Other methods
+    // (xlm/usdc) bypass this step.
+    if (paid.paymentMethod === 'loop_asset' && paid.chargeMinor > 0n) {
+      // Lock the (userId, currency) row FOR UPDATE so two concurrent
+      // payments for the same user can't race the balance.
+      const [existing] = await tx
+        .select({ balanceMinor: userCredits.balanceMinor })
+        .from(userCredits)
+        .where(
+          and(eq(userCredits.userId, paid.userId), eq(userCredits.currency, paid.chargeCurrency)),
+        )
+        .for('update');
+
+      if (existing === undefined) {
+        // Defence-in-depth: a user holding on-chain LOOP-asset MUST
+        // have a matching off-chain `user_credits` row — the only
+        // way to acquire LOOP on-chain is via cashback fulfilment
+        // which writes both halves (fulfillment.ts:97-110 +
+        // 149-160). A missing row at this point implies state
+        // corruption (bad import, partial restore, manual SQL).
+        // Throw so the txn rolls back and the order stays
+        // pending_payment for ops to investigate.
+        throw new LoopAssetMissingCreditRowError(paid.id, paid.userId, paid.chargeCurrency);
+      }
+
+      // Append-only ledger entry: type='spend' carries a NEGATIVE
+      // amount per the credit_transactions_amount_sign CHECK
+      // constraint. referenceType='order' / referenceId=orderId
+      // pins the spend to its source so reconciliation can trace
+      // the debit back to the user's loop_asset purchase.
+      await tx.insert(creditTransactions).values({
+        userId: paid.userId,
+        type: 'spend',
+        amountMinor: -paid.chargeMinor,
+        currency: paid.chargeCurrency,
+        referenceType: 'order',
+        referenceId: paid.id,
+      });
+
+      // Decrement via SQL expression — the FOR UPDATE lock above
+      // makes this safe; the DB expression is the ledger's own
+      // source of truth. user_credits has a non_negative CHECK,
+      // so a row that doesn't have enough balance to cover the
+      // charge surfaces as a constraint violation. That should
+      // never happen because the user couldn't have on-chain X
+      // without the matching off-chain X (the only way to get
+      // on-chain X is via cashback fulfilment which writes both
+      // halves), but the CHECK is the defence-in-depth.
+      await tx
+        .update(userCredits)
+        .set({ balanceMinor: sql`${userCredits.balanceMinor} - ${paid.chargeMinor}` })
+        .where(
+          and(eq(userCredits.userId, paid.userId), eq(userCredits.currency, paid.chargeCurrency)),
+        );
+    }
+
+    return paid;
+  });
+}
+
+/**
+ * A4-110: thrown by `markOrderPaid` when a `loop_asset`-method
+ * order arrives at the watcher but the user has no `user_credits`
+ * row in the order's charge currency. Indicates state corruption
+ * — a user holding on-chain LOOP without the matching off-chain
+ * liability — and should never happen in normal operation. The
+ * watcher catches and logs; the order stays in pending_payment
+ * for ops to investigate via the admin user-detail surface.
+ */
+export class LoopAssetMissingCreditRowError extends Error {
+  readonly orderId: string;
+  readonly userId: string;
+  readonly currency: string;
+  constructor(orderId: string, userId: string, currency: string) {
+    super(
+      `LOOP-asset payment for order ${orderId} arrived but user ${userId} has no ${currency} user_credits row — state corruption`,
+    );
+    this.name = 'LoopAssetMissingCreditRowError';
+    this.orderId = orderId;
+    this.userId = userId;
+    this.currency = currency;
+  }
 }
 
 /**
@@ -64,6 +183,31 @@ export async function markOrderProcuring(
       procuredAt: new Date(),
     })
     .where(and(eq(orders.id, orderId), eq(orders.state, 'paid')))
+    .returning();
+  return rows[0] ?? null;
+}
+
+/**
+ * A4-101: revert `procuring` → `paid`. Used when a transient
+ * pre-CTX-call failure (e.g. operator pool unavailable) means we
+ * picked the row but never actually attempted the wholesale
+ * purchase, so the order is safe to re-pick on the next tick.
+ * Without this, the row sat in `procuring` until the stuck-sweep
+ * marked it `failed` ~15 min later — a paid order silently
+ * failing under a transient outage.
+ *
+ * Guarded on `state='procuring'` so we never roll back a row that
+ * has already advanced past procurement.
+ */
+export async function revertOrderProcuringToPaid(orderId: string): Promise<Order | null> {
+  const rows = await db
+    .update(orders)
+    .set({
+      state: 'paid',
+      ctxOperatorId: null,
+      procuredAt: null,
+    })
+    .where(and(eq(orders.id, orderId), eq(orders.state, 'procuring')))
     .returning();
   return rows[0] ?? null;
 }

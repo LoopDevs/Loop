@@ -42,7 +42,7 @@ export function mountAdminCreditWritesRoutes(app: Hono): void {
   // header required; missing header is a 400 at the handler edge.
   app.post(
     '/api/admin/users/:userId/credit-adjustments',
-    rateLimit(20, 60_000),
+    rateLimit('POST /api/admin/users/:userId/credit-adjustments', 20, 60_000),
     adminCreditAdjustmentHandler,
   );
   // Refund write (A2-901 + ADR 017). Separate surface from credit-
@@ -51,14 +51,18 @@ export function mountAdminCreditWritesRoutes(app: Hono): void {
   // index on (type, reference_type, reference_id) from migration 0013.
   // Same rate limit and idempotency discipline as the adjustment
   // write.
-  app.post('/api/admin/users/:userId/refunds', rateLimit(20, 60_000), adminRefundHandler);
+  app.post(
+    '/api/admin/users/:userId/refunds',
+    rateLimit('POST /api/admin/users/:userId/refunds', 20, 60_000),
+    adminRefundHandler,
+  );
   // ADR-024 / A2-901 — admin-mediated withdrawal: debit user's
   // cashback balance + queue an on-chain LOOP-asset payout. Same
   // rate limit + idempotency discipline as refund.
   app.post(
     '/api/admin/users/:userId/withdrawals',
     killSwitch('withdrawals'),
-    rateLimit(20, 60_000),
+    rateLimit('POST /api/admin/users/:userId/withdrawals', 20, 60_000),
     adminWithdrawalHandler,
   );
 }

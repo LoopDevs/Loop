@@ -37,6 +37,21 @@ export interface AppConfig {
   /** ADR 010: the order workers are running and Loop-native orders can be placed. */
   loopOrdersEnabled: boolean;
   /**
+   * Tranche 1 (MVP) launch gate. When true, the web client hides
+   * every Phase 2+ surface — cashback navbar links, /settings/wallet,
+   * /settings/cashback, /cashback rates index, the onboarding
+   * currency picker + wallet-intro screens, LinkWalletNudge, and
+   * any "you've earned X cashback" copy. The discount badges stay
+   * (they ARE the Tranche 1 user proposition).
+   *
+   * Operator side: also turn off `LOOP_WORKERS_ENABLED`, leave LOOP
+   * issuers + operator secret unset, and set
+   * `INTEREST_APY_BASIS_POINTS=0` (defaults already do all three).
+   * Flipping `LOOP_PHASE_1_ONLY=false` later is a server-side
+   * config change — no app store resubmission needed.
+   */
+  phase1Only: boolean;
+  /**
    * ADR 015 — which LOOP stablecoins are wired for on-chain payout.
    * Always returns all three keys (USDLOOP/GBPLOOP/EURLOOP) so the
    * client can render a stable shape; a currency with `issuer: null`
@@ -76,6 +91,7 @@ export function configHandler(c: Context): Response {
       env.LOOP_AUTH_NATIVE_ENABLED &&
       env.LOOP_WORKERS_ENABLED &&
       env.LOOP_STELLAR_DEPOSIT_ADDRESS !== undefined,
+    phase1Only: env.LOOP_PHASE_1_ONLY,
     loopAssets: {
       USDLOOP: assetConfig(env.LOOP_STELLAR_USDLOOP_ISSUER),
       GBPLOOP: assetConfig(env.LOOP_STELLAR_GBPLOOP_ISSUER),

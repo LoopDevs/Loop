@@ -18,6 +18,7 @@ const findOrCreateUserMock = vi.fn();
 const recordRefreshMock = vi.fn();
 const findLiveRefreshMock = vi.fn();
 const revokeRefreshMock = vi.fn();
+const tryRevokeIfLiveMock = vi.fn();
 const findRefreshRecordMock = vi.fn();
 const revokeAllRefreshForUserMock = vi.fn();
 
@@ -46,6 +47,11 @@ vi.mock('../refresh-tokens.js', () => ({
   findLiveRefreshToken: (args: unknown) => findLiveRefreshMock(args),
   findRefreshTokenRecord: (jti: string) => findRefreshRecordMock(jti),
   revokeRefreshToken: (args: unknown) => revokeRefreshMock(args),
+  // A4-098: native refresh now uses tryRevokeIfLive for the
+  // concurrency-safe rotation. Default mocks to "won the race"
+  // (true) so existing happy-path tests pass through; the
+  // explicit race test flips it to false.
+  tryRevokeIfLive: (args: unknown) => tryRevokeIfLiveMock(args),
   revokeAllRefreshTokensForUser: (userId: string) => revokeAllRefreshForUserMock(userId),
 }));
 vi.mock('../../logger.js', () => ({
@@ -96,6 +102,7 @@ beforeEach(() => {
   recordRefreshMock.mockReset();
   findLiveRefreshMock.mockReset();
   revokeRefreshMock.mockReset();
+  tryRevokeIfLiveMock.mockReset();
   findRefreshRecordMock.mockReset();
   revokeAllRefreshForUserMock.mockReset();
   findRefreshRecordMock.mockResolvedValue(null);
@@ -108,6 +115,7 @@ beforeEach(() => {
   markConsumedMock.mockResolvedValue(undefined);
   recordRefreshMock.mockResolvedValue(undefined);
   revokeRefreshMock.mockResolvedValue(undefined);
+  tryRevokeIfLiveMock.mockResolvedValue(true);
 });
 
 describe('nativeRequestOtpHandler', () => {
@@ -157,11 +165,19 @@ describe('nativeRequestOtpHandler', () => {
     expect(createOtpMock).toHaveBeenCalled();
   });
 
-  it('returns 500 when the OTP row write fails', async () => {
+  it('returns generic 200 envelope when the OTP row write fails (A4-002 enumeration defense)', async () => {
+    // A4-002: the native path used to return 500 on a DB failure,
+    // contradicting the CTX-proxy path which collapses every
+    // internal failure into the same `{ message: 'Verification
+    // code sent' }` 200 envelope so an attacker probing both
+    // paths can't distinguish "user not found / DB happy" from
+    // "DB outage / queue saturation". Native now matches.
     createOtpMock.mockRejectedValue(new Error('db down'));
     const { ctx } = makeCtx({ email: 'a@b.com' });
     const res = await nativeRequestOtpHandler(ctx);
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({ message: 'Verification code sent' });
   });
 });
 
@@ -264,11 +280,32 @@ describe('nativeRefreshHandler', () => {
     const body = (await res.json()) as { accessToken: string; refreshToken: string };
     expect(body.refreshToken).not.toBe(oldRefresh);
     expect(recordRefreshMock).toHaveBeenCalled();
-    expect(revokeRefreshMock).toHaveBeenCalledWith(expect.objectContaining({ jti: oldClaims.jti }));
-    // The revoke call's replacedByJti should link to the new refresh's jti.
+    // A4-098: rotation goes through tryRevokeIfLive (compare-and-set)
+    // rather than the unconditional revokeRefreshToken. Pin that.
+    expect(tryRevokeIfLiveMock).toHaveBeenCalledWith(
+      expect.objectContaining({ jti: oldClaims.jti }),
+    );
     const newJti = recordRefreshMock.mock.calls[0]![0].jti as string;
-    const revokeArgs = revokeRefreshMock.mock.calls[0]![0] as { replacedByJti: string };
+    const revokeArgs = tryRevokeIfLiveMock.mock.calls[0]![0] as { replacedByJti: string };
     expect(revokeArgs.replacedByJti).toBe(newJti);
+  });
+
+  it('A4-098: concurrent rotation that loses the CAS rejects with 401 instead of minting a parallel pair', async () => {
+    const { token: oldRefresh, claims: oldClaims } = signLoopToken({
+      sub: 'user-1',
+      email: 'a@b.com',
+      typ: 'refresh',
+      ttlSeconds: 300,
+    });
+    findLiveRefreshMock.mockResolvedValue({ jti: oldClaims.jti, userId: 'user-1' });
+    // Simulate the race: another concurrent refresh request already
+    // revoked the prior token. Our compare-and-set returns false.
+    tryRevokeIfLiveMock.mockResolvedValue(false);
+    const { ctx } = makeCtx({ refreshToken: oldRefresh });
+    const res = await nativeRefreshHandler(ctx);
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('UNAUTHORIZED');
   });
 
   it('401 on an access token used where a refresh is expected', async () => {

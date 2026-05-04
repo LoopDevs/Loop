@@ -1,0 +1,49 @@
+Command/evidence date: 2026-05-03
+Scope: Codex cold audit only. Claude audit workspace was not read.
+Redaction: no secret values captured.
+
+Observed test inventory from current filesystem:
+
+- backend unit + integration specs under apps/backend/src/**/__tests__: 181
+- web unit/route specs under apps/web/app/**/__tests__: 123
+- Playwright specs under tests/**: 4
+- backend real-Postgres integration specs: 7
+- web route modules: 35
+- direct web route test specs: 14
+
+Focused skip/only scan:
+
+Command:
+rg -n "it\\.skip|describe\\.skip|test\\.skip|\\.only\\(" apps/backend/src apps/web/app tests packages/shared/src -g'*.ts' -g'*.tsx'
+
+Result:
+- No active .only found.
+- Only describe.skip occurrences are the real-Postgres integration files gated on LOOP_E2E_DB.
+
+Current backend coverage wiring:
+
+- apps/backend/vitest.config.ts excludes src/__tests__/integration/** from the default backend test/coverage run.
+- apps/backend/vitest.integration.config.ts includes src/__tests__/integration/**/*.test.ts and explicitly disables coverage.
+- .github/workflows/ci.yml test-unit job runs npm run test:coverage --workspaces --if-present.
+- .github/workflows/ci.yml flywheel-integration job separately runs npm run test:integration -w @loop/backend against a postgres service.
+
+Current e2e/CI wiring:
+
+- package.json maps test:e2e to playwright.mocked.config.ts.
+- package.json maps test:e2e:flywheel to playwright.flywheel.config.ts.
+- package.json maps test:e2e:real to playwright.config.ts.
+- .github/workflows/ci.yml has test-e2e-mocked on every push/PR.
+- .github/workflows/ci.yml has test-e2e-flywheel on every push/PR.
+- .github/workflows/ci.yml has test-e2e real upstream on pull_request only.
+- .github/workflows/ci.yml also runs flywheel-integration, secret-scan, container-cve-scan, sbom, audit, build, and quality jobs.
+
+Documentation drift verified:
+
+- docs/testing.md E2E inventory lists tests/e2e, tests/e2e-mocked, and scripts/e2e-real.mjs, but omits tests/e2e-flywheel and playwright.flywheel.config.ts.
+- docs/testing.md "When tests run" table says every-push CI runs quality, unit, security audit, build, and mocked e2e only; it omits flywheel-integration, secret-scan, container-cve-scan, SBOM/provenance/signing, and loop-native flywheel e2e.
+- docs/testing.md PR-only row says only real-upstream e2e is added; the actual PR graph also includes the every-push jobs listed above.
+- docs/testing.md coverage table labels apps/backend as "unit + integration", but the current coverage config excludes integration tests and the integration config disables coverage.
+
+Conclusion:
+
+The test system is broader than the guide describes, but the guide is not a faithful map of current CI/test evidence. This creates operator/reviewer confusion about which high-risk behaviors are automatically tested and which coverage percentages include real-DB integration behavior.

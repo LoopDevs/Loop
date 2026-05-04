@@ -13,6 +13,14 @@ import { fetchAppConfig, type AppConfig } from '~/services/config';
 const DEFAULT_CONFIG: AppConfig = {
   loopAuthNativeEnabled: false,
   loopOrdersEnabled: false,
+  // Default to phase1Only=false so a /api/config outage doesn't
+  // accidentally hide the cashback surfaces when they're supposed
+  // to be live ("users think the feature broke" is a worse failure
+  // mode than "Phase 2 surfaces appear briefly during a config
+  // outage"). Cashback flow itself is independently gated on
+  // `loopOrdersEnabled` / `loopAuthNativeEnabled` so a false here
+  // doesn't unlock anything live; it only governs UI visibility.
+  phase1Only: false,
   social: {
     googleClientIdWeb: null,
     googleClientIdIos: null,

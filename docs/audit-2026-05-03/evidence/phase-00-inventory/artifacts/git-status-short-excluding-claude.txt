@@ -1,0 +1,25 @@
+ M docs/audit-2026-05-03/inventory/directory-map.txt
+ M docs/audit-2026-05-03/inventory/git-status-short.txt
+ M docs/audit-2026-05-03/inventory/tracked-files.txt
+ M docs/audit-2026-05-03/inventory/workspace-files.txt
+?? docs/audit-2026-05-03/README.md
+?? docs/audit-2026-05-03/admin-handoff.md
+?? docs/audit-2026-05-03/checklist.md
+?? docs/audit-2026-05-03/evidence/
+?? docs/audit-2026-05-03/findings/
+?? docs/audit-2026-05-03/inventory/README.md
+?? docs/audit-2026-05-03/inventory/backend-src-counts.txt
+?? docs/audit-2026-05-03/inventory/exclusions.md
+?? docs/audit-2026-05-03/inventory/file-counts-by-phase.txt
+?? docs/audit-2026-05-03/inventory/file-counts-by-root.txt
+?? docs/audit-2026-05-03/inventory/file-disposition.tsv
+?? docs/audit-2026-05-03/inventory/phase-map.md
+?? docs/audit-2026-05-03/inventory/planned-feature-matrix.tsv
+?? docs/audit-2026-05-03/inventory/scaffold-disposition.tsv
+?? docs/audit-2026-05-03/inventory/scaffold-files.txt
+?? docs/audit-2026-05-03/inventory/scaffold-git-status-short.txt
+?? docs/audit-2026-05-03/inventory/web-app-counts.txt
+?? docs/audit-2026-05-03/journeys/
+?? docs/audit-2026-05-03/plan.md
+?? docs/audit-2026-05-03/protocol/
+?? docs/audit-2026-05-03/tracker.md

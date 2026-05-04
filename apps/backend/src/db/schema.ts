@@ -234,6 +234,16 @@ export const creditTransactions = pgTable(
         OR (${t.type} = 'adjustment')
       `,
     ),
+    // A4-028: pin the ADR-017 reason length contract at the DB
+    // layer. App-side handlers validate 2..500, but a direct
+    // INSERT (admin shell, future writer) could land an empty or
+    // multi-megabyte string. The CHECK is a NULL-tolerant guard:
+    // many ledger rows (cashback / spend / interest) leave reason
+    // NULL legitimately.
+    check(
+      'credit_transactions_reason_length',
+      sql`${t.reason} IS NULL OR (length(${t.reason}) >= 2 AND length(${t.reason}) <= 500)`,
+    ),
   ],
 );
 
@@ -431,7 +441,14 @@ export const orders = pgTable(
     // face_value_minor and charge_currency = currency via the
     // migration's UPDATE — true when the user bought in their own
     // region, which was every order before home-currency landed.
-    chargeMinor: bigint('charge_minor', { mode: 'bigint' }).notNull(),
+    //
+    // A4-030: `.default(0n)` mirrors the migration's
+    // `DEFAULT 0` so a future `drizzle-kit generate` doesn't emit a
+    // spurious `DROP DEFAULT`. The default is harmless in practice
+    // because `.notNull()` on a non-nullable insert never falls
+    // through to the default — handlers always supply a value —
+    // but the schema/migration parity matters for migration drift.
+    chargeMinor: bigint('charge_minor', { mode: 'bigint' }).notNull().default(0n),
     chargeCurrency: char('charge_currency', { length: 3 }).notNull(),
 
     // Payment source:
@@ -761,6 +778,19 @@ export const pendingPayouts = pgTable(
         OR (${t.kind} = 'withdrawal' AND ${t.orderId} IS NULL)
       `,
     ),
+    // A4-027: pin asset_code + asset_issuer at the DB layer. The app
+    // pins the LOOP-asset code set in payout-builder, but a direct
+    // INSERT (admin shell, future writer that drifts) could land
+    // 'BADASSET' which the submit worker would round-trip into
+    // Horizon and either silently mis-send or fail unclassified.
+    // The matching env vars (LOOP_STELLAR_*_ISSUER) all carry
+    // Stellar pubkeys, so the asset_issuer regex matches the
+    // to_address regex above (56-char base32 G-prefix).
+    check(
+      'pending_payouts_asset_code_known',
+      sql`${t.assetCode} IN ('USDLOOP', 'GBPLOOP', 'EURLOOP')`,
+    ),
+    check('pending_payouts_asset_issuer_format', sql`${t.assetIssuer} ~ '^G[A-Z2-7]{55}$'`),
   ],
 );
 

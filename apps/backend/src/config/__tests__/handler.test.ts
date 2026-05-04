@@ -64,6 +64,7 @@ describe('configHandler', () => {
     };
     expect(body.loopAuthNativeEnabled).toBe(false);
     expect(body.loopOrdersEnabled).toBe(false);
+    expect((body as unknown as { phase1Only: boolean }).phase1Only).toBe(false);
     expect(body.social).toEqual({
       googleClientIdWeb: null,
       googleClientIdIos: null,
@@ -124,6 +125,15 @@ describe('configHandler', () => {
     const { ctx } = makeCtx();
     const body = (await configHandler(ctx).json()) as { loopOrdersEnabled: boolean };
     expect(body.loopOrdersEnabled).toBe(false);
+  });
+
+  it('reflects LOOP_PHASE_1_ONLY independently of the loop-native flags', async () => {
+    process.env['LOOP_PHASE_1_ONLY'] = 'true';
+    const { configHandler } = await import('../handler.js');
+    const { ctx } = makeCtx();
+    const body = (await configHandler(ctx).json()) as { phase1Only: boolean };
+    expect(body.phase1Only).toBe(true);
+    delete process.env['LOOP_PHASE_1_ONLY'];
   });
 
   it('reports loopAssets with null issuers + available=false when unconfigured', async () => {

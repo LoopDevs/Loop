@@ -1,0 +1,202 @@
+apps/backend/src/routes/public.ts:10: *   that have no user context yet.
+apps/backend/src/routes/public.ts:14: * - Cache-Control set on the handler — the matching CDN respects
+apps/backend/src/routes/public.ts:40:  // renders once per visit; edge-cache respects the handler's
+apps/backend/src/routes/public.ts:41:  // Cache-Control so real origin load will be much lower.
+apps/backend/src/routes/public.ts:45:  // the landing page. Same never-500 + Cache-Control discipline as
+apps/backend/src/routes/public.ts:56:  // Same never-500 / cache-control discipline as the other
+apps/backend/src/routes/public.ts:60:  // Pre-signup "calculate your cashback" preview. Same never-500 +
+apps/backend/src/routes/public.ts:61:  // Cache-Control discipline as the other public endpoints (ADR
+apps/backend/src/routes/public.ts:65:  // preview never promises more than the user will actually earn.
+apps/backend/src/routes/public.ts:70:  // users can add trustlines to the verified issuer accounts
+apps/backend/src/routes/public.ts:77:  // of the story. Never-500; 300s cache on happy path, 60s on
+apps/backend/src/routes/public.ts:78:  // fallback.
+apps/backend/src/openapi/public.ts:8: * #1153 auth, #1154 merchants, #1155 orders, #1156 users).
+apps/backend/src/openapi/public.ts:14: * Per ADR 020 the public surface is never-500 + Cache-Control
+apps/backend/src/openapi/public.ts:15: * friendly + no-PII. Every path declaration here preserves the
+apps/backend/src/openapi/public.ts:58:      'Unauthenticated, CDN-friendly. Returns the user count with any earned cashback, per-currency cashback totals, and fulfilled order count. `Cache-Control: public, max-age=300` on the happy path; `max-age=60` on the fallback path if the backend is serving a last-known-good snapshot or zeros. Never 500 — a DB outage degrades to stale/zero rather than propagating to unauthenticated visitors.',
+apps/backend/src/openapi/public.ts:80:      userCashbackPct: z.string().openapi({
+apps/backend/src/openapi/public.ts:116:      'Public transparency surface. Lists the LOOP-branded Stellar assets Loop pays cashback in, with their issuer public keys, so third-party wallets + users adding trustlines can verify the asset list without guessing from on-chain traffic. Only issuer-configured pairs appear — publishing an unconfigured code would risk users opening a trustline to a spoofed issuer. `Cache-Control: public, max-age=300` on the happy path, `max-age=60` on the empty-list fallback. Never 500.',
+apps/backend/src/openapi/public.ts:148:      'Unauthenticated marketing surface. Scalar `{ fulfilledOrders, recycledOrders, pctRecycled }` over the last 30 days — the complement to `/api/public/cashback-stats` (emission) showing the recycle side of the story. `Cache-Control: public, max-age=300` on the happy path; `max-age=60` on the fallback path. Never 500.',
+apps/backend/src/openapi/public.ts:167:      'Unauthenticated, CDN-friendly. Landing-page "best cashback" band. `?limit=` clamped 1..50 (default 10). Merchants whose row has been evicted from the in-memory catalog (ADR 021 Rule B) are dropped from the response so the list never links to about-to-vanish merchants. The fallback snapshot is keyed by effective `limit`, so a degraded response preserves the caller-requested shape. `Cache-Control: public, max-age=300` on the happy path; `max-age=60` on the fallback path. Never 500.',
+apps/backend/src/openapi/public.ts:176:        description: 'Top merchants by user_cashback_pct, descending',
+apps/backend/src/public/flywheel-stats.ts:26: *     if one is cached, otherwise a zeroed response.
+apps/backend/src/public/flywheel-stats.ts:27: *   - `Cache-Control: public, max-age=300` happy path; `max-age=60`
+apps/backend/src/public/flywheel-stats.ts:28: *     on the fallback path so a fix lands in under a minute rather
+apps/backend/src/public/flywheel-stats.ts:30: *   - No PII — just two counts + a percentage string.
+apps/backend/src/public/flywheel-stats.ts:63:/** In-memory last-known-good snapshot. Serves the never-500 path. */
+apps/backend/src/public/flywheel-stats.ts:73:/** Test-only — reset the cached snapshot between cases. */
+apps/backend/src/public/flywheel-stats.ts:109:    c.header('Cache-Control', 'public, max-age=300');
+apps/backend/src/public/flywheel-stats.ts:110:    return c.json(body);
+apps/backend/src/public/flywheel-stats.ts:111:  } catch (err) {
+apps/backend/src/public/flywheel-stats.ts:112:    log.error({ err }, 'Public flywheel-stats computation failed — serving fallback');
+apps/backend/src/public/flywheel-stats.ts:114:    c.header('Cache-Control', 'public, max-age=60');
+apps/backend/src/public/flywheel-stats.ts:115:    return c.json<PublicFlywheelStats>(body);
+apps/backend/src/public/merchant.ts:7: * Amazon" — with a narrow, PII-free payload that sits behind a
+apps/backend/src/public/merchant.ts:13: * merchant_cashback_configs.user_cashback_pct. A merchant with
+apps/backend/src/public/merchant.ts:14: * no active config returns `userCashbackPct: null` — the "coming
+apps/backend/src/public/merchant.ts:19: *   - Never 500 — DB trouble → serve a last-known-good cached
+apps/backend/src/public/merchant.ts:25: *   - `Cache-Control: public, max-age=300` on the happy path,
+apps/backend/src/public/merchant.ts:26: *     `max-age=60` on the fallback path.
+apps/backend/src/public/merchant.ts:28: *     user-facing pct a visitor sees.
+apps/backend/src/public/merchant.ts:52:  userCashbackPct: string;
+apps/backend/src/public/merchant.ts:77:    .select({ userCashbackPct: merchantCashbackConfigs.userCashbackPct })
+apps/backend/src/public/merchant.ts:92:    userCashbackPct: rows[0]?.userCashbackPct ?? null,
+apps/backend/src/public/merchant.ts:100:    return c.json({ code: 'VALIDATION_ERROR', message: 'id is required' }, 400);
+apps/backend/src/public/merchant.ts:103:    return c.json({ code: 'VALIDATION_ERROR', message: 'id is malformed' }, 400);
+apps/backend/src/public/merchant.ts:108:    return c.json({ code: 'NOT_FOUND', message: 'Merchant not found' }, 404);
+apps/backend/src/public/merchant.ts:114:    c.header('cache-control', 'public, max-age=300');
+apps/backend/src/public/merchant.ts:115:    return c.json<PublicMerchantDetail>(snapshot);
+apps/backend/src/public/merchant.ts:116:  } catch (err) {
+apps/backend/src/public/merchant.ts:119:      'Public merchant detail computation failed — serving fallback',
+apps/backend/src/public/merchant.ts:121:    c.header('cache-control', 'public, max-age=60');
+apps/backend/src/public/merchant.ts:122:    const fallback = lastKnownGood.get(resolved.id);
+apps/backend/src/public/merchant.ts:123:    if (fallback !== undefined) {
+apps/backend/src/public/merchant.ts:124:      return c.json<PublicMerchantDetail>(fallback);
+apps/backend/src/public/merchant.ts:126:    // First-miss bootstrap fallback: catalog row + null pct.
+apps/backend/src/public/merchant.ts:127:    return c.json<PublicMerchantDetail>({
+apps/backend/src/public/merchant.ts:132:      userCashbackPct: null,
+apps/backend/src/public/cashback-stats.ts:6: *   - totalUsersWithCashback: distinct users with a `cashback`
+apps/backend/src/public/cashback-stats.ts:17: *     visitor should never see a server error on the landing page
+apps/backend/src/public/cashback-stats.ts:19: *   - `Cache-Control: public, max-age=300` (5 min). This is
+apps/backend/src/public/cashback-stats.ts:22: *   - On the fallback path we emit `max-age=60` instead — serve
+apps/backend/src/public/cashback-stats.ts:39:// "never 500" — if the DB read throws, we serve this instead.
+apps/backend/src/public/cashback-stats.ts:40:// Reset on process restart; fallback-to-zero is the bootstrap state.
+apps/backend/src/public/cashback-stats.ts:66:  // COUNT(DISTINCT user_id) WHERE type = 'cashback'. One row back.
+apps/backend/src/public/cashback-stats.ts:67:  const usersResult = await db.execute(sql`
+apps/backend/src/public/cashback-stats.ts:68:    SELECT COUNT(DISTINCT user_id)::text AS n
+apps/backend/src/public/cashback-stats.ts:72:  const usersRows = (
+apps/backend/src/public/cashback-stats.ts:73:    Array.isArray(usersResult)
+apps/backend/src/public/cashback-stats.ts:74:      ? (usersResult as unknown as UsersRow[])
+apps/backend/src/public/cashback-stats.ts:75:      : ((usersResult as unknown as { rows?: UsersRow[] }).rows ?? [])
+apps/backend/src/public/cashback-stats.ts:103:    totalUsersWithCashback: toNumber(usersRows[0]?.n ?? 0),
+apps/backend/src/public/cashback-stats.ts:122:    c.header('cache-control', 'public, max-age=300');
+apps/backend/src/public/cashback-stats.ts:123:    return c.json<PublicCashbackStats>(snapshot);
+apps/backend/src/public/cashback-stats.ts:124:  } catch (err) {
+apps/backend/src/public/cashback-stats.ts:125:    log.error({ err }, 'Public cashback-stats computation failed — serving fallback');
+apps/backend/src/public/cashback-stats.ts:128:    c.header('cache-control', 'public, max-age=60');
+apps/backend/src/public/cashback-stats.ts:130:      return c.json<PublicCashbackStats>(lastKnownGood);
+apps/backend/src/public/cashback-stats.ts:134:    return c.json<PublicCashbackStats>({
+apps/backend/src/public/cashback-preview.ts:5: * — returns the cashback a user would earn on a would-be order of
+apps/backend/src/public/cashback-preview.ts:21: *   cashbackMinor = floor(amountMinor × userCashbackPct × 100 / 10_000)
+apps/backend/src/public/cashback-preview.ts:23: * so the preview never promises more than the user will actually
+apps/backend/src/public/cashback-preview.ts:32: *   - `Cache-Control: public, max-age=60` — shorter than
+apps/backend/src/public/cashback-preview.ts:34: *     URL param and a stale preview is user-visible.
+apps/backend/src/public/cashback-preview.ts:35: *   - No PII, no commercial-terms (wholesale/margin) fields.
+apps/backend/src/public/cashback-preview.ts:111:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is required' }, 400);
+apps/backend/src/public/cashback-preview.ts:114:    return c.json({ code: 'VALIDATION_ERROR', message: 'merchantId is malformed' }, 400);
+apps/backend/src/public/cashback-preview.ts:119:    return c.json({ code: 'VALIDATION_ERROR', message: 'amountMinor is required' }, 400);
+apps/backend/src/public/cashback-preview.ts:125:    return c.json(
+apps/backend/src/public/cashback-preview.ts:133:  } catch {
+apps/backend/src/public/cashback-preview.ts:134:    return c.json({ code: 'VALIDATION_ERROR', message: 'amountMinor is malformed' }, 400);
+apps/backend/src/public/cashback-preview.ts:137:    return c.json({ code: 'VALIDATION_ERROR', message: 'amountMinor is out of range' }, 400);
+apps/backend/src/public/cashback-preview.ts:142:    return c.json({ code: 'NOT_FOUND', message: 'Merchant not found' }, 404);
+apps/backend/src/public/cashback-preview.ts:148:      .select({ userCashbackPct: merchantCashbackConfigs.userCashbackPct })
+apps/backend/src/public/cashback-preview.ts:156:      .limit(1)) as Array<{ userCashbackPct: string }>;
+apps/backend/src/public/cashback-preview.ts:157:    cashbackPct = rows[0]?.userCashbackPct ?? null;
+apps/backend/src/public/cashback-preview.ts:158:  } catch (err) {
+apps/backend/src/public/cashback-preview.ts:160:    // rather than 500 per ADR 020 never-500. Cache short so we
+apps/backend/src/public/cashback-preview.ts:163:    c.header('cache-control', 'public, max-age=60');
+apps/backend/src/public/cashback-preview.ts:164:    return c.json<PublicCashbackPreview>({
+apps/backend/src/public/cashback-preview.ts:177:  c.header('cache-control', 'public, max-age=60');
+apps/backend/src/public/cashback-preview.ts:178:  return c.json<PublicCashbackPreview>({
+apps/backend/src/public/__tests__/cashback-preview.test.ts:5:  configRows: [] as Array<{ userCashbackPct: string }>,
+apps/backend/src/public/__tests__/cashback-preview.test.ts:32:    userCashbackPct: 'merchant_cashback_configs.user_cashback_pct',
+apps/backend/src/public/__tests__/cashback-preview.test.ts:161:    state.configRows = [{ userCashbackPct: '2.50' }];
+apps/backend/src/public/__tests__/cashback-preview.test.ts:190:  it('falls back to soft-empty on DB failure (ADR 020 never-500)', async () => {
+apps/backend/src/public/__tests__/flywheel-stats.test.ts:69:    expect(headers['Cache-Control']).toBe('public, max-age=300');
+apps/backend/src/public/__tests__/flywheel-stats.test.ts:110:  it('never-500 — db throw + no cache → zeroed response + 60s cache', async () => {
+apps/backend/src/public/__tests__/flywheel-stats.test.ts:122:    expect(headers['Cache-Control']).toBe('public, max-age=60');
+apps/backend/src/public/__tests__/flywheel-stats.test.ts:125:  it('never-500 — serves last-known-good snapshot when db throws after a prior success', async () => {
+apps/backend/src/public/__tests__/flywheel-stats.test.ts:126:    // Warm the cache with a successful response.
+apps/backend/src/public/__tests__/flywheel-stats.test.ts:138:    expect(headers['Cache-Control']).toBe('public, max-age=60');
+apps/backend/src/public/__tests__/cashback-stats.test.ts:6:  users: 0,
+apps/backend/src/public/__tests__/cashback-stats.test.ts:9:  throwOn: null as 'users' | 'orders' | 'cashback' | null,
+apps/backend/src/public/__tests__/cashback-stats.test.ts:12:function classify(q: string): 'users' | 'orders' | 'cashback' {
+apps/backend/src/public/__tests__/cashback-stats.test.ts:14:  if (q.includes('COUNT(DISTINCT user_id)')) return 'users';
+apps/backend/src/public/__tests__/cashback-stats.test.ts:27:      if (kind === 'users') return [{ n: state.users.toString() }];
+apps/backend/src/public/__tests__/cashback-stats.test.ts:79:  state.users = 0;
+apps/backend/src/public/__tests__/cashback-stats.test.ts:90:    expect(res.headers.get('cache-control')).toBe('public, max-age=300');
+apps/backend/src/public/__tests__/cashback-stats.test.ts:101:    state.users = 1234;
+apps/backend/src/public/__tests__/cashback-stats.test.ts:119:  it('never 500s — DB throws serve zeros on bootstrap with max-age=60', async () => {
+apps/backend/src/public/__tests__/cashback-stats.test.ts:120:    state.throwOn = 'users';
+apps/backend/src/public/__tests__/cashback-stats.test.ts:123:    expect(res.headers.get('cache-control')).toBe('public, max-age=60');
+apps/backend/src/public/__tests__/cashback-stats.test.ts:130:    state.users = 42;
+apps/backend/src/public/__tests__/cashback-stats.test.ts:141:    expect(second.headers.get('cache-control')).toBe('public, max-age=60');
+apps/backend/src/public/__tests__/cashback-stats.test.ts:147:  it('emits cache-control: public, max-age=300 on the happy path', async () => {
+apps/backend/src/public/__tests__/cashback-stats.test.ts:149:    expect(res.headers.get('cache-control')).toBe('public, max-age=300');
+apps/backend/src/public/__tests__/merchant.test.ts:5:  configRows: [] as Array<{ userCashbackPct: string }>,
+apps/backend/src/public/__tests__/merchant.test.ts:32:    userCashbackPct: 'merchant_cashback_configs.user_cashback_pct',
+apps/backend/src/public/__tests__/merchant.test.ts:111:    state.configRows = [{ userCashbackPct: '5.50' }];
+apps/backend/src/public/__tests__/merchant.test.ts:114:    expect(res.headers.get('cache-control')).toBe('public, max-age=300');
+apps/backend/src/public/__tests__/merchant.test.ts:120:      userCashbackPct: string | null;
+apps/backend/src/public/__tests__/merchant.test.ts:127:    expect(body.userCashbackPct).toBe('5.50');
+apps/backend/src/public/__tests__/merchant.test.ts:131:  it('returns null userCashbackPct for a catalog merchant with no active config (coming-soon state)', async () => {
+apps/backend/src/public/__tests__/merchant.test.ts:141:    const body = (await res.json()) as { userCashbackPct: string | null };
+apps/backend/src/public/__tests__/merchant.test.ts:142:    expect(body.userCashbackPct).toBeNull();
+apps/backend/src/public/__tests__/merchant.test.ts:152:    state.configRows = [{ userCashbackPct: '2.00' }];
+apps/backend/src/public/__tests__/merchant.test.ts:161:  it('never-500s on DB trouble — serves last-known-good from cache', async () => {
+apps/backend/src/public/__tests__/merchant.test.ts:168:    // First call: seeds the cache.
+apps/backend/src/public/__tests__/merchant.test.ts:169:    state.configRows = [{ userCashbackPct: '5.50' }];
+apps/backend/src/public/__tests__/merchant.test.ts:176:    expect(res.headers.get('cache-control')).toBe('public, max-age=60');
+apps/backend/src/public/__tests__/merchant.test.ts:177:    const body = (await res.json()) as { userCashbackPct: string | null };
+apps/backend/src/public/__tests__/merchant.test.ts:178:    expect(body.userCashbackPct).toBe('5.50');
+apps/backend/src/public/__tests__/merchant.test.ts:181:  it('never-500s on first-miss DB trouble — serves catalog row with null pct', async () => {
+apps/backend/src/public/__tests__/merchant.test.ts:191:    expect(res.headers.get('cache-control')).toBe('public, max-age=60');
+apps/backend/src/public/__tests__/merchant.test.ts:192:    const body = (await res.json()) as { id: string; userCashbackPct: string | null };
+apps/backend/src/public/__tests__/merchant.test.ts:194:    expect(body.userCashbackPct).toBeNull();
+apps/backend/src/public/__tests__/loop-assets.test.ts:13: * the "throws" branch to exercise the never-500 fallback.
+apps/backend/src/public/__tests__/loop-assets.test.ts:58:    expect(headers['Cache-Control']).toBe('public, max-age=300');
+apps/backend/src/public/__tests__/loop-assets.test.ts:89:  it('never-500 — helper throw falls back to empty list with shorter cache', async () => {
+apps/backend/src/public/__tests__/loop-assets.test.ts:96:    // Shorter cache on the fallback path so a fix is reflected faster
+apps/backend/src/public/__tests__/loop-assets.test.ts:98:    expect(headers['Cache-Control']).toBe('public, max-age=60');
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:5:  configRows: [] as Array<{ merchantId: string; userCashbackPct: string }>,
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:28:    userCashbackPct: 'merchant_cashback_configs.user_cashback_pct',
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:84:  it('returns empty list with happy-path cache header when no configs exist', async () => {
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:87:    expect(res.headers.get('cache-control')).toBe('public, max-age=300');
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:95:      { merchantId: 'argos', userCashbackPct: '15.00' },
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:96:      { merchantId: 'tesco', userCashbackPct: '10.00' },
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:119:        userCashbackPct: '15.00',
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:125:        userCashbackPct: '10.00',
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:132:      { merchantId: 'evicted', userCashbackPct: '30.00' },
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:133:      { merchantId: 'argos', userCashbackPct: '15.00' },
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:151:      userCashbackPct: `${(60 - i).toString()}.00`,
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:172:  it('never 500s — DB throws serve empty list on bootstrap with max-age=60', async () => {
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:176:    expect(res.headers.get('cache-control')).toBe('public, max-age=60');
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:182:    state.configRows = [{ merchantId: 'argos', userCashbackPct: '15.00' }];
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:190:    expect(second.headers.get('cache-control')).toBe('public, max-age=60');
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:198:  it('keys fallback snapshots by effective limit', async () => {
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:201:      userCashbackPct: `${(50 - i).toString()}.00`,
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:211:    const fallback = await publicTopCashbackMerchantsHandler(makeCtx({ limit: '2' }));
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:212:    expect(fallback.status).toBe(200);
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:213:    expect(fallback.headers.get('cache-control')).toBe('public, max-age=60');
+apps/backend/src/public/__tests__/top-cashback-merchants.test.ts:214:    const body = (await fallback.json()) as {
+apps/backend/src/public/loop-assets.ts:6: * third parties (wallet apps, block explorers, users manually adding
+apps/backend/src/public/loop-assets.ts:20: * response — publishing an unconfigured code risks a user adding a
+apps/backend/src/public/loop-assets.ts:28: *     same try/catch + fallback as the other public endpoints to
+apps/backend/src/public/loop-assets.ts:30: *   - `Cache-Control: public, max-age=300` (5 min) for the happy
+apps/backend/src/public/loop-assets.ts:31: *     path. Matches sibling public endpoints so a CDN can cache
+apps/backend/src/public/loop-assets.ts:33: *   - No PII. Just a list of asset codes and public Stellar account
+apps/backend/src/public/loop-assets.ts:56:    // wrap in try/catch so the "never 500" contract holds even if
+apps/backend/src/public/loop-assets.ts:62:    c.header('Cache-Control', 'public, max-age=300');
+apps/backend/src/public/loop-assets.ts:63:    return c.json(body);
+apps/backend/src/public/loop-assets.ts:64:  } catch (err) {
+apps/backend/src/public/loop-assets.ts:66:    // ADR 020 never-500. Empty list is a valid response (the
+apps/backend/src/public/loop-assets.ts:68:    c.header('Cache-Control', 'public, max-age=60');
+apps/backend/src/public/loop-assets.ts:69:    return c.json<PublicLoopAssetsResponse>({ assets: [] });
+apps/backend/src/public/top-cashback-merchants.ts:6: * `user_cashback_pct`. Marketing uses this on the landing page to
+apps/backend/src/public/top-cashback-merchants.ts:18: *     snapshot; first-boot fallback is an empty list.
+apps/backend/src/public/top-cashback-merchants.ts:19: *   - `Cache-Control: public, max-age=300` on the happy path,
+apps/backend/src/public/top-cashback-merchants.ts:20: *     `max-age=60` on the fallback path.
+apps/backend/src/public/top-cashback-merchants.ts:42:  userCashbackPct: string;
+apps/backend/src/public/top-cashback-merchants.ts:56:      userCashbackPct: merchantCashbackConfigs.userCashbackPct,
+apps/backend/src/public/top-cashback-merchants.ts:60:    .orderBy(desc(merchantCashbackConfigs.userCashbackPct))) as ConfigRow[];
+apps/backend/src/public/top-cashback-merchants.ts:75:      userCashbackPct: row.userCashbackPct,
+apps/backend/src/public/top-cashback-merchants.ts:94:    c.header('cache-control', 'public, max-age=300');
+apps/backend/src/public/top-cashback-merchants.ts:95:    return c.json<PublicTopCashbackMerchantsResponse>(snapshot);
+apps/backend/src/public/top-cashback-merchants.ts:96:  } catch (err) {
+apps/backend/src/public/top-cashback-merchants.ts:97:    log.error({ err }, 'Public top-cashback-merchants computation failed — serving fallback');
+apps/backend/src/public/top-cashback-merchants.ts:98:    c.header('cache-control', 'public, max-age=60');
+apps/backend/src/public/top-cashback-merchants.ts:99:    const fallback = lastKnownGoodByLimit.get(limit);
+apps/backend/src/public/top-cashback-merchants.ts:100:    if (fallback !== undefined) {
+apps/backend/src/public/top-cashback-merchants.ts:101:      return c.json<PublicTopCashbackMerchantsResponse>(fallback);
+apps/backend/src/public/top-cashback-merchants.ts:103:    return c.json<PublicTopCashbackMerchantsResponse>({

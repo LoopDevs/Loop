@@ -250,15 +250,22 @@ CLOSED ──(N consecutive failures)──→ OPEN ──(cooldown elapsed)─�
 
 ## Phase 2 — Stellar wallet + cashback
 
-2-of-3 multisig per user:
+A4-096: the actually-shipped model is **external-wallet linking**
+(ADR 015) plus a **backend operator account** that signs outbound
+LOOP-asset payouts (ADR 016).
 
-| Key          | Location                                    | Signs when                         |
-| ------------ | ------------------------------------------- | ---------------------------------- |
-| Device key   | iOS Keychain / Android Keystore (biometric) | On-device after Face ID / Touch ID |
-| Server key   | Backend env (encrypted reference)           | Every transaction as co-signer     |
-| Recovery key | Third-party custodian                       | Account recovery only              |
+| Component       | Location                                              | Role                                                                                                                                              |
+| --------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| User wallet     | External (user-controlled)                            | User links a Stellar pubkey to `users.stellar_address`. Backend never holds the private key. Trustline opt-in is user-side.                       |
+| Operator secret | Backend env (`LOOP_STELLAR_OPERATOR_SECRET`)          | Backend signs outbound LOOP-asset payments using `Keypair.fromSecret(...)`. See `payments/payout-submit.ts`.                                      |
+| Issuers         | Backend env (`LOOP_STELLAR_<USD/GBP/EUR>LOOP_ISSUER`) | Per-currency issuer pubkeys for USDLOOP / GBPLOOP / EURLOOP. The asset-drift watcher reconciles on-chain circulation against off-chain liability. |
 
-Device key never leaves the device. Backend never sees the private key.
+The earlier 2-of-3 multisig design (Device key in Keychain + Server
+co-signer + recovery custodian) was **descoped** before launch in
+favour of external linking, which matches the gift-card-cashback UX
+better (no on-device key custody needed; users can rotate wallets
+freely). See `docs/adr/015-stablecoin-topology-and-payment-rails.md`
+for the rationale.
 
 ---
 
@@ -324,6 +331,7 @@ GET  /api/admin/treasury/credit-flow                   [admin — per-day credit
 GET  /api/admin/treasury/credit-flow.csv               [admin — Tier-3 CSV of the credit-flow time series for month-end ledger reconciliation, ADR 009/015/018]
 GET  /api/admin/assets/:assetCode/circulation          [admin — per-asset circulation drift: onChain stroops vs ledger liability, ADR 015]
 GET  /api/admin/asset-drift/state                      [admin — in-memory snapshot of the asset-drift watcher: per-asset state + last drift + last tick ms, ADR 015]
+GET  /api/admin/interest/mint-forecast                 [admin — forward-mint forecast for the interest pool: per-currency cohort balance, daily interest, pool balance, days of cover, recommended next-mint amount, ADR 009/015]
 GET  /api/admin/payouts/settlement-lag                 [admin — p50/p95/max seconds from payout-intent to on-chain confirm, per LOOP asset + fleet-wide, ADR 015/016]
 GET  /api/admin/cashback-realization                   [admin — per-currency lifetime earned vs spent vs outstanding; recycledBps = flywheel-health KPI, ADR 009/015]
 GET  /api/admin/cashback-realization/daily             [admin — daily time-series of earned/spent/recycledBps per currency over N days; sparkline-ready dense output, ADR 009/015]

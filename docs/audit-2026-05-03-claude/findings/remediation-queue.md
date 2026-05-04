@@ -1,0 +1,183 @@
+# Remediation Queue (Claude audit)
+
+Status of every Claude-audit finding (A4-001 → A4-124) as of the 2026-05-04 Tranche 1 remediation cycle. The register at [register.md](./register.md) is the immutable record of what was filed at audit baseline; this queue tracks how each finding has been resolved, deferred, or accepted.
+
+Numbering note: Claude (this audit) and Codex (`docs/audit-2026-05-03/`) share the `A4-XXX` numbering. Where the same defect was filed twice, this table picks the Claude number; the Codex audit's remediation queue cross-references the same commits. Many remediation commits reference the Claude number directly (`fix(backend): a4-105/108/109/111 ...`).
+
+## Resolved (committed on this branch)
+
+Each row names the commit (or one of the commits) that closes the finding. A handful were closed before the cold audit was filed and are listed for completeness.
+
+### Critical
+
+| Finding | Resolution                                                                                                                                                                                                          |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A4-110  | `85f0b1c5 fix(backend): a4-110 close cashback double-spend` — `loop_asset` payment now debits user_credits, `paymentMethod='credit'` rejected with `PAYMENT_METHOD_DISABLED` until cashback-source bucketing lands. |
+
+### High
+
+| Finding | Resolution                                                                                                                                                                           |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A4-001  | `8c1559f8 fix(backend): batch 2 audit fixes — A4-001/...` — per-route rate-limit bucket key.                                                                                         |
+| A4-019  | `65f97b54 fix(backend): batch 3 audit fixes — A4-019/...` — admin refund handler migrated to `withIdempotencyGuard`.                                                                 |
+| A4-034  | `519930dc fix: a4-034/050/051/058/074 health/csp/sentry hardening` — `/health` SELECT 1 DB probe + `databaseReachable` field.                                                        |
+| A4-050  | Same commit — Permissions-Policy allows `geolocation=(self)` so ClusterMap "Locate me" works.                                                                                        |
+| A4-051  | Same commit — TanStack Query → Sentry forward goes through scrubber.                                                                                                                 |
+| A4-052  | `902877f2 fix(web): a4-052/053 admin write forms gate writes behind confirm dialog` — credit-adjust form.                                                                            |
+| A4-053  | Same commit — withdrawal form.                                                                                                                                                       |
+| A4-061  | `b8279685 fix: a4-061/086 adr-020 endpoint list + dsr revoke logging` — ADR-020 references corrected.                                                                                |
+| A4-062  | `faa737c3` partial; ADR-026 quarterly-tax CSV deferred to Tranche 2 (operator decides whether to ship).                                                                              |
+| A4-072  | Already addressed in `apps/web/Dockerfile` (lines 31-38 plumb `VITE_SENTRY_DSN` / `VITE_SENTRY_RELEASE` / `VITE_LOOP_ENV`).                                                          |
+| A4-073  | `519930dc` — `/health` returns 503 on critical degradation; orchestrator probes flip on outage.                                                                                      |
+| A4-074  | Same commit — Sentry scrubber walks `event.exception.values[].value`, breadcrumbs, and message.                                                                                      |
+| A4-075  | `87930414 fix(backend): batch 1 audit fixes — A4-002/006/009/035/039/040/054/075/076` — orders + admin-payouts route mount order.                                                    |
+| A4-095  | **operator-required** — branch protection drift; no code change closes it.                                                                                                           |
+| A4-101  | `73b23828 fix(backend): a4-100/101/102/103 procurement + openapi + denomination` — `OperatorPoolUnavailableError` reverts `procuring → paid`.                                        |
+| A4-103  | Same commit — server-side `validateMerchantDenomination` + (this cycle) `df4cbafb fix(backend): a4-017 global order cap + bigint-safe ctx fiatAmount`.                               |
+| A4-104  | `bf78677f fix: a4-070/071/104 cross-tab logout + redeem copy + payout op-account` — payout pre-check now keys on operator account.                                                   |
+| A4-106  | `b9a9c576 fix(backend): a4-098/106/107 refresh-race + xlm precision + asset/method` — micro-cents precision + ceiling.                                                               |
+| A4-107  | Same commit — watcher rejects mismatched assets before size check.                                                                                                                   |
+| A4-109  | `22354311 fix(backend): a4-105/108/109/111 watcher + stuck + migrations + health` + (this cycle) `2fabc7e7 fix(backend): a4-023 ship drizzle migrations in dist via tsup onSuccess`. |
+| A4-113  | (this cycle) `64e3ca73` + `66f35bd5` — overlay source pinned and CI guard added.                                                                                                     |
+| A4-121  | (this cycle) `19fc71d8 fix(web): a4-040 expose USDC + XLM payment rails in purchase UI` — radio chooser surfaces both rails.                                                         |
+| A4-124  | **deferred to Tranche 2** — admin withdrawal direction inversion redesign needs the on-chain redemption flow (Tranche 2).                                                            |
+
+### Medium
+
+| Finding | Resolution                                                                                                                                        |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A4-002  | Batch 1 — request-otp 500 → 4xx + audit-logged.                                                                                                   |
+| A4-003  | Batch 3 — admin payout retry idempotency-guarded (extends A4-019 fix).                                                                            |
+| A4-004  | `d51df3cd` family — image proxy circuit breaker + SSRF guard tightening.                                                                          |
+| A4-006  | Batch 1 — cleanup interval `unref`ed.                                                                                                             |
+| A4-008  | Batch 2 — request-id middleware no longer trusts inbound `X-Request-Id`.                                                                          |
+| A4-009  | Batch 1 — `decodeJwtPayload` removed (verified by grep returning zero non-comment hits).                                                          |
+| A4-010  | `5bc55fa6 fix(backend): a4-064/093 partial loop-asset config + email provider gate` — OTP row written only after email send succeeds.             |
+| A4-011  | **accepted-risk** — `withIdempotencyGuard` body-comparison deferred; admin handlers use unique keys per intent.                                   |
+| A4-016  | Batch 2 — bucket eviction every cleanup tick.                                                                                                     |
+| A4-018  | `9ad951b1 fix(backend): a4-018/029/030 cashback doc + payout asset guard + schema default` — repo.ts docstring updated.                           |
+| A4-020  | `12f3a444 fix(backend): a4-020 payout compensation enforces daily admin cap`.                                                                     |
+| A4-021  | `5e31e737 fix(backend): a4-021/022/023 payout-comp invariants + peg-break alert`.                                                                 |
+| A4-022  | Same commit — userId/currency cross-check.                                                                                                        |
+| A4-023  | Same commit — peg-break alert on chargeCurrency mismatch.                                                                                         |
+| A4-024  | `e44789a7 fix: a4-024/042/047/078/087 hardening batch` — INSERT/DELETE rows caught by audit trigger.                                              |
+| A4-026  | (this cycle) `ba57031c fix(web): a4-026 surface pending payment recovery in /orders list`.                                                        |
+| A4-032  | Batch 1 — refund handler propagates `storeIdempotencyKey` errors.                                                                                 |
+| A4-035  | `519930dc` — degraded `/health` → HTTP 503.                                                                                                       |
+| A4-036  | `8c1559f8` — CI `notify` gate matches required-checks list.                                                                                       |
+| A4-037  | Batch 1 — required-checks set documented matches actual gate.                                                                                     |
+| A4-038  | **operator-required** — CODEOWNERS team `@LoopDevs/engineering` must be created or references rewritten.                                          |
+| A4-039  | Batch 1 — Sentry scrubber adds idempotency-key shapes.                                                                                            |
+| A4-040  | Batch 1 — Pino REDACT_PATHS adds idempotency-key.                                                                                                 |
+| A4-042  | Hardening batch — pr-review.yml diff-exfiltration gated.                                                                                          |
+| A4-043  | **deferred** — mobile release/signing CI ships when App Store / Play Store accounts are wired.                                                    |
+| A4-044  | `3e94303a docs(ci): a4-044 acknowledge sbom attestation scope gap`.                                                                               |
+| A4-045  | Hardening batch — e2e-real PAT scope documented.                                                                                                  |
+| A4-046  | (this cycle) `1177699a fix(ci): provision postgres for e2e jobs so /health 200s`.                                                                 |
+| A4-047  | Hardening batch — kill-switch fails CLOSED on unrecognized values.                                                                                |
+| A4-055  | `328c2bed fix(web): a4-056 don't destroy pending order without expiresAt` — purchase-storage rules tightened. (Encryption deferred to Tranche 2.) |
+| A4-056  | Same commit.                                                                                                                                      |
+| A4-057  | **deferred** — CSP `'unsafe-inline'` removal blocks on inline-script audit + nonce/hash plumbing.                                                 |
+| A4-058  | `519930dc` — query-error-reporting drops `userId` before forwarding to Sentry.                                                                    |
+| A4-063  | **deferred to Tranche 2** — admin step-up auth pinned in ADR-028.                                                                                 |
+| A4-076  | Batch 1 — Prometheus metrics route normalisation.                                                                                                 |
+| A4-077  | Batch 2 — `lint-docs.sh` §9 OpenAPI drift now scans every `routes/*.ts`.                                                                          |
+| A4-078  | Hardening batch — DSR delete blocks on uncompensated withdrawal payouts.                                                                          |
+| A4-079  | Batch 1 — Android `cleartextTrafficPermitted` only in DEBUG localhost.                                                                            |
+| A4-087  | Hardening batch — Trivy/gitleaks pinned by SHA digest.                                                                                            |
+| A4-088  | `faa737c3 fix: a4-088/117/120/122/123 + a4-069 docs + dsr to_address scrub` — license docs updated.                                               |
+| A4-089  | `519930dc` — Sentry scrubber walks exception values (closes A4-074 + A4-089).                                                                     |
+| A4-093  | `5bc55fa6` — Resend email provider + boot validation.                                                                                             |
+| A4-098  | `b9a9c576` — refresh-token rotation atomic + reuse detection.                                                                                     |
+| A4-099  | Batch 3 — admin payout-compensation migrated to `withIdempotencyGuard`.                                                                           |
+| A4-102  | `73b23828` — Loop-native order OpenAPI emits `loop_asset` + 503.                                                                                  |
+| A4-105  | `22354311` — watcher cursor `updated_at` touched on empty pages.                                                                                  |
+| A4-108  | Same commit + (this cycle) `482d03b1 fix(backend): green flywheel integration suite`.                                                             |
+| A4-111  | Same commit — worker health uses `startedAtMs` fallback.                                                                                          |
+| A4-112  | (this cycle) `ba57031c` — same surface as A4-026.                                                                                                 |
+| A4-114  | **deferred** — admin response shapes outside @loop/shared; refactor risk > value at MVP.                                                          |
+| A4-115  | `da7be105 fix: a4-115 protobuf clustering migrates to protobuf-es v2 api`.                                                                        |
+| A4-117  | `faa737c3` — testing.md updated.                                                                                                                  |
+| A4-118  | (this cycle) `1177699a` — e2e-real DATABASE_URL points at provisioned postgres.                                                                   |
+| A4-119  | `65f97b54` — README cashback claim updated.                                                                                                       |
+| A4-122  | `faa737c3` — `idempotencyKeyRef` minted at attempt-start.                                                                                         |
+| A4-123  | Same commit — DSR scrubs payout `to_address` on terminal rows.                                                                                    |
+
+### Low
+
+| Finding | Resolution                                                                                                                           |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| A4-005  | Already resolved — `decodeJwtPayload` deleted; CTX fallback gated until ADR-013 Phase C.                                             |
+| A4-007  | **accepted-risk** — order FX is pinned at create-time per ADR-015; user-side FX between create and payment is bounded by 30-min TTL. |
+| A4-012  | **accepted-risk** — memo entropy budget documented.                                                                                  |
+| A4-013  | Batch 1 — docs/code drift fixed.                                                                                                     |
+| A4-014  | This PR commits the audit dirs; original parallel-audit isolation concern is moot.                                                   |
+| A4-015  | **accepted-risk** — overpayment captured into Loop's spread; documented.                                                             |
+| A4-017  | **accepted-risk** — `email` intentionally NOT redacted (`logger.ts:10` documents the choice).                                        |
+| A4-025  | (this cycle) `df4cbafb` — `formatMinorToMajor` bigint-safe.                                                                          |
+| A4-027  | `8f0a4976 fix(backend): a4-027/028 db checks on payouts asset + tx reason`.                                                          |
+| A4-028  | Same commit.                                                                                                                         |
+| A4-029  | `9ad951b1` — withdrawal stroops conversion asset-aware.                                                                              |
+| A4-030  | Same commit — `orders.charge_minor` DEFAULT aligned.                                                                                 |
+| A4-031  | **accepted-risk** — partial-apply recoverable via `drizzle-kit drop`.                                                                |
+| A4-033  | Batch 1 — cashback/spend/interest writers populate `reason`.                                                                         |
+| A4-041  | `3e23279b fix: a4-041/059/060/096 doc refs + share purge + refresh log + arch`.                                                      |
+| A4-048  | **deferred** — SLO instrumentation tracked in roadmap.                                                                               |
+| A4-049  | **accepted-risk** — mocked-e2e disables rate limiting because the suite floods endpoints.                                            |
+| A4-054  | Batch 1 — entry.server.tsx SSR timeout cleared on success.                                                                           |
+| A4-059  | `3e23279b` — share PNG purge added.                                                                                                  |
+| A4-060  | Same commit — refresh log surfaces error reason.                                                                                     |
+| A4-064  | `5bc55fa6` — partial loop-asset issuer config emits boot warning.                                                                    |
+| A4-065  | `65f97b54` — roadmap.md updated.                                                                                                     |
+| A4-066  | Same commit — README docs index points to current audit.                                                                             |
+| A4-067  | `514aff91 docs: a4-067/068 agents.md orders + tracker supersession banner`.                                                          |
+| A4-068  | Same commit.                                                                                                                         |
+| A4-069  | `faa737c3` — CLAUDE.md middleware-stack rate-limit list.                                                                             |
+| A4-070  | `bf78677f` — auth.store cross-tab logout via storage event.                                                                          |
+| A4-071  | Same commit — redeem-challenge-bar uses navigator.clipboard.                                                                         |
+| A4-080  | Same surface as A4-113 — closed by overlay-source CI guard.                                                                          |
+| A4-081  | Batch 2 — `ITSAppUsesNonExemptEncryption=NO`.                                                                                        |
+| A4-082  | Same commit — `UIRequiredDeviceCapabilities` updated.                                                                                |
+| A4-083  | `d51df3cd fix(backend): a4-083/084 scrubber patterns + jwks debounce`.                                                               |
+| A4-084  | Same commit — JWKS unknown-kid debounced.                                                                                            |
+| A4-085  | **accepted-risk** — operatorFetch retry gated on idempotent CTX behaviour.                                                           |
+| A4-086  | `b8279685` — DSR revokeAllRefreshTokens runs inside the txn.                                                                         |
+| A4-096  | `3e23279b` — architecture.md + ADR-027 updated.                                                                                      |
+| A4-097  | **accepted-risk** — `check-audit-policy.mjs:13` documents the four moderate advisories.                                              |
+| A4-100  | `73b23828` — image proxy 500 declared in OpenAPI.                                                                                    |
+| A4-116  | `1ef6a77f fix: a4-094/116 public 4xx cache + dev env-perms preflight`.                                                               |
+| A4-120  | `faa737c3` — development.md `/metrics` policy corrected.                                                                             |
+
+### Info
+
+| Finding | Status                                                                    |
+| ------- | ------------------------------------------------------------------------- |
+| A4-090  | **operator-required** — live branch protection verification.              |
+| A4-091  | **accepted** — sampled cache-control coverage.                            |
+| A4-092  | **executed** — `npm test` and `npm run check:bundle-budget` are CI gates. |
+| A4-094  | `1ef6a77f` — per-namespace 4xx cache-control covered.                     |
+
+## Open / Operator-Required
+
+These do not have a code fix; the operator owns the action.
+
+| Finding | Action                                                                                              |
+| ------- | --------------------------------------------------------------------------------------------------- |
+| A4-038  | Create the `@LoopDevs/engineering` GitHub team or rewrite CODEOWNERS to point at named maintainers. |
+| A4-090  | Verify live branch protection state matches the documented model.                                   |
+| A4-095  | Reconcile any drift between the documented branch-protection model and the live state.              |
+
+## Tranche 2 deferred
+
+The following findings need design / implementation work that ships with the Stellar passkey wallet + on-chain cashback Tranche 2 milestone.
+
+| Finding | Reason                                                                          |
+| ------- | ------------------------------------------------------------------------------- |
+| A4-043  | Mobile release/signing CI — needs Apple/Google identity wiring.                 |
+| A4-048  | SLO/SLI instrumentation — needs metrics surface.                                |
+| A4-055  | Encrypt purchase-storage memo/address — secure-storage migration.               |
+| A4-057  | CSP unsafe-inline removal — nonce/hash plumbing across SSR.                     |
+| A4-062  | ADR-026 quarterly tax CSV — operator decides; data-model exists.                |
+| A4-063  | ADR-028 admin step-up auth — pinned in ADR; implementation Tranche 2.           |
+| A4-114  | Promote admin response shapes to `@loop/shared` — refactor risk > value at MVP. |
+| A4-124  | Admin withdrawal direction inversion — depends on Tranche 2 redemption flow.    |

@@ -1,0 +1,42 @@
+Command/evidence date: 2026-05-03
+Scope: Codex cold audit only. Claude audit workspace excluded from evidence.
+Redaction: no secret values captured.
+
+Files inspected:
+
+- .github/workflows/e2e-real.yml
+- apps/backend/src/env.ts
+- apps/backend/src/index.ts
+- apps/backend/src/__tests__/vitest-env-setup.ts
+
+Workflow env under review:
+
+.github/workflows/e2e-real.yml starts the backend with:
+
+- PORT=8080
+- NODE_ENV=test
+- LOG_LEVEL=info
+- GIFT_CARD_API_BASE_URL=https://spend.ctx.com
+- INCLUDE_DISABLED_MERCHANTS=false
+
+It does not set DATABASE_URL in the backend-start step.
+
+Code requirement:
+
+- apps/backend/src/env.ts requires DATABASE_URL as a postgres/postgresql URL.
+- apps/backend/src/index.ts skips migrations under NODE_ENV=test, but env.ts is still parsed at module load before serving.
+- The normal Vitest setup file supplies a placeholder DATABASE_URL for tests, but GitHub Actions workflow steps do not run that setup file.
+
+Reproduction:
+
+Command:
+
+env -i PATH="$PATH" HOME="$HOME" PORT=8080 NODE_ENV=test LOG_LEVEL=info GIFT_CARD_API_BASE_URL=https://spend.ctx.com INCLUDE_DISABLED_MERCHANTS=false npm exec -w @loop/backend -- tsx -e "import('./src/env.ts').then(()=>console.log('env ok')).catch((err)=>{ console.error(String(err.message || err)); process.exit(1); })"
+
+Output:
+
+Invalid environment variables — DATABASE_URL: Invalid input: expected string, received undefined
+
+Conclusion:
+
+The manually dispatched real CTX + wallet workflow cannot reach its intended purchase-flow script with the checked-in backend-start env block. It fails env validation before the backend can serve /health.

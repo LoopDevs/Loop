@@ -65,20 +65,24 @@ export function mountAdminPerMerchantRoutes(app: Hono): void {
   // operator-stats + the per-operator drill quartet.
   app.get(
     '/api/admin/merchants/:merchantId/operator-mix',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/merchants/:merchantId/operator-mix', 120, 60_000),
     adminMerchantOperatorMixHandler,
   );
   // Finance / negotiation CSV — flattened per-merchant stats for
   // the CTX rate-deck spreadsheet. Tier-3 rate limit matches the
   // other admin CSV exports.
-  app.get('/api/admin/merchant-stats.csv', rateLimit(10, 60_000), adminMerchantStatsCsvHandler);
+  app.get(
+    '/api/admin/merchant-stats.csv',
+    rateLimit('GET /api/admin/merchant-stats.csv', 10, 60_000),
+    adminMerchantStatsCsvHandler,
+  );
   // Per-merchant flywheel leaderboard — which merchants see the most
   // recycled-cashback traffic. Merchant-axis cousin of /orders/payment-
   // method-share (fleet) + /orders/payment-method-activity (time).
   // Zero-recycle merchants filtered out; sorted by recycled-count desc.
   app.get(
     '/api/admin/merchants/flywheel-share',
-    rateLimit(60, 60_000),
+    rateLimit('GET /api/admin/merchants/flywheel-share', 60, 60_000),
     adminMerchantsFlywheelShareHandler,
   );
   // Tier-3 CSV snapshot of the merchant flywheel leaderboard —
@@ -87,7 +91,7 @@ export function mountAdminPerMerchantRoutes(app: Hono): void {
   // every other admin CSV.
   app.get(
     '/api/admin/merchants/flywheel-share.csv',
-    rateLimit(10, 60_000),
+    rateLimit('GET /api/admin/merchants/flywheel-share.csv', 10, 60_000),
     adminMerchantsFlywheelShareCsvHandler,
   );
   // Per-merchant scalar flywheel stats — the single-merchant drill
@@ -97,7 +101,7 @@ export function mountAdminPerMerchantRoutes(app: Hono): void {
   // static > dynamic correctly.
   app.get(
     '/api/admin/merchants/:merchantId/flywheel-stats',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/merchants/:merchantId/flywheel-stats', 120, 60_000),
     adminMerchantFlywheelStatsHandler,
   );
   // Per-merchant cashback-summary (#625) — per-currency lifetime
@@ -107,7 +111,7 @@ export function mountAdminPerMerchantRoutes(app: Hono): void {
   // `.csv` paths so Hono resolves static > dynamic.
   app.get(
     '/api/admin/merchants/:merchantId/cashback-summary',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/merchants/:merchantId/cashback-summary', 120, 60_000),
     adminMerchantCashbackSummaryHandler,
   );
   // Per-merchant payment-method share (#627) — rail mix on one
@@ -118,7 +122,7 @@ export function mountAdminPerMerchantRoutes(app: Hono): void {
   // every known payment method for stable layout.
   app.get(
     '/api/admin/merchants/:merchantId/payment-method-share',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/merchants/:merchantId/payment-method-share', 120, 60_000),
     adminMerchantPaymentMethodShareHandler,
   );
   // Per-merchant cashback-monthly (#635) — 12-month per-(month,
@@ -129,7 +133,7 @@ export function mountAdminPerMerchantRoutes(app: Hono): void {
   // drill alongside the scalar cashback-paid-out card.
   app.get(
     '/api/admin/merchants/:merchantId/cashback-monthly',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/merchants/:merchantId/cashback-monthly', 120, 60_000),
     adminMerchantCashbackMonthlyHandler,
   );
   // Per-merchant flywheel-activity time-series (#641) — daily
@@ -140,7 +144,7 @@ export function mountAdminPerMerchantRoutes(app: Hono): void {
   // or plateaued over time.
   app.get(
     '/api/admin/merchants/:merchantId/flywheel-activity',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/merchants/:merchantId/flywheel-activity', 120, 60_000),
     adminMerchantFlywheelActivityHandler,
   );
   // Tier-3 CSV export of the same per-merchant flywheel-activity
@@ -150,7 +154,7 @@ export function mountAdminPerMerchantRoutes(app: Hono): void {
   // Rate-limited 10/min per ADR 018.
   app.get(
     '/api/admin/merchants/:merchantId/flywheel-activity.csv',
-    rateLimit(10, 60_000),
+    rateLimit('GET /api/admin/merchants/:merchantId/flywheel-activity.csv', 10, 60_000),
     adminMerchantFlywheelActivityCsvHandler,
   );
   // Per-merchant top-earners leaderboard (#655) — ranked list of
@@ -163,7 +167,7 @@ export function mountAdminPerMerchantRoutes(app: Hono): void {
   // gated, so email is fine in the response.
   app.get(
     '/api/admin/merchants/:merchantId/top-earners',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/merchants/:merchantId/top-earners', 120, 60_000),
     adminMerchantTopEarnersHandler,
   );
 }

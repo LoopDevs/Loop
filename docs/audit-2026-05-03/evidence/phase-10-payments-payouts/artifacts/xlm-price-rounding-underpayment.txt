@@ -1,0 +1,29 @@
+Cold evidence: XLM payment amount check rounds the oracle price to whole fiat cents before computing required stroops.
+
+Current code:
+
+- apps/backend/src/payments/price-feed.ts:74-82
+  - Parses CoinGecko-like prices as JavaScript numbers.
+  - Converts one-XLM major fiat price to whole minor units using `Math.round(usd * 100)`, same for GBP/EUR.
+
+- apps/backend/src/payments/price-feed.ts:101-116
+  - `stroopsPerCent` calculates required native stroops as `Math.ceil(10_000_000 / minor)`.
+  - The `minor` input is already rounded to a whole cent/pence/euro-cent.
+
+- apps/backend/src/payments/amount-sufficient.ts:127-131
+  - XLM watcher amount validation multiplies `order.chargeMinor * perCent` and accepts the payment when received stroops are greater than or equal.
+
+- apps/backend/src/payments/__tests__/price-feed.test.ts:41-50
+  - Tests cover exact `$0.10` and `£0.08` prices but do not cover fractional-cent XLM prices such as `$0.105`.
+
+Numeric example:
+
+- True XLM price = `$0.105`.
+- Correct stroops per cent = `ceil(10_000_000 / 10.5) = 952_381`.
+- Current code rounds `$0.105 * 100` to `11` cents.
+- Current stroops per cent = `ceil(10_000_000 / 11) = 909_091`.
+- A `$10.00` order should require `952_381_000` stroops (~95.2381 XLM), but current code requires only `909_091_000` stroops (~90.9091 XLM), accepting about 4.55% underpayment.
+
+Reasoning:
+
+XLM commonly trades far below 1 fiat unit, so whole-cent rounding is a large percentage of one-XLM price. When the rounded price is higher than the real price, the system believes each XLM is worth more than it is and accepts too few stroops for an order. Ceiling at the final stroops-per-cent step does not fix the earlier whole-cent rounding loss.

@@ -69,6 +69,39 @@ document and on the public licences page. The original
 > Copyright (c) 2010-2011, CloudMade
 > All rights reserved.
 
+### @capgo/inappbrowser — MPL-2.0
+
+**Package:** `@capgo/inappbrowser@8.6.1` (top-level runtime
+dependency in both `apps/web/package.json` and
+`apps/mobile/package.json`).
+
+**Used for:** the Capacitor in-app-browser plugin used by the
+purchase-redeem flow to host merchant redeem URLs in a webview
+that can be scripted with the challenge bar.
+
+**Licence:** Mozilla Public Licence 2.0 (MPL-2.0).
+
+**Attribution requirement:** MPL §3 requires source-code
+availability for any modifications and preservation of upstream
+source notices. Loop ships an unmodified vendored package — the
+`LICENSE` file inside `node_modules/@capgo/inappbrowser/` is
+preserved on install. The plugin's source remains available
+upstream at the package's homepage; no Loop-side modifications
+are distributed. Listed here to satisfy the "explicit attribution"
+arm of MPL §3.2(a).
+
+### @anthropic-ai/claude-code — Anthropic commercial licence
+
+**Package:** `@anthropic-ai/claude-code` (root `devDependencies`).
+
+**Used for:** the AI PR-review GitHub Actions workflow
+(`.github/workflows/pr-review.yml`); not shipped to end users.
+
+**Licence:** non-standard commercial licence — see
+`node_modules/@anthropic-ai/claude-code/LICENSE` for the canonical
+text. Listed here so the public attribution page is honest about
+the build-side AI tooling alongside Anthropic's own terms.
+
 ### postgres (driver) — Unlicense
 
 **Package:** `postgres@3.4.9` (aka `postgres-js`).

@@ -27,9 +27,8 @@ import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js
 import {
   IDEMPOTENCY_KEY_MIN,
   IDEMPOTENCY_KEY_MAX,
-  lookupIdempotencyKey,
-  storeIdempotencyKey,
   validateIdempotencyKey,
+  withIdempotencyGuard,
 } from './idempotency.js';
 
 const log = logger.child({ handler: 'admin-refund' });
@@ -108,37 +107,54 @@ export async function adminRefundHandler(c: Context): Promise<Response> {
     );
   }
 
-  // Replay path — return stored snapshot verbatim with replayed:true.
-  const prior = await lookupIdempotencyKey({
-    adminUserId: actor.id,
-    key: idempotencyKey,
-  });
-  if (prior !== null) {
-    const priorResult = (prior.body as { result?: RefundResponse }).result;
-    notifyAdminAudit({
-      actorUserId: actor.id,
-      endpoint: `POST /api/admin/users/${userId}/refunds`,
-      targetUserId: userId,
-      ...(priorResult?.amountMinor !== undefined ? { amountMinor: priorResult.amountMinor } : {}),
-      ...(priorResult?.currency !== undefined ? { currency: priorResult.currency } : {}),
-      reason: parsed.data.reason,
-      idempotencyKey,
-      replayed: true,
-    });
-    return c.json(prior.body, prior.status as 200 | 400 | 409 | 500);
-  }
-
+  // A4-019: serialise lookup → write → store under an advisory
+  // lock keyed on (actor, idempotencyKey) — same pattern as
+  // applyAdminCreditAdjustment. Two concurrent refunds with the
+  // same key block on the lock; the second sees the stored
+  // snapshot on re-lookup and replays. Before this, both could
+  // pass the lookup, both call applyAdminRefund — bounded by the
+  // partial unique index on (type, reference_type, reference_id),
+  // but a key reused across two different orderIds passed both.
   const amountMinor = BigInt(parsed.data.amountMinor);
-  let applied;
+  const endpointPath = `/api/admin/users/${userId}/refunds`;
+  let guardResult;
   try {
-    applied = await applyAdminRefund({
-      userId,
-      currency: parsed.data.currency,
-      amountMinor,
-      orderId: parsed.data.orderId,
-      adminUserId: actor.id,
-      reason: parsed.data.reason,
-    });
+    guardResult = await withIdempotencyGuard(
+      {
+        adminUserId: actor.id,
+        key: idempotencyKey,
+        method: 'POST',
+        path: endpointPath,
+      },
+      async () => {
+        const applied = await applyAdminRefund({
+          userId,
+          currency: parsed.data.currency,
+          amountMinor,
+          orderId: parsed.data.orderId,
+          adminUserId: actor.id,
+          reason: parsed.data.reason,
+        });
+        const result: RefundResponse = {
+          id: applied.id,
+          userId: applied.userId,
+          currency: applied.currency,
+          amountMinor: applied.amountMinor.toString(),
+          orderId: applied.orderId,
+          priorBalanceMinor: applied.priorBalanceMinor.toString(),
+          newBalanceMinor: applied.newBalanceMinor.toString(),
+          createdAt: applied.createdAt.toISOString(),
+        };
+        const envelope: AdminAuditEnvelope<RefundResponse> = buildAuditEnvelope({
+          result,
+          actor,
+          idempotencyKey,
+          appliedAt: applied.createdAt,
+          replayed: false,
+        });
+        return { status: 200, body: envelope as unknown as Record<string, unknown> };
+      },
+    );
   } catch (err) {
     if (err instanceof RefundAlreadyIssuedError) {
       return c.json(
@@ -153,51 +169,20 @@ export async function adminRefundHandler(c: Context): Promise<Response> {
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to apply refund' }, 500);
   }
 
-  const result: RefundResponse = {
-    id: applied.id,
-    userId: applied.userId,
-    currency: applied.currency,
-    amountMinor: applied.amountMinor.toString(),
-    orderId: applied.orderId,
-    priorBalanceMinor: applied.priorBalanceMinor.toString(),
-    newBalanceMinor: applied.newBalanceMinor.toString(),
-    createdAt: applied.createdAt.toISOString(),
-  };
-
-  const envelope: AdminAuditEnvelope<RefundResponse> = buildAuditEnvelope({
-    result,
-    actor,
-    idempotencyKey,
-    appliedAt: applied.createdAt,
-    replayed: false,
-  });
-
-  try {
-    await storeIdempotencyKey({
-      adminUserId: actor.id,
-      key: idempotencyKey,
-      method: 'POST',
-      path: `/api/admin/users/${userId}/refunds`,
-      status: 200,
-      body: envelope as unknown as Record<string, unknown>,
-    });
-  } catch (err) {
-    log.warn(
-      { err, adminUserId: actor.id, key: idempotencyKey },
-      'Failed to persist idempotency snapshot; retry will replay as new write',
-    );
-  }
-
+  // Discord fanout — fire-and-forget AFTER commit per ADR 017 #5.
+  // Runs for both fresh writes and replays so ops sees "this was
+  // already processed" in the channel.
+  const priorResult = (guardResult.body as { result?: RefundResponse }).result;
   notifyAdminAudit({
     actorUserId: actor.id,
-    endpoint: `POST /api/admin/users/${userId}/refunds`,
+    endpoint: `POST ${endpointPath}`,
     targetUserId: userId,
-    amountMinor: result.amountMinor,
-    currency: result.currency,
+    ...(priorResult?.amountMinor !== undefined ? { amountMinor: priorResult.amountMinor } : {}),
+    ...(priorResult?.currency !== undefined ? { currency: priorResult.currency } : {}),
     reason: parsed.data.reason,
     idempotencyKey,
-    replayed: false,
+    replayed: guardResult.replayed,
   });
 
-  return c.json(envelope, 200);
+  return c.json(guardResult.body, guardResult.status as 200);
 }

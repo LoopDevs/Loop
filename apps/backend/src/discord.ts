@@ -22,6 +22,9 @@ export {
   notifyHealthChange,
   notifyPayoutFailed,
   notifyUsdcBelowFloor,
+  notifyPegBreakOnFulfillment,
+  notifyInterestPoolLow,
+  notifyInterestPoolRecovered,
   notifyAssetDrift,
   notifyAssetDriftRecovered,
   notifyStuckProcurementSwept,
@@ -32,6 +35,7 @@ export {
   notifyCircuitBreaker,
   __resetCircuitNotifyDedupForTests,
   __resetCtxSchemaDriftDedupForTests,
+  __resetPoolDepletionDedupForTests,
 } from './discord/monitoring.js';
 
 // Admin-audit channel notifiers (3 functions covering admin

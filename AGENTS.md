@@ -69,6 +69,8 @@ upstream API     CTX gift card provider at spend.ctx.com — merchant catalog, a
 
 **Auth has two paths.** Loop-native (ADR 013, default once `LOOP_AUTH_NATIVE_ENABLED=true`): backend mints its own HS256 JWTs, generates OTPs, and sends email via the configured provider. Legacy CTX-proxy: backend forwards request-otp / verify-otp / refresh / logout to upstream `spend.ctx.com` and tokens are upstream-issued. Both paths coexist while the identity takeover rolls out. See `docs/architecture.md` + ADR-013 for the full auth flow.
 
+**Orders have two paths.** Loop-native (ADR 010, default once `LOOP_AUTH_NATIVE_ENABLED=true` and the merchant catalog has been synced): `POST /api/orders/loop` creates the order in the off-chain ledger and the user pays via XLM / USDC / LOOP-asset against the Stellar deposit address. Loop is the merchant of record (principal switch). Legacy CTX-proxy: `POST /api/orders` forwards order creation to upstream CTX and the user pays CTX directly. Loop-native is the principal-switch path; the legacy path stays alive until the takeover rolls out fully.
+
 ---
 
 ## Quick commands
@@ -231,7 +233,7 @@ Applied in order on every request:
 3. **Body limit** — 1MB max request body; overflow returns 413 `PAYLOAD_TOO_LARGE` (A2-1005)
 4. **Request ID** — unique `X-Request-Id` on every request
 5. **Logger** — Pino-backed access log for every request (audit A-021); shares service/env/redaction with application logs and correlates via `X-Request-Id`
-6. **Rate limiting** — per-IP: `/api/clusters` (60/min), `/api/image` (300/min), `/api/merchants` (180/min, A2-650), `/api/merchants/all` (60/min, A2-650), `/api/merchants/by-slug/:slug` (120/min, A2-650), `/api/merchants/cashback-rates` (120/min), `/api/merchants/:id` (120/min, A2-1008 — authed), `/api/merchants/:id/cashback-rate` (120/min), `/api/auth/request-otp` (5/min), `/api/auth/verify-otp` (10/min), `/api/auth/refresh` (30/min), `DELETE /api/auth/session` (20/min), `POST /api/orders` (10/min), `GET /api/orders` (60/min), `GET /api/orders/:id` (120/min). 429 responses include `Retry-After`.
+6. **Rate limiting** — per-IP, per-route. The full enumeration is the source code: every `app.get/post/put/delete` mount in `apps/backend/src/routes/**` declares its own `rateLimit('METHOD /path', max, windowMs)`. Quick-reference for the highest-traffic surfaces: `/api/clusters` (60/min), `/api/image` (300/min), `/api/merchants` (180/min), `/api/merchants/all` (60/min), `/api/merchants/by-slug/:slug` (120/min), `/api/merchants/cashback-rates` (120/min), `/api/merchants/:id` (120/min — authed), `/api/merchants/:id/cashback-rate` (120/min), `/api/auth/request-otp` (5/min), `/api/auth/verify-otp` (10/min), `/api/auth/refresh` (30/min), `DELETE /api/auth/session` (20/min), `POST /api/orders` (10/min), `GET /api/orders` (60/min), `GET /api/orders/:id` (120/min). Admin/payouts/credits/users/cashback-config endpoints have their own per-route limits (10–120/min, often 10/min for CSV exports). 429 responses include `Retry-After`. Don't treat this list as exhaustive — A4-001's per-route key fix is enforced in code, not docs.
 7. **Circuit breaker** — per-upstream-endpoint breakers (login, verify-email, refresh-token, logout, merchants, locations, gift-cards), each 5 failures → 30s open → HALF_OPEN probe. Independent so a failing `/locations` doesn't trip auth.
 
 ---

@@ -34,23 +34,35 @@ export function mountAdminDashboardRoutes(app: Hono): void {
   // Stuck-orders triage. Dashboard pings this every 30-60s — higher
   // rate limit because the admin UI polls it on a loop to surface
   // an SLO red-flag card.
-  app.get('/api/admin/stuck-orders', rateLimit(120, 60_000), adminStuckOrdersHandler);
+  app.get(
+    '/api/admin/stuck-orders',
+    rateLimit('GET /api/admin/stuck-orders', 120, 60_000),
+    adminStuckOrdersHandler,
+  );
   // Stuck-payouts triage — pending_payouts rows in pending/submitted
   // past the SLO threshold (ADR 015/016). Same 120/min polling budget
   // as stuck-orders since both feed the same dashboard card and often
   // refetch together.
-  app.get('/api/admin/stuck-payouts', rateLimit(120, 60_000), adminStuckPayoutsHandler);
+  app.get(
+    '/api/admin/stuck-payouts',
+    rateLimit('GET /api/admin/stuck-payouts', 120, 60_000),
+    adminStuckPayoutsHandler,
+  );
   // Daily cashback-accrual time-series for the dashboard sparkline.
   // Cheap read — single generate_series + LEFT JOIN, bounded at 180
   // days so the payload can't explode.
-  app.get('/api/admin/cashback-activity', rateLimit(60, 60_000), adminCashbackActivityHandler);
+  app.get(
+    '/api/admin/cashback-activity',
+    rateLimit('GET /api/admin/cashback-activity', 60, 60_000),
+    adminCashbackActivityHandler,
+  );
   // Cashback realization rate — per-currency earned vs spent vs
   // outstanding, plus a fleet-wide aggregate row. The flywheel-health
   // KPI: high realization = users recycling cashback into new orders
   // rather than hoarding or withdrawing (ADR 009/015).
   app.get(
     '/api/admin/cashback-realization',
-    rateLimit(60, 60_000),
+    rateLimit('GET /api/admin/cashback-realization', 60, 60_000),
     adminCashbackRealizationHandler,
   );
   // Daily realization time-series — per-(day, currency) earned +
@@ -58,7 +70,7 @@ export function mountAdminDashboardRoutes(app: Hono): void {
   // realization surface above; powers the sparkline on /admin landing.
   app.get(
     '/api/admin/cashback-realization/daily',
-    rateLimit(60, 60_000),
+    rateLimit('GET /api/admin/cashback-realization/daily', 60, 60_000),
     adminCashbackRealizationDailyHandler,
   );
   // Finance-ready CSV of the daily realization trend. Tier-3 10/min
@@ -66,7 +78,7 @@ export function mountAdminDashboardRoutes(app: Hono): void {
   // discipline as the other month-end exports.
   app.get(
     '/api/admin/cashback-realization/daily.csv',
-    rateLimit(10, 60_000),
+    rateLimit('GET /api/admin/cashback-realization/daily.csv', 10, 60_000),
     adminCashbackRealizationDailyCsvHandler,
   );
   // Finance-ready CSV: daily × per-currency cashback accrual. Same
@@ -74,7 +86,7 @@ export function mountAdminDashboardRoutes(app: Hono): void {
   // Tier-3 rate limit — month-end finance use, not polling.
   app.get(
     '/api/admin/cashback-activity.csv',
-    rateLimit(10, 60_000),
+    rateLimit('GET /api/admin/cashback-activity.csv', 10, 60_000),
     adminCashbackActivityCsvHandler,
   );
 }

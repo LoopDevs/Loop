@@ -101,7 +101,17 @@ export function generatePayoutMemo(): string {
  * 1:1 peg: LOOP assets denominate the matching fiat's minor unit
  * at 7 decimals. 1 pence = 100_000 GBPLOOP stroops, 1 cent =
  * 100_000 USDLOOP stroops. So `amountStroops = cashbackMinor * 1e5`.
+ *
+ * A4-029: the 100_000 ratio assumes the LOOP-asset 7-decimal layout
+ * pegged 1 unit-of-asset = 1 unit-of-fiat. If a future asset code
+ * drifts (e.g. a non-7-decimal LOOP, or a USDC variant), the
+ * on-chain amount sent is 100x off in either direction. Lock this
+ * invariant to the LOOP-asset code set; any other code is a bug
+ * upstream that we'd rather loud-fail on than silently mis-convert.
  */
+const LOOP_ASSET_STROOPS_PER_MINOR = 100_000n;
+const LOOP_ASSET_CODES = new Set(['USDLOOP', 'GBPLOOP', 'EURLOOP']);
+
 export function buildPayoutIntent(args: BuildPayoutArgs): PayoutDecision {
   if (args.userCashbackMinor <= 0n) {
     return { kind: 'skip', reason: 'no_cashback' };
@@ -113,13 +123,22 @@ export function buildPayoutIntent(args: BuildPayoutArgs): PayoutDecision {
   if (asset.issuer === null) {
     return { kind: 'skip', reason: 'no_issuer' };
   }
+  if (!LOOP_ASSET_CODES.has(asset.code)) {
+    // A4-029: fail-loud invariant. The 100_000 multiplier is the
+    // LOOP-asset 7-decimal ÷ 2-decimal-fiat ratio; a future
+    // non-LOOP asset would silently send 100x off without this
+    // guard.
+    throw new Error(
+      `payout-builder: unsupported asset code '${asset.code}' — stroops/minor ratio assumes LOOP-asset 7-decimal layout`,
+    );
+  }
   return {
     kind: 'pay',
     intent: {
       to: args.stellarAddress,
       assetCode: asset.code,
       assetIssuer: asset.issuer,
-      amountStroops: args.userCashbackMinor * 100_000n,
+      amountStroops: args.userCashbackMinor * LOOP_ASSET_STROOPS_PER_MINOR,
       memoText: args.memoText ?? generatePayoutMemo(),
     },
   };

@@ -121,7 +121,7 @@ vi.mock('../../credits/payout-asset.js', () => ({
   }),
 }));
 
-import { loopCreateOrderHandler } from '../loop-handler.js';
+import { loopCreateOrderHandler, validateMerchantDenomination } from '../loop-handler.js';
 
 interface FakeCtx {
   store: Map<string, unknown>;
@@ -283,17 +283,11 @@ describe('loopCreateOrderHandler', () => {
     expect(createOrderMock).toHaveBeenCalledWith(expect.objectContaining({ currency: 'GBP' }));
   });
 
-  it('credit path — rejects with 400 when balance is insufficient', async () => {
-    balanceState.rows = [{ balance: '500' }];
-    createOrderMock.mockResolvedValue({
-      id: 'order-uuid',
-      faceValueMinor: 10_000n,
-      currency: 'GBP',
-      chargeMinor: 10_000n,
-      chargeCurrency: 'GBP',
-      paymentMethod: 'credit',
-      paymentMemo: null,
-    });
+  it('credit path — rejects with 400 PAYMENT_METHOD_DISABLED (A4-110b)', async () => {
+    // A4-110(b): credit-method spend is rejected at the loop-handler
+    // until source-bucketing of user_credits lands. Was the
+    // INSUFFICIENT_CREDIT path; now the gate fires before the
+    // balance check ever runs (createOrder must NOT be called).
     const { ctx } = makeCtx({
       auth: LOOP_AUTH,
       body: {
@@ -306,7 +300,7 @@ describe('loopCreateOrderHandler', () => {
     const res = await loopCreateOrderHandler(ctx);
     expect(res.status).toBe(400);
     const body = (await res.json()) as { code: string };
-    expect(body.code).toBe('INSUFFICIENT_CREDIT');
+    expect(body.code).toBe('PAYMENT_METHOD_DISABLED');
     expect(createOrderMock).not.toHaveBeenCalled();
   });
 
@@ -411,17 +405,12 @@ describe('loopCreateOrderHandler', () => {
     expect(body.message).toMatch(/USD, GBP, or EUR/);
   });
 
-  it('credit path — creates order when balance covers the amount', async () => {
-    balanceState.rows = [{ balance: '20000' }];
-    createOrderMock.mockResolvedValue({
-      id: 'order-uuid',
-      faceValueMinor: 10_000n,
-      currency: 'GBP',
-      chargeMinor: 10_000n,
-      chargeCurrency: 'GBP',
-      paymentMethod: 'credit',
-      paymentMemo: null,
-    });
+  it('credit path — also rejected with 400 when balance is sufficient (A4-110b)', async () => {
+    // A4-110(b): credit-method orders are blocked unconditionally
+    // until source-bucketing lands. The balance pre-check is now
+    // bypassed; the gate fires regardless of how much credit the
+    // user holds. Re-enable once user_credits supports tagging
+    // cashback-source vs non-cashback-source liabilities.
     const { ctx } = makeCtx({
       auth: LOOP_AUTH,
       body: {
@@ -432,9 +421,10 @@ describe('loopCreateOrderHandler', () => {
       },
     });
     const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { payment: { method: string } };
-    expect(body.payment.method).toBe('credit');
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('PAYMENT_METHOD_DISABLED');
+    expect(createOrderMock).not.toHaveBeenCalled();
   });
 
   it('loop_asset path — returns deposit address + memo + asset code + issuer', async () => {
@@ -653,6 +643,130 @@ describe('loopCreateOrderHandler', () => {
         expect.not.objectContaining({ idempotencyKey: expect.anything() }),
       );
     });
+  });
+});
+
+describe('loopCreateOrderHandler — A4-017 global face-value cap', () => {
+  it('rejects amounts above the 50,000-major hard ceiling', async () => {
+    const fake = makeCtx({
+      auth: LOOP_AUTH,
+      body: {
+        merchantId: 'm1',
+        amountMinor: '5000001', // $50,000.01 — one cent past the cap
+        currency: 'GBP',
+        paymentMethod: 'xlm',
+      },
+    });
+    const res = await loopCreateOrderHandler(fake.ctx);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.message).toMatch(/exceeds maximum order value/);
+    expect(createOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('accepts amounts at the cap when merchant denominations allow', async () => {
+    getMerchantsMock.mockReturnValue({
+      merchantsById: new Map([
+        [
+          'm1',
+          {
+            id: 'm1',
+            name: 'Target',
+            enabled: true,
+            denominations: { type: 'min-max', denominations: [], currency: 'GBP', max: 50000 },
+          },
+        ],
+      ]),
+    });
+    const fake = makeCtx({
+      auth: LOOP_AUTH,
+      body: {
+        merchantId: 'm1',
+        amountMinor: '5000000', // $50,000.00 — exactly at the cap
+        currency: 'GBP',
+        paymentMethod: 'xlm',
+      },
+    });
+    const res = await loopCreateOrderHandler(fake.ctx);
+    expect(res.status).toBe(200);
+    expect(createOrderMock).toHaveBeenCalledWith(
+      expect.objectContaining({ faceValueMinor: 5_000_000n }),
+    );
+  });
+});
+
+describe('validateMerchantDenomination (A4-103)', () => {
+  it('passes when merchant has no denomination contract', () => {
+    expect(validateMerchantDenomination(1000n, 'GBP', undefined)).toBeNull();
+  });
+
+  it('rejects mismatched currency', () => {
+    expect(
+      validateMerchantDenomination(1000n, 'EUR', {
+        type: 'min-max',
+        denominations: [],
+        currency: 'GBP',
+        min: 5,
+        max: 100,
+      }),
+    ).toMatch(/currency must be GBP/);
+  });
+
+  it('rejects under min on min-max', () => {
+    expect(
+      validateMerchantDenomination(400n, 'GBP', {
+        type: 'min-max',
+        denominations: [],
+        currency: 'GBP',
+        min: 5,
+        max: 100,
+      }),
+    ).toMatch(/below merchant minimum/);
+  });
+
+  it('rejects over max on min-max', () => {
+    expect(
+      validateMerchantDenomination(15_000n, 'GBP', {
+        type: 'min-max',
+        denominations: [],
+        currency: 'GBP',
+        min: 5,
+        max: 100,
+      }),
+    ).toMatch(/above merchant maximum/);
+  });
+
+  it('passes inside min-max range', () => {
+    expect(
+      validateMerchantDenomination(2_500n, 'GBP', {
+        type: 'min-max',
+        denominations: [],
+        currency: 'GBP',
+        min: 5,
+        max: 100,
+      }),
+    ).toBeNull();
+  });
+
+  it('rejects amount not in fixed denominations', () => {
+    expect(
+      validateMerchantDenomination(2_500n, 'USD', {
+        type: 'fixed',
+        denominations: ['10', '50', '100'],
+        currency: 'USD',
+      }),
+    ).toMatch(/fixed denominations/);
+  });
+
+  it('passes amount matching fixed denomination (decimal)', () => {
+    expect(
+      validateMerchantDenomination(2_500n, 'USD', {
+        type: 'fixed',
+        denominations: ['25.00', '50'],
+        currency: 'USD',
+      }),
+    ).toBeNull();
   });
 });
 

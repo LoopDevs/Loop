@@ -1,0 +1,15 @@
+{
+  "status_checks": [
+    "Quality (typecheck, lint, format, docs)",
+    "Unit tests",
+    "Security audit",
+    "Build verification",
+    "E2E tests (mocked CTX)"
+  ],
+  "strict": false,
+  "enforce_admins": false,
+  "required_pull_request_reviews": null,
+  "conversation_resolution": false,
+  "force_pushes": false,
+  "deletions": false
+}

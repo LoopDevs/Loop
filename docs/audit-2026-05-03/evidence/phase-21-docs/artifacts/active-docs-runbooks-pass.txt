@@ -1,0 +1,35 @@
+Active docs, package guides, ADR, and runbook pass, 2026-05-03.
+
+Scope:
+- apps/backend/AGENTS.md
+- apps/backend/README.md
+- apps/backend/tsconfig.json
+- apps/web/AGENTS.md
+- apps/web/README.md
+- docs/admin-csv-conventions.md
+- docs/adr/*.md still in the active docs set
+- docs/alerting.md, docs/api-compat.md, docs/architecture.md, docs/error-codes.md, docs/log-policy.md, docs/mobile-native-ux.md, docs/oncall.md, docs/standards.md
+- docs/runbooks/*.md
+- Historical/prior-audit documents are dispositioned as archive/reference only and not used as truth for this cold audit.
+
+Commands run:
+- npm run lint:docs
+- rg over active docs/package guides for payment rails, wallet, cashback, payout, metrics/openapi, DATABASE_URL, email provider, quarterly CSV, step-up, health/readiness, branch protection, CI, and test coverage claims.
+
+Result:
+- npm run lint:docs passed: env vars, architecture API route references, stale deleted-file references, stale domain references, shared package exports, hardcoded Stellar secret scan, removed credential references, critical source files, OpenAPI drift guard, Fly config, and Capacitor plugin parity.
+
+Verified observations:
+- Package AGENTS/README guides broadly match the current package layout and command surface, but several code/doc drifts remain filed elsewhere.
+- Active ADRs align with the implemented broad architecture at a high level, while specific planned/current gaps remain open:
+  - A4-003 for superseded wallet/mobile architecture documentation.
+  - A4-037 for Loop-native auth provider readiness.
+  - A4-038 for tax/reporting CSV implementation drift.
+  - A4-040 for planned/current payment rails in the primary web purchase UI.
+- Operational runbooks exist for alerting, circuit breakers, drift, migrations, rollback, kill switches, payouts, operator pool, and Stellar operator rotation. Their code-facing assumptions remain bounded by the already-filed runtime findings:
+  - A4-032/A4-033 for health/readiness/orchestrator semantics.
+  - A4-039 for observability token behavior documentation drift.
+- Error-code docs include current DSR/payout/admin/credit error families; OpenAPI route parity is covered separately in openapi-route-parity.txt.
+- Historical audit/checklist/tracker documents are archive material. They were not used as evidence truth for current A4 findings.
+
+No new finding was filed from this pass beyond the documentation/planned-feature findings already registered.

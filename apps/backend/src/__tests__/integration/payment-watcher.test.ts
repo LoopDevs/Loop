@@ -43,11 +43,19 @@ vi.mock('../../payments/horizon.js', async (importActual) => {
 // real-world fixture amount covers the order). The amount-sufficient
 // path consults this for paymentMethod='xlm'; without the stub the
 // test environment has no oracle wired and rejects every XLM payment.
+//
+// A4-106: amount-sufficient now uses `requiredStroopsForCharge` (the
+// per-charge ceiling helper) instead of multiplying chargeMinor by
+// `stroopsPerCent`, so the test stub must cover both. Returning
+// `chargeMinor` cents of stroops keeps the trivial-coverage shape:
+// 1 cent ⇒ 1 stroop, so 2500-cent ($25) order requires 2500 stroops
+// and the 100-XLM (1e9 stroops) fixture covers it comfortably.
 vi.mock('../../payments/price-feed.js', async (importActual) => {
   const actual = (await importActual()) as Record<string, unknown>;
   return {
     ...actual,
     stroopsPerCent: vi.fn(async () => 1n),
+    requiredStroopsForCharge: vi.fn(async (chargeMinor: bigint) => chargeMinor),
     usdcStroopsPerCent: vi.fn(async () => 100_000n),
   };
 });

@@ -39,14 +39,19 @@ describe('isExpectedClientError', () => {
 });
 
 describe('forwardQueryErrorToSentry', () => {
-  it('calls captureException for a 5xx ApiException with source tag + key extra', () => {
+  it('calls captureException for a 5xx ApiException with source tag + key surface (A4-058)', () => {
     const sentry = { captureException: vi.fn() };
     const err = new ApiException(500, { code: 'INTERNAL', message: 'boom' });
     forwardQueryErrorToSentry(err, { source: 'tanstack-query', key: ['admin-treasury'] }, sentry);
     expect(sentry.captureException).toHaveBeenCalledTimes(1);
-    expect(sentry.captureException).toHaveBeenCalledWith(err, {
+    // A4-051 / A4-074: the err passes through scrubErrorForSentry,
+    // so the captured argument is a clone (different identity).
+    // A4-058: queryKey contents are no longer surfaced — only the
+    // source + the depth — so admin-user-drill keys can't leak
+    // userId UUIDs to Sentry.
+    expect(sentry.captureException.mock.calls[0]?.[1]).toMatchObject({
       tags: { source: 'tanstack-query' },
-      extra: { key: ['admin-treasury'] },
+      extra: { keySource: 'tanstack-query', keyDepth: 1 },
     });
   });
 
@@ -90,8 +95,9 @@ describe('forwardQueryErrorToSentry', () => {
       { source: 'tanstack-mutation', key: undefined },
       sentry,
     );
+    // A4-058: undefined queryKey reports keyDepth: 0, no key array.
     expect(sentry.captureException.mock.calls[0]?.[1]).toMatchObject({
-      extra: { key: null },
+      extra: { keySource: 'tanstack-mutation', keyDepth: 0 },
     });
   });
 

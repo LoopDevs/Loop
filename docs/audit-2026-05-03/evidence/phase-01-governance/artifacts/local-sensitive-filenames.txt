@@ -1,0 +1,5 @@
+./apps/backend/.env
+./apps/backend/.env.example
+./apps/web/.env.local
+./apps/web/.env.local.example
+./apps/web/.env.production

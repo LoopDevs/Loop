@@ -1,0 +1,81 @@
+Loop-native pending payment recovery audit evidence
+
+apps/backend/src/orders/loop-handler.ts:7: * writes a `pending_payment` row, and returns payment instructions
+apps/backend/src/orders/loop-handler.ts:76:export async function loopCreateOrderHandler(c: Context): Promise<Response> {
+apps/web/app/services/orders-loop.ts:50: * POST /api/orders/loop — creates a Loop-native order in `pending_payment`.
+apps/web/app/services/orders-loop.ts:58:export async function createLoopOrder(
+apps/web/app/services/orders-loop.ts:97:    case 'pending_payment':
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:7:import { createLoopOrder, type CreateLoopOrderResponse } from '~/services/orders-loop';
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:13:import { LoopPaymentStep } from './LoopPaymentStep';
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:45:  const [loopCreate, setLoopCreate] = useState<CreateLoopOrderResponse | null>(null);
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:70:      setLoopCreate(null);
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:74:      setLoopCreate(null);
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:81:  // once. The loopCreate gets cleared on reset so a new merchant
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:83:  if (isCurrentMerchant && loopCreate !== null) {
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:85:      <LoopPaymentStep
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:86:        create={loopCreate}
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:89:            setLoopCreate(null);
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:92:          // On fulfilled we leave the LoopPaymentStep visible showing
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:302:        const result = await createLoopOrder({
+apps/web/app/components/features/purchase/PurchaseContainer.tsx:308:        setLoopCreate(result);
+apps/web/app/components/features/orders/__tests__/LoopOrdersList.test.tsx:80:      orders: [mkOrder({ id: 'o-1' }), mkOrder({ id: 'o-2', state: 'pending_payment' })],
+apps/web/app/components/features/orders/__tests__/LoopOrdersList.test.tsx:149:      orders: [mkOrder({ state: 'pending_payment', userCashbackMinor: '250' })],
+apps/web/app/components/features/orders/__tests__/LoopOrdersList.test.tsx:170:      orders: [mkOrder({ paymentMethod: 'loop_asset', state: 'pending_payment' })],
+apps/web/app/stores/__tests__/purchase.store.test.ts:6:  PENDING_ORDER_KEY: 'loop_pending_order',
+apps/web/app/stores/__tests__/purchase.store.test.ts:7:  savePendingOrder: (data: Record<string, unknown>) => mockSave(data),
+apps/web/app/native/__tests__/native-modules.test.ts:103:import { savePendingOrder, loadPendingOrder, clearPendingOrder } from '../purchase-storage';
+apps/web/app/native/__tests__/native-modules.test.ts:671:  it('savePendingOrder stores to sessionStorage on web with default expiresAt', async () => {
+apps/web/app/native/__tests__/native-modules.test.ts:673:    await savePendingOrder({ orderId: 'test-123', step: 'payment' });
+apps/web/app/native/__tests__/native-modules.test.ts:680:    // omits expiresAt and loadPendingOrder silently no-ops.
+apps/web/app/native/__tests__/native-modules.test.ts:686:  it('savePendingOrder preserves caller-provided expiresAt', async () => {
+apps/web/app/native/__tests__/native-modules.test.ts:687:    await savePendingOrder({ orderId: 'x', step: 'payment', expiresAt: 9_999_999_999 });
+apps/web/app/native/__tests__/native-modules.test.ts:695:  it('loadPendingOrder returns data if not expired', async () => {
+apps/web/app/native/__tests__/native-modules.test.ts:698:    const result = await loadPendingOrder();
+apps/web/app/native/__tests__/native-modules.test.ts:702:  it('loadPendingOrder returns null if expired', async () => {
+apps/web/app/native/__tests__/native-modules.test.ts:705:    const result = await loadPendingOrder();
+apps/web/app/native/__tests__/native-modules.test.ts:709:  it('loadPendingOrder returns null if no data stored', async () => {
+apps/web/app/native/__tests__/native-modules.test.ts:710:    const result = await loadPendingOrder();
+apps/web/app/components/features/orders/LoopOrdersList.tsx:115:          <StateBanner order={order} />
+apps/web/app/components/features/orders/LoopOrdersList.tsx:176:function StateBanner({ order }: { order: LoopOrderView }): React.JSX.Element | null {
+apps/web/app/components/features/orders/LoopOrdersList.tsx:234:    case 'pending_payment':
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:16:import { LoopPaymentStep } from '../LoopPaymentStep';
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:57:    state: 'pending_payment',
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:84:describe('LoopPaymentStep — stellar (xlm/usdc)', () => {
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:87:    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:99:    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:111:    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:120:    render(wrap(<LoopPaymentStep create={mkStellarCreate()} onTerminal={spy} />));
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:129:    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:139:describe('LoopPaymentStep — fulfilled redemption', () => {
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:150:    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:168:    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:185:    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:200:    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:214:    render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:220:describe('LoopPaymentStep — credit', () => {
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:225:    render(wrap(<LoopPaymentStep create={mkCreditCreate()} />));
+apps/web/app/components/features/purchase/__tests__/LoopPaymentStep.test.tsx:242:    render(wrap(<LoopPaymentStep create={mkCreditCreate()} onTerminal={spy} />));
+apps/web/app/stores/purchase.store.ts:3:  PENDING_ORDER_KEY,
+apps/web/app/stores/purchase.store.ts:4:  savePendingOrder,
+apps/web/app/stores/purchase.store.ts:90:function loadPendingOrderSync(): Partial<PurchaseState> | null {
+apps/web/app/stores/purchase.store.ts:92:    const raw = sessionStorage.getItem(PENDING_ORDER_KEY);
+apps/web/app/stores/purchase.store.ts:97:    sessionStorage.removeItem(PENDING_ORDER_KEY);
+apps/web/app/stores/purchase.store.ts:138: * can race: a `clearPending` issued right after `savePendingOrder` may
+apps/web/app/stores/purchase.store.ts:147:const restored = loadPendingOrderSync();
+apps/web/app/stores/purchase.store.ts:163:      savePendingOrder({
+apps/web/app/native/purchase-storage.ts:8:export const PENDING_ORDER_KEY = 'loop_pending_order';
+apps/web/app/native/purchase-storage.ts:15: * `loadPendingOrder` requires `expiresAt` (unix seconds) and returns null
+apps/web/app/native/purchase-storage.ts:20:export async function savePendingOrder(data: Record<string, unknown>): Promise<void> {
+apps/web/app/native/purchase-storage.ts:28:    await Preferences.set({ key: PENDING_ORDER_KEY, value: json });
+apps/web/app/native/purchase-storage.ts:31:      sessionStorage.setItem(PENDING_ORDER_KEY, json);
+apps/web/app/native/purchase-storage.ts:39:export async function loadPendingOrder(): Promise<Record<string, unknown> | null> {
+apps/web/app/native/purchase-storage.ts:44:    const { value } = await Preferences.get({ key: PENDING_ORDER_KEY });
+apps/web/app/native/purchase-storage.ts:48:      raw = sessionStorage.getItem(PENDING_ORDER_KEY);
+apps/web/app/native/purchase-storage.ts:74:    await Preferences.remove({ key: PENDING_ORDER_KEY });
+apps/web/app/native/purchase-storage.ts:77:      sessionStorage.removeItem(PENDING_ORDER_KEY);
+apps/web/app/components/features/purchase/LoopPaymentStep.tsx:13:export interface LoopPaymentStepProps {
+apps/web/app/components/features/purchase/LoopPaymentStep.tsx:14:  /** Result of `createLoopOrder` — the memo + deposit address we display to the user. */
+apps/web/app/components/features/purchase/LoopPaymentStep.tsx:32:export function LoopPaymentStep({ create, onTerminal }: LoopPaymentStepProps): React.JSX.Element {
+apps/web/app/components/features/purchase/LoopPaymentStep.tsx:84:          address={create.payment.stellarAddress}
+apps/web/app/components/features/purchase/LoopPaymentStep.tsx:85:          memo={create.payment.memo}
+apps/web/app/components/features/purchase/LoopPaymentStep.tsx:200:  const showSpinner = order === undefined || order.state === 'pending_payment';

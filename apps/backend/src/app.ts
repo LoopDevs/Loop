@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
-import { requestId } from 'hono/request-id';
 import { sentry, captureException } from '@sentry/hono/node';
 import { env } from './env.js';
+import { logger } from './logger.js';
 import { accessLogMiddleware } from './middleware/access-log.js';
 import { requestContextMiddleware } from './middleware/request-context.js';
 import { requestCounterMiddleware } from './middleware/request-counter.js';
+import { requestIdMiddleware } from './middleware/request-id.js';
 import { corsMiddleware } from './middleware/cors.js';
 import { secureHeadersMiddleware } from './middleware/secure-headers.js';
 import { bodyLimitMiddleware } from './middleware/body-limit.js';
@@ -66,12 +67,19 @@ app.use('*', corsMiddleware);
 // `./middleware/body-limit.ts`.
 app.use('*', secureHeadersMiddleware);
 app.use('*', bodyLimitMiddleware);
-app.use('*', requestId());
+// A4-008: server-mints the request id and ignores any inbound
+// X-Request-Id header. Hono's stock `requestId()` honours the
+// client-supplied value when it matches a permissive shape, which
+// lets a client pollute access logs / Sentry breadcrumbs /
+// upstream CTX correlation with a chosen string or impersonate a
+// victim's correlation id. The custom wrapper always generates a
+// fresh UUID server-side and writes it to the response header.
+app.use('*', requestIdMiddleware);
 // A2-1305 AsyncLocalStorage request-context wrapper lives in
-// `./middleware/request-context.ts`. Must come after Hono's
-// `requestId()` (the wrapper reads `c.get('requestId')`) and
-// before the access logger (the log line reads its `requestId`
-// from the ALS-populated context).
+// `./middleware/request-context.ts`. Must come after the
+// request-id middleware (the wrapper reads `c.get('requestId')`)
+// and before the access logger (the log line reads its
+// `requestId` from the ALS-populated context).
 app.use('*', requestContextMiddleware);
 
 // Pino-backed access logger (audit A-021) lives in
@@ -180,7 +188,18 @@ app.notFound((c) => {
 // having to cross-reference Sentry timestamps.
 app.onError((err, c) => {
   captureException(err);
-  const requestId = c.get('requestId') ?? c.req.header('X-Request-Id');
+  // A4-008: use the server-minted requestId from the context; the
+  // requestIdMiddleware in middleware/request-id.ts always sets it
+  // before routes run. The inbound-header fallback was dropped to
+  // close the log-poisoning sidechannel.
+  const requestId = (c as unknown as { get(key: 'requestId'): string | undefined }).get(
+    'requestId',
+  );
+  // Emit to logger so a 500 has a forensic trail beyond Sentry —
+  // captureException sinks to Sentry only and the access log only
+  // records status. Without this line, a local or CI run that
+  // returns 500 has no stack trace anywhere.
+  logger.error({ err, requestId }, 'Unhandled error in request handler');
   return c.json(
     { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred', requestId },
     500,

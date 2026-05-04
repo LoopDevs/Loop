@@ -1,0 +1,34 @@
+Procurement selection and operator-pool failure evidence
+apps/backend/src/orders/__tests__/procurement.test.ts:19:  markOrderProcuring: (id: string, o: unknown) => markProcuringMock(id, o),
+apps/backend/src/orders/__tests__/procurement.test.ts:24:  class OperatorPoolUnavailableError extends Error {
+apps/backend/src/orders/__tests__/procurement.test.ts:27:      this.name = 'OperatorPoolUnavailableError';
+apps/backend/src/orders/__tests__/procurement.test.ts:32:    OperatorPoolUnavailableError,
+apps/backend/src/orders/__tests__/procurement.test.ts:108:import { OperatorPoolUnavailableError } from '../../ctx/operator-pool.js';
+apps/backend/src/orders/__tests__/procurement.test.ts:307:    operatorFetchMock.mockRejectedValue(new OperatorPoolUnavailableError('pool exhausted'));
+apps/backend/src/orders/procurement-worker.ts:31:import { sweepStuckProcurement } from './transitions.js';
+apps/backend/src/orders/procurement-worker.ts:72:      const n = await sweepStuckProcurement(cutoff);
+apps/backend/src/orders/transitions-sweeps.ts:8: * (`markOrderPaid` / `markOrderProcuring` / `markOrderFulfilled`
+apps/backend/src/orders/transitions-sweeps.ts:11: *   - `sweepStuckProcurement(cutoff)` — flips procuring rows
+apps/backend/src/orders/transitions-sweeps.ts:57:export async function sweepStuckProcurement(cutoff: Date): Promise<number> {
+apps/backend/src/orders/transitions-sweeps.ts:62:      state: 'failed',
+apps/backend/src/orders/transitions-sweeps.ts:63:      failureReason: 'procurement_timeout',
+apps/backend/src/orders/procurement.ts:11: * per-order locking — the `markOrderProcuring` state-guarded UPDATE
+apps/backend/src/orders/procurement.ts:57:    .where(eq(orders.state, 'paid'))
+apps/backend/src/orders/procure-one.ts:15:import { markOrderProcuring, markOrderFulfilled, markOrderFailed } from './transitions.js';
+apps/backend/src/orders/procure-one.ts:17:import { operatorFetch, OperatorPoolUnavailableError } from '../ctx/operator-pool.js';
+apps/backend/src/orders/procure-one.ts:56:  const transitioned = await markOrderProcuring(order.id, { ctxOperatorId: 'pool' });
+apps/backend/src/orders/procure-one.ts:113:        // `sweepStuckProcurement` flips the order back) could otherwise
+apps/backend/src/orders/procure-one.ts:182:    if (err instanceof OperatorPoolUnavailableError) {
+apps/backend/src/orders/procure-one.ts:183:      log.warn({ orderId: order.id }, 'Operator pool unavailable — leaving order procuring');
+apps/backend/src/orders/procure-one.ts:185:      // a terminal order failure. The next tick retries. An
+
+SLO/admin stuck-order claims
+docs/architecture.md:354:GET  /api/admin/stuck-orders                            [admin — SLO stuck-in-paid/procuring triage, ADR 011/013]
+docs/slo.md:8:> 40+ times in admin-route names and code comments (e.g. `/admin/stuck-orders`,
+docs/slo.md:9:> `notifyStuckProcurementSwept`, `past-SLO` log-line comments) without a
+docs/slo.md:75:These are the numbers `admin.stuck-orders.tsx` / `admin.stuck-payouts.tsx`
+docs/slo.md:80:| Stuck order          | > 15 min in `procuring` or `paid`   | Discord `monitoring` via `notifyStuckProcurementSwept` sweep |
+docs/slo.md:85:The admin UI slider (5 / 15 / 60 min on `stuck-orders`) is
+docs/slo.md:97:| Order `paid → fulfilled`          | `orders.fulfilledAt - paidAt` p95            | ≤ 2 min | 24h    | `admin/operator-latency`                                   |
+docs/slo.md:160:| CTX operator pool                | 1 operator at minimum, 2+ recommended (ADR 013 `CTX_OPERATOR_POOL`); rate-limit ceiling unknown to Loop | Provision more operators; coordinate with CTX ops on per-operator quota.                                                                                                     |
+docs/slo.md:265:- `apps/backend/src/admin/stuck-orders.ts` /

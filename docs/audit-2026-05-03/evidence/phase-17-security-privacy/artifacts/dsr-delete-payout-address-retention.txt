@@ -1,0 +1,206 @@
+Scoped evidence: DSR delete leaves historical payout destination addresses retained
+
+     8	 * **What "delete" means here.** ADR-009 makes the credit ledger
+     9	 * append-only; tax / regulatory rules (UK FCA + IRS) require we
+    10	 * retain the underlying transaction record. So "delete" is
+    11	 * **anonymisation** rather than a hard row removal:
+    12	 *
+    13	 *   - `users.email` is replaced with a synthetic
+    14	 *     `deleted-{userId}@deleted.loopfinance.io` placeholder so the
+    15	 *     row remains FK-consistent with the ledger but no longer carries
+    16	 *     a real PII anchor.
+    17	 *   - `users.stellar_address` is set NULL.
+    18	 *   - `users.ctx_user_id` is set NULL.
+    19	 *   - `user_identities` rows are deleted (Google/Apple OAuth links).
+    20	 *   - All refresh tokens are revoked so any session in flight is
+    21	 *     immediately invalidated.
+    22	 *
+    23	 * Ledger rows (`credit_transactions` / `orders` / `pending_payouts`)
+    24	 * are RETAINED because the FK is `onDelete: 'restrict'` — we'd
+    25	 * violate the append-only invariant by deleting them, and we need
+    26	 * them for tax reporting per A2-1923. They no longer link to a real
+    27	 * person after the email scrub.
+    28	 *
+    29	 * **Pre-conditions.** Refuse to anonymise when:
+    30	 *   - any `pending_payouts` row is in `pending` or `submitted` state
+    31	 *     — money is in flight; user must wait or contact support
+    32	 *   - any `orders` row is in `pending_payment` / `paid` / `procuring`
+    86	export async function deleteUserViaAnonymisation(userId: string): Promise<DsrDeleteResult> {
+    87	  // Block: any pending or submitted payout means money in flight.
+    88	  // We can't guarantee the right end-state for that money post-
+    89	  // anonymisation (e.g. an `op_no_trust` failure that needs the
+    90	  // user's Stellar address — which we just nulled).
+    91	  const blockingPayouts = await db
+    92	    .select({ id: pendingPayouts.id })
+    93	    .from(pendingPayouts)
+    94	    .where(
+    95	      and(
+    96	        eq(pendingPayouts.userId, userId),
+    97	        inArray(pendingPayouts.state, [
+    98	          'pending',
+    99	          'submitted',
+   100	        ] satisfies (typeof PAYOUT_STATES)[number][]),
+   101	      ),
+   102	    )
+   103	    .limit(1);
+   104	  if (blockingPayouts.length > 0) {
+   105	    return { ok: false, blockedBy: 'pending_payouts' };
+   106	  }
+   107	
+   108	  // Block: orders mid-fulfilment. ADR 010 transitions are
+   109	  // pending_payment → paid → procuring → fulfilled / failed.
+   110	  // Anonymising during procurement could drop the email the CTX
+   111	  // proxy flow relies on for order-attribution.
+   112	  const blockingOrders = await db
+   113	    .select({ id: orders.id })
+   114	    .from(orders)
+   115	    .where(
+   116	      and(
+   117	        eq(orders.userId, userId),
+   118	        inArray(orders.state, [
+   119	          'pending_payment',
+   120	          'paid',
+   121	          'procuring',
+   122	        ] satisfies (typeof ORDER_STATES)[number][]),
+   123	      ),
+   124	    )
+   125	    .limit(1);
+   126	  if (blockingOrders.length > 0) {
+   127	    return { ok: false, blockedBy: 'in_flight_orders' };
+   128	  }
+   129	
+   130	  await db.transaction(async (tx) => {
+   131	    // OAuth identity links — deleting these means a re-auth via
+   132	    // Google/Apple under the same provider_sub spawns a fresh user
+   133	    // row instead of resolving to the anonymised one.
+   134	    await tx.delete(userIdentities).where(eq(userIdentities.userId, userId));
+   135	
+   136	    // Email gets the synthetic placeholder. ctx_user_id and
+   137	    // stellar_address null out — both are PII anchors.
+   138	    await tx
+   139	      .update(users)
+   140	      .set({
+   141	        email: deletedEmailFor(userId),
+   142	        ctxUserId: null,
+   143	        stellarAddress: null,
+   144	      })
+   145	      .where(eq(users.id, userId));
+   146	  });
+
+Pending payout schema retains user id and destination address:
+   666	export const pendingPayouts = pgTable(
+   667	  'pending_payouts',
+   668	  {
+   669	    id: uuid('id').primaryKey().defaultRandom(),
+   670	    userId: uuid('user_id')
+   671	      .notNull()
+   672	      .references(() => users.id, { onDelete: 'restrict' }),
+   673	    // A2-901 / ADR-024 §2: nullable for withdrawal-initiated payouts.
+   674	    // Order-fulfilment (`kind='order_cashback'`) rows keep populating
+   675	    // this; withdrawal (`kind='withdrawal'`) rows leave it NULL. The
+   676	    // shape CHECK below pins the per-kind invariant.
+   677	    orderId: uuid('order_id').references(() => orders.id, { onDelete: 'restrict' }),
+   678	    // A2-901 / ADR-024 §2: discriminator for the two payout flows
+   679	    // this table now serves. Default 'order_cashback' preserves the
+   680	    // backfill semantics for existing rows — everything written
+   681	    // before migration 0018 was an order-fulfilment cashback payout.
+   682	    // `.$type` narrows the TypeScript side to the same literal set
+   683	    // the SQL CHECK enforces; callers get a compile-time error if
+   684	    // they try a third value.
+   685	    kind: text('kind').notNull().default('order_cashback').$type<'order_cashback' | 'withdrawal'>(),
+   686	    // The LOOP asset + issuer pinned at write-time. If an operator
+   687	    // changes the issuer env var later, in-flight rows still reference
+   688	    // the issuer at the time the intent was built — otherwise a rotate
+   689	    // could retarget a mid-flight payment to a different asset.
+   690	    assetCode: text('asset_code').notNull(),
+   691	    assetIssuer: text('asset_issuer').notNull(),
+   692	    // Destination + amount pinned at write-time. The user updating
+   693	    // their `stellar_address` after the row lands shouldn't redirect
+   694	    // the payment — the commitment was to the address they had when
+   695	    // the order fulfilled.
+   696	    toAddress: text('to_address').notNull(),
+   697	    amountStroops: bigint('amount_stroops', { mode: 'bigint' }).notNull(),
+   698	    memoText: text('memo_text').notNull(),
+   699	
+   700	    state: text('state').notNull().default('pending'),
+   701	    /** Stellar transaction hash, set once submit() succeeds. */
+   702	    txHash: text('tx_hash'),
+   703	    /** Error message from the most recent failed submit attempt. Bounded. */
+   704	    lastError: text('last_error'),
+   705	    attempts: integer('attempts').notNull().default(0),
+   706	    // ADR-024 §5 / A3-006: compensation is an operator-only overlay
+   707	    // on a failed withdrawal payout. Keep the public state enum
+   708	    // stable (`failed`) and record compensation separately so retry
+   709	    // can refuse already-compensated rows without widening every
+   710	    // payout-state consumer to a fifth value.
+   711	    compensatedAt: timestamp('compensated_at', { withTimezone: true }),
+   712	
+   713	    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+   714	    submittedAt: timestamp('submitted_at', { withTimezone: true }),
+   715	    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+   716	    failedAt: timestamp('failed_at', { withTimezone: true }),
+
+DSR export treats payout destination as user-held data:
+   102	    chargeMinor: string;
+   103	    chargeCurrency: string;
+   104	    paymentMethod: string;
+   105	    paymentMemo: string | null;
+   106	    userCashbackMinor: string;
+   107	    ctxOrderId: string | null;
+   108	    redeemIssued: boolean;
+   109	    failureReason: string | null;
+   110	    createdAt: string;
+   111	    paidAt: string | null;
+   112	    fulfilledAt: string | null;
+   113	    failedAt: string | null;
+   114	  }>;
+   115	  pendingPayouts: Array<{
+   116	    id: string;
+   117	    state: string;
+   118	    kind: string;
+   119	    orderId: string | null;
+   120	    amountStroops: string;
+   121	    assetCode: string;
+   122	    assetIssuer: string;
+   202	      fulfilledAt: r.fulfilledAt?.toISOString() ?? null,
+   203	      failedAt: r.failedAt?.toISOString() ?? null,
+   204	    })),
+   205	    pendingPayouts: payoutsRows.map((r) => ({
+   206	      id: r.id,
+   207	      state: r.state,
+   208	      kind: r.kind,
+   209	      orderId: r.orderId,
+   210	      amountStroops: r.amountStroops.toString(),
+   211	      assetCode: r.assetCode,
+   212	      assetIssuer: r.assetIssuer,
+   213	      toAddress: r.toAddress,
+   214	      memoText: r.memoText,
+   215	      txHash: r.txHash,
+   216	      lastError: r.lastError,
+   217	      attempts: r.attempts,
+   218	      createdAt: r.createdAt.toISOString(),
+   219	      submittedAt: r.submittedAt?.toISOString() ?? null,
+   220	      confirmedAt: r.confirmedAt?.toISOString() ?? null,
+
+Privacy route account-identifier deletion promise:
+    92	          <section>
+    93	            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+    94	              4. How long we keep it
+    95	            </h2>
+    96	            <p>
+    97	              Order and credit-ledger data are retained for the duration required by accounting and
+    98	              regulatory rules in your home jurisdiction. Account identifiers are deleted within 30
+    99	              days of account closure unless retention is mandated by law.
+   100	            </p>
+   101	          </section>
+   102	
+   103	          <section>
+   104	            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">5. Your rights</h2>
+   105	            <p>
+   106	              Access, rectification, erasure, portability, and restriction of processing — subject
+   107	              to the applicable regime in your jurisdiction (UK GDPR / EU GDPR / CCPA / equivalent).
+   108	              Self-serve: <code>GET /api/users/me/dsr/export</code> returns a JSON envelope of every
+   109	              row Loop holds for your account; <code>POST /api/users/me/dsr/delete</code> anonymises
+   110	              your account (ledger rows are retained per accounting / regulatory rules and are no
+   111	              longer linked to a real person). Requests:{' '}
+   112	              <a

@@ -24,6 +24,17 @@ export const API_BASE =
 export interface AppConfig {
   loopAuthNativeEnabled: boolean;
   loopOrdersEnabled: boolean;
+  /**
+   * Tranche 1 (MVP) launch gate. When true, the web client hides
+   * every Phase 2+ surface (cashback navbar, /settings/wallet,
+   * /settings/cashback, /cashback rates index, onboarding
+   * currency-picker + wallet-intro screens, LinkWalletNudge,
+   * "you've earned X cashback" copy). Discount badges stay —
+   * they're the Tranche 1 user proposition. Toggled server-side
+   * via `LOOP_PHASE_1_ONLY`; no app store resubmission needed
+   * to flip it back when Tranche 2 launches.
+   */
+  phase1Only: boolean;
   /** ADR 014 social-login client identifiers (public, per-platform). */
   social: {
     googleClientIdWeb: string | null;

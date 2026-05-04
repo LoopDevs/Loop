@@ -12,7 +12,12 @@
 import { z } from 'zod';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
-import { markOrderProcuring, markOrderFulfilled, markOrderFailed } from './transitions.js';
+import {
+  markOrderProcuring,
+  markOrderFulfilled,
+  markOrderFailed,
+  revertOrderProcuringToPaid,
+} from './transitions.js';
 import type { Order } from './repo.js';
 import { operatorFetch, OperatorPoolUnavailableError } from '../ctx/operator-pool.js';
 import { upstreamUrl } from '../upstream.js';
@@ -37,6 +42,21 @@ const log = logger.child({ area: 'procurement' });
 const CtxGiftCardResponse = z.object({
   id: z.string().min(1),
 });
+
+/**
+ * A4-017: bigint-safe minor → major decimal string. Bigints lose
+ * precision when coerced through `Number(...)` past 2^53; `1234n`
+ * cents must always serialize as `"12.34"`. Pads the fractional
+ * part to two digits so `5n` becomes `"0.05"` rather than `"0.5"`.
+ */
+function formatMinorToMajor(minor: bigint): string {
+  const negative = minor < 0n;
+  const abs = negative ? -minor : minor;
+  const cents = abs % 100n;
+  const dollars = abs / 100n;
+  const fractional = cents.toString().padStart(2, '0');
+  return `${negative ? '-' : ''}${dollars.toString()}.${fractional}`;
+}
 
 /**
  * Attempts procurement on a single order. Returns the outcome label
@@ -122,8 +142,12 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
       body: JSON.stringify({
         cryptoCurrency,
         fiatCurrency: order.currency,
-        // CTX expects fiatAmount as a decimal string in the major unit.
-        fiatAmount: (Number(order.faceValueMinor) / 100).toFixed(2),
+        // A4-017: bigint-safe major-unit formatting. `Number(faceValueMinor)`
+        // would silently lose precision past 2^53 (~$9e13). Even though
+        // realistic gift-card values stay under $10k, the boundary is
+        // financial; format the bigint directly so the wire string is
+        // exact regardless of magnitude.
+        fiatAmount: formatMinorToMajor(order.faceValueMinor),
         merchantId: order.merchantId,
       }),
       signal: AbortSignal.timeout(30_000),
@@ -180,11 +204,18 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
     return 'fulfilled';
   } catch (err) {
     if (err instanceof OperatorPoolUnavailableError) {
-      log.warn({ orderId: order.id }, 'Operator pool unavailable — leaving order procuring');
-      // Do NOT mark failed; operator-pool transient outage is not
-      // a terminal order failure. The next tick retries. An
-      // operator-recovery sweep (deferred) will flip genuinely
-      // stuck rows to failed.
+      // A4-101: revert state back to `paid` so the next
+      // procurement tick re-picks the order. Earlier behaviour
+      // left the row in `procuring`, but `runProcurementTick`
+      // only selects `state='paid'` rows — so the order sat
+      // there until the stuck-sweep marked it `failed`
+      // (~15 min later) under what is fundamentally a transient
+      // ops-pool outage with no CTX call ever made.
+      await revertOrderProcuringToPaid(order.id);
+      log.warn(
+        { orderId: order.id },
+        'Operator pool unavailable — reverted procuring → paid for retry',
+      );
       return 'skipped';
     }
     log.error({ err, orderId: order.id }, 'Procurement threw unexpectedly');

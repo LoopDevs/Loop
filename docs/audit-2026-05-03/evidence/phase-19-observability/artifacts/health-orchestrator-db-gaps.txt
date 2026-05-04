@@ -1,0 +1,35 @@
+Command/evidence date: 2026-05-03
+Scope: Codex cold audit only. Claude audit workspace excluded from evidence.
+Redaction: no secrets captured.
+
+Evidence source files inspected:
+
+- apps/backend/src/health.ts
+- apps/backend/src/index.ts
+- apps/backend/src/db/client.ts
+- apps/backend/src/__tests__/routes.integration.test.ts
+- apps/backend/Dockerfile
+- apps/backend/fly.toml
+- docs/deployment.md
+- docs/slo.md
+
+Finding 1: /health does not probe Postgres connectivity.
+
+- apps/backend/src/health.ts imports env, logger, getLocations, getMerchants, getRuntimeHealthSnapshot, upstreamUrl, and notifyHealthChange.
+- healthHandler reads in-memory merchant/location state, probes CTX /status with bare fetch, and reads runtime-health state.
+- healthHandler does not import db, postgres, drizzle, DATABASE_URL, or execute a lightweight SELECT 1.
+- Database connectivity is established in apps/backend/src/db/client.ts and migrations run before serving in apps/backend/src/index.ts, but a database outage after boot is not represented in /health.
+- docs/slo.md maps /api availability to Fly healthcheck + notifyHealthChange, but that health signal does not include the local database dependency used by admin, orders, credits, payouts, and auth-native persistence.
+
+Finding 2: degraded /health returns HTTP 200, so Docker/Fly health checks treat degraded machines as healthy.
+
+- apps/backend/src/health.ts computes degraded from stale merchant/location data, upstream reachability, and runtime-health degradation.
+- healthHandler returns c.json({ status: degraded ? 'degraded' : 'healthy', ... }) without passing a non-200 status.
+- apps/backend/src/__tests__/routes.integration.test.ts asserts res.status === 200 when upstream is unreachable and body.status === 'degraded'.
+- apps/backend/Dockerfile HEALTHCHECK exits healthy only when r.statusCode === 200.
+- apps/backend/fly.toml configures an HTTP health check to GET /health. Fly HTTP checks use response success/failure status, not the JSON body.
+- apps/backend/Dockerfile comments say /health is "200 when green, 503 when degraded" and that a degraded container gets cycled, which contradicts the handler and test.
+
+Conclusion:
+
+Current /health is useful for JSON-body diagnostics and Discord flap-damped notifications, but it is incomplete as an orchestrator liveness/readiness gate for the full backend. It can miss database outages and it returns HTTP 200 even when it knows the app is degraded.

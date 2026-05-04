@@ -1,0 +1,54 @@
+Image proxy implementation status evidence
+55:    return c.json({ code: 'VALIDATION_ERROR', message: 'url is required' }, 400);
+61:    return c.json({ code: 'VALIDATION_ERROR', message: urlError }, 400);
+95:      return c.json(
+96:        { code: 'UPSTREAM_REDIRECT', message: 'Redirects from upstream are not allowed' },
+102:      return c.json(
+103:        { code: 'UPSTREAM_ERROR', message: `Upstream returned ${upstream.status}` },
+110:      return c.json({ code: 'NOT_AN_IMAGE', message: 'Upstream response is not an image' }, 502);
+115:      return c.json({ code: 'IMAGE_TOO_LARGE', message: 'Image exceeds 10 MB limit' }, 413);
+120:      return c.json({ code: 'IMAGE_TOO_LARGE', message: 'Image exceeds 10 MB limit' }, 413);
+167:    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to process image' }, 500);
+
+OpenAPI image response declarations
+  registry.registerPath({
+    method: 'get',
+    path: '/api/image',
+    summary: 'Fetch, resize, and re-encode a remote image (SSRF-validated).',
+    tags: ['Images'],
+    request: {
+      query: z.object({
+        url: z.string().url(),
+        width: z.coerce.number().int().min(1).max(2000).optional(),
+        height: z.coerce.number().int().min(1).max(2000).optional(),
+        quality: z.coerce.number().int().min(1).max(100).optional(),
+        mode: z.enum(['public', 'private']).optional(),
+      }),
+    },
+    responses: {
+      200: {
+        description: 'Image bytes',
+        content: {
+          'image/jpeg': { schema: z.string().openapi({ format: 'binary' }) },
+          'image/webp': { schema: z.string().openapi({ format: 'binary' }) },
+        },
+      },
+      400: {
+        description: 'Validation / SSRF rejection',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      413: {
+        description: 'Image exceeds 10MB limit',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (300/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      502: {
+        description: 'Upstream image error',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+    },
+  });
+}

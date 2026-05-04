@@ -1,0 +1,114 @@
+Phase 11 schema/journal/table matrix from current code.
+
+Drizzle tables in `apps/backend/src/db/schema.ts`:
+
+- users
+- user_credits
+- credit_transactions
+- merchant_cashback_configs
+- merchant_cashback_config_history
+- otps
+- refresh_tokens
+- orders
+- watcher_cursors
+- user_identities
+- pending_payouts
+- admin_idempotency_keys
+- social_id_token_uses
+
+Integration-test truncate list in `apps/backend/src/__tests__/integration/db-test-setup.ts`:
+
+- pending_payouts
+- credit_transactions
+- user_credits
+- orders
+- merchant_cashback_config_history
+- merchant_cashback_configs
+- admin_idempotency_keys
+- social_id_token_uses
+- user_identities
+- refresh_tokens
+- otps
+- users
+- watcher_cursors
+
+All schema tables are represented in the truncate list.
+
+Migration SQL files in `apps/backend/src/db/migrations`:
+
+- 0000_initial_schema.sql
+- 0001_auth_tables.sql
+- 0002_loop_orders.sql
+- 0003_watcher_cursors.sql
+- 0004_orders_redemption.sql
+- 0005_user_identities.sql
+- 0006_users_home_currency.sql
+- 0007_orders_charge_columns.sql
+- 0008_orders_loop_asset_payment.sql
+- 0009_users_stellar_address.sql
+- 0010_pending_payouts.sql
+- 0011_admin_idempotency_keys.sql
+- 0012_credit_transactions_period_cursor.sql
+- 0013_ledger_constraints.sql
+- 0014_credit_tx_currency_check.sql
+- 0015_credit_tx_reason.sql
+- 0016_cashback_config_audit_trigger_guard.sql
+- 0017_user_credits_primary_key.sql
+- 0018_pending_payouts_generalise.sql
+- 0019_social_id_token_replay_guard.sql
+- 0020_users_email_unique.sql
+- 0021_orders_currency_check.sql
+- 0022_credit_tx_withdrawal_unique.sql
+- 0023_orders_idempotency_key.sql
+- 0024_pending_payouts_to_address_format.sql
+- 0025_user_identities_and_orders_db_checks.sql
+- 0026_orders_sweep_aggregate_indexes.sql
+- 0027_pending_payouts_user_created_index.sql
+- 0028_pending_payouts_compensation_and_withdrawal_uniqueness.sql
+
+Journal entries in `apps/backend/src/db/migrations/meta/_journal.json`:
+
+- 0000_initial_schema
+- 0001_auth_tables
+- 0002_loop_orders
+- 0003_watcher_cursors
+- 0004_orders_redemption
+- 0005_user_identities
+- 0006_users_home_currency
+- 0007_orders_charge_columns
+- 0008_orders_loop_asset_payment
+- 0009_users_stellar_address
+- 0010_pending_payouts
+- 0011_admin_idempotency_keys
+- 0012_credit_transactions_period_cursor
+- 0013_ledger_constraints
+- 0014_credit_tx_currency_check
+- 0015_credit_tx_reason
+- 0016_cashback_config_audit_trigger_guard
+- 0017_user_credits_primary_key
+- 0018_pending_payouts_generalise
+- 0019_social_id_token_replay_guard
+- 0020_users_email_unique
+- 0021_orders_currency_check
+- 0022_credit_tx_withdrawal_unique
+- 0023_orders_idempotency_key
+- 0024_pending_payouts_to_address_format
+- 0025_user_identities_and_orders_db_checks
+- 0026_orders_sweep_aggregate_indexes
+- 0027_pending_payouts_user_created_index
+- 0028_pending_payouts_compensation_and_withdrawal_uniqueness
+
+Journal/SQL parity: every SQL migration 0000 through 0028 has a matching journal entry.
+
+Non-destructive Drizzle CLI check:
+
+Command:
+  cd apps/backend && npx drizzle-kit check --config drizzle.config.ts
+
+Output:
+  Reading config file '/Users/ash/code/loop-app/apps/backend/drizzle.config.ts'
+  Everything's fine 🐶🔥
+
+Note:
+
+The CLI config resolves from `apps/backend/drizzle.config.ts`; the earlier concern about a missing root config was invalid after verifying current file placement.

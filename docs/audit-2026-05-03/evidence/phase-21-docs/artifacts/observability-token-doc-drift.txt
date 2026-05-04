@@ -1,0 +1,137 @@
+Scoped evidence: observability token documentation drift
+
+# DEFAULT_USER_CASHBACK_PCT_OF_CTX=0.00
+# DEFAULT_LOOP_MARGIN_PCT_OF_CTX=0.00
+
+# ── Observability (A2-1606 / A2-1607 / A2-1310 / A2-1327) ────────────
+# Shared-secret bearer tokens. Set either → endpoint requires
+# `Authorization: Bearer <token>` on every request. Absent → endpoint
+# is public. Use 32+ random chars.
+# METRICS_BEARER_TOKEN=<32+ random chars>      # gates /metrics
+# OPENAPI_BEARER_TOKEN=<32+ random chars>      # gates /openapi.json
+
+# Discord webhooks (optional)
+
+.env.example and env.ts/code behavior:
+# /openapi.json. When set, requests must carry
+# `Authorization: Bearer <token>`. Unset in development / test leaves
+# those routes open (local tooling + vitest); unset in production
+# makes them 404 so an anonymous probe can't fingerprint us. Minimum
+# 16 chars — typical Prometheus scraper token is 32+.
+# METRICS_BEARER_TOKEN=<32+ random chars>
+# OPENAPI_BEARER_TOKEN=<32+ random chars>
+
+# Discord webhooks (optional — for notifications)
+
+  // A2-1606 / A2-1607: shared-secret bearer tokens for `/metrics` and
+  // `/openapi.json`. When set, the route requires `Authorization:
+  // Bearer <token>` for every request. When unset the route is open in
+  // development/test and 404s in production so probes can't scrape
+  // the live route-map or circuit state anonymously. 32+ chars
+  // recommended (the same threshold LOOP_JWT_SIGNING_KEY enforces).
+  METRICS_BEARER_TOKEN: z.string().min(16).optional(),
+  OPENAPI_BEARER_TOKEN: z.string().min(16).optional(),
+
+/**
+ * Bearer-token guard for ops/observability probe endpoints.
+ * Pulled out of `app.ts` (A2-1606 / A2-1607).
+ *
+ * `/metrics` leaks the live route map + circuit-state gauge.
+ * `/openapi.json` exposes every admin route + schema. Both are
+ * useful for ops tooling but should not be reachable by an
+ * arbitrary internet caller.
+ *
+ * Policy:
+ * - When the matching env var is set (`METRICS_BEARER_TOKEN` /
+ *   `OPENAPI_BEARER_TOKEN`), the caller must present
+ *   `Authorization: Bearer <token>`. Otherwise the route 401s.
+ * - When the env var is unset, the route stays open in
+ *   `development` / `test` (local tooling + vitest convenience)
+ *   and 404s in `production` — closed by default so a probe can't
+ *   fingerprint us.
+ *
+ * Constant-time compare via `crypto.timingSafeEqual` defeats
+ * timing-oracle leaks against the token: `timingSafeEqual` throws
+ * on length mismatch so we size-check first to avoid leaking
+ * "wrong length" vs "wrong byte" via the exception path.
+ */
+import { timingSafeEqual } from 'node:crypto';
+import { Buffer } from 'node:buffer';
+import type { Context } from 'hono';
+import { env } from '../env.js';
+
+/**
+ * Returns `true` if the request is allowed past the probe gate.
+ *
+ * `expected` is the configured shared secret (`undefined` if the
+ * env var is unset). When `undefined`, dev/test runs are allowed
+ * through and production is blocked. When set, the caller must
+ * present a constant-time-equal `Authorization: Bearer …` value.
+ */
+export function probeGateAllows(c: Context, expected: string | undefined): boolean {
+  if (expected === undefined) {
+    return env.NODE_ENV !== 'production';
+  }
+  const header = c.req.header('Authorization');
+  if (header === undefined) return false;
+  const match = /^Bearer\s+(.+)$/i.exec(header);
+  if (match === null) return false;
+  const presented = match[1]!.trim();
+  // Constant-time compare: guard against length leaks + per-byte
+  // short-circuit leaks. crypto.timingSafeEqual throws on length
+  // mismatch so size first.
+  if (presented.length !== expected.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(presented), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
+/**
+ * `/metrics` (Prometheus) + `/openapi.json` handlers. Both are
+ * gated by `probeGateAllows()` (closed-by-default in production
+ * unless the matching `*_BEARER_TOKEN` env var is set + sent).
+ *
+ * Pulled out of `app.ts` so the Prometheus exposition emitter +
+ * the OpenAPI spec serializer live next to each other; both are
+ * pure ops/observability surfaces with the same auth model and
+ * the same caching characteristics (no-store for live counters,
+ * no-store for the bearer-gated spec).
+ */
+import type { Context } from 'hono';
+import { env } from './env.js';
+import { metrics } from './metrics.js';
+import { getAllCircuitStates } from './circuit-breaker.js';
+import { generateOpenApiSpec } from './openapi.js';
+import { probeGateAllows } from './middleware/probe-gate.js';
+import { getRuntimeHealthSnapshot } from './runtime-health.js';
+
+/** Closed-by-default response when the gate rejects a request. */
+function gateRejection(c: Context, expected: string | undefined): Response {
+  return expected === undefined
+    ? c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404, probeScopedHeaders())
+    : c.json({ code: 'UNAUTHORIZED', message: 'Bearer token required' }, 401, probeScopedHeaders());
+}
+
+function probeScopedHeaders(): Record<string, string> {
+  return {
+    'Cache-Control': 'private, no-store',
+    Vary: 'Authorization',
+  };
+}
+
+/**
+ * `GET /metrics` — Prometheus text exposition format. Counters
+ * for rate-limit hits + per-(method, route, status) request totals
+ * + a circuit-breaker state gauge per upstream endpoint.
+ */
+export function metricsHandler(c: Context): Response {
+  if (!probeGateAllows(c, env.METRICS_BEARER_TOKEN)) {
+    return gateRejection(c, env.METRICS_BEARER_TOKEN);
+  }
+  const lines: string[] = [];
+
+  lines.push('# HELP loop_rate_limit_hits_total Total 429 responses issued.');
+  lines.push('# TYPE loop_rate_limit_hits_total counter');
+  lines.push(`loop_rate_limit_hits_total ${metrics.rateLimitHitsTotal}`);
+  lines.push('');

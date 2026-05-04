@@ -1,0 +1,383 @@
+--- docs/adr/001-static-export-capacitor.md
+1:# ADR 001: Static export over remote URL for Capacitor
+3:Status: Accepted
+4:Date: 2026-03-05
+6:## Context
+13:## Decision
+17:## Consequences
+--- docs/adr/002-typescript-backend.md
+1:# ADR 002: TypeScript over Go for the backend
+3:Status: Accepted
+4:Date: 2026-03-05
+6:## Context
+12:## Decision
+16:## Consequences
+--- docs/adr/003-protobuf-clustering.md
+1:# ADR 003: Protobuf for the clustering endpoint
+3:Status: Accepted
+4:Date: 2026-03-05
+6:## Context
+12:## Decision
+16:## Consequences
+--- docs/adr/004-security-hardening-pass.md
+1:# ADR 004: Security-hardening architectural decisions
+3:Status: Accepted
+4:Date: 2026-04-17
+6:## Context
+14:## Decision
+16:### Per-endpoint circuit breakers
+34:### Authoritative server-side `expiresAt`
+46:### Coalesced refresh-token requests
+59:### Content-Security-Policy is restrictive by default
+70:### Structured-field log redaction, not content scrubbing
+83:### Order of stricter ESLint over plugin coverage
+97:### Native app is auth-gated; web is browse-first
+108:## Consequences
+--- docs/adr/005-known-limitations.md
+1:# ADR 005: Known Limitations
+3:Status: Accepted
+4:Date: 2026-04-17
+6:## Context
+20:## Decision
+26:### 1. Stellar wallet / USDC cashback is Phase 2
+40:### 2. Barcode gift card redemption is Phase 2
+62:### 3. `eslint-plugin-react` is not in use
+82:### 4. Rate limiting is per-process in-memory
+103:### 5. Image proxy DNS-rebinding TOCTOU
+120:### 6. Circuit-breaker probe cooperation
+137:### 7. Web vitest defaults to `node` environment; jsdom is per-file opt-in
+166:### 8. Proto generation is manual
+180:### 9. No metrics exporter integration
+193:### 10. Third-party runtime dependencies (Google Fonts, CARTO/OSM tiles)
+217:### 11. Secret token transport on login is via upstream
+231:## Consequences
+239:## Related
+--- docs/adr/006-keychain-backed-secure-storage.md
+1:# ADR 006: Keychain-backed secure storage for refresh tokens
+3:Status: Accepted
+4:Date: 2026-04-18
+7:## Context
+29:## Decision
+48:### Migration for existing native installs
+61:## Consequences
+78:## Related
+--- docs/adr/007-native-projects-source-of-truth.md
+1:# ADR 007: Native iOS/Android projects — overlays over versioning
+3:Status: Accepted
+4:Date: 2026-04-18
+7:## Context
+19:## Decision
+78:### What we audit separately for the generated state
+97:## Consequences
+116:## Related
+--- docs/adr/008-capacitor-filesystem-for-share.md
+1:# ADR 008: Add `@capacitor/filesystem` to enable file-rich native share
+3:Status: Accepted
+4:Date: 2026-04-21
+6:## Context
+34:## Decision
+49:## Alternatives considered
+74:## Consequences
+85:## References
+--- docs/adr/009-credits-ledger-cashback-flow.md
+1:# ADR 009: Credits ledger and cashback flow
+3:Status: Accepted
+4:Date: 2026-04-21
+8:## Context
+38:## Decision
+40:### Off-chain Postgres ledger is the source of truth
+84:### Treasury sits behind the ledger
+100:### Loop-issued stablecoins are a later upgrade, not a launch requirement
+112:### Interest accrual
+121:### Withdrawal rails
+130:## Alternatives considered
+148:## Consequences
+162:## References
+--- docs/adr/010-principal-switch-payment-rails.md
+1:# ADR 010: Principal switch and payment rails
+3:Status: Accepted
+4:Date: 2026-04-21
+8:## Context
+31:## Decision
+33:### New order flow
+54:### Deposit accounts and memo attribution
+68:### Rate oracle
+77:### Order state machine
+90:### Order row additions
+109:### Refund path
+119:## Alternatives considered
+134:## Consequences
+149:## References
+--- docs/adr/011-admin-panel-cashback-configuration.md
+1:# ADR 011: Admin panel for cashback configuration
+3:Status: Accepted
+4:Date: 2026-04-21
+8:## Context
+27:## Decision
+29:### Schema
+60:### Admin role
+71:### Admin route
+83:### Pinning policy (referenced from ADR 010)
+92:### Default on catalog sync
+101:## Alternatives considered
+115:## Consequences
+127:## References
+--- docs/adr/012-drizzle-orm-fly-postgres.md
+1:# ADR 012: Database stack — Drizzle ORM + Fly Postgres
+3:Status: Accepted
+4:Date: 2026-04-21
+7:## Context
+22:## Decision
+24:### ORM: Drizzle
+57:### Driver: `postgres` (porsager)
+63:### Migrations
+77:### Host: Fly Postgres
+91:### Local dev
+106:### Connection pooling
+113:### Test database
+120:### Env var
+131:## Alternatives considered
+144:## Consequences
+162:## References
+--- docs/adr/013-loop-owned-auth-and-ctx-operator-accounts.md
+1:# ADR 013: Loop-owned auth and CTX operator-account pool
+3:Status: Accepted
+4:Date: 2026-04-21
+8:## Context
+46:## Decision
+48:### Loop owns user identity end-to-end
+63:### CTX becomes a supplier behind a shared operator-account pool
+87:### Why a _pool_, not a single operator account
+113:### Migration path (there is existing traffic)
+119:Phased rollout:
+139:### Token format
+162:### Secrets
+177:### What doesn't change
+191:## Consequences
+193:### Positive
+204:### Negative
+218:### Deferred
+227:## Rollout checklist
+248:## Open questions
+--- docs/adr/014-social-login-google-apple.md
+1:# ADR 014: Social login — Google and Apple
+3:Status: Accepted
+4:Date: 2026-04-21
+8:## Context
+31:## Decision
+33:### Both providers use the authorization-code flow verified server-side
+62:### Identity linking via a `user_identities` table
+83:### Resolution policy — match by verified email
+105:### Apple-specific concerns
+116:### Google-specific concerns
+125:### Envelope
+143:### Secrets
+154:### What doesn't change
+162:## Consequences
+164:### Positive
+172:### Negative
+184:### Deferred
+194:## Rollout checklist
+214:## Open questions
+--- docs/adr/015-stablecoin-topology-and-payment-rails.md
+1:# ADR 015: Stablecoin topology and payment rails
+3:Status: Accepted
+4:Date: 2026-04-21
+8:## Context
+32:## Decision
+34:### Loop issues three branded Stellar assets
+55:### Asset matrix
+66:### Home currency — assigned at signup, drives denomination end-to-end
+118:### Future: multi-balance users, on-chain LOOP-asset swap
+152:### Treasury strategy: USDC for yield, LOOP assets for liability
+175:### Two independent oracles
+195:### What doesn't change
+208:## Consequences
+210:### Positive
+226:### Negative
+245:### Deferred
+271:## Rollout checklist
+321:## Open questions
+--- docs/adr/016-stellar-sdk-payout-submit.md
+1:# ADR 016: Stellar SDK for outbound payout submission
+3:Status: Accepted
+4:Date: 2026-04-21
+8:## Context
+40:## Decision
+42:### Add `@stellar/stellar-sdk` as a backend dependency
+60:### What the SDK is **not** used for
+75:### Signing-key management
+98:### Submit-worker design
+135:### Retry + idempotency
+179:### What doesn't change
+191:## Consequences
+193:### Positive
+205:### Negative
+221:### Deferred
+235:## Rollout checklist
+263:## Open questions
+--- docs/adr/017-admin-credit-primitives.md
+1:# ADR 017: Admin credit primitives (writes)
+3:Status: Accepted
+4:Date: 2026-04-22
+8:## Context
+37:## Decision
+42:### 1. Actor identity is pinned from `requireAdmin`, never the body
+51:### 2. Idempotency via `Idempotency-Key` header
+66:### 3. Reason required on every write
+77:### 4. Reversibility — never `UPDATE` ledger history, always append
+91:### 5. Operational visibility — every write hits Discord
+99:## Response shape
+121:## What this means for the existing retry endpoint
+124:#2, #3, and #5. A follow-up slice brings it into compliance — same
+128:**Status:** Landed. Retry endpoint now requires `Idempotency-Key`
+132:## Consequences
+--- docs/adr/018-admin-panel-architecture.md
+1:# ADR 018: Admin panel architecture — drill-down, triage, compliance
+3:Status: Accepted
+4:Date: 2026-04-22
+7:## Context
+27:## Decision
+29:### 1. Aggregate → detail drill-down
+66:### 2. Read / triage / write separation
+89:### 3. Compliance-grade CSV as first-class
+127:## Consequences
+129:### Positive
+143:### Negative / accepted trade-offs
+161:### Breaking this ADR
+--- docs/adr/019-shared-package-policy.md
+1:# ADR 019: `@loop/shared` package policy
+3:Status: Accepted
+4:Date: 2026-04-22
+7:## Context
+33:## Decision
+35:### The three-part test
+60:### Module conventions
+74:### Backend re-export rule
+90:### Consumer adoption is phased
+99:### Test placement
+110:## Consequences
+137:## Open issues
+151:## Related
+--- docs/adr/020-public-api-surface.md
+1:# ADR 020: Public API surface conventions
+3:Status: Accepted
+4:Date: 2026-04-22
+7:## Context
+36:## Decision
+38:### 1. Path prefix: `/api/public/*`
+48:### 2. Never 500 a marketing surface
+66:### 3. Cache-Control
+77:### 4. Rate limit: 60/min per IP
+88:### 5. Catalog eviction: drop the row, don't fall back
+96:### 6. No PII, no per-user shape, no write paths
+113:## Consequences
+138:## Open issues
+150:## Related
+--- docs/adr/021-merchant-catalog-eviction-policy.md
+1:# ADR 021: Merchant-catalog eviction policy
+3:Status: Accepted
+4:Date: 2026-04-22
+7:## Context
+40:## Decision
+42:### The three read rules
+50:### Why each is defensible
+74:### Write-side companion rules
+91:### How to apply
+102:## Consequences
+125:## Open issues
+137:## Related
+--- docs/adr/022-admin-drill-triplet-pattern.md
+1:# ADR 022: Admin drill-triplet pattern for cashback metrics
+3:Status: Accepted
+4:Date: 2026-04-23
+6:## Context
+26:## Decision
+37:Where the UI pairs:
+52:## Shape conventions
+71:## Rate-limit + rate-CSV conventions
+80:## Trade-offs
+104:## Consequences
+119:## Status of this pattern at time of writing
+--- docs/adr/023-admin-mix-axis-matrix.md
+1:# ADR 023: Admin mix-axis matrix for attribution endpoints
+3:Status: Accepted
+4:Date: 2026-04-23
+6:## Context
+34:## Decision
+39:### URL shape
+55:### Request shape
+71:### Response shape
+94:### Status codes
+104:### Attribution filter invariant
+113:### UI pairing
+129:## Consequences
+156:## How to add a fourth axis
+--- docs/adr/024-withdrawal-writer.md
+1:# ADR 024: Withdrawal writer (USDC cash-out of cashback balance)
+3:Status: Accepted
+4:Date: 2026-04-24
+9:## Context
+37:## Decision
+39:### 1. Admin-only entry point (Phase 2a)
+68:### 2. Schema prerequisite — generalise `pending_payouts`
+106:### 3. Atomic two-row write
+134:### 4. Semantic uniqueness for active withdrawals
+167:### 5. Compensation on permanent payout failure
+204:### 6. Response envelope mirrors the refund handler
+226:### 7. Error ladder
+242:## Consequences
+277:## Implementation plan
+323:Phase 2b (separate ADR): user-initiated withdrawal.
+--- docs/adr/025-llm-pr-review.md
+1:# ADR 025: LLM-assisted PR review (PR diffs sent to Anthropic)
+3:Status: Accepted
+4:Date: 2026-04-26
+7:## Context
+23:## Decision
+42:## What this exposes
+67:## Why this is acceptable for Phase 1
+86:## What would invalidate this
+102:## Operator runbook
+114:## References
+--- docs/adr/026-tax-regulatory-reporting-data-model.md
+1:# ADR 026: Tax / regulatory reporting data model
+3:Status: Accepted
+4:Date: 2026-04-26
+7:## Context
+36:## Decision
+83:Phase-2 column adds are **migrations**, not data backfills. Rows
+93:## Why CSV first instead of an API integration
+106:## Why home_currency as a Phase-1 jurisdiction proxy
+119:## Acceptance criteria
+144:## Open questions for Phase 2
+157:## References
+--- docs/adr/027-mobile-platform-security.md
+1:# ADR-027 — Mobile platform security: SSL pinning, App Attest, Play Integrity, jailbreak / root, binary tamper
+3:**Status:** Accepted (Phase-1 deferral)
+9:## Context
+20:## Decision
+33:## Consequences
+52:## Phase-2 implementation order
+61:## References
+--- docs/adr/028-admin-step-up-auth.md
+1:# ADR-028 — Admin step-up authentication for destructive actions
+3:**Status:** Accepted (Phase-1 design pinned, implementation deferred)
+9:## Context
+17:## Decision
+34:### Mechanism
+55:### Storage
+59:### Web flow
+70:## Consequences
+88:## Phase-2 expansions
+97:## References
+--- docs/adr/029-repo-managed-ci-clis.md
+1:# ADR 029: Repo-managed CI CLIs for secret-bearing workflows
+3:Status: Accepted
+4:Date: 2026-04-29
+7:## Context
+30:## Decision
+43:Where a CLI needs its own install hook to materialize a platform binary,
+48:## Consequences
+66:## Alternatives considered
+80:## References

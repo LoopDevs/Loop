@@ -33,8 +33,16 @@ const {
   }
   return {
     applyMock: vi.fn(),
-    lookupMock: vi.fn(async () => null as null | { body: unknown; status: number }),
-    storeMock: vi.fn(async () => undefined),
+    // A4-099: lookupMock now drives the simulated snapshot-replay
+    // path inside the withIdempotencyGuard mock below — when it
+    // returns a value, the guard skips doWrite and replays.
+    lookupMock: vi.fn(
+      async (_args?: unknown): Promise<null | { body: unknown; status: number }> => null,
+    ),
+    // A4-099: storeMock is invoked by the guard mock after a fresh
+    // doWrite to persist the snapshot. Tests assert it's called
+    // with the right shape.
+    storeMock: vi.fn(async (_args?: unknown): Promise<void> => undefined),
     notifyMock: vi.fn(),
     getPayoutMock: vi.fn(),
     AlreadyCompensatedError,
@@ -48,13 +56,41 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
+// A4-099: handler now uses withIdempotencyGuard. The mock here
+// emulates the production guard: lookup snapshot via lookupMock;
+// if hit, return as replay; otherwise run doWrite and persist
+// via storeMock. This preserves the lookupMock/storeMock test
+// surface so existing assertions still apply.
 vi.mock('../idempotency.js', () => ({
   IDEMPOTENCY_KEY_MIN: 16,
   IDEMPOTENCY_KEY_MAX: 128,
   validateIdempotencyKey: (k: string | undefined): k is string =>
     k !== undefined && k.length >= 16 && k.length <= 128,
-  lookupIdempotencyKey: lookupMock,
-  storeIdempotencyKey: storeMock,
+  withIdempotencyGuard: async (
+    args: { adminUserId: string; key: string; method: string; path: string },
+    doWrite: () => Promise<{ status: number; body: Record<string, unknown> }>,
+  ): Promise<{ replayed: boolean; status: number; body: Record<string, unknown> }> => {
+    const prior = await lookupMock(args);
+    if (prior !== null) {
+      // Mirror production behaviour: bump audit.replayed=true on
+      // the stored body so the wire contract matches the docs.
+      const body = prior.body as { audit?: Record<string, unknown> };
+      if (body.audit !== null && typeof body.audit === 'object') {
+        body.audit['replayed'] = true;
+      }
+      return { replayed: true, status: prior.status, body: prior.body as Record<string, unknown> };
+    }
+    const { status, body } = await doWrite();
+    await storeMock({
+      adminUserId: args.adminUserId,
+      key: args.key,
+      method: args.method,
+      path: args.path,
+      status,
+      body,
+    });
+    return { replayed: false, status, body };
+  },
 }));
 
 vi.mock('../../credits/payout-compensation.js', () => ({

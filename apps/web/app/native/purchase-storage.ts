@@ -53,16 +53,34 @@ export async function loadPendingOrder(): Promise<Record<string, unknown> | null
 
   if (!raw) return null;
 
+  let data: Record<string, unknown> | null = null;
   try {
-    const data = JSON.parse(raw) as Record<string, unknown>;
-    // Only restore if not expired
-    if (typeof data.expiresAt === 'number' && data.expiresAt > Math.floor(Date.now() / 1000)) {
-      return data;
-    }
+    data = JSON.parse(raw) as Record<string, unknown>;
   } catch {
-    /* invalid JSON */
+    // Invalid JSON — corrupt record, clean it up so we don't keep
+    // failing to parse on every cold start.
+    void clearPendingOrder();
+    return null;
   }
 
+  // Not expired (most common path) — return the data.
+  if (typeof data.expiresAt === 'number' && data.expiresAt > Math.floor(Date.now() / 1000)) {
+    return data;
+  }
+
+  // A4-056: a record without a parseable `expiresAt` USED to be
+  // destroyed silently here, taking a legacy-client pending order
+  // with it (the user couldn't recover the payment instructions).
+  // Now: when expiresAt is missing or non-numeric, fall through
+  // to the recovery path with a synthesised default expiry —
+  // matches `savePendingOrder`'s defaulting on the write side.
+  // The record is retained so the next cold start has another
+  // chance to honour it; the user's purchase isn't silently lost.
+  if (typeof data.expiresAt !== 'number') {
+    return { ...data, expiresAt: Math.floor(Date.now() / 1000) + DEFAULT_EXPIRY_SECONDS };
+  }
+
+  // Genuinely expired record — clean it up.
   void clearPendingOrder();
   return null;
 }

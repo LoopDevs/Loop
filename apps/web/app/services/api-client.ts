@@ -166,13 +166,28 @@ async function doRefresh(): Promise<string | null> {
     // retrying later, so clearing storage now avoids N guaranteed-401s
     // on every subsequent startup. 5xx, 429, and network errors stay on
     // disk because the token might still be valid once upstream recovers.
+    //
+    // A4-060: log the upstream rejection code (USER_DEACTIVATED,
+    // INVALID_REFRESH_TOKEN, EXPIRED_OTP, etc.) so a deactivation
+    // event isn't indistinguishable from a network blip in Sentry
+    // breadcrumbs / dev console. The function still returns null
+    // because the wire contract is "fresh access token or null"
+    // — surface-level UX differentiation is a follow-up that
+    // would change this signature.
     if (err instanceof ApiException) {
       const s = err.status;
       const definitivelyRejected = s >= 400 && s < 500 && s !== 429;
+      // eslint-disable-next-line no-console
+      console.warn(
+        `auth.refresh: ${definitivelyRejected ? 'definitive' : 'transient'} rejection — code=${err.code} status=${s}`,
+      );
       if (definitivelyRejected) {
         const { clearRefreshToken } = await import('~/native/secure-storage');
         await clearRefreshToken();
       }
+    } else if (err instanceof Error) {
+      // eslint-disable-next-line no-console
+      console.warn(`auth.refresh: non-API failure — ${err.message}`);
     }
     return null;
   }

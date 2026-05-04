@@ -357,6 +357,50 @@ describe('createOrder', () => {
     expect((values['paymentMemo'] as string).length).toBe(20);
   });
 
+  it('Tranche 1 discount mode: applies user cashback as discount on chargeMinor when LOOP_PHASE_1_ONLY=true', async () => {
+    envOverrides['LOOP_PHASE_1_ONLY'] = true as unknown as string;
+    try {
+      await createOrder({
+        userId: 'u-1',
+        merchantId: 'm1',
+        faceValueMinor: 10_000n,
+        currency: 'GBP',
+        chargeMinor: 10_000n,
+        chargeCurrency: 'GBP',
+        paymentMethod: 'usdc',
+      });
+      const values = state.insertValues[0] as Record<string, unknown>;
+      // Cashback portion (10% of 10_000 = 1_000) shifts to a discount
+      // on the user's effective charge instead of a Stellar payout.
+      expect(values['chargeMinor']).toBe(9_000n); // 10_000 − 1_000 discount
+      expect(values['userCashbackMinor']).toBe(0n);
+      expect(values['userCashbackPct']).toBe('0.00');
+      // Wholesale + margin unchanged — Loop still pays CTX the same
+      // wholesale share, still earns the same margin.
+      expect(values['wholesaleMinor']).toBe(8_500n);
+      expect(values['loopMarginMinor']).toBe(500n);
+    } finally {
+      delete envOverrides['LOOP_PHASE_1_ONLY'];
+    }
+  });
+
+  it('Tranche 2 mode (default): cashback stays as on-chain emission, chargeMinor untouched', async () => {
+    delete envOverrides['LOOP_PHASE_1_ONLY'];
+    await createOrder({
+      userId: 'u-1',
+      merchantId: 'm1',
+      faceValueMinor: 10_000n,
+      currency: 'GBP',
+      chargeMinor: 10_000n,
+      chargeCurrency: 'GBP',
+      paymentMethod: 'usdc',
+    });
+    const values = state.insertValues[0] as Record<string, unknown>;
+    expect(values['chargeMinor']).toBe(10_000n); // user pays face
+    expect(values['userCashbackMinor']).toBe(1_000n); // queued for emission
+    expect(values['userCashbackPct']).toBe('10.00');
+  });
+
   it('leaves payment_memo null for credit-funded orders', async () => {
     // A2-601 fix: credit orders now do insert + debit + paid
     // transition in one txn. Seed enough balance and a paid-row to
@@ -529,14 +573,20 @@ describe('A2-2003 idempotency on createOrder', () => {
     // violation. The catch arm re-fetches the prior row via
     // `findOrderByIdempotencyKey` and re-throws with the existing
     // attached.
+    //
+    // A4-026: detector now walks `err.cause` for `code='23505'`
+    // + `constraint_name`, matching refunds.ts + withdrawals.ts.
+    // Forge a postgres-js-shaped error with both fields so the
+    // walker recognises it.
     const priorRow = {
       id: 'o-prior',
       userId: 'u-1',
       idempotencyKey: 'key-1234567890ab',
     };
     state.orderByMemo = priorRow;
-    const dupErr = new Error(
-      'duplicate key value violates unique constraint "orders_user_idempotency_unique"',
+    const dupErr = Object.assign(
+      new Error('duplicate key value violates unique constraint "orders_user_idempotency_unique"'),
+      { code: '23505', constraint_name: 'orders_user_idempotency_unique' },
     );
     dbMock['returning']!.mockRejectedValueOnce(dupErr);
     await expect(

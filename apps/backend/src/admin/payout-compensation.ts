@@ -44,9 +44,8 @@ import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js
 import {
   IDEMPOTENCY_KEY_MIN,
   IDEMPOTENCY_KEY_MAX,
-  lookupIdempotencyKey,
-  storeIdempotencyKey,
   validateIdempotencyKey,
+  withIdempotencyGuard,
 } from './idempotency.js';
 
 const log = logger.child({ handler: 'admin-payout-compensation' });
@@ -107,80 +106,89 @@ export async function adminPayoutCompensationHandler(c: Context): Promise<Respon
 
   const endpointPath = `/api/admin/payouts/${id}/compensate`;
 
-  // Replay path: snapshot hit returns the stored envelope verbatim;
-  // Discord still gets a `replayed=true` ping so the second click is
-  // visible in the audit channel.
-  const prior = await lookupIdempotencyKey({
-    adminUserId: actor.id,
-    key: idempotencyKey,
-  });
-  if (prior !== null) {
-    const priorResult = (prior.body as { result?: PayoutCompensationResponse }).result;
-    notifyAdminAudit({
-      actorUserId: actor.id,
-      endpoint: `POST ${endpointPath}`,
-      ...(priorResult?.userId !== undefined ? { targetUserId: priorResult.userId } : {}),
-      ...(priorResult?.amountMinor !== undefined ? { amountMinor: priorResult.amountMinor } : {}),
-      ...(priorResult?.currency !== undefined ? { currency: priorResult.currency } : {}),
-      reason: parsed.data.reason,
-      idempotencyKey,
-      replayed: true,
-    });
-    return c.json(prior.body, prior.status as 200 | 400 | 404 | 409 | 500);
-  }
-
-  const payout = await getPayoutForAdmin(id);
-  if (payout === null) {
-    return c.json({ code: 'NOT_FOUND', message: 'Payout not found' }, 404);
-  }
-
-  if (payout.kind !== 'withdrawal') {
-    return c.json(
-      {
-        code: 'PAYOUT_NOT_COMPENSABLE',
-        message:
-          'Compensation only applies to withdrawal payouts; order-cashback failures use a different flow',
-      },
-      400,
-    );
-  }
-
-  if (payout.state !== 'failed') {
-    return c.json(
-      {
-        code: 'PAYOUT_NOT_COMPENSABLE',
-        message: `Payout is in state '${payout.state}'; only 'failed' payouts can be compensated`,
-      },
-      409,
-    );
-  }
-
-  if (!isLoopAssetCode(payout.assetCode)) {
-    log.error(
-      { payoutId: id, assetCode: payout.assetCode },
-      'Payout has non-LOOP asset code; cannot derive home currency',
-    );
-    return c.json(
-      { code: 'INTERNAL_ERROR', message: 'Payout asset code is not a LOOP asset' },
-      500,
-    );
-  }
-  const currency = currencyForLoopAsset(payout.assetCode);
-
-  // 1 stroop = 0.00001 minor. The stroops-to-minor floor mirrors the
-  // /100_000n factor `applyAdminWithdrawal` uses in reverse — for any
-  // payout this primitive emitted, the conversion is exact.
-  const amountMinor = payout.amountStroops / 100_000n;
-
-  let applied;
+  // A4-099: serialise lookup → write → store under an advisory
+  // lock keyed on (actor, idempotencyKey). Pre-checks (payout
+  // exists / kind=withdrawal / state=failed / assetCode known)
+  // run inside the guard so the lock covers the full sequence.
+  let guardResult;
   try {
-    applied = await applyAdminPayoutCompensation({
-      userId: payout.userId,
-      currency,
-      amountMinor,
-      payoutId: id,
-      reason: parsed.data.reason,
-    });
+    guardResult = await withIdempotencyGuard(
+      {
+        adminUserId: actor.id,
+        key: idempotencyKey,
+        method: 'POST',
+        path: endpointPath,
+      },
+      async () => {
+        const payout = await getPayoutForAdmin(id);
+        if (payout === null) {
+          return {
+            status: 404,
+            body: { code: 'NOT_FOUND', message: 'Payout not found' },
+          };
+        }
+        if (payout.kind !== 'withdrawal') {
+          return {
+            status: 400,
+            body: {
+              code: 'PAYOUT_NOT_COMPENSABLE',
+              message:
+                'Compensation only applies to withdrawal payouts; order-cashback failures use a different flow',
+            },
+          };
+        }
+        if (payout.state !== 'failed') {
+          return {
+            status: 409,
+            body: {
+              code: 'PAYOUT_NOT_COMPENSABLE',
+              message: `Payout is in state '${payout.state}'; only 'failed' payouts can be compensated`,
+            },
+          };
+        }
+        if (!isLoopAssetCode(payout.assetCode)) {
+          log.error(
+            { payoutId: id, assetCode: payout.assetCode },
+            'Payout has non-LOOP asset code; cannot derive home currency',
+          );
+          return {
+            status: 500,
+            body: { code: 'INTERNAL_ERROR', message: 'Payout asset code is not a LOOP asset' },
+          };
+        }
+        const currency = currencyForLoopAsset(payout.assetCode);
+        // 1 stroop = 0.00001 minor. The stroops-to-minor floor
+        // mirrors the /100_000n factor applyAdminWithdrawal uses
+        // in reverse — for any payout this primitive emitted the
+        // conversion is exact.
+        const amountMinor = payout.amountStroops / 100_000n;
+        const applied = await applyAdminPayoutCompensation({
+          userId: payout.userId,
+          currency,
+          amountMinor,
+          payoutId: id,
+          reason: parsed.data.reason,
+        });
+        const result: PayoutCompensationResponse = {
+          id: applied.id,
+          payoutId: applied.payoutId,
+          userId: applied.userId,
+          currency: applied.currency,
+          amountMinor: applied.amountMinor.toString(),
+          priorBalanceMinor: applied.priorBalanceMinor.toString(),
+          newBalanceMinor: applied.newBalanceMinor.toString(),
+          createdAt: applied.createdAt.toISOString(),
+        };
+        const envelope: AdminAuditEnvelope<PayoutCompensationResponse> = buildAuditEnvelope({
+          result,
+          actor,
+          idempotencyKey,
+          appliedAt: applied.createdAt,
+          replayed: false,
+        });
+        return { status: 200, body: envelope as unknown as Record<string, unknown> };
+      },
+    );
   } catch (err) {
     if (err instanceof AlreadyCompensatedError) {
       return c.json(
@@ -204,51 +212,23 @@ export async function adminPayoutCompensationHandler(c: Context): Promise<Respon
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to apply compensation' }, 500);
   }
 
-  const result: PayoutCompensationResponse = {
-    id: applied.id,
-    payoutId: applied.payoutId,
-    userId: applied.userId,
-    currency: applied.currency,
-    amountMinor: applied.amountMinor.toString(),
-    priorBalanceMinor: applied.priorBalanceMinor.toString(),
-    newBalanceMinor: applied.newBalanceMinor.toString(),
-    createdAt: applied.createdAt.toISOString(),
-  };
-
-  const envelope: AdminAuditEnvelope<PayoutCompensationResponse> = buildAuditEnvelope({
-    result,
-    actor,
-    idempotencyKey,
-    appliedAt: applied.createdAt,
-    replayed: false,
-  });
-
-  try {
-    await storeIdempotencyKey({
-      adminUserId: actor.id,
-      key: idempotencyKey,
-      method: 'POST',
-      path: endpointPath,
-      status: 200,
-      body: envelope as unknown as Record<string, unknown>,
+  // Discord fanout — fire-and-forget AFTER commit per ADR 017 #5.
+  // Only fans out for the success-shape envelope (200); the 4xx
+  // envelopes are operator-correctable validation rejections that
+  // shouldn't ping the audit channel.
+  if (guardResult.status === 200) {
+    const priorResult = (guardResult.body as { result?: PayoutCompensationResponse }).result;
+    notifyAdminAudit({
+      actorUserId: actor.id,
+      endpoint: `POST ${endpointPath}`,
+      ...(priorResult?.userId !== undefined ? { targetUserId: priorResult.userId } : {}),
+      ...(priorResult?.amountMinor !== undefined ? { amountMinor: priorResult.amountMinor } : {}),
+      ...(priorResult?.currency !== undefined ? { currency: priorResult.currency } : {}),
+      reason: parsed.data.reason,
+      idempotencyKey,
+      replayed: guardResult.replayed,
     });
-  } catch (err) {
-    log.warn(
-      { err, adminUserId: actor.id, key: idempotencyKey },
-      'Failed to persist idempotency snapshot; retry will replay as new write',
-    );
   }
 
-  notifyAdminAudit({
-    actorUserId: actor.id,
-    endpoint: `POST ${endpointPath}`,
-    targetUserId: result.userId,
-    amountMinor: result.amountMinor,
-    currency: result.currency,
-    reason: parsed.data.reason,
-    idempotencyKey,
-    replayed: false,
-  });
-
-  return c.json(envelope, 200);
+  return c.json(guardResult.body, guardResult.status as 200 | 400 | 404 | 409 | 500);
 }

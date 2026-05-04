@@ -146,9 +146,11 @@ fi
 # ─── 6. No removed credentials in source (outside tests) ────────────────────
 
 echo "Checking for removed credential references..."
-# GIFT_CARD_API_KEY and GIFT_CARD_API_SECRET are legitimate — used for /locations endpoint
-# Check for truly removed credentials only
-removed_creds=$(grep -rn "JWT_SECRET\|JWT_REFRESH_SECRET\|SMTP_HOST\|SMTP_PORT\|SMTP_USER\|SMTP_PASS\|EMAIL_FROM" apps/backend/src/ apps/web/app/ packages/shared/src/ 2>/dev/null | grep -v "node_modules\|__tests__" || true)
+# GIFT_CARD_API_KEY and GIFT_CARD_API_SECRET are legitimate — used for /locations endpoint.
+# EMAIL_FROM_ADDRESS / EMAIL_FROM_NAME are legitimate (transactional email, ADR 013); the
+# truly-removed credential was an unscoped EMAIL_FROM. The grep below tolerates the suffix
+# names while still catching a reintroduction of the bare EMAIL_FROM env.
+removed_creds=$(grep -rn "JWT_SECRET\|JWT_REFRESH_SECRET\|SMTP_HOST\|SMTP_PORT\|SMTP_USER\|SMTP_PASS\|EMAIL_FROM\b" apps/backend/src/ apps/web/app/ packages/shared/src/ 2>/dev/null | grep -v "node_modules\|__tests__\|EMAIL_FROM_ADDRESS\|EMAIL_FROM_NAME" || true)
 if [ -n "$removed_creds" ]; then
   err "Reference to removed credential (JWT/SMTP) found in source"
 fi
@@ -226,7 +228,15 @@ openapi_exceptions=(
 app_routes_tmp=$(mktemp)
 openapi_paths_tmp=$(mktemp)
 
-grep -E "^\s*app\.(get|post|put|delete|patch)\(" apps/backend/src/app.ts \
+# A4-077: scan both app.ts AND every routes/*.ts module. The
+# admin / auth / orders / users / public / merchants / misc routes
+# all live in routes/* per the route-module decomposition; the
+# original detector saw only the ~5 routes still mounted directly
+# in app.ts (/health, /metrics, /openapi.json, /__test__/reset).
+# Mirrors the §2 architecture-parity extractor which already
+# walks routes/*.ts.
+grep -E "^\s*app\.(get|post|put|delete|patch)\(" \
+  apps/backend/src/app.ts apps/backend/src/routes/*.ts \
   | grep -oE "'/[^']+'" \
   | sed -E "s/:([a-zA-Z_]+)/{\1}/g" \
   | sort -u > "$app_routes_tmp"

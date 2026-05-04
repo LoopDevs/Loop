@@ -119,6 +119,15 @@ export function registerClustersOpenApi(
         description: 'Rate limit exceeded (300/min per IP)',
         content: { 'application/json': { schema: errorResponse } },
       },
+      500: {
+        // A4-100: the handler's catch arm (apps/backend/src/images/proxy.ts)
+        // returns 500 INTERNAL_ERROR for sharp / fetch / unclassified
+        // processing failures. Generated clients need this in the
+        // contract or they reject a documented error path as
+        // unexpected.
+        description: 'Internal image-processing failure (sharp / fetch / unclassified)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
       502: {
         description: 'Upstream image error',
         content: { 'application/json': { schema: errorResponse } },

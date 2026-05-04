@@ -1,0 +1,200 @@
+Scoped evidence: Loop-native client idempotency key is per service call, not per user submit attempt
+
+    24	
+    25	export type LoopOrderState = OrderState;
+    26	export type LoopOrderPaymentMethod = OrderPaymentMethod;
+    27	export type CreateLoopOrderBody = CreateLoopOrderRequest;
+    28	export type { CreateLoopOrderResponse, LoopOrderView };
+    29	
+    30	/**
+    31	 * A2-2003: stamps every `POST /api/orders/loop` with a fresh
+    32	 * `Idempotency-Key`. The backend dedups against (user_id, key) so a
+    33	 * double-clicked submit, a retried fetch, or a network-flap retransmit
+    34	 * all collapse onto a single order row + (for credit-funded orders) a
+    35	 * single ledger debit.
+    36	 *
+    37	 * Generates a UUID v4 — 36 chars sits well inside the 16-128 server
+    38	 * window, the entropy is far past anything a client double-click can
+    39	 * collide on, and `crypto.randomUUID` is universally available in
+    40	 * supported browsers + the Capacitor webview.
+    41	 */
+    42	function freshOrderIdempotencyKey(): string {
+    43	  // `crypto.randomUUID()` requires a secure context; web runs over
+    44	  // HTTPS in prod and on `capacitor://` in the native shell which
+    45	  // counts as secure. Locally over `http://localhost` it's also OK.
+    46	  return crypto.randomUUID();
+    47	}
+    48	
+    49	/**
+    50	 * POST /api/orders/loop — creates a Loop-native order in `pending_payment`.
+    51	 *
+    52	 * Pass `idempotencyKey` if the caller has already minted one (e.g. the
+    53	 * payment-screen state survived a soft remount and we want to retry
+    54	 * without creating a duplicate). Otherwise the service mints a fresh
+    55	 * UUID v4 for each call so the natural double-click case is covered
+    56	 * without the caller thinking about it.
+    57	 */
+    58	export async function createLoopOrder(
+    59	  body: CreateLoopOrderBody,
+    60	  options: { idempotencyKey?: string } = {},
+    61	): Promise<CreateLoopOrderResponse> {
+    62	  return authenticatedRequest<CreateLoopOrderResponse>('/api/orders/loop', {
+    63	    method: 'POST',
+    64	    body,
+    65	    headers: {
+    66	      'Idempotency-Key': options.idempotencyKey ?? freshOrderIdempotencyKey(),
+    67	    },
+    68	  });
+    69	}
+    70	
+
+Purchase submit path and loading state:
+   292	  //   - config.loopOrdersEnabled → Loop-native (POST /api/orders/loop)
+   293	  //   - otherwise → legacy CTX proxy (POST /api/orders)
+   294	  const handlePurchase = async (amount: number): Promise<void> => {
+   295	    if (email === null) return;
+   296	    setIsCreatingOrder(true);
+   297	    setOrderError(null);
+   298	    void triggerHaptic();
+   299	
+   300	    try {
+   301	      if (config.loopOrdersEnabled) {
+   302	        const result = await createLoopOrder({
+   303	          merchantId: merchant.id,
+   304	          amountMinor: Math.round(amount * 100),
+   305	          currency: merchant.denominations?.currency ?? 'USD',
+   306	          paymentMethod: 'usdc',
+   307	        });
+   308	        setLoopCreate(result);
+   309	        // A2-1159: new row exists server-side; mark the cache stale so
+   310	        // /account/orders (LoopOrdersList) refetches on next mount
+   311	        // instead of sitting on its 30s staleTime.
+   312	        void queryClient.invalidateQueries({ queryKey: ['loop-orders'] });
+   313	        void triggerHapticNotification('success');
+   314	        return;
+   104	      const min = denominations.min ?? BACKEND_MIN;
+   105	      const max = denominations.max ?? BACKEND_MAX;
+   106	      if (amount < min || amount > max) {
+   107	        setValidationError(`Amount must be between ${symbol}${min} and ${symbol}${max}.`);
+   108	        return;
+   109	      }
+   110	    }
+   111	
+   112	    setValidationError(null);
+   113	    onConfirm(amount);
+   114	  };
+   151	          <p className="mb-3 text-sm font-medium text-green-700 dark:text-green-400">
+   152	            You&rsquo;ll earn {cashbackEstimate} cashback
+   153	          </p>
+   154	        )}
+   155	        {validationError !== null && <p className="text-sm text-red-600 mb-3">{validationError}</p>}
+   156	        <Button
+   157	          className="w-full"
+   158	          onClick={handleConfirm}
+   159	          loading={isLoading}
+   160	          disabled={selected === null || isLoading}
+   161	        >
+   162	          Buy {symbol}
+   201	      )}
+   202	      <Button
+   203	        className="w-full mt-4"
+   204	        onClick={handleConfirm}
+   205	        loading={isLoading}
+   206	        disabled={!customAmount || isLoading}
+   207	      >
+
+Backend dedupe scope:
+   104	  // A2-2003: optional `Idempotency-Key` header. When present and well-
+   105	  // formed, a repeat post within the row's lifetime returns the
+   106	  // already-created order's response instead of writing a second row
+   107	  // (and, for credit-funded orders, a second `user_credits` debit).
+   108	  // When absent, the legacy double-click risk is preserved — the
+   109	  // header is opt-in for now while the loop-native client rolls out.
+   110	  const idempotencyKey = c.req.header('Idempotency-Key') ?? c.req.header('idempotency-key');
+   111	  if (idempotencyKey !== undefined) {
+   112	    if (
+   113	      idempotencyKey.length < ORDER_IDEMPOTENCY_KEY_MIN ||
+   114	      idempotencyKey.length > ORDER_IDEMPOTENCY_KEY_MAX
+   115	    ) {
+   116	      return c.json(
+   117	        {
+   118	          code: 'VALIDATION_ERROR',
+   119	          message: `Idempotency-Key must be between ${ORDER_IDEMPOTENCY_KEY_MIN} and ${ORDER_IDEMPOTENCY_KEY_MAX} characters`,
+   120	        },
+   121	        400,
+   122	      );
+   123	    }
+   124	    // Lookup-first: a repeat post short-circuits without holding any
+   125	    // locks. The unique index is scoped to (user_id, key), so a key
+   126	    // re-used by a different user simply doesn't match here and falls
+   127	    // through to the create path.
+   128	    const prior = await findOrderByIdempotencyKey(auth.userId, idempotencyKey);
+   129	    if (prior !== null) {
+   130	      return replayOrderResponse(c, prior);
+    48	 * A2-2003: lookup the prior order for a given (userId, idempotencyKey)
+    49	 * pair. Returns null on miss. Called by the handler before the write
+    50	 * so a repeat request short-circuits without holding any locks; the
+    51	 * unique-index race is caught by `IdempotentOrderConflictError` from
+    52	 * the insert path.
+    53	 */
+    54	export async function findOrderByIdempotencyKey(
+    55	  userId: string,
+    56	  idempotencyKey: string,
+    57	): Promise<Order | null> {
+    58	  const row = await db.query.orders.findFirst({
+    59	    where: and(eq(orders.userId, userId), eq(orders.idempotencyKey, idempotencyKey)),
+    60	  });
+    61	  return row ?? null;
+    62	}
+
+Credit-funded order side-effect if rail is exposed:
+    84	 * returned order is guaranteed either:
+    85	 *
+    86	 *   - `state='pending_payment'` with no ledger side-effect (on-chain
+    87	 *     orders, awaiting external payment), or
+    88	 *   - `state='paid'` with a matching `type='spend'` ledger row and a
+    89	 *     debited balance (credit orders, fully settled).
+    90	 *
+    91	 * There is no intermediate state where the order is created but the
+    92	 * credit isn't yet debited, which means procurement can treat every
+    93	 * `paid` credit order the same as a `paid` on-chain order.
+    94	 *
+    95	 * If the user's live balance (re-read `FOR UPDATE` inside the txn)
+    96	 * is below `chargeMinor`, the function throws
+    97	 * `InsufficientCreditError` and the txn rolls back — no order row
+    98	 * is persisted. The caller's prior `hasSufficientCredit` fast-path
+    99	 * is a UX check, not a guard; a concurrent admin adjustment could
+   100	 * drain the balance between check and insert.
+   101	 *
+   102	 * Payment memo is generated for on-chain methods (xlm / usdc) and
+   103	 * left null for `credit` — a balance debit doesn't cross the chain.
+   104	 */
+   140	  // For credit-funded orders, do the insert + debit + state flip all
+   141	  // in one txn. Everything else (on-chain) just inserts and returns
+   142	  // pending_payment.
+   143	  if (args.paymentMethod !== 'credit') {
+   144	    try {
+   145	      const [row] = await db.insert(orders).values(baseValues).returning();
+   146	      if (row === undefined) {
+   147	        throw new Error('createOrder: no row returned');
+   148	      }
+   149	      return row;
+   150	    } catch (err) {
+   151	      // A2-2003: a concurrent caller raced us to the same
+   152	      // (userId, idempotencyKey) pair. Re-fetch the prior order so
+   153	      // the handler can replay its response.
+   154	      const conflict = await maybeFetchIdempotentConflict(args, err);
+   155	      if (conflict !== null) throw new IdempotentOrderConflictError(conflict);
+   156	      throw err;
+   157	    }
+   158	  }
+   159	
+   160	  try {
+   161	    return await insertCreditOrderTxn({ ...baseValues, paymentMethod: 'credit', paymentMemo });
+   162	  } catch (err) {
+   163	    if (err instanceof InsufficientCreditError) throw err;
+   164	    // A2-2003: a concurrent caller raced us to the same
+   165	    // (userId, idempotencyKey) pair. The whole txn rolled back, so
+   166	    // no debit / order row landed for this attempt. Re-fetch the
+   167	    // prior order and surface as IdempotentOrderConflictError so the
+   168	    // handler can replay its response.

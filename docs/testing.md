@@ -51,13 +51,14 @@ spinning up a browser. Covers:
 - Purchase-flow components (jsdom opt-in per file) — `AmountSelection`, `PaymentStep`, `PurchaseComplete`, `RedeemFlow` — render + event assertions via `@testing-library/react`.
 - Hooks — `use-auth`, `use-native-platform`, `use-session-restore`, `query-retry`.
 
-### E2E (`tests/e2e` + `tests/e2e-mocked`)
+### E2E (`tests/e2e` + `tests/e2e-mocked` + `tests/e2e-flywheel`)
 
 Playwright suites:
 
 - `tests/e2e/smoke.test.ts` — home / auth / map / orders / 404 smoke on real upstream.
 - `tests/e2e/purchase-flow.test.ts` — merchant detail, search navigation, sign-in, map loading on real upstream.
 - `tests/e2e-mocked/purchase-flow.test.ts` — full purchase happy path (email → OTP → amount → payment → redeem) + wrong-OTP path, backed by the deterministic mock CTX in `tests/e2e-mocked/fixtures/mock-ctx.mjs`.
+- `tests/e2e-flywheel/*.test.ts` — Loop-native flywheel walk (purchase → cashback → withdrawal) against a real Postgres + mocked Stellar/Horizon stack; runs in CI under the `flywheel-integration` lane.
 - `scripts/e2e-real.mjs` + `.github/workflows/e2e-real.yml` — manually dispatched real CTX + real Stellar wallet end-to-end run (see **Manual: real CTX + wallet purchase workflow** below).
 
 ---
@@ -114,13 +115,13 @@ MOBILE_SAFARI=1 npm run test:e2e:real
 
 ## When tests run
 
-| Trigger                            | What runs                                                                                                                    |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `git commit`                       | lint-staged (ESLint + Prettier on changed files)                                                                             |
-| `git push`                         | `npm test` + `lint:docs` (blocks push on failure)                                                                            |
-| CI (every push)                    | Quality (typecheck + lint + format:check + lint:docs) + Unit tests + Security audit + Build + mocked e2e (`test:e2e:mocked`) |
-| CI (PRs only)                      | + real-upstream e2e tests with Playwright (`test:e2e:real`)                                                                  |
-| GitHub Actions `workflow_dispatch` | **E2E (real CTX + wallet)** — manually triggered full purchase flow that spends real XLM; see below                          |
+| Trigger                            | What runs                                                                                                                                                                                                                                                                                                               |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `git commit`                       | lint-staged (ESLint + Prettier on changed files)                                                                                                                                                                                                                                                                        |
+| `git push`                         | `npm test` + `lint:docs` (blocks push on failure)                                                                                                                                                                                                                                                                       |
+| CI (every push)                    | Quality (typecheck + lint + format:check + lint:docs) + Unit tests + Flywheel-integration (real-postgres flywheel walk) + Security audit + Secret scan (gitleaks) + Container CVE scan (trivy) + SBOM + Build verification + Mocked e2e (`test:e2e:mocked`) + Loop-native flywheel e2e + Notify (Discord on pass/fail). |
+| CI (PRs only)                      | + real-upstream e2e tests with Playwright (`test:e2e:real`)                                                                                                                                                                                                                                                             |
+| GitHub Actions `workflow_dispatch` | **E2E (real CTX + wallet)** — manually triggered full purchase flow that spends real XLM; see below                                                                                                                                                                                                                     |
 
 ### Manual: real CTX + wallet purchase workflow
 
@@ -200,10 +201,16 @@ Defined in `apps/backend/vitest.config.ts` and `apps/web/vitest.config.ts`.
 If you're writing this table from memory, re-run `npm run test:coverage`
 in each workspace — the config files are the source of truth.
 
-| Surface                             | Lines | Branches | Functions | Statements |
-| ----------------------------------- | ----- | -------- | --------- | ---------- |
-| `apps/backend` (unit + integration) | 80%   | 72%      | 75%       | 80%        |
-| `apps/web` (excl. routes + root)    | 37%   | 32%      | 40%       | 35%        |
+| Surface                                               | Lines | Branches | Functions | Statements |
+| ----------------------------------------------------- | ----- | -------- | --------- | ---------- |
+| `apps/backend` (unit / default suite, no integration) | 80%   | 72%      | 75%       | 80%        |
+| `apps/web` (excl. routes + root)                      | 37%   | 32%      | 40%       | 35%        |
+
+A4-117: the backend coverage threshold reflects the default vitest
+config only. `apps/backend/vitest.integration.config.ts` sets
+`coverage: { enabled: false }` and the default config excludes
+`src/__tests__/integration/**`, so integration tests run for
+correctness but do NOT contribute to coverage numbers.
 
 ### Web coverage scope
 

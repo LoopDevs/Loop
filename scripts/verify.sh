@@ -13,6 +13,7 @@ echo "=== Typecheck ===" && npm run typecheck
 echo "=== Lint ==="      && npm run lint
 echo "=== Format ==="    && npm run format:check
 echo "=== Docs ==="      && ./scripts/lint-docs.sh
+echo "=== Env perms ===" && ./scripts/check-env-perms.sh
 echo "=== Test ==="      && npm test
 echo "=== Audit ==="     && npm run audit
 echo ""

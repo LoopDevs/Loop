@@ -35,10 +35,21 @@ const CoinGeckoResponse = z.object({
 /**
  * Cache stamps in wall-clock ms. Single-entry cache: one URL feeds
  * all three currencies, so we don't need per-currency bookkeeping.
+ *
+ * A4-106: store the rate as MICRO-CENTS per XLM (cents × 10^6) so
+ * the size-check math keeps sub-cent precision through the
+ * conversion. Earlier `Math.round(usd * 100)` rounded straight to
+ * cents, opening a ~5% underpayment window when the floor-to-cent
+ * direction favoured the user. Multiplying by 1e8 instead lets us
+ * compute `ceil(chargeMinor × 10^13 / microCentsPerXlm)` with one
+ * deterministic rounding at the boundary.
  */
 interface CachedPrice {
-  /** Minor units per XLM, keyed by currency. 1 XLM = (n * 10^-2) units. */
-  minorPerXlm: Partial<Record<'USD' | 'GBP' | 'EUR', number>>;
+  /**
+   * Micro-cents (cents × 10^6) per 1 XLM, keyed by currency.
+   * 1 XLM = (microCentsPerXlm × 10^-8) major units.
+   */
+  microCentsPerXlm: Partial<Record<'USD' | 'GBP' | 'EUR', number>>;
   expiresAt: number;
 }
 
@@ -72,16 +83,16 @@ async function refresh(): Promise<CachedPrice> {
     throw new Error('Price feed schema drift');
   }
   const { usd, gbp, eur } = parsed.data.stellar;
-  // Convert major-unit USD to cents: 1 USDish × 100 = cents.
-  // Pricing APIs typically return 6+ decimals; we round to cent so
-  // stroopsPerCent math stays integer.
-  const minorPerXlm: CachedPrice['minorPerXlm'] = {
-    USD: Math.round(usd * 100),
+  // A4-106: scale to micro-cents (cents × 10^6) so the size-check
+  // math keeps the upstream feed's typical 6+ decimal precision.
+  // 1 USD = 100 cents = 100_000_000 micro-cents.
+  const microCentsPerXlm: CachedPrice['microCentsPerXlm'] = {
+    USD: Math.round(usd * 100_000_000),
   };
-  if (typeof gbp === 'number') minorPerXlm.GBP = Math.round(gbp * 100);
-  if (typeof eur === 'number') minorPerXlm.EUR = Math.round(eur * 100);
+  if (typeof gbp === 'number') microCentsPerXlm.GBP = Math.round(gbp * 100_000_000);
+  if (typeof eur === 'number') microCentsPerXlm.EUR = Math.round(eur * 100_000_000);
   cached = {
-    minorPerXlm,
+    microCentsPerXlm,
     expiresAt: Date.now() + CACHE_TTL_MS,
   };
   return cached;
@@ -99,21 +110,50 @@ async function refresh(): Promise<CachedPrice> {
  * again.
  */
 export async function stroopsPerCent(currency: 'USD' | 'GBP' | 'EUR'): Promise<bigint> {
+  // A4-106: kept as a low-fidelity preview helper for callers that
+  // genuinely just want a per-cent quote (e.g. dev logging).
+  // Production size-check math goes through
+  // `requiredStroopsForCharge` so the per-charge ceil avoids
+  // rounding-down 4–5% underpayments at the cent boundary.
+  const microCents = await microCentsPerXlmFor(currency);
+  // 1 XLM = `microCents` × 10^-6 cents = 10^7 stroops.
+  // 1 cent = (10^7 / microCents) × 10^6 stroops = 10^13 / microCents stroops.
+  return BigInt(Math.ceil(10_000_000_000_000 / microCents));
+}
+
+async function microCentsPerXlmFor(currency: 'USD' | 'GBP' | 'EUR'): Promise<number> {
   const snap = cached !== null && cached.expiresAt > Date.now() ? cached : await refresh();
-  const minor = snap.minorPerXlm[currency];
-  if (minor === undefined) {
+  const microCents = snap.microCentsPerXlm[currency];
+  if (microCents === undefined) {
     throw new Error(`Price feed has no rate for ${currency}`);
   }
-  if (minor <= 0) {
-    // A zero/negative price on a fiat feed is never real; guards
-    // the callsite from a div-by-zero-shaped incident later.
-    throw new Error(`Price feed returned non-positive rate for ${currency}: ${minor}`);
+  if (microCents <= 0) {
+    throw new Error(`Price feed returned non-positive rate for ${currency}: ${microCents}`);
   }
-  // 1 XLM = `minor` minor units. 1 XLM = 10^7 stroops.
-  // So 1 minor unit = 10^7 / minor stroops.
-  // Ceiling so the required-stroops math rejects underpayments — a
-  // user sending exactly the computed amount always satisfies `>=`.
-  return BigInt(Math.ceil(10_000_000 / minor));
+  return microCents;
+}
+
+/**
+ * A4-106: precise required-stroops for an XLM payment of
+ * `chargeMinor` (cents) against the live oracle. Performs ONE
+ * ceiling at the end so a user trying to under-pay can't ride a
+ * floor-to-cent rounding window. Use in preference to
+ * `stroopsPerCent` × `chargeMinor`.
+ *
+ *   1 XLM = microCents × 10^-6 cents = 10^7 stroops
+ *   ⇒ 1 cent  = 10^13 / microCents stroops
+ *   ⇒ N cents = ceil(N × 10^13 / microCents) stroops
+ */
+export async function requiredStroopsForCharge(
+  chargeMinor: bigint,
+  currency: 'USD' | 'GBP' | 'EUR',
+): Promise<bigint> {
+  const microCents = await microCentsPerXlmFor(currency);
+  // BigInt division floors; `(num + denom - 1) / denom` is the
+  // standard ceiling pattern.
+  const num = chargeMinor * 10_000_000_000_000n;
+  const denom = BigInt(microCents);
+  return (num + denom - 1n) / denom;
 }
 
 // Fiat FX feed (Frankfurter) + cross-currency conversion helpers

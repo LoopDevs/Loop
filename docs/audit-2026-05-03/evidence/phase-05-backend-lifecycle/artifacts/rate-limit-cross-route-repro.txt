@@ -1,0 +1,12 @@
+{"level":30,"time":1777834125678,"service":"loop-backend","env":"test","component":"access","method":"GET","path":"/api/config","status":200,"durationMs":1,"requestId":"60ba8574-9c74-4b5c-8962-2f2d39628da8","msg":"GET /api/config 200 1ms"}
+config 1 200
+config 2 200
+config 3 200
+config 4 200
+config 5 200
+auth 429 {"code":"RATE_LIMITED","message":"Too many requests"}
+{"level":30,"time":1777834125679,"service":"loop-backend","env":"test","component":"access","method":"GET","path":"/api/config","status":200,"durationMs":0,"requestId":"c4a46f42-5491-401a-9d38-47eb07b41dff","msg":"GET /api/config 200 0ms"}
+{"level":30,"time":1777834125679,"service":"loop-backend","env":"test","component":"access","method":"GET","path":"/api/config","status":200,"durationMs":0,"requestId":"f9c1cd5b-25a9-4a75-a435-17297816bb07","msg":"GET /api/config 200 0ms"}
+{"level":30,"time":1777834125680,"service":"loop-backend","env":"test","component":"access","method":"GET","path":"/api/config","status":200,"durationMs":1,"requestId":"307e2c8d-acba-4cd1-9645-00b62c072ea3","msg":"GET /api/config 200 1ms"}
+{"level":30,"time":1777834125680,"service":"loop-backend","env":"test","component":"access","method":"GET","path":"/api/config","status":200,"durationMs":0,"requestId":"38e9ad03-6fae-4212-9418-af3d9072e2cc","msg":"GET /api/config 200 0ms"}
+{"level":30,"time":1777834125681,"service":"loop-backend","env":"test","component":"access","method":"POST","path":"/api/auth/request-otp","status":429,"durationMs":0,"requestId":"7eb16be0-86b8-4a38-bd79-983baa86e5eb","msg":"POST /api/auth/request-otp 429 0ms"}

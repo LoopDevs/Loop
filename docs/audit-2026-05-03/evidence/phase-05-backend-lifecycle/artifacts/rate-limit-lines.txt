@@ -1,0 +1,305 @@
+apps/backend/src/uuid.ts:4: * Admin drill-down handlers take untrusted id params from the URL
+apps/backend/src/credits/payout-compensation.ts:5: * destination account doesn't exist, the operator lacks a trustline,
+apps/backend/src/middleware/rate-limit.ts:4: * - `clientIpFor(c)` — resolves the IP the limiter keys on, with
+apps/backend/src/middleware/rate-limit.ts:6: *   trusted (audit A-023, A2-1526). Exported so the trust-proxy
+apps/backend/src/middleware/rate-limit.ts:9: * - `rateLimit(max, windowMs)` — Hono middleware factory. Returns
+apps/backend/src/middleware/rate-limit.ts:10: *   429 with `Retry-After` when the per-IP budget is exceeded,
+apps/backend/src/middleware/rate-limit.ts:12: *   `/metrics`. Honours `env.DISABLE_RATE_LIMITING` as the e2e
+apps/backend/src/middleware/rate-limit.ts:17: * The `rateLimitMap` is module-local; `RATE_LIMIT_MAP_MAX = 10_000`
+apps/backend/src/middleware/rate-limit.ts:30:const RATE_LIMIT_MAP_MAX = 10_000;
+apps/backend/src/middleware/rate-limit.ts:40: *   - `env.TRUST_PROXY === true`: we're behind a trusted edge
+apps/backend/src/middleware/rate-limit.ts:44: *   - `env.TRUST_PROXY === false`: no trusted proxy in front of
+apps/backend/src/middleware/rate-limit.ts:52:// A2-1526: exported so `__tests__/trust-proxy.test.ts` can drive
+apps/backend/src/middleware/rate-limit.ts:57:export function clientIpFor(c: Context): string {
+apps/backend/src/middleware/rate-limit.ts:93: * `RATE_LIMIT_MAP_MAX` cap kicks in and starts evicting on insert).
+apps/backend/src/middleware/rate-limit.ts:102:export function rateLimit(
+apps/backend/src/middleware/rate-limit.ts:110:    // Setting DISABLE_RATE_LIMITING=1 lets the harness bypass the
+apps/backend/src/middleware/rate-limit.ts:114:    if (env.DISABLE_RATE_LIMITING) {
+apps/backend/src/middleware/rate-limit.ts:118:    const ip = clientIpFor(c);
+apps/backend/src/middleware/rate-limit.ts:126:      if (rateLimitMap.size >= RATE_LIMIT_MAP_MAX && entry === undefined) {
+apps/backend/src/middleware/rate-limit.ts:137:        c.header('Retry-After', String(retryAfterSec));
+apps/backend/src/middleware/rate-limit.ts:139:        return c.json({ code: 'RATE_LIMITED', message: 'Too many requests' }, 429);
+apps/backend/src/payments/payout-worker-pay-one.ts:98:    // Fail closed. Without a trustworthy idempotency read we cannot
+apps/backend/src/routes/admin-operator.ts:51:  app.get('/api/admin/supplier-spend', rateLimit(60, 60_000), adminSupplierSpendHandler);
+apps/backend/src/routes/admin-operator.ts:60:    rateLimit(60, 60_000),
+apps/backend/src/routes/admin-operator.ts:71:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-operator.ts:83:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-operator.ts:93:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-operator.ts:101:  app.get('/api/admin/operator-stats', rateLimit(60, 60_000), adminOperatorStatsHandler);
+apps/backend/src/routes/admin-operator.ts:107:  app.get('/api/admin/operators/latency', rateLimit(60, 60_000), adminOperatorLatencyHandler);
+apps/backend/src/routes/auth.ts:55:  app.post('/api/auth/request-otp', killSwitch('auth'), rateLimit(5, 60_000), requestOtpHandler);
+apps/backend/src/routes/auth.ts:59:  app.post('/api/auth/verify-otp', killSwitch('auth'), rateLimit(10, 60_000), verifyOtpHandler);
+apps/backend/src/routes/auth.ts:63:  app.post('/api/auth/refresh', rateLimit(30, 60_000), refreshHandler);
+apps/backend/src/routes/auth.ts:71:    rateLimit(10, 60_000),
+apps/backend/src/routes/auth.ts:77:    rateLimit(10, 60_000),
+apps/backend/src/routes/auth.ts:84:  app.delete('/api/auth/session', rateLimit(20, 60_000), logoutHandler);
+apps/backend/src/routes/public.ts:42:  app.get('/api/public/cashback-stats', rateLimit(60, 60_000), publicCashbackStatsHandler);
+apps/backend/src/routes/public.ts:49:    rateLimit(60, 60_000),
+apps/backend/src/routes/public.ts:58:  app.get('/api/public/merchants/:id', rateLimit(60, 60_000), publicMerchantHandler);
+apps/backend/src/routes/public.ts:66:  app.get('/api/public/cashback-preview', rateLimit(60, 60_000), publicCashbackPreviewHandler);
+apps/backend/src/routes/public.ts:70:  // users can add trustlines to the verified issuer accounts
+apps/backend/src/routes/public.ts:72:  app.get('/api/public/loop-assets', rateLimit(60, 60_000), publicLoopAssetsHandler);
+apps/backend/src/routes/public.ts:79:  app.get('/api/public/flywheel-stats', rateLimit(60, 60_000), publicFlywheelStatsHandler);
+apps/backend/src/routes/misc.ts:36:  app.get('/api/clusters', rateLimit(60, 60_000), clustersHandler);
+apps/backend/src/routes/misc.ts:37:  app.get('/api/config', rateLimit(120, 60_000), configHandler);
+apps/backend/src/routes/misc.ts:38:  app.get('/api/image', rateLimit(300, 60_000), imageProxyHandler);
+apps/backend/src/discord/monitoring.ts:64: * ops whether it's an ops-actionable issue (op_no_trust,
+apps/backend/src/discord/monitoring.ts:66: * often needs the user to add a trustline, the latter is a cue to
+apps/backend/src/routes/users.ts:33: * - **Stellar / payouts** — GET /stellar-trustlines (30),
+apps/backend/src/routes/users.ts:68:import { getUserStellarTrustlinesHandler } from '../users/stellar-trustlines.js';
+apps/backend/src/routes/users.ts:86:  app.get('/api/users/me', rateLimit(60, 60_000), getMeHandler);
+apps/backend/src/routes/users.ts:87:  app.post('/api/users/me/home-currency', rateLimit(10, 60_000), setHomeCurrencyHandler);
+apps/backend/src/routes/users.ts:88:  app.put('/api/users/me/stellar-address', rateLimit(10, 60_000), setStellarAddressHandler);
+apps/backend/src/routes/users.ts:95:  app.get('/api/users/me/dsr/export', rateLimit(5, 60 * 60_000), dsrExportHandler);
+apps/backend/src/routes/users.ts:96:  app.post('/api/users/me/dsr/delete', rateLimit(3, 60 * 60_000), dsrDeleteHandler);
+apps/backend/src/routes/users.ts:100:    '/api/users/me/stellar-trustlines',
+apps/backend/src/routes/users.ts:101:    rateLimit(30, 60_000),
+apps/backend/src/routes/users.ts:104:  app.get('/api/users/me/pending-payouts', rateLimit(60, 60_000), getUserPendingPayoutsHandler);
+apps/backend/src/routes/users.ts:107:    rateLimit(60, 60_000),
+apps/backend/src/routes/users.ts:114:    rateLimit(120, 60_000),
+apps/backend/src/routes/users.ts:119:    rateLimit(120, 60_000),
+apps/backend/src/routes/users.ts:124:  app.get('/api/users/me/cashback-history', rateLimit(60, 60_000), getCashbackHistoryHandler);
+apps/backend/src/routes/users.ts:126:  app.get('/api/users/me/cashback-history.csv', rateLimit(6, 60_000), getCashbackHistoryCsvHandler);
+apps/backend/src/routes/users.ts:127:  app.get('/api/users/me/credits', rateLimit(60, 60_000), getUserCreditsHandler);
+apps/backend/src/routes/users.ts:128:  app.get('/api/users/me/cashback-summary', rateLimit(60, 60_000), getCashbackSummaryHandler);
+apps/backend/src/routes/users.ts:131:    rateLimit(60, 60_000),
+apps/backend/src/routes/users.ts:134:  app.get('/api/users/me/cashback-monthly', rateLimit(60, 60_000), getCashbackMonthlyHandler);
+apps/backend/src/routes/users.ts:137:  app.get('/api/users/me/orders/summary', rateLimit(60, 60_000), getUserOrdersSummaryHandler);
+apps/backend/src/routes/users.ts:138:  app.get('/api/users/me/flywheel-stats', rateLimit(60, 60_000), getUserFlywheelStatsHandler);
+apps/backend/src/routes/users.ts:142:    rateLimit(60, 60_000),
+apps/backend/src/routes/admin-credit-writes.ts:45:    rateLimit(20, 60_000),
+apps/backend/src/routes/admin-credit-writes.ts:54:  app.post('/api/admin/users/:userId/refunds', rateLimit(20, 60_000), adminRefundHandler);
+apps/backend/src/routes/admin-credit-writes.ts:61:    rateLimit(20, 60_000),
+apps/backend/src/routes/orders.ts:61:  app.post('/api/orders', killSwitch('orders'), rateLimit(10, 60_000), createOrderHandler);
+apps/backend/src/routes/orders.ts:62:  app.get('/api/orders', rateLimit(60, 60_000), listOrdersHandler);
+apps/backend/src/routes/orders.ts:63:  app.get('/api/orders/:id', rateLimit(120, 60_000), getOrderHandler);
+apps/backend/src/routes/orders.ts:69:  app.post('/api/orders/loop', killSwitch('orders'), rateLimit(10, 60_000), loopCreateOrderHandler);
+apps/backend/src/routes/orders.ts:74:  app.get('/api/orders/loop', rateLimit(60, 60_000), loopListOrdersHandler);
+apps/backend/src/routes/orders.ts:80:  app.get('/api/orders/loop/:id', rateLimit(120, 60_000), loopGetOrderHandler);
+apps/backend/src/middleware/kill-switch.ts:3: * Returns 503 `SUBSYSTEM_DISABLED` with a Retry-After hint when
+apps/backend/src/routes/admin-per-merchant.ts:68:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-per-merchant.ts:74:  app.get('/api/admin/merchant-stats.csv', rateLimit(10, 60_000), adminMerchantStatsCsvHandler);
+apps/backend/src/routes/admin-per-merchant.ts:81:    rateLimit(60, 60_000),
+apps/backend/src/routes/admin-per-merchant.ts:90:    rateLimit(10, 60_000),
+apps/backend/src/routes/admin-per-merchant.ts:100:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-per-merchant.ts:110:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-per-merchant.ts:121:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-per-merchant.ts:132:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-per-merchant.ts:143:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-per-merchant.ts:153:    rateLimit(10, 60_000),
+apps/backend/src/routes/admin-per-merchant.ts:166:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-fleet-monthly.ts:48:  app.get('/api/admin/cashback-monthly', rateLimit(60, 60_000), adminCashbackMonthlyHandler);
+apps/backend/src/routes/admin-fleet-monthly.ts:55:  app.get('/api/admin/payouts-monthly', rateLimit(60, 60_000), adminPayoutsMonthlyHandler);
+apps/backend/src/routes/admin-fleet-monthly.ts:61:  app.get('/api/admin/payouts-activity', rateLimit(60, 60_000), adminPayoutsActivityHandler);
+apps/backend/src/routes/admin-fleet-monthly.ts:66:  app.get('/api/admin/payouts-activity.csv', rateLimit(10, 60_000), adminPayoutsActivityCsvHandler);
+apps/backend/src/routes/admin-fleet-monthly.ts:74:    rateLimit(10, 60_000),
+apps/backend/src/routes/admin-fleet-monthly.ts:83:    rateLimit(10, 60_000),
+apps/backend/src/routes/admin-fleet-monthly.ts:92:    rateLimit(10, 60_000),
+apps/backend/src/payments/horizon-trustlines.ts:2: * Horizon trustline reader (ADR 015).
+apps/backend/src/payments/horizon-trustlines.ts:5: * trustlines the account has established, keyed as `${code}::${issuer}`.
+apps/backend/src/payments/horizon-trustlines.ts:7: * address but you're missing the USDLOOP trustline — your next payout
+apps/backend/src/payments/horizon-trustlines.ts:8: * will fail with `op_no_trust`" before the payout worker finds out.
+apps/backend/src/payments/horizon-trustlines.ts:12: * to a user's own address and speaks trustlines, not balances.
+apps/backend/src/payments/horizon-trustlines.ts:21: *     this as "no trustlines, link something valid first".
+apps/backend/src/payments/horizon-trustlines.ts:27:const log = logger.child({ area: 'horizon-trustlines' });
+apps/backend/src/payments/horizon-trustlines.ts:61:  trustlines: Map<string, TrustlineEntry>;
+apps/backend/src/payments/horizon-trustlines.ts:109:      trustlines: new Map(),
+apps/backend/src/payments/horizon-trustlines.ts:127:  const trustlines = new Map<string, TrustlineEntry>();
+apps/backend/src/payments/horizon-trustlines.ts:129:    // Skip the `native` (XLM) row — it's not a trustline, just the
+apps/backend/src/payments/horizon-trustlines.ts:130:    // account reserve. Our trustline map is explicitly for credit
+apps/backend/src/payments/horizon-trustlines.ts:142:      log.warn({ err, account, code, issuer }, 'Skipping unparseable trustline');
+apps/backend/src/payments/horizon-trustlines.ts:145:    trustlines.set(key, { code, issuer, balanceStroops, limitStroops });
+apps/backend/src/payments/horizon-trustlines.ts:151:    trustlines,
+apps/backend/src/__tests__/routes.integration.test.ts:17:    // Audit A-023 — rate limiter trusts X-Forwarded-For only when this
+apps/backend/src/__tests__/routes.integration.test.ts:18:    // is true. Integration tests inject XFF values, so enable trust.
+apps/backend/src/__tests__/routes.integration.test.ts:466:  it('includes Retry-After header when rate-limited', async () => {
+apps/backend/src/__tests__/routes.integration.test.ts:482:    const retryAfter = limited.headers.get('Retry-After');
+apps/backend/src/__tests__/routes.integration.test.ts:484:    // Retry-After is seconds; must be a positive integer
+apps/backend/src/routes/admin-treasury.ts:35:  app.get('/api/admin/treasury', rateLimit(60, 60_000), treasuryHandler);
+apps/backend/src/routes/admin-treasury.ts:41:  app.get('/api/admin/treasury.csv', rateLimit(10, 60_000), adminTreasurySnapshotCsvHandler);
+apps/backend/src/routes/admin-treasury.ts:46:  app.get('/api/admin/treasury/credit-flow', rateLimit(60, 60_000), adminTreasuryCreditFlowHandler);
+apps/backend/src/routes/admin-treasury.ts:53:    rateLimit(30, 60_000),
+apps/backend/src/routes/admin-treasury.ts:60:  app.get('/api/admin/asset-drift/state', rateLimit(120, 60_000), adminAssetDriftStateHandler);
+apps/backend/src/payments/__tests__/horizon-balances.test.ts:54:  it('returns usdcStroops null when account has no USDC trustline', async () => {
+apps/backend/src/__tests__/discord.test.ts:434:      kind: 'terminal_no_trust',
+apps/backend/src/__tests__/discord.test.ts:435:      reason: 'op_no_trust',
+apps/backend/src/payments/__tests__/payout-worker.test.ts:231:  it('terminal_no_trust immediately marks failed regardless of attempts', async () => {
+apps/backend/src/payments/__tests__/payout-worker.test.ts:234:      new PayoutSubmitErrorMock('terminal_no_trust', 'op_no_trust'),
+apps/backend/src/payments/__tests__/payout-worker.test.ts:254:      new PayoutSubmitErrorMock('terminal_no_trust', 'op_no_trust'),
+apps/backend/src/payments/__tests__/payout-worker.test.ts:260:        kind: 'terminal_no_trust',
+apps/backend/src/payments/__tests__/payout-worker.test.ts:261:        reason: 'op_no_trust',
+apps/backend/src/images/ssrf-guard.ts:43: * only operator-trusted hostnames can be resolved at all. Untrusted input
+apps/backend/src/openapi/users-profile.ts:7: * and the linked-wallet pair (set address, read trustlines):
+apps/backend/src/openapi/users-profile.ts:12: *   - GET  /api/users/me/stellar-trustlines     (Horizon trustline read)
+apps/backend/src/openapi/users-profile.ts:29:import { registerUsersStellarTrustlinesOpenApi } from './users-stellar-trustlines.js';
+apps/backend/src/openapi/users-profile.ts:183:  // The Horizon-trustline path
+apps/backend/src/openapi/users-profile.ts:184:  // (`/api/users/me/stellar-trustlines`) and its two locally-scoped
+apps/backend/src/openapi/users-profile.ts:186:  // live in `./users-stellar-trustlines.ts`. Same path-registration
+apps/backend/src/payments/__tests__/payout-submit.test.ts:264:  it('classifies op_no_trust as terminal_no_trust', async () => {
+apps/backend/src/payments/__tests__/payout-submit.test.ts:265:    sdkState.submitThrow = horizonError(400, 'tx_failed', ['op_no_trust']);
+apps/backend/src/payments/__tests__/payout-submit.test.ts:267:      kind: 'terminal_no_trust',
+apps/backend/src/payments/__tests__/payout-submit.test.ts:293:    sdkState.submitThrow = horizonError(400, 'tx_failed', ['op_no_trust']);
+apps/backend/src/payments/__tests__/payout-submit.test.ts:300:      expect(e.resultCodes?.operations).toEqual(['op_no_trust']);
+apps/backend/src/openapi/public.ts:116:      'Public transparency surface. Lists the LOOP-branded Stellar assets Loop pays cashback in, with their issuer public keys, so third-party wallets + users adding trustlines can verify the asset list without guessing from on-chain traffic. Only issuer-configured pairs appear — publishing an unconfigured code would risk users opening a trustline to a spoofed issuer. `Cache-Control: public, max-age=300` on the happy path, `max-age=60` on the empty-list fallback. Never 500.',
+apps/backend/src/payments/horizon-balances.ts:10: *     account has no USDC trustline (the asset won't appear in the
+apps/backend/src/payments/horizon-balances.ts:66:  /** USDC balance in stroops. Null when no trustline to the configured issuer is established. */
+apps/backend/src/__tests__/trust-proxy.test.ts:6: * trust boundary. The audit flagged this as a defense that was never
+apps/backend/src/__tests__/trust-proxy.test.ts:11: * `clientIpFor` predicate regressed, no test would catch it.
+apps/backend/src/__tests__/trust-proxy.test.ts:15: *   - trust-proxy.test.ts — TRUST_PROXY=false (this file)
+apps/backend/src/__tests__/trust-proxy.test.ts:16: *   - trust-proxy-trusted.test.ts — TRUST_PROXY=true (sibling file)
+apps/backend/src/__tests__/trust-proxy.test.ts:18: * Both files drive the exported `clientIpFor(c)` directly with
+apps/backend/src/__tests__/trust-proxy.test.ts:65:import { clientIpFor } from '../app.js';
+apps/backend/src/__tests__/trust-proxy.test.ts:85:describe('clientIpFor — TRUST_PROXY=false (A2-1526)', () => {
+apps/backend/src/__tests__/trust-proxy.test.ts:92:    expect(clientIpFor(ctx)).toBe('10.0.0.1');
+apps/backend/src/__tests__/trust-proxy.test.ts:99:    expect(clientIpFor(ctx)).toBe('unknown');
+apps/backend/src/__tests__/trust-proxy.test.ts:103:    const a = clientIpFor(makeCtx({ xForwardedFor: '1.2.3.4', socketAddress: '10.0.0.1' }));
+apps/backend/src/__tests__/trust-proxy.test.ts:104:    const b = clientIpFor(makeCtx({ xForwardedFor: '5.6.7.8', socketAddress: '10.0.0.1' }));
+apps/backend/src/__tests__/trust-proxy.test.ts:116:    expect(clientIpFor(ctx)).toBe('10.0.0.1');
+apps/backend/src/payments/payout-submit.ts:67:  /** `op_no_trust` — destination account missing the asset trustline. */
+apps/backend/src/payments/payout-submit.ts:68:  | 'terminal_no_trust'
+apps/backend/src/payments/payout-submit.ts:216:  if (ops.includes('op_no_trust')) {
+apps/backend/src/payments/payout-submit.ts:218:      'terminal_no_trust',
+apps/backend/src/payments/payout-submit.ts:219:      'Destination account has no trustline to this asset',
+apps/backend/src/routes/admin-user-cluster.ts:66:  app.get('/api/admin/users', rateLimit(60, 60_000), adminListUsersHandler);
+apps/backend/src/routes/admin-user-cluster.ts:72:  app.get('/api/admin/users/by-email', rateLimit(60, 60_000), adminUserByEmailHandler);
+apps/backend/src/routes/admin-user-cluster.ts:80:    rateLimit(60, 60_000),
+apps/backend/src/routes/admin-user-cluster.ts:90:    rateLimit(60, 60_000),
+apps/backend/src/routes/admin-user-cluster.ts:100:    rateLimit(10, 60_000),
+apps/backend/src/routes/admin-user-cluster.ts:106:  app.get('/api/admin/users/:userId', rateLimit(120, 60_000), adminGetUserHandler);
+apps/backend/src/routes/admin-user-cluster.ts:110:  app.get('/api/admin/users/:userId/credits', rateLimit(120, 60_000), adminUserCreditsHandler);
+apps/backend/src/routes/admin-user-cluster.ts:117:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-user-cluster.ts:127:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-user-cluster.ts:136:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-user-cluster.ts:146:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-user-cluster.ts:158:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-user-cluster.ts:166:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-user-cluster.ts:176:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-user-cluster.ts:185:    rateLimit(10, 60_000),
+apps/backend/src/payments/stroops.ts:11: * trustlines (USDC, USDLOOP/GBPLOOP/EURLOOP), and payment
+apps/backend/src/routes/admin-order-drill.ts:39:  app.get('/api/admin/orders/activity', rateLimit(60, 60_000), adminOrdersActivityHandler);
+apps/backend/src/routes/admin-order-drill.ts:48:    rateLimit(60, 60_000),
+apps/backend/src/routes/admin-order-drill.ts:58:    rateLimit(60, 60_000),
+apps/backend/src/routes/admin-order-drill.ts:64:  app.get('/api/admin/orders/:orderId', rateLimit(120, 60_000), adminGetOrderHandler);
+apps/backend/src/routes/admin-order-drill.ts:68:  app.get('/api/admin/orders.csv', rateLimit(10, 60_000), adminOrdersCsvHandler);
+apps/backend/src/routes/merchants.ts:48:  app.get('/api/merchants', rateLimit(180, 60_000), merchantListHandler);
+apps/backend/src/routes/merchants.ts:51:  app.get('/api/merchants/all', rateLimit(60, 60_000), merchantAllHandler);
+apps/backend/src/routes/merchants.ts:53:  app.get('/api/merchants/by-slug/:slug', rateLimit(120, 60_000), merchantBySlugHandler);
+apps/backend/src/routes/merchants.ts:62:  app.get('/api/merchants/cashback-rates', rateLimit(120, 60_000), merchantsCashbackRatesHandler);
+apps/backend/src/routes/merchants.ts:72:    rateLimit(120, 60_000),
+apps/backend/src/routes/merchants.ts:91:  app.get('/api/merchants/:id', rateLimit(120, 60_000), merchantDetailHandler);
+apps/backend/src/routes/admin-ops-tail.ts:64:  app.get('/api/admin/orders', rateLimit(60, 60_000), adminListOrdersHandler);
+apps/backend/src/routes/admin-ops-tail.ts:68:  app.get('/api/admin/merchant-flows', rateLimit(60, 60_000), adminMerchantFlowsHandler);
+apps/backend/src/routes/admin-ops-tail.ts:72:  app.get('/api/admin/discord/config', rateLimit(60, 60_000), adminDiscordConfigHandler);
+apps/backend/src/routes/admin-ops-tail.ts:76:  app.get('/api/admin/users/search', rateLimit(60, 60_000), adminUserSearchHandler);
+apps/backend/src/routes/admin-ops-tail.ts:79:  app.get('/api/admin/user-credits.csv', rateLimit(20, 60_000), adminUserCreditsCsvHandler);
+apps/backend/src/routes/admin-ops-tail.ts:82:  app.get('/api/admin/reconciliation', rateLimit(30, 60_000), adminReconciliationHandler);
+apps/backend/src/routes/admin-ops-tail.ts:88:  app.get('/api/admin/merchant-stats', rateLimit(60, 60_000), adminMerchantStatsHandler);
+apps/backend/src/routes/admin-ops-tail.ts:94:  app.get('/api/admin/orders/:orderId/payout', rateLimit(120, 60_000), adminPayoutByOrderHandler);
+apps/backend/src/routes/admin-ops-tail.ts:99:  app.get('/api/admin/top-users', rateLimit(60, 60_000), adminTopUsersHandler);
+apps/backend/src/routes/admin-ops-tail.ts:104:  app.get('/api/admin/audit-tail', rateLimit(60, 60_000), adminAuditTailHandler);
+apps/backend/src/routes/admin-ops-tail.ts:110:  app.get('/api/admin/audit-tail.csv', rateLimit(10, 60_000), adminAuditTailCsvHandler);
+apps/backend/src/routes/admin-ops-tail.ts:117:  app.post('/api/admin/merchants/resync', rateLimit(2, 60_000), adminMerchantsResyncHandler);
+apps/backend/src/routes/admin-ops-tail.ts:121:  app.get('/api/admin/discord/notifiers', rateLimit(60, 60_000), adminDiscordNotifiersHandler);
+apps/backend/src/routes/admin-ops-tail.ts:126:  app.post('/api/admin/discord/test', rateLimit(10, 60_000), adminDiscordTestHandler);
+apps/backend/src/payments/payout-worker.ts:112: * function trusts that both are set.
+apps/backend/src/routes/admin-cashback-config.ts:37:  app.get('/api/admin/merchant-cashback-configs', rateLimit(120, 60_000), listConfigsHandler);
+apps/backend/src/routes/admin-cashback-config.ts:45:    rateLimit(10, 60_000),
+apps/backend/src/routes/admin-cashback-config.ts:55:    rateLimit(10, 60_000),
+apps/backend/src/routes/admin-cashback-config.ts:63:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-cashback-config.ts:68:    rateLimit(60, 60_000),
+apps/backend/src/routes/admin-cashback-config.ts:73:    rateLimit(120, 60_000),
+apps/backend/src/routes/admin-dashboard.ts:37:  app.get('/api/admin/stuck-orders', rateLimit(120, 60_000), adminStuckOrdersHandler);
+apps/backend/src/routes/admin-dashboard.ts:42:  app.get('/api/admin/stuck-payouts', rateLimit(120, 60_000), adminStuckPayoutsHandler);
+apps/backend/src/routes/admin-dashboard.ts:46:  app.get('/api/admin/cashback-activity', rateLimit(60, 60_000), adminCashbackActivityHandler);
+apps/backend/src/routes/admin-dashboard.ts:53:    rateLimit(60, 60_000),
+apps/backend/src/routes/admin-dashboard.ts:61:    rateLimit(60, 60_000),
+apps/backend/src/routes/admin-dashboard.ts:69:    rateLimit(10, 60_000),
+apps/backend/src/routes/admin-dashboard.ts:77:    rateLimit(10, 60_000),
+apps/backend/src/routes/admin-payouts.ts:44:  app.get('/api/admin/payouts', rateLimit(60, 60_000), adminListPayoutsHandler);
+apps/backend/src/routes/admin-payouts.ts:48:  app.get('/api/admin/payouts/:id', rateLimit(120, 60_000), adminGetPayoutHandler);
+apps/backend/src/routes/admin-payouts.ts:54:  app.get('/api/admin/payouts-by-asset', rateLimit(60, 60_000), adminPayoutsByAssetHandler);
+apps/backend/src/routes/admin-payouts.ts:60:  app.get('/api/admin/payouts/settlement-lag', rateLimit(60, 60_000), adminSettlementLagHandler);
+apps/backend/src/routes/admin-payouts.ts:63:  app.post('/api/admin/payouts/:id/retry', rateLimit(20, 60_000), adminRetryPayoutHandler);
+apps/backend/src/routes/admin-payouts.ts:70:    rateLimit(20, 60_000),
+apps/backend/src/routes/admin-payouts.ts:76:  app.get('/api/admin/payouts.csv', rateLimit(10, 60_000), adminPayoutsCsvHandler);
+apps/backend/src/__tests__/trust-proxy-trusted.test.ts:5: * A2-1526 — companion file to `trust-proxy.test.ts`. This one mocks
+apps/backend/src/__tests__/trust-proxy-trusted.test.ts:54:import { clientIpFor } from '../app.js';
+apps/backend/src/__tests__/trust-proxy-trusted.test.ts:68:describe('clientIpFor — TRUST_PROXY=true (A2-1526)', () => {
+apps/backend/src/__tests__/trust-proxy-trusted.test.ts:74:    expect(clientIpFor(ctx)).toBe('1.2.3.4');
+apps/backend/src/__tests__/trust-proxy-trusted.test.ts:82:    // Only the leftmost is trusted — middle / right entries are the Fly
+apps/backend/src/__tests__/trust-proxy-trusted.test.ts:84:    expect(clientIpFor(ctx)).toBe('1.2.3.4');
+apps/backend/src/__tests__/trust-proxy-trusted.test.ts:92:    expect(clientIpFor(ctx)).toBe('1.2.3.4');
+apps/backend/src/__tests__/trust-proxy-trusted.test.ts:97:    expect(clientIpFor(ctx)).toBe('10.0.0.2');
+apps/backend/src/__tests__/trust-proxy-trusted.test.ts:101:    const a = clientIpFor(makeCtx({ xForwardedFor: '1.2.3.4', socketAddress: '10.0.0.1' }));
+apps/backend/src/__tests__/trust-proxy-trusted.test.ts:102:    const b = clientIpFor(makeCtx({ xForwardedFor: '5.6.7.8', socketAddress: '10.0.0.1' }));
+apps/backend/src/__tests__/trust-proxy-trusted.test.ts:110:    expect(clientIpFor(ctx)).toBe('unknown');
+apps/backend/src/openapi/users-stellar-trustlines.ts:2: * Caller-scoped Stellar-trustline OpenAPI registration (ADR 015).
+apps/backend/src/openapi/users-stellar-trustlines.ts:5: * Horizon-side trustline-check path sits alongside its two
+apps/backend/src/openapi/users-stellar-trustlines.ts:9: *   - GET /api/users/me/stellar-trustlines
+apps/backend/src/openapi/users-stellar-trustlines.ts:14: * trustline. Distinct from the profile-mutation paths above (which
+apps/backend/src/openapi/users-stellar-trustlines.ts:17: * trustlines surface.
+apps/backend/src/openapi/users-stellar-trustlines.ts:34: * Registers `/api/users/me/stellar-trustlines` plus its two
+apps/backend/src/openapi/users-stellar-trustlines.ts:65:    path: '/api/users/me/stellar-trustlines',
+apps/backend/src/openapi/users-stellar-trustlines.ts:66:    summary: 'Caller-scoped LOOP-asset trustline check (ADR 015).',
+apps/backend/src/openapi/users-stellar-trustlines.ts:68:      "Reads the caller's linked Stellar address on Horizon and reports which configured LOOP assets already have a trustline established. Lets the wallet UI warn 'your next USDLOOP payout will fail — add the trustline first' rather than surfacing a `op_no_trust` failed payout after the fact. Returns `accountLinked: false` with stub rows when the user hasn't linked a wallet; `accountExists: false` when the address isn't funded yet. 30s cache per address.",
+apps/backend/src/openapi/users-stellar-trustlines.ts:89:        description: 'Horizon trustline check unavailable',
+apps/backend/src/env.ts:12: * `TRUST_PROXY=false` would silently enable X-Forwarded-For trust —
+apps/backend/src/env.ts:108:  // Rate-limiter trust boundary (audit A-023). When `true` the rate limiter
+apps/backend/src/env.ts:122:  DISABLE_RATE_LIMITING: envBoolean.default(false),
+apps/backend/src/env.ts:541:  // A2-1605: DISABLE_RATE_LIMITING bypasses every per-IP rate
+apps/backend/src/env.ts:551:  if (parsed.data.NODE_ENV === 'production' && parsed.data.DISABLE_RATE_LIMITING) {
+apps/backend/src/env.ts:553:      'Invalid environment variables — DISABLE_RATE_LIMITING must not be set in production (audit A2-1605). ' +
+apps/backend/src/auth/__tests__/handler.test.ts:14:  // Audit A-023 — rate limiter trusts X-Forwarded-For only when this is
+apps/backend/src/auth/__tests__/handler.test.ts:16:  // per-"client" isolation, so we turn trust on for the test harness.
+apps/backend/src/openapi/users.ts:4: * view surface: profile, cashback ledger, credits, trustlines,
+apps/backend/src/openapi/users.ts:50:  // /me/stellar-trustlines) plus their five locally-scoped
+apps/backend/src/payments/__tests__/horizon-trustlines.test.ts:2:import { __resetTrustlineCacheForTests, getAccountTrustlines } from '../horizon-trustlines.js';
+apps/backend/src/payments/__tests__/horizon-trustlines.test.ts:17:  it('extracts trustlines from Horizon /accounts balances', async () => {
+apps/backend/src/payments/__tests__/horizon-trustlines.test.ts:45:    expect(snap.trustlines.size).toBe(2); // native XLM row excluded
+apps/backend/src/payments/__tests__/horizon-trustlines.test.ts:46:    const usd = snap.trustlines.get('USDLOOP::GUSD');
+apps/backend/src/payments/__tests__/horizon-trustlines.test.ts:48:    const gbp = snap.trustlines.get('GBPLOOP::GGBP');
+apps/backend/src/payments/__tests__/horizon-trustlines.test.ts:61:    expect(snap.trustlines.size).toBe(0);
+apps/backend/src/auth/__tests__/require-auth.test.ts:130:  it('drops an untrusted X-Client-Id without failing the request', async () => {
+apps/backend/src/users/__tests__/handler.test.ts:286:  // longer trusted for identity resolution. Previously the handler
+apps/backend/src/__tests__/env.test.ts:131:  // so `TRUST_PROXY=false` would silently enable X-Forwarded-For trust —
+apps/backend/src/__tests__/env.test.ts:219:  // A2-1605: DISABLE_RATE_LIMITING is a test-harness flag; production
+apps/backend/src/__tests__/env.test.ts:221:  describe('A2-1605: DISABLE_RATE_LIMITING production guard', () => {
+apps/backend/src/__tests__/env.test.ts:222:    it('refuses to start in production when DISABLE_RATE_LIMITING=true', () => {
+apps/backend/src/__tests__/env.test.ts:228:          DISABLE_RATE_LIMITING: 'true',
+apps/backend/src/__tests__/env.test.ts:230:      ).toThrow(/DISABLE_RATE_LIMITING/);
+apps/backend/src/__tests__/env.test.ts:240:            DISABLE_RATE_LIMITING: v,
+apps/backend/src/__tests__/env.test.ts:242:        ).toThrow(/DISABLE_RATE_LIMITING/);
+apps/backend/src/__tests__/env.test.ts:246:    it('accepts DISABLE_RATE_LIMITING=true in development + test', () => {
+apps/backend/src/__tests__/env.test.ts:248:        const env = parseEnv({ ...base, NODE_ENV: nodeEnv, DISABLE_RATE_LIMITING: 'true' });
+apps/backend/src/__tests__/env.test.ts:249:        expect(env.DISABLE_RATE_LIMITING).toBe(true);
+apps/backend/src/__tests__/env.test.ts:253:    it('accepts production when DISABLE_RATE_LIMITING is unset / false', () => {
+apps/backend/src/__tests__/env.test.ts:266:          DISABLE_RATE_LIMITING: 'false',
+apps/backend/src/public/loop-assets.ts:7: * trustlines) verify the asset list without having to guess from
+apps/backend/src/public/loop-assets.ts:21: * trustline to whichever account happens to issue a same-named token,
+apps/backend/src/app.ts:35:// `rateLimit`, `clientIpFor`, the `rateLimitMap` cap, and the test
+apps/backend/src/app.ts:38:// `clientIpFor` and `__resetRateLimitsForTests` are re-exported here
+apps/backend/src/app.ts:39:// so existing test imports (`trust-proxy.test.ts`,
+apps/backend/src/app.ts:42:export { clientIpFor, __resetRateLimitsForTests } from './middleware/rate-limit.js';
+apps/backend/src/__tests__/integration/cashback-history.test.ts:214:    // the handler trusts it and escapes at serialisation time.
+apps/backend/src/users/__tests__/stellar-trustlines.test.ts:24:vi.mock('../../payments/horizon-trustlines.js', () => ({
+apps/backend/src/users/__tests__/stellar-trustlines.test.ts:46:import { getUserStellarTrustlinesHandler } from '../stellar-trustlines.js';
+apps/backend/src/users/__tests__/stellar-trustlines.test.ts:94:  it('marks trustlines present + carries balance/limit when Horizon returns them', async () => {
+apps/backend/src/users/__tests__/stellar-trustlines.test.ts:98:      trustlines: new Map([
+apps/backend/src/users/__tests__/stellar-trustlines.test.ts:145:      trustlines: new Map(),
+apps/backend/src/users/stellar-trustlines.ts:2: * `GET /api/users/me/stellar-trustlines` — user-facing trustline
+apps/backend/src/users/stellar-trustlines.ts:6: * cashback?". Without a trustline to the configured issuer, the
+apps/backend/src/users/stellar-trustlines.ts:8: * `op_no_trust`, and the user ends up with a `failed` pending_payouts
+apps/backend/src/users/stellar-trustlines.ts:14: *     link-wallet nudge instead of a trustline list.
+apps/backend/src/users/stellar-trustlines.ts:18: *     a "add trustline for <issuer>" affordance.
+apps/backend/src/users/stellar-trustlines.ts:23: * trustline" that shouts at the user.
+apps/backend/src/users/stellar-trustlines.ts:29:import { getAccountTrustlines } from '../payments/horizon-trustlines.js';
+apps/backend/src/users/stellar-trustlines.ts:34:const log = logger.child({ handler: 'user-stellar-trustlines' });
+apps/backend/src/users/stellar-trustlines.ts:40:  /** Balance on an existing trustline. BigInt as string. 0 when absent. */
+apps/backend/src/users/stellar-trustlines.ts:95:      const t = snap.trustlines.get(key);
+apps/backend/src/users/stellar-trustlines.ts:112:    log.warn({ err, address: user.stellarAddress }, 'Horizon trustline read failed');
+apps/backend/src/auth/native-request-otp.ts:70:      // Retry-After; this branch handles rotated-IP attacks silently.
+apps/backend/src/users/dsr-delete.ts:89:  // anonymisation (e.g. an `op_no_trust` failure that needs the
+apps/backend/src/auth/require-auth.ts:72: *   - `c.set('clientId', platform)` when a trusted `X-Client-Id` is
+apps/backend/src/auth/require-auth.ts:125:  // an untrusted or unknown value is dropped rather than forwarded, which
+apps/backend/src/auth/require-auth.ts:132:    log.warn({ clientId }, 'Rejected untrusted X-Client-Id value on authenticated request');
+apps/backend/src/admin/__tests__/treasury.test.ts:236:  it('preserves null stroops when the account has no trustline for USDC', async () => {

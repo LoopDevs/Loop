@@ -45,12 +45,20 @@ export function mountMerchantRoutes(app: Hono): void {
   // 60/min because legitimate clients fetch it once and cache;
   // by-slug at 120/min matches the sibling cashback-rate
   // endpoints.
-  app.get('/api/merchants', rateLimit(180, 60_000), merchantListHandler);
+  app.get('/api/merchants', rateLimit('GET /api/merchants', 180, 60_000), merchantListHandler);
 
   // /all must come BEFORE /:id so 'all' is not interpreted as an id.
-  app.get('/api/merchants/all', rateLimit(60, 60_000), merchantAllHandler);
+  app.get(
+    '/api/merchants/all',
+    rateLimit('GET /api/merchants/all', 60, 60_000),
+    merchantAllHandler,
+  );
   // /by-slug/:slug before /:id for the same reason.
-  app.get('/api/merchants/by-slug/:slug', rateLimit(120, 60_000), merchantBySlugHandler);
+  app.get(
+    '/api/merchants/by-slug/:slug',
+    rateLimit('GET /api/merchants/by-slug/:slug', 120, 60_000),
+    merchantBySlugHandler,
+  );
 
   // GET /api/merchants/cashback-rates — bulk map of active
   // cashback pcts across every merchant (ADR 011 / 015). Lets
@@ -59,7 +67,11 @@ export function mountMerchantRoutes(app: Hono): void {
   // path — must come BEFORE the `/:merchantId/cashback-rate`
   // route so Hono's router matches the literal instead of
   // treating "cashback-rates" as a path param.
-  app.get('/api/merchants/cashback-rates', rateLimit(120, 60_000), merchantsCashbackRatesHandler);
+  app.get(
+    '/api/merchants/cashback-rates',
+    rateLimit('GET /api/merchants/cashback-rates', 120, 60_000),
+    merchantsCashbackRatesHandler,
+  );
 
   // GET /api/merchants/:merchantId/cashback-rate — public
   // cashback-rate preview for rendering "Earn X% cashback" on
@@ -69,7 +81,7 @@ export function mountMerchantRoutes(app: Hono): void {
   // reads.
   app.get(
     '/api/merchants/:merchantId/cashback-rate',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/merchants/:merchantId/cashback-rate', 120, 60_000),
     merchantCashbackRateHandler,
   );
 
@@ -88,5 +100,9 @@ export function mountMerchantRoutes(app: Hono): void {
   // backpressure. 120/min per IP matches the other merchant
   // reads and is well above a logged-in user's realistic browse
   // rate.
-  app.get('/api/merchants/:id', rateLimit(120, 60_000), merchantDetailHandler);
+  app.get(
+    '/api/merchants/:id',
+    rateLimit('GET /api/merchants/:id', 120, 60_000),
+    merchantDetailHandler,
+  );
 }

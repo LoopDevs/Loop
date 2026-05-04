@@ -1,0 +1,831 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Principle of least privilege — default GITHUB_TOKEN permissions grant
+# write on almost everything, which is more than any job here needs. Set
+# the workflow default to read-only on contents; a compromised dep
+# running in one of these jobs cannot then mutate the repo, open PRs,
+# or move tags. The sibling workflows (pr-automation, pr-review) already
+# scope their tokens explicitly; bringing ci.yml in line closes the gap.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Every non-audit job needs node_modules. The setup pattern used below is:
+#   1. checkout
+#   2. setup-node (for node itself + npm download cache)
+#   3. actions/cache keyed on package-lock.json for the installed node_modules
+#   4. npm ci only if the cache missed
+#
+# The cache saves ~20s per job on a hit. Invalidates whenever package-lock.json
+# changes. husky's `prepare` script is a no-op in CI (nothing to hook into).
+
+jobs:
+  quality:
+    name: Quality (typecheck, lint, format, docs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        # A2-107: commitlint needs the full history (or at least the
+        # base..head range) to lint per-commit messages on PRs.
+        # Shallow default (`fetch-depth: 1`) only has HEAD and trips
+        # `fatal: Invalid revision range` on the base.sha.
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Cache node_modules
+        id: npm-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install deps
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        # A2-304: `--ignore-scripts` blocks every postinstall hook
+        # (notably `@bufbuild/buf` shelling to `npm install` as its
+        # binary-fetch fallback — supply-chain surface on
+        # `--omit=optional` clones). esbuild ships pre-built binaries
+        # via optional deps + a postinstall that selects the right
+        # platform; `npm rebuild esbuild` regenerates the platform
+        # binary symlink without re-running every other postinstall.
+        # Production Dockerfiles already use this pattern.
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+      # Install flyctl so `lint:docs` can run `flyctl config validate` on
+      # every fly.toml in the repo. Without this, a regression like the
+      # orphaned `[[services.http_checks]]` block (PR #120) slips through
+      # CI and only surfaces when an ops engineer runs validate locally.
+      - name: Install flyctl
+        # A2-114: SHA-pinned to the 1.5 release so a compromised
+        # fly-side push to `master` can't swap in a token-exfil
+        # step. Bump deliberately — verify the new SHA against a
+        # signed release tag, don't chase the tag.
+        uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run lint:docs
+      # A2-107: server-side commitlint on PRs. Husky's commit-msg hook
+      # only runs on the author's machine, so a bypass (`--no-verify`,
+      # broken local install, GitHub web-edit commit) would let a
+      # malformed Conventional Commit slip onto the PR. Re-run the
+      # check here against every commit between the PR base and head;
+      # the same `commitlint.config.js` from the repo root is the
+      # source of truth.
+      - name: Commitlint (PR commits)
+        if: github.event_name == 'pull_request'
+        run: npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
+
+  test-unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Cache node_modules
+        id: npm-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install deps
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        # A2-304: `--ignore-scripts` blocks every postinstall hook
+        # (notably `@bufbuild/buf` shelling to `npm install` as its
+        # binary-fetch fallback — supply-chain surface on
+        # `--omit=optional` clones). esbuild ships pre-built binaries
+        # via optional deps + a postinstall that selects the right
+        # platform; `npm rebuild esbuild` regenerates the platform
+        # binary symlink without re-running every other postinstall.
+        # Production Dockerfiles already use this pattern.
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+      - name: Run tests with coverage
+        run: npm run test:coverage --workspaces --if-present
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage
+          path: |
+            apps/backend/coverage/
+            apps/web/coverage/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # A2-1705 phase A.1: real-postgres integration suite. Walks the
+  # cashback-flywheel happy path through a live `loop_test` database
+  # so the schema-level invariants (CHECK constraints, partial unique
+  # indexes, triggers) and drizzle SQL emission + multi-table txn
+  # semantics in `markOrderFulfilled` are exercised end-to-end —
+  # exactly the layer Phase 6.5 of the audit found bugs A2-610 / 611
+  # / 700 in via empirical testing. The default unit suite uses a
+  # placeholder DATABASE_URL + per-file mocks; this job is the only
+  # path that runs against a real postgres.
+  flywheel-integration:
+    name: Flywheel integration (real postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      # `postgres:16` matches docker-compose.yml + the prod base image
+      # (Fly Postgres tracks the same major). Port 5432 → host 5433
+      # mirrors the dev port choice so DATABASE_URL is identical.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: loop
+          POSTGRES_PASSWORD: loop
+          POSTGRES_DB: loop_test
+        ports:
+          - 5433:5432
+        # Wait for the container to accept connections before the job
+        # actually runs — `pg_isready` is the upstream-recommended
+        # readiness probe.
+        options: >-
+          --health-cmd "pg_isready -U loop -d loop_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Cache node_modules
+        id: npm-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install deps
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        # A2-304: same `--ignore-scripts` posture as the rest of CI.
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+      - name: Run flywheel integration suite
+        # The integration setup file pins DATABASE_URL to the loop_test
+        # DB on port 5433 (identical shape locally + in CI). The suite
+        # runs migrations on cold start via the `ensureMigrated` helper
+        # so the GitHub-hosted postgres lands at the right schema
+        # before any test touches it.
+        run: npm run test:integration -w @loop/backend
+
+  audit:
+    name: Security audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      # `npm audit` reads package-lock.json directly — no install needed.
+      # setup-node is still useful for the npm binary and consistent version.
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+      - run: npm run audit
+
+  # A2-408: SBOM (CycloneDX) + provenance attestation (SLSA build
+  # provenance) + cosign keyless signing — all three of the audit's
+  # remaining A2-408 legs, all driven by GitHub OIDC so there are
+  # no operator-managed keys to rotate. Closes A2-408 fully.
+  #
+  # Generates a CycloneDX 1.6 SBOM for the npm workspace tree via
+  # `@cyclonedx/cyclonedx-npm`, then attests + signs the SBOM file
+  # with the GitHub workflow's OIDC identity. The attestation is
+  # written to Sigstore Rekor (transparency log) so anyone can
+  # verify "this SBOM was produced by Loop's CI on commit X" without
+  # trusting Loop or GitHub directly. The signature is a Sigstore
+  # bundle (.sig + .pem) that pairs with the SBOM artifact.
+  #
+  # SBOM is generated for the workspace root — the recursive npm
+  # tree captures every transitive dep across apps/* and packages/*
+  # in one document, which is what tooling expects on the consumer
+  # side (vex / Snyk / Dependency-Track).
+  sbom:
+    name: SBOM + provenance + signing
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Required for keyless signing + attestation via GitHub OIDC.
+      id-token: write
+      # `actions/attest-build-provenance` writes the attestation to
+      # the repo's attestation index.
+      attestations: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Cache node_modules
+        id: npm-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install deps
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        # A2-304: same `--ignore-scripts` posture as the rest of CI.
+        # The buf postinstall fallback can't fire; esbuild's
+        # platform-binary symlink is rebuilt explicitly.
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+      - name: Generate CycloneDX SBOM
+        # `npx --no-install` blocks any postinstall behaviour from
+        # `cyclonedx-npm` itself; the package is already in
+        # node_modules from `npm ci` above (it's a devDependency on
+        # the root). The SBOM walks the entire workspace dep tree
+        # — `--omit dev` keeps the document scoped to runtime
+        # dependencies (the supply-chain surface that actually ships
+        # to prod). `--spec-version 1.6` matches the current
+        # CycloneDX schema; consumers default to it.
+        run: |
+          set -euo pipefail
+          npx --no-install @cyclonedx/cyclonedx-npm \
+            --output-format JSON \
+            --output-file sbom.cdx.json \
+            --spec-version 1.6 \
+            --omit dev
+      - name: Attest SBOM provenance (SLSA build provenance)
+        # `actions/attest-build-provenance` produces a SLSA
+        # provenance attestation linking the SBOM to the workflow
+        # run, repo, ref, and SHA. The attestation is uploaded to
+        # the GitHub-hosted attestation log + Sigstore Rekor; the
+        # workflow's GitHub OIDC token is the signer (no key mgmt).
+        # Verify externally via `gh attestation verify`.
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v3.0.0
+        with:
+          subject-path: sbom.cdx.json
+      - name: Install cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+      - name: Sign SBOM (cosign keyless)
+        # `cosign sign-blob --yes` runs in keyless mode by default
+        # since cosign 2.0 — uses the workflow's GitHub OIDC token
+        # to obtain a short-lived Sigstore certificate, signs the
+        # blob, and writes the signature + cert to disk. The bundle
+        # ships alongside the SBOM as a workflow artifact for
+        # consumers that prefer cosign over the GitHub attestation
+        # API.
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --bundle sbom.cdx.json.cosign-bundle \
+            sbom.cdx.json
+      - name: Upload SBOM + signature artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom
+          path: |
+            sbom.cdx.json
+            sbom.cdx.json.cosign-bundle
+          if-no-files-found: error
+          retention-days: 90
+
+  # A2-408 (CVE scanning leg): container CVE scan via Trivy. Scans
+  # the Dockerfile-pinned base image (`node:22-alpine@sha256:…`)
+  # for known OS-level vulnerabilities and surfaces the Dockerfile
+  # itself for misconfig (root user, ADD-with-URL, etc). The SBOM
+  # / provenance / signing legs of A2-408 land in the `sbom` job
+  # above.
+  #
+  # `--severity HIGH,CRITICAL` keeps the noise floor reasonable;
+  # the job fails on any HIGH or above. Bump the base-image SHA
+  # deliberately when this fires — that's the intended remediation
+  # path, same as A2-403's pinned-digest posture.
+  container-cve-scan:
+    name: Container CVE scan (trivy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Run trivy image scan (backend Dockerfile base image)
+        # aquasec/trivy is the upstream maintainer image. `image`
+        # mode scans an OCI image for OS + lib CVEs; the base
+        # image SHA is pinned in apps/backend/Dockerfile (A2-403)
+        # and reused by apps/web/Dockerfile, so a single scan
+        # covers both deploys.
+        #
+        # `--pkg-types os` restricts the scan to OS-level (Alpine
+        # apk) packages. Without it, trivy also scans the bundled
+        # `npm` package.json inside `/usr/local/lib/node_modules` —
+        # which surfaces CVEs in npm's own dep tree (e.g.
+        # picomatch / cross-spawn), tracking them as Loop's
+        # liability when they're actually upstream npm/Node bugs.
+        # Loop's own dep tree is covered by `npm audit` in the
+        # `audit` job; A2-408's scope is OS packages only.
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$HOME/.cache/trivy:/root/.cache/" \
+            aquasec/trivy:0.55.2 \
+            image \
+            --pkg-types os \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --no-progress \
+            --ignore-unfixed \
+            'node:22-alpine@sha256:8ea2348b068a9544dae7317b4f3aafcdc032df1647bb7d768a05a5cad1a7683f'
+      - name: Run trivy config scan (Dockerfile misconfig)
+        # `trivy config` (0.55.2) takes a single directory (not a
+        # file list) and rejects `--no-progress` (only the `image`
+        # subcommand supports that flag). Scope to `apps` so both
+        # Dockerfiles fall under the scan root without surfacing
+        # repo-wide configs the audit doesn't care about.
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE":/repo \
+            -w /repo \
+            aquasec/trivy:0.55.2 \
+            config \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            apps
+
+  # A2-206: secret scanning runs the gitleaks binary directly. The
+  # gitleaks-action wrapper requires a paid license for org-owned
+  # repos; the underlying CLI is free + open source. Default ruleset
+  # covers AWS / GCP / Stripe / Slack / private keys / JWTs / generic
+  # API-key heuristics. Allowlist for known false-positive paths
+  # (.env.example, __tests__, __fixtures__) lives in .gitleaks.toml.
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          # gitleaks needs full history to scan past commits.
+          fetch-depth: 0
+      - name: Run gitleaks
+        # zricethezav/gitleaks is the upstream maintainer image.
+        # `detect` walks every reachable commit; `--redact` keeps the
+        # offending value out of CI logs. `--exit-code=1` fails the
+        # job on any finding (default, but explicit).
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE":/repo \
+            -w /repo \
+            zricethezav/gitleaks:v8.30.1 \
+            detect \
+            --source=/repo \
+            --config=/repo/.gitleaks.toml \
+            --redact \
+            --verbose \
+            --no-banner \
+            --exit-code=1
+
+  build:
+    name: Build verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Cache node_modules
+        id: npm-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install deps
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        # A2-304: `--ignore-scripts` blocks every postinstall hook
+        # (notably `@bufbuild/buf` shelling to `npm install` as its
+        # binary-fetch fallback — supply-chain surface on
+        # `--omit=optional` clones). esbuild ships pre-built binaries
+        # via optional deps + a postinstall that selects the right
+        # platform; `npm rebuild esbuild` regenerates the platform
+        # binary symlink without re-running every other postinstall.
+        # Production Dockerfiles already use this pattern.
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+      - name: Build backend
+        run: npm run build -w @loop/backend
+      - name: Build web (SSR)
+        run: npm run build -w @loop/web
+        env:
+          VITE_API_URL: https://api.loopfinance.io
+          # A2-1307: stamp the build with the commit SHA so the Sentry
+          # release tag (Sentry.init reads VITE_SENTRY_RELEASE in
+          # apps/web/app/root.tsx) matches the source-map artifacts
+          # uploaded below. Push-only; PR builds leave it unset.
+          VITE_SENTRY_RELEASE: ${{ github.event_name == 'push' && github.sha || '' }}
+      - name: Build web (mobile static export)
+        run: npm run build:mobile -w @loop/web
+        env:
+          VITE_API_URL: https://api.loopfinance.io
+          VITE_SENTRY_RELEASE: ${{ github.event_name == 'push' && github.sha || '' }}
+      # A2-1115: assert admin route chunks stay out of the eagerly-loaded
+      # entry/root bundle. Catches regressions like a non-admin route
+      # importing from routes/admin*.tsx, which would silently ship
+      # admin payloads to every signed-out visitor.
+      - name: Verify admin bundle code-split
+        run: ./scripts/check-admin-bundle-split.sh
+      # A2-1307: upload web source maps to Sentry on push-to-main only.
+      # Without source maps, the Sentry events from prod (`apps/web/app/
+      # root.tsx` Sentry.init) carry minified stack traces — operator
+      # debug time scales with bundle obfuscation. Sentry's CLI matches
+      # the uploaded maps to the deployed release via the build-time
+      # `VITE_SENTRY_RELEASE` (set to the commit SHA below) which
+      # `Sentry.init` already forwards.
+      #
+      # Gated on the `SENTRY_AUTH_TOKEN` repo secret. When unset (e.g.
+      # PR runs from forks, or before the operator provisions the
+      # token), the step is a no-op — never blocks the build. Skipped
+      # entirely for PRs to avoid spamming Sentry with throwaway
+      # artifacts.
+      - name: Upload web source maps to Sentry
+        if: github.event_name == 'push' && env.SENTRY_AUTH_TOKEN != ''
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+          SENTRY_RELEASE: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SENTRY_ORG:-}" ] || [ -z "${SENTRY_PROJECT:-}" ]; then
+            echo "::warning::SENTRY_ORG / SENTRY_PROJECT vars unset — skipping source-map upload"
+            exit 0
+          fi
+          # A3-030 / ADR-029: use the repo-managed CLI pinned in
+          # package-lock.json, not a fresh runtime npm resolution.
+          ./node_modules/.bin/sentry-cli sourcemaps inject \
+            --org "$SENTRY_ORG" \
+            --project "$SENTRY_PROJECT" \
+            apps/web/build
+          ./node_modules/.bin/sentry-cli sourcemaps upload \
+            --org "$SENTRY_ORG" \
+            --project "$SENTRY_PROJECT" \
+            --release "$SENTRY_RELEASE" \
+            apps/web/build
+      - name: Report bundle size
+        run: |
+          echo "## Bundle Size" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Asset | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|------|" >> $GITHUB_STEP_SUMMARY
+          SSR_SIZE=$(du -sh apps/web/build/client/ | cut -f1)
+          echo "| Web (SSR client) | $SSR_SIZE |" >> $GITHUB_STEP_SUMMARY
+          for f in apps/web/build/client/assets/*.js; do
+            SIZE=$(du -sh "$f" | cut -f1)
+            NAME=$(basename "$f")
+            echo "| $NAME | $SIZE |" >> $GITHUB_STEP_SUMMARY
+          done
+      # Upload the backend build so test-e2e can reuse it instead of compiling
+      # the backend a second time.
+      - name: Upload backend build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: backend-dist
+          path: apps/backend/dist/
+          retention-days: 1
+
+  test-e2e:
+    name: E2E tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'pull_request'
+    needs: [quality, test-unit, build]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Cache node_modules
+        id: npm-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install deps
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        # A2-304: `--ignore-scripts` blocks every postinstall hook
+        # (notably `@bufbuild/buf` shelling to `npm install` as its
+        # binary-fetch fallback — supply-chain surface on
+        # `--omit=optional` clones). esbuild ships pre-built binaries
+        # via optional deps + a postinstall that selects the right
+        # platform; `npm rebuild esbuild` regenerates the platform
+        # binary symlink without re-running every other postinstall.
+        # Production Dockerfiles already use this pattern.
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Playwright system deps (cache hit path)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      # Reuse the backend dist produced by the `build` job — saves ~30s of
+      # rebuilding the same code the previous job already built.
+      - name: Download backend build
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: backend-dist
+          path: apps/backend/dist/
+      # NOTE: no `Build web` step here. Playwright's webServer config
+      # (playwright.config.ts) runs `npm run dev:web` itself with
+      # VITE_API_URL threaded through its `env` block. Building web up front
+      # produced output nothing read.
+      - name: Start backend
+        run: npm run start -w @loop/backend &
+        env:
+          PORT: 8080
+          NODE_ENV: test
+          GIFT_CARD_API_BASE_URL: https://spend.ctx.com
+          INCLUDE_DISABLED_MERCHANTS: 'true'
+          # Required by env.ts zod validator but never connected to —
+          # NODE_ENV=test skips runMigrations and the e2e suite does
+          # not exercise db-backed admin/credits endpoints.
+          DATABASE_URL: postgres://placeholder:placeholder@localhost:5433/loop_test
+      - name: Wait for backend
+        run: npx wait-on http://localhost:8080/health --timeout 30000
+      - name: Run e2e tests (real CTX)
+        # `test:e2e:real` is the explicit opt-in for the real-upstream suite.
+        # `test:e2e` is the self-contained mocked default (audit A-003).
+        run: npm run test:e2e:real
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  test-e2e-mocked:
+    name: E2E tests (mocked CTX)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Deterministic, no external dependencies — runs on every push and PR
+    # (unlike `test-e2e` which talks to the real upstream and is PR-gated).
+    needs: [quality, test-unit]
+    services:
+      # A2-1705 phase A.2: postgres for the mocked-e2e harness.
+      # `playwright.mocked.config.ts::globalSetup` runs the checked-in
+      # drizzle migrations against this DB before booting the backend
+      # webServer. Same port mapping (5433 → 5432) as docker-compose so
+      # the URL is identical locally + in CI. The existing CTX-proxy
+      # purchase flow doesn't write to this DB (orders live in
+      # mock-CTX's memory map); this is the harness investment for
+      # future loop-native UI tests.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: loop
+          POSTGRES_PASSWORD: loop
+          POSTGRES_DB: loop_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U loop -d loop_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Cache node_modules
+        id: npm-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install deps
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        # A2-304: `--ignore-scripts` blocks every postinstall hook
+        # (notably `@bufbuild/buf` shelling to `npm install` as its
+        # binary-fetch fallback — supply-chain surface on
+        # `--omit=optional` clones). esbuild ships pre-built binaries
+        # via optional deps + a postinstall that selects the right
+        # platform; `npm rebuild esbuild` regenerates the platform
+        # binary symlink without re-running every other postinstall.
+        # Production Dockerfiles already use this pattern.
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Playwright system deps (cache hit path)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      # The mocked suite's playwright config boots mock-ctx, backend (tsx),
+      # and the web dev server itself — no extra setup here.
+      - name: Run mocked e2e tests
+        run: npm run test:e2e:mocked
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: playwright-report-mocked
+          path: playwright-report/
+          retention-days: 7
+
+  test-e2e-flywheel:
+    name: E2E tests (loop-native flywheel)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # A2-1705 phase A.3 closure — separate config / port range from
+    # the mocked-e2e suite because LOOP_AUTH_NATIVE_ENABLED=true
+    # changes the home page's SSR branch and would break the legacy
+    # CTX-proxy tests that run there. Walks the consumer-side UI
+    # surface: real session restore via the test-only mint-token
+    # endpoint → /orders renders the seeded fulfilled order +
+    # cashback earnings headline.
+    needs: [quality, test-unit]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: loop
+          POSTGRES_PASSWORD: loop
+          POSTGRES_DB: loop_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U loop -d loop_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Cache node_modules
+        id: npm-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install deps
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Playwright system deps (cache hit path)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      - name: Run loop-native flywheel e2e tests
+        run: npm run test:e2e:flywheel
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: playwright-report-flywheel
+          path: playwright-report/
+          retention-days: 7
+
+  notify:
+    name: Discord notification
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    # Include test-e2e so the Discord status matches the actual PR gate. Without
+    # it, Discord reported PASSED whenever the fast jobs were green, even if
+    # e2e had failed.
+    needs:
+      [
+        quality,
+        test-unit,
+        flywheel-integration,
+        audit,
+        secret-scan,
+        container-cve-scan,
+        sbom,
+        build,
+        test-e2e,
+        test-e2e-mocked,
+        test-e2e-flywheel,
+      ]
+    steps:
+      - name: Notify Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_DEPLOYMENTS }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          BRANCH: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          FAILED: ${{ contains(needs.*.result, 'failure') }}
+        run: |
+          set -euo pipefail
+          if [ "$FAILED" = "true" ]; then
+            STATUS="❌ FAILED"
+            COLOR=15158332
+          else
+            STATUS="✅ PASSED"
+            COLOR=3066993
+          fi
+
+          # Take the first line of the commit message; everything else (quotes,
+          # backslashes, newlines) is handled by jq's JSON encoder. The previous
+          # sed-based sanitizer could leave a literal backslash in the body,
+          # which made the JSON malformed and a careful commit message could
+          # inject extra JSON fields.
+          #
+          # A2-1415: an attacker-controlled commit message can also contain
+          # Discord-rendered markdown — `[click](https://evil.com)` becomes a
+          # clickable link in the embed; `\u202E` flips the rendering direction;
+          # zero-width chars hide content. Mirror the backend's
+          # `escapeMarkdown` (A2-2004) here: strip bidi + zero-width chars,
+          # then backslash-escape the markdown specials. The escape happens
+          # BEFORE jq, so jq's JSON-encoding then double-escapes the
+          # backslashes — Discord renders the literal characters.
+          FIRST_LINE_RAW=$(printf '%s' "${COMMIT_MSG:-}" | head -n1)
+          FIRST_LINE=$(printf '%s' "$FIRST_LINE_RAW" \
+            | perl -CSD -pe 's/[\x{200B}-\x{200F}\x{2028}-\x{202F}\x{2066}-\x{2069}\x{FEFF}]//g' \
+            | sed 's/\([][()`*_~|>\\]\)/\\\1/g')
+          DESCRIPTION=$(printf '**Commit:** %s\n**Branch:** %s\n**Author:** %s' \
+            "$FIRST_LINE" "$BRANCH" "$ACTOR")
+          URL="$SERVER_URL/$REPO/actions/runs/$RUN_ID"
+          TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          PAYLOAD=$(jq -cn \
+            --arg title "$STATUS — CI Pipeline" \
+            --arg desc  "$DESCRIPTION" \
+            --argjson color $COLOR \
+            --arg url   "$URL" \
+            --arg ts    "$TIMESTAMP" \
+            '{embeds:[{title:$title,description:$desc,color:$color,url:$url,timestamp:$ts}]}')
+
+          curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK" || true

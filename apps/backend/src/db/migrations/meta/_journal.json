@@ -204,6 +204,27 @@
       "when": 1779700000000,
       "tag": "0028_pending_payouts_compensation_and_withdrawal_uniqueness",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1779800000000,
+      "tag": "0029_cashback_config_audit_insert_delete_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1779900000000,
+      "tag": "0030_pending_payouts_asset_checks",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1780000000000,
+      "tag": "0031_credit_transactions_reason_length",
+      "breakpoints": true
     }
   ]
 }

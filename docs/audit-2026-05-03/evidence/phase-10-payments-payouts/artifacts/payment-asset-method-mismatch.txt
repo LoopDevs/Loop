@@ -1,0 +1,35 @@
+Cold evidence: incoming payment asset is not required to match the order's selected payment method.
+
+Current code:
+
+- apps/backend/src/payments/watcher.ts:119-160
+  - For each Horizon payment, the watcher computes three independent match flags:
+    - `matchesUsdc`
+    - `matchesXlm`
+    - `loopAssetCode`
+  - If any accepted asset matches the deposit account and memo, the watcher loads the pending order by memo and calls `isAmountSufficient(p, order, loopAssetCode)`.
+  - The watcher does not reject when `matchesXlm` is true for an order whose `paymentMethod` is `usdc`, or when `matchesUsdc` is true for an `xlm` order.
+
+- apps/backend/src/payments/amount-sufficient.ts:49-139
+  - `isAmountSufficient` parses `payment.amount` as 7-decimal stroops.
+  - If `loopAssetCode !== null`, it applies the LOOP 1:1 fiat peg.
+  - Else if `order.paymentMethod === 'usdc'`, it applies USDC fiat value math.
+  - Else it applies XLM oracle math.
+  - It does not receive or verify the actual matched asset type (`USDC` vs native XLM).
+
+- apps/backend/src/payments/__tests__/watcher.test.ts:220-330
+  - Tests exercise USDC and XLM happy paths independently.
+  - No test asserts that an XLM payment for a USDC order is rejected, or that a USDC payment for an XLM order is rejected.
+
+Exploit example:
+
+- A user creates a `$10.00` order with `paymentMethod = 'usdc'`; the order memo and deposit address are shown.
+- The user sends `10.0000000` native XLM to the same deposit address with that memo.
+- `runPaymentWatcherTick` sets `matchesXlm = true` and loads the order by memo.
+- `isAmountSufficient` sees `order.paymentMethod === 'usdc'`, so it treats the 7-decimal amount as if it were USDC stroops.
+- For a USD charge, `requiredStroops = chargeMinor * 100_000 = 1000 * 100_000 = 100_000_000`, and `10.0000000` XLM also parses to `100_000_000` stroops.
+- The order is marked paid even though 10 XLM is materially less than 10 USDC at current XLM prices.
+
+Reasoning:
+
+The payment memo is the only order linkage, and the deposit address is shared by accepted assets. Therefore the watcher must bind the actual matched asset to the order's selected payment method before amount math. Otherwise the same decimal precision across XLM/USDC/LOOP assets lets a lower-value asset satisfy a higher-value method's nominal stroop threshold.

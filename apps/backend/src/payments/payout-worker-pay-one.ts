@@ -44,6 +44,14 @@ export type PayOutcome =
  */
 export interface PayOneArgs {
   operatorSecret: string;
+  /**
+   * A4-104: operator account pubkey for the Horizon idempotency
+   * pre-check. Must match the pubkey derived from `operatorSecret`
+   * — `submitPayout` derives the same one for signing. Resolved
+   * once in `resolvePayoutConfig` so this module doesn't pull in
+   * the SDK on every tick.
+   */
+  operatorAccount: string;
   horizonUrl: string;
   networkPassphrase: string;
   maxAttempts: number;
@@ -53,18 +61,15 @@ export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayO
   // Idempotency pre-check (ADR 016). If the prior submit landed
   // async between the last tick and this one, we observe the
   // payment in Horizon history and converge without issuing a
-  // second tx. `from` is the operator pubkey we'd sign with; we
-  // compute it off the secret via the SDK inside `submitPayout` —
-  // to keep `findOutboundPaymentByMemo` pure, we reuse the stored
-  // issuer pubkey as the lookup account (invariant: the operator
-  // account IS the issuer for LOOP-branded assets).
-  //
-  // TODO(follow-up): decouple operator pubkey from issuer pubkey
-  // once the operator secret is plumbed into its own env var with
-  // a separate LOOP_STELLAR_OPERATOR_ACCOUNT public key.
+  // second tx. A4-104: scan the operator account (the signer) — the
+  // earlier code reused `row.assetIssuer` here on the assumption
+  // that operator == issuer for LOOP-branded assets. That collapses
+  // for any treasury topology that splits issuer (cold) from
+  // operator (hot), so the pre-check would scan the wrong history
+  // and miss prior submits, opening a double-pay path.
   try {
     const prior = await findOutboundPaymentByMemo({
-      account: row.assetIssuer,
+      account: args.operatorAccount,
       to: row.toAddress,
       memo: row.memoText,
     });

@@ -29,9 +29,11 @@
  * retryable failure. Manual review by finance is the Phase 2a
  * workflow per ADR-024 §5.
  */
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, gte, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { creditTransactions, pendingPayouts, userCredits } from '../db/schema.js';
+import { env } from '../env.js';
+import { DailyAdjustmentLimitError } from './adjustments.js';
 
 export class PayoutNotCompensableError extends Error {
   constructor(message: string) {
@@ -109,6 +111,64 @@ export async function applyAdminPayoutCompensation(args: {
       throw new PayoutNotCompensableError(
         `Payout is in state '${payout.state}'; only 'failed' payouts can be compensated`,
       );
+    }
+
+    // A4-022: cross-check the locked payout's `userId` and the
+    // requesting user. A misuse from a future internal caller
+    // (cron / retry / a wrong-arg admin handler bug) that compensates
+    // user B for user A's failed payout would silently credit the
+    // wrong account. The lock above is `id`-scoped so we have the
+    // canonical row in hand; assert it.
+    if (payout.userId !== args.userId) {
+      throw new PayoutNotCompensableError(
+        `Payout userId '${payout.userId}' does not match args.userId '${args.userId}'`,
+      );
+    }
+
+    // A4-021: verify `amountMinor` equals the payout's outstanding
+    // stroops, divided by the LOOP-asset 100_000 stroops/minor
+    // ratio. The handler computes this correctly today, but the
+    // primitive should not trust the caller; over-compensation
+    // would silently inflate the user's balance vs. what was
+    // actually owed.
+    const expectedAmountMinor = payout.amountStroops / 100_000n;
+    if (args.amountMinor !== expectedAmountMinor) {
+      throw new PayoutNotCompensableError(
+        `Compensation amount '${args.amountMinor}' does not match payout outstanding '${expectedAmountMinor}' (stroops=${payout.amountStroops})`,
+      );
+    }
+
+    // A4-020: enforce the same daily admin-write cap on compensation
+    // rows that `applyAdminCreditAdjustment` enforces on adjustment
+    // rows. Earlier the cap query filtered on
+    // `referenceType='admin_adjustment'`, so compensation rows
+    // (`referenceType='payout'`) bypassed entirely — a compromised
+    // admin token could drain the treasury through compensation
+    // beyond the per-day cap. Apply the same cap to compensation
+    // totals (per currency, per day, all admins combined) until a
+    // schema-level per-admin attribution lands.
+    const capMinor = env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR;
+    if (capMinor > 0n) {
+      const dayStart = new Date();
+      dayStart.setUTCHours(0, 0, 0, 0);
+      const [dayRow] = await tx
+        .select({
+          usedMinor: sql<string>`COALESCE(SUM(ABS(${creditTransactions.amountMinor}))::text, '0')`,
+        })
+        .from(creditTransactions)
+        .where(
+          and(
+            eq(creditTransactions.type, 'adjustment'),
+            eq(creditTransactions.referenceType, 'payout'),
+            eq(creditTransactions.currency, args.currency),
+            gte(creditTransactions.createdAt, dayStart),
+          ),
+        );
+      const used = BigInt(dayRow?.usedMinor ?? '0');
+      const attempt = args.amountMinor;
+      if (used + attempt > capMinor) {
+        throw new DailyAdjustmentLimitError(args.currency, dayStart, used, capMinor, attempt);
+      }
     }
 
     const [existing] = await tx

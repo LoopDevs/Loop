@@ -1,0 +1,36 @@
+Web app full Vitest run and static boundary scan, 2026-05-03.
+
+Scope:
+- apps/web/app components, routes, hooks, stores, native wrappers, services, utilities, root, SSR entry, CSS.
+- apps/web route/component/service/unit tests.
+
+Command run:
+- npm test -w @loop/web -- --run
+
+Result:
+- 123 test files passed.
+- 959 tests passed.
+- Duration reported by Vitest: 12.95s.
+- jsdom emitted two non-fatal "HTMLCanvasElement.getContext() not implemented" warnings during the run; Vitest still exited 0.
+
+Static boundary scan:
+- Direct fetch calls outside tests remain confined to service/config/cluster modules and the documented sitemap loader exception.
+- Capacitor imports remain under apps/web/app/native plus native tests.
+- Dynamic HTML sinks remain limited to the root inline theme script, native app-lock static overlay markup, and escaped Leaflet popup/icon HTML in ClusterMap.
+- Persistent browser storage is intentionally used for non-sensitive merchant/theme/authed breadcrumbs and web-only session storage; refresh-token/pending-order caveats are tracked under existing findings where applicable.
+
+File inventory:
+- components/features: 97 source files, 78 tests.
+- components/ui: 8 source files, 1 test.
+- hooks: 7 source files, 5 tests.
+- stores: 3 source files, 4 tests.
+- utils: 11 source files, 7 tests.
+- routes: 35 source files, 14 tests.
+
+Existing findings connected to this surface remain open:
+- A4-026 pending Loop-native payment recovery after refresh/restart.
+- A4-029 cluster protobuf negotiation disabled by generated API mismatch.
+- A4-040 hardcoded-USDC primary purchase rail gap.
+- A4-041 unstable client idempotency key for rapid duplicate Loop-native submits.
+
+No new finding was filed from this full web test run itself.

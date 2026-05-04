@@ -1,0 +1,14 @@
+apps/backend/package.json:40:    "drizzle-kit": "0.31.10",
+package-lock.json:58:        "drizzle-kit": "0.31.10",
+package-lock.json:841:        "esbuild": "^0.27.0 || ^0.28.0",
+package-lock.json:859:        "esbuild": {
+package-lock.json:2669:        "esbuild": "~0.18.20",
+package-lock.json:2681:        "esbuild": "bin/esbuild"
+package-lock.json:7509:        "esbuild": ">=0.18"
+package-lock.json:8419:        "esbuild": "^0.25.4",
+package-lock.json:8423:        "drizzle-kit": "bin.cjs"
+package-lock.json:8808:        "esbuild": "bin/esbuild"
+package-lock.json:9191:        "esbuild": "bin/esbuild"
+package-lock.json:15388:        "esbuild": "^0.27.0",
+package-lock.json:15453:        "esbuild": "~0.27.0",
+package-lock.json:15727:        "esbuild": "^0.27.0",

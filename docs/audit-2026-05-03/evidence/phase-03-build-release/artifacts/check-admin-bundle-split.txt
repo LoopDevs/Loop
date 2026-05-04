@@ -1,0 +1,3 @@
+Admin route source files: 17
+Admin chunks in build:    18
+OK: admin routes are code-split out of the eagerly-loaded bundle.

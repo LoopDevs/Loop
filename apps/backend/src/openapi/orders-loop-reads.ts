@@ -50,9 +50,9 @@ export function registerOrdersLoopReadsOpenApi(
           'What the user was charged, in their home currency. Mirrors faceValueMinor when home === catalog currency.',
       }),
       chargeCurrency: z.string(),
-      paymentMethod: z.enum(['xlm', 'usdc', 'credit']).openapi({
+      paymentMethod: z.enum(['xlm', 'usdc', 'credit', 'loop_asset']).openapi({
         description:
-          'Payment rail used to pay the order. `loop_asset` maps to `credit` on the view since the user-visible shape is identical (no Stellar address to display post-pay).',
+          'A4-102: payment rail used to pay the order. The runtime view exposes all four ORDER_PAYMENT_METHODS values exactly as stored. (Earlier OpenAPI mapped `loop_asset` to `credit`; that erased the distinction needed by clients deciding whether to render an on-chain LOOP-asset deposit prompt.)',
       }),
       paymentMemo: z.string().nullable(),
       stellarAddress: z.string().nullable().openapi({

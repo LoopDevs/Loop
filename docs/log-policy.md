@@ -54,10 +54,14 @@ is admin read-audit query strings: search terms are treated as extra
 retention, not required identity context, so `email` and `q` params
 are redacted before off-host shipping.
 
-Sentry has a parallel scrubber (`apps/backend/src/sentry-init.ts` /
-`apps/web/app/sentry.client.ts`) that strips JWT-shaped substrings
-from error breadcrumbs before Sentry receives them — covers cases
-where Pino redaction misses a nested string-encoded payload.
+Sentry has a parallel scrubber (`apps/backend/src/sentry-scrubber.ts`
+called from `apps/backend/src/instrument.ts`'s `beforeSend` hook /
+`apps/web/app/utils/sentry-scrubber.ts` from
+`apps/web/app/utils/sentry-init.ts`) that strips JWT-shaped
+substrings, idempotency keys, emails, and Stellar secrets from
+error events / breadcrumbs / exception messages before Sentry
+receives them — covers cases where Pino redaction misses a
+nested string-encoded payload.
 
 ## Log retention (Phase 1)
 

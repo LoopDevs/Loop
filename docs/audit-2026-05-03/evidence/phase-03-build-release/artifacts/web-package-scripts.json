@@ -1,0 +1,10 @@
+{
+  "dev": "react-router dev --host",
+  "build": "react-router build",
+  "build:mobile": "BUILD_TARGET=mobile react-router build",
+  "start": "react-router-serve ./build/server/index.js",
+  "typecheck": "react-router typegen && tsc --noEmit",
+  "test": "vitest run",
+  "test:watch": "vitest",
+  "test:coverage": "vitest run --coverage"
+}

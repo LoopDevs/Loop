@@ -1,0 +1,44 @@
+Backend domain slice test run, 2026-05-03.
+
+Scope:
+- apps/backend/src/auth
+- apps/backend/src/orders
+- apps/backend/src/users
+- apps/backend/src/credits
+- apps/backend/src/payments
+- apps/backend/src/clustering
+- apps/backend/src/config
+- apps/backend/src/db
+- apps/backend/src/ctx
+- apps/backend/src/images
+- apps/backend/src/__tests__
+
+Command run:
+- npm test -w @loop/backend -- --run src/auth/__tests__ src/orders/__tests__ src/users/__tests__ src/credits/__tests__ src/payments/__tests__ src/clustering/__tests__ src/config/__tests__ src/db/__tests__ src/ctx/__tests__ src/images/__tests__ src/__tests__
+
+Result:
+- 81 test files passed.
+- 1,034 tests passed.
+- Duration reported by Vitest: 4.45s.
+
+Implementation/test pairing inventory:
+- auth: 21 implementation files, 13 test files. Missing same-name tests are helper/re-export files covered by auth handler/native/social/token tests: authenticated-user, id-token-replay, id-token-verify-with-key, issue-token-pair, jwks, logout-handler, native-request-otp, request-schemas.
+- orders: 24 implementation files, 8 test files. Missing same-name tests are split helpers covered by handler, Loop order, procurement, repo, and transition tests.
+- users: 15 implementation files, 11 test files. Missing same-name tests are handler split helpers covered by user handler/DSR/payout/cashback tests.
+- credits: 14 implementation files, 11 test files. Missing same-name tests are pending-payout split modules covered by pending-payout and payout-worker tests.
+- payments: 18 implementation files, 12 test files. Missing same-name tests are lower-level helpers covered by watcher, Horizon, payout-worker, price-feed, and stuck-payout watchdog tests.
+- clustering: 3 implementation files, 3 test files.
+- config: 1 implementation file, 1 test file.
+- db: 3 implementation files, 3 schema/user tests; db/client is covered indirectly by integration and migration checks.
+- ctx: 1 implementation file, 1 test file.
+- images: 2 implementation files, proxy test covers proxy and SSRF guard behavior.
+
+Existing findings connected to this slice remain open:
+- A4-012, A4-037 for auth.
+- A4-015, A4-016, A4-017, A4-026, A4-040, A4-041 for Loop-native orders and purchase recovery.
+- A4-024, A4-042 for credits/payout/user DSR relationships.
+- A4-018, A4-019, A4-020, A4-021, A4-022, A4-025 for payments/workers.
+- A4-029 for cluster protobuf runtime behavior.
+- A4-014 for image proxy OpenAPI status drift.
+
+No new finding was filed from this test run itself. The run is used as coverage and regression-confidence evidence, not as proof that the already-filed logic defects are false positives.

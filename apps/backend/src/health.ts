@@ -36,8 +36,10 @@
  * always the one from the last probe.
  */
 import type { Context } from 'hono';
+import { sql } from 'drizzle-orm';
 import { env } from './env.js';
 import { logger } from './logger.js';
+import { db } from './db/client.js';
 import { getLocations, isLocationLoading } from './clustering/data-store.js';
 import { getMerchants } from './merchants/sync.js';
 import { getRuntimeHealthSnapshot } from './runtime-health.js';
@@ -79,6 +81,62 @@ function maybeNotifyHealthChange(status: 'healthy' | 'degraded', details: string
   if (now - lastHealthNotifyAt < HEALTH_NOTIFY_COOLDOWN_MS) return;
   lastHealthNotifyAt = now;
   notifyHealthChange(status, details);
+}
+
+/**
+ * A4-034: lightweight Postgres readiness probe. Runs `SELECT 1`
+ * with a short timeout so a connection-pool exhaustion / DB
+ * outage / credential rotation mistake / network partition flips
+ * `/health` to degraded (HTTP 503 — A4-035 / A4-073) rather than
+ * silently leaving the orchestrator in the dark while DB-backed
+ * endpoints fail.
+ *
+ * Cached at the same 10s TTL as the upstream probe — `/health`
+ * is unauthenticated and Fly probes every 15s; we don't want a
+ * burst of `/health` calls to flood the DB pool.
+ */
+const DB_PROBE_TIMEOUT_MS = 3_000;
+let dbProbeCache: { reachable: boolean; at: number } | null = null;
+let dbProbeInFlight: Promise<boolean> | null = null;
+
+async function probeDb(): Promise<boolean> {
+  const now = Date.now();
+  if (dbProbeCache !== null && now - dbProbeCache.at < UPSTREAM_PROBE_TTL_MS) {
+    return dbProbeCache.reachable;
+  }
+  if (dbProbeInFlight !== null) return dbProbeInFlight;
+
+  dbProbeInFlight = (async () => {
+    let reachable = true;
+    try {
+      // SELECT 1 with a short timeout. A pool-exhausted state will
+      // queue the query past the timeout and surface as unreachable.
+      // The race against AbortSignal.timeout is the cheapest way to
+      // bound this without bringing in a query-timeout primitive
+      // we don't have today.
+      await Promise.race([
+        db.execute(sql`SELECT 1`),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('db probe timeout')), DB_PROBE_TIMEOUT_MS).unref?.(),
+        ),
+      ]);
+    } catch {
+      reachable = false;
+    }
+    dbProbeCache = { reachable, at: Date.now() };
+    dbProbeInFlight = null;
+    return reachable;
+  })();
+  return dbProbeInFlight;
+}
+
+/**
+ * Test seam: drops the cached DB probe so the next /health call
+ * re-runs the SELECT 1.
+ */
+export function __resetDbProbeCacheForTests(): void {
+  dbProbeCache = null;
+  dbProbeInFlight = null;
 }
 
 async function probeUpstream(): Promise<boolean> {
@@ -127,16 +185,45 @@ export async function healthHandler(c: Context): Promise<Response> {
   const merchantsStale = now - merLoadedAt > merchantStaleMs;
   const locationsStale = now - locLoadedAt > locationStaleMs;
 
-  const upstreamReachable = await probeUpstream();
+  const [upstreamReachable, databaseReachable] = await Promise.all([probeUpstream(), probeDb()]);
   const runtime = getRuntimeHealthSnapshot();
 
-  const degraded = merchantsStale || locationsStale || !upstreamReachable || runtime.degraded;
+  // Two-tier degradation. Critical = "the backend itself is in
+  // trouble; orchestrator should cycle this machine". Soft = "an
+  // external dependency we proxy is slow; we still want it visible
+  // in monitoring but the machine is functional and shouldn't
+  // cycle".
+  //
+  // Why split: a flapping upstream `/status` (CTX latency near our
+  // probe timeout) used to push `/health` to 503 → Fly cycles the
+  // machine → fresh process resets the in-memory notify cooldown →
+  // next state transition fires Discord again. Result: monitoring
+  // channel shows degraded↔healthy oscillation every couple of
+  // minutes during a CTX latency incident, even though Loop's own
+  // surfaces (DB, workers, in-memory caches) are fine.
+  //
+  // After this split:
+  //   - DB unreachable / required worker degraded → 503, Fly cycles.
+  //   - Upstream slow / catalog stale → 200 with `degraded: true`
+  //     in the body and `softDegradedReasons` listing causes. Fly
+  //     keeps the machine; monitoring dashboards still see truth;
+  //     Discord stays quiet on upstream blips.
+  const criticalDegraded = !databaseReachable || runtime.degraded;
+  const softDegraded = merchantsStale || locationsStale || !upstreamReachable;
+  const degraded = criticalDegraded || softDegraded;
 
   // Raw reading → rolling window. Keep the last N readings, flip
   // when a supermajority agrees. Shifts out the oldest reading
   // once the window is full so the detector always reflects
   // recent state.
-  const rawReading: 'degraded' | 'healthy' = degraded ? 'degraded' : 'healthy';
+  //
+  // Notification-flap fix: only critical degradation (DB / worker)
+  // contributes to the notify-window. Soft degradation (upstream
+  // slow, catalog stale) is reflected in the response body and the
+  // dashboard but doesn't toggle the Discord paging state. A CTX
+  // latency incident no longer flips the monitoring channel
+  // every 90 seconds.
+  const rawReading: 'degraded' | 'healthy' = criticalDegraded ? 'degraded' : 'healthy';
   healthReadings.push(rawReading);
   if (healthReadings.length > HEALTH_WINDOW_SIZE) healthReadings.shift();
 
@@ -203,19 +290,39 @@ export async function healthHandler(c: Context): Promise<Response> {
   // is the safe default even though Fly's own probe path doesn't
   // cache.
   c.header('Cache-Control', 'no-store');
-  return c.json({
-    status: degraded ? 'degraded' : 'healthy',
-    locationCount: locations.length,
-    locationsLoading: isLocationLoading(),
-    merchantCount: merchants.length,
-    merchantsLoadedAt: new Date(merLoadedAt).toISOString(),
-    locationsLoadedAt: new Date(locLoadedAt).toISOString(),
-    merchantsStale,
-    locationsStale,
-    upstreamReachable,
-    otpDelivery: runtime.otpDelivery,
-    workers: runtime.workers,
-  });
+  // Only critical degradation (DB / required worker) returns 503
+  // and triggers Fly machine cycling. Soft degradation (upstream
+  // slow, catalogs stale) still surfaces in the body so dashboards
+  // see the truth, but the orchestrator keeps the machine — Loop
+  // can serve cached merchants + place Loop-native orders
+  // independent of CTX `/status` latency.
+  const httpStatus = criticalDegraded ? 503 : 200;
+  const softDegradedReasons: string[] = [];
+  if (merchantsStale) softDegradedReasons.push('merchants_stale');
+  if (locationsStale) softDegradedReasons.push('locations_stale');
+  if (!upstreamReachable) softDegradedReasons.push('upstream_unreachable');
+  return c.json(
+    {
+      status: degraded ? 'degraded' : 'healthy',
+      locationCount: locations.length,
+      locationsLoading: isLocationLoading(),
+      merchantCount: merchants.length,
+      merchantsLoadedAt: new Date(merLoadedAt).toISOString(),
+      locationsLoadedAt: new Date(locLoadedAt).toISOString(),
+      merchantsStale,
+      locationsStale,
+      upstreamReachable,
+      // A4-034: DB readiness component. False = pool exhausted /
+      // credentials rotated / network partition / DB hard-down.
+      databaseReachable,
+      criticalDegraded,
+      softDegraded,
+      softDegradedReasons,
+      otpDelivery: runtime.otpDelivery,
+      workers: runtime.workers,
+    },
+    httpStatus,
+  );
 }
 
 /**
@@ -230,6 +337,10 @@ export async function healthHandler(c: Context): Promise<Response> {
 export function __resetHealthProbeCacheForTests(): void {
   upstreamProbeCache = null;
   upstreamProbeInFlight = null;
+  // A4-034: reset the DB probe cache too so DB-related test
+  // transitions are observable.
+  dbProbeCache = null;
+  dbProbeInFlight = null;
   lastHealthStatus = null;
   healthReadings.length = 0;
   lastHealthNotifyAt = 0;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Merchant } from '@loop/shared';
 import { useAuthStore } from '~/stores/auth.store';
@@ -37,12 +37,33 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
   const { config } = useAppConfig();
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
+  // A4-122: in-flight guard for the Loop-native create call. The
+  // disable-button + isCreatingOrder flag both depend on React
+  // state propagation, which doesn't block a synchronous double-tap
+  // during the same render cycle. A ref flips synchronously and
+  // shuts the second invocation out at the boundary.
+  const inFlightRef = useRef(false);
+  // A4-122: idempotency key minted at the purchase-attempt
+  // boundary and held in a ref across retries / submits. Reused
+  // until a terminal state is reached (success or unrecoverable
+  // error); freshens after a successful create or a manual
+  // re-attempt-with-fresh-key. Without this, the previous code
+  // minted a UUID per createLoopOrder() invocation, so two rapid
+  // clicks sent two different keys and the backend's
+  // (user_id, key) dedupe didn't coalesce them.
+  const idempotencyKeyRef = useRef<string | null>(null);
   // Local state for the Loop-native flow — we deliberately don't
   // push this into the purchase store because the CTX-shaped fields
   // (paymentAddress / xlmAmount / memo / expiresAt) don't map 1:1
   // onto the Loop response. Keep the store as the legacy path's
   // contract until ADR 013 Phase C retires it.
   const [loopCreate, setLoopCreate] = useState<CreateLoopOrderResponse | null>(null);
+  // A4-040: payment-rail selection for Loop-native orders. Tranche 1
+  // ships with USDC + XLM only; LOOP-asset (cashback recycle) and
+  // credit are gated behind `phase1Only=false` because they belong
+  // to the Tranche 2 cashback flywheel. Default USDC because the
+  // marketing copy + treasury docs lead with it.
+  const [paymentMethod, setPaymentMethod] = useState<'usdc' | 'xlm'>('usdc');
 
   // Cashback-rate preview (ADR 011 / 015). Null when the merchant
   // has no active config or the fetch fails — in both cases we just
@@ -293,19 +314,37 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
   //   - otherwise → legacy CTX proxy (POST /api/orders)
   const handlePurchase = async (amount: number): Promise<void> => {
     if (email === null) return;
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setIsCreatingOrder(true);
     setOrderError(null);
     void triggerHaptic();
 
     try {
       if (config.loopOrdersEnabled) {
-        const result = await createLoopOrder({
-          merchantId: merchant.id,
-          amountMinor: Math.round(amount * 100),
-          currency: merchant.denominations?.currency ?? 'USD',
-          paymentMethod: 'usdc',
-        });
+        // A4-122: stable idempotency key across retries until success.
+        // The first attempt mints, subsequent retries (e.g. network
+        // flap) reuse so the backend dedup collapses them to one row.
+        if (idempotencyKeyRef.current === null) {
+          idempotencyKeyRef.current = crypto.randomUUID();
+        }
+        const result = await createLoopOrder(
+          {
+            merchantId: merchant.id,
+            amountMinor: Math.round(amount * 100),
+            currency: merchant.denominations?.currency ?? 'USD',
+            // A4-040: was hardcoded to 'usdc'; user now picks USDC or XLM
+            // before confirming. Tranche 2 will widen this to credit /
+            // loop_asset once `phase1Only=false` exposes those rails.
+            paymentMethod,
+          },
+          { idempotencyKey: idempotencyKeyRef.current },
+        );
         setLoopCreate(result);
+        // Successful create — reset the key so a follow-up "place
+        // another order for this merchant" flow doesn't dedupe onto
+        // the just-created row.
+        idempotencyKeyRef.current = null;
         // A2-1159: new row exists server-side; mark the cache stale so
         // /account/orders (LoopOrdersList) refetches on next mount
         // instead of sitting on its 30s staleTime.
@@ -332,6 +371,7 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
       void triggerHapticNotification('error');
     } finally {
       setIsCreatingOrder(false);
+      inFlightRef.current = false;
     }
   };
 
@@ -345,6 +385,33 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
           </span>
         )}
       </div>
+
+      {config.loopOrdersEnabled && (
+        <fieldset className="mb-4">
+          <legend className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Pay with
+          </legend>
+          <div role="radiogroup" aria-label="Payment rail" className="grid grid-cols-2 gap-2">
+            {(['usdc', 'xlm'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="radio"
+                aria-checked={paymentMethod === m}
+                onClick={() => setPaymentMethod(m)}
+                disabled={isCreatingOrder}
+                className={`py-3 px-4 min-h-[44px] rounded-lg border text-sm font-semibold transition-colors ${
+                  paymentMethod === m
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                    : 'border-gray-200 dark:border-gray-700 hover:border-blue-400'
+                }`}
+              >
+                {m.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      )}
 
       <AmountSelection
         merchant={merchant}

@@ -5,6 +5,7 @@ import { getPublicLoopAssets, type PublicLoopAsset } from '~/services/public-sta
 import { shouldRetry } from '~/hooks/query-retry';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
+import { Phase2Gate } from '~/components/Phase2Gate';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { Spinner } from '~/components/ui/Spinner';
 
@@ -45,6 +46,14 @@ export function meta(): Route.MetaDescriptors {
 }
 
 export default function TrustlinesRoute(): React.JSX.Element {
+  return (
+    <Phase2Gate>
+      <TrustlinesBody />
+    </Phase2Gate>
+  );
+}
+
+function TrustlinesBody(): React.JSX.Element {
   const query = useQuery({
     queryKey: ['public-loop-assets'],
     queryFn: getPublicLoopAssets,

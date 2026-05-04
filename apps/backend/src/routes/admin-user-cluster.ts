@@ -63,13 +63,17 @@ import { adminUserOperatorMixHandler } from '../admin/user-operator-mix.js';
 export function mountAdminUserClusterRoutes(app: Hono): void {
   // Paginated user directory — browse + search for the admin panel.
   // Complements the exact-by-id drill at /api/admin/users/:userId.
-  app.get('/api/admin/users', rateLimit(60, 60_000), adminListUsersHandler);
+  app.get('/api/admin/users', rateLimit('GET /api/admin/users', 60, 60_000), adminListUsersHandler);
   // Exact-match email lookup — support pastes the full address from a
   // ticket, gets the user id back in one request. Different lookup
   // mode from the fragment search above; registered before
   // /:userId so the literal 'by-email' segment isn't captured as a
   // uuid param.
-  app.get('/api/admin/users/by-email', rateLimit(60, 60_000), adminUserByEmailHandler);
+  app.get(
+    '/api/admin/users/by-email',
+    rateLimit('GET /api/admin/users/by-email', 60, 60_000),
+    adminUserByEmailHandler,
+  );
   // Ops funding prioritisation — "who's owed the most USDLOOP right
   // now?". Grouped by (user, asset) over pending + submitted payout
   // rows; complements /api/admin/top-users (which ranks by lifetime
@@ -77,7 +81,7 @@ export function mountAdminUserClusterRoutes(app: Hono): void {
   // 'top-by-pending-payout' segment isn't treated as a uuid param.
   app.get(
     '/api/admin/users/top-by-pending-payout',
-    rateLimit(60, 60_000),
+    rateLimit('GET /api/admin/users/top-by-pending-payout', 60, 60_000),
     adminTopUsersByPendingPayoutHandler,
   );
   // "Who's recycling right now?" — 90-day list of users with at least
@@ -87,7 +91,7 @@ export function mountAdminUserClusterRoutes(app: Hono): void {
   // not captured as a uuid.
   app.get(
     '/api/admin/users/recycling-activity',
-    rateLimit(60, 60_000),
+    rateLimit('GET /api/admin/users/recycling-activity', 60, 60_000),
     adminUsersRecyclingActivityHandler,
   );
   // Tier-3 CSV snapshot of the user recycling leaderboard —
@@ -97,24 +101,32 @@ export function mountAdminUserClusterRoutes(app: Hono): void {
   // cap with `__TRUNCATED__` sentinel, attachment disposition).
   app.get(
     '/api/admin/users/recycling-activity.csv',
-    rateLimit(10, 60_000),
+    rateLimit('GET /api/admin/users/recycling-activity.csv', 10, 60_000),
     adminUsersRecyclingActivityCsvHandler,
   );
   // Admin user-detail drill. Entry point for the admin panel's user
   // page — subsequent drills (credits, credit-transactions, orders)
   // all key off the id this endpoint returns.
-  app.get('/api/admin/users/:userId', rateLimit(120, 60_000), adminGetUserHandler);
+  app.get(
+    '/api/admin/users/:userId',
+    rateLimit('GET /api/admin/users/:userId', 120, 60_000),
+    adminGetUserHandler,
+  );
   // Per-user credit-balance drill-down (ADR 009). Ops opens this from
   // a support ticket; complements the treasury aggregate which only
   // gives fleet-wide outstanding.
-  app.get('/api/admin/users/:userId/credits', rateLimit(120, 60_000), adminUserCreditsHandler);
+  app.get(
+    '/api/admin/users/:userId/credits',
+    rateLimit('GET /api/admin/users/:userId/credits', 120, 60_000),
+    adminUserCreditsHandler,
+  );
   // Per-user cashback-by-merchant breakdown — support triage. Answers
   // "user asks why they haven't earned cashback on merchant X" by
   // grouping their cashback ledger rows by source-order merchant.
   // Default window 180d, cap 366d; default limit 25, cap 100.
   app.get(
     '/api/admin/users/:userId/cashback-by-merchant',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/users/:userId/cashback-by-merchant', 120, 60_000),
     adminUserCashbackByMerchantHandler,
   );
   // Scalar cashback headline for a user — mirrors the user-facing
@@ -124,7 +136,7 @@ export function mountAdminUserClusterRoutes(app: Hono): void {
   // exist (LEFT JOIN returns no rows in that case).
   app.get(
     '/api/admin/users/:userId/cashback-summary',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/users/:userId/cashback-summary', 120, 60_000),
     adminUserCashbackSummaryHandler,
   );
   // Per-user flywheel scalar — admin mirror of /api/users/me/flywheel-
@@ -133,7 +145,7 @@ export function mountAdminUserClusterRoutes(app: Hono): void {
   // userId, zero counts on an existing user with no fulfilled orders.
   app.get(
     '/api/admin/users/:userId/flywheel-stats',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/users/:userId/flywheel-stats', 120, 60_000),
     adminUserFlywheelStatsHandler,
   );
   // Per-user payment-method share (#628 follow-up) — user-scoped
@@ -143,7 +155,7 @@ export function mountAdminUserClusterRoutes(app: Hono): void {
   // as the other share endpoints.
   app.get(
     '/api/admin/users/:userId/payment-method-share',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/users/:userId/payment-method-share', 120, 60_000),
     adminUserPaymentMethodShareHandler,
   );
   // Per-user cashback-monthly (#633) — 12-month emission trend for
@@ -155,7 +167,7 @@ export function mountAdminUserClusterRoutes(app: Hono): void {
   // cashback in the window.
   app.get(
     '/api/admin/users/:userId/cashback-monthly',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/users/:userId/cashback-monthly', 120, 60_000),
     adminUserCashbackMonthlyHandler,
   );
   // Credit-transaction log for a user (ADR 009). Drill-down from the
@@ -163,7 +175,7 @@ export function mountAdminUserClusterRoutes(app: Hono): void {
   // withdrawals, refunds, adjustments).
   app.get(
     '/api/admin/users/:userId/credit-transactions',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/users/:userId/credit-transactions', 120, 60_000),
     adminUserCreditTransactionsHandler,
   );
   // Per-user × per-operator attribution (ADR 013 / 022). Completes
@@ -173,7 +185,7 @@ export function mountAdminUserClusterRoutes(app: Hono): void {
   // carrying their recent orders?"
   app.get(
     '/api/admin/users/:userId/operator-mix',
-    rateLimit(120, 60_000),
+    rateLimit('GET /api/admin/users/:userId/operator-mix', 120, 60_000),
     adminUserOperatorMixHandler,
   );
   // Finance / compliance / support CSV of one user's credit-ledger
@@ -182,7 +194,7 @@ export function mountAdminUserClusterRoutes(app: Hono): void {
   // the admin UI.
   app.get(
     '/api/admin/users/:userId/credit-transactions.csv',
-    rateLimit(10, 60_000),
+    rateLimit('GET /api/admin/users/:userId/credit-transactions.csv', 10, 60_000),
     adminUserCreditTransactionsCsvHandler,
   );
 }

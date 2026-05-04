@@ -34,7 +34,7 @@ import {
   IdempotentOrderConflictError,
   InsufficientCreditError,
 } from './repo.js';
-import { hasSufficientCredit, isFirstLoopAssetOrder } from './loop-create-checks.js';
+import { isFirstLoopAssetOrder } from './loop-create-checks.js';
 import { buildLoopCreateResponse } from './loop-create-response.js';
 
 const log = logger.child({ handler: 'loop-orders' });
@@ -46,6 +46,18 @@ const log = logger.child({ handler: 'loop-orders' });
  */
 const ORDER_IDEMPOTENCY_KEY_MIN = 16;
 const ORDER_IDEMPOTENCY_KEY_MAX = 128;
+
+/**
+ * A4-017: hard ceiling on order face value, in minor units. Defence
+ * in depth past the merchant denomination check — most merchants in
+ * the catalog declare fixed/min-max denominations and the per-merchant
+ * validator rejects out-of-range amounts, but a merchant that ships
+ * without `denominations` would otherwise let a hand-crafted POST
+ * request a $1M+ order. $50k cap covers the realistic gift-card
+ * upper end (high-denomination travel/luxury cards top out around
+ * $25k–$50k) without restricting any merchant we've onboarded.
+ */
+const ORDER_MAX_FACE_VALUE_MINOR = 50_000_00n;
 
 const CreateBody = z.object({
   merchantId: z.string().min(1),
@@ -72,6 +84,62 @@ export type OrderPaymentResponse = CreateLoopOrderResponse;
 // `./loop-replay-response.ts`. Imported back here for the two
 // in-handler call sites.
 import { replayOrderResponse } from './loop-replay-response.js';
+
+/**
+ * A4-103: validate the requested amount against the merchant's
+ * denomination contract from the synced catalog. Pure / exported so
+ * tests can pin the parsing rules without going through the
+ * handler.
+ *
+ * Returns null when valid, or a user-facing message when the amount
+ * is out-of-range or a fixed-denomination merchant rejects the
+ * value. Currency mismatch falls through (merchant catalog currency
+ * differs from the user's home currency at FX-pinning time, which
+ * the handler already converts).
+ *
+ * `denominations.denominations[]` is a string array of major-unit
+ * decimal values (e.g. "10", "25.00") — parse to minor-unit
+ * comparison via `Math.round(major * 100)` to avoid float drift.
+ */
+import type { MerchantDenominations } from '@loop/shared';
+export function validateMerchantDenomination(
+  amountMinor: bigint,
+  requestedCurrency: string,
+  denominations: MerchantDenominations | undefined,
+): string | null {
+  if (denominations === undefined) return null;
+  if (denominations.currency.toUpperCase() !== requestedCurrency.toUpperCase()) {
+    return `currency must be ${denominations.currency} for this merchant`;
+  }
+  if (denominations.type === 'min-max') {
+    const minMinor =
+      denominations.min !== undefined ? BigInt(Math.round(denominations.min * 100)) : null;
+    const maxMinor =
+      denominations.max !== undefined ? BigInt(Math.round(denominations.max * 100)) : null;
+    if (minMinor !== null && amountMinor < minMinor) {
+      return `amount below merchant minimum (${denominations.min} ${denominations.currency})`;
+    }
+    if (maxMinor !== null && amountMinor > maxMinor) {
+      return `amount above merchant maximum (${denominations.max} ${denominations.currency})`;
+    }
+    return null;
+  }
+  // Fixed-denomination: amount must match one of the configured values.
+  // Defense in depth: a malformed merchant cache entry (CTX schema drift,
+  // a hand-edited fixture missing `denominations[]`) used to throw
+  // `Cannot read properties of undefined (reading 'map')` here and the
+  // global onError caught it as a 500. Fall through to "no denomination
+  // contract" rather than crash — the global face-value cap still
+  // bounds the amount.
+  if (!Array.isArray(denominations.denominations)) return null;
+  const allowedMinor = denominations.denominations
+    .map((d) => Number.parseFloat(d))
+    .filter((n) => Number.isFinite(n) && n > 0)
+    .map((n) => BigInt(Math.round(n * 100)));
+  if (allowedMinor.length === 0) return null;
+  if (allowedMinor.some((m) => m === amountMinor)) return null;
+  return `amount must be one of merchant's fixed denominations: ${denominations.denominations.join(', ')} ${denominations.currency}`;
+}
 
 export async function loopCreateOrderHandler(c: Context): Promise<Response> {
   if (!env.LOOP_AUTH_NATIVE_ENABLED) {
@@ -131,6 +199,19 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     }
   }
 
+  // A4-017: global face-value ceiling. Caught here before we do any
+  // merchant/FX/balance work so a malformed bigint request can't
+  // burn cycles or upstream calls.
+  if (parsed.data.amountMinor > ORDER_MAX_FACE_VALUE_MINOR) {
+    return c.json(
+      {
+        code: 'VALIDATION_ERROR',
+        message: `amount exceeds maximum order value (${ORDER_MAX_FACE_VALUE_MINOR / 100n} ${parsed.data.currency})`,
+      },
+      400,
+    );
+  }
+
   // Validate the merchant exists + is enabled in the in-memory cache.
   // We don't round-trip to CTX here — the sync job is our source of
   // truth; a merchant absent from cache is one the operator has
@@ -138,6 +219,23 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
   const merchant = getMerchants().merchantsById.get(parsed.data.merchantId);
   if (merchant === undefined || merchant.enabled === false) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'Unknown or disabled merchant' }, 400);
+  }
+
+  // A4-103: enforce merchant min/max/fixed denomination limits
+  // server-side. The web client gates the amount-input UX
+  // (AmountSelection.tsx), but a hand-crafted POST can pass any
+  // amount through, including a face value the merchant doesn't
+  // support — we'd then place the CTX wholesale purchase blind on
+  // an unsupported denomination, which CTX may reject mid-flow
+  // after the user has already paid. The merchant cache is the
+  // source of truth (synced from upstream catalog).
+  const denominationError = validateMerchantDenomination(
+    parsed.data.amountMinor,
+    parsed.data.currency,
+    merchant.denominations,
+  );
+  if (denominationError !== null) {
+    return c.json({ code: 'VALIDATION_ERROR', message: denominationError }, 400);
   }
 
   // ADR 015: resolve the user's home currency so we can pin the
@@ -190,26 +288,55 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     );
   }
 
-  // Credit-funded orders need an upfront balance check against the
-  // user's home-currency balance (the ledger is home-currency keyed,
-  // ADR 015). The actual debit happens on the `paid` transition.
+  // A4-110 (b): credit-method spend drains user_credits without
+  // requiring inbound on-chain LOOP-asset, contradicting the
+  // redemption-rule confirmed 2026-05-03 ("to spend cashback the
+  // user must send their on-chain LOOP back to Loop"). Off-chain
+  // user_credits is fungible across all positive sources
+  // (cashback, refund, adjustment, interest); the credit-method
+  // path can therefore drain the cashback-tagged portion of the
+  // balance even though the user is still holding the matching
+  // on-chain LOOP-asset, which they could then spend separately
+  // via loop_asset method or via withdrawal.
+  //
+  // The proper fix requires bucketing user_credits into
+  // "cashback-source" (redeemable only via on-chain return) vs
+  // "non-cashback-source" (refund/adjustment/interest, drainable
+  // via credit method). That's a schema-level migration tracked
+  // separately. Until then, reject `paymentMethod='credit'`
+  // entirely so the redemption rule is held strictly:
+  //   - cashback → user receives on-chain LOOP → spends via
+  //     loop_asset (which now debits user_credits, A4-110 a)
+  //   - non-cashback credit (refunds, adjustments) → currently
+  //     un-redeemable through the order surface; ops handles
+  //     manually until the bucketing design lands.
+  //
+  // The web UI already hardcodes paymentMethod='usdc' (A4-121),
+  // so no shipping client breaks. The CRITICAL_DOUBLE_SPEND
+  // error code makes the gate explicit so a staging environment
+  // that tries credit-method gets a clear signal.
   if (parsed.data.paymentMethod === 'credit') {
-    const ok = await hasSufficientCredit(auth.userId, user.homeCurrency, chargeMinor);
-    if (!ok) {
-      return c.json(
-        {
-          code: 'INSUFFICIENT_CREDIT',
-          message: 'Loop credit balance is below the order amount',
-        },
-        400,
-      );
-    }
+    log.warn(
+      { userId: auth.userId, merchantId: parsed.data.merchantId },
+      'credit-method order rejected pending A4-110(b) cashback/refund credit-source bucketing',
+    );
+    return c.json(
+      {
+        code: 'PAYMENT_METHOD_DISABLED',
+        message:
+          'credit-method spend is temporarily disabled. Use loop_asset (send your LOOP-asset to the deposit address) to spend cashback.',
+      },
+      400,
+    );
   }
 
-  // XLM / USDC orders need a configured deposit address; without one
-  // the watcher has nowhere to see payments, so we must reject before
-  // writing the row (the row's memo would be written but orphaned).
-  if (parsed.data.paymentMethod !== 'credit' && env.LOOP_STELLAR_DEPOSIT_ADDRESS === undefined) {
+  // XLM / USDC / loop_asset orders need a configured deposit
+  // address; without one the watcher has nowhere to see payments,
+  // so we must reject before writing the row (the row's memo
+  // would be written but orphaned). With A4-110(b) the credit
+  // method is rejected upstream, so the only remaining methods
+  // here are on-chain.
+  if (env.LOOP_STELLAR_DEPOSIT_ADDRESS === undefined) {
     log.error('LOOP_STELLAR_DEPOSIT_ADDRESS unset — refusing on-chain order');
     return c.json(
       {

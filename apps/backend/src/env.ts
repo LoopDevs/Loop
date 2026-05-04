@@ -244,6 +244,24 @@ export const EnvSchema = z.object({
   // false → the legacy CTX-proxy auth path stays in place.
   LOOP_AUTH_NATIVE_ENABLED: envBoolean.default(false),
 
+  // Phase 1 launch gate. When true, the public + onboarding surfaces
+  // hide every Phase 2 cashback / wallet / LOOP-asset element so the
+  // app reads as a pure XLM-via-CTX gift-card store. The Phase 2
+  // backend code paths (workers, payout submit, asset-drift watcher,
+  // interest accrual) are independently gated on
+  // LOOP_WORKERS_ENABLED / LOOP_AUTH_NATIVE_ENABLED /
+  // INTEREST_APY_BASIS_POINTS — those should also be off in a Phase 1
+  // deployment. This flag is the *UI-side* equivalent: hides
+  // /cashback, /settings/wallet, /settings/cashback, the navbar
+  // links, the cashback rate badges on merchant cards, the
+  // currency picker + wallet-intro onboarding screens, and any
+  // "you've earned X" surfaces.
+  //
+  // Set to false (default) once the operator is ready to launch
+  // cashback as v1.1 — flipping the flag is server-side only;
+  // no app-store resubmission needed.
+  LOOP_PHASE_1_ONLY: envBoolean.default(false),
+
   // Social login — Google (ADR 014). One client id per platform;
   // at least one must be set to activate the Google endpoint. The
   // id_token's `aud` must match one of these values. Generate in
@@ -322,6 +340,63 @@ export const EnvSchema = z.object({
     .string()
     .regex(/^S[A-Z2-7]{55}$/, { message: 'must be a valid Stellar secret key (S...)' })
     .optional(),
+
+  // Interest forward-mint pool account (ADR 009 / 015).
+  //
+  // Per the on-chain-is-source-of-truth model: paying users daily
+  // interest creates new off-chain `user_credits` liability that
+  // MUST be matched by an on-chain LOOP-asset mint to keep the
+  // asset-drift watcher reconciliation honest. To avoid one mint
+  // tx per day per currency (operationally heavy), the operator
+  // pre-mints a forward batch — typically a month's expected
+  // interest — to this pool account. Daily accrual then sub-
+  // allocates from the pool off-chain; on-chain issuance was
+  // already incurred at mint-time.
+  //
+  // The drift watcher subtracts the pool balance from on-chain
+  // circulation before comparing to off-chain liability, so a
+  // freshly-minted pool doesn't trip the over-issued alert (ADR 015).
+  //
+  // Defaults to the operator account when unset — the operator
+  // already holds custody of LOOP-asset and submits payouts from
+  // there, so reusing it as the pool is the simplest topology.
+  // A deliberate operator can split them by setting this to a
+  // different cold-custody account.
+  LOOP_INTEREST_POOL_ACCOUNT: z
+    .string()
+    .regex(STELLAR_PUBKEY_REGEX, { message: STELLAR_ADDRESS_MESSAGE })
+    .optional(),
+
+  // Interest pool depletion threshold (days of cover).
+  //
+  // The pool watcher pages the Discord monitoring channel when the
+  // on-chain pool balance can cover fewer than this many days of
+  // forecast daily interest at the current APY. 7 days gives the
+  // operator a week to mint the next batch before users would be
+  // under-allocated. Tighter ops can lower it (3-5 days); operators
+  // with monthly mint cadence + multi-day reaction time should
+  // raise it.
+  LOOP_INTEREST_POOL_MIN_DAYS_COVER: z.coerce.number().int().min(1).max(365).default(7),
+
+  // Transactional email provider (ADR 013). When unset / `console`
+  // the dev-only stub fires; production refuses to start with the
+  // console value (see auth/email.ts). Add a real provider before
+  // flipping `LOOP_AUTH_NATIVE_ENABLED=true` in production.
+  // Currently supported: `resend`. Each provider has its own
+  // API-key + from-address envs.
+  EMAIL_PROVIDER: z.enum(['console', 'resend']).optional(),
+
+  // Resend API key (https://resend.com). Required when
+  // EMAIL_PROVIDER=resend. Format is `re_...` — never log this.
+  RESEND_API_KEY: z.string().optional(),
+
+  // Sender address used by the email provider. Must be a domain
+  // the operator has verified DKIM/SPF for at the provider's
+  // dashboard. Defaults to `noreply@loopfinance.io` if unset.
+  EMAIL_FROM_ADDRESS: z.string().email().optional(),
+
+  // Display name for the From header. Defaults to `Loop`.
+  EMAIL_FROM_NAME: z.string().optional(),
 
   // Network passphrase for payout signing. PUBLIC mainnet is the
   // default; operators override with TESTNET string for staging.

@@ -1,0 +1,31 @@
+Tax/regulatory reporting implementation verification
+Date: 2026-05-03
+Scope: current code and current docs only.
+
+Relevant ADR text:
+
+- docs/adr/026-tax-regulatory-reporting-data-model.md lines 38-72 says Phase 1 adopts a two-layer reporting model and that Layer 2 is "implemented as CSV exports".
+- docs/adr/026-tax-regulatory-reporting-data-model.md lines 59-68 specifically names scripts/reports/quarterly-tax.ts and three output shapes:
+  - gift-card-sales-{YYYY-Q}.csv
+  - cashback-rebates-{YYYY-Q}.csv
+  - crypto-payouts-{YYYY-Q}.csv
+- docs/adr/026-tax-regulatory-reporting-data-model.md lines 119-142 then lists acceptance criteria and leaves the CSV emitter, headers, output path, Phase-2 columns, and API submission unchecked.
+
+Repository verification:
+
+- find scripts -type f lists only:
+  - scripts/check-admin-bundle-split.sh
+  - scripts/check-audit-policy.mjs
+  - scripts/check-bundle-budget.sh
+  - scripts/ci-watch.sh
+  - scripts/e2e-real.mjs
+  - scripts/lint-docs.sh
+  - scripts/postgres-init.sh
+  - scripts/verify.sh
+- No scripts/reports directory exists.
+- Search for report:quarterly-tax, quarterly-tax, gift-card-sales, cashback-rebates, and crypto-payouts finds only ADR-026 references.
+- Search for tax_residence_country and tax_jurisdiction in apps/backend finds no schema, migration, or code references.
+
+Conclusion:
+
+The tax/reporting ADR contains a direct internal contradiction and an externally false implementation claim. General admin CSV exports exist, but the named quarterly tax-report emitter, package command, output path, and report-specific CSV shapes are absent.

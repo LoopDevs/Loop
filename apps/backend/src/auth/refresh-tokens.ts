@@ -106,6 +106,42 @@ export async function revokeRefreshToken(args: {
 }
 
 /**
+ * A4-098: concurrency-safe single-shot revoke. Returns `true` only
+ * if the row went from `revoked_at IS NULL` → `revoked_at = now()`
+ * in this call; `false` if some other request already revoked it
+ * (the rotation lost the race).
+ *
+ * Refresh-token rotation must look like:
+ *   1. findLiveRefreshToken (read)
+ *   2. tryRevokeIfLive (compare-and-set; gate on this)
+ *   3. issueTokenPair (insert successor)
+ *
+ * Earlier code did revoke as a non-conditional UPDATE after issuing
+ * the new pair, so two parallel refresh requests with the same old
+ * token both made it past step 1 and both inserted successors.
+ * Now the second caller's `tryRevokeIfLive` returns false and the
+ * caller maps that to a refresh-rejection without minting a token
+ * pair.
+ */
+export async function tryRevokeIfLive(args: {
+  jti: string;
+  replacedByJti?: string;
+  now?: Date;
+}): Promise<boolean> {
+  const now = args.now ?? new Date();
+  const rows = await db
+    .update(refreshTokens)
+    .set({
+      revokedAt: now,
+      replacedByJti: args.replacedByJti ?? null,
+      lastUsedAt: now,
+    })
+    .where(and(eq(refreshTokens.jti, args.jti), isNull(refreshTokens.revokedAt)))
+    .returning({ jti: refreshTokens.jti });
+  return rows.length === 1;
+}
+
+/**
  * Bulk revoke — every live refresh token for a user. Used by
  * `DELETE /api/auth/session/all` and by the security-revoke pathway
  * when we need to invalidate all sessions for a user.

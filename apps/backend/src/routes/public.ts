@@ -39,14 +39,18 @@ export function mountPublicRoutes(app: Hono): void {
   // 60/min per IP is generous for a landing-page widget that
   // renders once per visit; edge-cache respects the handler's
   // Cache-Control so real origin load will be much lower.
-  app.get('/api/public/cashback-stats', rateLimit(60, 60_000), publicCashbackStatsHandler);
+  app.get(
+    '/api/public/cashback-stats',
+    rateLimit('GET /api/public/cashback-stats', 60, 60_000),
+    publicCashbackStatsHandler,
+  );
 
   // Public, unauthenticated, CDN-friendly "best cashback" list for
   // the landing page. Same never-500 + Cache-Control discipline as
   // the cashback-stats endpoint (ADR 020).
   app.get(
     '/api/public/top-cashback-merchants',
-    rateLimit(60, 60_000),
+    rateLimit('GET /api/public/top-cashback-merchants', 60, 60_000),
     publicTopCashbackMerchantsHandler,
   );
 
@@ -55,7 +59,11 @@ export function mountPublicRoutes(app: Hono): void {
   // id OR slug so SSR can pass whichever form is on the URL.
   // Same never-500 / cache-control discipline as the other
   // public endpoints (ADR 020).
-  app.get('/api/public/merchants/:id', rateLimit(60, 60_000), publicMerchantHandler);
+  app.get(
+    '/api/public/merchants/:id',
+    rateLimit('GET /api/public/merchants/:id', 60, 60_000),
+    publicMerchantHandler,
+  );
 
   // Pre-signup "calculate your cashback" preview. Same never-500 +
   // Cache-Control discipline as the other public endpoints (ADR
@@ -63,18 +71,30 @@ export function mountPublicRoutes(app: Hono): void {
   // minor units) and returns the projected cashback amount using
   // the same floor-rounded math as the order-insert path, so the
   // preview never promises more than the user will actually earn.
-  app.get('/api/public/cashback-preview', rateLimit(60, 60_000), publicCashbackPreviewHandler);
+  app.get(
+    '/api/public/cashback-preview',
+    rateLimit('GET /api/public/cashback-preview', 60, 60_000),
+    publicCashbackPreviewHandler,
+  );
 
   // LOOP-asset transparency surface (ADR 015 / 020). Public list
   // of configured (code, issuer) pairs so third-party wallets +
   // users can add trustlines to the verified issuer accounts
   // without guessing from on-chain traffic.
-  app.get('/api/public/loop-assets', rateLimit(60, 60_000), publicLoopAssetsHandler);
+  app.get(
+    '/api/public/loop-assets',
+    rateLimit('GET /api/public/loop-assets', 60, 60_000),
+    publicLoopAssetsHandler,
+  );
 
   // Marketing flywheel scalar — % of fulfilled orders in the last
   // 30 days paid via LOOP-asset cashback. Complement to
   // /api/public/cashback-stats (emission) with the recycle side
   // of the story. Never-500; 300s cache on happy path, 60s on
   // fallback.
-  app.get('/api/public/flywheel-stats', rateLimit(60, 60_000), publicFlywheelStatsHandler);
+  app.get(
+    '/api/public/flywheel-stats',
+    rateLimit('GET /api/public/flywheel-stats', 60, 60_000),
+    publicFlywheelStatsHandler,
+  );
 }

@@ -1,0 +1,57 @@
+apps/web/package.json:31:    "@capgo/inappbrowser": "8.6.1",
+package.json:48:    "@anthropic-ai/claude-code": "2.1.114",
+docs/third-party-licenses.md:29:libraries under BSD, MIT, Mozilla Public 2.0, and freetype's
+apps/mobile/package.json:28:    "@capgo/inappbrowser": "8.6.1"
+package-lock.json:13:        "@anthropic-ai/claude-code": "2.1.114",
+package-lock.json:483:        "@capgo/inappbrowser": "8.6.1"
+package-lock.json:525:        "@capgo/inappbrowser": "8.6.1",
+package-lock.json:1022:    "node_modules/@anthropic-ai/claude-code": {
+package-lock.json:1024:      "resolved": "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.114.tgz",
+package-lock.json:1028:      "license": "SEE LICENSE IN README.md",
+package-lock.json:1036:        "@anthropic-ai/claude-code-darwin-arm64": "2.1.114",
+package-lock.json:1037:        "@anthropic-ai/claude-code-darwin-x64": "2.1.114",
+package-lock.json:1038:        "@anthropic-ai/claude-code-linux-arm64": "2.1.114",
+package-lock.json:1039:        "@anthropic-ai/claude-code-linux-arm64-musl": "2.1.114",
+package-lock.json:1040:        "@anthropic-ai/claude-code-linux-x64": "2.1.114",
+package-lock.json:1041:        "@anthropic-ai/claude-code-linux-x64-musl": "2.1.114",
+package-lock.json:1042:        "@anthropic-ai/claude-code-win32-arm64": "2.1.114",
+package-lock.json:1043:        "@anthropic-ai/claude-code-win32-x64": "2.1.114"
+package-lock.json:1046:    "node_modules/@anthropic-ai/claude-code-darwin-arm64": {
+package-lock.json:1048:      "resolved": "https://registry.npmjs.org/@anthropic-ai/claude-code-darwin-arm64/-/claude-code-darwin-arm64-2.1.114.tgz",
+package-lock.json:1054:      "license": "SEE LICENSE IN LICENSE.md",
+package-lock.json:1060:    "node_modules/@anthropic-ai/claude-code-darwin-x64": {
+package-lock.json:1062:      "resolved": "https://registry.npmjs.org/@anthropic-ai/claude-code-darwin-x64/-/claude-code-darwin-x64-2.1.114.tgz",
+package-lock.json:1068:      "license": "SEE LICENSE IN LICENSE.md",
+package-lock.json:1074:    "node_modules/@anthropic-ai/claude-code-linux-arm64": {
+package-lock.json:1076:      "resolved": "https://registry.npmjs.org/@anthropic-ai/claude-code-linux-arm64/-/claude-code-linux-arm64-2.1.114.tgz",
+package-lock.json:1082:      "license": "SEE LICENSE IN LICENSE.md",
+package-lock.json:1088:    "node_modules/@anthropic-ai/claude-code-linux-arm64-musl": {
+package-lock.json:1090:      "resolved": "https://registry.npmjs.org/@anthropic-ai/claude-code-linux-arm64-musl/-/claude-code-linux-arm64-musl-2.1.114.tgz",
+package-lock.json:1096:      "license": "SEE LICENSE IN LICENSE.md",
+package-lock.json:1102:    "node_modules/@anthropic-ai/claude-code-linux-x64": {
+package-lock.json:1104:      "resolved": "https://registry.npmjs.org/@anthropic-ai/claude-code-linux-x64/-/claude-code-linux-x64-2.1.114.tgz",
+package-lock.json:1110:      "license": "SEE LICENSE IN LICENSE.md",
+package-lock.json:1116:    "node_modules/@anthropic-ai/claude-code-linux-x64-musl": {
+package-lock.json:1118:      "resolved": "https://registry.npmjs.org/@anthropic-ai/claude-code-linux-x64-musl/-/claude-code-linux-x64-musl-2.1.114.tgz",
+package-lock.json:1124:      "license": "SEE LICENSE IN LICENSE.md",
+package-lock.json:1130:    "node_modules/@anthropic-ai/claude-code-win32-arm64": {
+package-lock.json:1132:      "resolved": "https://registry.npmjs.org/@anthropic-ai/claude-code-win32-arm64/-/claude-code-win32-arm64-2.1.114.tgz",
+package-lock.json:1138:      "license": "SEE LICENSE IN LICENSE.md",
+package-lock.json:1144:    "node_modules/@anthropic-ai/claude-code-win32-x64": {
+package-lock.json:1146:      "resolved": "https://registry.npmjs.org/@anthropic-ai/claude-code-win32-x64/-/claude-code-win32-x64-2.1.114.tgz",
+package-lock.json:1152:      "license": "SEE LICENSE IN LICENSE.md",
+package-lock.json:2107:    "node_modules/@capgo/inappbrowser": {
+package-lock.json:2109:      "resolved": "https://registry.npmjs.org/@capgo/inappbrowser/-/inappbrowser-8.6.1.tgz",
+package-lock.json:2111:      "license": "MPL-2.0",
+package-lock.json:11537:      "license": "MPL-2.0",
+package-lock.json:11570:      "license": "MPL-2.0",
+package-lock.json:11591:      "license": "MPL-2.0",
+package-lock.json:11612:      "license": "MPL-2.0",
+package-lock.json:11633:      "license": "MPL-2.0",
+package-lock.json:11654:      "license": "MPL-2.0",
+package-lock.json:11675:      "license": "MPL-2.0",
+package-lock.json:11696:      "license": "MPL-2.0",
+package-lock.json:11717:      "license": "MPL-2.0",
+package-lock.json:11738:      "license": "MPL-2.0",
+package-lock.json:11759:      "license": "MPL-2.0",
+package-lock.json:11780:      "license": "MPL-2.0",

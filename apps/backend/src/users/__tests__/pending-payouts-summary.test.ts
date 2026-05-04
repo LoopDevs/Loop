@@ -24,10 +24,6 @@ vi.mock('../../db/users.js', () => ({
   upsertUserFromCtx: vi.fn(async () => state.dbUser),
 }));
 
-vi.mock('../../auth/jwt.js', () => ({
-  decodeJwtPayload: vi.fn(() => ({ sub: 'user-1' })),
-}));
-
 vi.mock('../../db/client.js', () => ({
   db: { select: vi.fn(), update: vi.fn(), query: { userCredits: { findFirst: vi.fn() } } },
 }));

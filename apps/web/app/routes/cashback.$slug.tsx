@@ -7,6 +7,7 @@ import { CashbackCalculator } from '~/components/features/cashback/CashbackCalcu
 import { shouldRetry } from '~/hooks/query-retry';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
+import { Phase2Gate } from '~/components/Phase2Gate';
 import { Spinner } from '~/components/ui/Spinner';
 import { LazyImage } from '~/components/ui/LazyImage';
 import { getImageProxyUrl } from '~/utils/image';
@@ -75,6 +76,14 @@ export function ErrorBoundary(): React.JSX.Element {
 }
 
 export default function CashbackMerchantLanding(): React.JSX.Element {
+  return (
+    <Phase2Gate>
+      <CashbackMerchantLandingBody />
+    </Phase2Gate>
+  );
+}
+
+function CashbackMerchantLandingBody(): React.JSX.Element {
   const { slug = '' } = useParams<{ slug: string }>();
   const query = useQuery({
     queryKey: ['public-merchant', slug],

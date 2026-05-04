@@ -143,7 +143,14 @@ export async function verifyIdToken(args: VerifyIdTokenArgs): Promise<VerifyIdTo
     // Key not in cache — could be a recent rotation. Force refetch
     // once to catch up before giving up. Avoids a stuck-cache class
     // of incident.
-    invalidateJwks(args.jwksUrl);
+    //
+    // A4-084: invalidateJwks now debounces per-URL. If we're inside
+    // the debounce window, skip the retry-refetch entirely — a
+    // burst of unknown-kid attempts can't thrash the provider's
+    // JWKS endpoint, and the cache will refresh naturally on its
+    // 60-min TTL or via the next debounce-window invalidation.
+    const refetched = invalidateJwks(args.jwksUrl);
+    if (!refetched) return { ok: false, reason: 'unknown_kid' };
     const refreshed = await fetchJwks(args.jwksUrl);
     const retry = refreshed.find((k) => k.kid === header.kid);
     if (retry === undefined) return { ok: false, reason: 'unknown_kid' };

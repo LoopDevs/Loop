@@ -62,4 +62,17 @@ describe('runtime health snapshot', () => {
       }),
     );
   });
+
+  it('A4-111: marks a worker whose first tick never resolves as stale once startedAtMs ages out', () => {
+    // Earlier behaviour: with no `lastSuccessAtMs` and no
+    // `lastErrorAtMs`, /health reported the worker green forever
+    // — a hung first tick masqueraded as healthy. Now we treat
+    // `startedAtMs` as the staleness anchor until the first success.
+    markWorkerStarted('payout_worker', { staleAfterMs: 1_000 });
+    const startedAtMs = getRuntimeHealthSnapshot().workers[0]?.startedAtMs ?? 0;
+    const fresh = getRuntimeHealthSnapshot(startedAtMs + 500);
+    expect(fresh.workers[0]).toEqual(expect.objectContaining({ stale: false, degraded: false }));
+    const stale = getRuntimeHealthSnapshot(startedAtMs + 1_500);
+    expect(stale.workers[0]).toEqual(expect.objectContaining({ stale: true, degraded: true }));
+  });
 });

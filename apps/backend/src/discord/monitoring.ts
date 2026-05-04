@@ -118,6 +118,108 @@ export function notifyPayoutFailed(args: {
  * Throttled at the caller (once per `LOOP_BELOW_FLOOR_ALERT_INTERVAL_MS`
  * per process) — this function itself fires every time.
  */
+/**
+ * Interest-pool depletion alert (ADR 009 / 015 forward-mint pool).
+ *
+ * Fires when the on-chain pool balance can cover fewer than the
+ * configured minimum days of forecast daily interest. Operator's
+ * action: mint the next batch into the pool before users would be
+ * under-allocated. One-shot per process per cohort — we don't want
+ * to re-page every tick during the same low-cover window.
+ */
+const poolDepletionFired = new Set<string>();
+
+export function __resetPoolDepletionDedupForTests(): void {
+  poolDepletionFired.clear();
+}
+
+export function notifyInterestPoolLow(args: {
+  assetCode: string;
+  poolStroops: string;
+  dailyInterestStroops: string;
+  daysOfCover: number;
+  minDaysOfCover: number;
+}): void {
+  if (poolDepletionFired.has(args.assetCode)) return;
+  poolDepletionFired.add(args.assetCode);
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🟠 Interest pool running low',
+    description: truncate(
+      `${escapeMarkdown(args.assetCode)} forward-mint pool has ${args.daysOfCover.toFixed(1)} days of cover left (minimum ${args.minDaysOfCover}). Mint the next batch into the pool account before users are under-allocated.`,
+      DESCRIPTION_MAX,
+    ),
+    color: ORANGE,
+    fields: [
+      { name: 'Asset', value: escapeMarkdown(args.assetCode), inline: true },
+      { name: 'Pool (stroops)', value: escapeMarkdown(args.poolStroops), inline: true },
+      {
+        name: 'Daily interest (stroops)',
+        value: escapeMarkdown(args.dailyInterestStroops),
+        inline: true,
+      },
+      { name: 'Days of cover', value: args.daysOfCover.toFixed(2), inline: true },
+      { name: 'Minimum', value: String(args.minDaysOfCover), inline: true },
+    ],
+  });
+}
+
+export function notifyInterestPoolRecovered(args: {
+  assetCode: string;
+  poolStroops: string;
+  daysOfCover: number;
+}): void {
+  if (!poolDepletionFired.has(args.assetCode)) return;
+  poolDepletionFired.delete(args.assetCode);
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '✅ Interest pool replenished',
+    description: truncate(
+      `${escapeMarkdown(args.assetCode)} forward-mint pool now has ${args.daysOfCover.toFixed(1)} days of cover. Closing the prior depletion alert.`,
+      DESCRIPTION_MAX,
+    ),
+    color: GREEN,
+    fields: [
+      { name: 'Asset', value: escapeMarkdown(args.assetCode), inline: true },
+      { name: 'Pool (stroops)', value: escapeMarkdown(args.poolStroops), inline: true },
+      { name: 'Days of cover', value: args.daysOfCover.toFixed(2), inline: true },
+    ],
+  });
+}
+
+/**
+ * A4-023: notify ops when an order's pinned `chargeCurrency`
+ * diverges from the user's `homeCurrency` at fulfillment time.
+ * The cashback ledger row still writes (off-chain liability is
+ * the source of truth, ADR-009) but the on-chain LOOP-asset
+ * payout is skipped — the 1:1 peg is broken until ops manually
+ * issues the on-chain payout in the right currency. Fires once
+ * per affected order; the operator decides whether to manually
+ * compensate, change the user's home currency back, or accept
+ * the divergence.
+ */
+export function notifyPegBreakOnFulfillment(args: {
+  orderId: string;
+  userId: string;
+  chargeCurrency: string;
+  userHomeCurrency: string;
+  cashbackMinor: string;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🚨 LOOP-asset peg break on fulfillment',
+    description: truncate(
+      `Order ${escapeMarkdown(args.orderId)} fulfilled with chargeCurrency=${escapeMarkdown(args.chargeCurrency)} but user.homeCurrency=${escapeMarkdown(args.userHomeCurrency)}. Off-chain cashback credited; on-chain payout SKIPPED. Manual compensation needed to restore the 1:1 peg.`,
+      DESCRIPTION_MAX,
+    ),
+    color: ORANGE,
+    fields: [
+      { name: 'Order', value: escapeMarkdown(args.orderId), inline: true },
+      { name: 'User', value: escapeMarkdown(args.userId), inline: true },
+      { name: 'Charge ccy', value: escapeMarkdown(args.chargeCurrency), inline: true },
+      { name: 'Home ccy', value: escapeMarkdown(args.userHomeCurrency), inline: true },
+      { name: 'Cashback (minor)', value: escapeMarkdown(args.cashbackMinor), inline: true },
+    ],
+  });
+}
+
 export function notifyUsdcBelowFloor(args: {
   balanceStroops: string;
   floorStroops: string;

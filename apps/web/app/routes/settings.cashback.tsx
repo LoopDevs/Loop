@@ -18,6 +18,7 @@ import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { Button } from '~/components/ui/Button';
+import { Phase2Gate } from '~/components/Phase2Gate';
 import {
   getCashbackHistory,
   type CashbackHistoryEntry,
@@ -71,6 +72,14 @@ function formatDate(iso: string): string {
 }
 
 export default function SettingsCashbackRoute(): React.JSX.Element {
+  return (
+    <Phase2Gate>
+      <SettingsCashbackBody />
+    </Phase2Gate>
+  );
+}
+
+function SettingsCashbackBody(): React.JSX.Element {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
 

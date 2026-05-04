@@ -1,0 +1,28 @@
+Loop-native auth email-provider verification
+Date: 2026-05-03
+Scope: current code and current docs only.
+
+Relevant code:
+
+- apps/backend/src/auth/email.ts lines 1-10 say production deploys set EMAIL_PROVIDER=<real> and provider API key env vars, but those real provider env vars are "not yet implemented".
+- apps/backend/src/auth/email.ts lines 71-94 implement getEmailProvider().
+- getEmailProvider() permits only the console provider in non-production.
+- getEmailProvider() throws when EMAIL_PROVIDER is unset or "console" in NODE_ENV=production.
+- getEmailProvider() throws "Unsupported EMAIL_PROVIDER" for every other configured value.
+- apps/backend/src/auth/native-request-otp.ts lines 75-91 create an OTP row, call getEmailProvider().sendOtpEmail(), catch provider errors, record runtime-health failure, log, and still return 200 "Verification code sent" to preserve email-enumeration resistance.
+
+Relevant tests:
+
+- apps/backend/src/auth/__tests__/email.test.ts lines 33-35 assert EMAIL_PROVIDER=sendgrid throws Unsupported EMAIL_PROVIDER.
+- apps/backend/src/auth/__tests__/email.test.ts lines 48-72 assert production rejects console and unset EMAIL_PROVIDER.
+
+Relevant docs/env:
+
+- apps/backend/src/env.ts lines 241-245 defines LOOP_AUTH_NATIVE_ENABLED but has no EMAIL_PROVIDER schema field.
+- apps/backend/.env.example lines 134-138 documents LOOP_AUTH_NATIVE_ENABLED and says Loop sends the OTP email when true, but includes no EMAIL_PROVIDER or provider API-key configuration.
+- docs/development.md lines 165-168 says LOOP_AUTH_NATIVE_ENABLED=true makes Loop send email and mint JWTs, with no provider setup.
+- docs/deployment.md lines 93-101 documents auth env vars but has no EMAIL_PROVIDER row.
+
+Conclusion:
+
+The Loop-native OTP flow can be enabled and can mint tokens after OTP verification, but there is no supported production email provider implementation. In production, unset/console provider fails; any real provider name also fails. The request-otp handler hides provider failure behind a 200 response, so users see success while receiving no OTP.

@@ -116,6 +116,24 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       'Fires when a pending_payouts row flips to `failed` (ADR 015/016). Embed carries asset code + user id + lastError preview.',
   },
   {
+    name: 'notifyPegBreakOnFulfillment',
+    channel: 'monitoring',
+    description:
+      "A4-023: fires when an order's pinned chargeCurrency diverges from the user's home_currency at fulfillment time. Off-chain cashback ledger row writes; on-chain payout is skipped. Ops gets a paging-grade signal so the 1:1 LOOP-asset peg can be restored manually before reconciliation drift accumulates.",
+  },
+  {
+    name: 'notifyInterestPoolLow',
+    channel: 'monitoring',
+    description:
+      "Fires when a LOOP-asset's interest forward-mint pool can cover fewer than LOOP_INTEREST_POOL_MIN_DAYS_COVER days of forecast daily interest. One-shot per asset until recovered — operator's action is to mint the next batch into the pool account before users would be under-allocated.",
+  },
+  {
+    name: 'notifyInterestPoolRecovered',
+    channel: 'monitoring',
+    description:
+      "Closes the prior notifyInterestPoolLow incident once the pool's days-of-cover crosses back above the threshold. Paired open + close mirrors notifyAssetDrift / notifyAssetDriftRecovered so the channel reads as bracketed events.",
+  },
+  {
     name: 'notifyStuckProcurementSwept',
     channel: 'monitoring',
     description:

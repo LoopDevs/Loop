@@ -168,15 +168,17 @@ vi.mock('../../credits/pending-payouts.js', () => ({
   }),
 }));
 
-// The handler decodes CTX bearers via auth/jwt decodeJwtPayload —
-// stub it to return a preconfigured claim set.
+// A4-009: the handler used to decode CTX bearers via
+// `decodeJwtPayload` (unverified) until A2-550/A2-551 moved
+// identity to `resolveLoopAuthenticatedUser`. The orphan helper
+// has been deleted; tests no longer mock it. Identity is supplied
+// directly via the LoopAuthContext fixture in `makeCtx` below
+// (kind='loop' carries `userId` straight off the cryptographically-
+// verified Loop JWT).
 const { jwtState } = vi.hoisted(() => ({
   jwtState: {
     claims: null as Record<string, unknown> | null,
   },
-}));
-vi.mock('../../auth/jwt.js', () => ({
-  decodeJwtPayload: vi.fn(() => jwtState.claims),
 }));
 
 import {

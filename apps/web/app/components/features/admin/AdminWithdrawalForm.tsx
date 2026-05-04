@@ -7,6 +7,7 @@ import {
   type WithdrawalResult,
 } from '~/services/admin';
 import { ReplayedBadge } from './ReplayedBadge';
+import { ConfirmDialog } from './ConfirmDialog';
 
 const CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
 type Currency = (typeof CURRENCIES)[number];
@@ -46,6 +47,16 @@ export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.J
   const [lastApplied, setLastApplied] = useState<{
     result: WithdrawalResult;
     replayed: boolean;
+  } | null>(null);
+  // A4-053: gate the on-chain payout queue behind a second-step
+  // confirmation. The destination address is the highest-stakes
+  // typo target on the admin surface — once the worker picks it
+  // up, no recall.
+  const [pendingPayload, setPendingPayload] = useState<{
+    amountMinor: string;
+    currency: Currency;
+    destinationAddress: string;
+    reason: string;
   } | null>(null);
 
   const mutation = useMutation({
@@ -97,8 +108,7 @@ export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.J
       return;
     }
 
-    mutation.mutate({
-      userId,
+    setPendingPayload({
       amountMinor: parsed.minorString,
       currency,
       destinationAddress: trimmedAddress,
@@ -106,11 +116,51 @@ export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.J
     });
   };
 
+  const handleConfirm = (confirmed: boolean): void => {
+    const payload = pendingPayload;
+    setPendingPayload(null);
+    if (!confirmed || payload === null) return;
+    mutation.mutate({
+      userId,
+      amountMinor: payload.amountMinor,
+      currency: payload.currency,
+      destinationAddress: payload.destinationAddress,
+      reason: payload.reason,
+    });
+  };
+
+  const dialogBody =
+    pendingPayload !== null ? (
+      <div className="space-y-2">
+        <p>
+          Queue a withdrawal of{' '}
+          <strong className="tabular-nums">
+            {formatMinorCurrency(pendingPayload.amountMinor, pendingPayload.currency)}
+          </strong>{' '}
+          for user <code className="font-mono text-xs">{userId}</code>?
+        </p>
+        <p className="text-xs">
+          Destination:{' '}
+          <code className="font-mono break-all">{pendingPayload.destinationAddress}</code>
+        </p>
+        <p className="text-xs text-red-600 dark:text-red-400">
+          The payout-submit worker fires irreversibly once queued. Verify the destination address.
+        </p>
+      </div>
+    ) : null;
+
   return (
     <form className="space-y-4" onSubmit={handleSubmit} aria-labelledby="admin-withdrawal-heading">
       <p id="admin-withdrawal-heading" className="sr-only">
         Apply admin withdrawal
       </p>
+      <ConfirmDialog
+        open={pendingPayload !== null}
+        title="Confirm withdrawal"
+        body={dialogBody}
+        confirmLabel="Queue withdrawal"
+        onResolve={handleConfirm}
+      />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <label className="space-y-1 sm:col-span-1">
           <span className="text-xs font-medium text-gray-600 dark:text-gray-400">

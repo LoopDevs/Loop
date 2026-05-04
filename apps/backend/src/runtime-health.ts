@@ -158,12 +158,20 @@ export function getRuntimeHealthSnapshot(now: number = Date.now()): RuntimeHealt
   const workers = Array.from(workerState.entries())
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([name, state]) => {
+      // A4-111: a worker that calls markWorkerStarted then hangs on
+      // its first tick (no markWorkerTickSuccess + no
+      // markWorkerTickFailure) used to look forever-healthy because
+      // staleness was gated on `lastSuccessAtMs !== null`. Use
+      // `startedAtMs` as the fallback anchor so a hung first-tick
+      // surfaces as stale/degraded once we've waited longer than
+      // the configured staleAfterMs.
+      const lastActivityMs = state.lastSuccessAtMs ?? state.startedAtMs;
       const stale =
         state.required &&
         state.running &&
         state.staleAfterMs !== null &&
-        state.lastSuccessAtMs !== null &&
-        now - state.lastSuccessAtMs > state.staleAfterMs;
+        lastActivityMs !== null &&
+        now - lastActivityMs > state.staleAfterMs;
       const degraded =
         state.required &&
         (state.blockedReason !== null ||

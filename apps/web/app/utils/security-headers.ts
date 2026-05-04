@@ -63,7 +63,19 @@ export function buildSecurityHeaders(options: SecurityHeadersOptions = {}): Reco
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
-    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+    // A4-050: geolocation=(self) — the "Locate me" button on the
+    // ClusterMap reads navigator.geolocation. The blanket
+    // `geolocation=()` in the prior policy revoked the capability
+    // from same-origin documents too, so the button silently
+    // failed in browsers that honour Permissions-Policy. Allowing
+    // self only (the Loop origin) keeps the feature working while
+    // still blocking iframe / cross-origin geolocation. Camera /
+    // microphone stay fully blocked — Loop has no UX that uses
+    // them today and Phase-2 plans don't either. Payment stays
+    // blocked until a card-rail UX lands (ADR-010 Phase 2);
+    // re-enable as `payment=(self)` if/when the Payment Request
+    // API is wired in.
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(self), payment=()',
     'Cross-Origin-Opener-Policy': 'same-origin',
     'Cross-Origin-Resource-Policy': 'same-origin',
   };

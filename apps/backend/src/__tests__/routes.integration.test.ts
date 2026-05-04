@@ -53,6 +53,21 @@ vi.mock('../images/proxy.js', async (importOriginal) => {
   return { ...(orig as Record<string, unknown>), evictExpiredImageCache: vi.fn() };
 });
 
+// A4-034: /health now SELECT 1's the DB. Mock db.execute so the
+// integration suite (which has no live Postgres) sees a happy
+// probe by default; individual tests can override via the
+// dbExecuteMock if they want to exercise the degraded path.
+const dbExecuteMock = vi.hoisted(() => vi.fn(async () => [{ '?column?': 1 }]));
+vi.mock('../db/client.js', async (importOriginal) => {
+  const orig = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...orig,
+    db: {
+      execute: dbExecuteMock,
+    },
+  };
+});
+
 // Mock clustering handler to avoid proto import
 vi.mock('../clustering/handler.js', () => ({
   clustersHandler: vi.fn(async (c: { json: (data: unknown) => Response }) =>
@@ -114,6 +129,7 @@ import {
   markWorkerStarted,
   markWorkerTickSuccess,
   recordOtpSendFailure,
+  recordOtpSendSuccess,
 } from '../runtime-health.js';
 
 // Mock global fetch for upstream proxy calls
@@ -153,23 +169,33 @@ describe('GET /health', () => {
     expect(body.upstreamReachable).toBe(true);
   });
 
-  it('returns degraded when upstream is unreachable', async () => {
+  it('flap-fix: upstream-only degradation reports degraded but stays HTTP 200', async () => {
     mockFetch.mockRejectedValueOnce(new Error('connection refused'));
 
     const res = await app.request('/health');
+    // Soft degradation (CTX `/status` slow / unreachable) used to
+    // flip the HTTP status to 503 → Fly cycled the machine → fresh
+    // process state → next transition fired Discord again. The fix
+    // is to keep the body's `degraded` for visibility but NOT cycle
+    // the machine on upstream-only issues.
     expect(res.status).toBe(200);
 
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.status).toBe('degraded');
     expect(body.upstreamReachable).toBe(false);
+    expect(body.softDegraded).toBe(true);
+    expect(body.criticalDegraded).toBe(false);
+    expect(body.softDegradedReasons).toEqual(expect.arrayContaining(['upstream_unreachable']));
   });
 
-  it('surfaces OTP delivery degradation in /health', async () => {
+  it('surfaces OTP delivery degradation in /health with HTTP 503', async () => {
     recordOtpSendFailure(new Error('provider down'));
     mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
 
     const res = await app.request('/health');
-    expect(res.status).toBe(200);
+    // A4-035 / A4-073: a degraded OTP-delivery surface counts as
+    // a degraded backend; orchestrator sees 503.
+    expect(res.status).toBe(503);
 
     const body = (await res.json()) as {
       status: string;
@@ -219,11 +245,26 @@ describe('GET /health', () => {
   // `__resetUpstreamProbeCacheOnlyForTests` drops the probe cache
   // between calls *without* clearing the window, so a single test
   // can drive a sequence of transitions.
+  //
+  // Flap-fix follow-up: the rolling-window detector now keys on
+  // criticalDegraded (DB / runtime) only — upstream-only blips no
+  // longer rotate the window. We simulate critical degradation by
+  // toggling OTP-delivery state, advancing `Date.now()` between
+  // calls so the success/failure timestamps order deterministically.
   async function driveHealth(probes: Array<'ok' | 'fail'>): Promise<void> {
     for (const p of probes) {
       __resetUpstreamProbeCacheOnlyForTests();
-      if (p === 'ok') mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
-      else mockFetch.mockRejectedValueOnce(new Error('timeout'));
+      mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+      if (p === 'ok') {
+        recordOtpSendSuccess();
+      } else {
+        recordOtpSendFailure(new Error('timeout'));
+      }
+      // Sleep 2ms so each record* stamp lands on a distinct ms —
+      // OTP-delivery degraded computes by `lastFailureAtMs >
+      // lastSuccessAtMs` so identical timestamps create a false
+      // healthy reading on the failure side.
+      await new Promise((r) => setTimeout(r, 2));
       await app.request('/health');
     }
   }

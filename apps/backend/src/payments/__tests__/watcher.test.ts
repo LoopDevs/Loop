@@ -24,6 +24,12 @@ vi.mock('../price-feed.js', () => ({
   // Fixed rate: 1 XLM = $0.10 → 10 cents → 10_000_000 / 10 = 1_000_000
   // stroops per cent. Tests that want XLM acceptance to pass use this.
   stroopsPerCent: async (): Promise<bigint> => 1_000_000n,
+  // A4-106: amount-sufficient now routes XLM through the
+  // higher-precision requiredStroopsForCharge. Mock the same
+  // 0.10 USD/XLM rate so the test expectations (1000 cents →
+  // 1_000_000_000 stroops) hold under both code paths.
+  requiredStroopsForCharge: async (chargeMinor: bigint): Promise<bigint> =>
+    chargeMinor * 1_000_000n,
   // Fixed fiat FX: USD → 100_000 stroops/cent (1:1); GBP → 128_206
   // (roughly 0.78 USD/GBP, so £1 ≈ $1.282 ≈ 1.282 USDC = 12_820_513
   // stroops, per-penny = 128_206); EUR → 108_696 (roughly 0.92 USD/EUR).
@@ -74,6 +80,13 @@ const { dbMock, state } = vi.hoisted(() => {
 vi.mock('../../db/client.js', () => ({
   db: {
     insert: dbMock['insert'],
+    // A4-105: writeCursor's empty-page sibling `touchCursorUpdatedAt`
+    // performs `db.update(watcherCursors).set({ updatedAt }).where()`.
+    // The watcher tests assert behaviour without round-tripping the
+    // cursor row to a real DB, so the chain returns nothing.
+    update: vi.fn(() => ({
+      set: vi.fn(() => ({ where: vi.fn(async () => undefined) })),
+    })),
     query: {
       watcherCursors: {
         findFirst: vi.fn(async () =>
@@ -118,7 +131,7 @@ function usdcPayment(memo: string, amount: string, pagingToken = 'pt-1'): Horizo
 
 interface FakeOrder {
   id: string;
-  paymentMethod: 'xlm' | 'usdc' | 'credit';
+  paymentMethod: 'xlm' | 'usdc' | 'credit' | 'loop_asset';
   currency: string;
   faceValueMinor: bigint;
   chargeMinor: bigint;
@@ -448,7 +461,12 @@ describe('runPaymentWatcherTick', () => {
     });
     findOrderMock.mockResolvedValue(
       makeOrder({
-        paymentMethod: 'usdc',
+        // A4-107: a LOOP-asset deposit must be paired with an
+        // order whose paymentMethod is `loop_asset`. Earlier the
+        // watcher accepted a LOOP deposit against a `usdc` order,
+        // which masked the cross-asset confusion bug. Update the
+        // test to the now-required pairing.
+        paymentMethod: 'loop_asset',
         currency: 'GBP',
         faceValueMinor: 1_000n,
         chargeMinor: 1_000n,
@@ -471,7 +489,7 @@ describe('runPaymentWatcherTick', () => {
     });
     findOrderMock.mockResolvedValue(
       makeOrder({
-        paymentMethod: 'usdc',
+        paymentMethod: 'loop_asset',
         currency: 'GBP',
         chargeCurrency: 'GBP',
         chargeMinor: 1_000n,
@@ -491,7 +509,12 @@ describe('runPaymentWatcherTick', () => {
       nextCursor: null,
     });
     findOrderMock.mockResolvedValue(
-      makeOrder({ chargeCurrency: 'GBP', chargeMinor: 1_000n, currency: 'GBP' }),
+      makeOrder({
+        paymentMethod: 'loop_asset',
+        chargeCurrency: 'GBP',
+        chargeMinor: 1_000n,
+        currency: 'GBP',
+      }),
     );
     const r = await runPaymentWatcherTick({ account: ACCOUNT });
     expect(r.paid).toBe(0);

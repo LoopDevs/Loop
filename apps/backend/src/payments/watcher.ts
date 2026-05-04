@@ -24,7 +24,7 @@ import { db } from '../db/client.js';
 import { watcherCursors } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { findPendingOrderByMemo } from '../orders/repo.js';
-import { markOrderPaid } from '../orders/transitions.js';
+import { markOrderPaid, LoopAssetMissingCreditRowError } from '../orders/transitions.js';
 import { listAccountPayments, isMatchingIncomingPayment } from './horizon.js';
 import { configuredLoopPayableAssets, type LoopAssetCode } from '../credits/payout-asset.js';
 import { parseStroops } from './stroops.js';
@@ -70,6 +70,25 @@ async function writeCursor(cursor: string): Promise<void> {
       target: watcherCursors.name,
       set: { cursor, updatedAt: sql`NOW()` },
     });
+}
+
+/**
+ * A4-105: heartbeat — bump `updated_at` on the cursor row even
+ * when the tick read an empty page that didn't advance the cursor.
+ * Without this, a low-volume but healthy period (no on-chain
+ * deposits) leaves the cursor's updated_at frozen at the last
+ * paid-order timestamp; the cursor-age watchdog (cursor-watchdog.ts)
+ * then pages "watcher stuck" after 10 min of healthy idleness.
+ *
+ * Only fires when the row exists — first-run is gated to writeCursor
+ * via the upsert above. The update is a tiny single-row touch and
+ * safe to do on every tick; even a 10-second cadence is 6 writes/min.
+ */
+async function touchCursorUpdatedAt(): Promise<void> {
+  await db
+    .update(watcherCursors)
+    .set({ updatedAt: sql`NOW()` })
+    .where(sql`${watcherCursors.name} = ${WATCHER_NAME}`);
 }
 
 export interface TickResult {
@@ -147,6 +166,24 @@ export async function runPaymentWatcherTick(args: {
       }
     }
     if (!matchesUsdc && !matchesXlm && loopAssetCode === null) continue;
+    // A4-107: tag the matched asset so amount-sufficient can
+    // validate the deposit's asset against the order's
+    // `paymentMethod` enum. Earlier code passed only
+    // `loopAssetCode`, so a USDC order satisfied by an XLM
+    // deposit silently parsed 7-decimal at 1:1 and accepted a
+    // catastrophically underpaying tx (10 XLM ≈ $1 funding a
+    // $10 USDC order). LOOP-asset wins over USDC + XLM because
+    // it's the most specific match (issuer-pinned).
+    type MatchedAsset =
+      | { kind: 'usdc' }
+      | { kind: 'xlm' }
+      | { kind: 'loop_asset'; code: LoopAssetCode };
+    const matchedAsset: MatchedAsset =
+      loopAssetCode !== null
+        ? { kind: 'loop_asset', code: loopAssetCode }
+        : matchesUsdc
+          ? { kind: 'usdc' }
+          : { kind: 'xlm' };
     const memo = p.transaction?.memo;
     if (typeof memo !== 'string') continue;
 
@@ -156,6 +193,31 @@ export async function runPaymentWatcherTick(args: {
       continue;
     }
     result.matched++;
+
+    // A4-107: enforce asset/method match BEFORE size check. If the
+    // deposit asset doesn't match the order's `paymentMethod`, no
+    // amount of size-check arithmetic should mark the order paid.
+    const expectedKind: MatchedAsset['kind'] =
+      order.paymentMethod === 'usdc'
+        ? 'usdc'
+        : order.paymentMethod === 'xlm'
+          ? 'xlm'
+          : order.paymentMethod === 'loop_asset'
+            ? 'loop_asset'
+            : 'usdc'; // 'credit' is debited inline; reaching the watcher with credit is a bug.
+    if (matchedAsset.kind !== expectedKind) {
+      log.warn(
+        {
+          orderId: order.id,
+          paymentMethod: order.paymentMethod,
+          matchedAsset: matchedAsset.kind,
+          paymentId: p.id,
+        },
+        'A4-107: deposit asset does not match order payment_method — rejecting',
+      );
+      result.skippedAmount++;
+      continue;
+    }
 
     if (!(await isAmountSufficient(p, order, loopAssetCode))) {
       log.warn(
@@ -172,7 +234,31 @@ export async function runPaymentWatcherTick(args: {
       continue;
     }
 
-    const transitioned = await markOrderPaid(order.id);
+    let transitioned;
+    try {
+      transitioned = await markOrderPaid(order.id);
+    } catch (err) {
+      if (err instanceof LoopAssetMissingCreditRowError) {
+        // A4-110 defence: state corruption (user holds on-chain
+        // LOOP without matching off-chain user_credits row).
+        // Order stays in pending_payment; the next watcher tick
+        // re-evaluates. Surface to ops via log + skipped counter
+        // so the row doesn't silently sit forever.
+        log.error(
+          {
+            orderId: err.orderId,
+            userId: err.userId,
+            currency: err.currency,
+            paymentId: p.id,
+            memo,
+          },
+          'LOOP-asset payment arrived but user has no matching user_credits row — order left pending_payment for ops investigation',
+        );
+        result.skippedAmount++;
+        continue;
+      }
+      throw err;
+    }
     if (transitioned !== null) {
       result.paid++;
       log.info(
@@ -193,6 +279,12 @@ export async function runPaymentWatcherTick(args: {
     // Empty page with an explicit next cursor — advance anyway to
     // avoid re-polling the same empty window.
     await writeCursor(page.nextCursor);
+  } else {
+    // A4-105: empty page with no next cursor (the typical
+    // healthy-idle case at the head of the stream). Touch
+    // `updated_at` so the cursor-watchdog doesn't false-positive
+    // on long no-deposit periods.
+    await touchCursorUpdatedAt();
   }
 
   return result;

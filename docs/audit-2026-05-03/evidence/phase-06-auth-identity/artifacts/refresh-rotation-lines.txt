@@ -1,0 +1,52 @@
+apps/backend/src/db/migrations/0001_auth_tables.sql:11:CREATE TABLE "refresh_tokens" (
+apps/backend/src/db/migrations/0001_auth_tables.sql:22:ALTER TABLE "refresh_tokens" ADD CONSTRAINT "refresh_tokens_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+apps/backend/src/db/migrations/0001_auth_tables.sql:24:CREATE INDEX "refresh_tokens_user" ON "refresh_tokens" USING btree ("user_id");--> statement-breakpoint
+apps/backend/src/db/migrations/0001_auth_tables.sql:25:CREATE INDEX "refresh_tokens_expires" ON "refresh_tokens" USING btree ("expires_at");
+apps/backend/src/db/schema.ts:22:  primaryKey,
+apps/backend/src/db/schema.ts:54:    id: uuid('id').primaryKey().defaultRandom(),
+apps/backend/src/db/schema.ts:131:    primaryKey({ columns: [t.userId, t.currency], name: 'user_credits_pkey' }),
+apps/backend/src/db/schema.ts:158:    id: uuid('id').primaryKey().defaultRandom(),
+apps/backend/src/db/schema.ts:254:    merchantId: text('merchant_id').primaryKey(),
+apps/backend/src/db/schema.ts:300:    id: uuid('id').primaryKey().defaultRandom(),
+apps/backend/src/db/schema.ts:332:    id: uuid('id').primaryKey().defaultRandom(),
+apps/backend/src/db/schema.ts:362:  'refresh_tokens',
+apps/backend/src/db/schema.ts:364:    jti: text('jti').primaryKey(),
+apps/backend/src/db/schema.ts:370:    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+apps/backend/src/db/schema.ts:371:    replacedByJti: text('replaced_by_jti'),
+apps/backend/src/db/schema.ts:376:    index('refresh_tokens_user').on(t.userId),
+apps/backend/src/db/schema.ts:380:    index('refresh_tokens_expires').on(t.expiresAt),
+apps/backend/src/db/schema.ts:405:    id: uuid('id').primaryKey().defaultRandom(),
+apps/backend/src/db/schema.ts:595:  name: text('name').primaryKey(),
+apps/backend/src/db/schema.ts:620:    id: uuid('id').primaryKey().defaultRandom(),
+apps/backend/src/db/schema.ts:669:    id: uuid('id').primaryKey().defaultRandom(),
+apps/backend/src/db/schema.ts:800:    primaryKey({ columns: [t.adminUserId, t.key], name: 'admin_idempotency_keys_pk' }),
+apps/backend/src/db/schema.ts:819:    tokenHash: text('token_hash').primaryKey(),
+apps/backend/src/auth/refresh-tokens.ts:2: * Refresh-token repository (ADR 013). Backs the `refresh_tokens`
+apps/backend/src/auth/refresh-tokens.ts:28:export async function recordRefreshToken(args: {
+apps/backend/src/auth/refresh-tokens.ts:52:export async function findLiveRefreshToken(args: {
+apps/backend/src/auth/refresh-tokens.ts:61:      isNull(refreshTokens.revokedAt),
+apps/backend/src/auth/refresh-tokens.ts:92:export async function revokeRefreshToken(args: {
+apps/backend/src/auth/refresh-tokens.ts:94:  replacedByJti?: string;
+apps/backend/src/auth/refresh-tokens.ts:101:      revokedAt: now,
+apps/backend/src/auth/refresh-tokens.ts:102:      replacedByJti: args.replacedByJti ?? null,
+apps/backend/src/auth/refresh-tokens.ts:117:    .set({ revokedAt: now })
+apps/backend/src/auth/refresh-tokens.ts:118:    .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
+apps/backend/src/auth/issue-token-pair.ts:14: *     populate the prior row's `replacedByJti` link, A2-557)
+apps/backend/src/auth/issue-token-pair.ts:29:import { recordRefreshToken } from './refresh-tokens.js';
+apps/backend/src/auth/issue-token-pair.ts:37:   * populate the `replacedByJti` link on the prior row without
+apps/backend/src/auth/issue-token-pair.ts:50:export async function issueTokenPair(user: { id: string; email: string }): Promise<TokenPair> {
+apps/backend/src/auth/issue-token-pair.ts:68:  await recordRefreshToken({
+apps/backend/src/auth/native.ts:16:  findLiveRefreshToken,
+apps/backend/src/auth/native.ts:18:  revokeRefreshToken,
+apps/backend/src/auth/native.ts:37:// `issueTokenPair` (and its `TokenPair` interface) lives in
+apps/backend/src/auth/native.ts:42:export { issueTokenPair, type TokenPair } from './issue-token-pair.js';
+apps/backend/src/auth/native.ts:43:import { issueTokenPair } from './issue-token-pair.js';
+apps/backend/src/auth/native.ts:90:    const pair = await issueTokenPair({ id: user.id, email: user.email });
+apps/backend/src/auth/native.ts:104: * the `refresh_tokens` row is live and hash-matches, revokes the old
+apps/backend/src/auth/native.ts:128:    const row = await findLiveRefreshToken({
+apps/backend/src/auth/native.ts:134:      //   - record exists but revokedAt != null → reuse of a rotated
+apps/backend/src/auth/native.ts:141:      if (record !== null && record.revokedAt !== null) {
+apps/backend/src/auth/native.ts:153:    const pair = await issueTokenPair({ id: claims.sub, email: claims.email });
+apps/backend/src/auth/native.ts:156:    // `issueTokenPair` already knows the new refresh jti from
+apps/backend/src/auth/native.ts:158:    await revokeRefreshToken({
+apps/backend/src/auth/native.ts:160:      replacedByJti: pair.refreshJti,

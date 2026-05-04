@@ -145,7 +145,22 @@ export async function adminWithdrawalHandler(c: Context): Promise<Response> {
 
   // Convert the minor-unit balance amount into Stellar stroops.
   // 1 minor unit = 100,000 stroops (1:1 peg, 7 decimals — same as
-  // payout-builder.ts:122 for order-cashback rows).
+  // payout-builder.ts for order-cashback rows).
+  //
+  // A4-029: lock the 100_000 ratio to the LOOP-asset code set. A
+  // future asset code with a different decimal layout (USDC variant,
+  // non-7-decimal LOOP) would silently send 100x off without this
+  // guard. The withdrawals path resolves `asset` via
+  // `payoutAssetFor(parsed.data.currency)` above.
+  if (asset.code !== 'USDLOOP' && asset.code !== 'GBPLOOP' && asset.code !== 'EURLOOP') {
+    return c.json(
+      {
+        code: 'INTERNAL_ERROR',
+        message: `Unsupported withdrawal asset code '${asset.code}' — stroops/minor ratio assumes LOOP-asset 7-decimal layout`,
+      },
+      500,
+    );
+  }
   const amountMinor = BigInt(parsed.data.amountMinor);
   const amountStroops = amountMinor * 100_000n;
 

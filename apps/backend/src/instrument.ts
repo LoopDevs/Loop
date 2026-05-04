@@ -35,6 +35,15 @@ if (env.SENTRY_DSN) {
     // Loop-specific secrets (env-named signing keys, CTX API
     // credentials, DATABASE_URL, Discord webhooks) that would
     // otherwise land in `extra` / `contexts` / `request.headers`.
-    beforeSend: (event) => scrubSentryEvent(event),
+    // Cast through `unknown` because Sentry's `ErrorEvent` type
+    // has many optional fields we don't read; `SentryEventLike` is
+    // the minimal subset the scrubber walks. The cast is sound as
+    // long as we only return a value with all the keys Sentry
+    // expects on the event, which scrubSentryEvent does
+    // (it returns the input shape with selected fields rewritten).
+    beforeSend: (event) =>
+      scrubSentryEvent(
+        event as unknown as Parameters<typeof scrubSentryEvent>[0],
+      ) as unknown as typeof event,
   });
 }

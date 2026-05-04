@@ -1,0 +1,32 @@
+docs/testing.md:121:| CI (every push)                    | Quality (typecheck + lint + format:check + lint:docs) + Unit tests + Security audit + Build + mocked e2e (`test:e2e:mocked`) |
+.github/workflows/ci.yml:149:  flywheel-integration:
+.github/workflows/ci.yml:203:    name: Security audit
+.github/workflows/ci.yml:215:  # A2-408: SBOM (CycloneDX) + provenance attestation (SLSA build
+.github/workflows/ci.yml:220:  # Generates a CycloneDX 1.6 SBOM for the npm workspace tree via
+.github/workflows/ci.yml:221:  # `@cyclonedx/cyclonedx-npm`, then attests + signs the SBOM file
+.github/workflows/ci.yml:224:  # verify "this SBOM was produced by Loop's CI on commit X" without
+.github/workflows/ci.yml:226:  # bundle (.sig + .pem) that pairs with the SBOM artifact.
+.github/workflows/ci.yml:228:  # SBOM is generated for the workspace root — the recursive npm
+.github/workflows/ci.yml:233:    name: SBOM + provenance + signing
+.github/workflows/ci.yml:267:      - name: Generate CycloneDX SBOM
+.github/workflows/ci.yml:271:        # the root). The SBOM walks the entire workspace dep tree
+.github/workflows/ci.yml:283:      - name: Attest SBOM provenance (SLSA build provenance)
+.github/workflows/ci.yml:285:        # provenance attestation linking the SBOM to the workflow
+.github/workflows/ci.yml:295:      - name: Sign SBOM (cosign keyless)
+.github/workflows/ci.yml:300:        # ships alongside the SBOM as a workflow artifact for
+.github/workflows/ci.yml:308:      - name: Upload SBOM + signature artifacts
+.github/workflows/ci.yml:321:  # itself for misconfig (root user, ADD-with-URL, etc). The SBOM
+.github/workflows/ci.yml:330:    name: Container CVE scan (trivy)
+.github/workflows/ci.yml:385:  secret-scan:
+.github/workflows/ci.yml:689:  test-e2e-flywheel:
+.github/workflows/ci.yml:690:    name: E2E tests (loop-native flywheel)
+.github/workflows/ci.yml:747:      - name: Run loop-native flywheel e2e tests
+.github/workflows/ci.yml:769:        flywheel-integration,
+.github/workflows/ci.yml:771:        secret-scan,
+.github/workflows/ci.yml:777:        test-e2e-flywheel,
+docs/standards.md:584:- **`main` is mechanically protected.** No direct pushes. All changes via PR. GitHub branch protection is live (audit A-037 closed after the repo went public): required passing checks are `Quality`, `Unit tests`, `Security audit`, `Build verification`, and `E2E tests (mocked CTX)`; force-push and branch deletion are blocked; stale reviews dismiss on new commits. See §15 CI/CD for the exact ruleset and the API pointer.
+docs/standards.md:1037:### Security audit policy
+docs/standards.md:1063:    `Security audit`, `Build verification`, and
+docs/standards.md:1153:- Security audit of auth and payment code paths.
+AGENTS.md:268:- **Never push directly to `main`** — all changes via PR. Branch protection is now enforced by GitHub (audit A-037 closed after the repo went public): required passing status checks are `Quality (typecheck, lint, format, docs)`, `Unit tests`, `Security audit`, `Build verification`, `E2E tests (mocked CTX)`; force-push and branch deletion are blocked; stale reviews dismiss on new commits. The `gh api repos/LoopDevs/Loop/branches/main/protection` endpoint now returns the active ruleset. Admins can still squash-merge without a required approval because the project is pre-team, but the passing-checks gate is non-negotiable.
+AGENTS.md:270:- Create a feature branch, push, open a PR. CI runs eleven jobs: `quality`, `test-unit`, `flywheel-integration` (real-postgres flywheel walk, A2-1705 phase A.1), `audit`, `secret-scan` (gitleaks, A2-206), `container-cve-scan` (trivy, A2-408), `sbom` (CycloneDX SBOM + SLSA provenance + cosign keyless signing, A2-408), `build`, `test-e2e-mocked`, `test-e2e` (PR only), and `notify`.
