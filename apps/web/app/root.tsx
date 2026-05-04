@@ -29,6 +29,7 @@ import { ToastContainer } from '~/components/ui/ToastContainer';
 import { useAuthStore } from '~/stores/auth.store';
 import { useUiStore } from '~/stores/ui.store';
 import { buildSecurityHeaders } from '~/utils/security-headers';
+import { useNonce } from '~/utils/nonce-context';
 import { shouldRetry } from '~/hooks/query-retry';
 import { NativeTabBar } from '~/components/features/NativeTabBar';
 import { fetchAllMerchants } from '~/services/merchants';
@@ -232,6 +233,12 @@ export const links: Route.LinksFunction = () => [
 ];
 
 export function Layout({ children }: { children: React.ReactNode }): React.JSX.Element {
+  // A4-057: per-request CSP nonce, present on the SSR path; null on
+  // the static-export mobile build (no entry.server.tsx round-trip).
+  // Threaded onto every inline <script> the page emits + into the
+  // CSP `script-src` directive so the browser only executes inline
+  // scripts carrying this exact nonce.
+  const nonce = useNonce();
   // Re-apply the theme class after hydration. React 19's hydration can
   // strip attributes that were added to <html> between SSR and client
   // mount — in our case the inline `__html` script below adds a
@@ -302,8 +309,13 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
          * accidentally zooming just reflows cleanly. `viewport-fit=cover`
          * stays so safe-area insets still work on notched devices. */}
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-        {/* Inline theme init prevents flash of unstyled content */}
+        {/* Inline theme init prevents flash of unstyled content. A4-057:
+            stamps the per-request nonce so the strict HTTP CSP on the
+            SSR web path executes it. Mobile static export has no nonce
+            (`useNonce()` returns null), and the meta-CSP fallback there
+            keeps `'unsafe-inline'` on script-src. */}
         <script
+          {...(nonce !== null ? { nonce } : {})}
           dangerouslySetInnerHTML={{
             __html: `(function(){try{var t=localStorage.getItem('theme');var d=window.matchMedia('(prefers-color-scheme: dark)').matches;var isDark=(t==='dark')||(t!=='light'&&d);document.documentElement.classList.add(isDark?'dark':'light');}catch(e){document.documentElement.classList.add('light');}})();`,
           }}
@@ -313,8 +325,11 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
       </head>
       <body>
         {children}
-        <ScrollRestoration />
-        <Scripts />
+        {/* A4-057: nonce stamps the inline scripts React Router v7
+            emits for hydration data + the routing manifest. RR's
+            <Scripts nonce> propagates to every emitted <script>. */}
+        <ScrollRestoration {...(nonce !== null ? { nonce } : {})} />
+        <Scripts {...(nonce !== null ? { nonce } : {})} />
       </body>
     </html>
   );

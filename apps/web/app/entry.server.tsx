@@ -18,6 +18,7 @@
  * with header injection added after the headers set is sealed.
  */
 import { PassThrough } from 'node:stream';
+import { randomBytes } from 'node:crypto';
 
 import type { AppLoadContext, EntryContext } from 'react-router';
 import { createReadableStreamFromReadable } from '@react-router/node';
@@ -27,6 +28,7 @@ import type { RenderToPipeableStreamOptions } from 'react-dom/server';
 import { renderToPipeableStream } from 'react-dom/server';
 
 import { buildSecurityHeaders } from '~/utils/security-headers';
+import { NonceContext } from '~/utils/nonce-context';
 
 export const streamTimeout = 5_000;
 
@@ -47,9 +49,14 @@ export const streamTimeout = 5_000;
  * previous "skip HTTP CSP" behaviour, but `frame-ancestors` is now
  * actually enforced (defence-in-depth on top of `X-Frame-Options`).
  */
-function applySecurityHeaders(responseHeaders: Headers): void {
+function applySecurityHeaders(
+  responseHeaders: Headers,
+  inlineScriptNonce: string | undefined,
+): void {
   const apiOrigin = process.env['VITE_API_URL'] ?? 'https://api.loopfinance.io';
-  const headers = buildSecurityHeaders({ apiOrigin });
+  const headers = buildSecurityHeaders(
+    inlineScriptNonce !== undefined ? { apiOrigin, inlineScriptNonce } : { apiOrigin },
+  );
   for (const [name, value] of Object.entries(headers)) {
     responseHeaders.set(name, value);
   }
@@ -62,7 +69,22 @@ export default function handleRequest(
   routerContext: EntryContext,
   _loadContext: AppLoadContext,
 ): Promise<Response> | Response {
-  applySecurityHeaders(responseHeaders);
+  // A4-057: mint a per-request nonce. base64url 18 bytes = 24 chars
+  // of entropy, well past the OWASP minimum of 128 bits. Threaded
+  // through `NonceContext` to every inline script in the React
+  // tree (theme-init guard + RR's <Scripts /> / <ScrollRestoration />)
+  // and into the HTTP CSP `script-src` directive so the browser
+  // only executes inline scripts carrying this exact value.
+  //
+  // Vite dev mode injects HMR + module-preload `<script>` tags into
+  // the SSR HTML response; those have no nonce attribute and would
+  // fail a strict CSP. Skip the nonce in dev so the dev server stays
+  // usable; production builds (`react-router-serve` against the
+  // built SSR bundle) emit only the scripts the React tree owns,
+  // and those carry the nonce.
+  const isDevSsr = process.env['NODE_ENV'] !== 'production';
+  const inlineScriptNonce = isDevSsr ? undefined : randomBytes(18).toString('base64url');
+  applySecurityHeaders(responseHeaders, inlineScriptNonce);
 
   // https://httpwg.org/specs/rfc9110.html#HEAD
   if (request.method.toUpperCase() === 'HEAD') {
@@ -100,7 +122,9 @@ export default function handleRequest(
     timeoutId = setTimeout(() => abort(), streamTimeout + 1000);
 
     const { pipe, abort } = renderToPipeableStream(
-      <ServerRouter context={routerContext} url={request.url} />,
+      <NonceContext value={inlineScriptNonce ?? null}>
+        <ServerRouter context={routerContext} url={request.url} />
+      </NonceContext>,
       {
         [readyOption]() {
           shellRendered = true;

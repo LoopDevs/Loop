@@ -10,6 +10,28 @@ import { buildSecurityHeaders } from '../security-headers';
 describe('buildSecurityHeaders', () => {
   const h = buildSecurityHeaders();
 
+  it('A4-057: with a per-request nonce, script-src lists the nonce and drops unsafe-inline', () => {
+    const withNonce = buildSecurityHeaders({ inlineScriptNonce: 'fixture-nonce-abcd' });
+    const csp = withNonce['Content-Security-Policy'] ?? '';
+    const scriptSrc = csp
+      .split(';')
+      .map((d) => d.trim())
+      .find((d) => d.startsWith('script-src '));
+    expect(scriptSrc).toBeDefined();
+    expect(scriptSrc).toContain("'nonce-fixture-nonce-abcd'");
+    expect(scriptSrc).not.toContain("'unsafe-inline'");
+  });
+
+  it('A4-057: without a nonce (mobile static export / dev SSR), script-src keeps unsafe-inline', () => {
+    const csp = h['Content-Security-Policy'] ?? '';
+    const scriptSrc = csp
+      .split(';')
+      .map((d) => d.trim())
+      .find((d) => d.startsWith('script-src '));
+    expect(scriptSrc).toBeDefined();
+    expect(scriptSrc).toContain("'unsafe-inline'");
+  });
+
   it('sets a Content-Security-Policy with frame-ancestors none', () => {
     expect(h['Content-Security-Policy']).toMatch(/default-src 'self'/);
     expect(h['Content-Security-Policy']).toMatch(/frame-ancestors 'none'/);
