@@ -166,6 +166,24 @@ export async function runPaymentWatcherTick(args: {
       }
     }
     if (!matchesUsdc && !matchesXlm && loopAssetCode === null) continue;
+    // A4-107: tag the matched asset so amount-sufficient can
+    // validate the deposit's asset against the order's
+    // `paymentMethod` enum. Earlier code passed only
+    // `loopAssetCode`, so a USDC order satisfied by an XLM
+    // deposit silently parsed 7-decimal at 1:1 and accepted a
+    // catastrophically underpaying tx (10 XLM ≈ $1 funding a
+    // $10 USDC order). LOOP-asset wins over USDC + XLM because
+    // it's the most specific match (issuer-pinned).
+    type MatchedAsset =
+      | { kind: 'usdc' }
+      | { kind: 'xlm' }
+      | { kind: 'loop_asset'; code: LoopAssetCode };
+    const matchedAsset: MatchedAsset =
+      loopAssetCode !== null
+        ? { kind: 'loop_asset', code: loopAssetCode }
+        : matchesUsdc
+          ? { kind: 'usdc' }
+          : { kind: 'xlm' };
     const memo = p.transaction?.memo;
     if (typeof memo !== 'string') continue;
 
@@ -175,6 +193,31 @@ export async function runPaymentWatcherTick(args: {
       continue;
     }
     result.matched++;
+
+    // A4-107: enforce asset/method match BEFORE size check. If the
+    // deposit asset doesn't match the order's `paymentMethod`, no
+    // amount of size-check arithmetic should mark the order paid.
+    const expectedKind: MatchedAsset['kind'] =
+      order.paymentMethod === 'usdc'
+        ? 'usdc'
+        : order.paymentMethod === 'xlm'
+          ? 'xlm'
+          : order.paymentMethod === 'loop_asset'
+            ? 'loop_asset'
+            : 'usdc'; // 'credit' is debited inline; reaching the watcher with credit is a bug.
+    if (matchedAsset.kind !== expectedKind) {
+      log.warn(
+        {
+          orderId: order.id,
+          paymentMethod: order.paymentMethod,
+          matchedAsset: matchedAsset.kind,
+          paymentId: p.id,
+        },
+        'A4-107: deposit asset does not match order payment_method — rejecting',
+      );
+      result.skippedAmount++;
+      continue;
+    }
 
     if (!(await isAmountSufficient(p, order, loopAssetCode))) {
       log.warn(

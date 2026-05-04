@@ -15,7 +15,7 @@ import { findOrCreateUserByEmail } from '../db/users.js';
 import {
   findLiveRefreshToken,
   findRefreshTokenRecord,
-  revokeRefreshToken,
+  tryRevokeIfLive,
   revokeAllRefreshTokensForUser,
 } from './refresh-tokens.js';
 
@@ -150,15 +150,33 @@ export async function nativeRefreshHandler(c: Context): Promise<Response> {
       return c.json({ code: 'UNAUTHORIZED', message: 'Invalid refresh token' }, 401);
     }
 
+    // A4-098: concurrency-safe rotation. Two parallel refresh
+    // requests with the same old token both make it past
+    // findLiveRefreshToken (the row is live until SOMEONE revokes
+    // it). To prevent both from issuing successors, we gate the
+    // mint on a compare-and-set revoke that only succeeds for the
+    // first caller. The loser short-circuits to 401 instead of
+    // creating a parallel live successor lineage.
+    //
+    // We pre-mint the successor jti so `tryRevokeIfLive` can stamp
+    // `replaced_by_jti` atomically with the revoke, then write the
+    // successor row only after that compare-and-set succeeds.
     const pair = await issueTokenPair({ id: claims.sub, email: claims.email });
-    // Revoke the old row after issuing the new one — if the new-row
-    // insert fails the old row is still usable on a retry. A2-557:
-    // `issueTokenPair` already knows the new refresh jti from
-    // signing; no need to re-verify the token string to extract it.
-    await revokeRefreshToken({
-      jti: claims.jti,
-      replacedByJti: pair.refreshJti,
-    });
+    const won = await tryRevokeIfLive({ jti: claims.jti, replacedByJti: pair.refreshJti });
+    if (!won) {
+      // Concurrent rotation lost the race. The other caller already
+      // revoked the row + minted its own successor; we must not
+      // emit a second live pair under the same prior jti. Surface
+      // a 401 — the legitimate client should retry refresh; an
+      // attacker holding the same prior token gets the same 401
+      // and on the next attempt trips the reuse-detection path
+      // above.
+      log.warn(
+        { jti: claims.jti, sub: claims.sub },
+        'Refresh token rotation lost concurrent race — rejecting',
+      );
+      return c.json({ code: 'UNAUTHORIZED', message: 'Invalid refresh token' }, 401);
+    }
     // Strip the internal `refreshJti` field before returning to the
     // client — the wire contract stays `{ accessToken, refreshToken }`.
     return c.json({ accessToken: pair.accessToken, refreshToken: pair.refreshToken });

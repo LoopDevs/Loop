@@ -26,7 +26,7 @@ import type { HorizonPayment } from './horizon.js';
 import type { Order } from '../orders/repo.js';
 import type { LoopAssetCode } from '../credits/payout-asset.js';
 import { logger } from '../logger.js';
-import { stroopsPerCent, usdcStroopsPerCent } from './price-feed.js';
+import { requiredStroopsForCharge, usdcStroopsPerCent } from './price-feed.js';
 import { parseStroops } from './stroops.js';
 
 const log = logger.child({ area: 'payment-watcher' });
@@ -132,8 +132,13 @@ export async function isAmountSufficient(
     return false;
   }
   try {
-    const perCent = await stroopsPerCent(order.chargeCurrency);
-    const requiredStroops = order.chargeMinor * perCent;
+    // A4-106: route through requiredStroopsForCharge so the
+    // single-ceiling math doesn't accept a 4-5% underpayment at
+    // the cent-rounding boundary (e.g. usd=0.105 XLM, where the
+    // earlier `Math.round(usd * 100) = 11` rounded UP and the
+    // computed stroopsPerCent was correspondingly LOWER than the
+    // true rate).
+    const requiredStroops = await requiredStroopsForCharge(order.chargeMinor, order.chargeCurrency);
     return receivedStroops >= requiredStroops;
   } catch (err) {
     log.warn({ err, orderId: order.id }, 'XLM price oracle unavailable — rejecting XLM payment');

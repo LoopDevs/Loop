@@ -7,6 +7,7 @@ vi.mock('../../logger.js', () => ({
 }));
 
 import {
+  requiredStroopsForCharge,
   stroopsPerCent,
   usdcStroopsPerCent,
   convertMinorUnits,
@@ -88,6 +89,29 @@ describe('stroopsPerCent', () => {
   it('throws on a non-positive rate', async () => {
     fetchSpy = stubFeed({ stellar: { usd: 0 } });
     await expect(stroopsPerCent('USD')).rejects.toThrow(/non-positive rate/);
+  });
+});
+
+describe('requiredStroopsForCharge (A4-106)', () => {
+  it('keeps sub-cent precision so a 0.105 USD/XLM rate yields the correct ceiling', async () => {
+    // The audit case: usd=0.105 USD/XLM. Earlier code did
+    // Math.round(0.105 * 100) = 11, so stroopsPerCent = ceil(1e7/11)
+    // = 909_091. A 1000-cent ($10) order then required 909_091_000
+    // stroops, but the true requirement is 1000 / 10.5 = 95.238...
+    // XLM = 952_381_000 stroops (ceiling).
+    fetchSpy = stubFeed({ stellar: { usd: 0.105 } });
+    const required = await requiredStroopsForCharge(1000n, 'USD');
+    // 1000 × 10^13 / 10_500_000 = 952_380_952.38... → ceil 952_380_953.
+    expect(required).toBe(952_380_953n);
+    // Sanity: more stroops than the OLD buggy 909_091_000.
+    expect(required).toBeGreaterThan(909_091_000n);
+  });
+
+  it('matches stroopsPerCent × chargeMinor when the rate aligns to whole cents', async () => {
+    // usd = 0.10 → exact 10 cents/XLM → no rounding loss either way.
+    fetchSpy = stubFeed({ stellar: { usd: 0.1 } });
+    const required = await requiredStroopsForCharge(1000n, 'USD');
+    expect(required).toBe(1000n * 1_000_000n);
   });
 });
 
