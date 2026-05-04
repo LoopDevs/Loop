@@ -98,28 +98,43 @@ export async function clustersHandler(c: Context): Promise<Response> {
   const wantsProtobuf = c.req.header('Accept')?.includes(PROTOBUF_MIME) ?? false;
 
   if (wantsProtobuf) {
-    // Lazy-import generated protobuf types to avoid hard startup dependency
-    // before buf generate has been run. The two failure modes are:
-    //   (a) module not present (expected in fresh checkouts, dev pre-codegen)
-    //   (b) construction/encoding failure (real bug in our mapping)
-    // We must not treat (b) as "fall back to JSON" — that silently hides a
-    // schema drift. Only the dynamic import itself is caught here; any error
-    // from `new ProtobufClusterResponse(...)` or `toBinary()` propagates out.
+    // A4-115: protobuf-es v2 generates a schema descriptor +
+    // create/toBinary/fromBinary helpers, NOT a class. The earlier
+    // code constructed `new ProtobufClusterResponse(...)` which is
+    // a v1-style API; the v2-generated module exports
+    // `ProtobufClusterResponseSchema` plus runtime helpers. The
+    // earlier `typeof ProtobufClusterResponse === 'function'`
+    // check was always false (it's a TYPE-only export under v2),
+    // so every protobuf-Accept request silently fell back to JSON
+    // — the protobuf rail was dead.
+    //
+    // Lazy-import: keeps the module out of cold-start path and
+    // tolerates a fresh checkout without `npm run proto:generate`
+    // having run. The two failure modes:
+    //   (a) module not present (codegen never ran) — fall back to JSON.
+    //   (b) construction or encoding failure — propagate so a real
+    //       schema drift loud-fails rather than silently masquerading.
     /* eslint-disable @typescript-eslint/no-explicit-any */
-    let ProtobufClusterResponse: any = null;
+    let create: any = null;
+    let toBinary: any = null;
+    let ProtobufClusterResponseSchema: any = null;
     try {
+      const protobufEs = (await import('@bufbuild/protobuf' as any)) as any;
+      create = protobufEs.create;
+      toBinary = protobufEs.toBinary;
       const mod = (await import('@loop/shared/src/proto/clustering_pb.js' as any)) as any;
-      ProtobufClusterResponse = mod.ProtobufClusterResponse;
+      ProtobufClusterResponseSchema = mod.ProtobufClusterResponseSchema;
     } catch (err) {
       log.warn({ err }, 'Protobuf types not generated, falling back to JSON');
     }
     /* eslint-enable @typescript-eslint/no-explicit-any */
 
-    // Guard against the import succeeding but the symbol being undefined —
-    // which happens in tests that mock the module without providing it, and
-    // in a partially-generated proto output. Either way, fall back to JSON.
-    if (typeof ProtobufClusterResponse === 'function') {
-      const msg = new ProtobufClusterResponse({
+    if (
+      typeof create === 'function' &&
+      typeof toBinary === 'function' &&
+      ProtobufClusterResponseSchema !== null
+    ) {
+      const msg = create(ProtobufClusterResponseSchema, {
         locationPoints: result.locationPoints.map((p) => ({
           type: p.type,
           properties: {
@@ -153,7 +168,7 @@ export async function clustersHandler(c: Context): Promise<Response> {
         bounds: { west, south, east, north },
       });
 
-      const bytes = msg.toBinary();
+      const bytes = toBinary(ProtobufClusterResponseSchema, msg);
       return new Response(bytes, {
         headers: {
           'Content-Type': PROTOBUF_MIME,
