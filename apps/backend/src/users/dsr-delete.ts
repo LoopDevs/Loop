@@ -50,6 +50,7 @@ import { db } from '../db/client.js';
 import { orders, pendingPayouts, userIdentities, users } from '../db/schema.js';
 import type { PAYOUT_STATES, ORDER_STATES } from '../db/schema.js';
 import { revokeAllRefreshTokensForUser } from '../auth/refresh-tokens.js';
+import { logger } from '../logger.js';
 
 /**
  * Pre-condition check: which user states would block deletion. The
@@ -234,7 +235,23 @@ export async function deleteUserViaAnonymisation(userId: string): Promise<DsrDel
   // Sessions: revoke after the txn so a partial failure doesn't
   // leave the user logged-out without their data anonymised. The
   // refresh-token revoke is idempotent.
-  await revokeAllRefreshTokensForUser(userId);
+  //
+  // A4-086: surface a revoke failure loudly. The anonymisation
+  // already committed, so we cannot roll back; but a stale
+  // refresh token against an anonymised row is a privacy
+  // regression we want operators to know about and remediate
+  // (running revokeAllRefreshTokensForUser manually). Without
+  // this log line, a transient DB blip during the revoke would
+  // silently leave the row anonymised but sessions live.
+  try {
+    await revokeAllRefreshTokensForUser(userId);
+  } catch (err) {
+    logger.error(
+      { err, userId },
+      'A4-086: DSR anonymisation succeeded but refresh-token revoke failed — rerun revokeAllRefreshTokensForUser manually',
+    );
+    throw err;
+  }
 
   return { ok: true };
 }

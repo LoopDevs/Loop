@@ -14,13 +14,23 @@ loopfinance.io landing page can render headline numbers
 ("$X cashback paid to N users") and a "top cashback merchants" tile
 without forcing a log-in.
 
-Four endpoints in production or about to land under the prefix:
+Endpoints in production under the prefix (A4-061: `/api/public/stats`
+was named in the original ADR but never implemented; removed
+2026-05-03 to keep the doc honest. The headline-count tile is served
+by `/api/public/cashback-stats` instead):
 
-- `/api/public/stats` — app-wide headline counts.
 - `/api/public/cashback-stats` — fleet-wide cashback totals + fulfilled
   order count, per-currency grouping.
 - `/api/public/top-cashback-merchants` — CDN-friendly "best cashback"
   list for the landing tile.
+- `/api/public/cashback-preview` — per-merchant cashback estimate for
+  a given amount (fuels the marketing-site calculator).
+- `/api/public/merchants/:id` — merchant detail for the public landing
+  flows.
+- `/api/public/loop-assets` — LOOP-asset issuer inventory for the
+  marketing surface.
+- `/api/public/flywheel-stats` — recycle-side counterpart to
+  `/api/public/cashback-stats`.
 - (plus the pre-existing `/api/config` surface that predates the
   prefix — it stays where it is).
 
