@@ -853,3 +853,38 @@ export const socialIdTokenUses = pgTable(
   },
   (t) => [index('social_id_token_uses_expires_at_idx').on(t.expiresAt)],
 );
+
+/**
+ * Per-user merchant favourites (Tranche 2 user-value follow-on).
+ *
+ * Opt-in pin list a user maintains so the app can surface go-to
+ * merchants on the home grid. Read-mostly and tiny per-user.
+ *
+ * `merchant_id` is `text` (not a foreign key) — the catalog itself
+ * isn't a Postgres table; it's the in-memory `MerchantCatalogStore`
+ * fed by upstream sync (ADR 021). A merchant temporarily disappearing
+ * from the catalog must NOT cascade-delete the user's favourite — the
+ * read-side hides the entry until the merchant returns. Permanently-
+ * removed merchants leave dead rows that the eviction sweep mops up
+ * (ADR 021 §eviction policy).
+ *
+ * Composite PK on `(user_id, merchant_id)` is the natural dedupe
+ * boundary; the `(user_id, created_at DESC)` index covers the only
+ * read shape ("this user's favourites, newest first"). See migration
+ * `0032_user_favorite_merchants.sql` for the SQL + the rollback path.
+ */
+export const userFavoriteMerchants = pgTable(
+  'user_favorite_merchants',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    merchantId: text('merchant_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.merchantId], name: 'user_favorite_merchants_pkey' }),
+    index('user_favorite_merchants_user_created').on(t.userId, t.createdAt),
+    check('user_favorite_merchants_merchant_id_nonempty', sql`length(${t.merchantId}) >= 1`),
+  ],
+);

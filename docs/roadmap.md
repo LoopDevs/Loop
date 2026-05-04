@@ -198,7 +198,8 @@ below is either shipped or an explicit "not yet started".
 ### Features
 
 - [x] ~~Order history page~~ — `/orders` route with pagination, status badges, sign-in prompt. Navbar link added.
-- [ ] Favourites / recently purchased merchants
+- [x] ~~Favourites~~ — `/api/users/me/favorites` list/add/remove with a 50-per-user cap, surfaced as a heart-toggle on every `MerchantCard` and a "Your favourites" strip on the home page (mobile + desktop). Catalog-evicted favourites surface as `merchant: null` so the row stays restorable while the UI hides the entry. Recently-purchased is a separate read on top of the orders ledger and stays open.
+- [ ] Recently purchased merchants
 - [ ] Referral program
 
 ### Observability

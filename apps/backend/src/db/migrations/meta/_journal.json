@@ -225,6 +225,13 @@
       "when": 1780000000000,
       "tag": "0031_credit_transactions_reason_length",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1780100000000,
+      "tag": "0032_user_favorite_merchants",
+      "breakpoints": true
     }
   ]
 }

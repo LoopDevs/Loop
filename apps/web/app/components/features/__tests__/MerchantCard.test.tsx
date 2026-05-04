@@ -2,6 +2,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { Merchant } from '@loop/shared';
 import { MerchantCard } from '../MerchantCard';
 
@@ -16,11 +17,19 @@ function merchant(overrides: Partial<Merchant> = {}): Merchant {
   };
 }
 
+// MerchantCard now embeds `FavoriteToggleButton`, which calls
+// `useAuth` (and therefore `useQueryClient`). Wrap renders in a
+// `QueryClientProvider` so the hook resolves; the auth store
+// defaults to signed-out so the heart button self-hides and these
+// cashback-badge assertions remain undisturbed.
 function renderCard(props: Parameters<typeof MerchantCard>[0]): ReturnType<typeof render> {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter>
-      <MerchantCard {...props} />
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <MerchantCard {...props} />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 

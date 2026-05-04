@@ -28,6 +28,7 @@ import type { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerUsersCashbackDrillOpenApi } from './users-cashback-drill.js';
 import { registerUsersDsrOrdersOpenApi } from './users-dsr-orders.js';
+import { registerUsersFavoritesOpenApi } from './users-favorites.js';
 import { registerUsersHistoryCreditsOpenApi } from './users-history-credits.js';
 import { registerUsersPendingPayoutsOpenApi } from './users-pending-payouts.js';
 import { registerUsersProfileOpenApi } from './users-profile.js';
@@ -90,4 +91,13 @@ export function registerUsersOpenApi(
   // counter. Lifted into ./users-dsr-orders.ts. Only
   // `errorResponse` crosses the boundary.
   registerUsersDsrOrdersOpenApi(registry, errorResponse);
+
+  // ─── Users — favourite merchants ───────────────────────────────────────────
+  //
+  // Three caller-scoped paths backing the per-user merchant pin
+  // list (list / add / remove). Schemas are locally scoped — the
+  // list response carries an inline merchant subset rather than
+  // re-registering the canonical Merchant. Only `errorResponse`
+  // crosses the boundary.
+  registerUsersFavoritesOpenApi(registry, errorResponse);
 }

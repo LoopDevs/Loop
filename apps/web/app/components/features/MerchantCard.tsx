@@ -5,6 +5,7 @@ import { getImageProxyUrl } from '~/utils/image';
 import { triggerHaptic } from '~/native/haptics';
 import { LazyImage } from '~/components/ui/LazyImage';
 import { currencySymbol } from '~/utils/money';
+import { FavoriteToggleButton } from './FavoriteToggleButton';
 
 /**
  * Render the merchant's allowed gift-card range beneath the card.
@@ -166,6 +167,11 @@ export function MerchantCard({
               {cashbackLabel}% cashback
             </span>
           )}
+          {/* Favourite toggle pinned to the top-left so it never
+              collides with the savings/cashback badges in the
+              top-right. Self-gated on isAuthenticated — renders
+              nothing for signed-out visitors. */}
+          <FavoriteToggleButton merchantId={merchant.id} className="absolute top-2 left-2" />
         </div>
 
         <div className="p-4">
