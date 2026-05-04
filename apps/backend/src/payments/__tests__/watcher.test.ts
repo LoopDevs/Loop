@@ -74,6 +74,13 @@ const { dbMock, state } = vi.hoisted(() => {
 vi.mock('../../db/client.js', () => ({
   db: {
     insert: dbMock['insert'],
+    // A4-105: writeCursor's empty-page sibling `touchCursorUpdatedAt`
+    // performs `db.update(watcherCursors).set({ updatedAt }).where()`.
+    // The watcher tests assert behaviour without round-tripping the
+    // cursor row to a real DB, so the chain returns nothing.
+    update: vi.fn(() => ({
+      set: vi.fn(() => ({ where: vi.fn(async () => undefined) })),
+    })),
     query: {
       watcherCursors: {
         findFirst: vi.fn(async () =>

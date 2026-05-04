@@ -72,6 +72,25 @@ async function writeCursor(cursor: string): Promise<void> {
     });
 }
 
+/**
+ * A4-105: heartbeat — bump `updated_at` on the cursor row even
+ * when the tick read an empty page that didn't advance the cursor.
+ * Without this, a low-volume but healthy period (no on-chain
+ * deposits) leaves the cursor's updated_at frozen at the last
+ * paid-order timestamp; the cursor-age watchdog (cursor-watchdog.ts)
+ * then pages "watcher stuck" after 10 min of healthy idleness.
+ *
+ * Only fires when the row exists — first-run is gated to writeCursor
+ * via the upsert above. The update is a tiny single-row touch and
+ * safe to do on every tick; even a 10-second cadence is 6 writes/min.
+ */
+async function touchCursorUpdatedAt(): Promise<void> {
+  await db
+    .update(watcherCursors)
+    .set({ updatedAt: sql`NOW()` })
+    .where(sql`${watcherCursors.name} = ${WATCHER_NAME}`);
+}
+
 export interface TickResult {
   scanned: number;
   matched: number;
@@ -217,6 +236,12 @@ export async function runPaymentWatcherTick(args: {
     // Empty page with an explicit next cursor — advance anyway to
     // avoid re-polling the same empty window.
     await writeCursor(page.nextCursor);
+  } else {
+    // A4-105: empty page with no next cursor (the typical
+    // healthy-idle case at the head of the stream). Touch
+    // `updated_at` so the cursor-watchdog doesn't false-positive
+    // on long no-deposit periods.
+    await touchCursorUpdatedAt();
   }
 
   return result;

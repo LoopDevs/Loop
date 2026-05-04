@@ -444,6 +444,20 @@ jobs:
           npm rebuild esbuild
       - name: Build backend
         run: npm run build -w @loop/backend
+      # A4-109: tsup only emits JS into dist/. The Dockerfile copies
+      # src/db/migrations into dist/migrations so Drizzle's migrator
+      # can find the SQL + meta/_journal.json at runtime. Pin the
+      # invariant in CI so a regression to "migrations folder
+      # missing in production image" trips before deploy. We assert
+      # in the build job's working tree instead of building the
+      # Docker image because the failure mode is the migration files
+      # going missing from src/, not the COPY itself.
+      - name: Verify backend migrations are tracked under src/
+        run: |
+          set -euo pipefail
+          test -f apps/backend/src/db/migrations/meta/_journal.json
+          # Ensure at least one .sql migration exists alongside the journal.
+          test "$(find apps/backend/src/db/migrations -maxdepth 1 -name '*.sql' | wc -l)" -gt 0
       - name: Build web (SSR)
         run: npm run build -w @loop/web
         env:

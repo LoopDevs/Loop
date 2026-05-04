@@ -20,7 +20,7 @@
  * limit 20; hard cap 100.
  */
 import type { Context } from 'hono';
-import { and, asc, inArray, lt } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, lt, or, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { pendingPayouts } from '../db/schema.js';
 import { logger } from '../logger.js';
@@ -31,9 +31,6 @@ const DEFAULT_THRESHOLD_MINUTES = 5;
 const MAX_THRESHOLD_MINUTES = 60 * 24 * 7; // 1 week
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
-
-/** Non-terminal states a row can stick in. */
-const STUCK_STATES = ['pending', 'submitted'] as const;
 
 export interface StuckPayoutRow {
   id: string;
@@ -95,10 +92,21 @@ export async function listStuckPayoutRows(args?: {
       submittedAt: pendingPayouts.submittedAt,
     })
     .from(pendingPayouts)
+    // A4-108: state-specific cutoff predicates. Earlier code used
+    // `created_at < cutoff` for both states, which mis-flagged a
+    // row that sat pending past the threshold and was just
+    // submitted: created_at was old, the row's `submittedAt`-based
+    // ageMinutes was near zero, but it still showed up as stuck.
+    // Now: pending rows by created_at < cutoff, submitted rows by
+    // submitted_at < cutoff (the moment Horizon took the tx).
     .where(
-      and(
-        inArray(pendingPayouts.state, STUCK_STATES as unknown as string[]),
-        lt(pendingPayouts.createdAt, cutoff),
+      or(
+        and(eq(pendingPayouts.state, 'pending'), lt(pendingPayouts.createdAt, cutoff)),
+        and(
+          eq(pendingPayouts.state, 'submitted'),
+          isNotNull(pendingPayouts.submittedAt),
+          sql`${pendingPayouts.submittedAt} < ${cutoff}`,
+        ),
       ),
     )
     .orderBy(asc(pendingPayouts.createdAt))
