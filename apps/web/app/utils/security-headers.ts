@@ -31,16 +31,33 @@
 export interface SecurityHeadersOptions {
   /** API origin the web app talks to. Used in CSP connect-src + img-src. */
   apiOrigin?: string;
+  /**
+   * A4-057: per-request nonce minted in `entry.server.tsx`. When set,
+   * `script-src` lists `'nonce-<value>'` instead of `'unsafe-inline'`,
+   * so only inline scripts carrying the matching `nonce` attribute
+   * execute. Threaded into the React tree via `NonceContext` so
+   * `<Scripts />` / `<ScrollRestoration />` / the theme-init guard
+   * all stamp it. Omit on the meta-tag CSP path (mobile static
+   * export) — there's no per-request nonce there.
+   */
+  inlineScriptNonce?: string;
 }
 
 export function buildSecurityHeaders(options: SecurityHeadersOptions = {}): Record<string, string> {
   const apiOrigin = options.apiOrigin ?? 'https://api.loopfinance.io';
+  // A4-057: prefer nonce-based script-src when an SSR nonce is
+  // available. Mobile static export keeps `'unsafe-inline'` because
+  // there's no request-time hook to mint a nonce there.
+  const scriptSrcDirective =
+    options.inlineScriptNonce !== undefined
+      ? `script-src 'self' 'nonce-${options.inlineScriptNonce}' https://accounts.google.com`
+      : `script-src 'self' 'unsafe-inline' https://accounts.google.com`;
   const csp = [
     "default-src 'self'",
     // accounts.google.com/gsi/client: Google Identity Services SDK
     // loaded on demand when the sign-in route mounts and the
     // deployment has a Google client id configured (ADR 014).
-    `script-src 'self' 'unsafe-inline' https://accounts.google.com`,
+    scriptSrcDirective,
     `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com`,
     `font-src 'self' https://fonts.gstatic.com`,
     // `https://basemaps.cartocdn.com` only matches that exact hostname;
