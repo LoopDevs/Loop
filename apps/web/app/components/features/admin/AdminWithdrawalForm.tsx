@@ -6,8 +6,10 @@ import {
   type AdminWriteEnvelope,
   type WithdrawalResult,
 } from '~/services/admin';
+import { useAdminStepUp } from '~/hooks/use-admin-step-up';
 import { ReplayedBadge } from './ReplayedBadge';
 import { ConfirmDialog } from './ConfirmDialog';
+import { StepUpModal } from './StepUpModal';
 
 const CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
 type Currency = (typeof CURRENCIES)[number];
@@ -59,8 +61,12 @@ export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.J
     reason: string;
   } | null>(null);
 
+  // ADR-028 / A4-063: same step-up wrap as the credit-adjust form.
+  const stepUp = useAdminStepUp();
+
   const mutation = useMutation({
-    mutationFn: applyAdminWithdrawal,
+    mutationFn: (args: Parameters<typeof applyAdminWithdrawal>[0]) =>
+      stepUp.runWithStepUp(() => applyAdminWithdrawal(args)),
     onSuccess: (envelope: AdminWriteEnvelope<WithdrawalResult>) => {
       setLastApplied({ result: envelope.result, replayed: envelope.audit.replayed });
       setAmountMajor('');
@@ -161,6 +167,9 @@ export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.J
         confirmLabel="Queue withdrawal"
         onResolve={handleConfirm}
       />
+      {stepUp.modalOpen && (
+        <StepUpModal onConfirm={stepUp.handleStepUpConfirm} onCancel={stepUp.handleStepUpCancel} />
+      )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <label className="space-y-1 sm:col-span-1">
           <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
