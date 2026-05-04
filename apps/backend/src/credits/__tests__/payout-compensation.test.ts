@@ -21,6 +21,15 @@ const { dbMock, state } = vi.hoisted(() => {
   chain['from'] = vi.fn(() => chain);
   chain['where'] = vi.fn(() => chain);
   chain['for'] = vi.fn(async () => s.forUpdateResults.shift() ?? []);
+  // A4-020: the daily-cap check runs `select().from().where()`
+  // without `.for('update')` and awaits the chain directly. Make
+  // the chain thenable so it resolves to an empty array (no
+  // prior compensations on the day) — the cap math then sees
+  // used=0, attempt < cap, and lets the test happy-path pass.
+  // Tests that want to exercise the cap can override `.then` per-test.
+  (chain as unknown as { then: (resolve: (v: unknown) => void) => void }).then = (
+    resolve: (v: unknown) => void,
+  ) => resolve([]);
   chain['insert'] = vi.fn((table: unknown) => {
     const name = (table as Record<string, unknown>)['__name'];
     (chain as unknown as { _lastInsert: string | undefined })._lastInsert =
