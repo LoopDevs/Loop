@@ -1,16 +1,18 @@
 /**
- * User favourite-merchants OpenAPI registrations.
+ * User favourite-merchants + recently-purchased OpenAPI registrations.
  *
- * Three caller-scoped paths backing the per-user merchant pin list:
+ * Caller-scoped paths backing the home-page strips:
  *   - GET    /api/users/me/favorites
  *   - POST   /api/users/me/favorites
  *   - DELETE /api/users/me/favorites/{merchantId}
+ *   - GET    /api/users/me/recently-purchased
  *
  * Schemas are locally scoped to this slice — the `merchant` field
- * on the list response carries a structural reference to the
- * `Merchant` registered by `registerMerchantsOpenApi` rather than
- * re-registering. Generators that walk the `$ref`s resolve it
- * against the merchant schema in the same document.
+ * on each list response carries an inline merchant subset rather than
+ * re-registering the canonical `Merchant` schema (which lives in
+ * `registerMerchantsOpenApi`). Inline subset + a description pointing
+ * at the canonical schema keeps the slice self-contained and avoids
+ * the duplicate-name registration error.
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
@@ -167,6 +169,68 @@ export function registerUsersFavoritesOpenApi(
       },
       429: {
         description: 'Rate limit exceeded (20/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+    },
+  });
+
+  const RecentlyPurchasedMerchantView = registry.register(
+    'RecentlyPurchasedMerchantView',
+    z.object({
+      merchantId: z.string(),
+      lastPurchasedAt: z.string().datetime(),
+      orderCount: z.number(),
+      merchant: z
+        .union([
+          z.object({
+            id: z.string(),
+            name: z.string(),
+            logoUrl: z.string().optional(),
+            cardImageUrl: z.string().optional(),
+            savingsPercentage: z.number().optional(),
+            enabled: z.boolean(),
+          }),
+          z.null(),
+        ])
+        .openapi({
+          description:
+            'Catalog row subset at read-time (see Merchant schema for the full shape); null if the merchant is temporarily evicted from the catalog (ADR 021).',
+        }),
+    }),
+  );
+
+  const RecentlyPurchasedResponse = registry.register(
+    'RecentlyPurchasedResponse',
+    z.object({ merchants: z.array(RecentlyPurchasedMerchantView) }),
+  );
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/users/me/recently-purchased',
+    summary: 'Distinct merchants the caller has bought from, most-recent first.',
+    description:
+      "GROUP BY merchant_id over orders in `state IN ('paid', 'procuring', 'fulfilled')`, ordered by MAX(created_at) DESC. Default limit 8; clamp [1, 20] via `?limit=`. Catalog-evicted merchants surface as `merchant: null` so the strip can filter them while the underlying order rows stay queryable.",
+    tags: ['Users'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      query: z.object({
+        limit: z.string().optional().openapi({
+          description:
+            'Optional integer in [1, 20]. Defaults to 8; non-integers fall back to default.',
+        }),
+      }),
+    },
+    responses: {
+      200: {
+        description: 'Recently-purchased merchants list (possibly empty)',
+        content: { 'application/json': { schema: RecentlyPurchasedResponse } },
+      },
+      401: {
+        description: 'Missing or invalid bearer',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (60/min per IP)',
         content: { 'application/json': { schema: errorResponse } },
       },
     },

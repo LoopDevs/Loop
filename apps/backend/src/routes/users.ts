@@ -76,6 +76,7 @@ import {
   listFavoritesHandler,
   removeFavoriteHandler,
 } from '../users/favorites-handler.js';
+import { listRecentlyPurchasedHandler } from '../users/recently-purchased-handler.js';
 
 /** Mounts all `/api/users/me/*` routes on the supplied Hono app. */
 export function mountUserRoutes(app: Hono): void {
@@ -214,5 +215,14 @@ export function mountUserRoutes(app: Hono): void {
     '/api/users/me/favorites/:merchantId',
     rateLimit('DELETE /api/users/me/favorites/:merchantId', 20, 60_000),
     removeFavoriteHandler,
+  );
+
+  // ── Recently purchased ──────────────────────────────────────
+  // Sister surface to favourites, derived from the orders ledger.
+  // GROUP BY merchant_id over `state IN ('paid','procuring','fulfilled')`.
+  app.get(
+    '/api/users/me/recently-purchased',
+    rateLimit('GET /api/users/me/recently-purchased', 60, 60_000),
+    listRecentlyPurchasedHandler,
   );
 }

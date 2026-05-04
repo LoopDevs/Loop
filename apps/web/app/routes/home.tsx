@@ -8,6 +8,7 @@ import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
 import { MerchantCard } from '~/components/features/MerchantCard';
 import { FavoritesStrip } from '~/components/features/FavoritesStrip';
+import { RecentlyPurchasedStrip } from '~/components/features/RecentlyPurchasedStrip';
 import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
 import { MobileHome } from '~/components/features/home/MobileHome';
 import { CashbackStatsBand } from '~/components/features/home/CashbackStatsBand';
@@ -204,10 +205,13 @@ function HomeContent(): React.JSX.Element {
               know the flow; the band would be just noise). */}
           {!isAuthenticated && <HowItWorksStrip />}
 
-          {/* Per-user "Your favourites" strip — self-gates on
-              isAuthenticated + favorites.length > 0, so signed-out
-              and never-favourited users see the existing layout
-              unchanged. */}
+          {/* "Recently purchased" + "Your favourites" strips — both
+              self-gate on isAuthenticated and a non-empty list, so
+              brand-new and signed-out users see the existing layout
+              unchanged. Recently-purchased renders first because a
+              returning buyer is most likely to want to repeat-purchase
+              before they want to browse pinned-but-unused merchants. */}
+          <RecentlyPurchasedStrip variant="desktop" />
           <FavoritesStrip variant="desktop" />
 
           {/* Featured */}
