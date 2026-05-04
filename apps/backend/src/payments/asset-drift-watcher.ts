@@ -29,6 +29,8 @@
 import { configuredLoopPayableAssets, type LoopAssetCode } from '../credits/payout-asset.js';
 import { sumOutstandingLiability } from '../credits/liabilities.js';
 import { getLoopAssetCirculation } from './horizon-circulation.js';
+import { getAssetBalance } from './horizon-asset-balance.js';
+import { resolveInterestPoolAccount } from '../credits/interest-pool.js';
 import { notifyAssetDrift, notifyAssetDriftRecovered } from '../discord.js';
 import { logger } from '../logger.js';
 import {
@@ -75,7 +77,24 @@ function currentState(code: LoopAssetCode): DriftState {
 
 export interface AssetDriftSample {
   assetCode: LoopAssetCode;
+  /**
+   * Drift after subtracting the interest forward-mint pool balance
+   * from on-chain circulation. See `runAssetDriftTick` doc-comment
+   * for the reconciliation equation.
+   */
   driftStroops: bigint;
+  /**
+   * Raw on-chain stroops issued by the LOOP-asset issuer (held by
+   * non-issuer accounts including users + the interest pool).
+   * Surfaced separately from `driftStroops` so the admin treasury
+   * surface can show "X issued, Y in pool, Z out to users."
+   */
+  onChainStroops: bigint;
+  /**
+   * Stroops sitting in the interest forward-mint pool. `0n` when
+   * the pool isn't configured or the trustline is missing.
+   */
+  poolStroops: bigint;
   thresholdStroops: bigint;
   over: boolean;
   previousState: DriftState;
@@ -113,15 +132,37 @@ function abs(n: bigint): bigint {
 }
 
 /**
- * Single pass. For each configured LOOP asset: read Horizon, sum
+ * Single pass. For each configured LOOP asset: read Horizon
+ * issuance + the forward-mint pool balance, sum the off-chain
  * ledger, compute drift, compare to threshold, emit a transition
  * notification when state flips.
+ *
+ * Reconciliation equation (ADR 009 + ADR 015 with on-chain as
+ * source of truth):
+ *
+ *   driftStroops = (onChain − pool) − userCreditsLiability × 1e5
+ *
+ *   - onChain: total LOOP-asset issued from the issuer (held by
+ *     anyone other than the issuer itself; Horizon `/assets`).
+ *   - pool: stroops in the operator's interest forward-mint pool
+ *     account. Pre-minted ahead of daily distribution; not yet
+ *     allocated to a user. Subtracted because off-chain
+ *     `user_credits` doesn't yet reflect this LOOP.
+ *   - userCreditsLiability: sum of `user_credits.balance_minor`
+ *     for the matching fiat.
+ *
+ * In equilibrium drift ≈ 0. After a forward-mint, pool grows and
+ * onChain grows by the same amount → drift stays flat. As days
+ * pass, daily accrual writes off-chain credits while the pool
+ * holds steady (no on-chain action) → off-chain catches up to
+ * the (onChain − pool) figure, drift stays flat.
  *
  * Pure enough to be called from tests directly — the Horizon fetch +
  * ledger query + Discord send are all injected via module mocks.
  */
 export async function runAssetDriftTick(args: RunDriftTickArgs): Promise<DriftTickResult> {
   const assets = configuredLoopPayableAssets();
+  const poolAccount = resolveInterestPoolAccount();
   const result: DriftTickResult = { checked: 0, skipped: 0, samples: [] };
   for (const { code, issuer } of assets) {
     const fiat = fiatOf(code);
@@ -137,6 +178,25 @@ export async function runAssetDriftTick(args: RunDriftTickArgs): Promise<DriftTi
       result.skipped++;
       continue;
     }
+
+    // Pool balance: stroops sitting at the operator-custody interest
+    // pool account. `null` when no pool is configured or the
+    // account has no trustline yet — treated as zero either way.
+    let poolStroops: bigint = 0n;
+    if (poolAccount !== null) {
+      try {
+        const balance = await getAssetBalance(poolAccount, code, issuer);
+        poolStroops = balance ?? 0n;
+      } catch (err) {
+        log.warn(
+          { err, assetCode: code, poolAccount },
+          'Horizon pool-balance read failed — skipping drift check this tick',
+        );
+        result.skipped++;
+        continue;
+      }
+    }
+
     let ledgerMinor: bigint;
     try {
       ledgerMinor = await sumOutstandingLiability(fiat);
@@ -147,13 +207,15 @@ export async function runAssetDriftTick(args: RunDriftTickArgs): Promise<DriftTi
     }
     result.checked++;
 
-    const driftStroops = onChainStroops - ledgerMinor * STROOPS_PER_MINOR;
+    const driftStroops = onChainStroops - poolStroops - ledgerMinor * STROOPS_PER_MINOR;
     const over = abs(driftStroops) >= args.thresholdStroops;
     const previous = currentState(code);
     const next: DriftState = over ? 'over' : 'ok';
     const sample: AssetDriftSample = {
       assetCode: code,
       driftStroops,
+      onChainStroops,
+      poolStroops,
       thresholdStroops: args.thresholdStroops,
       over,
       previousState: previous,

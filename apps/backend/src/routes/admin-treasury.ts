@@ -25,6 +25,7 @@ import { adminTreasurySnapshotCsvHandler } from '../admin/treasury-snapshot-csv.
 import { adminTreasuryCreditFlowHandler } from '../admin/treasury-credit-flow.js';
 import { adminAssetCirculationHandler } from '../admin/asset-circulation.js';
 import { adminAssetDriftStateHandler } from '../admin/asset-drift-state.js';
+import { adminInterestMintForecastHandler } from '../admin/interest-mint-forecast.js';
 
 /**
  * Mounts the treasury / asset-drift routes on the supplied Hono
@@ -69,5 +70,18 @@ export function mountAdminTreasuryRoutes(app: Hono): void {
     '/api/admin/asset-drift/state',
     rateLimit('GET /api/admin/asset-drift/state', 120, 60_000),
     adminAssetDriftStateHandler,
+  );
+
+  // Forward-mint forecast for the interest pool (ADR 009 / 015).
+  // Per-currency: cohort balance, daily interest, current pool
+  // balance, days of cover, recommended next-mint amount. Operator
+  // signs + submits the actual mint with their cold-stored issuer
+  // secret out-of-band — backend never holds that key. 30/min:
+  // forecast is cheap (one Horizon read per asset, 30s cached) but
+  // not dashboard-grade.
+  app.get(
+    '/api/admin/interest/mint-forecast',
+    rateLimit('GET /api/admin/interest/mint-forecast', 30, 60_000),
+    adminInterestMintForecastHandler,
   );
 }

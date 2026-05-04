@@ -38,6 +38,7 @@ import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAdminAssetDriftStateOpenApi } from './admin-asset-drift-state.js';
 import { registerAdminAssetCirculationOpenApi } from './admin-asset-circulation.js';
+import { registerAdminInterestMintForecastOpenApi } from './admin-interest-mint-forecast.js';
 
 type ZodEnumLike = z.ZodEnum<{ readonly [key: string]: string | number }>;
 
@@ -183,4 +184,7 @@ export function registerAdminTreasuryAssetsOpenApi(
   // locally-scoped schemas. Same path-registration position as
   // the original block.
   registerAdminAssetDriftStateOpenApi(registry, errorResponse, LoopAssetCode);
+
+  // Interest forward-mint forecast (ADR 009 / 015).
+  registerAdminInterestMintForecastOpenApi(registry, errorResponse, LoopAssetCode);
 }

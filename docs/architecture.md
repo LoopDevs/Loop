@@ -331,6 +331,7 @@ GET  /api/admin/treasury/credit-flow                   [admin — per-day credit
 GET  /api/admin/treasury/credit-flow.csv               [admin — Tier-3 CSV of the credit-flow time series for month-end ledger reconciliation, ADR 009/015/018]
 GET  /api/admin/assets/:assetCode/circulation          [admin — per-asset circulation drift: onChain stroops vs ledger liability, ADR 015]
 GET  /api/admin/asset-drift/state                      [admin — in-memory snapshot of the asset-drift watcher: per-asset state + last drift + last tick ms, ADR 015]
+GET  /api/admin/interest/mint-forecast                 [admin — forward-mint forecast for the interest pool: per-currency cohort balance, daily interest, pool balance, days of cover, recommended next-mint amount, ADR 009/015]
 GET  /api/admin/payouts/settlement-lag                 [admin — p50/p95/max seconds from payout-intent to on-chain confirm, per LOOP asset + fleet-wide, ADR 015/016]
 GET  /api/admin/cashback-realization                   [admin — per-currency lifetime earned vs spent vs outstanding; recycledBps = flywheel-health KPI, ADR 009/015]
 GET  /api/admin/cashback-realization/daily             [admin — daily time-series of earned/spent/recycledBps per currency over N days; sparkline-ready dense output, ADR 009/015]

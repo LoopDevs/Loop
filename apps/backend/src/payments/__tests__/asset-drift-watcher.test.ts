@@ -18,6 +18,14 @@ const { mocks } = vi.hoisted(() => ({
         issuer: string,
       ) => Promise<{ stroops: bigint; assetCode: string; issuer: string; asOfMs: number }>
     >(async () => ({ stroops: 0n, assetCode: '', issuer: '', asOfMs: 0 })),
+    // Pool-aware drift (forward-mint pool, ADR 009 / 015). Default
+    // returns null = "pool not configured" so existing tests
+    // exercise the pre-pool reconciliation. Per-test overrides can
+    // simulate a configured pool.
+    resolveInterestPoolAccount: vi.fn<() => string | null>(() => null),
+    getAssetBalance: vi.fn<
+      (account: string, code: string, issuer: string) => Promise<bigint | null>
+    >(async () => null),
     notifyAssetDrift: vi.fn<(args: unknown) => void>(() => undefined),
     notifyAssetDriftRecovered: vi.fn<(args: unknown) => void>(() => undefined),
   },
@@ -36,6 +44,15 @@ vi.mock('../horizon-circulation.js', () => ({
     mocks.getLoopAssetCirculation(code, issuer),
 }));
 
+vi.mock('../horizon-asset-balance.js', () => ({
+  getAssetBalance: (account: string, code: string, issuer: string) =>
+    mocks.getAssetBalance(account, code, issuer),
+}));
+
+vi.mock('../../credits/interest-pool.js', () => ({
+  resolveInterestPoolAccount: () => mocks.resolveInterestPoolAccount(),
+}));
+
 vi.mock('../../discord.js', () => ({
   notifyAssetDrift: (args: unknown) => mocks.notifyAssetDrift(args),
   notifyAssetDriftRecovered: (args: unknown) => mocks.notifyAssetDriftRecovered(args),
@@ -52,8 +69,13 @@ beforeEach(() => {
   mocks.configuredLoopPayableAssets.mockReset();
   mocks.sumOutstandingLiability.mockReset();
   mocks.getLoopAssetCirculation.mockReset();
+  mocks.resolveInterestPoolAccount.mockReset();
+  mocks.getAssetBalance.mockReset();
   mocks.notifyAssetDrift.mockReset();
   mocks.notifyAssetDriftRecovered.mockReset();
+  // Default: pool not configured (matches a fresh deployment).
+  mocks.resolveInterestPoolAccount.mockReturnValue(null);
+  mocks.getAssetBalance.mockResolvedValue(null);
 });
 
 describe('runAssetDriftTick', () => {
@@ -199,6 +221,33 @@ describe('runAssetDriftTick', () => {
     expect(usd?.over).toBe(true);
     expect(gbp?.over).toBe(false);
     expect(mocks.notifyAssetDrift).toHaveBeenCalledOnce();
+  });
+
+  it('subtracts the interest forward-mint pool balance from on-chain when computing drift', async () => {
+    // Pool configured at GPOOL. On-chain issued = 1_500_000 stroops.
+    // Pool holds 1_000_000 (pre-minted forward batch). Off-chain
+    // user_credits sums to 5 minor (5 × 1e5 = 500_000 stroops).
+    // Pool-aware drift = (1_500_000 − 1_000_000) − 500_000 = 0.
+    // (Pre-pool drift would be 1_500_000 − 500_000 = 1_000_000 → over.)
+    mocks.configuredLoopPayableAssets.mockReturnValue([{ code: 'USDLOOP', issuer: 'GABC' }]);
+    mocks.resolveInterestPoolAccount.mockReturnValue('GPOOL');
+    mocks.getAssetBalance.mockResolvedValue(1_000_000n);
+    mocks.getLoopAssetCirculation.mockResolvedValue({
+      stroops: 1_500_000n,
+      assetCode: 'USDLOOP',
+      issuer: 'GABC',
+      asOfMs: 0,
+    });
+    mocks.sumOutstandingLiability.mockResolvedValue(5n);
+
+    const r = await runAssetDriftTick({ thresholdStroops: 1_000n });
+    expect(r.checked).toBe(1);
+    const sample = r.samples[0]!;
+    expect(sample.driftStroops).toBe(0n);
+    expect(sample.onChainStroops).toBe(1_500_000n);
+    expect(sample.poolStroops).toBe(1_000_000n);
+    expect(sample.over).toBe(false);
+    expect(mocks.notifyAssetDrift).not.toHaveBeenCalled();
   });
 });
 

@@ -14,6 +14,12 @@ import {
   resolvePayoutConfig,
 } from './payments/payout-worker.js';
 import { startAssetDriftWatcher, stopAssetDriftWatcher } from './payments/asset-drift-watcher.js';
+import {
+  startInterestPoolWatcher,
+  stopInterestPoolWatcher,
+  INTEREST_POOL_WATCHER_DEFAULT_INTERVAL_MS,
+  resolvePoolMinDaysCover,
+} from './payments/interest-pool-watcher.js';
 import { configuredLoopPayableAssets } from './credits/payout-asset.js';
 import { startInterestScheduler, stopInterestScheduler } from './credits/interest-scheduler.js';
 import { markWorkerBlocked, markWorkerDisabled } from './runtime-health.js';
@@ -146,6 +152,17 @@ if (env.LOOP_WORKERS_ENABLED) {
       },
       intervalMs: env.INTEREST_TICK_INTERVAL_HOURS * 60 * 60 * 1000,
     });
+    // Pool depletion watcher (ADR 009 / 015 forward-mint pool).
+    // Only meaningful when interest is on AND at least one LOOP-
+    // asset issuer is configured — otherwise there's nothing to
+    // forward-mint against.
+    if (configuredLoopPayableAssets().length > 0) {
+      startInterestPoolWatcher({
+        apyBasisPoints: env.INTEREST_APY_BASIS_POINTS,
+        minDaysOfCover: resolvePoolMinDaysCover(),
+        intervalMs: INTEREST_POOL_WATCHER_DEFAULT_INTERVAL_MS,
+      });
+    }
   } else {
     markWorkerDisabled('interest_scheduler', 'interest APY is zero');
   }
@@ -187,6 +204,7 @@ function shutdown(signal: string): void {
   stopPayoutWorker();
   stopAssetDriftWatcher();
   stopInterestScheduler();
+  stopInterestPoolWatcher();
 
   server.close(() => {
     void Promise.allSettled([sentryFlush(5000), closeDb()]).finally(() => {

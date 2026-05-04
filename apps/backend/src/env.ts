@@ -323,6 +323,43 @@ export const EnvSchema = z.object({
     .regex(/^S[A-Z2-7]{55}$/, { message: 'must be a valid Stellar secret key (S...)' })
     .optional(),
 
+  // Interest forward-mint pool account (ADR 009 / 015).
+  //
+  // Per the on-chain-is-source-of-truth model: paying users daily
+  // interest creates new off-chain `user_credits` liability that
+  // MUST be matched by an on-chain LOOP-asset mint to keep the
+  // asset-drift watcher reconciliation honest. To avoid one mint
+  // tx per day per currency (operationally heavy), the operator
+  // pre-mints a forward batch — typically a month's expected
+  // interest — to this pool account. Daily accrual then sub-
+  // allocates from the pool off-chain; on-chain issuance was
+  // already incurred at mint-time.
+  //
+  // The drift watcher subtracts the pool balance from on-chain
+  // circulation before comparing to off-chain liability, so a
+  // freshly-minted pool doesn't trip the over-issued alert (ADR 015).
+  //
+  // Defaults to the operator account when unset — the operator
+  // already holds custody of LOOP-asset and submits payouts from
+  // there, so reusing it as the pool is the simplest topology.
+  // A deliberate operator can split them by setting this to a
+  // different cold-custody account.
+  LOOP_INTEREST_POOL_ACCOUNT: z
+    .string()
+    .regex(STELLAR_PUBKEY_REGEX, { message: STELLAR_ADDRESS_MESSAGE })
+    .optional(),
+
+  // Interest pool depletion threshold (days of cover).
+  //
+  // The pool watcher pages the Discord monitoring channel when the
+  // on-chain pool balance can cover fewer than this many days of
+  // forecast daily interest at the current APY. 7 days gives the
+  // operator a week to mint the next batch before users would be
+  // under-allocated. Tighter ops can lower it (3-5 days); operators
+  // with monthly mint cadence + multi-day reaction time should
+  // raise it.
+  LOOP_INTEREST_POOL_MIN_DAYS_COVER: z.coerce.number().int().min(1).max(365).default(7),
+
   // Network passphrase for payout signing. PUBLIC mainnet is the
   // default; operators override with TESTNET string for staging.
   // Anything non-empty is accepted so a self-hosted network can
