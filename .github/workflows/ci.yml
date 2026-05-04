@@ -92,6 +92,11 @@ jobs:
       # ship that broader boundary on next sync. Loop only writes
       # share-image PNGs into `cache/share/`; anything broader is
       # over-grant.
+      #
+      # Implementation note: the overlay file has an XML comment that
+      # quotes Capacitor's default (broader) shape as a what-we-removed
+      # explanation. Strip XML comments before greping, otherwise the
+      # comment trips the drift check.
       - name: Verify Android FileProvider overlay source is scoped
         run: |
           set -euo pipefail
@@ -100,16 +105,23 @@ jobs:
             echo "expected overlay source $fp to exist" >&2
             exit 1
           fi
-          if grep -q '<external-path' "$fp"; then
-            echo "FileProvider overlay drift: <external-path> grant detected in $fp" >&2
-            echo 'overlay source must scope grants to share/ only' >&2
-            exit 1
-          fi
-          if grep -E 'path="\."' "$fp"; then
-            echo 'FileProvider overlay drift: path="." (root) grant detected in '"$fp" >&2
-            echo 'overlay source must scope grants to share/ only' >&2
-            exit 1
-          fi
+          python3 - <<'PY' "$fp"
+          import re, sys
+          path = sys.argv[1]
+          with open(path) as f:
+              content = f.read()
+          # Strip XML comments — they document the broader default we
+          # removed, and naive substring matches false-positive on it.
+          stripped = re.sub(r"<!--.*?-->", "", content, flags=re.DOTALL)
+          if "<external-path" in stripped:
+              print(f"FileProvider overlay drift: <external-path> grant detected in {path}", file=sys.stderr)
+              print("overlay source must scope grants to share/ only", file=sys.stderr)
+              sys.exit(1)
+          if re.search(r'path="\."', stripped):
+              print(f'FileProvider overlay drift: path="." (root) grant detected in {path}', file=sys.stderr)
+              print("overlay source must scope grants to share/ only", file=sys.stderr)
+              sys.exit(1)
+          PY
       # A2-107: server-side commitlint on PRs. Husky's commit-msg hook
       # only runs on the author's machine, so a bypass (`--no-verify`,
       # broken local install, GitHub web-edit commit) would let a
