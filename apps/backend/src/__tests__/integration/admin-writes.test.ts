@@ -56,6 +56,7 @@ import { findOrCreateUserByEmail, upsertUserFromCtx } from '../../db/users.js';
 import { app, __resetRateLimitsForTests } from '../../app.js';
 import { notifyAdminBulkRead } from '../../discord.js';
 import { signLoopToken } from '../../auth/tokens.js';
+import { signAdminStepUpToken } from '../../auth/admin-step-up.js';
 import { env } from '../../env.js';
 import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
 
@@ -70,6 +71,16 @@ interface SeededState {
   adminUserId: string;
   targetUser: { id: string; email: string };
   bearer: string;
+  /**
+   * ADR-028 / A4-063: step-up token for the seeded admin. Sent as
+   * `X-Admin-Step-Up` on the gated destructive endpoints
+   * (credit-adjust / withdrawal / payout-retry). Minted at seed time
+   * so the per-test setup doesn't have to round-trip through the
+   * `POST /api/admin/step-up` handler — the integration value here is
+   * proving the gated handler accepts a valid token, not the
+   * step-up minting flow itself (covered by unit tests).
+   */
+  stepUp: string;
   orderId: string;
 }
 
@@ -140,6 +151,10 @@ async function seed(): Promise<SeededState> {
     typ: 'access',
     ttlSeconds: 300,
   });
+  const { token: stepUp } = signAdminStepUpToken({
+    sub: admin.id,
+    email: admin.email,
+  });
   const target = await findOrCreateUserByEmail('target@test.local');
   await db.update(users).set({ homeCurrency: 'USD' }).where(eq(users.id, target.id));
 
@@ -173,6 +188,7 @@ async function seed(): Promise<SeededState> {
     adminUserId: admin.id,
     targetUser: { id: target.id, email: target.email },
     bearer: token,
+    stepUp,
     orderId: orderRow.id,
   };
 }
@@ -187,7 +203,7 @@ describeIf('admin credit-adjustment write — real postgres ladder', () => {
   });
 
   it('credit happy path: writes ledger row + bumps balance + returns envelope', async () => {
-    const { targetUser, bearer } = await seed();
+    const { targetUser, bearer, stepUp } = await seed();
     const key = idemKey();
     const res = await app.request(
       `http://localhost/api/admin/users/${targetUser.id}/credit-adjustments`,
@@ -197,6 +213,7 @@ describeIf('admin credit-adjustment write — real postgres ladder', () => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${bearer}`,
           'idempotency-key': key,
+          'X-Admin-Step-Up': stepUp,
         },
         body: JSON.stringify({
           amountMinor: '500',
@@ -231,7 +248,7 @@ describeIf('admin credit-adjustment write — real postgres ladder', () => {
   });
 
   it('replays the stored snapshot when the same idempotency key arrives again', async () => {
-    const { targetUser, bearer } = await seed();
+    const { targetUser, bearer, stepUp } = await seed();
     const key = idemKey();
     const body = JSON.stringify({
       amountMinor: '300',
@@ -242,6 +259,7 @@ describeIf('admin credit-adjustment write — real postgres ladder', () => {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${bearer}`,
       'idempotency-key': key,
+      'X-Admin-Step-Up': stepUp,
     };
     const url = `http://localhost/api/admin/users/${targetUser.id}/credit-adjustments`;
     const first = await app.request(url, { method: 'POST', headers, body });
@@ -273,7 +291,7 @@ describeIf('admin credit-adjustment write — real postgres ladder', () => {
   });
 
   it('rejects a debit that would drive the balance negative with 409 INSUFFICIENT_BALANCE', async () => {
-    const { targetUser, bearer } = await seed();
+    const { targetUser, bearer, stepUp } = await seed();
     // Target user has a $0 balance. Try to debit $5.
     const res = await app.request(
       `http://localhost/api/admin/users/${targetUser.id}/credit-adjustments`,
@@ -283,6 +301,7 @@ describeIf('admin credit-adjustment write — real postgres ladder', () => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${bearer}`,
           'idempotency-key': idemKey(),
+          'X-Admin-Step-Up': stepUp,
         },
         body: JSON.stringify({
           amountMinor: '-500',
@@ -306,7 +325,7 @@ describeIf('admin credit-adjustment write — real postgres ladder', () => {
     const previousCap = env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR;
     env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 500n;
     try {
-      const { bearer, targetUser } = await seed();
+      const { bearer, targetUser, stepUp } = await seed();
       const secondTarget = await findOrCreateUserByEmail('target-2@test.local');
       await db.update(users).set({ homeCurrency: 'USD' }).where(eq(users.id, secondTarget.id));
 
@@ -323,6 +342,7 @@ describeIf('admin credit-adjustment write — real postgres ladder', () => {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${bearer}`,
               'idempotency-key': key,
+              'X-Admin-Step-Up': stepUp,
             },
             body: JSON.stringify({
               amountMinor,
@@ -459,7 +479,7 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
   });
 
   it('withdrawal happy path: debits balance + queues pending_payouts row in one txn', async () => {
-    const { targetUser, bearer } = await seed();
+    const { targetUser, bearer, stepUp } = await seed();
     // Withdrawal needs an existing balance to debit. Pre-seed a
     // credit_transactions row + user_credits balance directly so we
     // don't reach for a separate flow.
@@ -484,6 +504,7 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
+        'X-Admin-Step-Up': stepUp,
       },
       body: JSON.stringify({
         amountMinor: '500',
@@ -530,7 +551,7 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
   });
 
   it('rejects a second semantic duplicate withdrawal with a fresh idempotency key', async () => {
-    const { targetUser, bearer } = await seed();
+    const { targetUser, bearer, stepUp } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
 
     const destinationAddress = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
@@ -548,6 +569,7 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
+        'X-Admin-Step-Up': stepUp,
       },
       body,
     });
@@ -559,6 +581,7 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
+        'X-Admin-Step-Up': stepUp,
       },
       body,
     });
@@ -587,7 +610,7 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
   });
 
   it('serialises concurrent same-key withdrawal requests into one write plus one replay', async () => {
-    const { targetUser, bearer } = await seed();
+    const { targetUser, bearer, stepUp } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
 
     const idempotencyKey = idemKey();
@@ -603,6 +626,7 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
       'Content-Type': 'application/json',
       Authorization: `Bearer ${bearer}`,
       'idempotency-key': idempotencyKey,
+      'X-Admin-Step-Up': stepUp,
     };
 
     const [first, second] = await Promise.all([
@@ -644,7 +668,7 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
   });
 
   it('rejects a withdrawal exceeding the balance with 400 INSUFFICIENT_BALANCE', async () => {
-    const { targetUser, bearer } = await seed();
+    const { targetUser, bearer, stepUp } = await seed();
     // No prior balance. Try to withdraw $5.
     const res = await app.request(`http://localhost/api/admin/users/${targetUser.id}/withdrawals`, {
       method: 'POST',
@@ -652,6 +676,7 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
+        'X-Admin-Step-Up': stepUp,
       },
       body: JSON.stringify({
         amountMinor: '500',
@@ -678,7 +703,7 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
   });
 
   it('keeps retry and compensation at-most-once when both hit the same failed payout', async () => {
-    const { targetUser, bearer } = await seed();
+    const { targetUser, bearer, stepUp } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 1500n });
     const payoutId = await seedFailedWithdrawalPayout({
       userId: targetUser.id,
@@ -702,6 +727,7 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
             'Content-Type': 'application/json',
             Authorization: `Bearer ${bearer}`,
             'idempotency-key': idemKey(),
+            'X-Admin-Step-Up': stepUp,
           },
           body: JSON.stringify({ reason: 'race retry' }),
         }),

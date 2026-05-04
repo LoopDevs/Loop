@@ -22,6 +22,7 @@
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
 import { killSwitch } from '../middleware/kill-switch.js';
+import { requireAdminStepUp } from '../auth/admin-step-up-middleware.js';
 import {
   adminGetPayoutHandler,
   adminListPayoutsHandler,
@@ -82,9 +83,14 @@ export function mountAdminPayoutsRoutes(app: Hono): void {
   );
   // POST /api/admin/payouts/:id/retry — flip a failed row back to pending.
   // Lower rate limit: retries should be rare, one-at-a-time ops actions.
+  // ADR-028 / A4-063 step-up gate: re-trying an outbound on-chain payout
+  // is destructive (it can cause a duplicate transfer if the prior
+  // submit reached Horizon but the response was lost) and a stolen
+  // bearer must NOT be able to fire it.
   app.post(
     '/api/admin/payouts/:id/retry',
     rateLimit('POST /api/admin/payouts/:id/retry', 20, 60_000),
+    requireAdminStepUp(),
     adminRetryPayoutHandler,
   );
   // POST /api/admin/payouts/:id/compensate — re-credit a user after a

@@ -85,6 +85,8 @@ import { requireAdmin } from '../auth/require-admin.js';
 import { notifyAdminBulkRead } from '../discord.js';
 import { mountAdminCashbackConfigRoutes } from './admin-cashback-config.js';
 import { mountAdminCreditWritesRoutes } from './admin-credit-writes.js';
+import { rateLimit } from '../middleware/rate-limit.js';
+import { adminStepUpHandler } from '../admin/step-up-handler.js';
 import { mountAdminDashboardRoutes } from './admin-dashboard.js';
 import { mountAdminFleetMonthlyRoutes } from './admin-fleet-monthly.js';
 import { mountAdminOperatorRoutes } from './admin-operator.js';
@@ -226,4 +228,16 @@ export function mountAdminRoutes(app: Hono): void {
   // withdrawals (ADR 017/024 + A2-901). Lifted into
   // ./admin-credit-writes.ts (mirrors openapi #1175).
   mountAdminCreditWritesRoutes(app);
+
+  // ADR-028 / A4-063: step-up token endpoint. Mounted under the
+  // standard admin middleware stack (cache-control / requireAuth /
+  // requireAdmin / audit) so only authenticated admins can mint
+  // step-up tokens — but NOT under requireAdminStepUp itself
+  // (chicken-and-egg: the admin can't have a step-up token before
+  // they hit this endpoint to get one).
+  app.post(
+    '/api/admin/step-up',
+    rateLimit('POST /api/admin/step-up', 30, 60_000),
+    adminStepUpHandler,
+  );
 }

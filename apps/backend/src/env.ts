@@ -238,6 +238,34 @@ export const EnvSchema = z.object({
     .min(32, { message: 'LOOP_JWT_SIGNING_KEY_PREVIOUS must be at least 32 characters' })
     .optional(),
 
+  // Admin step-up signing key (ADR 028, A4-063). Separate from
+  // LOOP_JWT_SIGNING_KEY so a JWT-key compromise doesn't widen to
+  // step-up — an attacker who exfiltrates LOOP_JWT_SIGNING_KEY can
+  // still mint access tokens but cannot mint step-up tokens, so the
+  // ADR-028 gate (X-Admin-Step-Up on credit-adjust / withdrawals /
+  // payout-retry) holds even under partial key compromise.
+  //
+  // Optional in `env.ts` so the surface ships without breaking
+  // deployments that haven't generated the key yet; the boot
+  // validator below downgrades the gate to "always 401" when the
+  // key is unset, so the surface fails closed rather than silently
+  // skipping the check.
+  //
+  // Rotation: same staged-rotation pattern as LOOP_JWT_SIGNING_KEY.
+  // Set `_PREVIOUS` to the old key during the 5-minute step-up TTL
+  // window; the verifier accepts either, the signer always uses
+  // the current.
+  LOOP_ADMIN_STEP_UP_SIGNING_KEY: z
+    .string()
+    .min(32, { message: 'LOOP_ADMIN_STEP_UP_SIGNING_KEY must be at least 32 characters' })
+    .optional(),
+  LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS: z
+    .string()
+    .min(32, {
+      message: 'LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS must be at least 32 characters',
+    })
+    .optional(),
+
   // Loop-native auth feature flag (ADR 013). When true, /request-otp
   // (and, as they ship, /verify-otp + /refresh) take the Loop-native
   // path: Loop sends the OTP email and mints its own JWTs. Default

@@ -347,6 +347,7 @@ GET  /api/admin/audit-tail.csv                          [admin — finance/legal
 POST /api/admin/users/:userId/credit-adjustments        [admin — signed credit adjustment, ADR 017]
 POST /api/admin/users/:userId/refunds                   [admin — order-bound refund, ADR 017 + A2-901]
 POST /api/admin/users/:userId/withdrawals               [admin — debit cashback balance + queue on-chain payout, ADR-024 / A2-901]
+POST /api/admin/step-up                                 [admin — mint 5-min step-up token, ADR-028 / A4-063]
 GET  /api/admin/payouts.csv                            [admin — finance-ready CSV export, ADR 015]
 GET  /api/admin/orders                                  [admin — Loop-native orders drill-down + ?state/?userId/?merchantId/?chargeCurrency/?paymentMethod/?ctxOperatorId filters, ADR 011/013/015]
 GET  /api/admin/merchant-flows                          [admin — per-merchant fulfilled-order flow, ADR 011/015]
