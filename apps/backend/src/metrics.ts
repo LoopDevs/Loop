@@ -42,11 +42,54 @@ export interface Metrics {
    * Separator delimiter; see `METRIC_KEY_SEPARATOR`).
    */
   requestsTotal: Map<string, number>;
+  /**
+   * A4-048: per-(method, route) duration histogram. Each entry is
+   * keyed by `METHOD<US>ROUTE` and accumulates Prometheus-shaped
+   * cumulative bucket counts plus sum + count. The exposition
+   * handler emits `loop_request_duration_seconds_bucket{le=…}` /
+   * `_sum` / `_count` per key so an operator can compute SLI
+   * targets (p50/p95/p99 latency, error-rate-by-window) via
+   * standard Prometheus queries against the scraped state. Status
+   * is NOT a histogram label by design — duration distribution is
+   * shape-of-traffic, not shape-of-failures; the existing
+   * `loop_requests_total{status=…}` counter is the canonical
+   * 5xx-rate signal.
+   */
+  requestDurationHistograms: Map<string, RequestDurationHistogram>;
+}
+
+/**
+ * A4-048: standard Prometheus latency buckets (seconds). Cover the
+ * Loop backend's interesting range — tens of ms for in-memory
+ * cluster reads, hundreds of ms for upstream-proxy auth, multiple
+ * seconds for slow-path payment-watcher ticks. The +Inf bucket is
+ * implicit (`count` carries it).
+ */
+export const REQUEST_DURATION_BUCKETS_SECONDS: readonly number[] = [
+  0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
+];
+
+export interface RequestDurationHistogram {
+  /** Cumulative bucket counts; length === REQUEST_DURATION_BUCKETS_SECONDS.length. */
+  buckets: number[];
+  /** Sum of observed durations in seconds. */
+  sumSeconds: number;
+  /** Total observation count (matches the +Inf bucket). */
+  count: number;
+}
+
+function emptyHistogram(): RequestDurationHistogram {
+  return {
+    buckets: new Array<number>(REQUEST_DURATION_BUCKETS_SECONDS.length).fill(0),
+    sumSeconds: 0,
+    count: 0,
+  };
 }
 
 export const metrics: Metrics = {
   rateLimitHitsTotal: 0,
   requestsTotal: new Map(),
+  requestDurationHistograms: new Map(),
 };
 
 /**
@@ -69,6 +112,43 @@ export function incrementRequest(method: string, route: string, status: number):
 }
 
 /**
+ * A4-048: records a request's wall-clock duration in seconds against
+ * the `METHOD<US>ROUTE` histogram. Called from the request-counter
+ * middleware on the same path as `incrementRequest` so every counted
+ * request also contributes to the latency distribution.
+ *
+ * Buckets are cumulative — an observation of `0.07s` increments
+ * every bucket from `0.1` upwards (the smallest bucket whose `le`
+ * is ≥ the observation). This matches Prometheus's histogram
+ * convention so client-side tooling (recording rules, Grafana,
+ * `histogram_quantile`) reads the data correctly.
+ *
+ * Negative or non-finite durations are clamped to 0 — `performance.now()`
+ * regressions / test-time clock skew shouldn't corrupt the bucket
+ * shape.
+ */
+export function recordRequestDuration(
+  method: string,
+  route: string,
+  durationSeconds: number,
+): void {
+  const obs = Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : 0;
+  const key = `${method}${METRIC_KEY_SEPARATOR}${route}`;
+  let hist = metrics.requestDurationHistograms.get(key);
+  if (hist === undefined) {
+    hist = emptyHistogram();
+    metrics.requestDurationHistograms.set(key, hist);
+  }
+  hist.count++;
+  hist.sumSeconds += obs;
+  for (let i = 0; i < REQUEST_DURATION_BUCKETS_SECONDS.length; i++) {
+    if (obs <= REQUEST_DURATION_BUCKETS_SECONDS[i]!) {
+      hist.buckets[i]!++;
+    }
+  }
+}
+
+/**
  * Test helper: reset both counters between vitest cases. Module
  * state persists across `app.request(...)` calls inside a single
  * `vitest run`, so any test that asserts on absolute counter
@@ -77,4 +157,5 @@ export function incrementRequest(method: string, route: string, status: number):
 export function __resetMetricsForTests(): void {
   metrics.rateLimitHitsTotal = 0;
   metrics.requestsTotal.clear();
+  metrics.requestDurationHistograms.clear();
 }

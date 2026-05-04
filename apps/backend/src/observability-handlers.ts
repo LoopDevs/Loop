@@ -11,7 +11,7 @@
  */
 import type { Context } from 'hono';
 import { env } from './env.js';
-import { METRIC_KEY_SEPARATOR, metrics } from './metrics.js';
+import { METRIC_KEY_SEPARATOR, REQUEST_DURATION_BUCKETS_SECONDS, metrics } from './metrics.js';
 import { getAllCircuitStates } from './circuit-breaker.js';
 import { generateOpenApiSpec } from './openapi.js';
 import { probeGateAllows } from './middleware/probe-gate.js';
@@ -64,6 +64,30 @@ export function metricsHandler(c: Context): Response {
       `route="${escapePromLabel(route ?? '')}",` +
       `status="${escapePromLabel(status ?? '')}"`;
     lines.push(`loop_requests_total{${labels}} ${count}`);
+  }
+  lines.push('');
+
+  // A4-048: per-(method, route) latency histogram. Operators paired
+  // with `loop_requests_total{status=~"5.."}` to compute the SLI
+  // pair the SLO doc commits to (p95 latency, 5xx rate). Bucket
+  // labels are `le=<seconds>` per Prometheus convention; the +Inf
+  // bucket is required and is sourced from the histogram's `count`.
+  lines.push(
+    '# HELP loop_request_duration_seconds Request handler duration by method/route, in seconds.',
+  );
+  lines.push('# TYPE loop_request_duration_seconds histogram');
+  for (const [key, hist] of metrics.requestDurationHistograms) {
+    const [method, route] = key.split(METRIC_KEY_SEPARATOR);
+    const baseLabels = `method="${escapePromLabel(method ?? '')}",route="${escapePromLabel(route ?? '')}"`;
+    for (let i = 0; i < REQUEST_DURATION_BUCKETS_SECONDS.length; i++) {
+      const upper = REQUEST_DURATION_BUCKETS_SECONDS[i]!;
+      lines.push(
+        `loop_request_duration_seconds_bucket{${baseLabels},le="${upper}"} ${hist.buckets[i]}`,
+      );
+    }
+    lines.push(`loop_request_duration_seconds_bucket{${baseLabels},le="+Inf"} ${hist.count}`);
+    lines.push(`loop_request_duration_seconds_sum{${baseLabels}} ${hist.sumSeconds}`);
+    lines.push(`loop_request_duration_seconds_count{${baseLabels}} ${hist.count}`);
   }
   lines.push('');
 
