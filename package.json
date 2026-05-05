@@ -41,7 +41,7 @@
   },
   "overrides": {
     "@stellar/stellar-sdk": {
-      "axios": "1.15.0"
+      "axios": "1.15.2"
     }
   },
   "devDependencies": {
