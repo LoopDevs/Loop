@@ -40,6 +40,19 @@ export interface CreateLoopOrderRequest {
  *   as `xlm`/`usdc`, plus `assetCode` + `assetIssuer` the client sends
  *   alongside the payment.
  * - `credit`: off-chain credit-ledger debit. No on-chain fields.
+ *
+ * On-chain variants additionally carry:
+ * - `assetAmount` — the amount the user must send in the asset's native
+ *   units (decimal string, 7 decimals max). For USDC, this is the
+ *   chargeMinor converted via the USDC FX feed; for XLM, via the XLM
+ *   price oracle; for `loop_asset`, 1:1 with chargeMinor (LOOP-asset is
+ *   1:1 fiat-backed). Computed at order creation; oracle re-validation
+ *   happens at watcher tick (slight rate movement during in-flight
+ *   payment is absorbed by the watcher's tolerance).
+ * - `paymentUri` — SEP-7 `web+stellar:pay?...` URI deep-linking into
+ *   any installed Stellar wallet. Mobile clients render a single
+ *   "Open in wallet" button using this; web clients use the
+ *   address+memo+amount fields directly for copy-paste.
  */
 export interface CreateLoopOrderResponse {
   orderId: string;
@@ -50,6 +63,10 @@ export interface CreateLoopOrderResponse {
         memo: string;
         amountMinor: string;
         currency: string;
+        /** Amount in asset native units (decimal string, e.g. "240.5000000" XLM or "24.0000000" USDC). */
+        assetAmount: string;
+        /** SEP-7 `web+stellar:pay?...` deep-link URI. */
+        paymentUri: string;
       }
     | {
         method: 'loop_asset';
@@ -59,6 +76,10 @@ export interface CreateLoopOrderResponse {
         currency: string;
         assetCode: LoopAssetCode;
         assetIssuer: string;
+        /** Amount in asset native units (decimal string, 7 decimals). 1:1 with chargeMinor. */
+        assetAmount: string;
+        /** SEP-7 `web+stellar:pay?...` deep-link URI. */
+        paymentUri: string;
       }
     | {
         method: 'credit';
