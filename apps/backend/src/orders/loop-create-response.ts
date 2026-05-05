@@ -26,6 +26,12 @@ import { logger } from '../logger.js';
 import { type CreateLoopOrderResponse, type Merchant } from '@loop/shared';
 import { payoutAssetFor } from '../credits/payout-asset.js';
 import { notifyCashbackRecycled, notifyFirstCashbackRecycled } from '../discord.js';
+import {
+  buildSep7PayUri,
+  loopAssetAmountFor,
+  usdcAmountFor,
+  xlmAmountFor,
+} from '../payments/sep7.js';
 import { type Order } from './repo.js';
 
 const log = logger.child({ handler: 'loop-orders' });
@@ -36,7 +42,7 @@ const log = logger.child({ handler: 'loop-orders' });
  * caller's first-ever `loop_asset` order — gates the milestone
  * Discord notification.
  */
-export function buildLoopCreateResponse(
+export async function buildLoopCreateResponse(
   c: Context,
   args: {
     order: Order;
@@ -45,7 +51,7 @@ export function buildLoopCreateResponse(
     merchant: Merchant;
     firstLoopAsset: boolean;
   },
-): Response {
+): Promise<Response> {
   const { order, userId, homeCurrency, merchant, firstLoopAsset } = args;
   const base = {
     orderId: order.id,
@@ -111,29 +117,79 @@ export function buildLoopCreateResponse(
         assetCode: payoutAsset.code,
       });
     }
+    const loopAssetAmount = loopAssetAmountFor(order.chargeMinor);
+    const memo = order.paymentMemo ?? '';
+    const stellarAddress = env.LOOP_STELLAR_DEPOSIT_ADDRESS!;
+    const paymentUri = buildSep7PayUri({
+      destination: stellarAddress,
+      amount: loopAssetAmount.formatted,
+      memo,
+      assetCode: payoutAsset.code,
+      assetIssuer: payoutAsset.issuer,
+      msg: `Loop order ${order.id.slice(0, 8)}`,
+    });
     return c.json<CreateLoopOrderResponse>({
       ...base,
       payment: {
         method: 'loop_asset',
-        stellarAddress: env.LOOP_STELLAR_DEPOSIT_ADDRESS!,
-        memo: order.paymentMemo ?? '',
+        stellarAddress,
+        memo,
         amountMinor: order.chargeMinor.toString(),
         currency: order.chargeCurrency,
         assetCode: payoutAsset.code,
         assetIssuer: payoutAsset.issuer,
+        assetAmount: loopAssetAmount.formatted,
+        paymentUri,
       },
     });
   }
   // xlm / usdc — both use Stellar as the rail. LOOP_STELLAR_DEPOSIT_ADDRESS
-  // was validated above.
+  // was validated above. Compute the asset amount (XLM via oracle, USDC via
+  // FX feed) and the SEP-7 deep-link URI so clients can render an
+  // "Open in wallet" button.
+  const memo = order.paymentMemo ?? '';
+  const stellarAddress = env.LOOP_STELLAR_DEPOSIT_ADDRESS!;
+  const chargeCurrency = order.chargeCurrency as 'USD' | 'GBP' | 'EUR';
+  let assetAmount: { stroops: bigint; formatted: string };
+  try {
+    if (order.paymentMethod === 'usdc') {
+      assetAmount = await usdcAmountFor(order.chargeMinor, chargeCurrency);
+    } else {
+      assetAmount = await xlmAmountFor(order.chargeMinor, chargeCurrency);
+    }
+  } catch (err) {
+    log.error(
+      { err, orderId: order.id, paymentMethod: order.paymentMethod, chargeCurrency },
+      'Asset-amount oracle unavailable at order create — falling back to fiat-only response',
+    );
+    // Fail-open: if the oracle is down at create time, return the
+    // payment payload with a placeholder zero amount so the client
+    // still has the address + memo to fall back to manual entry.
+    // Watcher's amount validation will still hold.
+    assetAmount = { stroops: 0n, formatted: '0.0000000' };
+  }
+  const paymentUri = buildSep7PayUri({
+    destination: stellarAddress,
+    amount: assetAmount.formatted,
+    memo,
+    ...(order.paymentMethod === 'usdc'
+      ? {
+          assetCode: 'USDC',
+          assetIssuer: env.LOOP_STELLAR_USDC_ISSUER ?? '',
+        }
+      : {}),
+    msg: `Loop order ${order.id.slice(0, 8)}`,
+  });
   return c.json<CreateLoopOrderResponse>({
     ...base,
     payment: {
       method: order.paymentMethod as 'xlm' | 'usdc',
-      stellarAddress: env.LOOP_STELLAR_DEPOSIT_ADDRESS!,
-      memo: order.paymentMemo ?? '',
+      stellarAddress,
+      memo,
       amountMinor: order.chargeMinor.toString(),
       currency: order.chargeCurrency,
+      assetAmount: assetAmount.formatted,
+      paymentUri,
     },
   });
 }

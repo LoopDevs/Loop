@@ -1,17 +1,28 @@
 /**
  * XLM price oracle (ADR 010 follow-up).
  *
- * Fetches the current USD / GBP / EUR price of one XLM from a public
- * price feed, caches it for 60s, and exposes a `stroopsPerCent(currency)`
+ * Fetches the current USD / GBP / EUR price of one XLM from a price
+ * feed, caches it for 60s, and exposes a `stroopsPerCent(currency)`
  * helper the payment watcher uses to size-check an incoming XLM
  * payment against an order's pinned minor-unit face value.
  *
- * Defaults to CoinGecko's public `/simple/price` endpoint; operators
- * override with `LOOP_XLM_PRICE_FEED_URL` for a self-hosted or
- * commercial feed. The URL must return
- *   { stellar: { usd: number, gbp: number, eur: number } }
- * which matches CoinGecko's shape — adapters for other APIs can be
- * a self-hosted shim.
+ * Two adapter modes (selected automatically by URL host):
+ *
+ *   1. **CTX rates** (default, 2026-05-05): three parallel fetches to
+ *      `https://rates.ctx.com/rates?source=ctx&symbol={xlmusd,xlmgbp,xlmeur}`,
+ *      each returning a single-element array of
+ *      `{ baseCurrency, price, quoteCurrency, retrieved, source, symbol }`.
+ *      A pair returning empty / 404 / network error is tolerated:
+ *      that currency simply won't be available in the snapshot
+ *      (watcher rejects orders in that currency until the next tick).
+ *      USD must succeed — it's the floor currency.
+ *
+ *   2. **CoinGecko** (operator override via `LOOP_XLM_PRICE_FEED_URL`):
+ *      single fetch returning `{ stellar: { usd, gbp?, eur? } }`. Used
+ *      when an operator points the env var at CoinGecko, a self-hosted
+ *      shim, or a commercial feed mirroring CoinGecko's shape. Selected
+ *      whenever the override env var is set, regardless of host —
+ *      operators who want CTX shape can leave the env var unset.
  *
  * Why the cache TTL is 60s: the watcher ticks every 10s; polling a
  * rate API on every tick would gate the whole loop on external
@@ -31,6 +42,35 @@ const CoinGeckoResponse = z.object({
     eur: z.number().optional(),
   }),
 });
+
+/**
+ * CTX rates response shape (verified 2026-05-05 against
+ * `https://rates.ctx.com/rates?source=ctx&symbol=xlmusd`):
+ *
+ *   [
+ *     {
+ *       "baseCurrency": "XLM",
+ *       "price": "0.1610",
+ *       "quoteCurrency": "USD",
+ *       "retrieved": "2026-05-05T22:08:31.914725653Z",
+ *       "source": "ctx-average",
+ *       "symbol": "XLMUSD"
+ *     }
+ *   ]
+ *
+ * `price` is a decimal string (1 baseCurrency = `price` quoteCurrency).
+ * The array is single-element per query as far as we've observed; we
+ * defensively take the first element matching the requested symbol.
+ */
+const CtxRateRecord = z.object({
+  baseCurrency: z.string(),
+  price: z.string(),
+  quoteCurrency: z.string(),
+  retrieved: z.string(),
+  source: z.string(),
+  symbol: z.string(),
+});
+const CtxRatesResponse = z.array(CtxRateRecord);
 
 /**
  * Cache stamps in wall-clock ms. Single-entry cache: one URL feeds
@@ -61,14 +101,23 @@ export function __resetPriceFeedForTests(): void {
   cached = null;
 }
 
-function feedUrl(): string {
+/**
+ * Selects the active feed source. Operator override via
+ * `LOOP_XLM_PRICE_FEED_URL` switches to the CoinGecko-shape adapter
+ * (single fetch). Unset → CTX rates adapter (three parallel fetches,
+ * one per currency).
+ */
+function feedSource(): { kind: 'ctx' } | { kind: 'coingecko'; url: string } {
   const override = process.env['LOOP_XLM_PRICE_FEED_URL'];
-  if (typeof override === 'string' && override.length > 0) return override;
-  return 'https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=usd,gbp,eur';
+  if (typeof override === 'string' && override.length > 0) {
+    return { kind: 'coingecko', url: override };
+  }
+  return { kind: 'ctx' };
 }
 
-async function refresh(): Promise<CachedPrice> {
-  const url = feedUrl();
+const CTX_RATES_BASE = 'https://rates.ctx.com/rates';
+
+async function fetchJson(url: string): Promise<unknown> {
   const res = await fetch(url, {
     headers: { Accept: 'application/json' },
     signal: AbortSignal.timeout(10_000),
@@ -76,26 +125,100 @@ async function refresh(): Promise<CachedPrice> {
   if (!res.ok) {
     throw new Error(`Price feed ${res.status} from ${url}`);
   }
-  const raw = await res.json();
+  return res.json();
+}
+
+/**
+ * Fetches a single XLM/<quote> rate from CTX rates. Returns the
+ * decimal price as a number (1 XLM = `price` quote-currency major
+ * units). Returns null when the feed has no data for that pair —
+ * caller treats this as "currency unavailable in this snapshot."
+ */
+async function fetchCtxRate(quote: 'USD' | 'GBP' | 'EUR'): Promise<number | null> {
+  const symbol = `xlm${quote.toLowerCase()}`;
+  const url = `${CTX_RATES_BASE}?source=ctx&symbol=${symbol}`;
+  let raw: unknown;
+  try {
+    raw = await fetchJson(url);
+  } catch (err) {
+    log.warn({ err, quote, url }, 'CTX rates fetch failed for one pair');
+    return null;
+  }
+  const parsed = CtxRatesResponse.safeParse(raw);
+  if (!parsed.success) {
+    log.error({ issues: parsed.error.issues, url, quote }, 'CTX rates schema drift');
+    // USD failure becomes a hard error in the caller; GBP/EUR drift
+    // is caller-tolerated, so return null and let it surface there.
+    return null;
+  }
+  // Defensively pick the record matching the requested symbol —
+  // future-proofs against the API ever returning a multi-symbol response.
+  const record = parsed.data.find((r) => r.symbol.toUpperCase() === `XLM${quote}`);
+  if (record === undefined) {
+    log.warn(
+      { url, quote, returned: parsed.data.map((r) => r.symbol) },
+      'CTX rates response missing requested symbol',
+    );
+    return null;
+  }
+  const price = Number(record.price);
+  if (!Number.isFinite(price) || price <= 0) {
+    log.error(
+      { url, quote, price: record.price },
+      'CTX rates returned non-numeric or non-positive price',
+    );
+    return null;
+  }
+  return price;
+}
+
+async function refreshCtx(): Promise<CachedPrice> {
+  // Three parallel fetches — the API is per-symbol, but this still
+  // adds up to ~one round-trip latency since they fire concurrently.
+  const [usd, gbp, eur] = await Promise.all([
+    fetchCtxRate('USD'),
+    fetchCtxRate('GBP'),
+    fetchCtxRate('EUR'),
+  ]);
+  if (usd === null) {
+    // USD is the floor currency — without it the feed is effectively
+    // dead. Throw so the watcher tick treats this as a feed outage and
+    // the caller sees a 503 at order create time.
+    throw new Error('CTX rates: USD pair unavailable');
+  }
+  // Scale to micro-cents (cents × 10^6) per A4-106 precision rationale.
+  // `price` is major-unit per XLM (e.g. 0.1610 USD per XLM), so
+  // microCents per XLM = price × 100 cents/major × 10^6 = price × 1e8.
+  const microCentsPerXlm: CachedPrice['microCentsPerXlm'] = {
+    USD: Math.round(usd * 100_000_000),
+  };
+  if (gbp !== null) microCentsPerXlm.GBP = Math.round(gbp * 100_000_000);
+  if (eur !== null) microCentsPerXlm.EUR = Math.round(eur * 100_000_000);
+  cached = { microCentsPerXlm, expiresAt: Date.now() + CACHE_TTL_MS };
+  return cached;
+}
+
+async function refreshCoinGecko(url: string): Promise<CachedPrice> {
+  const raw = await fetchJson(url);
   const parsed = CoinGeckoResponse.safeParse(raw);
   if (!parsed.success) {
-    log.error({ issues: parsed.error.issues, url }, 'Price feed schema drift');
+    log.error({ issues: parsed.error.issues, url }, 'CoinGecko price feed schema drift');
     throw new Error('Price feed schema drift');
   }
   const { usd, gbp, eur } = parsed.data.stellar;
-  // A4-106: scale to micro-cents (cents × 10^6) so the size-check
-  // math keeps the upstream feed's typical 6+ decimal precision.
-  // 1 USD = 100 cents = 100_000_000 micro-cents.
   const microCentsPerXlm: CachedPrice['microCentsPerXlm'] = {
     USD: Math.round(usd * 100_000_000),
   };
   if (typeof gbp === 'number') microCentsPerXlm.GBP = Math.round(gbp * 100_000_000);
   if (typeof eur === 'number') microCentsPerXlm.EUR = Math.round(eur * 100_000_000);
-  cached = {
-    microCentsPerXlm,
-    expiresAt: Date.now() + CACHE_TTL_MS,
-  };
+  cached = { microCentsPerXlm, expiresAt: Date.now() + CACHE_TTL_MS };
   return cached;
+}
+
+async function refresh(): Promise<CachedPrice> {
+  const source = feedSource();
+  if (source.kind === 'ctx') return refreshCtx();
+  return refreshCoinGecko(source.url);
 }
 
 /**

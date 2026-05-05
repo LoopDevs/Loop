@@ -66,7 +66,10 @@ beforeEach(() => {
 
 describe('replayOrderResponse', () => {
   it('replays a credit-method order without leaking deposit address or memo', async () => {
-    const res = replayOrderResponse(fakeContext(), order({ paymentMethod: 'credit' }) as never);
+    const res = await replayOrderResponse(
+      fakeContext(),
+      order({ paymentMethod: 'credit' }) as never,
+    );
     const body = (await res.json()) as { orderId: string; payment: Record<string, string> };
     expect(body.orderId).toBe('order-1');
     expect(body.payment).toEqual({ method: 'credit', amountMinor: '1000', currency: 'USD' });
@@ -74,20 +77,20 @@ describe('replayOrderResponse', () => {
   });
 
   it('replays an XLM-method order with deposit address + memo', async () => {
-    const res = replayOrderResponse(fakeContext(), order({ paymentMethod: 'xlm' }) as never);
+    const res = await replayOrderResponse(fakeContext(), order({ paymentMethod: 'xlm' }) as never);
     const body = (await res.json()) as { payment: { stellarAddress: string; memo: string } };
     expect(body.payment.stellarAddress).toBe('GDEPOSIT');
     expect(body.payment.memo).toBe('MEMO-XLM-AAAAAAAAAAAA');
   });
 
   it('replays a USDC-method order with the same envelope shape as XLM', async () => {
-    const res = replayOrderResponse(fakeContext(), order({ paymentMethod: 'usdc' }) as never);
+    const res = await replayOrderResponse(fakeContext(), order({ paymentMethod: 'usdc' }) as never);
     const body = (await res.json()) as { payment: { method: string } };
     expect(body.payment.method).toBe('usdc');
   });
 
   it('replays a loop_asset order with assetCode + assetIssuer', async () => {
-    const res = replayOrderResponse(
+    const res = await replayOrderResponse(
       fakeContext(),
       order({ paymentMethod: 'loop_asset', chargeCurrency: 'GBP' }) as never,
     );
@@ -104,7 +107,7 @@ describe('replayOrderResponse', () => {
   });
 
   it('returns 500 when a stored loop_asset order has a chargeCurrency outside the home-currency enum', async () => {
-    const res = replayOrderResponse(
+    const res = await replayOrderResponse(
       fakeContext(),
       order({ paymentMethod: 'loop_asset', chargeCurrency: 'JPY' }) as never,
     );
@@ -115,7 +118,7 @@ describe('replayOrderResponse', () => {
 
   it('returns 503 for loop_asset replay when the issuer for the currency has been unset', async () => {
     payoutAssetState.USD.issuer = null;
-    const res = replayOrderResponse(
+    const res = await replayOrderResponse(
       fakeContext(),
       order({ paymentMethod: 'loop_asset', chargeCurrency: 'USD' }) as never,
     );
@@ -126,12 +129,12 @@ describe('replayOrderResponse', () => {
 
   it('returns 503 for xlm/usdc replay when LOOP_STELLAR_DEPOSIT_ADDRESS has been unset', async () => {
     envState.LOOP_STELLAR_DEPOSIT_ADDRESS = undefined;
-    const res = replayOrderResponse(fakeContext(), order({ paymentMethod: 'xlm' }) as never);
+    const res = await replayOrderResponse(fakeContext(), order({ paymentMethod: 'xlm' }) as never);
     expect(res.status).toBe(503);
   });
 
   it('falls back to empty memo when paymentMemo is null', async () => {
-    const res = replayOrderResponse(
+    const res = await replayOrderResponse(
       fakeContext(),
       order({ paymentMethod: 'xlm', paymentMemo: null }) as never,
     );
