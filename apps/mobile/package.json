@@ -25,7 +25,7 @@
     "@capacitor/share": "8.0.1",
     "@capacitor/splash-screen": "8.0.1",
     "@capacitor/status-bar": "8.0.2",
-    "@capgo/inappbrowser": "8.6.1"
+    "@capgo/inappbrowser": "8.6.2"
   },
   "engines": {
     "node": ">=22.0.0"
