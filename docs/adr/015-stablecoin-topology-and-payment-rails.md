@@ -1,9 +1,9 @@
 # ADR 015: Stablecoin topology and payment rails
 
-Status: Accepted
-Date: 2026-04-21
-Implemented: 2026-04-21 (backend data layer + admin UI + onboarding picker + wallet settings; gated behind `LOOP_WORKERS_ENABLED` + issuer env vars — see rollout checklist at the bottom)
-Related: ADR 009 (credits ledger), ADR 010 (principal switch), ADR 011 (admin panel), ADR 013 (Loop-owned auth + CTX operator pool), ADR 016 (Stellar SDK for outbound payouts)
+Status: Amended (2026-05-05) — superseded in part by ADR 030 (wallet model: external linking → Privy embedded wallet) and ADR 031 (per-currency yield: USDLOOP/EURLOOP retired in favour of Loop-curated DeFindex vault shares LOOPUSD/LOOPEUR; GBPLOOP retained with 3% APY nightly mint payouts). Sections retained: composite-key user_credits, FX-pin at order creation, watcher allowlist concept, asset matrix structure (with renames). Sections superseded: §"User wallet linking" + rollout checklist items #362 / #366 → ADR 030; §"Loop issues three branded Stellar assets" partially → ADR 031 retires USDLOOP and EURLOOP; §"Defindex deposit automation — currently manual ops top-up" → ADR 031 automates via Loop-curated vaults.
+Date: 2026-04-21 (amended 2026-05-05)
+Implemented: 2026-04-21 (backend data layer + admin UI + onboarding picker + wallet settings; gated behind `LOOP_WORKERS_ENABLED` + issuer env vars — see rollout checklist at the bottom). 2026-05-05 amendments NOT yet implemented; tracked in ADR 030 + 031 implementation cycles.
+Related: ADR 009 (credits ledger), ADR 010 (principal switch), ADR 011 (admin panel), ADR 013 (Loop-owned auth + CTX operator pool), ADR 016 (Stellar SDK for outbound payouts), ADR 030 (Privy wallet — supersedes wallet-linking section), ADR 031 (per-currency yield — supersedes asset-issuance and DeFindex sections)
 
 ## Context
 

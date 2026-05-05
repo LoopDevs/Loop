@@ -98,12 +98,13 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 
 ---
 
-## Phase 2 — Stellar wallet & cashback
+## Phase 2 — Integrated wallet, cashback, yield
 
-Phase 2 reshaped mid-flight into the **ADR 015 / 016 cashback-app
-switch** (Loop-as-merchant-of-record, CTX as supplier, LOOP-branded
-stablecoins, admin panel). That work is code-complete; what's
-below is either shipped or an explicit "not yet started".
+Phase 2 has been reshaped twice. First, mid-2026, into the **ADR 015 / 016 cashback-app switch** (Loop-as-merchant-of-record, CTX as supplier, LOOP-branded stablecoins, admin panel). Second, in the 2026-05-05 design session, into the **integrated wallet + per-currency yield** topology now captured in ADR 030 (Privy embedded wallet, with dfns documented as fallback) + ADR 031 (LOOPUSD / LOOPEUR as Loop-curated DeFindex vault shares; GBPLOOP as 1:1-backed Stellar classic asset with nightly 3% APY mints; treasury captures spread).
+
+The earlier "link external wallet" model from ADR 015 is **retired** by ADR 030. USDLOOP and EURLOOP are **retired** by ADR 031 — users hold canonical USDC/EURC routed into Loop's curated vaults via the LOOPUSD/LOOPEUR vault-share tokens. GBPLOOP **stays** as the only Loop-issued 1:1-backed stablecoin, with a nightly on-chain 3% APY mint funded by treasury spread on backing reserves.
+
+That work is code-complete on the original ADR 015 surface; the new ADR 030 + 031 work is **not yet started** and is what Phase 2 ships next. Items below are either shipped on the original surface or explicit "not yet started" on the new surface.
 
 ### Cashback app switch — ADR 015/016 (shipped across #330 — #366)
 
@@ -134,27 +135,28 @@ below is either shipped or an explicit "not yet started".
       (#360) + below-floor (#361) with throttling + classified `kind`.
 - [x] ~~ADR status: Accepted~~ — rollout checklists all ticked (#365).
 
-### Deferred from ADR 015
+### New work — ADR 030 + 031 (not yet started, 2026-05-05 design)
 
-- [ ] Multi-home-currency per user — holding USDLOOP + GBPLOOP +
-      EURLOOP simultaneously. Schema supports it (composite key);
-      UX to pick-and-switch doesn't exist yet. Launch users hold
-      one home currency.
-- [ ] In-app LOOP-asset swap — UX layer over Stellar path-payment.
-      Out-of-scope for MVP; users who want it today withdraw +
-      swap on SDEX.
-- [x] ~~Admin-mediated home-currency change~~ — `POST /api/admin/users/:userId/home-currency` (2026-05-04). Step-up gated; preflight rejects if the user has a non-zero credit balance in the old currency or any in-flight payouts. Self-serve remains deliberately out of scope: the safety invariants (orphaned credits / mid-flight payouts) are the same, so the support-mediated path is the one that gets exercised under audit.
-- [ ] SEP-24 / off-platform withdrawal UX for LOOP assets.
-- [ ] Defindex deposit automation — currently manual ops top-up.
-- [x] ~~Trustline-probe before payout submit~~ — `payOne` reads the
-      destination account's trustlines from Horizon (cached 30s)
-      before claiming the row (2026-05-04). Missing trustline →
-      row stays `pending`, throttled Discord ping
-      (`notifyPayoutAwaitingTrustline`), next tick re-probes
-      automatically once the user adds the trustline. Closes the
-      ADR-016 open question.
-- [ ] Hardware signing (HSM) for the operator secret — software
-      signing adequate for launch volume.
+- [ ] **Privy integration** (ADR 030). RS256 JWT migration + JWKS publish endpoint, Privy SDK Custom Auth Provider wiring, webhook for `users.stellar_address`. Fallback path to dfns documented if Privy DD fails on Soroban.
+- [ ] **LOOPUSD vault** (ADR 031). Loop-curated DeFindex vault contract, USDC backing routed to Blend USDC pool, 0% mgmt + 50% perf fee. Audit on the vault contract is critical-path.
+- [ ] **LOOPEUR vault** (ADR 031). Same structure with EURC + Blend EURC.
+- [ ] **GBPLOOP nightly mint cron** (ADR 031). 3% APY paid as on-chain GBPLOOP mints to holders nightly. Idempotent via `gbploop_interest_payments` table.
+- [ ] **Treasury spread management** (ADR 031). Operator-side investment of USDC/EURC backing into vaults + GBP fiat into UK custodian/MMF/gilts. Hot float per currency for instant withdrawals.
+- [ ] **Past-30-day APY computation + display** (ADR 031). On-chain share-price history for vaults + on-chain mint history for GBPLOOP, surfaced as "past 30 days: X.XX%" with "no guarantee of future performance" disclaimer.
+- [ ] **Asset rename: USDLOOP and EURLOOP retired**. Code references retired; never issued in production.
+- [ ] **Privy/dfns Soroban DD** (critical-path). Verify vendor Soroban token custody before signing contracts.
+- [ ] **Multi-jurisdictional regulatory review** (bundled). LOOPUSD/LOOPEUR vault curation + GBPLOOP issuance + Privy custody. 4–6 weeks of crypto-fintech counsel.
+- [x] ~~UK GBP banking partner~~ — **Revolut Business** (resolved 2026-05-05). Treasury yield product selection (Flexible Cash Funds vs gilts) and Revolut Business API integration for Faster Payments off-ramp remain as scoping work but are not DD blockers.
+
+### Deferred from original ADR 015 (no longer in scope)
+
+- [ ] Multi-home-currency per user — UX still not built; launch users hold one home currency. Schema supports composite key.
+- [ ] In-app LOOP-asset swap — out of scope for MVP; deferred entirely.
+- [x] ~~Admin-mediated home-currency change~~ — `POST /api/admin/users/:userId/home-currency` (2026-05-04). Step-up gated; preflight rejects if the user has a non-zero credit balance in the old currency or any in-flight payouts.
+- [ ] SEP-24 / off-platform withdrawal UX for LOOP assets — replaced by Privy-native withdraw flow per ADR 030 (Privy server signs LOOP-asset transfer, Loop redeems and pays canonical asset / fiat to destination).
+- [x] ~~Trustline-probe before payout submit~~ — Privy provisions trustlines automatically per ADR 030; old probe logic obsolete.
+- [ ] Hardware signing (HSM) for the operator secret — software signing adequate for launch volume.
+- [ ] **External wallet linking** (`/settings/wallet` PUT endpoint, `LinkWalletNudge`, `TrustlineSetupCard`) — **retired by ADR 030**. The "user pastes their Stellar pubkey" model is replaced by Privy-provisioned wallets keyed on user_id.
 
 ### Authentication upgrades
 
@@ -170,13 +172,9 @@ below is either shipped or an explicit "not yet started".
 
 - [x] ~~Cashback calculation + distribution service~~ — `user_credits`
       ledger (ADR 009) + `pending_payouts` worker (ADR 016).
-- [ ] On-device Stellar wallet key generation — superseded by the
-      ADR 015 model where users link an external wallet rather
-      than Loop managing device keys. Revisit if we add a custodial
-      wallet product.
-- [ ] 2-of-3 multisig wallet — same; deferred with the custodial
-      wallet question.
-- [ ] Recovery key escrow — same.
+- [ ] **On-device Stellar wallet key generation** — **retired by ADR 030**. Privy provisions managed wallets keyed on user_id; on-device key gen is not Loop's path. Revisit only if Privy/dfns vendor relationship breaks down.
+- [ ] **2-of-3 multisig wallet** — **retired by ADR 030**. Vendor MPC (Privy/dfns) replaces multisig; recovery is vendor's responsibility.
+- [ ] **Recovery key escrow** — **retired by ADR 030**. Vendor-managed.
 
 ### Mobile enhancements
 
@@ -201,6 +199,19 @@ below is either shipped or an explicit "not yet started".
 - [x] ~~Favourites~~ — `/api/users/me/favorites` list/add/remove with a 50-per-user cap, surfaced as a heart-toggle on every `MerchantCard` and a "Your favourites" strip on the home page (mobile + desktop). Catalog-evicted favourites surface as `merchant: null` so the row stays restorable while the UI hides the entry. Recently-purchased is a separate read on top of the orders ledger and stays open.
 - [x] ~~Recently purchased merchants~~ — `GET /api/users/me/recently-purchased` derives distinct merchants from `orders` in `state IN ('paid', 'procuring', 'fulfilled')`, ordered by MAX(created_at) DESC. Surfaces as a "Recently purchased" strip above the home grid (mobile + desktop), rendered before the Favourites strip so a returning buyer lands on repeat-purchase shortcuts before browsing pinned merchants.
 - [ ] Referral program
+
+### Tranche 3 contract deliverables (added 2026-05-05 from contract review)
+
+The proposal commits Tranche 3 to **Plaid + virtual cashback Visa/Mastercard + mainnet + 4-country launch**, none of which are scoped under "Phase 3 Growth & polish" above. These are the genuine T3 deliverables; the "Growth & polish" items below are post-contract enhancements.
+
+- [ ] **Plaid SDK integration** — open-banking USD/GBP/EUR/CAD payment rails. Lets users buy gift cards via bank transfer in addition to crypto. Backend route accepts Plaid Auth + ACH/SEPA/FPS settlement; web/mobile SDK for account linking. Rough scope: 2–3 months including bank-rail integration and reg posture per jurisdiction.
+- [ ] **Virtual cashback Visa/Mastercard** — physical/virtual card issuance for cashback spending. BIN sponsor partnership (Marqeta, Stripe Issuing, Galileo, etc) required; KYC + compliance program needed. Rough scope: 4–6 months including card issuer onboarding.
+- [ ] **Mainnet launch** — flip from Tranche 2 testnet to mainnet across all stablecoins, vaults, and wallet provisioning. Includes audit completion (Privy/dfns custody, LOOPUSD/LOOPEUR vault, GBPLOOP issuance), regulatory authorisations (UK FCA EMI for GBPLOOP, equivalent posture per US/EU/CA jurisdictions), and migration of any testnet user balances.
+- [ ] **Four-country launch** (US/UK/EU/CA) — verify CTX merchant catalog covers all four; complete jurisdictional reg posture for each; localise app strings and currency display.
+
+### Phase 3 — Growth & polish (post-contract, not Tranche 3)
+
+These were originally listed as Phase 3 but are not in the Tranche 3 contract. They're post-launch quality and scaling work.
 
 ### Observability
 

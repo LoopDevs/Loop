@@ -29,7 +29,7 @@ User-hidden (gated behind `LOOP_PHASE_1_ONLY=true`):
 - `/settings/cashback` → placeholder
 - Footer "Cashback rates" + "Trustlines" links → omitted
 - Navbar "Rates" + "Cashback" links → omitted
-- `LinkWalletNudge` (the "earned cashback, link your wallet" prompt) → renders nothing
+- `LinkWalletNudge` (the "earned cashback, link your wallet" prompt) → renders nothing in T1; **fully retired in T2** by ADR 030 (Privy auto-provisions; no link UX needed)
 - Onboarding step 5 (currency picker) and step 7 (wallet intro) → auto-skipped
 
 Inert at the backend level (independent flags, all default off):
@@ -90,14 +90,17 @@ OPENAPI_BEARER_TOKEN=…
 **Explicitly NOT set in Tranche 1** — these belong to Tranche 2's cashback emission / yield surface and stay off:
 
 ```bash
-LOOP_STELLAR_USDLOOP_ISSUER=                  # unset — no LOOP-asset issuance
-LOOP_STELLAR_GBPLOOP_ISSUER=                  # unset
-LOOP_STELLAR_EURLOOP_ISSUER=                  # unset
-INTEREST_APY_BASIS_POINTS=0                   # default — no daily interest
+LOOP_STELLAR_GBPLOOP_ISSUER=                  # unset — no GBPLOOP issuance in T1
+INTEREST_APY_BASIS_POINTS=0                   # default — no nightly interest mint
 LOOP_INTEREST_POOL_ACCOUNT=                   # unset — no pool
+PRIVY_APP_ID=                                 # unset — Privy not integrated until T2 (ADR 030)
+LOOP_USD_VAULT_ADDRESS=                       # unset — DeFindex curator vault not deployed until T2 (ADR 031)
+LOOP_EUR_VAULT_ADDRESS=                       # unset — same
 ```
 
-The discount path doesn't emit on-chain LOOP-asset, so leaving the LOOP issuers unset is correct (and the asset-drift watcher stays inert because `configuredLoopPayableAssets()` returns an empty list). When Tranche 2 lands you'll set the issuer envs + flip `LOOP_PHASE_1_ONLY=false`, and the cashback amount that's currently delivered as a discount will start emitting as a Stellar payout instead.
+USDLOOP and EURLOOP issuer envs are gone entirely — those assets are retired by ADR 031 (users hold LOOPUSD/LOOPEUR vault shares directly, not Loop-issued 1:1 stablecoin wrappers).
+
+The discount path doesn't emit on-chain assets, so leaving these unset is correct. When Tranche 2 lands the operator: deploys LOOPUSD/LOOPEUR vaults + sets vault env vars; configures GBPLOOP issuer + `INTEREST_APY_BASIS_POINTS=300` for 3% APY; signs Privy production contract + sets `PRIVY_APP_ID`; flips `LOOP_PHASE_1_ONLY=false`. Cashback that's currently delivered as a discount starts emitting to user wallets via the appropriate per-currency mechanism.
 
 For the web build:
 
@@ -173,24 +176,28 @@ The treasury reconciliation lives at `/admin/treasury` (admin-only) — USDC + X
 
 ---
 
-## What flipping the flag back does (Tranche 1 → Tranche 2)
+## What Tranche 2 looks like (post-2026-05-05 design — ADR 030 + 031)
 
-When you're ready for Tranche 2 (Stellar passkey wallet + on-chain cashback + DeFindex yield):
+**The earlier "Stellar passkey wallet" framing for Tranche 2 is retired** — see decision-history sections of ADR 030 (wallet model) and ADR 031 (per-currency yield architecture). The actual T2 surface is:
 
-```bash
-LOOP_PHASE_1_ONLY=false                       # web client immediately shows Phase 2 surfaces
-LOOP_STELLAR_USDLOOP_ISSUER=G…                # Loop's USDLOOP issuer pubkey
-LOOP_STELLAR_GBPLOOP_ISSUER=G…
-LOOP_STELLAR_EURLOOP_ISSUER=G…
-INTEREST_APY_BASIS_POINTS=350                 # 3.5% APY (or whatever the operator chooses)
-LOOP_INTEREST_POOL_ACCOUNT=G…                 # forward-mint pool (or leave unset → defaults to operator account)
-```
+- **Privy-provisioned embedded wallet** (with dfns as documented fallback) keyed on Loop's user_id. Cross-platform identity-bound; single auth login also authenticates Privy via Custom Auth Provider.
+- **LOOPUSD and LOOPEUR**: Loop-curated DeFindex vault shares (Soroban). User's wallet holds the vault share token directly. Vault routes USDC/EURC into Blend lending pools. 0% mgmt + 50% perf fee captures Loop's revenue on-chain.
+- **GBPLOOP**: 1:1-backed Stellar classic asset. 3% APY paid as **nightly on-chain GBPLOOP mints** to holders. Loop's treasury invests GBP backing wherever yields best (UK base rate, MMF, gilts) and pockets the spread.
+- **USDLOOP and EURLOOP retired**: users hold native vault shares (LOOPUSD/LOOPEUR) instead of Loop-issued 1:1 stablecoins for USD/EUR. Only GBPLOOP remains as a Loop-issued 1:1-backed token.
+- **APY display**: past-30-day realised rate per asset with "no guarantee of future performance" disclaimer. No yield-source/strategy disclosure to users.
 
-Effect on the order pricing model:
+Effect on the order pricing model on flag flip:
 
-- Tranche 1 (`LOOP_PHASE_1_ONLY=true`): user pays `chargeMinor − userCashbackMinor`, no on-chain emission.
-- Tranche 2 (`LOOP_PHASE_1_ONLY=false`): user pays full `chargeMinor`, `pending_payouts` queues the cashback amount for on-chain LOOP-asset emission.
+- Tranche 1 (`LOOP_PHASE_1_ONLY=true`): user pays `chargeMinor − userCashbackMinor`, no on-chain emission, cashback delivered as instant discount.
+- Tranche 2 (`LOOP_PHASE_1_ONLY=false`): user pays full `chargeMinor`, cashback emitted to user's Privy wallet as the home-currency LOOP-asset (LOOPUSD vault share, LOOPEUR vault share, or GBPLOOP).
 
-Same `merchant_cashback_configs` rows; the env flag swaps the delivery channel. Existing orders aren't migrated — Tranche 1 orders stay as discounted, Tranche 2 orders going forward earn cashback to the user's Stellar wallet.
+Same `merchant_cashback_configs` rows; the env flag swaps the delivery channel. Existing T1 orders aren't migrated — they stay as discounted; T2-and-after orders earn cashback to the user's Privy wallet.
 
-Web + mobile clients pick up the flag flip on the next `GET /api/config` (10-min cache). Mobile clients re-fetch on app foreground. **No app store resubmission required.**
+Web + mobile clients pick up the flag flip on the next `GET /api/config` (10-min cache). Mobile clients re-fetch on foreground. **No app store resubmission required.**
+
+Critical-path DD before T2 ships:
+
+1. Privy Soroban token custody — verify before signing the Privy contract (or fall back to dfns)
+2. DeFindex curator vault audit — $30–80k, 4–8 weeks
+3. ~~UK GBP custodian/BaaS partner for GBPLOOP backing~~ **Resolved**: Revolut Business. Treasury yield product selection (Flexible Cash Funds vs gilts vs other) + Revolut Business API integration for Faster Payments off-ramp still need scoping but are below DD-blocker level.
+4. Multi-jurisdictional regulatory review (bundled): vault curation + GBPLOOP issuance + Privy custody — 4–6 weeks counsel

@@ -248,24 +248,33 @@ CLOSED ──(N consecutive failures)──→ OPEN ──(cooldown elapsed)─�
 
 ---
 
-## Phase 2 — Stellar wallet + cashback
+## Phase 2 — Integrated wallet + per-currency yield (ADR 030 + ADR 031)
 
-A4-096: the actually-shipped model is **external-wallet linking**
-(ADR 015) plus a **backend operator account** that signs outbound
-LOOP-asset payouts (ADR 016).
+Phase 2's wallet model has evolved through three design states. The current state, locked in 2026-05-05, is captured in ADR 030 (wallet) and ADR 031 (per-currency yield).
 
-| Component       | Location                                              | Role                                                                                                                                              |
-| --------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| User wallet     | External (user-controlled)                            | User links a Stellar pubkey to `users.stellar_address`. Backend never holds the private key. Trustline opt-in is user-side.                       |
-| Operator secret | Backend env (`LOOP_STELLAR_OPERATOR_SECRET`)          | Backend signs outbound LOOP-asset payments using `Keypair.fromSecret(...)`. See `payments/payout-submit.ts`.                                      |
-| Issuers         | Backend env (`LOOP_STELLAR_<USD/GBP/EUR>LOOP_ISSUER`) | Per-currency issuer pubkeys for USDLOOP / GBPLOOP / EURLOOP. The asset-drift watcher reconciles on-chain circulation against off-chain liability. |
+**State 1 (pre-2026-04, archived)**: 2-of-3 multisig with on-device Ed25519 key in Keychain + server co-signer + recovery custodian. Descoped before any implementation.
 
-The earlier 2-of-3 multisig design (Device key in Keychain + Server
-co-signer + recovery custodian) was **descoped** before launch in
-favour of external linking, which matches the gift-card-cashback UX
-better (no on-device key custody needed; users can rotate wallets
-freely). See `docs/adr/015-stablecoin-topology-and-payment-rails.md`
-for the rationale.
+**State 2 (2026-04-21, ADR 015)**: External-wallet linking. User pastes a Stellar pubkey into `users.stellar_address`; backend signs outbound LOOP-asset payouts. Three Loop-issued 1:1-backed stablecoins: USDLOOP, GBPLOOP, EURLOOP. Implemented and shipped behind feature flags.
+
+**State 3 (2026-05-05, ADR 030 + ADR 031, NOT YET IMPLEMENTED)**: Integrated cross-platform wallet via Privy (with dfns fallback). Per-currency yield with Loop revenue capture:
+
+| Currency | User holds                                              | Mechanism                                                                                        | APY mechanism                               |
+| -------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------- |
+| USD      | LOOPUSD (Soroban DeFindex vault share, Loop is curator) | Vault holds USDC, routes to Blend USDC pool. 0% mgmt + 50% perf fee.                             | Variable, displayed as past 30-day realised |
+| EUR      | LOOPEUR (Soroban DeFindex vault share, Loop is curator) | Vault holds EURC, routes to Blend EURC pool. Same fee schedule.                                  | Variable, displayed as past 30-day realised |
+| GBP      | GBPLOOP (Stellar classic asset, 1:1 GBP-backed)         | Loop's treasury holds GBP fiat, invests for yield. **Nightly on-chain 3% APY mints to holders.** | 3% APY fixed (policy variable, adjustable)  |
+
+USDLOOP and EURLOOP **retire** in State 3 — users hold canonical vault shares (LOOPUSD/LOOPEUR) instead of Loop-issued 1:1 wrappers for those currencies. Only GBPLOOP remains as a Loop-issued 1:1-backed stablecoin (because no on-chain GBP yield primitive exists on Stellar).
+
+| Component              | Location                                     | Role                                                                                                                      |
+| ---------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| User wallet (State 3)  | Privy-provisioned (or dfns fallback)         | Embedded MPC wallet keyed on Loop's `user_id`. Cross-platform, single-auth identity-bound. Holds LOOPUSD/LOOPEUR/GBPLOOP. |
+| Operator secret        | Backend env (`LOOP_STELLAR_OPERATOR_SECRET`) | Backend signs outbound LOOP-asset payments + nightly GBPLOOP mints. See `payments/payout-submit.ts`.                      |
+| GBPLOOP issuer         | Backend env (`LOOP_STELLAR_GBPLOOP_ISSUER`)  | Issuer pubkey for GBPLOOP. Asset-drift watcher reconciles on-chain circulation against off-chain GBP backing.             |
+| LOOPUSD vault contract | Soroban (Stellar mainnet)                    | Loop-curated DeFindex vault for USDC backing. Vault share token IS LOOPUSD; users hold it directly.                       |
+| LOOPEUR vault contract | Soroban (Stellar mainnet)                    | Same shape, EURC.                                                                                                         |
+
+**State 2 → State 3 migration**: removes `LinkWalletNudge`, `TrustlineSetupCard`, the `PUT /api/users/me/stellar-address` user-input endpoint (becomes Privy-webhook-populated), and the asset-drift watcher's USDLOOP/EURLOOP entries. Keeps the `users.stellar_address` column (now populated by Privy webhook), the FX-pin behaviour, the cross-FX cashback emission, and the operator/issuer-account architecture for GBPLOOP. ADR 030's File map and ADR 031's File map list the affected files.
 
 ---
 
