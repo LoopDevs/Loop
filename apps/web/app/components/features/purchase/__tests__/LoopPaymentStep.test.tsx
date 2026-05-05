@@ -34,6 +34,11 @@ function mkStellarCreate(
       memo: 'MEMO-ABCDEFGHIJKLMN',
       amountMinor: '1000',
       currency: 'USD',
+      // 2026-05-05: response now carries the live-oracle quote +
+      // SEP-7 deep-link URI; tests build a fake one here.
+      assetAmount: '10.0000000',
+      paymentUri:
+        'web+stellar:pay?destination=GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW&amount=10.0000000&memo=MEMO-ABCDEFGHIJKLMN&memo_type=MEMO_TEXT&asset_code=USDC',
       ...overrides,
     } as CreateLoopOrderResponse['payment'],
   };
@@ -82,14 +87,17 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('LoopPaymentStep — stellar (xlm/usdc)', () => {
-  it('renders the deposit address, memo, and formatted amount', async () => {
+  it('renders the deposit address, memo, fiat charge, and asset amount', async () => {
     getLoopOrderMock.mockResolvedValue(mkOrder());
     render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
     await waitFor(() => screen.getByText(/Waiting for payment/i));
     expect(screen.getByText(/GABCDEFGHIJKLMNOPQRSTUVWXYZ234567/)).toBeDefined();
     expect(screen.getByText('MEMO-ABCDEFGHIJKLMN')).toBeDefined();
-    // $10.00 USDC
-    expect(screen.getByText(/10\.00 USD in USDC/)).toBeDefined();
+    // Web variant shows fiat ("$10.00") + asset-native amount ("10.0000000 USDC")
+    // on separate rows alongside the SEP-7 "Open in wallet" anchor.
+    expect(screen.getByText(/10\.00 USD/)).toBeDefined();
+    expect(screen.getByText(/10\.0000000 USDC/)).toBeDefined();
+    expect(screen.getByRole('link', { name: /Open in wallet/i })).toBeDefined();
   });
 
   it('updates the state label as the order transitions', async () => {
