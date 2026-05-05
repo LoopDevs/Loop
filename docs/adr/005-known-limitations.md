@@ -25,17 +25,27 @@ and where the fix work would happen.
 
 ### 1. Stellar wallet / USDC cashback is Phase 2
 
-- **What**: No on-device Stellar wallet, no USDC cashback on fulfilled orders,
-  no biometric-gated signing. Orders are paid by the user sending XLM from an
-  external wallet to the address returned in the `paymentUri`.
-- **Why accepted**: Phase 1 ships discounted gift cards via external XLM
-  payment only. The wallet features are the entire Phase 2 deliverable.
-- **Revisit**: When Phase 2 is prioritised on the roadmap.
-- **Where**: `apps/web/app/stores/`, `apps/web/app/native/biometrics.ts`
-  (already implemented for app-lock; Phase 2 wires it into wallet
-  signing), new `apps/web/app/native/stellar-wallet.ts`, plus
-  `@stellar/stellar-sdk` integration on-device (never on the backend —
-  see CLAUDE.md rule).
+- **What**: No integrated wallet in Phase 1. Orders are paid by the user sending
+  XLM (or USDC, per ADR 010 / `tranche-1-launch.md`) from an external wallet to
+  the address returned in the `paymentUri`. No cashback emission to user wallets;
+  the cashback split is delivered as an instant discount at order creation under
+  `LOOP_PHASE_1_ONLY=true`.
+- **Why accepted**: Phase 1 ships discounted gift cards via external crypto
+  payment only. The integrated wallet features are the entire Phase 2 deliverable.
+- **Revisit**: When Phase 2 is prioritised on the roadmap. **Phase 2 design has
+  evolved** — see decision-history sections of ADR 030 (Privy embedded wallet,
+  with dfns fallback) and ADR 031 (LOOPUSD/LOOPEUR Loop-curated DeFindex vault
+  shares, GBPLOOP nightly mint). The earlier "on-device Stellar wallet" /
+  "biometric-gated signing" plan is **superseded**: vendor MPC custody (Privy
+  primary) replaces on-device key custody. The mobile binary still doesn't hold
+  a Stellar private key — but for a different reason than originally planned
+  (Privy holds the key remotely, not "key on device with biometric gate").
+- **Where (post-supersession)**: `apps/web/app/services/privy.ts` (new — frontend
+  Privy SDK wrap), `apps/backend/src/auth/jwks-publish.ts` (new — JWKS endpoint
+  for Privy Custom Auth Provider), `apps/backend/src/webhooks/privy.ts` (new —
+  wallet-creation webhook). Vault contracts in `contracts/loop-vault/` (new
+  Soroban project). The original `apps/web/app/native/stellar-wallet.ts` plan
+  is retired — no on-device key generation needed.
 
 ### 2. Barcode gift card redemption is Phase 2
 

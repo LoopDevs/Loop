@@ -9,6 +9,7 @@ import {
 } from '~/services/orders-loop';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { isNativePlatform } from '~/native/platform';
 
 export interface LoopPaymentStepProps {
   /** Result of `createLoopOrder` — the memo + deposit address we display to the user. */
@@ -73,19 +74,36 @@ export function LoopPaymentStep({ create, onTerminal }: LoopPaymentStepProps): R
         <RedemptionBody order={orderQuery.data} />
       ) : create.payment.method === 'credit' ? (
         <CreditPaymentBody order={orderQuery.data} />
+      ) : // A2-1504 + 2026-05-05 mobile-first revision: the stellar-funded
+      // payload now carries `paymentUri` (SEP-7 deep-link) and
+      // `assetAmount` (live-oracle quote). On native platforms the UI
+      // collapses to a single "Open in wallet" button to keep the demo
+      // flow tight. On web, the existing copy-paste view stays — and a
+      // forthcoming Stellar Wallets Kit v2 connect-wallet flow can
+      // be layered on top (see `~/services/stellar-wallet.ts` stub +
+      // pending ADR for npm install).
+      isNativePlatform() ? (
+        <NativePaymentBody
+          paymentUri={create.payment.paymentUri}
+          assetAmount={create.payment.assetAmount}
+          assetLabel={
+            create.payment.method === 'loop_asset'
+              ? create.payment.assetCode
+              : create.payment.method.toUpperCase()
+          }
+          amountMinor={create.payment.amountMinor}
+          currency={create.payment.currency}
+          order={orderQuery.data}
+        />
       ) : (
-        // A2-1504: the stellar-funded payload now includes `loop_asset`
-        // (ADR 015 recycled-cashback rail). Rendering is identical to
-        // xlm/usdc — stellarAddress + memo + amount — and
-        // StellarPaymentBody shows the asset label in the "Send X in Y"
-        // line. assetCode is only on the loop_asset variant; the render
-        // asserts its presence via a method-narrowing check inside.
         <StellarPaymentBody
           address={create.payment.stellarAddress}
           memo={create.payment.memo}
           method={create.payment.method}
           amountMinor={create.payment.amountMinor}
           currency={create.payment.currency}
+          assetAmount={create.payment.assetAmount}
+          paymentUri={create.payment.paymentUri}
           assetLabel={
             create.payment.method === 'loop_asset'
               ? create.payment.assetCode
@@ -180,6 +198,10 @@ interface StellarPaymentBodyProps {
   method: 'xlm' | 'usdc' | 'loop_asset';
   amountMinor: string;
   currency: string;
+  /** Asset-native amount (decimal string, 7 decimals) — what the user actually sends. */
+  assetAmount: string;
+  /** SEP-7 `web+stellar:pay?...` deep-link URI for "Open in wallet". */
+  paymentUri: string;
   /**
    * User-facing label for the rail. `XLM` / `USDC` for native methods,
    * the `USDLOOP`/`GBPLOOP`/`EURLOOP` asset code for `loop_asset` so
@@ -194,6 +216,8 @@ function StellarPaymentBody({
   memo,
   amountMinor,
   currency,
+  assetAmount,
+  paymentUri,
   assetLabel,
   order,
 }: StellarPaymentBodyProps): React.JSX.Element {
@@ -201,12 +225,90 @@ function StellarPaymentBody({
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
-        <Row label="Send" value={`${formatMinor(amountMinor)} ${currency} in ${assetLabel}`} />
-        <Row label="To address" value={address} copyable />
+        <Row label="You pay" value={`${formatMinor(amountMinor)} ${currency}`} />
+        <Row label="Send" value={`${assetAmount} ${assetLabel}`} mono />
+        <Row label="To address" value={address} copyable mono />
         <Row label="Memo (required)" value={memo} copyable mono />
       </div>
+      <a
+        href={paymentUri}
+        className="block w-full rounded-lg bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200 px-4 py-3 text-center text-sm font-semibold text-white"
+      >
+        Open in wallet
+      </a>
+      {/*
+        TODO(adr-pending): integrate Stellar Wallets Kit v2 here for an
+        in-app "Connect wallet" flow. Adding `@creit.tech/stellar-wallets-kit`
+        + `@stellar/stellar-sdk` to apps/web requires an ADR per
+        CLAUDE.md "new dependency" rule. Stub at
+        ~/services/stellar-wallet.ts. Until that lands, the SEP-7 URI
+        button above covers Freighter / xBull / any wallet that
+        registers `web+stellar:` — works for the demo, doesn't cover
+        users without an installed handler.
+      */}
       <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
         Send from any Stellar wallet. Your order updates automatically once the payment confirms.
+      </p>
+      {showSpinner ? (
+        <div className="flex justify-center">
+          <Spinner />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+interface NativePaymentBodyProps {
+  paymentUri: string;
+  assetAmount: string;
+  assetLabel: string;
+  amountMinor: string;
+  currency: string;
+  order: LoopOrderView | undefined;
+}
+
+/**
+ * 2026-05-05: native-platform payment body. Drops the QR / address /
+ * memo display in favour of a single "Open in wallet" button that
+ * deep-links via SEP-7 — wallets installed on the device pick up
+ * the `web+stellar:pay?...` scheme and pre-populate destination,
+ * amount, asset, and memo. Cleaner demo flow; users don't have to
+ * copy-paste anything.
+ *
+ * The fiat charge + asset amount are still surfaced so the user
+ * knows what they're committing to before tapping.
+ */
+function NativePaymentBody({
+  paymentUri,
+  assetAmount,
+  assetLabel,
+  amountMinor,
+  currency,
+  order,
+}: NativePaymentBodyProps): React.JSX.Element {
+  const showSpinner = order === undefined || order.state === 'pending_payment';
+  return (
+    <div className="space-y-5">
+      <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 text-center space-y-1">
+        <div className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          You pay
+        </div>
+        <div className="text-3xl font-semibold tabular-nums text-gray-900 dark:text-white">
+          {formatMinor(amountMinor)} {currency}
+        </div>
+        <div className="text-sm text-gray-600 dark:text-gray-400 tabular-nums">
+          ≈ {assetAmount} {assetLabel}
+        </div>
+      </div>
+      <a
+        href={paymentUri}
+        className="block w-full rounded-lg bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200 px-4 py-4 text-center text-base font-semibold text-white"
+      >
+        Open in wallet
+      </a>
+      <p className="text-xs text-gray-500 dark:text-gray-400 text-center px-4">
+        Tap to open your installed Stellar wallet. Your order updates automatically once the payment
+        confirms.
       </p>
       {showSpinner ? (
         <div className="flex justify-center">

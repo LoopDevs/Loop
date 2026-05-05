@@ -27,6 +27,10 @@ const ACCEPTED_MODERATE_VULNS = new Map([
     'esbuild',
     'Only the deprecated drizzle-kit sub-tree lands on the vulnerable range; repo policy tracks it explicitly.',
   ],
+  [
+    'ip-address',
+    'XSS in Address6 HTML-emitting methods. Transitive via @cyclonedx/cyclonedx-npm → libxmljs2 → node-gyp → … → socks → ip-address; only used at build-time for SBOM generation, the vulnerable HTML emitters are never invoked at runtime. Revisit when a fixed ip-address version (>10.1.0) propagates through the socks dependency chain.',
+  ],
 ]);
 
 function runAuditJson() {

@@ -23,10 +23,19 @@ function stubFeed(body: unknown): ReturnType<typeof vi.spyOn> {
   });
 }
 
+// 2026-05-05: default feed is now CTX rates (per-pair fetches at
+// `https://rates.ctx.com/rates?source=ctx&symbol=...`). The existing
+// XLM tests assert against the CoinGecko `{stellar:{...}}` shape, so
+// they set `LOOP_XLM_PRICE_FEED_URL` via beforeEach to exercise the
+// CoinGecko adapter path. CTX-shape coverage lives in its own describe
+// block at the bottom of the file.
+const COINGECKO_OVERRIDE =
+  'https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=usd,gbp,eur';
+
 beforeEach(() => {
   __resetPriceFeedForTests();
   __resetFxFeedForTests();
-  delete process.env['LOOP_XLM_PRICE_FEED_URL'];
+  process.env['LOOP_XLM_PRICE_FEED_URL'] = COINGECKO_OVERRIDE;
   delete process.env['LOOP_FX_FEED_URL'];
 });
 afterEach(() => {
@@ -89,6 +98,119 @@ describe('stroopsPerCent', () => {
   it('throws on a non-positive rate', async () => {
     fetchSpy = stubFeed({ stellar: { usd: 0 } });
     await expect(stroopsPerCent('USD')).rejects.toThrow(/non-positive rate/);
+  });
+});
+
+describe('stroopsPerCent — CTX rates adapter', () => {
+  // The CTX adapter does per-pair fetches against
+  // `https://rates.ctx.com/rates?source=ctx&symbol=xlm{usd,gbp,eur}`.
+  // Each returns a single-element array of CtxRateRecord objects.
+  // Tests in this describe block clear the override env var so the
+  // default CTX path is exercised.
+  beforeEach(() => {
+    delete process.env['LOOP_XLM_PRICE_FEED_URL'];
+  });
+
+  function ctxRecord(base: string, quote: string, price: string): unknown {
+    return {
+      baseCurrency: base,
+      price,
+      quoteCurrency: quote,
+      retrieved: new Date().toISOString(),
+      source: 'ctx-average',
+      symbol: `${base}${quote}`,
+    };
+  }
+
+  function stubCtxFeed(
+    rates: Partial<Record<'USD' | 'GBP' | 'EUR', string | null>>,
+  ): ReturnType<typeof vi.spyOn> {
+    return vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+      const u = String(url);
+      const match = /symbol=xlm(usd|gbp|eur)/i.exec(u);
+      if (match === null) {
+        return new Response('{"error":"unknown"}', { status: 404 });
+      }
+      const quote = match[1]!.toUpperCase() as 'USD' | 'GBP' | 'EUR';
+      const price = rates[quote];
+      if (price === undefined) {
+        return new Response('[]', { status: 200 });
+      }
+      if (price === null) {
+        return new Response('feed down', { status: 503 });
+      }
+      return new Response(JSON.stringify([ctxRecord('XLM', quote, price)]), { status: 200 });
+    });
+  }
+
+  it('returns stroops-per-cent derived from a CTX-shape USD feed', async () => {
+    // 1 XLM = $0.1610 → 16.1 cents → 1e7 stroops / 16.1 cents
+    //                = ceil(1e13 / 16_100_000) = 621_119 stroops/cent.
+    fetchSpy = stubCtxFeed({ USD: '0.1610', GBP: '0.1280', EUR: '0.1480' });
+    expect(await stroopsPerCent('USD')).toBe(621_119n);
+  });
+
+  it('returns GBP rate when the GBP pair is supplied', async () => {
+    // 1 XLM = £0.1280 → 12.8 cents → 1e7 / 12.8 = 781_250 stroops/cent.
+    fetchSpy = stubCtxFeed({ USD: '0.1610', GBP: '0.1280' });
+    expect(await stroopsPerCent('GBP')).toBe(781_250n);
+  });
+
+  it('falls back gracefully when GBP pair is missing — USD still works', async () => {
+    // CTX returns 404 / empty array for GBP; USD must still serve.
+    // (This is the production fallback story — partial feed availability
+    // shouldn't kill the whole payment system.)
+    fetchSpy = stubCtxFeed({ USD: '0.1610' }); // GBP/EUR omitted
+    expect(await stroopsPerCent('USD')).toBe(621_119n);
+    await expect(stroopsPerCent('GBP')).rejects.toThrow(/no rate for GBP/);
+  });
+
+  it('throws when the USD pair is unavailable — USD is the floor', async () => {
+    // GBP / EUR can be missing without breaking USD orders, but a
+    // missing USD pair means the whole feed is dead.
+    fetchSpy = stubCtxFeed({ USD: null, GBP: '0.1280' });
+    await expect(stroopsPerCent('USD')).rejects.toThrow(/USD pair unavailable/);
+  });
+
+  it('caches across calls within the TTL window', async () => {
+    fetchSpy = stubCtxFeed({ USD: '0.1610', GBP: '0.1280', EUR: '0.1480' });
+    await stroopsPerCent('USD');
+    await stroopsPerCent('GBP');
+    await stroopsPerCent('EUR');
+    // First call triggers all three parallel fetches; subsequent calls
+    // hit the in-process cache. Total fetches: 3 (one per currency).
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it('targets the rates.ctx.com endpoint with the correct query string', async () => {
+    const captured: string[] = [];
+    fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+      captured.push(String(url));
+      const u = String(url);
+      const match = /symbol=xlm(usd|gbp|eur)/i.exec(u);
+      const quote = (match?.[1] ?? 'usd').toUpperCase() as 'USD' | 'GBP' | 'EUR';
+      return new Response(JSON.stringify([ctxRecord('XLM', quote, '0.1610')]), { status: 200 });
+    });
+    await stroopsPerCent('USD');
+    expect(captured).toContain('https://rates.ctx.com/rates?source=ctx&symbol=xlmusd');
+    expect(captured).toContain('https://rates.ctx.com/rates?source=ctx&symbol=xlmgbp');
+    expect(captured).toContain('https://rates.ctx.com/rates?source=ctx&symbol=xlmeur');
+  });
+
+  it('throws on schema drift (non-array response)', async () => {
+    fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ unexpected: 'shape' }), { status: 200 }));
+    // CTX adapter handles per-pair drift by returning null (logged) and
+    // continuing, so partial-failure paths surface as "no rate." A USD
+    // schema-drift response → no USD rate → "USD pair unavailable" error.
+    await expect(stroopsPerCent('USD')).rejects.toThrow(/USD pair unavailable/);
+  });
+
+  it('tolerates a non-numeric price string by treating it as missing', async () => {
+    fetchSpy = stubCtxFeed({ USD: '0.1610', GBP: 'NaN' as string });
+    expect(await stroopsPerCent('USD')).toBe(621_119n);
+    await expect(stroopsPerCent('GBP')).rejects.toThrow(/no rate for GBP/);
   });
 });
 

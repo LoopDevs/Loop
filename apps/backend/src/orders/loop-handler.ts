@@ -195,7 +195,7 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     // through to the create path.
     const prior = await findOrderByIdempotencyKey(auth.userId, idempotencyKey);
     if (prior !== null) {
-      return replayOrderResponse(c, prior);
+      return await replayOrderResponse(c, prior);
     }
   }
 
@@ -368,7 +368,7 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
       paymentMethod: parsed.data.paymentMethod,
       ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
     });
-    return buildLoopCreateResponse(c, {
+    return await buildLoopCreateResponse(c, {
       order,
       userId: user.id,
       homeCurrency: user.homeCurrency,
@@ -381,7 +381,7 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     // the first INSERT committed). The unique-violation rolled the
     // failing txn back; replay the prior order's response.
     if (err instanceof IdempotentOrderConflictError) {
-      return replayOrderResponse(c, err.existing);
+      return await replayOrderResponse(c, err.existing);
     }
     // Balance race between `hasSufficientCredit` check and the FOR
     // UPDATE debit inside `createOrder` (A2-601 guard). No order
