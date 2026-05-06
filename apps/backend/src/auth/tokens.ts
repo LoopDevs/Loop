@@ -1,17 +1,23 @@
 /**
  * Loop-signed JWT sign + verify (ADR 013).
  *
- * Minted by Loop against `LOOP_JWT_SIGNING_KEY` (HS256). Kept
- * dependency-free on Node's built-in `crypto` — the token format is
- * narrow (always HS256, always our claim shape) so pulling in
- * `jsonwebtoken` or `jose` would carry surface area we don't need.
+ * Minted by Loop with the signer returned by
+ * `./signer.ts::getActiveSigner()`. Today that's HS256 against
+ * `LOOP_JWT_SIGNING_KEY`; ADR 030 Track A.2 will add RS256 with JWKS
+ * publish so Privy's Custom Auth Provider can verify Loop's tokens.
+ * The algorithm choice lives behind the Signer interface — this
+ * module owns the JWT claim shape, header construction, and verify
+ * dispatch.
  *
- * Verification accepts either the current key or
- * `LOOP_JWT_SIGNING_KEY_PREVIOUS` so a rotation can overlap for the
- * access-token TTL without a flag-day.
+ * Verification reads `alg` from the incoming token's header and
+ * fetches the matching set of verifiers; during an HS256 rotation
+ * (`LOOP_JWT_SIGNING_KEY` + `LOOP_JWT_SIGNING_KEY_PREVIOUS`) both
+ * keys are tried. During a future HS256 → RS256 cutover, both
+ * algorithms verify so 15-minute access tokens minted under the old
+ * algorithm don't get rejected post-cutover.
  */
-import { createHmac, timingSafeEqual, randomBytes } from 'node:crypto';
-import { env } from '../env.js';
+import { randomBytes } from 'node:crypto';
+import { getActiveSigner, getVerifiersForAlg, isAnySignerConfigured, type Alg } from './signer.js';
 
 export type TokenType = 'access' | 'refresh';
 
@@ -69,25 +75,17 @@ function b64urlDecode(s: string): Buffer {
   return Buffer.from(s, 'base64url');
 }
 
-function hmac(key: string, signingInput: string): Buffer {
-  return createHmac('sha256', key).update(signingInput).digest();
-}
-
-function currentKey(): string {
-  const k = env.LOOP_JWT_SIGNING_KEY;
-  if (k === undefined) {
-    throw new Error('LOOP_JWT_SIGNING_KEY is not configured — Loop-native auth is disabled');
-  }
-  return k;
-}
-
 /**
  * Signs a Loop JWT. Caller supplies the type + TTL; this module owns
- * the claim shape. `iat` is pinned to the provided `now` (or `Date.now()`)
- * so tests are deterministic.
+ * the claim shape. `iat` is pinned to the provided `now` (or
+ * `Date.now()`) so tests are deterministic. The header `alg` and
+ * (where applicable) `kid` come from the active signer.
  */
 export function signLoopToken(opts: SignOptions): { token: string; claims: LoopTokenClaims } {
-  const key = currentKey();
+  const signer = getActiveSigner();
+  if (signer === null) {
+    throw new Error('LOOP_JWT_SIGNING_KEY is not configured — Loop-native auth is disabled');
+  }
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   const claims: LoopTokenClaims = {
     sub: opts.sub,
@@ -103,10 +101,12 @@ export function signLoopToken(opts: SignOptions): { token: string; claims: LoopT
     // a straight-up brute force of the revocation table.
     claims.jti = opts.jti ?? randomBytes(16).toString('base64url');
   }
-  const header = b64urlEncode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const headerObj: Record<string, string> = { alg: signer.alg, typ: 'JWT' };
+  if (signer.kid !== undefined) headerObj['kid'] = signer.kid;
+  const header = b64urlEncode(JSON.stringify(headerObj));
   const payload = b64urlEncode(JSON.stringify(claims));
   const signingInput = `${header}.${payload}`;
-  const sig = b64urlEncode(hmac(key, signingInput));
+  const sig = b64urlEncode(signer.sign(signingInput));
   return { token: `${signingInput}.${sig}`, claims };
 }
 
@@ -124,10 +124,10 @@ export type VerifyResult =
     };
 
 /**
- * Verifies a Loop JWT. Checks signature against the current key first,
- * then the previous key (rotation window). Does NOT check the token is
- * in a revocation list — callers doing revocation must do that
- * themselves (refresh tokens go through `refresh_tokens` table).
+ * Verifies a Loop JWT. Reads the header's `alg` field, fetches the
+ * matching set of verifiers, and tries each. Does NOT check the
+ * token is in a revocation list — callers doing revocation must do
+ * that themselves (refresh tokens go through `refresh_tokens` table).
  *
  * `expectedType` narrows to one of `access` or `refresh`. A token of
  * the wrong type against an endpoint expecting the other returns
@@ -148,17 +148,31 @@ export function verifyLoopToken(token: string, expectedType: TokenType): VerifyR
   ) {
     return { ok: false, reason: 'malformed' };
   }
+
+  // Parse header to discover alg. Reject anything that doesn't match
+  // a known algorithm — defends against `alg: 'none'` and unknown
+  // algorithms that would otherwise route to an empty verifier set.
+  let headerObj: unknown;
+  try {
+    headerObj = JSON.parse(b64urlDecode(header).toString('utf8'));
+  } catch {
+    return { ok: false, reason: 'malformed' };
+  }
+  if (headerObj === null || typeof headerObj !== 'object') {
+    return { ok: false, reason: 'malformed' };
+  }
+  const alg = (headerObj as Record<string, unknown>)['alg'];
+  if (alg !== 'HS256' && alg !== 'RS256') {
+    return { ok: false, reason: 'bad_signature' };
+  }
+  const verifiers = getVerifiersForAlg(alg as Alg);
+  if (verifiers.length === 0) return { ok: false, reason: 'bad_signature' };
+
   const signingInput = `${header}.${payload}`;
   const providedSigBuf = b64urlDecode(providedSig);
-  const keys = [env.LOOP_JWT_SIGNING_KEY, env.LOOP_JWT_SIGNING_KEY_PREVIOUS].filter(
-    (k): k is string => typeof k === 'string' && k.length > 0,
-  );
-  if (keys.length === 0) return { ok: false, reason: 'bad_signature' };
-  const matched = keys.some((k) => {
-    const expected = hmac(k, signingInput);
-    return expected.length === providedSigBuf.length && timingSafeEqual(expected, providedSigBuf);
-  });
+  const matched = verifiers.some((s) => s.verify(signingInput, providedSigBuf));
   if (!matched) return { ok: false, reason: 'bad_signature' };
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(b64urlDecode(payload).toString('utf8'));
@@ -208,7 +222,7 @@ export function verifyLoopToken(token: string, expectedType: TokenType): VerifyR
   return { ok: true, claims };
 }
 
-/** True when `LOOP_JWT_SIGNING_KEY` is configured. */
+/** True when an active signer is configured (any algorithm). */
 export function isLoopAuthConfigured(): boolean {
-  return typeof env.LOOP_JWT_SIGNING_KEY === 'string' && env.LOOP_JWT_SIGNING_KEY.length > 0;
+  return isAnySignerConfigured();
 }

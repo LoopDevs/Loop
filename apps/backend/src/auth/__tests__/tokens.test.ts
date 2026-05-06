@@ -190,6 +190,80 @@ describe('verifyLoopToken', () => {
     }
   });
 
+  it("rejects a token with alg='none' (defence against the classic JWT alg-strip attack)", () => {
+    // Standard alg=none form is `header.payload.` — trailing dot,
+    // empty signature. The empty-part check at the top of
+    // verifyLoopToken catches it before the alg dispatch even runs;
+    // reason comes back as 'malformed'. The pre-Track-A.1 code also
+    // rejected this (via HMAC length-mismatch); A.1 keeps the
+    // protection on a different code path but the outcome is the
+    // same: the forged token is refused.
+    const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
+    const payload = Buffer.from(
+      JSON.stringify({
+        sub: 'u1',
+        email: 'a@b.com',
+        typ: 'access',
+        iat: nowSec,
+        exp: nowSec + 60,
+        iss: 'loop-api',
+        aud: 'loop-clients',
+      }),
+    ).toString('base64url');
+    const forged = `${header}.${payload}.`;
+    const result = verifyLoopToken(forged, 'access');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('malformed');
+  });
+
+  it("rejects a token with alg='none' even if it carries a forged signature", () => {
+    // An attacker who knows the empty-sig path is rejected as
+    // malformed might try alg=none with arbitrary bytes in the
+    // signature slot, hoping to slip past the empty-part check and
+    // land on a path that doesn't verify. Track A.1's alg dispatch
+    // catches this: 'none' is not in the {HS256, RS256} allowlist.
+    const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
+    const payload = Buffer.from(
+      JSON.stringify({
+        sub: 'u1',
+        email: 'a@b.com',
+        typ: 'access',
+        iat: nowSec,
+        exp: nowSec + 60,
+        iss: 'loop-api',
+        aud: 'loop-clients',
+      }),
+    ).toString('base64url');
+    // Non-empty signature → passes the malformed check, hits alg dispatch.
+    const sig = Buffer.alloc(32, 0x00).toString('base64url');
+    const forged = `${header}.${payload}.${sig}`;
+    const result = verifyLoopToken(forged, 'access');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('bad_signature');
+  });
+
+  it('rejects a token with an unknown alg (e.g. ES256, future RS512)', () => {
+    const header = Buffer.from(JSON.stringify({ alg: 'ES256', typ: 'JWT' })).toString('base64url');
+    const payload = Buffer.from(
+      JSON.stringify({
+        sub: 'u1',
+        email: 'a@b.com',
+        typ: 'access',
+        iat: nowSec,
+        exp: nowSec + 60,
+        iss: 'loop-api',
+        aud: 'loop-clients',
+      }),
+    ).toString('base64url');
+    // Signature bytes don't matter — alg dispatch rejects before
+    // signature verification.
+    const sig = Buffer.alloc(32, 0x42).toString('base64url');
+    const forged = `${header}.${payload}.${sig}`;
+    const result = verifyLoopToken(forged, 'access');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('bad_signature');
+  });
+
   it('A2-1600: malformed when a legacy token without iss/aud is verified', () => {
     // Manually-crafted payload representing the pre-fix shape.
     // Signed with the test key so the signature is valid — the
@@ -233,6 +307,59 @@ describe('verifyLoopToken', () => {
     process.env['LOOP_JWT_SIGNING_KEY'] = 'k'.repeat(32);
     delete process.env['LOOP_JWT_SIGNING_KEY_PREVIOUS'];
     vi.resetModules();
+  });
+});
+
+describe('wire-format back-compat (Track A.1 regression gate)', () => {
+  // This fixture was computed via the PRE-REFACTOR algorithm, verbatim:
+  //
+  //   header = b64url(JSON.stringify({alg: 'HS256', typ: 'JWT'}))
+  //   payload = b64url(JSON.stringify(claims))
+  //   sig = b64url(createHmac('sha256', key).update(header + '.' + payload).digest())
+  //   token = header + '.' + payload + '.' + sig
+  //
+  // with key = 'k'.repeat(32) (the test signing key set at the top of
+  // this file) and claims pinned to a far-future exp so the fixture
+  // doesn't drift on time. If a future change to signer.ts / tokens.ts
+  // produces a different verify behaviour for this exact byte
+  // sequence, this assertion fails — proving wire-format
+  // back-compatibility with the pre-A.1 binary.
+  //
+  // Phase-1 gate: a Loop-native deploy that started under the pre-A.1
+  // binary may have minted access tokens still alive (15-min TTL); the
+  // post-A.1 binary that takes over MUST verify them. This fixture
+  // pins that property as a regression test.
+  const FIXTURE_TOKEN =
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmaXh0dXJlLXVzZXIiLCJlbWFpbCI6ImZpeHR1cmVAbG9vcGZpbmFuY2UudGVzdCIsInR5cCI6ImFjY2VzcyIsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwLCJpc3MiOiJsb29wLWFwaSIsImF1ZCI6Imxvb3AtY2xpZW50cyJ9.cwtnCoHVUQG2aKK4bjexNa3ihWqPAS2Xdor9Ckh5Ydw';
+
+  it('verifies a pre-refactor-format HS256 token byte-for-byte', () => {
+    const result = verifyLoopToken(FIXTURE_TOKEN, 'access');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.claims.sub).toBe('fixture-user');
+      expect(result.claims.email).toBe('fixture@loopfinance.test');
+      expect(result.claims.typ).toBe('access');
+      expect(result.claims.iss).toBe('loop-api');
+      expect(result.claims.aud).toBe('loop-clients');
+      expect(result.claims.iat).toBe(1_700_000_000);
+      expect(result.claims.exp).toBe(4_102_444_800);
+    }
+  });
+
+  it('the new sign path produces wire-identical output to the pre-refactor algorithm', () => {
+    // Sanity-check the inverse: signing the same claims with the
+    // current `signLoopToken` should produce the same byte sequence
+    // the fixture was computed from. If this drifts, the OLD binary
+    // can't verify NEW tokens — the other half of the cross-version
+    // compatibility property the deploy needs.
+    const { token } = signLoopToken({
+      sub: 'fixture-user',
+      email: 'fixture@loopfinance.test',
+      typ: 'access',
+      ttlSeconds: 4_102_444_800 - 1_700_000_000,
+      now: 1_700_000_000,
+    });
+    expect(token).toBe(FIXTURE_TOKEN);
   });
 });
 
