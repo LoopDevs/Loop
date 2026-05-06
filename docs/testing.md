@@ -121,34 +121,62 @@ MOBILE_SAFARI=1 npm run test:e2e:real
 | `git push`                         | `npm test` + `lint:docs` (blocks push on failure)                                                                                                                                                                                                                                                                       |
 | CI (every push)                    | Quality (typecheck + lint + format:check + lint:docs) + Unit tests + Flywheel-integration (real-postgres flywheel walk) + Security audit + Secret scan (gitleaks) + Container CVE scan (trivy) + SBOM + Build verification + Mocked e2e (`test:e2e:mocked`) + Loop-native flywheel e2e + Notify (Discord on pass/fail). |
 | CI (PRs only)                      | + real-upstream e2e tests with Playwright (`test:e2e:real`)                                                                                                                                                                                                                                                             |
-| GitHub Actions `workflow_dispatch` | **E2E (real CTX + wallet)** — manually triggered full purchase flow that spends real XLM; see below                                                                                                                                                                                                                     |
+| GitHub Actions `workflow_dispatch` | **E2E (real Tranche-1 purchase + wallet)** — manually triggered loop-native purchase flow that spends real XLM (or USDC); see below                                                                                                                                                                                     |
 
-### Manual: real CTX + wallet purchase workflow
+### Manual: real Tranche-1 purchase workflow
 
-`scripts/e2e-real.mjs` + `.github/workflows/e2e-real.yml` drive the full
-purchase flow end-to-end against the real CTX upstream, paying an order
-from the funded test Stellar wallet and polling until it is fulfilled.
+`scripts/e2e-real.mjs` + `.github/workflows/e2e-real.yml` drive the
+loop-native purchase chain end-to-end against the real CTX upstream:
+Loop-native auth refresh → `POST /api/orders/loop` → Stellar payment
+from the funded test wallet → poll until `state='fulfilled'`.
+
+Default per run: ~$0.02 USD on Aerie + Stellar fees. Aerie's `$0.01`
+catalog minimum makes this the cheapest possible real-money flow on
+the deployed catalog.
 
 Repository secrets required:
 
-- `CTX_TEST_REFRESH_TOKEN` — refresh token for the test CTX account. CTX
-  rotates this on every `/refresh-token` call, so the workflow rewrites
-  the secret with the new value after each run.
-- `STELLAR_TEST_SECRET_KEY` — secret key (`S…`) of the funded test wallet.
+- `LOOP_E2E_REFRESH_TOKEN` — Loop-native refresh token for the test
+  account. Bootstrap once via
+  `./scripts/bootstrap-e2e-refresh-token.sh --backend
+https://api.loopfinance.io --email reviewer@loopfinance.io
+--gh-secret`. The script drives `POST /api/auth/request-otp` →
+  prompts for the OTP from the inbox → `POST /api/auth/verify-otp` →
+  uploads the resulting refresh token to the repo secret via `gh
+secret set`. Loop-native rotates the token on every
+  `/refresh-token` call, so the workflow rewrites the secret after
+  each run via `GH_SECRETS_PAT`.
+- `STELLAR_TEST_SECRET_KEY` — secret key (`S…`) of the funded test
+  wallet. Mainnet wallet for real-money tests.
+- `LOOP_JWT_SIGNING_KEY` — Loop-native HS256 signing key the CI backend
+  uses to validate the refresh token. Must match the secret used when
+  the refresh token was minted.
+- `LOOP_STELLAR_DEPOSIT_ADDRESS` — Loop's deposit address (where the
+  test wallet sends XLM/USDC). Same address as production.
+- `LOOP_STELLAR_OPERATOR_SECRET` — operator key the CI backend's
+  procurement-worker uses to pay CTX in XLM. Same key as production.
 - `GH_SECRETS_PAT` — fine-grained PAT scoped to this repo with
-  **Secrets: Read and write** permission. Used only by the "Rotate
-  CTX_TEST_REFRESH_TOKEN secret" step; without it each run leaves the
+  **Secrets: Read and write** permission. Used by the "Rotate
+  LOOP_E2E_REFRESH_TOKEN secret" step; without it each run leaves the
   stored refresh token invalid and the next run 401s immediately.
 
-Trigger: GitHub → Actions → **E2E (real CTX + wallet)** → Run workflow.
-Optional inputs: `amount_usd` (blank = merchant minimum — the cheapest
-card; any numeric value overrides), `merchant_id` (blank = first
-min-max merchant in the catalog).
+Trigger: GitHub → Actions → **E2E (real Tranche-1 purchase + wallet)**
+→ Run workflow. Optional inputs:
 
-The script can also be run locally against a running backend:
+- `amount_usd` — blank = `0.02` (Aerie minimum + 1¢ headroom). Any
+  numeric override applies.
+- `merchant_id` — blank = Aerie. Override id must be a min-max merchant
+  whose currency matches `currency`.
+- `payment_method` — `xlm` (default) or `usdc`. USDC requires the test
+  wallet to hold a USDC trustline + balance against the configured
+  issuer.
+- `currency` — `USD` (default) | `GBP` | `EUR`. Must match the merchant.
+
+The script can also be run locally against a running Tranche-1 backend
+(see `docs/tranche-1-launch.md` for the env block):
 
 ```bash
-CTX_TEST_REFRESH_TOKEN=… STELLAR_TEST_SECRET_KEY=… node scripts/e2e-real.mjs
+E2E_REFRESH_TOKEN=… STELLAR_TEST_SECRET_KEY=… node scripts/e2e-real.mjs
 ```
 
 ---

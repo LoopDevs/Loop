@@ -1,0 +1,63 @@
+// Phase-1 release signing (audit / Phase-1 mobile-app submission).
+//
+// Capacitor's `cap add android` template ships build.gradle without a
+// `signingConfigs` block, so a `release` build either fails or falls
+// back to debug signing — neither shippable. This script injects a
+// release `signingConfig` driven by an out-of-tree `keystore.properties`
+// file the operator drops into `apps/mobile/android/`.
+//
+// keystore.properties layout (apps/mobile/android/keystore.properties —
+// gitignored; see keystore.properties.example):
+//
+//     storeFile=path/to/loop-release.keystore
+//     storePassword=…
+//     keyAlias=loop
+//     keyPassword=…
+//
+// `storeFile` is resolved against `apps/mobile/android/` (Gradle's
+// rootProject in this Capacitor project). Drop the .keystore inside
+// the android dir and reference it as `loop-release.keystore`, OR put
+// it elsewhere on disk and use an absolute path. The .keystore file
+// itself MUST NOT be checked in — losing it AND being unable to
+// re-sign updates means losing the package identity on Play Store.
+//
+// Behaviour:
+//   - keystore.properties present → release builds are signed.
+//   - keystore.properties absent → release builds run unsigned, with a
+//     loud Gradle warning. Useful for local dev (debug signing still
+//     works for sideloading) without forcing the operator to maintain
+//     a keystore for every developer machine.
+//
+// `apply-native-overlays.sh` copies this file into
+// `apps/mobile/android/app/signing.gradle` and patches build.gradle to
+// `apply from: 'signing.gradle'`.
+
+def keystorePropsFile = rootProject.file('keystore.properties')
+
+if (keystorePropsFile.exists()) {
+    def keystoreProps = new Properties()
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+
+    android {
+        signingConfigs {
+            release {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+        buildTypes {
+            release {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+} else {
+    logger.warn(
+        "[loop] keystore.properties not found at ${keystorePropsFile.absolutePath} — " +
+        "release builds will be unsigned. " +
+        "Copy keystore.properties.example to keystore.properties and fill in your keystore details. " +
+        "See docs/mobile-release.md for keystore generation."
+    )
+}

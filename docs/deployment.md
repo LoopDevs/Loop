@@ -342,6 +342,18 @@ In Android Studio:
 - Build → Generate Signed Bundle / APK
 - Upload `.aab` to Play Console
 
+**Release-signing wiring.** `apply-native-overlays.sh` copies a
+`signing.gradle` overlay into the regenerated Android tree on every
+`cap sync` and patches `app/build.gradle` to `apply from:
+'signing.gradle'`. The signing script reads
+`apps/mobile/android/keystore.properties` (gitignored — copy
+`keystore.properties.example` to seed) and injects
+`signingConfigs.release` referenced by the `release` build type. If
+`keystore.properties` is absent, Gradle logs a warning and the
+release variant builds unsigned — fine for local smoke, not
+shippable. Keystore generation steps live in
+`docs/tranche-1-launch.md` §"Track 4 — Android signed APK".
+
 ### Signing / provisioning / cert-expiry runbook (A2-1205)
 
 Apple and Google credentials expire on different cycles, and a missed

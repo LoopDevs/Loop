@@ -16,6 +16,11 @@
 #     cannot be decrypted on a different device.
 #   - iOS NSFaceIDUsageDescription (audit A-034) — required for the
 #     biometric-auth plugin to work and for App Store approval.
+#   - Android + iOS launcher icons + splash — Loop wordmark on
+#     near-black. `cap add ios` / `cap add android` reset both the
+#     iOS appiconset and the Android mipmap / drawable resources back
+#     to Capacitor placeholders; the overlay re-applies the branded
+#     assets on every sync.
 #
 # Idempotent: safe to run repeatedly. Each step checks for the
 # required state before writing.
@@ -163,6 +168,57 @@ if [ -d "$ANDROID_DIR" ]; then
   done
   say "Copied AVD splash drawables"
 
+  # Release-signing config (Phase-1 mobile submission). signing.gradle
+  # injects `signingConfigs.release` into the Capacitor-generated
+  # build.gradle, driven by an out-of-tree keystore.properties. The
+  # keystore.properties.example template lives next to it so the
+  # operator can copy + fill in. Both files are kept under
+  # native-overlays/ and re-applied on every cap sync.
+  SIGNING_GRADLE_SRC="$OVERLAY_DIR/android/app/signing.gradle"
+  SIGNING_GRADLE_DEST="$ANDROID_DIR/app/signing.gradle"
+  if [ -f "$SIGNING_GRADLE_SRC" ]; then
+    cp_if_changed "$SIGNING_GRADLE_SRC" "$SIGNING_GRADLE_DEST"
+    say "Copied signing.gradle"
+  fi
+
+  KEYSTORE_EXAMPLE_SRC="$OVERLAY_DIR/android/keystore.properties.example"
+  KEYSTORE_EXAMPLE_DEST="$ANDROID_DIR/keystore.properties.example"
+  if [ -f "$KEYSTORE_EXAMPLE_SRC" ]; then
+    cp_if_changed "$KEYSTORE_EXAMPLE_SRC" "$KEYSTORE_EXAMPLE_DEST"
+    say "Copied keystore.properties.example"
+  fi
+
+  # Wire signing.gradle into build.gradle. Idempotent — only inserts
+  # `apply from: 'signing.gradle'` if it is not already there. Anchored
+  # on the existing `apply from: 'capacitor.build.gradle'` line that
+  # `cap add android` always emits; if a future Capacitor template drops
+  # that anchor we fail loudly so the next sync shouts instead of
+  # silently producing unsigned release builds.
+  ANDROID_BUILD_GRADLE="$ANDROID_DIR/app/build.gradle"
+  if [ -f "$ANDROID_BUILD_GRADLE" ] && [ -f "$SIGNING_GRADLE_DEST" ]; then
+    if ! grep -q "apply from: 'signing.gradle'" "$ANDROID_BUILD_GRADLE"; then
+      if ! grep -q "apply from: 'capacitor.build.gradle'" "$ANDROID_BUILD_GRADLE"; then
+        say "ERROR: app/build.gradle is missing the 'apply from: capacitor.build.gradle' anchor."
+        say "       Update apply-native-overlays.sh to match the new Capacitor template."
+        exit 1
+      fi
+      say "Adding 'apply from: signing.gradle' to app/build.gradle"
+      if sed --version >/dev/null 2>&1; then
+        sed -i "s|apply from: 'capacitor.build.gradle'|apply from: 'capacitor.build.gradle'\napply from: 'signing.gradle'|" "$ANDROID_BUILD_GRADLE"
+      else
+        sed -i '' "s|apply from: 'capacitor.build.gradle'|apply from: 'capacitor.build.gradle'\\
+apply from: 'signing.gradle'|" "$ANDROID_BUILD_GRADLE"
+      fi
+      if ! grep -q "apply from: 'signing.gradle'" "$ANDROID_BUILD_GRADLE"; then
+        say "ERROR: sed completed but 'apply from: signing.gradle' is still missing."
+        say "       Inspect app/build.gradle by hand."
+        exit 1
+      fi
+    else
+      say "app/build.gradle already wires signing.gradle, skipping"
+    fi
+  fi
+
   # Location permissions — required for the "locate me" control on
   # the map. `navigator.geolocation` inside the Capacitor WebView
   # still goes through the Android runtime permission gate, and
@@ -235,8 +291,13 @@ fi
 # drifted copy in the live Info.plist, this overlay would never
 # reconcile it. Fixed by Set-or-Add: read the current value, compare
 # with the canonical, and rewrite only if they differ. Idempotent —
-# match → no PlistBuddy write at all, drift → single Set, missing →
-# Add.
+# match → no plutil write at all, drift / missing → single
+# `plutil -replace`. We use `plutil` instead of `PlistBuddy -c "Set …"`
+# because PlistBuddy's `-c` string is parsed with single-quote pairing,
+# so an apostrophe in the canonical value (e.g. "someone else's") aborts
+# the Set with `Parse Error: Unclosed Quotes`. `plutil -replace` takes
+# the value as a normal argv and creates the key if missing, so the
+# same call covers both Add and Set without escape gymnastics.
 plist_set_or_add_string() {
   local key=$1
   local desired=$2
@@ -247,11 +308,10 @@ plist_set_or_add_string() {
       return 0
     fi
     say "Info.plist :$key drifted — reconciling to canonical copy"
-    /usr/libexec/PlistBuddy -c "Set :$key $desired" "$IOS_PLIST"
   else
     say "Adding :$key to Info.plist"
-    /usr/libexec/PlistBuddy -c "Add :$key string $desired" "$IOS_PLIST"
   fi
+  plutil -replace "$key" -string "$desired" "$IOS_PLIST"
 }
 
 if [ -f "$IOS_PLIST" ]; then
@@ -279,6 +339,50 @@ if [ -f "$IOS_PLIST" ]; then
   if [ -f "$IOS_RELEASE_XCCONFIG_SRC" ]; then
     cp_if_changed "$IOS_RELEASE_XCCONFIG_SRC" "$IOS_RELEASE_XCCONFIG_DEST"
     say "Copied iOS release.xcconfig (A2-1201)"
+  fi
+
+  # App Icon + Splash — Loop wordmark on near-black, matching Android.
+  # `cap add ios` regenerates the appiconset / Splash.imageset back to
+  # the Capacitor blue-X placeholder; the overlay re-applies the
+  # branded assets on every sync. App Store rejects icons with an
+  # alpha channel, so the source PNGs are flat sRGB (verified via
+  # `magick identify` — alpha=Undefined). If a future rev introduces
+  # an alpha channel, flatten with `magick src -background black
+  # -alpha remove dest` before checking it in.
+  IOS_APPICON_SRC="$OVERLAY_DIR/ios/App/App/Assets.xcassets/AppIcon.appiconset"
+  IOS_APPICON_DEST="$ROOT_DIR/apps/mobile/ios/App/App/Assets.xcassets/AppIcon.appiconset"
+  if [ -d "$IOS_APPICON_SRC" ]; then
+    mkdir -p "$IOS_APPICON_DEST"
+    cp_if_changed "$IOS_APPICON_SRC/AppIcon-512@2x.png" "$IOS_APPICON_DEST/AppIcon-512@2x.png"
+    cp_if_changed "$IOS_APPICON_SRC/Contents.json" "$IOS_APPICON_DEST/Contents.json"
+    say "Copied iOS AppIcon overlay"
+  fi
+
+  IOS_SPLASH_SRC="$OVERLAY_DIR/ios/App/App/Assets.xcassets/Splash.imageset"
+  IOS_SPLASH_DEST="$ROOT_DIR/apps/mobile/ios/App/App/Assets.xcassets/Splash.imageset"
+  if [ -d "$IOS_SPLASH_SRC" ]; then
+    mkdir -p "$IOS_SPLASH_DEST"
+    cp_if_changed "$IOS_SPLASH_SRC/splash-2732x2732.png" "$IOS_SPLASH_DEST/splash-2732x2732.png"
+    cp_if_changed "$IOS_SPLASH_SRC/splash-2732x2732-1.png" "$IOS_SPLASH_DEST/splash-2732x2732-1.png"
+    cp_if_changed "$IOS_SPLASH_SRC/splash-2732x2732-2.png" "$IOS_SPLASH_DEST/splash-2732x2732-2.png"
+    cp_if_changed "$IOS_SPLASH_SRC/Contents.json" "$IOS_SPLASH_DEST/Contents.json"
+    say "Copied iOS Splash overlay"
+  fi
+
+  # Privacy Manifest (Apple-required since 2024-05). Declares Loop's
+  # data collection types, tracking flags, and required-reason API
+  # categories. Capacitor + Sentry + Stellar pods ship their own
+  # PrivacyInfo.xcprivacy entries; Apple aggregates at archive time.
+  # Operator-once after `cap add ios`: Xcode → App target → Build
+  # Phases → Copy Bundle Resources → ensure PrivacyInfo.xcprivacy is
+  # listed. Capacitor's default folder reference for the App/ folder
+  # usually picks it up automatically, but verify before the first
+  # archive — the App-Store binary check rejects on missing manifest.
+  IOS_PRIVACY_SRC="$OVERLAY_DIR/ios/App/App/PrivacyInfo.xcprivacy"
+  IOS_PRIVACY_DEST="$ROOT_DIR/apps/mobile/ios/App/App/PrivacyInfo.xcprivacy"
+  if [ -f "$IOS_PRIVACY_SRC" ]; then
+    cp_if_changed "$IOS_PRIVACY_SRC" "$IOS_PRIVACY_DEST"
+    say "Copied iOS PrivacyInfo.xcprivacy"
   fi
 else
   say "iOS Info.plist not present at $IOS_PLIST — skipping (run \`npx cap add ios\` first)"

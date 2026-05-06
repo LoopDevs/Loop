@@ -26,7 +26,7 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 - [x] ~~Add `.env` files~~ — created from `.env.example`
 - [x] ~~Run `npx cap add ios && npx cap add android`~~ — native projects created
 - [x] ~~Install Playwright browsers~~ — chromium installed
-- [x] ~~Set GitHub repo secrets for CI~~ — no **CTX API** secrets needed (upstream `/merchants`, `/login`, `/verify-email`, `/refresh-token` are public). Other workflow secrets that **do** need to be set when enabling the relevant workflow: `CTX_TEST_REFRESH_TOKEN` + `STELLAR_TEST_SECRET_KEY` + `GH_SECRETS_PAT` (rotates the refresh token back to Actions secrets after each run) for `e2e-real.yml`; `DISCORD_WEBHOOK_DEPLOYMENTS` for the CI-status notify job; `ANTHROPIC_API_KEY` for the Claude PR-review job.
+- [x] ~~Set GitHub repo secrets for CI~~ — no **CTX API** secrets needed (upstream `/merchants`, `/login`, `/verify-email`, `/refresh-token` are public). Other workflow secrets that **do** need to be set when enabling the relevant workflow: `LOOP_E2E_REFRESH_TOKEN` + `STELLAR_TEST_SECRET_KEY` + `LOOP_JWT_SIGNING_KEY` + `LOOP_STELLAR_DEPOSIT_ADDRESS` + `LOOP_STELLAR_OPERATOR_SECRET` + `GH_SECRETS_PAT` (rotates the refresh token back to Actions secrets after each run) for `e2e-real.yml` (Tranche-1 loop-native purchase flow); `DISCORD_WEBHOOK_DEPLOYMENTS` for the CI-status notify job; `ANTHROPIC_API_KEY` for the Claude PR-review job.
 - [x] ~~Set up GitHub branch protection rules on `main`~~ — done once the repo went public (A-037 closed). Required passing checks: Quality, Unit tests, Security audit, Build verification, E2E tests (mocked CTX); force-push and branch deletion blocked; stale reviews dismissed on new commits. See `docs/standards.md §15 CI/CD` for the ruleset and `gh api repos/LoopDevs/Loop/branches/main/protection` for the live config.
 
 ### Production infrastructure
@@ -75,8 +75,17 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 
 ### Mobile app submission
 
+> **Operator runbook:** the linear, click-by-click sequence for
+> claiming the Phase-1 deliverable (TestFlight + APK + demo video) is
+> in `tranche-1-launch.md` §"Release sequence — Phase 1 acceptance
+> path". This roadmap section is the bullet-level checklist; the
+> runbook section is the actionable path.
+
 - [ ] Build and test on physical iOS device
 - [ ] Build and test on physical Android device
+- [x] ~~iOS app icon (1024x1024) + splash screens~~ — Loop wordmark on near-black; lives at `apps/mobile/native-overlays/ios/App/App/Assets.xcassets/{AppIcon.appiconset,Splash.imageset}` and re-applies on every `cap sync` via `apply-native-overlays.sh`. Matches Android branding.
+- [x] ~~Android app icon (512x512) + adaptive icon + splash~~ — already in `apps/mobile/native-overlays/android/`.
+- [x] ~~Android signed-APK build wiring~~ — `signing.gradle` overlay drives `signingConfigs.release` from operator-supplied `keystore.properties`. Falls back to unsigned with a Gradle warning if keystore is absent (release builds still buildable for local smoke). Keystore generation steps in `tranche-1-launch.md`.
 - [ ] Apple Developer account setup, bundle ID `io.loopfinance.app`
 - [ ] Google Play Console setup, package name `io.loopfinance.app`
 - [ ] App Store screenshots and metadata
