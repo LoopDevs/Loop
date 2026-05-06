@@ -146,6 +146,17 @@ async function placeOrderAndFulfil(args: {
   userBearer: string;
   ctxOrderId: string;
 }): Promise<string> {
+  const orderId = await placeOrder({ userBearer: args.userBearer });
+  await fulfilOrder({ orderId, ctxOrderId: args.ctxOrderId });
+  return orderId;
+}
+
+/**
+ * Track A.6: split out create + fulfil so a test can flip
+ * `LOOP_PHASE_1_ONLY` between the two halves. The original
+ * `placeOrderAndFulfil` stays as the same-mode convenience wrapper.
+ */
+async function placeOrder(args: { userBearer: string }): Promise<string> {
   const createRes = await app.request('http://localhost/api/orders/loop', {
     method: 'POST',
     headers: {
@@ -161,9 +172,11 @@ async function placeOrderAndFulfil(args: {
   });
   expect(createRes.status).toBe(200);
   const { orderId } = (await createRes.json()) as { orderId: string };
+  return orderId;
+}
 
-  await markOrderPaid(orderId);
-
+async function fulfilOrder(args: { orderId: string; ctxOrderId: string }): Promise<void> {
+  await markOrderPaid(args.orderId);
   vi.mocked(operatorFetch).mockResolvedValueOnce(
     new Response(JSON.stringify({ id: args.ctxOrderId }), {
       status: 200,
@@ -173,7 +186,6 @@ async function placeOrderAndFulfil(args: {
   const tick = await runProcurementTick({ limit: 5 });
   expect(tick.fulfilled).toBe(1);
   expect(tick.failed).toBe(0);
-  return orderId;
 }
 
 describeIf('phase-mode toggle — full order walk diverges as documented', () => {
@@ -261,6 +273,116 @@ describeIf('phase-mode toggle — full order walk diverges as documented', () =>
       expect(txs[0]!.type).toBe('cashback');
       expect(txs[0]!.amountMinor).toBe(125n);
       expect(txs[0]!.referenceId).toBe(orderId);
+    } finally {
+      env.LOOP_PHASE_1_ONLY = previous;
+    }
+  });
+
+  it('mid-flight flip P1→P2: order created under Phase 1, fulfilled under Phase 2 — preserves Phase-1 shape (no payout)', async () => {
+    // Operator-deploy scenario: an order is created while
+    // LOOP_PHASE_1_ONLY=true (instant-discount mode). Before it
+    // fulfils, a deploy flips the flag to false (Tranche-2 cutover).
+    // The order's `userCashbackMinor` was set to 0 at creation; the
+    // fulfillment path gates the pending_payouts insert on
+    // `order.userCashbackMinor > 0n`, so this in-flight order keeps
+    // its Phase-1 semantics regardless of current env. Locks in the
+    // "phase is locked at order creation" invariant — operators can
+    // flip the flag without worrying about in-flight orders
+    // straddling the cutover.
+    await seedAmazonCashbackConfig();
+    const me = await seedUserWithStellar('mid-flight-p1p2@test.local');
+
+    const previous = env.LOOP_PHASE_1_ONLY;
+    try {
+      env.LOOP_PHASE_1_ONLY = true;
+      const orderId = await placeOrder({ userBearer: me.bearer });
+
+      // Verify Phase-1 shape was locked at creation.
+      const [created] = await db.select().from(orders).where(eq(orders.id, orderId));
+      expect(created!.userCashbackMinor).toBe(0n);
+      expect(created!.chargeMinor).toBe(2375n);
+
+      // Flip mid-flight — simulating an operator deploy between
+      // POST /api/orders/loop and the procurement worker tick.
+      env.LOOP_PHASE_1_ONLY = false;
+
+      await fulfilOrder({ orderId, ctxOrderId: 'ctx-flip-p1p2' });
+
+      const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
+      expect(order!.state).toBe('fulfilled');
+      // Order's at-rest fields are unchanged by the env flip.
+      expect(order!.userCashbackMinor).toBe(0n);
+      expect(order!.chargeMinor).toBe(2375n);
+
+      // No pending_payouts row — fulfillment respected the order's
+      // userCashbackMinor=0, not the current env.
+      const payouts = await db
+        .select()
+        .from(pendingPayouts)
+        .where(eq(pendingPayouts.orderId, orderId));
+      expect(payouts).toHaveLength(0);
+
+      // No cashback ledger row either.
+      const txs = await db
+        .select()
+        .from(creditTransactions)
+        .where(eq(creditTransactions.userId, me.id));
+      expect(txs).toHaveLength(0);
+    } finally {
+      env.LOOP_PHASE_1_ONLY = previous;
+    }
+  });
+
+  it('mid-flight flip P2→P1: order created under Phase 2, fulfilled under Phase 1 — preserves Phase-2 shape (payout written)', async () => {
+    // The reverse direction: a Phase-2 order in-flight when an
+    // emergency flag flip pulls the cashback emission back. The
+    // pending_payouts row was earmarked at creation; fulfillment
+    // honours it. Operators rolling back from Phase 2 → Phase 1
+    // would need to additionally cancel the in-flight pending_payouts
+    // separately if they want the user to NOT receive cashback — the
+    // env flip alone is not retroactive.
+    await seedAmazonCashbackConfig();
+    const me = await seedUserWithStellar('mid-flight-p2p1@test.local');
+
+    const previous = env.LOOP_PHASE_1_ONLY;
+    try {
+      env.LOOP_PHASE_1_ONLY = false;
+      const orderId = await placeOrder({ userBearer: me.bearer });
+
+      // Verify Phase-2 shape was locked at creation.
+      const [created] = await db.select().from(orders).where(eq(orders.id, orderId));
+      expect(created!.userCashbackMinor).toBe(125n);
+      expect(created!.chargeMinor).toBe(2500n);
+
+      // Flip mid-flight to Phase 1.
+      env.LOOP_PHASE_1_ONLY = true;
+
+      await fulfilOrder({ orderId, ctxOrderId: 'ctx-flip-p2p1' });
+
+      const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
+      expect(order!.state).toBe('fulfilled');
+      // Order at-rest fields remain Phase-2-shaped.
+      expect(order!.userCashbackMinor).toBe(125n);
+      expect(order!.chargeMinor).toBe(2500n);
+
+      // Exactly one pending_payouts row — fulfillment honoured the
+      // order's at-rest userCashbackMinor=125, not the current env.
+      const payouts = await db
+        .select()
+        .from(pendingPayouts)
+        .where(eq(pendingPayouts.orderId, orderId));
+      expect(payouts).toHaveLength(1);
+      expect(payouts[0]!.state).toBe('pending');
+      expect(payouts[0]!.amountStroops).toBe(125n * 100_000n);
+
+      // Cashback ledger row also written.
+      const txs = await db
+        .select()
+        .from(creditTransactions)
+        .where(eq(creditTransactions.userId, me.id));
+      expect(txs).toHaveLength(1);
+      expect(txs[0]!.type).toBe('cashback');
+      expect(txs[0]!.amountMinor).toBe(125n);
     } finally {
       env.LOOP_PHASE_1_ONLY = previous;
     }
