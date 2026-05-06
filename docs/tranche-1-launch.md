@@ -129,8 +129,16 @@ The Fly app exists and is healthy, but its currently-deployed binary
 pre-dates the Tranche-1 surface (`/api/config` returns 404, no
 Loop-native auth path) and has only five secrets set
 (`DISCORD_WEBHOOK_*`, `GIFT_CARD_API_KEY/SECRET`, `SENTRY_DSN`).
-Tranche 1 needs the full env block from "Operator env" above. Set
-secrets via:
+Tranche 1 needs the full env block from "Operator env" above.
+
+> **Read first:** `docs/phase-1-redeploy-audit.md` — every change
+> between the deployed 2026-04-20 binary and current `main`. Lists
+> all the boot-time gates that have been added since (DATABASE_URL,
+> EMAIL_PROVIDER=resend, etc), the 33 SQL migrations that will run
+> on first deploy, and the four operator action items the
+> preflight script does NOT catch on its own.
+
+Set secrets via:
 
 ```bash
 # Required for Tranche 1 acceptance flow
