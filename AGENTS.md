@@ -115,6 +115,28 @@ npm run check:bundle-budget  # Size-regression gate for the web SSR bundle
 npm run proto:generate       # buf generate → packages/shared/src/proto/ (A2-404: auto-prettier'd)
 ```
 
+### Operator scripts (Phase-1 release path)
+
+```bash
+# Diff `flyctl secrets list -a <app>` against the required Tranche-1
+# secret set. Exits non-zero if any required secret is missing — the
+# pre-`flyctl deploy` gate. Never prints values, just key names.
+./scripts/preflight-tranche-1.sh [app-name]   # default: loopfinance-api
+
+# One-time bootstrap of the LOOP_E2E_REFRESH_TOKEN repo secret. Drives
+# request-otp → operator enters OTP → verify-otp → uploads the resulting
+# refresh token via `gh secret set` (token piped via stdin).
+./scripts/bootstrap-e2e-refresh-token.sh \
+  --backend https://api.loopfinance.io \
+  --email reviewer@loopfinance.io \
+  --gh-secret
+
+# Real Tranche-1 e2e purchase — loop-native only (POST /api/orders/loop,
+# state='fulfilled'). Default merchant Aerie at $0.02 USD. Workflow
+# wrapper at .github/workflows/e2e-real.yml; can also run locally.
+E2E_REFRESH_TOKEN=… STELLAR_TEST_SECRET_KEY=… node scripts/e2e-real.mjs
+```
+
 ---
 
 ## Critical architecture rules
