@@ -66,6 +66,15 @@ export async function adminUserCreditTransactionsCsvHandler(c: Context): Promise
     return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
   }
 
+  // Cache Date.now() once. The default-window path computes
+  // `since = now - DEFAULT_WINDOW_MS` and the next line validates
+  // `now - since.getTime() <= MAX_WINDOW_MS`. With DEFAULT_WINDOW_MS
+  // == MAX_WINDOW_MS (the SAR-compliant 366-day window — both equal
+  // by design), two separate Date.now() calls drift by milliseconds
+  // on slow CI runners and the validation fires 400 by a few-µs
+  // race. Local runs land in the same millisecond and pass; CI
+  // hits the race intermittently. Capturing once eliminates it.
+  const now = Date.now();
   const sinceRaw = c.req.query('since');
   let since: Date;
   if (sinceRaw !== undefined && sinceRaw.length > 0) {
@@ -78,9 +87,9 @@ export async function adminUserCreditTransactionsCsvHandler(c: Context): Promise
     }
     since = d;
   } else {
-    since = new Date(Date.now() - DEFAULT_WINDOW_MS);
+    since = new Date(now - DEFAULT_WINDOW_MS);
   }
-  if (Date.now() - since.getTime() > MAX_WINDOW_MS) {
+  if (now - since.getTime() > MAX_WINDOW_MS) {
     return c.json(
       { code: 'VALIDATION_ERROR', message: 'since cannot be more than 366 days ago' },
       400,
