@@ -115,6 +115,214 @@ The web client reads `phase1Only` from `GET /api/config` at runtime, so flipping
 
 ---
 
+## Release sequence — Phase 1 acceptance path
+
+How to get from repo-state to TestFlight + APK + demo video. Five
+tracks; three of them parallelize once Track 3 (Apple Developer
+approval) is filed. Detailed mechanics live in `docs/deployment.md`
+and per-package AGENTS.md guides — this section is the linear
+checklist.
+
+### Track 1 — Backend deploy (`loopfinance-api`)
+
+The Fly app exists and is healthy, but its currently-deployed binary
+pre-dates the Tranche-1 surface (`/api/config` returns 404, no
+Loop-native auth path) and has only five secrets set
+(`DISCORD_WEBHOOK_*`, `GIFT_CARD_API_KEY/SECRET`, `SENTRY_DSN`).
+Tranche 1 needs the full env block from "Operator env" above. Set
+secrets via:
+
+```bash
+# Required for Tranche 1 acceptance flow
+flyctl secrets set -a loopfinance-api \
+  LOOP_PHASE_1_ONLY=true \
+  LOOP_AUTH_NATIVE_ENABLED=true \
+  LOOP_WORKERS_ENABLED=true \
+  LOOP_JWT_SIGNING_KEY="$(openssl rand -base64 48)" \
+  LOOP_STELLAR_DEPOSIT_ADDRESS=G… \
+  LOOP_STELLAR_OPERATOR_SECRET=S… \
+  LOOP_STELLAR_USDC_ISSUER=GA5ZSEJYB37JRC5AVCIA7VBRVRWWZBMXWXZAHYBRQHGSZHGCASCHV3VW \
+  EMAIL_PROVIDER=resend \
+  RESEND_API_KEY=re_… \
+  EMAIL_FROM_ADDRESS=noreply@loopfinance.io \
+  EMAIL_FROM_NAME=Loop \
+  METRICS_BEARER_TOKEN="$(openssl rand -base64 32)" \
+  OPENAPI_BEARER_TOKEN="$(openssl rand -base64 32)" \
+  DATABASE_URL=postgres://…
+
+flyctl deploy -a loopfinance-api --config apps/backend/fly.toml
+```
+
+Verify: `curl https://loopfinance-api.fly.dev/api/config` returns the
+runtime config (not 404), `/health` reports
+`upstreamReachable:true` + every required worker `running:true`.
+Once `api.loopfinance.io` DNS lands (Track 2), repeat against the
+canonical hostname.
+
+### Track 2 — Web deploy (`loop-web` — first time)
+
+`apps/web/fly.toml` is configured but the app does not exist on Fly
+yet. First-time bootstrap:
+
+```bash
+flyctl apps create loop-web
+flyctl secrets set -a loop-web   # nothing required at runtime, but Sentry DSN goes here
+flyctl deploy -a loop-web --config apps/web/fly.toml \
+  --build-arg VITE_SENTRY_DSN=… \
+  --build-arg VITE_LOOP_ENV=production \
+  --build-arg VITE_SENTRY_RELEASE=$(git rev-parse HEAD)
+```
+
+DNS:
+
+| Hostname             | Target                  | Notes                                         |
+| -------------------- | ----------------------- | --------------------------------------------- |
+| `loopfinance.io`     | loop-web Fly app        | Apex — Fly issues TLS automatically.          |
+| `www.loopfinance.io` | loop-web Fly app        | CNAME or apex-flatten depending on registrar. |
+| `api.loopfinance.io` | loopfinance-api Fly app | CNAME `loopfinance-api.fly.dev`.              |
+
+The web client reads `VITE_API_URL` from build args (currently
+`https://api.loopfinance.io`), so the api hostname must be live before
+the production web bundle is shipped or the SPA can't reach the
+backend.
+
+### Track 3 — Apple Developer + bundle ID + TestFlight
+
+The long pole — Apple Developer enrollment can take 3–7 days for a
+personal account, longer if D-U-N-S verification is needed for an
+Organization account. **File this on Day 1.**
+
+While waiting:
+
+- Register bundle ID `io.loopfinance.app` in the dev portal (post-approval).
+- Create the App Store Connect app entry (metadata only; no submission
+  for review yet — TestFlight internal testing skips Beta App Review).
+- Privacy policy URL: point at `https://loopfinance.io/privacy`. The
+  page is wired with placeholder copy; legal review can land before the
+  public App Store submission.
+
+Once approved, build + archive:
+
+```bash
+cd apps/web && npm run build:mobile
+cd ../.. && npm run mobile:sync         # wraps cap sync + apply-native-overlays.sh
+cd apps/mobile && npx cap open ios
+```
+
+In Xcode:
+
+1. Project navigator → App target → Signing & Capabilities → set Team.
+2. Project navigator → App target → Build Settings → Configurations →
+   Release → set `baseConfigurationReference` to `release.xcconfig`
+   (one-time; `cap sync` does not regenerate the .pbxproj so the
+   reference survives. Pins `CAPACITOR_DEBUG = false` for App-Store
+   builds — see ADR comment in `apps/mobile/native-overlays/ios/release.xcconfig`).
+3. Set marketing version (`1.0.0`) and build number (CI run number — see
+   "Version-bump discipline" in `docs/deployment.md`).
+4. Product → Archive → Distribute App → App Store Connect → Upload.
+
+In App Store Connect → TestFlight tab:
+
+- Wait for processing (~15min — DKIM-style background).
+- Add internal testers (up to 100, no Beta App Review needed).
+- Reviewers receive an email invite and install via the TestFlight app.
+
+### Track 4 — Android signed APK
+
+The repo now ships a `signing.gradle` overlay that injects
+`signingConfigs.release` into the Capacitor-generated build.gradle
+when a `keystore.properties` file is present.
+
+One-time keystore generation (back this up — losing the keystore means
+losing Play Store package identity permanently):
+
+```bash
+cd apps/mobile/android
+keytool -genkeypair -v \
+  -keystore loop-release.keystore \
+  -keyalg RSA -keysize 2048 -validity 10000 \
+  -alias loop
+# Answer the prompts for cert details + passwords.
+# Back up loop-release.keystore + the passwords to 1Password (sealed) +
+# offline cold storage.
+
+cp keystore.properties.example keystore.properties
+# Edit keystore.properties and fill in the passwords + alias.
+# Both keystore.properties AND loop-release.keystore are gitignored
+# (apps/mobile/android/ is ignored at the repo root).
+```
+
+Build the signed APK:
+
+```bash
+cd apps/web && npm run build:mobile
+cd ../.. && npm run mobile:sync
+cd apps/mobile && npx cap open android
+```
+
+In Android Studio:
+
+- Build → Generate Signed Bundle / APK → APK → Release variant.
+- Output: `apps/mobile/android/app/build/outputs/apk/release/app-release.apk`.
+- For Play Store submission later, switch to AAB. APK is sufficient for
+  the Phase 1 sideload deliverable (direct link, Drive, Diawi).
+
+If `keystore.properties` is absent, `signing.gradle` logs a Gradle
+warning and the release variant builds unsigned — useful for local
+smoke tests but not shippable.
+
+### Track 5 — Demo video
+
+Cost ≈ one real gift-card purchase. Use $5–$10 denomination if
+available; the test wallet (`reference_test_wallet.md`) is funded for
+this. Script:
+
+1. Install — TestFlight on iOS, APK sideload on Android.
+2. First-run onboarding — splash → welcome → "How it works" → email →
+   OTP → biometric setup → home (currency + wallet steps auto-skipped
+   under `LOOP_PHASE_1_ONLY=true`).
+3. Browse + map + search.
+4. Pick merchant → amount → confirm → see Loop's deposit address +
+   memo + discounted XLM/USDC amount.
+5. Pay from external wallet to that address with the memo.
+6. Watch order: `pending_payment → paid → procuring → fulfilled`.
+7. Reveal gift card code + barcode.
+8. Redeem at the merchant (in-store scan or online code paste).
+
+Recording: iOS Control Center → Screen Recording; Android Quick
+Settings → Screen Record. Voiceover added later in QuickTime / video
+editor. Target ~10–15 minutes.
+
+### Critical-path order
+
+- **Day 1:** File Apple Developer enrollment (Track 3 is the long pole);
+  start Track 1 (backend redeploy) and Track 2 (web first-deploy + DNS) in
+  parallel.
+- **Day 2–7 (waiting on Apple):** Generate keystore + build signed APK
+  (Track 4); smoke-test Tranche 1 acceptance against the redeployed
+  backend with the test wallet.
+- **Apple approves:** Configure signing in Xcode, archive, upload to
+  TestFlight, add reviewers as internal testers.
+- **+1 day:** Verify both binaries install + run on fresh devices.
+- **+1 day:** Record the demo video (Track 5).
+
+Total: ~5 days if Apple Developer is already approved on a team Loop
+controls; ~10 days if approval is the long pole.
+
+### Out of Phase-1 scope (deferred)
+
+- Privacy/terms copy review — placeholder copy is wired into both
+  routes; legal review before the public App Store submission, not
+  before TestFlight internal testing.
+- Sentry / Discord plumbing — DSNs go in Fly secrets when ready; code
+  is wired and gated on env presence (silent if unset).
+- Real-CTX e2e tests in CI — mocked-CTX suite gates main; real-upstream
+  contract check stays PR-only.
+- Play Console submission ($25 one-time, AAB upload, internal-testing
+  track) — APK + Diawi is sufficient for the Phase 1 reviewer flow.
+
+---
+
 ## Tranche 1 deliverable acceptance check
 
 Per the deliverable roadmap:
