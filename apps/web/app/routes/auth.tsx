@@ -177,14 +177,22 @@ function formatCashbackBalance(minor: string, currency: 'USD' | 'GBP' | 'EUR'): 
  * off-chain balance in their home currency (ADR 015). Zero-balance
  * users still see the card so "you have 0.00 cashback" is a clear
  * state rather than an empty container.
+ *
+ * Phase 1 (`phase1Only=true`) delivers cashback as instant discount
+ * at order creation — no balance accumulates, no wallet to withdraw
+ * to. The "Link a wallet to withdraw" CTA suppresses in that mode so
+ * users aren't sold a feature that doesn't exist yet.
  */
 function CashbackBalanceCard({
   me,
   isLoading,
+  phase1Only,
 }: {
   me: UserMeView | undefined;
   isLoading: boolean;
+  phase1Only: boolean;
 }): React.JSX.Element {
+  const showWithdrawNudge = !phase1Only && me?.stellarAddress === null;
   return (
     <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4">
       <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -196,8 +204,8 @@ function CashbackBalanceCard({
           : formatCashbackBalance(me.homeCurrencyBalanceMinor, me.homeCurrency)}
       </p>
       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-        Earned on every Loop order.
-        {me?.stellarAddress === null ? ' Link a wallet to withdraw.' : ''}
+        {phase1Only ? 'Realised on every Loop order as a discount.' : 'Earned on every Loop order.'}
+        {showWithdrawNudge ? ' Link a wallet to withdraw.' : ''}
       </p>
     </div>
   );
@@ -426,7 +434,11 @@ export default function AuthRoute(): React.JSX.Element {
             </div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Your account</h1>
             <p className="text-gray-500 dark:text-gray-400 mb-6">{userEmail}</p>
-            <CashbackBalanceCard me={meQuery.data} isLoading={meQuery.isLoading} />
+            <CashbackBalanceCard
+              me={meQuery.data}
+              isLoading={meQuery.isLoading}
+              phase1Only={config.phase1Only}
+            />
             <PendingCashbackChip />
             <CashbackHistoryCard
               entries={historyQuery.data?.entries}
