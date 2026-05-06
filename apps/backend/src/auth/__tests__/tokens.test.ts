@@ -310,6 +310,59 @@ describe('verifyLoopToken', () => {
   });
 });
 
+describe('wire-format back-compat (Track A.1 regression gate)', () => {
+  // This fixture was computed via the PRE-REFACTOR algorithm, verbatim:
+  //
+  //   header = b64url(JSON.stringify({alg: 'HS256', typ: 'JWT'}))
+  //   payload = b64url(JSON.stringify(claims))
+  //   sig = b64url(createHmac('sha256', key).update(header + '.' + payload).digest())
+  //   token = header + '.' + payload + '.' + sig
+  //
+  // with key = 'k'.repeat(32) (the test signing key set at the top of
+  // this file) and claims pinned to a far-future exp so the fixture
+  // doesn't drift on time. If a future change to signer.ts / tokens.ts
+  // produces a different verify behaviour for this exact byte
+  // sequence, this assertion fails — proving wire-format
+  // back-compatibility with the pre-A.1 binary.
+  //
+  // Phase-1 gate: a Loop-native deploy that started under the pre-A.1
+  // binary may have minted access tokens still alive (15-min TTL); the
+  // post-A.1 binary that takes over MUST verify them. This fixture
+  // pins that property as a regression test.
+  const FIXTURE_TOKEN =
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmaXh0dXJlLXVzZXIiLCJlbWFpbCI6ImZpeHR1cmVAbG9vcGZpbmFuY2UudGVzdCIsInR5cCI6ImFjY2VzcyIsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwLCJpc3MiOiJsb29wLWFwaSIsImF1ZCI6Imxvb3AtY2xpZW50cyJ9.cwtnCoHVUQG2aKK4bjexNa3ihWqPAS2Xdor9Ckh5Ydw';
+
+  it('verifies a pre-refactor-format HS256 token byte-for-byte', () => {
+    const result = verifyLoopToken(FIXTURE_TOKEN, 'access');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.claims.sub).toBe('fixture-user');
+      expect(result.claims.email).toBe('fixture@loopfinance.test');
+      expect(result.claims.typ).toBe('access');
+      expect(result.claims.iss).toBe('loop-api');
+      expect(result.claims.aud).toBe('loop-clients');
+      expect(result.claims.iat).toBe(1_700_000_000);
+      expect(result.claims.exp).toBe(4_102_444_800);
+    }
+  });
+
+  it('the new sign path produces wire-identical output to the pre-refactor algorithm', () => {
+    // Sanity-check the inverse: signing the same claims with the
+    // current `signLoopToken` should produce the same byte sequence
+    // the fixture was computed from. If this drifts, the OLD binary
+    // can't verify NEW tokens — the other half of the cross-version
+    // compatibility property the deploy needs.
+    const { token } = signLoopToken({
+      sub: 'fixture-user',
+      email: 'fixture@loopfinance.test',
+      typ: 'access',
+      ttlSeconds: 4_102_444_800 - 1_700_000_000,
+      now: 1_700_000_000,
+    });
+    expect(token).toBe(FIXTURE_TOKEN);
+  });
+});
+
 describe('isLoopAuthConfigured', () => {
   it('reports configured when the signing key is present', () => {
     expect(isLoopAuthConfigured()).toBe(true);
