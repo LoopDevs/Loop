@@ -91,8 +91,7 @@ const HORIZON_URL = process.env.HORIZON_URL ?? 'https://horizon.stellar.org';
 // E2E_REFRESH_TOKEN is the canonical name; CTX_TEST_REFRESH_TOKEN is kept
 // as an alias only so the existing GitHub workflow's `secrets.CTX_TEST_…`
 // reference doesn't break before it's renamed in the workflow file.
-const REFRESH_TOKEN =
-  process.env.E2E_REFRESH_TOKEN ?? process.env.CTX_TEST_REFRESH_TOKEN;
+const REFRESH_TOKEN = process.env.E2E_REFRESH_TOKEN ?? process.env.CTX_TEST_REFRESH_TOKEN;
 const WALLET_SECRET = process.env.STELLAR_TEST_SECRET_KEY;
 const PAYMENT_METHOD = (process.env.LOOP_E2E_PAYMENT_METHOD ?? 'xlm').toLowerCase();
 const CURRENCY = (process.env.LOOP_E2E_CURRENCY ?? 'USD').toUpperCase();
@@ -199,7 +198,9 @@ async function createLoopOrder(accessToken, candidate) {
   if (amountMinor <= 0) {
     throw new Error(`Invalid amountMinor=${amountMinor} for candidate ${candidate.name}`);
   }
-  log(`Creating loop-native order for ${candidate.name} (${candidate.id}), ${CURRENCY} ${candidate.amount} (paymentMethod=${PAYMENT_METHOD})`);
+  log(
+    `Creating loop-native order for ${candidate.name} (${candidate.id}), ${CURRENCY} ${candidate.amount} (paymentMethod=${PAYMENT_METHOD})`,
+  );
   const order = await api('/api/orders/loop', {
     method: 'POST',
     accessToken,
@@ -250,7 +251,9 @@ async function payOrder({ paymentAddress, asset, assetCode, assetIssuer, assetAm
     throw new Error(`Unsupported payment asset: ${asset}`);
   }
 
-  log(`Paying ${assetAmount} ${stellarAsset.code} from ${kp.publicKey()} to ${paymentAddress} (memo=${memo})`);
+  log(
+    `Paying ${assetAmount} ${stellarAsset.code} from ${kp.publicKey()} to ${paymentAddress} (memo=${memo})`,
+  );
   const account = await server.loadAccount(kp.publicKey());
   let fee = '1000';
   try {
