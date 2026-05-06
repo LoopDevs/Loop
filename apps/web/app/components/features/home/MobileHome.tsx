@@ -6,6 +6,7 @@ import { foldForSearch, merchantSlug } from '@loop/shared';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
 import { useOrders } from '~/hooks/use-orders';
 import { useAuth } from '~/hooks/use-auth';
+import { useAppConfig } from '~/hooks/use-app-config';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { shouldRetry } from '~/hooks/query-retry';
 import { getCashbackSummary } from '~/services/user';
@@ -45,6 +46,15 @@ export function MobileHome(): React.JSX.Element {
   const { orders } = useOrders(1, isAuthenticated);
   const navigate = useNavigate();
   const { isNative } = useNativePlatform();
+  // Phase 1 delivers cashback as instant discount at order creation —
+  // no accumulating balance, no on-chain wallet to withdraw to. The
+  // savings hero copy switches between "Cashback earned" (Phase 2,
+  // user has a balance) and "You've saved" (Phase 1, totals are the
+  // sum of discounts already realised). The numeric value is the
+  // same in both phases — `o.amount × savingsPercentage` is the
+  // realised saving regardless of delivery model.
+  const { config } = useAppConfig();
+  const phase1Only = config.phase1Only;
   const visibleMerchants = useMemo(() => (hydrated ? merchants : []), [hydrated, merchants]);
   const visibleMerchantsLoading = !hydrated || merchantsLoading;
 
@@ -169,6 +179,7 @@ export function MobileHome(): React.JSX.Element {
           cashbackCents={cashbackCents}
           ordersCount={ordersCount}
           isAuthenticated={isAuthenticated}
+          phase1Only={phase1Only}
         />
       </div>
 
@@ -359,19 +370,33 @@ function SectionHeader({
   );
 }
 
-function SavingsHero({
+// Exported for unit-test access — the parent file's coverage is
+// component-shape only; this lets the label-switch + amount
+// formatting assertions live in a focused test file.
+export function SavingsHero({
   cashbackCents,
   ordersCount,
   isAuthenticated,
+  phase1Only,
 }: {
   cashbackCents: number;
   ordersCount: number;
   isAuthenticated: boolean;
+  phase1Only: boolean;
 }): React.JSX.Element {
   // Unauth or no-orders state — show a teaser instead of "$0.00"
   // which reads as a bug. Matches the design's ink face but with a
   // friendlier copy instead of the stat strip.
   const empty = !isAuthenticated || ordersCount === 0;
+  // Phase 1 = instant-discount delivery, no accumulating balance →
+  // "You've saved" / "Buy a gift card to start saving."
+  // Phase 2 = cashback paid to user's Loop wallet, withdraw-able →
+  // "Cashback earned" / "Buy a gift card to start earning cashback."
+  const heroLabel = phase1Only ? 'You’ve saved' : 'Cashback earned';
+  const emptySubtitle = phase1Only
+    ? 'Buy a gift card to start saving.'
+    : 'Buy a gift card to start earning cashback.';
+  const avgLabel = phase1Only ? 'Avg saving' : 'Avg back';
   return (
     <div
       className="relative overflow-hidden rounded-[18px] px-6 py-5 text-white shadow-[0_8px_24px_rgba(3,7,18,0.25),0_2px_6px_rgba(3,7,18,0.15)]"
@@ -391,7 +416,7 @@ function SavingsHero({
         }}
       />
       <div className="text-[12px] font-semibold uppercase tracking-[0.06em] opacity-60 mb-1.5">
-        Cashback earned
+        {heroLabel}
       </div>
       <div
         className="text-[44px] font-extrabold leading-none mb-1"
@@ -401,7 +426,7 @@ function SavingsHero({
       </div>
       <div className="text-[13px] text-white/65 mb-4">
         {empty
-          ? 'Buy a gift card to start earning cashback.'
+          ? emptySubtitle
           : `Across ${ordersCount} order${ordersCount === 1 ? '' : 's'} — keep going.`}
       </div>
       <div className="grid grid-cols-2 gap-0 border-t border-white/10 pt-3.5">
@@ -415,7 +440,7 @@ function SavingsHero({
           <div className="text-[16px] font-bold" style={{ fontVariantNumeric: 'tabular-nums' }}>
             {empty ? '—' : avgBackLabel(cashbackCents, ordersCount)}
           </div>
-          <div className="text-[11px] opacity-55 mt-0.5">Avg back</div>
+          <div className="text-[11px] opacity-55 mt-0.5">{avgLabel}</div>
         </div>
       </div>
     </div>
