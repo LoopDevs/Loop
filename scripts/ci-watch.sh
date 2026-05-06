@@ -43,7 +43,20 @@ while [ "$(date +%s)" -lt "$DEADLINE" ]; do
     ($req | map(select(.conclusion == "SUCCESS")) | length) as $p |
     ($req | map(select(.conclusion == "FAILURE" or .conclusion == "CANCELLED")) | length) as $f |
     "pr\($s) required_passing=\($p) required_failing=\($f)"
-  ' || echo "err")
+  ' 2>/dev/null || true)
+
+  # Skip iterations where `gh` / `jq` produced no usable state — a
+  # transient API blip otherwise leaves $state empty (or the
+  # legacy "err" fallback), the sed below leaves passing/failing
+  # un-substituted, and `[ "$failing" -gt 0 ]` errors with
+  # "integer expression expected". The next tick usually recovers.
+  case "$state" in
+    pr*' required_passing='*' required_failing='*) ;;
+    *)
+      sleep 30
+      continue
+      ;;
+  esac
 
   # Pull out the parts we branch on. The state echo above already
   # carries the values we need.

@@ -61,9 +61,10 @@ RECOMMENDED=(
 
 # Non-secret env vars that ride in fly.toml [env] — checked separately
 # because `flyctl secrets list` doesn't surface them. The Tranche-1
-# runbook expects these set as Fly secrets OR baked into [env]; we treat
-# them as "set if either path declares them". For now we just note them
-# in the report — fly.toml inspection is a separate concern.
+# runbook expects these set as Fly secrets OR baked into [env]; we
+# accept either. The script also reads `apps/backend/fly.toml` and
+# resolves the value-side (Fly secrets only expose names) so a few of
+# these can be VALUE-checked too — see VALUE_CHECKS below.
 TOML_OR_SECRETS=(
   LOOP_PHASE_1_ONLY
   LOOP_AUTH_NATIVE_ENABLED
@@ -74,6 +75,23 @@ TOML_OR_SECRETS=(
   LOOP_STELLAR_USDC_FLOOR_STROOPS
   LOOP_ENV
 )
+
+# Vars where we know the canonical Tranche-1 VALUE and want to flag
+# drift, not just presence. KEY=VALUE pairs. The local boot test on
+# 2026-05-06 surfaced the `EMAIL_PROVIDER=resend` gate (boot refuses
+# `console` in production); these pairs encode that finding so the
+# preflight catches it before deploy instead of after.
+declare -a VALUE_CHECKS=(
+  "EMAIL_PROVIDER=resend"
+  "LOOP_PHASE_1_ONLY=true"
+  "LOOP_AUTH_NATIVE_ENABLED=true"
+  "LOOP_WORKERS_ENABLED=true"
+)
+
+# Path to the fly.toml the deploy will use. Hardcoded for the
+# Tranche-1 launch surface; flyctl deploy itself takes the same
+# `--config` path.
+FLY_TOML="apps/backend/fly.toml"
 
 echo "Pre-flight: checking $APP for Tranche-1 secret coverage…"
 echo
@@ -99,6 +117,40 @@ contains() {
   printf '%s\n' "$PRESENT" | grep -qx -- "$needle"
 }
 
+# Read a single key's value from the fly.toml [env] block. Outputs the
+# raw string (without quotes) on stdout, or empty string if the key
+# isn't set. Naive parser sufficient for our [env] block which is
+# strictly KEY = "VALUE" lines — no nested tables, no multi-line
+# strings. Anchors on `^[env]$` and stops at the next `^[` line.
+toml_env_value() {
+  local key="$1"
+  if [ ! -f "$FLY_TOML" ]; then
+    return 0
+  fi
+  awk -v k="$key" '
+    /^\[env\][[:space:]]*$/ { in_env = 1; next }
+    in_env && /^\[/        { in_env = 0 }
+    in_env {
+      # Match `  KEY = "VALUE"` or `KEY = "VALUE"` (any whitespace).
+      if (match($0, "^[[:space:]]*" k "[[:space:]]*=[[:space:]]*\"([^\"]*)\"")) {
+        print substr($0, RSTART, RLENGTH)
+        exit
+      }
+    }
+  ' "$FLY_TOML" \
+    | sed -E 's/^[^"]*"([^"]*)"$/\1/'
+}
+
+# Returns 0 if `key` is set as a Fly secret OR in fly.toml [env]
+# (regardless of value). Tells the caller "this key is configured
+# somewhere"; the value-side check is a separate step.
+key_set_anywhere() {
+  local key="$1"
+  if contains "$key"; then return 0; fi
+  if [ -n "$(toml_env_value "$key")" ]; then return 0; fi
+  return 1
+}
+
 MISSING_REQUIRED=()
 PRESENT_REQUIRED=()
 for key in "${REQUIRED[@]}"; do
@@ -120,13 +172,40 @@ for key in "${RECOMMENDED[@]}"; do
 done
 
 MISSING_TOML=()
-PRESENT_TOML=()
+PRESENT_TOML=()      # in Fly secrets
+PRESENT_TOML_FILE=() # in fly.toml [env] only
 for key in "${TOML_OR_SECRETS[@]}"; do
   if contains "$key"; then
     PRESENT_TOML+=("$key")
+  elif [ -n "$(toml_env_value "$key")" ]; then
+    PRESENT_TOML_FILE+=("$key=$(toml_env_value "$key")")
   else
     MISSING_TOML+=("$key")
   fi
+done
+
+# Value-side drift check. For each `KEY=EXPECTED` in VALUE_CHECKS,
+# resolve the effective value (fly.toml [env] takes precedence over
+# `[secret-set?]` since we can't read secret values; if the key is a
+# Fly secret only, we report "value-uncheckable"). Drift = effective
+# value differs from expected.
+VALUE_OK=()
+VALUE_DRIFT=()
+VALUE_UNCHECKABLE=()
+for pair in "${VALUE_CHECKS[@]}"; do
+  key="${pair%%=*}"
+  expected="${pair#*=}"
+  toml_val="$(toml_env_value "$key")"
+  if [ -n "$toml_val" ]; then
+    if [ "$toml_val" = "$expected" ]; then
+      VALUE_OK+=("$key=$toml_val")
+    else
+      VALUE_DRIFT+=("$key=$toml_val (expected $expected)")
+    fi
+  elif contains "$key"; then
+    VALUE_UNCHECKABLE+=("$key (in Fly secrets — flyctl can't read values; verify manually)")
+  fi
+  # Absent entirely is already reported by the TOML_OR_SECRETS loop.
 done
 
 echo "── REQUIRED secrets (boot-time hard requirements) ─────────────────"
@@ -147,13 +226,27 @@ if [ ${#MISSING_RECOMMENDED[@]} -gt 0 ]; then
 fi
 echo
 
-echo "── TOML-or-secrets (may be in fly.toml [env] instead) ─────────────"
-echo "  These can ride in fly.toml [env] OR Fly secrets; check both."
+echo "── TOML-or-secrets (Fly secrets OR fly.toml [env]) ────────────────"
 if [ ${#PRESENT_TOML[@]} -gt 0 ]; then
   printf '  ✓ %s (in Fly secrets)\n' "${PRESENT_TOML[@]}"
 fi
+if [ ${#PRESENT_TOML_FILE[@]} -gt 0 ]; then
+  printf '  ✓ %s (in fly.toml [env])\n' "${PRESENT_TOML_FILE[@]}"
+fi
 if [ ${#MISSING_TOML[@]} -gt 0 ]; then
-  printf '  ? %s (not in Fly secrets — verify fly.toml [env] sets it)\n' "${MISSING_TOML[@]}"
+  printf '  ? %s (absent from Fly secrets AND fly.toml [env])\n' "${MISSING_TOML[@]}"
+fi
+echo
+
+echo "── VALUE checks (drift between fly.toml and Tranche-1 expected) ───"
+if [ ${#VALUE_OK[@]} -gt 0 ]; then
+  printf '  ✓ %s\n' "${VALUE_OK[@]}"
+fi
+if [ ${#VALUE_UNCHECKABLE[@]} -gt 0 ]; then
+  printf '  ? %s\n' "${VALUE_UNCHECKABLE[@]}"
+fi
+if [ ${#VALUE_DRIFT[@]} -gt 0 ]; then
+  printf '  ✗ %s\n' "${VALUE_DRIFT[@]}"
 fi
 echo
 
@@ -164,6 +257,13 @@ if [ ${#MISSING_REQUIRED[@]} -gt 0 ]; then
   exit 1
 fi
 
-echo "PASS: all ${#REQUIRED[@]} required secrets present. Safe to:"
+if [ ${#VALUE_DRIFT[@]} -gt 0 ]; then
+  echo "FAIL: ${#VALUE_DRIFT[@]} fly.toml value(s) drift from Tranche-1 expected:"
+  printf '  - %s\n' "${VALUE_DRIFT[@]}"
+  echo "Update apps/backend/fly.toml [env] (or override via secret) and re-run."
+  exit 1
+fi
+
+echo "PASS: all ${#REQUIRED[@]} required secrets present and ${#VALUE_OK[@]}/${#VALUE_CHECKS[@]} fly.toml values match expected. Safe to:"
 echo "  flyctl deploy -a $APP --config apps/backend/fly.toml"
 exit 0
