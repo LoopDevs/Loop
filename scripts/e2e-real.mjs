@@ -1,39 +1,75 @@
 #!/usr/bin/env node
 /**
- * Real end-to-end purchase workflow.
+ * Real end-to-end Tranche-1 purchase workflow.
  *
- * Talks to a running backend (default http://localhost:8080) which itself
- * talks to the real CTX upstream. Drives the full flow:
+ * Drives the loop-native purchase chain end-to-end against a running
+ * backend that is itself talking to real CTX upstream:
  *
- *   1. Refresh an access token from CTX_TEST_REFRESH_TOKEN
- *   2. Pick a merchant from /api/merchants
- *   3. Create an order via POST /api/orders
- *   4. Pay the order from the test Stellar wallet
- *   5. Poll GET /api/orders/:id until status === 'completed' or timeout
+ *   1. Refresh a Loop-native access token from E2E_REFRESH_TOKEN
+ *   2. Pick a merchant — defaults to Aerie ($0.01 minimum, USD)
+ *   3. POST /api/orders/loop with the chosen amount + payment method
+ *   4. Pay the deposit address from the test Stellar wallet (XLM or USDC)
+ *   5. Poll GET /api/orders/loop/:id until state='fulfilled' or timeout
  *
- * Required env:
- *   CTX_TEST_REFRESH_TOKEN   — upstream refresh token for the test account
- *   STELLAR_TEST_SECRET_KEY  — secret key (S...) of the funded test wallet
+ * Loop is merchant of record (ADR 010): the user pays Loop's deposit
+ * address; Loop's payment-watcher detects the on-chain credit, marks
+ * the order paid, the procurement-worker pays CTX in XLM, and CTX
+ * returns the gift-card code which Loop hands back to the user.
+ *
+ * The legacy CTX-proxy `POST /api/orders` flow is bootstrap-only and
+ * is no longer exercised by this script — Tranche-1 onward is always
+ * via the Loop-native path. The CTX-proxy endpoints still exist in
+ * the backend for back-compat with old clients, but acceptance tests
+ * target what users actually exercise.
+ *
+ * Backend prerequisites (env on the backend, not this script):
+ *   LOOP_AUTH_NATIVE_ENABLED=true       (Loop mints HS256 JWTs)
+ *   LOOP_WORKERS_ENABLED=true            (payment-watcher + procurement)
+ *   LOOP_STELLAR_DEPOSIT_ADDRESS=G…       (where users send XLM/USDC)
+ *   LOOP_STELLAR_OPERATOR_SECRET=S…       (procurement-worker signing key)
+ *   LOOP_STELLAR_USDC_ISSUER=GA5ZSEJ…     (Centre USDC mainnet)
+ *   DATABASE_URL=postgres://…             (orders ledger)
+ *
+ * Required env (this script):
+ *   E2E_REFRESH_TOKEN        — Loop-native refresh token for the test
+ *                              account. Bootstrap: complete one OTP
+ *                              flow manually (request OTP → verify),
+ *                              capture the refresh token from the
+ *                              backend response, store as a repo
+ *                              secret. Both Loop-native and CTX-proxy
+ *                              rotate refresh tokens every call —
+ *                              persist the new value via
+ *                              NEW_REFRESH_TOKEN_OUT.
+ *   STELLAR_TEST_SECRET_KEY  — secret key (S...) of the funded test
+ *                              wallet. Mainnet wallet for real-money
+ *                              tests; per `reference_test_wallet.md`.
  *
  * Optional env:
- *   BACKEND_URL              — defaults to http://localhost:8080
- *   E2E_MERCHANT_ID          — merchant id to buy from; defaults to first
- *                              min-max merchant in the catalog
- *   E2E_AMOUNT_USD           — USD amount to purchase. Unset or empty
- *                              means "buy each candidate merchant's `min`
- *                              denomination" (the cheapest possible card).
- *                              The GitHub workflow passes the manual-input
- *                              value through as '' when blank, which the
- *                              script treats the same as unset.
- *   POLL_TIMEOUT_MS          — total poll budget; defaults to 600000 (10m)
- *   POLL_INTERVAL_MS         — poll cadence; defaults to 5000 (5s)
- *   NEW_REFRESH_TOKEN_OUT    — path to write the rotated refresh token to.
- *                              CTX rotates on every /refresh-token call, so
- *                              the workflow must persist the new value back
- *                              to the CTX_TEST_REFRESH_TOKEN secret before
- *                              the next run. Written immediately after the
- *                              refresh succeeds so a failure later in the
- *                              flow still allows the rotation step to run.
+ *   LOOP_E2E_PAYMENT_METHOD  — 'xlm' (default) or 'usdc'. USDC requires
+ *                              the test wallet to hold a USDC trustline +
+ *                              balance against LOOP_STELLAR_USDC_ISSUER.
+ *   LOOP_E2E_CURRENCY        — 'USD' (default) | 'GBP' | 'EUR'. Pins
+ *                              the order's charge currency. Aerie is
+ *                              USD-only so leave as USD when using the
+ *                              default merchant.
+ *   BACKEND_URL              — default http://localhost:8080. Point at
+ *                              api.loopfinance.io for the deployed run.
+ *   E2E_MERCHANT_ID          — default Aerie. Override for other merchants
+ *                              (must be a min-max merchant whose currency
+ *                              matches LOOP_E2E_CURRENCY).
+ *   E2E_AMOUNT_USD           — default 0.02 (2 cents — Aerie min is $0.01,
+ *                              the cents-precision floor of the order body
+ *                              is enforced server-side). Empty/unset
+ *                              defaults to 0.02. Variable name kept for
+ *                              workflow compatibility — applies to any
+ *                              currency, not just USD.
+ *   POLL_TIMEOUT_MS          — total poll budget; default 600000 (10m)
+ *   POLL_INTERVAL_MS         — poll cadence; default 5000 (5s)
+ *   NEW_REFRESH_TOKEN_OUT    — path to write the rotated refresh token
+ *                              to. The workflow rotates the repo secret
+ *                              from this file regardless of whether the
+ *                              rest of the flow succeeds — the old
+ *                              token is already dead by then.
  *
  * Exit codes:
  *   0 on fulfilment, non-zero otherwise.
@@ -52,22 +88,41 @@ import {
 
 const BACKEND_URL = process.env.BACKEND_URL ?? 'http://localhost:8080';
 const HORIZON_URL = process.env.HORIZON_URL ?? 'https://horizon.stellar.org';
-const REFRESH_TOKEN = process.env.CTX_TEST_REFRESH_TOKEN;
+// E2E_REFRESH_TOKEN is the canonical name; CTX_TEST_REFRESH_TOKEN is kept
+// as an alias only so the existing GitHub workflow's `secrets.CTX_TEST_…`
+// reference doesn't break before it's renamed in the workflow file.
+const REFRESH_TOKEN =
+  process.env.E2E_REFRESH_TOKEN ?? process.env.CTX_TEST_REFRESH_TOKEN;
 const WALLET_SECRET = process.env.STELLAR_TEST_SECRET_KEY;
+const PAYMENT_METHOD = (process.env.LOOP_E2E_PAYMENT_METHOD ?? 'xlm').toLowerCase();
+const CURRENCY = (process.env.LOOP_E2E_CURRENCY ?? 'USD').toUpperCase();
 const MERCHANT_ID = process.env.E2E_MERCHANT_ID;
-// Unset (undefined OR empty string) means "use each candidate merchant's own
-// `min` denomination" — buys the cheapest possible card. The workflow passes
-// E2E_AMOUNT_USD: '' when the manual input is blank, so treat '' as unset.
-const AMOUNT_USD =
+const AMOUNT =
   process.env.E2E_AMOUNT_USD && process.env.E2E_AMOUNT_USD.trim() !== ''
-    ? process.env.E2E_AMOUNT_USD
-    : undefined;
+    ? Number(process.env.E2E_AMOUNT_USD)
+    : 0.02;
 const POLL_TIMEOUT_MS = Number(process.env.POLL_TIMEOUT_MS ?? 600_000);
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 5_000);
 const NEW_REFRESH_TOKEN_OUT = process.env.NEW_REFRESH_TOKEN_OUT;
 
+// Aerie — $0.01 min, USD, 2% savings. Cheapest documented merchant on
+// the deployed catalog. Default so the cost is ~2 cents per run.
+const AERIE_MERCHANT_ID = 'a8f90501-c10a-4a14-adde-9a045b7ff1c6';
+
+if (!['xlm', 'usdc'].includes(PAYMENT_METHOD)) {
+  console.error(`Invalid LOOP_E2E_PAYMENT_METHOD: ${PAYMENT_METHOD}. Use 'xlm' or 'usdc'.`);
+  process.exit(2);
+}
+if (!['USD', 'GBP', 'EUR'].includes(CURRENCY)) {
+  console.error(`Invalid LOOP_E2E_CURRENCY: ${CURRENCY}. Use 'USD' | 'GBP' | 'EUR'.`);
+  process.exit(2);
+}
+if (!Number.isFinite(AMOUNT) || AMOUNT <= 0) {
+  console.error(`Invalid amount: ${AMOUNT}. Must be a positive number.`);
+  process.exit(2);
+}
 if (!REFRESH_TOKEN || !WALLET_SECRET) {
-  console.error('Missing CTX_TEST_REFRESH_TOKEN or STELLAR_TEST_SECRET_KEY');
+  console.error('Missing E2E_REFRESH_TOKEN or STELLAR_TEST_SECRET_KEY');
   process.exit(2);
 }
 
@@ -81,9 +136,6 @@ async function api(path, { method = 'GET', body, accessToken } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (accessToken) {
     headers.Authorization = `Bearer ${accessToken}`;
-    // CTX binds the access token to the clientId used at auth. Omitting
-    // X-Client-Id on authenticated requests causes upstream to 401 even
-    // though the bearer token is otherwise valid.
     headers['X-Client-Id'] = 'loopweb';
   }
   const res = await fetch(`${BACKEND_URL}${path}`, {
@@ -107,129 +159,99 @@ async function api(path, { method = 'GET', body, accessToken } = {}) {
 }
 
 async function refreshAccessToken() {
-  log('Refreshing access token via backend');
+  log('Refreshing Loop-native access token via backend');
   const data = await api('/api/auth/refresh', {
     method: 'POST',
     body: { refreshToken: REFRESH_TOKEN, platform: 'web' },
   });
   if (!data?.accessToken) throw new Error('No accessToken in refresh response');
 
-  // CTX rotates refresh tokens on every /refresh-token call — the token we
-  // just used is now dead. Persist the new one to disk IMMEDIATELY so the
-  // workflow can rotate the repo secret even if a later step fails. If
-  // upstream ever stops returning a new token, skip silently (the old one
-  // is still valid).
+  // Loop-native and CTX-proxy both rotate refresh tokens on every call.
+  // Persist the new one to disk IMMEDIATELY so the workflow can rotate
+  // the repo secret even if a later step fails.
   if (NEW_REFRESH_TOKEN_OUT !== undefined && NEW_REFRESH_TOKEN_OUT !== '') {
     if (data.refreshToken) {
       writeFileSync(NEW_REFRESH_TOKEN_OUT, data.refreshToken, { mode: 0o600 });
       log(`Wrote rotated refresh token to ${NEW_REFRESH_TOKEN_OUT}`);
     } else {
-      log('Upstream did not return a new refresh token — skipping rotation');
+      log('Backend did not return a new refresh token — skipping rotation');
     }
   }
 
   return data.accessToken;
 }
 
-/**
- * Returns candidate merchants to try, in priority order. If E2E_MERCHANT_ID
- * is set we trust it and return only that one.
- *
- * Otherwise: min-max merchants whose range covers AMOUNT_USD and that report
- * `enabled: true`. Even enabled-in-cache merchants can report "merchant
- * disabled" at order time (CTX's order API enforces stricter state than
- * the catalog), so the caller retries down the list.
- */
-async function pickMerchantCandidates(accessToken) {
+async function pickMerchant() {
   if (MERCHANT_ID) {
     log(`Using merchant from env: ${MERCHANT_ID}`);
-    const amount = AMOUNT_USD !== undefined ? Number(AMOUNT_USD) : undefined;
-    return [{ id: MERCHANT_ID, name: `(env override ${MERCHANT_ID})`, amount }];
+    return { id: MERCHANT_ID, name: `(env override ${MERCHANT_ID})`, amount: AMOUNT };
   }
-  // GET /api/merchants paginates (max 100 per page) — fetch every page so
-  // the candidate list covers the whole catalog, not just the first 20.
-  const merchants = [];
-  for (let page = 1; ; page++) {
-    const data = await api(`/api/merchants?page=${page}&limit=100`, { accessToken });
-    merchants.push(...(data?.merchants ?? []));
-    if (!data?.pagination?.hasNext) break;
-  }
-  // If AMOUNT_USD is set, require the merchant's range to cover it. Otherwise
-  // buy at the merchant's own minimum — cheapest possible card per run.
-  const filtered = merchants.filter((m) => {
-    if (m?.enabled !== true) return false;
-    if (m?.denominations?.type !== 'min-max') return false;
-    if (AMOUNT_USD !== undefined) {
-      const amount = Number(AMOUNT_USD);
-      return (m.denominations.min ?? 0) <= amount && (m.denominations.max ?? Infinity) >= amount;
-    }
-    return m.denominations.min !== undefined && m.denominations.min > 0;
-  });
-  if (filtered.length === 0) {
-    throw new Error(
-      `No enabled min-max merchant${AMOUNT_USD !== undefined ? ` covers $${AMOUNT_USD}` : ''} (of ${merchants.length} merchants returned)`,
-    );
-  }
-  // When buying at min, try the cheapest merchants first so a wallet with
-  // limited funds goes further.
-  const sorted =
-    AMOUNT_USD !== undefined
-      ? filtered
-      : [...filtered].sort((a, b) => (a.denominations.min ?? 0) - (b.denominations.min ?? 0));
-  log(`Found ${sorted.length} candidate merchants; first few:`, {
-    merchants: sorted.slice(0, 5).map((m) => `${m.name} (min $${m.denominations.min})`),
-  });
-  return sorted.map((m) => ({
-    id: m.id,
-    name: m.name,
-    amount: AMOUNT_USD !== undefined ? Number(AMOUNT_USD) : m.denominations.min,
-  }));
+  log(`Default: Aerie ${AERIE_MERCHANT_ID} at ${CURRENCY} ${AMOUNT}`);
+  return { id: AERIE_MERCHANT_ID, name: 'Aerie (default)', amount: AMOUNT };
 }
 
-/**
- * Tries each candidate in order; returns the first order that's successfully
- * created. CTX occasionally flags merchants as disabled at order time even
- * when they look fine in the catalog, so we treat "merchant disabled" and
- * any 502 as retry-worthy rather than a hard failure.
- */
-async function createOrderWithFallback(accessToken, candidates) {
-  const errors = [];
-  for (const candidate of candidates.slice(0, 10)) {
-    log(`Creating order for ${candidate.name} (${candidate.id}), $${candidate.amount}`);
-    try {
-      const order = await api('/api/orders', {
-        method: 'POST',
-        accessToken,
-        body: { merchantId: candidate.id, amount: candidate.amount },
-      });
-      log('Order created', {
-        orderId: order.orderId,
-        paymentAddress: order.paymentAddress,
-        xlmAmount: order.xlmAmount,
-        memo: order.memo,
-      });
-      return order;
-    } catch (err) {
-      const msg = err?.message ?? String(err);
-      errors.push(`${candidate.name}: ${msg}`);
-      // Retry on 502 UPSTREAM_ERROR (covers "merchant disabled" and other
-      // upstream rejections). Any other error — 401, 400 validation, etc. —
-      // is a problem with our request, not the specific merchant.
-      if (!/→ 502:/.test(msg)) throw err;
-      log(`Order attempt failed, trying next merchant`);
-    }
+async function createLoopOrder(accessToken, candidate) {
+  // Major-unit float → minor-unit integer. Order body's `amountMinor`
+  // is a bigint on the wire, but JS Number safely covers up to ~$9e13
+  // — overkill for our $0.02 default. Math.round handles the IEEE-754
+  // 0.02 → 0.020000000000000004 case so the integer is exact.
+  const amountMinor = Math.round(candidate.amount * 100);
+  if (amountMinor <= 0) {
+    throw new Error(`Invalid amountMinor=${amountMinor} for candidate ${candidate.name}`);
   }
-  throw new Error(`All ${errors.length} merchant candidates failed:\n  ${errors.join('\n  ')}`);
+  log(`Creating loop-native order for ${candidate.name} (${candidate.id}), ${CURRENCY} ${candidate.amount} (paymentMethod=${PAYMENT_METHOD})`);
+  const order = await api('/api/orders/loop', {
+    method: 'POST',
+    accessToken,
+    body: {
+      merchantId: candidate.id,
+      amountMinor,
+      currency: CURRENCY,
+      paymentMethod: PAYMENT_METHOD,
+    },
+  });
+  if (!order?.payment?.stellarAddress || !order?.payment?.memo) {
+    throw new Error(`Unexpected loop-native order response shape: ${JSON.stringify(order)}`);
+  }
+  log('Loop-native order created', {
+    orderId: order.orderId,
+    method: order.payment.method,
+    stellarAddress: order.payment.stellarAddress,
+    memo: order.payment.memo,
+    assetAmount: order.payment.assetAmount,
+  });
+  return {
+    orderId: order.orderId,
+    paymentAddress: order.payment.stellarAddress,
+    asset: order.payment.method,
+    assetCode: order.payment.assetCode,
+    assetIssuer: order.payment.assetIssuer,
+    assetAmount: order.payment.assetAmount,
+    memo: order.payment.memo,
+  };
 }
 
-async function payOrder({ paymentAddress, xlmAmount, memo }) {
+async function payOrder({ paymentAddress, asset, assetCode, assetIssuer, assetAmount, memo }) {
   const server = new Horizon.Server(HORIZON_URL);
   const kp = Keypair.fromSecret(WALLET_SECRET);
-  log(`Paying ${xlmAmount} XLM from ${kp.publicKey()} to ${paymentAddress} (memo=${memo})`);
+
+  let stellarAsset;
+  if (asset === 'xlm') {
+    stellarAsset = Asset.native();
+  } else if (asset === 'usdc') {
+    const issuer = assetIssuer || 'GA5ZSEJYB37JRC5AVCIA7VBRVRWWZBMXWXZAHYBRQHGSZHGCASCHV3VW';
+    stellarAsset = new Asset(assetCode || 'USDC', issuer);
+  } else if (asset === 'loop_asset') {
+    if (!assetCode || !assetIssuer) {
+      throw new Error(`loop_asset payment missing assetCode/assetIssuer in order response`);
+    }
+    stellarAsset = new Asset(assetCode, assetIssuer);
+  } else {
+    throw new Error(`Unsupported payment asset: ${asset}`);
+  }
+
+  log(`Paying ${assetAmount} ${stellarAsset.code} from ${kp.publicKey()} to ${paymentAddress} (memo=${memo})`);
   const account = await server.loadAccount(kp.publicKey());
-  // Fetch the current network fee stats and use the p70 fee so we're above
-  // whatever is currently required — a static 100 stroops (the historic
-  // minimum) has been rejected as tx_insufficient_fee in the past.
   let fee = '1000';
   try {
     const stats = await server.feeStats();
@@ -244,8 +266,8 @@ async function payOrder({ paymentAddress, xlmAmount, memo }) {
     .addOperation(
       Operation.payment({
         destination: paymentAddress,
-        asset: Asset.native(),
-        amount: xlmAmount,
+        asset: stellarAsset,
+        amount: assetAmount,
       }),
     )
     .addMemo(new Memo('text', memo))
@@ -257,9 +279,6 @@ async function payOrder({ paymentAddress, xlmAmount, memo }) {
     log(`Stellar tx submitted: ${result.hash}`);
     return result.hash;
   } catch (err) {
-    // Horizon returns the useful detail in response.data.extras.result_codes;
-    // the default AxiosError toString is just "Request failed with status
-    // code 400" which tells us nothing.
     const codes = err?.response?.data?.extras?.result_codes;
     const detail = codes ? JSON.stringify(codes) : (err?.response?.data ?? err?.message);
     throw new Error(
@@ -269,38 +288,46 @@ async function payOrder({ paymentAddress, xlmAmount, memo }) {
 }
 
 async function pollForFulfilment(accessToken, orderId) {
+  // State machine: pending_payment → paid → procuring → fulfilled.
+  // Terminal: expired (24h sweep). No `failed` state on this surface
+  // — procurement-side failures keep the order in `paid`/`procuring`
+  // and surface in admin only. The 10-minute poll budget covers the
+  // expected end-to-end latency: payment-watcher detection (~10–30s),
+  // procurement worker (~30–60s), CTX-side issuance (≤60s).
   const deadline = Date.now() + POLL_TIMEOUT_MS;
-  let lastStatus = '';
+  let lastState = '';
   while (Date.now() < deadline) {
-    const data = await api(`/api/orders/${orderId}`, { accessToken });
-    const status = data?.order?.status;
-    if (status !== lastStatus) {
-      log(`Order status: ${status}`);
-      lastStatus = status;
+    const data = await api(`/api/orders/loop/${orderId}`, { accessToken });
+    const state = data?.order?.state;
+    if (state !== lastState) {
+      log(`Order state: ${state}`);
+      lastState = state;
     }
-    if (status === 'completed') {
+    if (state === 'fulfilled') {
       log('Order fulfilled', {
-        redeemType: data.order.redeemType,
         hasRedeemUrl: Boolean(data.order.redeemUrl),
-        hasChallenge: Boolean(data.order.redeemChallengeCode),
+        hasRedeemCode: Boolean(data.order.redeemCode),
+        hasRedeemPin: Boolean(data.order.redeemPin),
+        ctxOrderId: data.order.ctxOrderId,
       });
       return data.order;
     }
-    if (status === 'failed' || status === 'expired') {
-      throw new Error(`Order reached terminal state: ${status}`);
+    if (state === 'expired') {
+      throw new Error(`Order reached terminal state: ${state}`);
     }
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
-  throw new Error(`Order not fulfilled within ${POLL_TIMEOUT_MS}ms (last status: ${lastStatus})`);
+  throw new Error(`Order not fulfilled within ${POLL_TIMEOUT_MS}ms (last state: ${lastState})`);
 }
 
 async function main() {
+  log(`Currency: ${CURRENCY} | Payment: ${PAYMENT_METHOD} | Backend: ${BACKEND_URL}`);
   const accessToken = await refreshAccessToken();
-  const candidates = await pickMerchantCandidates(accessToken);
-  const order = await createOrderWithFallback(accessToken, candidates);
+  const candidate = await pickMerchant();
+  const order = await createLoopOrder(accessToken, candidate);
   await payOrder(order);
   await pollForFulfilment(accessToken, order.orderId);
-  log('E2E real purchase flow succeeded');
+  log('E2E real Tranche-1 purchase flow succeeded');
 }
 
 main().catch((err) => {

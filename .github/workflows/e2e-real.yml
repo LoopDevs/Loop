@@ -1,18 +1,37 @@
-name: E2E (real CTX + wallet)
+name: E2E (real Tranche-1 purchase + wallet)
 
-# Manually triggered only — this spends real XLM and creates a real order
-# against the upstream CTX sandbox/production. Never run automatically.
+# Manually triggered only — this spends real XLM (or USDC) and creates
+# a real order against the upstream CTX sandbox/production via the
+# loop-native order surface (POST /api/orders/loop). Never run
+# automatically. Default per run: ~$0.02 USD on Aerie + Stellar fees.
 on:
   workflow_dispatch:
     inputs:
       amount_usd:
-        description: 'USD amount to purchase (blank = use merchant min — cheapest card)'
+        description: 'Face-value amount (blank = 0.02 — default Aerie minimum)'
         required: false
         default: ''
       merchant_id:
-        description: 'Override merchant id (blank = first min-max in catalog)'
+        description: 'Override merchant id (blank = Aerie a8f90501-…)'
         required: false
         default: ''
+      payment_method:
+        description: 'Stellar asset to pay with'
+        required: false
+        type: choice
+        default: 'xlm'
+        options:
+          - xlm
+          - usdc
+      currency:
+        description: 'Order charge currency (must match merchant)'
+        required: false
+        type: choice
+        default: 'USD'
+        options:
+          - USD
+          - GBP
+          - EUR
 
 permissions:
   contents: read
@@ -23,14 +42,12 @@ concurrency:
 
 jobs:
   run:
-    name: Full purchase flow
+    name: Tranche-1 loop-native purchase flow
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
-      # /health probes the DB and returns 503 when unreachable. The
-      # script under scripts/e2e-real.mjs only exercises the CTX-proxy
-      # purchase flow (no DB-backed endpoints), but wait-on /health
-      # still has to clear, so a real postgres has to be up.
+      # Backend's payment-watcher / procurement-worker / order ledger
+      # all need a real postgres. Boot one in the runner.
       postgres:
         image: postgres:16
         env:
@@ -58,13 +75,10 @@ jobs:
           # tsx/vite-backed tooling still works on the runner.
           npm ci --ignore-scripts
           npm rebuild esbuild
-      # The `dev` script uses `tsx watch --env-file=.env`, which would error in
-      # CI since no `.env` exists. Run tsx directly against the source so only
-      # the workflow `env:` block applies. Redirect stdout+stderr to a file so
-      # a later "Dump backend log" step can surface upstream errors — backend
-      # logs are the only place we see the CTX status/body when the script
-      # hits a 502 UPSTREAM_ERROR.
-      - name: Start backend against real CTX
+      # Run a real backend in loop-native mode against real CTX. Logs
+      # to a file so a later "Dump backend log" step can surface
+      # upstream errors when the script hits a 502 UPSTREAM_ERROR.
+      - name: Start backend (loop-native, real CTX)
         run: |
           mkdir -p "${{ runner.temp }}"
           nohup npm exec -w @loop/backend -- tsx src/index.ts \
@@ -76,38 +90,51 @@ jobs:
           LOG_LEVEL: info
           GIFT_CARD_API_BASE_URL: https://spend.ctx.com
           INCLUDE_DISABLED_MERCHANTS: 'false'
-          # A4-118: env.ts requires DATABASE_URL even when
-          # NODE_ENV=test. The script under scripts/e2e-real.mjs only
-          # exercises the CTX-proxy purchase flow (no DB-backed
-          # endpoints), but /health probes the DB and returns 503 when
-          # the connection fails — wait-on never clears. Point at the
-          # postgres service this job provisions (matching the
-          # `test-e2e` job pattern).
           DATABASE_URL: 'postgres://loop:loop@127.0.0.1:5433/loop_test'
+          # Tranche-1 backend env. Without these, POST /api/orders/loop
+          # is gated off (loopOrdersEnabled=false in /api/config) and
+          # the script's order-create call will 503/501.
+          LOOP_AUTH_NATIVE_ENABLED: 'true'
+          LOOP_WORKERS_ENABLED: 'true'
+          LOOP_PHASE_1_ONLY: 'true'
+          LOOP_JWT_SIGNING_KEY: ${{ secrets.LOOP_JWT_SIGNING_KEY }}
+          LOOP_STELLAR_DEPOSIT_ADDRESS: ${{ secrets.LOOP_STELLAR_DEPOSIT_ADDRESS }}
+          LOOP_STELLAR_OPERATOR_SECRET: ${{ secrets.LOOP_STELLAR_OPERATOR_SECRET }}
+          LOOP_STELLAR_USDC_ISSUER: 'GA5ZSEJYB37JRC5AVCIA7VBRVRWWZBMXWXZAHYBRQHGSZHGCASCHV3VW'
+          # Email OTP isn't exercised by this script (we refresh from a
+          # cached refresh token), but env.ts validates EMAIL_PROVIDER
+          # is set when LOOP_AUTH_NATIVE_ENABLED=true. Use a no-op
+          # provider for tests; the script bypasses the email path.
+          EMAIL_PROVIDER: 'console'
+          EMAIL_FROM_ADDRESS: 'noreply@loopfinance.io'
+          EMAIL_FROM_NAME: 'Loop'
       - name: Wait for backend
         run: npx wait-on http://localhost:8080/health --timeout 60000
-      - name: Run real purchase workflow
+      - name: Run real Tranche-1 purchase workflow
         run: node scripts/e2e-real.mjs
         env:
           BACKEND_URL: http://localhost:8080
-          CTX_TEST_REFRESH_TOKEN: ${{ secrets.CTX_TEST_REFRESH_TOKEN }}
+          E2E_REFRESH_TOKEN: ${{ secrets.LOOP_E2E_REFRESH_TOKEN }}
           STELLAR_TEST_SECRET_KEY: ${{ secrets.STELLAR_TEST_SECRET_KEY }}
           E2E_AMOUNT_USD: ${{ inputs.amount_usd }}
           E2E_MERCHANT_ID: ${{ inputs.merchant_id }}
-          # Script writes the rotated refresh token here immediately after
-          # the refresh call succeeds. The next step persists it back to
-          # the repo secret regardless of whether the rest of the flow
-          # passes — the old token is already dead.
+          LOOP_E2E_PAYMENT_METHOD: ${{ inputs.payment_method }}
+          LOOP_E2E_CURRENCY: ${{ inputs.currency }}
+          # Script writes the rotated refresh token here immediately
+          # after the refresh call succeeds. The next step persists it
+          # back to the repo secret regardless of whether the rest of
+          # the flow passes — the old token is already dead.
           NEW_REFRESH_TOKEN_OUT: ${{ runner.temp }}/new-refresh-token.txt
-      # CTX rotates refresh tokens on every call to /refresh-token, so the
-      # secret MUST be updated after each run or the next workflow run will
-      # 401 on the very first request. `if: always()` ensures we persist
-      # the new token even if a later step (payment, poll, etc.) fails.
+      # Loop-native rotates refresh tokens on every call to /refresh-token,
+      # so the secret MUST be updated after each run or the next workflow
+      # run will 401 on the very first request. `if: always()` ensures we
+      # persist the new token even if a later step (payment, poll, etc.)
+      # fails.
       #
       # Requires a fine-grained PAT (`GH_SECRETS_PAT`) scoped to this repo
       # with "Secrets: Read and write" permission — the default GITHUB_TOKEN
       # has no way to write secrets.
-      - name: Rotate CTX_TEST_REFRESH_TOKEN secret
+      - name: Rotate LOOP_E2E_REFRESH_TOKEN secret
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GH_SECRETS_PAT }}
@@ -122,15 +149,13 @@ jobs:
               "The refresh token used by this run is now invalid."
             exit 1
           fi
-          # Pipe the token via stdin so it's never visible in `ps` or logs.
-          # The runner's gh CLI doesn't support --body-file; stdin is the
-          # documented alternative ("reads from standard input if not
-          # specified").
-          gh secret set CTX_TEST_REFRESH_TOKEN \
+          # Pipe the token via stdin so it's never visible in `ps` or
+          # logs. gh CLI reads from stdin when --body-file is omitted.
+          gh secret set LOOP_E2E_REFRESH_TOKEN \
             --repo "$GITHUB_REPOSITORY" \
             < "$TOKEN_FILE"
           rm -f "$TOKEN_FILE"
-          echo "Rotated CTX_TEST_REFRESH_TOKEN."
+          echo "Rotated LOOP_E2E_REFRESH_TOKEN."
       - name: Dump backend log
         if: always()
         run: |
