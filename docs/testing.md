@@ -137,12 +137,15 @@ the deployed catalog.
 Repository secrets required:
 
 - `LOOP_E2E_REFRESH_TOKEN` — Loop-native refresh token for the test
-  account. Bootstrap once: complete a manual OTP flow against the
-  backend (`POST /api/auth/request-otp` → `POST /api/auth/verify-otp`),
-  capture the `refreshToken` from the verify-otp response, store as
-  this secret. Loop-native rotates the token on every `/refresh-token`
-  call, so the workflow rewrites the secret after each run via
-  `GH_SECRETS_PAT`.
+  account. Bootstrap once via
+  `./scripts/bootstrap-e2e-refresh-token.sh --backend
+https://api.loopfinance.io --email reviewer@loopfinance.io
+--gh-secret`. The script drives `POST /api/auth/request-otp` →
+  prompts for the OTP from the inbox → `POST /api/auth/verify-otp` →
+  uploads the resulting refresh token to the repo secret via `gh
+secret set`. Loop-native rotates the token on every
+  `/refresh-token` call, so the workflow rewrites the secret after
+  each run via `GH_SECRETS_PAT`.
 - `STELLAR_TEST_SECRET_KEY` — secret key (`S…`) of the funded test
   wallet. Mainnet wallet for real-money tests.
 - `LOOP_JWT_SIGNING_KEY` — Loop-native HS256 signing key the CI backend
