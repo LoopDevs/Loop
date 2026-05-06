@@ -190,6 +190,80 @@ describe('verifyLoopToken', () => {
     }
   });
 
+  it("rejects a token with alg='none' (defence against the classic JWT alg-strip attack)", () => {
+    // Standard alg=none form is `header.payload.` — trailing dot,
+    // empty signature. The empty-part check at the top of
+    // verifyLoopToken catches it before the alg dispatch even runs;
+    // reason comes back as 'malformed'. The pre-Track-A.1 code also
+    // rejected this (via HMAC length-mismatch); A.1 keeps the
+    // protection on a different code path but the outcome is the
+    // same: the forged token is refused.
+    const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
+    const payload = Buffer.from(
+      JSON.stringify({
+        sub: 'u1',
+        email: 'a@b.com',
+        typ: 'access',
+        iat: nowSec,
+        exp: nowSec + 60,
+        iss: 'loop-api',
+        aud: 'loop-clients',
+      }),
+    ).toString('base64url');
+    const forged = `${header}.${payload}.`;
+    const result = verifyLoopToken(forged, 'access');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('malformed');
+  });
+
+  it("rejects a token with alg='none' even if it carries a forged signature", () => {
+    // An attacker who knows the empty-sig path is rejected as
+    // malformed might try alg=none with arbitrary bytes in the
+    // signature slot, hoping to slip past the empty-part check and
+    // land on a path that doesn't verify. Track A.1's alg dispatch
+    // catches this: 'none' is not in the {HS256, RS256} allowlist.
+    const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
+    const payload = Buffer.from(
+      JSON.stringify({
+        sub: 'u1',
+        email: 'a@b.com',
+        typ: 'access',
+        iat: nowSec,
+        exp: nowSec + 60,
+        iss: 'loop-api',
+        aud: 'loop-clients',
+      }),
+    ).toString('base64url');
+    // Non-empty signature → passes the malformed check, hits alg dispatch.
+    const sig = Buffer.alloc(32, 0x00).toString('base64url');
+    const forged = `${header}.${payload}.${sig}`;
+    const result = verifyLoopToken(forged, 'access');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('bad_signature');
+  });
+
+  it('rejects a token with an unknown alg (e.g. ES256, future RS512)', () => {
+    const header = Buffer.from(JSON.stringify({ alg: 'ES256', typ: 'JWT' })).toString('base64url');
+    const payload = Buffer.from(
+      JSON.stringify({
+        sub: 'u1',
+        email: 'a@b.com',
+        typ: 'access',
+        iat: nowSec,
+        exp: nowSec + 60,
+        iss: 'loop-api',
+        aud: 'loop-clients',
+      }),
+    ).toString('base64url');
+    // Signature bytes don't matter — alg dispatch rejects before
+    // signature verification.
+    const sig = Buffer.alloc(32, 0x42).toString('base64url');
+    const forged = `${header}.${payload}.${sig}`;
+    const result = verifyLoopToken(forged, 'access');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('bad_signature');
+  });
+
   it('A2-1600: malformed when a legacy token without iss/aud is verified', () => {
     // Manually-crafted payload representing the pre-fix shape.
     // Signed with the test key so the signature is valid — the
