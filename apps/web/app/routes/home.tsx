@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import type { Route } from './+types/home';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
 import { useAuth } from '~/hooks/use-auth';
+import { useAppConfig } from '~/hooks/use-app-config';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
@@ -42,6 +43,16 @@ function HomeContent(): React.JSX.Element {
   const { isNative } = useNativePlatform();
   const { isAuthenticated } = useAuth();
   const { merchants, isLoading, isError } = useAllMerchants();
+  // Phase 1 (LOOP_PHASE_1_ONLY=true) delivers cashback as instant
+  // discount at order creation — no balance, no on-chain withdraw.
+  // Hero copy below switches between Phase-1 framing ("Save on
+  // every gift card") and Phase-2 framing ("Earn cashback…")
+  // accordingly. Meta tags stay Phase-2-leaning for now — they
+  // drive search-result indexing rather than the in-page
+  // experience, and changing them has SEO implications worth
+  // batching with the eventual marketing-site copy refresh.
+  const { config } = useAppConfig();
+  const phase1Only = config.phase1Only;
   // Bulk cashback-rate map (ADR 011 / 015). One fetch for the whole
   // page — the lookup below is O(1) per card, so both grids share it.
   const { lookup: lookupCashback } = useMerchantsCashbackRatesMap();
@@ -102,17 +113,28 @@ function HomeContent(): React.JSX.Element {
             />
             <div className="absolute inset-0 bg-black/55" />
             <div className="relative z-0 text-center pt-16 pb-12 px-6 sm:pt-24 sm:pb-16 lg:pt-48 lg:pb-24">
-              <h1 className="text-5xl font-bold mb-4">Earn cashback on every gift card</h1>
+              <h1 className="text-5xl font-bold mb-4">
+                {phase1Only ? 'Save on every gift card' : 'Earn cashback on every gift card'}
+              </h1>
               <p className="text-lg md:text-xl text-white/80 max-w-2xl mx-auto">
-                Buy from merchants you already shop at. Every order pays back to your Loop balance —
-                withdraw on-chain whenever you&rsquo;re ready.
+                {phase1Only ? (
+                  <>
+                    Buy from merchants you already shop at. Save up to 15% instantly — pay with XLM
+                    or USDC, redeem online or in-store.
+                  </>
+                ) : (
+                  <>
+                    Buy from merchants you already shop at. Every order pays back to your Loop
+                    balance — withdraw on-chain whenever you&rsquo;re ready.
+                  </>
+                )}
               </p>
               <p className="mt-6">
                 <Link
                   to="/calculator"
                   className="inline-block text-sm font-medium text-white underline decoration-white/40 underline-offset-4 hover:decoration-white"
                 >
-                  Try the cashback calculator →
+                  {phase1Only ? 'Try the savings calculator →' : 'Try the cashback calculator →'}
                 </Link>
               </p>
               <div className="flex flex-row justify-center items-center gap-8 md:gap-16 mt-12 mb-12">
@@ -159,7 +181,7 @@ function HomeContent(): React.JSX.Element {
                       />
                     </svg>
                   }
-                  label="Cashback on every order"
+                  label={phase1Only ? 'Save on every order' : 'Cashback on every order'}
                 />
               </div>
             </div>
