@@ -47,13 +47,33 @@ const HorizonTransaction = z.object({
 const HorizonPayment = z.object({
   id: z.string(),
   paging_token: z.string(),
+  // `type` discriminates the operation variant: `payment` /
+  // `path_payment_strict_receive` / `path_payment_strict_send` /
+  // `create_account` / `account_merge`. Only the first three carry
+  // an `asset_type`; the latter two represent activation/merge XLM
+  // moves with their own field shapes. The downstream watcher gates
+  // on `p.type === 'payment'` (see `isMatchingIncomingPayment`) so
+  // non-payment ops never reach the cashback ledger.
   type: z.string(),
   from: z.string().optional(),
   to: z.string().optional(),
-  asset_type: z.string(),
+  // Optional: `create_account` and `account_merge` records don't
+  // emit it. Prior to this relaxation the schema rejected those
+  // records and threw "Horizon schema drift on /payments", marking
+  // the entire watcher tick failed even though those ops are
+  // harmless. The first-ever payment in the deposit account's
+  // history is the createAccount that activated it — locking the
+  // schema to require `asset_type` made bootstrap impossible.
+  asset_type: z.string().optional(),
   asset_code: z.string().optional(),
   asset_issuer: z.string().optional(),
   amount: z.string().optional(),
+  // create_account-only fields: present when activating the
+  // account. Captured so a future log line or test can introspect
+  // the bootstrap event.
+  starting_balance: z.string().optional(),
+  account: z.string().optional(),
+  funder: z.string().optional(),
   transaction_hash: z.string(),
   transaction_successful: z.boolean().optional(),
   transaction: HorizonTransaction.optional(),
