@@ -30,6 +30,13 @@ const log = logger.child({ area: 'operator-pool' });
 const OperatorEntry = z.object({
   id: z.string().min(1),
   bearer: z.string().min(1),
+  // CTX cross-checks the JWT's embedded `clientId` against the
+  // request's `X-Client-Id` header and 401s on mismatch ("token
+  // invalid"). Operator bearers were minted via the normal CTX
+  // login flow with `clientId: 'loopweb'`, so default to that.
+  // Operators that were minted under a different client id (a
+  // future ios/android operator pool, for example) override here.
+  clientId: z.string().min(1).default('loopweb'),
 });
 
 const OperatorPoolSchema = z.array(OperatorEntry).min(1);
@@ -39,6 +46,7 @@ type OperatorConfig = z.infer<typeof OperatorEntry>;
 interface Operator {
   id: string;
   bearer: string;
+  clientId: string;
   breaker: ReturnType<typeof createCircuitBreaker>;
 }
 
@@ -113,6 +121,7 @@ function ensureInitialised(): void {
   operators = validated.data.map((o: OperatorConfig) => ({
     id: o.id,
     bearer: o.bearer,
+    clientId: o.clientId,
     // A2-1326: tag the breaker so its Discord embeds dedup per-operator
     // — one flapping operator won't suppress notifications for a
     // different operator that flaps an hour later.
@@ -213,6 +222,14 @@ export async function operatorFetch(url: string | URL, init?: RequestInit): Prom
     if (op === null) break;
     const headers = new Headers(init?.headers);
     headers.set('Authorization', `Bearer ${op.bearer}`);
+    // CTX validates that `X-Client-Id` matches the `clientId`
+    // embedded in the JWT, returning 401 "token invalid" on
+    // mismatch. Operator bearers carry the clientId they were
+    // minted with — attach it here so the field validator-passing
+    // crypto-purchase request (`cryptoCurrency: "XLM"`) actually
+    // reaches the procurement code path instead of bouncing at
+    // the auth gate.
+    headers.set('X-Client-Id', op.clientId);
     // A2-1305: propagate our X-Request-Id onto the CTX call so ops
     // can correlate our request id with CTX's server logs. The
     // circuit-breaker wrapper does the same when called directly,
