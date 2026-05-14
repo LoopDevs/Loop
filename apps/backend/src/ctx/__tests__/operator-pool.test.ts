@@ -155,7 +155,7 @@ describe('operatorFetch', () => {
     );
   });
 
-  it('injects Authorization: Bearer <operator> on the outgoing request', async () => {
+  it('injects Authorization: Bearer <operator> + the operator clientId on the outgoing request', async () => {
     const captured: Array<{ url: string; init: RequestInit | undefined }> = [];
     fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       captured.push({ url: String(url), init });
@@ -163,14 +163,32 @@ describe('operatorFetch', () => {
     });
     await operatorFetch('https://example.local/orders', {
       method: 'POST',
-      headers: { 'X-Client-Id': 'loopops' },
+      // Caller-supplied X-Client-Id is overridden — operator's
+      // own clientId (default 'loopweb') is the only safe choice
+      // because CTX 401s on token-vs-header clientId mismatch.
+      headers: { 'X-Client-Id': 'something-else' },
       body: JSON.stringify({ a: 1 }),
     });
     expect(captured).toHaveLength(1);
     const h = new Headers(captured[0]!.init?.headers);
     expect(h.get('Authorization')).toMatch(/^Bearer bearer-[12]$/);
-    expect(h.get('X-Client-Id')).toBe('loopops');
+    expect(h.get('X-Client-Id')).toBe('loopweb');
     expect(captured[0]!.init?.method).toBe('POST');
+  });
+
+  it('honours per-operator clientId override in CTX_OPERATOR_POOL', async () => {
+    delete process.env['CTX_OPERATOR_POOL'];
+    process.env['CTX_OPERATOR_POOL'] = JSON.stringify([
+      { id: 'ios-op', bearer: 'bearer-ios', clientId: 'loopios' },
+    ]);
+    __resetOperatorPoolForTests();
+    const captured: Array<RequestInit | undefined> = [];
+    fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
+      captured.push(init);
+      return new Response('{}', { status: 200 });
+    });
+    await operatorFetch('https://example.local/x');
+    expect(new Headers(captured[0]?.headers).get('X-Client-Id')).toBe('loopios');
   });
 
   it('rotates operators across calls (round-robin)', async () => {
