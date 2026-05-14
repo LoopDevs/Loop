@@ -27,6 +27,35 @@ primary_region = "iad"
   # populates X-Forwarded-For. Turn trust on here so the rate limiter
   # keys on the actual client IP instead of the edge's single address.
   TRUST_PROXY = "true"
+  # Tranche-1 mode (`docs/tranche-1-launch.md`): cashback delivered as
+  # instant discount at order creation, no on-chain emission, no
+  # withdrawal. Flipping to "false" later is the Tranche-2 cutover and
+  # is a runtime-only change (web reads `/api/config` on each load).
+  LOOP_PHASE_1_ONLY = "true"
+  # Loop-native auth (ADR 013) — backend mints HS256 JWTs, generates
+  # OTPs, sends email via Resend. Required for the Tranche-1
+  # Loop-deposit-address payment flow (ADR 010 principal switch).
+  LOOP_AUTH_NATIVE_ENABLED = "true"
+  # Payment-watcher + procurement + payout workers. Boot-time fail-safe
+  # in env.ts requires `LOOP_STELLAR_OPERATOR_SECRET` when set true.
+  LOOP_WORKERS_ENABLED = "true"
+  # Resend (https://resend.com) is the only supported provider when
+  # `LOOP_AUTH_NATIVE_ENABLED=true` in production. The `console`
+  # variant is dev-only; env.ts boot-rejects `console` in prod.
+  EMAIL_PROVIDER = "resend"
+  # `no-reply.loopfinance.io` is a Resend-verified subdomain, kept
+  # separate from the apex `loopfinance.io` (Google Workspace mail)
+  # so the two don't conflict at DKIM/SPF level.
+  EMAIL_FROM_ADDRESS = "no-reply@no-reply.loopfinance.io"
+  EMAIL_FROM_NAME = "Loop"
+  # Recipients who hit "Reply" land at the operator inbox on the
+  # apex domain (Google Workspace) rather than bouncing off the
+  # no-reply sender.
+  EMAIL_REPLY_TO_ADDRESS = "hello@loopfinance.io"
+  # Sentry environment tag — paired with `VITE_LOOP_ENV` on the web
+  # build so a staging deploy that runs `NODE_ENV=production` still
+  # buckets Sentry events as `staging`.
+  LOOP_ENV = "production"
 
 [http_service]
   internal_port = 8080

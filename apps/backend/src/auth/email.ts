@@ -83,6 +83,7 @@ class ResendEmailProvider implements EmailProvider {
   constructor(
     private readonly apiKey: string,
     private readonly from: string,
+    private readonly replyTo: string | null,
   ) {}
 
   async sendOtpEmail(input: OtpEmailInput): Promise<void> {
@@ -103,19 +104,28 @@ class ResendEmailProvider implements EmailProvider {
       `<p style="color:#888;font-size:12px;">If you didn't request this, you can ignore this email.</p>`,
     ].join('');
 
+    // Resend's API uses `reply_to` (snake_case). Omit the key entirely
+    // when unset — sending `reply_to: null` confuses some inbox
+    // clients into showing "(no reply address)" rather than falling
+    // back to the From address.
+    const body: Record<string, unknown> = {
+      from: this.from,
+      to: input.to,
+      subject,
+      text,
+      html,
+    };
+    if (this.replyTo !== null) {
+      body['reply_to'] = this.replyTo;
+    }
+
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${this.apiKey}`,
       },
-      body: JSON.stringify({
-        from: this.from,
-        to: input.to,
-        subject,
-        text,
-        html,
-      }),
+      body: JSON.stringify(body),
       // 10s — short enough that a hung Resend doesn't lock up the
       // OTP request beyond what the user would tolerate; the OTP
       // handler's circuit / retry plumbing covers transient blips
@@ -183,7 +193,9 @@ export function getEmailProvider(): EmailProvider {
     }
     const fromAddress = process.env['EMAIL_FROM_ADDRESS'] ?? 'noreply@loopfinance.io';
     const fromName = process.env['EMAIL_FROM_NAME'] ?? 'Loop';
-    cached = new ResendEmailProvider(apiKey, `${fromName} <${fromAddress}>`);
+    const replyToRaw = process.env['EMAIL_REPLY_TO_ADDRESS'];
+    const replyTo = replyToRaw !== undefined && replyToRaw.length > 0 ? replyToRaw : null;
+    cached = new ResendEmailProvider(apiKey, `${fromName} <${fromAddress}>`, replyTo);
     return cached;
   }
   // Keeping the throw minimal so an operator setting
