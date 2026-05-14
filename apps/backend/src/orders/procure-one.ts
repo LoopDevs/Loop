@@ -25,6 +25,9 @@ import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { notifyCashbackCredited, notifyUsdcBelowFloor } from '../discord.js';
 import { getMerchants } from '../merchants/sync.js';
 import { waitForRedemption } from './procurement-redemption.js';
+import { parseSep7PayUri } from './sep7.js';
+import { payCtxOrder, PayCtxConfigError } from './pay-ctx.js';
+import { PayoutSubmitError } from '../payments/payout-submit.js';
 import {
   pickProcurementAsset,
   readUsdcBalanceSafely,
@@ -34,13 +37,23 @@ import {
 const log = logger.child({ area: 'procurement' });
 
 /**
- * CTX response shape for POST /gift-cards. We only pin the fields
- * the worker needs — `id` to persist as `ctx_order_id`. Narrow parse
- * so a schema drift loud-fails the procurement, rather than silently
- * writing an undefined id.
+ * CTX response shape for POST /gift-cards. We pin:
+ *   - `id` to persist as `ctx_order_id`.
+ *   - `paymentUrls.XLM` — the SEP-7 URI Loop must pay to settle the
+ *     order on CTX's side (ADR 010 principal switch). Without this
+ *     CTX treats the order as `unpaid` and never issues codes.
+ *   - `paymentCryptoAmount` — captured for log/observability; the
+ *     authoritative amount lives in the SEP-7 URI itself.
+ *
+ * `.passthrough()` on `paymentUrls` keeps unknown rail entries
+ * (USDC, etc.) around without forcing a schema edit when CTX adds
+ * a new one. Required-field validation lives on the consumer side
+ * (`parseSep7PayUri`).
  */
 const CtxGiftCardResponse = z.object({
   id: z.string().min(1),
+  paymentUrls: z.record(z.string(), z.string()).optional(),
+  paymentCryptoAmount: z.string().optional(),
 });
 
 /**
@@ -179,6 +192,71 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
       await markOrderFailed(order.id, 'CTX response schema drift');
       return 'failed';
     }
+
+    // ADR 010 principal switch: Loop pays CTX from the operator
+    // wallet using the SEP-7 URI returned in the create-response.
+    // Without this hop CTX leaves the order `unpaid` forever and
+    // never issues redemption codes — see the four stranded
+    // orders pre-2026-05-14 that fulfilled in our ledger but
+    // showed `unpaid` on CTX's side.
+    const paymentUri = parsed.data.paymentUrls?.[cryptoCurrency];
+    if (paymentUri === undefined || paymentUri === '') {
+      log.error(
+        { orderId: order.id, ctxOrderId: parsed.data.id, cryptoCurrency },
+        'CTX procurement response missing paymentUrls entry — cannot pay CTX',
+      );
+      await markOrderFailed(order.id, `CTX response missing paymentUrls.${cryptoCurrency}`);
+      return 'failed';
+    }
+    const sep7 = parseSep7PayUri(paymentUri);
+    if (!sep7.ok) {
+      log.error(
+        { orderId: order.id, ctxOrderId: parsed.data.id, sep7Error: sep7.error },
+        'CTX paymentUrls entry failed SEP-7 parse',
+      );
+      await markOrderFailed(order.id, `CTX paymentUrls SEP-7 ${sep7.error}`);
+      return 'failed';
+    }
+    try {
+      const payRes = await payCtxOrder(sep7.value);
+      log.info(
+        {
+          orderId: order.id,
+          ctxOrderId: parsed.data.id,
+          ctxPaymentTxHash: payRes.txHash,
+          submitted: payRes.submitted,
+        },
+        payRes.submitted
+          ? 'Paid CTX for order'
+          : 'CTX payment already on chain (idempotent re-run)',
+      );
+    } catch (err) {
+      // Config error is an ops bug — operator secret missing /
+      // invalid. Fail the order so the operator sees it loudly;
+      // the underlying env fix is required before any procurement
+      // can succeed.
+      if (err instanceof PayCtxConfigError) {
+        log.error({ orderId: order.id, err: err.message }, 'CTX payment config error');
+        await markOrderFailed(order.id, `CTX payment config: ${err.message}`);
+        return 'failed';
+      }
+      // Submit-side error. Transient kinds (transient_horizon,
+      // transient_rebuild) could be retried by the stuck-procurement
+      // sweep — but the order is already in `procuring` and the
+      // sweep marks stuck orders `failed` after 15 min. For now
+      // fail the order and surface the result_codes; treasury can
+      // recover the operator-side debt manually if needed.
+      if (err instanceof PayoutSubmitError) {
+        log.error(
+          { orderId: order.id, kind: err.kind, resultCodes: err.resultCodes },
+          'CTX payment submit failed',
+        );
+        await markOrderFailed(order.id, `CTX payment ${err.kind}`);
+        return 'failed';
+      }
+      throw err;
+    }
+
     // Wait for the redemption payload before flipping to fulfilled
     // so the user's "Ready" screen has the code/PIN ready on first
     // render. `waitForRedemption` subscribes to CTX's SSE stream

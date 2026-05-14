@@ -46,6 +46,24 @@ vi.mock('../../ctx/stream.js', () => ({
     throw new Error('streamGiftCardStatus should not be invoked in this suite');
   }),
 }));
+// Mock the principal-switch CTX-payment hop. Production paths go
+// through `payCtxOrder` → Horizon idempotency lookup → native XLM
+// submit; the procurement-tick suite asserts on order-state
+// transitions, not on Stellar submit details. Default: resolve
+// successfully with a synthetic tx hash. Individual tests can
+// override to exercise failure paths.
+const { payCtxOrderMock } = vi.hoisted(() => ({
+  payCtxOrderMock: vi.fn(async () => ({ txHash: 'ctx-pay-tx', submitted: true })),
+}));
+vi.mock('../pay-ctx.js', () => ({
+  payCtxOrder: payCtxOrderMock,
+  PayCtxConfigError: class PayCtxConfigError extends Error {
+    constructor(m: string) {
+      super(m);
+      this.name = 'PayCtxConfigError';
+    }
+  },
+}));
 
 // Collapse waitForRedemption's 5-minute / 1-second cadence into
 // near-instant ticks so the procurement-tick test suite stays fast
@@ -150,10 +168,27 @@ function makeOrder(overrides: Partial<AnyOrder> = {}): AnyOrder {
 }
 
 function okCtxResponse(id: string): Response {
-  return new Response(JSON.stringify({ id }), {
-    status: 200,
-    headers: { 'content-type': 'application/json' },
-  });
+  // Include valid `paymentUrls` SEP-7 URIs for BOTH rails so the
+  // procurement worker's new principal-switch hop
+  // (parseSep7PayUri → payCtxOrder) doesn't fail the order
+  // regardless of whether the picker selected XLM or USDC. The
+  // destination/amount are synthetic; the actual Stellar submit is
+  // mocked via `payCtxOrderMock`.
+  const stellarUri = `web+stellar:pay?destination=GTESTCTXDEST&amount=0.10&memo=${encodeURIComponent(id)}`;
+  return new Response(
+    JSON.stringify({
+      id,
+      paymentUrls: {
+        XLM: stellarUri,
+        USDC: stellarUri,
+      },
+      paymentCryptoAmount: '0.10',
+    }),
+    {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    },
+  );
 }
 
 function ctxDetailResponse(
@@ -190,6 +225,8 @@ beforeEach(() => {
   revertProcuringMock.mockReset();
   revertProcuringMock.mockResolvedValue({ id: 'o-1' });
   operatorFetchMock.mockReset();
+  payCtxOrderMock.mockReset();
+  payCtxOrderMock.mockResolvedValue({ txHash: 'ctx-pay-tx', submitted: true });
   getBalancesMock.mockClear();
   discordMock.notifyUsdcBelowFloor.mockClear();
   __resetBelowFloorAlertForTests();
