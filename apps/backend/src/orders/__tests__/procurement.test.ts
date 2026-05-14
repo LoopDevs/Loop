@@ -70,6 +70,7 @@ const { envState, balancesState, getBalancesMock } = vi.hoisted(() => {
     LOOP_STELLAR_DEPOSIT_ADDRESS: undefined as string | undefined,
     LOOP_STELLAR_USDC_ISSUER: undefined as string | undefined,
     LOOP_STELLAR_USDC_FLOOR_STROOPS: undefined as bigint | undefined,
+    LOOP_PHASE_1_ONLY: false as boolean,
   };
   const balances = {
     usdc: null as bigint | null,
@@ -166,6 +167,7 @@ beforeEach(() => {
   envState.LOOP_STELLAR_DEPOSIT_ADDRESS = undefined;
   envState.LOOP_STELLAR_USDC_ISSUER = undefined;
   envState.LOOP_STELLAR_USDC_FLOOR_STROOPS = undefined;
+  envState.LOOP_PHASE_1_ONLY = false;
   balancesState.usdc = null;
   balancesState.throwErr = null;
   for (const fn of Object.values(dbMock)) {
@@ -453,6 +455,22 @@ describe('runProcurementTick — USDC floor / Horizon wiring', () => {
     await runProcurementTick();
     const init = operatorFetchMock.mock.calls[0]![1] as RequestInit;
     expect(JSON.parse(String(init.body))).toMatchObject({ cryptoCurrency: 'USDC' });
+  });
+
+  it('forces XLM under LOOP_PHASE_1_ONLY regardless of floor/balance state', async () => {
+    state.paid = [makeOrder({ id: 'o-1' })];
+    mockProcureAndFetch('ctx-a');
+    envState.LOOP_PHASE_1_ONLY = true;
+    // Configure the picker to want USDC (balance well above floor) —
+    // Phase-1 override must still emit XLM. CTX's production validator
+    // rejects `cryptoCurrency: "USDC"` ("chain prefix invalid") until
+    // we wire the Tranche-2 USDC operator topology.
+    envState.LOOP_STELLAR_DEPOSIT_ADDRESS = 'GACCOUNT';
+    envState.LOOP_STELLAR_USDC_FLOOR_STROOPS = 10n ** 9n;
+    balancesState.usdc = 5n * 10n ** 9n;
+    await runProcurementTick();
+    const init = operatorFetchMock.mock.calls[0]![1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({ cryptoCurrency: 'XLM' });
   });
 
   it('fires the Discord alert on first below-floor tick', async () => {

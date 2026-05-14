@@ -86,15 +86,25 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
   // A Horizon failure resolves to `balanceStroops: null` and the
   // picker gracefully falls back to USDC — we'd rather risk an
   // over-drained USDC reserve than stall procurement entirely.
+  //
+  // Phase-1 override: in `LOOP_PHASE_1_ONLY` mode we don't have a
+  // USDC operator topology yet — the deposit account has no USDC
+  // trustline, and CTX's production validator now rejects
+  // `cryptoCurrency: "USDC"` outright ("chain prefix invalid"). Pin
+  // to XLM here to match the legacy `/api/orders` handler, which
+  // hard-codes the same value. Tranche-2 reactivates the picker
+  // once the USDC operator account and floor secrets are wired.
   const floorStroops = env.LOOP_STELLAR_USDC_FLOOR_STROOPS ?? null;
   const balanceStroops =
     floorStroops !== null && env.LOOP_STELLAR_DEPOSIT_ADDRESS !== undefined
       ? await readUsdcBalanceSafely(env.LOOP_STELLAR_DEPOSIT_ADDRESS)
       : null;
-  const cryptoCurrency = pickProcurementAsset({
-    balanceStroops,
-    floorStroops,
-  });
+  const cryptoCurrency: 'USDC' | 'XLM' = env.LOOP_PHASE_1_ONLY
+    ? 'XLM'
+    : pickProcurementAsset({
+        balanceStroops,
+        floorStroops,
+      });
   if (cryptoCurrency === 'XLM') {
     log.warn(
       {
