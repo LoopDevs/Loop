@@ -24,7 +24,7 @@ import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { notifyCashbackCredited, notifyUsdcBelowFloor } from '../discord.js';
 import { getMerchants } from '../merchants/sync.js';
-import { fetchRedemption } from './procurement-redemption.js';
+import { waitForRedemption } from './procurement-redemption.js';
 import {
   pickProcurementAsset,
   readUsdcBalanceSafely,
@@ -179,11 +179,17 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
       await markOrderFailed(order.id, 'CTX response schema drift');
       return 'failed';
     }
-    // Fetch the redemption payload before flipping to fulfilled so
-    // the user's "Ready" screen has the code/PIN ready to display on
-    // first render. A fetch failure doesn't block fulfillment — we
-    // still transition and log; a follow-up can backfill later.
-    const redemption = await fetchRedemption(parsed.data.id);
+    // Wait for the redemption payload before flipping to fulfilled
+    // so the user's "Ready" screen has the code/PIN ready on first
+    // render. `waitForRedemption` subscribes to CTX's SSE stream
+    // (terminal `fulfilled`/`complete` arrives in seconds typically),
+    // then does one authoritative GET to pull the codes — CTX SSE
+    // frames don't carry redemption fields. Falls back to 1s polling
+    // on stream transport errors and bails after 5 minutes with
+    // whatever payload it has. A `failed`/`rejected`/`error` terminal
+    // status from the stream throws and is caught by the outer
+    // try/catch below, transitioning the order to `failed`.
+    const redemption = await waitForRedemption(parsed.data.id);
     const fulfilled = await markOrderFulfilled(order.id, {
       ctxOrderId: parsed.data.id,
       redemption,

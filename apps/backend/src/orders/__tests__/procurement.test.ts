@@ -32,8 +32,30 @@ vi.mock('../../ctx/operator-pool.js', () => {
   return {
     operatorFetch: (url: string, init?: RequestInit) => operatorFetchMock(url, init),
     OperatorPoolUnavailableError,
+    // waitForRedemption asks the pool for SSE credentials. Returning
+    // null skips the SSE attempt entirely and the polling fallback
+    // exercises the same fetch path the legacy one-shot did — which
+    // is what these tests assert on (POST then GET).
+    pickOperatorCredentials: (): null => null,
   };
 });
+vi.mock('../../ctx/stream.js', () => ({
+  // Stream is not used when `pickOperatorCredentials` returns null —
+  // keep the import resolvable but assert it's never called.
+  streamGiftCardStatus: vi.fn(async () => {
+    throw new Error('streamGiftCardStatus should not be invoked in this suite');
+  }),
+}));
+
+// Collapse waitForRedemption's 5-minute / 1-second cadence into
+// near-instant ticks so the procurement-tick test suite stays fast
+// without using fake timers (the rest of the suite is real-timer).
+// 20-ms budget is enough for several no-op polling cycles when the
+// mocked CTX response has empty redemption fields; the deadline
+// exit returns null payload, mirroring the legacy one-shot
+// `fetchRedemption` behaviour the suite was written against.
+process.env['LOOP_REDEMPTION_TOTAL_TIMEOUT_MS'] = '20';
+process.env['LOOP_REDEMPTION_POLL_INTERVAL_MS'] = '1';
 
 // db mock for runProcurementTick's paid-orders query — chain
 // select().from().where().orderBy().limit() resolves to the stashed
@@ -143,10 +165,17 @@ function ctxDetailResponse(
   });
 }
 
-/** Wires two CTX responses in order: POST /gift-cards, then GET /gift-cards/:id. */
+/**
+ * Wires two CTX responses in order: POST /gift-cards, then GET /gift-cards/:id.
+ *
+ * Default detail carries a non-null redeemUrl so waitForRedemption's
+ * polling fallback returns on the first poll. Tests that need empty
+ * fields pass `detail: {}` explicitly and account for polling
+ * consuming additional mocked responses (or budget exhaustion).
+ */
 function mockProcureAndFetch(
   id: string,
-  detail: Parameters<typeof ctxDetailResponse>[0] = {},
+  detail: Parameters<typeof ctxDetailResponse>[0] = { redeemUrl: 'https://x.example' },
 ): void {
   operatorFetchMock
     .mockResolvedValueOnce(okCtxResponse(id))
@@ -380,12 +409,17 @@ describe('runProcurementTick', () => {
     // Order 1: POST ok, GET ok → fulfilled.
     // Order 2: POST fails with 502 → failed (no second call).
     // Order 3: POST ok, GET ok → fulfilled.
+    //
+    // GET detail responses carry a non-null redeemUrl so the
+    // waitForRedemption polling loop returns on the first poll
+    // without consuming extra mocked responses.
+    const detailWithUrl = ctxDetailResponse({ redeemUrl: 'https://x.example' });
     operatorFetchMock
       .mockResolvedValueOnce(okCtxResponse('ctx-1'))
-      .mockResolvedValueOnce(ctxDetailResponse())
+      .mockResolvedValueOnce(detailWithUrl.clone())
       .mockResolvedValueOnce(new Response('boom', { status: 502 }))
       .mockResolvedValueOnce(okCtxResponse('ctx-3'))
-      .mockResolvedValueOnce(ctxDetailResponse());
+      .mockResolvedValueOnce(detailWithUrl.clone());
     const r = await runProcurementTick();
     expect(r.picked).toBe(3);
     expect(r.fulfilled).toBe(2);
