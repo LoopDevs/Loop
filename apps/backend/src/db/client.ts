@@ -18,11 +18,39 @@ const log = logger.child({ area: 'db' });
  */
 // A2-724: per-session statement_timeout. Postgres-js's `connection`
 // option becomes the startup-parameter set sent on each connect, so
-// every connection out of this pool has the timeout applied without
-// us needing a per-query SET LOCAL. Value of 0 turns the timeout off
-// (matches Postgres's own convention).
+// every direct-postgres connection out of this pool has the timeout
+// applied without us needing a per-query SET LOCAL. Value of 0 turns
+// the timeout off (matches Postgres's own convention).
+//
+// PgBouncer (transaction mode) rejects `statement_timeout` as a
+// startup parameter — connections fail with "unsupported startup
+// parameter". When DATABASE_URL points at a PgBouncer endpoint (Fly
+// MPG's `pgbouncer.*.flympg.net`, Supabase pooler, etc.), skip the
+// startup parameter; statement_timeout protection is omitted in that
+// mode. Direct-postgres deployments and local dev keep the timeout
+// as before. A per-query `SET LOCAL statement_timeout` rebuild is a
+// future hardening; the empty timeout is acceptable at launch volume
+// where every Loop query is short-lived by design.
+/**
+ * Heuristic: returns `true` when the connection URL points at a
+ * PgBouncer / Supavisor / similar transaction-mode pooler that
+ * rejects `statement_timeout` (and other restricted parameters) as
+ * startup parameters. Exported for direct unit testing — the
+ * detection ships behind the `connection: startupParameters` toggle
+ * inside the module, so the test mirrors what the runtime code sees.
+ *
+ * Patterns covered:
+ *   - Fly MPG pooler: `pgbouncer.<cluster>.flympg.net`
+ *   - Supabase pooler: `<region>.pooler.supabase.com` (legacy/PgBouncer mode)
+ *   - Generic pgbouncer hostnames the operator may use
+ */
+export function isPooledPostgresUrl(url: string): boolean {
+  return /\bpgbouncer\b/i.test(url) || /\bpooler\b/i.test(url);
+}
+
+const isPgBouncerUrl = isPooledPostgresUrl(env.DATABASE_URL);
 const startupParameters: Record<string, string> = {};
-if (env.DATABASE_STATEMENT_TIMEOUT_MS > 0) {
+if (!isPgBouncerUrl && env.DATABASE_STATEMENT_TIMEOUT_MS > 0) {
   startupParameters['statement_timeout'] = String(env.DATABASE_STATEMENT_TIMEOUT_MS);
 }
 
@@ -33,7 +61,8 @@ const client = postgres(env.DATABASE_URL, {
   // interacting badly with Fly Postgres idle disconnects.
   idle_timeout: 20,
   connect_timeout: 10,
-  // A2-724: see `startupParameters` above.
+  // A2-724: see `startupParameters` above. PgBouncer pooler hosts get
+  // an empty connection object.
   connection: startupParameters,
   // We use `bigint` mode on our bigint columns in schema.ts; keep the
   // driver in sync so `balance_minor` round-trips as a BigInt
