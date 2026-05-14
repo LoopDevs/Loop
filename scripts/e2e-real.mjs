@@ -300,22 +300,25 @@ async function pollForFulfilment(accessToken, orderId) {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   let lastState = '';
   while (Date.now() < deadline) {
+    // `GET /api/orders/loop/:id` returns the flat `orderToView`
+    // shape — no `{ order: ... }` wrapper. Earlier versions of this
+    // script read `data.order.state` and looped on `undefined`.
     const data = await api(`/api/orders/loop/${orderId}`, { accessToken });
-    const state = data?.order?.state;
+    const state = data?.state;
     if (state !== lastState) {
       log(`Order state: ${state}`);
       lastState = state;
     }
     if (state === 'fulfilled') {
       log('Order fulfilled', {
-        hasRedeemUrl: Boolean(data.order.redeemUrl),
-        hasRedeemCode: Boolean(data.order.redeemCode),
-        hasRedeemPin: Boolean(data.order.redeemPin),
-        ctxOrderId: data.order.ctxOrderId,
+        hasRedeemUrl: Boolean(data.redeemUrl),
+        hasRedeemCode: Boolean(data.redeemCode),
+        hasRedeemPin: Boolean(data.redeemPin),
+        ctxOrderId: data.ctxOrderId,
       });
-      return data.order;
+      return data;
     }
-    if (state === 'expired') {
+    if (state === 'failed' || state === 'expired') {
       throw new Error(`Order reached terminal state: ${state}`);
     }
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
