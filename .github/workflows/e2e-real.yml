@@ -86,7 +86,14 @@ jobs:
           echo $! > "${{ runner.temp }}/backend.pid"
         env:
           PORT: 8080
-          NODE_ENV: test
+          # `development` (not `test`) so the boot-time `runMigrations()`
+          # call in src/index.ts actually runs against the postgres
+          # service this job spun up. `NODE_ENV=test` skips migrations
+          # — fine for the mocked e2e harness that has no live DB, but
+          # this workflow needs a fully-migrated orders ledger to
+          # exercise the loop-native procurement chain. The production-
+          # only guards (email-provider strict mode, etc.) stay inert.
+          NODE_ENV: development
           LOG_LEVEL: info
           GIFT_CARD_API_BASE_URL: https://spend.ctx.com
           INCLUDE_DISABLED_MERCHANTS: 'false'
