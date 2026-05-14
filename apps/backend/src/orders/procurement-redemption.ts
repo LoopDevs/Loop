@@ -81,11 +81,26 @@ export async function fetchRedemption(ctxOrderId: string): Promise<{
     );
     return { code: null, pin: null, url: null };
   }
-  return {
+  const out = {
     code: parsed.data.redeemCode ?? parsed.data.code ?? null,
     pin: parsed.data.redeemPin ?? parsed.data.pin ?? null,
     url: parsed.data.redeemUrl ?? parsed.data.url ?? null,
   };
+  // Diagnostic: CTX has been returning 200 with all redemption fields
+  // missing across long polling windows for operator-account orders.
+  // When that happens, log the raw response keys + a truncated body
+  // so ops can tell `wrong field name` from `genuinely empty`. We
+  // only log when EVERY field is null — once any code/pin/url is
+  // populated the codes are PII and must not land in logs.
+  if (out.code === null && out.pin === null && out.url === null) {
+    const keys = raw !== null && typeof raw === 'object' ? Object.keys(raw) : [];
+    const bodyPreview = JSON.stringify(raw).slice(0, 500);
+    log.info(
+      { ctxOrderId, keys, bodyPreview },
+      'CTX gift-card detail returned no redemption fields — capturing shape for diagnosis',
+    );
+  }
+  return out;
 }
 
 /**
