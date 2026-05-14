@@ -31,6 +31,10 @@ const ACCEPTED_MODERATE_VULNS = new Map([
     'ip-address',
     'XSS in Address6 HTML-emitting methods. Transitive via @cyclonedx/cyclonedx-npm → libxmljs2 → node-gyp → … → socks → ip-address; only used at build-time for SBOM generation, the vulnerable HTML emitters are never invoked at runtime. Revisit when a fixed ip-address version (>10.1.0) propagates through the socks dependency chain.',
   ],
+  [
+    'hono',
+    'Three moderate advisories on hono <=4.12.17: (a) CSS Declaration Injection via Style Object Values in JSX SSR — Loop does not use Hono JSX SSR; web SSR runs via React Router v7. (b) Improper NumericDate-claim validation in Hono JWT verify() — Loop uses its own verifier at apps/backend/src/auth/tokens.ts with explicit iat/exp/iss/aud checks; Hono JWT is never imported. (c) Cache Middleware Vary-header gap — Loop does not mount Hono Cache Middleware. None of the three reach an exploitable code path. Fix requires hono@4.12.18+ which lies outside the @hono/zod-openapi peer-dep range; revisit when that peer constraint relaxes.',
+  ],
 ]);
 
 function runAuditJson() {
