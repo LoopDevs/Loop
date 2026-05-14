@@ -125,6 +125,58 @@ describe('listAccountPayments', () => {
       .mockResolvedValue(new Response('{"not":"what we expect"}', { status: 200 }));
     await expect(listAccountPayments({ account: ACCOUNT })).rejects.toThrow(/schema drift/);
   });
+
+  it("accepts create_account records (no asset_type) so account-bootstrap doesn't fail the watcher", async () => {
+    // First-ever record in a newly-funded account's /payments
+    // history is the createAccount that activated it. Horizon emits
+    // those as `type: 'create_account'` with `starting_balance`,
+    // `account`, `funder` — NO `asset_type` field. Tightening the
+    // schema to require asset_type used to throw "schema drift",
+    // marking every watcher tick failed until the createAccount
+    // record paged off (never, since cursor stays at the head).
+    // After this fix, asset_type is optional and the watcher's
+    // downstream `p.type === 'payment'` gate skips create_account
+    // records cleanly.
+    fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      paymentResponse([
+        {
+          id: '12345-0',
+          paging_token: '12345-0',
+          type: 'create_account',
+          transaction_hash: 'ded010218c41e4252908d29515996ff5e6d0ae7e96bf5e17340e1667130d2d60',
+          starting_balance: '5.0000000',
+          account: ACCOUNT,
+          funder: 'GDUV377PDCHMPTAFJ5S2GUIHFUYMODLZGLXCV4H4O27GFYXEVVRGHBT7',
+        },
+      ]),
+    );
+    const result = await listAccountPayments({ account: ACCOUNT });
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0]!.type).toBe('create_account');
+    expect(result.records[0]!.asset_type).toBeUndefined();
+    expect(result.records[0]!.starting_balance).toBe('5.0000000');
+  });
+
+  it('accepts account_merge records (no asset_type) the same way', async () => {
+    // Same shape, different op. Bundled for defence-in-depth: a
+    // future deposit-address rotation might emit account_merge in
+    // the watched address's history.
+    fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      paymentResponse([
+        {
+          id: '67890-0',
+          paging_token: '67890-0',
+          type: 'account_merge',
+          transaction_hash: 'mergehash',
+          account: ACCOUNT,
+          into: 'GDESTINATIONXXX',
+        },
+      ]),
+    );
+    const result = await listAccountPayments({ account: ACCOUNT });
+    expect(result.records[0]!.type).toBe('account_merge');
+    expect(result.records[0]!.asset_type).toBeUndefined();
+  });
 });
 
 describe('isMatchingIncomingPayment', () => {
