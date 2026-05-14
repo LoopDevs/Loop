@@ -7,6 +7,10 @@ name: E2E (real Tranche-1 purchase + wallet)
 on:
   workflow_dispatch:
     inputs:
+      backend_url:
+        description: 'Backend URL to drive (default deployed prod)'
+        required: false
+        default: 'https://api.loopfinance.io'
       amount_usd:
         description: 'Face-value amount (blank = 0.02 — default Aerie minimum)'
         required: false
@@ -45,22 +49,14 @@ jobs:
     name: Tranche-1 loop-native purchase flow
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    services:
-      # Backend's payment-watcher / procurement-worker / order ledger
-      # all need a real postgres. Boot one in the runner.
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: loop
-          POSTGRES_PASSWORD: loop
-          POSTGRES_DB: loop_test
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd "pg_isready -U loop -d loop_test"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
+    # No `services:` block — this workflow drives a deployed backend
+    # (api.loopfinance.io by default), not a freshly-booted local one.
+    # The earlier local-backend approach was unworkable for a fresh
+    # deploy: the refresh token in the GH secret is bound to a user
+    # row in the deployed DB, and a brand-new local DB would 401
+    # immediately. The deployed backend is the only place where the
+    # full procurement chain (CTX operator pool, payment watcher,
+    # procurement worker, Stellar deposit account) is actually wired.
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -75,52 +71,21 @@ jobs:
           # tsx/vite-backed tooling still works on the runner.
           npm ci --ignore-scripts
           npm rebuild esbuild
-      # Run a real backend in loop-native mode against real CTX. Logs
-      # to a file so a later "Dump backend log" step can surface
-      # upstream errors when the script hits a 502 UPSTREAM_ERROR.
-      - name: Start backend (loop-native, real CTX)
+      - name: Confirm backend reachable
         run: |
-          mkdir -p "${{ runner.temp }}"
-          nohup npm exec -w @loop/backend -- tsx src/index.ts \
-            > "${{ runner.temp }}/backend.log" 2>&1 &
-          echo $! > "${{ runner.temp }}/backend.pid"
-        env:
-          PORT: 8080
-          # `development` (not `test`) so the boot-time `runMigrations()`
-          # call in src/index.ts actually runs against the postgres
-          # service this job spun up. `NODE_ENV=test` skips migrations
-          # — fine for the mocked e2e harness that has no live DB, but
-          # this workflow needs a fully-migrated orders ledger to
-          # exercise the loop-native procurement chain. The production-
-          # only guards (email-provider strict mode, etc.) stay inert.
-          NODE_ENV: development
-          LOG_LEVEL: info
-          GIFT_CARD_API_BASE_URL: https://spend.ctx.com
-          INCLUDE_DISABLED_MERCHANTS: 'false'
-          DATABASE_URL: 'postgres://loop:loop@127.0.0.1:5433/loop_test'
-          # Tranche-1 backend env. Without these, POST /api/orders/loop
-          # is gated off (loopOrdersEnabled=false in /api/config) and
-          # the script's order-create call will 503/501.
-          LOOP_AUTH_NATIVE_ENABLED: 'true'
-          LOOP_WORKERS_ENABLED: 'true'
-          LOOP_PHASE_1_ONLY: 'true'
-          LOOP_JWT_SIGNING_KEY: ${{ secrets.LOOP_JWT_SIGNING_KEY }}
-          LOOP_STELLAR_DEPOSIT_ADDRESS: ${{ secrets.LOOP_STELLAR_DEPOSIT_ADDRESS }}
-          LOOP_STELLAR_OPERATOR_SECRET: ${{ secrets.LOOP_STELLAR_OPERATOR_SECRET }}
-          LOOP_STELLAR_USDC_ISSUER: 'GA5ZSEJYB37JRC5AVCIA7VBRVRWWZBMXWXZAHYBRQHGSZHGCASCHV3VW'
-          # Email OTP isn't exercised by this script (we refresh from a
-          # cached refresh token), but env.ts validates EMAIL_PROVIDER
-          # is set when LOOP_AUTH_NATIVE_ENABLED=true. Use a no-op
-          # provider for tests; the script bypasses the email path.
-          EMAIL_PROVIDER: 'console'
-          EMAIL_FROM_ADDRESS: 'noreply@loopfinance.io'
-          EMAIL_FROM_NAME: 'Loop'
-      - name: Wait for backend
-        run: npx wait-on http://localhost:8080/health --timeout 60000
+          set -euo pipefail
+          BACKEND_URL="${{ inputs.backend_url }}"
+          echo "Driving backend at: $BACKEND_URL"
+          curl -fsS --max-time 10 "$BACKEND_URL/health" > /dev/null
+          # Confirm the loop-native order surface is gated on.
+          CONFIG=$(curl -fsS --max-time 10 "$BACKEND_URL/api/config")
+          echo "$CONFIG"
+          echo "$CONFIG" | grep -q '"loopOrdersEnabled":true' \
+            || (echo "::error::loopOrdersEnabled is false on $BACKEND_URL" && exit 1)
       - name: Run real Tranche-1 purchase workflow
         run: node scripts/e2e-real.mjs
         env:
-          BACKEND_URL: http://localhost:8080
+          BACKEND_URL: ${{ inputs.backend_url }}
           E2E_REFRESH_TOKEN: ${{ secrets.LOOP_E2E_REFRESH_TOKEN }}
           STELLAR_TEST_SECRET_KEY: ${{ secrets.STELLAR_TEST_SECRET_KEY }}
           E2E_AMOUNT_USD: ${{ inputs.amount_usd }}
@@ -163,12 +128,3 @@ jobs:
             < "$TOKEN_FILE"
           rm -f "$TOKEN_FILE"
           echo "Rotated LOOP_E2E_REFRESH_TOKEN."
-      - name: Dump backend log
-        if: always()
-        run: |
-          if [ -f "${{ runner.temp }}/backend.log" ]; then
-            echo "### Backend log (tail 200)"
-            tail -n 200 "${{ runner.temp }}/backend.log"
-          else
-            echo "No backend log captured."
-          fi
