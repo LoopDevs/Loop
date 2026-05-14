@@ -71,7 +71,9 @@ async function probe(token) {
     });
     const text = await res.text();
     const truncated = text.length > 400 ? `${text.slice(0, 400)}...` : text;
-    console.log(`[probe] cryptoCurrency=${JSON.stringify(value).padEnd(20)} → ${res.status} ${truncated.replace(/\s+/g, ' ')}`);
+    console.log(
+      `[probe] cryptoCurrency=${JSON.stringify(value).padEnd(20)} → ${res.status} ${truncated.replace(/\s+/g, ' ')}`,
+    );
     // Small pause so we don't trip CTX rate limits
     await new Promise((r) => setTimeout(r, 250));
   }
