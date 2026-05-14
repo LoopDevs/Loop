@@ -99,6 +99,102 @@ function stroopsToAmount(stroops: bigint): string {
   return `${whole}.${frac}`;
 }
 
+export interface NativePaymentSubmitArgs {
+  /** Operator Stellar secret key (`S...`). Never logged. */
+  secret: string;
+  /** Horizon base URL. Pinned per-deployment via env. */
+  horizonUrl: string;
+  /** Network passphrase — PUBLIC or TESTNET constant from the SDK. */
+  networkPassphrase: string;
+  intent: {
+    to: string;
+    /**
+     * Decimal-string amount as the SDK's `Operation.payment` wants
+     * (e.g. `"0.1198323"`). Not stroops — the CTX `paymentUrls.XLM`
+     * URI carries this in decimal form already, and re-encoding it
+     * via stroops invites a rounding wobble on the wire string.
+     */
+
+    amount: string;
+    memoText: string;
+  };
+  timeoutSeconds?: number;
+  feeStroops?: string;
+}
+
+/**
+ * Builds + signs + submits a NATIVE XLM payment. Mirror of
+ * `submitPayout` for the principal-switch flow (ADR 010) where Loop
+ * forwards user-paid XLM to CTX's per-order deposit URI returned by
+ * `POST /gift-cards`. Native asset (`Asset.native()`), no issuer
+ * involved, amount passed as a decimal string straight from the
+ * SEP-7 URI.
+ *
+ * Same retry classification as `submitPayout` — both share
+ * `classifySubmitError`.
+ */
+export async function submitNativePayment(
+  args: NativePaymentSubmitArgs,
+): Promise<PayoutSubmitResult> {
+  const timeout = args.timeoutSeconds ?? 60;
+  const fee = args.feeStroops ?? BASE_FEE;
+
+  let keypair: Keypair;
+  try {
+    keypair = Keypair.fromSecret(args.secret);
+  } catch (err) {
+    throw new PayoutSubmitError(
+      'terminal_bad_auth',
+      err instanceof Error ? err.message : 'Invalid operator secret',
+    );
+  }
+
+  const server = new Horizon.Server(args.horizonUrl);
+
+  let account: Awaited<ReturnType<Horizon.Server['loadAccount']>>;
+  try {
+    account = await server.loadAccount(keypair.publicKey());
+  } catch (err) {
+    throw new PayoutSubmitError(
+      'transient_horizon',
+      err instanceof Error ? err.message : 'loadAccount failed',
+    );
+  }
+
+  let tx;
+  try {
+    tx = new TransactionBuilder(account, {
+      fee,
+      networkPassphrase: args.networkPassphrase,
+    })
+      .addOperation(
+        Operation.payment({
+          destination: args.intent.to,
+          asset: Asset.native(),
+          amount: args.intent.amount,
+        }),
+      )
+      .addMemo(Memo.text(args.intent.memoText))
+      .setTimeout(timeout)
+      .build();
+    tx.sign(keypair);
+  } catch (err) {
+    throw new PayoutSubmitError(
+      'terminal_other',
+      err instanceof Error ? err.message : 'TransactionBuilder failed',
+    );
+  }
+
+  try {
+    const res = await server.submitTransaction(tx);
+    const hash = (res as { hash?: string }).hash ?? tx.hash().toString('hex');
+    const ledger = (res as { ledger?: number }).ledger ?? null;
+    return { txHash: hash, ledger };
+  } catch (err) {
+    throw classifySubmitError(err);
+  }
+}
+
 /**
  * Builds + signs + submits one payout tx. On success, returns the
  * Horizon-confirmed tx hash. On failure, throws a `PayoutSubmitError`

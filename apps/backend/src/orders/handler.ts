@@ -25,6 +25,7 @@ const log = logger.child({ handler: 'orders' });
 // alongside the auth-slice precedent so both this runtime parser and
 // the openapi factory in `../openapi/orders.ts` resolve to one shape.
 import { CreateOrderBody } from './request-schemas.js';
+import { parseSep7PayUri } from './sep7.js';
 
 /**
  * POST /api/orders
@@ -111,56 +112,27 @@ export async function createOrderHandler(c: Context): Promise<Response> {
         502,
       );
     }
-    // Parse destination and memo from stellar URI: web+stellar:pay?destination=X&amount=Y&memo=Z
-    //
-    // Previously this replace+URLSearchParams path would silently coerce any
-    // non-matching URI (e.g. a `bitcoin:` URL if CTX ever reshuffled schemes)
-    // into a "no-op replace → URLSearchParams of the whole string" flow that
-    // produced empty destination + memo, leading to a 201 with unpayable
-    // data. Validate the scheme up front so a schema shift from upstream
-    // surfaces as 502 instead of a silently-broken payment screen.
-    const STELLAR_PAY_PREFIX = 'web+stellar:pay?';
-    if (!paymentUri.startsWith(STELLAR_PAY_PREFIX)) {
+    const sep7 = parseSep7PayUri(paymentUri);
+    if (!sep7.ok) {
+      const messageByError: Record<typeof sep7.error, string> = {
+        'wrong-scheme': 'Order payment URL uses an unexpected scheme',
+        'missing-destination': 'Order payment URL missing destination',
+        'missing-amount': 'Order payment URL missing amount',
+        'missing-memo': 'Order payment URL missing memo',
+      };
       log.error(
-        { orderId: validated.data.id, merchantId, paymentUriScheme: paymentUri.slice(0, 32) },
-        'Upstream XLM payment URL does not use the expected web+stellar:pay? scheme',
-      );
-      return c.json(
         {
-          code: 'UPSTREAM_ERROR',
-          message: 'Order payment URL uses an unexpected scheme',
+          orderId: validated.data.id,
+          merchantId,
+          sep7Error: sep7.error,
+          paymentUriScheme: paymentUri.slice(0, 32),
         },
-        502,
+        'Upstream XLM payment URL failed SEP-7 parse',
       );
+      return c.json({ code: 'UPSTREAM_ERROR', message: messageByError[sep7.error] }, 502);
     }
-    const uriParams = new URLSearchParams(paymentUri.slice(STELLAR_PAY_PREFIX.length));
-    const paymentAddress = uriParams.get('destination') ?? '';
-    // URLSearchParams.get() already decodes percent-encoding. Calling decodeURIComponent
-    // again would double-decode (and throw on malformed sequences like "%ZZ"). Use raw value.
-    const memo = uriParams.get('memo') ?? '';
-    if (paymentAddress === '') {
-      log.error(
-        { orderId: validated.data.id, merchantId },
-        'Upstream XLM payment URL missing destination parameter',
-      );
-      return c.json(
-        { code: 'UPSTREAM_ERROR', message: 'Order payment URL missing destination' },
-        502,
-      );
-    }
-    if (memo === '') {
-      // CTX uses a shared custodial Stellar wallet + per-order memo to match
-      // incoming payments to orders. A URI without memo means a user who
-      // pays it will have their XLM credited, but CTX can never associate
-      // the payment with this order — the order times out and the XLM is
-      // effectively lost to support. Fail closed here so the frontend never
-      // shows an unpayable payment screen.
-      log.error(
-        { orderId: validated.data.id, merchantId },
-        'Upstream XLM payment URL missing memo parameter',
-      );
-      return c.json({ code: 'UPSTREAM_ERROR', message: 'Order payment URL missing memo' }, 502);
-    }
+    const paymentAddress = sep7.value.destination;
+    const memo = sep7.value.memo;
 
     // Notify Discord
     notifyOrderCreated(
