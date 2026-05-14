@@ -148,6 +148,30 @@ export function operatorPoolSize(): number {
 }
 
 /**
+ * Picks a healthy operator and returns its credentials directly,
+ * without dispatching a fetch. Used by call sites (CTX SSE stream)
+ * that can't go through the `operatorFetch` wrapper because the
+ * underlying transport isn't a single `fetch` call we can substitute.
+ *
+ * Mirrors `operatorFetch`'s selection policy: round-robin across
+ * healthy operators, skipping any whose breaker is OPEN. Returns
+ * `null` when every operator is unavailable — caller must surface
+ * the outage themselves (the helper has no `notifyOperatorPoolExhausted`
+ * hook because the stream is opportunistic and the caller falls back
+ * to `operatorFetch`-based polling on failure).
+ */
+export function pickOperatorCredentials(): {
+  id: string;
+  bearer: string;
+  clientId: string;
+} | null {
+  ensureInitialised();
+  const op = pickHealthyOperator();
+  if (op === null) return null;
+  return { id: op.id, bearer: op.bearer, clientId: op.clientId };
+}
+
+/**
  * Picks the next healthy operator in round-robin order, skipping
  * any whose circuit breaker is OPEN.
  *
