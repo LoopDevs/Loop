@@ -94,6 +94,7 @@ describe('ResendEmailProvider.sendOtpEmail', () => {
     process.env['RESEND_API_KEY'] = 're_test_xxxxxxxxxxxxxxxx';
     delete process.env['EMAIL_FROM_ADDRESS'];
     delete process.env['EMAIL_FROM_NAME'];
+    delete process.env['EMAIL_REPLY_TO_ADDRESS'];
     __resetEmailProviderForTests();
   });
 
@@ -102,6 +103,7 @@ describe('ResendEmailProvider.sendOtpEmail', () => {
     delete process.env['RESEND_API_KEY'];
     delete process.env['EMAIL_FROM_ADDRESS'];
     delete process.env['EMAIL_FROM_NAME'];
+    delete process.env['EMAIL_REPLY_TO_ADDRESS'];
     __resetEmailProviderForTests();
   });
 
@@ -133,6 +135,41 @@ describe('ResendEmailProvider.sendOtpEmail', () => {
     expect(body.subject).toContain('654321');
     expect(body.text).toContain('654321');
     expect(body.html).toContain('654321');
+    fetchSpy.mockRestore();
+  });
+
+  it('omits reply_to from the body when EMAIL_REPLY_TO_ADDRESS is unset', async () => {
+    const fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response('{}', { status: 200 }));
+    await getEmailProvider().sendOtpEmail({
+      to: 'a@b.com',
+      code: '222222',
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    // The key itself must be absent — sending `reply_to: null` makes
+    // some inbox clients render "(no reply address)" instead of
+    // falling back to the From address.
+    expect('reply_to' in body).toBe(false);
+    fetchSpy.mockRestore();
+  });
+
+  it('sends reply_to in the body when EMAIL_REPLY_TO_ADDRESS is set', async () => {
+    process.env['EMAIL_REPLY_TO_ADDRESS'] = 'hello@loopfinance.io';
+    __resetEmailProviderForTests();
+    const fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response('{}', { status: 200 }));
+    await getEmailProvider().sendOtpEmail({
+      to: 'a@b.com',
+      code: '333333',
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    const body = JSON.parse(String(init.body)) as { reply_to?: string };
+    expect(body.reply_to).toBe('hello@loopfinance.io');
     fetchSpy.mockRestore();
   });
 
