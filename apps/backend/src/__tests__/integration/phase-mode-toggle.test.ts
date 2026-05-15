@@ -61,6 +61,17 @@ vi.mock('../../orders/pay-ctx.js', async (importActual) => {
   };
 });
 
+// Since PR #1366, procureOne parses `paymentUrls.<rail>` (a SEP-7
+// URI) out of the CTX create-response and fails the order if it's
+// absent — BEFORE the (mocked) payCtxOrder hop. The mocked CTX
+// POST /gift-cards responses must therefore carry a valid SEP-7
+// URI for both rails.
+const CTX_SEP7 = 'web+stellar:pay?destination=GINTEGRATIONCTXDEST&amount=0.10&memo=integration';
+const CTX_PAY_FIELDS = {
+  paymentUrls: { XLM: CTX_SEP7, USDC: CTX_SEP7 },
+  paymentCryptoAmount: '0.10',
+};
+
 vi.mock('../../merchants/sync.js', async (importActual) => {
   const actual = (await importActual()) as Record<string, unknown>;
   const stubMerchant = {
@@ -198,7 +209,7 @@ async function placeOrder(args: { userBearer: string }): Promise<string> {
 async function fulfilOrder(args: { orderId: string; ctxOrderId: string }): Promise<void> {
   await markOrderPaid(args.orderId);
   vi.mocked(operatorFetch).mockResolvedValueOnce(
-    new Response(JSON.stringify({ id: args.ctxOrderId }), {
+    new Response(JSON.stringify({ id: args.ctxOrderId, ...CTX_PAY_FIELDS }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }),

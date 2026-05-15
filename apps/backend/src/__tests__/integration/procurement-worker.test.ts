@@ -68,6 +68,18 @@ vi.mock('../../orders/pay-ctx.js', async (importActual) => {
   };
 });
 
+// Since PR #1366, procureOne parses `paymentUrls.<rail>` (a SEP-7
+// URI) out of the CTX create-response and fails the order if it's
+// absent — BEFORE the (mocked) payCtxOrder hop. The mocked CTX
+// POST /gift-cards responses must therefore carry a valid SEP-7
+// URI for both rails. payCtxOrder is mocked so the destination /
+// amount are inert; only the SEP-7 shape needs to parse.
+const CTX_SEP7 = 'web+stellar:pay?destination=GINTEGRATIONCTXDEST&amount=0.10&memo=integration';
+const CTX_PAY_FIELDS = {
+  paymentUrls: { XLM: CTX_SEP7, USDC: CTX_SEP7 },
+  paymentCryptoAmount: '0.10',
+};
+
 vi.mock('../../merchants/sync.js', async (importActual) => {
   const actual = (await importActual()) as Record<string, unknown>;
   const stubMerchant = {
@@ -207,10 +219,13 @@ describeIf('procurement-worker integration — concurrent claim race', () => {
     let ctxCounter = 0;
     vi.mocked(operatorFetch).mockImplementation(async () => {
       ctxCounter += 1;
-      return new Response(JSON.stringify({ id: `ctx-test-order-${ctxCounter}` }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({ id: `ctx-test-order-${ctxCounter}`, ...CTX_PAY_FIELDS }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
     });
 
     const [tickA, tickB] = await Promise.all([
@@ -293,7 +308,7 @@ describeIf('procurement-worker integration — concurrent claim race', () => {
         .limit(1);
       if (row !== undefined) fetchOrder.push(row.id);
       void args;
-      return new Response(JSON.stringify({ id: `ctx-fifo-${ctxCounter}` }), {
+      return new Response(JSON.stringify({ id: `ctx-fifo-${ctxCounter}`, ...CTX_PAY_FIELDS }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
