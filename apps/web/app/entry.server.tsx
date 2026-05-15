@@ -123,7 +123,22 @@ export default function handleRequest(
 
     const { pipe, abort } = renderToPipeableStream(
       <NonceContext value={inlineScriptNonce ?? null}>
-        <ServerRouter context={routerContext} url={request.url} />
+        {/*
+          A4-057 follow-up: RR v7 streams its hydration bootstrap as
+          raw inline `<script>window.__reactRouterContext.streamController
+          .enqueue/close(...)</script>` tags injected by the
+          server-streaming runtime — NOT through the `<Scripts>`
+          React component, so the `NonceContext` / `<Scripts nonce>`
+          path never reaches them. `ServerRouter`'s own `nonce` prop
+          is the documented hook that stamps those streamed scripts.
+          Without it the strict nonce-CSP blocks hydration entirely
+          (blank app: no merchants, no search).
+        */}
+        <ServerRouter
+          context={routerContext}
+          url={request.url}
+          {...(inlineScriptNonce !== undefined ? { nonce: inlineScriptNonce } : {})}
+        />
       </NonceContext>,
       {
         [readyOption]() {
