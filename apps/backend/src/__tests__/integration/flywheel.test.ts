@@ -65,8 +65,40 @@ vi.mock('../../orders/procurement-redemption.js', async (importActual) => {
   return {
     ...actual,
     fetchRedemption: vi.fn(async () => ({ code: 'TEST-CODE-12345', pin: '1234' })),
+    // procureOne calls `waitForRedemption`, not `fetchRedemption`,
+    // since PR #1364. The real impl hits the operator pool + a
+    // 5-min SSE/poll budget — stub it to resolve immediately so
+    // the real-postgres flywheel walk fulfils synchronously.
+    waitForRedemption: vi.fn(async () => ({
+      code: 'TEST-CODE-12345',
+      pin: '1234',
+      url: null,
+    })),
   };
 });
+
+// PR #1366 added a `payCtxOrder` hop into procureOne (ADR 010
+// principal switch). The real impl resolves the operator secret
+// and submits a Stellar tx — stub it so the flywheel walk
+// doesn't need a funded operator wallet / Horizon.
+vi.mock('../../orders/pay-ctx.js', async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return {
+    ...actual,
+    payCtxOrder: vi.fn(async () => ({ txHash: 'integration-ctx-tx', submitted: true })),
+  };
+});
+
+// Since PR #1366, procureOne parses `paymentUrls.<rail>` (a SEP-7
+// URI) out of the CTX create-response and fails the order if it's
+// absent — BEFORE the (mocked) payCtxOrder hop. The mocked CTX
+// POST /gift-cards responses must therefore carry a valid SEP-7
+// URI for both rails.
+const CTX_SEP7 = 'web+stellar:pay?destination=GINTEGRATIONCTXDEST&amount=0.10&memo=integration';
+const CTX_PAY_FIELDS = {
+  paymentUrls: { XLM: CTX_SEP7, USDC: CTX_SEP7 },
+  paymentCryptoAmount: '0.10',
+};
 
 // Stub the merchants in-memory store so the order handler resolves
 // the test merchant without running the CTX sync.
@@ -236,7 +268,7 @@ describeIf('flywheel integration — XLM order → fulfilment → cashback credi
 
     // ─── Procurement tick. Stub CTX upstream calls. ───────────────────
     vi.mocked(operatorFetch).mockResolvedValueOnce(
-      new Response(JSON.stringify({ id: 'ctx-test-order-1' }), {
+      new Response(JSON.stringify({ id: 'ctx-test-order-1', ...CTX_PAY_FIELDS }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -330,7 +362,7 @@ describeIf('flywheel integration — XLM order → fulfilment → cashback credi
     await markOrderPaid(createBody.orderId);
 
     vi.mocked(operatorFetch).mockResolvedValueOnce(
-      new Response(JSON.stringify({ id: 'ctx-test-order-zero' }), {
+      new Response(JSON.stringify({ id: 'ctx-test-order-zero', ...CTX_PAY_FIELDS }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
