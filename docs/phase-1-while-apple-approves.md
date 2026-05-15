@@ -121,27 +121,27 @@ fulfillment chain against real CTX. Cost: 2 cents + Stellar fees.
 
 ## Track B — Web first deploy + Android keystore (parallelisable)
 
-### B.1 `loop-web` first deploy (15 min)
+### B.1 `loopfinance-web` first deploy (15 min)
 
 ```bash
-flyctl apps create loop-web
-flyctl deploy -a loop-web --config apps/web/fly.toml \
+flyctl apps create loopfinance-web
+flyctl deploy -a loopfinance-web --config apps/web/fly.toml \
   --build-arg VITE_API_URL=https://api.loopfinance.io \
   --build-arg VITE_LOOP_ENV=production \
   --build-arg VITE_SENTRY_DSN=…           # optional
 ```
 
 Note: `VITE_API_URL` is baked into the bundle at build time. Deploy
-loop-web AFTER `api.loopfinance.io` DNS resolves to the api app, or
+loopfinance-web AFTER `api.loopfinance.io` DNS resolves to the api app, or
 the SPA can't reach the backend.
 
 ### B.2 DNS (~30 min, propagation can take longer)
 
-| Hostname             | Target                                  |
-| -------------------- | --------------------------------------- |
-| `loopfinance.io`     | loop-web Fly app (apex)                 |
-| `www.loopfinance.io` | loop-web Fly app (CNAME / apex-flatten) |
-| `api.loopfinance.io` | CNAME `loopfinance-api.fly.dev`         |
+| Hostname             | Target                                         |
+| -------------------- | ---------------------------------------------- |
+| `loopfinance.io`     | loopfinance-web Fly app (apex)                 |
+| `www.loopfinance.io` | loopfinance-web Fly app (CNAME / apex-flatten) |
+| `api.loopfinance.io` | CNAME `loopfinance-api.fly.dev`                |
 
 Mechanics: registrar-specific. Fly's `flyctl certs add` triggers
 auto-TLS once DNS resolves.

@@ -127,7 +127,7 @@ switches). Banner copy is plain text + an optional href; the flag
 shape:
 
 ```bash
-fly secrets set LOOP_INCIDENT_BANNER='{"text":"Investigating elevated payout latency","href":"https://twitter.com/loopfinance/status/..."}' -a loop-web
+fly secrets set LOOP_INCIDENT_BANNER='{"text":"Investigating elevated payout latency","href":"https://twitter.com/loopfinance/status/..."}' -a loopfinance-web
 ```
 
 The web app reads the flag on every page load (no caching) so the
