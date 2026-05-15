@@ -34,7 +34,7 @@ forward instead.
 2. **Identify the specific release to roll back.**
    ```bash
    fly releases list -a loopfinance-api  # backend
-   fly releases list -a loop-web          # web
+   fly releases list -a loopfinance-web          # web
    ```
    The most recent release is the bad one; the one before is the
    target. Note their **image** identifiers (`registry.fly.io/...:deployment-XXX`).
@@ -60,8 +60,8 @@ careful — see "Migration rollback" below.
 Same shape:
 
 ```bash
-PRIOR=$(fly releases list -a loop-web -j | jq -r '.[1].imageRef')
-fly deploy --image $PRIOR -a loop-web
+PRIOR=$(fly releases list -a loopfinance-web -j | jq -r '.[1].imageRef')
+fly deploy --image $PRIOR -a loopfinance-web
 ```
 
 The web app is stateless (no DB writes), so this is always safe.

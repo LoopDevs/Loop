@@ -167,15 +167,15 @@ runtime config (not 404), `/health` reports
 Once `api.loopfinance.io` DNS lands (Track 2), repeat against the
 canonical hostname.
 
-### Track 2 — Web deploy (`loop-web` — first time)
+### Track 2 — Web deploy (`loopfinance-web` — first time)
 
 `apps/web/fly.toml` is configured but the app does not exist on Fly
 yet. First-time bootstrap:
 
 ```bash
-flyctl apps create loop-web
-flyctl secrets set -a loop-web   # nothing required at runtime, but Sentry DSN goes here
-flyctl deploy -a loop-web --config apps/web/fly.toml \
+flyctl apps create loopfinance-web
+flyctl secrets set -a loopfinance-web   # nothing required at runtime, but Sentry DSN goes here
+flyctl deploy -a loopfinance-web --config apps/web/fly.toml \
   --build-arg VITE_SENTRY_DSN=… \
   --build-arg VITE_LOOP_ENV=production \
   --build-arg VITE_SENTRY_RELEASE=$(git rev-parse HEAD)
@@ -185,8 +185,8 @@ DNS:
 
 | Hostname             | Target                  | Notes                                         |
 | -------------------- | ----------------------- | --------------------------------------------- |
-| `loopfinance.io`     | loop-web Fly app        | Apex — Fly issues TLS automatically.          |
-| `www.loopfinance.io` | loop-web Fly app        | CNAME or apex-flatten depending on registrar. |
+| `loopfinance.io`     | loopfinance-web Fly app | Apex — Fly issues TLS automatically.          |
+| `www.loopfinance.io` | loopfinance-web Fly app | CNAME or apex-flatten depending on registrar. |
 | `api.loopfinance.io` | loopfinance-api Fly app | CNAME `loopfinance-api.fly.dev`.              |
 
 The web client reads `VITE_API_URL` from build args (currently

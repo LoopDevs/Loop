@@ -73,7 +73,7 @@ fly scale count 0 --region iad -a loopfinance-api
 ```
 
 Once `iad` recovers, scale back symmetrically. The web app is
-stateless; same `fly status` + region scale on `loop-web`.
+stateless; same `fly status` + region scale on `loopfinance-web`.
 
 ### Postgres data loss
 

@@ -1,4 +1,4 @@
-app = "loop-web"
+app = "loopfinance-web"
 primary_region = "iad"
 
 [build]

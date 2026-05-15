@@ -13,7 +13,7 @@
      ┌────────▼────────┐     ┌─────────▼────────┐
      │  iad (Virginia)  │     │  lhr (London)     │
      │  loopfinance-api    │     │  loopfinance-api     │
-     │  loop-web        │     │  loop-web         │
+     │  loopfinance-web        │     │  loopfinance-web         │
      └──────────────────┘     └──────────────────┘
 ```
 
@@ -251,7 +251,7 @@ is the single source of truth. Synthetic drift scenarios are covered by
 # Deploy from repo root — same rationale as the backend (audit A2-410):
 # apps/web/Dockerfile copies from packages/shared/ + the workspace lockfile,
 # so the docker build context has to be the repo root.
-fly launch --name loop-web --region iad --no-deploy --config apps/web/fly.toml --dockerfile apps/web/Dockerfile
+fly launch --name loopfinance-web --region iad --no-deploy --config apps/web/fly.toml --dockerfile apps/web/Dockerfile
 
 # Add EU region
 fly regions add lhr --config apps/web/fly.toml
@@ -285,8 +285,8 @@ Point these domains to Fly.io:
 
 ```
 api.loopfinance.io  → CNAME loopfinance-api.fly.dev
-loopfinance.io      → CNAME loop-web.fly.dev
-www.loopfinance.io  → CNAME loop-web.fly.dev
+loopfinance.io      → CNAME loopfinance-web.fly.dev
+www.loopfinance.io  → CNAME loopfinance-web.fly.dev
 ```
 
 Fly.io handles TLS certificates automatically via Let's Encrypt.
@@ -403,7 +403,7 @@ previously-uploaded artifact**, regardless of build path. Loop's policy:
 ```bash
 # Build images
 docker build -t loopfinance-api -f apps/backend/Dockerfile .
-docker build -t loop-web -f apps/web/Dockerfile .
+docker build -t loopfinance-web -f apps/web/Dockerfile .
 
 # Run backend — the Dockerfile hardcodes NODE_ENV=production, so the
 # audit A-025 allowlist is required; either set IMAGE_PROXY_ALLOWED_HOSTS
@@ -416,7 +416,7 @@ docker run -p 8080:8080 \
   loopfinance-api
 
 # Run web
-docker run -p 3000:3000 loop-web
+docker run -p 3000:3000 loopfinance-web
 ```
 
 ---
