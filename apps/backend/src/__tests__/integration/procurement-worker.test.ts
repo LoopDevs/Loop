@@ -44,6 +44,27 @@ vi.mock('../../orders/procurement-redemption.js', async (importActual) => {
   return {
     ...actual,
     fetchRedemption: vi.fn(async () => ({ code: 'TEST-CODE-12345', pin: '1234' })),
+    // procureOne calls `waitForRedemption`, not `fetchRedemption`,
+    // since PR #1364. The real impl hits the operator pool + a
+    // 5-min SSE/poll budget — stub it to resolve immediately so
+    // the real-postgres ladder fulfils synchronously.
+    waitForRedemption: vi.fn(async () => ({
+      code: 'TEST-CODE-12345',
+      pin: '1234',
+      url: null,
+    })),
+  };
+});
+
+// PR #1366 added a `payCtxOrder` hop into procureOne (ADR 010
+// principal switch). The real impl resolves the operator secret
+// and submits a Stellar tx — stub it so the integration ladder
+// doesn't need a funded operator wallet / Horizon.
+vi.mock('../../orders/pay-ctx.js', async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return {
+    ...actual,
+    payCtxOrder: vi.fn(async () => ({ txHash: 'integration-ctx-tx', submitted: true })),
   };
 });
 
