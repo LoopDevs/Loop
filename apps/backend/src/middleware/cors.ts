@@ -6,7 +6,13 @@
  *
  * Production origins:
  * - `https://loopfinance.io` + `https://www.loopfinance.io` — the
- *   web app served from Vercel.
+ *   production web app (apex + www).
+ * - `https://beta.loopfinance.io` — the Phase-1 beta/reviewer web
+ *   app, served from the `loopfinance-web` Fly app. The apex stays
+ *   parked on GitHub Pages until public launch; the beta subdomain
+ *   is where the SSR build actually runs, so its origin must be
+ *   allowlisted or every API call from the beta site fails
+ *   preflight.
  * - `capacitor://localhost` — Capacitor 3+ default WebView origin
  *   on iOS.
  * - `https://localhost` — Capacitor's WebView origin on Android.
@@ -38,6 +44,7 @@ import { env } from '../env.js';
 export const PRODUCTION_ORIGINS = [
   'https://loopfinance.io',
   'https://www.loopfinance.io',
+  'https://beta.loopfinance.io',
   'capacitor://localhost',
   'https://localhost',
 ];
