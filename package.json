@@ -46,23 +46,23 @@
     "fast-uri": "^3.1.2"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "2.1.126",
+    "@anthropic-ai/claude-code": "2.1.150",
     "@commitlint/cli": "20.5.3",
     "@commitlint/config-conventional": "20.5.3",
     "@cyclonedx/cyclonedx-npm": "4.2.1",
-    "@playwright/test": "1.59.1",
-    "@sentry/cli": "3.4.1",
+    "@playwright/test": "1.60.0",
+    "@sentry/cli": "3.4.3",
     "@stellar/stellar-sdk": "15.1.0",
-    "@typescript-eslint/eslint-plugin": "8.59.2",
-    "@typescript-eslint/parser": "8.59.2",
+    "@typescript-eslint/eslint-plugin": "8.60.0",
+    "@typescript-eslint/parser": "8.60.0",
     "concurrently": "9.2.1",
-    "eslint": "10.3.0",
+    "eslint": "10.4.0",
     "eslint-plugin-react-hooks": "7.1.1",
     "husky": "9.1.7",
     "lint-staged": "16.4.0",
     "prettier": "3.8.3",
     "typescript": "6.0.3",
-    "wait-on": "9.0.5"
+    "wait-on": "9.0.10"
   },
   "engines": {
     "node": ">=22.0.0"
