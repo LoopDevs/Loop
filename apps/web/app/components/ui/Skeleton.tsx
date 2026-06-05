@@ -9,11 +9,15 @@ export function Skeleton({ className = '' }: SkeletonProps): React.JSX.Element {
 
 /** Skeleton shaped like a merchant card. */
 export function MerchantCardSkeleton(): React.JSX.Element {
+  // Mirrors the real MerchantCard layout exactly (aspect-video banner,
+  // overlapping logo well, title + denomination lines) so swapping
+  // skeleton → card causes no vertical reflow.
   return (
-    <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
-      <Skeleton className="h-32 w-full rounded-none" />
-      <div className="p-3 space-y-2">
-        <Skeleton className="h-4 w-3/4" />
+    <div className="overflow-hidden rounded-lg border border-line bg-surface">
+      <Skeleton className="aspect-video w-full rounded-none" />
+      <div className="p-4">
+        <div className="w-16 h-16 sm:w-20 sm:h-20 -mt-12 sm:-mt-16 mb-3 relative z-10 rounded-lg border border-line ring-4 ring-white bg-gray-100" />
+        <Skeleton className="h-4 sm:h-5 w-3/4 mb-2" />
         <Skeleton className="h-3 w-1/2" />
       </div>
     </div>

@@ -215,8 +215,11 @@ function HomeContent(): React.JSX.Element {
           <RecentlyPurchasedStrip variant="desktop" />
           <FavoritesStrip variant="desktop" />
 
-          {/* Featured */}
-          {visibleFeatured.length > 0 && (
+          {/* Featured — rendered (with skeletons) during load too, so it
+              reserves its space from first paint instead of popping in
+              above "All Merchants" once data resolves. Hidden only when
+              loading has finished AND there's genuinely nothing featured. */}
+          {(visibleLoading || visibleFeatured.length > 0) && (
             <section className="mb-16">
               <div className="text-center mb-10">
                 <h2 className="text-3xl font-semibold tracking-[-0.02em] text-ink mb-3">
@@ -227,48 +230,46 @@ function HomeContent(): React.JSX.Element {
                 </p>
               </div>
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-                {visibleFeatured.map((merchant, i) => (
-                  <MerchantCard
-                    key={merchant.id}
-                    merchant={merchant}
-                    displayIndex={i}
-                    eager={i < 4}
-                    userCashbackPct={lookupCashback(merchant.id)}
-                  />
-                ))}
+                {visibleLoading
+                  ? Array.from({ length: 6 }).map((_, i) => <MerchantCardSkeleton key={i} />)
+                  : visibleFeatured.map((merchant, i) => (
+                      <MerchantCard
+                        key={merchant.id}
+                        merchant={merchant}
+                        displayIndex={i}
+                        eager={i < 4}
+                        userCashbackPct={lookupCashback(merchant.id)}
+                      />
+                    ))}
               </div>
             </section>
           )}
 
-          {/* All merchants */}
+          {/* All merchants — the skeleton grid uses the SAME column /
+              gap classes as the populated grid so the column count
+              doesn't jump (was lg:4 skeletons → lg:3 populated). */}
           <section id="directory" className="scroll-mt-24">
             <div className="text-center mb-12">
-              <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
-                All Merchants
+              <h2 className="text-3xl font-semibold tracking-[-0.02em] text-ink mb-3">
+                All merchants
               </h2>
-              <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
-                Browse our complete collection of gift cards
+              <p className="text-base text-ink-muted max-w-2xl mx-auto">
+                Browse our complete collection of gift cards.
               </p>
             </div>
-            {visibleLoading ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 px-4 sm:px-6">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <MerchantCardSkeleton key={i} />
-                ))}
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
-                {visibleMerchants.map((merchant, i) => (
-                  <MerchantCard
-                    key={merchant.id}
-                    merchant={merchant}
-                    displayIndex={i + 6}
-                    eager={i < 4}
-                    userCashbackPct={lookupCashback(merchant.id)}
-                  />
-                ))}
-              </div>
-            )}
+            <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
+              {visibleLoading
+                ? Array.from({ length: 8 }).map((_, i) => <MerchantCardSkeleton key={i} />)
+                : visibleMerchants.map((merchant, i) => (
+                    <MerchantCard
+                      key={merchant.id}
+                      merchant={merchant}
+                      displayIndex={i + 6}
+                      eager={i < 4}
+                      userCashbackPct={lookupCashback(merchant.id)}
+                    />
+                  ))}
+            </div>
           </section>
         </div>
 
