@@ -115,9 +115,8 @@ function HomeContent(): React.JSX.Element {
               <h1 className="mt-6 text-4xl sm:text-6xl font-semibold tracking-[-0.03em] text-ink leading-[1.05]">
                 {phase1Only ? (
                   <>
-                    Save on every
-                    <br className="hidden sm:block" />{' '}
-                    <span className="text-blue-600">gift card</span>
+                    Instant <span className="text-blue-600">cashback</span>
+                    <br className="hidden sm:block" /> everywhere you shop.
                   </>
                 ) : (
                   <>

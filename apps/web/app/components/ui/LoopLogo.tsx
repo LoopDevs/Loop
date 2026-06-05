@@ -1,10 +1,18 @@
 /**
  * Loop wordmark — inlined SVG (not an <img src>) so it renders as
  * crisp vector markup, inherits `currentColor`, and never shows the
- * rasterisation/scaling artefacts an <img> can. Height-driven: set
- * `h-*` (and keep `w-auto`) on the className; the viewBox handles the
- * 172.22:71 aspect ratio. Colour follows the surrounding text colour
- * (`text-ink` by default at call sites).
+ * rasterisation/scaling artefacts an <img> can.
+ *
+ * Sizing: set the height on `className` (e.g. `h-7`) and keep
+ * `w-auto`; the viewBox + `preserveAspectRatio` derive the width from
+ * the 172.22:71 aspect ratio. Colour follows the surrounding text
+ * colour (`text-ink` at call sites).
+ *
+ * Crispness: `shapeRendering="geometricPrecision"` makes Chrome favour
+ * edge accuracy over speed, and the navbar dropped its `backdrop-blur`
+ * so the mark isn't pushed onto a lower-quality compositing layer. On
+ * a 1x (non-retina) display, thin vector curves still alias a little —
+ * a rasterisation limit, not something CSS resolves.
  */
 export function LoopLogo({ className = '' }: { className?: string }): React.JSX.Element {
   return (
@@ -13,6 +21,8 @@ export function LoopLogo({ className = '' }: { className?: string }): React.JSX.
       fill="currentColor"
       role="img"
       aria-label="Loop"
+      preserveAspectRatio="xMidYMid meet"
+      shapeRendering="geometricPrecision"
       className={className}
     >
       <path d="M0,52V0h10v43h20v9H0Z" />
