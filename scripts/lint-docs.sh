@@ -264,6 +264,13 @@ if command -v flyctl >/dev/null 2>&1; then
   while IFS= read -r fly_toml; do
     dir=$(dirname "$fly_toml")
     output=$(cd "$dir" && flyctl config validate 2>&1 || echo "FLYCTL_FAILED")
+    # Drop flyctl telemetry noise that is orthogonal to config
+    # validity. When flyctl is authed but can't fetch an org metrics
+    # token it prints `Warning: Metrics token unavailable: … context
+    # canceled` to stderr — a network/telemetry hiccup, not a fly.toml
+    # problem. Left in, it trips the `grep -qi warning` gate below and
+    # fails the docs check on any maintainer laptop with authed flyctl.
+    output=$(printf '%s\n' "$output" | grep -v "Metrics token unavailable")
     if echo "$output" | grep -q "no access token available"; then
       echo "  (flyctl installed but not authenticated — skipping $fly_toml; run 'flyctl auth login' to enable this check)"
       continue
