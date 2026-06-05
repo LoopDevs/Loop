@@ -34,10 +34,13 @@ function SlidePanel(): React.JSX.Element {
 
   return (
     <div className="relative hidden lg:flex lg:w-1/2 flex-col overflow-hidden border-r border-line bg-surface-subtle">
-      {/* The live onboarding screen. `key` remounts on change so the
-          screen's enter animations (count-up, tile reveal) re-fire. */}
-      <div key={i} className="flex flex-1 flex-col pt-12">
-        {SCREENS[i]!(true)}
+      {/* The live onboarding screen, capped at 600px and centred. `key`
+          remounts on change so the screen's enter animations (count-up,
+          tile reveal) re-fire. */}
+      <div className="flex flex-1 flex-col items-center pt-12">
+        <div key={i} className="flex w-full max-w-[600px] flex-1 flex-col">
+          {SCREENS[i]!(true)}
+        </div>
       </div>
 
       {/* Slideshow controls. */}
