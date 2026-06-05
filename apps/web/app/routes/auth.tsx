@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { Route } from './+types/auth';
 import { useAuth } from '~/hooks/use-auth';
 import { LoopLogo } from '~/components/ui/LoopLogo';
+import { BackToSite } from '~/components/ui/BackToSite';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAppConfig } from '~/hooks/use-app-config';
 import { useUiStore } from '~/stores/ui.store';
@@ -528,6 +529,7 @@ export default function AuthRoute(): React.JSX.Element {
       {/* Form panel */}
       <div className="flex flex-1 items-center justify-center bg-surface px-6 py-12">
         <div className="w-full max-w-sm">
+          <BackToSite />
           <div className="mb-8 text-center lg:text-left">
             <LoopLogo className="h-8 w-auto mb-4 text-ink mx-auto lg:mx-0" />
             <h1 className="text-2xl font-bold text-ink">

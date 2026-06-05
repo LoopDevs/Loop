@@ -1,5 +1,4 @@
 import type { Route } from './+types/onboarding';
-import { Onboarding } from '~/components/features/onboarding/Onboarding';
 import { OnboardingDesktop } from '~/components/features/onboarding/OnboardingDesktop';
 
 export function meta(): Route.MetaDescriptors {
@@ -7,27 +6,18 @@ export function meta(): Route.MetaDescriptors {
 }
 
 /**
- * `/onboarding` — first-launch / sign-up flow.
+ * `/onboarding` — the web sign-up entry point.
  *
- * Two presentations, picked by width:
- *   - `<lg` (phones, native webview): the multi-screen mobile flow
- *     (`Onboarding`, `fixed inset-0`, its own footer CTA). The
- *     `lg:hidden` wrapper hides its fixed children at desktop widths.
- *   - `lg+` (desktop web): a split layout — marketing slideshow on the
- *     left, email → verification-code capture on the right.
+ *   - `lg+`: a split layout — the animated marketing screens on the
+ *     left (with arrows), email → verification-code capture on the
+ *     right.
+ *   - `<lg`: just the sign-up form (no slideshow) — a single clean
+ *     screen rather than the native app's multi-screen walkthrough.
  *
- * Native always renders the mobile flow directly from root.tsx; this
- * route is the web entry point.
+ * The native app's full onboarding walkthrough (`Onboarding`) is
+ * rendered directly from root.tsx for native users; it isn't used on
+ * the web route.
  */
 export default function OnboardingRoute(): React.JSX.Element {
-  return (
-    <>
-      <div className="lg:hidden">
-        <Onboarding />
-      </div>
-      <div className="hidden lg:block">
-        <OnboardingDesktop />
-      </div>
-    </>
-  );
+  return <OnboardingDesktop />;
 }

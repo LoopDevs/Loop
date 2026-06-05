@@ -11,6 +11,7 @@
 import { useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { LoopLogo } from '~/components/ui/LoopLogo';
+import { BackToSite } from '~/components/ui/BackToSite';
 import { Input } from '~/components/ui/Input';
 import { Button } from '~/components/ui/Button';
 import { useOnboardingAuth } from './signup-tail';
@@ -124,16 +125,17 @@ export function OnboardingDesktop({ onComplete }: OnboardingDesktopProps = {}): 
       {/* Form panel */}
       <div className="flex flex-1 items-center justify-center bg-surface px-8 py-12">
         <div className="w-full max-w-sm">
-          <LoopLogo className="mb-8 h-8 w-auto text-ink lg:hidden" />
+          <BackToSite />
+          <LoopLogo className="mb-6 h-8 w-auto text-ink lg:hidden" />
           {step === 'email' ? (
             <>
               <h1 className="text-3xl font-semibold tracking-[-0.02em] text-ink">
-                Create your account
+                Welcome to the club.
               </h1>
               <p className="mt-2 text-ink-muted">
-                Enter your email and we’ll send you a verification code — no password needed.
+                Drop your email below and we’ll send you a 6-digit code to verify.
               </p>
-              <form onSubmit={(e) => void handleEmail(e)} className="mt-8 space-y-4">
+              <form onSubmit={(e) => void handleEmail(e)} className="mt-8">
                 <Input
                   type="email"
                   label="Email address"
@@ -148,7 +150,17 @@ export function OnboardingDesktop({ onComplete }: OnboardingDesktopProps = {}): 
                   autoFocus
                   {...(emailError !== null ? { error: emailError } : {})}
                 />
-                <Button type="submit" size="lg" className="w-full" loading={sendingOtp}>
+                <p className="mt-2.5 flex items-center gap-1.5 text-sm text-ink-muted">
+                  <svg
+                    className="h-3.5 w-3.5 flex-shrink-0 text-blue-500"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M12 21s-7.5-4.9-10-9.2C.4 8.6 2 5 5.5 5c2 0 3.4 1.1 4.5 2.6C11.1 6.1 12.5 5 14.5 5 18 5 19.6 8.6 22 11.8 19.5 16.1 12 21 12 21z" />
+                  </svg>
+                  Your email stays yours. We never sell contacts.
+                </p>
+                <Button type="submit" size="lg" className="mt-4 w-full" loading={sendingOtp}>
                   Send verification code
                 </Button>
               </form>
