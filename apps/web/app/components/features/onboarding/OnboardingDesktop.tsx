@@ -8,7 +8,7 @@
  * Reuses `useOnboardingAuth` so the OTP send/verify behaviour is
  * identical to the mobile flow.
  */
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { LoopLogo } from '~/components/ui/LoopLogo';
 import { Input } from '~/components/ui/Input';
@@ -30,21 +30,10 @@ function SlidePanel(): React.JSX.Element {
   const [i, setI] = useState(0);
   const go = useCallback((d: number) => setI((v) => (v + d + SCREENS.length) % SCREENS.length), []);
 
-  // Gentle auto-advance; pauses on hover.
-  const paused = useRef(false);
-  useEffect(() => {
-    const t = setInterval(() => {
-      if (!paused.current) setI((v) => (v + 1) % SCREENS.length);
-    }, 6500);
-    return () => clearInterval(t);
-  }, []);
+  // No autoplay — the user advances the slideshow with the arrows / dots.
 
   return (
-    <div
-      className="relative hidden lg:flex lg:w-1/2 flex-col overflow-hidden border-r border-line bg-surface-subtle"
-      onMouseEnter={() => (paused.current = true)}
-      onMouseLeave={() => (paused.current = false)}
-    >
+    <div className="relative hidden lg:flex lg:w-1/2 flex-col overflow-hidden border-r border-line bg-surface-subtle">
       {/* The live onboarding screen. `key` remounts on change so the
           screen's enter animations (count-up, tile reveal) re-fire. */}
       <div key={i} className="flex flex-1 flex-col pt-12">
