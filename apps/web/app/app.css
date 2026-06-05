@@ -1,11 +1,116 @@
 @import 'tailwindcss';
 
+/* ─────────────────────────────────────────────────────────────────────
+   Loop design language — "clean tech", light-mode only.
+
+   ONE place to change the look of the whole app. Two layers:
+
+   1. We OVERRIDE Tailwind's default `blue`, `gray`, `radius`, and
+      `shadow` ramps so every existing `bg-blue-600`, `text-gray-600`,
+      `rounded-lg`, `shadow-sm`, etc. across all routes + components
+      instantly inherits the new palette + 2px corners with no
+      per-file edits. This is the DRY / updateable core: retune a
+      token here, the entire surface follows.
+
+   2. We add NAMED semantic tokens (`brand`, `ink`, `surface`, `line`)
+      so new components read intentionally — `text-ink`, `bg-surface`,
+      `border-line`, `bg-brand-600` — instead of guessing greys.
+
+   Inspiration: Coinbase / Revolut / Quidco / Framer / Google — a
+   confident blue accent, generous whitespace, hairline borders,
+   near-flat surfaces, sharp 2px geometry.
+   ───────────────────────────────────────────────────────────────────── */
 @theme {
   --font-sans:
     'Inter', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
     'Segoe UI Symbol', 'Noto Color Emoji';
+
+  /* ── Brand blue ─────────────────────────────────────────────
+     Confident, professional, faintly electric. `blue-600` is the
+     primary action colour; `blue-500` is the focus/accent ring.
+     Overriding the default `blue-*` ramp also re-skins every
+     pre-existing `*-blue-*` utility in the codebase. */
+  --color-blue-50: #eef4ff;
+  --color-blue-100: #d9e6ff;
+  --color-blue-200: #bcd2ff;
+  --color-blue-300: #8eb4ff;
+  --color-blue-400: #5a8bff;
+  --color-blue-500: #2f6bff;
+  --color-blue-600: #1a56db;
+  --color-blue-700: #1846b3;
+  --color-blue-800: #183a8f;
+  --color-blue-900: #173474;
+  --color-blue-950: #101f47;
+
+  /* ── Neutrals (cool slate) ──────────────────────────────────
+     Slightly cool greys read more "tech" than warm neutrals.
+     Overrides Tailwind's `gray-*` so the whole app shifts in one
+     move. */
+  --color-gray-50: #f8fafc;
+  --color-gray-100: #f1f5f9;
+  --color-gray-200: #e8edf3;
+  --color-gray-300: #d3dbe6;
+  --color-gray-400: #98a4b6;
+  --color-gray-500: #64748b;
+  --color-gray-600: #475569;
+  --color-gray-700: #334155;
+  --color-gray-800: #1e293b;
+  --color-gray-900: #0f1b2d;
+  --color-gray-950: #0a1322;
+
+  /* ── Named semantic aliases ─────────────────────────────────
+     For new components. `bg-surface`, `text-ink`, `border-line`,
+     `bg-brand-600`, … */
+  --color-brand-50: #eef4ff;
+  --color-brand-100: #d9e6ff;
+  --color-brand-200: #bcd2ff;
+  --color-brand-300: #8eb4ff;
+  --color-brand-400: #5a8bff;
+  --color-brand-500: #2f6bff;
+  --color-brand-600: #1a56db;
+  --color-brand-700: #1846b3;
+  --color-brand-800: #183a8f;
+  --color-brand-900: #173474;
+
+  --color-canvas: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f8fafc;
+  --color-surface-muted: #f1f5f9;
+  --color-line: #e8edf3;
+  --color-line-strong: #d3dbe6;
+  --color-ink: #0f1b2d;
+  --color-ink-muted: #475569;
+  --color-ink-subtle: #98a4b6;
+
+  /* ── Radii — sharp, 2px everywhere ──────────────────────────
+     Overrides the whole `rounded-*` scale. Pills/avatars use
+     `rounded-full` (separate 9999px token) and stay circular. */
+  --radius-xs: 2px;
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 3px;
+  --radius-2xl: 4px;
+  --radius-3xl: 6px;
+  --radius-4xl: 8px;
+
+  /* ── Shadows — soft, low, cool-tinted ───────────────────────
+     Clean/minimal leans on hairline borders + barely-there
+     elevation rather than heavy drop shadows. */
+  --shadow-2xs: 0 1px 1px rgba(15, 27, 45, 0.04);
+  --shadow-xs: 0 1px 2px rgba(15, 27, 45, 0.05);
+  --shadow-sm: 0 1px 2px rgba(15, 27, 45, 0.06), 0 1px 3px rgba(15, 27, 45, 0.04);
+  --shadow-md: 0 2px 6px rgba(15, 27, 45, 0.06), 0 6px 16px rgba(15, 27, 45, 0.05);
+  --shadow-lg: 0 8px 24px rgba(15, 27, 45, 0.08), 0 2px 6px rgba(15, 27, 45, 0.04);
+  --shadow-xl: 0 16px 48px rgba(15, 27, 45, 0.1);
 }
 
+/* Keep `dark:` variants gated on the `.dark` class. Light-mode is the
+   only theme now and root.tsx never adds `.dark`, so every existing
+   `dark:*` utility across the codebase stays inert — no need to strip
+   them all. WITHOUT this custom-variant, `dark:` would fall back to
+   `@media (prefers-color-scheme: dark)` and re-activate on a user's
+   dark-set device, fighting the light lock. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* Use system font on native — faster, feels native */
@@ -13,44 +118,46 @@ html.native {
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
-/* Default light mode */
+/* Light-mode only (the dark theme is retired for now — the inline
+   script in root.tsx always resolves to `light`). Body baseline:
+   white canvas, ink text, cool font rendering, and Inter's nicer
+   glyph + numeric features for financial figures. */
 html,
 body {
-  background-color: white;
-  color: #111827;
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
   min-width: 320px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings:
+    'cv11' 1,
+    'ss01' 1;
 }
 
-/* Explicit light mode - only apply to html/body, not children */
-html.light {
-  background-color: white !important;
-}
-
+html.light,
 html.light body {
-  background-color: white !important;
-  color: #111827 !important;
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
 }
 
-/* Explicit dark mode - only apply to html/body, not children */
-html.dark {
-  background-color: rgb(3, 7, 18) !important;
+/* Tabular figures for aligned money/columns. Apply `.tabular`. */
+.tabular {
+  font-variant-numeric: tabular-nums;
 }
 
-html.dark body {
-  background-color: rgb(3, 7, 18) !important;
-  color: white !important;
+/* Subtle dotted/grid atmospheres for hero + section backgrounds —
+   used by marketing surfaces to add depth without heavy imagery. */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(15, 27, 45, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 27, 45, 0.04) 1px, transparent 1px);
+  background-size: 32px 32px;
 }
 
-/* Theme is driven entirely by the inline script in root.tsx setting
-   `html.dark` or `html.light` before body paints. We used to also
-   honour `@media (prefers-color-scheme: dark)` as a fallback, but
-   that fought with Tailwind's class-based `dark:` variants during
-   the tiny window before the stylesheet + script finished loading:
-   body went dark via the media query while Tailwind dark: variants
-   on content were still inactive, producing a visible mix of light
-   content on a dark body on no-cache refresh. Dropping the media
-   fallback means users with JS disabled see the light theme — the
-   script's catch-block already handles that case explicitly. */
+.bg-dots {
+  background-image: radial-gradient(rgba(15, 27, 45, 0.06) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
 
 /* Hero SVG fill - explicit overrides for theme classes */
 html.light .hero-shape-fill {

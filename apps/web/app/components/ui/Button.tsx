@@ -11,21 +11,25 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   rightIcon?: React.ReactNode;
 }
 
+// Loop design language — clean tech, blue accent, 2px corners.
+// `rounded-md` resolves to 2px via the @theme radius tokens.
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-blue-500 hover:bg-blue-600 text-white border-blue-500',
-  secondary:
-    'bg-gray-100 hover:bg-gray-200 text-gray-900 dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-100',
-  outline: 'border-2 border-gray-600 hover:bg-gray-800 text-gray-300',
-  ghost: 'hover:bg-gray-100 text-gray-700 dark:hover:bg-gray-800 dark:text-gray-300',
-  link: 'text-blue-500 hover:text-blue-600 underline-offset-4 hover:underline',
-  destructive: 'bg-red-500 hover:bg-red-600 text-white border-red-500',
+  primary:
+    'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white shadow-xs border border-transparent',
+  secondary: 'bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-ink border border-transparent',
+  outline: 'bg-white border border-line-strong hover:bg-gray-50 hover:border-gray-400 text-ink',
+  ghost:
+    'hover:bg-gray-100 active:bg-gray-200 text-ink-muted hover:text-ink border border-transparent',
+  link: 'text-blue-600 hover:text-blue-700 underline-offset-4 hover:underline',
+  destructive:
+    'bg-red-600 hover:bg-red-700 active:bg-red-800 text-white shadow-xs border border-transparent',
 };
 
 const SIZES: Record<Size, string> = {
   sm: 'px-3 py-1.5 text-sm',
   md: 'px-4 py-2 text-sm',
-  lg: 'px-6 py-3 text-base',
-  xl: 'px-8 py-4 text-lg',
+  lg: 'px-5 py-2.5 text-[0.9375rem]',
+  xl: 'px-7 py-3.5 text-base',
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
@@ -45,7 +49,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     ref,
   ) => {
     const base =
-      'inline-flex items-center justify-center gap-2 min-h-[44px] rounded-lg font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed';
+      'inline-flex items-center justify-center gap-2 min-h-[44px] rounded-md font-medium tracking-[-0.01em] transition-[background-color,border-color,color,box-shadow] duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:opacity-50 disabled:cursor-not-allowed';
     const classes = `${base} ${VARIANTS[variant]} ${SIZES[size]} ${className}`.trim();
 
     return (
