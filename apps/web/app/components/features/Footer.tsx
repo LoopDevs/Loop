@@ -10,7 +10,7 @@ export function Footer(): React.JSX.Element {
   const linkClass = 'text-ink-muted hover:text-ink transition-colors';
   return (
     <footer className="bg-surface-subtle border-t border-line mt-16">
-      <div className="container mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
+      <div className="container mx-auto px-4 py-10">
         <div className="flex flex-col md:flex-row justify-between items-center gap-6">
           <Link to="/" className="flex items-center gap-3 text-ink">
             <LoopLogo className="h-6 w-auto" />

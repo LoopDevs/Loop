@@ -128,7 +128,7 @@ function HomeContent(): React.JSX.Element {
               </h1>
               <p className="mt-5 text-lg text-ink-muted max-w-xl mx-auto">
                 {phase1Only
-                  ? 'Buy from merchants you already shop at. Save up to 15% instantly — pay with XLM or USDC, redeem online or in-store.'
+                  ? 'Buy from merchants you already shop at. Save up to 15% instantly. Pay with XLM or USDC, redeem online or in-store.'
                   : 'Buy from merchants you already shop at. Every order pays back to your Loop balance — withdraw on-chain whenever you’re ready.'}
               </p>
               <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -205,15 +205,6 @@ function HomeContent(): React.JSX.Element {
               Failed to load merchants. Please try again.
             </p>
           )}
-
-          {/* How it works — three-step explainer for unauthenticated
-              crawlers + first-time visitors (#661). SEO content for
-              the "how does Loop cashback work" query class; internal
-              links down to /cashback and /trustlines give the
-              acquisition funnel two natural next clicks. Rendered
-              only when not authenticated (signed-in users already
-              know the flow; the band would be just noise). */}
-          {!isAuthenticated && <HowItWorksStrip />}
 
           {/* "Recently purchased" + "Your favourites" strips — both
               self-gate on isAuthenticated and a non-empty list, so
@@ -304,94 +295,6 @@ function Feature({ icon, label }: { icon: React.ReactNode; label: string }): Rea
       </span>
       <div className="text-xs sm:text-sm font-medium text-ink-muted text-center">{label}</div>
     </div>
-  );
-}
-
-/**
- * Three-step cashback-flywheel explainer strip for unauthenticated
- * homepage visitors (#661). Keyword-rich body copy ("cashback on
- * gift cards", "LOOP asset stablecoin", "compounds") so crawlers
- * have content to rank; internal links to /cashback and
- * /trustlines give first-time visitors two natural next clicks
- * without breaking the main merchant-browse flow.
- *
- * Self-hides for authenticated users — they already know how it
- * works; the strip would just add noise between the stats band
- * and the merchant grid. Non-authenticated = pre-funnel audience,
- * the only people the explainer helps.
- */
-function HowItWorksStrip(): React.JSX.Element {
-  return (
-    <section
-      aria-labelledby="how-it-works-heading"
-      className="mb-16 rounded-xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-gray-900"
-    >
-      <div className="text-center mb-8">
-        <h2
-          id="how-it-works-heading"
-          className="text-2xl font-bold text-gray-900 dark:text-white mb-2"
-        >
-          How Loop cashback works
-        </h2>
-        <p className="text-sm text-gray-600 dark:text-gray-300 max-w-xl mx-auto">
-          Every gift card pays back. Your cashback compounds into more cashback — a flywheel, not a
-          one-shot rebate.
-        </p>
-      </div>
-      <ol className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
-        <Step
-          index={1}
-          heading="Buy a gift card"
-          body="Pay with XLM, USDC, or your existing LOOP-asset balance. We check out at the merchant on your behalf — same brand, same card."
-        />
-        <Step
-          index={2}
-          heading="Earn in LOOP asset"
-          body="Cashback lands in USDLOOP / GBPLOOP / EURLOOP — Stellar stablecoins pinned 1:1 to your home currency. Verified issuers live on the /trustlines page."
-          linkTo="/trustlines"
-          linkLabel="See the verified issuers →"
-        />
-        <Step
-          index={3}
-          heading="Spend it again"
-          body="Use your LOOP-asset balance to pay for your next gift card. Cashback on order #1 pays part of order #2 — the flywheel."
-          linkTo="/cashback"
-          linkLabel="Browse all cashback rates →"
-        />
-      </ol>
-    </section>
-  );
-}
-
-function Step({
-  index,
-  heading,
-  body,
-  linkTo,
-  linkLabel,
-}: {
-  index: number;
-  heading: string;
-  body: string;
-  linkTo?: string;
-  linkLabel?: string;
-}): React.JSX.Element {
-  return (
-    <li className="flex flex-col">
-      <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-green-100 text-sm font-semibold text-green-800 dark:bg-green-900/40 dark:text-green-300 mb-3">
-        {index}
-      </span>
-      <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-1">{heading}</h3>
-      <p className="text-gray-600 dark:text-gray-300">{body}</p>
-      {linkTo !== undefined && linkLabel !== undefined ? (
-        <Link
-          to={linkTo}
-          className="mt-2 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
-        >
-          {linkLabel}
-        </Link>
-      ) : null}
-    </li>
   );
 }
 
