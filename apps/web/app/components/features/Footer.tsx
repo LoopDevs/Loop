@@ -1,5 +1,6 @@
 import { Link } from 'react-router';
 import { useAppConfig } from '~/hooks/use-app-config';
+import { LoopLogo } from '~/components/ui/LoopLogo';
 
 export function Footer(): React.JSX.Element {
   const { config } = useAppConfig();
@@ -11,8 +12,8 @@ export function Footer(): React.JSX.Element {
     <footer className="bg-surface-subtle border-t border-line mt-16">
       <div className="container mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex flex-col md:flex-row justify-between items-center gap-6">
-          <Link to="/" className="flex items-center gap-3">
-            <img src="/loop-logo.svg" alt="Loop" className="h-6" />
+          <Link to="/" className="flex items-center gap-3 text-ink">
+            <LoopLogo className="h-6 w-auto" />
           </Link>
           <nav className="flex flex-wrap justify-center gap-x-6 gap-y-3 text-sm font-medium">
             <Link to="/" className={linkClass}>

@@ -9,6 +9,7 @@ import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAppConfig } from '~/hooks/use-app-config';
 import { getImageProxyUrl } from '~/utils/image';
 import { Avatar } from '~/components/ui/Avatar';
+import { LoopLogo } from '~/components/ui/LoopLogo';
 
 interface NavbarProps {
   // extensible for future props
@@ -329,7 +330,7 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
   return (
     <nav
       data-nav="top"
-      className="fixed top-0 left-0 right-0 z-[1100] bg-white/80 backdrop-blur-md border-b border-line"
+      className="fixed top-0 left-0 right-0 z-[1100] bg-white border-b border-line"
       style={{
         // calc(100vw - 100%) = scrollbar width; keeps nav content aligned
         // with page content whether or not a scrollbar is present.
@@ -342,8 +343,8 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
         <div className="flex items-center gap-3 px-4 sm:px-6 lg:px-8 py-2 sm:py-2.5">
           {/* Logo — web only (native shows the launcher mark). */}
           {!isNative && (
-            <Link to="/" className="flex items-center flex-shrink-0 pr-1">
-              <img src="/loop-logo.svg" alt="Loop" className="h-6 md:h-7" />
+            <Link to="/" className="flex items-center flex-shrink-0 pr-1 text-ink">
+              <LoopLogo className="h-6 md:h-7 w-auto" />
             </Link>
           )}
 

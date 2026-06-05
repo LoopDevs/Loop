@@ -12,8 +12,6 @@ import { FavoritesStrip } from '~/components/features/FavoritesStrip';
 import { RecentlyPurchasedStrip } from '~/components/features/RecentlyPurchasedStrip';
 import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
 import { MobileHome } from '~/components/features/home/MobileHome';
-import { CashbackStatsBand } from '~/components/features/home/CashbackStatsBand';
-import { FlywheelStatsBand } from '~/components/features/home/FlywheelStatsBand';
 
 export function meta(): Route.MetaDescriptors {
   return [
@@ -143,13 +141,13 @@ function HomeContent(): React.JSX.Element {
                     Get started — it’s free
                   </Link>
                 )}
-                <Link
-                  to="/calculator"
+                <a
+                  href="#directory"
                   className="inline-flex items-center justify-center gap-1 rounded-md border border-line-strong bg-white px-5 py-3 text-sm font-semibold text-ink hover:bg-gray-50 transition-colors"
                 >
-                  {phase1Only ? 'Savings calculator' : 'Cashback calculator'}
+                  Browse brands
                   <span aria-hidden="true">→</span>
-                </Link>
+                </a>
               </div>
               <div className="mt-12 grid grid-cols-3 gap-4 max-w-2xl mx-auto">
                 <Feature
@@ -209,15 +207,6 @@ function HomeContent(): React.JSX.Element {
             </p>
           )}
 
-          <div className="mb-12 space-y-3">
-            <CashbackStatsBand />
-            {/* Flywheel band (#609): "X% of recent orders paid with
-                recycled cashback". Forward-looking pitch below the
-                emission totals. Self-hides at recycledOrders=0 so
-                the pre-flywheel state doesn't render a 0% banner. */}
-            <FlywheelStatsBand />
-          </div>
-
           {/* How it works — three-step explainer for unauthenticated
               crawlers + first-time visitors (#661). SEO content for
               the "how does Loop cashback work" query class; internal
@@ -262,7 +251,7 @@ function HomeContent(): React.JSX.Element {
           )}
 
           {/* All merchants */}
-          <section>
+          <section id="directory" className="scroll-mt-24">
             <div className="text-center mb-12">
               <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
                 All Merchants

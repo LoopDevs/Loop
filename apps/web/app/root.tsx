@@ -32,6 +32,7 @@ import { buildSecurityHeaders } from '~/utils/security-headers';
 import { useNonce } from '~/utils/nonce-context';
 import { shouldRetry } from '~/hooks/query-retry';
 import { NativeTabBar } from '~/components/features/NativeTabBar';
+import { LoopLogo } from '~/components/ui/LoopLogo';
 import { fetchAllMerchants } from '~/services/merchants';
 import './app.css';
 
@@ -484,9 +485,8 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
 
 function NativeSplash(): React.JSX.Element {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
-      <img src="/loop-logo.svg" alt="Loop" className="h-10 animate-pulse dark:hidden" />
-      <img src="/loop-logo-white.svg" alt="Loop" className="h-10 animate-pulse hidden dark:block" />
+    <div className="min-h-screen flex items-center justify-center bg-surface-subtle">
+      <LoopLogo className="h-10 w-auto animate-pulse text-ink" />
     </div>
   );
 }

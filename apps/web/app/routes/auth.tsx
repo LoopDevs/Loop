@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import type { Route } from './+types/auth';
 import { useAuth } from '~/hooks/use-auth';
+import { LoopLogo } from '~/components/ui/LoopLogo';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAppConfig } from '~/hooks/use-app-config';
 import { useUiStore } from '~/stores/ui.store';
@@ -513,12 +514,7 @@ export default function AuthRoute(): React.JSX.Element {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4 native-auth-screen">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <img src="/loop-logo.svg" alt="Loop" className="h-8 mx-auto mb-4 dark:hidden" />
-          <img
-            src="/loop-logo-white.svg"
-            alt="Loop"
-            className="h-8 mx-auto mb-4 hidden dark:block"
-          />
+          <LoopLogo className="h-8 w-auto mx-auto mb-4 text-ink" />
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
             {step === 'email' ? 'Sign in to Loop' : 'Check your email'}
           </h1>

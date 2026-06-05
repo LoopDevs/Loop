@@ -10,6 +10,7 @@ export { Card, type CardProps } from './Card';
 export { Badge, type BadgeProps } from './Badge';
 export { Avatar, type AvatarProps } from './Avatar';
 export { Container, type ContainerProps } from './Container';
+export { LoopLogo } from './LoopLogo';
 export { Spinner } from './Spinner';
 export { Skeleton } from './Skeleton';
 export { PageHeader } from './PageHeader';
