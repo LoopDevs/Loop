@@ -126,10 +126,10 @@ export function MerchantCard({
       }}
     >
       <div
-        className={`overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 transition-all duration-300 md:group-hover:shadow-xl md:group-hover:shadow-black/10 md:group-hover:-translate-y-1 ${className}`}
+        className={`overflow-hidden rounded-lg border border-line bg-surface transition-[border-color,box-shadow,transform] duration-200 md:group-hover:border-line-strong md:group-hover:shadow-md md:group-hover:-translate-y-0.5 ${className}`}
       >
         {/* Card image */}
-        <div className="relative aspect-video overflow-hidden bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800">
+        <div className="relative aspect-video overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200">
           {cardImgUrl !== undefined ? (
             <LazyImage
               src={cardImgUrl}
@@ -140,7 +140,7 @@ export function MerchantCard({
               className="w-full h-full"
             />
           ) : (
-            <div className="w-full h-full bg-gradient-to-br from-gray-400 to-gray-500 dark:from-gray-600 dark:to-gray-700 flex items-center justify-center">
+            <div className="w-full h-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center">
               <span className="text-white text-3xl font-bold">{merchant.name.charAt(0)}</span>
             </div>
           )}
@@ -152,13 +152,13 @@ export function MerchantCard({
               specific value and reads like an addition on top of the
               headline discount. */}
           {merchant.savingsPercentage !== undefined && merchant.savingsPercentage > 0 && (
-            <span className="absolute top-2 right-2 text-xs font-semibold text-green-700 bg-green-100/95 dark:text-green-300 dark:bg-green-900/80 px-2 py-0.5 rounded-full shadow-sm backdrop-blur-sm">
+            <span className="absolute top-2 right-2 text-xs font-semibold text-green-700 bg-white/95 px-2 py-0.5 rounded-md shadow-xs backdrop-blur-sm tabular">
               Save {merchant.savingsPercentage.toFixed(1)}%
             </span>
           )}
           {cashbackLabel !== null && (
             <span
-              className={`absolute right-2 text-xs font-semibold text-blue-700 bg-blue-100/95 dark:text-blue-300 dark:bg-blue-900/80 px-2 py-0.5 rounded-full shadow-sm backdrop-blur-sm ${
+              className={`absolute right-2 text-xs font-semibold text-blue-700 bg-white/95 px-2 py-0.5 rounded-md shadow-xs backdrop-blur-sm tabular ${
                 merchant.savingsPercentage !== undefined && merchant.savingsPercentage > 0
                   ? 'top-9'
                   : 'top-2'
@@ -176,7 +176,7 @@ export function MerchantCard({
 
         <div className="p-4">
           {/* Logo */}
-          <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gray-50 dark:bg-gray-800 rounded-lg border-[3px] border-white dark:border-gray-900 shadow-md flex items-center justify-center -mt-12 sm:-mt-16 mb-3 relative z-10 overflow-hidden">
+          <div className="w-16 h-16 sm:w-20 sm:h-20 bg-white rounded-lg border border-line ring-4 ring-white shadow-sm flex items-center justify-center -mt-12 sm:-mt-16 mb-3 relative z-10 overflow-hidden">
             {logoImgUrl !== undefined ? (
               <LazyImage
                 src={logoImgUrl}
@@ -187,13 +187,13 @@ export function MerchantCard({
                 className="w-full h-full"
               />
             ) : (
-              <span className="text-gray-500 text-sm font-bold">
+              <span className="text-ink-subtle text-sm font-bold">
                 {merchant.name.substring(0, 2).toUpperCase()}
               </span>
             )}
           </div>
 
-          <h3 className="text-sm sm:text-lg font-semibold text-gray-900 dark:text-white mb-2 line-clamp-1 md:group-hover:text-blue-600 dark:md:group-hover:text-blue-400 transition-colors">
+          <h3 className="text-sm sm:text-lg font-semibold text-ink mb-2 line-clamp-1 md:group-hover:text-blue-600 transition-colors">
             {merchant.name}
           </h3>
 

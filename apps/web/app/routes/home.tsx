@@ -101,105 +101,105 @@ function HomeContent(): React.JSX.Element {
             grid. The pitch section is for web visitors who need convincing; on
             mobile the user has already installed the app. */}
         {!isNative && (
-          <div className="text-white relative overflow-hidden">
-            {/* hero.webp at the bottom of the stack, gradient as a fallback
-              beneath it (visible while the webp loads or if it 404s).
-              A dark overlay on top keeps the hero copy readable against
-              whatever photography comes through. */}
-            <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900" />
+          <section className="relative overflow-hidden border-b border-line bg-surface">
+            {/* Clean light hero — subtle grid texture + a soft blue glow
+                top-centre for depth, no heavy photography. */}
+            <div className="absolute inset-0 bg-grid opacity-60" aria-hidden="true" />
             <div
-              className="absolute inset-0 bg-cover bg-center"
-              style={{ backgroundImage: 'url(/hero.webp)' }}
+              className="absolute inset-x-0 -top-40 h-96 bg-[radial-gradient(closest-side,rgba(26,86,219,0.10),transparent)]"
+              aria-hidden="true"
             />
-            <div className="absolute inset-0 bg-black/55" />
-            <div className="relative z-0 text-center pt-16 pb-12 px-6 sm:pt-24 sm:pb-16 lg:pt-48 lg:pb-24">
-              <h1 className="text-5xl font-bold mb-4">
-                {phase1Only ? 'Save on every gift card' : 'Earn cashback on every gift card'}
-              </h1>
-              <p className="text-lg md:text-xl text-white/80 max-w-2xl mx-auto">
+            <div className="relative mx-auto max-w-4xl text-center px-6 pt-20 pb-16 sm:pt-28 sm:pb-20">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-100">
+                <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
+                {phase1Only ? 'Up to 15% off, instantly' : 'Cashback on every order'}
+              </span>
+              <h1 className="mt-6 text-4xl sm:text-6xl font-semibold tracking-[-0.03em] text-ink leading-[1.05]">
                 {phase1Only ? (
                   <>
-                    Buy from merchants you already shop at. Save up to 15% instantly — pay with XLM
-                    or USDC, redeem online or in-store.
+                    Save on every
+                    <br className="hidden sm:block" />{' '}
+                    <span className="text-blue-600">gift card</span>
                   </>
                 ) : (
                   <>
-                    Buy from merchants you already shop at. Every order pays back to your Loop
-                    balance — withdraw on-chain whenever you&rsquo;re ready.
+                    Earn cashback on
+                    <br className="hidden sm:block" /> every{' '}
+                    <span className="text-blue-600">gift card</span>
                   </>
                 )}
+              </h1>
+              <p className="mt-5 text-lg text-ink-muted max-w-xl mx-auto">
+                {phase1Only
+                  ? 'Buy from merchants you already shop at. Save up to 15% instantly — pay with XLM or USDC, redeem online or in-store.'
+                  : 'Buy from merchants you already shop at. Every order pays back to your Loop balance — withdraw on-chain whenever you’re ready.'}
               </p>
-              <p className="mt-6">
+              <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
+                {!isAuthenticated && (
+                  <Link
+                    to="/onboarding"
+                    className="inline-flex items-center justify-center rounded-md bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-xs hover:bg-blue-700 active:bg-blue-800 transition-colors"
+                  >
+                    Get started — it’s free
+                  </Link>
+                )}
                 <Link
                   to="/calculator"
-                  className="inline-block text-sm font-medium text-white underline decoration-white/40 underline-offset-4 hover:decoration-white"
+                  className="inline-flex items-center justify-center gap-1 rounded-md border border-line-strong bg-white px-5 py-3 text-sm font-semibold text-ink hover:bg-gray-50 transition-colors"
                 >
-                  {phase1Only ? 'Try the savings calculator →' : 'Try the cashback calculator →'}
+                  {phase1Only ? 'Savings calculator' : 'Cashback calculator'}
+                  <span aria-hidden="true">→</span>
                 </Link>
-              </p>
-              <div className="flex flex-row justify-center items-center gap-8 md:gap-16 mt-12 mb-12">
+              </div>
+              <div className="mt-12 grid grid-cols-3 gap-4 max-w-2xl mx-auto">
                 <Feature
                   icon={
-                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
-                        strokeWidth={1.5}
+                        strokeWidth={2}
                         d="M13 10V3L4 14h7v7l9-11h-7z"
                       />
                     </svg>
                   }
-                  label="Instant Delivery"
+                  label="Instant delivery"
                 />
                 <Feature
                   icon={
-                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
-                        strokeWidth={1.5}
+                        strokeWidth={2}
                         d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
                       />
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
-                        strokeWidth={1.5}
+                        strokeWidth={2}
                         d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
                       />
                     </svg>
                   }
-                  label="100,000+ Locations"
+                  label="500,000+ locations"
                 />
                 <Feature
                   icon={
-                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
-                        strokeWidth={1.5}
+                        strokeWidth={2}
                         d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                       />
                     </svg>
                   }
-                  label={phase1Only ? 'Save on every order' : 'Cashback on every order'}
+                  label={phase1Only ? 'Save on every order' : 'Cashback every order'}
                 />
               </div>
             </div>
-            <div className="absolute pointer-events-none inset-x-0 bottom-0">
-              <svg
-                viewBox="0 0 2880 48"
-                xmlns="http://www.w3.org/2000/svg"
-                preserveAspectRatio="none"
-                className="w-full"
-                style={{ transform: 'scale(2)', transformOrigin: 'top center' }}
-              >
-                <path
-                  d="M0 48H1437.5H2880V0H2160C1442.5 52 720 0 720 0H0V48Z"
-                  className="hero-shape-fill"
-                />
-              </svg>
-            </div>
-          </div>
+          </section>
         )}
 
         <div className="container mx-auto px-4 py-12 lg:py-20">
@@ -239,11 +239,11 @@ function HomeContent(): React.JSX.Element {
           {/* Featured */}
           {visibleFeatured.length > 0 && (
             <section className="mb-16">
-              <div className="text-center mb-12">
-                <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+              <div className="text-center mb-10">
+                <h2 className="text-3xl font-semibold tracking-[-0.02em] text-ink mb-3">
                   Top cashback rates
                 </h2>
-                <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
+                <p className="text-base text-ink-muted max-w-2xl mx-auto">
                   Featured merchants with the highest cashback on Loop right now.
                 </p>
               </div>
@@ -310,9 +310,11 @@ function HomeContent(): React.JSX.Element {
 
 function Feature({ icon, label }: { icon: React.ReactNode; label: string }): React.JSX.Element {
   return (
-    <div className="text-center">
-      <div className="flex justify-center mb-2">{icon}</div>
-      <div className="text-sm sm:text-base font-medium">{label}</div>
+    <div className="flex flex-col items-center gap-2 rounded-lg border border-line bg-surface px-3 py-4">
+      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+        {icon}
+      </span>
+      <div className="text-xs sm:text-sm font-medium text-ink-muted text-center">{label}</div>
     </div>
   );
 }
