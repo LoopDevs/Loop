@@ -1,18 +1,33 @@
 import type { Route } from './+types/onboarding';
 import { Onboarding } from '~/components/features/onboarding/Onboarding';
+import { OnboardingDesktop } from '~/components/features/onboarding/OnboardingDesktop';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Welcome to Loop' }];
 }
 
 /**
- * `/onboarding` — six-screen first-launch flow (welcome, how-it-
- * works, brands, email, OTP, welcome-in). Rendered full-bleed — the
- * Onboarding component itself uses `fixed inset-0` and runs its own
- * footer CTA, so the route module just mounts it. No Navbar here:
- * the top-level Navbar is rendered by individual routes (home, map,
- * orders), and onboarding opts out by not mounting it.
+ * `/onboarding` — first-launch / sign-up flow.
+ *
+ * Two presentations, picked by width:
+ *   - `<lg` (phones, native webview): the multi-screen mobile flow
+ *     (`Onboarding`, `fixed inset-0`, its own footer CTA). The
+ *     `lg:hidden` wrapper hides its fixed children at desktop widths.
+ *   - `lg+` (desktop web): a split layout — marketing slideshow on the
+ *     left, email → verification-code capture on the right.
+ *
+ * Native always renders the mobile flow directly from root.tsx; this
+ * route is the web entry point.
  */
 export default function OnboardingRoute(): React.JSX.Element {
-  return <Onboarding />;
+  return (
+    <>
+      <div className="lg:hidden">
+        <Onboarding />
+      </div>
+      <div className="hidden lg:block">
+        <OnboardingDesktop />
+      </div>
+    </>
+  );
 }
