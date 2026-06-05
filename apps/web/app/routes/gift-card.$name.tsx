@@ -156,7 +156,7 @@ export default function GiftCardRoute(): React.JSX.Element {
             style={{ backgroundImage: `url(${heroUrl})` }}
           />
         ) : (
-          <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-purple-600" />
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-blue-700" />
         )}
         <div className="absolute inset-0 bg-black/60" />
         <div className="absolute pointer-events-none inset-x-0 -bottom-1">
