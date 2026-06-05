@@ -511,107 +511,123 @@ export default function AuthRoute(): React.JSX.Element {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4 native-auth-screen">
-      <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <LoopLogo className="h-8 w-auto mx-auto mb-4 text-ink" />
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-            {step === 'email' ? 'Sign in to Loop' : 'Check your email'}
-          </h1>
-          {step === 'otp' && (
-            <p className="text-gray-500 mt-2">We sent a 6-digit code to {email}</p>
-          )}
+    <div className="min-h-screen flex native-auth-screen">
+      {/* Image panel — desktop only. Self-hosted Unsplash portrait. */}
+      <div className="relative hidden lg:block lg:w-1/2">
+        <img src="/login-hero.jpg" alt="" className="absolute inset-0 h-full w-full object-cover" />
+        <div className="absolute inset-0 bg-gradient-to-t from-blue-950/55 via-blue-900/10 to-transparent" />
+        <div className="absolute bottom-10 left-10 right-10">
+          <p className="text-3xl font-semibold leading-tight tracking-[-0.02em] text-white">
+            Instant cashback,
+            <br />
+            everywhere you shop.
+          </p>
         </div>
+      </div>
 
-        {step === 'email' ? (
-          <div className="space-y-4">
-            {googleClientId !== null && googleClientId.length > 0 ? (
-              <>
-                <GoogleSignInButton
-                  clientId={googleClientId}
-                  onCredential={handleGoogleCredential}
+      {/* Form panel */}
+      <div className="flex flex-1 items-center justify-center bg-surface px-6 py-12">
+        <div className="w-full max-w-sm">
+          <div className="mb-8 text-center lg:text-left">
+            <LoopLogo className="h-8 w-auto mb-4 text-ink mx-auto lg:mx-0" />
+            <h1 className="text-2xl font-bold text-ink">
+              {step === 'email' ? 'Sign in to Loop' : 'Check your email'}
+            </h1>
+            {step === 'otp' && (
+              <p className="text-ink-muted mt-2">We sent a 6-digit code to {email}</p>
+            )}
+          </div>
+
+          {step === 'email' ? (
+            <div className="space-y-4">
+              {googleClientId !== null && googleClientId.length > 0 ? (
+                <>
+                  <GoogleSignInButton
+                    clientId={googleClientId}
+                    onCredential={handleGoogleCredential}
+                  />
+                  <div className="relative flex items-center justify-center my-2">
+                    <span className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-px bg-gray-200 dark:bg-gray-800" />
+                    <span className="relative bg-white dark:bg-gray-950 px-3 text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      or
+                    </span>
+                  </div>
+                </>
+              ) : null}
+              <form
+                onSubmit={(e) => {
+                  void handleEmailSubmit(e);
+                }}
+                className="space-y-4"
+              >
+                <Input
+                  type="email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(v) => setEmail(v)}
+                  required
+                  label="Email address"
+                  // A2-1100: let password managers + iOS / Android auto-fill
+                  // the email from Keychain / Autofill. Matches the
+                  // onboarding signup form (signup-tail.tsx) which already
+                  // sets this.
+                  autoComplete="email"
                 />
-                <div className="relative flex items-center justify-center my-2">
-                  <span className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-px bg-gray-200 dark:bg-gray-800" />
-                  <span className="relative bg-white dark:bg-gray-950 px-3 text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                    or
-                  </span>
-                </div>
-              </>
-            ) : null}
+                {error !== null && <p className="text-red-500 text-sm">{error}</p>}
+                <Button type="submit" className="w-full" disabled={isLoading}>
+                  {isLoading ? 'Sending…' : 'Send verification code'}
+                </Button>
+              </form>
+            </div>
+          ) : (
             <form
               onSubmit={(e) => {
-                void handleEmailSubmit(e);
+                void handleOtpSubmit(e);
               }}
               className="space-y-4"
             >
               <Input
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(v) => setEmail(v)}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                placeholder="000000"
+                value={otp}
+                onChange={(v) => setOtp(v)}
                 required
-                label="Email address"
-                // A2-1100: let password managers + iOS / Android auto-fill
-                // the email from Keychain / Autofill. Matches the
-                // onboarding signup form (signup-tail.tsx) which already
-                // sets this.
-                autoComplete="email"
+                autoFocus
+                label="Verification code"
+                // A2-1100: iOS surfaces the OTP from the notification
+                // bar as a keyboard suggestion; Android Autofill does
+                // the same via Google Messages. Matches the onboarding
+                // form (signup-tail.tsx) which already sets this.
+                autoComplete="one-time-code"
               />
               {error !== null && <p className="text-red-500 text-sm">{error}</p>}
               <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? 'Sending…' : 'Send verification code'}
+                {isLoading ? 'Verifying…' : 'Verify'}
               </Button>
+              <button
+                type="button"
+                className="w-full text-sm text-gray-500 underline"
+                onClick={() => {
+                  // Clear OTP + error state alongside the step flip —
+                  // otherwise a user who typed a wrong code, saw an error,
+                  // then backed out to try another email would see the
+                  // OTP-step error leak onto the email form, and the
+                  // stale OTP buffer would be submitted alongside the
+                  // new email if they forgot to retype. Matches the
+                  // inline-auth handler in `PurchaseContainer`.
+                  setStep('email');
+                  setOtp('');
+                  setError(null);
+                }}
+              >
+                Use a different email
+              </button>
             </form>
-          </div>
-        ) : (
-          <form
-            onSubmit={(e) => {
-              void handleOtpSubmit(e);
-            }}
-            className="space-y-4"
-          >
-            <Input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]{6}"
-              maxLength={6}
-              placeholder="000000"
-              value={otp}
-              onChange={(v) => setOtp(v)}
-              required
-              autoFocus
-              label="Verification code"
-              // A2-1100: iOS surfaces the OTP from the notification
-              // bar as a keyboard suggestion; Android Autofill does
-              // the same via Google Messages. Matches the onboarding
-              // form (signup-tail.tsx) which already sets this.
-              autoComplete="one-time-code"
-            />
-            {error !== null && <p className="text-red-500 text-sm">{error}</p>}
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? 'Verifying…' : 'Verify'}
-            </Button>
-            <button
-              type="button"
-              className="w-full text-sm text-gray-500 underline"
-              onClick={() => {
-                // Clear OTP + error state alongside the step flip —
-                // otherwise a user who typed a wrong code, saw an error,
-                // then backed out to try another email would see the
-                // OTP-step error leak onto the email form, and the
-                // stale OTP buffer would be submitted alongside the
-                // new email if they forgot to retype. Matches the
-                // inline-auth handler in `PurchaseContainer`.
-                setStep('email');
-                setOtp('');
-                setError(null);
-              }}
-            >
-              Use a different email
-            </button>
-          </form>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
