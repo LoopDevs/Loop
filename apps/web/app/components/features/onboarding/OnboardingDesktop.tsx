@@ -14,70 +14,50 @@ import { LoopLogo } from '~/components/ui/LoopLogo';
 import { Input } from '~/components/ui/Input';
 import { Button } from '~/components/ui/Button';
 import { useOnboardingAuth } from './signup-tail';
+import { TrustWelcome, TrustHowItWorks, TrustMerchants } from './screens-trust';
+import { COPY } from './Onboarding';
 
-interface Slide {
-  eyebrow: string;
-  title: string;
-  body: string;
-}
-
-const SLIDES: Slide[] = [
-  {
-    eyebrow: 'Welcome to Loop',
-    title: 'Instant cashback, everywhere you shop.',
-    body: 'Buy gift cards from the brands you already love and save up to 15% the moment you check out.',
-  },
-  {
-    eyebrow: 'Pay your way',
-    title: 'Crypto in, savings out.',
-    body: 'Pay with XLM or USDC and redeem online or in-store — over 500,000 locations and counting.',
-  },
-  {
-    eyebrow: 'It compounds',
-    title: 'Cashback that pays for your next order.',
-    body: 'Your savings stack up and roll straight into your next purchase. The flywheel does the rest.',
-  },
+// The same animated marketing screens the mobile flow uses (the
+// count-up cashback card, the how-it-works panel, the brand tiles) —
+// reused verbatim so desktop and mobile tell the identical story.
+const SCREENS = [
+  (active: boolean) => <TrustWelcome active={active} copy={COPY[1]} />,
+  (active: boolean) => <TrustHowItWorks active={active} copy={COPY[2]} />,
+  (active: boolean) => <TrustMerchants active={active} copy={COPY[3]} />,
 ];
 
 function SlidePanel(): React.JSX.Element {
   const [i, setI] = useState(0);
-  const go = useCallback((d: number) => setI((v) => (v + d + SLIDES.length) % SLIDES.length), []);
+  const go = useCallback((d: number) => setI((v) => (v + d + SCREENS.length) % SCREENS.length), []);
 
   // Gentle auto-advance; pauses on hover.
   const paused = useRef(false);
   useEffect(() => {
     const t = setInterval(() => {
-      if (!paused.current) setI((v) => (v + 1) % SLIDES.length);
-    }, 6000);
+      if (!paused.current) setI((v) => (v + 1) % SCREENS.length);
+    }, 6500);
     return () => clearInterval(t);
   }, []);
 
-  const slide = SLIDES[i]!;
   return (
     <div
-      className="relative hidden lg:flex lg:w-1/2 flex-col justify-between overflow-hidden bg-gradient-to-br from-blue-600 via-blue-700 to-blue-900 p-12 text-white"
+      className="relative hidden lg:flex lg:w-1/2 flex-col overflow-hidden border-r border-line bg-surface-subtle"
       onMouseEnter={() => (paused.current = true)}
       onMouseLeave={() => (paused.current = false)}
     >
-      <div className="absolute inset-0 bg-dots opacity-[0.12]" aria-hidden="true" />
-      <LoopLogo className="relative h-7 w-auto text-white" />
-
-      <div className="relative max-w-md">
-        <p className="text-sm font-semibold uppercase tracking-[0.14em] text-blue-200">
-          {slide.eyebrow}
-        </p>
-        <h2 className="mt-3 text-4xl font-semibold leading-[1.1] tracking-[-0.02em]">
-          {slide.title}
-        </h2>
-        <p className="mt-4 text-lg text-blue-100">{slide.body}</p>
+      {/* The live onboarding screen. `key` remounts on change so the
+          screen's enter animations (count-up, tile reveal) re-fire. */}
+      <div key={i} className="flex flex-1 flex-col pt-12">
+        {SCREENS[i]!(true)}
       </div>
 
-      <div className="relative flex items-center justify-between">
+      {/* Slideshow controls. */}
+      <div className="relative flex items-center justify-between px-12 pb-10">
         <div className="flex gap-2">
-          {SLIDES.map((_, idx) => (
+          {SCREENS.map((_, idx) => (
             <span
               key={idx}
-              className={`h-1.5 rounded-full transition-all ${idx === i ? 'w-6 bg-white' : 'w-1.5 bg-white/40'}`}
+              className={`h-1.5 rounded-full transition-all ${idx === i ? 'w-6 bg-blue-600' : 'w-1.5 bg-ink/15'}`}
             />
           ))}
         </div>
@@ -85,8 +65,8 @@ function SlidePanel(): React.JSX.Element {
           <button
             type="button"
             onClick={() => go(-1)}
-            aria-label="Previous slide"
-            className="flex h-10 w-10 items-center justify-center rounded-md border border-white/30 text-white transition-colors hover:bg-white/10"
+            aria-label="Previous"
+            className="flex h-10 w-10 items-center justify-center rounded-md border border-line-strong bg-white text-ink-muted transition-colors hover:bg-gray-50 hover:text-ink"
           >
             <svg
               className="h-4 w-4"
@@ -101,8 +81,8 @@ function SlidePanel(): React.JSX.Element {
           <button
             type="button"
             onClick={() => go(1)}
-            aria-label="Next slide"
-            className="flex h-10 w-10 items-center justify-center rounded-md border border-white/30 text-white transition-colors hover:bg-white/10"
+            aria-label="Next"
+            className="flex h-10 w-10 items-center justify-center rounded-md border border-line-strong bg-white text-ink-muted transition-colors hover:bg-gray-50 hover:text-ink"
           >
             <svg
               className="h-4 w-4"

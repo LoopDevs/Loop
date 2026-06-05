@@ -24,7 +24,7 @@ interface ScreenCopy {
 // we end on Welcome-in right after OTP verify. Step 6 is an
 // optional biometric-enable step between OTP and Welcome-in; it
 // self-skips on devices without biometrics.
-const COPY: Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, ScreenCopy> = {
+export const COPY: Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, ScreenCopy> = {
   1: {
     eyebrow: 'Welcome to Loop',
     title: 'Shop. Save.\nRepeat.',
