@@ -11,6 +11,7 @@ export * from './cashback-realization.js';
 export * from './credit-transaction-type.js';
 export * from './loop-asset.js';
 export * from './loop-orders.js';
+export * from './merchant-groups.js';
 export * from './merchants.js';
 export * from './money-format.js';
 export * from './order-state.js';
