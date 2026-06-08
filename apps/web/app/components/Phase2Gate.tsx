@@ -13,10 +13,13 @@ import { useAppConfig } from '~/hooks/use-app-config';
  * gate to be a runtime feature flag so flipping it back doesn't
  * require an app store resubmission.
  *
- * Renders the children verbatim when the flag is off (default).
- * Rendering during the initial config-load also passes through —
- * `phase1Only` defaults to `false` in `useAppConfig`, so a
- * /api/config outage won't accidentally hide a live cashback page.
+ * Renders the children verbatim when the flag is off. NOTE:
+ * `useAppConfig` currently defaults `phase1Only` to `true` (the
+ * shipping reality), so SSR, first paint, and a /api/config outage
+ * render the "coming soon" panel until config confirms otherwise.
+ * Feature tests for gated pages must therefore mock `useAppConfig`
+ * with `phase1Only: false` (see the settings.wallet / settings.cashback
+ * / LinkWalletNudge tests) to exercise the page instead of the gate.
  */
 export function Phase2Gate({ children }: { children: ReactNode }): React.ReactElement {
   const { config } = useAppConfig();

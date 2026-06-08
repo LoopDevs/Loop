@@ -35,6 +35,13 @@ vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: authMock.isAuthenticated }),
 }));
 
+// Phase-2 surface: useAppConfig defaults phase1Only=true (the shipping reality),
+// so Phase2Gate would render "Coming soon". Force phase1Only=false here so these
+// tests exercise the actual cashback feature rather than the launch gate.
+vi.mock('~/hooks/use-app-config', () => ({
+  useAppConfig: () => ({ config: { phase1Only: false }, isLoading: false }),
+}));
+
 vi.mock('~/hooks/query-retry', () => ({
   shouldRetry: () => false,
 }));

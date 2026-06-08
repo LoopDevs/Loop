@@ -33,6 +33,12 @@ vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: true, user: null, refreshUser: () => {} }),
 }));
 
+// LinkWalletNudge returns null when phase1Only (a Phase-2 surface); useAppConfig
+// defaults phase1Only=true, so force it false to exercise the CTA.
+vi.mock('~/hooks/use-app-config', () => ({
+  useAppConfig: () => ({ config: { phase1Only: false }, isLoading: false }),
+}));
+
 function renderNudge(): { container: HTMLElement } {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const result = render(
