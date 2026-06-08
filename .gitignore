@@ -73,3 +73,4 @@ server.log
 # accountant / portal. The artefacts never belong in git — they
 # carry per-user totals that the privacy policy treats as PII.
 tmp/reports/
+.loop-shots/

@@ -176,7 +176,7 @@ export function MapBottomSheet({ merchant, onClose }: MapBottomSheetProps): Reac
                 eager
               />
             ) : (
-              <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-purple-600 pointer-events-none" />
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-blue-700 pointer-events-none" />
             )}
             <div className="absolute top-2 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/75 shadow-sm pointer-events-none" />
             <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/70 via-black/30 to-transparent pointer-events-none" />

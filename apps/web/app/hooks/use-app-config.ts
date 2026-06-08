@@ -13,14 +13,19 @@ import { fetchAppConfig, type AppConfig } from '~/services/config';
 const DEFAULT_CONFIG: AppConfig = {
   loopAuthNativeEnabled: false,
   loopOrdersEnabled: false,
-  // Default to phase1Only=false so a /api/config outage doesn't
-  // accidentally hide the cashback surfaces when they're supposed
-  // to be live ("users think the feature broke" is a worse failure
-  // mode than "Phase 2 surfaces appear briefly during a config
-  // outage"). Cashback flow itself is independently gated on
-  // `loopOrdersEnabled` / `loopAuthNativeEnabled` so a false here
-  // doesn't unlock anything live; it only governs UI visibility.
-  phase1Only: false,
+  // Default to phase1Only=true — the current shipping reality
+  // (api.loopfinance.io returns phase1Only:true). SSR + first client
+  // paint can't fetch /api/config, so they render with this default;
+  // matching it to the live value eliminates the visible flash where
+  // Phase-2-only chrome (the "Rates" nav link, "Earn cashback" hero
+  // copy, cashback footer links) paints for one frame and then
+  // disappears once the real config resolves. `phase1Only` only
+  // governs UI visibility — the cashback flow itself is independently
+  // gated on `loopOrdersEnabled` / `loopAuthNativeEnabled`, so this
+  // default unlocks nothing live; it only hides Phase-2 surfaces
+  // until config confirms they're on. Flip back to `false` (or make
+  // it deploy-aware) when Phase 2 ships.
+  phase1Only: true,
   social: {
     googleClientIdWeb: null,
     googleClientIdIos: null,

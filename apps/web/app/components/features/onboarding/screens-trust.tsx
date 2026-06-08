@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useAllMerchants } from '~/hooks/use-merchants';
 import { getImageProxyUrl } from '~/utils/image';
+import { LoopLogo } from '~/components/ui/LoopLogo';
 import { MerchantTile, useCountUp } from './atoms';
 
 interface ScreenCopy {
@@ -25,11 +26,8 @@ export function TrustWelcome({ active, copy }: ScreenProps): React.JSX.Element {
   return (
     <div className="flex-1 flex flex-col px-6">
       <div className="flex-1 flex flex-col items-center justify-center gap-6">
-        {/* Loop wordmark — real logo asset, theme-swapped. Dark logo
-            on light bg, white logo on dark bg. Matches the height of
-            the text wordmark in the original design (~40px). */}
-        <img src="/loop-logo.svg" alt="Loop" className="h-10 dark:hidden" />
-        <img src="/loop-logo-white.svg" alt="Loop" className="h-10 hidden dark:block" />
+        {/* Loop wordmark — inline vector so it stays crisp at any DPI. */}
+        <LoopLogo className="h-10 w-auto text-ink" />
 
         <div className="w-full max-w-[280px] rounded-[18px] p-5 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-[0_2px_10px_rgba(0,0,0,0.04),0_20px_40px_rgba(0,0,0,0.06)] dark:shadow-[0_2px_10px_rgba(0,0,0,0.20),0_20px_40px_rgba(0,0,0,0.30)]">
           <div className="text-[11px] uppercase tracking-[0.08em] font-semibold text-gray-500 dark:text-gray-400 mb-2">

@@ -77,8 +77,8 @@ export function CurrencyPickerScreen({
                 className={[
                   'w-full rounded-2xl px-5 py-4 border text-left flex items-center gap-4 cursor-pointer active:scale-[0.98] transition-transform',
                   isSelected
-                    ? 'border-gray-950 dark:border-white bg-gray-50 dark:bg-gray-900'
-                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950',
+                    ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600'
+                    : 'border-line bg-white hover:border-line-strong',
                 ].join(' ')}
               >
                 <span
@@ -101,8 +101,8 @@ export function CurrencyPickerScreen({
                   className={[
                     'flex-shrink-0 w-5 h-5 rounded-full border-2',
                     isSelected
-                      ? 'border-gray-950 dark:border-white bg-gray-950 dark:bg-white'
-                      : 'border-gray-300 dark:border-gray-600 bg-transparent',
+                      ? 'border-blue-600 bg-blue-600'
+                      : 'border-line-strong bg-transparent',
                   ].join(' ')}
                 />
               </button>

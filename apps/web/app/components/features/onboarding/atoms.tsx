@@ -15,11 +15,7 @@ export function Dots({ active, total }: { active: number; total: number }): Reac
           'h-1.5 rounded-full transition-all duration-[280ms] ease-[cubic-bezier(0.4,0,0.2,1)]';
         const width = state === 'active' ? 'w-[22px]' : 'w-1.5';
         const color =
-          state === 'active'
-            ? 'bg-gray-950 dark:bg-white'
-            : state === 'done'
-              ? 'bg-black/35 dark:bg-white/45'
-              : 'bg-black/15 dark:bg-white/20';
+          state === 'active' ? 'bg-blue-600' : state === 'done' ? 'bg-blue-600/40' : 'bg-ink/15';
         return <div key={i} className={`${base} ${width} ${color}`} />;
       })}
     </div>

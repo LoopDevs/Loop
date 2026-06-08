@@ -32,6 +32,7 @@ import { buildSecurityHeaders } from '~/utils/security-headers';
 import { useNonce } from '~/utils/nonce-context';
 import { shouldRetry } from '~/hooks/query-retry';
 import { NativeTabBar } from '~/components/features/NativeTabBar';
+import { LoopLogo } from '~/components/ui/LoopLogo';
 import { fetchAllMerchants } from '~/services/merchants';
 import './app.css';
 
@@ -239,31 +240,16 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
   // CSP `script-src` directive so the browser only executes inline
   // scripts carrying this exact nonce.
   const nonce = useNonce();
-  // Re-apply the theme class after hydration. React 19's hydration can
-  // strip attributes that were added to <html> between SSR and client
-  // mount — in our case the inline `__html` script below adds a
-  // `dark` / `light` class before body paints, and React has been
-  // observed to remove it on hydration (visible as the page flashing
-  // from dark to unstyled). This effect runs once and asserts whatever
-  // class the user's stored preference resolves to. No-op when the
-  // class is already correct.
+  // Light-mode only. The dark theme is retired for now, so we always
+  // assert `light` on <html>. React 19's hydration can strip the class
+  // the inline script added before paint, so this effect re-asserts it
+  // once after mount. (Kept as an effect rather than removing it
+  // entirely so a stale `.dark` from a previously-cached session is
+  // cleared on first load.)
   useEffect(() => {
-    const stored = (() => {
-      try {
-        return localStorage.getItem('theme');
-      } catch {
-        return null;
-      }
-    })();
-    const prefersDark =
-      typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const isDark = stored === 'dark' || (stored !== 'light' && prefersDark);
-    const next = isDark ? 'dark' : 'light';
     const el = document.documentElement;
-    if (!el.classList.contains(next)) {
-      el.classList.remove('light', 'dark');
-      el.classList.add(next);
-    }
+    el.classList.remove('dark');
+    if (!el.classList.contains('light')) el.classList.add('light');
   }, []);
 
   // Audit A-027 — CSP is emitted via <meta http-equiv> because RR v7 SPA
@@ -317,7 +303,9 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
         <script
           {...(nonce !== null ? { nonce } : {})}
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('theme');var d=window.matchMedia('(prefers-color-scheme: dark)').matches;var isDark=(t==='dark')||(t!=='light'&&d);document.documentElement.classList.add(isDark?'dark':'light');}catch(e){document.documentElement.classList.add('light');}})();`,
+            // Light-mode only — always add `light`, never `dark`. Runs
+            // before body paints so there's no flash.
+            __html: `document.documentElement.classList.add('light');`,
           }}
         />
         <Meta />
@@ -497,9 +485,8 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
 
 function NativeSplash(): React.JSX.Element {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
-      <img src="/loop-logo.svg" alt="Loop" className="h-10 animate-pulse dark:hidden" />
-      <img src="/loop-logo-white.svg" alt="Loop" className="h-10 animate-pulse hidden dark:block" />
+    <div className="min-h-screen flex items-center justify-center bg-surface-subtle">
+      <LoopLogo className="h-10 w-auto animate-pulse text-ink" />
     </div>
   );
 }

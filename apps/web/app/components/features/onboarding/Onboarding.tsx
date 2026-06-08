@@ -24,7 +24,7 @@ interface ScreenCopy {
 // we end on Welcome-in right after OTP verify. Step 6 is an
 // optional biometric-enable step between OTP and Welcome-in; it
 // self-skips on devices without biometrics.
-const COPY: Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, ScreenCopy> = {
+export const COPY: Record<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, ScreenCopy> = {
   1: {
     eyebrow: 'Welcome to Loop',
     title: 'Shop. Save.\nRepeat.',
@@ -441,7 +441,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
           type="button"
           onClick={currentCta.act}
           disabled={!currentCta.enabled}
-          className="w-full h-[54px] rounded-2xl border-0 text-[17px] font-semibold cursor-pointer disabled:cursor-not-allowed bg-gray-950 text-white dark:bg-white dark:text-gray-950 disabled:bg-gray-300 disabled:text-white dark:disabled:bg-gray-700 dark:disabled:text-gray-400 active:scale-[0.98] transition-transform"
+          className="w-full h-[54px] rounded-2xl border-0 text-[17px] font-semibold cursor-pointer disabled:cursor-not-allowed bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:text-white active:scale-[0.98] transition-[transform,background-color]"
           style={{ letterSpacing: '-0.01em' }}
         >
           {currentCta.label}

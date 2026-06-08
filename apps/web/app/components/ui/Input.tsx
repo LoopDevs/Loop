@@ -41,11 +41,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     const describedBy = [errorId, hintId].filter((v): v is string => v !== undefined).join(' ');
 
     const borderClass =
-      error !== undefined
-        ? 'border-red-500'
-        : focused
-          ? 'border-blue-500'
-          : 'border-gray-300 dark:border-gray-600';
+      error !== undefined ? 'border-red-500' : focused ? 'border-blue-500' : 'border-line-strong';
 
     const paddingClass =
       leftIcon !== undefined && rightIcon !== undefined
@@ -57,22 +53,19 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             : '';
 
     const inputClass =
-      `w-full px-3 py-2 text-base bg-white dark:bg-gray-800 border rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed ${borderClass} ${paddingClass} ${className}`.trim();
+      `w-full px-3.5 py-2.5 text-[0.9375rem] bg-white text-ink placeholder:text-ink-subtle border rounded-md transition-[border-color,box-shadow] duration-150 focus:outline-none focus:ring-4 focus:ring-blue-500/12 focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-50 ${borderClass} ${paddingClass} ${className}`.trim();
 
     return (
       <div className="w-full">
         {label !== undefined && (
-          <label
-            htmlFor={inputId}
-            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-          >
+          <label htmlFor={inputId} className="block text-sm font-medium text-ink mb-1.5">
             {label}
             {required === true && <span className="text-red-500 ml-1">*</span>}
           </label>
         )}
         <div className="relative">
           {leftIcon !== undefined && (
-            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-subtle">
               {leftIcon}
             </div>
           )}
@@ -97,18 +90,18 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             {...props}
           />
           {rightIcon !== undefined && (
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500">
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-subtle">
               {rightIcon}
             </div>
           )}
         </div>
         {error !== undefined && (
-          <p id={errorId} className="mt-1 text-sm text-red-600 dark:text-red-400">
+          <p id={errorId} className="mt-1.5 text-sm text-red-600">
             {error}
           </p>
         )}
         {hint !== undefined && error === undefined && (
-          <p id={hintId} className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+          <p id={hintId} className="mt-1.5 text-sm text-ink-muted">
             {hint}
           </p>
         )}
