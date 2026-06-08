@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, forwardRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useAllMerchants } from '~/hooks/use-merchants';
-import { foldForSearch, merchantSlug } from '@loop/shared';
+import { foldForSearch, groupMerchants, merchantSlug } from '@loop/shared';
 import { useAuthStore } from '~/stores/auth.store';
 import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
@@ -20,6 +20,10 @@ interface SearchResult {
   name: string;
   logoUrl?: string | undefined;
   savingsPercentage?: number | undefined;
+  /** Precomputed navigation target — `/gift-card/:slug` or, for a brand group, `/brand/:slug`. */
+  to: string;
+  /** For a brand group (ADR 032): number of variants. Shown instead of a savings %. */
+  optionCount?: number | undefined;
 }
 
 interface SearchDropdownProps {
@@ -66,10 +70,17 @@ function SearchDropdown({
           )}
           <div className="min-w-0">
             <div className="font-medium text-ink truncate">{r.name}</div>
-            {r.savingsPercentage !== undefined && r.savingsPercentage > 0 && (
-              <div className="text-xs text-green-600 font-medium tabular">
-                {r.savingsPercentage.toFixed(1)}% off
+            {r.optionCount !== undefined ? (
+              <div className="text-xs text-ink-muted font-medium tabular">
+                {r.optionCount} options
               </div>
+            ) : (
+              r.savingsPercentage !== undefined &&
+              r.savingsPercentage > 0 && (
+                <div className="text-xs text-green-600 font-medium tabular">
+                  {r.savingsPercentage.toFixed(1)}% off
+                </div>
+              )
             )}
           </div>
         </button>
@@ -104,17 +115,32 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
   // Shared foldForSearch keeps navbar filtering in step with the
   // backend /api/merchants?q= behaviour (accent-insensitive).
   const foldedQuery = foldForSearch(debouncedQuery);
+  // ADR 032: group "Brand - Variant" matches so a search for "dots" returns
+  // one "dots.eco" entry (→ the brand view) rather than 14 rows. Grouping the
+  // filtered set keeps a brand whose variant matches; slice(0,6) caps brands.
   const results: SearchResult[] =
     debouncedQuery.length > 1
-      ? merchants
-          .filter((m) => foldForSearch(m.name).includes(foldedQuery))
+      ? groupMerchants(merchants.filter((m) => foldForSearch(m.name).includes(foldedQuery)))
           .slice(0, 6)
-          .map((m) => ({
-            id: m.id,
-            name: m.name,
-            logoUrl: m.logoUrl,
-            savingsPercentage: m.savingsPercentage,
-          }))
+          .map((g): SearchResult => {
+            if (g.isGroup) {
+              return {
+                id: `g:${g.key}`,
+                name: g.name,
+                logoUrl: g.members.find((m) => m.logoUrl !== undefined)?.logoUrl,
+                to: `/brand/${merchantSlug(g.name)}`,
+                optionCount: g.members.length,
+              };
+            }
+            const m = g.members[0]!;
+            return {
+              id: m.id,
+              name: m.name,
+              logoUrl: m.logoUrl,
+              savingsPercentage: m.savingsPercentage,
+              to: `/gift-card/${merchantSlug(m.name)}`,
+            };
+          })
       : [];
 
   return (
@@ -313,7 +339,7 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
   const showCashbackNav = !config.phase1Only;
 
   const handleSelect = (r: SearchResult): void => {
-    void navigate(`/gift-card/${merchantSlug(r.name)}`);
+    void navigate(r.to);
   };
 
   // Prefix-match for everything except "/".
