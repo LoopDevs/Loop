@@ -70,3 +70,19 @@ describe('MerchantCard — cashback badge (ADR 011 / 015)', () => {
     expect(screen.getByText(/2% cashback/)).toBeDefined();
   });
 });
+
+describe('MerchantCard — displayName (ADR 032 brand view)', () => {
+  it('renders displayName over merchant.name when provided', () => {
+    renderCard({
+      merchant: merchant({ name: 'dots.eco - Plant a Tree' }),
+      displayName: 'Plant a Tree',
+    });
+    expect(screen.getByRole('heading', { name: 'Plant a Tree' })).toBeDefined();
+    expect(screen.queryByRole('heading', { name: 'dots.eco - Plant a Tree' })).toBeNull();
+  });
+
+  it('falls back to merchant.name when displayName is omitted', () => {
+    renderCard({ merchant: merchant({ name: 'Target' }) });
+    expect(screen.getByRole('heading', { name: 'Target' })).toBeDefined();
+  });
+});

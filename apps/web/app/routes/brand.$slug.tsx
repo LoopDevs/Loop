@@ -1,6 +1,6 @@
 import { useParams, Link, useNavigate } from 'react-router';
 import type { Route } from './+types/brand.$slug';
-import { groupMerchants, merchantSlug } from '@loop/shared';
+import { groupMerchants, merchantSlug, variantLabel } from '@loop/shared';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { Navbar } from '~/components/features/Navbar';
@@ -90,6 +90,7 @@ export default function BrandRoute(): React.JSX.Element {
                   <MerchantCard
                     key={merchant.id}
                     merchant={merchant}
+                    displayName={variantLabel(merchant)}
                     displayIndex={i}
                     eager={i < 4}
                     userCashbackPct={lookupCashback(merchant.id)}
