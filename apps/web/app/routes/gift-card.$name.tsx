@@ -93,7 +93,12 @@ export default function GiftCardRoute(): React.JSX.Element {
     );
   }
 
-  const heroUrl = merchant.cardImageUrl ? getImageProxyUrl(merchant.cardImageUrl, 1280) : undefined;
+  // One 640-wide proxied cover, reused for both the card image and the desktop
+  // hero backdrop. The hero sits under a 60% black wash, so 640 is visually
+  // indistinguishable from a larger source — and reusing the *same* URL makes
+  // the hero an instant browser-cache hit (the directory card already loaded
+  // this exact URL with `Cache-Control: immutable`) instead of a second,
+  // larger 1280 fetch + first-time resize.
   const cardUrl = merchant.cardImageUrl ? getImageProxyUrl(merchant.cardImageUrl, 640) : undefined;
   const logoUrl = merchant.logoUrl ? getImageProxyUrl(merchant.logoUrl, 160) : undefined;
   const savings = merchant.savingsPercentage;
@@ -150,10 +155,10 @@ export default function GiftCardRoute(): React.JSX.Element {
           image would just duplicate it. Classic dark-wash + wave
           divider so the sidebar purchase card peeks out of it. */}
       <div className="hidden lg:block relative h-96 overflow-hidden">
-        {heroUrl ? (
+        {cardUrl ? (
           <div
             className="absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: `url(${heroUrl})` }}
+            style={{ backgroundImage: `url(${cardUrl})` }}
           />
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-blue-700" />
