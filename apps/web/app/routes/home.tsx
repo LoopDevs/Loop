@@ -1,5 +1,6 @@
 import { Link } from 'react-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { groupMerchants } from '@loop/shared';
 import type { Route } from './+types/home';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
 import { useAuth } from '~/hooks/use-auth';
@@ -8,6 +9,7 @@ import { useNativePlatform } from '~/hooks/use-native-platform';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
 import { MerchantCard } from '~/components/features/MerchantCard';
+import { MerchantGroupCard } from '~/components/features/MerchantGroupCard';
 import { FavoritesStrip } from '~/components/features/FavoritesStrip';
 import { RecentlyPurchasedStrip } from '~/components/features/RecentlyPurchasedStrip';
 import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
@@ -76,9 +78,13 @@ function HomeContent(): React.JSX.Element {
     })
     .slice(0, 6)
     .map(({ m }) => m);
-  const visibleMerchants = hydrated ? merchants : [];
+  const visibleMerchants = useMemo(() => (hydrated ? merchants : []), [hydrated, merchants]);
   const visibleFeatured = hydrated ? featured : [];
   const visibleLoading = !hydrated || isLoading;
+  // ADR 032: collapse "Brand - Variant" SKUs (dots.eco x14, Town & City
+  // x69, …) into one brand tile in the directory. Featured stays
+  // ungrouped — it's a curated top-cashback strip, not the full list.
+  const groupedMerchants = useMemo(() => groupMerchants(visibleMerchants), [visibleMerchants]);
 
   useEffect(() => {
     setHydrated(true);
@@ -260,15 +266,25 @@ function HomeContent(): React.JSX.Element {
             <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
               {visibleLoading
                 ? Array.from({ length: 8 }).map((_, i) => <MerchantCardSkeleton key={i} />)
-                : visibleMerchants.map((merchant, i) => (
-                    <MerchantCard
-                      key={merchant.id}
-                      merchant={merchant}
-                      displayIndex={i + 6}
-                      eager={i < 4}
-                      userCashbackPct={lookupCashback(merchant.id)}
-                    />
-                  ))}
+                : groupedMerchants.map((g, i) =>
+                    g.isGroup ? (
+                      <MerchantGroupCard
+                        key={`g:${g.key}`}
+                        group={g}
+                        displayIndex={i + 6}
+                        eager={i < 4}
+                        lookupCashback={lookupCashback}
+                      />
+                    ) : (
+                      <MerchantCard
+                        key={g.members[0]!.id}
+                        merchant={g.members[0]!}
+                        displayIndex={i + 6}
+                        eager={i < 4}
+                        userCashbackPct={lookupCashback(g.members[0]!.id)}
+                      />
+                    ),
+                  )}
             </div>
           </section>
         </div>

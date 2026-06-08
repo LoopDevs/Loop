@@ -56,7 +56,10 @@ with other CTX consumers such as DCG).
 
 ## Follow-ups
 
-- Wire the web merchant list to render one tile per `MerchantGroup`, expanding to its
-  variants.
+- ~~Wire the web merchant list to render one tile per `MerchantGroup`.~~ **Done:** the
+  home directory (desktop `routes/home.tsx` + mobile `MobileHome`) renders
+  `MerchantGroupCard` / `DirectoryGroupCell` for groups, linking to the brand view
+  `routes/brand.$slug.tsx`, which lists the variants. Featured/Favorites/Recent strips
+  stay ungrouped (curated, not the full list).
 - When ready, add a `group` field to the CTX merchant + `@loop/shared` `Merchant` type
   and have `groupMerchants` prefer it over the name-derived key.

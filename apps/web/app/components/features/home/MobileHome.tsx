@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router';
-import type { Merchant } from '@loop/shared';
-import { foldForSearch, merchantSlug } from '@loop/shared';
+import type { Merchant, MerchantGroup } from '@loop/shared';
+import { foldForSearch, groupMerchants, merchantSlug } from '@loop/shared';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
 import { useOrders } from '~/hooks/use-orders';
 import { useAuth } from '~/hooks/use-auth';
@@ -141,6 +141,10 @@ export function MobileHome(): React.JSX.Element {
         : enabled;
     return filtered.slice().sort((a, b) => (b.savingsPercentage ?? 0) - (a.savingsPercentage ?? 0));
   }, [visibleMerchants, foldedQuery]);
+  // ADR 032: collapse "Brand - Variant" SKUs into one brand cell. Grouping
+  // the *filtered* list means a search for "tree" still surfaces the
+  // dots.eco brand (a matching variant keeps its group).
+  const groupedGrid = useMemo(() => groupMerchants(grid), [grid]);
 
   useEffect(() => {
     setHydrated(true);
@@ -303,7 +307,7 @@ export function MobileHome(): React.JSX.Element {
       {/* Directory grid ----------------------------------------- */}
       <SectionHeader
         title={query.length > 0 ? 'Results' : 'Browse'}
-        meta={`${grid.length} brand${grid.length === 1 ? '' : 's'}`}
+        meta={`${groupedGrid.length} brand${groupedGrid.length === 1 ? '' : 's'}`}
       />
       {/* `min-h-[70vh]` keeps the page tall enough that the search
           input's scroll position doesn't jump when the grid shrinks
@@ -315,10 +319,18 @@ export function MobileHome(): React.JSX.Element {
       <div id="mobile-home-grid" className="px-5 pb-6 grid grid-cols-2 gap-2.5 min-h-[70vh]">
         {visibleMerchantsLoading && grid.length === 0 ? (
           Array.from({ length: 6 }).map((_, i) => <MerchantCardSkeleton key={i} />)
-        ) : grid.length > 0 ? (
-          grid.map((m) => (
-            <DirectoryCell key={m.id} merchant={m} userCashbackPct={lookupCashback(m.id)} />
-          ))
+        ) : groupedGrid.length > 0 ? (
+          groupedGrid.map((g) =>
+            g.isGroup ? (
+              <DirectoryGroupCell key={`g:${g.key}`} group={g} />
+            ) : (
+              <DirectoryCell
+                key={g.members[0]!.id}
+                merchant={g.members[0]!}
+                userCashbackPct={lookupCashback(g.members[0]!.id)}
+              />
+            ),
+          )
         ) : (
           <div className="col-span-2 text-center py-10 text-sm text-gray-500 dark:text-gray-400">
             No brands match &ldquo;{query}&rdquo;
@@ -555,6 +567,38 @@ function DirectoryCell({
       </div>
       <div className="text-[11px] font-medium text-gray-400 dark:text-gray-500 -mt-1">
         Gift cards
+      </div>
+    </Link>
+  );
+}
+
+/**
+ * Brand cell for a multi-variant group (ADR 032) — links to the brand
+ * view (`/brand/:slug`) rather than a single gift card. Mirrors
+ * DirectoryCell, with an option count instead of a single savings %.
+ */
+function DirectoryGroupCell({ group }: { group: MerchantGroup }): React.JSX.Element {
+  const rep = group.members.find((m) => m.logoUrl !== undefined) ?? group.members[0]!;
+  const maxSavings = group.members.reduce((acc, m) => Math.max(acc, m.savingsPercentage ?? 0), 0);
+  return (
+    <Link
+      to={`/brand/${merchantSlug(group.name)}`}
+      className="rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 p-3 flex flex-col gap-2 active:scale-[0.98] transition-transform"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <BrandTile merchant={rep} size={44} />
+        <div className="flex flex-col items-end gap-1">
+          {maxSavings > 0 && <PctPill>{`${maxSavings.toFixed(1)}%`}</PctPill>}
+          <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 tabular">
+            {group.members.length}
+          </span>
+        </div>
+      </div>
+      <div className="text-[14px] font-semibold text-gray-900 dark:text-white truncate">
+        {group.name}
+      </div>
+      <div className="text-[11px] font-medium text-gray-400 dark:text-gray-500 -mt-1">
+        {group.members.length} options
       </div>
     </Link>
   );

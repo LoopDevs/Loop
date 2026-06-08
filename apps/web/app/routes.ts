@@ -20,6 +20,7 @@ export default [
   index('routes/home.tsx'),
   route('map', 'routes/map.tsx'),
   route('gift-card/:name', 'routes/gift-card.$name.tsx'),
+  route('brand/:slug', 'routes/brand.$slug.tsx'),
   route('cashback', 'routes/cashback.tsx'),
   route('cashback/:slug', 'routes/cashback.$slug.tsx'),
   route('calculator', 'routes/calculator.tsx'),

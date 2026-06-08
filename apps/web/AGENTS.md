@@ -6,8 +6,8 @@
 
 ```
 app/
-├── routes/           ← File-based routes (React Router v7, 33 routes)
-│   ├── home.tsx, map.tsx, gift-card.$name.tsx, auth.tsx,
+├── routes/           ← File-based routes (React Router v7, 34 routes)
+│   ├── home.tsx, map.tsx, gift-card.$name.tsx, brand.$slug.tsx, auth.tsx,
 │   │   onboarding.tsx, calculator.tsx, sitemap.tsx,
 │   │   privacy.tsx, terms.tsx, not-found.tsx
 │   ├── orders.tsx, orders.$id.tsx          ← order history + detail
@@ -28,7 +28,7 @@ app/
 │   │   ├── orders/   ← loop-orders list + summary header
 │   │   ├── purchase/ ← amount → payment → complete / redeem state machine
 │   │   ├── wallet/   ← Stellar trustline status / setup cards
-│   │   └── top-level: Navbar, Footer, MerchantCard, ClusterMap, MapBottomSheet,
+│   │   └── top-level: Navbar, Footer, MerchantCard, MerchantGroupCard, ClusterMap, MapBottomSheet,
 │   │                  NativeTabBar, NativeBackButton, FixedSearchButton
 │   └── ui/           ← Primitives (Button, Input, LazyImage, OfflineBanner,
 │                       Skeleton, Spinner, ToastContainer)
