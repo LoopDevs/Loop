@@ -83,6 +83,13 @@ export interface MerchantCardProps {
    * `useMerchantsCashbackRatesMap().lookup(merchant.id)`.
    */
   userCashbackPct?: string | null;
+  /**
+   * Override the displayed title. The brand view (ADR 032) passes the
+   * variant label (e.g. "Plant a Tree") so cards under a "dots.eco"
+   * header don't repeat the brand ("dots.eco - Plant a Tree"). Defaults
+   * to `merchant.name`. Image alt text keeps the full name.
+   */
+  displayName?: string;
 }
 
 /**
@@ -108,6 +115,7 @@ export function MerchantCard({
   className = '',
   eager = false,
   userCashbackPct = null,
+  displayName,
 }: MerchantCardProps): React.JSX.Element {
   const slug = merchantSlug(merchant.name);
   const cardImgUrl =
@@ -194,7 +202,7 @@ export function MerchantCard({
           </div>
 
           <h3 className="text-sm sm:text-lg font-semibold text-ink mb-2 line-clamp-1 md:group-hover:text-blue-600 transition-colors">
-            {merchant.name}
+            {displayName ?? merchant.name}
           </h3>
 
           {renderDenominationRange(merchant.denominations)}
