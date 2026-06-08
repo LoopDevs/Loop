@@ -28,10 +28,10 @@ const UA =
 const CATALOG = 'https://api.loopfinance.io/api/merchants/all';
 
 const args = process.argv.slice(2);
-const limit = args.includes('--all')
-  ? Infinity
-  : Number(args[args.indexOf('--limit') + 1] ?? 20);
-const outPath = args.includes('--out') ? args[args.indexOf('--out') + 1] : '/tmp/merchant-images.json';
+const limit = args.includes('--all') ? Infinity : Number(args[args.indexOf('--limit') + 1] ?? 20);
+const outPath = args.includes('--out')
+  ? args[args.indexOf('--out') + 1]
+  : '/tmp/merchant-images.json';
 const onlyMissing = !args.includes('--all-merchants'); // default: only the ones lacking images
 
 function timeout(ms) {
@@ -57,7 +57,10 @@ export function cleanName(raw) {
 
 /** Does the resolved domain plausibly belong to the brand name? */
 function domainMatchesName(name, domain) {
-  const label = domain.split('.')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+  const label = domain
+    .split('.')[0]
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
   const folded = name.toLowerCase().replace(/[^a-z0-9]/g, '');
   if (label.length < 3 || folded.length < 3) return true; // too short to judge
   return label.includes(folded.slice(0, 6)) || folded.includes(label.slice(0, 6));
@@ -128,7 +131,11 @@ async function scrapeSite(domain) {
   let html = '';
   let finalUrl = base;
   try {
-    const res = await fetch(base, { headers: { 'User-Agent': UA }, redirect: 'follow', signal: timeout(12000) });
+    const res = await fetch(base, {
+      headers: { 'User-Agent': UA },
+      redirect: 'follow',
+      signal: timeout(12000),
+    });
     finalUrl = res.url || base;
     html = await res.text();
   } catch {
@@ -140,7 +147,9 @@ async function scrapeSite(domain) {
   // last one catches sites that don't set social meta but do have a
   // big wide hero (the "1920×1080 on their site" case).
   const og =
-    html.match(/<meta[^>]+property=["']og:image(?::secure_url|:url)?["'][^>]+content=["']([^"']+)["']/i) ||
+    html.match(
+      /<meta[^>]+property=["']og:image(?::secure_url|:url)?["'][^>]+content=["']([^"']+)["']/i,
+    ) ||
     html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i) ||
     html.match(/<meta[^>]+name=["']twitter:image(?::src)?["'][^>]+content=["']([^"']+)["']/i) ||
     html.match(/<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i);
@@ -180,7 +189,11 @@ async function scrapeSite(domain) {
 async function validateImage(url) {
   if (!url) return false;
   try {
-    const res = await fetch(url, { method: 'GET', headers: { 'User-Agent': UA }, signal: timeout(10000) });
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'User-Agent': UA },
+      signal: timeout(10000),
+    });
     if (!res.ok) return false;
     const ct = res.headers.get('content-type') ?? '';
     return ct.startsWith('image/');
@@ -205,7 +218,13 @@ async function main() {
     const resolved = await resolveDomain(m.name);
     if (!resolved) {
       console.log(`✗ ${m.name.padEnd(34)} no domain`);
-      out[m.id] = { name: m.name, domain: null, confident: false, logoUrl: null, cardImageUrl: null };
+      out[m.id] = {
+        name: m.name,
+        domain: null,
+        confident: false,
+        logoUrl: null,
+        cardImageUrl: null,
+      };
       continue;
     }
     const { domain, confident } = resolved;
