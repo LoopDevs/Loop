@@ -330,6 +330,7 @@ GET  /api/public/merchants/:id     [public — per-merchant SEO detail (accepts 
 GET  /api/public/cashback-preview  [public — pre-signup "calculate your cashback" preview: ?merchantId + ?amountMinor → floor-rounded cashback, never-500, ADR 011/015/020]
 GET  /api/public/loop-assets       [public — configured (code, issuer) pairs for trustline setup, never-500, ADR 015/020]
 GET  /api/public/flywheel-stats    [public — 30-day fulfilled + recycled counts + % pill, never-500, ADR 015/020]
+GET  /api/public/geo               [public — IP-geolocation first guess for the region selector → { countryCode, region }, never-500, ADR 020/033]
 GET  /api/admin/merchant-cashback-configs              [admin]
 GET  /api/admin/merchant-cashback-configs/history      [admin — fleet-wide config-edit audit feed, ADR 011/018]
 PUT  /api/admin/merchant-cashback-configs/:merchantId  [admin]

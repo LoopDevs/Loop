@@ -25,6 +25,7 @@ import { rateLimit } from '../middleware/rate-limit.js';
 import { publicCashbackStatsHandler } from '../public/cashback-stats.js';
 import { publicCashbackPreviewHandler } from '../public/cashback-preview.js';
 import { publicFlywheelStatsHandler } from '../public/flywheel-stats.js';
+import { publicGeoHandler } from '../public/geo.js';
 import { publicLoopAssetsHandler } from '../public/loop-assets.js';
 import { publicMerchantHandler } from '../public/merchant.js';
 import { publicTopCashbackMerchantsHandler } from '../public/top-cashback-merchants.js';
@@ -44,6 +45,10 @@ export function mountPublicRoutes(app: Hono): void {
     rateLimit('GET /api/public/cashback-stats', 60, 60_000),
     publicCashbackStatsHandler,
   );
+
+  // Best-guess region from the caller's IP to seed the region selector (ADR 033).
+  // Never-500: returns the US default when the GeoLite2 DB is absent or the lookup fails.
+  app.get('/api/public/geo', rateLimit('GET /api/public/geo', 60, 60_000), publicGeoHandler);
 
   // Public, unauthenticated, CDN-friendly "best cashback" list for
   // the landing page. Same never-500 + Cache-Control discipline as

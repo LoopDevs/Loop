@@ -96,6 +96,11 @@ export const EnvSchema = z.object({
   // Example: "cdn.giftcards.com,images.merchant.com"
   IMAGE_PROXY_ALLOWED_HOSTS: z.string().optional(),
 
+  // Path to an operator-provided MaxMind GeoLite2-Country .mmdb (ADR 033). Powers the
+  // GET /api/public/geo first-guess for the region selector. Unset → that endpoint
+  // returns the US default and the web client falls back to navigator.language.
+  MAXMIND_GEOLITE2_PATH: z.string().optional(),
+
   // A2-654: emergency opt-out for the production-allowlist boot guard
   // below. Typed here rather than read from bare `process.env` so a
   // typo on deploy (`DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCMENT=1`) fails
