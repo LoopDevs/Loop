@@ -1,23 +1,65 @@
 import { type RouteConfig, index, route } from '@react-router/dev/routes';
 
+const isMobile = process.env.BUILD_TARGET === 'mobile';
+
 // The sitemap is an SSR-only resource route — it exports a `loader`,
 // which SPA mode (mobile static export) rejects. Skip it at build
 // time when BUILD_TARGET=mobile. Mobile doesn't serve HTTP, so it
 // has no use for a sitemap anyway.
-const sitemapRoutes =
-  process.env.BUILD_TARGET === 'mobile' ? [] : [route('sitemap.xml', 'routes/sitemap.tsx')];
+const sitemapRoutes = isMobile ? [] : [route('sitemap.xml', 'routes/sitemap.tsx')];
 
 // A2-1111: SSR build wires the splat to `not-found-ssr.tsx`, whose
 // loader throws a real HTTP 404 so crawlers stop seeing soft-200s.
 // Mobile build uses the plain `not-found.tsx` because SPA mode rejects
 // `loader` exports. Both files render the same 404 UI.
-const splatRoute =
-  process.env.BUILD_TARGET === 'mobile'
-    ? route('*', 'routes/not-found.tsx')
-    : route('*', 'routes/not-found-ssr.tsx');
+const splatRoute = isMobile
+  ? route('*', 'routes/not-found.tsx')
+  : route('*', 'routes/not-found-ssr.tsx');
+
+// ADR 034 — the public marketing surface is also reachable under a
+// `/:country/:lang` locale prefix (e.g. `/gb/en/cashback`). These mirror the
+// legacy top-level routes below: both forms resolve during the migration so
+// every pre-ADR-034 URL + internal <Link> keeps working, while Phase 3 routes
+// links through `localizedHref()` to emit the prefixed form. Each locale copy
+// carries an `locale/` id so React Router can tell the two mounts of the same
+// module apart.
+//
+// Scope: only the public catalogue + onboarding are localised — that's where
+// per-country SEO and price-display currency matter. The authed app
+// (auth/orders/settings) and admin stay single-locale: their currency comes
+// from the user's home-currency setting, not the URL, and admin is single-market
+// ops.
+const localeChildren: RouteConfig = [
+  index('routes/home.tsx', { id: 'locale/home' }),
+  route('map', 'routes/map.tsx', { id: 'locale/map' }),
+  route('gift-card/:name', 'routes/gift-card.$name.tsx', { id: 'locale/gift-card' }),
+  route('brand/:slug', 'routes/brand.$slug.tsx', { id: 'locale/brand' }),
+  route('cashback', 'routes/cashback.tsx', { id: 'locale/cashback' }),
+  route('cashback/:slug', 'routes/cashback.$slug.tsx', { id: 'locale/cashback-slug' }),
+  route('calculator', 'routes/calculator.tsx', { id: 'locale/calculator' }),
+  route('trustlines', 'routes/trustlines.tsx', { id: 'locale/trustlines' }),
+  route('privacy', 'routes/privacy.tsx', { id: 'locale/privacy' }),
+  route('terms', 'routes/terms.tsx', { id: 'locale/terms' }),
+  route('onboarding', 'routes/onboarding.tsx', { id: 'locale/onboarding' }),
+];
+
+// The locale layout validates the country/lang segments. SSR throws a real 404
+// for an unrouted locale; mobile (SPA, no loader) renders the 404 UI in-component.
+const localeLayout = route(
+  ':country/:lang',
+  isMobile ? 'routes/locale-layout.tsx' : 'routes/locale-layout-ssr.tsx',
+  localeChildren,
+);
+
+// Root `/`: SSR geo-redirects to `/<country>/en` (bots get the x-default home);
+// mobile renders home directly (no SSR to redirect — the shell pins a locale).
+const rootIndex = isMobile ? index('routes/home.tsx') : index('routes/home-geo-redirect.tsx');
 
 export default [
-  index('routes/home.tsx'),
+  rootIndex,
+  localeLayout,
+  // Legacy top-level public routes — unchanged, kept working during the ADR 034
+  // migration (mirrored by `localeChildren` above).
   route('map', 'routes/map.tsx'),
   route('gift-card/:name', 'routes/gift-card.$name.tsx'),
   route('brand/:slug', 'routes/brand.$slug.tsx'),
