@@ -69,6 +69,28 @@ document and on the public licences page. The original
 > Copyright (c) 2010-2011, CloudMade
 > All rights reserved.
 
+### flag-icons country flags — MIT (flags are public domain)
+
+**Files:** `apps/web/public/flags/*.svg` (23 flat 4:3 country flags — the
+`/:country/:lang` selector, ADR 034).
+
+**Origin:** copied verbatim from the `flag-icons` collection
+(`flags/4x3/`), replacing the platform emoji flags (which render as wavy
+cloth flags and vary per OS).
+
+**Upstream:** `https://github.com/lipis/flag-icons`. The collection is
+MIT-licensed; the flag artwork itself is in the public domain.
+
+**Why we ship copies instead of the npm package:** same reason as the
+Leaflet markers — the Capacitor static-export build needs assets at a
+stable public path, and we only ship the ~23 flags we route, not the
+full set. No new runtime dependency.
+
+**Attribution** (MIT — preserve the notice):
+
+> The MIT License (MIT)
+> Copyright (c) 2013 Panayiotis Lipiridis
+
 ### @capgo/inappbrowser — MPL-2.0
 
 **Package:** `@capgo/inappbrowser@8.6.1` (top-level runtime

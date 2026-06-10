@@ -76,9 +76,7 @@ export function CountrySelector(): React.JSX.Element {
         aria-label={`Country: ${current.label}`}
         className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 py-2 text-sm font-medium text-ink transition-colors hover:bg-gray-50"
       >
-        <span aria-hidden className="text-base leading-none">
-          {current.flag}
-        </span>
+        <FlagIcon code={current.code} emoji={current.flag} />
         <span className="hidden sm:inline">{current.code}</span>
         <svg
           aria-hidden
@@ -130,9 +128,7 @@ export function CountrySelector(): React.JSX.Element {
                         selected ? 'font-semibold text-blue-600' : 'text-ink'
                       }`}
                     >
-                      <span aria-hidden className="text-base leading-none">
-                        {c.flag}
-                      </span>
+                      <FlagIcon code={c.code} emoji={c.flag} />
                       <span className="flex-1">{c.label}</span>
                       <span className="text-xs text-ink-muted">{c.currency}</span>
                     </button>
@@ -147,5 +143,33 @@ export function CountrySelector(): React.JSX.Element {
         </div>
       ) : null}
     </>
+  );
+}
+
+/**
+ * Flat rectangular flag — a flag-icons 4x3 SVG bundled under `/public/flags`
+ * (replaces the platform emoji flag, which renders as a wavy cloth flag). Falls
+ * back to the emoji if the asset can't load. The `ring` keeps white-edged flags
+ * legible on a white surface.
+ */
+function FlagIcon({ code, emoji }: { code: string; emoji: string }): React.JSX.Element {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <span aria-hidden className="text-base leading-none">
+        {emoji}
+      </span>
+    );
+  }
+  return (
+    <img
+      src={`/flags/${code.toLowerCase()}.svg`}
+      alt=""
+      aria-hidden
+      width={20}
+      height={15}
+      onError={() => setFailed(true)}
+      className="h-[15px] w-5 shrink-0 rounded-[2px] object-cover ring-1 ring-black/10"
+    />
   );
 }
