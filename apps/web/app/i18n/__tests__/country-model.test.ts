@@ -30,13 +30,15 @@ const merchant = (
 });
 
 describe('COUNTRIES list integrity', () => {
-  it('includes the anchor markets and the full Eurozone', () => {
-    expect(COUNTRIES).toHaveLength(23); // US + GB + CA + 20 Eurozone
+  it('includes the anchor markets, the full Eurozone, and the extended markets', () => {
+    expect(COUNTRIES).toHaveLength(28); // US + GB + CA + 20 Eurozone + 5 extended
     const codes = COUNTRIES.map((c) => c.code);
     expect(codes).toContain('US');
     expect(codes).toContain('GB');
     expect(codes).toContain('CA');
     expect(codes).toContain('DE');
+    // ADR 035 extended supplier-currency markets.
+    expect(codes).toEqual(expect.arrayContaining(['AE', 'IN', 'SA', 'AU', 'MX']));
   });
 
   it('uses uppercase, unique ISO codes', () => {
@@ -62,6 +64,13 @@ describe('currencyOf', () => {
     expect(currencyOf('GB')).toBe('GBP');
     expect(currencyOf('CA')).toBe('CAD');
     expect(currencyOf('DE')).toBe('EUR');
+  });
+  it('maps the extended markets to their currency (ADR 035)', () => {
+    expect(currencyOf('AE')).toBe('AED');
+    expect(currencyOf('IN')).toBe('INR');
+    expect(currencyOf('SA')).toBe('SAR');
+    expect(currencyOf('AU')).toBe('AUD');
+    expect(currencyOf('MX')).toBe('MXN');
   });
   it('is case-insensitive', () => {
     expect(currencyOf('gb')).toBe('GBP');
@@ -99,6 +108,11 @@ describe('countriesForCurrency', () => {
   it('returns a single country for the anchor currencies', () => {
     expect(countriesForCurrency('USD').map((c) => c.code)).toEqual(['US']);
     expect(countriesForCurrency('gbp').map((c) => c.code)).toEqual(['GB']);
+  });
+  it('returns a single country for each extended-market currency (ADR 035)', () => {
+    expect(countriesForCurrency('AED').map((c) => c.code)).toEqual(['AE']);
+    expect(countriesForCurrency('INR').map((c) => c.code)).toEqual(['IN']);
+    expect(countriesForCurrency('mxn').map((c) => c.code)).toEqual(['MX']);
   });
 });
 
