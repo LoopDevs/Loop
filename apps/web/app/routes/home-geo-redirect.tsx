@@ -2,6 +2,7 @@ import { isbot } from 'isbot';
 import { redirect } from 'react-router';
 import { DEFAULT_LANG, resolveCountryPath, type GeoResponse } from '@loop/shared';
 import type { Route } from './+types/home-geo-redirect';
+import { parseCountryCookie } from '~/i18n/locale';
 
 // The home component + its meta/links render unchanged at `/` for the bot /
 // x-default case below.
@@ -53,6 +54,9 @@ async function geoCountry(request: Request): Promise<string> {
  */
 export async function loader({ request }: Route.LoaderArgs): Promise<null> {
   if (isbot(request.headers.get('user-agent') ?? '')) return null;
-  const country = resolveCountryPath(await geoCountry(request));
+  // Detection precedence (ADR 034 §7): saved cookie > geo-IP > default. A
+  // visitor who chose a country keeps it even when their IP says otherwise.
+  const chosen = parseCountryCookie(request.headers.get('cookie'));
+  const country = chosen ?? resolveCountryPath(await geoCountry(request));
   throw redirect(`/${country}/${DEFAULT_LANG}`);
 }

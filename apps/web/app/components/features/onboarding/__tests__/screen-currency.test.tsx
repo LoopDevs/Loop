@@ -1,9 +1,28 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import { CurrencyPickerScreen, guessHomeCurrency } from '../screen-currency';
+import {
+  CurrencyPickerScreen,
+  guessHomeCurrency,
+  homeCurrencyForCountry,
+} from '../screen-currency';
 
 afterEach(cleanup);
+
+describe('homeCurrencyForCountry (ADR 034)', () => {
+  it('maps a country to its home currency', () => {
+    expect(homeCurrencyForCountry('gb')).toBe('GBP');
+    expect(homeCurrencyForCountry('US')).toBe('USD');
+    expect(homeCurrencyForCountry('de')).toBe('EUR');
+    expect(homeCurrencyForCountry('fr')).toBe('EUR');
+  });
+  it('settles CAD in USD — no CADLOOP asset yet', () => {
+    expect(homeCurrencyForCountry('ca')).toBe('USD');
+  });
+  it('falls back to USD for an unrouted country', () => {
+    expect(homeCurrencyForCountry('jp')).toBe('USD');
+  });
+});
 
 describe('CurrencyPickerScreen', () => {
   const copy = { eyebrow: 'Your region', title: 'Pick your currency', sub: 'sub' };

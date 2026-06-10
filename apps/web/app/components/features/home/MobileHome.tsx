@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router';
 import type { Merchant, MerchantGroup } from '@loop/shared';
-import { foldForSearch, groupMerchants, merchantSlug, regionByCode } from '@loop/shared';
+import { foldForSearch, groupMerchants, merchantInCountry, merchantSlug } from '@loop/shared';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
 import { useOrders } from '~/hooks/use-orders';
 import { useAuth } from '~/hooks/use-auth';
 import { useAppConfig } from '~/hooks/use-app-config';
 import { useNativePlatform } from '~/hooks/use-native-platform';
-import { useRegionStore } from '~/stores/region.store';
+import { useLocale } from '~/i18n/locale';
 import { shouldRetry } from '~/hooks/query-retry';
 import { getCashbackSummary } from '~/services/user';
 import { getImageProxyUrl } from '~/utils/image';
@@ -58,15 +58,14 @@ export function MobileHome(): React.JSX.Element {
   const phase1Only = config.phase1Only;
   const visibleMerchants = useMemo(() => (hydrated ? merchants : []), [hydrated, merchants]);
   const visibleMerchantsLoading = !hydrated || merchantsLoading;
-  const region = useRegionStore((s) => s.region);
-  // Region-filtered view for the directory + quick-buy display. `visibleMerchants` stays
-  // unfiltered for the lifetime-savings calc (orders span every region the user has bought in).
-  const regionMerchants = useMemo(() => {
-    const countries = regionByCode(region).countries;
-    return visibleMerchants.filter(
-      (m) => !m.country || countries.includes(m.country.toUpperCase()),
-    );
-  }, [visibleMerchants, region]);
+  const { country } = useLocale();
+  // Country-filtered view (ADR 034) for the directory + quick-buy display.
+  // `visibleMerchants` stays unfiltered for the lifetime-savings calc (orders span
+  // every country the user has bought in).
+  const countryMerchants = useMemo(
+    () => visibleMerchants.filter((m) => merchantInCountry(m, country)),
+    [visibleMerchants, country],
+  );
 
   // Greeting name — email local-part, title-cased first char. Falls
   // back to "there" for unauth / no-email visitors.
@@ -121,12 +120,12 @@ export function MobileHome(): React.JSX.Element {
   // row reads as populated.
   const quickBuy = useMemo(
     () =>
-      regionMerchants
+      countryMerchants
         .filter((m) => m.enabled !== false && m.logoUrl !== undefined)
         .slice()
         .sort((a, b) => (b.savingsPercentage ?? 0) - (a.savingsPercentage ?? 0))
         .slice(0, 6),
-    [regionMerchants],
+    [countryMerchants],
   );
 
   // Pending orders are hidden from Recent activity — a blank row
@@ -146,25 +145,23 @@ export function MobileHome(): React.JSX.Element {
   const grid = useMemo(() => {
     const bySavings = (a: Merchant, b: Merchant): number =>
       (b.savingsPercentage ?? 0) - (a.savingsPercentage ?? 0);
-    // Browsing the directory shows the selected region. Searching spans every region but
-    // ranks the user's region first (ADR 033).
+    // Browsing the directory shows the active country. Searching spans every
+    // country but ranks the active country first (ADR 034).
     if (foldedQuery.length === 0) {
-      return regionMerchants
+      return countryMerchants
         .filter((m) => m.enabled !== false)
         .slice()
         .sort(bySavings);
     }
-    const regionCountries = regionByCode(region).countries;
-    const inRegion = (m: Merchant): boolean =>
-      !!m.country && regionCountries.includes(m.country.toUpperCase());
+    const inCountry = (m: Merchant): boolean => merchantInCountry(m, country);
     return visibleMerchants
       .filter((m) => m.enabled !== false && foldForSearch(m.name).includes(foldedQuery))
       .slice()
       .sort((a, b) => {
-        const r = (inRegion(b) ? 1 : 0) - (inRegion(a) ? 1 : 0);
+        const r = (inCountry(b) ? 1 : 0) - (inCountry(a) ? 1 : 0);
         return r !== 0 ? r : bySavings(a, b);
       });
-  }, [regionMerchants, visibleMerchants, region, foldedQuery]);
+  }, [countryMerchants, visibleMerchants, country, foldedQuery]);
   // ADR 032: collapse "Brand - Variant" SKUs into one brand cell. Grouping
   // the *filtered* list means a search for "tree" still surfaces the
   // dots.eco brand (a matching variant keeps its group).
