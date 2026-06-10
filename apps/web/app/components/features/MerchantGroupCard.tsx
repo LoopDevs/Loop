@@ -1,4 +1,4 @@
-import { Link } from 'react-router';
+import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { MerchantGroup } from '@loop/shared';
 import { merchantSlug } from '@loop/shared';
 import { getImageProxyUrl } from '~/utils/image';

@@ -1,4 +1,5 @@
-import { Link, useLocation } from 'react-router';
+import { useLocation } from 'react-router';
+import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import { triggerHaptic } from '~/native/haptics';
 
 /**

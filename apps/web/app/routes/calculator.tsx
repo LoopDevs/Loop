@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router';
+import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Route } from './+types/calculator';
 import { getPublicTopCashbackMerchants, type TopCashbackMerchant } from '~/services/public-stats';
 import { shouldRetry } from '~/hooks/query-retry';

@@ -1,4 +1,5 @@
-import { useParams, Link, useNavigate } from 'react-router';
+import { useParams, useNavigate } from 'react-router';
+import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Route } from './+types/gift-card.$name';
 import { useMerchantBySlug, useMerchant, useMerchantCashbackRate } from '~/hooks/use-merchants';
 import { useAuth } from '~/hooks/use-auth';

@@ -1,4 +1,5 @@
-import { useParams, Link, useNavigate } from 'react-router';
+import { useParams, useNavigate } from 'react-router';
+import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Route } from './+types/brand.$slug';
 import { groupMerchants, merchantSlug, variantLabel } from '@loop/shared';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';

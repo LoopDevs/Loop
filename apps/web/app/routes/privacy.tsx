@@ -1,4 +1,4 @@
-import { Link } from 'react-router';
+import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Route } from './+types/privacy';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';

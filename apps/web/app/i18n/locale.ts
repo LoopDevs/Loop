@@ -12,7 +12,7 @@
  * server byte, never corrected on the client).
  */
 
-import { useParams } from 'react-router';
+import { useNavigate, useParams, type NavigateOptions } from 'react-router';
 import {
   DEFAULT_COUNTRY,
   DEFAULT_LANG,
@@ -50,6 +50,21 @@ export function useLocale(): Locale {
   return normalizeLocale(params.country, params.lang);
 }
 
+/**
+ * The locale of the **current** route, or `null` when this route is not under
+ * the `/:country/:lang` layout. Unlike {@link useLocale}, it does NOT default to
+ * the US market — so link helpers stay a no-op on unprefixed routes and never
+ * invent a locale the visitor didn't choose (which would, e.g., send a GB
+ * visitor on `/orders` to the US catalogue). SSR-safe: reads only the URL.
+ */
+export function useActiveLocale(): Locale | null {
+  const params = useParams();
+  if (isSupportedCountryCode(params.country) && isSupportedLang(params.lang)) {
+    return { country: params.country!.toLowerCase(), lang: params.lang!.toLowerCase() };
+  }
+  return null;
+}
+
 const LOCALE_PREFIX = /^\/[a-z]{2}\/[a-z]{2}(?=\/|$)/;
 
 /** Strip a leading `/xx/yy` locale prefix from a path (no-op if absent). */
@@ -74,6 +89,21 @@ export function localizedHref(path: string, locale: Locale): string {
 export function useLocalizedHref(): (path: string) => string {
   const locale = useLocale();
   return (path: string) => localizedHref(path, locale);
+}
+
+/**
+ * `navigate()` that keeps the visitor in their locale: a localizable target is
+ * prefixed with the current route's locale, anything else (and any navigation
+ * from an unprefixed route) passes through unchanged — same no-op rule as
+ * {@link useActiveLocale}.
+ */
+export function useLocalizedNavigate(): (to: string, opts?: NavigateOptions) => void {
+  const navigate = useNavigate();
+  const locale = useActiveLocale();
+  return (to: string, opts?: NavigateOptions) => {
+    const dest = locale && isLocalizablePath(to) ? localizedHref(to, locale) : to;
+    void navigate(dest, opts);
+  };
 }
 
 // The unprefixed paths that have a `/:country/:lang` mount (ADR 034 — the public

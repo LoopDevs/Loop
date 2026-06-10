@@ -1,4 +1,4 @@
-import { Link } from 'react-router';
+import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import { useEffect, useMemo, useState } from 'react';
 import { groupMerchants, merchantInCountry } from '@loop/shared';
 import type { Route } from './+types/home';

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
+import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Merchant, MerchantGroup } from '@loop/shared';
 import { foldForSearch, groupMerchants, merchantInCountry, merchantSlug } from '@loop/shared';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
