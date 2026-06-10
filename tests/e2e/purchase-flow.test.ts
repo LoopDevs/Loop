@@ -9,7 +9,7 @@ test.describe('Purchase flow', () => {
     // then `if (await link.isVisible())`, which made the whole test a silent
     // no-op when merchants failed to load — the worst case of "green CI that
     // actually caught nothing".
-    const merchantLink = page.locator('a[href^="/gift-card/"]').first();
+    const merchantLink = page.locator('a[href*="/gift-card/"]').first();
     await expect(merchantLink).toBeVisible();
     await merchantLink.click();
     await page.waitForURL(/\/gift-card\//);
@@ -24,7 +24,7 @@ test.describe('Purchase flow', () => {
     // Wait for merchant data to be available. Navbar's search hooks into
     // useMerchants; until that resolves, the dropdown has nothing to show
     // even for a valid query.
-    await expect(page.locator('a[href^="/gift-card/"]').first()).toBeVisible();
+    await expect(page.locator('a[href*="/gift-card/"]').first()).toBeVisible();
 
     // Placeholder became "Search brands" in the design-system redesign (#1389); match by
     // substring so this doesn't re-break on a future copy tweak. (Was stale + failing on

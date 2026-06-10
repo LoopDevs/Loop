@@ -47,7 +47,7 @@ async function gotoMerchantDetail(page: Page): Promise<string> {
     }
   });
   await page.goto('/');
-  const merchantLink = page.locator('a[href^="/gift-card/"]').first();
+  const merchantLink = page.locator('a[href*="/gift-card/"]').first();
   await expect(merchantLink).toBeVisible();
   expect(hydrationErrors).toHaveLength(0);
   // The card's h3 carries the merchant name; read it for later assertions.
