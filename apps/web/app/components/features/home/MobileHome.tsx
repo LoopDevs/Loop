@@ -144,13 +144,27 @@ export function MobileHome(): React.JSX.Element {
   const [query, setQuery] = useState('');
   const foldedQuery = foldForSearch(query.trim());
   const grid = useMemo(() => {
-    const enabled = regionMerchants.filter((m) => m.enabled !== false);
-    const filtered =
-      foldedQuery.length > 0
-        ? enabled.filter((m) => foldForSearch(m.name).includes(foldedQuery))
-        : enabled;
-    return filtered.slice().sort((a, b) => (b.savingsPercentage ?? 0) - (a.savingsPercentage ?? 0));
-  }, [regionMerchants, foldedQuery]);
+    const bySavings = (a: Merchant, b: Merchant): number =>
+      (b.savingsPercentage ?? 0) - (a.savingsPercentage ?? 0);
+    // Browsing the directory shows the selected region. Searching spans every region but
+    // ranks the user's region first (ADR 033).
+    if (foldedQuery.length === 0) {
+      return regionMerchants
+        .filter((m) => m.enabled !== false)
+        .slice()
+        .sort(bySavings);
+    }
+    const regionCountries = regionByCode(region).countries;
+    const inRegion = (m: Merchant): boolean =>
+      !!m.country && regionCountries.includes(m.country.toUpperCase());
+    return visibleMerchants
+      .filter((m) => m.enabled !== false && foldForSearch(m.name).includes(foldedQuery))
+      .slice()
+      .sort((a, b) => {
+        const r = (inRegion(b) ? 1 : 0) - (inRegion(a) ? 1 : 0);
+        return r !== 0 ? r : bySavings(a, b);
+      });
+  }, [regionMerchants, visibleMerchants, region, foldedQuery]);
   // ADR 032: collapse "Brand - Variant" SKUs into one brand cell. Grouping
   // the *filtered* list means a search for "tree" still surfaces the
   // dots.eco brand (a matching variant keeps its group).
