@@ -1,5 +1,6 @@
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Route } from './+types/privacy';
+import { canonicalHref } from '~/i18n/seo';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
 
@@ -19,14 +20,14 @@ import { Footer } from '~/components/features/Footer';
  * re-architecting the page. Don't use the placeholder text in
  * any binding context.
  */
-export function meta(): Route.MetaDescriptors {
+export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
   return [
     { title: 'Privacy Policy — Loop' },
     {
       name: 'description',
       content: 'How Loop handles your personal data.',
     },
-    { tagName: 'link', rel: 'canonical', href: 'https://loopfinance.io/privacy' },
+    { tagName: 'link', rel: 'canonical', href: canonicalHref(params, '/privacy') },
   ];
 }
 

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Route } from './+types/trustlines';
+import { canonicalHref } from '~/i18n/seo';
 import { getPublicLoopAssets, type PublicLoopAsset } from '~/services/public-stats';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Navbar } from '~/components/features/Navbar';
@@ -33,7 +34,7 @@ import { Spinner } from '~/components/ui/Spinner';
 const FREIGHTER_URL = 'https://www.freighter.app/';
 const STELLAR_EXPERT_BASE = 'https://stellar.expert/explorer/public/account';
 
-export function meta(): Route.MetaDescriptors {
+export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
   return [
     { title: 'LOOP asset trustlines — Loop' },
     {
@@ -41,7 +42,7 @@ export function meta(): Route.MetaDescriptors {
       content:
         'Verified issuer accounts for USDLOOP, GBPLOOP, and EURLOOP Stellar stablecoins. Add a trustline from any Stellar wallet to receive cashback on Loop.',
     },
-    { tagName: 'link', rel: 'canonical', href: 'https://loopfinance.io/trustlines' },
+    { tagName: 'link', rel: 'canonical', href: canonicalHref(params, '/trustlines') },
   ];
 }
 
