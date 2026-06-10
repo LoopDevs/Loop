@@ -41,6 +41,8 @@
 
 **Static export constraint**: React Router loaders cannot run server-side in static export mode. Loaders may only handle layout structure and `<meta>` tags. All data fetching is client-side via TanStack Query.
 
+**Path-based locale routing (ADR 034)**: the public catalogue is also served under a `/:country/:lang` prefix (e.g. `/gb/en`, `/de/en`); a bare `/` issues a server-side 302 to the geo-resolved country (`/<country>/en`), while bots get the `x-default` home rendered at `/`. The merchant filter and price-display currency read the URL country (via `useLocale()` + `merchantInCountry()`), not a client store — which is what removes the "US flash". Two SSR loaders fetch server-side as the **documented exceptions** to the pure-API-client rule: `routes/sitemap.tsx` (XML for crawlers, with per-country `hreflang`) and `routes/home-geo-redirect.tsx` (the `/` geo-redirect; precedence cookie > geo-IP > default). The legacy unprefixed routes still resolve during the migration; internal `<Link>`s on the localized surface go through `LocaleLink`.
+
 ---
 
 ## Backend data model (in-memory)
@@ -330,7 +332,7 @@ GET  /api/public/merchants/:id     [public — per-merchant SEO detail (accepts 
 GET  /api/public/cashback-preview  [public — pre-signup "calculate your cashback" preview: ?merchantId + ?amountMinor → floor-rounded cashback, never-500, ADR 011/015/020]
 GET  /api/public/loop-assets       [public — configured (code, issuer) pairs for trustline setup, never-500, ADR 015/020]
 GET  /api/public/flywheel-stats    [public — 30-day fulfilled + recycled counts + % pill, never-500, ADR 015/020]
-GET  /api/public/geo               [public — IP-geolocation first guess for the region selector → { countryCode, region }, never-500, ADR 020/033]
+GET  /api/public/geo               [public — IP-geolocation first guess for the `/` locale redirect + onboarding currency → { countryCode, region }, never-500, ADR 020/033/034]
 GET  /api/admin/merchant-cashback-configs              [admin]
 GET  /api/admin/merchant-cashback-configs/history      [admin — fleet-wide config-edit audit feed, ADR 011/018]
 PUT  /api/admin/merchant-cashback-configs/:merchantId  [admin]
