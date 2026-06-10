@@ -109,3 +109,26 @@ exists to future-proof real localisation like `/de/de`, not because we translate
    `meta`/H1, `Offer.priceCurrency` structured data.
 5. **Cleanup** — retire `region.store.ts`; update `architecture.md` (the new loader
    exception) + docs. Cloudflare-edge redirect stays a documented future perf upgrade.
+
+## Implementation status
+
+Shipped across five PRs (2026-06):
+
+- **#1401** — Phase 1: `countries.ts` model and the `i18n/` seam.
+- **#1402** — Phase 2: the `:country/:lang` layout, `home-geo-redirect.tsx`, locale
+  validation/404.
+- **#1403 / #1404** — Phase 3: filters/search/onboarding read the URL country, the
+  `CountrySelector` modal and choice cookie, and `LocaleLink` link wiring.
+- **#1405** — Phase 4: per-country `hreflang` sitemap, self-canonicals, per-country titles.
+- **This PR** — Phase 5: retire `region.store.ts` and `RegionSelector`; update the docs.
+
+Two deltas from the original plan, both grounded in the live data / current feed:
+
+- **Scope is the public catalogue + onboarding**, not literally every route. Auth/orders/
+  settings/admin stay single-locale — their currency comes from the user's home-currency
+  setting, not the URL, and admin is single-market ops.
+- **~23 countries, not ~40**: the catalogue's live currency spread is USD/GBP/CAD/EUR, so
+  the list is US + GB + CA + the full Eurozone. Per-country **merchant** sitemap pages and
+  `Offer.priceCurrency` structured data are deferred until the public merchant feed carries
+  country/currency (today it carries neither, so a per-country merchant page would be thin);
+  the per-country **landing** pages (home + `/cashback`) ship with full reciprocal `hreflang`.

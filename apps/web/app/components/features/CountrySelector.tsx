@@ -10,7 +10,7 @@ import {
 } from '~/i18n/locale';
 
 /**
- * Country picker (ADR 034 §4). Replaces the four-region `RegionSelector`. With
+ * Country picker (ADR 034 §4). Replaces the four-region selector (ADR 033). With
  * ~23 routable countries the navbar dropdown becomes a centered modal: a search
  * field + flagged list (type "ger" → Germany). Selecting a country navigates to
  * the **same page** under the new locale (so the choice is a real, shareable

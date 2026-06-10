@@ -1,7 +1,12 @@
 /**
- * Region model — the US / CA / UK / EUR selector that drives the merchant filter and
- * the price-display currency on loopfinance.io. The first guess comes from IP
- * geolocation (backend `/api/public/geo`, MaxMind GeoLite2); the user can override it.
+ * Region model — the original US / CA / UK / EUR selector.
+ *
+ * **Superseded by the per-country model in `countries.ts` (ADR 034).** The web's
+ * region store + selector are retired; what remains live here is `GeoResponse`
+ * (the `/api/public/geo` shape) and the backend's `regionForCountry` /
+ * `DEFAULT_REGION`, which still populate the (now-vestigial) `GeoResponse.region`
+ * field for backward compatibility. New code should use `countries.ts`
+ * (`COUNTRIES`, `currencyOf`, `merchantInCountry`).
  *
  * NOTE: a region's `currency` here is the **display** currency for merchant prices. It is
  * deliberately separate from the user's cashback *home currency* (`HomeCurrency` in
