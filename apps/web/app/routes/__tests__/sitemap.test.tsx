@@ -1,22 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 /**
- * A2-1714: the `/sitemap.xml` resource route is the only React Router
- * loader Loop runs server-side ("Web is a pure API client" in
- * CLAUDE.md, with sitemap as the documented exception). It had no
- * tests; a regression here silently breaks every public route's SEO
- * discovery without surfacing in the unit suite or e2e.
+ * A2-1714 / ADR 034 §5: the `/sitemap.xml` resource route is one of the two
+ * React Router loaders Loop runs server-side ("Web is a pure API client" in
+ * CLAUDE.md). It had no tests; a regression here silently breaks every public
+ * route's SEO discovery without surfacing in the unit suite or e2e.
  *
  * These tests pin the loader's contract:
- *   - Always emits a valid sitemap with the static routes (homepage,
- *     /cashback, /calculator, /trustlines, /privacy, /terms) — even
- *     when the merchants fetch fails.
- *   - When merchants fetch succeeds, appends a `<url>` per merchant
- *     under `/cashback/:slug`.
- *   - XML escapes any merchant-name-derived content (defence-in-depth
- *     even though slugs are alphanumeric).
- *   - Cache headers: `public, max-age=300, s-maxage=3600`.
- *   - 200 + `application/xml; charset=utf-8` content-type.
+ *   - The country-varying landing pages (home + /cashback) are emitted once per
+ *     routed country with a reciprocal `hreflang` + `x-default` block.
+ *   - The static pages + per-merchant pages stay single `x-default` (us/en) URLs.
+ *   - Fails open to the static set when the merchants fetch errors.
+ *   - XML-escapes URL content; correct cache + content-type headers.
  */
 
 import { loader } from '../sitemap';
@@ -28,10 +23,19 @@ beforeEach(() => {
   mockFetch.mockReset();
 });
 
-const STATIC_PATHS = ['/', '/cashback', '/calculator', '/trustlines', '/privacy', '/terms'];
+// Every locale-agnostic page resolves to its us/en (x-default) URL; the two
+// country-varying pages resolve to their us/en variant (plus 22 siblings).
+const XDEFAULT_LOCS = [
+  'https://loopfinance.io/us/en', // home
+  'https://loopfinance.io/us/en/cashback',
+  'https://loopfinance.io/us/en/calculator',
+  'https://loopfinance.io/us/en/trustlines',
+  'https://loopfinance.io/us/en/privacy',
+  'https://loopfinance.io/us/en/terms',
+];
 
 describe('sitemap loader', () => {
-  it('emits the static routes when the merchants fetch returns null', async () => {
+  it('emits the localized static routes when the merchants fetch returns null', async () => {
     mockFetch.mockResolvedValue(new Response(null, { status: 503 }));
     const res = await loader();
     expect(res.status).toBe(200);
@@ -39,57 +43,65 @@ describe('sitemap loader', () => {
     expect(res.headers.get('cache-control')).toBe('public, max-age=300, s-maxage=3600');
     const body = await res.text();
     expect(body.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
-    for (const path of STATIC_PATHS) {
-      expect(body).toContain(`<loc>https://loopfinance.io${path}</loc>`);
+    expect(body).toContain('xmlns:xhtml="http://www.w3.org/1999/xhtml"');
+    for (const loc of XDEFAULT_LOCS) {
+      expect(body).toContain(`<loc>${loc}</loc>`);
     }
+  });
+
+  it('emits per-country variants + reciprocal hreflang for the home + cashback pages', async () => {
+    mockFetch.mockResolvedValue(new Response(null, { status: 503 }));
+    const body = await (await loader()).text();
+    // Per-country <loc> for home and /cashback.
+    expect(body).toContain('<loc>https://loopfinance.io/gb/en</loc>');
+    expect(body).toContain('<loc>https://loopfinance.io/de/en/cashback</loc>');
+    // Reciprocal hreflang + x-default alternates.
+    expect(body).toContain('<xhtml:link rel="alternate" hreflang="x-default"');
+    expect(body).toContain(
+      '<xhtml:link rel="alternate" hreflang="en-GB" href="https://loopfinance.io/gb/en"/>',
+    );
+    // The static + merchant pages carry NO per-country hreflang block.
+    expect(body).not.toContain('href="https://loopfinance.io/gb/en/privacy"');
   });
 
   it('emits the static routes when the merchants fetch throws', async () => {
     mockFetch.mockRejectedValue(new Error('upstream blew up'));
-    const res = await loader();
-    expect(res.status).toBe(200);
-    const body = await res.text();
-    for (const path of STATIC_PATHS) {
-      expect(body).toContain(`<loc>https://loopfinance.io${path}</loc>`);
+    const body = await (await loader()).text();
+    for (const loc of XDEFAULT_LOCS) {
+      expect(body).toContain(`<loc>${loc}</loc>`);
     }
   });
 
-  it('appends one /cashback/:slug entry per merchant when the fetch succeeds', async () => {
+  it('appends one us/en /cashback/:slug entry per merchant when the fetch succeeds', async () => {
     mockFetch.mockResolvedValue(
       new Response(
         JSON.stringify({
           asOf: '2026-04-20T00:00:00Z',
           merchants: [
-            { name: 'Acme Coffee', cashbackPct: 5 },
-            { name: 'Globex Tools', cashbackPct: 3 },
+            { name: 'Acme Coffee', userCashbackPct: '5.00' },
+            { name: 'Globex Tools', userCashbackPct: '3.00' },
           ],
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       ),
     );
-    const res = await loader();
-    const body = await res.text();
-    expect(body).toContain('<loc>https://loopfinance.io/cashback/acme-coffee</loc>');
-    expect(body).toContain('<loc>https://loopfinance.io/cashback/globex-tools</loc>');
-    // lastmod for merchant entries should reflect the asOf date, not today
+    const body = await (await loader()).text();
+    expect(body).toContain('<loc>https://loopfinance.io/us/en/cashback/acme-coffee</loc>');
+    expect(body).toContain('<loc>https://loopfinance.io/us/en/cashback/globex-tools</loc>');
     expect(body).toContain('<lastmod>2026-04-20</lastmod>');
   });
 
-  it('XML-escapes ampersand in URLs (defence-in-depth even for slug paths)', async () => {
+  it('does not emit an unescaped ampersand inside any <loc>', async () => {
     mockFetch.mockResolvedValue(
       new Response(
         JSON.stringify({
           asOf: '2026-04-20T00:00:00Z',
-          merchants: [{ name: 'Smith & Co', cashbackPct: 5 }],
+          merchants: [{ name: 'Smith & Co', userCashbackPct: '5.00' }],
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       ),
     );
-    const res = await loader();
-    const body = await res.text();
-    // merchantSlug already lowercases + dashifies, so the raw `&`
-    // never reaches the URL — but the test pins that no unescaped
-    // `&` ever appears in any `<loc>` line.
+    const body = await (await loader()).text();
     expect(body).not.toMatch(/<loc>[^<]*&[^a-z][^<]*<\/loc>/);
   });
 

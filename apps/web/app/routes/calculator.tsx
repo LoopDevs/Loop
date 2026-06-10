@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Route } from './+types/calculator';
+import { canonicalHref } from '~/i18n/seo';
 import { getPublicTopCashbackMerchants, type TopCashbackMerchant } from '~/services/public-stats';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Navbar } from '~/components/features/Navbar';
@@ -27,7 +28,7 @@ import { CashbackCalculator } from '~/components/features/cashback/CashbackCalcu
  * fetch, so this route just orchestrates merchant selection.
  */
 
-export function meta(): Route.MetaDescriptors {
+export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
   return [
     { title: 'Cashback calculator — Loop' },
     {
@@ -35,7 +36,7 @@ export function meta(): Route.MetaDescriptors {
       content:
         'See how much cashback you would earn on any merchant. Pick a store, enter an amount — Loop pays cashback in LOOP-asset stablecoin pinned 1:1 to your home currency.',
     },
-    { tagName: 'link', rel: 'canonical', href: 'https://loopfinance.io/calculator' },
+    { tagName: 'link', rel: 'canonical', href: canonicalHref(params, '/calculator') },
   ];
 }
 

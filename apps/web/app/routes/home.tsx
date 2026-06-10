@@ -2,6 +2,7 @@ import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import { useEffect, useMemo, useState } from 'react';
 import { groupMerchants, merchantInCountry } from '@loop/shared';
 import type { Route } from './+types/home';
+import { canonicalHref, countryLabel } from '~/i18n/seo';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
 import { useAuth } from '~/hooks/use-auth';
 import { useAppConfig } from '~/hooks/use-app-config';
@@ -16,14 +17,23 @@ import { RecentlyPurchasedStrip } from '~/components/features/RecentlyPurchasedS
 import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
 import { MobileHome } from '~/components/features/home/MobileHome';
 
-export function meta(): Route.MetaDescriptors {
+export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
+  // Per-country title + self-canonical (ADR 034 §5): the localized URL ranks in
+  // its own market and never cross-canonicals to /us/en.
+  const where = countryLabel(params.country);
   return [
-    { title: 'Loop — Earn cashback on every gift card' },
+    {
+      title: where
+        ? `Loop — Earn cashback on every gift card in ${where}`
+        : 'Loop — Earn cashback on every gift card',
+    },
     {
       name: 'description',
-      content:
-        'Buy gift cards from your favourite merchants and earn cashback back to your wallet — on-chain, every time.',
+      content: where
+        ? `Buy gift cards from your favourite merchants in ${where} and earn cashback back to your wallet — on-chain, every time.`
+        : 'Buy gift cards from your favourite merchants and earn cashback back to your wallet — on-chain, every time.',
     },
+    { tagName: 'link', rel: 'canonical', href: canonicalHref(params, '/') },
   ];
 }
 

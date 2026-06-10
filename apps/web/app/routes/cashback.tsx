@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import { merchantSlug } from '@loop/shared';
 import type { Route } from './+types/cashback';
+import { canonicalHref, countryLabel } from '~/i18n/seo';
 import { getPublicTopCashbackMerchants, type TopCashbackMerchant } from '~/services/public-stats';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Navbar } from '~/components/features/Navbar';
@@ -32,15 +33,17 @@ import { getImageProxyUrl } from '~/utils/image';
 
 const LIMIT = 50;
 
-export function meta(): Route.MetaDescriptors {
+export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
+  const where = countryLabel(params.country);
   return [
-    { title: 'Best cashback rates — Loop' },
+    { title: where ? `Best cashback rates in ${where} — Loop` : 'Best cashback rates — Loop' },
     {
       name: 'description',
-      content:
-        'Earn cashback on gift cards from every merchant on Loop. Paid in LOOP-asset stablecoin — recycle it into more orders for compounding rewards.',
+      content: `Earn cashback on gift cards from every merchant on Loop${
+        where ? ` in ${where}` : ''
+      }. Paid in LOOP-asset stablecoin — recycle it into more orders for compounding rewards.`,
     },
-    { tagName: 'link', rel: 'canonical', href: 'https://loopfinance.io/cashback' },
+    { tagName: 'link', rel: 'canonical', href: canonicalHref(params, '/cashback') },
   ];
 }
 

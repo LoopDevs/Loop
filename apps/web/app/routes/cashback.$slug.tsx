@@ -3,6 +3,7 @@ import { useParams } from 'react-router';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/cashback.$slug';
+import { canonicalHref } from '~/i18n/seo';
 import { getPublicMerchant } from '~/services/public-stats';
 import { CashbackCalculator } from '~/components/features/cashback/CashbackCalculator';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -52,7 +53,7 @@ export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
       name: 'description',
       content: `Earn cashback on ${name} gift cards with Loop. Paid in LOOP-asset stablecoin — recycle it into more orders for compounding rewards.`,
     },
-    { tagName: 'link', rel: 'canonical', href: `https://loopfinance.io/cashback/${slug}` },
+    { tagName: 'link', rel: 'canonical', href: canonicalHref(params, `/cashback/${slug}`) },
   ];
 }
 
