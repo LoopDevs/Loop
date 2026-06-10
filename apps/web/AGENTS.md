@@ -45,6 +45,8 @@ app/
 ├── utils/            ← admin-cache, error-messages, image, locale, money,
 │                       security-headers, query-error-reporting (A2-1322),
 │                       sentry-error-scrubber (A2-1312), sentry-scrubber (A2-1308)
+├── i18n/             ← ADR 034 locale seam: format (Intl currency/number, localeTag),
+│                       messages (keyed copy catalogue), t() lookup — route-driven, SSR-safe
 └── root.tsx          ← Layout, QueryClientProvider (QueryCache + MutationCache
                         forwarding to Sentry), Sentry.init with LOOP_ENV, meta, links
 ```
