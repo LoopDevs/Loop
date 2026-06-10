@@ -23,6 +23,29 @@ COPY apps/backend/ apps/backend/
 # Build with tsup — bundles @loop/shared into single output
 RUN npm run build -w @loop/backend
 
+# Bake the MaxMind GeoLite2-Country DB for /api/public/geo's first guess (ADR 033).
+# Best-effort + BuildKit-only: skipped when the build secrets are absent (CI/local image
+# builds), so the endpoint just falls back to the US default. Done in the builder stage so
+# curl never lands in the runtime image. Provide at deploy time:
+#   flyctl deploy \
+#     --build-secret maxmind_account_id=<account-id> \
+#     --build-secret maxmind_license_key=<license-key>
+RUN --mount=type=secret,id=maxmind_account_id \
+    --mount=type=secret,id=maxmind_license_key \
+    mkdir -p /app/geoip && \
+    if [ -s /run/secrets/maxmind_license_key ]; then \
+      apk add --no-cache curl && \
+      curl -fsSL \
+        -u "$(cat /run/secrets/maxmind_account_id):$(cat /run/secrets/maxmind_license_key)" \
+        "https://download.maxmind.com/geoip/databases/GeoLite2-Country/download?suffix=tar.gz" \
+        -o /tmp/geoip.tar.gz && \
+      tar -xzf /tmp/geoip.tar.gz -C /tmp && \
+      cp /tmp/GeoLite2-Country_*/GeoLite2-Country.mmdb /app/geoip/GeoLite2-Country.mmdb && \
+      echo "GeoLite2-Country.mmdb baked: $(wc -c < /app/geoip/GeoLite2-Country.mmdb) bytes"; \
+    else \
+      echo "MaxMind build secrets absent — /api/public/geo will use the US default"; \
+    fi
+
 # --- Production image ---
 FROM node:22-alpine@sha256:8ea2348b068a9544dae7317b4f3aafcdc032df1647bb7d768a05a5cad1a7683f
 WORKDIR /app
@@ -43,6 +66,10 @@ RUN npm ci --omit=dev --ignore-scripts
 # `runMigrations()` look.
 COPY --from=builder /app/apps/backend/dist apps/backend/dist
 
+# GeoLite2-Country DB for /api/public/geo (ADR 033). Empty dir when not provisioned at
+# deploy; MAXMIND_GEOLITE2_PATH (below) points at it and the handler degrades gracefully.
+COPY --from=builder /app/geoip /app/geoip
+
 # Run as the non-root `node` user that node:*-alpine ships with. The default
 # is root — meaning any RCE in a dep would land with full container
 # privileges. `node` has no write access outside its home, which is all this
@@ -52,7 +79,7 @@ RUN chown -R node:node /app
 USER node
 
 EXPOSE 8080
-ENV PORT=8080 NODE_ENV=production
+ENV PORT=8080 NODE_ENV=production MAXMIND_GEOLITE2_PATH=/app/geoip/GeoLite2-Country.mmdb
 
 # A2-402: orchestrator-visible liveness probe. `GET /health` runs the
 # app-level health logic (upstream reachability + DB + signing-key
