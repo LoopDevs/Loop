@@ -202,6 +202,23 @@ that the role-grant wasn't extended for a new table.
 fly deploy --config apps/backend/fly.toml --dockerfile apps/backend/Dockerfile
 ```
 
+#### GeoLite2 (region selector first-guess, ADR 033)
+
+`GET /api/public/geo` reads a MaxMind **GeoLite2-Country** `.mmdb` baked into the
+image at build time (the Dockerfile downloads it via build secrets — best-effort, so
+a build without the secrets just falls back to the US default). To provision it,
+deploy with the MaxMind account ID + license key as build secrets:
+
+```bash
+fly deploy --config apps/backend/fly.toml --dockerfile apps/backend/Dockerfile \
+  --build-secret maxmind_account_id="$MAXMIND_ACCOUNT_ID" \
+  --build-secret maxmind_license_key="$MAXMIND_LICENSE_KEY"
+```
+
+The DB refreshes on each such deploy. `MAXMIND_GEOLITE2_PATH` is set in the Dockerfile
+(`/app/geoip/GeoLite2-Country.mmdb`); no `fly secrets` entry is needed since the build
+secrets are consumed at build time, not runtime.
+
 ### Scaling
 
 ```bash
