@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router';
+import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Route } from './+types/trustlines';
 import { getPublicLoopAssets, type PublicLoopAsset } from '~/services/public-stats';
 import { shouldRetry } from '~/hooks/query-retry';

@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, forwardRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Link, useLocation, useNavigate } from 'react-router';
+import { useLocation } from 'react-router';
+import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import { useAllMerchants } from '~/hooks/use-merchants';
 import { foldForSearch, groupMerchants, merchantInCountry, merchantSlug } from '@loop/shared';
 import { useAuthStore } from '~/stores/auth.store';
-import { useLocale } from '~/i18n/locale';
+import { useLocale, useLocalizedNavigate } from '~/i18n/locale';
 import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAppConfig } from '~/hooks/use-app-config';
@@ -252,7 +253,7 @@ SearchBar.displayName = 'SearchBar';
 function AccountMenu({ showCashbackNav }: { showCashbackNav: boolean }): React.JSX.Element {
   const email = useAuthStore((s) => s.email);
   const { logout } = useAuth();
-  const navigate = useNavigate();
+  const navigate = useLocalizedNavigate();
   const location = useLocation();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -345,7 +346,7 @@ function AccountMenu({ showCashbackNav }: { showCashbackNav: boolean }): React.J
 
 export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useLocalizedNavigate();
   const { isNative } = useNativePlatform();
   const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
   const { config } = useAppConfig();

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router';
+import { useParams } from 'react-router';
+import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/cashback.$slug';
 import { getPublicMerchant } from '~/services/public-stats';

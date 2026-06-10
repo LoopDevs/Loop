@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router';
+import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import { merchantSlug } from '@loop/shared';
 import type { Route } from './+types/cashback';
 import { getPublicTopCashbackMerchants, type TopCashbackMerchant } from '~/services/public-stats';

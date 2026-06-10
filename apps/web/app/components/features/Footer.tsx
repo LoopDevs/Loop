@@ -1,4 +1,4 @@
-import { Link } from 'react-router';
+import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import { useAppConfig } from '~/hooks/use-app-config';
 import { LoopLogo } from '~/components/ui/LoopLogo';
 
