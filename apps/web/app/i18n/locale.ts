@@ -52,6 +52,11 @@ export function useLocale(): Locale {
 
 const LOCALE_PREFIX = /^\/[a-z]{2}\/[a-z]{2}(?=\/|$)/;
 
+/** Strip a leading `/xx/yy` locale prefix from a path (no-op if absent). */
+export function stripLocale(path: string): string {
+  return (path || '/').replace(LOCALE_PREFIX, '') || '/';
+}
+
 /**
  * Prefix an app path with a locale → `localizedHref('/cashback', {country:'gb',
  * lang:'en'})` is `'/gb/en/cashback'`. Idempotent: a path that already carries
@@ -60,9 +65,8 @@ const LOCALE_PREFIX = /^\/[a-z]{2}\/[a-z]{2}(?=\/|$)/;
  */
 export function localizedHref(path: string, locale: Locale): string {
   const prefix = `/${locale.country}/${locale.lang}`;
-  const cleaned = (path || '/').replace(LOCALE_PREFIX, '');
-  const rest =
-    cleaned === '/' || cleaned === '' ? '' : cleaned.startsWith('/') ? cleaned : `/${cleaned}`;
+  const cleaned = stripLocale(path);
+  const rest = cleaned === '/' ? '' : cleaned.startsWith('/') ? cleaned : `/${cleaned}`;
   return `${prefix}${rest}`;
 }
 
@@ -70,4 +74,57 @@ export function localizedHref(path: string, locale: Locale): string {
 export function useLocalizedHref(): (path: string) => string {
   const locale = useLocale();
   return (path: string) => localizedHref(path, locale);
+}
+
+// The unprefixed paths that have a `/:country/:lang` mount (ADR 034 — the public
+// catalogue + onboarding). Used by the country selector to decide whether
+// switching country can stay on the same page or should land on the locale home.
+const LOCALIZABLE_PATHS = [
+  /^\/$/,
+  /^\/map(\/|$)/,
+  /^\/gift-card(\/|$)/,
+  /^\/brand(\/|$)/,
+  /^\/cashback(\/|$)/,
+  /^\/calculator(\/|$)/,
+  /^\/trustlines(\/|$)/,
+  /^\/privacy(\/|$)/,
+  /^\/terms(\/|$)/,
+  /^\/onboarding(\/|$)/,
+];
+
+/** Does this path (locale prefix ignored) have a localized mount? */
+export function isLocalizablePath(path: string): boolean {
+  const stripped = stripLocale(path).split(/[?#]/)[0] ?? '/';
+  return LOCALIZABLE_PATHS.some((re) => re.test(stripped));
+}
+
+/** Cookie that persists the visitor's explicit country choice (no PII). */
+export const COUNTRY_COOKIE = 'loop_country';
+
+/**
+ * Read the saved country from a Cookie header (server) or `document.cookie`
+ * (client). Returns a lowercased routed country, or `null` if absent/unrouted.
+ */
+export function parseCountryCookie(cookieHeader: string | null | undefined): string | null {
+  if (!cookieHeader) return null;
+  for (const part of cookieHeader.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq === -1) continue;
+    const key = part.slice(0, eq).trim();
+    const value = part.slice(eq + 1).trim();
+    if (key === COUNTRY_COOKIE && isSupportedCountryCode(value)) return value.toLowerCase();
+  }
+  return null;
+}
+
+/** Client-side read of the saved country choice. */
+export function readCountryCookie(): string | null {
+  if (typeof document === 'undefined') return null;
+  return parseCountryCookie(document.cookie);
+}
+
+/** Persist the visitor's explicit country choice (client-only, 1-year, Lax). */
+export function setCountryCookie(country: string): void {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${COUNTRY_COOKIE}=${country.toLowerCase()}; path=/; max-age=31536000; SameSite=Lax`;
 }

@@ -2,16 +2,16 @@ import { useState, useEffect, useRef, forwardRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useAllMerchants } from '~/hooks/use-merchants';
-import { foldForSearch, groupMerchants, merchantSlug, regionByCode } from '@loop/shared';
+import { foldForSearch, groupMerchants, merchantInCountry, merchantSlug } from '@loop/shared';
 import { useAuthStore } from '~/stores/auth.store';
-import { useRegionStore } from '~/stores/region.store';
+import { useLocale } from '~/i18n/locale';
 import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAppConfig } from '~/hooks/use-app-config';
 import { getImageProxyUrl } from '~/utils/image';
 import { Avatar } from '~/components/ui/Avatar';
 import { LoopLogo } from '~/components/ui/LoopLogo';
-import { RegionSelector } from '~/components/features/RegionSelector';
+import { CountrySelector } from '~/components/features/CountrySelector';
 
 interface NavbarProps {
   // extensible for future props
@@ -108,7 +108,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
     setMounted(true);
   }, []);
   const { merchants } = useAllMerchants();
-  const region = useRegionStore((s) => s.region);
+  const { country } = useLocale();
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query), 150);
@@ -121,18 +121,17 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
   // ADR 032: group "Brand - Variant" matches so a search for "dots" returns
   // one "dots.eco" entry (→ the brand view) rather than 14 rows. Grouping the
   // filtered set keeps a brand whose variant matches; slice(0,6) caps brands.
-  // Search spans every region; the user's region ranks first (ADR 033) — a UK visitor
-  // searching "amazon" sees the UK entry before the US one. Stable sort preserves the
-  // existing order within each tier.
-  const regionCountries = regionByCode(region).countries;
+  // Search spans every country; the active country ranks first (ADR 034) — a UK
+  // visitor searching "amazon" sees the UK entry before the US one. Stable sort
+  // preserves the existing order within each tier.
   const results: SearchResult[] =
     debouncedQuery.length > 1
       ? groupMerchants(
           merchants
             .filter((m) => foldForSearch(m.name).includes(foldedQuery))
             .sort((a, b) => {
-              const ra = a.country && regionCountries.includes(a.country.toUpperCase()) ? 1 : 0;
-              const rb = b.country && regionCountries.includes(b.country.toUpperCase()) ? 1 : 0;
+              const ra = merchantInCountry(a, country) ? 1 : 0;
+              const rb = merchantInCountry(b, country) ? 1 : 0;
               return rb - ra;
             }),
         )
@@ -416,7 +415,7 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
 
           {/* Account area — pushed to the right edge. */}
           <div className="flex items-center gap-2 ml-auto">
-            <RegionSelector />
+            <CountrySelector />
             {isAuthenticated ? (
               <AccountMenu showCashbackNav={showCashbackNav} />
             ) : isNative ? null : (

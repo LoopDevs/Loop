@@ -4,8 +4,10 @@ import { loader } from '../home-geo-redirect';
 
 type Args = Parameters<typeof loader>[0];
 
-const run = async (ua: string): Promise<Response | null> => {
-  const request = new Request('https://loopfinance.io/', { headers: { 'user-agent': ua } });
+const run = async (ua: string, cookie?: string): Promise<Response | null> => {
+  const headers: Record<string, string> = { 'user-agent': ua };
+  if (cookie) headers.cookie = cookie;
+  const request = new Request('https://loopfinance.io/', { headers });
   try {
     return await loader({ request } as unknown as Args);
   } catch (e) {
@@ -67,5 +69,17 @@ describe('home-geo-redirect loader', () => {
     );
     const res = await run(CHROME);
     expect(res!.headers.get('location')).toBe('/us/en');
+  });
+
+  it('honours the saved country cookie over geo-IP (ADR §7 precedence)', async () => {
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ countryCode: 'GB', region: 'UK' }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    const res = await run(CHROME, 'loop_country=de');
+    expect(res!.headers.get('location')).toBe('/de/en');
+    // Cookie short-circuits the geo lookup entirely.
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

@@ -7,7 +7,7 @@
  * backend, but onboarding is necessarily pre-any-order so the
  * endpoint's 409 branch is unreachable here).
  */
-import type { RegionCode } from '@loop/shared';
+import { currencyOf, type RegionCode } from '@loop/shared';
 
 interface ScreenCopy {
   eyebrow?: string;
@@ -31,6 +31,18 @@ export function homeCurrencyForRegion(region: RegionCode): HomeCurrency {
     case 'EUR':
       return 'EUR';
   }
+}
+
+/**
+ * Home currency for a routed country's first guess (ADR 034). Maps the country's
+ * display currency to a supported home currency; CAD → USD, since there is no
+ * CADLOOP asset yet, so Canadian cashback settles in USDLOOP for now.
+ */
+export function homeCurrencyForCountry(country: string): HomeCurrency {
+  const currency = currencyOf(country);
+  if (currency === 'GBP') return 'GBP';
+  if (currency === 'EUR') return 'EUR';
+  return 'USD';
 }
 
 interface CurrencyOption {

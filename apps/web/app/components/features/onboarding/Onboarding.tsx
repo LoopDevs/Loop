@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import { checkBiometrics } from '~/native/biometrics';
 import type { BiometricResult } from '~/native/biometrics';
 import { setHomeCurrency } from '~/services/user';
 import { useAppConfig } from '~/hooks/use-app-config';
-import { useRegionStore } from '~/stores/region.store';
-import { ApiException } from '@loop/shared';
+import { readCountryCookie } from '~/i18n/locale';
+import { ApiException, isSupportedCountryCode } from '@loop/shared';
 import { Dots } from './atoms';
 import { TrustWelcome, TrustHowItWorks, TrustMerchants } from './screens-trust';
 import { EmailEntry, OtpEntry, WelcomeIn, useOnboardingAuth } from './signup-tail';
@@ -13,7 +13,7 @@ import { BiometricSetup } from './screen-biometric';
 import {
   CurrencyPickerScreen,
   guessHomeCurrency,
-  homeCurrencyForRegion,
+  homeCurrencyForCountry,
   type HomeCurrency,
 } from './screen-currency';
 import { WalletIntroScreen } from './screen-wallet-intro';
@@ -151,20 +151,18 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
   const [currency, setCurrency] = useState<HomeCurrency>(() =>
     guessHomeCurrency(typeof navigator !== 'undefined' ? navigator.language : undefined),
   );
-  // IP-geo first guess (ADR 033). The onboarding flow has no navbar to seed the region
-  // store, so trigger it here and upgrade the locale guess once geo resolves — unless the
-  // user has already tapped a currency.
-  const region = useRegionStore((s) => s.region);
-  const regionHydrated = useRegionStore((s) => s.hydrated);
-  const hydrateRegion = useRegionStore((s) => s.hydrate);
+  // First guess from the visitor's country (ADR 034). Precedence: the routed
+  // URL country (canonical) → the saved country cookie (the onboarding link may
+  // be unprefixed) → the browser-locale default above. Skipped once the user
+  // taps a currency.
+  const params = useParams();
   const currencyTouched = useRef(false);
   useEffect(() => {
-    void hydrateRegion();
-  }, [hydrateRegion]);
-  useEffect(() => {
-    if (!regionHydrated || currencyTouched.current) return;
-    setCurrency(homeCurrencyForRegion(region));
-  }, [regionHydrated, region]);
+    if (currencyTouched.current) return;
+    const country =
+      (isSupportedCountryCode(params.country) ? params.country : null) ?? readCountryCookie();
+    if (country) setCurrency(homeCurrencyForCountry(country));
+  }, [params.country]);
   const handlePickCurrency = useCallback((code: HomeCurrency) => {
     currencyTouched.current = true;
     setCurrency(code);
