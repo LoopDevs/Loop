@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router';
 import type { Merchant, MerchantGroup } from '@loop/shared';
-import { foldForSearch, groupMerchants, merchantSlug } from '@loop/shared';
+import { foldForSearch, groupMerchants, merchantSlug, regionByCode } from '@loop/shared';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
 import { useOrders } from '~/hooks/use-orders';
 import { useAuth } from '~/hooks/use-auth';
 import { useAppConfig } from '~/hooks/use-app-config';
 import { useNativePlatform } from '~/hooks/use-native-platform';
+import { useRegionStore } from '~/stores/region.store';
 import { shouldRetry } from '~/hooks/query-retry';
 import { getCashbackSummary } from '~/services/user';
 import { getImageProxyUrl } from '~/utils/image';
@@ -57,6 +58,15 @@ export function MobileHome(): React.JSX.Element {
   const phase1Only = config.phase1Only;
   const visibleMerchants = useMemo(() => (hydrated ? merchants : []), [hydrated, merchants]);
   const visibleMerchantsLoading = !hydrated || merchantsLoading;
+  const region = useRegionStore((s) => s.region);
+  // Region-filtered view for the directory + quick-buy display. `visibleMerchants` stays
+  // unfiltered for the lifetime-savings calc (orders span every region the user has bought in).
+  const regionMerchants = useMemo(() => {
+    const countries = regionByCode(region).countries;
+    return visibleMerchants.filter(
+      (m) => !m.country || countries.includes(m.country.toUpperCase()),
+    );
+  }, [visibleMerchants, region]);
 
   // Greeting name — email local-part, title-cased first char. Falls
   // back to "there" for unauth / no-email visitors.
@@ -111,12 +121,12 @@ export function MobileHome(): React.JSX.Element {
   // row reads as populated.
   const quickBuy = useMemo(
     () =>
-      visibleMerchants
+      regionMerchants
         .filter((m) => m.enabled !== false && m.logoUrl !== undefined)
         .slice()
         .sort((a, b) => (b.savingsPercentage ?? 0) - (a.savingsPercentage ?? 0))
         .slice(0, 6),
-    [visibleMerchants],
+    [regionMerchants],
   );
 
   // Pending orders are hidden from Recent activity — a blank row
@@ -134,13 +144,13 @@ export function MobileHome(): React.JSX.Element {
   const [query, setQuery] = useState('');
   const foldedQuery = foldForSearch(query.trim());
   const grid = useMemo(() => {
-    const enabled = visibleMerchants.filter((m) => m.enabled !== false);
+    const enabled = regionMerchants.filter((m) => m.enabled !== false);
     const filtered =
       foldedQuery.length > 0
         ? enabled.filter((m) => foldForSearch(m.name).includes(foldedQuery))
         : enabled;
     return filtered.slice().sort((a, b) => (b.savingsPercentage ?? 0) - (a.savingsPercentage ?? 0));
-  }, [visibleMerchants, foldedQuery]);
+  }, [regionMerchants, foldedQuery]);
   // ADR 032: collapse "Brand - Variant" SKUs into one brand cell. Grouping
   // the *filtered* list means a search for "tree" still surfaces the
   // dots.eco brand (a matching variant keeps its group).

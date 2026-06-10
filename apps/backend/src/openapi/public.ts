@@ -159,6 +159,39 @@ export function registerPublicOpenApi(
     },
   });
 
+  const PublicGeoResponse = registry.register(
+    'PublicGeoResponse',
+    z.object({
+      countryCode: z.string().openapi({
+        description: 'ISO 3166-1 alpha-2 country code; empty string when undetermined.',
+        example: 'US',
+      }),
+      region: z.enum(['US', 'CA', 'UK', 'EUR']).openapi({
+        description: 'Region derived from the country code (defaults to US when undetermined).',
+        example: 'US',
+      }),
+    }),
+  );
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/public/geo',
+    summary: 'IP-geolocation first guess for the region selector (ADR 033).',
+    description:
+      "Resolves the caller's country from its IP (MaxMind GeoLite2) and maps it to a region (US / CA / UK / EUR) so the region selector can be seeded before the user picks one. No-PII: only the country code + region leave the server — the IP is never echoed or logged. `Cache-Control: private, max-age=600`. Never 500: falls back to `{ countryCode: '', region: 'US' }` when the GeoLite2 DB is absent or the lookup fails.",
+    tags: ['Public'],
+    responses: {
+      200: {
+        description: 'Best-guess country + region for the caller.',
+        content: { 'application/json': { schema: PublicGeoResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (60/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+    },
+  });
+
   registry.registerPath({
     method: 'get',
     path: '/api/public/top-cashback-merchants',

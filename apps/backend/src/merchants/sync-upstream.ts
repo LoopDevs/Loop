@@ -142,5 +142,6 @@ export function mapUpstreamMerchant(item: UpstreamMerchant): Merchant | null {
     // real state instead of a falsified `enabled: true` on every record.
     enabled: item.enabled,
     ...(locationCount !== undefined ? { locationCount } : {}),
+    ...(item.country ? { country: item.country } : {}),
   };
 }

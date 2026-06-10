@@ -21,6 +21,7 @@ export * from './public-cashback-preview.js';
 export * from './public-cashback-stats.js';
 export * from './public-merchant.js';
 export * from './public-top-cashback-merchants.js';
+export * from './regions.js';
 export * from './search.js';
 export * from './slugs.js';
 export * from './stellar.js';

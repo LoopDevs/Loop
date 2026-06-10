@@ -26,7 +26,10 @@ test.describe('Purchase flow', () => {
     // even for a valid query.
     await expect(page.locator('a[href^="/gift-card/"]').first()).toBeVisible();
 
-    const searchInput = page.locator('input[placeholder="Search"]').first();
+    // Placeholder became "Search brands" in the design-system redesign (#1389); match by
+    // substring so this doesn't re-break on a future copy tweak. (Was stale + failing on
+    // main's real-e2e since #1389 — non-required, so it slipped through.)
+    const searchInput = page.locator('input[placeholder*="Search" i]').first();
     await expect(searchInput).toBeVisible();
 
     // The Navbar search only renders results for queries > 1 character. Use

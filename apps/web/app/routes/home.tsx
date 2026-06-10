@@ -1,11 +1,12 @@
 import { Link } from 'react-router';
 import { useEffect, useMemo, useState } from 'react';
-import { groupMerchants } from '@loop/shared';
+import { groupMerchants, regionByCode } from '@loop/shared';
 import type { Route } from './+types/home';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
 import { useAuth } from '~/hooks/use-auth';
 import { useAppConfig } from '~/hooks/use-app-config';
 import { useNativePlatform } from '~/hooks/use-native-platform';
+import { useRegionStore } from '~/stores/region.store';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
 import { MerchantCard } from '~/components/features/MerchantCard';
@@ -43,6 +44,13 @@ function HomeContent(): React.JSX.Element {
   const { isNative } = useNativePlatform();
   const { isAuthenticated } = useAuth();
   const { merchants, isLoading, isError } = useAllMerchants();
+  const region = useRegionStore((s) => s.region);
+  // Region filter — show merchants in the selected region. Country-less merchants (rare)
+  // stay visible so the grid never empties while the country backfill rolls out.
+  const regionMerchants = useMemo(() => {
+    const countries = regionByCode(region).countries;
+    return merchants.filter((m) => !m.country || countries.includes(m.country.toUpperCase()));
+  }, [merchants, region]);
   // Phase 1 (LOOP_PHASE_1_ONLY=true) delivers cashback as instant
   // discount at order creation — no balance, no on-chain withdraw.
   // Hero copy below switches between Phase-1 framing ("Save on
@@ -62,7 +70,7 @@ function HomeContent(): React.JSX.Element {
   // hasn't loaded yet (otherwise the featured strip would be empty
   // on a cold page load). A merchant surfaces as long as it has
   // either a cashback rate or a savings percentage.
-  const featured = [...merchants]
+  const featured = [...regionMerchants]
     .map((m) => {
       const pctStr = lookupCashback(m.id);
       const cashbackPct = pctStr !== null ? Number(pctStr) : 0;
@@ -78,7 +86,10 @@ function HomeContent(): React.JSX.Element {
     })
     .slice(0, 6)
     .map(({ m }) => m);
-  const visibleMerchants = useMemo(() => (hydrated ? merchants : []), [hydrated, merchants]);
+  const visibleMerchants = useMemo(
+    () => (hydrated ? regionMerchants : []),
+    [hydrated, regionMerchants],
+  );
   const visibleFeatured = hydrated ? featured : [];
   const visibleLoading = !hydrated || isLoading;
   // ADR 032: collapse "Brand - Variant" SKUs (dots.eco x14, Town & City

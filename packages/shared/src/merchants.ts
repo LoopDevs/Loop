@@ -22,6 +22,8 @@ export interface Merchant {
   terms?: string | undefined;
   enabled: boolean;
   locationCount?: number | undefined;
+  /** ISO 3166-1 alpha-2 country code, used by the region filter (e.g. 'US', 'GB', 'CA', 'DE'). */
+  country?: string | undefined;
 }
 
 /** Paginated response for the merchant list endpoint. */

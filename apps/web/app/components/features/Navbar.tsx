@@ -10,6 +10,7 @@ import { useAppConfig } from '~/hooks/use-app-config';
 import { getImageProxyUrl } from '~/utils/image';
 import { Avatar } from '~/components/ui/Avatar';
 import { LoopLogo } from '~/components/ui/LoopLogo';
+import { RegionSelector } from '~/components/features/RegionSelector';
 
 interface NavbarProps {
   // extensible for future props
@@ -401,6 +402,7 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
 
           {/* Account area — pushed to the right edge. */}
           <div className="flex items-center gap-2 ml-auto">
+            <RegionSelector />
             {isAuthenticated ? (
               <AccountMenu showCashbackNav={showCashbackNav} />
             ) : isNative ? null : (
