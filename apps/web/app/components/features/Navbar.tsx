@@ -2,8 +2,9 @@ import { useState, useEffect, useRef, forwardRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useAllMerchants } from '~/hooks/use-merchants';
-import { foldForSearch, groupMerchants, merchantSlug } from '@loop/shared';
+import { foldForSearch, groupMerchants, merchantSlug, regionByCode } from '@loop/shared';
 import { useAuthStore } from '~/stores/auth.store';
+import { useRegionStore } from '~/stores/region.store';
 import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAppConfig } from '~/hooks/use-app-config';
@@ -107,6 +108,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
     setMounted(true);
   }, []);
   const { merchants } = useAllMerchants();
+  const region = useRegionStore((s) => s.region);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query), 150);
@@ -119,9 +121,21 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
   // ADR 032: group "Brand - Variant" matches so a search for "dots" returns
   // one "dots.eco" entry (→ the brand view) rather than 14 rows. Grouping the
   // filtered set keeps a brand whose variant matches; slice(0,6) caps brands.
+  // Search spans every region; the user's region ranks first (ADR 033) — a UK visitor
+  // searching "amazon" sees the UK entry before the US one. Stable sort preserves the
+  // existing order within each tier.
+  const regionCountries = regionByCode(region).countries;
   const results: SearchResult[] =
     debouncedQuery.length > 1
-      ? groupMerchants(merchants.filter((m) => foldForSearch(m.name).includes(foldedQuery)))
+      ? groupMerchants(
+          merchants
+            .filter((m) => foldForSearch(m.name).includes(foldedQuery))
+            .sort((a, b) => {
+              const ra = a.country && regionCountries.includes(a.country.toUpperCase()) ? 1 : 0;
+              const rb = b.country && regionCountries.includes(b.country.toUpperCase()) ? 1 : 0;
+              return rb - ra;
+            }),
+        )
           .slice(0, 6)
           .map((g): SearchResult => {
             if (g.isGroup) {

@@ -4,12 +4,18 @@ import { checkBiometrics } from '~/native/biometrics';
 import type { BiometricResult } from '~/native/biometrics';
 import { setHomeCurrency } from '~/services/user';
 import { useAppConfig } from '~/hooks/use-app-config';
+import { useRegionStore } from '~/stores/region.store';
 import { ApiException } from '@loop/shared';
 import { Dots } from './atoms';
 import { TrustWelcome, TrustHowItWorks, TrustMerchants } from './screens-trust';
 import { EmailEntry, OtpEntry, WelcomeIn, useOnboardingAuth } from './signup-tail';
 import { BiometricSetup } from './screen-biometric';
-import { CurrencyPickerScreen, guessHomeCurrency, type HomeCurrency } from './screen-currency';
+import {
+  CurrencyPickerScreen,
+  guessHomeCurrency,
+  homeCurrencyForRegion,
+  type HomeCurrency,
+} from './screen-currency';
 import { WalletIntroScreen } from './screen-wallet-intro';
 
 interface ScreenCopy {
@@ -145,6 +151,24 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
   const [currency, setCurrency] = useState<HomeCurrency>(() =>
     guessHomeCurrency(typeof navigator !== 'undefined' ? navigator.language : undefined),
   );
+  // IP-geo first guess (ADR 033). The onboarding flow has no navbar to seed the region
+  // store, so trigger it here and upgrade the locale guess once geo resolves — unless the
+  // user has already tapped a currency.
+  const region = useRegionStore((s) => s.region);
+  const regionHydrated = useRegionStore((s) => s.hydrated);
+  const hydrateRegion = useRegionStore((s) => s.hydrate);
+  const currencyTouched = useRef(false);
+  useEffect(() => {
+    void hydrateRegion();
+  }, [hydrateRegion]);
+  useEffect(() => {
+    if (!regionHydrated || currencyTouched.current) return;
+    setCurrency(homeCurrencyForRegion(region));
+  }, [regionHydrated, region]);
+  const handlePickCurrency = useCallback((code: HomeCurrency) => {
+    currencyTouched.current = true;
+    setCurrency(code);
+  }, []);
   const [savingCurrency, setSavingCurrency] = useState(false);
   const [currencyError, setCurrencyError] = useState<string | null>(null);
 
@@ -365,7 +389,7 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
           active={active}
           copy={COPY[6]}
           selected={currency}
-          onSelect={setCurrency}
+          onSelect={handlePickCurrency}
           error={currencyError}
         />
       );
