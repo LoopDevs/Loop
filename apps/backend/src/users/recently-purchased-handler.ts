@@ -23,7 +23,7 @@
  */
 import type { Context } from 'hono';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
-import type { Merchant } from '@loop/shared';
+import type { RecentlyPurchasedMerchantView, RecentlyPurchasedResponse } from '@loop/shared';
 import { db } from '../db/client.js';
 import { orders } from '../db/schema.js';
 import { getMerchants } from '../merchants/sync.js';
@@ -38,26 +38,10 @@ const MAX_LIMIT = 20;
 
 const PURCHASED_STATES = ['paid', 'procuring', 'fulfilled'] as const;
 
-export interface RecentlyPurchasedMerchantView {
-  merchantId: string;
-  /**
-   * ISO-8601, the user's most recent order with this merchant. Drives
-   * client-side ordering when it needs to merge with another stream.
-   */
-  lastPurchasedAt: string;
-  /** Total purchased orders this user has with this merchant (count of qualifying rows). */
-  orderCount: number;
-  /**
-   * Catalog row at read-time. Null when the merchant is temporarily
-   * evicted from the in-memory catalog (ADR 021); the strip filters
-   * those out so a stale id never crashes the render path.
-   */
-  merchant: Merchant | null;
-}
-
-export interface RecentlyPurchasedResponse {
-  merchants: RecentlyPurchasedMerchantView[];
-}
+// RecentlyPurchasedMerchantView and RecentlyPurchasedResponse are now the
+// single source of truth from @loop/shared
+// (packages/shared/src/user-recently-purchased.ts — ADR 019).
+export type { RecentlyPurchasedMerchantView, RecentlyPurchasedResponse };
 
 function parseLimit(raw: string | undefined): number {
   if (raw === undefined) return DEFAULT_LIMIT;

@@ -26,6 +26,15 @@ const DEFAULT_CONFIG: AppConfig = {
   // until config confirms they're on. Flip back to `false` (or make
   // it deploy-aware) when Phase 2 ships.
   phase1Only: true,
+  // Default all LOOP assets to unavailable — matches a deployment that
+  // hasn't yet configured Stellar issuers. Components that branch on
+  // `loopAssets.*.available` see "coming soon" until the real config
+  // resolves (ADR 015).
+  loopAssets: {
+    USDLOOP: { issuer: null, available: false },
+    GBPLOOP: { issuer: null, available: false },
+    EURLOOP: { issuer: null, available: false },
+  },
   social: {
     googleClientIdWeb: null,
     googleClientIdIos: null,

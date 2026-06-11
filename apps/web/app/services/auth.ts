@@ -1,4 +1,9 @@
-import type { RequestOtpRequest, VerifyOtpRequest, VerifyOtpResponse } from '@loop/shared';
+import type {
+  RequestOtpRequest,
+  SocialLoginResponse,
+  VerifyOtpRequest,
+  VerifyOtpResponse,
+} from '@loop/shared';
 import { getPlatform } from '~/native/platform';
 import { apiRequest } from './api-client';
 
@@ -23,17 +28,12 @@ export async function verifyOtp(email: string, otp: string): Promise<VerifyOtpRe
   });
 }
 
-/**
- * Shape returned by the Loop-native auth endpoints. Social + OTP
- * converge on this — the client doesn't care which provider produced
- * the pair. Social responses include `email` because the client
- * never typed it (OTP knows it from the form).
- */
-export interface LoopAuthPair {
-  accessToken: string;
-  refreshToken: string;
-  email?: string;
-}
+// SocialLoginResponse (accessToken + refreshToken + email: string) is now
+// the single source of truth from @loop/shared (packages/shared/src/api.ts —
+// ADR 019). Re-exported as LoopAuthPair so existing callers keep resolving.
+export type { SocialLoginResponse };
+/** @deprecated Use SocialLoginResponse from @loop/shared instead. */
+export type LoopAuthPair = SocialLoginResponse;
 
 /**
  * Exchanges a Google id_token (obtained on-device via the Google
@@ -42,8 +42,8 @@ export interface LoopAuthPair {
  * audience + email_verified, then resolves or creates the Loop user
  * (ADR 014). See `/api/auth/social/google`.
  */
-export async function socialLoginGoogle(idToken: string): Promise<LoopAuthPair> {
-  return apiRequest<LoopAuthPair>('/api/auth/social/google', {
+export async function socialLoginGoogle(idToken: string): Promise<SocialLoginResponse> {
+  return apiRequest<SocialLoginResponse>('/api/auth/social/google', {
     method: 'POST',
     body: { idToken, platform: getPlatform() },
   });
@@ -54,8 +54,8 @@ export async function socialLoginGoogle(idToken: string): Promise<LoopAuthPair> 
  * Same flow as Google; Apple's JWKS + issuer is checked on the
  * backend. See `/api/auth/social/apple`.
  */
-export async function socialLoginApple(idToken: string): Promise<LoopAuthPair> {
-  return apiRequest<LoopAuthPair>('/api/auth/social/apple', {
+export async function socialLoginApple(idToken: string): Promise<SocialLoginResponse> {
+  return apiRequest<SocialLoginResponse>('/api/auth/social/apple', {
     method: 'POST',
     body: { idToken, platform: getPlatform() },
   });

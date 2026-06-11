@@ -55,6 +55,10 @@ export function registerHealthOpenApi(
         description:
           'ADR 010 — Loop-native orders can be placed (auth + workers + deposit address all configured).',
       }),
+      phase1Only: z.boolean().openapi({
+        description:
+          'Tranche 1 (MVP) gate. When true, the web client hides every Phase 2+ surface. Toggled server-side via LOOP_PHASE_1_ONLY.',
+      }),
       loopAssets: z.object({
         USDLOOP: LoopAssetConfig,
         GBPLOOP: LoopAssetConfig,

@@ -120,3 +120,27 @@ export interface ClusterParams {
   north: number;
   zoom: number;
 }
+
+/** `GET /api/merchants/:id/cashback-rate` response (ADR 011 / 015). */
+export interface MerchantCashbackRateResponse {
+  merchantId: string;
+  /**
+   * Numeric(5,2) as a string (e.g. `"2.50"`). Null when the merchant
+   * has no active cashback config — the UI should hide the badge
+   * rather than render "0% cashback".
+   */
+  userCashbackPct: string | null;
+}
+
+/**
+ * `GET /api/merchants/cashback-rates` response — bulk map for
+ * catalog / list views (ADR 011 / 015). Only merchants with an active
+ * config are present; treat a missing key as "no cashback".
+ */
+export interface MerchantsCashbackRatesResponse {
+  /**
+   * `merchantId` → `numeric(5,2)` pct string (e.g. `"2.50"`). Only
+   * merchants with an active config are present.
+   */
+  rates: Record<string, string>;
+}

@@ -12,37 +12,22 @@
  * crashes the render path; the underlying favourite row stays so the
  * pin reappears once the merchant returns.
  */
-import type { Merchant } from '@loop/shared';
+import type {
+  AddFavoriteResult,
+  FavoriteMerchantView,
+  ListFavoritesResponse,
+  RemoveFavoriteResult,
+} from '@loop/shared';
 import { authenticatedRequest } from './api-client';
 
-export interface FavoriteMerchantView {
-  merchantId: string;
-  /** ISO-8601 timestamp of when the user added the favourite. */
-  createdAt: string;
-  /**
-   * Catalog row at read-time; null when the merchant is temporarily
-   * evicted from the in-memory catalog (ADR 021).
-   */
-  merchant: Merchant | null;
-}
-
-export interface ListFavoritesResponse {
-  favorites: FavoriteMerchantView[];
-  total: number;
-}
-
-export interface AddFavoriteResult {
-  merchantId: string;
-  createdAt: string;
-  /** True when the call inserted a new row; false when the favourite already existed. */
-  added: boolean;
-}
-
-export interface RemoveFavoriteResult {
-  merchantId: string;
-  /** True when the call deleted a row; false when there was nothing to remove. */
-  removed: boolean;
-}
+// Types now live in @loop/shared (packages/shared/src/user-favorites.ts — ADR 019).
+// Re-exported so existing import sites that read them from this module keep resolving.
+export type {
+  AddFavoriteResult,
+  FavoriteMerchantView,
+  ListFavoritesResponse,
+  RemoveFavoriteResult,
+};
 
 export async function listFavorites(): Promise<ListFavoritesResponse> {
   return authenticatedRequest<ListFavoritesResponse>('/api/users/me/favorites');

@@ -1,8 +1,10 @@
 import type {
-  MerchantListResponse,
+  MerchantCashbackRateResponse,
   MerchantDetailResponse,
   MerchantListParams,
+  MerchantListResponse,
   MerchantAllResponse,
+  MerchantsCashbackRatesResponse,
 } from '@loop/shared';
 import { apiRequest, authenticatedRequest } from './api-client';
 
@@ -49,15 +51,11 @@ export async function fetchMerchantBySlug(slug: string): Promise<MerchantDetailR
   return apiRequest<MerchantDetailResponse>(`/api/merchants/by-slug/${encodeURIComponent(slug)}`);
 }
 
-export interface MerchantCashbackRateResponse {
-  merchantId: string;
-  /**
-   * Numeric(5,2) as a string (e.g. `"2.50"`). Null when the merchant
-   * has no active cashback config (ADR 011 / 015) — the UI should hide
-   * the cashback badge rather than render "0% cashback".
-   */
-  userCashbackPct: string | null;
-}
+// MerchantCashbackRateResponse and MerchantsCashbackRatesResponse are now the
+// single source of truth from @loop/shared (packages/shared/src/merchants.ts —
+// ADR 019). Re-exported so existing import sites that read them from this
+// module keep resolving.
+export type { MerchantCashbackRateResponse, MerchantsCashbackRatesResponse };
 
 /**
  * Cashback-rate preview for the gift-card detail page. Public — no
@@ -68,15 +66,6 @@ export async function fetchMerchantCashbackRate(id: string): Promise<MerchantCas
   return apiRequest<MerchantCashbackRateResponse>(
     `/api/merchants/${encodeURIComponent(id)}/cashback-rate`,
   );
-}
-
-export interface MerchantsCashbackRatesResponse {
-  /**
-   * `merchantId` → `numeric(5,2)` pct string (e.g. `"2.50"`). Only
-   * merchants with an active config are present; hide the badge
-   * when a given id has no entry.
-   */
-  rates: Record<string, string>;
 }
 
 /**
