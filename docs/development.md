@@ -95,6 +95,10 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # CTX_OPERATOR_POOL=[{"id":"primary","bearer":"eyJ..."},{"id":"backup-1","bearer":"eyJ..."}]
 
 # ── Merchant sync (ADR 021) ──────────────────────────────────────────
+# A2-1922: comma-separated CTX merchant IDs filtered out of the catalog
+# at sync time — Loop's operator deny-list. Denied IDs never reach the
+# in-memory store, the public API, or the admin catalog.
+# LOOP_MERCHANT_DENYLIST=merchant-id-1,merchant-id-2
 REFRESH_INTERVAL_HOURS=6                # merchant cache refresh
 LOCATION_REFRESH_INTERVAL_HOURS=24      # location data refresh
 # INCLUDE_DISABLED_MERCHANTS=true       # dev mode — show disabled merchants
@@ -104,6 +108,9 @@ LOCATION_REFRESH_INTERVAL_HOURS=24      # location data refresh
 # Postgres instance — see `docker-compose.yml` at the repo root.
 DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # DATABASE_POOL_MAX=10                   # default 10
+# A2-724: per-session statement_timeout (ms) sent on every connection
+# so a runaway query can't monopolise a pool slot. 0 disables.
+# DATABASE_STATEMENT_TIMEOUT_MS=30000
 
 # ── Admin gate + write invariants (ADR 017 / 018) ────────────────────
 # Comma-separated CTX user IDs allowed to hit /api/admin/*. Absent →
@@ -146,6 +153,10 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 
 # Error tracking (optional)
 # SENTRY_DSN=https://xxx@yyy.ingest.sentry.io/zzz
+# A2-1309: release tag for Sentry events (paired with VITE_SENTRY_RELEASE
+# on web). CI/CD sets the git SHA; leave unset locally so dev runs don't
+# poison the release pivot in Sentry.
+# SENTRY_RELEASE=<git-sha or v1.2.3+sha>
 
 # ── Security posture (audit A-023 / A-025 / test-only) ───────────────
 # Image proxy SSRF allowlist — REQUIRED in production (audit A-025).
@@ -178,6 +189,28 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # /verify-otp / /refresh take the Loop-native path (Loop sends the
 # email, mints its own JWTs).
 # LOOP_AUTH_NATIVE_ENABLED=true
+
+# Admin step-up auth (ADR 028 / A4-063). ≥32 chars, deliberately
+# separate from LOOP_JWT_SIGNING_KEY so a JWT-key compromise doesn't
+# widen to step-up. Absent → boot succeeds but the destructive admin
+# endpoints (credit-adjust / withdrawals / payout-retry) fail closed
+# with 503 STEP_UP_UNAVAILABLE. `_PREVIOUS` only during rotation.
+# LOOP_ADMIN_STEP_UP_SIGNING_KEY=...(≥32 chars)
+# LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS=...(≥32 chars)
+
+# ── Transactional email (ADR 013) ────────────────────────────────────
+# Dev default is the `console` stub (logs the OTP to stdout — grab the
+# code from `npm run dev:backend` output). Production refuses to boot
+# with `console`/unset when NODE_ENV=production (A2-571); set `resend`
+# + an API key before flipping LOOP_AUTH_NATIVE_ENABLED in prod.
+# EMAIL_PROVIDER=resend
+# RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxxx
+# EMAIL_FROM_ADDRESS=noreply@loopfinance.io   # default; domain must be DKIM/SPF-verified
+# EMAIL_FROM_NAME=Loop                        # default
+# Optional Reply-To so user replies land in a monitored inbox instead
+# of bouncing off the no-reply sender. Unset → reply_to omitted from
+# the send. Email-validated at boot by env.ts.
+# EMAIL_REPLY_TO_ADDRESS=hello@loopfinance.io
 
 # Social login (ADR 014). Verified server-side against Google /
 # Apple's issuer keys. Omit a platform to disable it.
@@ -241,6 +274,13 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # LOOP_PAYOUT_WORKER_INTERVAL_SECONDS=30
 # LOOP_PAYOUT_MAX_ATTEMPTS=5                   # bounded retry
 
+# A2-1921 fee-bump strategy. Attempt N pays BASE * MULTIPLIER^(N-1),
+# capped at CAP, so congested-network submits drain instead of going
+# terminal at base fee.
+# LOOP_PAYOUT_FEE_BASE_STROOPS=100
+# LOOP_PAYOUT_FEE_MULTIPLIER=2
+# LOOP_PAYOUT_FEE_CAP_STROOPS=100000
+
 # A2-602 watchdog. Rows stuck in `submitted` past this many seconds
 # are requeued (idempotent — the memo-check in the submit path will
 # noop if the tx already landed).
@@ -258,6 +298,21 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # INTEREST_APY_BASIS_POINTS=0                  # 250 = 2.50% APY
 # INTEREST_PERIODS_PER_YEAR=365                # daily
 # INTEREST_TICK_INTERVAL_HOURS=24              # how often the worker ticks
+
+# ADR 009/015 interest forward-mint pool. Daily accrual sub-allocates
+# from this pre-minted on-chain pool; defaults to the operator account
+# when unset. The pool watcher pages Discord monitoring when cover
+# drops below the days threshold.
+# LOOP_INTEREST_POOL_ACCOUNT=G...(55 chars)
+# LOOP_INTEREST_POOL_MIN_DAYS_COVER=7
+
+# ── Runtime kill switches (A2-1907) ──────────────────────────────────
+# Set any to `true` and the matching surface returns 503
+# SUBSYSTEM_DISABLED on the next request — no redeploy. Runbook:
+# docs/runbooks/kill-switch.md. All default false.
+# LOOP_KILL_ORDERS=false        # POST /api/orders + /api/orders/loop
+# LOOP_KILL_AUTH=false          # request/verify-otp + social (refresh/logout stay open)
+# LOOP_KILL_WITHDRAWALS=false   # admin withdrawal + compensation endpoints
 ```
 
 ### Inheritance model

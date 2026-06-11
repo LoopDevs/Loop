@@ -48,10 +48,19 @@ REQUIRED=(
   OPENAPI_BEARER_TOKEN
 )
 
-# Optional but strongly recommended — ops loses visibility without these
-# but the boot doesn't fail. Reported separately so the operator sees
+# Optional but strongly recommended — boot doesn't fail without these,
+# but the deployment is degraded (lost ops visibility, or admin
+# surfaces that fail closed). Reported separately so the operator sees
 # the gap without it being a hard blocker.
 RECOMMENDED=(
+  # ADR 028 / A4-063: env.ts treats this as optional so boot succeeds
+  # without it, but the step-up gate fails CLOSED — every destructive
+  # admin endpoint (credit-adjust, withdrawals, payout-retry) returns
+  # 503 STEP_UP_UNAVAILABLE until the key is set. Advisory rather
+  # than REQUIRED because Tranche 1 can launch with those admin
+  # surfaces dark; generate the key (openssl rand -base64 48) before
+  # the first admin credit adjustment is needed.
+  LOOP_ADMIN_STEP_UP_SIGNING_KEY
   SENTRY_DSN
   DISCORD_WEBHOOK_ORDERS
   DISCORD_WEBHOOK_MONITORING

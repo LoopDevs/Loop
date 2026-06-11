@@ -65,13 +65,16 @@ class ConsoleEmailProvider implements EmailProvider {
  * `https://api.resend.com/emails` with the operator's
  * `RESEND_API_KEY`.
  *
- * Two operator-tunable env vars beyond the API key:
+ * Three operator-tunable env vars beyond the API key:
  *   - `EMAIL_FROM_ADDRESS` — the sender. Resend requires this
  *     domain to be verified (DKIM / SPF) in their dashboard
  *     before delivery succeeds. Defaults to `noreply@loopfinance.io`
  *     to make the launch path the no-touch case.
  *   - `EMAIL_FROM_NAME` — the human-readable display name.
  *     Defaults to `Loop`.
+ *   - `EMAIL_REPLY_TO_ADDRESS` — optional Reply-To so user replies
+ *     route to a monitored inbox. Omitted from the payload when
+ *     unset. Email-validated by env.ts at boot.
  *
  * Network failure / non-2xx responses throw — the caller (OTP
  * handler) maps the throw to a 503 so the user retries rather than
@@ -193,6 +196,12 @@ export function getEmailProvider(): EmailProvider {
     }
     const fromAddress = process.env['EMAIL_FROM_ADDRESS'] ?? 'noreply@loopfinance.io';
     const fromName = process.env['EMAIL_FROM_NAME'] ?? 'Loop';
+    // Schema-validated by env.ts at boot (z.string().email()) so a
+    // typo'd address fails parseEnv instead of silently sending mail
+    // without a Reply-To. Read live from process.env here — same
+    // test-reload pattern as the EMAIL_FROM_* vars above (tests
+    // mutate process.env and reset the cached provider; the typed
+    // `env` object is frozen at module load).
     const replyToRaw = process.env['EMAIL_REPLY_TO_ADDRESS'];
     const replyTo = replyToRaw !== undefined && replyToRaw.length > 0 ? replyToRaw : null;
     cached = new ResendEmailProvider(apiKey, `${fromName} <${fromAddress}>`, replyTo);
