@@ -8,6 +8,7 @@ import { startMerchantRefresh, stopMerchantRefresh } from './merchants/sync.js';
 import { runMigrations, closeDb } from './db/client.js';
 import { startPaymentWatcher, stopPaymentWatcher } from './payments/watcher.js';
 import { startProcurementWorker, stopProcurementWorker } from './orders/procurement.js';
+import { startRedemptionBackfill, stopRedemptionBackfill } from './orders/redemption-backfill.js';
 import {
   startPayoutWorker,
   stopPayoutWorker,
@@ -91,6 +92,11 @@ if (env.LOOP_WORKERS_ENABLED) {
   startProcurementWorker({
     intervalMs: env.LOOP_PROCUREMENT_INTERVAL_SECONDS * 1000,
   });
+  // Redemption-backfill sweeper — backstops waitForRedemption's
+  // budget-exhaustion path: fulfilled orders that captured a
+  // ctx_order_id but no redemption payload get re-fetched with
+  // backoff until recovered or the attempts cap pages ops.
+  startRedemptionBackfill();
   // Payout worker (ADR 016). Resolve reads LOOP_STELLAR_OPERATOR_SECRET
   // + network passphrase; returns null when the secret is unset, in
   // which case pending_payouts rows stay pending until ops plumbs it.
@@ -169,6 +175,7 @@ if (env.LOOP_WORKERS_ENABLED) {
 } else {
   markWorkerDisabled('payment_watcher', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('procurement_worker', 'LOOP_WORKERS_ENABLED is false');
+  markWorkerDisabled('redemption_backfill', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('payout_worker', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('asset_drift_watcher', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('interest_scheduler', 'LOOP_WORKERS_ENABLED is false');
@@ -201,6 +208,7 @@ function shutdown(signal: string): void {
   stopLocationRefresh();
   stopPaymentWatcher();
   stopProcurementWorker();
+  stopRedemptionBackfill();
   stopPayoutWorker();
   stopAssetDriftWatcher();
   stopInterestScheduler();

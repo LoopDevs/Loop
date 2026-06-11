@@ -1,6 +1,6 @@
 /**
  * Monitoring-channel Discord notifiers — fires to
- * `env.DISCORD_WEBHOOK_MONITORING`. Twelve signals covering the
+ * `env.DISCORD_WEBHOOK_MONITORING`. Signals covering the
  * fleet-health surfaces operators watch for incidents:
  *
  *   - **Service health flap** — `notifyHealthChange`
@@ -16,7 +16,9 @@
  *   - **Stuck-row sweepers** — `notifyStuckProcurementSwept`
  *     (A2-621 — `procuring` → `failed` per-row drilldown),
  *     `notifyPaymentWatcherStuck` (A2-626 — Horizon cursor age
- *     past stale-threshold).
+ *     past stale-threshold), `notifyRedemptionBackfillExhausted`
+ *     (redemption-backfill sweeper hit the attempts cap with the
+ *     order still missing its redemption payload).
  *   - **Upstream contract** — `notifyCtxSchemaDrift` (A2-1915 —
  *     CTX response failed Zod validation against a recorded
  *     fixture; per-surface 10-minute dedup),
@@ -370,6 +372,7 @@ export {
   notifyStuckProcurementSwept,
   notifyPaymentWatcherStuck,
   notifyStuckPayouts,
+  notifyRedemptionBackfillExhausted,
 } from './monitoring-stuck-sweepers.js';
 
 // `notifyCtxSchemaDrift` (A2-1915) and its per-surface dedup state

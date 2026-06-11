@@ -140,6 +140,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       "Closes the prior notifyInterestPoolLow incident once the pool's days-of-cover crosses back above the threshold. Paired open + close mirrors notifyAssetDrift / notifyAssetDriftRecovered so the channel reads as bracketed events.",
   },
   {
+    name: 'notifyRedemptionBackfillExhausted',
+    channel: 'monitoring',
+    description:
+      'Fires when the redemption-backfill sweeper has re-fetched the CTX gift-card detail 10 times for a fulfilled order and the redemption payload (code / PIN / URL) is still empty. Per-row — each exhaustion needs a CTX support ticket keyed on the embedded CTX order id (see docs/runbooks/redemption-backfill-exhausted.md).',
+  },
+  {
     name: 'notifyStuckProcurementSwept',
     channel: 'monitoring',
     description:

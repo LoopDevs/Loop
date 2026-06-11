@@ -5,7 +5,8 @@ export type RuntimeWorkerName =
   | 'interest_scheduler'
   | 'payment_watcher'
   | 'payout_worker'
-  | 'procurement_worker';
+  | 'procurement_worker'
+  | 'redemption_backfill';
 
 interface MutableWorkerState {
   required: boolean;

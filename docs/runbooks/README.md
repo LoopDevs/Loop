@@ -27,6 +27,7 @@ split it into a sub-page rather than padding.
 | **Watcher liveness**  | [payment-watcher-stuck.md](./payment-watcher-stuck.md) — `notifyPaymentWatcherStuck` cursor-stall alert                                                              |
 |                       | [deposit-skip-abandoned.md](./deposit-skip-abandoned.md) — `notifyDepositSkipAbandoned` — skipped deposit gave up retrying; user funds need manual reconciliation    |
 | **Procurement sweep** | [stuck-procurement-swept.md](./stuck-procurement-swept.md) — `notifyStuckProcurementSwept` per-row reconcile-before-refund alert                                     |
+| **Redemption**        | [redemption-backfill-exhausted.md](./redemption-backfill-exhausted.md) — `notifyRedemptionBackfillExhausted` fulfilled-but-no-payload alert after 10 backfill tries  |
 | **Auth**              | [jwt-key-rotation.md](./jwt-key-rotation.md) — rotating `LOOP_JWT_SIGNING_KEY` without invalidating sessions                                                         |
 | **Stellar signer**    | [stellar-operator-rotation.md](./stellar-operator-rotation.md) — quarterly + emergency rotation of `LOOP_STELLAR_OPERATOR_SECRET` (A2-1909)                          |
 | **Mobile signing**    | [mobile-cert-renewal.md](./mobile-cert-renewal.md) — Apple/Google cert + provisioning + key renewal flow (A2-1908)                                                   |
