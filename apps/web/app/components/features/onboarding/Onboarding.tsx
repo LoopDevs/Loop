@@ -337,17 +337,24 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
     if (step !== 5) setCurrencyError(null);
   }, [step, clearErrors]);
 
-  // Tranche 1 auto-advance for the cashback-related steps. Done in
+  // Tranche 1 auto-skip for the cashback-related steps. Done in
   // an effect so React commits the intermediate render before we
   // setStep — avoids "Cannot update during render" warnings.
+  //
+  // Direction-aware (comprehensive-audit 2026-06-11, P10): the skip
+  // must follow the user's travel direction. The previous version
+  // always skipped forward, so pressing Back from step 6 landed on
+  // skipped step 5 and immediately bounced forward to 6 again —
+  // Back was a no-op trap. Track where we came from and skip
+  // backward when the user is navigating backward.
+  const prevStepRef = useRef(0);
   useEffect(() => {
+    const cameFrom = prevStepRef.current;
+    prevStepRef.current = step;
     if (!phase1Only) return;
     if (step === 5 || step === 7) {
-      // Skip forward by one. Forward-only — these indices are only
-      // ever reached via `next()`, and a user pressing Back from
-      // step 6 would land on step 4 (Otp) per the existing
-      // navigation, never on step 5.
-      setStep((s) => s + 1);
+      const movingBack = cameFrom > step;
+      setStep((s) => (movingBack ? Math.max(0, s - 1) : Math.min(TOTAL_STEPS - 1, s + 1)));
     }
   }, [step, phase1Only]);
 

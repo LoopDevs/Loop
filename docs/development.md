@@ -310,9 +310,11 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # Set any to `true` and the matching surface returns 503
 # SUBSYSTEM_DISABLED on the next request — no redeploy. Runbook:
 # docs/runbooks/kill-switch.md. All default false.
-# LOOP_KILL_ORDERS=false        # POST /api/orders + /api/orders/loop
-# LOOP_KILL_AUTH=false          # request/verify-otp + social (refresh/logout stay open)
-# LOOP_KILL_WITHDRAWALS=false   # admin withdrawal + compensation endpoints
+# LOOP_KILL_ORDERS=false         # POST /api/orders + /api/orders/loop (combined)
+# LOOP_KILL_ORDERS_LEGACY=false  # POST /api/orders only; unset → falls back to LOOP_KILL_ORDERS
+# LOOP_KILL_ORDERS_LOOP=false    # POST /api/orders/loop only; unset → falls back to LOOP_KILL_ORDERS
+# LOOP_KILL_AUTH=false           # request/verify-otp + social (refresh/logout stay open)
+# LOOP_KILL_WITHDRAWALS=false    # admin withdrawal + compensation endpoints
 ```
 
 ### Inheritance model

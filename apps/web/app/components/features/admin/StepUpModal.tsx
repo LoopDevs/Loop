@@ -23,7 +23,7 @@
  * are needed: ConfirmDialog catches fat-finger amounts, StepUpModal
  * catches stolen-token actor swaps.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ApiException } from '@loop/shared';
 import { requestOtp } from '~/services/auth';
 import { mintAdminStepUp } from '~/services/admin-step-up';
@@ -43,6 +43,18 @@ export function StepUpModal({ onConfirm, onCancel }: Props): React.JSX.Element {
   const [otp, setOtp] = useState('');
   const [stage, setStage] = useState<'idle' | 'sending' | 'awaiting-code' | 'confirming'>('idle');
   const [error, setError] = useState<string | null>(null);
+
+  // Native <dialog> + showModal() — same pattern as ConfirmDialog /
+  // ReasonDialog. The browser provides the focus trap, ESC handling,
+  // and aria-modal semantics for free; the previous div[role=dialog]
+  // shell had none of those while gating destructive admin writes.
+  // The parent mounts this component only while the step-up flow is
+  // active, so we open the dialog once on mount.
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog !== null && !dialog.open) dialog.showModal();
+  }, []);
 
   const handleSendCode = async (): Promise<void> => {
     if (email === null) {
@@ -87,13 +99,19 @@ export function StepUpModal({ onConfirm, onCancel }: Props): React.JSX.Element {
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      role="dialog"
-      aria-modal="true"
+    <dialog
+      ref={dialogRef}
+      onClose={onCancel}
+      onCancel={(e) => {
+        // ESC: keep the dialog mounted-but-open state consistent —
+        // the parent unmounts us in response to onCancel().
+        e.preventDefault();
+        onCancel();
+      }}
+      className="rounded-xl shadow-xl backdrop:bg-black/50 p-0 max-w-md w-[90vw] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
       aria-labelledby="step-up-modal-title"
     >
-      <div className="w-full max-w-md rounded-xl bg-white dark:bg-gray-900 p-5 shadow-xl">
+      <div className="p-5">
         <h2
           id="step-up-modal-title"
           className="text-lg font-semibold text-gray-900 dark:text-white mb-2"
@@ -151,7 +169,7 @@ export function StepUpModal({ onConfirm, onCancel }: Props): React.JSX.Element {
           Cancel
         </button>
       </div>
-    </div>
+    </dialog>
   );
 }
 

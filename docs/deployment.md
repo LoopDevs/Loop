@@ -217,11 +217,13 @@ that the role-grant wasn't extended for a new table.
 
 Set any of these to `true` on a running deployment (`fly secrets set LOOP_KILL_<NAME>=true -a loopfinance-api` — triggers a rolling restart) and the matching surface returns `503 SUBSYSTEM_DISABLED` without a redeploy. All default `false`. Operator runbook: `docs/runbooks/kill-switch.md`.
 
-| Variable                | Required | Default | Description                                                                                            |
-| ----------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
-| `LOOP_KILL_ORDERS`      | No       | `false` | Gates `POST /api/orders` + `POST /api/orders/loop`.                                                    |
-| `LOOP_KILL_AUTH`        | No       | `false` | Gates request-otp / verify-otp / social logins. Refresh + logout stay open so existing sessions drain. |
-| `LOOP_KILL_WITHDRAWALS` | No       | `false` | Gates the admin withdrawal + compensation endpoints.                                                   |
+| Variable                  | Required | Default | Description                                                                                               |
+| ------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------- |
+| `LOOP_KILL_ORDERS`        | No       | `false` | Gates `POST /api/orders` + `POST /api/orders/loop` (combined).                                            |
+| `LOOP_KILL_ORDERS_LEGACY` | No       | unset   | Gates `POST /api/orders` only. Set → overrides `LOOP_KILL_ORDERS` for that path; unset → falls back.      |
+| `LOOP_KILL_ORDERS_LOOP`   | No       | unset   | Gates `POST /api/orders/loop` only. Set → overrides `LOOP_KILL_ORDERS` for that path; unset → falls back. |
+| `LOOP_KILL_AUTH`          | No       | `false` | Gates request-otp / verify-otp / social logins. Refresh + logout stay open so existing sessions drain.    |
+| `LOOP_KILL_WITHDRAWALS`   | No       | `false` | Gates the admin withdrawal + compensation endpoints.                                                      |
 
 `env.ts` is the source of truth; run `parseEnv()` via `npm run dev -w @loop/backend` locally to validate a deploy's env block before pushing.
 

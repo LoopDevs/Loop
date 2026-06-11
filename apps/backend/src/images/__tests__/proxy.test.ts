@@ -81,6 +81,7 @@ vi.mock('node:dns/promises', () => ({
 }));
 
 import { app } from '../../app.js';
+import { __getImageCacheStatsForTests, __resetImageCacheForTests } from '../proxy.js';
 
 // Mock global fetch for upstream image fetches
 const mockFetch = vi.fn();
@@ -380,5 +381,39 @@ describe('GET /api/image — upstream hardening', () => {
     expect(res.status).toBe(413);
     const body = (await res.json()) as Record<string, string>;
     expect(body.code).toBe('IMAGE_TOO_LARGE');
+  });
+});
+
+describe('GET /api/image — LRU byte accounting', () => {
+  it('does not drift the byte counter when an expired entry is overwritten', async () => {
+    __resetImageCacheForTests();
+    mockFetch.mockResolvedValue(fakeImageResponse());
+    const url = `/api/image?url=${encodeURIComponent('https://cdn.example.com/recached.jpg')}`;
+
+    const first = await app.request(url);
+    expect(first.status).toBe(200);
+    const afterFirst = __getImageCacheStatsForTests();
+    expect(afterFirst.entries).toBe(1);
+    expect(afterFirst.totalBytes).toBeGreaterThan(0);
+
+    // Jump past the 7-day TTL so the cached entry is stale: the next
+    // request refetches and overwrites the same key. Before the fix,
+    // the old entry's bytes were never subtracted, so the counter
+    // double-counted every refresh (comprehensive-audit 2026-06-11,
+    // P10) until the LRU evicted everything on sight.
+    const realNow = Date.now();
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(realNow + 8 * 24 * 60 * 60 * 1000);
+    try {
+      const second = await app.request(url);
+      expect(second.status).toBe(200);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    const afterSecond = __getImageCacheStatsForTests();
+    expect(afterSecond.entries).toBe(1);
+    expect(afterSecond.totalBytes).toBe(afterFirst.totalBytes);
+    __resetImageCacheForTests();
   });
 });

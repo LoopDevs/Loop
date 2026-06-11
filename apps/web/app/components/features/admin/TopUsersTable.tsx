@@ -41,14 +41,17 @@ export function fmtPositiveMinor(minor: string, currency: string): string {
  */
 export function TopUsersTable(): React.JSX.Element {
   const [windowDays, setWindowDays] = useState<number>(DEFAULT_WINDOW_DAYS);
-  // The endpoint takes a `since` ISO timestamp. Derive it from the
-  // current window; `new Date()` is re-evaluated on every render so
-  // day-boundary rollover while the page is left open doesn't strand
-  // the query on a stale cursor.
-  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
   const query = useQuery({
     queryKey: ['admin-top-users', windowDays, LIMIT],
-    queryFn: () => getTopUsers({ since, limit: LIMIT }),
+    // `since` is computed inside queryFn — not at render — so every
+    // (re)fetch uses a fresh rolling window. A render-time value isn't
+    // part of the queryKey, so it would pin the window to whenever the
+    // component last rendered and serve an ever-staler slice on
+    // long-lived admin pages (comprehensive-audit 2026-06-11, P10).
+    queryFn: () => {
+      const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
+      return getTopUsers({ since, limit: LIMIT });
+    },
     retry: shouldRetry,
     staleTime: 60_000,
   });

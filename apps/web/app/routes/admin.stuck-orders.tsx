@@ -11,7 +11,7 @@ import {
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { Spinner } from '~/components/ui/Spinner';
-import { ADMIN_LOCALE } from '~/utils/locale';
+import { fmtStroops } from '~/utils/format-stellar';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · Stuck orders — Loop' }];
@@ -176,23 +176,6 @@ function AdminStuckOrdersRouteInner(): React.JSX.Element {
       <StuckPayoutsSection />
     </main>
   );
-}
-
-/**
- * Stroops-as-string → compact major-unit string ("1.25 GBPLOOP").
- * Shared with /admin/payouts; inlined here to avoid cross-page
- * helper drift while the pattern stabilises.
- */
-function fmtStroops(stroops: string, code: string): string {
-  const negative = stroops.startsWith('-');
-  const digits = negative ? stroops.slice(1) : stroops;
-  if (!/^\d+$/.test(digits)) return '—';
-  const padded = digits.padStart(8, '0');
-  const whole = padded.slice(0, -7);
-  const fractionRaw = padded.slice(-7).replace(/0+$/, '');
-  const fraction = fractionRaw.length > 0 ? `.${fractionRaw}` : '';
-  const sign = negative ? '-' : '';
-  return `${sign}${Number(whole).toLocaleString(ADMIN_LOCALE)}${fraction} ${code}`;
 }
 
 /**

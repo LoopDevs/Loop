@@ -4,6 +4,7 @@ import { listPayouts, type AdminPayoutView, type PayoutState } from '~/services/
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
+import { fmtStroops } from '~/utils/format-stellar';
 
 const LIMIT = 25;
 
@@ -13,22 +14,6 @@ const STATE_CLASSES: Record<PayoutState, string> = {
   confirmed: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
   failed: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
 };
-
-/**
- * Formats a stroops (7-decimal minor) amount as `X.Y <code>` — trims
- * trailing zeros, falls back to em-dash on non-numeric input.
- */
-export function fmtStroops(stroops: string, code: string): string {
-  const negative = stroops.startsWith('-');
-  const digits = negative ? stroops.slice(1) : stroops;
-  if (!/^\d+$/.test(digits)) return '—';
-  const padded = digits.padStart(8, '0');
-  const whole = padded.slice(0, -7);
-  const fractionRaw = padded.slice(-7).replace(/0+$/, '');
-  const fraction = fractionRaw.length > 0 ? `.${fractionRaw}` : '';
-  const sign = negative ? '-' : '';
-  return `${sign}${Number(whole).toLocaleString(ADMIN_LOCALE)}${fraction} ${code}`;
-}
 
 interface Props {
   userId: string;

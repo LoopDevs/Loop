@@ -22,6 +22,7 @@ import { PaymentMethodActivityChart } from '~/components/features/admin/PaymentM
 import { PaymentMethodShareCard } from '~/components/features/admin/PaymentMethodShareCard';
 import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
+import { fmtStroops } from '~/utils/format-stellar';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · Treasury — Loop' }];
@@ -43,23 +44,6 @@ function fmtMinor(minor: string, currency: string): string {
   const symbol =
     currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : currency === 'USD' ? '$' : '';
   return `${sign}${symbol}${Number(whole).toLocaleString(ADMIN_LOCALE)}.${fraction} ${currency}`;
-}
-
-/**
- * Stroops → human Stellar amount string. 7-decimal asset precision,
- * trims trailing zeros for readability (e.g. "1,234.56 USDC" not
- * "1,234.5600000").
- */
-function fmtStroops(stroops: string | null, code: string): string {
-  if (stroops === null) return '—';
-  const negative = stroops.startsWith('-');
-  const digits = negative ? stroops.slice(1) : stroops;
-  const padded = digits.padStart(8, '0');
-  const whole = padded.slice(0, -7);
-  const fractionRaw = padded.slice(-7).replace(/0+$/, '');
-  const fraction = fractionRaw.length > 0 ? `.${fractionRaw}` : '';
-  const sign = negative ? '-' : '';
-  return `${sign}${Number(whole).toLocaleString(ADMIN_LOCALE)}${fraction} ${code}`;
 }
 
 // LOOP asset enumeration comes from `@loop/shared` so the treasury

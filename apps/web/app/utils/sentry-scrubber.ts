@@ -10,6 +10,19 @@
  * Authorization header goes over the wire in every authenticated
  * request; a Sentry capture of a fetch error could include the
  * request headers verbatim without this scrubber.
+ *
+ * Sibling to `sentry-error-scrubber.ts` (A2-1312) — the two are
+ * deliberately distinct, not duplicates:
+ *   - THIS module is key-based and runs at the `Sentry.init({
+ *     beforeSend })` boundary: it redacts sensitive *fields* on the
+ *     final event envelope (headers, cookies, extra, tags).
+ *   - `sentry-error-scrubber.ts` is value/pattern-based and runs
+ *     BEFORE `Sentry.captureException`: it normalises the thrown
+ *     object itself (Response/Request bodies, email / bearer / hex
+ *     patterns inside message + stack strings) — shapes Sentry's
+ *     serialiser folds into the envelope before beforeSend can see
+ *     them as named keys.
+ * Neither subsumes the other; both layers are required.
  */
 
 const SENSITIVE_KEY_RE =

@@ -268,6 +268,16 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # production + Fly staging after LOOP_STELLAR_OPERATOR_SECRET is wired.
 # LOOP_WORKERS_ENABLED=true
 
+# A2-1907 runtime kill switches (read live from process.env, no
+# redeploy). Combined orders switch plus per-path overrides — a set
+# per-path var wins for its path; unset falls back to the combined.
+# Runbook: docs/runbooks/kill-switch.md.
+# LOOP_KILL_ORDERS=false          — POST /api/orders + /api/orders/loop
+# LOOP_KILL_ORDERS_LEGACY=false   — POST /api/orders only
+# LOOP_KILL_ORDERS_LOOP=false     — POST /api/orders/loop only
+# LOOP_KILL_AUTH=false
+# LOOP_KILL_WITHDRAWALS=false
+
 # Observability
 # SENTRY_DSN=<dsn>
 # LOOP_ENV=staging                      — A2-1310: paired with VITE_LOOP_ENV;

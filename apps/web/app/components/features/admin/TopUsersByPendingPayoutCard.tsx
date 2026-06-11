@@ -4,30 +4,9 @@ import { getTopUsersByPendingPayout, type TopUserByPendingPayoutEntry } from '~/
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
+import { fmtStroops } from '~/utils/format-stellar';
 
 const DEFAULT_LIMIT = 10;
-
-/**
- * Stroops string (bigint 7-decimal integer) → human-readable asset
- * amount with the code appended. "12500000" + "GBPLOOP" →
- * "1.25 GBPLOOP". Strips trailing zeros; falls back to "—" on parse
- * failure (bigint parse throws on malformed input, we don't want
- * the whole card to error).
- */
-export function fmtStroops(stroopsStr: string, code: string): string {
-  try {
-    const stroops = BigInt(stroopsStr);
-    const negative = stroops < 0n;
-    const magnitude = negative ? -stroops : stroops;
-    const whole = magnitude / 10_000_000n;
-    const fractionRaw = (magnitude % 10_000_000n).toString().padStart(7, '0').replace(/0+$/, '');
-    const fraction = fractionRaw.length > 0 ? `.${fractionRaw}` : '';
-    const sign = negative ? '-' : '';
-    return `${sign}${whole.toString()}${fraction} ${code}`;
-  } catch {
-    return '—';
-  }
-}
 
 /**
  * Top-N users by pending on-chain payout obligation (ADR 015 / 016).
