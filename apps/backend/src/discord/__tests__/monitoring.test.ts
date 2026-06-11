@@ -90,7 +90,7 @@ function lastEmbed(): Embed {
 }
 
 describe('notifyHealthChange', () => {
-  it('green + healthy title on healthy → ', () => {
+  it('green embed + "Service Healthy" title on transition to healthy', () => {
     notifyHealthChange('healthy', 'all good');
     const e = lastEmbed();
     expect(e.title).toBe('💚 Service Healthy');

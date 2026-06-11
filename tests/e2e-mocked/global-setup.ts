@@ -22,6 +22,7 @@ import postgres from 'postgres';
 const DATABASE_URL = process.env['DATABASE_URL'] ?? 'postgres://loop:loop@localhost:5433/loop_test';
 
 const TABLES_TO_TRUNCATE = [
+  'user_favorite_merchants',
   'pending_payouts',
   'credit_transactions',
   'user_credits',

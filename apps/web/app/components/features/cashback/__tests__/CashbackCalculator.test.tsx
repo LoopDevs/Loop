@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type * as PublicStats from '~/services/public-stats';
 import { CashbackCalculator, formatCashbackMinor } from '../CashbackCalculator';
@@ -111,27 +111,35 @@ describe('<CashbackCalculator />', () => {
   });
 
   it('skips the fetch when the amount is zero', async () => {
-    mocks.getPublicCashbackPreview.mockResolvedValue({
-      merchantId: 'amazon-us',
-      merchantName: 'Amazon',
-      orderAmountMinor: '0',
-      cashbackPct: null,
-      cashbackMinor: '0',
-      currency: 'USD',
-    });
-    renderCalculator();
-    const input = screen.getByLabelText(/Gift card amount/i) as HTMLInputElement;
-    // Immediately change to 0 before the initial debounce fires —
-    // the final debounced value is 0, `enabled` goes false, no fetch.
-    fireEvent.change(input, { target: { value: '0' } });
-    // Let the debounce + any queued useEffect flush.
-    await new Promise((r) => setTimeout(r, 400));
-    // The initial render with default $50 may have fired once; after
-    // the 0 change the query stays disabled. Assert the last known
-    // amountMinor was a non-zero call OR the mock was never called —
-    // either is fine, we're checking we DON'T fire a fetch for 0.
-    for (const call of mocks.getPublicCashbackPreview.mock.calls) {
-      expect((call[0] as { amountMinor: number }).amountMinor).toBeGreaterThan(0);
+    vi.useFakeTimers();
+    try {
+      mocks.getPublicCashbackPreview.mockResolvedValue({
+        merchantId: 'amazon-us',
+        merchantName: 'Amazon',
+        orderAmountMinor: '0',
+        cashbackPct: null,
+        cashbackMinor: '0',
+        currency: 'USD',
+      });
+      renderCalculator();
+      const input = screen.getByLabelText(/Gift card amount/i) as HTMLInputElement;
+      // Immediately change to 0 before the initial debounce fires —
+      // the final debounced value is 0, `enabled` goes false, no fetch.
+      fireEvent.change(input, { target: { value: '0' } });
+      // Drive the 300ms debounce (plus margin) deterministically and
+      // flush queued effects/microtasks inside act.
+      await act(async () => {
+        vi.advanceTimersByTime(400);
+      });
+      // The initial render with default $50 may have fired once; after
+      // the 0 change the query stays disabled. Assert the last known
+      // amountMinor was a non-zero call OR the mock was never called —
+      // either is fine, we're checking we DON'T fire a fetch for 0.
+      for (const call of mocks.getPublicCashbackPreview.mock.calls) {
+        expect((call[0] as { amountMinor: number }).amountMinor).toBeGreaterThan(0);
+      }
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

@@ -139,13 +139,15 @@ describe('adminTopUsersByPendingPayoutHandler', () => {
     { input: '100', expected: 100 },
     { input: '9999', expected: 100 },
     { input: 'nonsense', expected: 20 },
-  ])('clamps ?limit=$input to $expected', async ({ input, expected: _expected }) => {
+  ])('clamps ?limit=$input to $expected', async ({ input, expected }) => {
     const res = await adminTopUsersByPendingPayoutHandler(makeCtx({ limit: input }));
     expect(res.status).toBe(200);
-    // The handler clamps internally; we're asserting it didn't 400
-    // and that execute was called (the clamped limit is baked into
-    // the sql template and isn't independently observable here).
-    expect(executeMock).toHaveBeenCalled();
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    // The mocked `sql` tag captures its interpolations; the clamped
+    // limit is the final `LIMIT ${limit}` interpolation in the query
+    // template, so assert the handler actually clamped it.
+    const captured = state.capturedSql as { values: unknown[] };
+    expect(captured.values.at(-1)).toBe(expected);
   });
 
   it('handles a { rows: [...] } execute return shape (postgres-js)', async () => {

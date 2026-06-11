@@ -629,10 +629,12 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
       'X-Admin-Step-Up': stepUp,
     };
 
-    const [first, second] = await Promise.all([
-      Promise.resolve(app.request(url, { method: 'POST', headers, body })),
-      Promise.resolve(app.request(url, { method: 'POST', headers, body })),
-    ]);
+    // Fire both requests before awaiting either so they genuinely
+    // contend on the idempotency-key row inside the writer's
+    // transaction, rather than running back-to-back.
+    const firstPromise = app.request(url, { method: 'POST', headers, body });
+    const secondPromise = app.request(url, { method: 'POST', headers, body });
+    const [first, second] = await Promise.all([firstPromise, secondPromise]);
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
@@ -645,7 +647,10 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
       audit: { replayed: boolean };
       result: { payoutId: string };
     };
-    expect([firstBody.audit.replayed, secondBody.audit.replayed].sort()).toEqual([false, true]);
+    // Exactly one request performed the write; the other replayed it.
+    const replays = [firstBody.audit.replayed, secondBody.audit.replayed];
+    expect(replays.filter((r) => r === false)).toHaveLength(1);
+    expect(replays.filter((r) => r === true)).toHaveLength(1);
     expect(firstBody.result.payoutId).toBe(secondBody.result.payoutId);
 
     const payouts = await db

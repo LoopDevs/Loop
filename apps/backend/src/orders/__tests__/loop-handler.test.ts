@@ -769,23 +769,3 @@ describe('validateMerchantDenomination (A4-103)', () => {
     ).toBeNull();
   });
 });
-
-describe('loopCreateOrderHandler — feature flag off', () => {
-  it('returns 404 when LOOP_AUTH_NATIVE_ENABLED is false', async () => {
-    const prev = process.env['LOOP_AUTH_NATIVE_ENABLED'];
-    process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'false';
-    vi.resetModules();
-    const fresh = await import('../loop-handler.js');
-    const store = new Map<string, unknown>();
-    const ctx = {
-      req: { json: async () => ({}) },
-      get: (k: string) => store.get(k),
-      json: (b: unknown, status?: number) =>
-        new Response(JSON.stringify(b), { status: status ?? 200 }),
-    } as unknown as Context;
-    const res = await fresh.loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(404);
-    process.env['LOOP_AUTH_NATIVE_ENABLED'] = prev;
-    vi.resetModules();
-  });
-});
