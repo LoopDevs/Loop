@@ -26,27 +26,42 @@ import { useAuthStore } from '~/stores/auth.store';
 import { usePurchaseStore } from '~/stores/purchase.store';
 import { useAuth } from '../use-auth';
 
+const makeWrapper = (): (({ children }: { children: ReactNode }) => React.JSX.Element) => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }): React.JSX.Element => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+  return wrapper;
+};
+
 describe('auth flow integration', () => {
   beforeEach(() => {
     useAuthStore.getState().clearSession();
     vi.clearAllMocks();
   });
 
-  it('successful verifyOtp stores session in auth store', async () => {
+  it('successful verifyOtp through the hook stores the session in the auth store', async () => {
     vi.mocked(verifyOtp).mockResolvedValue({ accessToken: 'at-123', refreshToken: 'rt-456' });
 
-    const result = await verifyOtp('test@example.com', '123456');
-    useAuthStore
-      .getState()
-      .setSession('test@example.com', result.accessToken, result.refreshToken ?? null);
+    const { result } = renderHook(() => useAuth(), { wrapper: makeWrapper() });
+    await act(async () => {
+      await result.current.verifyOtp('test@example.com', '123456');
+    });
 
+    expect(verifyOtp).toHaveBeenCalledWith('test@example.com', '123456');
     expect(useAuthStore.getState().email).toBe('test@example.com');
     expect(useAuthStore.getState().accessToken).toBe('at-123');
+    expect(result.current.isAuthenticated).toBe(true);
   });
 
-  it('requestOtp calls service with email', async () => {
+  it('requestOtp through the hook calls the service with the email', async () => {
     vi.mocked(requestOtp).mockResolvedValue(undefined);
-    await requestOtp('test@example.com');
+
+    const { result } = renderHook(() => useAuth(), { wrapper: makeWrapper() });
+    await act(async () => {
+      await result.current.requestOtp('test@example.com');
+    });
+
     expect(requestOtp).toHaveBeenCalledWith('test@example.com');
   });
 

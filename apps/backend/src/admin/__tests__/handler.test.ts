@@ -453,12 +453,6 @@ describe('configHistoryHandler — A2-513 validation', () => {
 });
 
 describe('configHistoryHandler', () => {
-  it('400 when merchantId param is missing', async () => {
-    const { ctx } = makeCtx({ param: { merchantId: undefined } });
-    const res = await configHistoryHandler(ctx);
-    expect(res.status).toBe(400);
-  });
-
   it('returns the history rows in an envelope', async () => {
     const rows = [{ merchantId: 'm1', changedAt: '2025-01-01T00:00:00Z' }];
     dbMock['limit']!.mockResolvedValueOnce(rows);

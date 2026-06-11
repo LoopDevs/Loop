@@ -42,7 +42,11 @@ describe('<Sparkline />', () => {
         errorMessage="err"
       />,
     );
-    expect(container.querySelector('svg')).toBeDefined();
+    // The pending state renders the shared <Spinner /> (a status role
+    // wrapping a decorative svg) instead of the chart svg.
+    expect(screen.getByRole('status')).not.toBeNull();
+    expect(container.querySelector('svg')).not.toBeNull();
+    expect(container.querySelector('polyline')).toBeNull();
   });
 
   it('renders the error message in the error state', () => {

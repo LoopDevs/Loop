@@ -120,12 +120,21 @@ describe('PaymentStep — retry budget (audit A-030)', () => {
 describe('PaymentStep — copy-to-clipboard', () => {
   it('copies the payment address when its copy button is clicked', async () => {
     render(<PaymentStep {...baseProps} expiresAt={Math.floor(Date.now() / 1000) + 600} />);
-    // Address section has a Copy button; click the first one available.
-    const copyButtons = screen.getAllByRole('button', { name: /Copy/i });
-    expect(copyButtons.length).toBeGreaterThan(0);
+    const copyAddressButton = screen.getByRole('button', { name: /copy address/i });
     await act(async () => {
-      fireEvent.click(copyButtons[0]!);
+      fireEvent.click(copyAddressButton);
     });
-    expect(mockCopy).toHaveBeenCalled();
+    expect(mockCopy).toHaveBeenCalledTimes(1);
+    expect(mockCopy).toHaveBeenCalledWith(baseProps.paymentAddress);
+  });
+
+  it('copies the memo when its copy button is clicked', async () => {
+    render(<PaymentStep {...baseProps} expiresAt={Math.floor(Date.now() / 1000) + 600} />);
+    const copyMemoButton = screen.getByRole('button', { name: /copy memo/i });
+    await act(async () => {
+      fireEvent.click(copyMemoButton);
+    });
+    expect(mockCopy).toHaveBeenCalledTimes(1);
+    expect(mockCopy).toHaveBeenCalledWith(baseProps.memo);
   });
 });
