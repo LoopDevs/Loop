@@ -297,7 +297,7 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
   // path can therefore drain the cashback-tagged portion of the
   // balance even though the user is still holding the matching
   // on-chain LOOP-asset, which they could then spend separately
-  // via loop_asset method or via withdrawal.
+  // via loop_asset redemption (or the future fiat-out rail).
   //
   // The proper fix requires bucketing user_credits into
   // "cashback-source" (redeemable only via on-chain return) vs

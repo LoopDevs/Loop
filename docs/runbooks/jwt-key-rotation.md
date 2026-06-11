@@ -117,7 +117,7 @@ entirely. Worst case, an admin mid-action re-confirms their password
 preserve, so the emergency path is essentially free.
 
 Note: if `LOOP_ADMIN_STEP_UP_SIGNING_KEY` is ever **unset** (rather
-than rotated), the credit-adjust / withdrawal / payout-retry surfaces
+than rotated), the credit-adjust / emission / payout-retry surfaces
 fail closed with 503 `STEP_UP_UNAVAILABLE` until it is restored
 (ADR-028 §Activation gate).
 

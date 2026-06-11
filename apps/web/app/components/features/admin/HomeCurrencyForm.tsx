@@ -22,7 +22,7 @@ interface Props {
 
 /**
  * Admin home-currency change form. Same shape as
- * `CreditAdjustmentForm` / `AdminWithdrawalForm`: confirm-dialog
+ * `CreditAdjustmentForm` / `AdminEmissionForm`: confirm-dialog
  * gate before submit, step-up auth dance via `useAdminStepUp`,
  * `audit.replayed` badge after submit. Backend enforces the safety
  * preflight (no live balance / no in-flight payouts) and surfaces

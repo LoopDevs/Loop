@@ -94,11 +94,12 @@ export function mountAdminPayoutsRoutes(app: Hono): void {
     adminRetryPayoutHandler,
   );
   // POST /api/admin/payouts/:id/compensate — re-credit a user after a
-  // permanently-failed withdrawal payout (ADR-024 §5). Same rate limit
-  // as retry: rare, finance-reviewed, one-at-a-time.
+  // permanently-failed legacy (pre-ADR-036, at-send-debited) emission
+  // payout (ADR-024 §5). Same rate limit as retry: rare,
+  // finance-reviewed, one-at-a-time.
   app.post(
     '/api/admin/payouts/:id/compensate',
-    killSwitch('withdrawals'),
+    killSwitch('emissions'),
     rateLimit('POST /api/admin/payouts/:id/compensate', 20, 60_000),
     adminPayoutCompensationHandler,
   );

@@ -31,7 +31,7 @@ export function registerUsersDsrOrdersOpenApi(
     path: '/api/users/me/dsr/delete',
     summary: 'A2-1905: self-serve account deletion (DSR / GDPR right of erasure).',
     description:
-      "Anonymises the calling user — email replaced with a synthetic placeholder, OAuth identity links deleted, refresh tokens revoked. Ledger rows (`credit_transactions` / `orders` / `pending_payouts`) are RETAINED for tax / regulatory compliance per ADR 009 (append-only) but no longer link to a real person. Refuses with 409 + a typed `code` (`PENDING_PAYOUTS`, `IN_FLIGHT_ORDERS`, or `FAILED_UNCOMPENSATED_WITHDRAWALS`) when there's money / fulfilment in flight or a failed withdrawal awaiting compensation — see `apps/backend/src/users/dsr-delete.ts` module header for the full posture.",
+      "Anonymises the calling user — email replaced with a synthetic placeholder, OAuth identity links deleted, refresh tokens revoked. Ledger rows (`credit_transactions` / `orders` / `pending_payouts`) are RETAINED for tax / regulatory compliance per ADR 009 (append-only) but no longer link to a real person. Refuses with 409 + a typed `code` (`PENDING_PAYOUTS`, `IN_FLIGHT_ORDERS`, or `FAILED_UNCOMPENSATED_WITHDRAWALS`) when there's money / fulfilment in flight or a failed legacy (pre-ADR-036) withdrawal awaiting compensation — see `apps/backend/src/users/dsr-delete.ts` module header for the full posture.",
     tags: ['Users'],
     security: [{ bearerAuth: [] }],
     responses: {
@@ -45,7 +45,7 @@ export function registerUsersDsrOrdersOpenApi(
       },
       409: {
         description:
-          'Pre-condition failed: pending payout, in-flight order, or failed withdrawal awaiting compensation (A4-078)',
+          'Pre-condition failed: pending payout, in-flight order, or failed legacy withdrawal awaiting compensation (A4-078)',
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {

@@ -20,6 +20,9 @@ const { dbMock, state } = vi.hoisted(() => {
     upsertSet: unknown;
     // User-row lookup inside the fulfilled txn (ADR 015).
     userLookupRows: unknown[];
+    // user_credits FOR UPDATE lookup inside markOrderPaid's
+    // loop_asset branch (A4-110 + ADR 036).
+    creditRowLookup: unknown[];
   }
   const s: State = {
     returningRows: [],
@@ -30,6 +33,7 @@ const { dbMock, state } = vi.hoisted(() => {
     insertPendingPayoutCalls: [],
     upsertSet: undefined,
     userLookupRows: [],
+    creditRowLookup: [],
   };
 
   // Outer db chain — shared between the non-txn path and the tx
@@ -87,6 +91,10 @@ const { dbMock, state } = vi.hoisted(() => {
     // keeps the chain happy for both callers.
     return Object.assign(chain, selectAwarePromise);
   });
+
+  // markOrderPaid's loop_asset branch ends its balance read with
+  // `.for('update')` — resolve it from creditRowLookup.
+  chain['for'] = vi.fn(async () => s.creditRowLookup);
 
   // db.transaction(cb) just calls cb with the same chain — we want
   // to observe writes against the mock, not fight with an isolated
@@ -172,6 +180,7 @@ const { payoutBuilderMock } = vi.hoisted(() => ({
   },
 }));
 vi.mock('../../credits/payout-builder.js', () => ({
+  generatePayoutMemo: () => 'mock-burn-memo-20char',
   buildPayoutIntent: (args: {
     userCashbackMinor: bigint;
     stellarAddress: string | null;
@@ -194,11 +203,25 @@ vi.mock('../../credits/payout-builder.js', () => ({
   },
 }));
 
+const { payoutAssetMock } = vi.hoisted(() => ({
+  payoutAssetMock: {
+    issuer: 'GBURNISSUER' as string | null,
+  },
+}));
+vi.mock('../../credits/payout-asset.js', () => ({
+  payoutAssetFor: (homeCurrency: string) => ({
+    code: `${homeCurrency}LOOP`,
+    issuer: payoutAssetMock.issuer,
+  }),
+}));
+
 import {
   markOrderPaid,
   markOrderProcuring,
   markOrderFulfilled,
   markOrderFailed,
+  LoopAssetMissingCreditRowError,
+  LoopAssetBurnUnavailableError,
   sweepExpiredOrders,
 } from '../transitions.js';
 
@@ -211,6 +234,8 @@ beforeEach(() => {
   state.insertPendingPayoutCalls = [];
   state.upsertSet = undefined;
   state.userLookupRows = [];
+  state.creditRowLookup = [];
+  payoutAssetMock.issuer = 'GBURNISSUER';
   payoutBuilderMock.decision = null;
   notifyPegBreakMock.mockClear();
   for (const fn of Object.values(dbMock)) {
@@ -240,6 +265,92 @@ describe('markOrderPaid', () => {
     const at = new Date('2026-04-21T12:00:00Z');
     await markOrderPaid('o-1', { paymentReceivedAt: at });
     expect(state.updateSet).toMatchObject({ paymentReceivedAt: at });
+  });
+});
+
+describe('markOrderPaid — loop_asset redemption (A4-110 + ADR 036)', () => {
+  const PAID_ROW = {
+    id: 'o-loop',
+    state: 'paid',
+    paymentMethod: 'loop_asset',
+    userId: 'u-1',
+    chargeMinor: 500n,
+    chargeCurrency: 'GBP',
+  };
+
+  it('debits the mirror, writes a spend ledger row, and enqueues the issuer-return burn in one txn', async () => {
+    state.returningRows = [PAID_ROW];
+    state.creditRowLookup = [{ balanceMinor: 1000n }];
+
+    const result = await markOrderPaid('o-loop');
+    expect(result).toEqual(PAID_ROW);
+
+    // The whole thing ran inside db.transaction.
+    expect(dbMock['transaction']).toHaveBeenCalledOnce();
+
+    // Spend ledger row: negative chargeMinor, referencing the order.
+    expect(state.insertCreditCalls[0]).toMatchObject({
+      userId: 'u-1',
+      type: 'spend',
+      amountMinor: -500n,
+      currency: 'GBP',
+      referenceType: 'order',
+      referenceId: 'o-loop',
+    });
+
+    // ADR 036: burn row enqueued in the SAME txn — kind='burn',
+    // destination = the asset's issuer, amount = the charge at the
+    // 1:1 peg (100_000 stroops / minor).
+    expect(state.insertPendingPayoutCalls).toHaveLength(1);
+    expect(state.insertPendingPayoutCalls[0]).toMatchObject({
+      userId: 'u-1',
+      orderId: 'o-loop',
+      kind: 'burn',
+      assetCode: 'GBPLOOP',
+      assetIssuer: 'GBURNISSUER',
+      toAddress: 'GBURNISSUER',
+      amountStroops: 500n * 100_000n,
+      memoText: 'mock-burn-memo-20char',
+    });
+  });
+
+  it('throws LoopAssetMissingCreditRowError when no user_credits row exists (state corruption)', async () => {
+    state.returningRows = [PAID_ROW];
+    state.creditRowLookup = [];
+    await expect(markOrderPaid('o-loop')).rejects.toBeInstanceOf(LoopAssetMissingCreditRowError);
+    // Neither the debit nor the burn landed.
+    expect(state.insertCreditCalls).toHaveLength(0);
+    expect(state.insertPendingPayoutCalls).toHaveLength(0);
+  });
+
+  it('throws LoopAssetBurnUnavailableError (rolling back the txn) when the issuer is unset', async () => {
+    state.returningRows = [PAID_ROW];
+    state.creditRowLookup = [{ balanceMinor: 1000n }];
+    payoutAssetMock.issuer = null;
+    await expect(markOrderPaid('o-loop')).rejects.toMatchObject({
+      name: 'LoopAssetBurnUnavailableError',
+      reason: 'issuer_unset',
+      orderId: 'o-loop',
+    });
+    expect(markOrderPaid).toBeDefined(); // type anchor
+    // The real txn rolls everything back; the mock just shows the
+    // burn insert never happened.
+    expect(state.insertPendingPayoutCalls).toHaveLength(0);
+  });
+
+  it('throws LoopAssetBurnUnavailableError for a non-home-currency charge', async () => {
+    state.returningRows = [{ ...PAID_ROW, chargeCurrency: 'JPY' }];
+    state.creditRowLookup = [{ balanceMinor: 1000n }];
+    await expect(markOrderPaid('o-loop')).rejects.toBeInstanceOf(LoopAssetBurnUnavailableError);
+    expect(state.insertPendingPayoutCalls).toHaveLength(0);
+  });
+
+  it('xlm / usdc orders flip state only — no debit, no burn', async () => {
+    state.returningRows = [{ id: 'o-x', state: 'paid', paymentMethod: 'xlm', chargeMinor: 500n }];
+    const result = await markOrderPaid('o-x');
+    expect(result).toMatchObject({ id: 'o-x' });
+    expect(state.insertCreditCalls).toHaveLength(0);
+    expect(state.insertPendingPayoutCalls).toHaveLength(0);
   });
 });
 

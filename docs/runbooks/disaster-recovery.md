@@ -127,7 +127,7 @@ is not on a bot — refills are deliberately manual.
 3. Submit via Horizon. Watch the operator balance via
    `https://horizon.stellar.org/accounts/$LOOP_STELLAR_OPERATOR_ID`.
 4. Re-enable the payout worker if it was killed via
-   `LOOP_KILL_WITHDRAWALS=true`.
+   `LOOP_KILL_EMISSIONS=true`.
 
 ### Whole-environment compromise
 

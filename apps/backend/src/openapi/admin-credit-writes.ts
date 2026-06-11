@@ -4,14 +4,14 @@
  *
  * Lifted out of `apps/backend/src/openapi/admin.ts`. The three
  * admin-mediated write surfaces — credit-adjustment, refund,
- * withdrawal — share the ADR-017 admin-write contract: actor
+ * emission — share the ADR-017 admin-write contract: actor
  * from `requireAdmin`, `Idempotency-Key` header, `reason` body
  * field, append-only ledger, Discord audit fanout AFTER commit,
  * and the uniform `{ result, audit }` envelope.
  *
  * Co-locating them mirrors how operators read these surfaces —
  * the admin UI's "user actions" panel exposes adjustment / refund
- * / withdrawal as one row of three buttons.
+ * / emission as one row of three buttons.
  *
  * Paths registered directly here:
  *   - POST /api/admin/users/{userId}/credit-adjustments
@@ -21,9 +21,9 @@
  *   - CreditAdjustmentBody / Result / Envelope
  *   - RefundBody / Result / Envelope
  *
- * The third write — withdrawal (ADR-024) — has its own slice in
- * `./admin-withdrawal-write.ts` and is fanned out via the
- * `registerAdminWithdrawalWriteOpenApi` call below. The
+ * The third write — emission (ADR-024 re-scoped by ADR 036) — has
+ * its own slice in `./admin-emission-write.ts` and is fanned out via
+ * the `registerAdminEmissionWriteOpenApi` call below. The
  * three-write façade is preserved by keeping that fan-out inside
  * this factory: callers in `admin.ts` still see one registration
  * call for the entire admin-write surface.
@@ -36,7 +36,7 @@
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
-import { registerAdminWithdrawalWriteOpenApi } from './admin-withdrawal-write.js';
+import { registerAdminEmissionWriteOpenApi } from './admin-emission-write.js';
 
 /**
  * Registers the admin-write paths + their locally-scoped schemas
@@ -233,11 +233,11 @@ export function registerAdminCreditWritesOpenApi(
     },
   });
 
-  // ─── Admin — withdrawal write (ADR-024 / A2-901) ──────────────────────────
+  // ─── Admin — emission write (ADR-024 / A2-901 / ADR 036) ──────────────────
   //
-  // Schemas (WithdrawalBody / Result / Envelope) + path registration
-  // live in `./admin-withdrawal-write.ts`. Fanned out from here so
+  // Schemas (EmissionBody / Result / Envelope) + path registration
+  // live in `./admin-emission-write.ts`. Fanned out from here so
   // the three-write façade in `admin.ts` keeps registering the
   // entire admin-write surface with one factory call.
-  registerAdminWithdrawalWriteOpenApi(registry, errorResponse, AdminWriteAudit);
+  registerAdminEmissionWriteOpenApi(registry, errorResponse, AdminWriteAudit);
 }

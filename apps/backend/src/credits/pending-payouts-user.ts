@@ -13,7 +13,7 @@
  * smaller import surface and keeps user-side query patterns
  * separate from worker race-condition logic.
  */
-import { and, desc, eq, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, lt, ne, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { pendingPayouts } from '../db/schema.js';
 import { type PendingPayout } from './pending-payouts.js';
@@ -24,6 +24,11 @@ import { type PendingPayout } from './pending-payouts.js';
  * by `GET /api/users/me/pending-payouts` so each user can see their
  * own queued / submitted / confirmed / failed on-chain payouts, not
  * just the off-chain ledger entries (ADR 015).
+ *
+ * ADR 036: `kind='burn'` rows are excluded — they're the system's
+ * issuer-return housekeeping for a redemption the user already sees
+ * as an order + a `spend` ledger entry; surfacing a payment "to the
+ * issuer" in the user's payout list would only confuse.
  */
 export async function listPayoutsForUser(
   userId: string,
@@ -34,7 +39,7 @@ export async function listPayoutsForUser(
   } = {},
 ): Promise<PendingPayout[]> {
   const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100);
-  const conditions = [eq(pendingPayouts.userId, userId)];
+  const conditions = [eq(pendingPayouts.userId, userId), ne(pendingPayouts.kind, 'burn')];
   if (opts.state !== undefined) conditions.push(eq(pendingPayouts.state, opts.state));
   // A2-1610: typed `lt()` + `desc()` — postgres-js can't bind a Date
   // through the raw sql interpolator. See `audit-tail-csv.ts`.
@@ -61,6 +66,8 @@ export interface PendingPayoutsSummaryRow {
  * (asset_code, state). Reads only `state IN ('pending', 'submitted')`
  * — confirmed rows live in the ledger, failed rows belong to the
  * admin-retry flow, neither represent "still-awaited cashback."
+ * `kind='burn'` rows are excluded for the same reason as the list
+ * above (ADR 036): an in-flight issuer-return isn't awaited cashback.
  *
  * Returned rows are empty when the user has no in-flight payouts.
  */
@@ -79,6 +86,7 @@ export async function pendingPayoutsSummaryForUser(
     .where(
       and(
         eq(pendingPayouts.userId, userId),
+        ne(pendingPayouts.kind, 'burn'),
         sql`${pendingPayouts.state} IN ('pending', 'submitted')`,
       ),
     )
@@ -118,10 +126,19 @@ export async function getPayoutByOrderIdForUser(
   orderId: string,
   userId: string,
 ): Promise<PendingPayout | null> {
+  // ADR 036: pin kind='order_cashback' — a loop_asset-redeemed order
+  // can also carry a `kind='burn'` row (per-kind unique since
+  // migration 0035); "the payout for my order" means the cashback.
   const [row] = await db
     .select()
     .from(pendingPayouts)
-    .where(and(eq(pendingPayouts.orderId, orderId), eq(pendingPayouts.userId, userId)))
+    .where(
+      and(
+        eq(pendingPayouts.orderId, orderId),
+        eq(pendingPayouts.userId, userId),
+        eq(pendingPayouts.kind, 'order_cashback'),
+      ),
+    )
     .limit(1);
   return row ?? null;
 }

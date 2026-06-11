@@ -181,6 +181,7 @@ beforeEach(() => {
   horizonMock.findOutboundPaymentByMemo.mockResolvedValue(null);
   sdkMock.submitPayout.mockResolvedValue({ txHash: 'tx-hash', ledger: 1 });
   discordMock.notifyPayoutFailed.mockClear();
+  discordMock.notifyPayoutAwaitingTrustline.mockClear();
 });
 
 describe('runPayoutTick', () => {
@@ -510,5 +511,46 @@ describe('runPayoutTick', () => {
     const r = await runPayoutTick(BASE_ARGS);
     expect(r.skippedRace).toBe(1);
     expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+  });
+});
+
+describe('ADR 036 — issuer-return burn rows', () => {
+  it('skips the trustline probe and submits to the issuer destination', async () => {
+    // Burn rows target the asset's ISSUER account, which never holds
+    // a trustline to its own asset — probing would park the burn in
+    // pending forever. payOne must bypass the probe for
+    // toAddress === assetIssuer and submit directly; Stellar accepts
+    // (and natively burns) an asset returned to its issuer.
+    trustlinesMock.getAccountTrustlines.mockClear();
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({
+        id: 'p-burn',
+        kind: 'burn',
+        orderId: 'o-redeemed',
+        toAddress: 'GISSUER',
+        assetIssuer: 'GISSUER',
+      }),
+    ]);
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.confirmed).toBe(1);
+    expect(trustlinesMock.getAccountTrustlines).not.toHaveBeenCalled();
+    expect(discordMock.notifyPayoutAwaitingTrustline).not.toHaveBeenCalled();
+    expect(sdkMock.submitPayout).toHaveBeenCalledTimes(1);
+    const submitArg = sdkMock.submitPayout.mock.calls[0]?.[0] as {
+      intent: { to: string; assetCode: string; assetIssuer: string };
+    };
+    expect(submitArg.intent.to).toBe('GISSUER');
+    expect(submitArg.intent.assetIssuer).toBe('GISSUER');
+    expect(repoMocks.markPayoutConfirmed).toHaveBeenCalledWith({
+      id: 'p-burn',
+      txHash: 'tx-hash',
+    });
+  });
+
+  it('still probes the trustline for user-addressed (non-issuer) destinations', async () => {
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.confirmed).toBe(1);
+    expect(trustlinesMock.getAccountTrustlines).toHaveBeenCalledWith('GDESTINATION');
   });
 });

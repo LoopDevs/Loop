@@ -26,7 +26,7 @@
  *     threading it in keeps every consumer pointing at the same
  *     registered schema instance.
  *   - `adminWriteAudit` — the ADR-017 audit envelope shape; same
- *     threading pattern as the credit-write / withdrawal slices
+ *     threading pattern as the credit-write / emission slices
  *     (#1166 / #1265).
  */
 import { z } from 'zod';

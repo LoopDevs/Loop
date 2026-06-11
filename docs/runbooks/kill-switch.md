@@ -11,8 +11,8 @@ specific surface immediately** without waiting for a redeploy. Triggers:
 - **`auth`** — the OTP / social-login flow has a regression that's
   flooding upstream with garbage (e.g. malformed bodies); halt new
   sign-ins while existing sessions drain on refresh.
-- **`withdrawals`** — a known-broken Stellar route is causing every
-  admin withdrawal to permanently fail; halt admin cash-out + the
+- **`emissions`** — a known-broken Stellar route is causing every
+  admin emission to permanently fail; halt admin emissions + the
   compensation endpoint until the rail is fixed.
 
 ## Severity
@@ -49,8 +49,8 @@ fly secrets set LOOP_KILL_ORDERS=true -a loopfinance-api
 # Block new sign-ins (existing sessions keep working via /refresh)
 fly secrets set LOOP_KILL_AUTH=true -a loopfinance-api
 
-# Block admin withdrawals + compensation endpoint
-fly secrets set LOOP_KILL_WITHDRAWALS=true -a loopfinance-api
+# Block admin emissions + compensation endpoint
+fly secrets set LOOP_KILL_EMISSIONS=true -a loopfinance-api
 ```
 
 The killed surface returns:
@@ -85,7 +85,7 @@ doesn't show stale flags.
 `LOOP_WORKERS_ENABLED=false` is the existing kill switch for the
 on-chain payout worker (ADR 016) — separate from the user-facing
 endpoints above. Flip it independently if you need to halt Stellar
-submission while keeping new orders / withdrawals queueable. Verify the
+submission while keeping new orders / emissions queueable. Verify the
 current setting with `fly ssh console -a loopfinance-api -C 'printenv LOOP_WORKERS_ENABLED'`
 or the secret manager you use for the app; `/health` does not currently
 echo worker-enabled flags.

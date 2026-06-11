@@ -23,7 +23,7 @@ process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
 process.env['LOOP_JWT_SIGNING_KEY'] ??= 'integration-test-loop-jwt-signing-key-32-chars-min';
 
 // ADR-028 / A4-063: admin step-up signing key. The destructive admin
-// endpoints (credit-adjust, withdrawals, payout-retry) now require a
+// endpoints (credit-adjust, emissions, payout-retry) now require a
 // fresh `X-Admin-Step-Up` JWT; without the key configured they return
 // 503 STEP_UP_UNAVAILABLE. Pin a separate fixture (mirrors the prod
 // posture: distinct from LOOP_JWT_SIGNING_KEY) so the integration

@@ -5,13 +5,13 @@ describe('isKilled — A2-1907 runtime kill switches', () => {
   afterEach(() => {
     delete process.env.LOOP_KILL_ORDERS;
     delete process.env.LOOP_KILL_AUTH;
-    delete process.env.LOOP_KILL_WITHDRAWALS;
+    delete process.env.LOOP_KILL_EMISSIONS;
   });
 
   it('returns false when env var is unset (fail-open)', () => {
     expect(isKilled('orders')).toBe(false);
     expect(isKilled('auth')).toBe(false);
-    expect(isKilled('withdrawals')).toBe(false);
+    expect(isKilled('emissions')).toBe(false);
   });
 
   it('returns true on each accepted truthy value, case-insensitive', () => {
@@ -52,6 +52,6 @@ describe('isKilled — A2-1907 runtime kill switches', () => {
     process.env.LOOP_KILL_AUTH = 'true';
     expect(isKilled('auth')).toBe(true);
     expect(isKilled('orders')).toBe(false);
-    expect(isKilled('withdrawals')).toBe(false);
+    expect(isKilled('emissions')).toBe(false);
   });
 });
