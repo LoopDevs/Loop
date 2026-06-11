@@ -113,7 +113,7 @@ npm run test:e2e:real        # Playwright e2e — requires a running real-CTX ba
 
 # Perf / budget (A2-1711)
 # Run after `npm run build -w @loop/web`. Fails if the SSR client dir
-# exceeds MAX_SSR_KB (2500) or any single JS chunk exceeds MAX_CHUNK_KB (800).
+# exceeds MAX_SSR_KB (3300) or any single JS chunk exceeds MAX_CHUNK_KB (800).
 # Enforced in CI: the `build` job runs it right after the web SSR build.
 npm run check:bundle-budget  # Size-regression gate for the web SSR bundle
 

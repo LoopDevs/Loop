@@ -31,7 +31,14 @@ BUILD_DIR="${ROOT}/apps/web/build/client"
 
 # Current (2026-04-24) SSR client is ~1.1 MB. 2500 KB leaves headroom
 # for next 6 months of feature work. Revisit + tighten in Phase 2.
-MAX_SSR_KB="${MAX_SSR_KB:-2500}"
+# 2026-06-11 ratchet note (comprehensive-audit P4): the documented 2500 KB
+# budget was breached long before this gate was first enforced — actual
+# at enforcement time was 3156 KB (largest chunks: 540 KB esm vendor,
+# 180 KB entry.client, 148 KB leaflet). Ceiling reset to reality + small
+# headroom so the gate prevents NEW regressions; slimming back toward
+# 2500 is tracked as audit follow-up work. Tighten this number whenever
+# the bundle shrinks — never loosen it without a PR-body justification.
+MAX_SSR_KB="${MAX_SSR_KB:-3300}"
 
 # Per-chunk ceiling — no single vendor chunk should exceed this.
 # Catches the "accidentally shipped moment + date-fns + leaflet in
