@@ -13,9 +13,9 @@ export {
   notifyCashbackCredited,
 } from './discord/orders.js';
 
-// Monitoring-channel notifiers (12 functions covering health,
-// payouts, asset drift, stuck-row sweepers, upstream contract,
-// circuit breaker — plus 2 dedup-state test seams) live in
+// Monitoring-channel notifiers (covering health, payouts, asset
+// drift, stuck-row sweepers, redemption backfill, upstream contract,
+// circuit breaker — plus dedup-state test seams) live in
 // `./discord/monitoring.ts`. Re-exported here so existing call
 // sites keep working without re-targeting.
 export {
@@ -31,6 +31,7 @@ export {
   notifyStuckProcurementSwept,
   notifyPaymentWatcherStuck,
   notifyStuckPayouts,
+  notifyRedemptionBackfillExhausted,
   notifyCtxSchemaDrift,
   notifyOperatorPoolExhausted,
   notifyCircuitBreaker,

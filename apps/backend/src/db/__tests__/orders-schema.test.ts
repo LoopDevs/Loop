@@ -1,10 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
 import {
   ORDER_STATES,
   ORDER_PAYMENT_METHODS,
   type OrderState,
   type OrderPaymentMethod,
+  type orders,
 } from '../schema.js';
+
+type OrderRow = typeof orders.$inferSelect;
+type OrderInsert = typeof orders.$inferInsert;
 
 /**
  * The `orders` table's `state` column has a `CHECK` constraint listing
@@ -45,5 +49,29 @@ describe('ORDER_PAYMENT_METHODS', () => {
   it('loop_asset is a valid value (ADR 015 LOOP-branded payment)', () => {
     const sample: OrderPaymentMethod = 'loop_asset';
     expect(ORDER_PAYMENT_METHODS).toContain(sample);
+  });
+});
+
+/**
+ * Migration 0034 (redemption-backfill bookkeeping): the Drizzle
+ * mirror must keep `redemption_backfill_attempts` NOT NULL DEFAULT 0
+ * and `redemption_backfill_last_attempt_at` nullable, or the sweeper
+ * (orders/redemption-backfill.ts) compiles against a contract
+ * Postgres doesn't enforce.
+ */
+describe('orders redemption-backfill columns (migration 0034)', () => {
+  it('attempts is a non-null number on the row type', () => {
+    expectTypeOf<OrderRow['redemptionBackfillAttempts']>().toEqualTypeOf<number>();
+  });
+
+  it('last_attempt_at is nullable on the row type', () => {
+    expectTypeOf<OrderRow['redemptionBackfillLastAttemptAt']>().toEqualTypeOf<Date | null>();
+  });
+
+  it('both columns are optional on insert (DEFAULT 0 / NULL)', () => {
+    expectTypeOf<OrderInsert['redemptionBackfillAttempts']>().toEqualTypeOf<number | undefined>();
+    expectTypeOf<OrderInsert['redemptionBackfillLastAttemptAt']>().toEqualTypeOf<
+      Date | null | undefined
+    >();
   });
 });

@@ -486,6 +486,18 @@ export const orders = pgTable(
     redeemPin: text('redeem_pin'),
     redeemUrl: text('redeem_url'),
 
+    // Redemption-backfill bookkeeping (migration 0034, comprehensive
+    // audit 2026-06-11). `waitForRedemption` can exhaust its budget and
+    // the order still fulfills with all three redeem fields NULL; the
+    // redemption-backfill sweeper (orders/redemption-backfill.ts)
+    // re-runs the CTX detail fetch for such rows. `attempts` drives the
+    // exponential-ish backoff and the 10-attempt cap; `last_attempt_at`
+    // gates when the next attempt is due.
+    redemptionBackfillAttempts: integer('redemption_backfill_attempts').notNull().default(0),
+    redemptionBackfillLastAttemptAt: timestamp('redemption_backfill_last_attempt_at', {
+      withTimezone: true,
+    }),
+
     // State machine. `check` constraint below enforces the enum.
     state: text('state').notNull().default('pending_payment'),
     failureReason: text('failure_reason'),
@@ -538,6 +550,16 @@ export const orders = pgTable(
     // Ops lookup — "did operator X place this order?" — from the
     // admin pool-health surface (ADR 013).
     index('orders_ctx_operator').on(t.ctxOperatorId),
+    // Redemption-backfill sweeper poll (migration 0034): fulfilled rows
+    // that captured a ctx_order_id but no redemption payload. Partial
+    // index keeps the scan tiny — the qualifying set is empty in the
+    // happy path. The attempts cap is filtered code-side so changing
+    // the constant doesn't require an index rebuild.
+    index('orders_redemption_backfill_pending')
+      .on(t.fulfilledAt)
+      .where(
+        sql`${t.state} = 'fulfilled' AND ${t.ctxOrderId} IS NOT NULL AND ${t.redeemCode} IS NULL AND ${t.redeemPin} IS NULL AND ${t.redeemUrl} IS NULL`,
+      ),
     check(
       'orders_state_known',
       sql`${t.state} IN ('pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired')`,

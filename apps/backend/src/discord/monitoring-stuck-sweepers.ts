@@ -113,6 +113,57 @@ export function notifyPaymentWatcherStuck(args: {
   });
 }
 
+/**
+ * Redemption-backfill exhaustion (comprehensive audit 2026-06-11
+ * §redemption follow-up): a `fulfilled` order has had its CTX
+ * gift-card detail re-fetched `attempts` times by the backfill
+ * sweeper and STILL carries no redeem code / PIN / URL. The user
+ * paid and the order fulfilled, but there is nothing to show on the
+ * "Ready" screen — ops must reconcile against CTX support with the
+ * supplier-side order id.
+ *
+ * Per-row (not aggregated) for the same reason as
+ * `notifyStuckProcurementSwept`: exhaustion is rare and each row
+ * needs its own CTX-side investigation. Loop-side ids follow the
+ * A2-1314 last-8 convention; `ctxOrderId` is emitted in full because
+ * it is the supplier's id (not Loop PII) and is exactly what the CTX
+ * support ticket needs.
+ */
+export function notifyRedemptionBackfillExhausted(args: {
+  orderId: string;
+  userId: string;
+  merchantId: string;
+  ctxOrderId: string;
+  attempts: number;
+  fulfilledAtMs: number | null;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🔴 Redemption Backfill Exhausted',
+    description: truncate(
+      `A fulfilled order still has no redemption payload after ${args.attempts} backfill attempts. The user paid and CTX shows the order, but GET /gift-cards/:id keeps returning empty redemption fields. Open a CTX support ticket with the CTX order id below — see runbook redemption-backfill-exhausted.md.`,
+      DESCRIPTION_MAX,
+    ),
+    color: RED,
+    fields: [
+      { name: 'Order', value: `\`${args.orderId.slice(-8)}\``, inline: true },
+      { name: 'User', value: `\`${args.userId.slice(-8)}\``, inline: true },
+      { name: 'Merchant', value: escapeMarkdown(args.merchantId), inline: true },
+      {
+        name: 'CTX order',
+        value: truncate(`\`${escapeMarkdown(args.ctxOrderId)}\``, FIELD_VALUE_MAX),
+        inline: false,
+      },
+      { name: 'Attempts', value: String(args.attempts), inline: true },
+      {
+        name: 'Fulfilled at',
+        value:
+          args.fulfilledAtMs === null ? '_unknown_' : new Date(args.fulfilledAtMs).toISOString(),
+        inline: true,
+      },
+    ],
+  });
+}
+
 export function notifyStuckPayouts(args: {
   rowCount: number;
   thresholdMinutes: number;
