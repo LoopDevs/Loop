@@ -57,6 +57,76 @@ export function notifyHealthChange(status: 'healthy' | 'degraded', details: stri
 }
 
 /**
+ * Notify: the payment watcher skipped an incoming deposit for a
+ * reason ops should look at immediately (A4-110 missing credit row,
+ * or an unexpected processing error). Transient skips
+ * (amount_insufficient during an oracle blip, asset_mismatch user
+ * error) retry quietly under the skip-table budget and only page on
+ * abandonment. Fired once on first record — the upsert keyed on the
+ * Horizon payment id keeps retries from re-paging.
+ */
+export function notifyDepositSkipRecorded(args: {
+  paymentId: string;
+  orderId: string | null;
+  reason: string;
+  detail: string | null;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🟠 Deposit Skipped — needs investigation',
+    color: ORANGE,
+    fields: [
+      { name: 'Reason', value: `\`${escapeMarkdown(args.reason)}\``, inline: true },
+      { name: 'Payment', value: `\`${args.paymentId.slice(-8)}\``, inline: true },
+      {
+        name: 'Order',
+        value: args.orderId === null ? '_none_' : `\`${args.orderId.slice(-8)}\``,
+        inline: true,
+      },
+      ...(args.detail !== null
+        ? [
+            {
+              name: 'Detail',
+              value: truncate(escapeMarkdown(args.detail), FIELD_VALUE_MAX),
+              inline: false,
+            },
+          ]
+        : []),
+    ],
+  });
+}
+
+/**
+ * Notify: a skipped deposit exhausted its retry budget or its order
+ * left `pending_payment` without it — the user's funds sit in the
+ * deposit account with no order to credit. Always pages: this is
+ * the "user paid and got nothing" state that needs a manual refund
+ * or recovery decision.
+ */
+export function notifyDepositSkipAbandoned(args: {
+  paymentId: string;
+  orderId: string | null;
+  reason: string;
+  attempts: number;
+  note: string;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🔴 Skipped Deposit Abandoned — funds need manual reconciliation',
+    color: RED,
+    fields: [
+      { name: 'Reason', value: `\`${escapeMarkdown(args.reason)}\``, inline: true },
+      { name: 'Attempts', value: String(args.attempts), inline: true },
+      { name: 'Payment', value: `\`${args.paymentId.slice(-8)}\``, inline: true },
+      {
+        name: 'Order',
+        value: args.orderId === null ? '_none_' : `\`${args.orderId.slice(-8)}\``,
+        inline: true,
+      },
+      { name: 'Note', value: truncate(escapeMarkdown(args.note), FIELD_VALUE_MAX), inline: false },
+    ],
+  });
+}
+
+/**
  * Notify: an outbound Stellar payout has transitioned to `failed`
  * (ADR 015/016). Pages the monitoring channel so ops sees it
  * real-time rather than discovering failed rows on the next

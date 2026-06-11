@@ -232,6 +232,13 @@
       "when": 1780100000000,
       "tag": "0032_user_favorite_merchants",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1780100100000,
+      "tag": "0033_payment_watcher_skips",
+      "breakpoints": true
     }
   ]
 }

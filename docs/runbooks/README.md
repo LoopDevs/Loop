@@ -25,6 +25,7 @@ split it into a sub-page rather than padding.
 | **Treasury floor**    | [usdc-below-floor.md](./usdc-below-floor.md) — `notifyUsdcBelowFloor` reserve-floor alert                                                                            |
 | **Operator pool**     | [operator-pool-exhausted.md](./operator-pool-exhausted.md) — `notifyOperatorPoolExhausted` — every CTX operator's circuit OPEN simultaneously (A2-1917)              |
 | **Watcher liveness**  | [payment-watcher-stuck.md](./payment-watcher-stuck.md) — `notifyPaymentWatcherStuck` cursor-stall alert                                                              |
+|                       | [deposit-skip-abandoned.md](./deposit-skip-abandoned.md) — `notifyDepositSkipAbandoned` — skipped deposit gave up retrying; user funds need manual reconciliation    |
 | **Procurement sweep** | [stuck-procurement-swept.md](./stuck-procurement-swept.md) — `notifyStuckProcurementSwept` per-row reconcile-before-refund alert                                     |
 | **Auth**              | [jwt-key-rotation.md](./jwt-key-rotation.md) — rotating `LOOP_JWT_SIGNING_KEY` without invalidating sessions                                                         |
 | **Stellar signer**    | [stellar-operator-rotation.md](./stellar-operator-rotation.md) — quarterly + emergency rotation of `LOOP_STELLAR_OPERATOR_SECRET` (A2-1909)                          |

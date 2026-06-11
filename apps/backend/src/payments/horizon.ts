@@ -81,6 +81,11 @@ const HorizonPayment = z.object({
 
 export type HorizonPayment = z.infer<typeof HorizonPayment>;
 
+// Exported for the skipped-deposit retry sweep
+// (`./skipped-payments.ts`), which re-parses jsonb snapshots of
+// payment records through the same schema before replaying them.
+export const HorizonPaymentSchema = HorizonPayment;
+
 export const HorizonPaymentsResponse = z.object({
   _embedded: z.object({
     records: z.array(HorizonPayment),
