@@ -269,6 +269,14 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # production + Fly staging after LOOP_STELLAR_OPERATOR_SECRET is wired.
 # LOOP_WORKERS_ENABLED=true
 
+# ADR 030 Phase B: provider-agnostic embedded-wallet layer. '' (default)
+# → OFF: getWalletProvider() returns null. 'privy' → Privy REST adapter
+# (fetch + Zod, no SDK dep); PRIVY_APP_ID + PRIVY_APP_SECRET then
+# required (parseEnv cross-field check). Substrate only in Phase B.
+# LOOP_WALLET_PROVIDER=
+# PRIVY_APP_ID=<app-id>
+# PRIVY_APP_SECRET=<app-secret>        — never logged (pino redaction)
+
 # A2-1907 runtime kill switches (read live from process.env, no
 # redeploy). Combined orders switch plus per-path overrides — a set
 # per-path var wins for its path; unset falls back to the combined.
