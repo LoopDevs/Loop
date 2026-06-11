@@ -18,6 +18,9 @@ export default [
       '**/build/**',
       '**/dist/**',
       '**/coverage/**',
+      // Claude Code agent worktrees — full repo copies; linting them
+      // multiplies the file set ~Nx and OOMs eslint.
+      '.claude/**',
       '**/.react-router/**',
       '**/packages/shared/src/proto/**',
       '**/*.generated.ts',
