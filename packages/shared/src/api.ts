@@ -167,6 +167,17 @@ export const ApiErrorCode = {
   // user-input problem. Distinct from SERVICE_UNAVAILABLE (a genuine FX
   // feed outage for a currency we DO support).
   CURRENCY_NOT_AVAILABLE: 'CURRENCY_NOT_AVAILABLE',
+  // ADR 030 Phase C — POST /api/orders/loop/:id/pay-with-balance.
+  // ORDER_NOT_PAYABLE: the order isn't a loop_asset order awaiting
+  // payment (wrong payment method, or a terminal failed/expired
+  // state — already-paid states replay 200 instead).
+  ORDER_NOT_PAYABLE: 'ORDER_NOT_PAYABLE',
+  // A concurrent pay-with-balance call for the same order is still
+  // in flight (in-process fence). Retry after the first resolves.
+  PAYMENT_IN_FLIGHT: 'PAYMENT_IN_FLIGHT',
+  // The caller's embedded wallet isn't provisioned + activated yet,
+  // so there is no on-chain balance to pay from.
+  WALLET_NOT_ACTIVATED: 'WALLET_NOT_ACTIVATED',
 } as const;
 
 export type ApiErrorCodeValue = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];

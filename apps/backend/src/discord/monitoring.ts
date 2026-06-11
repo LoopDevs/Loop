@@ -482,6 +482,7 @@ export {
   notifyPaymentWatcherStuck,
   notifyStuckPayouts,
   notifyRedemptionBackfillExhausted,
+  notifyWalletProvisioningStuck,
 } from './monitoring-stuck-sweepers.js';
 
 // `notifyCtxSchemaDrift` (A2-1915) and its per-surface dedup state

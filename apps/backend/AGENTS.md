@@ -50,6 +50,7 @@ src/
 │   ├── transitions.ts  ← markOrderPaid (loop_asset: mirror debit + issuer-return burn enqueue, ADR 036) / markOrderProcuring / markOrderFulfilled (writes ledger + pending_payouts inside one txn)
 │   ├── procurement.ts  ← paid → procuring → fulfilled worker (USDC-default, XLM-floor fallback, ADR 015)
 │   ├── procurement-redemption.ts ← CTX gift-card detail fetch + waitForRedemption (SSE-first, polling fallback)
+│   ├── pay-with-balance.ts ← POST /api/orders/loop/:id/pay-with-balance — embedded-wallet LOOP redemption: user-signed inner payment + operator fee-bump; watcher settles downstream (ADR 030 C3 / ADR 036)
 │   ├── redemption-backfill.ts ← Sweeper re-fetching redemption payloads for fulfilled orders that persisted nulls (migration 0034; pages ops after 10 attempts → runbooks/redemption-backfill-exhausted.md)
 │   └── redeem-crypto.ts ← AES-256-GCM envelope for redeem_code/redeem_pin at rest (CF-25; LOOP_REDEEM_ENCRYPTION_KEY; encrypt-on-write, decrypt-on-read, legacy-plaintext passthrough)
 ├── payments/
@@ -60,15 +61,20 @@ src/
 │   ├── price-feed.ts   ← XLM + USDC stroops-per-cent + convertMinorUnits FX
 │   ├── payout-submit.ts ← @stellar/stellar-sdk sign+submit wrapper with classified error kinds (ADR 016)
 │   └── payout-worker.ts ← Outbound LOOP-asset payout worker with memo-idempotent retry (ADR 016)
-├── wallet/             ← ADR 030 Phase B — provider-agnostic embedded wallet.
-│   │                     OFF by default (LOOP_WALLET_PROVIDER='') ; substrate
-│   │                     only — nothing user-facing consumes it until Phase C.
+├── wallet/             ← ADR 030 — provider-agnostic embedded wallet.
+│   │                     OFF by default (LOOP_WALLET_PROVIDER='').
 │   ├── provider.ts     ← WalletProvider interface + getWalletProvider() env factory
 │   │                     + WalletProviderError (transient/terminal taxonomy)
 │   ├── privy.ts        ← Privy REST adapter — plain fetch + Zod (no SDK dep);
 │   │                     query-before-create idempotency on external_id
-│   └── user-signer.ts  ← Verify + attach user-wallet ed25519 signature, then
-│                         submit via payout-submit's classify path
+│   ├── user-signer.ts  ← Verify + attach user-wallet ed25519 signature, then
+│   │                     submit via payout-submit's classify path
+│   └── provisioning.ts ← Phase C1 — none→wallet_created→activated state machine
+│                         (migration 0037): createWallet + ONE operator-sponsored
+│                         activation tx (createAccount 0 XLM + LOOP trustlines,
+│                         user-signed via the bridge); fire-and-forget signup hook
+│                         + 60s backoff sweeper (pages ops after 10 attempts →
+│                         runbooks/wallet-provisioning-stuck.md)
 ├── merchants/
 │   ├── sync.ts         ← Background sync from upstream /merchants
 │   └── handler.ts      ← GET /api/merchants endpoints (from in-memory cache)
@@ -77,6 +83,7 @@ src/
 │   ├── algorithm.ts    ← Grid-based clustering (pure function, no I/O)
 │   └── handler.ts      ← GET /api/clusters (protobuf + JSON)
 ├── users/handler.ts    ← GET /me + POST /me/home-currency + PUT /me/stellar-address (ADR 015)
+├── users/wallet-handler.ts ← GET /api/me/wallet — embedded-wallet balances, never-500 last-known-good (ADR 030 C4)
 ├── db/                 ← Drizzle schema + migrations + pool client (ADR 012)
 └── images/proxy.ts     ← Image resize proxy with LRU cache + SSRF protection
 ```

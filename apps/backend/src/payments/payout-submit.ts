@@ -20,6 +20,7 @@ import {
   Operation,
   TransactionBuilder,
   BASE_FEE,
+  type FeeBumpTransaction,
   type Transaction,
 } from '@stellar/stellar-sdk';
 
@@ -341,8 +342,13 @@ export async function submitPayout(args: PayoutSubmitArgs): Promise<PayoutSubmit
 export interface PreSignedSubmitArgs {
   /** Horizon base URL. Pinned per-deployment via env. */
   horizonUrl: string;
-  /** Fully built AND fully signed transaction. */
-  tx: Transaction;
+  /**
+   * Fully built AND fully signed transaction. Fee-bump envelopes
+   * (ADR 030 Phase C3 — operator pays the fee on a user-signed inner
+   * tx) submit through the same path; Horizon's error taxonomy is
+   * identical for both.
+   */
+  tx: Transaction | FeeBumpTransaction;
 }
 
 /**

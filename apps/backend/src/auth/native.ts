@@ -9,6 +9,7 @@
 import type { Context } from 'hono';
 import { logger } from '../logger.js';
 import { findLiveOtp, incrementOtpAttempts, markOtpConsumed } from './otps.js';
+import { enqueueWalletProvisioning } from '../wallet/provisioning.js';
 import { normalizeEmail, NonAsciiEmailError } from './normalize-email.js';
 import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
 import { findOrCreateUserByEmail } from '../db/users.js';
@@ -88,6 +89,11 @@ export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
     await markOtpConsumed(hit.id);
     const user = await findOrCreateUserByEmail(email);
     const pair = await issueTokenPair({ id: user.id, email: user.email });
+    // ADR 030 Phase C1 — fire-and-forget embedded-wallet
+    // provisioning. Synchronous + never throws; signup must not
+    // block on Stellar or the wallet provider. Failures are picked
+    // up by the provisioning sweeper with backoff.
+    enqueueWalletProvisioning(user.id);
     // A2-557: strip the internal `refreshJti` field; wire contract
     // stays `{ accessToken, refreshToken }`.
     return c.json({ accessToken: pair.accessToken, refreshToken: pair.refreshToken });

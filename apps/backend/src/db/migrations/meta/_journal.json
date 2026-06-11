@@ -281,6 +281,13 @@
       "when": 1780100700000,
       "tag": "0039_users_wallet_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1780100800000,
+      "tag": "0040_users_wallet_provisioning",
+      "breakpoints": true
     }
   ]
 }

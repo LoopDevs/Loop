@@ -912,7 +912,7 @@ describe('runPayoutTick', () => {
     expect(r.failed).toBe(1);
   });
 
-  // ─── CF-15: LOOP_KILL_WITHDRAWALS gates the worker ──────────────────
+  // ─── CF-15: LOOP_KILL_EMISSIONS gates the worker ──────────────────
 
   it('CF-15: withdrawals-kill engaged → withdrawal rows skipped, order_cashback still drains', async () => {
     killMock.isKilled.mockImplementation((s: string) => s === 'emissions');
