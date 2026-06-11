@@ -41,7 +41,17 @@
 
 **Static export constraint**: React Router loaders cannot run server-side in static export mode. Loaders may only handle layout structure and `<meta>` tags. All data fetching is client-side via TanStack Query.
 
-**Path-based locale routing (ADR 034)**: the public catalogue is also served under a `/:country/:lang` prefix (e.g. `/gb/en`, `/de/en`); a bare `/` issues a server-side 302 to the geo-resolved country (`/<country>/en`), while bots get the `x-default` home rendered at `/`. The merchant filter and price-display currency read the URL country (via `useLocale()` + `merchantInCountry()`), not a client store — which is what removes the "US flash". Two SSR loaders fetch server-side as the **documented exceptions** to the pure-API-client rule: `routes/sitemap.tsx` (XML for crawlers, with per-country `hreflang`) and `routes/home-geo-redirect.tsx` (the `/` geo-redirect; precedence cookie > geo-IP > default). The legacy unprefixed routes still resolve during the migration; internal `<Link>`s on the localized surface go through `LocaleLink`.
+---
+
+## Locale routing (ADR 034 / ADR 035)
+
+**Path-based locale routing (ADR 034)**: the public catalogue is served under a `/:country/:lang` URL prefix (e.g. `/gb/en`, `/de/en`, `/ae/en`); a bare `/` issues a server-side 302 to the geo-resolved country (`/<country>/en`), while bots get the `x-default` home rendered at `/`. The merchant filter and price-display currency read the URL country (via `useLocale()` + `merchantInCountry()`), not a client store — which is what removes the "US flash". Two SSR loaders fetch server-side as the **documented exceptions** to the pure-API-client rule: `routes/sitemap.tsx` (XML for crawlers, with per-country `hreflang`) and `routes/home-geo-redirect.tsx` (the `/` geo-redirect; precedence cookie > geo-IP via `/api/public/geo` > default). The legacy unprefixed routes still resolve during the migration; internal `<Link>`s on the localized surface go through `LocaleLink`.
+
+**`packages/shared/src/countries.ts` is the single source of truth** for the country model. Adding a `Country` row (plus its currency in `SUPPORTED_CURRENCIES`) is the whole change needed to surface a market: the locale layout, geo-redirect, country selector, per-country SEO/hreflang sitemap, merchant filter, and the `money.ts` price formatter (generic `Intl.NumberFormat`) all derive from that list. It supersedes the retired four-region model in `regions.ts` (ADR 034 phase 5).
+
+**Merchant country filtering**: `merchantInCountry()` matches merchants to a country by display currency (a EUR merchant surfaces on every Eurozone country page), so thin per-country catalogues still populate.
+
+**Extended markets (ADR 035)**: the June-2026 supplier program took the catalogue to 33 currencies. Only **strong** markets — currencies with **≥ 15 enabled merchants** — get a country row: AE/IN/SA/AU/MX joined US/GB/CA + the Eurozone as **display-only** countries (price display + XLM ordering, no LOOP cashback band — the CAD precedent, since no AEDLOOP/INRLOOP/… asset exists). The ~20 thinner currencies stay catalogue-only (API-orderable but unrouted) until they cross the threshold; promotion is a one-line `countries.ts` addition (review cadence tracked in `docs/roadmap.md` §Orphaned-work register). Order-path support for extended-market currencies (currency CHECK constraints + loop-handler) is in progress per `docs/comprehensive-audit-2026-06-11.md` Part IV, Phase 3.
 
 ---
 

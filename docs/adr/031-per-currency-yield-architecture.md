@@ -3,7 +3,7 @@
 Status: Proposed
 Date: 2026-05-05 (rewritten across six iterations mid-session — see Decision history)
 Supersedes: ADR 015 §"Defindex deposit automation — currently manual ops top-up" — replaced by Loop-curated DeFindex vaults backing LOOPUSD/LOOPEUR + treasury-managed yield for GBPLOOP.
-Amends: ADR 015 §"Loop issues three branded Stellar assets" — three Loop-branded yield assets retained, with LOOP-prefix naming. LOOPUSD and LOOPEUR are DeFindex vault shares (Soroban) where Loop is the curator. GBPLOOP is a Stellar classic asset, 1:1 backed, since no Stellar GBP yield primitive exists. GBPLOOP renamed to GBPLOOP for naming consistency; never issued in production.
+Amends: ADR 015 §"Loop issues three branded Stellar assets" — three Loop-branded yield assets retained, with LOOP-prefix naming. LOOPUSD and LOOPEUR are DeFindex vault shares (Soroban) where Loop is the curator. GBPLOOP is a Stellar classic asset, 1:1 backed, since no Stellar GBP yield primitive exists. GBPLOOP retains its existing name — the v6 LOOPGBP rename was dropped in v7. None of the three assets has been issued in production.
 Related: ADR 015 (stablecoin topology — amended), ADR 016 (operator-signed payouts), ADR 030 (Privy wallet)
 
 ## Decision history (intra-session, 2026-05-05)
@@ -199,9 +199,22 @@ All three currencies surface the same shape:
 6. ~~**GBP custodian / banking partner.**~~ **Resolved 2026-05-05**: Revolut Business. Yield product for backing reserves (Flexible Cash Funds vs gilts vs other) and API integration for Faster Payments off-ramp on user withdraws still need scoping, but the partner choice is locked.
 7. **Multi-jurisdictional regulatory review (bundled).** LOOPUSD/LOOPEUR vault curation + GBPLOOP issuance + Privy custody (ADR 030). 4–6 weeks of crypto-fintech counsel.
 8. **Performance fee cap setting in vault contract.** 75% proposed; verify regulators / DeFindex template caps allow.
-9. **Past-30-day APY computation source.** On-chain share-price history for vaults (compute from `share_price(now) / share_price(30d_ago) − 1` annualised). For GBPLOOP: off-chain ledger of accrual rate history. Frontend reads via API endpoint exposing both.
+9. **Past-30-day APY computation source.** On-chain share-price history for vaults (compute from `share_price(now) / share_price(30d_ago) − 1` annualised). For GBPLOOP: on-chain mint history (per §rate-setting above; the `gbploop_interest_payments` table mirrors it for fast reads). Frontend reads via API endpoint exposing both.
 10. **Hot-float sizing per currency.** 5–10% target — pin once historical withdraw volume data exists.
-11. **Partial-redeem proportional accrual (GBPLOOP).** When user withdraws £50 of £100 GBPLOOP, redeem proportional accrued interest. Confirm cron + redemption code handles partial cleanly.
+11. **Partial-withdraw × nightly-mint interaction (GBPLOOP).** Under v7 there is no accrued-interest ledger — a withdraw just redeems GBPLOOP at face (any interest already landed on-chain via prior nightly mints). Residual check: confirm the nightly cron reads post-withdraw on-chain balances so an intra-day withdraw doesn't earn that night's interest on the withdrawn amount.
+
+## Gate for Accepted
+
+This ADR stays **Proposed** — and no implementation work (vault contract, mint cron, payout-builder changes) starts — until every blocking condition below has a **recorded** answer:
+
+1. **Privy Soroban custody DD passes** (Open questions 1–2; shared critical-path blocker with ADR 030). Privy must custody the LOOPUSD/LOOPEUR vault-share tokens, display their balances, and policy-gate programmatic `vault.deposit` / `vault.redeem` signing without per-tx prompts. If Privy fails, the gate re-runs against the dfns fallback (ADR 030) or this design reverts to the v5-style classic-asset wrapper noted in Open question 1.
+2. **DeFindex template / fork lineage chosen** (Open question 3). Audited template fork vs from-scratch determines the audit scope below.
+3. **Vault contract audit scheduled** (§Negative). $30–80k budget, 4–8 weeks lead time, applied once for both vaults. Accepted requires the audit slot to be **booked** (the lead time is uncompressible); mainnet (Tranche 3) requires it complete.
+4. **Blend strategy DD recorded** (Open questions 4–5). Depth, audit posture, and historical worst-case redemption for the Blend USDC and EURC pools.
+5. **Counsel sign-off scheduled** (Open question 7; bundled with ADR 030's custody review and GBPLOOP EMI framing). 4–6 weeks of crypto-fintech counsel; Accepted requires the engagement booked, mainnet requires the review complete.
+6. **Performance-fee cap validated** (Open question 8). The proposed 75% contract cap is allowed by the DeFindex template and survives the counsel review.
+
+As of 2026-06-11 none of these is scheduled; the Privy DD call (the cheapest unblock in the chain) is the first move.
 
 ## Migration from ADR 015
 
@@ -217,19 +230,19 @@ ADR 015 should be marked Amended pointing at this ADR.
 
 ## File map
 
-| Change                           | File / surface                                                                                                                                                               |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Asset rename GBPLOOP → GBPLOOP   | `apps/backend/src/credits/payout-asset.ts`, all references in `credits/`, `orders/`, schema CHECK constraints, web copy                                                      |
-| Vault contract                   | `contracts/loop-vault/` (new Soroban project) — fork of DeFindex curator template, parameterised per currency for LOOPUSD and LOOPEUR                                        |
-| Vault deployment + admin tooling | `apps/backend/src/treasury/vault-admin.ts` (new) — propose/apply fee changes, emergency pause                                                                                |
-| Cashback emission via vault      | `apps/backend/src/credits/payout-builder.ts` — extend to deposit-into-vault for USD/EUR (mints vault shares to user); existing classic-asset emit for GBP                    |
-| Withdraw / spend redemption      | `apps/backend/src/credits/payout-builder.ts` — vault redeem for LOOPUSD/LOOPEUR, classic transfer + off-chain accrual for GBPLOOP                                            |
-| Treasury yield investment (GBP)  | `apps/backend/src/treasury/gbp-investment.ts` (new) — operator-side; not user-facing                                                                                         |
-| Hot-float bookkeeping            | `apps/backend/src/treasury/hot-float.ts` (new) — per-currency float, low-water alerts                                                                                        |
-| Off-chain APY accrual (GBP)      | `apps/backend/src/credits/interest-accrual.ts` (new) — daily cron updating `accrued_interest_minor` in `user_credits` for GBP                                                |
-| Schema: accrued-interest column  | Migration adding `accrued_interest_minor` to `user_credits`                                                                                                                  |
-| Past-30-day APY computation      | `apps/backend/src/credits/apy-snapshot.ts` (new) — vault share-price history (USD/EUR) + accrual-rate history (GBP); exposed via API endpoint                                |
-| Balance display                  | `apps/web/app/components/features/cashback/CashbackBalanceCard.tsx` — read principal × share-price (USD/EUR) or principal + accrued (GBP); show past-30-day APY + disclaimer |
-| Yield disclosure surfaces        | `apps/web/app/routes/settings.cashback.tsx` + onboarding — past 30-day APY display + "no guarantee of future performance" disclaimer. No mention of Blend, DeFindex, vaults. |
-| Privy SDK Soroban integration    | `apps/web/app/services/privy.ts` — pending Privy Soroban support verification                                                                                                |
-| Operator runbook                 | `docs/runbooks/loop-asset-operations.md` (new) — daily/weekly ops for vaults + GBPLOOP issuance + treasury investment                                                        |
+| Change                                                                                                                          | File / surface                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Asset retirement USDLOOP / EURLOOP → LOOPUSD / LOOPEUR vault shares (GBPLOOP name unchanged — v7 dropped the v6 LOOPGBP rename) | `apps/backend/src/credits/payout-asset.ts`, all references in `credits/`, `orders/`, schema CHECK constraints, web copy                                                                                             |
+| Vault contract                                                                                                                  | `contracts/loop-vault/` (new Soroban project) — fork of DeFindex curator template, parameterised per currency for LOOPUSD and LOOPEUR                                                                               |
+| Vault deployment + admin tooling                                                                                                | `apps/backend/src/treasury/vault-admin.ts` (new) — propose/apply fee changes, emergency pause                                                                                                                       |
+| Cashback emission via vault                                                                                                     | `apps/backend/src/credits/payout-builder.ts` — extend to deposit-into-vault for USD/EUR (mints vault shares to user); existing classic-asset emit for GBP                                                           |
+| Withdraw / spend redemption                                                                                                     | `apps/backend/src/credits/payout-builder.ts` — vault redeem for LOOPUSD/LOOPEUR; classic GBPLOOP transfer at face (interest already on-chain via nightly mints — no accrual settlement step)                        |
+| Treasury yield investment (GBP)                                                                                                 | `apps/backend/src/treasury/gbp-investment.ts` (new) — operator-side; not user-facing                                                                                                                                |
+| Hot-float bookkeeping                                                                                                           | `apps/backend/src/treasury/hot-float.ts` (new) — per-currency float, low-water alerts                                                                                                                               |
+| Nightly GBPLOOP interest mint                                                                                                   | `apps/backend/src/credits/interest-mint.ts` (new) — nightly cron minting `balance × (3% / 365)` on-chain per holder; idempotent on `(user_id, payment_date)` per §runbook                                           |
+| Schema: interest-payment ledger                                                                                                 | Migration adding `gbploop_interest_payments` (`user_id`, `payment_date`, `amount_minor`, `tx_hash`; unique on `(user_id, payment_date)`)                                                                            |
+| Past-30-day APY computation                                                                                                     | `apps/backend/src/credits/apy-snapshot.ts` (new) — vault share-price history (USD/EUR) + on-chain mint history (GBP); exposed via API endpoint                                                                      |
+| Balance display                                                                                                                 | `apps/web/app/components/features/cashback/CashbackBalanceCard.tsx` — read principal × share-price (USD/EUR) or the on-chain GBPLOOP balance (GBP — nightly mints land on-chain); show past-30-day APY + disclaimer |
+| Yield disclosure surfaces                                                                                                       | `apps/web/app/routes/settings.cashback.tsx` + onboarding — past 30-day APY display + "no guarantee of future performance" disclaimer. No mention of Blend, DeFindex, vaults.                                        |
+| Privy SDK Soroban integration                                                                                                   | `apps/web/app/services/privy.ts` — pending Privy Soroban support verification                                                                                                                                       |
+| Operator runbook                                                                                                                | `docs/runbooks/loop-asset-operations.md` (new) — daily/weekly ops for vaults + GBPLOOP issuance + treasury investment                                                                                               |

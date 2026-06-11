@@ -58,6 +58,6 @@ if (keystorePropsFile.exists()) {
         "[loop] keystore.properties not found at ${keystorePropsFile.absolutePath} — " +
         "release builds will be unsigned. " +
         "Copy keystore.properties.example to keystore.properties and fill in your keystore details. " +
-        "See docs/mobile-release.md for keystore generation."
+        "See docs/deployment.md §Mobile (Release-signing wiring) for keystore generation."
     )
 }

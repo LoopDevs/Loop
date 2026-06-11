@@ -28,12 +28,12 @@ ACK in 5 min, mitigate in 15 min.
 
 ## Triage (first 5 minutes)
 
-1. **Snapshot pool state.** Hit `/admin/operators/health` or query:
-   ```sql
-   -- (operators are configured in env, not DB; check Fly secrets)
-   ```
-   Read `CTX_OPERATOR_POOL` from Fly. Each operator entry has its
-   own circuit breaker (`apps/backend/src/operator-pool.ts`).
+1. **Snapshot pool state.** Open the admin operators page
+   (`/admin/operators`, backed by `GET /api/admin/operator-stats` +
+   `GET /api/admin/operators/latency`) for per-operator volume and
+   failure signals. Operators are configured in env, not DB — read
+   `CTX_OPERATOR_POOL` from Fly secrets. Each operator entry has its
+   own circuit breaker (`apps/backend/src/ctx/operator-pool.ts`).
 2. **Identify the cause class.** Look at `Last error` in the embed,
    then check Pino log lines tagged `area: 'operator-pool'`:
    ```bash
@@ -75,7 +75,7 @@ auth flow per-operator, so all of them lose tokens at once.
 
 If only Loop is reporting "all operators down" but CTX is otherwise
 healthy (status page green, other Loop teams unaffected): the bug
-is in `operator-pool.ts` itself. Likely candidates:
+is in `apps/backend/src/ctx/operator-pool.ts` itself. Likely candidates:
 
 - Circuit-breaker state corruption (process restart usually clears)
 - A bad operator entry (malformed JSON in `CTX_OPERATOR_POOL`)
