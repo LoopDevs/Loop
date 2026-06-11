@@ -4,7 +4,7 @@
  * together as the admin-action audit trail:
  *
  *   1. **Admin write** (`notifyAdminAudit`) — generic ADR
- *      017/018 mutation log. Every credit-adjustment, withdrawal,
+ *      017/018 mutation log. Every credit-adjustment, emission,
  *      payout-retry, config-edit, etc. emits one of these
  *      AFTER the DB commit. Actor id last-8-chars only; idempotency-
  *      key first-32-chars only; reason verbatim (truncated to

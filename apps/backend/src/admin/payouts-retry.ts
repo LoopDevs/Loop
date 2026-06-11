@@ -54,7 +54,7 @@ interface PayoutRow {
   id: string;
   userId: string;
   orderId: string | null;
-  kind: 'order_cashback' | 'withdrawal';
+  kind: 'order_cashback' | 'emission' | 'burn';
   assetCode: string;
   assetIssuer: string;
   toAddress: string;

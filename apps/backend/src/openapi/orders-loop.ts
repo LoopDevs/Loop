@@ -33,6 +33,7 @@
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerOrdersLoopReadsOpenApi } from './orders-loop-reads.js';
+import { registerOrdersPayWithBalanceOpenApi } from './orders-pay-with-balance.js';
 
 /**
  * Registers the Loop-native `/api/orders/loop/*` schemas + paths
@@ -185,4 +186,8 @@ export function registerOrdersLoopOpenApi(
   // `LoopOrderListResponse` schemas. Same path-registration
   // position as the original block.
   registerOrdersLoopReadsOpenApi(registry, errorResponse);
+
+  // ADR 030 Phase C3 — one-tap "pay with Loop balance" on an
+  // existing loop_asset order. Lives in its own module.
+  registerOrdersPayWithBalanceOpenApi(registry, errorResponse);
 }

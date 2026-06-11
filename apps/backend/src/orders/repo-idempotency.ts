@@ -80,7 +80,7 @@ export async function findOrderByIdempotencyKey(
  * orders) a stranded debit. Walk the cause chain for the SQLSTATE +
  * constraint_name, matching the pattern used by
  * `credits/refunds.ts:isDuplicateRefund` and
- * `credits/withdrawals.ts:isDuplicateWithdrawal`.
+ * `credits/emissions.ts:isDuplicateEmission`.
  *
  * Re-fetches the prior order so the caller can build the replay
  * response. Returns null when the failure was something else

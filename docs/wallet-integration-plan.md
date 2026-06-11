@@ -6,12 +6,12 @@
 
 ## Phase map
 
-| Phase | Scope                                                                                                                             | Status     |
-| ----- | --------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| A     | RS256 + `kid` token signing, `/.well-known/jwks.json`, dual-verify window, rotation runbook                                       | building   |
-| B     | `WalletProvider` interface, Privy REST adapter (fetch+Zod), rawSign→decorated-signature bridge, `users.wallet_provider/wallet_id` | building   |
-| C     | Provisioning + payout targeting + one-tap redemption + balance surface                                                            | spec below |
-| D     | Nightly on-chain interest mints (midnight UTC, APR/365)                                                                           | spec below |
+| Phase | Scope                                                                                                                             | Status                                                            |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| A     | RS256 + `kid` token signing, `/.well-known/jwks.json`, dual-verify window, rotation runbook                                       | building                                                          |
+| B     | `WalletProvider` interface, Privy REST adapter (fetch+Zod), rawSign→decorated-signature bridge, `users.wallet_provider/wallet_id` | building                                                          |
+| C     | Provisioning + payout targeting + one-tap redemption + balance surface                                                            | built — `feat/wallet-phase-c-flows` (backend; web wiring pending) |
+| D     | Nightly on-chain interest mints (midnight UTC, APR/365)                                                                           | spec below                                                        |
 
 ## Phase C — flows
 

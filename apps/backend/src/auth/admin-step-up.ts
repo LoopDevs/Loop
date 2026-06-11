@@ -3,7 +3,7 @@
  *
  * Mints + verifies the short-lived (5-minute) `X-Admin-Step-Up`
  * JWT that gates destructive admin endpoints — credit-adjust,
- * withdrawals, payout retry. Sits beside `auth/tokens.ts` (which
+ * emissions, payout retry. Sits beside `auth/tokens.ts` (which
  * mints the bearer access + refresh tokens) but uses a SEPARATE
  * signing key so a `LOOP_JWT_SIGNING_KEY` compromise doesn't widen
  * to step-up.

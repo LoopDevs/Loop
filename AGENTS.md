@@ -41,11 +41,11 @@
 | `docs/adr/021-merchant-catalog-eviction-policy.md`          | Merchant-catalog eviction — admin fall-back / public drop / pin                                                                                                                                                                                                                                  |
 | `docs/adr/022-admin-drill-triplet-pattern.md`               | Fleet / per-merchant / per-user / self quartet for every metric                                                                                                                                                                                                                                  |
 | `docs/adr/023-admin-mix-axis-matrix.md`                     | Mix-axis matrix pattern for `/:scope/:id/<target>-mix` endpoints                                                                                                                                                                                                                                 |
-| `docs/adr/024-withdrawal-writer.md`                         | Admin withdrawal writer — USDLOOP debit + payout-queue insert                                                                                                                                                                                                                                    |
+| `docs/adr/024-withdrawal-writer.md`                         | Admin withdrawal writer — re-scoped to the **emission** primitive by ADR 036 (payout-queue insert, no mirror debit)                                                                                                                                                                              |
 | `docs/adr/025-llm-pr-review.md`                             | LLM-assisted PR review — what gets sent to Anthropic + why it's acceptable                                                                                                                                                                                                                       |
 | `docs/adr/026-tax-regulatory-reporting-data-model.md`       | Tax / regulatory reporting data model — Phase-1 CSV exports + Phase-2 jurisdiction tagging                                                                                                                                                                                                       |
 | `docs/adr/027-mobile-platform-security.md`                  | Mobile platform security — Phase-1 deferral of SSL pinning / App Attest / Play Integrity / jailbreak-root / binary tamper, with per-control Phase-2 triggers                                                                                                                                     |
-| `docs/adr/028-admin-step-up-auth.md`                        | Admin step-up auth design — 5-min `X-Admin-Step-Up` JWT gating credit-adjust / withdrawal / payout-retry; Phase-1 design pinned, implementation deferred                                                                                                                                         |
+| `docs/adr/028-admin-step-up-auth.md`                        | Admin step-up auth design — 5-min `X-Admin-Step-Up` JWT gating credit-adjust / emission / payout-retry; Phase-1 design pinned, implementation deferred                                                                                                                                           |
 | `docs/adr/029-repo-managed-ci-clis.md`                      | Why secret-bearing GitHub Actions workflows use lockfile-pinned repo-managed CLIs instead of live npm installs                                                                                                                                                                                   |
 | `docs/adr/030-integrated-wallet-via-privy.md`               | **Proposed** — integrated cross-platform wallet via Privy embedded wallet (with dfns fallback if Privy Soroban DD fails); supersedes ADR 015's external-link model                                                                                                                               |
 | `docs/adr/031-per-currency-yield-architecture.md`           | **Proposed (v7)** — LOOPUSD/LOOPEUR are Loop-curated DeFindex vault shares (0% mgmt + 50% perf fee); GBPLOOP is Stellar classic 1:1-backed with **nightly on-chain 3% APY mints**; past-30-day APY + "no guarantee" disclaimer; no yield-source disclosure                                       |
@@ -53,6 +53,7 @@
 | `docs/adr/033-ip-geolocation-region-selector.md`            | MaxMind GeoLite2 + `/api/public/geo` regional first-guess; superseded by ADR 034's path-based model                                                                                                                                                                                              |
 | `docs/adr/034-path-based-locale-routing.md`                 | `/:country/:lang` URLs (~28 countries: Eurozone + US/GB/CA + ADR 035); SSR geo 302 at `/`, self-canonicals + reciprocal hreflang sitemap                                                                                                                                                         |
 | `docs/adr/035-extended-supplier-currency-markets.md`        | Display countries for strong extended-currency markets (≥15 merchants): AE/IN/SA/AU/MX. Order-path support (rates-API conversion) in progress — comprehensive audit Part IV, Phase 3                                                                                                             |
+| `docs/adr/036-cashback-token-lifecycle.md`                  | Cashback-mode token lifecycle — on-chain LOOP is the authoritative balance; user_credits is the mirror; emission never debits, redemption extinguishes both halves (issuer-return burn)                                                                                                          |
 
 ---
 
@@ -239,7 +240,7 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # LOOP_JWT_SIGNING_KEY_PREVIOUS=<prior-secret-during-rotation>
 
 # Admin step-up auth (ADR 028). Absent → boot succeeds but destructive
-# admin endpoints (credit-adjust / withdrawals / payout-retry) return
+# admin endpoints (credit-adjust / emissions / payout-retry) return
 # 503 STEP_UP_UNAVAILABLE.
 # LOOP_ADMIN_STEP_UP_SIGNING_KEY=<at-least-32-char-random-secret>
 
@@ -269,10 +270,12 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # production + Fly staging after LOOP_STELLAR_OPERATOR_SECRET is wired.
 # LOOP_WORKERS_ENABLED=true
 
-# ADR 030 Phase B: provider-agnostic embedded-wallet layer. '' (default)
+# ADR 030: provider-agnostic embedded-wallet layer. '' (default)
 # → OFF: getWalletProvider() returns null. 'privy' → Privy REST adapter
 # (fetch + Zod, no SDK dep); PRIVY_APP_ID + PRIVY_APP_SECRET then
-# required (parseEnv cross-field check). Substrate only in Phase B.
+# required (parseEnv cross-field check). Phase C wires the flows:
+# signup provisioning + sweeper, payout targeting, pay-with-balance,
+# GET /api/me/wallet.
 # LOOP_WALLET_PROVIDER=
 # PRIVY_APP_ID=<app-id>
 # PRIVY_APP_SECRET=<app-secret>        — never logged (pino redaction)
@@ -285,7 +288,7 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # LOOP_KILL_ORDERS_LEGACY=false   — POST /api/orders only
 # LOOP_KILL_ORDERS_LOOP=false     — POST /api/orders/loop only
 # LOOP_KILL_AUTH=false
-# LOOP_KILL_WITHDRAWALS=false
+# LOOP_KILL_EMISSIONS=false
 
 # Observability
 # SENTRY_DSN=<dsn>

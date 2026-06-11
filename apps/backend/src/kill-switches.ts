@@ -12,8 +12,11 @@
  *                       `social/google`, `social/apple`. Refresh +
  *                       logout intentionally remain open so existing
  *                       sessions can drain.
- *   - `withdrawals`   → blocks `POST /api/admin/users/:userId/withdrawals`
+ *   - `emissions`     → blocks `POST /api/admin/users/:userId/emissions`
  *                       and `POST /api/admin/payouts/:id/compensate`.
+ *                       (Pre-ADR-036 this switch was `withdrawals` /
+ *                       `LOOP_KILL_WITHDRAWALS` — renamed with the
+ *                       emission re-scope.)
  *
  * Set via:
  *   `fly secrets set LOOP_KILL_ORDERS=true -a loopfinance-api`
@@ -54,7 +57,7 @@ import { logger } from './logger.js';
 const TRUTHY = new Set(['true', '1', 'yes', 'on']);
 const FALSY = new Set(['false', '0', 'no', 'off', '']);
 
-export type KillSwitch = 'orders-legacy' | 'orders-loop' | 'auth' | 'withdrawals';
+export type KillSwitch = 'orders-legacy' | 'orders-loop' | 'auth' | 'emissions';
 
 /**
  * Env keys per subsystem, in precedence order: the first key that is
@@ -65,7 +68,7 @@ const ENV_KEYS: Record<KillSwitch, readonly string[]> = {
   'orders-legacy': ['LOOP_KILL_ORDERS_LEGACY', 'LOOP_KILL_ORDERS'],
   'orders-loop': ['LOOP_KILL_ORDERS_LOOP', 'LOOP_KILL_ORDERS'],
   auth: ['LOOP_KILL_AUTH'],
-  withdrawals: ['LOOP_KILL_WITHDRAWALS'],
+  emissions: ['LOOP_KILL_EMISSIONS'],
 };
 
 const log = logger.child({ module: 'kill-switches' });

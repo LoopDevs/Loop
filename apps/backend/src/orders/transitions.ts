@@ -16,7 +16,10 @@
  */
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { orders, creditTransactions, userCredits } from '../db/schema.js';
+import { orders, creditTransactions, pendingPayouts, userCredits } from '../db/schema.js';
+import { HOME_CURRENCIES, type HomeCurrency } from '../db/schema.js';
+import { payoutAssetFor } from '../credits/payout-asset.js';
+import { generatePayoutMemo } from '../credits/payout-builder.js';
 import type { Order } from './repo.js';
 
 /**
@@ -26,32 +29,40 @@ import type { Order } from './repo.js';
  * user's balance (so a crashed watcher leaves the balance untouched);
  * that tx uses this helper's shape but inlines the debit alongside.
  *
- * **A4-110 (Critical):** when the on-chain payment arrived in a LOOP-
- * asset (`paymentMethod = 'loop_asset'`), the user is spending the
- * cashback they previously accrued. The redemption model (per ADR
- * 015 + operator clarification 2026-05-03):
+ * **A4-110 (Critical) + ADR 036:** when the on-chain payment arrived
+ * in a LOOP-asset (`paymentMethod = 'loop_asset'`), the user is
+ * redeeming the cashback they previously accrued. The redemption
+ * model (ADR 036, normative):
  *
  *   - Cashback fulfilment writes BOTH the off-chain `user_credits`
- *     liability AND issues an on-chain LOOP-asset payout to the
- *     user's wallet. Both halves exist for reconciliation.
- *   - To redeem (gift card OR fiat withdrawal), the user MUST send
- *     their on-chain LOOP back to Loop, which extinguishes BOTH
- *     halves: Loop debits `user_credits` and routes the inbound
- *     LOOP-asset to a treasury / burn account.
+ *     liability mirror AND issues an on-chain LOOP-asset payout to
+ *     the user's wallet. The on-chain half is the user's
+ *     authoritative balance; both halves exist for reconciliation.
+ *   - To redeem (gift card today, fiat-out later), the user's LOOP
+ *     returns to the system, extinguishing BOTH halves: Loop debits
+ *     `user_credits` and forwards the inbound LOOP from the deposit
+ *     account back to the asset's ISSUER account — Stellar burns
+ *     payments to the issuing account natively (ADR 036 open
+ *     question 1: issuer-return, decided 2026-06-11).
  *
- * Before this fix, the watcher accepted the inbound LOOP-asset and
- * flipped the order state but never debited `user_credits`, so the
- * user's off-chain liability stayed full. They could then spend the
- * still-spendable off-chain X via `paymentMethod='credit'` for a
- * second gift card OR have an admin issue a withdrawal that paid X
- * more LOOP back to them. Net: 2X economic value for one cashback.
+ * Before A4-110, the watcher accepted the inbound LOOP-asset and
+ * flipped the order state but never debited `user_credits` — 2X
+ * economic value for one cashback. Before ADR 036, the debit landed
+ * but the received LOOP sat in the deposit account forever, so the
+ * drift watcher's equation drifted monotonically upward with every
+ * redemption.
  *
- * The fix runs inside a single Drizzle transaction:
+ * The transition runs inside a single Drizzle transaction:
  *   1. UPDATE orders SET state='paid' WHERE state='pending_payment'
  *   2. (loop_asset only) FOR UPDATE lock on user_credits
  *   3. (loop_asset only) INSERT credit_transactions
  *      type='spend' amount = -chargeMinor reference=(order, orderId)
  *   4. (loop_asset only) UPDATE user_credits SET balance -= chargeMinor
+ *   5. (loop_asset only) INSERT pending_payouts kind='burn' —
+ *      forwards the received LOOP (deposit account → issuer) via the
+ *      existing payout worker. Same txn as the debit: a crash
+ *      between steps leaves NEITHER half applied (the order stays
+ *      pending_payment and the skip-table sweep retries).
  *
  * Other payment methods (`xlm`, `usdc`) are pre-cashback purchases —
  * they have no off-chain liability to extinguish, so the state flip
@@ -132,10 +143,80 @@ export async function markOrderPaid(
         .where(
           and(eq(userCredits.userId, paid.userId), eq(userCredits.currency, paid.chargeCurrency)),
         );
+
+      // ADR 036: extinguish the ON-CHAIN half too. The received LOOP
+      // is sitting in the deposit/operator account; queue a
+      // `kind='burn'` payout that forwards exactly the charged amount
+      // to the asset's issuer account (Stellar burns payments to the
+      // issuer natively). Processed by the existing payout worker —
+      // memo-idempotent submit, classified retries (ADR 016).
+      //
+      // Asset resolution: the watcher only accepts a loop_asset
+      // deposit whose asset currency matches `chargeCurrency`
+      // (amount-sufficient.ts), so payoutAssetFor(chargeCurrency) is
+      // exactly the asset that arrived. A missing issuer here means
+      // the env was un-configured between deposit acceptance and
+      // processing — throw so the whole txn (state flip + debit)
+      // rolls back and the skip-table sweep retries once ops fixes
+      // the config. Same crash-consistency as the debit: burn row
+      // and debit land together or not at all.
+      if (!(HOME_CURRENCIES as readonly string[]).includes(paid.chargeCurrency)) {
+        throw new LoopAssetBurnUnavailableError(paid.id, paid.chargeCurrency, 'unknown_currency');
+      }
+      const burnAsset = payoutAssetFor(paid.chargeCurrency as HomeCurrency);
+      if (burnAsset.issuer === null) {
+        throw new LoopAssetBurnUnavailableError(paid.id, paid.chargeCurrency, 'issuer_unset');
+      }
+      // Belt-and-braces idempotency: the state-guarded UPDATE above
+      // already makes this txn at-most-once per order, and the
+      // partial unique index `pending_payouts_burn_order_unique`
+      // fences a second burn row per order at the DB layer.
+      await tx
+        .insert(pendingPayouts)
+        .values({
+          userId: paid.userId,
+          orderId: paid.id,
+          kind: 'burn',
+          assetCode: burnAsset.code,
+          assetIssuer: burnAsset.issuer,
+          toAddress: burnAsset.issuer,
+          amountStroops: paid.chargeMinor * 100_000n,
+          memoText: generatePayoutMemo(),
+        })
+        .onConflictDoNothing({
+          target: pendingPayouts.orderId,
+          // Index predicate of `pending_payouts_burn_order_unique` —
+          // Postgres requires the ON CONFLICT target to match the
+          // partial index, so the WHERE must travel with the target.
+          where: sql`kind = 'burn'`,
+        });
     }
 
     return paid;
   });
+}
+
+/**
+ * ADR 036: thrown by `markOrderPaid` when a `loop_asset` redemption
+ * cannot enqueue its issuer-return burn — either the order's charge
+ * currency has no LOOP-asset mapping or the asset's issuer env var is
+ * unset. Rolls the whole paid-transition back (debit included) so the
+ * deposit parks in the watcher's skip table and is retried once ops
+ * fixes the configuration.
+ */
+export class LoopAssetBurnUnavailableError extends Error {
+  readonly orderId: string;
+  readonly currency: string;
+  readonly reason: 'unknown_currency' | 'issuer_unset';
+  constructor(orderId: string, currency: string, reason: 'unknown_currency' | 'issuer_unset') {
+    super(
+      `Cannot enqueue issuer-return burn for order ${orderId}: ${reason} (currency=${currency}) — paid transition rolled back`,
+    );
+    this.name = 'LoopAssetBurnUnavailableError';
+    this.orderId = orderId;
+    this.currency = currency;
+    this.reason = reason;
+  }
 }
 
 /**

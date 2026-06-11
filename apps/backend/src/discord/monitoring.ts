@@ -141,7 +141,7 @@ export function notifyDepositSkipAbandoned(args: {
 export function notifyPayoutFailed(args: {
   payoutId: string;
   userId: string;
-  /** Null for `kind='withdrawal'` payouts (A2-901 / ADR-024 §2). */
+  /** Null for `kind='emission'` payouts (A2-901 / ADR-024 §2 / ADR 036). */
   orderId: string | null;
   assetCode: string;
   amount: string;
@@ -166,7 +166,7 @@ export function notifyPayoutFailed(args: {
       { name: 'User', value: `\`${args.userId.slice(-8)}\``, inline: true },
       {
         name: 'Order',
-        value: args.orderId === null ? '_withdrawal_' : `\`${args.orderId.slice(-8)}\``,
+        value: args.orderId === null ? '_emission_' : `\`${args.orderId.slice(-8)}\``,
         inline: true,
       },
       { name: 'Payout', value: `\`${args.payoutId.slice(-8)}\``, inline: true },
@@ -373,6 +373,7 @@ export {
   notifyPaymentWatcherStuck,
   notifyStuckPayouts,
   notifyRedemptionBackfillExhausted,
+  notifyWalletProvisioningStuck,
 } from './monitoring-stuck-sweepers.js';
 
 // `notifyCtxSchemaDrift` (A2-1915) and its per-surface dedup state

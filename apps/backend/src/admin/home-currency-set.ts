@@ -14,7 +14,7 @@
  *      reversibility surface.
  *   5. Discord audit fanout AFTER commit, fire-and-forget.
  *
- * Step-up gate (ADR 028): like credit-adjustments and withdrawals,
+ * Step-up gate (ADR 028): like credit-adjustments and emissions,
  * a captured bearer token alone must not be able to retarget which
  * LOOP-asset a user's future cashback lands in. The route is
  * mounted under `requireAdminStepUp()`; the handler is unaware.

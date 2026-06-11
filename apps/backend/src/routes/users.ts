@@ -77,6 +77,7 @@ import {
   removeFavoriteHandler,
 } from '../users/favorites-handler.js';
 import { listRecentlyPurchasedHandler } from '../users/recently-purchased-handler.js';
+import { getMyWalletHandler } from '../users/wallet-handler.js';
 
 /** Mounts all `/api/users/me/*` routes on the supplied Hono app. */
 export function mountUserRoutes(app: Hono): void {
@@ -84,12 +85,20 @@ export function mountUserRoutes(app: Hono): void {
   // header lands on the 401 envelope too (A2-1002).
   app.use('/api/users/me', privateNoStoreResponse);
   app.use('/api/users/me/*', privateNoStoreResponse);
+  // ADR 030 Phase C4 — the wallet surface lives at /api/me/wallet
+  // (the wallet-integration-plan's pinned path); same cache-control
+  // + auth discipline as the /api/users/me namespace.
+  app.use('/api/me/wallet', privateNoStoreResponse);
 
   app.use('/api/users/me', requireAuth);
   app.use('/api/users/me/*', requireAuth);
+  app.use('/api/me/wallet', requireAuth);
 
   // ── Profile ─────────────────────────────────────────────────
   app.get('/api/users/me', rateLimit('GET /api/users/me', 60, 60_000), getMeHandler);
+  // ADR 030 Phase C4 — embedded-wallet balance card. 60/min matches
+  // the profile read; the Horizon read behind it is 30s-cached.
+  app.get('/api/me/wallet', rateLimit('GET /api/me/wallet', 60, 60_000), getMyWalletHandler);
   app.post(
     '/api/users/me/home-currency',
     rateLimit('POST /api/users/me/home-currency', 10, 60_000),

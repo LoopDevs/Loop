@@ -452,7 +452,7 @@ describe('notifyPayoutFailed', () => {
     expect(serialised).not.toContain('p-aabbccdd11223344');
   });
 
-  it('renders "_withdrawal_" for withdrawal payouts (no order id)', async () => {
+  it('renders "_emission_" for emission payouts (no order id)', async () => {
     notifyPayoutFailed({
       payoutId: 'p-a1b2c3d4e5f60000',
       userId: 'u-ffffeeeeddddcccc',
@@ -467,7 +467,7 @@ describe('notifyPayoutFailed', () => {
     const embed = lastBody().embeds[0] as {
       fields: Array<{ name: string; value: string }>;
     };
-    expect(embed.fields.find((f) => f.name === 'Order')?.value).toBe('_withdrawal_');
+    expect(embed.fields.find((f) => f.name === 'Order')?.value).toBe('_emission_');
   });
 });
 

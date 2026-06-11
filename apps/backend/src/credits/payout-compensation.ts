@@ -1,13 +1,21 @@
 /**
- * Admin payout-compensation writer (ADR-024 §5).
+ * Admin payout-compensation writer (ADR-024 §5, narrowed by ADR 036).
  *
- * When a queued withdrawal's on-chain payout permanently fails (the
- * destination account doesn't exist, the operator lacks a trustline,
- * Horizon returns a non-retryable `op_*` error), the user's ledger is
- * net-negative — the original `applyAdminWithdrawal` debit landed but
- * the matching Stellar payment never settled. This module re-credits
- * the user's off-chain balance so the withdrawal becomes a no-op end-
- * to-end.
+ * When a LEGACY pre-ADR-036 withdrawal's on-chain payout permanently
+ * fails (the destination account doesn't exist, the operator lacks a
+ * trustline, Horizon returns a non-retryable `op_*` error), the
+ * user's ledger is net-negative — the original at-send
+ * `applyAdminWithdrawal` debit landed but the matching Stellar
+ * payment never settled. This module re-credits the user's off-chain
+ * balance so the withdrawal becomes a no-op end-to-end.
+ *
+ * ADR 036 re-scoped withdrawals to *emissions*, which never debit the
+ * `user_credits` mirror — so a failed post-ADR-036 emission has
+ * NOTHING to compensate (re-crediting would mint unbacked balance).
+ * The discriminator is the original debit row: legacy rows carry a
+ * `credit_transactions` row with `type='withdrawal'`,
+ * `reference_type='payout'`, `reference_id=<payout id>`; post-ADR-036
+ * emissions don't. Compensation refuses rows without it.
  *
  * Per ADR-024 §5, the compensation row is a `type='adjustment'`, NOT
  * a `type='refund'`:
@@ -80,11 +88,14 @@ export interface PayoutCompensationResult {
  * user's `user_credits` balance by the same magnitude.
  *
  * Preconditions (re-checked under row lock here):
- *   - `payoutId` exists, has `kind='withdrawal'`, `state='failed'`,
+ *   - `payoutId` exists, has `kind='emission'`, `state='failed'`,
  *     and `compensated_at IS NULL`.
+ *   - the legacy at-send debit row exists (`type='withdrawal'`
+ *     referencing the payout) — ADR 036: post-ADR-036 emissions
+ *     never debit and are therefore not compensable.
  *   - `amountMinor` matches the original withdrawal magnitude (the
  *     handler converts stroops → minor with the same `/100_000n`
- *     factor `applyAdminWithdrawal` used in reverse).
+ *     factor the legacy writer used in reverse).
  *
  * The function also enforces the schema-side guard (`amountMinor > 0`).
  */
@@ -108,9 +119,30 @@ export async function applyAdminPayoutCompensation(args: {
     if (payout === undefined) {
       throw new PayoutNotCompensableError('Payout not found');
     }
-    if (payout.kind !== 'withdrawal') {
+    if (payout.kind !== 'emission') {
       throw new PayoutNotCompensableError(
-        'Compensation only applies to withdrawal payouts; order-cashback failures use a different flow',
+        'Compensation only applies to legacy debited emission (withdrawal-era) payouts; order-cashback and burn failures use different flows',
+      );
+    }
+    // ADR 036: only legacy pre-ADR-036 rows carried an at-send
+    // `user_credits` debit (written as a negative `type='withdrawal'`
+    // ledger row referencing this payout). A post-ADR-036 emission
+    // never debited — compensating it would create unbacked mirror
+    // balance out of thin air.
+    const [legacyDebit] = await tx
+      .select({ id: creditTransactions.id })
+      .from(creditTransactions)
+      .where(
+        and(
+          eq(creditTransactions.type, 'withdrawal'),
+          eq(creditTransactions.referenceType, 'payout'),
+          eq(creditTransactions.referenceId, args.payoutId),
+        ),
+      )
+      .limit(1);
+    if (legacyDebit === undefined) {
+      throw new PayoutNotCompensableError(
+        'Emission payouts post-ADR-036 carry no at-send debit — nothing to compensate',
       );
     }
     if (payout.compensatedAt !== null) {

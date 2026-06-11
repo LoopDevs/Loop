@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseUnsignedAmountMajor } from '../AdminWithdrawalForm';
+import { parseUnsignedAmountMajor } from '../AdminEmissionForm';
 
 describe('parseUnsignedAmountMajor', () => {
   it('parses a whole number as positive minor units', () => {
@@ -14,7 +14,7 @@ describe('parseUnsignedAmountMajor', () => {
     expect(parseUnsignedAmountMajor('12.34')?.minorString).toBe('1234');
   });
 
-  it('rejects signed input — withdrawals are always positive', () => {
+  it('rejects signed input — emissions are always positive', () => {
     expect(parseUnsignedAmountMajor('+12.34')).toBeNull();
     expect(parseUnsignedAmountMajor('-50')).toBeNull();
   });

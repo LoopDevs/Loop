@@ -99,9 +99,9 @@ export function registerAdminPayoutsClusterOpenApi(
         limit: z.coerce.number().int().min(1).max(100).optional().openapi({
           description: 'Page size. Default 20, hard-capped at 100.',
         }),
-        kind: z.enum(['order_cashback', 'withdrawal']).optional().openapi({
+        kind: z.enum(['order_cashback', 'emission', 'burn']).optional().openapi({
           description:
-            'ADR-024 §2 discriminator filter. `order_cashback` = legacy order-fulfilment payout; `withdrawal` = admin cash-out from balance. Omitted → both.',
+            'ADR-024 §2 / ADR 036 discriminator filter. `order_cashback` = order-fulfilment payout; `emission` = admin on-chain backfill (no mirror debit); `burn` = redemption issuer-return. Omitted → all.',
         }),
       }),
     },

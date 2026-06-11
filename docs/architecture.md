@@ -168,7 +168,7 @@ cookies. No CSRF token primitive exists today and none is needed.
 
 **Any future move to cookie-based session auth must add CSRF tokens
 before rollout.** The migration is silently breaking otherwise: every
-authenticated mutation today (orders, withdrawals, admin writes) would
+authenticated mutation today (orders, emissions, admin writes) would
 become forgeable from a malicious origin once cookies start riding
 along. If the migration is even being scoped, treat CSRF tokens as a
 prerequisite, not a follow-up.
@@ -315,6 +315,7 @@ POST /api/orders             [authenticated]
 POST /api/orders/loop        [authenticated — Loop-native flow, ADR 010 + Idempotency-Key, A2-2003]
 GET  /api/orders/loop        [authenticated — Loop-native list, ADR 010]
 GET  /api/orders/loop/:id    [authenticated — Loop-native flow, ADR 010]
+POST /api/orders/loop/:id/pay-with-balance [authenticated — one-tap LOOP-asset redemption from the embedded wallet: user-signed inner payment + operator fee-bump; watcher settles downstream, ADR 030 C3 / ADR 036]
 GET  /api/orders             [authenticated]
 GET  /api/orders/:id         [authenticated]
 GET  /api/users/me           [authenticated — profile + home_currency, ADR 015]
@@ -336,6 +337,7 @@ GET  /api/users/me/cashback-monthly [authenticated — last 12 months of cashbac
 GET  /api/users/me/orders/summary   [authenticated — 5-number orders-page summary header, ADR 010/015]
 GET  /api/users/me/flywheel-stats   [authenticated — caller's LOOP-asset recycled order count + charge, ADR 015]
 GET  /api/users/me/payment-method-share [authenticated — caller's own rail mix, home-currency locked, ADR 010/015]
+GET  /api/me/wallet                [authenticated — embedded-wallet balance surface: address + provisioning + on-chain LOOP balances + interest APY; never-500 last-known-good fallback, ADR 030 C4 / ADR 036]
 GET  /api/public/cashback-stats    [public — landing-page aggregates, never-500, ADR 009/015/020]
 GET  /api/public/top-cashback-merchants [public — landing-page "best cashback" list, never-500, ADR 011/020]
 GET  /api/public/merchants/:id     [public — per-merchant SEO detail (accepts id or slug), never-500, ADR 011/020]
@@ -361,14 +363,14 @@ GET  /api/admin/cashback-realization/daily.csv         [admin — Tier-3 finance
 GET  /api/admin/payouts                                [admin — ADR 015 payout backlog, ?state/?userId/?assetCode filters]
 GET  /api/admin/payouts/:id                            [admin — single pending-payout drill-down]
 POST /api/admin/payouts/:id/retry                      [admin — reset failed payout to pending, ADR 015/016/017]
-POST /api/admin/payouts/:id/compensate                 [admin — re-credit user after permanently failed withdrawal payout, ADR 024 §5]
+POST /api/admin/payouts/:id/compensate                 [admin — re-credit user after permanently failed LEGACY withdrawal payout, ADR 024 §5 / ADR 036]
 GET  /api/admin/payouts-by-asset                       [admin — per-asset × per-state payout breakdown, ADR 015/016]
 GET  /api/admin/top-users                               [admin — ranked top users by cashback, ADR 009/015]
 GET  /api/admin/audit-tail                              [admin — newest-first admin-write audit rows + ?before cursor, ADR 017/018]
 GET  /api/admin/audit-tail.csv                          [admin — finance/legal CSV export of admin write-audit, ADR 017/018]
 POST /api/admin/users/:userId/credit-adjustments        [admin — signed credit adjustment, ADR 017]
 POST /api/admin/users/:userId/refunds                   [admin — order-bound refund, ADR 017 + A2-901]
-POST /api/admin/users/:userId/withdrawals               [admin — debit cashback balance + queue on-chain payout, ADR-024 / A2-901]
+POST /api/admin/users/:userId/emissions                 [admin — queue on-chain LOOP backfill, mirror NOT debited, ADR-024 / ADR 036]
 POST /api/admin/users/:userId/home-currency              [admin — change home_currency with safety preflight, ADR 015 deferred]
 GET  /api/users/me/favorites                            [user — favourite merchants, newest first; joined to in-memory catalog]
 POST /api/users/me/favorites                            [user — add a merchant to favourites; idempotent on (user_id, merchant_id)]

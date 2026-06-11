@@ -193,7 +193,7 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # Admin step-up auth (ADR 028 / A4-063). ≥32 chars, deliberately
 # separate from LOOP_JWT_SIGNING_KEY so a JWT-key compromise doesn't
 # widen to step-up. Absent → boot succeeds but the destructive admin
-# endpoints (credit-adjust / withdrawals / payout-retry) fail closed
+# endpoints (credit-adjust / emissions / payout-retry) fail closed
 # with 503 STEP_UP_UNAVAILABLE. `_PREVIOUS` only during rotation.
 # LOOP_ADMIN_STEP_UP_SIGNING_KEY=...(≥32 chars)
 # LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS=...(≥32 chars)
@@ -306,13 +306,15 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # LOOP_INTEREST_POOL_ACCOUNT=G...(55 chars)
 # LOOP_INTEREST_POOL_MIN_DAYS_COVER=7
 
-# ── Embedded wallet (ADR 030, Phase B) ───────────────────────────────
+# ── Embedded wallet (ADR 030) ────────────────────────────────────────
 # Provider-agnostic embedded-wallet layer. '' (default) → OFF:
 # getWalletProvider() returns null and no vendor code path is
 # reachable. 'privy' → the Privy REST adapter is active (plain
 # fetch + Zod, no SDK dependency) and both PRIVY_* credentials are
-# required — parseEnv refuses to boot otherwise. Phase B is
-# substrate only; Phase C wires it into flows.
+# required — parseEnv refuses to boot otherwise. Phase C flows:
+# signup-time wallet provisioning + activation sweeper (under
+# LOOP_WORKERS_ENABLED), payout targeting to the activated wallet,
+# POST /api/orders/loop/:id/pay-with-balance, GET /api/me/wallet.
 # LOOP_WALLET_PROVIDER=
 # PRIVY_APP_ID=your-privy-app-id
 # PRIVY_APP_SECRET=your-privy-app-secret   # never logged (pino redaction)
@@ -325,7 +327,7 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # LOOP_KILL_ORDERS_LEGACY=false  # POST /api/orders only; unset → falls back to LOOP_KILL_ORDERS
 # LOOP_KILL_ORDERS_LOOP=false    # POST /api/orders/loop only; unset → falls back to LOOP_KILL_ORDERS
 # LOOP_KILL_AUTH=false           # request/verify-otp + social (refresh/logout stay open)
-# LOOP_KILL_WITHDRAWALS=false    # admin withdrawal + compensation endpoints
+# LOOP_KILL_EMISSIONS=false      # admin emission (ADR 036) + compensation endpoints
 ```
 
 ### Inheritance model

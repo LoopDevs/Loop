@@ -46,6 +46,15 @@ export type PayoutDecision =
   | { kind: 'skip'; reason: PayoutSkipReason };
 
 export interface BuildPayoutArgs {
+  /**
+   * ADR 030 Phase C2 — the user's ACTIVATED embedded-wallet address,
+   * or null when the wallet isn't provisioned/activated yet. Takes
+   * precedence over the legacy linked `stellarAddress`: the embedded
+   * wallet is operator-sponsored with guaranteed LOOP trustlines, so
+   * a payout to it can never `op_no_trust`. Callers must pass null
+   * (not the address) for wallets that exist but aren't `activated`.
+   */
+  embeddedWalletAddress?: string | null;
   /** User's linked Stellar address, or null when unlinked. */
   stellarAddress: string | null;
   /** User's home currency — picks the LOOP asset. */
@@ -116,7 +125,11 @@ export function buildPayoutIntent(args: BuildPayoutArgs): PayoutDecision {
   if (args.userCashbackMinor <= 0n) {
     return { kind: 'skip', reason: 'no_cashback' };
   }
-  if (args.stellarAddress === null) {
+  // ADR 030 Phase C2 — destination resolution order: activated
+  // embedded wallet → legacy linked address → skip. Semantics
+  // otherwise unchanged.
+  const destination = args.embeddedWalletAddress ?? args.stellarAddress;
+  if (destination === null) {
     return { kind: 'skip', reason: 'no_address' };
   }
   const asset = payoutAssetFor(args.homeCurrency);
@@ -135,7 +148,7 @@ export function buildPayoutIntent(args: BuildPayoutArgs): PayoutDecision {
   return {
     kind: 'pay',
     intent: {
-      to: args.stellarAddress,
+      to: destination,
       assetCode: asset.code,
       assetIssuer: asset.issuer,
       amountStroops: args.userCashbackMinor * LOOP_ASSET_STROOPS_PER_MINOR,

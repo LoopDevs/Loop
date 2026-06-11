@@ -5,7 +5,7 @@ import { Button } from '~/components/ui/Button';
  * A4-052 / A4-053: second-step confirmation gate for destructive
  * admin write actions where the reason is already collected
  * inline in the parent form (CreditAdjustmentForm,
- * AdminWithdrawalForm). Sibling to ReasonDialog — that one prompts
+ * AdminEmissionForm). Sibling to ReasonDialog — that one prompts
  * for the reason itself; this one just renders the parsed summary
  * and asks "are you sure?".
  *

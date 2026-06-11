@@ -248,10 +248,24 @@
       "breakpoints": true
     },
     {
+      "idx": 35,
+      "version": "7",
+      "when": 1780100300000,
+      "tag": "0035_adr036_emission_and_burn_kinds",
+      "breakpoints": true
+    },
+    {
       "idx": 36,
       "version": "7",
       "when": 1780100500000,
       "tag": "0036_users_wallet_provider",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1780100600000,
+      "tag": "0037_users_wallet_provisioning",
       "breakpoints": true
     }
   ]

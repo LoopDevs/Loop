@@ -32,6 +32,7 @@ import { registerUsersFavoritesOpenApi } from './users-favorites.js';
 import { registerUsersHistoryCreditsOpenApi } from './users-history-credits.js';
 import { registerUsersPendingPayoutsOpenApi } from './users-pending-payouts.js';
 import { registerUsersProfileOpenApi } from './users-profile.js';
+import { registerUsersWalletOpenApi } from './users-wallet.js';
 
 /**
  * Registers all `/api/users/me/*` schemas + paths on the
@@ -53,6 +54,12 @@ export function registerUsersOpenApi(
   // StellarTrustlineRow/Response) live in ./users-profile.ts.
   // Only `errorResponse` crosses the boundary.
   registerUsersProfileOpenApi(registry, errorResponse, loopAssetCode);
+
+  // ─── Embedded wallet (ADR 030 Phase C4) ─────────────────────────────────────
+  //
+  // GET /api/me/wallet — address + provisioning + on-chain LOOP
+  // balances + interest APY. Lives in ./users-wallet.ts.
+  registerUsersWalletOpenApi(registry, errorResponse, loopAssetCode);
 
   // ─── Users cashback-history + credits (ADR 009 / 015) ──────────────────────
   //

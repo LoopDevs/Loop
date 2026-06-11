@@ -98,9 +98,12 @@ export const ApiErrorCode = {
   HOME_CURRENCY_LOCKED: 'HOME_CURRENCY_LOCKED',
   IN_FLIGHT_ORDERS: 'IN_FLIGHT_ORDERS',
   PENDING_PAYOUTS: 'PENDING_PAYOUTS',
+  // Kept under the legacy name deliberately: only pre-ADR-036
+  // withdrawal-era payouts (at-send-debited) can block DSR deletion.
   FAILED_UNCOMPENSATED_WITHDRAWALS: 'FAILED_UNCOMPENSATED_WITHDRAWALS',
   REFUND_ALREADY_ISSUED: 'REFUND_ALREADY_ISSUED',
-  WITHDRAWAL_ALREADY_ISSUED: 'WITHDRAWAL_ALREADY_ISSUED',
+  // ADR 036: emission (ex-ADR-024 withdrawal) duplicate-intent fence.
+  EMISSION_ALREADY_ISSUED: 'EMISSION_ALREADY_ISSUED',
   ALREADY_COMPENSATED: 'ALREADY_COMPENSATED',
   PAYOUT_NOT_COMPENSABLE: 'PAYOUT_NOT_COMPENSABLE',
   NOT_CONFIGURED: 'NOT_CONFIGURED',
@@ -133,6 +136,17 @@ export const ApiErrorCode = {
   // User favourites (per-user merchant pin list).
   MERCHANT_NOT_FOUND: 'MERCHANT_NOT_FOUND',
   FAVORITES_LIMIT_EXCEEDED: 'FAVORITES_LIMIT_EXCEEDED',
+  // ADR 030 Phase C — POST /api/orders/loop/:id/pay-with-balance.
+  // ORDER_NOT_PAYABLE: the order isn't a loop_asset order awaiting
+  // payment (wrong payment method, or a terminal failed/expired
+  // state — already-paid states replay 200 instead).
+  ORDER_NOT_PAYABLE: 'ORDER_NOT_PAYABLE',
+  // A concurrent pay-with-balance call for the same order is still
+  // in flight (in-process fence). Retry after the first resolves.
+  PAYMENT_IN_FLIGHT: 'PAYMENT_IN_FLIGHT',
+  // The caller's embedded wallet isn't provisioned + activated yet,
+  // so there is no on-chain balance to pay from.
+  WALLET_NOT_ACTIVATED: 'WALLET_NOT_ACTIVATED',
 } as const;
 
 export type ApiErrorCodeValue = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];

@@ -1,10 +1,24 @@
 # ADR 024: Withdrawal writer (USDC cash-out of cashback balance)
 
-Status: Accepted
+Status: Accepted — **re-scoped to "emission" by ADR 036 (2026-06-11)**
 Date: 2026-04-24
-Implemented: 2026-04-25 onwards. Schema: migration 0018 generalised `pending_payouts` for `kind='withdrawal'`; migration 0022 extended `credit_transactions_reference_unique` to include `withdrawal`; migration 0028 added `pending_payouts.compensated_at` plus an active-withdrawal semantic unique index. Withdrawal flow: `applyAdminWithdrawal` ledger primitive in `apps/backend/src/credits/withdrawals.ts`; `POST /api/admin/users/:userId/withdrawals` admin handler in `apps/backend/src/admin/withdrawals.ts`; web client `applyAdminWithdrawal` in `apps/web/app/services/admin.ts`; admin form `AdminWithdrawalForm` in `apps/web/app/components/features/admin/`; mounted on `/admin/users/:userId`. Compensation flow (ADR §5): `applyAdminPayoutCompensation` primitive in `apps/backend/src/credits/payout-compensation.ts`; `POST /api/admin/payouts/:id/compensate` handler in `apps/backend/src/admin/payout-compensation.ts`. Both flows ADR-017 compliant — idempotency-key + audit envelope + Discord fanout + handler-level test coverage.
-Related: ADR 009 (credits ledger), ADR 013 (Loop-owned auth), ADR 015 (stablecoin topology), ADR 016 (payout submit worker), ADR 017 (admin write primitives)
-Resolves: A2-901 residual (`withdrawal` writer), migration 0013 §28
+
+> **ADR 036 amendment (2026-06-11).** The "withdrawal writer" this ADR
+> specifies is re-scoped to an **emission** primitive: under ADR 036's
+> normative lifecycle the on-chain LOOP in the user's wallet IS the
+> balance and `user_credits` is the liability mirror, so sending LOOP
+> to a user (backfilling a missed/failed payout) must NOT debit. The
+> at-send `user_credits` debit + negative `type='withdrawal'` ledger
+> row described in §3 were removed; the surface renamed
+> (`applyAdminEmission`, `POST /api/admin/users/:userId/emissions`,
+> `pending_payouts.kind='emission'`, migration 0035). Compensation
+> (§5) now applies only to LEGACY pre-ADR-036 rows that carry the
+> at-send debit. "Withdrawal" as a user-facing concept now exclusively
+> means the future fiat-out **redemption** rail. See
+> `docs/adr/036-cashback-token-lifecycle.md`.
+> Implemented: 2026-04-25 onwards. Schema: migration 0018 generalised `pending_payouts` for `kind='withdrawal'`; migration 0022 extended `credit_transactions_reference_unique` to include `withdrawal`; migration 0028 added `pending_payouts.compensated_at` plus an active-withdrawal semantic unique index. Withdrawal flow: `applyAdminWithdrawal` ledger primitive in `apps/backend/src/credits/withdrawals.ts`; `POST /api/admin/users/:userId/withdrawals` admin handler in `apps/backend/src/admin/withdrawals.ts`; web client `applyAdminWithdrawal` in `apps/web/app/services/admin.ts`; admin form `AdminWithdrawalForm` in `apps/web/app/components/features/admin/`; mounted on `/admin/users/:userId`. Compensation flow (ADR §5): `applyAdminPayoutCompensation` primitive in `apps/backend/src/credits/payout-compensation.ts`; `POST /api/admin/payouts/:id/compensate` handler in `apps/backend/src/admin/payout-compensation.ts`. Both flows ADR-017 compliant — idempotency-key + audit envelope + Discord fanout + handler-level test coverage.
+> Related: ADR 009 (credits ledger), ADR 013 (Loop-owned auth), ADR 015 (stablecoin topology), ADR 016 (payout submit worker), ADR 017 (admin write primitives)
+> Resolves: A2-901 residual (`withdrawal` writer), migration 0013 §28
 
 ## Context
 
