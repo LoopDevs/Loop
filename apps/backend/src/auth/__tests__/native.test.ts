@@ -66,6 +66,13 @@ import {
   nativeRefreshHandler,
 } from '../native.js';
 import { signLoopToken } from '../tokens.js';
+// Real (unmocked) runtime-health module — the kill-switch tests below
+// assert on the same module instance the handler mutates.
+import {
+  __resetRuntimeHealthForTests,
+  getRuntimeHealthSnapshot,
+  setOtpDeliveryEnabled,
+} from '../../runtime-health.js';
 
 interface FakeCtx {
   body: unknown;
@@ -179,6 +186,45 @@ describe('nativeRequestOtpHandler', () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body).toEqual({ message: 'Verification code sent' });
   });
+
+  describe('OTP delivery kill-switch (no self-reset)', () => {
+    beforeEach(() => {
+      __resetRuntimeHealthForTests();
+    });
+
+    it('a request that fails validation leaves a disabled kill-switch disabled', async () => {
+      // Pre-fix: the handler called setOtpDeliveryEnabled(true)
+      // unconditionally on entry, so even a 400 re-armed the surface.
+      setOtpDeliveryEnabled(false);
+      const { ctx } = makeCtx({ email: 'not-an-email' });
+      await nativeRequestOtpHandler(ctx);
+      expect(getRuntimeHealthSnapshot().otpDelivery.enabled).toBe(false);
+    });
+
+    it('a request whose email send fails leaves a disabled kill-switch disabled (silenced, but error still recorded)', async () => {
+      setOtpDeliveryEnabled(false);
+      sendOtpMock.mockRejectedValue(new Error('provider down'));
+      const { ctx } = makeCtx({ email: 'a@b.com' });
+      const res = await nativeRequestOtpHandler(ctx);
+      expect(res.status).toBe(200);
+      const snap = getRuntimeHealthSnapshot();
+      expect(snap.otpDelivery.enabled).toBe(false);
+      // Operator silenced the surface — failures must not page…
+      expect(snap.otpDelivery.degraded).toBe(false);
+      // …but the failure metadata stays truthful for when it re-arms.
+      expect(snap.otpDelivery.lastError).toBe('provider down');
+    });
+
+    it('only a successful send re-enables the surface (self-heal)', async () => {
+      setOtpDeliveryEnabled(false);
+      const { ctx } = makeCtx({ email: 'a@b.com' });
+      const res = await nativeRequestOtpHandler(ctx);
+      expect(res.status).toBe(200);
+      const snap = getRuntimeHealthSnapshot();
+      expect(snap.otpDelivery.enabled).toBe(true);
+      expect(snap.otpDelivery.degraded).toBe(false);
+    });
+  });
 });
 
 describe('nativeVerifyOtpHandler', () => {
@@ -288,6 +334,12 @@ describe('nativeRefreshHandler', () => {
     const newJti = recordRefreshMock.mock.calls[0]![0].jti as string;
     const revokeArgs = tryRevokeIfLiveMock.mock.calls[0]![0] as { replacedByJti: string };
     expect(revokeArgs.replacedByJti).toBe(newJti);
+    // A4-098 ordering: the successor row is persisted only AFTER the
+    // compare-and-set revoke succeeds. Persist-before-CAS is the
+    // orphaned-live-row bug.
+    expect(tryRevokeIfLiveMock.mock.invocationCallOrder[0]!).toBeLessThan(
+      recordRefreshMock.mock.invocationCallOrder[0]!,
+    );
   });
 
   it('A4-098: concurrent rotation that loses the CAS rejects with 401 instead of minting a parallel pair', async () => {
@@ -306,6 +358,12 @@ describe('nativeRefreshHandler', () => {
     expect(res.status).toBe(401);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('UNAUTHORIZED');
+    // The loser must NOT have persisted a successor refresh row —
+    // doing so before (or despite) losing the CAS is exactly the
+    // orphaned-live-row bug: a live credential nothing ever revokes.
+    expect(recordRefreshMock).not.toHaveBeenCalled();
+    // And losing a rotation race is not a theft signal.
+    expect(revokeAllRefreshForUserMock).not.toHaveBeenCalled();
   });
 
   it('401 on an access token used where a refresh is expected', async () => {

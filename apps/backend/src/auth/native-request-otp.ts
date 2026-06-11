@@ -15,11 +15,7 @@
  */
 import type { Context } from 'hono';
 import { logger } from '../logger.js';
-import {
-  recordOtpSendFailure,
-  recordOtpSendSuccess,
-  setOtpDeliveryEnabled,
-} from '../runtime-health.js';
+import { recordOtpSendFailure, recordOtpSendSuccess } from '../runtime-health.js';
 import {
   createOtp,
   generateOtpCode,
@@ -42,9 +38,18 @@ const log = logger.child({ handler: 'auth-native' });
  *
  * Per-email cap on top of the per-IP rate limit: an attacker
  * rotating IPs can't still flood one inbox.
+ *
+ * Health-surface note: this handler used to call
+ * `setOtpDeliveryEnabled(true)` unconditionally on entry, which
+ * re-armed the OTP-delivery surface on every request — including
+ * requests that failed validation or never reached the provider —
+ * clobbering an operator-set kill-switch before any email was sent.
+ * Enablement is owned by the send path now: `recordOtpSendSuccess()`
+ * re-enables on a successful send (the only real evidence of
+ * recovery); `recordOtpSendFailure()` records error metadata without
+ * touching the switch.
  */
 export async function nativeRequestOtpHandler(c: Context): Promise<Response> {
-  setOtpDeliveryEnabled(true);
   const parsed = RequestOtpBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'Valid email is required' }, 400);

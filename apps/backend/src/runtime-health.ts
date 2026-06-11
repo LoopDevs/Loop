@@ -73,18 +73,32 @@ function errorMessage(err: unknown): string {
   return 'unknown error';
 }
 
+/**
+ * Operator-facing kill-switch for the OTP-delivery health surface.
+ * `false` silences `otpDelivery.degraded` (e.g. during a known
+ * provider incident) without blocking sends. Nothing self-resets it
+ * except `recordOtpSendSuccess` — a successful send is the only real
+ * evidence the surface recovered, so it re-arms reporting.
+ */
 export function setOtpDeliveryEnabled(enabled: boolean): void {
   otpDeliveryState.enabled = enabled;
 }
 
 export function recordOtpSendSuccess(): void {
+  // Self-heal: a successful send proves delivery works again, so a
+  // previously disabled surface re-arms its degraded reporting.
   otpDeliveryState.enabled = true;
   otpDeliveryState.lastSuccessAtMs = Date.now();
   otpDeliveryState.lastError = null;
 }
 
 export function recordOtpSendFailure(err: unknown): void {
-  otpDeliveryState.enabled = true;
+  // Deliberately does NOT flip `enabled` back on. A failed send is
+  // not evidence of recovery — re-arming here would clobber an
+  // operator-set kill-switch on the very provider incident they
+  // silenced (each failing request would re-page). Failure metadata
+  // is still recorded so /health and /metrics stay truthful once
+  // the surface is re-enabled.
   otpDeliveryState.lastFailureAtMs = Date.now();
   otpDeliveryState.lastError = errorMessage(err);
 }

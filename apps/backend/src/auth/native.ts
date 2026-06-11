@@ -40,7 +40,7 @@ const log = logger.child({ handler: 'auth-native' });
 // Re-exported here so existing import sites against `'./native.js'`
 // keep resolving.
 export { issueTokenPair, type TokenPair } from './issue-token-pair.js';
-import { issueTokenPair } from './issue-token-pair.js';
+import { issueTokenPair, mintTokenPair, persistMintedRefreshToken } from './issue-token-pair.js';
 
 /**
  * POST /api/auth/verify-otp — native path.
@@ -158,28 +158,40 @@ export async function nativeRefreshHandler(c: Context): Promise<Response> {
     // first caller. The loser short-circuits to 401 instead of
     // creating a parallel live successor lineage.
     //
-    // We pre-mint the successor jti so `tryRevokeIfLive` can stamp
-    // `replaced_by_jti` atomically with the revoke, then write the
-    // successor row only after that compare-and-set succeeds.
-    const pair = await issueTokenPair({ id: claims.sub, email: claims.email });
-    const won = await tryRevokeIfLive({ jti: claims.jti, replacedByJti: pair.refreshJti });
+    // Ordering matters: SIGN the successor pair first (so the CAS
+    // can stamp `replaced_by_jti` atomically with the revoke), but
+    // PERSIST the successor row only after winning the CAS. The
+    // earlier shape called `issueTokenPair` — which inserts the
+    // `refresh_tokens` row — before `tryRevokeIfLive`, so the
+    // losing side of a concurrent rotation had already written a
+    // live successor row that nothing would ever revoke (it isn't
+    // the `replaced_by_jti` of any row, and the loser's 401 left
+    // it behind as a live orphaned credential).
+    const minted = mintTokenPair({ id: claims.sub, email: claims.email });
+    const won = await tryRevokeIfLive({ jti: claims.jti, replacedByJti: minted.refreshJti });
     if (!won) {
       // Concurrent rotation lost the race. The other caller already
       // revoked the row + minted its own successor; we must not
-      // emit a second live pair under the same prior jti. Surface
-      // a 401 — the legitimate client should retry refresh; an
-      // attacker holding the same prior token gets the same 401
-      // and on the next attempt trips the reuse-detection path
-      // above.
+      // emit a second live pair under the same prior jti. Nothing
+      // was persisted for this loser — the signed pair above is
+      // dropped on the floor. Surface a 401 — the legitimate
+      // client should retry refresh; an attacker holding the same
+      // prior token gets the same 401 and on the next attempt
+      // trips the reuse-detection path above.
       log.warn(
         { jti: claims.jti, sub: claims.sub },
         'Refresh token rotation lost concurrent race — rejecting',
       );
       return c.json({ code: 'UNAUTHORIZED', message: 'Invalid refresh token' }, 401);
     }
-    // Strip the internal `refreshJti` field before returning to the
-    // client — the wire contract stays `{ accessToken, refreshToken }`.
-    return c.json({ accessToken: pair.accessToken, refreshToken: pair.refreshToken });
+    // CAS won — now persist the successor row. If this write fails
+    // the old token is already revoked and the successor was never
+    // stored, so the client re-authenticates: fail-closed beats an
+    // orphaned live credential.
+    await persistMintedRefreshToken(minted);
+    // Strip the internal fields before returning to the client —
+    // the wire contract stays `{ accessToken, refreshToken }`.
+    return c.json({ accessToken: minted.accessToken, refreshToken: minted.refreshToken });
   } catch (err) {
     log.error({ err }, 'Native refresh failed unexpectedly');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Refresh failed' }, 500);

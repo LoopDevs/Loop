@@ -5,7 +5,9 @@ const { dbMock, state } = vi.hoisted(() => {
     findFirstResult: unknown;
     insertCalls: unknown[];
     updateSetArgs: unknown[];
-  } = { findFirstResult: null, insertCalls: [], updateSetArgs: [] };
+    /** Rows the next `.returning()` resolves with (CAS win/lose). */
+    returningRows: unknown[];
+  } = { findFirstResult: null, insertCalls: [], updateSetArgs: [], returningRows: [] };
   const m: Record<string, ReturnType<typeof vi.fn>> = {};
   m['insert'] = vi.fn(() => m);
   m['values'] = vi.fn((v: unknown) => {
@@ -17,7 +19,17 @@ const { dbMock, state } = vi.hoisted(() => {
     s.updateSetArgs.push(v);
     return m;
   });
-  m['where'] = vi.fn(async () => []);
+  // Drizzle's update chain is awaitable directly (`await ...where()`)
+  // AND chainable into `.returning()` (used by tryRevokeIfLive's
+  // compare-and-set). Mirror both shapes: a thenable that resolves
+  // `[]`, carrying a `returning` that resolves `state.returningRows`.
+  m['where'] = vi.fn(() => ({
+    returning: vi.fn(async () => s.returningRows),
+    then: (
+      onFulfilled?: (value: unknown[]) => unknown,
+      onRejected?: (reason: unknown) => unknown,
+    ) => Promise.resolve<unknown[]>([]).then(onFulfilled, onRejected),
+  }));
   const query = {
     refreshTokens: {
       findFirst: vi.fn(async () => s.findFirstResult),
@@ -43,7 +55,9 @@ import {
   hashRefreshToken,
   recordRefreshToken,
   findLiveRefreshToken,
+  findRefreshTokenRecord,
   revokeRefreshToken,
+  tryRevokeIfLive,
   revokeAllRefreshTokensForUser,
 } from '../refresh-tokens.js';
 
@@ -51,6 +65,7 @@ beforeEach(() => {
   state.findFirstResult = null;
   state.insertCalls = [];
   state.updateSetArgs = [];
+  state.returningRows = [];
   for (const [k, v] of Object.entries(dbMock)) {
     if (k === 'query') continue;
     if (typeof v === 'function' && 'mockClear' in v) {
@@ -128,6 +143,70 @@ describe('revokeRefreshToken', () => {
     await revokeRefreshToken({ jti: 'jti-1' });
     const s = state.updateSetArgs[0] as Record<string, unknown>;
     expect(s['replacedByJti']).toBeNull();
+  });
+});
+
+describe('findRefreshTokenRecord', () => {
+  it('returns the raw row even when revoked (A2-1608 reuse-signal lookup)', async () => {
+    // findLiveRefreshToken filters revoked rows out; the reuse
+    // detector needs the raw record to distinguish "revoked → theft
+    // signal" from "never existed → forged".
+    const revokedRow = {
+      jti: 'jti-1',
+      userId: 'user-uuid',
+      tokenHash: hashRefreshToken('rotated-out-token'),
+      revokedAt: new Date(),
+      replacedByJti: 'jti-2',
+    };
+    state.findFirstResult = revokedRow;
+    const r = await findRefreshTokenRecord('jti-1');
+    expect(r).toBe(revokedRow);
+  });
+
+  it('returns null when the jti never existed (forged / cleaned-up token)', async () => {
+    state.findFirstResult = undefined;
+    const r = await findRefreshTokenRecord('never-issued');
+    expect(r).toBeNull();
+  });
+});
+
+describe('tryRevokeIfLive', () => {
+  it('CAS win: returns true when the conditional update revoked the row, stamping successor metadata', async () => {
+    // The UPDATE ... WHERE revoked_at IS NULL ... RETURNING hit the
+    // (still-live) row — this caller owns the rotation.
+    state.returningRows = [{ jti: 'jti-old' }];
+    const won = await tryRevokeIfLive({ jti: 'jti-old', replacedByJti: 'jti-new' });
+    expect(won).toBe(true);
+    expect(state.updateSetArgs).toHaveLength(1);
+    const set = state.updateSetArgs[0] as Record<string, unknown>;
+    expect(set['revokedAt']).toBeInstanceOf(Date);
+    expect(set['replacedByJti']).toBe('jti-new');
+    expect(set['lastUsedAt']).toBeInstanceOf(Date);
+  });
+
+  it('CAS lose: returns false when a concurrent rotation already revoked the row', async () => {
+    // RETURNING came back empty — `revoked_at IS NULL` no longer
+    // matched, i.e. another request won the race first.
+    state.returningRows = [];
+    const won = await tryRevokeIfLive({ jti: 'jti-old', replacedByJti: 'jti-new' });
+    expect(won).toBe(false);
+  });
+
+  it('allows replacedByJti to be omitted (null)', async () => {
+    state.returningRows = [{ jti: 'jti-old' }];
+    const won = await tryRevokeIfLive({ jti: 'jti-old' });
+    expect(won).toBe(true);
+    const set = state.updateSetArgs[0] as Record<string, unknown>;
+    expect(set['replacedByJti']).toBeNull();
+  });
+
+  it('honours an explicit `now` for the revocation timestamp', async () => {
+    const now = new Date('2026-06-11T00:00:00Z');
+    state.returningRows = [{ jti: 'jti-old' }];
+    await tryRevokeIfLive({ jti: 'jti-old', now });
+    const set = state.updateSetArgs[0] as Record<string, unknown>;
+    expect(set['revokedAt']).toBe(now);
+    expect(set['lastUsedAt']).toBe(now);
   });
 });
 
