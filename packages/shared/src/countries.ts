@@ -27,8 +27,20 @@
 
 import type { Merchant } from './merchants.js';
 
-/** Display currencies present in the live catalogue (ISO 4217). */
-export const SUPPORTED_CURRENCIES = ['USD', 'GBP', 'EUR', 'CAD'] as const;
+/** Display currencies present in the live catalogue (ISO 4217). USD/GBP/EUR/CAD
+ * are the anchor markets; AED/INR/SAR/AUD/MXN are the extended supplier-currency
+ * markets surfaced under ADR 035 (display-only, no LOOP cashback asset). */
+export const SUPPORTED_CURRENCIES = [
+  'USD',
+  'GBP',
+  'EUR',
+  'CAD',
+  'AED',
+  'INR',
+  'SAR',
+  'AUD',
+  'MXN',
+] as const;
 export type SupportedCurrency = (typeof SUPPORTED_CURRENCIES)[number];
 
 /** Language segments we route. English-only today; the segment future-proofs
@@ -75,12 +87,22 @@ const EUROZONE: ReadonlyArray<Omit<Country, 'currency'>> = [
 ];
 
 /** Every routable country, in selector display order (anchors first, then the
- * Eurozone). The URL country segment is `code.toLowerCase()`. */
+ * Eurozone, then the extended supplier-currency markets). The URL country
+ * segment is `code.toLowerCase()`. */
 export const COUNTRIES: readonly Country[] = [
   { code: 'US', label: 'United States', flag: '🇺🇸', currency: 'USD' },
   { code: 'GB', label: 'United Kingdom', flag: '🇬🇧', currency: 'GBP' },
   { code: 'CA', label: 'Canada', flag: '🇨🇦', currency: 'CAD' },
   ...EUROZONE.map((c): Country => ({ ...c, currency: 'EUR' })),
+  // Extended supplier-currency markets (ADR 035) — EzPin catalogue depth of ≥15
+  // enabled merchants. Display-only like CAD: priced in the local currency with
+  // no LOOP cashback asset yet. Thinner currencies (NZD/TRY/KWD/… <15 merchants)
+  // stay catalogue-only until they have the depth to populate a country page.
+  { code: 'AE', label: 'United Arab Emirates', flag: '🇦🇪', currency: 'AED' },
+  { code: 'IN', label: 'India', flag: '🇮🇳', currency: 'INR' },
+  { code: 'SA', label: 'Saudi Arabia', flag: '🇸🇦', currency: 'SAR' },
+  { code: 'AU', label: 'Australia', flag: '🇦🇺', currency: 'AUD' },
+  { code: 'MX', label: 'Mexico', flag: '🇲🇽', currency: 'MXN' },
 ];
 
 /** The country a bare `/` (or an unrecognised locale) falls back to. */

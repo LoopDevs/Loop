@@ -43,7 +43,7 @@ describe('hreflangAlternates', () => {
     expect(block).toContain(
       '<xhtml:link rel="alternate" hreflang="en-GB" href="https://loopfinance.io/gb/en/cashback"/>',
     );
-    // 23 countries + x-default = 24 reciprocal links.
-    expect(block.split('\n')).toHaveLength(24);
+    // 28 countries + x-default = 29 reciprocal links.
+    expect(block.split('\n')).toHaveLength(29);
   });
 });
