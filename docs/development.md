@@ -294,8 +294,10 @@ npm run test:e2e:real    # Playwright e2e — against a running real-CTX backend
 npm run audit            # explicit audit policy gate: fail on any high/critical or unapproved moderate advisory
 npm run build            # production build across all workspaces
 npm run proto:generate   # buf generate → packages/shared/src/proto/
-npm run verify           # typecheck + lint + format:check + lint:docs + test — the
-                         # one-command gate; mirrors the CI quality + unit-test jobs
+npm run verify           # typecheck + lint + format:check + lint:docs +
+                         # shared-type-parity (ADR 019 drift detector) + env-perms +
+                         # test + audit — the one-command gate; mirrors the CI
+                         # quality + unit-test jobs
 ```
 
 ### apps/web
