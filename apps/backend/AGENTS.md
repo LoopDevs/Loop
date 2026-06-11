@@ -43,6 +43,7 @@ src/
 │   └── procurement.ts  ← paid → procuring → fulfilled worker (USDC-default, XLM-floor fallback, ADR 015)
 ├── payments/
 │   ├── watcher.ts      ← Horizon payment watcher (matches inbound deposits, accepts USDC/XLM/LOOP assets)
+│   ├── skipped-payments.ts ← Skipped-deposit retry ledger — persists skips before cursor advance, sweeps each tick (audit CRIT #1/#2)
 │   ├── horizon.ts      ← Horizon read client (listAccountPayments, findOutboundPaymentByMemo)
 │   ├── horizon-balances.ts ← Horizon /accounts balance reader with 30s cache
 │   ├── price-feed.ts   ← XLM + USDC stroops-per-cent + convertMinorUnits FX

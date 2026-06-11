@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { HorizonPayment } from '../horizon.js';
 import type * as HorizonModule from '../horizon.js';
 import type * as SchemaModule from '../../db/schema.js';
+import type * as TransitionsModule from '../../orders/transitions.js';
 
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -43,8 +44,31 @@ vi.mock('../price-feed.js', () => ({
 vi.mock('../../orders/repo.js', () => ({
   findPendingOrderByMemo: (memo: string) => findOrderMock(memo),
 }));
-vi.mock('../../orders/transitions.js', () => ({
-  markOrderPaid: (id: string) => markPaidMock(id),
+vi.mock('../../orders/transitions.js', async () => {
+  // Keep the real LoopAssetMissingCreditRowError class — the
+  // watcher's catch discriminates with `instanceof`, so the mock
+  // must not replace it with undefined.
+  const actual = await vi.importActual<typeof TransitionsModule>('../../orders/transitions.js');
+  return {
+    ...actual,
+    markOrderPaid: (id: string) => markPaidMock(id),
+  };
+});
+
+// Skipped-deposit retry ledger (CRIT #1/#2) — mocked so the tick's
+// skip persistence + sweep are observable without a real DB. The
+// dedicated suite for the real module lives in
+// `./skipped-payments.test.ts`.
+const recordSkipMock = vi.fn(async (_args: unknown): Promise<void> => undefined);
+const retrySkipsMock = vi.fn(async (_process: unknown) => ({
+  retried: 0,
+  resolved: 0,
+  abandoned: 0,
+  stillPending: 0,
+}));
+vi.mock('../skipped-payments.js', () => ({
+  recordSkip: (args: unknown) => recordSkipMock(args),
+  retrySkippedPayments: (process: unknown) => retrySkipsMock(process),
 }));
 
 // ADR 015 — mock the configured LOOP-asset allowlist. Tests that
@@ -154,6 +178,10 @@ beforeEach(() => {
   listPaymentsMock.mockReset();
   findOrderMock.mockReset();
   markPaidMock.mockReset();
+  recordSkipMock.mockReset();
+  recordSkipMock.mockResolvedValue(undefined);
+  retrySkipsMock.mockReset();
+  retrySkipsMock.mockResolvedValue({ retried: 0, resolved: 0, abandoned: 0, stillPending: 0 });
   state.cursor = null;
   state.writtenCursors = [];
   loopAssetsState.assets = [];
@@ -551,5 +579,120 @@ describe('runPaymentWatcherTick', () => {
     markPaidMock.mockResolvedValue({ id: 'order-1' });
     const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
     expect(r.paid).toBe(1);
+  });
+});
+
+describe('skip persistence + poison isolation (comprehensive-audit CRIT #1/#2)', () => {
+  it('underpayment records an amount_insufficient skip BEFORE the cursor advances', async () => {
+    listPaymentsMock.mockResolvedValue({
+      records: [usdcPayment('memo-1', '1.0000000', 'pt-10')],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(makeOrder());
+
+    const result = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+
+    expect(result.skippedAmount).toBe(1);
+    expect(recordSkipMock).toHaveBeenCalledTimes(1);
+    const call = recordSkipMock.mock.calls[0]?.[0] as {
+      reason: string;
+      orderId: string;
+      memo: string;
+    };
+    expect(call.reason).toBe('amount_insufficient');
+    expect(call.orderId).toBe('order-1');
+    expect(call.memo).toBe('memo-1');
+    // Cursor still advances — the skip row is the retry path now.
+    expect(state.writtenCursors).toEqual(['pt-10']);
+  });
+
+  it('A4-107 asset mismatch records an asset_mismatch skip', async () => {
+    listPaymentsMock.mockResolvedValue({
+      records: [usdcPayment('memo-1', '100.0000000', 'pt-11')],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(makeOrder({ paymentMethod: 'xlm' }));
+
+    await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+
+    expect(recordSkipMock).toHaveBeenCalledTimes(1);
+    expect((recordSkipMock.mock.calls[0]?.[0] as { reason: string }).reason).toBe('asset_mismatch');
+  });
+
+  it('poison payment is isolated: skip recorded, later payments processed, cursor advanced', async () => {
+    listPaymentsMock.mockResolvedValue({
+      records: [
+        usdcPayment('memo-poison', '100.0000000', 'pt-20'),
+        usdcPayment('memo-good', '100.0000000', 'pt-21'),
+      ],
+      nextCursor: null,
+    });
+    findOrderMock.mockImplementation(async (memo: string) =>
+      memo === 'memo-poison' ? makeOrder({ id: 'order-poison' }) : makeOrder({ id: 'order-good' }),
+    );
+    markPaidMock.mockImplementation(async (id: string) => {
+      if (id === 'order-poison') throw new Error('user_credits_non_negative violation');
+      return { id };
+    });
+
+    const result = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+
+    // Pre-fix behaviour: the throw aborted the tick before the
+    // cursor write, so the same page (poison included) re-ran
+    // forever and 'memo-good' never got paid.
+    expect(result.errors).toBe(1);
+    expect(result.paid).toBe(1);
+    expect(markPaidMock).toHaveBeenCalledWith('order-good');
+    expect(recordSkipMock).toHaveBeenCalledTimes(1);
+    const call = recordSkipMock.mock.calls[0]?.[0] as { reason: string; detail?: string };
+    expect(call.reason).toBe('processing_error');
+    expect(call.detail).toContain('user_credits_non_negative');
+    expect(state.writtenCursors).toEqual(['pt-21']);
+  });
+
+  it('A4-110 missing credit row records a missing_credit_row skip and continues', async () => {
+    const { LoopAssetMissingCreditRowError } = await vi.importActual<typeof TransitionsModule>(
+      '../../orders/transitions.js',
+    );
+    loopAssetsState.assets = [{ code: 'USDLOOP', issuer: 'GISSUER' }];
+    const payment = usdcPayment('memo-loop', '10.0000000', 'pt-30');
+    payment.asset_code = 'USDLOOP';
+    payment.asset_issuer = 'GISSUER';
+    listPaymentsMock.mockResolvedValue({ records: [payment], nextCursor: null });
+    findOrderMock.mockResolvedValue(makeOrder({ paymentMethod: 'loop_asset' }));
+    markPaidMock.mockRejectedValue(new LoopAssetMissingCreditRowError('order-1', 'user-1', 'USD'));
+
+    const result = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+
+    expect(result.skippedAmount).toBe(1);
+    expect(result.errors).toBe(0);
+    expect((recordSkipMock.mock.calls[0]?.[0] as { reason: string }).reason).toBe(
+      'missing_credit_row',
+    );
+    expect(state.writtenCursors).toEqual(['pt-30']);
+  });
+
+  it('recordSkip failure aborts the tick before the cursor write (skip must not be lost)', async () => {
+    listPaymentsMock.mockResolvedValue({
+      records: [usdcPayment('memo-1', '1.0000000', 'pt-40')],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(makeOrder());
+    recordSkipMock.mockRejectedValue(new Error('db down'));
+
+    await expect(
+      runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' }),
+    ).rejects.toThrow('db down');
+    expect(state.writtenCursors).toEqual([]);
+  });
+
+  it('sweep recoveries count into paid + skipsRecovered', async () => {
+    retrySkipsMock.mockResolvedValue({ retried: 3, resolved: 2, abandoned: 1, stillPending: 0 });
+    listPaymentsMock.mockResolvedValue({ records: [], nextCursor: null });
+
+    const result = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+
+    expect(result.skipsRecovered).toBe(2);
+    expect(result.paid).toBe(2);
   });
 });

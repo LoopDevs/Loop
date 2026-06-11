@@ -21,6 +21,7 @@ import {
   check,
   primaryKey,
   uniqueIndex,
+  jsonb,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -613,6 +614,48 @@ export const watcherCursors = pgTable('watcher_cursors', {
   cursor: text('cursor'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Deposits the payment watcher skipped (comprehensive-audit
+ * 2026-06-11, CRIT #1/#2). The watcher cursor advances past every
+ * record on a Horizon page — a payment rejected for a transient
+ * reason (oracle outage, A4-110 missing credit row, an unexpected
+ * `markOrderPaid` error) would otherwise never be re-scanned. Each
+ * skip is persisted here BEFORE the cursor advances; the sweep in
+ * `payments/skipped-payments.ts` re-evaluates pending rows each tick.
+ *
+ * `payment` snapshots the parsed Horizon record (jsonb) so the retry
+ * replays the exact matching/validation logic without a Horizon
+ * round-trip. `order_id` is informational (no FK — the skip row is
+ * operational telemetry and must survive any order lifecycle).
+ */
+export const paymentWatcherSkips = pgTable(
+  'payment_watcher_skips',
+  {
+    /** Horizon operation id — stable replay key. */
+    paymentId: text('payment_id').primaryKey(),
+    memo: text('memo').notNull(),
+    orderId: uuid('order_id'),
+    reason: text('reason').notNull(),
+    payment: jsonb('payment').notNull(),
+    attempts: integer('attempts').notNull().default(1),
+    lastError: text('last_error'),
+    status: text('status').notNull().default('pending'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      'payment_watcher_skips_reason_known',
+      sql`${t.reason} IN ('asset_mismatch', 'amount_insufficient', 'missing_credit_row', 'processing_error')`,
+    ),
+    check(
+      'payment_watcher_skips_status_known',
+      sql`${t.status} IN ('pending', 'resolved', 'abandoned')`,
+    ),
+    index('payment_watcher_skips_status_created').on(t.status, t.createdAt),
+  ],
+);
 
 /**
  * External identity links for a Loop user (ADR 014 — social login).
