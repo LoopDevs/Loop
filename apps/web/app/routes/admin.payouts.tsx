@@ -11,6 +11,7 @@ import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton
 import { ReasonDialog } from '~/components/features/admin/ReasonDialog';
 import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
+import { fmtStroops } from '~/utils/format-stellar';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · Payouts — Loop' }];
@@ -41,17 +42,6 @@ function kindLabel(k: KindFilter): string {
 // see imports at top of file. Kept the narrowing function name in
 // scope via the import so the `?assetCode=` URL-param check below
 // reads the same as before.
-
-function fmtStroops(stroops: string, code: string): string {
-  const negative = stroops.startsWith('-');
-  const digits = negative ? stroops.slice(1) : stroops;
-  const padded = digits.padStart(8, '0');
-  const whole = padded.slice(0, -7);
-  const fractionRaw = padded.slice(-7).replace(/0+$/, '');
-  const fraction = fractionRaw.length > 0 ? `.${fractionRaw}` : '';
-  const sign = negative ? '-' : '';
-  return `${sign}${Number(whole).toLocaleString(ADMIN_LOCALE)}${fraction} ${code}`;
-}
 
 function truncId(s: string): string {
   if (s.length <= 12) return s;

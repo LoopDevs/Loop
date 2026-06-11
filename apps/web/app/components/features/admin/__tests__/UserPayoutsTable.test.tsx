@@ -5,7 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import type * as AdminModule from '~/services/admin';
 import type { AdminPayoutView } from '~/services/admin';
-import { UserPayoutsTable, fmtStroops } from '../UserPayoutsTable';
+import { UserPayoutsTable } from '../UserPayoutsTable';
+import { fmtStroops } from '~/utils/format-stellar';
 
 afterEach(cleanup);
 

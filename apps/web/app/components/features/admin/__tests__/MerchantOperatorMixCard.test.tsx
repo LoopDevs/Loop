@@ -25,7 +25,7 @@ vi.mock('~/services/admin', async (importActual) => {
 
 vi.mock('~/hooks/query-retry', () => ({ shouldRetry: () => false }));
 
-function renderCard(merchantId = 'mctx-acme'): void {
+function renderCard(merchantId = 'mctx-acme'): QueryClient {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={qc}>
@@ -34,6 +34,7 @@ function renderCard(merchantId = 'mctx-acme'): void {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return qc;
 }
 
 describe('<MerchantOperatorMixCard />', () => {
@@ -109,5 +110,41 @@ describe('<MerchantOperatorMixCard />', () => {
     await waitFor(() => {
       expect(screen.getByText('—')).toBeDefined();
     });
+  });
+
+  // Comprehensive-audit 2026-06-11 P10: `since` must be derived at
+  // fetch time. A render-time `since` isn't part of the queryKey, so
+  // long-lived pages would refetch with the original (ever-staler)
+  // window forever. Same pattern in OperatorMerchantMixCard,
+  // OperatorStatsCard, UserOperatorMixCard, SupplierSpendCard,
+  // TopUsersTable — this test pins the representative instance.
+  it('recomputes `since` at fetch time so refetches use a fresh rolling window', async () => {
+    adminMock.getMerchantOperatorMix.mockReset();
+    adminMock.getMerchantOperatorMix.mockResolvedValue({
+      merchantId: 'mctx-drained',
+      since: '2026-04-22T01:00:00.000Z',
+      rows: [],
+    });
+    const qc = renderCard('mctx-drained');
+    await waitFor(() => {
+      expect(adminMock.getMerchantOperatorMix).toHaveBeenCalledTimes(1);
+    });
+    const firstSince = (adminMock.getMerchantOperatorMix.mock.calls[0]?.[1] as { since: string })
+      .since;
+
+    // Pretend an hour passes while the page sits open, then refetch.
+    const later = Date.now() + 60 * 60 * 1000;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(later);
+    try {
+      await qc.refetchQueries();
+    } finally {
+      nowSpy.mockRestore();
+    }
+    expect(adminMock.getMerchantOperatorMix).toHaveBeenCalledTimes(2);
+    const secondSince = (adminMock.getMerchantOperatorMix.mock.calls[1]?.[1] as { since: string })
+      .since;
+    expect(new Date(secondSince).getTime() - new Date(firstSince).getTime()).toBeGreaterThanOrEqual(
+      60 * 60 * 1000,
+    );
   });
 });

@@ -14,7 +14,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
-import { ApiException } from '@loop/shared';
+import { ApiException, formatMinorCurrency } from '@loop/shared';
 import type { Route } from './+types/admin.orders';
 import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import {
@@ -24,6 +24,7 @@ import {
   type AdminPaymentMethod,
 } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
+import { ADMIN_LOCALE } from '~/utils/locale';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { OrdersSparkline } from '~/components/features/admin/OrdersSparkline';
@@ -58,7 +59,7 @@ const PAYMENT_METHODS: ReadonlyArray<AdminPaymentMethod> = ['xlm', 'usdc', 'cred
 const PAGE_SIZE = 50;
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
+  return new Date(iso).toLocaleString(ADMIN_LOCALE, {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
@@ -66,24 +67,12 @@ function formatDate(iso: string): string {
   });
 }
 
-/**
- * Bigint-minor → localized currency (e.g. `"5000"` GBP → `"£50.00"`).
- * Local copy — the shared helper in #390 covers this but isn't merged
- * yet, so inlining keeps this PR unblocked. Follow-up slice will
- * replace with `formatMinorAmount` from `@loop/shared`.
- */
-function formatMinor(minor: string, currency: string): string {
-  try {
-    const major = Number(BigInt(minor)) / 100;
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 2,
-    }).format(major);
-  } catch {
-    return '—';
-  }
-}
+// Bigint-minor → admin-locale currency (e.g. `"5000"` GBP → `"£50.00"`).
+// The promised follow-up to the old local copy: `formatMinorCurrency`
+// from `@loop/shared` is bigint-safe and pinned to the admin locale
+// (A2-1521), replacing the `undefined`-locale Number(BigInt(...)) inline
+// version (comprehensive-audit 2026-06-11, P10).
+const formatMinor = formatMinorCurrency;
 
 // A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminOrdersRoute(): React.JSX.Element {

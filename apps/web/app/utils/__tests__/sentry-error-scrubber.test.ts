@@ -94,6 +94,21 @@ describe('scrubErrorForSentry', () => {
     expect(err.message).toBe('x');
   });
 
+  it('scrubs the stack with the same patterns as the message', () => {
+    // V8 stacks repeat the message on the first line, so an
+    // unscrubbed stack would leak everything the message scrub
+    // removed (comprehensive-audit 2026-06-11, P10).
+    const err = new Error('login failed for user@example.com');
+    err.stack =
+      'Error: login failed for user@example.com\n    at login (auth.ts:10:5) Bearer abcdefghijklmnop1234';
+    const out = scrubErrorForSentry(err) as Error;
+    expect(out.stack).not.toContain('user@example.com');
+    expect(out.stack).toContain('[REDACTED_EMAIL]');
+    expect(out.stack).toContain('[REDACTED_BEARER]');
+    // Frame lines survive so the trace is still useful.
+    expect(out.stack).toContain('at login (auth.ts:10:5)');
+  });
+
   it('redacts string inputs via scrubStringForSentry', () => {
     const out = scrubErrorForSentry('boom email@x.com') as string;
     expect(out).toBe('boom [REDACTED_EMAIL]');

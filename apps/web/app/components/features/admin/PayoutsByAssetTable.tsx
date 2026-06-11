@@ -7,24 +7,7 @@ import {
 } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
-import { ADMIN_LOCALE } from '~/utils/locale';
-
-/**
- * Renders a stroops-as-string amount as `X.Y <code>`. Same formatting
- * as /admin/payouts (7-decimal stellar minor → major). Falls back
- * to `—` for non-numeric input so a bad response doesn't print NaN.
- */
-function fmtStroops(stroops: string, code: string): string {
-  const negative = stroops.startsWith('-');
-  const digits = negative ? stroops.slice(1) : stroops;
-  if (!/^\d+$/.test(digits)) return '—';
-  const padded = digits.padStart(8, '0');
-  const whole = padded.slice(0, -7);
-  const fractionRaw = padded.slice(-7).replace(/0+$/, '');
-  const fraction = fractionRaw.length > 0 ? `.${fractionRaw}` : '';
-  const sign = negative ? '-' : '';
-  return `${sign}${Number(whole).toLocaleString(ADMIN_LOCALE)}${fraction} ${code}`;
-}
+import { fmtStroops } from '~/utils/format-stellar';
 
 function StateCell({
   value,

@@ -24,7 +24,7 @@ import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { AssetCirculationCard } from '~/components/features/admin/AssetCirculationCard';
 import { Spinner } from '~/components/ui/Spinner';
 import { shortDay } from '~/components/features/admin/PaymentMethodActivityChart';
-import { ADMIN_LOCALE } from '~/utils/locale';
+import { fmtStroops } from '~/utils/format-stellar';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · Asset — Loop' }];
@@ -41,17 +41,6 @@ function fiatOf(code: LoopAssetCode): string {
 
 // A2-1520: local fmtMinor replaced with bigint-safe shared helper.
 import { formatMinorCurrency as fmtMinor } from '@loop/shared';
-
-function fmtStroops(stroops: string, assetCode: LoopAssetCode): string {
-  const negative = stroops.startsWith('-');
-  const digits = negative ? stroops.slice(1) : stroops;
-  const padded = digits.padStart(8, '0');
-  const whole = padded.slice(0, -7);
-  const fractionRaw = padded.slice(-7).replace(/0+$/, '');
-  const fraction = fractionRaw.length > 0 ? `.${fractionRaw}` : '';
-  const sign = negative ? '-' : '';
-  return `${sign}${Number(whole).toLocaleString(ADMIN_LOCALE)}${fraction} ${assetCode}`;
-}
 
 function truncPubkey(pk: string): string {
   if (pk.length <= 12) return pk;

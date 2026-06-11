@@ -42,8 +42,9 @@ app/
 │                       biometrics, app-lock, back-button, clipboard, keyboard, network,
 │                       notifications, purchase-storage, share, task-switcher-overlay,
 │                       status-bar, webview)
-├── utils/            ← admin-cache, error-messages, image, locale, money,
-│                       security-headers, query-error-reporting (A2-1322),
+├── utils/            ← admin-cache, error-messages, format-stellar (fmtStroops),
+│                       image, locale, money, security-headers,
+│                       query-error-reporting (A2-1322),
 │                       sentry-error-scrubber (A2-1312), sentry-scrubber (A2-1308)
 ├── i18n/             ← ADR 034 locale seam: locale (useLocale/localizedHref over the
 │                       URL params), format (Intl currency/number, localeTag),

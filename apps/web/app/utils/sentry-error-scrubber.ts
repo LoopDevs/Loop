@@ -72,7 +72,11 @@ export function scrubErrorForSentry(err: unknown): unknown {
     // for UI state).
     const clone = new Error(scrubStringForSentry(err.message));
     clone.name = err.name;
-    if (err.stack !== undefined) clone.stack = err.stack;
+    // The stack's first line repeats the message verbatim (V8 format:
+    // `Error: <message>\n    at ...`), so an email / bearer token in
+    // the message would leak through an unscrubbed stack even though
+    // the cloned message itself is clean.
+    if (err.stack !== undefined) clone.stack = scrubStringForSentry(err.stack);
     const src = err as Error & { response?: unknown; cause?: unknown };
     if (src.response !== undefined && !isResponseOrRequest(src.response)) {
       (clone as Error & { response?: unknown }).response = src.response;

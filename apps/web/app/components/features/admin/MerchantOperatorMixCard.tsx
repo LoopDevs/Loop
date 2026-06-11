@@ -43,10 +43,17 @@ function fmtRelative(iso: string): string {
  * state=failed) for direct incident triage.
  */
 export function MerchantOperatorMixCard({ merchantId }: { merchantId: string }): React.JSX.Element {
-  const since = new Date(Date.now() - WINDOW_HOURS * 60 * 60 * 1000).toISOString();
   const query = useQuery({
     queryKey: ['admin-merchant-operator-mix', merchantId, WINDOW_HOURS],
-    queryFn: () => getMerchantOperatorMix(merchantId, { since }),
+    // `since` is computed inside queryFn — not at render — so every
+    // (re)fetch uses a fresh rolling window. A render-time value isn't
+    // part of the queryKey, so it would pin the window to whenever the
+    // component last rendered and serve an ever-staler slice on
+    // long-lived admin pages (comprehensive-audit 2026-06-11, P10).
+    queryFn: () => {
+      const since = new Date(Date.now() - WINDOW_HOURS * 60 * 60 * 1000).toISOString();
+      return getMerchantOperatorMix(merchantId, { since });
+    },
     retry: shouldRetry,
     staleTime: 60_000,
   });

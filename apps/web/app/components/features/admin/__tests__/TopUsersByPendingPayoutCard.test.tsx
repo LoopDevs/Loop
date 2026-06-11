@@ -4,7 +4,8 @@ import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import type * as AdminModule from '~/services/admin';
-import { TopUsersByPendingPayoutCard, fmtStroops } from '../TopUsersByPendingPayoutCard';
+import { TopUsersByPendingPayoutCard } from '../TopUsersByPendingPayoutCard';
+import { fmtStroops } from '~/utils/format-stellar';
 
 afterEach(cleanup);
 

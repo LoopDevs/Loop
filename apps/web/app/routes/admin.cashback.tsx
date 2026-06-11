@@ -173,13 +173,22 @@ function AdminCashbackRouteInner(): React.JSX.Element {
     };
   };
 
+  // Numeric comparison, not string comparison: the inputs are free
+  // text, so "5" vs a stored "5.00" is the same value and must not
+  // read as dirty (comprehensive-audit 2026-06-11, P10). NaN (draft
+  // mid-edit, e.g. "5.") compares unequal to everything, which keeps
+  // Save enabled while the user types — the backend validates the
+  // final shape.
+  const pctChanged = (draft: string, stored: string | undefined): boolean =>
+    Number(draft) !== Number(stored ?? '0.00');
+
   const isDirty = (cfg: MerchantCashbackConfig | undefined, merchantId: string): boolean => {
     const d = drafts[merchantId];
     if (d === undefined) return false;
     return (
-      d.wholesalePct !== (cfg?.wholesalePct ?? '0.00') ||
-      d.userCashbackPct !== (cfg?.userCashbackPct ?? '0.00') ||
-      d.loopMarginPct !== (cfg?.loopMarginPct ?? '0.00')
+      pctChanged(d.wholesalePct, cfg?.wholesalePct) ||
+      pctChanged(d.userCashbackPct, cfg?.userCashbackPct) ||
+      pctChanged(d.loopMarginPct, cfg?.loopMarginPct)
     );
   };
 

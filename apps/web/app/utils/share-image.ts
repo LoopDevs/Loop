@@ -140,17 +140,41 @@ function getImageHeight(source: CanvasImageSource): number {
   return 0;
 }
 
-function loadImage(url: string): Promise<HTMLImageElement | null> {
+/**
+ * Bounded image load. `Image` has no native timeout — a half-open
+ * connection fires neither `onload` nor `onerror`, which would hang
+ * the share composition forever (the user tapped Share and nothing
+ * happens). After `LOAD_IMAGE_TIMEOUT_MS` we resolve `null` so the
+ * caller falls back to composing without the barcode.
+ */
+const LOAD_IMAGE_TIMEOUT_MS = 8_000;
+
+// Exported for the timeout unit test only — production callers go
+// through `composeGiftCardShareImage`.
+export function loadImage(url: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     const image = new Image();
+    let settled = false;
+    const settle = (value: HTMLImageElement | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      // Stop the in-flight fetch; assigning an empty src aborts the
+      // load in every engine we target.
+      image.src = '';
+      settle(null);
+    }, LOAD_IMAGE_TIMEOUT_MS);
     // `crossOrigin` is required so the resulting canvas isn't
     // tainted and `toDataURL` can serialise it. Our image proxy
     // (`/api/image?url=...`) returns the right CORS headers; the
     // URL comes from `getImageProxyUrl` so it always hits the
     // proxy, never the raw CTX origin.
     image.crossOrigin = 'anonymous';
-    image.onload = () => resolve(image);
-    image.onerror = () => resolve(null);
+    image.onload = () => settle(image);
+    image.onerror = () => settle(null);
     image.src = url;
   });
 }

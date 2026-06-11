@@ -5,7 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Routes, Route } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type * as AdminModule from '~/services/admin';
-import AdminPayoutDetailRoute, { fmtStroops } from '../admin.payouts.$id';
+import AdminPayoutDetailRoute from '../admin.payouts.$id';
+import { fmtStroops } from '~/utils/format-stellar';
 
 afterEach(cleanup);
 

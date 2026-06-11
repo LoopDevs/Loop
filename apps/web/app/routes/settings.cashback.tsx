@@ -49,7 +49,17 @@ const LEDGER_LABELS: Record<CashbackHistoryEntry['type'], string> = {
 
 function formatAmount(minor: string, currency: string): string {
   try {
-    const major = Number(BigInt(minor)) / 100;
+    // Bigint split per the `@loop/shared` money-format convention
+    // (`formatMinorCurrency`): divide/modulo in bigint space and
+    // Number-cast only the whole + fraction components, so a minor
+    // amount beyond 2^53 can't silently round before the division.
+    // (We format locally rather than calling the shared helper
+    // because this is a user-facing surface — browser locale +
+    // signDisplay, vs the helper's pinned en-US admin locale.)
+    const big = BigInt(minor);
+    const neg = big < 0n;
+    const abs = neg ? -big : big;
+    const major = (neg ? -1 : 1) * (Number(abs / 100n) + Number(abs % 100n) / 100);
     return new Intl.NumberFormat(undefined, {
       style: 'currency',
       currency,
