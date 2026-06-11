@@ -24,6 +24,7 @@ import { createHash } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { adminIdempotencyKeys } from '../db/schema.js';
+import { logger } from '../logger.js';
 import {
   IDEMPOTENCY_KEY_MIN,
   IDEMPOTENCY_KEY_MAX,
@@ -42,6 +43,8 @@ export {
   sweepStaleIdempotencyKeys,
   type IdempotencySnapshot,
 } from './idempotency-store.js';
+
+const log = logger.child({ area: 'admin-idempotency' });
 
 export function validateIdempotencyKey(key: string | undefined): key is string {
   if (key === undefined) return false;
@@ -107,7 +110,11 @@ export interface IdempotencyGuardResult {
  *      return it as a replay (the other caller finished first). The
  *      same TTL gate as `lookupIdempotencyKey()` applies here so the
  *      bounded replay window cannot drift between guarded and manual
- *      paths.
+ *      paths. If the stored snapshot is corrupt (unparseable or an
+ *      empty/non-object body) the guard returns a structured 500
+ *      (`IDEMPOTENCY_SNAPSHOT_CORRUPT`) instead of re-running the
+ *      write — the snapshot only exists because the write committed,
+ *      so re-executing would double the side-effect.
  *   3. Otherwise call `doWrite()`. Its own internal transaction
  *      becomes a SAVEPOINT of the outer txn, so a failure cleanly
  *      rolls back without releasing the lock.
@@ -139,28 +146,59 @@ export async function withIdempotencyGuard(
     if (prior !== undefined) {
       const ageMs = Date.now() - prior.createdAt.getTime();
       if (ageMs <= IDEMPOTENCY_TTL_HOURS * 60 * 60 * 1000) {
-        let body: Record<string, unknown>;
+        let body: Record<string, unknown> | null;
         try {
-          body = JSON.parse(prior.responseBody) as Record<string, unknown>;
+          const parsed: unknown = JSON.parse(prior.responseBody);
+          body =
+            parsed !== null &&
+            typeof parsed === 'object' &&
+            !Array.isArray(parsed) &&
+            Object.keys(parsed).length > 0
+              ? (parsed as Record<string, unknown>)
+              : null;
         } catch {
-          // Corrupt stored snapshot — treat as miss and re-run. Falls
-          // through into the write path below.
-          body = {};
+          body = null;
         }
-        if (Object.keys(body).length > 0) {
-          // ADR-017 + every admin-write OpenAPI entry promises that
-          // `audit.replayed: true` on the response body indicates a
-          // snapshot replay. The stored body was produced on the first
-          // call with `replayed: false`; mutate it here on the replay
-          // path so the wire contract matches the docs. Doing it in
-          // the guard means every handler using `withIdempotencyGuard`
-          // gets the spec-compliant behaviour without per-handler code.
-          const audit = body['audit'];
-          if (audit !== null && typeof audit === 'object') {
-            (audit as Record<string, unknown>)['replayed'] = true;
-          }
-          return { replayed: true, status: prior.status, body };
+        if (body === null) {
+          // Corrupt stored snapshot. The original write committed (a
+          // snapshot is only persisted in the same txn as the write),
+          // so silently re-running `doWrite()` here would double the
+          // side-effect — double-credit, double-payout-retry. A
+          // financial write must never re-execute because its replay
+          // record is unreadable: fail loud with a structured 500 and
+          // leave the row in place for an operator to inspect.
+          log.error(
+            {
+              adminUserId: args.adminUserId,
+              key: args.key,
+              method: args.method,
+              path: args.path,
+              storedStatus: prior.status,
+            },
+            'Corrupt admin idempotency snapshot — refusing to re-execute the write',
+          );
+          return {
+            replayed: true,
+            status: 500,
+            body: {
+              code: 'IDEMPOTENCY_SNAPSHOT_CORRUPT',
+              message:
+                'Stored idempotency snapshot is unreadable; the original write was applied but its response cannot be replayed. Do NOT retry with a new key — escalate to ops.',
+            },
+          };
         }
+        // ADR-017 + every admin-write OpenAPI entry promises that
+        // `audit.replayed: true` on the response body indicates a
+        // snapshot replay. The stored body was produced on the first
+        // call with `replayed: false`; mutate it here on the replay
+        // path so the wire contract matches the docs. Doing it in
+        // the guard means every handler using `withIdempotencyGuard`
+        // gets the spec-compliant behaviour without per-handler code.
+        const audit = body['audit'];
+        if (audit !== null && typeof audit === 'object') {
+          (audit as Record<string, unknown>)['replayed'] = true;
+        }
+        return { replayed: true, status: prior.status, body };
       }
     }
 

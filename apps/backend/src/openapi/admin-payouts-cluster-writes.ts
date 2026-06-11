@@ -90,7 +90,8 @@ export function registerAdminPayoutsClusterWritesOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       500: {
-        description: 'Internal error resetting the row',
+        description:
+          'Internal error resetting the row (`INTERNAL_ERROR`), or the stored replay snapshot for this Idempotency-Key is unreadable (`IDEMPOTENCY_SNAPSHOT_CORRUPT` — the write is never re-executed)',
         content: { 'application/json': { schema: errorResponse } },
       },
     },
@@ -173,11 +174,13 @@ export function registerAdminPayoutsClusterWritesOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {
-        description: 'Rate limit exceeded (20/min per IP)',
+        description:
+          'Rate limit exceeded (20/min per IP, `RATE_LIMITED`), or the fleet-wide daily compensation cap would be exceeded (`DAILY_LIMIT_EXCEEDED`, A4-020)',
         content: { 'application/json': { schema: errorResponse } },
       },
       500: {
-        description: 'Internal error applying compensation',
+        description:
+          'Internal error applying compensation (`INTERNAL_ERROR`), or the stored replay snapshot for this Idempotency-Key is unreadable (`IDEMPOTENCY_SNAPSHOT_CORRUPT` — the write is never re-executed)',
         content: { 'application/json': { schema: errorResponse } },
       },
     },

@@ -107,6 +107,7 @@ vi.mock('../../discord.js', () => ({
   notifyAdminAudit: (args: unknown) => notifyMock(args),
 }));
 
+import { DailyAdjustmentLimitError } from '../../credits/adjustments.js';
 import { adminPayoutCompensationHandler } from '../payout-compensation.js';
 
 const VALID_PAYOUT_ID = '00000000-0000-0000-0000-000000000aaa';
@@ -417,6 +418,21 @@ describe('adminPayoutCompensationHandler — ADR-017 + ADR-024 §5 invariants', 
     expect(res.status).toBe(500);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('INTERNAL_ERROR');
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('429 DAILY_LIMIT_EXCEEDED when the fleet-wide compensation cap is hit', async () => {
+    const dayStart = new Date();
+    dayStart.setUTCHours(0, 0, 0, 0);
+    applyMock.mockRejectedValueOnce(
+      new DailyAdjustmentLimitError('USD', dayStart, 500n, 700n, 500n),
+    );
+    const res = await adminPayoutCompensationHandler(
+      makeCtx({ payoutId: VALID_PAYOUT_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
+    );
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('DAILY_LIMIT_EXCEEDED');
     expect(notifyMock).not.toHaveBeenCalled();
   });
 });

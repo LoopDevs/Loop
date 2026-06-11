@@ -21,15 +21,33 @@ vi.mock('../../credits/pending-payouts.js', () => ({
   getPayoutForAdmin: (id: string) => getMock(id),
   getPayoutByOrderId: (orderId: string) => byOrderMock(orderId),
 }));
+// the retry handler now routes through withIdempotencyGuard.
+// The mock emulates the production guard: replay the prior snapshot
+// (with audit.replayed flipped true) when one exists, otherwise run
+// doWrite and persist into idempotencyState.storedSnapshot. A doWrite
+// rejection propagates without storing (the real guard rolls the txn
+// back), so the 404-not-stored sentinel path behaves like production.
 vi.mock('../idempotency.js', () => ({
   IDEMPOTENCY_KEY_MIN: 16,
   IDEMPOTENCY_KEY_MAX: 128,
   validateIdempotencyKey: (k: string | undefined): k is string =>
     k !== undefined && k.length >= 16 && k.length <= 128,
-  lookupIdempotencyKey: vi.fn(async () => idempotencyState.priorSnapshot),
-  storeIdempotencyKey: vi.fn(async (args: Record<string, unknown>) => {
-    idempotencyState.storedSnapshot = args;
-  }),
+  withIdempotencyGuard: async (
+    args: { adminUserId: string; key: string; method: string; path: string },
+    doWrite: () => Promise<{ status: number; body: Record<string, unknown> }>,
+  ): Promise<{ replayed: boolean; status: number; body: Record<string, unknown> }> => {
+    const prior = idempotencyState.priorSnapshot;
+    if (prior !== null) {
+      const audit = prior.body['audit'];
+      if (audit !== null && typeof audit === 'object') {
+        (audit as Record<string, unknown>)['replayed'] = true;
+      }
+      return { replayed: true, status: prior.status, body: prior.body };
+    }
+    const { status, body } = await doWrite();
+    idempotencyState.storedSnapshot = { ...args, status, body };
+    return { replayed: false, status, body };
+  },
 }));
 vi.mock('../../discord.js', () => ({
   notifyAdminAudit: vi.fn((args: Record<string, unknown>) => {
@@ -472,5 +490,44 @@ describe('adminRetryPayoutHandler (ADR 017)', () => {
     expect(resetMock).not.toHaveBeenCalled();
     expect(idempotencyState.discordCalls).toHaveLength(1);
     expect(idempotencyState.discordCalls[0]?.['replayed']).toBe(true);
+  });
+
+  it('two sequential same-key retries reset exactly once — second is the cached replay', async () => {
+    const first = await adminRetryPayoutHandler(
+      makeRetryCtx({
+        headers: { 'idempotency-key': validKey },
+        body: { reason: 'first click' },
+      }),
+    );
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as { result: Record<string, unknown> };
+
+    // The guard persisted a snapshot for (admin, key); surface it as
+    // the prior so the second call takes the replay path.
+    const stored = idempotencyState.storedSnapshot as {
+      status: number;
+      body: Record<string, unknown>;
+    };
+    idempotencyState.priorSnapshot = {
+      status: stored.status,
+      body: stored.body,
+      createdAt: new Date(),
+    };
+
+    const second = await adminRetryPayoutHandler(
+      makeRetryCtx({
+        headers: { 'idempotency-key': validKey },
+        body: { reason: 'second click' },
+      }),
+    );
+    expect(second.status).toBe(200);
+    const secondBody = (await second.json()) as {
+      result: Record<string, unknown>;
+      audit: { replayed: boolean };
+    };
+    expect(secondBody.result).toEqual(firstBody.result);
+    expect(secondBody.audit.replayed).toBe(true);
+    // The payout transition ran exactly once across both requests.
+    expect(resetMock).toHaveBeenCalledTimes(1);
   });
 });

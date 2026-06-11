@@ -31,6 +31,7 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import { isLoopAssetCode, currencyForLoopAsset } from '@loop/shared';
 import { UUID_RE } from '../uuid.js';
+import { DailyAdjustmentLimitError } from '../credits/adjustments.js';
 import { getPayoutForAdmin } from '../credits/pending-payouts.js';
 import {
   AlreadyCompensatedError,
@@ -206,6 +207,19 @@ export async function adminPayoutCompensationHandler(c: Context): Promise<Respon
           message: err.message,
         },
         409,
+      );
+    }
+    if (err instanceof DailyAdjustmentLimitError) {
+      // the fleet-wide compensation cap (A4-020) hit. Same
+      // shape as the credit-adjustment handler's mapping so the admin
+      // UI shares one DAILY_LIMIT_EXCEEDED branch; previously this
+      // surfaced as a generic 500.
+      return c.json(
+        {
+          code: 'DAILY_LIMIT_EXCEEDED',
+          message: `Daily ${err.currency} compensation cap (${err.capMinor} minor) hit — ${err.usedMinor} used today, attempted ${err.attemptedDelta}`,
+        },
+        429,
       );
     }
     log.error({ err, payoutId: id, adminUserId: actor.id }, 'Compensation failed');

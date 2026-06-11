@@ -7,6 +7,8 @@ const { dbMock, state } = vi.hoisted(() => {
     insertUserCreditsCalls: unknown[];
     updateCalls: Array<{ table: string | undefined; values: unknown }>;
     returnedCreditRow: unknown;
+    /** pg_advisory_xact_lock bigint args, in call order. */
+    advisoryLockCalls: bigint[];
   }
   const s: State = {
     forUpdateResults: [],
@@ -14,13 +16,37 @@ const { dbMock, state } = vi.hoisted(() => {
     insertUserCreditsCalls: [],
     updateCalls: [],
     returnedCreditRow: null,
+    advisoryLockCalls: [],
   };
+
+  /** Recursively pull bigints out of drizzle's sql-template object. */
+  function extractBigints(v: unknown, out: bigint[]): void {
+    if (typeof v === 'bigint') {
+      out.push(v);
+      return;
+    }
+    if (v === null || typeof v !== 'object') return;
+    if (Array.isArray(v)) {
+      for (const item of v) extractBigints(item, out);
+      return;
+    }
+    for (const value of Object.values(v as Record<string, unknown>)) {
+      extractBigints(value, out);
+    }
+  }
 
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
   chain['select'] = vi.fn(() => chain);
   chain['from'] = vi.fn(() => chain);
   chain['where'] = vi.fn(() => chain);
   chain['for'] = vi.fn(async () => s.forUpdateResults.shift() ?? []);
+  // the cap check now opens with `tx.execute(SELECT
+  // pg_advisory_xact_lock(...))`. Capture the bigint lock key so
+  // tests can pin the key derivation.
+  chain['execute'] = vi.fn(async (q: unknown) => {
+    extractBigints(q, s.advisoryLockCalls);
+    return [];
+  });
   // A4-020: the daily-cap check runs `select().from().where()`
   // without `.for('update')` and awaits the chain directly. Make
   // the chain thenable so it resolves to an empty array (no
@@ -76,11 +102,13 @@ vi.mock('../../db/schema.js', () => ({
   },
 }));
 
+import { adjustmentCapLockKey, DailyAdjustmentLimitError } from '../adjustments.js';
 import {
   AlreadyCompensatedError,
   applyAdminPayoutCompensation,
   PayoutNotCompensableError,
 } from '../payout-compensation.js';
+import { env } from '../../env.js';
 
 beforeEach(() => {
   state.forUpdateResults = [];
@@ -88,6 +116,7 @@ beforeEach(() => {
   state.insertUserCreditsCalls = [];
   state.updateCalls = [];
   state.returnedCreditRow = { id: 'ct-1', createdAt: new Date('2026-04-29T00:00:00Z') };
+  state.advisoryLockCalls = [];
 });
 
 describe('applyAdminPayoutCompensation', () => {
@@ -241,5 +270,79 @@ describe('applyAdminPayoutCompensation', () => {
       }),
     ).rejects.toBeInstanceOf(PayoutNotCompensableError);
     expect(state.insertCreditCalls).toHaveLength(0);
+  });
+
+  it('acquires the shared cap advisory lock keyed (payout-compensation, currency, UTC day)', async () => {
+    state.forUpdateResults = [
+      [
+        {
+          id: 'p-1',
+          userId: 'u-1',
+          amountStroops: 50_000_000n,
+          kind: 'withdrawal',
+          state: 'failed',
+          compensatedAt: null,
+        },
+      ],
+      [{ userId: 'u-1', currency: 'USD', balanceMinor: 100n }],
+    ];
+
+    await applyAdminPayoutCompensation({
+      userId: 'u-1',
+      currency: 'USD',
+      amountMinor: 500n,
+      payoutId: 'p-1',
+      reason: 'manual compensation',
+    });
+
+    const dayStart = new Date();
+    dayStart.setUTCHours(0, 0, 0, 0);
+    // Exact same derivation `applyAdminCreditAdjustment` uses, with
+    // the fleet-wide 'payout-compensation' scope in place of an
+    // admin id — every concurrent compensation in the same
+    // (currency, day) bucket serialises on this one lock.
+    expect(state.advisoryLockCalls).toEqual([
+      adjustmentCapLockKey('payout-compensation', 'USD', dayStart),
+    ]);
+  });
+
+  it('throws DailyAdjustmentLimitError when the day total would exceed the cap', async () => {
+    const previousCap = env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR;
+    env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 700n;
+    const chain = dbMock as unknown as { then: (resolve: (v: unknown) => void) => void };
+    const previousThen = chain.then;
+    // Cap read sees 500 minor already compensated today; the next
+    // 500 would take the bucket to 1000 > 700.
+    chain.then = (resolve: (v: unknown) => void) => resolve([{ usedMinor: '500' }]);
+    try {
+      state.forUpdateResults = [
+        [
+          {
+            id: 'p-2',
+            userId: 'u-1',
+            amountStroops: 50_000_000n,
+            kind: 'withdrawal',
+            state: 'failed',
+            compensatedAt: null,
+          },
+        ],
+      ];
+      await expect(
+        applyAdminPayoutCompensation({
+          userId: 'u-1',
+          currency: 'USD',
+          amountMinor: 500n,
+          payoutId: 'p-2',
+          reason: 'manual compensation',
+        }),
+      ).rejects.toBeInstanceOf(DailyAdjustmentLimitError);
+      // The lock was still taken (check happens under it) and no
+      // ledger write landed.
+      expect(state.advisoryLockCalls).toHaveLength(1);
+      expect(state.insertCreditCalls).toHaveLength(0);
+    } finally {
+      chain.then = previousThen;
+      env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = previousCap;
+    }
   });
 });

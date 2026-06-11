@@ -67,9 +67,18 @@ export interface CreditAdjustment {
   createdAt: Date;
 }
 
-function adjustmentCapLockKey(adminUserId: string, currency: string, dayStartUtc: Date): bigint {
+/**
+ * Advisory-lock key for a daily admin-write cap bucket. `scope` is
+ * the cap pool's partition key — `applyAdminCreditAdjustment` passes
+ * the admin user id (its cap is per-admin), while
+ * `applyAdminPayoutCompensation` passes the fixed string
+ * `'payout-compensation'` (its cap is fleet-wide per currency, A4-020).
+ * Exported so the compensation writer serialises its check+write
+ * under the exact same lock-derivation as the adjustment writer.
+ */
+export function adjustmentCapLockKey(scope: string, currency: string, dayStartUtc: Date): bigint {
   const digest = createHash('sha256')
-    .update(`${adminUserId}:${currency}:${dayStartUtc.toISOString()}`)
+    .update(`${scope}:${currency}:${dayStartUtc.toISOString()}`)
     .digest();
   const raw =
     (BigInt(digest[0]!) << 56n) |

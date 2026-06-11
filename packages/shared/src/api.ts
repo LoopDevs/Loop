@@ -88,6 +88,11 @@ export const ApiErrorCode = {
   // catches drift at the TypeScript layer. Ops-facing UX for these
   // is tracked under A2-1153.
   IDEMPOTENCY_KEY_REQUIRED: 'IDEMPOTENCY_KEY_REQUIRED',
+  // The stored replay snapshot for an (admin, Idempotency-Key) pair
+  // is unreadable. The original write committed (snapshots persist
+  // in the same txn as the write), so the guard refuses to
+  // re-execute — 500, ops escalation, never an automatic re-run.
+  IDEMPOTENCY_SNAPSHOT_CORRUPT: 'IDEMPOTENCY_SNAPSHOT_CORRUPT',
   INSUFFICIENT_BALANCE: 'INSUFFICIENT_BALANCE',
   INSUFFICIENT_CREDIT: 'INSUFFICIENT_CREDIT',
   HOME_CURRENCY_LOCKED: 'HOME_CURRENCY_LOCKED',

@@ -33,7 +33,16 @@ import { and, eq, gte, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { creditTransactions, pendingPayouts, userCredits } from '../db/schema.js';
 import { env } from '../env.js';
-import { DailyAdjustmentLimitError } from './adjustments.js';
+import { adjustmentCapLockKey, DailyAdjustmentLimitError } from './adjustments.js';
+
+/**
+ * Advisory-lock scope for the compensation cap bucket. Unlike the
+ * per-admin adjustment cap, the A4-020 compensation cap is fleet-wide
+ * (per currency, per UTC day, all admins combined), so the lock
+ * partitions on this fixed scope + currency + day — every concurrent
+ * compensation in the same bucket serialises on one lock.
+ */
+const COMPENSATION_CAP_LOCK_SCOPE = 'payout-compensation';
 
 export class PayoutNotCompensableError extends Error {
   constructor(message: string) {
@@ -151,6 +160,16 @@ export async function applyAdminPayoutCompensation(args: {
     if (capMinor > 0n) {
       const dayStart = new Date();
       dayStart.setUTCHours(0, 0, 0, 0);
+      // serialise the cap check + ledger write under the same
+      // advisory-lock derivation `applyAdminCreditAdjustment` uses.
+      // Without the lock, two concurrent compensations (different
+      // payouts, same currency) both read the same `used` total, both
+      // pass the check, and jointly exceed the cap — the row lock on
+      // `pending_payouts` above only serialises same-payout calls.
+      // Lock is per (scope, currency, UTC day) and held to commit.
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${adjustmentCapLockKey(COMPENSATION_CAP_LOCK_SCOPE, args.currency, dayStart)})`,
+      );
       const [dayRow] = await tx
         .select({
           usedMinor: sql<string>`COALESCE(SUM(ABS(${creditTransactions.amountMinor}))::text, '0')`,
