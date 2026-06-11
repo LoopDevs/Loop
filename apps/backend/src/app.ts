@@ -19,6 +19,7 @@ import { mountMiscRoutes } from './routes/misc.js';
 import { mountPublicRoutes } from './routes/public.js';
 import { mountUserRoutes } from './routes/users.js';
 import { mountAdminRoutes } from './routes/admin.js';
+import { mountWellKnownRoutes } from './routes/well-known.js';
 
 export const app = new Hono();
 
@@ -130,6 +131,10 @@ app.get('/health', healthHandler);
 // single-mount routes that don't fit a larger namespace) live in
 // `./routes/misc.ts`.
 mountMiscRoutes(app);
+
+// `/.well-known/jwks.json` (public RSA JWKS for Loop-minted RS256
+// JWTs — ADR 030 Phase A) lives in `./routes/well-known.ts`.
+mountWellKnownRoutes(app);
 
 // `/api/merchants/*` route mounts (catalog reads + auth-gated
 // detail fetch) live in `./routes/merchants.ts`. Mount-order

@@ -28,6 +28,7 @@ import { registerMerchantsOpenApi } from './openapi/merchants.js';
 import { registerOrdersOpenApi } from './openapi/orders.js';
 import { registerPublicOpenApi } from './openapi/public.js';
 import { registerUsersOpenApi } from './openapi/users.js';
+import { registerWellKnownOpenApi } from './openapi/well-known.js';
 
 extendZodWithOpenApi(z);
 
@@ -201,6 +202,7 @@ registerPublicOpenApi(registry, ErrorResponse);
 registerAdminOpenApi(registry, ErrorResponse, LoopAssetCode, PayoutState, CashbackPctString);
 registerHealthOpenApi(registry, ErrorResponse);
 registerClustersOpenApi(registry, ErrorResponse);
+registerWellKnownOpenApi(registry, ErrorResponse);
 
 const generator = new OpenApiGeneratorV31(registry.definitions);
 

@@ -2,19 +2,20 @@
  * Loop-signed JWT sign + verify (ADR 013).
  *
  * Minted by Loop with the signer returned by
- * `./signer.ts::getActiveSigner()`. Today that's HS256 against
- * `LOOP_JWT_SIGNING_KEY`; ADR 030 Track A.2 will add RS256 with JWKS
- * publish so Privy's Custom Auth Provider can verify Loop's tokens.
- * The algorithm choice lives behind the Signer interface — this
- * module owns the JWT claim shape, header construction, and verify
- * dispatch.
+ * `./signer.ts::getActiveSigner()` — RS256 with a `kid` header when
+ * `LOOP_JWT_RSA_PRIVATE_KEY` is configured (ADR 030 Phase A; public
+ * keys publish at `/.well-known/jwks.json` so an external wallet
+ * provider can verify Loop's tokens), HS256 against
+ * `LOOP_JWT_SIGNING_KEY` otherwise. The algorithm choice lives
+ * behind the Signer interface — this module owns the JWT claim
+ * shape, header construction, and verify dispatch.
  *
  * Verification reads `alg` from the incoming token's header and
- * fetches the matching set of verifiers; during an HS256 rotation
- * (`LOOP_JWT_SIGNING_KEY` + `LOOP_JWT_SIGNING_KEY_PREVIOUS`) both
- * keys are tried. During a future HS256 → RS256 cutover, both
- * algorithms verify so 15-minute access tokens minted under the old
- * algorithm don't get rejected post-cutover.
+ * fetches the matching set of verifiers; within each algorithm the
+ * current key is tried before the `_PREVIOUS` rotation key. During
+ * the HS256 → RS256 cutover both algorithms verify so tokens minted
+ * under the old algorithm don't get rejected post-cutover (15-minute
+ * access tokens and 30-day refresh tokens both survive the window).
  */
 import { randomBytes } from 'node:crypto';
 import { getActiveSigner, getVerifiersForAlg, isAnySignerConfigured, type Alg } from './signer.js';
@@ -84,7 +85,9 @@ function b64urlDecode(s: string): Buffer {
 export function signLoopToken(opts: SignOptions): { token: string; claims: LoopTokenClaims } {
   const signer = getActiveSigner();
   if (signer === null) {
-    throw new Error('LOOP_JWT_SIGNING_KEY is not configured — Loop-native auth is disabled');
+    throw new Error(
+      'No Loop JWT signing key configured (LOOP_JWT_RSA_PRIVATE_KEY or LOOP_JWT_SIGNING_KEY) — Loop-native auth is disabled',
+    );
   }
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   const claims: LoopTokenClaims = {
