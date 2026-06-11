@@ -139,6 +139,17 @@ To add a migration:
 4. `runMigrations()` (apps/backend/src/db/client.ts) reads the
    journal at backend boot and applies pending SQL files in order,
    so no manual `db:migrate` call is needed in production.
+5. Run `npm run check:migration-parity -w @loop/backend` against a
+   disposable postgres (the docker-compose dev DB works). The script
+   (`src/scripts/check-migration-parity.ts`) replays the full
+   migration chain into one scratch DB, materialises `schema.ts`
+   into another via drizzle-kit, and diffs the catalogs — so a
+   step-2 omission (schema.ts lagging the SQL) fails here and in
+   CI's flywheel-integration job. Shapes Drizzle's DSL cannot
+   represent (the ADR-011 triggers, divergent auto-generated
+   constraint names) live in `scripts/migration-parity-allowlist.json`
+   at the repo root; never allowlist a real column/constraint/index
+   divergence.
 
 The `db:generate` and `db:migrate` scripts are retained for
 emergency baselining + local tinkering. Don't invoke them without

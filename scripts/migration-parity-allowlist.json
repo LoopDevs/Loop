@@ -1,0 +1,27 @@
+[
+  {
+    "side": "migrations-only",
+    "line": "trigger merchant_cashback_configs.merchant_cashback_configs_audit: CREATE TRIGGER merchant_cashback_configs_audit BEFORE UPDATE ON public.merchant_cashback_configs FOR EACH ROW EXECUTE FUNCTION record_merchant_cashback_config_history()",
+    "reason": "ADR-011 audit trigger — drizzle's schema DSL cannot represent triggers (A2-412/A2-703); the hand-written migration is the source of truth."
+  },
+  {
+    "side": "migrations-only",
+    "line": "trigger merchant_cashback_configs.merchant_cashback_configs_audit_delete: CREATE TRIGGER merchant_cashback_configs_audit_delete AFTER DELETE ON public.merchant_cashback_configs FOR EACH ROW EXECUTE FUNCTION record_merchant_cashback_config_history()",
+    "reason": "ADR-011 audit trigger (delete leg) — not representable in drizzle's schema DSL."
+  },
+  {
+    "side": "migrations-only",
+    "line": "trigger merchant_cashback_configs.merchant_cashback_configs_audit_insert: CREATE TRIGGER merchant_cashback_configs_audit_insert AFTER INSERT ON public.merchant_cashback_configs FOR EACH ROW EXECUTE FUNCTION record_merchant_cashback_config_history()",
+    "reason": "ADR-011 audit trigger (insert leg) — not representable in drizzle's schema DSL."
+  },
+  {
+    "side": "migrations-only",
+    "line": "constraint user_favorite_merchants.user_favorite_merchants_user_id_fkey: FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+    "reason": "Identical FK definition; the hand-written migration used Postgres's default constraint name (…_fkey) while drizzle names it …_users_id_fk. Renaming a production constraint carries deploy risk for zero behavioural benefit."
+  },
+  {
+    "side": "schema-only",
+    "line": "constraint user_favorite_merchants.user_favorite_merchants_user_id_users_id_fk: FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+    "reason": "Pair of the …_fkey entry above — same FK, drizzle-generated name."
+  }
+]
