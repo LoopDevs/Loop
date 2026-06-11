@@ -1469,7 +1469,7 @@ This is a locally defined `fmtMinor` with BigInt-safe arithmetic, different from
 
 ## Batch 21 — scripts (1/2)
 
-- [CRITICAL] scripts/ctx-media-cleanup.mjs:9 — Hardcoded logo.dev public key `const PK = 'pk_actJVN2RTA-2VNlzSYsXjQ'` in source. This is the known key flagged across four files. Being a public-facing (not secret) key it is lower operational risk, but hardcoding API keys in source enables accidental rotation difficulty and ties the codebase to one account. **Recommended fix:** read from env var `LOGO_DEV_PUBLIC_KEY` or a /tmp file (as `fetch-logos.mjs` already does correctly via `/tmp/logodev-pk.txt`). The other three files with this key (`newinfo-apply.mjs`, `qc-residue-fix.mjs`, `note-resource.mjs`) are in a different batch — flag confirmed for this file.
+- [CRITICAL] scripts/ctx-media-cleanup.mjs:9 — Hardcoded logo.dev public key `const PK = 'pk_actJ…[token redacted]'` in source. This is the known key flagged across four files. Being a public-facing (not secret) key it is lower operational risk, but hardcoding API keys in source enables accidental rotation difficulty and ties the codebase to one account. **Recommended fix:** read from env var `LOGO_DEV_PUBLIC_KEY` or a /tmp file (as `fetch-logos.mjs` already does correctly via `/tmp/logodev-pk.txt`). The other three files with this key (`newinfo-apply.mjs`, `qc-residue-fix.mjs`, `note-resource.mjs`) are in a different batch — flag confirmed for this file.
 
 - [HIGH] scripts/ctx-combined-split-apply.mjs:53-55 — Partial-apply hazard: the script disables the combined-name merchant if `famMissing === 0` (all constituent merchants exist in the local snapshot), but it does NOT check whether all constituent `PUT /merchants/:id` link-calls succeeded. If one or more link PUTs fail silently (logged to console but execution continues), the combined-name merchant still gets disabled, leaving the brand unreachable. **Recommended fix:** track per-family link-success count and only issue the disable if `linkedCount === fam.constituents.length` for that family.
 
@@ -1557,13 +1557,13 @@ This is a locally defined `fmtMinor` with BigInt-safe arithmetic, different from
 
 ### CRITICAL
 
-- [CRITICAL] scripts/newinfo-apply.mjs:10 — Hardcoded logo.dev public API key `pk_actJVN2RTA-2VNlzSYsXjQ` (same key flagged by other batches). Baked into a URL template that gets written to `/tmp/ctx-media-final.json` and eventually pushed to CTX as permanent `logoUrl` values, meaning the secret leaks into the production catalog database. — Move to `process.env.LOGODEV_TOKEN`; replace all embedded `?token=${PK}` URLs before they reach production, or switch to server-side logo proxying.
+- [CRITICAL] scripts/newinfo-apply.mjs:10 — Hardcoded logo.dev public API key `pk_actJ…[token redacted]` (same key flagged by other batches). Baked into a URL template that gets written to `/tmp/ctx-media-final.json` and eventually pushed to CTX as permanent `logoUrl` values, meaning the secret leaks into the production catalog database. — Move to `process.env.LOGODEV_TOKEN`; replace all embedded `?token=${PK}` URLs before they reach production, or switch to server-side logo proxying.
 
-- [CRITICAL] scripts/note-fixes-media.mjs:6 — Same hardcoded `pk_actJVN2RTA-2VNlzSYsXjQ` key, same issue as above. Token appears in generated logo.dev URLs that are written to `/tmp/ctx-media-final.json` and later applied to CTX. — Same fix.
+- [CRITICAL] scripts/note-fixes-media.mjs:6 — Same hardcoded `pk_actJ…[token redacted]` key, same issue as above. Token appears in generated logo.dev URLs that are written to `/tmp/ctx-media-final.json` and later applied to CTX. — Same fix.
 
-- [CRITICAL] scripts/note-resource.mjs:6 — Same hardcoded `pk_actJVN2RTA-2VNlzSYsXjQ` key. Identical pattern. — Same fix.
+- [CRITICAL] scripts/note-resource.mjs:6 — Same hardcoded `pk_actJ…[token redacted]` key. Identical pattern. — Same fix.
 
-- [CRITICAL] scripts/qc-residue-fix.mjs:9 — Same hardcoded `pk_actJVN2RTA-2VNlzSYsXjQ` key. Used in `logoDev()` which writes URLs with the embedded token to `/tmp/ctx-media-final.json`. — Same fix.
+- [CRITICAL] scripts/qc-residue-fix.mjs:9 — Same hardcoded `pk_actJ…[token redacted]` key. Used in `logoDev()` which writes URLs with the embedded token to `/tmp/ctx-media-final.json`. — Same fix.
 
 - [CRITICAL] scripts/qc-residue-fix.mjs:12 — Hardcoded absolute path to a session-specific Claude task output file: `/private/tmp/claude-501/-Users-ash-code-loop-app/19cd3253-a26f-4157-bfe1-78144150dfbe/tasks/wlw6k9zmm.output`. This is a machine-local, session-transient file path. The script will silently produce empty/wrong results on any other machine or after the session expires. — Replace with a stable, configurable path or a CLI argument.
 
