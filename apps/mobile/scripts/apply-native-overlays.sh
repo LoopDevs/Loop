@@ -127,9 +127,12 @@ if [ -d "$ANDROID_DIR" ]; then
   fi
 
   # Splash drawable — Loop mark centered on #111111 at 2732x2732.
-  # Copied into every drawable folder (density + orientation) so the
-  # Capacitor SplashScreen plugin renders the same image whatever the
-  # device config.
+  # ONE master PNG lives in the overlay (drawable/splash.png); it is
+  # fanned out into every drawable folder (density + orientation) of
+  # the generated project here so the Capacitor SplashScreen plugin
+  # renders the same image whatever the device config. The overlay
+  # deliberately does NOT keep per-density copies — they were
+  # byte-identical dead weight (comprehensive-audit 2026-06-11, P10).
   SPLASH_SRC="$OVERLAY_DIR/android/app/src/main/res/drawable/splash.png"
   if [ -f "$SPLASH_SRC" ]; then
     for DRAWABLE in drawable drawable-land-mdpi drawable-land-hdpi \

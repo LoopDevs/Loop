@@ -7,7 +7,10 @@ specific surface immediately** without waiting for a redeploy. Triggers:
 
 - **`orders`** — CTX upstream is misbehaving in a way the circuit
   breaker isn't catching (returning 200s with bad data, double-debiting,
-  etc.); halt new order creation while finance investigates.
+  etc.); halt new order creation while finance investigates. Use the
+  per-path variants when only one order path is sick: `ORDERS_LEGACY`
+  gates `POST /api/orders` (CTX-proxy) and `ORDERS_LOOP` gates
+  `POST /api/orders/loop` (loop-native / principal-switch).
 - **`auth`** — the OTP / social-login flow has a regression that's
   flooding upstream with garbage (e.g. malformed bodies); halt new
   sign-ins while existing sessions drain on refresh.
@@ -43,8 +46,18 @@ to a `killSwitch`-wrapped route checks `process.env` directly, so
 whichever machine has the new secret already returns 503 — no race.
 
 ```bash
-# Block new orders (existing orders + payouts continue draining)
+# Block new orders on BOTH paths (existing orders + payouts continue draining)
 fly secrets set LOOP_KILL_ORDERS=true -a loopfinance-api
+
+# Block one order path only. A per-path secret — even an explicit
+# `false` — overrides LOOP_KILL_ORDERS for that path; when unset it
+# falls back to the combined switch.
+fly secrets set LOOP_KILL_ORDERS_LEGACY=true -a loopfinance-api   # POST /api/orders only
+fly secrets set LOOP_KILL_ORDERS_LOOP=true -a loopfinance-api     # POST /api/orders/loop only
+
+# Kill everything except the loop-native path (e.g. CTX-proxy incident
+# during the principal-switch rollout):
+fly secrets set LOOP_KILL_ORDERS=true LOOP_KILL_ORDERS_LOOP=false -a loopfinance-api
 
 # Block new sign-ins (existing sessions keep working via /refresh)
 fly secrets set LOOP_KILL_AUTH=true -a loopfinance-api
@@ -78,7 +91,10 @@ fly secrets unset LOOP_KILL_ORDERS -a loopfinance-api
 
 Both leave the surface open. The `unset` form is the cleaner end
 state — it removes the secret entirely so a future `fly secrets list`
-doesn't show stale flags.
+doesn't show stale flags. Remember to unset any per-path
+`LOOP_KILL_ORDERS_LEGACY` / `LOOP_KILL_ORDERS_LOOP` overrides too —
+a lingering per-path `false` would silently mask a future combined
+`LOOP_KILL_ORDERS=true` for that path.
 
 ## What about the payout worker?
 

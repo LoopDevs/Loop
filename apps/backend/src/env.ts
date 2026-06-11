@@ -548,6 +548,14 @@ export const EnvSchema = z.object({
   // value. Default false on every switch — fail-open posture, no
   // surprise blackout if an env var is mis-set.
   LOOP_KILL_ORDERS: envBoolean.default(false),
+  // Per-path order switches (comprehensive-audit 2026-06-11, P10):
+  // when set they override LOOP_KILL_ORDERS for their path; when
+  // UNSET they fall back to it — fully backward compatible. No
+  // `.default(false)` on purpose: the unset/false distinction is the
+  // fallback semantic (kill-switches.ts reads process.env directly;
+  // these entries exist for validation + .env.example parity).
+  LOOP_KILL_ORDERS_LEGACY: envBoolean.optional(),
+  LOOP_KILL_ORDERS_LOOP: envBoolean.optional(),
   LOOP_KILL_AUTH: envBoolean.default(false),
   LOOP_KILL_WITHDRAWALS: envBoolean.default(false),
 

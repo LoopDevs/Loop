@@ -67,13 +67,13 @@ export function mountOrderRoutes(app: Hono): void {
   // but we also keep semantically related routes co-located.
   app.post(
     '/api/orders',
-    killSwitch('orders'),
+    killSwitch('orders-legacy'),
     rateLimit('POST /api/orders', 10, 60_000),
     createOrderHandler,
   );
   app.post(
     '/api/orders/loop',
-    killSwitch('orders'),
+    killSwitch('orders-loop'),
     rateLimit('POST /api/orders/loop', 10, 60_000),
     loopCreateOrderHandler,
   );

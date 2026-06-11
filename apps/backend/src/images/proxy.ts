@@ -146,6 +146,17 @@ export async function imageProxyHandler(c: Context): Promise<Response> {
     const output = new Uint8Array(data);
 
     if (mode === 'public' && output.byteLength <= MAX_CACHE_BYTES) {
+      // Overwrite accounting: a TTL-expired entry for the same key is
+      // replaced (not added), so its bytes must come off the counter
+      // first — otherwise `totalCacheBytes` drifts upward on every
+      // refresh and the LRU evicts earlier and earlier until the
+      // cache is effectively disabled (comprehensive-audit
+      // 2026-06-11, P10).
+      const previous = cache.get(key);
+      if (previous !== undefined) {
+        cache.delete(key);
+        totalCacheBytes -= previous.sizeBytes;
+      }
       evictLruUntilFits(output.byteLength);
       cache.set(key, {
         data: output,
@@ -166,6 +177,21 @@ export async function imageProxyHandler(c: Context): Promise<Response> {
     log.error({ err, url: imageUrl }, 'Image proxy error');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to process image' }, 500);
   }
+}
+
+/**
+ * Test seam: byte-counter + entry-count snapshot so the LRU
+ * accounting (incl. the overwrite path above) can be asserted
+ * without exporting the cache map itself.
+ */
+export function __getImageCacheStatsForTests(): { entries: number; totalBytes: number } {
+  return { entries: cache.size, totalBytes: totalCacheBytes };
+}
+
+/** Test seam: clears the cache and resets the byte counter. */
+export function __resetImageCacheForTests(): void {
+  cache.clear();
+  totalCacheBytes = 0;
 }
 
 /** Removes entries older than CACHE_TTL_MS. Call periodically. */
