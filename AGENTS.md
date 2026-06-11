@@ -75,7 +75,7 @@ stellar          On-chain LOOP-asset issuance + USDC/XLM operator accounts (ADR 
 upstream API     CTX gift card provider at spend.ctx.com — merchant catalog, auth, gift card orders
 ```
 
-**Auth has two paths.** Loop-native (ADR 013, default once `LOOP_AUTH_NATIVE_ENABLED=true`): backend mints its own HS256 JWTs, generates OTPs, and sends email via the configured provider. Legacy CTX-proxy: backend forwards request-otp / verify-otp / refresh / logout to upstream `spend.ctx.com` and tokens are upstream-issued. Both paths coexist while the identity takeover rolls out. See `docs/architecture.md` + ADR-013 for the full auth flow.
+**Auth has two paths.** Loop-native (ADR 013, default once `LOOP_AUTH_NATIVE_ENABLED=true`): backend mints its own JWTs (RS256 + `/.well-known/jwks.json` publish when `LOOP_JWT_RSA_PRIVATE_KEY` is set — ADR 030 Phase A; HS256 otherwise), generates OTPs, and sends email via the configured provider. Legacy CTX-proxy: backend forwards request-otp / verify-otp / refresh / logout to upstream `spend.ctx.com` and tokens are upstream-issued. Both paths coexist while the identity takeover rolls out. See `docs/architecture.md` + ADR-013 for the full auth flow.
 
 **Orders have two paths.** Loop-native (ADR 010, default once `LOOP_AUTH_NATIVE_ENABLED=true` and the merchant catalog has been synced): `POST /api/orders/loop` creates the order in the off-chain ledger and the user pays via XLM / USDC / LOOP-asset against the Stellar deposit address. Loop is the merchant of record (principal switch). Legacy CTX-proxy: `POST /api/orders` forwards order creation to upstream CTX and the user pays CTX directly. Loop-native is the principal-switch path; the legacy path stays alive until the takeover rolls out fully.
 
@@ -163,7 +163,7 @@ E2E_REFRESH_TOKEN=… STELLAR_TEST_SECRET_KEY=… node scripts/e2e-real.mjs
 ## Critical architecture rules
 
 1. **Web is a pure API client — with two documented exceptions.** All data via TanStack Query against `apps/backend`. The only loaders that fetch server-side are `routes/sitemap.tsx` (crawlers need an XML response, not a React shell) and `routes/home-geo-redirect.tsx` (ADR 034: the `/` geo-redirect resolves the visitor's country via `/api/public/geo` and must 302 server-side, before any React renders, to kill the US flash). Any new loader-side fetch beyond these needs a comment explaining why TanStack Query doesn't fit.
-2. **Auth has two coexisting paths.** Loop-native (ADR 013): backend mints HS256 JWTs, generates OTPs, sends email. Gated on `LOOP_AUTH_NATIVE_ENABLED`. Legacy CTX-proxy: backend forwards request-otp / verify-otp / refresh / logout to `spend.ctx.com`. All upstream responses are Zod-validated before forwarding. Do NOT assume a single path when modifying auth code; both need to keep working until the takeover is complete.
+2. **Auth has two coexisting paths.** Loop-native (ADR 013): backend mints its own JWTs (RS256 with JWKS publish when `LOOP_JWT_RSA_PRIVATE_KEY` is set — ADR 030 Phase A — otherwise HS256), generates OTPs, sends email. Gated on `LOOP_AUTH_NATIVE_ENABLED`. Legacy CTX-proxy: backend forwards request-otp / verify-otp / refresh / logout to `spend.ctx.com`. All upstream responses are Zod-validated before forwarding. Do NOT assume a single path when modifying auth code; both need to keep working until the takeover is complete.
 3. **All Capacitor plugin calls live in `apps/web/app/native/`.** Never import plugins in components or hooks directly.
 4. **Static export constraint**: `BUILD_TARGET=mobile` → loaders cannot run server-side. Loaders do layout/meta only.
 5. **Protobuf for clusters**: clients send `Accept: application/x-protobuf`. JSON is the fallback for debugging only.
@@ -238,6 +238,16 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # LOOP_JWT_SIGNING_KEY=<at-least-32-char-random-secret>
 # LOOP_JWT_SIGNING_KEY_PREVIOUS=<prior-secret-during-rotation>
 
+# RS256 signing (ADR 030 Phase A). PKCS8 PEM RSA private key — when
+# set, new Loop JWTs sign RS256 (RFC 7638 `kid` header) and the
+# public keys publish at GET /.well-known/jwks.json for external
+# verifiers; the HS256 keys above keep verifying outstanding tokens.
+# Malformed / non-RSA PEM fails boot. Generate:
+# `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048`.
+# Cutover + rotation: docs/runbooks/jwt-key-rotation.md.
+# LOOP_JWT_RSA_PRIVATE_KEY=<PKCS8 PEM>
+# LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS=<prior PKCS8 PEM during rotation>
+
 # Admin step-up auth (ADR 028). Absent → boot succeeds but destructive
 # admin endpoints (credit-adjust / withdrawals / payout-retry) return
 # 503 STEP_UP_UNAVAILABLE.
@@ -302,7 +312,7 @@ Applied in order on every request:
 3. **Body limit** — 1MB max request body; overflow returns 413 `PAYLOAD_TOO_LARGE` (A2-1005)
 4. **Request ID** — unique `X-Request-Id` on every request
 5. **Logger** — Pino-backed access log for every request (audit A-021); shares service/env/redaction with application logs and correlates via `X-Request-Id`
-6. **Rate limiting** — per-IP, per-route. The full enumeration is the source code: every `app.get/post/put/delete` mount in `apps/backend/src/routes/**` declares its own `rateLimit('METHOD /path', max, windowMs)`. Quick-reference for the highest-traffic surfaces: `/api/clusters` (60/min), `/api/image` (300/min), `/api/merchants` (180/min), `/api/merchants/all` (60/min), `/api/merchants/by-slug/:slug` (120/min), `/api/merchants/cashback-rates` (120/min), `/api/merchants/:id` (120/min — authed), `/api/merchants/:id/cashback-rate` (120/min), `/api/auth/request-otp` (5/min), `/api/auth/verify-otp` (10/min), `/api/auth/refresh` (30/min), `DELETE /api/auth/session` (20/min), `POST /api/orders` (10/min), `GET /api/orders` (60/min), `GET /api/orders/:id` (120/min). Admin/payouts/credits/users/cashback-config endpoints have their own per-route limits (10–120/min, often 10/min for CSV exports). 429 responses include `Retry-After`. Don't treat this list as exhaustive — A4-001's per-route key fix is enforced in code, not docs.
+6. **Rate limiting** — per-IP, per-route. The full enumeration is the source code: every `app.get/post/put/delete` mount in `apps/backend/src/routes/**` declares its own `rateLimit('METHOD /path', max, windowMs)`. Quick-reference for the highest-traffic surfaces: `/api/clusters` (60/min), `/api/image` (300/min), `/api/merchants` (180/min), `/api/merchants/all` (60/min), `/api/merchants/by-slug/:slug` (120/min), `/api/merchants/cashback-rates` (120/min), `/api/merchants/:id` (120/min — authed), `/api/merchants/:id/cashback-rate` (120/min), `/.well-known/jwks.json` (120/min), `/api/auth/request-otp` (5/min), `/api/auth/verify-otp` (10/min), `/api/auth/refresh` (30/min), `DELETE /api/auth/session` (20/min), `POST /api/orders` (10/min), `GET /api/orders` (60/min), `GET /api/orders/:id` (120/min). Admin/payouts/credits/users/cashback-config endpoints have their own per-route limits (10–120/min, often 10/min for CSV exports). 429 responses include `Retry-After`. Don't treat this list as exhaustive — A4-001's per-route key fix is enforced in code, not docs.
 7. **Circuit breaker** — per-upstream-endpoint breakers (login, verify-email, refresh-token, logout, merchants, locations, gift-cards), each 5 failures → 30s open → HALF_OPEN probe. Independent so a failing `/locations` doesn't trip auth.
 
 ---

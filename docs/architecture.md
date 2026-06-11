@@ -107,7 +107,11 @@ Authentication has two coexisting paths:
 
 - **Loop-native auth** (default when `LOOP_AUTH_NATIVE_ENABLED=true`) —
   Loop writes OTP rows, sends email itself, verifies social `id_token`s,
-  and mints its own HS256 access/refresh JWTs.
+  and mints its own access/refresh JWTs — RS256 with a `kid` header when
+  `LOOP_JWT_RSA_PRIVATE_KEY` is configured (ADR 030 Phase A; public keys
+  publish at `GET /.well-known/jwks.json` so an external wallet provider
+  can verify Loop tokens), HS256 otherwise. Verification accepts both
+  algorithms during the cutover window so outstanding tokens survive.
 - **Legacy CTX-proxy auth** (used while the identity takeover rolls out,
   or when the native flag is disabled) — Loop forwards OTP request /
   verify / refresh / logout to the upstream CTX API and passes the
@@ -296,6 +300,7 @@ USDLOOP and EURLOOP **retire** in State 3 — users hold canonical vault shares 
 GET  /health
 GET  /metrics                               — Prometheus format
 GET  /openapi.json                          — full OpenAPI 3.1 spec, bearer-gated, `private, no-store`
+GET  /.well-known/jwks.json                 — public RSA JWKS for Loop-minted RS256 JWTs (ADR 030 Phase A), `public, max-age=3600`
 GET  /api/merchants              ?page=&limit=&q=      — paginated, max 100 per page
 GET  /api/merchants/all                                 — full catalog in one response (audit A-002)
 GET  /api/merchants/by-slug/:slug

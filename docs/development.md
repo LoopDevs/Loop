@@ -185,6 +185,18 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # LOOP_JWT_SIGNING_KEY=...(≥32 chars)
 # LOOP_JWT_SIGNING_KEY_PREVIOUS=...(≥32 chars)
 
+# RS256 signing keys (ADR 030 Phase A). PKCS8 PEM RSA private key —
+# generate with `openssl genpkey -algorithm RSA -pkeyopt
+# rsa_keygen_bits:2048`. When set, new Loop JWTs sign RS256 (header
+# carries the RFC 7638 `kid`) and GET /.well-known/jwks.json serves
+# the public keys so an external wallet provider can verify Loop
+# tokens. Unset → HS256 signing continues unchanged. Boot fails on a
+# malformed or non-RSA PEM; escaped "\n" sequences are normalised.
+# `_PREVIOUS` only during a rotation window (both kids publish in the
+# JWKS). Cutover + rotation: docs/runbooks/jwt-key-rotation.md.
+# LOOP_JWT_RSA_PRIVATE_KEY=<PKCS8 PEM>
+# LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS=<PKCS8 PEM>
+
 # Feature flag. When true + the signing key is set, /request-otp /
 # /verify-otp / /refresh take the Loop-native path (Loop sends the
 # email, mints its own JWTs).

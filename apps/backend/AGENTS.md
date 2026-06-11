@@ -15,6 +15,10 @@ src/
 ├── discord.ts          ← Webhook senders (orders, health, circuit, payout-failed, below-floor)
 ├── openapi.ts          ← OpenAPI 3.1 spec (every new handler registers its path + status codes)
 ├── auth/handler.ts     ← Auth proxy + Loop-native OTP (ADR 013 + ADR 014 social login)
+├── auth/signer.ts      ← Pluggable JWT signer — RS256 (kid = RFC 7638 thumbprint) preferred
+│                         when LOOP_JWT_RSA_PRIVATE_KEY is set, HS256 fallback (ADR 030 Phase A)
+├── auth/jwks-publish.ts ← GET /.well-known/jwks.json handler — Loop's public RSA JWKS
+│                          (publisher side; auth/jwks.ts is the Google/Apple consumer side)
 ├── admin/              ← Admin-panel handlers (~60 files) grouped by domain:
 │   │                     ADR 011 cashback config, ADR 015 treasury + asset
 │   │                     drift + settlement lag, ADR 017/018 credit
