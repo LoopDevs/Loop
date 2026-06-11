@@ -82,6 +82,20 @@ vi.mock('../../db/schema.js', () => ({
   },
 }));
 
+const loggerState = vi.hoisted(() => ({ errorCalls: [] as unknown[][] }));
+vi.mock('../../logger.js', () => ({
+  logger: {
+    child: () => ({
+      info: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+      error: (...args: unknown[]) => {
+        loggerState.errorCalls.push(args);
+      },
+    }),
+  },
+}));
+
 import {
   idempotencyLockKey,
   IDEMPOTENCY_KEY_MIN,
@@ -96,6 +110,7 @@ beforeEach(() => {
   state.advisoryLockCalls = [];
   state.insertedSnapshots = [];
   state.insertSet = undefined;
+  loggerState.errorCalls = [];
 });
 
 describe('idempotencyLockKey', () => {
@@ -186,20 +201,57 @@ describe('withIdempotencyGuard', () => {
     expect(r.body).toEqual({ result: 'fresh' });
   });
 
-  it('treats a corrupt snapshot (invalid JSON) as a miss and re-runs doWrite', async () => {
+  it('corrupt snapshot (invalid JSON) → structured 500, doWrite NEVER runs, error logged', async () => {
     state.priorRow = {
       status: 200,
       responseBody: '{not valid json',
       createdAt: new Date(),
     };
-    const doWrite = vi.fn(async () => ({ status: 200, body: { result: 'recovered' } }));
+    const doWrite = vi.fn(async () => ({ status: 200, body: { result: 'must-not-run' } }));
     const r = await withIdempotencyGuard(
       { adminUserId: 'a-1', key: 'k-1', method: 'POST', path: '/x' },
       doWrite,
     );
-    expect(doWrite).toHaveBeenCalledTimes(1);
-    expect(r.replayed).toBe(false);
-    expect(r.body).toEqual({ result: 'recovered' });
+    expect(doWrite).not.toHaveBeenCalled();
+    expect(r.status).toBe(500);
+    expect(r.body['code']).toBe('IDEMPOTENCY_SNAPSHOT_CORRUPT');
+    // No replacement snapshot stored — the corrupt row stays for ops.
+    expect(state.insertedSnapshots).toHaveLength(0);
+    expect(loggerState.errorCalls).toHaveLength(1);
+  });
+
+  it('corrupt snapshot (empty object body) → structured 500, doWrite NEVER runs', async () => {
+    state.priorRow = {
+      status: 200,
+      responseBody: '{}',
+      createdAt: new Date(),
+    };
+    const doWrite = vi.fn(async () => ({ status: 200, body: { result: 'must-not-run' } }));
+    const r = await withIdempotencyGuard(
+      { adminUserId: 'a-1', key: 'k-1', method: 'POST', path: '/x' },
+      doWrite,
+    );
+    expect(doWrite).not.toHaveBeenCalled();
+    expect(r.status).toBe(500);
+    expect(r.body['code']).toBe('IDEMPOTENCY_SNAPSHOT_CORRUPT');
+    expect(state.insertedSnapshots).toHaveLength(0);
+    expect(loggerState.errorCalls).toHaveLength(1);
+  });
+
+  it('corrupt snapshot (non-object JSON like `null`) → structured 500, doWrite NEVER runs', async () => {
+    state.priorRow = {
+      status: 200,
+      responseBody: 'null',
+      createdAt: new Date(),
+    };
+    const doWrite = vi.fn(async () => ({ status: 200, body: { result: 'must-not-run' } }));
+    const r = await withIdempotencyGuard(
+      { adminUserId: 'a-1', key: 'k-1', method: 'POST', path: '/x' },
+      doWrite,
+    );
+    expect(doWrite).not.toHaveBeenCalled();
+    expect(r.status).toBe(500);
+    expect(r.body['code']).toBe('IDEMPOTENCY_SNAPSHOT_CORRUPT');
   });
 
   it('propagates doWrite rejections (the lock releases via rollback)', async () => {

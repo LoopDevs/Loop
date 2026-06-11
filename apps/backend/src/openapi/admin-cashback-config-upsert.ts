@@ -120,7 +120,8 @@ export function registerAdminCashbackConfigUpsertOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       500: {
-        description: 'DB write failed',
+        description:
+          'DB write failed (`INTERNAL_ERROR`), or the stored replay snapshot for this Idempotency-Key is unreadable (`IDEMPOTENCY_SNAPSHOT_CORRUPT` — the write is never re-executed)',
         content: { 'application/json': { schema: errorResponse } },
       },
     },

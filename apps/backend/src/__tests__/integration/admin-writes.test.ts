@@ -31,7 +31,7 @@
  * admin auth path (`requireAuth` + `requireAdmin`).
  */
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 const RUN_INTEGRATION = process.env['LOOP_E2E_DB'] === '1';
 
@@ -51,12 +51,20 @@ vi.mock('../../discord.js', async (importActual) => {
 });
 
 import { db } from '../../db/client.js';
-import { users, orders, creditTransactions, userCredits, pendingPayouts } from '../../db/schema.js';
+import {
+  users,
+  orders,
+  creditTransactions,
+  userCredits,
+  pendingPayouts,
+  adminIdempotencyKeys,
+} from '../../db/schema.js';
 import { findOrCreateUserByEmail, upsertUserFromCtx } from '../../db/users.js';
 import { app, __resetRateLimitsForTests } from '../../app.js';
 import { notifyAdminBulkRead } from '../../discord.js';
 import { signLoopToken } from '../../auth/tokens.js';
 import { signAdminStepUpToken } from '../../auth/admin-step-up.js';
+import { adjustmentCapLockKey } from '../../credits/adjustments.js';
 import { env } from '../../env.js';
 import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
 
@@ -777,6 +785,393 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
       expect(payout?.compensatedAt).not.toBeNull();
       expect(compensationRows).toHaveLength(1);
       expect(credit?.balanceMinor).toBe(2000n);
+    }
+  });
+});
+
+describeIf('admin payout-retry write — idempotency-guarded ladder', () => {
+  beforeAll(async () => {
+    await ensureMigrated();
+  });
+
+  beforeEach(async () => {
+    await truncateAllTables();
+    __resetRateLimitsForTests();
+  });
+
+  async function retryRequest(args: {
+    payoutId: string;
+    bearer: string;
+    stepUp: string;
+    key: string;
+    reason: string;
+  }): Promise<Response> {
+    // async wrapper (not Promise.resolve) — `app.request` is invoked
+    // synchronously at call time, so two calls assembled inside a
+    // `Promise.all` are genuinely in flight together.
+    return app.request(`http://localhost/api/admin/payouts/${args.payoutId}/retry`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${args.bearer}`,
+        'idempotency-key': args.key,
+        'X-Admin-Step-Up': args.stepUp,
+      },
+      body: JSON.stringify({ reason: args.reason }),
+    });
+  }
+
+  it('replays the cached envelope on idempotency-key reuse — the reset runs exactly once', async () => {
+    const { targetUser, bearer, stepUp } = await seed();
+    const payoutId = await seedFailedWithdrawalPayout({
+      userId: targetUser.id,
+      amountStroops: 500n * 100_000n,
+    });
+    const key = idemKey();
+
+    const first = await retryRequest({ payoutId, bearer, stepUp, key, reason: 'first click' });
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as {
+      result: { id: string; state: string };
+      audit: { replayed: boolean };
+    };
+    expect(firstBody.result.state).toBe('pending');
+    expect(firstBody.audit.replayed).toBe(false);
+
+    // Force the row back to `failed`. If the replay path re-ran the
+    // reset, the state below would flip to `pending` again — the row
+    // staying `failed` proves the write executed exactly once.
+    await db
+      .update(pendingPayouts)
+      .set({ state: 'failed', failedAt: new Date(), lastError: 'failed again post-retry' })
+      .where(eq(pendingPayouts.id, payoutId));
+
+    const second = await retryRequest({ payoutId, bearer, stepUp, key, reason: 'second click' });
+    expect(second.status).toBe(200);
+    const secondBody = (await second.json()) as {
+      result: { id: string; state: string };
+      audit: { replayed: boolean };
+    };
+    expect(secondBody.audit.replayed).toBe(true);
+    expect(secondBody.result).toEqual(firstBody.result);
+
+    const [row] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, payoutId));
+    expect(row?.state).toBe('failed');
+  });
+
+  it('serialises truly-concurrent same-key retries into one reset plus one replay', async () => {
+    const { targetUser, bearer, stepUp } = await seed();
+    const payoutId = await seedFailedWithdrawalPayout({
+      userId: targetUser.id,
+      amountStroops: 500n * 100_000n,
+    });
+    const key = idemKey();
+
+    // Both requests in flight at once — no Promise.resolve wrapper,
+    // the two handler invocations genuinely race for the advisory
+    // lock. Pre-guard both passed the unguarded lookup and both
+    // reported a fresh (replayed: false) write.
+    const [first, second] = await Promise.all([
+      retryRequest({ payoutId, bearer, stepUp, key, reason: 'race click a' }),
+      retryRequest({ payoutId, bearer, stepUp, key, reason: 'race click b' }),
+    ]);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    const firstBody = (await first.json()) as { audit: { replayed: boolean } };
+    const secondBody = (await second.json()) as { audit: { replayed: boolean } };
+    expect([firstBody.audit.replayed, secondBody.audit.replayed].sort()).toEqual([false, true]);
+
+    const [row] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, payoutId));
+    expect(row?.state).toBe('pending');
+  });
+
+  it('does NOT pin a 404 to the key: a failed-again payout is retryable with the same key', async () => {
+    const { bearer, stepUp } = await seed();
+    const key = idemKey();
+    const missingId = crypto.randomUUID();
+
+    const miss = await retryRequest({
+      payoutId: missingId,
+      bearer,
+      stepUp,
+      key,
+      reason: 'not there yet',
+    });
+    expect(miss.status).toBe(404);
+
+    // No snapshot was stored for the 404 — the same key must stay
+    // usable once a matching failed row exists.
+    const snapshots = await db.select().from(adminIdempotencyKeys);
+    expect(snapshots).toHaveLength(0);
+  });
+});
+
+describeIf('admin idempotency guard — corrupt snapshot fails loud', () => {
+  beforeAll(async () => {
+    await ensureMigrated();
+  });
+
+  beforeEach(async () => {
+    await truncateAllTables();
+    __resetRateLimitsForTests();
+  });
+
+  async function postAdjustment(args: {
+    targetUserId: string;
+    bearer: string;
+    stepUp: string;
+    key: string;
+  }): Promise<Response> {
+    return app.request(`http://localhost/api/admin/users/${args.targetUserId}/credit-adjustments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${args.bearer}`,
+        'idempotency-key': args.key,
+        'X-Admin-Step-Up': args.stepUp,
+      },
+      body: JSON.stringify({
+        amountMinor: '500',
+        currency: 'USD',
+        reason: 'corrupt snapshot test',
+      }),
+    });
+  }
+
+  async function seedSnapshot(args: {
+    adminUserId: string;
+    key: string;
+    targetUserId: string;
+    responseBody: string;
+  }): Promise<void> {
+    await db.insert(adminIdempotencyKeys).values({
+      adminUserId: args.adminUserId,
+      key: args.key,
+      method: 'POST',
+      path: `/api/admin/users/${args.targetUserId}/credit-adjustments`,
+      status: 200,
+      responseBody: args.responseBody,
+    });
+  }
+
+  it('unparseable stored snapshot → 500 IDEMPOTENCY_SNAPSHOT_CORRUPT and NO write executes', async () => {
+    const { adminUserId, targetUser, bearer, stepUp } = await seed();
+    const key = idemKey();
+    await seedSnapshot({
+      adminUserId,
+      key,
+      targetUserId: targetUser.id,
+      responseBody: '{this is not json',
+    });
+
+    const res = await postAdjustment({ targetUserId: targetUser.id, bearer, stepUp, key });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('IDEMPOTENCY_SNAPSHOT_CORRUPT');
+
+    // The financial write must NOT have re-executed.
+    const txRows = await db
+      .select()
+      .from(creditTransactions)
+      .where(eq(creditTransactions.userId, targetUser.id));
+    expect(txRows).toHaveLength(0);
+    const credits = await db
+      .select()
+      .from(userCredits)
+      .where(eq(userCredits.userId, targetUser.id));
+    expect(credits).toHaveLength(0);
+  });
+
+  it('empty-object stored snapshot → 500 IDEMPOTENCY_SNAPSHOT_CORRUPT and NO write executes', async () => {
+    const { adminUserId, targetUser, bearer, stepUp } = await seed();
+    const key = idemKey();
+    await seedSnapshot({ adminUserId, key, targetUserId: targetUser.id, responseBody: '{}' });
+
+    const res = await postAdjustment({ targetUserId: targetUser.id, bearer, stepUp, key });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('IDEMPOTENCY_SNAPSHOT_CORRUPT');
+
+    const txRows = await db
+      .select()
+      .from(creditTransactions)
+      .where(eq(creditTransactions.userId, targetUser.id));
+    expect(txRows).toHaveLength(0);
+
+    // The corrupt row stays in place for ops to inspect.
+    const snapshots = await db.select().from(adminIdempotencyKeys);
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]!.responseBody).toBe('{}');
+  });
+});
+
+describeIf('admin payout-compensation write — fleet-wide daily cap race', () => {
+  beforeAll(async () => {
+    await ensureMigrated();
+  });
+
+  beforeEach(async () => {
+    await truncateAllTables();
+    __resetRateLimitsForTests();
+  });
+
+  it('two truly-concurrent compensations cannot jointly exceed the cap', async () => {
+    const previousCap = env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR;
+    // 500 each; one fits, two would total 1000 > 700.
+    env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 700n;
+    try {
+      const { targetUser, bearer } = await seed();
+      const payoutA = await seedFailedWithdrawalPayout({
+        userId: targetUser.id,
+        amountStroops: 500n * 100_000n,
+      });
+      // Distinct destination so the partial unique index on active
+      // withdrawals (user, asset, destination, amount) doesn't reject
+      // the second seeded row.
+      const payoutB = await seedFailedWithdrawalPayout({
+        userId: targetUser.id,
+        amountStroops: 500n * 100_000n,
+        toAddress: 'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+      });
+
+      const compensate = async (payoutId: string): Promise<Response> =>
+        app.request(`http://localhost/api/admin/payouts/${payoutId}/compensate`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${bearer}`,
+            'idempotency-key': idemKey(),
+          },
+          body: JSON.stringify({ reason: 'concurrent cap race test' }),
+        });
+
+      // Genuinely concurrent — both requests are in flight before
+      // either resolves. Pre-lock the cap check read `used` without
+      // the advisory lock, so both saw 0 and both committed 500.
+      const [a, b] = await Promise.all([compensate(payoutA), compensate(payoutB)]);
+
+      const statuses = [a.status, b.status].sort((x, y) => x - y);
+      expect(statuses).toEqual([200, 429]);
+      const limited = a.status === 429 ? a : b;
+      const limitedBody = (await limited.json()) as { code: string };
+      expect(limitedBody.code).toBe('DAILY_LIMIT_EXCEEDED');
+
+      // Exactly one compensation row landed across both payouts.
+      const compensationRows = (
+        await db
+          .select()
+          .from(creditTransactions)
+          .where(eq(creditTransactions.referenceType, 'payout'))
+      ).filter((row) => row.type === 'adjustment');
+      expect(compensationRows).toHaveLength(1);
+
+      // Exactly one payout carries the compensated marker.
+      const payouts = await db
+        .select()
+        .from(pendingPayouts)
+        .where(eq(pendingPayouts.userId, targetUser.id));
+      expect(payouts.filter((p) => p.compensatedAt !== null)).toHaveLength(1);
+
+      // Balance bumped once — 500 minor, not 1000.
+      const [credit] = await db
+        .select()
+        .from(userCredits)
+        .where(eq(userCredits.userId, targetUser.id));
+      expect(credit?.balanceMinor).toBe(500n);
+    } finally {
+      env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = previousCap;
+    }
+  });
+
+  it('blocks on the cap advisory lock and honours usage committed while it waited', async () => {
+    // Deterministic version of the race above: a manually-held
+    // transaction owns the cap lock with an as-yet-uncommitted 500
+    // of usage. An unlocked cap check (the pre-fix code) would read
+    // used=0 past the holder and commit a second 500; the fixed
+    // writer must park on pg_advisory_xact_lock until the holder
+    // commits, then see used=500 and reject with 429.
+    const previousCap = env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR;
+    env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 700n;
+    try {
+      const { targetUser, bearer } = await seed();
+      const payoutId = await seedFailedWithdrawalPayout({
+        userId: targetUser.id,
+        amountStroops: 500n * 100_000n,
+      });
+
+      const dayStart = new Date();
+      dayStart.setUTCHours(0, 0, 0, 0);
+      const lockKey = adjustmentCapLockKey('payout-compensation', 'USD', dayStart);
+
+      let releaseHolder!: () => void;
+      const holderGate = new Promise<void>((resolve) => {
+        releaseHolder = resolve;
+      });
+      let signalEntered!: () => void;
+      const holderEntered = new Promise<void>((resolve) => {
+        signalEntered = resolve;
+      });
+      const holder = db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(${lockKey})`);
+        // Uncommitted usage a lock-less reader cannot see.
+        await tx.insert(creditTransactions).values({
+          userId: targetUser.id,
+          type: 'adjustment',
+          amountMinor: 500n,
+          currency: 'USD',
+          referenceType: 'payout',
+          referenceId: crypto.randomUUID(),
+          reason: 'simulated concurrent compensation holding the cap lock',
+        });
+        signalEntered();
+        await holderGate;
+      });
+      await holderEntered;
+
+      const resPromise = Promise.resolve(
+        app.request(`http://localhost/api/admin/payouts/${payoutId}/compensate`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${bearer}`,
+            'idempotency-key': idemKey(),
+          },
+          body: JSON.stringify({ reason: 'must wait for the cap lock' }),
+        }),
+      );
+      let settled = false;
+      void resPromise.then(() => {
+        settled = true;
+      });
+
+      // The compensation must still be parked on the advisory lock.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(settled).toBe(false);
+
+      releaseHolder();
+      await holder;
+
+      const res = await resPromise;
+      expect(res.status).toBe(429);
+      const body = (await res.json()) as { code: string };
+      expect(body.code).toBe('DAILY_LIMIT_EXCEEDED');
+
+      // Only the holder's 500 landed — the cap held.
+      const rows = (
+        await db
+          .select()
+          .from(creditTransactions)
+          .where(eq(creditTransactions.referenceType, 'payout'))
+      ).filter((row) => row.type === 'adjustment');
+      expect(rows).toHaveLength(1);
+      const [payout] = await db
+        .select()
+        .from(pendingPayouts)
+        .where(eq(pendingPayouts.id, payoutId));
+      expect(payout?.compensatedAt).toBeNull();
+    } finally {
+      env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = previousCap;
     }
   });
 });

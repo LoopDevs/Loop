@@ -25,13 +25,27 @@ import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js
 import {
   IDEMPOTENCY_KEY_MIN,
   IDEMPOTENCY_KEY_MAX,
-  lookupIdempotencyKey,
-  storeIdempotencyKey,
   validateIdempotencyKey,
+  withIdempotencyGuard,
 } from './idempotency.js';
 import { type AdminPayoutView } from './payouts.js';
 
 const log = logger.child({ handler: 'admin-payouts-retry' });
+
+/**
+ * Sentinel thrown from inside the `withIdempotencyGuard` write
+ * callback when `resetPayoutToPending` matches no `failed` row.
+ * Throwing (instead of returning a 404 result) rolls the guard txn
+ * back, so the 404 is NOT snapshot-stored — a replay with the same
+ * key stays free to try again once the row is back in a failed
+ * state. Returning would persist the 404 and pin the key to it.
+ */
+class PayoutNotRetryableError extends Error {
+  constructor(public readonly payoutId: string) {
+    super(`Payout ${payoutId} not found or not in failed state`);
+    this.name = 'PayoutNotRetryableError';
+  }
+}
 
 // `toView` lives in the parent file — re-shape a fresh DB row into
 // the wire view. Re-importing keeps the slice signature short
@@ -142,74 +156,64 @@ export async function adminRetryPayoutHandler(c: Context): Promise<Response> {
 
   const endpointPath = `/api/admin/payouts/${id}/retry`;
 
-  // Replay path: snapshot hit -> return stored response + audit-fanout
-  // marked replayed so Discord still shows the second click.
-  const prior = await lookupIdempotencyKey({
-    adminUserId: actor.id,
-    key: idempotencyKey,
-  });
-  if (prior !== null) {
-    const priorResult = (prior.body as { result?: AdminPayoutView }).result;
+  // lookup → reset → store used to be three unguarded steps,
+  // so two concurrent same-key retries could both miss the lookup and
+  // both reset (and a crash between reset and store lost the replay
+  // record). `withIdempotencyGuard` serialises the whole sequence
+  // under a pg advisory lock and persists the snapshot in the same
+  // txn — identical ladder to the credit-adjustment / compensation
+  // writes. A snapshot hit replays the stored envelope with
+  // `audit.replayed: true` flipped by the guard.
+  let guardResult;
+  try {
+    guardResult = await withIdempotencyGuard(
+      {
+        adminUserId: actor.id,
+        key: idempotencyKey,
+        method: 'POST',
+        path: endpointPath,
+      },
+      async () => {
+        const row = await resetPayoutToPending(id);
+        if (row === null) {
+          // Thrown (not returned) so the 404 isn't snapshot-stored —
+          // see PayoutNotRetryableError above.
+          throw new PayoutNotRetryableError(id);
+        }
+        log.info({ payoutId: id, adminUserId: actor.id }, 'Payout reset to pending by admin retry');
+        const result = toView(row as PayoutRow);
+        const envelope: AdminAuditEnvelope<AdminPayoutView> = buildAuditEnvelope({
+          result,
+          actor,
+          idempotencyKey,
+          appliedAt: new Date(),
+          replayed: false,
+        });
+        return { status: 200, body: envelope as unknown as Record<string, unknown> };
+      },
+    );
+  } catch (err) {
+    if (err instanceof PayoutNotRetryableError) {
+      return c.json({ code: 'NOT_FOUND', message: 'Payout not found or not in failed state' }, 404);
+    }
+    log.error({ err, payoutId: id }, 'Admin retry failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to retry payout' }, 500);
+  }
+
+  // Discord fanout — fire-and-forget AFTER commit per ADR 017 #5.
+  // Fires for fresh writes and replays alike (so ops sees the second
+  // click), but not for the corrupt-snapshot 500 the guard can emit.
+  if (guardResult.status === 200) {
+    const priorResult = (guardResult.body as { result?: AdminPayoutView }).result;
     notifyAdminAudit({
       actorUserId: actor.id,
       endpoint: `POST ${endpointPath}`,
       ...(priorResult?.userId !== undefined ? { targetUserId: priorResult.userId } : {}),
       reason: parsed.data.reason,
       idempotencyKey,
-      replayed: true,
+      replayed: guardResult.replayed,
     });
-    return c.json(prior.body, prior.status as 200 | 400 | 404 | 500);
   }
 
-  // Fresh retry.
-  let row;
-  try {
-    row = await resetPayoutToPending(id);
-  } catch (err) {
-    log.error({ err, payoutId: id }, 'Admin retry failed');
-    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to retry payout' }, 500);
-  }
-  if (row === null) {
-    // 404 response isn't snapshot-stored — the payout didn't
-    // transition, so a replay with the same key should be free to
-    // try again once the row is in a failed state.
-    return c.json({ code: 'NOT_FOUND', message: 'Payout not found or not in failed state' }, 404);
-  }
-  log.info({ payoutId: id, adminUserId: actor.id }, 'Payout reset to pending by admin retry');
-
-  const result = toView(row as PayoutRow);
-  const envelope: AdminAuditEnvelope<AdminPayoutView> = buildAuditEnvelope({
-    result,
-    actor,
-    idempotencyKey,
-    appliedAt: new Date(),
-    replayed: false,
-  });
-
-  try {
-    await storeIdempotencyKey({
-      adminUserId: actor.id,
-      key: idempotencyKey,
-      method: 'POST',
-      path: endpointPath,
-      status: 200,
-      body: envelope as unknown as Record<string, unknown>,
-    });
-  } catch (err) {
-    log.warn(
-      { err, adminUserId: actor.id, key: idempotencyKey },
-      'Failed to persist idempotency snapshot; retry will replay as new write',
-    );
-  }
-
-  notifyAdminAudit({
-    actorUserId: actor.id,
-    endpoint: `POST ${endpointPath}`,
-    targetUserId: result.userId,
-    reason: parsed.data.reason,
-    idempotencyKey,
-    replayed: false,
-  });
-
-  return c.json(envelope, 200);
+  return c.json(guardResult.body, guardResult.status as 200 | 500);
 }

@@ -108,7 +108,8 @@ export function registerAdminUserWritesOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       500: {
-        description: 'Internal error applying the change',
+        description:
+          'Internal error applying the change (`INTERNAL_ERROR`), or the stored replay snapshot for this Idempotency-Key is unreadable (`IDEMPOTENCY_SNAPSHOT_CORRUPT` — the write is never re-executed)',
         content: { 'application/json': { schema: errorResponse } },
       },
       503: {
