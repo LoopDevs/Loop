@@ -78,11 +78,13 @@ See `apps/backend/fly.toml`:
 | `CTX_CLIENT_ID_IOS`               | No                 | `loopios`     | Client ID for iOS auth                                                                                                                                                                                                                                                                                                                      |
 | `CTX_CLIENT_ID_ANDROID`           | No                 | `loopandroid` | Client ID for Android auth                                                                                                                                                                                                                                                                                                                  |
 | `INCLUDE_DISABLED_MERCHANTS`      | No                 | `false`       | Show disabled merchants (dev-only — prod boot warns)                                                                                                                                                                                                                                                                                        |
+| `LOOP_MERCHANT_DENYLIST`          | No                 | —             | A2-1922: comma-separated CTX merchant IDs filtered out of the catalog at sync time (operator deny-list). Denied IDs never enter the in-memory store, public API, or admin catalog.                                                                                                                                                          |
 | `REFRESH_INTERVAL_HOURS`          | No                 | `6`           | Merchant catalog refresh cadence                                                                                                                                                                                                                                                                                                            |
 | `LOCATION_REFRESH_INTERVAL_HOURS` | No                 | `24`          | Location data refresh cadence                                                                                                                                                                                                                                                                                                               |
 | `DISCORD_WEBHOOK_ORDERS`          | No                 | —             | Webhook URL for order created / fulfilled notifications                                                                                                                                                                                                                                                                                     |
 | `DISCORD_WEBHOOK_MONITORING`      | No                 | —             | Webhook URL for health-status and circuit-breaker alerts                                                                                                                                                                                                                                                                                    |
 | `SENTRY_DSN`                      | Recommended (prod) | —             | Backend error tracking DSN                                                                                                                                                                                                                                                                                                                  |
+| `SENTRY_RELEASE`                  | No (paired)        | —             | A2-1309: release tag for Sentry events. Pair with `VITE_SENTRY_RELEASE` on web. CI/CD sets it to the git SHA so Sentry can pivot from an event to the exact deploy artifact. Absent → events carry no `release` attribute.                                                                                                                  |
 | `LOOP_ENV`                        | No (paired)        | `NODE_ENV`    | A2-1310: explicit logical-env tag for Sentry bucketing. Pair with `VITE_LOOP_ENV` on web. A staging deploy that runs `NODE_ENV=production` should set `LOOP_ENV=staging` on both sides so Sentry events bucket consistently across backend and web.                                                                                         |
 | `PORT`                            | No                 | `8080`        | Server port                                                                                                                                                                                                                                                                                                                                 |
 | `NODE_ENV`                        | No                 | `development` | Environment. Schema default is `development`; prod deployments set it to `production` explicitly (our `fly.toml` + Dockerfile both do). Audit A-025's image-proxy allowlist enforcement and the `INCLUDE_DISABLED_MERCHANTS=true` boot warn only fire when `NODE_ENV === 'production'`, so leaving it unset in prod silently disables both. |
@@ -90,22 +92,37 @@ See `apps/backend/fly.toml`:
 
 #### Auth (ADR 013 / ADR 014)
 
-| Variable                         | Required   | Default | Description                                                                                                     |
-| -------------------------------- | ---------- | ------- | --------------------------------------------------------------------------------------------------------------- |
-| `LOOP_JWT_SIGNING_KEY`           | Yes (prod) | —       | 32+ char secret for HS256 signing on the Loop-native auth path (ADR 013). Rotate via `_PREVIOUS` below.         |
-| `LOOP_JWT_SIGNING_KEY_PREVIOUS`  | No         | —       | Prior signing key accepted during rotation. Remove after all outstanding tokens expire.                         |
-| `LOOP_AUTH_NATIVE_ENABLED`       | No         | `false` | Gates the Loop-native OTP path. `false` → legacy CTX-proxy. Flip to `true` per deploy in the identity takeover. |
-| `GOOGLE_OAUTH_CLIENT_ID_WEB`     | No         | —       | ADR-014 social login. Absent → Google button hidden on web.                                                     |
-| `GOOGLE_OAUTH_CLIENT_ID_IOS`     | No         | —       | ADR-014 social login, iOS.                                                                                      |
-| `GOOGLE_OAUTH_CLIENT_ID_ANDROID` | No         | —       | ADR-014 social login, Android.                                                                                  |
-| `APPLE_SIGN_IN_SERVICE_ID`       | No         | —       | ADR-014 Apple Sign-In service id.                                                                               |
+| Variable                                  | Required           | Default | Description                                                                                                                                                                                                                                                                                                              |
+| ----------------------------------------- | ------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `LOOP_JWT_SIGNING_KEY`                    | Yes (prod)         | —       | 32+ char secret for HS256 signing on the Loop-native auth path (ADR 013). Rotate via `_PREVIOUS` below.                                                                                                                                                                                                                  |
+| `LOOP_JWT_SIGNING_KEY_PREVIOUS`           | No                 | —       | Prior signing key accepted during rotation. Remove after all outstanding tokens expire.                                                                                                                                                                                                                                  |
+| `LOOP_AUTH_NATIVE_ENABLED`                | No                 | `false` | Gates the Loop-native OTP path. `false` → legacy CTX-proxy. Flip to `true` per deploy in the identity takeover.                                                                                                                                                                                                          |
+| `GOOGLE_OAUTH_CLIENT_ID_WEB`              | No                 | —       | ADR-014 social login. Absent → Google button hidden on web.                                                                                                                                                                                                                                                              |
+| `GOOGLE_OAUTH_CLIENT_ID_IOS`              | No                 | —       | ADR-014 social login, iOS.                                                                                                                                                                                                                                                                                               |
+| `GOOGLE_OAUTH_CLIENT_ID_ANDROID`          | No                 | —       | ADR-014 social login, Android.                                                                                                                                                                                                                                                                                           |
+| `APPLE_SIGN_IN_SERVICE_ID`                | No                 | —       | ADR-014 Apple Sign-In service id.                                                                                                                                                                                                                                                                                        |
+| `LOOP_ADMIN_STEP_UP_SIGNING_KEY`          | Recommended (prod) | —       | ADR-028 / A4-063: 32+ char key signing the 5-min `X-Admin-Step-Up` JWTs. **Absent → boot succeeds but destructive admin endpoints (credit-adjust / withdrawals / payout-retry) fail closed with `503 STEP_UP_UNAVAILABLE`.** Keep separate from `LOOP_JWT_SIGNING_KEY` so a JWT-key compromise doesn't widen to step-up. |
+| `LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS` | No                 | —       | Prior step-up key accepted during rotation. Drop after the 5-minute step-up TTL elapses.                                                                                                                                                                                                                                 |
+
+#### Transactional email (ADR 013)
+
+Required as a set when `LOOP_AUTH_NATIVE_ENABLED=true` in production — the OTP path can't send mail without a real provider, and boot refuses `EMAIL_PROVIDER=console` (or unset) in production (A2-571).
+
+| Variable                 | Required                | Default                  | Description                                                                                                                                                                             |
+| ------------------------ | ----------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EMAIL_PROVIDER`         | Yes (prod, native auth) | `console` (dev only)     | `resend` is the only real provider today. `console` logs OTPs to stdout — dev only; production boot throws on it.                                                                       |
+| `RESEND_API_KEY`         | Yes (when `resend`)     | —                        | Resend API key (`re_…`). Never logged.                                                                                                                                                  |
+| `EMAIL_FROM_ADDRESS`     | No                      | `noreply@loopfinance.io` | Sender address. Domain must be DKIM/SPF-verified at the provider before delivery succeeds.                                                                                              |
+| `EMAIL_FROM_NAME`        | No                      | `Loop`                   | Display name for the From header.                                                                                                                                                       |
+| `EMAIL_REPLY_TO_ADDRESS` | No                      | —                        | Optional Reply-To so user replies route to a monitored inbox (prod sets `hello@loopfinance.io` in `fly.toml [env]`). Unset → `reply_to` omitted from the send. Email-validated at boot. |
 
 #### Database (ADR 012)
 
-| Variable            | Required | Default | Description                                                                                                   |
-| ------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`      | Yes      | —       | `postgres://` or `postgresql://` URL. Dev points at the docker-compose Postgres on `:5433`; prod Fly-managed. |
-| `DATABASE_POOL_MAX` | No       | `10`    | Drizzle pool size per Node process. Tune if a machine hosts multiple workers.                                 |
+| Variable                        | Required | Default | Description                                                                                                                                   |
+| ------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                  | Yes      | —       | `postgres://` or `postgresql://` URL. Dev points at the docker-compose Postgres on `:5433`; prod Fly-managed.                                 |
+| `DATABASE_POOL_MAX`             | No       | `10`    | Drizzle pool size per Node process. Tune if a machine hosts multiple workers.                                                                 |
+| `DATABASE_STATEMENT_TIMEOUT_MS` | No       | `30000` | A2-724: per-session `statement_timeout` sent as a connection startup parameter so a runaway query can't monopolise a pool slot. `0` disables. |
 
 ##### Postgres role hygiene (A2-1614)
 
@@ -178,18 +195,33 @@ that the role-grant wasn't extended for a new table.
 
 #### Background workers
 
-| Variable                                    | Required | Default        | Description                                                                                              |
-| ------------------------------------------- | -------- | -------------- | -------------------------------------------------------------------------------------------------------- |
-| `LOOP_WORKERS_ENABLED`                      | No       | `false`        | Master switch for all outbound workers. Set `true` on prod + Fly staging once Stellar secrets are wired. |
-| `LOOP_PAYOUT_WORKER_INTERVAL_SECONDS`       | No       | `30`           | Payout worker tick cadence.                                                                              |
-| `LOOP_PAYOUT_MAX_ATTEMPTS`                  | No       | schema default | Retries before a payout transitions to `failed`.                                                         |
-| `LOOP_PAYOUT_WATCHDOG_STALE_SECONDS`        | No       | schema default | `submitted` payouts older than this get re-picked (A2-602).                                              |
-| `LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS`     | No       | schema default | Horizon payment watcher cadence.                                                                         |
-| `LOOP_PROCUREMENT_INTERVAL_SECONDS`         | No       | schema default | CTX procurement worker cadence.                                                                          |
-| `LOOP_ASSET_DRIFT_WATCHER_INTERVAL_SECONDS` | No       | schema default | Asset drift watcher cadence.                                                                             |
-| `INTEREST_APY_BASIS_POINTS`                 | No       | schema default | APY for the interest-accrual primitive.                                                                  |
-| `INTEREST_PERIODS_PER_YEAR`                 | No       | schema default | E.g. `365` for daily, `12` for monthly.                                                                  |
-| `INTEREST_TICK_INTERVAL_HOURS`              | No       | schema default | Wall-clock cadence of the interest scheduler.                                                            |
+| Variable                                    | Required | Default          | Description                                                                                                                        |
+| ------------------------------------------- | -------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `LOOP_WORKERS_ENABLED`                      | No       | `false`          | Master switch for all outbound workers. Set `true` on prod + Fly staging once Stellar secrets are wired.                           |
+| `LOOP_PAYOUT_WORKER_INTERVAL_SECONDS`       | No       | `30`             | Payout worker tick cadence.                                                                                                        |
+| `LOOP_PAYOUT_MAX_ATTEMPTS`                  | No       | schema default   | Retries before a payout transitions to `failed`.                                                                                   |
+| `LOOP_PAYOUT_WATCHDOG_STALE_SECONDS`        | No       | schema default   | `submitted` payouts older than this get re-picked (A2-602).                                                                        |
+| `LOOP_PAYOUT_FEE_BASE_STROOPS`              | No       | `100`            | A2-1921: Stellar fee for a payout's first submit attempt.                                                                          |
+| `LOOP_PAYOUT_FEE_MULTIPLIER`                | No       | `2`              | A2-1921: per-attempt fee scaling factor (attempt N pays `BASE * MULTIPLIER^(N-1)`).                                                |
+| `LOOP_PAYOUT_FEE_CAP_STROOPS`               | No       | `100000`         | A2-1921: ceiling on the scaled fee.                                                                                                |
+| `LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS`     | No       | schema default   | Horizon payment watcher cadence.                                                                                                   |
+| `LOOP_PROCUREMENT_INTERVAL_SECONDS`         | No       | schema default   | CTX procurement worker cadence.                                                                                                    |
+| `LOOP_ASSET_DRIFT_WATCHER_INTERVAL_SECONDS` | No       | schema default   | Asset drift watcher cadence.                                                                                                       |
+| `INTEREST_APY_BASIS_POINTS`                 | No       | schema default   | APY for the interest-accrual primitive.                                                                                            |
+| `INTEREST_PERIODS_PER_YEAR`                 | No       | schema default   | E.g. `365` for daily, `12` for monthly.                                                                                            |
+| `INTEREST_TICK_INTERVAL_HOURS`              | No       | schema default   | Wall-clock cadence of the interest scheduler.                                                                                      |
+| `LOOP_INTEREST_POOL_ACCOUNT`                | No       | operator account | ADR 009/015: forward-mint pool account the daily interest accrual sub-allocates from. Defaults to the operator account when unset. |
+| `LOOP_INTEREST_POOL_MIN_DAYS_COVER`         | No       | `7`              | Pool watcher pages Discord monitoring when the on-chain pool covers fewer than this many days of forecast interest.                |
+
+#### Runtime kill switches (A2-1907)
+
+Set any of these to `true` on a running deployment (`fly secrets set LOOP_KILL_<NAME>=true -a loopfinance-api` — triggers a rolling restart) and the matching surface returns `503 SUBSYSTEM_DISABLED` without a redeploy. All default `false`. Operator runbook: `docs/runbooks/kill-switch.md`.
+
+| Variable                | Required | Default | Description                                                                                            |
+| ----------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `LOOP_KILL_ORDERS`      | No       | `false` | Gates `POST /api/orders` + `POST /api/orders/loop`.                                                    |
+| `LOOP_KILL_AUTH`        | No       | `false` | Gates request-otp / verify-otp / social logins. Refresh + logout stay open so existing sessions drain. |
+| `LOOP_KILL_WITHDRAWALS` | No       | `false` | Gates the admin withdrawal + compensation endpoints.                                                   |
 
 `env.ts` is the source of truth; run `parseEnv()` via `npm run dev -w @loop/backend` locally to validate a deploy's env block before pushing.
 
@@ -315,6 +347,21 @@ fly certs add api.loopfinance.io --config apps/backend/fly.toml
 fly certs add loopfinance.io --config apps/web/fly.toml
 fly certs add www.loopfinance.io --config apps/web/fly.toml
 ```
+
+---
+
+## CI secrets (GitHub Actions)
+
+These are **repo-level** GitHub secrets/vars — they configure CI workflows, not the running backend, so they don't appear in `env.ts` or `.env.example`. Provision via `gh secret set <NAME>` (or `gh variable set` where noted). Missing entries degrade gracefully (skipped steps / silent notifications), which makes them easy to forget on a fresh fork — this list is the checklist.
+
+| Secret / var                  | Kind     | Used by                                  | Effect when missing                                                                                                                                                                 |
+| ----------------------------- | -------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DISCORD_WEBHOOK_DEPLOYMENTS` | secret   | `ci.yml` notify job                      | No CI pass/fail messages in Discord `#loop-deployments`. Also listed as RECOMMENDED in `scripts/preflight-tranche-1.sh`.                                                            |
+| `SENTRY_AUTH_TOKEN`           | secret   | `ci.yml` build job (source-map upload)   | Source-map upload to Sentry is skipped (A2-1307). Push builds only.                                                                                                                 |
+| `SENTRY_ORG`                  | variable | `ci.yml` build job                       | Source-map upload step warns and skips.                                                                                                                                             |
+| `SENTRY_PROJECT`              | variable | `ci.yml` build job                       | Source-map upload step warns and skips.                                                                                                                                             |
+| `LOOP_E2E_REFRESH_TOKEN`      | secret   | `e2e-real.yml` (real Tranche-1 purchase) | Real-upstream e2e fails at auth. Bootstrap + rotate via `scripts/bootstrap-e2e-refresh-token.sh` (CTX rotates the refresh token on every use; the workflow re-uploads the new one). |
+| `STELLAR_TEST_SECRET_KEY`     | secret   | `e2e-real.yml`                           | Real-upstream e2e cannot pay the order. Mainnet test wallet secret — fund with a few XLM; treat as production-adjacent (it holds real funds).                                       |
 
 ---
 

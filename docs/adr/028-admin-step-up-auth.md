@@ -16,6 +16,15 @@
   - Wired on `/api/admin/users/:userId/credit-adjustments`,
     `/api/admin/users/:userId/withdrawals`, `/api/admin/payouts/:id/retry`.
   - Tests: 12 unit tests covering sign/verify/middleware error paths.
+- **2026-06-11** Operator-visibility follow-up (cross-env audit): the key is
+  `optional()` in `env.ts`, so a deployment that never provisions it boots
+  cleanly while every gated endpoint (credit-adjust / withdrawals /
+  payout-retry) fails closed with `503 STEP_UP_UNAVAILABLE` — easy to mistake
+  for an outage. `LOOP_ADMIN_STEP_UP_SIGNING_KEY` is now listed in
+  `scripts/preflight-tranche-1.sh` (RECOMMENDED tier — advisory, since
+  Tranche 1 may deliberately launch with those admin surfaces dark) and in
+  the `docs/deployment.md` env table. Generate with `openssl rand -base64 48`;
+  rotate via `LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS` over the 5-minute TTL.
 - **Pending**: web modal (`StepUpModal` component + `useStepUpToken` hook). The
   backend endpoints will return `STEP_UP_REQUIRED` when the modal isn't wired
   yet, so the operator can ship the backend independently of the UI.

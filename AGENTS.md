@@ -222,6 +222,20 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # LOOP_JWT_SIGNING_KEY=<at-least-32-char-random-secret>
 # LOOP_JWT_SIGNING_KEY_PREVIOUS=<prior-secret-during-rotation>
 
+# Admin step-up auth (ADR 028). Absent → boot succeeds but destructive
+# admin endpoints (credit-adjust / withdrawals / payout-retry) return
+# 503 STEP_UP_UNAVAILABLE.
+# LOOP_ADMIN_STEP_UP_SIGNING_KEY=<at-least-32-char-random-secret>
+
+# Transactional email (ADR 013) — required set when
+# LOOP_AUTH_NATIVE_ENABLED=true in production (`console` is dev-only).
+# Reply-To is optional; email-validated at boot by env.ts.
+# EMAIL_PROVIDER=resend
+# RESEND_API_KEY=re_...
+# EMAIL_FROM_ADDRESS=noreply@loopfinance.io     # default
+# EMAIL_FROM_NAME=Loop                          # default
+# EMAIL_REPLY_TO_ADDRESS=hello@loopfinance.io   # unset → reply_to omitted
+
 # Dev mode: show disabled merchants
 # INCLUDE_DISABLED_MERCHANTS=true
 

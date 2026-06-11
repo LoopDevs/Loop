@@ -431,6 +431,22 @@ export const EnvSchema = z.object({
   // Display name for the From header. Defaults to `Loop`.
   EMAIL_FROM_NAME: z.string().optional(),
 
+  // Optional Reply-To address for transactional email. When set, OTP
+  // emails carry a `reply_to` header so user replies route to a
+  // monitored inbox (production sets hello@loopfinance.io via
+  // fly.toml) instead of bouncing off the no-reply sender. Unset →
+  // the reply_to key is omitted from the provider payload entirely.
+  //
+  // Declared in the schema so a typo'd address fails parseEnv at boot
+  // (it previously bypassed env.ts via a bare process.env read in
+  // auth/email.ts — a malformed value silently sent mail with no
+  // Reply-To). The call site still reads process.env live, matching
+  // the documented test-reload pattern (A2-1513 / A2-1812 resolution
+  // notes) used by the sibling EMAIL_* vars: zod validates at boot,
+  // runtime reads stay live so tests can mutate process.env and reset
+  // the cached provider.
+  EMAIL_REPLY_TO_ADDRESS: z.string().email().optional(),
+
   // Network passphrase for payout signing. PUBLIC mainnet is the
   // default; operators override with TESTNET string for staging.
   // Anything non-empty is accepted so a self-hosted network can
