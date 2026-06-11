@@ -30,6 +30,28 @@ describe('runtime health snapshot', () => {
     expect(recovered.otpDelivery.degraded).toBe(false);
   });
 
+  it('recordOtpSendFailure does not re-arm a disabled kill-switch; only a successful send does', () => {
+    // Operator silenced the surface during a known provider incident.
+    setOtpDeliveryEnabled(false);
+    recordOtpSendFailure(new Error('provider down'));
+
+    const silenced = getRuntimeHealthSnapshot();
+    // Pre-fix, the failure flipped `enabled` back to true — every
+    // failing request re-paged the exact incident being silenced.
+    expect(silenced.otpDelivery.enabled).toBe(false);
+    expect(silenced.otpDelivery.degraded).toBe(false);
+    expect(silenced.degraded).toBe(false);
+    // Failure metadata is still recorded while silenced.
+    expect(silenced.otpDelivery.lastError).toBe('provider down');
+    expect(silenced.otpDelivery.lastFailureAtMs).not.toBeNull();
+
+    // A successful send is real evidence of recovery — it re-arms.
+    recordOtpSendSuccess();
+    const rearmed = getRuntimeHealthSnapshot();
+    expect(rearmed.otpDelivery.enabled).toBe(true);
+    expect(rearmed.otpDelivery.degraded).toBe(false);
+  });
+
   it('treats a blocked required worker as degraded', () => {
     markWorkerBlocked('payment_watcher', {
       reason: 'LOOP_STELLAR_DEPOSIT_ADDRESS is unset',

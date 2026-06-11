@@ -113,15 +113,18 @@ export async function revokeRefreshToken(args: {
  *
  * Refresh-token rotation must look like:
  *   1. findLiveRefreshToken (read)
- *   2. tryRevokeIfLive (compare-and-set; gate on this)
- *   3. issueTokenPair (insert successor)
+ *   2. mintTokenPair (sign only — the successor jti must exist for
+ *      step 3, but NO row is written yet)
+ *   3. tryRevokeIfLive (compare-and-set; gate on this)
+ *   4. persistMintedRefreshToken (insert successor — winners only)
  *
  * Earlier code did revoke as a non-conditional UPDATE after issuing
  * the new pair, so two parallel refresh requests with the same old
- * token both made it past step 1 and both inserted successors.
- * Now the second caller's `tryRevokeIfLive` returns false and the
- * caller maps that to a refresh-rejection without minting a token
- * pair.
+ * token both made it past step 1 and both inserted successors. A
+ * later iteration gated on this CAS but still persisted the
+ * successor row BEFORE it, so the losing request left an orphaned
+ * live row behind. Now the loser's `tryRevokeIfLive` returns false
+ * and the caller rejects the refresh without ever inserting a row.
  */
 export async function tryRevokeIfLive(args: {
   jti: string;

@@ -130,6 +130,7 @@ import {
   markWorkerTickSuccess,
   recordOtpSendFailure,
   recordOtpSendSuccess,
+  setOtpDeliveryEnabled,
 } from '../runtime-health.js';
 
 // Mock global fetch for upstream proxy calls
@@ -189,6 +190,10 @@ describe('GET /health', () => {
   });
 
   it('surfaces OTP delivery degradation in /health with HTTP 503', async () => {
+    // The OTP kill-switch fix made `recordOtpSendFailure` stop
+    // re-arming the surface, so arm it explicitly (in production it
+    // arms via LOOP_AUTH_NATIVE_ENABLED at boot / a successful send).
+    setOtpDeliveryEnabled(true);
     recordOtpSendFailure(new Error('provider down'));
     mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
 
@@ -252,6 +257,9 @@ describe('GET /health', () => {
   // toggling OTP-delivery state, advancing `Date.now()` between
   // calls so the success/failure timestamps order deterministically.
   async function driveHealth(probes: Array<'ok' | 'fail'>): Promise<void> {
+    // `recordOtpSendFailure` no longer re-arms the surface (OTP
+    // kill-switch fix), so arm it explicitly before driving probes.
+    setOtpDeliveryEnabled(true);
     for (const p of probes) {
       __resetUpstreamProbeCacheOnlyForTests();
       mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
@@ -681,6 +689,9 @@ describe('app-level middleware', () => {
   });
 
   it('/metrics exposes runtime health gauges for OTP and workers', async () => {
+    // Arm the surface first — failures alone no longer re-arm it
+    // (OTP kill-switch fix).
+    setOtpDeliveryEnabled(true);
     recordOtpSendFailure(new Error('provider down'));
     markWorkerStarted('payout_worker', { staleAfterMs: 60_000 });
     markWorkerTickSuccess('payout_worker');
