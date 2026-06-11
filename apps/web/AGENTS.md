@@ -27,16 +27,19 @@ app/
 │   │   ├── order/    ← per-order payout card
 │   │   ├── orders/   ← loop-orders list + summary header
 │   │   ├── purchase/ ← amount → payment → complete / redeem state machine
-│   │   ├── wallet/   ← Stellar trustline status / setup cards
+│   │   │               (incl. PayWithLoopBalance — ADR 030 one-tap pay)
+│   │   ├── wallet/   ← Stellar trustline status / setup cards, WalletCard
+│   │   │               (ADR 030 embedded-wallet balance surface)
 │   │   └── top-level: Navbar, Footer, MerchantCard, MerchantGroupCard, ClusterMap, MapBottomSheet,
 │   │                  NativeTabBar, NativeBackButton, FixedSearchButton
 │   └── ui/           ← Primitives (Button, Input, LazyImage, OfflineBanner,
 │                       Skeleton, Spinner, ToastContainer)
 ├── hooks/            ← TanStack Query wrappers + lifecycle (use-auth, use-merchants,
-│                       use-orders, use-native-platform, use-session-restore, query-retry)
+│                       use-orders, use-wallet, use-native-platform,
+│                       use-session-restore, query-retry)
 ├── services/         ← Typed API client (api-client, auth, clusters, merchants,
-│                       orders, orders-loop, config, admin, user, public-stats,
-│                       parse-error-response)
+│                       orders, orders-loop, wallet, config, admin, user,
+│                       public-stats, parse-error-response)
 ├── stores/           ← Zustand (auth.store, purchase.store, ui.store)
 ├── native/           ← Capacitor plugin wrappers (platform, haptics, secure-storage,
 │                       biometrics, app-lock, back-button, clipboard, keyboard, network,

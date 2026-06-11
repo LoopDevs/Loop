@@ -10,6 +10,7 @@ import {
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { isNativePlatform } from '~/native/platform';
+import { PayWithLoopBalance } from './PayWithLoopBalance';
 
 export interface LoopPaymentStepProps {
   /** Result of `createLoopOrder` — the memo + deposit address we display to the user. */
@@ -69,6 +70,14 @@ export function LoopPaymentStep({ create, onTerminal }: LoopPaymentStepProps): R
         </div>
         <h2 className="text-2xl font-semibold text-gray-900 dark:text-white">{stateLabel}</h2>
       </header>
+
+      {/* ADR 030 Phase C: one-tap "Pay with Loop balance" above the
+          deposit instructions. Self-gating — renders nothing unless
+          the order is pending_payment, the wallet is activated, and a
+          matching LOOP-asset balance exists. On success it invalidates
+          the SAME ['loop-order', id] query this component polls, so
+          the state machine below is shared with the crypto path. */}
+      <PayWithLoopBalance create={create} order={orderQuery.data} />
 
       {orderQuery.data?.state === 'fulfilled' ? (
         <RedemptionBody order={orderQuery.data} />
