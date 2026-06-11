@@ -132,6 +132,8 @@ export async function markOrderFulfilled(
         .select({
           stellarAddress: users.stellarAddress,
           homeCurrency: users.homeCurrency,
+          walletAddress: users.walletAddress,
+          walletProvisioning: users.walletProvisioning,
         })
         .from(users)
         .where(eq(users.id, order.userId));
@@ -160,6 +162,12 @@ export async function markOrderFulfilled(
           };
         } else {
           const decision = buildPayoutIntent({
+            // ADR 030 Phase C2 — activated embedded wallet wins over
+            // the legacy linked address; a wallet that exists but is
+            // not yet activated has no trustlines and must not be
+            // targeted (the legacy address / skip path applies).
+            embeddedWalletAddress:
+              userRow.walletProvisioning === 'activated' ? userRow.walletAddress : null,
             stellarAddress: userRow.stellarAddress,
             homeCurrency: userRow.homeCurrency,
             userCashbackMinor: order.userCashbackMinor,

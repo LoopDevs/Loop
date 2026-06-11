@@ -23,6 +23,7 @@ import {
 } from './payments/interest-pool-watcher.js';
 import { configuredLoopPayableAssets } from './credits/payout-asset.js';
 import { startInterestScheduler, stopInterestScheduler } from './credits/interest-scheduler.js';
+import { startWalletProvisioning, stopWalletProvisioning } from './wallet/provisioning.js';
 import { markWorkerBlocked, markWorkerDisabled } from './runtime-health.js';
 
 // A4-093: production gate for loop-native auth. The OTP send path
@@ -172,6 +173,16 @@ if (env.LOOP_WORKERS_ENABLED) {
   } else {
     markWorkerDisabled('interest_scheduler', 'interest APY is zero');
   }
+
+  // ADR 030 Phase C1 — wallet-provisioning sweeper. Re-drives stuck
+  // signup-time provisioning with backoff and backfills existing
+  // users that hold user_credits. Only meaningful when the embedded
+  // wallet layer is on.
+  if (env.LOOP_WALLET_PROVIDER !== '') {
+    startWalletProvisioning();
+  } else {
+    markWorkerDisabled('wallet_provisioning', 'LOOP_WALLET_PROVIDER is unset');
+  }
 } else {
   markWorkerDisabled('payment_watcher', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('procurement_worker', 'LOOP_WORKERS_ENABLED is false');
@@ -179,6 +190,7 @@ if (env.LOOP_WORKERS_ENABLED) {
   markWorkerDisabled('payout_worker', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('asset_drift_watcher', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('interest_scheduler', 'LOOP_WORKERS_ENABLED is false');
+  markWorkerDisabled('wallet_provisioning', 'LOOP_WORKERS_ENABLED is false');
 }
 
 logger.info({ port: env.PORT }, 'Loop backend starting');
@@ -213,6 +225,7 @@ function shutdown(signal: string): void {
   stopAssetDriftWatcher();
   stopInterestScheduler();
   stopInterestPoolWatcher();
+  stopWalletProvisioning();
 
   server.close(() => {
     void Promise.allSettled([sentryFlush(5000), closeDb()]).finally(() => {

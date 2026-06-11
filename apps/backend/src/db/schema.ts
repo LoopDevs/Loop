@@ -24,6 +24,7 @@ import {
   jsonb,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import type { WalletProvisioningState } from '@loop/shared';
 
 /**
  * Loop users. For the current CTX-anchored identity, populated lazily
@@ -76,6 +77,22 @@ export const users = pgTable(
     // guarantees two users can never share one provider wallet.
     walletProvider: text('wallet_provider').$type<'privy'>(),
     walletId: text('wallet_id'),
+    // ADR 030 Phase C — wallet provisioning state machine (migration
+    // 0037). `wallet_address` is the embedded wallet's Stellar public
+    // key, persisted at wallet-creation time so payout targeting (C2)
+    // and the balance surface (C4) never round-trip to the provider.
+    // `wallet_provisioning` walks none → wallet_created → activated;
+    // attempts + last_attempt_at are the provisioning sweeper's
+    // backoff bookkeeping (same shape as the redemption backfill).
+    walletAddress: text('wallet_address'),
+    walletProvisioning: text('wallet_provisioning')
+      .$type<WalletProvisioningState>()
+      .notNull()
+      .default('none'),
+    walletProvisioningAttempts: integer('wallet_provisioning_attempts').notNull().default(0),
+    walletProvisioningLastAttemptAt: timestamp('wallet_provisioning_last_attempt_at', {
+      withTimezone: true,
+    }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -105,8 +122,34 @@ export const users = pgTable(
     uniqueIndex('users_wallet_id_unique')
       .on(t.walletId)
       .where(sql`${t.walletId} IS NOT NULL`),
+    // ADR 030 Phase C (migration 0037): provisioning enum pinned at
+    // the DB boundary; one on-chain account per user; partial index
+    // keeps the sweeper's candidate scan cheap (activated rows fall
+    // out of it).
+    check(
+      'users_wallet_provisioning_known',
+      sql`${t.walletProvisioning} IN ('none', 'wallet_created', 'activated')`,
+    ),
+    uniqueIndex('users_wallet_address_unique')
+      .on(t.walletAddress)
+      .where(sql`${t.walletAddress} IS NOT NULL`),
+    index('users_wallet_provisioning_pending')
+      .on(t.createdAt)
+      .where(sql`${t.walletProvisioning} <> 'activated'`),
   ],
 );
+
+/**
+ * ADR 030 Phase C — wallet-provisioning state machine values
+ * (`users.wallet_provisioning`, migration 0037). The union itself is
+ * canonical in `@loop/shared/users-wallet` (`GET /api/me/wallet`
+ * returns it on the wire); re-exported here for the many schema-side
+ * callers, mirroring the HomeCurrency pattern above. The runtime
+ * array is declared here because only the backend needs to iterate
+ * the states (sweeper + tests); it is pinned to the same DB CHECK.
+ */
+export const WALLET_PROVISIONING_STATES = ['none', 'wallet_created', 'activated'] as const;
+export type { WalletProvisioningState } from '@loop/shared';
 
 // Home-currency enum + type live in `@loop/shared/loop-asset` alongside
 // the LOOP asset codes they map to. Re-exported here for the many

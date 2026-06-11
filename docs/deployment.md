@@ -213,13 +213,13 @@ that the role-grant wasn't extended for a new table.
 | `LOOP_INTEREST_POOL_ACCOUNT`                | No       | operator account | ADR 009/015: forward-mint pool account the daily interest accrual sub-allocates from. Defaults to the operator account when unset. |
 | `LOOP_INTEREST_POOL_MIN_DAYS_COVER`         | No       | `7`              | Pool watcher pages Discord monitoring when the on-chain pool covers fewer than this many days of forecast interest.                |
 
-#### Embedded wallet (ADR 030, Phase B)
+#### Embedded wallet (ADR 030)
 
-| Variable               | Required         | Default | Description                                                                                                                                                                |
-| ---------------------- | ---------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LOOP_WALLET_PROVIDER` | No               | `''`    | Embedded-wallet vendor selector (`''` or `privy`). `''` (default) disables the wallet layer entirely — `getWalletProvider()` returns null. Phase B is substrate only.      |
-| `PRIVY_APP_ID`         | Iff provider set | —       | Privy app id. Sent as Basic-auth username + `privy-app-id` header on every Privy REST call.                                                                                |
-| `PRIVY_APP_SECRET`     | Iff provider set | —       | Privy app secret (Basic-auth password). Never logged — pino redaction covers it. Boot fails (`parseEnv`) if `LOOP_WALLET_PROVIDER=privy` is set without both Privy values. |
+| Variable               | Required         | Default | Description                                                                                                                                                                                                         |
+| ---------------------- | ---------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LOOP_WALLET_PROVIDER` | No               | `''`    | Embedded-wallet vendor selector (`''` or `privy`). `''` (default) disables the wallet layer entirely — `getWalletProvider()` returns null. Phase C wires provisioning, payouts, pay-with-balance, `/api/me/wallet`. |
+| `PRIVY_APP_ID`         | Iff provider set | —       | Privy app id. Sent as Basic-auth username + `privy-app-id` header on every Privy REST call.                                                                                                                         |
+| `PRIVY_APP_SECRET`     | Iff provider set | —       | Privy app secret (Basic-auth password). Never logged — pino redaction covers it. Boot fails (`parseEnv`) if `LOOP_WALLET_PROVIDER=privy` is set without both Privy values.                                          |
 
 #### Runtime kill switches (A2-1907)
 

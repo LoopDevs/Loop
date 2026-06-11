@@ -199,3 +199,54 @@ export function notifyStuckPayouts(args: {
     ],
   });
 }
+
+/**
+ * Wallet-provisioning exhaustion (ADR 030 Phase C1): a user's
+ * embedded-wallet provisioning has failed `attempts` consecutive
+ * drives (provider createWallet, sponsored activation submit, or
+ * Horizon reads) and the sweeper has stopped retrying. The user can
+ * still browse + buy — only on-chain payouts wait on the wallet —
+ * but cashback emission for them is parked until ops intervenes.
+ *
+ * Per-row for the same reason as the redemption-backfill alert:
+ * exhaustion is rare and each row needs its own investigation
+ * (Privy dashboard state, operator account funding, Horizon health).
+ * Runbook: docs/runbooks/wallet-provisioning-stuck.md.
+ */
+export function notifyWalletProvisioningStuck(args: {
+  userId: string;
+  walletId: string | null;
+  walletAddress: string | null;
+  provisioning: string;
+  attempts: number;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🔴 Wallet Provisioning Stuck',
+    description: truncate(
+      `A user's embedded-wallet provisioning is still incomplete after ${args.attempts} attempts — the sweeper has stopped retrying. Check the wallet provider dashboard, operator-account funding, and Horizon before re-driving. See runbook wallet-provisioning-stuck.md.`,
+      DESCRIPTION_MAX,
+    ),
+    color: RED,
+    fields: [
+      { name: 'User', value: `\`${args.userId.slice(-8)}\``, inline: true },
+      { name: 'State', value: escapeMarkdown(args.provisioning), inline: true },
+      { name: 'Attempts', value: String(args.attempts), inline: true },
+      {
+        name: 'Wallet id',
+        value:
+          args.walletId === null
+            ? '_none_'
+            : truncate(`\`${escapeMarkdown(args.walletId)}\``, FIELD_VALUE_MAX),
+        inline: false,
+      },
+      {
+        name: 'Address',
+        value:
+          args.walletAddress === null
+            ? '_none_'
+            : truncate(`\`${escapeMarkdown(args.walletAddress)}\``, FIELD_VALUE_MAX),
+        inline: false,
+      },
+    ],
+  });
+}
