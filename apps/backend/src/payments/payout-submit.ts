@@ -20,6 +20,7 @@ import {
   Operation,
   TransactionBuilder,
   BASE_FEE,
+  type Transaction,
 } from '@stellar/stellar-sdk';
 
 export interface PayoutSubmitArgs {
@@ -330,6 +331,39 @@ export async function submitPayout(args: PayoutSubmitArgs): Promise<PayoutSubmit
     // Types on the SDK's submit response differ across versions;
     // narrow defensively. `hash` is stable across 10-15.x.
     const hash = (res as { hash?: string }).hash ?? signedHash;
+    const ledger = (res as { ledger?: number }).ledger ?? null;
+    return { txHash: hash, ledger };
+  } catch (err) {
+    throw classifySubmitError(err);
+  }
+}
+
+export interface PreSignedSubmitArgs {
+  /** Horizon base URL. Pinned per-deployment via env. */
+  horizonUrl: string;
+  /** Fully built AND fully signed transaction. */
+  tx: Transaction;
+}
+
+/**
+ * Submits a transaction that was built and signed elsewhere (ADR 030
+ * Phase B: user-embedded-wallet signatures attached via
+ * `wallet/user-signer.ts`). Shares `classifySubmitError` with the
+ * operator-signed paths above so every Stellar submit in the backend
+ * throws the same `PayoutSubmitError` kinds. The operator-keypair
+ * functions (`submitPayout` / `submitNativePayment`) are untouched —
+ * this is additive, not a re-route.
+ *
+ * As with `submitPayout`, idempotency lives in the caller; this is
+ * the raw submit.
+ */
+export async function submitPreSignedTransaction(
+  args: PreSignedSubmitArgs,
+): Promise<PayoutSubmitResult> {
+  const server = new Horizon.Server(args.horizonUrl);
+  try {
+    const res = await server.submitTransaction(args.tx);
+    const hash = (res as { hash?: string }).hash ?? args.tx.hash().toString('hex');
     const ledger = (res as { ledger?: number }).ledger ?? null;
     return { txHash: hash, ledger };
   } catch (err) {

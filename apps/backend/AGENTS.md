@@ -60,6 +60,15 @@ src/
 │   ├── price-feed.ts   ← XLM + USDC stroops-per-cent + convertMinorUnits FX
 │   ├── payout-submit.ts ← @stellar/stellar-sdk sign+submit wrapper with classified error kinds (ADR 016)
 │   └── payout-worker.ts ← Outbound LOOP-asset payout worker with memo-idempotent retry (ADR 016)
+├── wallet/             ← ADR 030 Phase B — provider-agnostic embedded wallet.
+│   │                     OFF by default (LOOP_WALLET_PROVIDER='') ; substrate
+│   │                     only — nothing user-facing consumes it until Phase C.
+│   ├── provider.ts     ← WalletProvider interface + getWalletProvider() env factory
+│   │                     + WalletProviderError (transient/terminal taxonomy)
+│   ├── privy.ts        ← Privy REST adapter — plain fetch + Zod (no SDK dep);
+│   │                     query-before-create idempotency on external_id
+│   └── user-signer.ts  ← Verify + attach user-wallet ed25519 signature, then
+│                         submit via payout-submit's classify path
 ├── merchants/
 │   ├── sync.ts         ← Background sync from upstream /merchants
 │   └── handler.ts      ← GET /api/merchants endpoints (from in-memory cache)

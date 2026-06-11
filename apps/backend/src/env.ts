@@ -730,6 +730,23 @@ export const EnvSchema = z.object({
   // real accounting divergence.
   LOOP_ASSET_DRIFT_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(100_000_000n),
 
+  // ADR 030 Phase B: provider-agnostic embedded-wallet substrate.
+  // '' (default) → the wallet layer is OFF: `getWalletProvider()`
+  // returns null and no vendor code path is reachable. 'privy' →
+  // the Privy REST adapter is active and PRIVY_APP_ID +
+  // PRIVY_APP_SECRET become required (cross-field check in
+  // `parseEnv` below). Nothing user-facing consumes this in Phase B
+  // — it is the substrate Phase C wires into flows.
+  LOOP_WALLET_PROVIDER: z.enum(['', 'privy']).default(''),
+
+  // Privy app credentials (ADR 030). Used as HTTP Basic auth
+  // (`PRIVY_APP_ID:PRIVY_APP_SECRET`) plus the `privy-app-id` header
+  // on every Privy REST call. The secret is never logged (pino
+  // redaction paths cover PRIVY_APP_SECRET). Both required iff
+  // LOOP_WALLET_PROVIDER=privy; ignored otherwise.
+  PRIVY_APP_ID: z.string().min(1).optional(),
+  PRIVY_APP_SECRET: z.string().min(1).optional(),
+
   // A2-905 / ADR 009: interest accrual on user credit balances.
   // Off by default (0 bps) — ADR 009 explicitly feature-flags this
   // "until counsel confirms the framing of interest on promotional
@@ -886,6 +903,23 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
         'The flag is a test-harness escape hatch; production runs without it. ' +
         'Unset the variable and redeploy.',
     );
+  }
+
+  // ADR 030 Phase B cross-field requirement: selecting the Privy
+  // wallet provider without its credentials would otherwise only
+  // surface on the first wallet call (as a terminal provider error).
+  // Fail at boot instead, naming exactly what's missing.
+  if (parsed.data.LOOP_WALLET_PROVIDER === 'privy') {
+    const missing: string[] = [];
+    if (parsed.data.PRIVY_APP_ID === undefined) missing.push('PRIVY_APP_ID');
+    if (parsed.data.PRIVY_APP_SECRET === undefined) missing.push('PRIVY_APP_SECRET');
+    if (missing.length > 0) {
+      throw new Error(
+        `Invalid environment variables — LOOP_WALLET_PROVIDER=privy requires ${missing.join(
+          ' and ',
+        )} to be set (ADR 030). Unset LOOP_WALLET_PROVIDER to disable the wallet layer instead.`,
+      );
+    }
   }
 
   // A2-203: the fallback cashback split must respect the

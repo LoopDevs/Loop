@@ -377,6 +377,17 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS=1         # sweep cadence (hours)
 # LOOP_AUTH_ROW_RETENTION_DAYS=30              # grace before a dead row is reaped
 
+# ── Embedded wallet (ADR 030, Phase B) ───────────────────────────────
+# Provider-agnostic embedded-wallet layer. '' (default) → OFF:
+# getWalletProvider() returns null and no vendor code path is
+# reachable. 'privy' → the Privy REST adapter is active (plain
+# fetch + Zod, no SDK dependency) and both PRIVY_* credentials are
+# required — parseEnv refuses to boot otherwise. Phase B is
+# substrate only; Phase C wires it into flows.
+# LOOP_WALLET_PROVIDER=
+# PRIVY_APP_ID=your-privy-app-id
+# PRIVY_APP_SECRET=your-privy-app-secret   # never logged (pino redaction)
+
 # ── Runtime kill switches (A2-1907) ──────────────────────────────────
 # Set any to `true` and the matching surface returns 503
 # SUBSYSTEM_DISABLED on the next request — no redeploy. Runbook:

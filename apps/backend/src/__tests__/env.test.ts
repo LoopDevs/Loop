@@ -369,6 +369,46 @@ describe('parseEnv', () => {
       expect(() => parseEnv({ ...base, RATE_LIMIT_MACHINE_COUNT_ESTIMATE: '-1' })).toThrow();
     });
   });
+
+  describe('ADR 030 Phase B: LOOP_WALLET_PROVIDER cross-field requirement', () => {
+    it('defaults to the empty string (wallet layer OFF)', () => {
+      expect(parseEnv(base).LOOP_WALLET_PROVIDER).toBe('');
+    });
+
+    it('rejects unknown provider values', () => {
+      expect(() => parseEnv({ ...base, LOOP_WALLET_PROVIDER: 'dfns' })).toThrow(
+        /LOOP_WALLET_PROVIDER/,
+      );
+    });
+
+    it('requires PRIVY_APP_ID + PRIVY_APP_SECRET when provider=privy', () => {
+      expect(() => parseEnv({ ...base, LOOP_WALLET_PROVIDER: 'privy' })).toThrow(
+        /PRIVY_APP_ID and PRIVY_APP_SECRET/,
+      );
+      expect(() =>
+        parseEnv({ ...base, LOOP_WALLET_PROVIDER: 'privy', PRIVY_APP_ID: 'app123' }),
+      ).toThrow(/PRIVY_APP_SECRET/);
+      expect(() =>
+        parseEnv({ ...base, LOOP_WALLET_PROVIDER: 'privy', PRIVY_APP_SECRET: 'sec456' }),
+      ).toThrow(/PRIVY_APP_ID/);
+    });
+
+    it('accepts provider=privy with both credentials set', () => {
+      const env = parseEnv({
+        ...base,
+        LOOP_WALLET_PROVIDER: 'privy',
+        PRIVY_APP_ID: 'app123',
+        PRIVY_APP_SECRET: 'sec456',
+      });
+      expect(env.LOOP_WALLET_PROVIDER).toBe('privy');
+      expect(env.PRIVY_APP_ID).toBe('app123');
+      expect(env.PRIVY_APP_SECRET).toBe('sec456');
+    });
+
+    it('ignores stray PRIVY_* credentials when the provider is unset', () => {
+      expect(() => parseEnv({ ...base, PRIVY_APP_SECRET: 'sec456' })).not.toThrow();
+    });
+  });
 });
 
 // ADR 030 Phase A: the RS256 signing keys are PEM-validated at boot —
