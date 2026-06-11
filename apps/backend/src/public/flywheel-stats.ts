@@ -35,6 +35,7 @@
  */
 import type { Context } from 'hono';
 import { sql } from 'drizzle-orm';
+import type { PublicFlywheelStats } from '@loop/shared';
 import { db } from '../db/client.js';
 import { orders } from '../db/schema.js';
 import { logger } from '../logger.js';
@@ -43,13 +44,9 @@ const log = logger.child({ handler: 'public-flywheel-stats' });
 
 const WINDOW_DAYS = 30;
 
-export interface PublicFlywheelStats {
-  windowDays: number;
-  fulfilledOrders: number;
-  recycledOrders: number;
-  /** One-decimal percentage, e.g. `"12.3"`. `"0.0"` when denominator is zero. */
-  pctRecycled: string;
-}
+// PublicFlywheelStats is now the single source of truth from @loop/shared
+// (packages/shared/src/public-flywheel-stats.ts — ADR 019).
+export type { PublicFlywheelStats };
 
 interface AggRow extends Record<string, unknown> {
   fulfilled: string | number;

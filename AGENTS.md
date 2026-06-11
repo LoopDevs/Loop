@@ -101,7 +101,7 @@ npm run mobile:sync && cd apps/mobile && npx cap open ios
 # survive the native-project regeneration (ADR-007).
 
 # Code quality
-npm run verify               # typecheck + lint + format:check + lint:docs + test (one command — runs ./scripts/verify.sh)
+npm run verify               # typecheck + lint + format:check + lint:docs + shared-type-parity + env-perms + test + audit (one command — runs ./scripts/verify.sh)
 npm run typecheck            # tsc across all packages
 npm run lint                 # ESLint across all packages
 npm run format               # Prettier across all packages

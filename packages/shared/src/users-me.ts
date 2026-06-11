@@ -18,6 +18,7 @@
 import type { HomeCurrency, LoopAssetCode } from './loop-asset.js';
 import type { OrderPaymentMethod, OrderState } from './order-state.js';
 import type { CreditTransactionType } from './credit-transaction-type.js';
+import type { PayoutState } from './payout-state.js';
 
 /**
  * `GET /api/users/me` / `POST /api/users/me/home-currency` /
@@ -53,8 +54,14 @@ export interface CashbackHistoryResponse {
   entries: CashbackHistoryEntry[];
 }
 
-/** Caller-scoped on-chain payout lifecycle (ADR 015 / 016). */
-export type UserPendingPayoutState = 'pending' | 'submitted' | 'confirmed' | 'failed';
+/**
+ * Caller-scoped on-chain payout lifecycle (ADR 015 / 016).
+ *
+ * Aliased to `PayoutState` (same four-literal union) so a future state
+ * addition in `payout-state.ts` propagates here automatically without
+ * requiring a second edit.
+ */
+export type UserPendingPayoutState = PayoutState;
 
 /** One row of the caller's pending-payout backlog. */
 export interface UserPendingPayoutView {

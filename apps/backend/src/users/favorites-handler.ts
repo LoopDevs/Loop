@@ -24,7 +24,12 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { and, desc, eq, sql } from 'drizzle-orm';
-import type { Merchant } from '@loop/shared';
+import type {
+  AddFavoriteResult,
+  FavoriteMerchantView,
+  ListFavoritesResponse,
+  RemoveFavoriteResult,
+} from '@loop/shared';
 import { db } from '../db/client.js';
 import { userFavoriteMerchants } from '../db/schema.js';
 import { getMerchants } from '../merchants/sync.js';
@@ -45,28 +50,15 @@ const AddFavoriteBody = z.object({
   merchantId: z.string().min(1).max(MERCHANT_ID_MAX),
 });
 
-export interface FavoriteMerchantView {
-  merchantId: string;
-  /** ISO-8601, when the user added the favourite. Used for newest-first ordering on the client. */
-  createdAt: string;
-  /**
-   * The catalog row at read-time. Null when the favourited merchant is
-   * temporarily evicted from the in-memory catalog (ADR 021). The UI
-   * filters these out, but exposing the field lets the client distinguish
-   * "favourite is gone forever" from "we don't know yet" if we ever want
-   * to surface that.
-   */
-  merchant: Merchant | null;
-}
-
-export interface ListFavoritesResponse {
-  favorites: FavoriteMerchantView[];
-  /**
-   * Total favourite rows on the user's account (including evicted-merchant
-   * rows). Lets the UI render "X / 50" without a separate count call.
-   */
-  total: number;
-}
+// FavoriteMerchantView, ListFavoritesResponse, AddFavoriteResult, and
+// RemoveFavoriteResult are now the single source of truth from @loop/shared
+// (packages/shared/src/user-favorites.ts — ADR 019).
+export type {
+  AddFavoriteResult,
+  FavoriteMerchantView,
+  ListFavoritesResponse,
+  RemoveFavoriteResult,
+};
 
 /**
  * `GET /api/users/me/favorites` — list the caller's favourite merchants
@@ -98,13 +90,6 @@ export async function listFavoritesHandler(c: Context): Promise<Response> {
   }));
 
   return c.json<ListFavoritesResponse>({ favorites, total: rows.length });
-}
-
-export interface AddFavoriteResult {
-  merchantId: string;
-  createdAt: string;
-  /** True when this call inserted a new row; false if the favourite already existed. */
-  added: boolean;
 }
 
 /**
@@ -201,12 +186,6 @@ export async function addFavoriteHandler(c: Context): Promise<Response> {
     createdAt: result.row.createdAt.toISOString(),
     added: result.kind === 'added',
   });
-}
-
-export interface RemoveFavoriteResult {
-  merchantId: string;
-  /** True when this call deleted a row; false if there was nothing to remove. */
-  removed: boolean;
 }
 
 /**

@@ -7,25 +7,13 @@
  * catalog entries as `merchant: null`; the UI filters those out so
  * the strip never renders a stale id.
  */
-import type { Merchant } from '@loop/shared';
+import type { RecentlyPurchasedMerchantView, RecentlyPurchasedResponse } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
 
-export interface RecentlyPurchasedMerchantView {
-  merchantId: string;
-  /** ISO-8601 timestamp of the user's most recent qualifying order with this merchant. */
-  lastPurchasedAt: string;
-  /** Total qualifying orders this user has with this merchant. */
-  orderCount: number;
-  /**
-   * Catalog row at read-time; null when the merchant is temporarily
-   * evicted from the in-memory catalog (ADR 021).
-   */
-  merchant: Merchant | null;
-}
-
-export interface RecentlyPurchasedResponse {
-  merchants: RecentlyPurchasedMerchantView[];
-}
+// Types now live in @loop/shared
+// (packages/shared/src/user-recently-purchased.ts — ADR 019).
+// Re-exported so existing import sites that read them from this module keep resolving.
+export type { RecentlyPurchasedMerchantView, RecentlyPurchasedResponse };
 
 export async function listRecentlyPurchased(
   opts: {

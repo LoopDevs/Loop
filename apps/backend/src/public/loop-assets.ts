@@ -34,21 +34,15 @@
  *     ids — already broadcast to any Horizon consumer.
  */
 import type { Context } from 'hono';
-import { configuredLoopPayableAssets, type LoopAssetCode } from '../credits/payout-asset.js';
+import type { PublicLoopAsset, PublicLoopAssetsResponse } from '@loop/shared';
+import { configuredLoopPayableAssets } from '../credits/payout-asset.js';
 import { logger } from '../logger.js';
 
 const log = logger.child({ handler: 'public-loop-assets' });
 
-export interface PublicLoopAsset {
-  /** 3-letter home currency followed by `LOOP` — e.g. `USDLOOP`. */
-  code: LoopAssetCode;
-  /** Stellar account public key (G...) that mints the asset. */
-  issuer: string;
-}
-
-export interface PublicLoopAssetsResponse {
-  assets: PublicLoopAsset[];
-}
+// PublicLoopAsset and PublicLoopAssetsResponse are now the single source
+// of truth from @loop/shared (packages/shared/src/public-loop-assets.ts — ADR 019).
+export type { PublicLoopAsset, PublicLoopAssetsResponse };
 
 export async function publicLoopAssetsHandler(c: Context): Promise<Response> {
   try {

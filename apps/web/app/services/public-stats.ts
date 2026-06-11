@@ -79,25 +79,11 @@ export async function getPublicCashbackPreview(args: {
   return apiRequest<PublicCashbackPreview>(`/api/public/cashback-preview?${qs}`);
 }
 
-/**
- * One configured LOOP asset from `/api/public/loop-assets` (#596).
- * `code` is the Stellar asset code; `issuer` is the G-account that
- * mints it. Both are public — the endpoint is an intentional
- * transparency surface so third-party wallets can add trustlines
- * against a verified issuer (ADR 015 anti-spoofing).
- *
- * The shape repeats what the backend exports locally rather than
- * pulling through `@loop/shared`. ADR 019 says to consolidate once
- * we have a second consumer; today the web side is the first.
- */
-export interface PublicLoopAsset {
-  code: 'USDLOOP' | 'GBPLOOP' | 'EURLOOP';
-  issuer: string;
-}
-
-export interface PublicLoopAssetsResponse {
-  assets: PublicLoopAsset[];
-}
+// PublicLoopAsset, PublicLoopAssetsResponse, and PublicFlywheelStats are now
+// the single source of truth from @loop/shared (ADR 019). Re-exported so
+// existing import sites that read them from this module keep resolving.
+export type { PublicFlywheelStats, PublicLoopAsset, PublicLoopAssetsResponse } from '@loop/shared';
+import type { PublicFlywheelStats, PublicLoopAssetsResponse } from '@loop/shared';
 
 /**
  * `GET /api/public/loop-assets` (ADR 015 / 020) — unauthenticated list
@@ -107,22 +93,6 @@ export interface PublicLoopAssetsResponse {
  */
 export async function getPublicLoopAssets(): Promise<PublicLoopAssetsResponse> {
   return apiRequest<PublicLoopAssetsResponse>('/api/public/loop-assets');
-}
-
-/**
- * Public flywheel-stats response (#609). 30-day scalar of the
- * cashback-recycling signal — the forward-looking counterpart to
- * `PublicCashbackStats` (which only shows emission). Shape repeats
- * the backend export rather than pulling through `@loop/shared` —
- * ADR 019 consolidates when there's a second consumer; today the
- * web side is the first.
- */
-export interface PublicFlywheelStats {
-  windowDays: number;
-  fulfilledOrders: number;
-  recycledOrders: number;
-  /** One-decimal percentage string, e.g. `"12.3"`. `"0.0"` when denom is zero. */
-  pctRecycled: string;
 }
 
 /**

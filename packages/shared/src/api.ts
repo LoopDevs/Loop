@@ -154,6 +154,16 @@ export interface VerifyOtpResponse {
   refreshToken: string;
 }
 
+/**
+ * Response from POST /api/auth/social/google and
+ * POST /api/auth/social/apple (ADR 014). The backend always returns
+ * `email` on social paths because the user never typed it; callers
+ * that don't need it can ignore the field.
+ */
+export interface SocialLoginResponse extends VerifyOtpResponse {
+  email: string;
+}
+
 /** POST /api/auth/refresh */
 export interface RefreshRequest {
   /** Required — the backend's zod schema rejects empty refresh tokens. */

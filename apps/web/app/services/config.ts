@@ -17,6 +17,16 @@ export const API_BASE =
   import.meta.env['VITE_API_URL'] ?? (import.meta.env.PROD ? 'https://api.loopfinance.io' : '');
 
 /**
+ * Per-LOOP-asset availability snapshot inside `AppConfig`. Mirrors the
+ * backend `LoopAssetConfig` from `apps/backend/src/config/handler.ts`.
+ */
+export interface LoopAssetConfig {
+  issuer: string | null;
+  /** Convenience flag — `issuer !== null`. */
+  available: boolean;
+}
+
+/**
  * Feature-flag snapshot from the backend (`GET /api/config`). These
  * gate the Loop-native code paths so the web app doesn't try to call
  * an endpoint that isn't active in the current deployment.
@@ -35,6 +45,16 @@ export interface AppConfig {
    * to flip it back when Tranche 2 launches.
    */
   phase1Only: boolean;
+  /**
+   * ADR 015 — which LOOP stablecoins are wired for on-chain payout.
+   * Always returns all three keys so the client can render a stable
+   * shape; a currency with `issuer: null` renders as "coming soon".
+   */
+  loopAssets: {
+    USDLOOP: LoopAssetConfig;
+    GBPLOOP: LoopAssetConfig;
+    EURLOOP: LoopAssetConfig;
+  };
   /** ADR 014 social-login client identifiers (public, per-platform). */
   social: {
     googleClientIdWeb: string | null;
