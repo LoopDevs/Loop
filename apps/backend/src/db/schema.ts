@@ -450,7 +450,11 @@ export const orders = pgTable(
     // through to the default — handlers always supply a value —
     // but the schema/migration parity matters for migration drift.
     chargeMinor: bigint('charge_minor', { mode: 'bigint' }).notNull().default(0n),
-    chargeCurrency: char('charge_currency', { length: 3 }).notNull(),
+    // Same A4-030 treatment as `chargeMinor` above: the 0007 migration
+    // declares `DEFAULT 'USD'` (so pre-existing rows backfill on ADD
+    // COLUMN); mirror it here so schema.ts ↔ migration parity holds
+    // (`check:migration-parity`). Handlers always supply a value.
+    chargeCurrency: char('charge_currency', { length: 3 }).notNull().default('USD'),
 
     // Payment source:
     //   - 'xlm'    → Stellar XLM to a Loop deposit address, `payment_memo` set
@@ -949,7 +953,12 @@ export const userFavoriteMerchants = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.userId, t.merchantId], name: 'user_favorite_merchants_pkey' }),
-    index('user_favorite_merchants_user_created').on(t.userId, t.createdAt),
+    // `.desc().nullsFirst()` mirrors the migration's `created_at DESC`
+    // exactly (Postgres DESC defaults to NULLS FIRST; drizzle's bare
+    // `.desc()` would emit NULLS LAST). The index serves newest-first
+    // favourites pagination; schema.ts ↔ migration parity is enforced
+    // by `check:migration-parity`.
+    index('user_favorite_merchants_user_created').on(t.userId, t.createdAt.desc().nullsFirst()),
     check('user_favorite_merchants_merchant_id_nonempty', sql`length(${t.merchantId}) >= 1`),
   ],
 );

@@ -127,10 +127,6 @@ export function registerAdminWithdrawalWriteOpenApi(
         description: 'Missing or invalid bearer',
         content: { 'application/json': { schema: errorResponse } },
       },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
       404: {
         description: 'Target user not found (`NOT_FOUND`)',
         content: { 'application/json': { schema: errorResponse } },

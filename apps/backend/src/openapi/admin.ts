@@ -209,6 +209,11 @@ export function registerAdminOpenApi(
         description: 'Wrong OTP, expired, or wrong auth kind (Loop-native required)',
         content: { 'application/json': { schema: errorResponse } },
       },
+      404: {
+        description:
+          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
+        content: { 'application/json': { schema: errorResponse } },
+      },
       429: {
         description: 'Rate limit exceeded (30/min per IP)',
         content: { 'application/json': { schema: errorResponse } },
