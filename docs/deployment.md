@@ -319,6 +319,39 @@ See `apps/web/fly.toml`:
 - Health check: `GET /` every 15s, 30s grace period (PR #150)
 - Force HTTPS
 
+### Environment variables — build-time only (A4-072 gotcha)
+
+The web app has **no runtime env**: Vite freezes every
+`import.meta.env.VITE_*` value into the bundle when the static assets
+are emitted. Anything the bundle reads must be supplied as a **docker
+build arg**, not a Fly runtime secret:
+
+- `VITE_API_URL` — defaults to `https://api.loopfinance.io` in
+  `apps/web/fly.toml` `[build.args]`.
+- `VITE_SENTRY_DSN` / `VITE_SENTRY_RELEASE` / `VITE_LOOP_ENV` —
+  default **empty**, which means **Sentry silently stays off**: the
+  `Sentry.init` call at `root.tsx` is gated on `VITE_SENTRY_DSN`, so a
+  deploy that forgets the build arg produces a working bundle whose
+  frontend errors are invisible to ops. Production deploys MUST pass
+  them, either via `fly secrets set VITE_SENTRY_DSN=…` (Fly overlays
+  secrets onto build args) or explicitly:
+
+  ```bash
+  fly deploy --config apps/web/fly.toml --dockerfile apps/web/Dockerfile \
+    --build-arg VITE_SENTRY_DSN=https://...@sentry.io/... \
+    --build-arg VITE_SENTRY_RELEASE=$(git rev-parse HEAD) \
+    --build-arg VITE_LOOP_ENV=production
+  ```
+
+  Setting a runtime secret on the running app does nothing — the
+  value has to be present **at image build time**.
+
+Note this Fly app serves the **SSR** build (`npm run build` →
+`ssr: true`) only. The `BUILD_TARGET=mobile` static export
+(`npm run build:mobile`) is never deployed to Fly — it is bundled into
+the Capacitor binary (§Mobile below) and has no server-side loaders at
+all (`docs/architecture.md` §Web build modes).
+
 ### Subsequent deploys
 
 ```bash

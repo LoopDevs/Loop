@@ -107,6 +107,18 @@ The payout worker still emits LOOP-asset (post-ADR 031 reduction: just GBPLOOP) 
 
 These are 1–3 hours each to resolve and gate moving from Proposed → Accepted on this ADR.
 
+## Gate for Accepted
+
+This ADR stays **Proposed** — and no implementation work (RS256 migration, Privy SDK wiring, webhook handler, UI collapse) starts — until every blocking condition below has a **recorded** answer. Flipping the status line is the deliverable of the DD cycle:
+
+1. **Privy Soroban custody DD** (Open questions 1–2; shared critical-path blocker with ADR 031). Written confirmation via a Privy dev account that Privy can (a) custody Soroban tokens — the LOOPUSD/LOOPEUR DeFindex vault shares ADR 031 puts in user wallets, (b) display their balances, and (c) policy-gate programmatic signing of the specific `vault.deposit` / `vault.redeem` contract calls without per-tx user prompts. A "no" on any of these does **not** unblock Accepted — it triggers the documented dfns fallback (~1–2 weeks migration cost) and a re-run of this gate against dfns.
+2. **Key-export path verified** (Open question 2). Privy supports `S...`-format Ed25519 secret export to standard wallets (Lobstr, Freighter). Determines lock-in severity; must be known before contracts are signed.
+3. **ToS jurisdictional coverage confirmed** (Open question 3). Privy's terms cover US / EU / UK / CA — the full T1 acceptance scope.
+4. **Account-merge semantics confirmed** (Open question 4). Loop's identity de-dup keeps `users.id` stable across email change so Privy keeps the same wallet.
+5. **Counsel sign-off scheduled** (bundled with ADR 031 Open question 7). The custody-framing review (UK FCA / EU MiCA / US state-by-state) is engaged — 4–6 weeks of crypto-fintech counsel; Accepted requires the engagement to be booked, mainnet (Tranche 3) requires it complete.
+
+As of 2026-06-11 none of these has a recorded answer — the DD call is unscheduled. That, not engineering capacity, is what is holding this ADR (and the Tranche-2 dependency chain behind it) at Proposed.
+
 ## File map
 
 | Change                      | File                                                                                                  |

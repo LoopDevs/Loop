@@ -1,6 +1,6 @@
 # ADR-028 — Admin step-up authentication for destructive actions
 
-**Status:** Accepted (Phase-1 backend implemented 2026-05-04 / A4-063; web modal pending)
+**Status:** Accepted (Phase-1 implemented 2026-05-04 / A4-063 — backend gate + web modal both shipped; Phase-2 expansions pending)
 **Date:** 2026-04-26
 **Audit ref:** A2-1609 (pin), A4-063 (implementation)
 **Supersedes:** none
@@ -25,9 +25,26 @@
   Tranche 1 may deliberately launch with those admin surfaces dark) and in
   the `docs/deployment.md` env table. Generate with `openssl rand -base64 48`;
   rotate via `LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS` over the 5-minute TTL.
-- **Pending**: web modal (`StepUpModal` component + `useStepUpToken` hook). The
-  backend endpoints will return `STEP_UP_REQUIRED` when the modal isn't wired
-  yet, so the operator can ship the backend independently of the UI.
+- **2026-05-04** Web modal landed (#1319): `StepUpModal.tsx`
+  (`apps/web/app/components/features/admin/`), `use-admin-step-up.ts` hook,
+  `admin-step-up.store.ts` Zustand store, `services/admin-step-up.ts`, with
+  auto-prompt on 401 `STEP_UP_REQUIRED`. Tested. Both halves of the Phase-1
+  slice are shipped.
+
+### Activation gate / deploy ordering
+
+The gate **fails closed** end-to-end, which fixes the safe rollout order:
+
+- **Backend-before-web is safe.** A backend with the gate wired but a web
+  bundle without the modal returns 401 `STEP_UP_REQUIRED` on destructive ops —
+  the action is blocked (visible error), never silently allowed.
+- **Web-without-backend fails destructive ops.** A web bundle with the modal
+  pointed at a backend missing `POST /api/admin/step-up`, or one deployed
+  without `LOOP_ADMIN_STEP_UP_SIGNING_KEY` set, cannot complete credit-adjust /
+  withdrawal / payout-retry: the middleware returns 503 `STEP_UP_UNAVAILABLE`
+  when the key is unset (`admin-step-up-middleware.ts` — "surface ships
+  disabled if the operator hasn't generated the key"). Deploy the backend (with
+  the key in Fly secrets) before or together with the web bundle.
 
 ## Context
 
@@ -77,7 +94,7 @@ POST /api/admin/credits/adjust
 
 ### Storage
 
-Step-up tokens are **stateless** — verified by HS256 signature against `LOOP_STEP_UP_SIGNING_KEY` (separate from `LOOP_JWT_SIGNING_KEY` so a JWT-key compromise doesn't widen to step-up). No DB row per issued token; the 5-minute TTL is enforced by the `exp` claim. A keepalive endpoint is **not** offered — admins re-auth on expiry, not extend.
+Step-up tokens are **stateless** — verified by HS256 signature against `LOOP_ADMIN_STEP_UP_SIGNING_KEY` (separate from `LOOP_JWT_SIGNING_KEY` so a JWT-key compromise doesn't widen to step-up; matches `apps/backend/src/env.ts`, with `LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS` accepted during rotation windows). No DB row per issued token; the 5-minute TTL is enforced by the `exp` claim. A keepalive endpoint is **not** offered — admins re-auth on expiry, not extend.
 
 ### Web flow
 

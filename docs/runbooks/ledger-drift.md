@@ -82,5 +82,6 @@ user_credits.balance_minor`, per (user, currency).
 - `apps/backend/src/credits/ledger-invariant.ts` — single source of
   truth for the drift computation; both the API endpoint and the
   CLI smoke read from this module (audit A2-1519).
-- `scripts/check-ledger-invariant.ts` — the CLI invocation the
-  post-deploy smoke runs.
+- `apps/backend/src/scripts/check-ledger-invariant.ts` — the CLI the
+  post-deploy smoke runs; invoke via
+  `npm run -w @loop/backend check:ledger`.

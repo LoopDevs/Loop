@@ -1043,16 +1043,28 @@ jobs:
   pins the currently accepted moderate set exactly; a new moderate, or a
   removed one that leaves stale policy behind, fails CI until the policy
   is reviewed and updated.
-- Current accepted moderates:
+- Current accepted moderates (the authoritative set, with full
+  rationale per entry, is `ACCEPTED_MODERATE_VULNS` in
+  `scripts/check-audit-policy.mjs` — keep this list in sync with it):
   - `@esbuild-kit/core-utils`
   - `@esbuild-kit/esm-loader`
   - `drizzle-kit`
   - `esbuild`
-  - `postcss`
-- The `drizzle-kit` / `@esbuild-kit/*` cluster remains accepted only
-  because the available fix path is a major-version move that needs a
-  deliberate migration. `postcss` remains accepted until the transitive
-  bump lands. Neither is a blanket waiver for future moderate findings.
+  - `hono`
+- The `drizzle-kit` / `@esbuild-kit/*` / `esbuild` cluster remains
+  accepted only because the available fix path is a major-version move
+  that needs a deliberate migration. `hono` covers three moderate
+  advisories on `hono <= 4.12.17`, none of which reach an exploitable
+  code path in Loop: (a) JSX-SSR CSS injection — Loop's SSR is React
+  Router v7, not Hono JSX; (b) Hono JWT `verify()` NumericDate-claim
+  gap — Loop uses its own verifier (`apps/backend/src/auth/tokens.ts`)
+  with explicit `iat`/`exp`/`iss`/`aud` checks and never imports Hono
+  JWT; (c) Cache-Middleware `Vary` gap — Loop doesn't mount Hono Cache
+  Middleware. The fix needs `hono@4.12.18+`, outside the
+  `@hono/zod-openapi` peer-dep range — revisit when that constraint
+  relaxes. (`postcss` was previously listed; its transitive bump landed
+  and the gate would now flag it as stale policy.) None of this is a
+  blanket waiver for future moderate findings.
 
 ### Branch protection on `main`
 

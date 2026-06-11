@@ -31,7 +31,8 @@ don't, trace via:
    timestamps, staleness booleans, and whether the broad upstream probe
    is reachable. It does **not** expose per-breaker state or worker
    enablement flags; use Fly logs / env for those.
-3. **`/admin/audit-tail`.** If admin writes are misbehaving, the
+3. **`/admin/audit`** (admin UI; CSV export at
+   `/api/admin/audit-tail.csv`). If admin writes are misbehaving, the
    per-action ledger is the fastest read.
 
 ## Mitigation

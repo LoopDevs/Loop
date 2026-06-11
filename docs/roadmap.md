@@ -18,6 +18,23 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 
 ---
 
+## Audit remediation (in flight)
+
+The 2026-06-11 comprehensive audit ([`docs/comprehensive-audit-2026-06-11.md`](./comprehensive-audit-2026-06-11.md)) is the live findings register; its **Part IV** is the sequenced remediation plan currently in execution. Roadmap items below defer to Part IV's sequencing where they overlap (notably the ADR 035 order-path work and the redemption-null backfill).
+
+## Orphaned-work register (2026-06-11)
+
+Items flagged in past sessions or audits that previously had **no home in any forward-looking document**. Each stays here until it is either scheduled (move into a phase/tranche checklist with an owner) or explicitly declined (record the decision, dated).
+
+- [ ] **Redemption-null backfill** — pre-public-order-traffic blocker, flagged 2026-05-14: the validated e2e order fulfilled but `redeemUrl/Code/Pin` came back false (CTX-side delay or `fetchRedemption` swallowing an error), plus the related `Body has already been read` polling-fallback bug. Comprehensive audit P1 #10. Must be resolved (and added to the Tranche-1 acceptance checks) before public order traffic.
+- [ ] **`loopfinance-web` first deploy + DNS** — listed in three checklists (this roadmap, `tranche-1-launch.md` Track 2, `phase-1-while-apple-approves.md` B.1); no document records whether it ever happened. Verify, record the outcome, and tick or schedule.
+- [ ] **Android keystore escrow** — losing the upload keystore means losing Play Store package identity permanently. Both launch runbooks say "back it up to 1Password", but the operator does not use 1Password. Document an escrow/offline-backup procedure that doesn't assume it, before keystore generation.
+- [ ] **GeoLite2 refresh cadence** — the `.mmdb` refreshes only on deploys that remember the MaxMind build secrets, and the download is best-effort (a build without the secrets silently falls back to the US default — a quiet degradation of the ADR 034 geo-redirect). Define a refresh cadence and/or a staleness signal (`docs/deployment.md` §GeoLite2).
+- [ ] **Thin-currency promotion process** — ADR 035 leaves ~20 catalogue-only currencies below the ≥15-merchant threshold "revisited as the catalogue grows", with no review cadence or owner. Define the cadence (e.g. quarterly with the supplier-catalogue sweep); promoting one is a one-line `countries.ts` addition.
+- [ ] **ADR 027 trigger review — decision needed** — binary-tamper detection's Phase-2 trigger is "distribution path moves outside the official stores". That trigger is **already met**: the Phase-1 deliverable explicitly includes APK sideload via direct link / Drive / Diawi (`tranche-1-launch.md`). Decide: implement tamper detection for the sideload build, or record a dated acceptance of the deferral in ADR 027. The other three deferred controls (SSL pinning, App Attest / Play Integrity, jailbreak-root) keep their original triggers — re-check them on the same review.
+
+---
+
 ## Phase 1 — Gift card purchases (XLM)
 
 ### Remaining setup tasks
@@ -31,12 +48,13 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 
 ### Production infrastructure
 
-- [ ] Deploy backend to Fly.io (see `docs/deployment.md`)
-- [ ] Deploy web (SSR) to Fly.io or Vercel
+- [x] ~~Deploy backend to Fly.io~~ — deployed and validated end-to-end on 2026-05-14: the `e2e-real` workflow drove an Aerie $0.02 XLM order `pending_payment → paid → procuring → fulfilled` against the deployed `api.loopfinance.io` (see `docs/deployment.md`)
+- [ ] Deploy web (SSR) to Fly.io — `loopfinance-web` first-deploy **status unrecorded** (appears in three checklists, none with an outcome); verify with `flyctl status -a loopfinance-web` and record the result here. Tracked in §Orphaned-work register below.
 - [x] ~~Set `IMAGE_PROXY_ALLOWED_HOSTS` in production backend~~ — now enforced at boot (audit A-025); `apps/backend/fly.toml` ships with the CTX hostnames baked in.
 - [ ] Set up monitoring / error tracking — **code side wired**: backend uses `sentry()` middleware gated on `env.SENTRY_DSN` (`app.ts`); web calls `Sentry.init` on the client gated on `VITE_SENTRY_DSN` (`root.tsx`, with `browserTracingIntegration`, `tracesSampleRate: 0.1` in prod). **Operator side remaining**: set `SENTRY_DSN` in Fly secrets + `VITE_SENTRY_DSN` in the web build args.
 - [x] ~~Configure production CORS allowlist~~ — already set in `apps/backend/src/app.ts` (`PRODUCTION_ORIGINS` includes `loopfinance.io`, `www.loopfinance.io`, and the Capacitor native origins `capacitor://localhost` / `https://localhost` / `http://localhost`; dev allows `*`).
-- [ ] DNS: point `loopfinance.io` → web deployment, `api.loopfinance.io` → backend deployment
+- [x] ~~DNS: `api.loopfinance.io` → backend deployment~~ — live and serving since the 2026-05-14 validation
+- [ ] DNS: point `loopfinance.io` / `www.loopfinance.io` → web deployment (blocked on the `loopfinance-web` first deploy above; apex/www stay parked on GitHub Pages until public launch)
 - [ ] TLS certificates (automatic via Fly.io / Vercel)
 
 ### Code hardening (before connecting to real upstream)
@@ -72,6 +90,15 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 - [x] ~~Integrate assets into web app (`apps/web/public/`)~~ — core assets referenced from every surface above.
 - [ ] Configure splash screen assets for iOS and Android
 - [ ] App icon for iOS (1024x1024) and Android (512x512)
+
+### Web localisation & market coverage (shipped 2026-06)
+
+The June 2026 web workstream — previously untracked here — shipped:
+
+- [x] ~~Merchant variant grouping~~ — ADR 032: client-side brand grouping via `@loop/shared` name parsing (1,134 tiles → 982 groups).
+- [x] ~~IP-geolocation region first-guess~~ — ADR 033: MaxMind GeoLite2 + `/api/public/geo` (superseded as the routing model by ADR 034; still feeds the `/` geo-redirect).
+- [x] ~~Path-based locale routing~~ — ADR 034, phases 1–5 shipped across PRs #1401–#1406: `/:country/:lang` URLs, SSR geo 302 at `/`, per-country SEO (self-canonicals + reciprocal hreflang sitemap), locale-routed public links, region-store retirement.
+- [x] ~~Extended supplier-currency display markets~~ — ADR 035, merged in PR #1408: AE/IN/SA/AU/MX surfaced as display-only countries (≥15-merchant threshold). **Follow-up open**: order-path support for extended-market currencies (currency CHECKs + loop-handler) is tracked in `docs/comprehensive-audit-2026-06-11.md` Part IV, Phase 3; ~20 thinner catalogue-only currencies await the promotion process in §Orphaned-work register below.
 
 ### Mobile app submission
 

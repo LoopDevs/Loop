@@ -86,6 +86,41 @@ old key remains accepted is a minute of attacker validity.
 5. File a security incident note (channel TBD; the SECURITY.md
    reporting flow is the start).
 
+### Admin step-up signing key (`LOOP_ADMIN_STEP_UP_SIGNING_KEY`)
+
+ADR-028's step-up tokens are signed with a **separate** key,
+`LOOP_ADMIN_STEP_UP_SIGNING_KEY` (deliberately not `LOOP_JWT_SIGNING_KEY`,
+so a JWT-key compromise doesn't widen to the destructive-admin gate).
+Rotate it on the same quarterly cadence, in the same session as the
+JWT key. The same staged pattern applies — verification accepts either
+`LOOP_ADMIN_STEP_UP_SIGNING_KEY` or `LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS`
+(`apps/backend/src/auth/admin-step-up.ts`) — but the overlap window is
+much shorter because step-up tokens live only 5 minutes:
+
+1. Generate a new 32+ char key (`openssl rand -base64 32`).
+2. Move the current key into the PREVIOUS slot, then set the new
+   primary:
+   ```bash
+   fly secrets set LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS=<old-key> -a loopfinance-api
+   fly secrets set LOOP_ADMIN_STEP_UP_SIGNING_KEY=<new-key> -a loopfinance-api
+   ```
+3. After the deploy rolls out, wait **10 minutes** (2× the 5-minute
+   step-up TTL — generous), then unset the PREVIOUS slot:
+   ```bash
+   fly secrets unset LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS -a loopfinance-api
+   ```
+4. Update the password manager entry.
+
+**Emergency variant**: set the new key and skip the PREVIOUS slot
+entirely. Worst case, an admin mid-action re-confirms their password
+5 minutes early — there are no long-lived step-up sessions to
+preserve, so the emergency path is essentially free.
+
+Note: if `LOOP_ADMIN_STEP_UP_SIGNING_KEY` is ever **unset** (rather
+than rotated), the credit-adjust / withdrawal / payout-retry surfaces
+fail closed with 503 `STEP_UP_UNAVAILABLE` until it is restored
+(ADR-028 §Activation gate).
+
 ## Resolution
 
 Staged: tokens flow through both keys for ~30 days, then the old key
@@ -104,6 +139,8 @@ of integrity isn't.
 
 - ADR 013 (Loop-owned auth) — JWT minting + the dual-key verification
   contract.
+- ADR 028 (admin step-up auth) — the step-up signing key rotated in
+  the section above.
 - `docs/deployment.md` env table for `LOOP_JWT_SIGNING_KEY` /
   `LOOP_JWT_SIGNING_KEY_PREVIOUS`.
 - `apps/backend/src/auth/tokens.ts` — verification accepts either key.
