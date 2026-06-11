@@ -66,6 +66,11 @@ export function registerAdminPayoutsAggregatesOpenApi(
         description: 'Per-(month, assetCode) confirmed-payout totals',
         content: { 'application/json': { schema: AdminPayoutsMonthlyResponse } },
       },
+      404: {
+        description:
+          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
+        content: { 'application/json': { schema: errorResponse } },
+      },
       429: {
         description: 'Rate limit exceeded (60/min per IP)',
         content: { 'application/json': { schema: errorResponse } },
@@ -118,6 +123,11 @@ export function registerAdminPayoutsAggregatesOpenApi(
       200: {
         description: 'Daily confirmed-payout series',
         content: { 'application/json': { schema: PayoutsActivityResponse } },
+      },
+      404: {
+        description:
+          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
+        content: { 'application/json': { schema: errorResponse } },
       },
       429: {
         description: 'Rate limit exceeded (60/min per IP)',

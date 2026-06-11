@@ -48,6 +48,11 @@ export function registerAdminCsvExportsCashbackOpenApi(
         description: 'CSV body',
         content: { 'text/csv; charset=utf-8': { schema: z.string() } },
       },
+      404: {
+        description:
+          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
+        content: { 'application/json': { schema: errorResponse } },
+      },
       429: {
         description: 'Rate limit exceeded (10/min per IP)',
         content: { 'application/json': { schema: errorResponse } },
@@ -73,6 +78,11 @@ export function registerAdminCsvExportsCashbackOpenApi(
       200: {
         description: 'CSV body',
         content: { 'text/csv; charset=utf-8': { schema: z.string() } },
+      },
+      404: {
+        description:
+          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
+        content: { 'application/json': { schema: errorResponse } },
       },
       429: {
         description: 'Rate limit exceeded (10/min per IP)',

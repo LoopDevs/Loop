@@ -350,9 +350,23 @@ npm run audit            # explicit audit policy gate: fail on any high/critical
 npm run build            # production build across all workspaces
 npm run proto:generate   # buf generate → packages/shared/src/proto/
 npm run verify           # typecheck + lint + format:check + lint:docs +
-                         # shared-type-parity (ADR 019 drift detector) + env-perms +
-                         # test + audit — the one-command gate; mirrors the CI
-                         # quality + unit-test jobs
+                         # shared-type-parity (ADR 019 drift detector) +
+                         # openapi-parity + env-perms + test + audit — the
+                         # one-command gate; mirrors the CI quality +
+                         # unit-test jobs
+npm run check:bundle-budget    # web SSR bundle size gate (A2-1711); run after
+                               # `npm run build -w @loop/web`. CI runs it in the
+                               # build job right after the SSR build.
+npm run check:openapi-parity   # static route-mount ↔ openapi registration parity
+                               # (missing registrations / missing 429s / 403-vs-404
+                               # on /api/admin). Allowlist for deferred violations:
+                               # scripts/openapi-parity-allowlist.json (empty today).
+npm run check:migration-parity # replays migrations 0000→latest into a scratch DB
+                               # and diffs the catalog against schema.ts (drizzle-kit
+                               # materialisation). Needs a disposable postgres via
+                               # DATABASE_URL (defaults to the docker-compose dev DB
+                               # on :5433); CI runs it in flywheel-integration.
+                               # Allowlist: scripts/migration-parity-allowlist.json.
 ```
 
 ### apps/web

@@ -90,10 +90,6 @@ export function registerAdminUserWritesOpenApi(
         description: 'Missing or invalid bearer / missing or invalid step-up token',
         content: { 'application/json': { schema: errorResponse } },
       },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
       404: {
         description: 'Target user does not exist (`USER_NOT_FOUND`)',
         content: { 'application/json': { schema: errorResponse } },

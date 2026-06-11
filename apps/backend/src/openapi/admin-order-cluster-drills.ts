@@ -100,10 +100,6 @@ export function registerAdminOrderClusterDrillsOpenApi(
         description: 'Missing or invalid bearer',
         content: { 'application/json': { schema: errorResponse } },
       },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
       404: {
         description: 'Order not found',
         content: { 'application/json': { schema: errorResponse } },
@@ -141,10 +137,6 @@ export function registerAdminOrderClusterDrillsOpenApi(
       },
       401: {
         description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
         content: { 'application/json': { schema: errorResponse } },
       },
       404: {

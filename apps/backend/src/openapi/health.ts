@@ -1,10 +1,11 @@
 /**
  * Health / config section of the OpenAPI spec — schemas + path
- * registrations for the three meta endpoints the platform exposes
+ * registrations for the meta endpoints the platform exposes
  * outside of the user / admin surfaces:
  *
  * - `GET /health` — liveness + upstream reachability probe
  * - `GET /metrics` — Prometheus text-format counters / gauges
+ * - `GET /openapi.json` — this spec itself (probe-gated)
  * - `GET /api/config` — public client config (feature flags +
  *   social IDs + LOOP-asset availability)
  *
@@ -14,25 +15,21 @@
  *
  * Shared dependencies passed in:
  * - `errorResponse` — registered ErrorResponse from openapi.ts
- *   shared components. Currently unused by the three endpoints
- *   themselves (they only document a 200 response) but accepted
- *   for parity with the other slices and for headroom on future
- *   error-path entries (e.g. a 503 for the metrics scraper if
- *   liveness ever becomes degraded-aware).
- *
- * Generated spec is byte-identical to before this slice.
+ *   shared components. Used by the 429 on /api/config, the 503 on
+ *   /health (critical degradation — A4-035 / A4-073), and the
+ *   probe-gate rejection codes (401/404) on /openapi.json.
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 
 /**
- * Registers the three meta endpoints + their associated
- * schemas on the supplied registry. Called once from openapi.ts
- * during module init.
+ * Registers the meta endpoints + their associated schemas on the
+ * supplied registry. Called once from openapi.ts during module
+ * init.
  */
 export function registerHealthOpenApi(
   registry: OpenAPIRegistry,
-  _errorResponse: ReturnType<OpenAPIRegistry['register']>,
+  errorResponse: ReturnType<OpenAPIRegistry['register']>,
 ): void {
   // ─── Public config (ADR 013 / 014 / 015) ────────────────────────────────────
 
@@ -84,6 +81,10 @@ export function registerHealthOpenApi(
       200: {
         description: 'App config',
         content: { 'application/json': { schema: AppConfigResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (120/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
       },
     },
   });
@@ -140,7 +141,15 @@ export function registerHealthOpenApi(
     summary: 'Liveness + upstream reachability probe.',
     tags: ['Meta'],
     responses: {
-      200: { description: 'OK', content: { 'application/json': { schema: HealthResponse } } },
+      200: {
+        description: 'OK (including soft degradation — stale caches, upstream unreachable)',
+        content: { 'application/json': { schema: HealthResponse } },
+      },
+      503: {
+        description:
+          'Critical degradation — DB unreachable or a required worker is down (A4-035 / A4-073). Body is the same HealthResponse shape with status: degraded; orchestrators (Fly) cycle the machine on this.',
+        content: { 'application/json': { schema: HealthResponse } },
+      },
     },
   });
 
@@ -153,6 +162,35 @@ export function registerHealthOpenApi(
       200: {
         description: 'Prometheus text format',
         content: { 'text/plain; version=0.0.4': { schema: z.string() } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/openapi.json',
+    summary: 'This OpenAPI 3.1 document.',
+    description:
+      'Probe-gated (closed-by-default in production): without OPENAPI_BEARER_TOKEN configured the endpoint masks itself as 404; with it configured, requests must present the bearer or receive 401. Responses carry `Cache-Control: private, no-store` + `Vary: Authorization`.',
+    tags: ['Meta'],
+    responses: {
+      200: {
+        description: 'The OpenAPI 3.1 spec document',
+        content: {
+          'application/json': {
+            schema: z
+              .record(z.string(), z.unknown())
+              .openapi({ description: 'OpenAPI 3.1 document.' }),
+          },
+        },
+      },
+      401: {
+        description: 'OPENAPI_BEARER_TOKEN is configured and the request bearer is missing/wrong',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      404: {
+        description: 'Probe gate closed (production without OPENAPI_BEARER_TOKEN configured)',
+        content: { 'application/json': { schema: errorResponse } },
       },
     },
   });

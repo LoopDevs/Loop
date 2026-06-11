@@ -77,10 +77,6 @@ export function registerAdminPayoutsClusterWritesOpenApi(
         description: 'Missing or invalid bearer',
         content: { 'application/json': { schema: errorResponse } },
       },
-      403: {
-        description: 'Not an admin',
-        content: { 'application/json': { schema: errorResponse } },
-      },
       404: {
         description: 'Payout not found or not in failed state',
         content: { 'application/json': { schema: errorResponse } },
@@ -158,10 +154,6 @@ export function registerAdminPayoutsClusterWritesOpenApi(
       },
       401: {
         description: 'Missing or invalid bearer',
-        content: { 'application/json': { schema: errorResponse } },
-      },
-      403: {
-        description: 'Not an admin',
         content: { 'application/json': { schema: errorResponse } },
       },
       404: {

@@ -78,6 +78,11 @@ export function registerAdminPerMerchantTimeAxisOpenApi(
         description: 'Malformed merchantId',
         content: { 'application/json': { schema: errorResponse } },
       },
+      404: {
+        description:
+          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
+        content: { 'application/json': { schema: errorResponse } },
+      },
       429: {
         description: 'Rate limit exceeded (120/min per IP)',
         content: { 'application/json': { schema: errorResponse } },
@@ -133,6 +138,11 @@ export function registerAdminPerMerchantTimeAxisOpenApi(
       },
       400: {
         description: 'Malformed merchantId',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      404: {
+        description:
+          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {

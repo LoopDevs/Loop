@@ -74,6 +74,11 @@ export function registerAdminCsvExportsOpenApi(
         description: 'CSV body',
         content: { 'text/csv; charset=utf-8': { schema: z.string() } },
       },
+      404: {
+        description:
+          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
+        content: { 'application/json': { schema: errorResponse } },
+      },
       429: {
         description: 'Rate limit exceeded (10/min per IP)',
         content: { 'application/json': { schema: errorResponse } },
@@ -105,6 +110,11 @@ export function registerAdminCsvExportsOpenApi(
         description: 'Malformed merchantId',
         content: { 'application/json': { schema: errorResponse } },
       },
+      404: {
+        description:
+          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
+        content: { 'application/json': { schema: errorResponse } },
+      },
       429: {
         description: 'Rate limit exceeded (10/min per IP)',
         content: { 'application/json': { schema: errorResponse } },
@@ -125,6 +135,11 @@ export function registerAdminCsvExportsOpenApi(
       200: {
         description: 'CSV body',
         content: { 'text/csv; charset=utf-8': { schema: z.string() } },
+      },
+      404: {
+        description:
+          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
+        content: { 'application/json': { schema: errorResponse } },
       },
       429: {
         description: 'Rate limit exceeded (10/min per IP)',
@@ -155,6 +170,11 @@ export function registerAdminCsvExportsOpenApi(
       },
       400: {
         description: 'Unknown `currency`',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      404: {
+        description:
+          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {
@@ -193,6 +213,11 @@ export function registerAdminCsvExportsOpenApi(
       },
       400: {
         description: 'Invalid or out-of-window `since`',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      404: {
+        description:
+          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {

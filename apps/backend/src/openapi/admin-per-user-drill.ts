@@ -186,6 +186,11 @@ export function registerAdminPerUserDrillOpenApi(
         description: 'Malformed userId or invalid ?state',
         content: { 'application/json': { schema: errorResponse } },
       },
+      404: {
+        description:
+          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
+        content: { 'application/json': { schema: errorResponse } },
+      },
       429: {
         description: 'Rate limit exceeded (120/min per IP)',
         content: { 'application/json': { schema: errorResponse } },

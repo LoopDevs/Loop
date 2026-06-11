@@ -63,8 +63,9 @@ export function registerAdminRecyclingActivityOpenApi(
         description: 'Missing or invalid bearer',
         content: { 'application/json': { schema: errorResponse } },
       },
-      403: {
-        description: 'Not an admin',
+      404: {
+        description:
+          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {
@@ -124,8 +125,9 @@ export function registerAdminRecyclingActivityOpenApi(
         description: 'Missing or invalid bearer',
         content: { 'application/json': { schema: errorResponse } },
       },
-      403: {
-        description: 'Not an admin',
+      404: {
+        description:
+          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {
