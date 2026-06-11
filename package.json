@@ -51,7 +51,7 @@
   "devDependencies": {
     "@anthropic-ai/claude-code": "2.1.126",
     "@commitlint/cli": "20.5.3",
-    "@commitlint/config-conventional": "20.5.3",
+    "@commitlint/config-conventional": "21.0.0",
     "@cyclonedx/cyclonedx-npm": "4.2.1",
     "@playwright/test": "1.59.1",
     "@sentry/cli": "3.4.1",
