@@ -2,7 +2,7 @@
  * A2-1165 (slice 16): the ADR 017 admin-write response envelope
  * primitives extracted from `services/admin.ts`. Every admin
  * mutation (`upsertCashbackConfig`, `retryPayout`,
- * `applyCreditAdjustment`, `applyAdminWithdrawal`, `resyncMerchants`,
+ * `applyCreditAdjustment`, `applyAdminEmission`, `resyncMerchants`,
  * etc.) returns `{ result, audit }` — pulling these two types out
  * lets each writer surface live in its own slice without a
  * circular import back into admin.ts.
@@ -42,7 +42,7 @@ export interface AdminWriteEnvelope<T> {
  * Generates a per-click idempotency key for ADR-017 admin writes.
  *
  * Used by every admin writer (`upsertCashbackConfig`,
- * `applyCreditAdjustment`, `applyAdminWithdrawal`, `retryPayout`,
+ * `applyCreditAdjustment`, `applyAdminEmission`, `retryPayout`,
  * `resyncMerchants`) so a double-click on a write button can't
  * apply the mutation twice — the backend looks for a prior snapshot
  * keyed by `Idempotency-Key` and returns the stored response

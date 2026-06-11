@@ -259,7 +259,7 @@ export const EnvSchema = z.object({
   // LOOP_JWT_SIGNING_KEY so a JWT-key compromise doesn't widen to
   // step-up — an attacker who exfiltrates LOOP_JWT_SIGNING_KEY can
   // still mint access tokens but cannot mint step-up tokens, so the
-  // ADR-028 gate (X-Admin-Step-Up on credit-adjust / withdrawals /
+  // ADR-028 gate (X-Admin-Step-Up on credit-adjust / emissions /
   // payout-retry) holds even under partial key compromise.
   //
   // Optional in `env.ts` so the surface ships without breaking
@@ -557,7 +557,10 @@ export const EnvSchema = z.object({
   LOOP_KILL_ORDERS_LEGACY: envBoolean.optional(),
   LOOP_KILL_ORDERS_LOOP: envBoolean.optional(),
   LOOP_KILL_AUTH: envBoolean.default(false),
-  LOOP_KILL_WITHDRAWALS: envBoolean.default(false),
+  // Pre-ADR-036 name: LOOP_KILL_WITHDRAWALS (renamed with the
+  // withdrawal→emission re-scope; gates admin emissions + the
+  // payout-compensation endpoint).
+  LOOP_KILL_EMISSIONS: envBoolean.default(false),
 
   // Worker tick intervals (seconds). Defaults tuned for a moderate
   // order volume: watcher every 10s to keep deposit latency low;

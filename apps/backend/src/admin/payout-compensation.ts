@@ -2,10 +2,12 @@
  * Admin payout-compensation endpoint (ADR-024 §5).
  *
  * `POST /api/admin/payouts/:id/compensate` — re-credits the user's
- * cashback balance after their queued withdrawal payout permanently
- * failed on-chain. Net result: the original `applyAdminWithdrawal`
+ * cashback balance after a LEGACY pre-ADR-036 withdrawal payout
+ * permanently failed on-chain. Net result: the original at-send
  * debit is offset by a positive `type='adjustment'` row, leaving the
  * user's balance where it was before the doomed withdrawal attempt.
+ * Post-ADR-036 emissions never debit the mirror and are NOT
+ * compensable — the primitive refuses rows without the legacy debit.
  *
  * Manual-only by design (Phase 2a). The on-chain payout worker keeps
  * `state='failed'` rows around so finance can review before triggering
@@ -14,8 +16,10 @@
  *
  * Preconditions enforced here:
  *   - The payout exists.
- *   - `kind='withdrawal'` — order-cashback failures are a separate
- *     code path that doesn't run through this endpoint.
+ *   - `kind='emission'` with the legacy at-send debit row — order-
+ *     cashback and burn failures are separate code paths that don't
+ *     run through this endpoint, and post-ADR-036 emissions have
+ *     nothing to compensate (enforced in the primitive).
  *   - `state='failed'` — pending / submitted / confirmed payouts must
  *     not be compensated; that would double-credit a user whose
  *     payout is still in flight or has already settled.
@@ -109,7 +113,7 @@ export async function adminPayoutCompensationHandler(c: Context): Promise<Respon
 
   // A4-099: serialise lookup → write → store under an advisory
   // lock keyed on (actor, idempotencyKey). Pre-checks (payout
-  // exists / kind=withdrawal / state=failed / assetCode known)
+  // exists / kind=emission / state=failed / assetCode known)
   // run inside the guard so the lock covers the full sequence.
   let guardResult;
   try {
@@ -128,13 +132,13 @@ export async function adminPayoutCompensationHandler(c: Context): Promise<Respon
             body: { code: 'NOT_FOUND', message: 'Payout not found' },
           };
         }
-        if (payout.kind !== 'withdrawal') {
+        if (payout.kind !== 'emission') {
           return {
             status: 400,
             body: {
               code: 'PAYOUT_NOT_COMPENSABLE',
               message:
-                'Compensation only applies to withdrawal payouts; order-cashback failures use a different flow',
+                'Compensation only applies to legacy debited emission (withdrawal-era) payouts; order-cashback and burn failures use different flows',
             },
           };
         }
@@ -159,7 +163,7 @@ export async function adminPayoutCompensationHandler(c: Context): Promise<Respon
         }
         const currency = currencyForLoopAsset(payout.assetCode);
         // 1 stroop = 0.00001 minor. The stroops-to-minor floor
-        // mirrors the /100_000n factor applyAdminWithdrawal uses
+        // mirrors the /100_000n factor the legacy withdrawal writer used
         // in reverse — for any payout this primitive emitted the
         // conversion is exact.
         const amountMinor = payout.amountStroops / 100_000n;

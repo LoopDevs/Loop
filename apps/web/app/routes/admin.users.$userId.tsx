@@ -10,7 +10,7 @@ import { AdminUserFlywheelChip } from '~/components/features/admin/AdminUserFlyw
 import { CashbackSummaryChip } from '~/components/features/admin/CashbackSummaryChip';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { CreditAdjustmentForm } from '~/components/features/admin/CreditAdjustmentForm';
-import { AdminWithdrawalForm } from '~/components/features/admin/AdminWithdrawalForm';
+import { AdminEmissionForm } from '~/components/features/admin/AdminEmissionForm';
 import { HomeCurrencyForm } from '~/components/features/admin/HomeCurrencyForm';
 import { CreditTransactionsTable } from '~/components/features/admin/CreditTransactionsTable';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
@@ -248,18 +248,18 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
         <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
           <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
             <h2 className="text-base font-semibold text-gray-900 dark:text-white">
-              Queue withdrawal (ADR 024)
+              Queue emission (ADR 024 / ADR 036)
             </h2>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Debits the user&rsquo;s cashback balance and queues a matching on-chain LOOP-asset
-              payout. Insufficient balance returns <code className="font-mono">400</code>; a
-              duplicate payout id surfaces as <code className="font-mono">409</code>{' '}
-              WITHDRAWAL_ALREADY_ISSUED. Idempotent on the browser-generated key + Discord-audited
-              after commit.
+              Queues an on-chain LOOP-asset payout backfilling the on-chain half of an existing
+              liability — the off-chain mirror is <em>not</em> debited (ADR 036). An amount above
+              the mirror balance returns <code className="font-mono">400</code>; a duplicate active
+              intent surfaces as <code className="font-mono">409</code> EMISSION_ALREADY_ISSUED.
+              Idempotent on the browser-generated key + Discord-audited after commit.
             </p>
           </header>
           <div className="px-6 py-5">
-            <AdminWithdrawalForm
+            <AdminEmissionForm
               userId={userId}
               defaultCurrency={
                 isHomeCurrency(userQuery.data.homeCurrency) ? userQuery.data.homeCurrency : 'USD'

@@ -118,7 +118,7 @@ const FAILED_WITHDRAWAL_PAYOUT = {
   id: VALID_PAYOUT_ID,
   userId: VALID_USER_ID,
   orderId: null,
-  kind: 'withdrawal' as const,
+  kind: 'emission' as const,
   assetCode: 'USDLOOP',
   assetIssuer: 'GISSUER123',
   toAddress: 'GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ',

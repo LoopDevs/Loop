@@ -2,7 +2,8 @@
  * Admin write-surface integration tests (ADR 017).
  *
  * The three ADR-017 admin writes — credit-adjustment, refund, and
- * withdrawal — share the idempotency-guarded ladder
+ * emission (ex-withdrawal, re-scoped by ADR 036) — share the
+ * idempotency-guarded ladder
  * (`withIdempotencyGuard` → handler-supplied write → snapshot persist
  * → audit fanout). Each handler has unit-test coverage of the
  * function-call shape, but the cross-cutting invariants only show up
@@ -11,15 +12,15 @@
  *   - The advisory-lock serialization in `pg_advisory_xact_lock`
  *     (A2-2001 — concurrent calls with the same idempotency key
  *     must serialise, not both pass the lookup).
- *   - The partial unique indexes on
- *     `(type, reference_type, reference_id)` that catch duplicate
- *     refund + withdrawal writes against the same order/payout id
- *     (`REFUND_ALREADY_ISSUED`, `WITHDRAWAL_ALREADY_ISSUED`).
+ *   - The partial unique indexes that catch duplicate refund writes
+ *     against the same order id (`REFUND_ALREADY_ISSUED`) and
+ *     duplicate active emission intents
+ *     (`EMISSION_ALREADY_ISSUED`, ADR 036).
  *   - The `credit_transactions_amount_sign` CHECK constraint that
  *     pins cashback/refund > 0 and spend/withdrawal/adjustment-debit < 0.
- *   - The atomic two-row write inside `applyAdminWithdrawal`
- *     (`credit_transactions` debit + `pending_payouts` queue) — both
- *     land or neither does.
+ *   - ADR 036: the emission write queues ONLY a `pending_payouts`
+ *     row — no ledger row, no balance change. Assertions pin the
+ *     mirror staying untouched end-to-end.
  *
  * Walks each happy path + the duplicate-rejection path through the
  * real ledger. Mirrors the flywheel.test.ts harness — same
@@ -113,7 +114,14 @@ async function seedCashbackBalance(args: {
   });
 }
 
-async function seedFailedWithdrawalPayout(args: {
+/**
+ * Seeds a failed LEGACY withdrawal-era payout (pre-ADR-036): the
+ * `kind='emission'` row PLUS the at-send `type='withdrawal'` debit
+ * ledger row that marks it as legacy/compensable. Post-ADR-036
+ * emissions carry no debit row — seed those inline where a test
+ * needs one.
+ */
+async function seedFailedLegacyWithdrawalPayout(args: {
   userId: string;
   assetCode?: string;
   assetIssuer?: string;
@@ -124,7 +132,7 @@ async function seedFailedWithdrawalPayout(args: {
     .insert(pendingPayouts)
     .values({
       userId: args.userId,
-      kind: 'withdrawal',
+      kind: 'emission',
       assetCode: args.assetCode ?? 'USDLOOP',
       assetIssuer: args.assetIssuer ?? 'GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
       toAddress: args.toAddress ?? 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
@@ -136,7 +144,20 @@ async function seedFailedWithdrawalPayout(args: {
       attempts: 1,
     })
     .returning({ id: pendingPayouts.id });
-  if (row === undefined) throw new Error('seedFailedWithdrawalPayout: insert returned no row');
+  if (row === undefined) {
+    throw new Error('seedFailedLegacyWithdrawalPayout: insert returned no row');
+  }
+  // The legacy at-send debit — pre-ADR-036 withdrawals debited the
+  // mirror when queueing. This row is the compensability marker.
+  await db.insert(creditTransactions).values({
+    userId: args.userId,
+    type: 'withdrawal',
+    amountMinor: -(args.amountStroops / 100_000n),
+    currency: 'USD',
+    referenceType: 'payout',
+    referenceId: row.id,
+    reason: 'seeded legacy at-send debit (pre-ADR-036)',
+  });
   return row.id;
 }
 
@@ -477,7 +498,7 @@ describeIf('admin refund write — real postgres ladder + duplicate guard', () =
   });
 });
 
-describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn', () => {
+describeIf('admin emission write — real postgres ladder, mirror untouched (ADR 036)', () => {
   beforeAll(async () => {
     await ensureMigrated();
   });
@@ -486,11 +507,11 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
     await truncateAllTables();
   });
 
-  it('withdrawal happy path: debits balance + queues pending_payouts row in one txn', async () => {
+  it('emission happy path: queues pending_payouts row; balance unchanged + no ledger row', async () => {
     const { targetUser, bearer, stepUp } = await seed();
-    // Withdrawal needs an existing balance to debit. Pre-seed a
-    // credit_transactions row + user_credits balance directly so we
-    // don't reach for a separate flow.
+    // The unbacked-emission guard requires an existing mirror
+    // balance >= the emitted amount. Pre-seed a credit_transactions
+    // row + user_credits balance directly.
     await db.insert(creditTransactions).values({
       userId: targetUser.id,
       type: 'cashback',
@@ -506,7 +527,7 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
     });
 
     const destinationAddress = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
-    const res = await app.request(`http://localhost/api/admin/users/${targetUser.id}/withdrawals`, {
+    const res = await app.request(`http://localhost/api/admin/users/${targetUser.id}/emissions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -518,27 +539,25 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
         amountMinor: '500',
         currency: 'USD',
         destinationAddress,
-        reason: 'integration test withdrawal',
+        reason: 'integration test emission',
       }),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      result: { amountMinor: string; payoutId: string; newBalanceMinor: string };
+      result: { amountMinor: string; payoutId: string; balanceMinor: string };
     };
     expect(body.result.amountMinor).toBe('500');
-    expect(body.result.newBalanceMinor).toBe('1500'); // 2000 - 500
+    // ADR 036: the reported mirror balance is the UNCHANGED balance.
+    expect(body.result.balanceMinor).toBe('2000');
     expect(body.result.payoutId).toBeTruthy();
 
-    // Both rows landed atomically: the negative ledger row
-    // (CHECK passes because withdrawal < 0) AND the pending_payouts
-    // queue row.
-    const withdrawalTx = await db
+    // ADR 036: NO ledger row references the payout — emission writes
+    // the queue row only.
+    const emissionTx = await db
       .select()
       .from(creditTransactions)
       .where(eq(creditTransactions.referenceId, body.result.payoutId));
-    expect(withdrawalTx).toHaveLength(1);
-    expect(withdrawalTx[0]!.type).toBe('withdrawal');
-    expect(withdrawalTx[0]!.amountMinor).toBe(-500n);
+    expect(emissionTx).toHaveLength(0);
 
     const payouts = await db
       .select()
@@ -546,29 +565,39 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
       .where(eq(pendingPayouts.id, body.result.payoutId));
     expect(payouts).toHaveLength(1);
     expect(payouts[0]!.userId).toBe(targetUser.id);
+    expect(payouts[0]!.kind).toBe('emission');
+    expect(payouts[0]!.orderId).toBeNull();
     expect(payouts[0]!.toAddress).toBe(destinationAddress);
     expect(payouts[0]!.amountStroops).toBe(500n * 100_000n);
     expect(payouts[0]!.state).toBe('pending');
 
-    // Balance debited end-to-end.
+    // Mirror balance untouched end-to-end.
     const [credit] = await db
       .select()
       .from(userCredits)
       .where(eq(userCredits.userId, targetUser.id));
-    expect(credit?.balanceMinor).toBe(1500n);
+    expect(credit?.balanceMinor).toBe(2000n);
+
+    // The user's ledger still holds exactly the seeded cashback row.
+    const txRows = await db
+      .select()
+      .from(creditTransactions)
+      .where(eq(creditTransactions.userId, targetUser.id));
+    expect(txRows).toHaveLength(1);
+    expect(txRows[0]!.type).toBe('cashback');
   });
 
-  it('rejects a second semantic duplicate withdrawal with a fresh idempotency key', async () => {
+  it('rejects a second semantic duplicate emission with a fresh idempotency key', async () => {
     const { targetUser, bearer, stepUp } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
 
     const destinationAddress = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
-    const url = `http://localhost/api/admin/users/${targetUser.id}/withdrawals`;
+    const url = `http://localhost/api/admin/users/${targetUser.id}/emissions`;
     const body = JSON.stringify({
       amountMinor: '500',
       currency: 'USD',
       destinationAddress,
-      reason: 'integration duplicate withdrawal',
+      reason: 'integration duplicate emission',
     });
 
     const first = await app.request(url, {
@@ -595,7 +624,7 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
     });
     expect(second.status).toBe(409);
     const secondBody = (await second.json()) as { code: string };
-    expect(secondBody.code).toBe('WITHDRAWAL_ALREADY_ISSUED');
+    expect(secondBody.code).toBe('EMISSION_ALREADY_ISSUED');
 
     const payouts = await db
       .select()
@@ -603,27 +632,29 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
       .where(eq(pendingPayouts.userId, targetUser.id));
     expect(payouts).toHaveLength(1);
 
+    // Ledger holds only the seeded cashback row — neither emission
+    // attempt wrote anything (ADR 036).
     const txRows = await db
       .select()
       .from(creditTransactions)
       .where(eq(creditTransactions.userId, targetUser.id));
-    expect(txRows).toHaveLength(2);
-    expect(txRows.filter((row) => row.type === 'withdrawal')).toHaveLength(1);
+    expect(txRows).toHaveLength(1);
+    expect(txRows.filter((row) => row.type === 'withdrawal')).toHaveLength(0);
 
     const [credit] = await db
       .select()
       .from(userCredits)
       .where(eq(userCredits.userId, targetUser.id));
-    expect(credit?.balanceMinor).toBe(1500n);
+    expect(credit?.balanceMinor).toBe(2000n);
   });
 
-  it('serialises concurrent same-key withdrawal requests into one write plus one replay', async () => {
+  it('serialises concurrent same-key emission requests into one write plus one replay', async () => {
     const { targetUser, bearer, stepUp } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
 
     const idempotencyKey = idemKey();
     const destinationAddress = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
-    const url = `http://localhost/api/admin/users/${targetUser.id}/withdrawals`;
+    const url = `http://localhost/api/admin/users/${targetUser.id}/emissions`;
     const body = JSON.stringify({
       amountMinor: '500',
       currency: 'USD',
@@ -671,19 +702,19 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
       .select()
       .from(creditTransactions)
       .where(eq(creditTransactions.userId, targetUser.id));
-    expect(txRows.filter((row) => row.type === 'withdrawal')).toHaveLength(1);
+    expect(txRows.filter((row) => row.type === 'withdrawal')).toHaveLength(0);
 
     const [credit] = await db
       .select()
       .from(userCredits)
       .where(eq(userCredits.userId, targetUser.id));
-    expect(credit?.balanceMinor).toBe(1500n);
+    expect(credit?.balanceMinor).toBe(2000n);
   });
 
-  it('rejects a withdrawal exceeding the balance with 400 INSUFFICIENT_BALANCE', async () => {
+  it('rejects an emission exceeding the mirror balance with 400 INSUFFICIENT_BALANCE', async () => {
     const { targetUser, bearer, stepUp } = await seed();
-    // No prior balance. Try to withdraw $5.
-    const res = await app.request(`http://localhost/api/admin/users/${targetUser.id}/withdrawals`, {
+    // No prior balance. Try to emit $5 — would mint unbacked LOOP.
+    const res = await app.request(`http://localhost/api/admin/users/${targetUser.id}/emissions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -695,14 +726,14 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
         amountMinor: '500',
         currency: 'USD',
         destinationAddress: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-        reason: 'overdraft attempt',
+        reason: 'unbacked emission attempt',
       }),
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('INSUFFICIENT_BALANCE');
 
-    // Neither side of the two-row txn landed.
+    // Nothing landed.
     const txRows = await db
       .select()
       .from(creditTransactions)
@@ -715,21 +746,62 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
     expect(payouts).toHaveLength(0);
   });
 
+  it('ADR 036: compensation refuses a debit-less post-ADR-036 emission with 409', async () => {
+    const { targetUser, bearer } = await seed();
+    // A failed emission WITHOUT the legacy at-send debit row — the
+    // post-ADR-036 shape. Compensating it would mint unbacked mirror
+    // balance, so the primitive must refuse.
+    const [row] = await db
+      .insert(pendingPayouts)
+      .values({
+        userId: targetUser.id,
+        kind: 'emission',
+        assetCode: 'USDLOOP',
+        assetIssuer: 'GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        toAddress: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        amountStroops: 500n * 100_000n,
+        memoText: 'post-adr036-emission',
+        state: 'failed',
+        lastError: 'seeded failed payout',
+        failedAt: new Date(),
+        attempts: 1,
+      })
+      .returning({ id: pendingPayouts.id });
+    const payoutId = row!.id;
+
+    const res = await app.request(`http://localhost/api/admin/payouts/${payoutId}/compensate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${bearer}`,
+        'idempotency-key': idemKey(),
+      },
+      body: JSON.stringify({ reason: 'should be refused — no legacy debit' }),
+    });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('PAYOUT_NOT_COMPENSABLE');
+
+    // No compensation row, no compensated marker, no balance change.
+    const adjustments = (
+      await db.select().from(creditTransactions).where(eq(creditTransactions.referenceId, payoutId))
+    ).filter((r) => r.type === 'adjustment');
+    expect(adjustments).toHaveLength(0);
+    const [payout] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, payoutId));
+    expect(payout?.compensatedAt).toBeNull();
+    const credits = await db
+      .select()
+      .from(userCredits)
+      .where(eq(userCredits.userId, targetUser.id));
+    expect(credits).toHaveLength(0);
+  });
+
   it('keeps retry and compensation at-most-once when both hit the same failed payout', async () => {
     const { targetUser, bearer, stepUp } = await seed();
     await seedCashbackBalance({ userId: targetUser.id, amountMinor: 1500n });
-    const payoutId = await seedFailedWithdrawalPayout({
+    const payoutId = await seedFailedLegacyWithdrawalPayout({
       userId: targetUser.id,
       amountStroops: 500n * 100_000n,
-    });
-    await db.insert(creditTransactions).values({
-      userId: targetUser.id,
-      type: 'withdrawal',
-      amountMinor: -500n,
-      currency: 'USD',
-      referenceType: 'payout',
-      referenceId: payoutId,
-      reason: 'seeded withdrawal backing failed payout',
     });
 
     const [retryRes, compensateRes] = await Promise.all([
@@ -828,7 +900,7 @@ describeIf('admin payout-retry write — idempotency-guarded ladder', () => {
 
   it('replays the cached envelope on idempotency-key reuse — the reset runs exactly once', async () => {
     const { targetUser, bearer, stepUp } = await seed();
-    const payoutId = await seedFailedWithdrawalPayout({
+    const payoutId = await seedFailedLegacyWithdrawalPayout({
       userId: targetUser.id,
       amountStroops: 500n * 100_000n,
     });
@@ -866,7 +938,7 @@ describeIf('admin payout-retry write — idempotency-guarded ladder', () => {
 
   it('serialises truly-concurrent same-key retries into one reset plus one replay', async () => {
     const { targetUser, bearer, stepUp } = await seed();
-    const payoutId = await seedFailedWithdrawalPayout({
+    const payoutId = await seedFailedLegacyWithdrawalPayout({
       userId: targetUser.id,
       amountStroops: 500n * 100_000n,
     });
@@ -1027,14 +1099,14 @@ describeIf('admin payout-compensation write — fleet-wide daily cap race', () =
     env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 700n;
     try {
       const { targetUser, bearer } = await seed();
-      const payoutA = await seedFailedWithdrawalPayout({
+      const payoutA = await seedFailedLegacyWithdrawalPayout({
         userId: targetUser.id,
         amountStroops: 500n * 100_000n,
       });
       // Distinct destination so the partial unique index on active
       // withdrawals (user, asset, destination, amount) doesn't reject
       // the second seeded row.
-      const payoutB = await seedFailedWithdrawalPayout({
+      const payoutB = await seedFailedLegacyWithdrawalPayout({
         userId: targetUser.id,
         amountStroops: 500n * 100_000n,
         toAddress: 'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
@@ -1100,7 +1172,7 @@ describeIf('admin payout-compensation write — fleet-wide daily cap race', () =
     env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 700n;
     try {
       const { targetUser, bearer } = await seed();
-      const payoutId = await seedFailedWithdrawalPayout({
+      const payoutId = await seedFailedLegacyWithdrawalPayout({
         userId: targetUser.id,
         amountStroops: 500n * 100_000n,
       });
@@ -1468,7 +1540,7 @@ describeIf('admin home-currency write — real postgres ladder + safety prefligh
 
   it('allows the change when user has only failed payouts (already off the worker hot path)', async () => {
     const { targetUser, bearer, stepUp } = await seed();
-    await seedFailedWithdrawalPayout({
+    await seedFailedLegacyWithdrawalPayout({
       userId: targetUser.id,
       amountStroops: 5_000_000n,
     });

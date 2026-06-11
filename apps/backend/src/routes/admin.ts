@@ -62,7 +62,7 @@
  *   per-user detail / credits / cashback-by-merchant /
  *   cashback-summary / flywheel-stats / payment-method-share /
  *   cashback-monthly / credit-transactions (+ CSV) / operator-
- *   mix, plus writes (refunds / credit-adjustments / withdrawals)
+ *   mix, plus writes (refunds / credit-adjustments / emissions)
  *   each gated by ADR-017 idempotency.
  * - **Resync + Discord (~3)** — manual merchant-catalog resync,
  *   Discord notifier catalog read, manual Discord test ping.
@@ -226,7 +226,7 @@ export function mountAdminRoutes(app: Hono): void {
   mountAdminUserClusterRoutes(app);
 
   // Credit-write surfaces — credit-adjustments + refunds +
-  // withdrawals (ADR 017/024 + A2-901). Lifted into
+  // emissions (ADR 017/024 + A2-901 / ADR 036). Lifted into
   // ./admin-credit-writes.ts (mirrors openapi #1175).
   mountAdminCreditWritesRoutes(app);
 
@@ -234,7 +234,7 @@ export function mountAdminRoutes(app: Hono): void {
   // flip (ADR 015 deferred § "self-serve home-currency change —
   // currently support-mediated"). Same step-up + idempotency
   // discipline as the credit writes; lives in its own file because
-  // it isn't a credit/refund/withdrawal.
+  // it isn't a credit/refund/emission.
   mountAdminUserWritesRoutes(app);
 
   // ADR-028 / A4-063: step-up token endpoint. Mounted under the

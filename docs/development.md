@@ -193,7 +193,7 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # Admin step-up auth (ADR 028 / A4-063). ≥32 chars, deliberately
 # separate from LOOP_JWT_SIGNING_KEY so a JWT-key compromise doesn't
 # widen to step-up. Absent → boot succeeds but the destructive admin
-# endpoints (credit-adjust / withdrawals / payout-retry) fail closed
+# endpoints (credit-adjust / emissions / payout-retry) fail closed
 # with 503 STEP_UP_UNAVAILABLE. `_PREVIOUS` only during rotation.
 # LOOP_ADMIN_STEP_UP_SIGNING_KEY=...(≥32 chars)
 # LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS=...(≥32 chars)
@@ -325,7 +325,7 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # LOOP_KILL_ORDERS_LEGACY=false  # POST /api/orders only; unset → falls back to LOOP_KILL_ORDERS
 # LOOP_KILL_ORDERS_LOOP=false    # POST /api/orders/loop only; unset → falls back to LOOP_KILL_ORDERS
 # LOOP_KILL_AUTH=false           # request/verify-otp + social (refresh/logout stay open)
-# LOOP_KILL_WITHDRAWALS=false    # admin withdrawal + compensation endpoints
+# LOOP_KILL_EMISSIONS=false      # admin emission (ADR 036) + compensation endpoints
 ```
 
 ### Inheritance model

@@ -1,10 +1,13 @@
 /**
- * Admin withdrawal endpoint (ADR-024 / A2-901).
+ * Admin emission endpoint (ADR-024 / A2-901, re-scoped by ADR 036).
  *
- * `POST /api/admin/users/:userId/withdrawals` — debits the user's
- * cashback balance and queues an on-chain LOOP-asset payout.
- * Admin-mediated only (Phase 2a); user-initiated cash-out is
- * deferred to Phase 2b.
+ * `POST /api/admin/users/:userId/emissions` — queues an on-chain
+ * LOOP-asset payment to the user WITHOUT debiting the off-chain
+ * `user_credits` mirror (ADR 036: emission materialises the on-chain
+ * half of a liability that already exists — e.g. backfilling a
+ * missed/failed cashback payout). Admin-mediated only; the user-facing
+ * way value leaves the system is redemption (gift-card loop_asset
+ * payment today, fiat-out later).
  *
  * Two-layer idempotency mirrors the credit-adjustment / refund
  * handlers:
@@ -12,10 +15,14 @@
  *   - Admin idempotency key (ADR 017) — advisory-lock-serialised
  *     actor+key snapshot replay, covers double-clicks and retried
  *     POSTs with the same key.
- *   - DB semantic uniqueness fence on active withdrawal intents
- *     (`pending_payouts_active_withdrawal_unique`) — catches the
+ *   - DB semantic uniqueness fence on active emission intents
+ *     (`pending_payouts_active_emission_unique`) — catches the
  *     "fresh key, same user/asset/address/amount" race. Surfaces as
- *     409 WITHDRAWAL_ALREADY_ISSUED.
+ *     409 EMISSION_ALREADY_ISSUED.
+ *
+ * The operator `reason` has no ledger row to live on (no credit-tx is
+ * written) — it persists in the ADR-017 idempotency snapshot and the
+ * Discord admin-audit fanout.
  *
  * Response envelope matches the refund handler's shape so the admin
  * UI can share the post-action renderer.
@@ -28,7 +35,7 @@ import { HOME_CURRENCIES, type HomeCurrency } from '../db/schema.js';
 import { getUserById, type User } from '../db/users.js';
 import { payoutAssetFor } from '../credits/payout-asset.js';
 import { generatePayoutMemo } from '../credits/payout-builder.js';
-import { applyAdminWithdrawal, WithdrawalAlreadyIssuedError } from '../credits/withdrawals.js';
+import { applyAdminEmission, EmissionAlreadyIssuedError } from '../credits/emissions.js';
 import { InsufficientBalanceError } from '../credits/adjustments.js';
 import { notifyAdminAudit } from '../discord.js';
 import { logger } from '../logger.js';
@@ -40,13 +47,13 @@ import {
   withIdempotencyGuard,
 } from './idempotency.js';
 
-const log = logger.child({ handler: 'admin-withdrawal' });
+const log = logger.child({ handler: 'admin-emission' });
 
 /**
  * Body schema. `amountMinor` is unsigned integer-as-string; same
  * 10,000,000 cap as refund/adjustment. `destinationAddress` is the
  * user's Stellar wallet — admin specifies it explicitly because the
- * use case is "manual cash-out request" where the user might not
+ * use case is "manual payout backfill" where the user might not
  * have a stored wallet yet.
  */
 const BodySchema = z.object({
@@ -68,19 +75,18 @@ const BodySchema = z.object({
   reason: z.string().min(2).max(500),
 });
 
-export interface WithdrawalResponse {
-  id: string;
+export interface EmissionResponse {
   payoutId: string;
   userId: string;
   currency: string;
   amountMinor: string;
   destinationAddress: string;
-  priorBalanceMinor: string;
-  newBalanceMinor: string;
+  /** Mirror balance at queue time — unchanged by the emission (ADR 036). */
+  balanceMinor: string;
   createdAt: string;
 }
 
-export async function adminWithdrawalHandler(c: Context): Promise<Response> {
+export async function adminEmissionHandler(c: Context): Promise<Response> {
   const userId = c.req.param('userId');
   if (userId === undefined || !UUID_RE.test(userId)) {
     return c.json({ code: 'VALIDATION_ERROR', message: 'userId must be a uuid' }, 400);
@@ -119,16 +125,17 @@ export async function adminWithdrawalHandler(c: Context): Promise<Response> {
     );
   }
 
-  // Target user must exist before we charge their balance — fail
-  // fast with 404 rather than letting `applyAdminWithdrawal` write
-  // a credit-tx referencing a missing user_id.
+  // Target user must exist before we queue an on-chain payment in
+  // their name — fail fast with 404 rather than letting
+  // `applyAdminEmission` write a payout row referencing a missing
+  // user_id.
   const targetUser = await getUserById(userId);
   if (targetUser === null) {
     return c.json({ code: 'NOT_FOUND', message: 'Target user not found' }, 404);
   }
 
-  // Resolve LOOP asset for the requested currency. ADR-024 follows
-  // the same payoutAssetFor mapping as order-cashback (USD→USDLOOP,
+  // Resolve LOOP asset for the requested currency — same
+  // payoutAssetFor mapping as order-cashback (USD→USDLOOP,
   // GBP→GBPLOOP, EUR→EURLOOP). Issuer absent in env → return 503
   // NOT_CONFIGURED so ops sees the misconfiguration loud.
   const asset = payoutAssetFor(parsed.data.currency as HomeCurrency);
@@ -143,20 +150,20 @@ export async function adminWithdrawalHandler(c: Context): Promise<Response> {
     );
   }
 
-  // Convert the minor-unit balance amount into Stellar stroops.
+  // Convert the minor-unit amount into Stellar stroops.
   // 1 minor unit = 100,000 stroops (1:1 peg, 7 decimals — same as
   // payout-builder.ts for order-cashback rows).
   //
   // A4-029: lock the 100_000 ratio to the LOOP-asset code set. A
   // future asset code with a different decimal layout (USDC variant,
   // non-7-decimal LOOP) would silently send 100x off without this
-  // guard. The withdrawals path resolves `asset` via
+  // guard. The emission path resolves `asset` via
   // `payoutAssetFor(parsed.data.currency)` above.
   if (asset.code !== 'USDLOOP' && asset.code !== 'GBPLOOP' && asset.code !== 'EURLOOP') {
     return c.json(
       {
         code: 'INTERNAL_ERROR',
-        message: `Unsupported withdrawal asset code '${asset.code}' — stroops/minor ratio assumes LOOP-asset 7-decimal layout`,
+        message: `Unsupported emission asset code '${asset.code}' — stroops/minor ratio assumes LOOP-asset 7-decimal layout`,
       },
       500,
     );
@@ -171,10 +178,10 @@ export async function adminWithdrawalHandler(c: Context): Promise<Response> {
         adminUserId: actor.id,
         key: idempotencyKey,
         method: 'POST',
-        path: `/api/admin/users/${userId}/withdrawals`,
+        path: `/api/admin/users/${userId}/emissions`,
       },
       async () => {
-        const applied = await applyAdminWithdrawal({
+        const applied = await applyAdminEmission({
           userId,
           currency: parsed.data.currency,
           amountMinor,
@@ -185,22 +192,19 @@ export async function adminWithdrawalHandler(c: Context): Promise<Response> {
             amountStroops,
             memoText: generatePayoutMemo(),
           },
-          reason: parsed.data.reason,
         });
 
-        const result: WithdrawalResponse = {
-          id: applied.id,
+        const result: EmissionResponse = {
           payoutId: applied.payoutId,
           userId: applied.userId,
           currency: applied.currency,
           amountMinor: applied.amountMinor.toString(),
           destinationAddress: parsed.data.destinationAddress,
-          priorBalanceMinor: applied.priorBalanceMinor.toString(),
-          newBalanceMinor: applied.newBalanceMinor.toString(),
+          balanceMinor: applied.balanceMinor.toString(),
           createdAt: applied.createdAt.toISOString(),
         };
 
-        const envelope: AdminAuditEnvelope<WithdrawalResponse> = buildAuditEnvelope({
+        const envelope: AdminAuditEnvelope<EmissionResponse> = buildAuditEnvelope({
           result,
           actor,
           idempotencyKey,
@@ -220,24 +224,24 @@ export async function adminWithdrawalHandler(c: Context): Promise<Response> {
         400,
       );
     }
-    if (err instanceof WithdrawalAlreadyIssuedError) {
+    if (err instanceof EmissionAlreadyIssuedError) {
       return c.json(
         {
-          code: 'WITHDRAWAL_ALREADY_ISSUED',
+          code: 'EMISSION_ALREADY_ISSUED',
           message: err.message,
         },
         409,
       );
     }
-    log.error({ err, userId, adminUserId: actor.id }, 'Withdrawal failed');
-    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to apply withdrawal' }, 500);
+    log.error({ err, userId, adminUserId: actor.id }, 'Emission failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to apply emission' }, 500);
   }
 
-  const priorResult = (guardResult.body as { result?: WithdrawalResponse }).result;
+  const priorResult = (guardResult.body as { result?: EmissionResponse }).result;
 
   notifyAdminAudit({
     actorUserId: actor.id,
-    endpoint: `POST /api/admin/users/${userId}/withdrawals`,
+    endpoint: `POST /api/admin/users/${userId}/emissions`,
     targetUserId: userId,
     ...(priorResult?.amountMinor !== undefined ? { amountMinor: priorResult.amountMinor } : {}),
     ...(priorResult?.currency !== undefined ? { currency: priorResult.currency } : {}),

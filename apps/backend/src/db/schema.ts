@@ -217,9 +217,11 @@ export const creditTransactions = pgTable(
     // withdrawal debit against the same payout row would double-
     // debit. Scope excludes 'adjustment' (idempotency handled by
     // admin_idempotency_keys, ADR 017) and 'interest' (its own
-    // partial unique above). The admin withdrawal path also has a
-    // stronger semantic fence on `pending_payouts` for "same active
-    // withdrawal intent" races.
+    // partial unique above). 'withdrawal' stays in the scope for the
+    // legacy pre-ADR-036 rows (the emission writer no longer debits;
+    // the type is reserved for the future fiat-out redemption rail).
+    // The admin emission path also has a stronger semantic fence on
+    // `pending_payouts` for "same active emission intent" races.
     uniqueIndex('credit_transactions_reference_unique')
       .on(t.type, t.referenceType, t.referenceId)
       .where(
@@ -773,19 +775,31 @@ export const pendingPayouts = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
-    // A2-901 / ADR-024 §2: nullable for withdrawal-initiated payouts.
-    // Order-fulfilment (`kind='order_cashback'`) rows keep populating
-    // this; withdrawal (`kind='withdrawal'`) rows leave it NULL. The
-    // shape CHECK below pins the per-kind invariant.
+    // A2-901 / ADR-024 §2: nullable for emission payouts. Order-
+    // fulfilment (`kind='order_cashback'`) and redemption burns
+    // (`kind='burn'`) keep populating this; emission rows leave it
+    // NULL. The shape CHECK below pins the per-kind invariant.
     orderId: uuid('order_id').references(() => orders.id, { onDelete: 'restrict' }),
-    // A2-901 / ADR-024 §2: discriminator for the two payout flows
-    // this table now serves. Default 'order_cashback' preserves the
-    // backfill semantics for existing rows — everything written
-    // before migration 0018 was an order-fulfilment cashback payout.
-    // `.$type` narrows the TypeScript side to the same literal set
-    // the SQL CHECK enforces; callers get a compile-time error if
-    // they try a third value.
-    kind: text('kind').notNull().default('order_cashback').$type<'order_cashback' | 'withdrawal'>(),
+    // Discriminator for the three payout flows this table serves
+    // (A2-901 / ADR-024 §2, re-scoped by ADR 036):
+    //   - 'order_cashback' — fulfilment-time cashback payout to the user.
+    //   - 'emission' — admin-mediated emission (ex-ADR-024 "withdrawal"):
+    //     backfill of the on-chain half of an existing user_credits
+    //     liability. Never debits the mirror (ADR 036). Pre-ADR-036
+    //     rows (migration 0035 relabelled 'withdrawal' → 'emission')
+    //     DID debit at send-time; their `credit_transactions` debit row
+    //     (`type='withdrawal'`, reference_id=payout id) survives and
+    //     marks them as legacy/compensable.
+    //   - 'burn' — redemption issuer-return: forwards LOOP received at
+    //     the deposit account back to the asset's issuer (native
+    //     Stellar burn) after a loop_asset deposit pays an order.
+    // Default 'order_cashback' preserves the backfill semantics for
+    // pre-0018 rows. `.$type` narrows the TypeScript side to the same
+    // literal set the SQL CHECK enforces.
+    kind: text('kind')
+      .notNull()
+      .default('order_cashback')
+      .$type<'order_cashback' | 'emission' | 'burn'>(),
     // The LOOP asset + issuer pinned at write-time. If an operator
     // changes the issuer env var later, in-flight rows still reference
     // the issuer at the time the intent was built — otherwise a rotate
@@ -807,7 +821,8 @@ export const pendingPayouts = pgTable(
     lastError: text('last_error'),
     attempts: integer('attempts').notNull().default(0),
     // ADR-024 §5 / A3-006: compensation is an operator-only overlay
-    // on a failed withdrawal payout. Keep the public state enum
+    // on a failed legacy (pre-ADR-036, at-send-debited) emission
+    // payout. Keep the public state enum
     // stable (`failed`) and record compensation separately so retry
     // can refuse already-compensated rows without widening every
     // payout-state consumer to a fifth value.
@@ -819,9 +834,18 @@ export const pendingPayouts = pgTable(
     failedAt: timestamp('failed_at', { withTimezone: true }),
   },
   (t) => [
-    // One payout per order — the unique constraint is the idempotency
-    // guard for a re-run of markOrderFulfilled.
-    uniqueIndex('pending_payouts_order_unique').on(t.orderId),
+    // One *cashback* payout per order — the idempotency guard for a
+    // re-run of markOrderFulfilled. Partial since migration 0035 so a
+    // redeemed order can also carry its `kind='burn'` row (which has
+    // its own per-order fence below).
+    uniqueIndex('pending_payouts_order_unique')
+      .on(t.orderId)
+      .where(sql`${t.kind} = 'order_cashback'`),
+    // One burn per order — the idempotency fence for the redemption
+    // issuer-return enqueued by markOrderPaid (ADR 036).
+    uniqueIndex('pending_payouts_burn_order_unique')
+      .on(t.orderId)
+      .where(sql`${t.kind} = 'burn'`),
     // Worker picks up pending rows in FIFO order on each tick.
     index('pending_payouts_state_created').on(t.state, t.createdAt),
     // A2-716: composite (user_id, created_at desc) so
@@ -830,16 +854,16 @@ export const pendingPayouts = pgTable(
     // `pending_payouts_user` index — the composite covers every
     // single-column lookup as well.
     index('pending_payouts_user_created').on(t.userId, t.createdAt),
-    // A3-007: "same semantic withdrawal twice" must not create a
+    // A3-007: "same semantic emission twice" must not create a
     // second active payout row just because the new request gets a
     // fresh UUID. Confirmed payouts are excluded so a later
-    // legitimate repeat withdrawal can happen; compensated failures
+    // legitimate repeat emission can happen; compensated failures
     // are excluded so support can deliberately re-issue after making
     // the user whole.
-    uniqueIndex('pending_payouts_active_withdrawal_unique')
+    uniqueIndex('pending_payouts_active_emission_unique')
       .on(t.userId, t.assetCode, t.assetIssuer, t.toAddress, t.amountStroops)
       .where(
-        sql`${t.kind} = 'withdrawal' AND ${t.state} IN ('pending', 'submitted', 'failed') AND ${t.compensatedAt} IS NULL`,
+        sql`${t.kind} = 'emission' AND ${t.state} IN ('pending', 'submitted', 'failed') AND ${t.compensatedAt} IS NULL`,
       ),
     check(
       'pending_payouts_state_known',
@@ -855,13 +879,16 @@ export const pendingPayouts = pgTable(
     // the column.
     check('pending_payouts_to_address_format', sql`${t.toAddress} ~ '^G[A-Z2-7]{55}$'`),
     check('pending_payouts_attempts_non_negative', sql`${t.attempts} >= 0`),
-    // A2-901 / ADR-024 §2: discriminator + per-kind shape invariants.
-    check('pending_payouts_kind_known', sql`${t.kind} IN ('order_cashback', 'withdrawal')`),
+    // A2-901 / ADR-024 §2 + ADR 036: discriminator + per-kind shape
+    // invariants. Emissions are user-addressed with no source order;
+    // burns reference the redeemed order and target the issuer.
+    check('pending_payouts_kind_known', sql`${t.kind} IN ('order_cashback', 'emission', 'burn')`),
     check(
       'pending_payouts_kind_shape',
       sql`
         (${t.kind} = 'order_cashback' AND ${t.orderId} IS NOT NULL)
-        OR (${t.kind} = 'withdrawal' AND ${t.orderId} IS NULL)
+        OR (${t.kind} = 'emission' AND ${t.orderId} IS NULL)
+        OR (${t.kind} = 'burn' AND ${t.orderId} IS NOT NULL)
       `,
     ),
     // A4-027: pin asset_code + asset_issuer at the DB layer. The app
