@@ -136,7 +136,7 @@ is not on a bot — refills are deliberately manual.
    ```
 
 4. Re-enable the payout worker if it was killed via
-   `LOOP_KILL_WITHDRAWALS=true`.
+   `LOOP_KILL_EMISSIONS=true`.
 
 ### Whole-environment compromise
 

@@ -114,7 +114,7 @@ export async function dsrDeleteHandler(c: Context): Promise<Response> {
         );
       }
       if (result.blockedBy === 'failed_uncompensated_withdrawals') {
-        // A4-078: a failed withdrawal whose compensation hasn't
+        // A4-078: a failed legacy (pre-ADR-036) withdrawal whose compensation hasn't
         // landed yet — anonymising now would orphan the balance the
         // user is owed (see dsr-delete.ts). Distinct from the
         // generic in-flight-orders reason so the client can render

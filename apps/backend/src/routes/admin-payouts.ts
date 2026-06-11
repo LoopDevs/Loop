@@ -94,15 +94,16 @@ export function mountAdminPayoutsRoutes(app: Hono): void {
     adminRetryPayoutHandler,
   );
   // POST /api/admin/payouts/:id/compensate — re-credit a user after a
-  // permanently-failed withdrawal payout (ADR-024 §5). Same rate limit
-  // as retry: rare, finance-reviewed, one-at-a-time. CF-07: compensation
-  // re-credits the user's balance (a positive `type='adjustment'` row),
-  // so it carries the same ADR-028 step-up gate as its sibling
-  // `/retry` — a captured bearer alone must not be able to re-credit a
-  // balance. CF-08: bound to the `'payout-compensation'` scope.
+  // permanently-failed legacy (pre-ADR-036, at-send-debited) emission
+  // payout (ADR-024 §5). Same rate limit as retry: rare, finance-
+  // reviewed, one-at-a-time. CF-07: compensation re-credits the
+  // user's balance (a positive `type='adjustment'` row), so it
+  // carries the same ADR-028 step-up gate as its sibling `/retry` —
+  // a captured bearer alone must not be able to re-credit a balance.
+  // CF-08: bound to the `'payout-compensation'` scope.
   app.post(
     '/api/admin/payouts/:id/compensate',
-    killSwitch('withdrawals'),
+    killSwitch('emissions'),
     rateLimit('POST /api/admin/payouts/:id/compensate', 20, 60_000),
     requireAdminStepUp('payout-compensation'),
     adminPayoutCompensationHandler,

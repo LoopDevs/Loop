@@ -280,6 +280,7 @@ beforeEach(() => {
     },
   );
   discordMock.notifyPayoutFailed.mockClear();
+  discordMock.notifyPayoutAwaitingTrustline.mockClear();
   compensationMock.applyAdminPayoutCompensation.mockReset();
   compensationMock.applyAdminPayoutCompensation.mockResolvedValue({
     id: 'comp-1',
@@ -574,7 +575,7 @@ describe('runPayoutTick', () => {
   describe('CF2-07: transient_horizon at retry-exhaustion re-checks before compensating', () => {
     it('landed=true → converges to confirmed instead of failing/compensating', async () => {
       repoMocks.listClaimablePayouts.mockResolvedValue([
-        makeRow({ attempts: 4, kind: 'withdrawal', assetCode: 'GBPLOOP' }),
+        makeRow({ attempts: 4, kind: 'emission', assetCode: 'GBPLOOP' }),
       ]);
       sdkMock.submitPayout.mockRejectedValue(
         new PayoutSubmitErrorMock('transient_horizon', 'ambiguous timeout'),
@@ -601,7 +602,7 @@ describe('runPayoutTick', () => {
 
     it('landed=false → proceeds with the existing fail + auto-compensate path', async () => {
       repoMocks.listClaimablePayouts.mockResolvedValue([
-        makeRow({ attempts: 4, kind: 'withdrawal', assetCode: 'GBPLOOP' }),
+        makeRow({ attempts: 4, kind: 'emission', assetCode: 'GBPLOOP' }),
       ]);
       sdkMock.submitPayout.mockRejectedValue(
         new PayoutSubmitErrorMock('transient_horizon', 'ambiguous timeout'),
@@ -618,7 +619,7 @@ describe('runPayoutTick', () => {
 
     it('no fresh hash persisted → skips the check gracefully, proceeds to fail + compensate', async () => {
       repoMocks.listClaimablePayouts.mockResolvedValue([
-        makeRow({ attempts: 4, kind: 'withdrawal', assetCode: 'GBPLOOP' }),
+        makeRow({ attempts: 4, kind: 'emission', assetCode: 'GBPLOOP' }),
       ]);
       sdkMock.submitPayout.mockRejectedValue(
         new PayoutSubmitErrorMock('transient_horizon', 'ambiguous timeout'),
@@ -632,7 +633,7 @@ describe('runPayoutTick', () => {
 
     it('the authoritative check itself failing → falls through to the existing fail path (no throw out of the tick)', async () => {
       repoMocks.listClaimablePayouts.mockResolvedValue([
-        makeRow({ attempts: 4, kind: 'withdrawal', assetCode: 'GBPLOOP' }),
+        makeRow({ attempts: 4, kind: 'emission', assetCode: 'GBPLOOP' }),
       ]);
       sdkMock.submitPayout.mockRejectedValue(
         new PayoutSubmitErrorMock('transient_horizon', 'ambiguous timeout'),
@@ -646,7 +647,7 @@ describe('runPayoutTick', () => {
 
     it('transient_rebuild (not ambiguous) at retry-exhaustion does NOT trigger the re-check at all', async () => {
       repoMocks.listClaimablePayouts.mockResolvedValue([
-        makeRow({ attempts: 4, kind: 'withdrawal', assetCode: 'GBPLOOP' }),
+        makeRow({ attempts: 4, kind: 'emission', assetCode: 'GBPLOOP' }),
       ]);
       sdkMock.submitPayout.mockRejectedValue(
         new PayoutSubmitErrorMock('transient_rebuild', 'tx_bad_seq'),
@@ -829,7 +830,7 @@ describe('runPayoutTick', () => {
 
   it('CF-21: a failed WITHDRAWAL payout auto-compensates the user', async () => {
     repoMocks.listClaimablePayouts.mockResolvedValue([
-      makeRow({ kind: 'withdrawal', orderId: null, attempts: 0 }),
+      makeRow({ kind: 'emission', orderId: null, attempts: 0 }),
     ]);
     sdkMock.submitPayout.mockRejectedValue(
       new PayoutSubmitErrorMock('terminal_no_trust', 'op_no_trust'),
@@ -863,7 +864,7 @@ describe('runPayoutTick', () => {
 
   it('CF-21: compensation is idempotent — AlreadyCompensatedError is swallowed (no throw)', async () => {
     repoMocks.listClaimablePayouts.mockResolvedValue([
-      makeRow({ kind: 'withdrawal', orderId: null }),
+      makeRow({ kind: 'emission', orderId: null }),
     ]);
     sdkMock.submitPayout.mockRejectedValue(new PayoutSubmitErrorMock('terminal_no_trust', 'fail'));
     compensationMock.applyAdminPayoutCompensation.mockRejectedValue(
@@ -876,8 +877,8 @@ describe('runPayoutTick', () => {
 
   it('CF-21: a compensation throw does not abort the tick or change the outcome', async () => {
     repoMocks.listClaimablePayouts.mockResolvedValue([
-      makeRow({ kind: 'withdrawal', orderId: null }),
-      makeRow({ id: 'p-2', kind: 'withdrawal', orderId: null }),
+      makeRow({ kind: 'emission', orderId: null }),
+      makeRow({ id: 'p-2', kind: 'emission', orderId: null }),
     ]);
     sdkMock.submitPayout.mockRejectedValue(new PayoutSubmitErrorMock('terminal_no_trust', 'fail'));
     // First compensation throws (cap hit); the second row must still be
@@ -901,7 +902,7 @@ describe('runPayoutTick', () => {
 
   it('CF-21: PayoutNotCompensableError is swallowed (precondition moved under us)', async () => {
     repoMocks.listClaimablePayouts.mockResolvedValue([
-      makeRow({ kind: 'withdrawal', orderId: null }),
+      makeRow({ kind: 'emission', orderId: null }),
     ]);
     sdkMock.submitPayout.mockRejectedValue(new Error('socket hang up'));
     compensationMock.applyAdminPayoutCompensation.mockRejectedValue(
@@ -914,9 +915,9 @@ describe('runPayoutTick', () => {
   // ─── CF-15: LOOP_KILL_WITHDRAWALS gates the worker ──────────────────
 
   it('CF-15: withdrawals-kill engaged → withdrawal rows skipped, order_cashback still drains', async () => {
-    killMock.isKilled.mockImplementation((s: string) => s === 'withdrawals');
+    killMock.isKilled.mockImplementation((s: string) => s === 'emissions');
     repoMocks.listClaimablePayouts.mockResolvedValue([
-      makeRow({ id: 'w-1', kind: 'withdrawal', orderId: null, memoText: 'withdrawal-memo' }),
+      makeRow({ id: 'w-1', kind: 'emission', orderId: null, memoText: 'withdrawal-memo' }),
       makeRow({ id: 'c-1', kind: 'order_cashback', memoText: 'cashback-memo' }),
     ]);
     const r = await runPayoutTick(BASE_ARGS);
@@ -936,7 +937,7 @@ describe('runPayoutTick', () => {
   it('CF-15: withdrawals-kill OFF → withdrawal rows process normally', async () => {
     killMock.isKilled.mockReturnValue(false);
     repoMocks.listClaimablePayouts.mockResolvedValue([
-      makeRow({ id: 'w-1', kind: 'withdrawal', orderId: null }),
+      makeRow({ id: 'w-1', kind: 'emission', orderId: null }),
     ]);
     const r = await runPayoutTick(BASE_ARGS);
     expect(r.skippedKilled).toBe(0);
@@ -945,17 +946,58 @@ describe('runPayoutTick', () => {
   });
 
   it('CF-15: the kill switch is read once per tick (live process.env)', async () => {
-    killMock.isKilled.mockImplementation((s: string) => s === 'withdrawals');
+    killMock.isKilled.mockImplementation((s: string) => s === 'emissions');
     repoMocks.listClaimablePayouts.mockResolvedValue([
-      makeRow({ id: 'w-1', kind: 'withdrawal', orderId: null }),
-      makeRow({ id: 'w-2', kind: 'withdrawal', orderId: null }),
+      makeRow({ id: 'w-1', kind: 'emission', orderId: null }),
+      makeRow({ id: 'w-2', kind: 'emission', orderId: null }),
     ]);
     const r = await runPayoutTick(BASE_ARGS);
     expect(r.skippedKilled).toBe(2);
     // One read per tick, not per row.
     expect(killMock.isKilled).toHaveBeenCalledTimes(1);
-    expect(killMock.isKilled).toHaveBeenCalledWith('withdrawals');
+    expect(killMock.isKilled).toHaveBeenCalledWith('emissions');
     // No on-chain submit at all while engaged + only withdrawals queued.
     expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+  });
+});
+
+describe('ADR 036 — issuer-return burn rows', () => {
+  it('skips the trustline probe and submits to the issuer destination', async () => {
+    // Burn rows target the asset's ISSUER account, which never holds
+    // a trustline to its own asset — probing would park the burn in
+    // pending forever. payOne must bypass the probe for
+    // toAddress === assetIssuer and submit directly; Stellar accepts
+    // (and natively burns) an asset returned to its issuer.
+    trustlinesMock.getAccountTrustlines.mockClear();
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({
+        id: 'p-burn',
+        kind: 'burn',
+        orderId: 'o-redeemed',
+        toAddress: 'GISSUER',
+        assetIssuer: 'GISSUER',
+      }),
+    ]);
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.confirmed).toBe(1);
+    expect(trustlinesMock.getAccountTrustlines).not.toHaveBeenCalled();
+    expect(discordMock.notifyPayoutAwaitingTrustline).not.toHaveBeenCalled();
+    expect(sdkMock.submitPayout).toHaveBeenCalledTimes(1);
+    const submitArg = sdkMock.submitPayout.mock.calls[0]?.[0] as {
+      intent: { to: string; assetCode: string; assetIssuer: string };
+    };
+    expect(submitArg.intent.to).toBe('GISSUER');
+    expect(submitArg.intent.assetIssuer).toBe('GISSUER');
+    expect(repoMocks.markPayoutConfirmed).toHaveBeenCalledWith({
+      id: 'p-burn',
+      txHash: 'tx-hash',
+    });
+  });
+
+  it('still probes the trustline for user-addressed (non-issuer) destinations', async () => {
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.confirmed).toBe(1);
+    expect(trustlinesMock.getAccountTrustlines).toHaveBeenCalledWith('GDESTINATION');
   });
 });

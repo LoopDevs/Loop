@@ -66,7 +66,14 @@ vi.mock('../../discord.js', async (importActual) => {
 });
 
 import { db } from '../../db/client.js';
-import { users, orders, watcherCursors } from '../../db/schema.js';
+import {
+  users,
+  orders,
+  watcherCursors,
+  userCredits,
+  creditTransactions,
+  pendingPayouts,
+} from '../../db/schema.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
 import { runPaymentWatcherTick } from '../../payments/watcher.js';
 import { listAccountPayments, type HorizonPayment } from '../../payments/horizon.js';
@@ -252,5 +259,155 @@ describeIf('payment-watcher integration — memo match + state transition', () =
     await runPaymentWatcherTick({ account: ACCOUNT });
     const cursors = await db.select().from(watcherCursors);
     expect(cursors).toHaveLength(0);
+  });
+});
+
+// ─── ADR 036: loop_asset redemption — debit + issuer-return burn ──────────
+
+const USDLOOP_ISSUER = process.env['LOOP_STELLAR_USDLOOP_ISSUER']!;
+
+/** USDLOOP payment fixture — issuer-pinned 12-char alphanum asset. */
+function usdloopPayment(args: {
+  id: string;
+  pagingToken: string;
+  memo: string;
+  amount?: string;
+}): HorizonPayment {
+  return {
+    id: args.id,
+    paging_token: args.pagingToken,
+    type: 'payment',
+    to: ACCOUNT,
+    asset_type: 'credit_alphanum12',
+    asset_code: 'USDLOOP',
+    asset_issuer: USDLOOP_ISSUER,
+    // 2500 minor × 100_000 stroops/minor = 250_000_000 stroops = 25.0.
+    amount: args.amount ?? '25.0000000',
+    transaction_hash: `tx-${args.id}`,
+    transaction: { memo: args.memo, memo_type: 'text', successful: true },
+  };
+}
+
+async function seedLoopAssetOrder(memo: string): Promise<SeededOrder> {
+  const user = await findOrCreateUserByEmail(`redeem-${Date.now()}-${Math.random()}@test.local`);
+  await db.update(users).set({ homeCurrency: 'USD' }).where(eq(users.id, user.id));
+  const [row] = await db
+    .insert(orders)
+    .values({
+      userId: user.id,
+      merchantId: 'amazon',
+      faceValueMinor: 2500n,
+      currency: 'USD',
+      chargeMinor: 2500n,
+      chargeCurrency: 'USD',
+      paymentMethod: 'loop_asset',
+      paymentMemo: memo,
+      wholesalePct: '70.00',
+      userCashbackPct: '5.00',
+      loopMarginPct: '25.00',
+      wholesaleMinor: 1750n,
+      userCashbackMinor: 125n,
+      loopMarginMinor: 625n,
+      state: 'pending_payment',
+    })
+    .returning({ id: orders.id });
+  if (row === undefined) throw new Error('seed: orders insert returned no row');
+  return { userId: user.id, orderId: row.id, memo };
+}
+
+describeIf('payment-watcher integration — loop_asset redemption (A4-110 + ADR 036)', () => {
+  beforeAll(async () => {
+    await ensureMigrated();
+  });
+
+  beforeEach(async () => {
+    await truncateAllTables();
+    vi.mocked(listAccountPayments).mockReset();
+  });
+
+  it('debits the mirror AND enqueues the issuer-return burn in the same txn', async () => {
+    const seeded = await seedLoopAssetOrder('redeem-memo-1');
+    // The redeeming user holds 3000 minor of mirrored USD balance.
+    await db.insert(creditTransactions).values({
+      userId: seeded.userId,
+      type: 'cashback',
+      amountMinor: 3000n,
+      currency: 'USD',
+      referenceType: 'order',
+      referenceId: crypto.randomUUID(),
+    });
+    await db.insert(userCredits).values({
+      userId: seeded.userId,
+      currency: 'USD',
+      balanceMinor: 3000n,
+    });
+    vi.mocked(listAccountPayments).mockResolvedValueOnce({
+      records: [usdloopPayment({ id: 'lp1', pagingToken: 'tok-loop-1', memo: seeded.memo })],
+      nextCursor: null,
+    });
+
+    const result = await runPaymentWatcherTick({ account: ACCOUNT });
+    expect(result.paid).toBe(1);
+
+    const [order] = await db.select().from(orders).where(eq(orders.id, seeded.orderId));
+    expect(order!.state).toBe('paid');
+
+    // Mirror debited by the charge.
+    const [credit] = await db
+      .select()
+      .from(userCredits)
+      .where(eq(userCredits.userId, seeded.userId));
+    expect(credit?.balanceMinor).toBe(500n); // 3000 - 2500
+
+    // Spend ledger row referencing the order.
+    const spends = (
+      await db.select().from(creditTransactions).where(eq(creditTransactions.userId, seeded.userId))
+    ).filter((r) => r.type === 'spend');
+    expect(spends).toHaveLength(1);
+    expect(spends[0]!.amountMinor).toBe(-2500n);
+    expect(spends[0]!.referenceId).toBe(seeded.orderId);
+
+    // ADR 036: the burn row landed in the same txn — kind='burn',
+    // destination = the USDLOOP issuer, amount at the 1:1 peg.
+    const burns = await db
+      .select()
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.orderId, seeded.orderId));
+    expect(burns).toHaveLength(1);
+    expect(burns[0]!.kind).toBe('burn');
+    expect(burns[0]!.assetCode).toBe('USDLOOP');
+    expect(burns[0]!.assetIssuer).toBe(USDLOOP_ISSUER);
+    expect(burns[0]!.toAddress).toBe(USDLOOP_ISSUER);
+    expect(burns[0]!.amountStroops).toBe(2500n * 100_000n);
+    expect(burns[0]!.state).toBe('pending');
+  });
+
+  it('missing user_credits row → NEITHER half applies (txn atomicity) and the deposit is parked for retry', async () => {
+    const seeded = await seedLoopAssetOrder('redeem-memo-2');
+    // No user_credits row — state corruption per A4-110. The
+    // markOrderPaid txn must roll back the state flip, the debit
+    // and the burn enqueue together.
+    vi.mocked(listAccountPayments).mockResolvedValueOnce({
+      records: [usdloopPayment({ id: 'lp2', pagingToken: 'tok-loop-2', memo: seeded.memo })],
+      nextCursor: null,
+    });
+
+    const result = await runPaymentWatcherTick({ account: ACCOUNT });
+    expect(result.paid).toBe(0);
+
+    const [order] = await db.select().from(orders).where(eq(orders.id, seeded.orderId));
+    expect(order!.state).toBe('pending_payment');
+
+    const ledgerRows = await db
+      .select()
+      .from(creditTransactions)
+      .where(eq(creditTransactions.userId, seeded.userId));
+    expect(ledgerRows).toHaveLength(0);
+
+    const burns = await db
+      .select()
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.orderId, seeded.orderId));
+    expect(burns).toHaveLength(0);
   });
 });

@@ -190,7 +190,13 @@ export async function markOrderFulfilled(
                   amountStroops: decision.intent.amountStroops,
                   memoText: decision.intent.memoText,
                 })
-                .onConflictDoNothing({ target: pendingPayouts.orderId })
+                .onConflictDoNothing({
+                  target: pendingPayouts.orderId,
+                  // Partial unique index (migration 0038 / ADR 036) —
+                  // the ON CONFLICT target must name the index
+                  // predicate to match `pending_payouts_order_unique`.
+                  where: sql`kind = 'order_cashback'`,
+                })
                 .returning({ id: pendingPayouts.id });
               durableRowWritten = inserted.length > 0;
             } else {
@@ -244,7 +250,13 @@ export async function markOrderFulfilled(
                 amountStroops: decision.intent.amountStroops,
                 memoText: decision.intent.memoText,
               })
-              .onConflictDoNothing({ target: pendingPayouts.orderId });
+              .onConflictDoNothing({
+                target: pendingPayouts.orderId,
+                // Partial unique index (migration 0038 / ADR 036) —
+                // the ON CONFLICT target must name the index
+                // predicate to match `pending_payouts_order_unique`.
+                where: sql`kind = 'order_cashback'`,
+              });
           } else {
             log.info(
               { orderId: order.id, reason: decision.reason },

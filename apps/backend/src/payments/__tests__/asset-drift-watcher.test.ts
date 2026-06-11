@@ -28,6 +28,12 @@ const { mocks } = vi.hoisted(() => ({
     >(async () => null),
     notifyAssetDrift: vi.fn<(args: unknown) => void>(() => undefined),
     notifyAssetDriftRecovered: vi.fn<(args: unknown) => void>(() => undefined),
+    // ADR 036: in-flight redemption burns (mirror already debited,
+    // tokens awaiting issuer-return). Default 0n = no burns in
+    // flight so the pre-ADR-036 reconciliation tests hold as-is.
+    sumInFlightBurnStroops: vi.fn<
+      (args: { assetCode: string; assetIssuer: string }) => Promise<bigint>
+    >(async () => 0n),
   },
 }));
 
@@ -37,6 +43,11 @@ vi.mock('../../credits/payout-asset.js', () => ({
 
 vi.mock('../../credits/liabilities.js', () => ({
   sumOutstandingLiability: (c: string) => mocks.sumOutstandingLiability(c),
+}));
+
+vi.mock('../../credits/pending-payouts.js', () => ({
+  sumInFlightBurnStroops: (args: { assetCode: string; assetIssuer: string }) =>
+    mocks.sumInFlightBurnStroops(args),
 }));
 
 vi.mock('../horizon-circulation.js', () => ({
@@ -73,9 +84,12 @@ beforeEach(() => {
   mocks.getAssetBalance.mockReset();
   mocks.notifyAssetDrift.mockReset();
   mocks.notifyAssetDriftRecovered.mockReset();
+  mocks.sumInFlightBurnStroops.mockReset();
   // Default: pool not configured (matches a fresh deployment).
   mocks.resolveInterestPoolAccount.mockReturnValue(null);
   mocks.getAssetBalance.mockResolvedValue(null);
+  // Default: no redemption burns in flight (ADR 036).
+  mocks.sumInFlightBurnStroops.mockResolvedValue(0n);
 });
 
 describe('runAssetDriftTick', () => {
@@ -307,5 +321,73 @@ describe('getAssetDriftState', () => {
     const after = getAssetDriftState().perAsset[0]!;
     expect(after.state).toBe('ok');
     expect(after.lastDriftStroops).toBe(before.lastDriftStroops);
+  });
+});
+
+describe('ADR 036 — burn-aware drift equation', () => {
+  it('subtracts in-flight burn stroops so a mid-redemption tick reads as zero drift', async () => {
+    mocks.configuredLoopPayableAssets.mockReturnValue([{ code: 'GBPLOOP', issuer: 'GABC' }]);
+    // Mid-redemption snapshot: the user sent 2 GBPLOOP (200_000
+    // stroops) to the deposit account; markOrderPaid already debited
+    // the mirror (5 → 3 minor) and enqueued the burn. Circulation
+    // still counts the deposit-held 200_000 stroops until the worker
+    // forwards them to the issuer.
+    mocks.getLoopAssetCirculation.mockResolvedValue({
+      stroops: 500_000n,
+      assetCode: 'GBPLOOP',
+      issuer: 'GABC',
+      asOfMs: 0,
+    });
+    mocks.sumOutstandingLiability.mockResolvedValue(3n); // 3 × 1e5 = 300_000
+    mocks.sumInFlightBurnStroops.mockResolvedValue(200_000n);
+
+    const r = await runAssetDriftTick({ thresholdStroops: 1_000n });
+    expect(r.checked).toBe(1);
+    // 500_000 − 0 (pool) − 200_000 (in-flight burn) − 300_000 = 0.
+    expect(r.samples[0]!.driftStroops).toBe(0n);
+    expect(r.samples[0]!.pendingBurnStroops).toBe(200_000n);
+    expect(r.samples[0]!.over).toBe(false);
+    expect(mocks.notifyAssetDrift).not.toHaveBeenCalled();
+    // The reader was asked about the right asset.
+    expect(mocks.sumInFlightBurnStroops).toHaveBeenCalledWith({
+      assetCode: 'GBPLOOP',
+      assetIssuer: 'GABC',
+    });
+  });
+
+  it('after the burn confirms, circulation drops and the equation stays converged', async () => {
+    mocks.configuredLoopPayableAssets.mockReturnValue([{ code: 'GBPLOOP', issuer: 'GABC' }]);
+    // Post-burn: the 200_000 stroops returned to the issuer, leaving
+    // circulation at 300_000 — matching the post-debit mirror.
+    mocks.getLoopAssetCirculation.mockResolvedValue({
+      stroops: 300_000n,
+      assetCode: 'GBPLOOP',
+      issuer: 'GABC',
+      asOfMs: 0,
+    });
+    mocks.sumOutstandingLiability.mockResolvedValue(3n);
+    mocks.sumInFlightBurnStroops.mockResolvedValue(0n);
+
+    const r = await runAssetDriftTick({ thresholdStroops: 1_000n });
+    expect(r.samples[0]!.driftStroops).toBe(0n);
+    expect(r.samples[0]!.pendingBurnStroops).toBe(0n);
+    expect(mocks.notifyAssetDrift).not.toHaveBeenCalled();
+  });
+
+  it('skips the asset (does not flip state) when the burn read fails', async () => {
+    mocks.configuredLoopPayableAssets.mockReturnValue([{ code: 'GBPLOOP', issuer: 'GABC' }]);
+    mocks.getLoopAssetCirculation.mockResolvedValue({
+      stroops: 500_000n,
+      assetCode: 'GBPLOOP',
+      issuer: 'GABC',
+      asOfMs: 0,
+    });
+    mocks.sumInFlightBurnStroops.mockRejectedValue(new Error('db down'));
+
+    const r = await runAssetDriftTick({ thresholdStroops: 1_000n });
+    expect(r.checked).toBe(0);
+    expect(r.skipped).toBe(1);
+    expect(r.samples).toHaveLength(0);
+    expect(mocks.notifyAssetDrift).not.toHaveBeenCalled();
   });
 });

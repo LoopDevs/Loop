@@ -5,12 +5,12 @@
 `#ops-alerts` Discord embed titled **"🔴 Stellar Payout Failed"**
 with fields:
 
-- `Kind` — `order_cashback` or `withdrawal`
+- `Kind` — `order_cashback`, `emission`, or `burn` (ADR 036)
 - `Asset` — `USDLOOP` / `GBPLOOP` / `EURLOOP`
 - `Amount` — stroops (1 LOOP = 10⁷ stroops)
 - `Attempts` — number of submit retries before this terminal failure
 - `User` — last-8 of `users.id`
-- `Order` — last-8 of `orders.id` (`_withdrawal_` for ADR-024 rows)
+- `Order` — last-8 of `orders.id` (`_emission_` for ADR-024/036 rows)
 - `Payout` — last-8 of `pending_payouts.id`
 - `Reason` — Stellar error code (`op_no_trust`, `op_no_destination`,
   `op_underfunded`, `op_line_full`, …) or a transient retry-exhaust
@@ -21,10 +21,11 @@ worker (ADR 016).
 
 ## Severity
 
-| Kind             | Severity | Why                                                                                                                           |
-| ---------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `withdrawal`     | **P1**   | User's cashback balance is debited (ADR-024 §3) but the payout never landed — they're owed money. Same-day response required. |
-| `order_cashback` | **P2**   | Order was fulfilled and the cashback is owed; the user expects an on-chain top-up that hasn't arrived. Next-business-day OK.  |
+| Kind             | Severity | Why                                                                                                                                                                                                                                                                                                     |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `emission`       | **P1**   | LEGACY pre-ADR-036 rows: the user's balance was debited at send (ADR-024 §3) but the payout never landed — they're owed money. Same-day response. Post-ADR-036 emissions carry no debit but the user is still awaiting an owed on-chain backfill.                                                       |
+| `burn`           | **P1**   | A redemption's issuer-return failed (ADR 036): the mirror is already debited and the received LOOP is stranded at the deposit account, so the drift watcher's in-flight-burn term stays elevated. Operator-side only — the destination is our own issuer, so failures imply config or Horizon problems. |
+| `order_cashback` | **P2**   | Order was fulfilled and the cashback is owed; the user expects an on-chain top-up that hasn't arrived. Next-business-day OK.                                                                                                                                                                            |
 
 Bump severity by one tier if `Attempts >= 5` AND the same
 `(userId, reason)` pair has fired more than once in 24h — this is a
@@ -54,12 +55,26 @@ pattern, not a one-off.
 
 ## Mitigation
 
-### Withdrawal (`kind='withdrawal'`)
+### Emission (`kind='emission'`)
 
-→ Run the compensation flow from
-[`payout-permanent-failure.md` §`kind='withdrawal'`](./payout-permanent-failure.md#kindwithdrawal--compensate).
-Result: user's balance restored, they can re-request once their
-wallet is fixed.
+- **Legacy pre-ADR-036 row** (a `type='withdrawal'` ledger debit
+  references the payout id): run the compensation flow from
+  [`payout-permanent-failure.md` §legacy-emission](./payout-permanent-failure.md#kindemission-legacy--compensate).
+  Result: user's balance restored, they can re-request once their
+  wallet is fixed.
+- **Post-ADR-036 emission** (no debit row): there is nothing to
+  compensate — the mirror was never touched. Fix the user-side or
+  operator-side cause and re-queue via `/admin/payouts/<id>/retry`,
+  or re-issue a fresh emission to a corrected address.
+
+### Burn (`kind='burn'`)
+
+The destination is the asset's own issuer, which always accepts its
+asset back — `op_no_trust` / `op_no_destination` here mean the
+pinned `asset_issuer` env var is wrong or the issuer account was
+merged. Verify `LOOP_STELLAR_<CODE>_ISSUER`, then re-queue with
+`/admin/payouts/<id>/retry`. Never compensate a burn: the mirror
+debit it pairs with is correct; the burn just needs to land.
 
 ### Order cashback (`kind='order_cashback'`)
 
@@ -96,15 +111,15 @@ Close the incident in `#ops-alerts` with a single message:
 ✅ <last-8>  → <action taken>  (<owner-handle>)
 ```
 
-For withdrawal failures, the compensation row `type='adjustment'`
+For legacy emission failures, the compensation row `type='adjustment'`
 referencing the payout id is the in-DB closure record (auditable
 via `/admin/users/:userId` ledger drill).
 
 ## Post-mortem
 
-- **Always** for any `kind='withdrawal'` failure — even a single
-  one. The user-money trust gradient is real; multiple withdrawal
-  failures eat trust faster than any other class of bug.
+- **Always** for any `kind='emission'` or `kind='burn'` failure —
+  even a single one. The user-money trust gradient is real; failures
+  in these classes eat trust faster than any other class of bug.
 - **For repeats of the same `(reason, asset)`** pair → file a UX
   ticket. `op_no_trust` repeating means the trustline-prompt UX is
   failing — fix it upstream of the alert.

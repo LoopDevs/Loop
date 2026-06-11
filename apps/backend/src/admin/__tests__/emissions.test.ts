@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Context } from 'hono';
 
 /**
- * A2-901: handler-level coverage for the admin withdrawal endpoint —
- * companion to `credits/__tests__/withdrawals.test.ts` which pins the
- * ledger primitive. These tests pin the HTTP-surface invariants:
+ * A2-901 / ADR 036: handler-level coverage for the admin emission
+ * endpoint — companion to `credits/__tests__/emissions.test.ts` which
+ * pins the queue primitive. These tests pin the HTTP-surface invariants:
  * idempotency validation, body parsing, target-user lookup, asset
  * resolution, error mapping, replay path, envelope shape, and the
  * Discord audit fanout. Same mock-db / fake-context style as the
@@ -18,14 +18,14 @@ const {
   getUserByIdMock,
   payoutAssetForMock,
   generateMemoMock,
-  WithdrawalAlreadyIssuedError,
+  EmissionAlreadyIssuedError,
   InsufficientBalanceError,
   DailyAdjustmentLimitError,
 } = vi.hoisted(() => {
-  class WithdrawalAlreadyIssuedError extends Error {
+  class EmissionAlreadyIssuedError extends Error {
     constructor(public readonly payoutId: string) {
-      super(`A withdrawal credit-tx has already been issued for payout ${payoutId}`);
-      this.name = 'WithdrawalAlreadyIssuedError';
+      super(`A matching active emission already exists for payout ${payoutId}`);
+      this.name = 'EmissionAlreadyIssuedError';
     }
   }
   class InsufficientBalanceError extends Error {
@@ -60,7 +60,7 @@ const {
     getUserByIdMock: vi.fn(),
     payoutAssetForMock: vi.fn(),
     generateMemoMock: vi.fn(() => 'memo-fixed-for-tests'),
-    WithdrawalAlreadyIssuedError,
+    EmissionAlreadyIssuedError,
     InsufficientBalanceError,
     DailyAdjustmentLimitError,
   };
@@ -80,9 +80,9 @@ vi.mock('../idempotency.js', () => ({
   withIdempotencyGuard: guardMock,
 }));
 
-vi.mock('../../credits/withdrawals.js', () => ({
-  applyAdminWithdrawal: applyMock,
-  WithdrawalAlreadyIssuedError,
+vi.mock('../../credits/emissions.js', () => ({
+  applyAdminEmission: applyMock,
+  EmissionAlreadyIssuedError,
 }));
 
 vi.mock('../../credits/adjustments.js', () => ({
@@ -110,7 +110,7 @@ vi.mock('../../db/schema.js', () => ({
   HOME_CURRENCIES: ['USD', 'GBP', 'EUR'] as const,
 }));
 
-import { adminWithdrawalHandler } from '../withdrawals.js';
+import { adminEmissionHandler } from '../emissions.js';
 
 const VALID_USER_ID = '00000000-0000-0000-0000-000000000001';
 const VALID_KEY = 'a'.repeat(32);
@@ -120,17 +120,15 @@ const GOOD_BODY = {
   amountMinor: '500',
   currency: 'USD',
   destinationAddress: VALID_DEST,
-  reason: 'user requested cash-out via support ticket #4081',
+  reason: 'backfill of failed cashback payout — ticket #4081',
 };
 
 const APPLIED = {
-  id: 'credit-tx-uuid',
   payoutId: 'payout-uuid',
   userId: VALID_USER_ID,
   currency: 'USD',
   amountMinor: 500n,
-  priorBalanceMinor: 1000n,
-  newBalanceMinor: 500n,
+  balanceMinor: 1000n,
   createdAt: new Date('2026-04-24T00:00:00Z'),
 };
 
@@ -186,23 +184,23 @@ beforeEach(() => {
   generateMemoMock.mockReset().mockReturnValue('memo-fixed-for-tests');
 });
 
-describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
+describe('adminEmissionHandler — ADR-017 + ADR-024/036 invariants', () => {
   it('400 on non-UUID userId', async () => {
-    const res = await adminWithdrawalHandler(makeCtx({ userId: 'not-a-uuid' }));
+    const res = await adminEmissionHandler(makeCtx({ userId: 'not-a-uuid' }));
     expect(res.status).toBe(400);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('VALIDATION_ERROR');
   });
 
   it('400 on missing Idempotency-Key (IDEMPOTENCY_KEY_REQUIRED)', async () => {
-    const res = await adminWithdrawalHandler(makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY }));
+    const res = await adminEmissionHandler(makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY }));
     expect(res.status).toBe(400);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
   });
 
   it('400 on too-short Idempotency-Key', async () => {
-    const res = await adminWithdrawalHandler(
+    const res = await adminEmissionHandler(
       makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: 'short' }),
     );
     expect(res.status).toBe(400);
@@ -211,7 +209,7 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
   });
 
   it('401 when admin user context is missing (fail-closed on middleware gap)', async () => {
-    const res = await adminWithdrawalHandler(
+    const res = await adminEmissionHandler(
       makeCtx({
         userId: VALID_USER_ID,
         body: GOOD_BODY,
@@ -225,7 +223,7 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
   });
 
   it('400 when the request body is not valid JSON', async () => {
-    const res = await adminWithdrawalHandler(
+    const res = await adminEmissionHandler(
       makeCtx({ userId: VALID_USER_ID, body: '__throw__', idempotencyKey: VALID_KEY }),
     );
     expect(res.status).toBe(400);
@@ -235,7 +233,7 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
   });
 
   it('400 when amountMinor is zero', async () => {
-    const res = await adminWithdrawalHandler(
+    const res = await adminEmissionHandler(
       makeCtx({
         userId: VALID_USER_ID,
         body: { ...GOOD_BODY, amountMinor: '0' },
@@ -246,7 +244,7 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
   });
 
   it('400 when amountMinor exceeds the 10M cap', async () => {
-    const res = await adminWithdrawalHandler(
+    const res = await adminEmissionHandler(
       makeCtx({
         userId: VALID_USER_ID,
         body: { ...GOOD_BODY, amountMinor: '10000001' },
@@ -257,7 +255,7 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
   });
 
   it('400 when currency is outside the USD/GBP/EUR enum', async () => {
-    const res = await adminWithdrawalHandler(
+    const res = await adminEmissionHandler(
       makeCtx({
         userId: VALID_USER_ID,
         body: { ...GOOD_BODY, currency: 'JPY' },
@@ -268,7 +266,7 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
   });
 
   it('400 when destinationAddress is not a Stellar pubkey', async () => {
-    const res = await adminWithdrawalHandler(
+    const res = await adminEmissionHandler(
       makeCtx({
         userId: VALID_USER_ID,
         body: { ...GOOD_BODY, destinationAddress: 'not-a-stellar-key' },
@@ -282,7 +280,7 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
 
   it('404 when target user does not exist', async () => {
     getUserByIdMock.mockResolvedValueOnce(null);
-    const res = await adminWithdrawalHandler(
+    const res = await adminEmissionHandler(
       makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
     );
     expect(res.status).toBe(404);
@@ -293,7 +291,7 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
 
   it('503 NOT_CONFIGURED when the LOOP asset issuer is missing in env', async () => {
     payoutAssetForMock.mockReturnValueOnce({ code: 'USDLOOP', issuer: null });
-    const res = await adminWithdrawalHandler(
+    const res = await adminEmissionHandler(
       makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
     );
     expect(res.status).toBe(503);
@@ -304,27 +302,24 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
 
   it('200 + envelope on happy path; converts minor→stroops, guard + notify fire once', async () => {
     applyMock.mockResolvedValueOnce(APPLIED);
-    const res = await adminWithdrawalHandler(
+    const res = await adminEmissionHandler(
       makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       result: {
-        id: string;
         payoutId: string;
         amountMinor: string;
         destinationAddress: string;
-        priorBalanceMinor: string;
-        newBalanceMinor: string;
+        balanceMinor: string;
       };
       audit: { replayed: boolean };
     };
-    expect(body.result.id).toBe('credit-tx-uuid');
     expect(body.result.payoutId).toBe('payout-uuid');
     expect(body.result.amountMinor).toBe('500');
     expect(body.result.destinationAddress).toBe(VALID_DEST);
-    expect(body.result.priorBalanceMinor).toBe('1000');
-    expect(body.result.newBalanceMinor).toBe('500');
+    // ADR 036: the mirror balance is reported, not changed.
+    expect(body.result.balanceMinor).toBe('1000');
     expect(body.audit.replayed).toBe(false);
 
     // Stroops = minor * 100_000; 500 * 100_000 = 50_000_000.
@@ -349,21 +344,19 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
   it('replays the stored snapshot on duplicate Idempotency-Key', async () => {
     const priorEnvelope = {
       result: {
-        id: 'credit-tx-uuid',
         payoutId: 'payout-uuid',
         userId: VALID_USER_ID,
         currency: 'USD',
         amountMinor: '500',
         destinationAddress: VALID_DEST,
-        priorBalanceMinor: '1000',
-        newBalanceMinor: '500',
+        balanceMinor: '1000',
         createdAt: APPLIED.createdAt.toISOString(),
       },
       audit: { replayed: true },
     };
     guardMock.mockResolvedValueOnce({ replayed: true, status: 200, body: priorEnvelope });
 
-    const res = await adminWithdrawalHandler(
+    const res = await adminEmissionHandler(
       makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
     );
     expect(res.status).toBe(200);
@@ -371,9 +364,9 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
     expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({ replayed: true }));
   });
 
-  it('400 INSUFFICIENT_BALANCE when the ledger layer rejects the debit', async () => {
+  it('400 INSUFFICIENT_BALANCE when the unbacked-emission guard rejects', async () => {
     applyMock.mockRejectedValueOnce(new InsufficientBalanceError('USD', 100n, 500n));
-    const res = await adminWithdrawalHandler(
+    const res = await adminEmissionHandler(
       makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
     );
     expect(res.status).toBe(400);
@@ -382,42 +375,20 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
     expect(notifyMock).not.toHaveBeenCalled();
   });
 
-  it('409 WITHDRAWAL_ALREADY_ISSUED when the semantic duplicate guard trips', async () => {
-    applyMock.mockRejectedValueOnce(new WithdrawalAlreadyIssuedError('payout-uuid'));
-    const res = await adminWithdrawalHandler(
+  it('409 EMISSION_ALREADY_ISSUED when the semantic duplicate guard trips', async () => {
+    applyMock.mockRejectedValueOnce(new EmissionAlreadyIssuedError('payout-uuid'));
+    const res = await adminEmissionHandler(
       makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
     );
     expect(res.status).toBe(409);
     const body = (await res.json()) as { code: string };
-    expect(body.code).toBe('WITHDRAWAL_ALREADY_ISSUED');
+    expect(body.code).toBe('EMISSION_ALREADY_ISSUED');
     expect(notifyMock).not.toHaveBeenCalled();
   });
 
-  // ADM-01 (2026-06-30 cold audit): withdrawals had no daily aggregate
-  // cap at all — this pins the new 429 mapping, mirroring the sibling
-  // adjustment/compensation handlers' response shape.
-  it('429 DAILY_LIMIT_EXCEEDED when the ledger layer reports the daily withdrawal cap hit', async () => {
-    applyMock.mockRejectedValueOnce(
-      new DailyAdjustmentLimitError(
-        'USD',
-        new Date('2026-06-30T00:00:00Z'),
-        99_999_900n,
-        100_000_000n,
-        200n,
-      ),
-    );
-    const res = await adminWithdrawalHandler(
-      makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
-    );
-    expect(res.status).toBe(429);
-    const body = (await res.json()) as { code: string };
-    expect(body.code).toBe('DAILY_LIMIT_EXCEEDED');
-    expect(notifyMock).not.toHaveBeenCalled();
-  });
-
-  it('500 INTERNAL_ERROR on unexpected ledger-layer failure', async () => {
+  it('500 INTERNAL_ERROR on unexpected queue-layer failure', async () => {
     applyMock.mockRejectedValueOnce(new Error('unexpected DB timeout'));
-    const res = await adminWithdrawalHandler(
+    const res = await adminEmissionHandler(
       makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
     );
     expect(res.status).toBe(500);

@@ -29,8 +29,12 @@ interface PayoutIntent {
 
 /**
  * Writes a pending payout row from an intent. Idempotent against a
- * replay of the same order via the UNIQUE(order_id) index — a second
- * call returns null and leaves the prior row untouched.
+ * replay of the same order via the partial unique index
+ * `pending_payouts_order_unique (order_id) WHERE kind='order_cashback'`
+ * — a second call returns null and leaves the prior row untouched.
+ * (Partial since migration 0038 / ADR 036 so a redeemed order can
+ * also carry its `kind='burn'` row; the ON CONFLICT target must name
+ * the index predicate to match.)
  */
 export async function insertPayout(args: {
   userId: string;
@@ -48,9 +52,42 @@ export async function insertPayout(args: {
       amountStroops: args.intent.amountStroops,
       memoText: args.intent.memoText,
     })
-    .onConflictDoNothing({ target: pendingPayouts.orderId })
+    .onConflictDoNothing({
+      target: pendingPayouts.orderId,
+      where: sql`kind = 'order_cashback'`,
+    })
     .returning();
   return row ?? null;
+}
+
+/**
+ * ADR 036: sum of `amount_stroops` across in-flight `kind='burn'`
+ * rows for one asset. "In-flight" = pending / submitted / failed —
+ * the corresponding LOOP has already been debited from the
+ * `user_credits` mirror (markOrderPaid) and is parked at the
+ * deposit/operator account awaiting the issuer-return burn, so it is
+ * no longer user-circulating but still counts toward on-chain
+ * issuance until the burn confirms. The asset-drift watcher subtracts
+ * this from circulation so redemptions don't read as drift. Confirmed
+ * burns are excluded — the issuer-return already removed them from
+ * circulation on-chain.
+ */
+export async function sumInFlightBurnStroops(args: {
+  assetCode: string;
+  assetIssuer: string;
+}): Promise<bigint> {
+  const [row] = await db
+    .select({
+      total: sql<string>`COALESCE(SUM(${pendingPayouts.amountStroops}), 0)::text`,
+    })
+    .from(pendingPayouts)
+    .where(
+      sql`${pendingPayouts.kind} = 'burn'
+        AND ${pendingPayouts.assetCode} = ${args.assetCode}
+        AND ${pendingPayouts.assetIssuer} = ${args.assetIssuer}
+        AND ${pendingPayouts.state} IN ('pending', 'submitted', 'failed')`,
+    );
+  return BigInt(row?.total ?? '0');
 }
 
 /**

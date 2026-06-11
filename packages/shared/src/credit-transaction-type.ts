@@ -21,6 +21,13 @@
  * - `cashback` / `interest` / `refund` → always positive.
  * - `spend` / `withdrawal` → always negative.
  * - `adjustment` → signed; ops discretion (correcting a prior bug).
+ *
+ * ADR 036: `withdrawal` is no longer written by any live path — the
+ * ADR-024 writer was re-scoped to *emission*, which never debits the
+ * mirror and writes no ledger row. The type stays in the tuple for
+ * (a) historical pre-ADR-036 rows (they discriminate
+ * legacy/compensable emission payouts) and (b) the future fiat-out
+ * redemption rail, which WILL debit (ADR 036 §Decision 4).
  */
 export const CREDIT_TRANSACTION_TYPES = [
   'cashback',

@@ -35,13 +35,15 @@ src/
 ├── credits/
 │   ├── payout-asset.ts ← home-currency → LOOP asset code + issuer lookup (ADR 015)
 │   ├── payout-builder.ts ← Pure payout-intent decision (pay vs skip) for markOrderFulfilled (ADR 015)
-│   ├── pending-payouts.ts ← Pending-payout repo (insert / list / state transitions) (ADR 015/016)
+│   ├── pending-payouts.ts ← Pending-payout repo (insert / list / state transitions / in-flight burn sum) (ADR 015/016/036)
+│   ├── emissions.ts    ← Admin emission queue primitive — no mirror debit (ADR 024 re-scoped by ADR 036)
+│   ├── payout-compensation.ts ← Compensation for LEGACY debited emissions only (ADR 024 §5 / ADR 036)
 │   └── accrue-interest.ts ← Daily APY accrual primitive on user_credits
 ├── orders/
 │   ├── handler.ts      ← Legacy CTX-proxy order creation
 │   ├── loop-handler.ts ← Loop-native order creation with FX-pin (ADR 010 + 015)
 │   ├── repo.ts         ← Order INSERT + cashback-split computation
-│   ├── transitions.ts  ← markOrderPaid / markOrderProcuring / markOrderFulfilled (writes ledger + pending_payouts inside one txn)
+│   ├── transitions.ts  ← markOrderPaid (loop_asset: mirror debit + issuer-return burn enqueue, ADR 036) / markOrderProcuring / markOrderFulfilled (writes ledger + pending_payouts inside one txn)
 │   ├── procurement.ts  ← paid → procuring → fulfilled worker (USDC-default, XLM-floor fallback, ADR 015)
 │   ├── procurement-redemption.ts ← CTX gift-card detail fetch + waitForRedemption (SSE-first, polling fallback)
 │   ├── redemption-backfill.ts ← Sweeper re-fetching redemption payloads for fulfilled orders that persisted nulls (migration 0034; pages ops after 10 attempts → runbooks/redemption-backfill-exhausted.md)

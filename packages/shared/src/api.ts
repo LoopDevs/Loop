@@ -98,6 +98,8 @@ export const ApiErrorCode = {
   HOME_CURRENCY_LOCKED: 'HOME_CURRENCY_LOCKED',
   IN_FLIGHT_ORDERS: 'IN_FLIGHT_ORDERS',
   PENDING_PAYOUTS: 'PENDING_PAYOUTS',
+  // Kept under the legacy name deliberately: only pre-ADR-036
+  // withdrawal-era payouts (at-send-debited) can block DSR deletion.
   FAILED_UNCOMPENSATED_WITHDRAWALS: 'FAILED_UNCOMPENSATED_WITHDRAWALS',
   // PLAT-30-03 (2026-06-30 cold audit): DSR self-delete blocks on a
   // non-zero user_credits balance in any currency.
@@ -114,7 +116,11 @@ export const ApiErrorCode = {
   ORDER_USER_MISMATCH: 'ORDER_USER_MISMATCH',
   REFUND_CURRENCY_MISMATCH: 'REFUND_CURRENCY_MISMATCH',
   REFUND_EXCEEDS_CHARGE: 'REFUND_EXCEEDS_CHARGE',
-  WITHDRAWAL_ALREADY_ISSUED: 'WITHDRAWAL_ALREADY_ISSUED',
+  // ADR 036: emission (ex-ADR-024 withdrawal) duplicate-intent fence.
+  // Replaces the retired WITHDRAWAL_ALREADY_ISSUED — the withdrawal
+  // route + `credits/withdrawals.ts` are gone, superseded entirely by
+  // the emission primitive.
+  EMISSION_ALREADY_ISSUED: 'EMISSION_ALREADY_ISSUED',
   ALREADY_COMPENSATED: 'ALREADY_COMPENSATED',
   PAYOUT_NOT_COMPENSABLE: 'PAYOUT_NOT_COMPENSABLE',
   NOT_CONFIGURED: 'NOT_CONFIGURED',

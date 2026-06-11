@@ -3,14 +3,14 @@
  *
  * Lifted out of `./admin-ops-tail.ts`. The audit-tail surface is
  * the read-side companion to the ADR-017 admin-write contract —
- * every credit-adjustment / refund / withdrawal / cashback-config
+ * every credit-adjustment / refund / emission / cashback-config
  * upsert lands a row in `admin_idempotency_keys`, and this endpoint
  * is the "Recent admin activity" feed the admin dashboard surfaces
  * so ops can audit without scrolling the Discord channel.
  *
  * Pulling it into its own slice co-locates the audit-read with the
  * write surfaces it mirrors (each of which is already its own
- * sibling slice — credit-writes, withdrawal-write, cashback-config-
+ * sibling slice — credit-writes, emission-write, cashback-config-
  * upsert) rather than letting it sit in the residual ops-tail.
  *
  * Path in the slice:
