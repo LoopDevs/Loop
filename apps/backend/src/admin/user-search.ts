@@ -27,6 +27,7 @@
  * `stellarAddress`, `ctxUserId`, balances — those live on the
  * drill-down endpoint (ADR 017).
  */
+import { createHash } from 'node:crypto';
 import type { Context } from 'hono';
 import { desc, ilike } from 'drizzle-orm';
 import { db } from '../db/client.js';
@@ -83,6 +84,15 @@ export async function adminUserSearchHandler(c: Context): Promise<Response> {
   const escaped = q.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
   const pattern = `%${escaped}%`;
 
+  // The raw email fragment is PII — the read-audit sanitizer
+  // (`sanitizeAdminReadQueryString`) redacts `q` before query strings
+  // leave the process, so this handler's own log lines must not
+  // reintroduce it. Log a short stable hash + the length instead:
+  // ops can still correlate repeated searches without the search
+  // term being retained off-host.
+  const qHash = createHash('sha256').update(q).digest('hex').slice(0, 16);
+  const qLength = q.length;
+
   try {
     // Fetch one extra row to detect truncation without a COUNT(*).
     const rows = await db
@@ -110,13 +120,13 @@ export async function adminUserSearchHandler(c: Context): Promise<Response> {
       createdAt: r.createdAt.toISOString(),
     }));
 
-    log.debug({ q, hits: results.length, truncated }, 'admin user-search served');
+    log.debug({ qHash, qLength, hits: results.length, truncated }, 'admin user-search served');
     return c.json<AdminUserSearchResponse>({ users: results, truncated });
   } catch (err) {
     // A2-507: keep the handler-scoped logger bindings instead of
     // letting the global onError swallow them. Ops correlates a failed
     // search to this log line via the request-id.
-    log.error({ err, q }, 'admin user-search query failed');
+    log.error({ err, qHash, qLength }, 'admin user-search query failed');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to search users' }, 500);
   }
 }

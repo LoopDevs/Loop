@@ -29,7 +29,10 @@ const state = vi.hoisted(() => ({
   /** Result for deleteUserViaAnonymisation. */
   deleteResult: { ok: true } as
     | { ok: true }
-    | { ok: false; blockedBy: 'pending_payouts' | 'in_flight_orders' },
+    | {
+        ok: false;
+        blockedBy: 'pending_payouts' | 'in_flight_orders' | 'failed_uncompensated_withdrawals';
+      },
   /** When set, deleteUserViaAnonymisation throws → 500 path. */
   deleteError: null as Error | null,
 }));
@@ -207,6 +210,16 @@ describe('dsrDeleteHandler', () => {
     const body = (await res.json()) as { code: string; message: string };
     expect(body.code).toBe('IN_FLIGHT_ORDERS');
     expect(body.message).toContain('mid-fulfilment');
+  });
+
+  it('A4-078: returns 409 FAILED_UNCOMPENSATED_WITHDRAWALS with a contact-support message', async () => {
+    state.deleteResult = { ok: false, blockedBy: 'failed_uncompensated_withdrawals' };
+    const res = await dsrDeleteHandler(makeCtx());
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('FAILED_UNCOMPENSATED_WITHDRAWALS');
+    expect(body.message).toContain('contact support');
+    expect(body.message).toContain('failed withdrawal');
   });
 
   it('500s when the anonymisation helper throws', async () => {

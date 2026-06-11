@@ -58,7 +58,17 @@ export async function markOrderFulfilled(
   orderId: string,
   opts: { ctxOrderId: string; redemption?: RedemptionPayload },
 ): Promise<Order | null> {
-  return db.transaction(async (tx) => {
+  // A4-023 peg-break alert payload, captured inside the transaction
+  // but emitted only after it commits — firing the Discord notify
+  // from within the txn callback meant a rollback (e.g. a failed
+  // pending_payouts insert) still alerted ops about ledger writes
+  // that never landed.
+  type PegBreakAlert = Parameters<typeof notifyPegBreakOnFulfillment>[0];
+  const txnResult = await db.transaction<{
+    order: Order;
+    pegBreak: PegBreakAlert | null;
+  } | null>(async (tx) => {
+    let pegBreak: PegBreakAlert | null = null;
     const updated = await tx
       .update(orders)
       .set({
@@ -136,25 +146,18 @@ export async function markOrderFulfilled(
           // (above), but on-chain payout is skipped. Surface
           // beyond a log line — emit a Discord alert so ops can
           // manually compensate the on-chain side and restore
-          // the 1:1 invariant. Fire-and-forget after the txn
-          // commits implicitly (notifyPegBreakOnFulfillment is
-          // also fire-and-forget); a Discord blip never blocks
-          // the order's transition.
-          log.warn(
-            {
-              orderId: order.id,
-              chargeCurrency: order.chargeCurrency,
-              userHomeCurrency: userRow.homeCurrency,
-            },
-            'A4-023: order charge currency diverged from user home currency — on-chain payout skipped, peg break Discord notification sent',
-          );
-          notifyPegBreakOnFulfillment({
+          // the 1:1 invariant. Capture the payload here; the log
+          // + fire-and-forget notify happen after the transaction
+          // resolves (see below) so a rollback can't alert on
+          // ledger writes that never committed. A Discord blip
+          // never blocks the order's transition.
+          pegBreak = {
             orderId: order.id,
             userId: order.userId,
             chargeCurrency: order.chargeCurrency,
             userHomeCurrency: userRow.homeCurrency,
             cashbackMinor: order.userCashbackMinor.toString(),
-          });
+          };
         } else {
           const decision = buildPayoutIntent({
             stellarAddress: userRow.stellarAddress,
@@ -183,6 +186,19 @@ export async function markOrderFulfilled(
         }
       }
     }
-    return order;
+    return { order, pegBreak };
   });
+  if (txnResult === null) return null;
+  if (txnResult.pegBreak !== null) {
+    log.warn(
+      {
+        orderId: txnResult.pegBreak.orderId,
+        chargeCurrency: txnResult.pegBreak.chargeCurrency,
+        userHomeCurrency: txnResult.pegBreak.userHomeCurrency,
+      },
+      'A4-023: order charge currency diverged from user home currency — on-chain payout skipped, peg break Discord notification sent',
+    );
+    notifyPegBreakOnFulfillment(txnResult.pegBreak);
+  }
+  return txnResult.order;
 }

@@ -87,23 +87,28 @@ export async function getCashbackHistoryHandler(c: Context): Promise<Response> {
     before === undefined
       ? eq(creditTransactions.userId, user.id)
       : and(eq(creditTransactions.userId, user.id), lt(creditTransactions.createdAt, before));
-  const rows = await db
-    .select()
-    .from(creditTransactions)
-    .where(predicate)
-    .orderBy(desc(creditTransactions.createdAt))
-    .limit(limit);
-  return c.json<CashbackHistoryResponse>({
-    entries: rows.map((row) => ({
-      id: row.id,
-      type: row.type,
-      amountMinor: row.amountMinor.toString(),
-      currency: row.currency,
-      referenceType: row.referenceType,
-      referenceId: row.referenceId,
-      createdAt: row.createdAt.toISOString(),
-    })),
-  });
+  try {
+    const rows = await db
+      .select()
+      .from(creditTransactions)
+      .where(predicate)
+      .orderBy(desc(creditTransactions.createdAt))
+      .limit(limit);
+    return c.json<CashbackHistoryResponse>({
+      entries: rows.map((row) => ({
+        id: row.id,
+        type: row.type,
+        amountMinor: row.amountMinor.toString(),
+        currency: row.currency,
+        referenceType: row.referenceType,
+        referenceId: row.referenceId,
+        createdAt: row.createdAt.toISOString(),
+      })),
+    });
+  } catch (err) {
+    log.error({ err, userId: user.id }, 'Cashback-history query failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load cashback history' }, 500);
+  }
 }
 
 /**
@@ -212,21 +217,26 @@ export async function getUserCreditsHandler(c: Context): Promise<Response> {
     return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
 
-  const rows = await db
-    .select({
-      currency: userCredits.currency,
-      balanceMinor: userCredits.balanceMinor,
-      updatedAt: userCredits.updatedAt,
-    })
-    .from(userCredits)
-    .where(eq(userCredits.userId, user.id))
-    .orderBy(userCredits.currency);
+  try {
+    const rows = await db
+      .select({
+        currency: userCredits.currency,
+        balanceMinor: userCredits.balanceMinor,
+        updatedAt: userCredits.updatedAt,
+      })
+      .from(userCredits)
+      .where(eq(userCredits.userId, user.id))
+      .orderBy(userCredits.currency);
 
-  return c.json<UserCreditsResponse>({
-    credits: rows.map((r) => ({
-      currency: r.currency,
-      balanceMinor: r.balanceMinor.toString(),
-      updatedAt: r.updatedAt.toISOString(),
-    })),
-  });
+    return c.json<UserCreditsResponse>({
+      credits: rows.map((r) => ({
+        currency: r.currency,
+        balanceMinor: r.balanceMinor.toString(),
+        updatedAt: r.updatedAt.toISOString(),
+      })),
+    });
+  } catch (err) {
+    log.error({ err, userId: user.id }, 'User-credits query failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to load credits' }, 500);
+  }
 }

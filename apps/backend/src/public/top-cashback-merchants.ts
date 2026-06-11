@@ -20,7 +20,7 @@
  *     `max-age=60` on the fallback path.
  */
 import type { Context } from 'hono';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 // Response shape lives in `@loop/shared` alongside the web's consumer
 // (ADR 019 single-source rule). Re-exported below for existing backend
 // callers that import the symbol relative to this module.
@@ -57,7 +57,11 @@ async function compute(limit: number): Promise<PublicTopCashbackMerchantsRespons
     })
     .from(merchantCashbackConfigs)
     .where(eq(merchantCashbackConfigs.active, true))
-    .orderBy(desc(merchantCashbackConfigs.userCashbackPct))) as ConfigRow[];
+    // Drizzle surfaces `user_cashback_pct` as a string; sort on an
+    // explicit numeric cast so the ordering can never degrade to
+    // lexicographic ("9.50" ranking above "10.00") regardless of how
+    // the column is typed at the SQL layer.
+    .orderBy(desc(sql`${merchantCashbackConfigs.userCashbackPct}::numeric`))) as ConfigRow[];
 
   const { merchantsById } = getMerchants();
 

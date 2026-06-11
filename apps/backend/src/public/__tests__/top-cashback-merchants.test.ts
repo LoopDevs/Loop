@@ -36,6 +36,13 @@ vi.mock('drizzle-orm', async () => {
     ...actual,
     eq: (col: unknown, value: unknown) => ({ __eq: true, col, value }),
     desc: (col: unknown) => ({ __desc: true, col }),
+    // Tagged-template recorder so the numeric-cast test below can
+    // assert what the orderBy fragment was built from.
+    sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+      __sql: true,
+      text: strings.join('?'),
+      values,
+    }),
   };
 });
 
@@ -167,6 +174,22 @@ describe('publicTopCashbackMerchantsHandler', () => {
       await publicTopCashbackMerchantsHandler(makeCtx({ limit: '0' }))
     ).json()) as { merchants: unknown[] };
     expect(tiny.merchants).toHaveLength(1);
+  });
+
+  it('orders by user_cashback_pct cast to ::numeric so "9.50" never outranks "10.00"', async () => {
+    // The column reaches the driver as a string (drizzle numeric
+    // mapping) — an explicit ::numeric cast in the ORDER BY pins the
+    // sort to numeric semantics instead of trusting the column type.
+    await publicTopCashbackMerchantsHandler(makeCtx());
+    const calls = orderByMock.mock.calls as unknown[][];
+    const arg = calls[calls.length - 1]![0] as {
+      __desc: boolean;
+      col: { __sql: boolean; text: string; values: unknown[] };
+    };
+    expect(arg.__desc).toBe(true);
+    expect(arg.col.__sql).toBe(true);
+    expect(arg.col.text).toContain('::numeric');
+    expect(arg.col.values).toContain('merchant_cashback_configs.user_cashback_pct');
   });
 
   it('never 500s — DB throws serve empty list on bootstrap with max-age=60', async () => {

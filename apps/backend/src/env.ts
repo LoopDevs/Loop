@@ -4,6 +4,18 @@ import { DEFAULT_CLIENT_IDS, STELLAR_PUBKEY_REGEX } from '@loop/shared';
 const STELLAR_ADDRESS_MESSAGE = 'must be a valid Stellar public key (G...)';
 
 /**
+ * Circle's canonical USDC issuer account on Stellar mainnet. Used by
+ * the boot-time tripwire below — a launch-runbook typo once shipped a
+ * wrong issuer address, which makes the payment watcher silently
+ * ignore every legitimate USDC deposit.
+ */
+export const CANONICAL_MAINNET_USDC_ISSUER =
+  'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN';
+
+/** Stellar mainnet (pubnet) network passphrase. */
+const MAINNET_NETWORK_PASSPHRASE = 'Public Global Stellar Network ; September 2015';
+
+/**
  * Parses a process.env boolean the way operators actually write them.
  *
  * `z.coerce.boolean()` is a footgun here: it uses JavaScript's truthy
@@ -319,10 +331,13 @@ export const EnvSchema = z.object({
     .regex(STELLAR_PUBKEY_REGEX, { message: STELLAR_ADDRESS_MESSAGE })
     .optional(),
 
-  // USDC issuer account for the watcher's asset-match guard. Centre
+  // USDC issuer account for the watcher's asset-match guard. Circle
   // on mainnet: GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN.
   // Defaults to undefined → watcher accepts any USDC issuer (MVP
   // leniency; tighten once operators have verified the deployment).
+  // `parseEnv` warns at boot when this is set on mainnet to anything
+  // other than the canonical Circle issuer (launch-runbook typo
+  // tripwire — see CANONICAL_MAINNET_USDC_ISSUER above).
   LOOP_STELLAR_USDC_ISSUER: z
     .string()
     .regex(STELLAR_PUBKEY_REGEX, { message: STELLAR_ADDRESS_MESSAGE })
@@ -635,6 +650,27 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
       `[env] ${name}=${actual} differs from @loop/shared DEFAULT_CLIENT_IDS (${expected}). ` +
         `The web bundle sends X-Client-Id from the shared constant, so authenticated requests will ` +
         `fail the X-Client-Id allowlist (audit A-036) until apps/web is rebuilt with a matching value.`,
+    );
+  }
+
+  // Launch-runbook tripwire: a typo'd LOOP_STELLAR_USDC_ISSUER once
+  // shipped to production — the watcher's issuer-match guard then
+  // silently ignores every legitimate USDC deposit, which presents as
+  // "payments never arrive" rather than an error. On mainnet, warn
+  // (don't throw — a deliberate operator may genuinely point at a
+  // non-Circle asset, e.g. a private network fork) whenever the value
+  // differs from Circle's canonical issuer.
+  if (
+    parsed.data.LOOP_STELLAR_USDC_ISSUER !== undefined &&
+    parsed.data.LOOP_STELLAR_NETWORK_PASSPHRASE === MAINNET_NETWORK_PASSPHRASE &&
+    parsed.data.LOOP_STELLAR_USDC_ISSUER !== CANONICAL_MAINNET_USDC_ISSUER
+  ) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[env] LOOP_STELLAR_USDC_ISSUER=${parsed.data.LOOP_STELLAR_USDC_ISSUER} differs from ` +
+        `Circle's canonical mainnet USDC issuer (${CANONICAL_MAINNET_USDC_ISSUER}) while the ` +
+        `Stellar network passphrase is mainnet. If this is a typo, the payment watcher will ` +
+        `silently ignore every legitimate USDC deposit. Double-check the value before serving traffic.`,
     );
   }
 

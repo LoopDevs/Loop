@@ -9,7 +9,7 @@ vi.hoisted(() => {
   }
 });
 
-import { parseEnv } from '../env.js';
+import { parseEnv, CANONICAL_MAINNET_USDC_ISSUER } from '../env.js';
 
 // Minimum viable env — everything else is optional or has a default.
 // `DATABASE_URL` is required (ADR 012) so every parse run needs it;
@@ -214,6 +214,40 @@ describe('parseEnv', () => {
   it('does not enforce the allowlist in development or test', () => {
     expect(() => parseEnv({ ...base, NODE_ENV: 'development' })).not.toThrow();
     expect(() => parseEnv({ ...base, NODE_ENV: 'test' })).not.toThrow();
+  });
+
+  // Launch-runbook tripwire: a typo'd USDC issuer on mainnet makes
+  // the payment watcher silently ignore every legitimate deposit.
+  describe('LOOP_STELLAR_USDC_ISSUER mainnet tripwire', () => {
+    const NON_CANONICAL_ISSUER = `G${'B'.repeat(55)}`;
+    const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
+
+    it('warns (does not throw) when a mainnet config uses a non-canonical USDC issuer', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      parseEnv({ ...base, LOOP_STELLAR_USDC_ISSUER: NON_CANONICAL_ISSUER });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('LOOP_STELLAR_USDC_ISSUER'));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(CANONICAL_MAINNET_USDC_ISSUER));
+      warn.mockRestore();
+    });
+
+    it('stays quiet for the canonical Circle issuer on mainnet', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      parseEnv({ ...base, LOOP_STELLAR_USDC_ISSUER: CANONICAL_MAINNET_USDC_ISSUER });
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it('stays quiet off mainnet (testnet passphrase) and when the issuer is unset', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      parseEnv({
+        ...base,
+        LOOP_STELLAR_USDC_ISSUER: NON_CANONICAL_ISSUER,
+        LOOP_STELLAR_NETWORK_PASSPHRASE: TESTNET_PASSPHRASE,
+      });
+      parseEnv({ ...base });
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
   });
 
   // A2-1605: DISABLE_RATE_LIMITING is a test-harness flag; production
