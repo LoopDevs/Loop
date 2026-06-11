@@ -69,6 +69,7 @@ apps/mobile      Capacitor v8 shell — loads static web build from disk
 apps/web         React Router v7 + Vite — SSR for loopfinance.io, static export for mobile
 apps/backend     TypeScript + Hono — proxies upstream CTX API, caches merchants, clusters locations
 packages/shared  Shared TypeScript types (Merchant, Order, ClusterResponse, admin response shapes)
+tools/ctx-catalog CTX catalog operator tooling (supplier pulls, allocators, media pipeline, QC) — see its README; archive/ holds consumed one-shot passes
 postgres         Off-chain credits ledger (Drizzle ORM + Postgres-on-Fly, ADR 012 / ADR 009)
 stellar          On-chain LOOP-asset issuance + USDC/XLM operator accounts (ADR 015 / ADR 016)
 upstream API     CTX gift card provider at spend.ctx.com — merchant catalog, auth, gift card orders
