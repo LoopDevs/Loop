@@ -1,3 +1,4 @@
+import { createPrivateKey } from 'node:crypto';
 import { z } from 'zod';
 import { DEFAULT_CLIENT_IDS, STELLAR_PUBKEY_REGEX } from '@loop/shared';
 
@@ -83,6 +84,42 @@ function signingKeySchema(varName: string): z.ZodOptional<z.ZodString> {
     })
     .optional();
 }
+
+/**
+ * Validates an RSA private key in PEM (PKCS8) form at boot (ADR 030
+ * Phase A). Two-step:
+ *
+ * 1. `transform` — normalise escaped `\n` sequences to real newlines.
+ *    PEM-in-env-var is a classic deployment footgun: some secret
+ *    stores flatten the multiline value to a single line with literal
+ *    backslash-n, which `createPrivateKey` rejects. Normalising here
+ *    means consumers (auth/signer.ts) always see a parseable PEM.
+ * 2. `superRefine` — actually parse the key with node:crypto and
+ *    require `asymmetricKeyType === 'rsa'`. A malformed PEM (or an
+ *    EC/Ed25519 key pasted by mistake) fails `parseEnv()` and the
+ *    boot, rather than surfacing as a 500 on the first token mint.
+ */
+const rsaPrivateKeyPem = z
+  .string()
+  .transform((v) => v.replace(/\\n/g, '\n'))
+  .superRefine((pem, ctx) => {
+    try {
+      const key = createPrivateKey(pem);
+      if (key.asymmetricKeyType !== 'rsa') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `must be an RSA private key, got ${key.asymmetricKeyType ?? 'unknown'}`,
+        });
+      }
+    } catch {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'must be a PEM-encoded (PKCS8) RSA private key — generate with ' +
+          '`openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048`',
+      });
+    }
+  });
 
 /**
  * Environment schema. Exported so tests can exercise it directly if they
@@ -336,6 +373,24 @@ export const EnvSchema = z.object({
   // the current. Drop PREVIOUS after the TTL elapses.
   LOOP_JWT_SIGNING_KEY: signingKeySchema('LOOP_JWT_SIGNING_KEY'),
   LOOP_JWT_SIGNING_KEY_PREVIOUS: signingKeySchema('LOOP_JWT_SIGNING_KEY_PREVIOUS'),
+
+  // RS256 signing keys (ADR 030 Phase A). PEM-encoded PKCS8 RSA
+  // private key; when set, newly-minted Loop JWTs sign RS256 with a
+  // `kid` header (RFC 7638 thumbprint) and the matching public keys
+  // publish at `GET /.well-known/jwks.json` so an external wallet
+  // provider (Privy custom auth — or any JWKS consumer) can verify
+  // Loop's tokens without sharing a secret. Unset → HS256 signing
+  // via LOOP_JWT_SIGNING_KEY continues unchanged (rollout safety).
+  //
+  // Generate: `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048`
+  // Rotation: set LOOP_JWT_RSA_PRIVATE_KEY to the new PEM and
+  // LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS to the old one for the
+  // refresh-token TTL window (30 days); both public keys serve in the
+  // JWKS, the signer always uses the current. Malformed / non-RSA
+  // PEMs fail boot (see `rsaPrivateKeyPem` above). Escaped "\n"
+  // sequences are normalised to newlines at parse time.
+  LOOP_JWT_RSA_PRIVATE_KEY: rsaPrivateKeyPem.optional(),
+  LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS: rsaPrivateKeyPem.optional(),
 
   // Admin step-up signing key (ADR 028, A4-063). Separate from
   // LOOP_JWT_SIGNING_KEY so a JWT-key compromise doesn't widen to

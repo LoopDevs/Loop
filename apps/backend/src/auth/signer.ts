@@ -1,24 +1,38 @@
 /**
- * Pluggable JWT signer abstraction (Tranche-2 prep — ADR 030 Track A.1).
+ * Pluggable JWT signer abstraction (ADR 030 Phase A — Track A.1
+ * shipped the abstraction, Track A.2 shipped RS256).
  *
- * Today Loop signs every JWT with HS256 + a shared secret. ADR 030
- * targets a Privy-integration migration to RS256 with a JWKS publish
- * endpoint at `/.well-known/jwks.json` so Privy's Custom Auth Provider
- * can verify Loop's tokens without sharing the signing key.
+ * Two concrete signers:
  *
- * This module decouples the algorithm choice from `tokens.ts`'s
- * sign/verify entry points so the swap is mechanical when Track A.2
- * lands. The HS256 path is the only concrete implementation today;
- * the `Alg` union already carries `'RS256'` so the dispatch in
- * `tokens.ts::verifyLoopToken` can route on it, but `Rs256Signer`
- * isn't built until Track A.2 needs it.
+ * - `Rs256Signer` — preferred when `LOOP_JWT_RSA_PRIVATE_KEY` (PKCS8
+ *   PEM, boot-validated in env.ts) is configured. Newly-minted Loop
+ *   JWTs sign RS256 with a `kid` header (RFC 7638 SHA-256 JWK
+ *   thumbprint of the public key) so an external wallet provider
+ *   (Privy Custom Auth, or any JWKS-consuming verifier — ADR 030)
+ *   can verify Loop's tokens against `/.well-known/jwks.json`
+ *   without Loop sharing a secret.
+ * - `Hs256Signer` — the legacy shared-secret path
+ *   (`LOOP_JWT_SIGNING_KEY`). Still the active signer when no RSA
+ *   key is configured (rollout safety), and always available as a
+ *   verifier while the HS256 env vars remain set so outstanding
+ *   tokens survive the HS256 → RS256 cutover window.
  *
- * Verification dispatches on the JWT header's `alg` field — during a
- * future HS256 → RS256 rotation, both algorithms must verify since
- * 15-minute access tokens minted under the old algorithm survive
- * past the cutover.
+ * Verification dispatches on the JWT header's `alg` field — during
+ * the HS256 → RS256 cutover, both algorithms verify since 15-minute
+ * access tokens (and 30-day refresh tokens) minted under the old
+ * algorithm survive past the cutover. Within an algorithm the
+ * current key is tried before the `_PREVIOUS` rotation key.
  */
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import {
+  createHash,
+  createHmac,
+  createPrivateKey,
+  createPublicKey,
+  createSign,
+  createVerify,
+  timingSafeEqual,
+  type KeyObject,
+} from 'node:crypto';
 import { env } from '../env.js';
 
 export type Alg = 'HS256' | 'RS256';
@@ -46,13 +60,87 @@ class Hs256Signer implements Signer {
   }
 }
 
-// Track A.2 will add an `Rs256Signer implements Signer` class right
-// here — `createSign('RSA-SHA256')` for sign, `createVerify(...)` for
-// verify, with a `KeyObject` pair + `kid` from the
-// `LOOP_JWT_PRIVATE_KEY` family. Not landing it now keeps A.1 a pure
-// abstraction with no inert code; the `Alg` union below carries the
-// 'RS256' value so the dispatch in `tokens.ts::verifyLoopToken` can
-// already case on it.
+/**
+ * Public half of an RSA signing key in standard JWK shape (RFC 7517
+ * §4 + RFC 7518 §6.3.1). Exactly the six public members — never any
+ * private-key material (`d`, `p`, `q`, `dp`, `dq`, `qi`) — because
+ * this shape is served verbatim at `/.well-known/jwks.json`.
+ */
+export interface LoopRsaPublicJwk {
+  kty: 'RSA';
+  n: string;
+  e: string;
+  alg: 'RS256';
+  use: 'sig';
+  kid: string;
+}
+
+class Rs256Signer implements Signer {
+  readonly alg: 'RS256' = 'RS256';
+  readonly kid: string;
+  /** Public JWK served at /.well-known/jwks.json. */
+  readonly publicJwk: LoopRsaPublicJwk;
+  private readonly privateKey: KeyObject;
+  private readonly publicKey: KeyObject;
+
+  constructor(privateKeyPem: string) {
+    // env.ts boot-validates the PEM (parse + asymmetricKeyType check),
+    // so a throw here means the module was driven with an unvalidated
+    // value — fail loudly rather than mint unverifiable tokens.
+    this.privateKey = createPrivateKey(privateKeyPem);
+    if (this.privateKey.asymmetricKeyType !== 'rsa') {
+      throw new Error(
+        `Rs256Signer requires an RSA private key, got ${this.privateKey.asymmetricKeyType ?? 'unknown'}`,
+      );
+    }
+    this.publicKey = createPublicKey(this.privateKey);
+    const jwk = this.publicKey.export({ format: 'jwk' }) as {
+      kty?: unknown;
+      n?: unknown;
+      e?: unknown;
+    };
+    if (jwk.kty !== 'RSA' || typeof jwk.n !== 'string' || typeof jwk.e !== 'string') {
+      throw new Error('Rs256Signer: public-key JWK export missing RSA members (kty/n/e)');
+    }
+    // RFC 7638 §3.1 JWK thumbprint: SHA-256 over the JSON of ONLY the
+    // required RSA public members ({e, kty, n}), keys in lexicographic
+    // order, no whitespace — exactly what JSON.stringify of this
+    // literal produces. Stable across processes/deploys for the same
+    // key, so external verifiers can cache by kid.
+    this.kid = createHash('sha256')
+      .update(JSON.stringify({ e: jwk.e, kty: 'RSA', n: jwk.n }))
+      .digest('base64url');
+    this.publicJwk = { kty: 'RSA', n: jwk.n, e: jwk.e, alg: 'RS256', use: 'sig', kid: this.kid };
+  }
+
+  sign(signingInput: string): Buffer {
+    // RSASSA-PKCS1-v1_5 with SHA-256 — the JWA `RS256` algorithm
+    // (RFC 7518 §3.3). Node's default padding for RSA sign.
+    return createSign('RSA-SHA256').update(signingInput).sign(this.privateKey);
+  }
+
+  verify(signingInput: string, signatureBuf: Buffer): boolean {
+    return createVerify('RSA-SHA256').update(signingInput).verify(this.publicKey, signatureBuf);
+  }
+}
+
+/**
+ * Per-PEM memo for Rs256Signer construction. PEM parse + thumbprint
+ * hashing is pure but not free; the env values are static for the
+ * process lifetime so at most two entries ever exist (current +
+ * previous). Tests that mutate env go through `vi.resetModules()`,
+ * which discards this cache with the module.
+ */
+const rs256SignerCache = new Map<string, Rs256Signer>();
+
+function rs256SignerFor(privateKeyPem: string): Rs256Signer {
+  let signer = rs256SignerCache.get(privateKeyPem);
+  if (signer === undefined) {
+    signer = new Rs256Signer(privateKeyPem);
+    rs256SignerCache.set(privateKeyPem, signer);
+  }
+  return signer;
+}
 
 /**
  * Returns the signer that newly-issued tokens should use. `null` when
@@ -60,11 +148,15 @@ class Hs256Signer implements Signer {
  * treat null as "Loop-native auth disabled" and fall through to the
  * legacy CTX-proxy path.
  *
- * Track A.2 will extend this to prefer RS256 over HS256 when the
- * `LOOP_JWT_PRIVATE_KEY` family is set, leaving HS256 as the
- * historical fallback during rotation.
+ * RS256 (`LOOP_JWT_RSA_PRIVATE_KEY`) is preferred over HS256 when
+ * both are configured — the cutover is "set the RSA key"; the HS256
+ * key stays set (verification only) until outstanding HS256 tokens
+ * expire (ADR 030 Phase A; runbook: docs/runbooks/jwt-key-rotation.md).
  */
 export function getActiveSigner(): Signer | null {
+  if (typeof env.LOOP_JWT_RSA_PRIVATE_KEY === 'string' && env.LOOP_JWT_RSA_PRIVATE_KEY.length > 0) {
+    return rs256SignerFor(env.LOOP_JWT_RSA_PRIVATE_KEY);
+  }
   if (typeof env.LOOP_JWT_SIGNING_KEY === 'string' && env.LOOP_JWT_SIGNING_KEY.length > 0) {
     return new Hs256Signer(env.LOOP_JWT_SIGNING_KEY);
   }
@@ -73,10 +165,12 @@ export function getActiveSigner(): Signer | null {
 
 /**
  * Returns the set of signers that can verify a token under the given
- * `alg`. Multiple HS256 keys exist during a rotation window
- * (`LOOP_JWT_SIGNING_KEY` + `LOOP_JWT_SIGNING_KEY_PREVIOUS`); the
- * caller iterates and accepts the first match. Track A.2 adds RS256
- * with kid lookup against the JWKS-published public keys.
+ * `alg`, current key first, `_PREVIOUS` rotation key second; the
+ * caller iterates and accepts the first match. Combined with the
+ * alg dispatch in `tokens.ts::verifyLoopToken`, the effective verify
+ * order across the migration window is: RS256 current → RS256
+ * previous (for RS256-headed tokens), then HS256 current → HS256
+ * previous (for legacy HS256-headed tokens).
  */
 export function getVerifiersForAlg(alg: Alg): readonly Signer[] {
   if (alg === 'HS256') {
@@ -92,8 +186,38 @@ export function getVerifiersForAlg(alg: Alg): readonly Signer[] {
     }
     return out;
   }
-  // Track A.2 fills the RS256 path with JWKS lookup + kid match.
-  return [];
+  const out: Signer[] = [];
+  if (typeof env.LOOP_JWT_RSA_PRIVATE_KEY === 'string' && env.LOOP_JWT_RSA_PRIVATE_KEY.length > 0) {
+    out.push(rs256SignerFor(env.LOOP_JWT_RSA_PRIVATE_KEY));
+  }
+  if (
+    typeof env.LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS === 'string' &&
+    env.LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS.length > 0
+  ) {
+    out.push(rs256SignerFor(env.LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS));
+  }
+  return out;
+}
+
+/**
+ * Public JWKs for the configured RSA signing keys — current first,
+ * then `_PREVIOUS` during a rotation window. Empty array when RS256
+ * is unconfigured (the JWKS endpoint then serves a valid-but-empty
+ * key set). Consumed by `auth/jwks-publish.ts`; contains public
+ * members only by construction (see `LoopRsaPublicJwk`).
+ */
+export function getLoopRsaPublicJwks(): LoopRsaPublicJwk[] {
+  const out: LoopRsaPublicJwk[] = [];
+  if (typeof env.LOOP_JWT_RSA_PRIVATE_KEY === 'string' && env.LOOP_JWT_RSA_PRIVATE_KEY.length > 0) {
+    out.push(rs256SignerFor(env.LOOP_JWT_RSA_PRIVATE_KEY).publicJwk);
+  }
+  if (
+    typeof env.LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS === 'string' &&
+    env.LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS.length > 0
+  ) {
+    out.push(rs256SignerFor(env.LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS).publicJwk);
+  }
+  return out;
 }
 
 /**

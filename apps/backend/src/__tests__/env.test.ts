@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { generateKeyPairSync } from 'node:crypto';
 
 // env.ts validates process.env at module-load time, so we must make the parse
 // succeed on import even though our individual tests exercise parseEnv with
@@ -367,5 +368,68 @@ describe('parseEnv', () => {
       expect(() => parseEnv({ ...base, RATE_LIMIT_MACHINE_COUNT_ESTIMATE: '0' })).toThrow();
       expect(() => parseEnv({ ...base, RATE_LIMIT_MACHINE_COUNT_ESTIMATE: '-1' })).toThrow();
     });
+  });
+});
+
+// ADR 030 Phase A: the RS256 signing keys are PEM-validated at boot —
+// a malformed or non-RSA PEM must fail parseEnv (boot) rather than
+// surface as a 500 on the first token mint or JWKS fetch.
+describe('LOOP_JWT_RSA_PRIVATE_KEY (ADR 030 Phase A)', () => {
+  // Generated at runtime — never commit a PEM fixture, even test-only.
+  const rsaPem = generateKeyPairSync('rsa', { modulusLength: 2048 })
+    .privateKey.export({ type: 'pkcs8', format: 'pem' })
+    .toString();
+  const ecPem = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+    .privateKey.export({ type: 'pkcs8', format: 'pem' })
+    .toString();
+
+  it('is optional — absent leaves RS256 unconfigured', () => {
+    const env = parseEnv(base);
+    expect(env.LOOP_JWT_RSA_PRIVATE_KEY).toBeUndefined();
+    expect(env.LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS).toBeUndefined();
+  });
+
+  it('accepts a valid PKCS8 RSA PEM on both slots', () => {
+    const env = parseEnv({
+      ...base,
+      LOOP_JWT_RSA_PRIVATE_KEY: rsaPem,
+      LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS: rsaPem,
+    });
+    expect(env.LOOP_JWT_RSA_PRIVATE_KEY).toBe(rsaPem);
+    expect(env.LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS).toBe(rsaPem);
+  });
+
+  it('normalises escaped \\n sequences to real newlines (secret-store flattening)', () => {
+    const flattened = rsaPem.replace(/\n/g, '\\n');
+    const env = parseEnv({ ...base, LOOP_JWT_RSA_PRIVATE_KEY: flattened });
+    expect(env.LOOP_JWT_RSA_PRIVATE_KEY).toBe(rsaPem);
+  });
+
+  it('rejects a malformed PEM at boot with the openssl hint', () => {
+    expect(() => parseEnv({ ...base, LOOP_JWT_RSA_PRIVATE_KEY: 'not-a-pem' })).toThrow(
+      /LOOP_JWT_RSA_PRIVATE_KEY.*openssl genpkey/,
+    );
+  });
+
+  it('rejects a truncated PEM at boot', () => {
+    expect(() => parseEnv({ ...base, LOOP_JWT_RSA_PRIVATE_KEY: rsaPem.slice(0, 80) })).toThrow(
+      /LOOP_JWT_RSA_PRIVATE_KEY/,
+    );
+  });
+
+  it('rejects a non-RSA (EC) private key at boot', () => {
+    expect(() => parseEnv({ ...base, LOOP_JWT_RSA_PRIVATE_KEY: ecPem })).toThrow(
+      /must be an RSA private key/,
+    );
+  });
+
+  it('validates the _PREVIOUS slot with the same rules', () => {
+    expect(() =>
+      parseEnv({
+        ...base,
+        LOOP_JWT_RSA_PRIVATE_KEY: rsaPem,
+        LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS: 'garbage',
+      }),
+    ).toThrow(/LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS/);
   });
 });

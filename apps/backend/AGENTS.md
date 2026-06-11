@@ -17,6 +17,10 @@ src/
 ├── auth/handler.ts     ← Auth proxy + Loop-native OTP (ADR 013 + ADR 014 social login)
 ├── auth/auth-row-purge.ts ← Retention sweep deleting expired/consumed OTP rows + dead refresh-token rows past LOOP_AUTH_ROW_RETENTION_DAYS (CF-26 / X-PRIV-07/08; gated on LOOP_WORKERS_ENABLED; runbooks/dsr.md)
 ├── csv/csv-escape.ts   ← Shared CSV cell escaper (RFC 4180 + formula-injection guard; CF-26 / X-PRIV-11). admin/csv-escape.ts re-exports it; user + tax-script exporters import it directly
+├── auth/signer.ts      ← Pluggable JWT signer — RS256 (kid = RFC 7638 thumbprint) preferred
+│                         when LOOP_JWT_RSA_PRIVATE_KEY is set, HS256 fallback (ADR 030 Phase A)
+├── auth/jwks-publish.ts ← GET /.well-known/jwks.json handler — Loop's public RSA JWKS
+│                          (publisher side; auth/jwks.ts is the Google/Apple consumer side)
 ├── admin/              ← Admin-panel handlers (~60 files) grouped by domain:
 │   │                     ADR 011 cashback config, ADR 015 treasury + asset
 │   │                     drift + settlement lag, ADR 017/018 credit
