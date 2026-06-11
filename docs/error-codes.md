@@ -43,13 +43,14 @@ client switch-ladders tracked drift informally in code review.
 
 ## Resource-state family (409)
 
-| Code                        | Status | Where                                                                                     | Client guidance                                                                                                   |
-| --------------------------- | ------ | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `ALREADY_COMPENSATED`       | 409    | `POST /api/admin/payouts/:id/compensate` (ADR-024 §5)                                     | Terminal. The failed payout already has a compensation marker; don't compensate it again.                         |
-| `PAYOUT_NOT_COMPENSABLE`    | 409    | Same endpoint — payout is `kind='order_cashback'` or not currently a retryable failed row | Terminal. Compensation is strictly for failed withdrawal payouts.                                                 |
-| `WITHDRAWAL_ALREADY_ISSUED` | 409    | `POST /api/admin/users/:userId/withdrawals` (ADR-024)                                     | Terminal for the attempted duplicate. Reuse or resolve the existing active withdrawal instead of issuing another. |
-| `PENDING_PAYOUTS`           | 409    | `POST /api/users/me/dsr/delete` while cashback payout rows are still pending/submitted    | Terminal until the payout settles or support intervenes.                                                          |
-| `IN_FLIGHT_ORDERS`          | 409    | `POST /api/users/me/dsr/delete` while an order is still pending/paid/procuring            | Terminal until fulfilment or expiry completes.                                                                    |
+| Code                               | Status | Where                                                                                               | Client guidance                                                                                                                               |
+| ---------------------------------- | ------ | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ALREADY_COMPENSATED`              | 409    | `POST /api/admin/payouts/:id/compensate` (ADR-024 §5)                                               | Terminal. The failed payout already has a compensation marker; don't compensate it again.                                                     |
+| `PAYOUT_NOT_COMPENSABLE`           | 409    | Same endpoint — payout is `kind='order_cashback'` or not currently a retryable failed row           | Terminal. Compensation is strictly for failed withdrawal payouts.                                                                             |
+| `WITHDRAWAL_ALREADY_ISSUED`        | 409    | `POST /api/admin/users/:userId/withdrawals` (ADR-024)                                               | Terminal for the attempted duplicate. Reuse or resolve the existing active withdrawal instead of issuing another.                             |
+| `PENDING_PAYOUTS`                  | 409    | `POST /api/users/me/dsr/delete` while cashback payout rows are still pending/submitted              | Terminal until the payout settles or support intervenes.                                                                                      |
+| `IN_FLIGHT_ORDERS`                 | 409    | `POST /api/users/me/dsr/delete` while an order is still pending/paid/procuring                      | Terminal until fulfilment or expiry completes.                                                                                                |
+| `FAILED_UNCOMPENSATED_WITHDRAWALS` | 409    | `POST /api/users/me/dsr/delete` while a failed withdrawal payout awaits admin compensation (A4-078) | Terminal until support compensates or writes off the failed withdrawal — surface the "contact support" path; waiting alone will not clear it. |
 
 ## Rate-limit family (429)
 

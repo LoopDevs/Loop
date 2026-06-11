@@ -113,6 +113,22 @@ export async function dsrDeleteHandler(c: Context): Promise<Response> {
           409,
         );
       }
+      if (result.blockedBy === 'failed_uncompensated_withdrawals') {
+        // A4-078: a failed withdrawal whose compensation hasn't
+        // landed yet — anonymising now would orphan the balance the
+        // user is owed (see dsr-delete.ts). Distinct from the
+        // generic in-flight-orders reason so the client can render
+        // the right instruction: this one can only be resolved by
+        // support, not by waiting.
+        return c.json(
+          {
+            code: 'FAILED_UNCOMPENSATED_WITHDRAWALS',
+            message:
+              'Cannot delete account while a failed withdrawal is awaiting compensation — contact support about the failed withdrawal before deleting your account.',
+          },
+          409,
+        );
+      }
       return c.json(
         {
           code: 'IN_FLIGHT_ORDERS',

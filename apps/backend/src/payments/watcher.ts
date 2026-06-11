@@ -216,15 +216,19 @@ async function processPayment(
   }
 
   if (!(await isAmountSufficient(p, order, loopAssetCode))) {
+    // A2-619: the validation compares against chargeMinor in
+    // chargeCurrency — log the same basis, or cross-currency
+    // incident investigation chases the wrong number.
     log.warn(
       {
         orderId: order.id,
-        expected: order.faceValueMinor.toString(),
+        expected: order.chargeMinor.toString(),
+        expectedCurrency: order.chargeCurrency,
         paymentAmount: p.amount,
         paymentMethod: order.paymentMethod,
         loopAssetCode,
       },
-      'Payment amount does not cover order face value',
+      'Payment amount does not cover order charge amount',
     );
     return { kind: 'skip', reason: 'amount_insufficient', orderId: order.id, memo };
   }

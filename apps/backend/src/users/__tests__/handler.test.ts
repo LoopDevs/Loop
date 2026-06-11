@@ -29,14 +29,18 @@ const { selectChain, updateChain, queryObj, dbState } = vi.hoisted(() => {
     updatedUser: unknown;
     userExistsProbeRows: unknown[] | null;
     historyRows: unknown[];
+    historyThrow: Error | null;
     homeBalanceMinor: bigint | null;
     creditsRows: unknown[];
+    creditsThrow: Error | null;
   } = {
     updatedUser: null,
     userExistsProbeRows: null,
     historyRows: [],
+    historyThrow: null,
     homeBalanceMinor: null,
     creditsRows: [],
+    creditsThrow: null,
   };
   const sel: Record<string, ReturnType<typeof vi.fn>> = {};
   sel['from'] = vi.fn(() => sel);
@@ -49,13 +53,20 @@ const { selectChain, updateChain, queryObj, dbState } = vi.hoisted(() => {
     leaf['orderBy'] = vi.fn(() => {
       const orderByLeaf: Record<string, unknown> = {};
       orderByLeaf['then'] = (resolve: (v: unknown[]) => void, reject: (err: unknown) => void) => {
+        if (state.creditsThrow !== null) {
+          reject(state.creditsThrow);
+          return;
+        }
         try {
           resolve(state.creditsRows);
         } catch (err) {
           reject(err);
         }
       };
-      orderByLeaf['limit'] = vi.fn(async () => state.historyRows);
+      orderByLeaf['limit'] = vi.fn(async () => {
+        if (state.historyThrow !== null) throw state.historyThrow;
+        return state.historyRows;
+      });
       return orderByLeaf;
     });
     leaf['limit'] = vi.fn(async () =>
@@ -225,7 +236,9 @@ beforeEach(() => {
   dbState.updatedUser = null;
   dbState.userExistsProbeRows = null;
   dbState.historyRows = [];
+  dbState.historyThrow = null;
   dbState.homeBalanceMinor = null;
+  dbState.creditsThrow = null;
   payoutState.rows = [];
   payoutState.calls = [];
   payoutState.singleRow = null;
@@ -599,6 +612,16 @@ describe('getCashbackHistoryHandler', () => {
     const res = await getCashbackHistoryHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
     expect(res.status).toBe(401);
   });
+
+  it('500s with the structured INTERNAL_ERROR envelope when the ledger query throws', async () => {
+    userState.byId = baseUser;
+    dbState.historyThrow = new Error('postgres unreachable');
+    const res = await getCashbackHistoryHandler(makeCtx(LOOP_AUTH));
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('INTERNAL_ERROR');
+    expect(body.message).toBe('Failed to load cashback history');
+  });
 });
 
 describe('getUserPendingPayoutsHandler', () => {
@@ -769,6 +792,15 @@ describe('getUserCreditsHandler', () => {
     jwtState.claims = { sub: 'some-victim', email: 'v@x.com' };
     const res = await getUserCreditsHandler(makeCtx({ kind: 'ctx', bearerToken: 't' }));
     expect(res.status).toBe(401);
+  });
+
+  it('500s with the structured INTERNAL_ERROR envelope when the credits query throws', async () => {
+    dbState.creditsThrow = new Error('postgres unreachable');
+    const res = await getUserCreditsHandler(makeCtx(LOOP_AUTH));
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('INTERNAL_ERROR');
+    expect(body.message).toBe('Failed to load credits');
   });
 });
 

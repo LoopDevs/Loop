@@ -145,8 +145,9 @@ vi.mock('../../logger.js', () => ({
     child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
   },
 }));
-const { notifyStuckProcurementSweptMock } = vi.hoisted(() => ({
+const { notifyStuckProcurementSweptMock, notifyPegBreakMock } = vi.hoisted(() => ({
   notifyStuckProcurementSweptMock: vi.fn(),
+  notifyPegBreakMock: vi.fn(),
 }));
 vi.mock('../../discord.js', () => ({
   notifyStuckProcurementSwept: (args: unknown) => notifyStuckProcurementSweptMock(args),
@@ -158,8 +159,9 @@ vi.mock('../../discord.js', () => ({
   notifyFirstCashbackRecycled: vi.fn(),
   notifyOrderCreated: vi.fn(),
   // A4-023: peg-break notifier called from fulfillment.ts when
-  // chargeCurrency diverges from user.home_currency.
-  notifyPegBreakOnFulfillment: vi.fn(),
+  // chargeCurrency diverges from user.home_currency. Hoisted so the
+  // notify-after-commit tests below can assert call ordering.
+  notifyPegBreakOnFulfillment: (args: unknown) => notifyPegBreakMock(args),
 }));
 // Payout-intent builder — default: "pay" when userCashbackMinor > 0,
 // with a fixed issuer/asset/address. Tests that need skip paths can
@@ -210,6 +212,7 @@ beforeEach(() => {
   state.upsertSet = undefined;
   state.userLookupRows = [];
   payoutBuilderMock.decision = null;
+  notifyPegBreakMock.mockClear();
   for (const fn of Object.values(dbMock)) {
     if (typeof fn === 'function' && 'mockClear' in fn) {
       (fn as unknown as { mockClear: () => void }).mockClear();
@@ -383,6 +386,44 @@ describe('markOrderFulfilled', () => {
     payoutBuilderMock.decision = { kind: 'skip', reason: 'no_issuer' };
     await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
     expect(state.insertPendingPayoutCalls).toHaveLength(0);
+  });
+
+  // ─── A4-023 — peg-break notify must fire after the txn, not inside it ─────
+  it('A4-023: emits the peg-break Discord notify only after the transaction resolves', async () => {
+    state.returningRows = [{ ...baseOrder, chargeCurrency: 'USD' }];
+    state.userLookupRows = [{ stellarAddress: 'GDESTINATION', homeCurrency: 'GBP' }];
+    let notifyCallsWhenTxnResolved = -1;
+    dbMock['transaction']!.mockImplementationOnce(async (cb: (tx: unknown) => Promise<unknown>) => {
+      const result = await cb(dbMock);
+      // Snapshot taken at the moment the txn callback finishes —
+      // i.e. before the (real) COMMIT would land.
+      notifyCallsWhenTxnResolved = notifyPegBreakMock.mock.calls.length;
+      return result;
+    });
+    const result = await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+    expect(result?.id).toBe('o-1');
+    expect(notifyCallsWhenTxnResolved).toBe(0);
+    expect(notifyPegBreakMock).toHaveBeenCalledTimes(1);
+    expect(notifyPegBreakMock).toHaveBeenCalledWith({
+      orderId: 'o-1',
+      userId: 'u-1',
+      chargeCurrency: 'USD',
+      userHomeCurrency: 'GBP',
+      cashbackMinor: '500',
+    });
+  });
+
+  it('A4-023: a transaction rollback suppresses the peg-break notify', async () => {
+    state.returningRows = [{ ...baseOrder, chargeCurrency: 'USD' }];
+    state.userLookupRows = [{ stellarAddress: 'GDESTINATION', homeCurrency: 'GBP' }];
+    dbMock['transaction']!.mockImplementationOnce(async (cb: (tx: unknown) => Promise<unknown>) => {
+      await cb(dbMock);
+      throw new Error('serialization failure — txn rolled back');
+    });
+    await expect(markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' })).rejects.toThrow(
+      'txn rolled back',
+    );
+    expect(notifyPegBreakMock).not.toHaveBeenCalled();
   });
 });
 
