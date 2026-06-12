@@ -11,8 +11,8 @@
  *   2.  seed mirror liability + emit an on-chain payout
  *       (operator-signed `kind='emission'` — GBPLOOP minted from the
  *       test issuer to the operator first if the float is short)
- *   3.  pay-with-balance redemption: user-signed inner tx (Privy
- *       rawSign) + operator fee-bump → deposit address
+ *   3.  redeem (ADR 036 term, formerly pay-with-balance): user-signed
+ *       inner tx (Privy rawSign) + operator fee-bump → deposit address
  *   4.  payment-watcher tick → order paid, mirror debited,
  *       issuer-return `kind='burn'` enqueued → payout tick confirms it
  *   5.  interest-mint tick → snapshot + interest credit +
@@ -87,7 +87,7 @@ import {
   getAccountTrustlines,
   __resetTrustlineCacheForTests,
 } from '../payments/horizon-trustlines.js';
-import { buildPayWithBalanceTransaction, feeBumpBaseFee } from '../orders/pay-with-balance.js';
+import { buildRedeemTransaction, feeBumpBaseFee } from '../orders/redeem.js';
 import { getWalletProvider } from '../wallet/provider.js';
 import { attachUserWalletSignature } from '../wallet/user-signer.js';
 import { provisionUserWallet } from '../wallet/provisioning.js';
@@ -345,7 +345,7 @@ async function main(): Promise<void> {
     `${EMISSION_MINOR} minor GBPLOOP on-chain (tx ${emissionTx.txHash.slice(0, 8)}…)`,
   );
 
-  // ── Step 4: loop_asset order + pay-with-balance redemption ───────
+  // ── Step 4: loop_asset order + redeem ────────────────────────────
   const paymentMemo = generatePayoutMemo();
   const [order] = await db
     .insert(orders)
@@ -388,10 +388,10 @@ async function main(): Promise<void> {
     }
   }
 
-  // The pay-with-balance core (handler minus HTTP): user-signed inner
+  // The redeem core (handler minus HTTP): user-signed inner
   // payment, operator fee-bump, classify-path submit.
   const loaded = await server.loadAccount(walletAddress);
-  const innerTx = buildPayWithBalanceTransaction({
+  const innerTx = buildRedeemTransaction({
     userAccount: new Account(walletAddress, loaded.sequenceNumber()),
     depositAddress: env.LOOP_STELLAR_DEPOSIT_ADDRESS,
     asset: { code: 'GBPLOOP', issuer: gbploop.getIssuer() },

@@ -66,7 +66,7 @@ src/
 │   ├── transitions.ts  ← markOrderPaid (loop_asset: mirror debit + issuer-return burn enqueue, ADR 036) / markOrderProcuring / markOrderFulfilled (writes ledger + pending_payouts inside one txn)
 │   ├── procurement.ts  ← paid → procuring → fulfilled worker (USDC-default, XLM-floor fallback, ADR 015)
 │   ├── procurement-redemption.ts ← CTX gift-card detail fetch + waitForRedemption (SSE-first, polling fallback)
-│   ├── pay-with-balance.ts ← POST /api/orders/loop/:id/pay-with-balance — embedded-wallet LOOP redemption: user-signed inner payment + operator fee-bump; watcher settles downstream (ADR 030 C3 / ADR 036)
+│   ├── redeem.ts        ← POST /api/orders/loop/:id/redeem — embedded-wallet LOOP redemption (ADR 036 term): user-signed inner payment + operator fee-bump; watcher settles downstream (ADR 030 C3 / ADR 036)
 │   ├── redemption-backfill.ts ← Sweeper re-fetching redemption payloads for fulfilled orders that persisted nulls (migration 0034; pages ops after 10 attempts → runbooks/redemption-backfill-exhausted.md) + refetchOrderRedemption one-shot for the ADR 037 admin action
 │   └── redeem-crypto.ts ← AES-256-GCM envelope for redeem_code/redeem_pin at rest (CF-25; LOOP_REDEEM_ENCRYPTION_KEY; encrypt-on-write, decrypt-on-read, legacy-plaintext passthrough)
 ├── payments/

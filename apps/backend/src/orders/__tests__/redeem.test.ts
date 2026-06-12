@@ -135,10 +135,10 @@ vi.mock('@stellar/stellar-sdk', async () => {
 
 import { PayoutSubmitError } from '../../payments/payout-submit.js';
 import {
-  payWithBalanceHandler,
-  buildPayWithBalanceTransaction,
-  __resetPayWithBalanceFenceForTests,
-} from '../pay-with-balance.js';
+  redeemLoopOrderHandler,
+  buildRedeemTransaction,
+  __resetRedeemFenceForTests,
+} from '../redeem.js';
 
 const ORDER_ID = '0a1b2c3d-1111-4222-8333-444455556666';
 const MEMO = 'ABCDEFGHIJKLMNOPQRST';
@@ -202,7 +202,7 @@ function fundedTrustlines(balanceStroops: bigint): unknown {
 }
 
 beforeEach(() => {
-  __resetPayWithBalanceFenceForTests();
+  __resetRedeemFenceForTests();
   envState.LOOP_AUTH_NATIVE_ENABLED = true;
   envState.LOOP_STELLAR_DEPOSIT_ADDRESS = DEPOSIT_ADDRESS;
   envState.LOOP_STELLAR_OPERATOR_SECRET = OPERATOR_SECRET;
@@ -225,36 +225,36 @@ async function bodyOf(res: Response): Promise<Record<string, unknown>> {
   return (await res.json()) as Record<string, unknown>;
 }
 
-describe('payWithBalanceHandler — guards', () => {
+describe('redeemLoopOrderHandler — guards', () => {
   it('404 when the loop-native flag is off', async () => {
     envState.LOOP_AUTH_NATIVE_ENABLED = false;
-    const res = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect(res.status).toBe(404);
   });
 
   it('401 without a loop auth context', async () => {
-    expect((await payWithBalanceHandler(makeCtx({ param: ORDER_ID }))).status).toBe(401);
+    expect((await redeemLoopOrderHandler(makeCtx({ param: ORDER_ID }))).status).toBe(401);
     expect(
-      (await payWithBalanceHandler(makeCtx({ auth: { kind: 'ctx' }, param: ORDER_ID }))).status,
+      (await redeemLoopOrderHandler(makeCtx({ auth: { kind: 'ctx' }, param: ORDER_ID }))).status,
     ).toBe(401);
   });
 
   it('400 VALIDATION_ERROR on a non-uuid id', async () => {
-    const res = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: 'loop' }));
+    const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: 'loop' }));
     expect(res.status).toBe(400);
     expect((await bodyOf(res))['code']).toBe('VALIDATION_ERROR');
   });
 
   it('404 when the order does not exist / is not owned', async () => {
     orderState.row = null;
-    const res = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect(res.status).toBe(404);
   });
 
   it('200 idempotent replay for already-paid states', async () => {
     for (const state of ['paid', 'procuring', 'fulfilled']) {
       orderState.row = loopAssetOrder({ state });
-      const res = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+      const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
       expect(res.status).toBe(200);
       expect(await bodyOf(res)).toEqual({ state });
     }
@@ -263,43 +263,43 @@ describe('payWithBalanceHandler — guards', () => {
 
   it('400 ORDER_NOT_PAYABLE on terminal states and non-loop_asset methods', async () => {
     orderState.row = loopAssetOrder({ state: 'expired' });
-    let res = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    let res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect(res.status).toBe(400);
     expect((await bodyOf(res))['code']).toBe('ORDER_NOT_PAYABLE');
 
     orderState.row = loopAssetOrder({ paymentMethod: 'usdc' });
-    res = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect(res.status).toBe(400);
     expect((await bodyOf(res))['code']).toBe('ORDER_NOT_PAYABLE');
   });
 
   it('503 NOT_CONFIGURED when the wallet layer is off', async () => {
     providerState.enabled = false;
-    const res = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect(res.status).toBe(503);
     expect((await bodyOf(res))['code']).toBe('NOT_CONFIGURED');
   });
 
   it('503 NOT_CONFIGURED when the LOOP issuer for the charge currency is unset', async () => {
     envState.LOOP_STELLAR_GBPLOOP_ISSUER = undefined;
-    const res = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect(res.status).toBe(503);
     expect((await bodyOf(res))['code']).toBe('NOT_CONFIGURED');
   });
 
   it('400 WALLET_NOT_ACTIVATED when provisioning is incomplete', async () => {
     userState.row = { ...activatedUser(), walletProvisioning: 'wallet_created' };
-    const res = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect(res.status).toBe(400);
     expect((await bodyOf(res))['code']).toBe('WALLET_NOT_ACTIVATED');
     expect(submitMock).not.toHaveBeenCalled();
   });
 });
 
-describe('payWithBalanceHandler — balance + fence', () => {
+describe('redeemLoopOrderHandler — balance + fence', () => {
   it('400 INSUFFICIENT_BALANCE when the on-chain balance is below the charge', async () => {
     trustlinesMock.mockResolvedValue(fundedTrustlines(24_999_999n)); // one stroop short
-    const res = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect(res.status).toBe(400);
     expect((await bodyOf(res))['code']).toBe('INSUFFICIENT_BALANCE');
     expect(providerState.rawSign).not.toHaveBeenCalled();
@@ -313,13 +313,13 @@ describe('payWithBalanceHandler — balance + fence', () => {
       trustlines: new Map(),
       asOfMs: Date.now(),
     });
-    const res = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect((await bodyOf(res))['code']).toBe('INSUFFICIENT_BALANCE');
   });
 
   it('503 when the Horizon balance read fails', async () => {
     trustlinesMock.mockRejectedValue(new Error('horizon down'));
-    const res = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect(res.status).toBe(503);
     expect((await bodyOf(res))['code']).toBe('SERVICE_UNAVAILABLE');
   });
@@ -336,10 +336,10 @@ describe('payWithBalanceHandler — balance + fence', () => {
       return fundedTrustlines(100_000_000n);
     });
 
-    const first = payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    const first = redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     // Give the first call a tick to acquire the fence.
     await new Promise((r) => setImmediate(r));
-    const second = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    const second = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect(second.status).toBe(400);
     expect((await bodyOf(second))['code']).toBe('PAYMENT_IN_FLIGHT');
 
@@ -350,17 +350,17 @@ describe('payWithBalanceHandler — balance + fence', () => {
   });
 
   it('releases the fence after completion (sequential retry is allowed)', async () => {
-    const res1 = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    const res1 = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect(res1.status).toBe(200);
-    const res2 = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    const res2 = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect(res2.status).toBe(200);
     expect(submitMock).toHaveBeenCalledTimes(2);
   });
 });
 
-describe('payWithBalanceHandler — fee-bump envelope', () => {
+describe('redeemLoopOrderHandler — fee-bump envelope', () => {
   it('submits an operator fee-bump wrapping the user-signed payment with the order memo', async () => {
-    const res = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect(res.status).toBe(200);
     expect(await bodyOf(res)).toEqual({ state: 'pending_payment' });
 
@@ -402,14 +402,14 @@ describe('payWithBalanceHandler — fee-bump envelope', () => {
         operations: ['op_underfunded'],
       }),
     );
-    const res = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect(res.status).toBe(400);
     expect((await bodyOf(res))['code']).toBe('INSUFFICIENT_BALANCE');
   });
 
   it('maps transient Horizon submit failures to 503', async () => {
     submitMock.mockRejectedValue(new PayoutSubmitError('transient_horizon', 'Horizon 503'));
-    const res = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect(res.status).toBe(503);
     expect((await bodyOf(res))['code']).toBe('SERVICE_UNAVAILABLE');
   });
@@ -419,16 +419,16 @@ describe('payWithBalanceHandler — fee-bump envelope', () => {
     providerState.rawSign.mockRejectedValue(
       new WalletProviderError('transient_provider', 'privy 503', 503),
     );
-    const res = await payWithBalanceHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+    const res = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
     expect(res.status).toBe(503);
     expect(submitMock).not.toHaveBeenCalled();
   });
 });
 
-describe('buildPayWithBalanceTransaction (pure)', () => {
+describe('buildRedeemTransaction (pure)', () => {
   it('converts chargeMinor stroops to the 7-decimal SDK amount', async () => {
     const { Account } = await import('@stellar/stellar-sdk');
-    const tx = buildPayWithBalanceTransaction({
+    const tx = buildRedeemTransaction({
       userAccount: new Account(USER_PUBLIC, '5'),
       depositAddress: DEPOSIT_ADDRESS,
       asset: { code: 'GBPLOOP', issuer: GBPLOOP_ISSUER },

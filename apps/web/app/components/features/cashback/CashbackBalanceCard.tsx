@@ -1,7 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
+import { isLoopAssetCode, currencyForLoopAsset } from '@loop/shared';
 import { getMyCredits, type UserCreditRow } from '~/services/user';
 import { useAuth } from '~/hooks/use-auth';
+import { useWallet } from '~/hooks/use-wallet';
 import { shouldRetry } from '~/hooks/query-retry';
+import { fmtLoopBalance } from '~/components/features/wallet/WalletCard';
 import { Spinner } from '~/components/ui/Spinner';
 import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 
@@ -33,26 +36,55 @@ export function CashbackBalanceCard(): React.JSX.Element {
   // before session restore completes.
   const { isAuthenticated } = useAuth();
   const locale = useLocaleTag();
+  // balance = tokens once activated; mirror is reconciliation-only
+  // (ADR 036). Once the embedded wallet is `activated`, the user's
+  // balance IS the on-chain LOOP they hold — the tiles below source
+  // from the wallet's LOOP-asset balances. Pre-activation users keep
+  // the `user_credits` mirror display (their tokens haven't been
+  // emitted yet).
+  const { wallet, isActivated } = useWallet();
+  const tokenSourced = isActivated && wallet !== undefined;
   const query = useQuery({
     queryKey: ['me', 'credits'],
     queryFn: getMyCredits,
-    enabled: isAuthenticated,
+    // The mirror read is only needed while the display is
+    // mirror-sourced — skip it entirely once tokens are authoritative.
+    enabled: isAuthenticated && !tokenSourced,
     retry: shouldRetry,
     staleTime: 30_000,
   });
 
-  if (query.isPending) {
-    return (
-      <section className="flex justify-center py-4">
-        <Spinner />
-      </section>
+  // One row shape for both sources: ISO currency label + formatted
+  // major-unit amount.
+  let rows: Array<{ currency: string; formatted: string }>;
+  if (tokenSourced) {
+    rows = wallet.balances.flatMap((b) =>
+      isLoopAssetCode(b.assetCode)
+        ? [
+            {
+              currency: currencyForLoopAsset(b.assetCode),
+              formatted: fmtLoopBalance(b.balance, b.assetCode, locale),
+            },
+          ]
+        : [],
     );
+  } else {
+    if (query.isPending) {
+      return (
+        <section className="flex justify-center py-4">
+          <Spinner />
+        </section>
+      );
+    }
+
+    // Silent fail — the off-chain ledger view below tells the full story.
+    if (query.isError) return <></>;
+
+    rows = query.data.credits.map((r: UserCreditRow) => ({
+      currency: r.currency,
+      formatted: fmtBalance(r.balanceMinor, r.currency, locale),
+    }));
   }
-
-  // Silent fail — the off-chain ledger view below tells the full story.
-  if (query.isError) return <></>;
-
-  const rows = query.data.credits;
 
   return (
     <section
@@ -71,7 +103,7 @@ export function CashbackBalanceCard(): React.JSX.Element {
         </p>
       ) : (
         <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {rows.map((r: UserCreditRow) => (
+          {rows.map((r) => (
             <div
               key={r.currency}
               className="rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 px-4 py-3"
@@ -80,7 +112,7 @@ export function CashbackBalanceCard(): React.JSX.Element {
                 {r.currency}
               </div>
               <div className="mt-0.5 text-xl font-semibold tabular-nums text-gray-900 dark:text-white">
-                {fmtBalance(r.balanceMinor, r.currency, locale)}
+                {r.formatted}
               </div>
             </div>
           ))}

@@ -125,13 +125,16 @@ export const ApiErrorCode = {
   PAYOUT_NOT_COMPENSABLE: 'PAYOUT_NOT_COMPENSABLE',
   NOT_CONFIGURED: 'NOT_CONFIGURED',
   WEBHOOK_NOT_CONFIGURED: 'WEBHOOK_NOT_CONFIGURED',
-  // A4-110(b): credit-method spend gate. Returned by
-  // `loopCreateOrderHandler` when `paymentMethod='credit'` is
-  // requested but the cashback/refund credit-source bucketing
-  // hasn't shipped yet. Guard is removed once `user_credits`
-  // gains a source-tag column so the credit method can drain
-  // only the non-cashback portion safely.
-  PAYMENT_METHOD_DISABLED: 'PAYMENT_METHOD_DISABLED',
+  // ADR 036 OQ3 (resolved 2026-06-12): the `credit` payment method
+  // is retired once the caller's embedded wallet is `activated` and
+  // the wallet layer is on — their balance IS their tokens, so
+  // spending happens as token redemption (`loop_asset` /
+  // POST /api/orders/loop/:id/redeem). Returned by
+  // `loopCreateOrderHandler`; not-yet-activated users (mirror balance
+  // accrued pre-wallet) keep `credit` working as the migration
+  // window. Replaces the blanket A4-110(b) PAYMENT_METHOD_DISABLED
+  // gate, which is now scoped precisely to the emitted balance.
+  CREDIT_METHOD_RETIRED: 'CREDIT_METHOD_RETIRED',
   // ADR-028 / A4-063 admin step-up auth. Distinct codes so the
   // admin UI can branch: REQUIRED → prompt for password modal;
   // INVALID → re-prompt (token expired or signature failed);
@@ -167,12 +170,12 @@ export const ApiErrorCode = {
   // user-input problem. Distinct from SERVICE_UNAVAILABLE (a genuine FX
   // feed outage for a currency we DO support).
   CURRENCY_NOT_AVAILABLE: 'CURRENCY_NOT_AVAILABLE',
-  // ADR 030 Phase C — POST /api/orders/loop/:id/pay-with-balance.
+  // ADR 030 Phase C — POST /api/orders/loop/:id/redeem.
   // ORDER_NOT_PAYABLE: the order isn't a loop_asset order awaiting
   // payment (wrong payment method, or a terminal failed/expired
   // state — already-paid states replay 200 instead).
   ORDER_NOT_PAYABLE: 'ORDER_NOT_PAYABLE',
-  // A concurrent pay-with-balance call for the same order is still
+  // A concurrent redeem call for the same order is still
   // in flight (in-process fence). Retry after the first resolves.
   PAYMENT_IN_FLIGHT: 'PAYMENT_IN_FLIGHT',
   // The caller's embedded wallet isn't provisioned + activated yet,

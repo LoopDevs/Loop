@@ -67,10 +67,14 @@ disease; this ADR pins the single canonical model.
   issuer-return burn routing it documents but never implemented; the asset-drift watcher's
   equation then converges instead of drifting monotonically.
 - **`paymentMethod='credit'`** (inline mirror debit, no token movement) is **transitional**: under
-  this model it is only coherent for balance that has not yet been emitted on-chain. Once
-  automated payouts + embedded-wallet redemption are live, 'credit' is retired and "pay with your
-  Loop balance" is implemented as automated token redemption. Until then it remains gated to
-  exactly the not-yet-emitted portion (open question 3).
+  this model it is only coherent for balance that has not yet been emitted on-chain. Per the
+  open-question-3 resolution (2026-06-12), the gate is the wallet-provisioning state: once the
+  wallet layer is on (`LOOP_WALLET_PROVIDER` set) and the user's wallet is `activated`,
+  `POST /api/orders/loop` rejects `paymentMethod='credit'` with 400 `CREDIT_METHOD_RETIRED` —
+  "pay with your Loop balance" for those users IS automated token redemption
+  (`POST /api/orders/loop/:id/redeem`). Users not yet activated (mirror balance accrued
+  pre-wallet, payouts not yet drained) keep 'credit' working as the migration window, and the
+  web purchase flow only offers the credit rail to them.
 
 ## Open questions
 
@@ -79,9 +83,14 @@ disease; this ADR pins the single canonical model.
 2. External-wallet users (pre-Privy, or who exported keys): their redemption is a manual send to
    the deposit address — supported (it's today's flow), but the seamless path assumes the
    embedded wallet.
-3. Exact gating of the transitional 'credit' method to the unemitted balance (requires tracking
-   emitted-vs-unemitted per user, or simply disabling 'credit' once auto-payout coverage is
-   complete).
+3. ~~Exact gating of the transitional 'credit' method to the unemitted balance~~ — **RESOLVED
+   2026-06-12 (Ash): gate on wallet activation.** When the wallet layer is on
+   (`LOOP_WALLET_PROVIDER` set) and the user's `wallet_provisioning = 'activated'`,
+   `paymentMethod='credit'` is rejected with 400 `CREDIT_METHOD_RETIRED` — those users spend via
+   token redemption (`POST /api/orders/loop/:id/redeem`), the authority being the tokens they
+   hold. Not-yet-activated users keep 'credit' as the migration window (their balance has not
+   been emitted on-chain, so the inline mirror debit is the only coherent spend path). No
+   per-user emitted-vs-unemitted tracking: activation is the emission boundary.
 4. Interest on balance earned-but-not-yet-emitted (payout pending): accrue from earn-time or
    emission-time? Proposed: earn-time (the liability exists), implemented when ADR 031 lands.
 

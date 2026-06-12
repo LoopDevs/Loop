@@ -139,6 +139,15 @@ vi.mock('../../credits/payout-asset.js', () => ({
   }),
 }));
 
+// Wallet layer (ADR 036 OQ3) — the credit-retirement gate checks
+// `getWalletProvider() !== null`. Toggleable per-test; default off.
+const { walletProviderState } = vi.hoisted(() => ({
+  walletProviderState: { on: false },
+}));
+vi.mock('../../wallet/provider.js', () => ({
+  getWalletProvider: () => (walletProviderState.on ? ({} as never) : null),
+}));
+
 import { loopCreateOrderHandler, validateMerchantDenomination } from '../loop-handler.js';
 
 interface FakeCtx {
@@ -196,12 +205,14 @@ beforeEach(() => {
   balanceState.rows = [];
   payoutAssetState.issuer = null;
   fxState.impl = async (amount: bigint) => amount;
+  walletProviderState.on = false;
   userState.user = {
     id: 'user-uuid',
     email: 'a@b.com',
     isAdmin: false,
     homeCurrency: 'GBP',
     ctxUserId: null,
+    walletProvisioning: 'none',
   };
   for (const fn of Object.values(dbChain)) {
     if (typeof fn === 'function' && 'mockClear' in fn) {
@@ -302,11 +313,20 @@ describe('loopCreateOrderHandler', () => {
     expect(createOrderMock).toHaveBeenCalledWith(expect.objectContaining({ currency: 'GBP' }));
   });
 
-  it('credit path — rejects with 400 PAYMENT_METHOD_DISABLED (A4-110b)', async () => {
-    // A4-110(b): credit-method spend is rejected at the loop-handler
-    // until source-bucketing of user_credits lands. Was the
-    // INSUFFICIENT_CREDIT path; now the gate fires before the
-    // balance check ever runs (createOrder must NOT be called).
+  it('credit path — 400 CREDIT_METHOD_RETIRED for wallet-activated users (ADR 036 OQ3)', async () => {
+    // ADR 036 OQ3 (resolved 2026-06-12): once the wallet layer is on
+    // and the user's wallet is `activated`, the balance IS the tokens
+    // — spending happens as token redemption, so the inline mirror
+    // debit ('credit') is retired. createOrder must NOT be called.
+    walletProviderState.on = true;
+    userState.user = {
+      id: 'user-uuid',
+      email: 'a@b.com',
+      isAdmin: false,
+      homeCurrency: 'GBP',
+      ctxUserId: null,
+      walletProvisioning: 'activated',
+    };
     const { ctx } = makeCtx({
       auth: LOOP_AUTH,
       body: {
@@ -319,7 +339,7 @@ describe('loopCreateOrderHandler', () => {
     const res = await loopCreateOrderHandler(ctx);
     expect(res.status).toBe(400);
     const body = (await res.json()) as { code: string };
-    expect(body.code).toBe('PAYMENT_METHOD_DISABLED');
+    expect(body.code).toBe('CREDIT_METHOD_RETIRED');
     expect(createOrderMock).not.toHaveBeenCalled();
   });
 
@@ -507,12 +527,30 @@ describe('loopCreateOrderHandler', () => {
     expect(body.code).toBe('SERVICE_UNAVAILABLE');
   });
 
-  it('credit path — also rejected with 400 when balance is sufficient (A4-110b)', async () => {
-    // A4-110(b): credit-method orders are blocked unconditionally
-    // until source-bucketing lands. The balance pre-check is now
-    // bypassed; the gate fires regardless of how much credit the
-    // user holds. Re-enable once user_credits supports tagging
-    // cashback-source vs non-cashback-source liabilities.
+  it('credit path — still allowed for not-yet-activated users (ADR 036 migration window)', async () => {
+    // Mirror balance accrued pre-wallet has no emitted tokens, so the
+    // inline mirror debit is the only coherent spend path — 'credit'
+    // keeps working until provisioning completes.
+    walletProviderState.on = true;
+    userState.user = {
+      id: 'user-uuid',
+      email: 'a@b.com',
+      isAdmin: false,
+      homeCurrency: 'GBP',
+      ctxUserId: null,
+      walletProvisioning: 'wallet_created',
+    };
+    createOrderMock.mockResolvedValue({
+      id: 'order-uuid',
+      userId: 'user-uuid',
+      merchantId: 'm1',
+      faceValueMinor: 10_000n,
+      currency: 'GBP',
+      chargeMinor: 10_000n,
+      chargeCurrency: 'GBP',
+      paymentMethod: 'credit',
+      paymentMemo: null,
+    });
     const { ctx } = makeCtx({
       auth: LOOP_AUTH,
       body: {
@@ -523,10 +561,52 @@ describe('loopCreateOrderHandler', () => {
       },
     });
     const res = await loopCreateOrderHandler(ctx);
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { code: string };
-    expect(body.code).toBe('PAYMENT_METHOD_DISABLED');
-    expect(createOrderMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { payment: { method: string } };
+    expect(body.payment.method).toBe('credit');
+    expect(createOrderMock).toHaveBeenCalledWith(
+      expect.objectContaining({ paymentMethod: 'credit' }),
+    );
+  });
+
+  it('credit path — still allowed when the wallet layer is off, even if activated', async () => {
+    // LOOP_WALLET_PROVIDER='' deployments have no redemption rail to
+    // point users at; the retirement gate requires BOTH the provider
+    // and an activated wallet (ADR 036 OQ3).
+    walletProviderState.on = false;
+    userState.user = {
+      id: 'user-uuid',
+      email: 'a@b.com',
+      isAdmin: false,
+      homeCurrency: 'GBP',
+      ctxUserId: null,
+      walletProvisioning: 'activated',
+    };
+    createOrderMock.mockResolvedValue({
+      id: 'order-uuid',
+      userId: 'user-uuid',
+      merchantId: 'm1',
+      faceValueMinor: 10_000n,
+      currency: 'GBP',
+      chargeMinor: 10_000n,
+      chargeCurrency: 'GBP',
+      paymentMethod: 'credit',
+      paymentMemo: null,
+    });
+    const { ctx } = makeCtx({
+      auth: LOOP_AUTH,
+      body: {
+        merchantId: 'm1',
+        amountMinor: 10_000,
+        currency: 'GBP',
+        paymentMethod: 'credit',
+      },
+    });
+    const res = await loopCreateOrderHandler(ctx);
+    expect(res.status).toBe(200);
+    expect(createOrderMock).toHaveBeenCalledWith(
+      expect.objectContaining({ paymentMethod: 'credit' }),
+    );
   });
 
   it('loop_asset path — returns deposit address + memo + asset code + issuer', async () => {

@@ -2,11 +2,13 @@
  * Embedded-wallet API (ADR 030 Phase C).
  *
  * Thin wrappers over `GET /api/me/wallet` (balance surface) and
- * `POST /api/orders/loop/:id/pay-with-balance` (one-tap pay). Wire
- * shapes live in `@loop/shared/users-wallet.ts` (ADR 019 — shared
- * with the backend's `GET /api/me/wallet` handler, one definition);
- * this module holds fetchers, local re-exports, and the pure
- * cover-math helpers the checkout button needs.
+ * `POST /api/orders/loop/:id/redeem` (one-tap redemption, ADR 036
+ * term). Wire shapes live in `@loop/shared/users-wallet.ts` (the
+ * balance surface) and `@loop/shared/loop-orders.ts`
+ * (`RedeemLoopOrderResponse`) — ADR 019, shared with the backend's
+ * handlers, one definition each; this module holds fetchers, local
+ * re-exports, and the pure cover-math helpers the checkout button
+ * needs.
  *
  * The on-chain LOOP-asset balance is the user's authoritative balance
  * — the off-chain mirror is never user-visible. Balances arrive as
@@ -16,9 +18,9 @@
  * is involved.
  */
 import type {
+  RedeemLoopOrderResponse,
   UserWalletBalance,
   UserWalletResponse,
-  PayWithBalanceResponse,
   WalletProvisioningState,
 } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
@@ -26,7 +28,7 @@ import { authenticatedRequest } from './api-client';
 export type {
   UserWalletBalance,
   UserWalletResponse,
-  PayWithBalanceResponse,
+  RedeemLoopOrderResponse,
   WalletProvisioningState,
 };
 
@@ -39,7 +41,7 @@ export async function getMyWallet(): Promise<UserWalletResponse> {
 }
 
 /**
- * `POST /api/orders/loop/:id/pay-with-balance` — one-tap payment of a
+ * `POST /api/orders/loop/:id/redeem` — one-tap payment of a
  * `pending_payment` Loop-native order from the user's on-chain LOOP
  * balance. Idempotent on order id server-side, so a double-tap can't
  * double-spend. The response carries the order's post-submit `state`;
@@ -50,9 +52,9 @@ export async function getMyWallet(): Promise<UserWalletResponse> {
  * the balance doesn't cover the charge, 503 when the wallet provider
  * or Horizon is unavailable.
  */
-export async function payLoopOrderWithBalance(orderId: string): Promise<PayWithBalanceResponse> {
-  return authenticatedRequest<PayWithBalanceResponse>(
-    `/api/orders/loop/${encodeURIComponent(orderId)}/pay-with-balance`,
+export async function redeemLoopOrder(orderId: string): Promise<RedeemLoopOrderResponse> {
+  return authenticatedRequest<RedeemLoopOrderResponse>(
+    `/api/orders/loop/${encodeURIComponent(orderId)}/redeem`,
     { method: 'POST' },
   );
 }

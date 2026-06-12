@@ -403,7 +403,7 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # required — parseEnv refuses to boot otherwise. Phase C flows:
 # signup-time wallet provisioning + activation sweeper (under
 # LOOP_WORKERS_ENABLED), payout targeting to the activated wallet,
-# POST /api/orders/loop/:id/pay-with-balance, GET /api/me/wallet.
+# POST /api/orders/loop/:id/redeem, GET /api/me/wallet.
 # LOOP_WALLET_PROVIDER=
 # PRIVY_APP_ID=your-privy-app-id
 # PRIVY_APP_SECRET=your-privy-app-secret   # never logged (pino redaction)
