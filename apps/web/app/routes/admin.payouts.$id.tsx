@@ -5,6 +5,7 @@ import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.payouts.$id';
 import { shouldRetry } from '~/hooks/query-retry';
 import { useAdminStepUp } from '~/hooks/use-admin-step-up';
+import { useStaffRole } from '~/hooks/use-staff-role';
 import {
   generateIdempotencyKey,
   getAdminPayout,
@@ -13,7 +14,7 @@ import {
   type PayoutState,
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
-import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
+import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { ReasonDialog } from '~/components/features/admin/ReasonDialog';
 import { StepUpModal } from '~/components/features/admin/StepUpModal';
@@ -57,13 +58,15 @@ function TimelineRow({ label, iso }: { label: string; iso: string | null }): Rea
 // A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminPayoutDetailRoute(): React.JSX.Element {
   return (
-    <RequireAdmin>
+    <RequireStaff minimum="support">
       <AdminPayoutDetailRouteInner />
-    </RequireAdmin>
+    </RequireStaff>
   );
 }
 
 function AdminPayoutDetailRouteInner(): React.JSX.Element {
+  // ADR 037: admin-only controls (CSV / money writes) key off this.
+  const { isAdminRole } = useStaffRole();
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
 
@@ -167,7 +170,9 @@ function AdminPayoutDetailRouteInner(): React.JSX.Element {
             </div>
           ) : null}
 
-          {query.data.state === 'failed' ? (
+          {/* ADR 037 §3: payout retry is a money write — admin-only,
+              hidden for support. */}
+          {isAdminRole && query.data.state === 'failed' ? (
             <button
               type="button"
               onClick={() => handleRetry(query.data.id)}

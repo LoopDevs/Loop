@@ -5,9 +5,10 @@ import { foldForSearch } from '@loop/shared';
 import type { Route } from './+types/admin.merchants';
 import { useAllMerchants } from '~/hooks/use-merchants';
 import { shouldRetry } from '~/hooks/query-retry';
+import { useStaffRole } from '~/hooks/use-staff-role';
 import { listCashbackConfigs, type MerchantCashbackConfig } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
-import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
+import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
@@ -42,13 +43,15 @@ export function meta(): Route.MetaDescriptors {
 // A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminMerchantsRoute(): React.JSX.Element {
   return (
-    <RequireAdmin>
+    <RequireStaff minimum="support">
       <AdminMerchantsRouteInner />
-    </RequireAdmin>
+    </RequireStaff>
   );
 }
 
 function AdminMerchantsRouteInner(): React.JSX.Element {
+  // ADR 037: admin-only controls (CSV / money writes) key off this.
+  const { isAdminRole } = useStaffRole();
   const { merchants, isLoading: merchantsLoading } = useAllMerchants();
   const configsQuery = useQuery({
     queryKey: ['admin-cashback-configs'],
@@ -96,11 +99,14 @@ function AdminMerchantsRouteInner(): React.JSX.Element {
           aria-label="Filter merchants"
           className="flex-1 min-w-[16rem] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
         />
-        <CsvDownloadButton
-          path="/api/admin/merchants-catalog.csv"
-          filename={`merchants-catalog-${new Date().toISOString().slice(0, 10)}.csv`}
-          label="Catalog CSV"
-        />
+        {/* ADR 037 §3: bulk CSV exports are admin-only. */}
+        {isAdminRole ? (
+          <CsvDownloadButton
+            path="/api/admin/merchants-catalog.csv"
+            filename={`merchants-catalog-${new Date().toISOString().slice(0, 10)}.csv`}
+            label="Catalog CSV"
+          />
+        ) : null}
       </div>
 
       {merchantsLoading ? (

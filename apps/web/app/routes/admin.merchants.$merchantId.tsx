@@ -25,6 +25,7 @@ import { ApiException, merchantSlug } from '@loop/shared';
 import type { Route } from './+types/admin.merchants.$merchantId';
 import { useAllMerchants } from '~/hooks/use-merchants';
 import { shouldRetry } from '~/hooks/query-retry';
+import { useStaffRole } from '~/hooks/use-staff-role';
 import {
   cashbackConfigHistory,
   listAdminOrders,
@@ -32,7 +33,7 @@ import {
   type AdminOrderView,
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
-import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
+import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { MerchantCashbackMonthlyChart } from '~/components/features/admin/MerchantCashbackMonthlyChart';
@@ -54,13 +55,15 @@ const RECENT_ORDERS_LIMIT = 10;
 // A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminMerchantDetailRoute(): React.JSX.Element {
   return (
-    <RequireAdmin>
+    <RequireStaff minimum="support">
       <AdminMerchantDetailRouteInner />
-    </RequireAdmin>
+    </RequireStaff>
   );
 }
 
 function AdminMerchantDetailRouteInner(): React.JSX.Element {
+  // ADR 037: admin-only controls (CSV / money writes) key off this.
+  const { isAdminRole } = useStaffRole();
   const { merchantId = '' } = useParams<{ merchantId: string }>();
   const { merchants } = useAllMerchants();
   const merchant = merchants.find((m) => m.id === merchantId);
@@ -170,13 +173,16 @@ function AdminMerchantDetailRouteInner(): React.JSX.Element {
             prep — the long-form companion to the scalar chip and
             the 30-day sparkline. Appends ?days=366 for a full-
             year pull in one go. */}
-        <div className="mt-4">
-          <CsvDownloadButton
-            path={`/api/admin/merchants/${encodeURIComponent(merchantId)}/flywheel-activity.csv?days=366`}
-            filename={`${merchantId}-flywheel-activity-${new Date().toISOString().slice(0, 10)}.csv`}
-            label="Flywheel CSV (1y)"
-          />
-        </div>
+        {/* ADR 037 §3: bulk CSV exports are admin-only. */}
+        {isAdminRole ? (
+          <div className="mt-4">
+            <CsvDownloadButton
+              path={`/api/admin/merchants/${encodeURIComponent(merchantId)}/flywheel-activity.csv?days=366`}
+              filename={`${merchantId}-flywheel-activity-${new Date().toISOString().slice(0, 10)}.csv`}
+              label="Flywheel CSV (1y)"
+            />
+          </div>
+        ) : null}
       </section>
 
       {/* Current cashback config — small card. Shows the three

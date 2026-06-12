@@ -3,13 +3,15 @@ import { Link } from 'react-router';
 import { ApiException, LOOP_ASSET_CODES, type LoopAssetCode } from '@loop/shared';
 import type { Route } from './+types/admin._index';
 import { shouldRetry } from '~/hooks/query-retry';
+import { useStaffRole } from '~/hooks/use-staff-role';
 import { getTreasurySnapshot, type TreasurySnapshot } from '~/services/admin';
 import {
   AdminNav,
   failedPayoutsCount,
   operatorPoolStatus,
 } from '~/components/features/admin/AdminNav';
-import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
+import { AdminLookupSearch } from '~/components/features/admin/AdminLookupSearch';
+import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { AdminAuditTail } from '~/components/features/admin/AdminAuditTail';
 import { ConfigsHistoryCard } from '~/components/features/admin/ConfigsHistoryCard';
 import { CashbackSparkline } from '~/components/features/admin/CashbackSparkline';
@@ -33,6 +35,11 @@ interface CardLink {
   href: string;
   title: string;
   description: string;
+  /**
+   * ADR 037 §6: cards for surfaces support can't open are hidden
+   * (not disabled). `admin` → admin role only.
+   */
+  minRole: 'support' | 'admin';
 }
 
 // A2-1520: local fmtMinor replaced with bigint-safe shared helper.
@@ -81,59 +88,83 @@ function LiabilityCard({
 const CARDS: ReadonlyArray<CardLink> = [
   {
     href: '/admin/treasury',
+    minRole: 'support',
     title: 'Treasury',
     description:
       'Outstanding credit, LOOP liabilities, operator pool health, payout counts, per-asset breakdown.',
   },
   {
     href: '/admin/payouts',
+    minRole: 'support',
     title: 'Payouts',
     description: 'Stellar cashback backlog (ADR 015/016). Retry failed rows with Discord audit.',
   },
   {
     href: '/admin/orders',
+    minRole: 'support',
     title: 'Orders',
     description: 'Loop-native orders drill-down with state + cashback split (ADR 011/015).',
   },
   {
     href: '/admin/cashback',
+    minRole: 'admin',
     title: 'Cashback',
     description: 'Per-merchant wholesale / cashback / margin config + audit trail (ADR 011).',
   },
   {
     href: '/admin/users',
+    minRole: 'support',
     title: 'Users',
     description: 'Paginated user directory with email search + credit drill-down (ADR 009/017).',
   },
   {
     href: '/admin/merchants',
+    minRole: 'support',
     title: 'Merchants',
     description:
       'Searchable catalog index with cashback-config state per merchant. Exports the catalog as CSV for BD / finance.',
   },
   {
     href: '/admin/operators',
+    minRole: 'admin',
     title: 'Operators',
     description:
       'CTX supplier operator pool — volume, success rate, p50/p95 fulfilment latency per operator (ADR 013/022).',
   },
   {
     href: '/admin/assets',
+    minRole: 'admin',
     title: 'Assets',
     description:
       'LOOP stablecoins (USDLOOP / GBPLOOP / EURLOOP) — outstanding liability, issuer, in-flight payout state (ADR 015/022).',
   },
   {
     href: '/admin/stuck-orders',
+    minRole: 'admin',
     title: 'Stuck orders',
     description:
       'SLO-triage list for orders sitting past threshold in paid / procuring (ADR 011/013).',
   },
   {
     href: '/admin/audit',
+    minRole: 'admin',
     title: 'Audit',
     description:
       'Admin write-audit trail (ADR 017/018) — every POST/PUT/DELETE with actor email and result.',
+  },
+  {
+    href: '/admin/skips',
+    minRole: 'support',
+    title: 'Watcher skips',
+    description:
+      'Payments the deposit watcher skipped (ADR 037) — re-open abandoned rows to unstick delivery.',
+  },
+  {
+    href: '/admin/staff',
+    minRole: 'admin',
+    title: 'Staff',
+    description:
+      'Staff-role grants (ADR 037) — grant / revoke admin and support roles with step-up + audit.',
   },
 ];
 
@@ -153,13 +184,15 @@ const CARDS: ReadonlyArray<CardLink> = [
 // deny banner without any of the admin-specific data fetches firing.
 export default function AdminIndexRoute(): React.JSX.Element {
   return (
-    <RequireAdmin>
+    <RequireStaff minimum="support">
       <AdminIndexRouteInner />
-    </RequireAdmin>
+    </RequireStaff>
   );
 }
 
 function AdminIndexRouteInner(): React.JSX.Element {
+  // ADR 037: support sees the read cards only.
+  const { isAdminRole } = useStaffRole();
   const snapshotQuery = useQuery<TreasurySnapshot, Error>({
     queryKey: ['admin-treasury'],
     queryFn: getTreasurySnapshot,
@@ -181,6 +214,11 @@ function AdminIndexRouteInner(): React.JSX.Element {
         <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
           Cashback operations hub. Use the tabs above or the cards below to drill into each surface.
         </p>
+        {/* ADR 037: global reverse lookup — email / order id / payment
+            memo / Stellar address. */}
+        <div className="mt-4">
+          <AdminLookupSearch />
+        </div>
       </header>
 
       {denied ? (
@@ -228,7 +266,10 @@ function AdminIndexRouteInner(): React.JSX.Element {
               {failed}
             </div>
           </Link>
-          <StuckOrdersCard />
+          {/* StuckOrdersCard drills into /admin/stuck-orders which
+              stays admin-gated — hide the card for support so the
+              home page never offers a dead end. */}
+          {isAdminRole ? <StuckOrdersCard /> : null}
           <StuckPayoutsCard />
         </section>
       )}
@@ -301,12 +342,14 @@ function AdminIndexRouteInner(): React.JSX.Element {
           threshold on the point card. */}
       {denied ? null : <RealizationSparkline />}
 
-      {denied ? null : <AdminAuditTail />}
+      {/* ADR 037 §6: audit + cashback-config history are admin
+          surfaces — hidden for support. */}
+      {denied || !isAdminRole ? null : <AdminAuditTail />}
 
-      {denied ? null : <ConfigsHistoryCard />}
+      {denied || !isAdminRole ? null : <ConfigsHistoryCard />}
 
       <section className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {CARDS.map((card) => (
+        {CARDS.filter((card) => isAdminRole || card.minRole === 'support').map((card) => (
           <Link
             key={card.href}
             to={card.href}

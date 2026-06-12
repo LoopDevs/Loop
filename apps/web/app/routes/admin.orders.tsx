@@ -16,7 +16,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { ApiException, formatMinorCurrency } from '@loop/shared';
 import type { Route } from './+types/admin.orders';
-import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
+import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import {
   listAdminOrders,
   type AdminOrderState,
@@ -24,6 +24,7 @@ import {
   type AdminPaymentMethod,
 } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
+import { useStaffRole } from '~/hooks/use-staff-role';
 import { ADMIN_LOCALE } from '~/utils/locale';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
@@ -77,13 +78,15 @@ const formatMinor = formatMinorCurrency;
 // A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminOrdersRoute(): React.JSX.Element {
   return (
-    <RequireAdmin>
+    <RequireStaff minimum="support">
       <AdminOrdersRouteInner />
-    </RequireAdmin>
+    </RequireStaff>
   );
 }
 
 function AdminOrdersRouteInner(): React.JSX.Element {
+  // ADR 037: admin-only controls (CSV / money writes) key off this.
+  const { isAdminRole } = useStaffRole();
   const [searchParams, setSearchParams] = useSearchParams();
   const merchantIdFilter = searchParams.get('merchantId') ?? undefined;
   const chargeCurrencyRaw = searchParams.get('chargeCurrency');
@@ -131,10 +134,14 @@ function AdminOrdersRouteInner(): React.JSX.Element {
             rows; each row shows the ADR-015 cashback split + CTX procurement metadata.
           </p>
         </div>
-        <CsvDownloadButton
-          path="/api/admin/orders.csv"
-          filename={`loop-orders-${new Date().toISOString().slice(0, 10)}.csv`}
-        />
+        {/* ADR 037 §3: bulk CSV exports are admin-only — hidden
+            for support, not disabled. */}
+        {isAdminRole ? (
+          <CsvDownloadButton
+            path="/api/admin/orders.csv"
+            filename={`loop-orders-${new Date().toISOString().slice(0, 10)}.csv`}
+          />
+        ) : null}
       </header>
 
       <OrdersSparkline />

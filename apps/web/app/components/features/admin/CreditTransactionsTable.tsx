@@ -66,18 +66,29 @@ interface Props {
  *
  * Filter chips narrow the query server-side by `?type=` so pagination
  * stays consistent when a filter is active.
+ *
+ * ADR 037 (ledger browser): the "on or before" date filter rides the
+ * same `?before=` cursor the pagination uses — picking a date jumps
+ * the window to end-of-that-day UTC, and "Older →" pages on from
+ * there. One server param, two UI affordances.
  */
 export function CreditTransactionsTable({ userId }: Props): React.JSX.Element {
   const [typeFilter, setTypeFilter] = useState<'all' | CreditTransactionType>('all');
   const [beforeCursor, setBeforeCursor] = useState<string | null>(null);
+  const [untilDate, setUntilDate] = useState<string>('');
+
+  // Cursor (a row click-through) wins over the coarse date filter —
+  // it's always more specific.
+  const effectiveBefore =
+    beforeCursor ?? (untilDate.length > 0 ? `${untilDate}T23:59:59.999Z` : null);
 
   const query = useQuery({
-    queryKey: ['admin-user-credit-transactions', userId, typeFilter, beforeCursor],
+    queryKey: ['admin-user-credit-transactions', userId, typeFilter, effectiveBefore],
     queryFn: () =>
       listAdminUserCreditTransactions({
         userId,
         ...(typeFilter !== 'all' ? { type: typeFilter } : {}),
-        ...(beforeCursor !== null ? { before: beforeCursor } : {}),
+        ...(effectiveBefore !== null ? { before: effectiveBefore } : {}),
         limit: PAGE_SIZE,
       }),
     retry: shouldRetry,
@@ -97,25 +108,52 @@ export function CreditTransactionsTable({ userId }: Props): React.JSX.Element {
 
   return (
     <div className="space-y-4">
-      <nav className="flex flex-wrap gap-2" aria-label="Transaction type filter">
-        {TYPES.map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => {
-              setTypeFilter(t);
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <nav className="flex flex-wrap gap-2" aria-label="Transaction type filter">
+          {TYPES.map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => {
+                setTypeFilter(t);
+                setBeforeCursor(null);
+              }}
+              className={`rounded-full px-3 py-1 text-xs font-medium border ${
+                typeFilter === t
+                  ? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
+                  : 'border-gray-200 text-gray-700 bg-white dark:border-gray-700 dark:text-gray-300 dark:bg-gray-900'
+              }`}
+            >
+              {t === 'all' ? 'All' : t}
+            </button>
+          ))}
+        </nav>
+        <label className="flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400">
+          On or before
+          <input
+            type="date"
+            value={untilDate}
+            onChange={(e) => {
+              setUntilDate(e.target.value);
               setBeforeCursor(null);
             }}
-            className={`rounded-full px-3 py-1 text-xs font-medium border ${
-              typeFilter === t
-                ? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
-                : 'border-gray-200 text-gray-700 bg-white dark:border-gray-700 dark:text-gray-300 dark:bg-gray-900'
-            }`}
-          >
-            {t === 'all' ? 'All' : t}
-          </button>
-        ))}
-      </nav>
+            aria-label="Show transactions on or before this date"
+            className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+          />
+          {untilDate.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                setUntilDate('');
+                setBeforeCursor(null);
+              }}
+              className="text-xs underline hover:no-underline"
+            >
+              Clear
+            </button>
+          ) : null}
+        </label>
+      </div>
 
       {query.isPending ? (
         <div className="flex justify-center py-8">

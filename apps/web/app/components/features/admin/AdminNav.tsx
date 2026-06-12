@@ -19,28 +19,49 @@
  * both surfaces share the fetch + cache line.
  *
  * Deliberately no auth gate inside the component — each admin page
- * already gates on `requireAdmin` at the backend and renders a
- * "Not authorised" body on 401/404. The nav itself is safe to render
- * for any caller; non-admins just can't follow the links usefully.
+ * already gates on `requireStaff` at the backend and renders a
+ * "Not authorised" body on 401/404. The nav IS role-aware though
+ * (ADR 037 §6): tabs for surfaces the support role cannot use
+ * (money config, drill aggregates with CSV mass exports, audit,
+ * staff management) are hidden — hidden, not disabled, so support
+ * never sees surface names it can't open. Role comes from the same
+ * `['me']` cache line the `RequireStaff` gate already warmed, so
+ * this adds no extra fetch.
  */
 import { Link, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { ApiException } from '@loop/shared';
+import { ApiException, type StaffRole } from '@loop/shared';
 import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
+import { useStaffRole } from '~/hooks/use-staff-role';
 import { getTreasurySnapshot, type TreasurySnapshot } from '~/services/admin';
 
-const TABS: ReadonlyArray<{ href: string; label: string }> = [
-  { href: '/admin/cashback', label: 'Cashback' },
-  { href: '/admin/treasury', label: 'Treasury' },
-  { href: '/admin/payouts', label: 'Payouts' },
-  { href: '/admin/orders', label: 'Orders' },
-  { href: '/admin/merchants', label: 'Merchants' },
-  { href: '/admin/users', label: 'Users' },
-  { href: '/admin/operators', label: 'Operators' },
-  { href: '/admin/assets', label: 'Assets' },
-  { href: '/admin/audit', label: 'Audit' },
+/**
+ * `minRole: 'support'` → visible to both staff roles;
+ * `minRole: 'admin'` → admin only (ADR 037 §3 permission matrix:
+ * support's nav is users / orders / payouts / skips / merchants /
+ * treasury reads).
+ */
+const TABS: ReadonlyArray<{ href: string; label: string; minRole: StaffRole }> = [
+  { href: '/admin/cashback', label: 'Cashback', minRole: 'admin' },
+  { href: '/admin/treasury', label: 'Treasury', minRole: 'support' },
+  { href: '/admin/payouts', label: 'Payouts', minRole: 'support' },
+  { href: '/admin/orders', label: 'Orders', minRole: 'support' },
+  { href: '/admin/merchants', label: 'Merchants', minRole: 'support' },
+  { href: '/admin/users', label: 'Users', minRole: 'support' },
+  { href: '/admin/skips', label: 'Skips', minRole: 'support' },
+  { href: '/admin/operators', label: 'Operators', minRole: 'admin' },
+  { href: '/admin/assets', label: 'Assets', minRole: 'admin' },
+  { href: '/admin/audit', label: 'Audit', minRole: 'admin' },
+  { href: '/admin/staff', label: 'Staff', minRole: 'admin' },
 ];
+
+/** Pure tab filter, exported for tests. `null` role → no tabs. */
+export function visibleTabs(role: StaffRole | null): ReadonlyArray<(typeof TABS)[number]> {
+  if (role === null) return [];
+  if (role === 'admin') return TABS;
+  return TABS.filter((t) => t.minRole === 'support');
+}
 
 /**
  * Summarises an operator-pool snapshot into one of four display
@@ -167,6 +188,9 @@ function FailedPayoutsBadge({ count }: { count: number }): React.JSX.Element {
 export function AdminNav(): React.JSX.Element {
   const { pathname } = useLocation();
   const { isAuthenticated } = useAuth();
+  // ADR 037 §6: filter tabs by the resolved staff role. Shares the
+  // `['me']` cache line with RequireStaff — no extra fetch.
+  const { staffRole } = useStaffRole();
   // Share the `['admin-treasury']` cache key with /admin/treasury so
   // the pill's fetch deduplicates with the page's fetch — loading
   // either surface warms the other. 30s stale matches the
@@ -195,7 +219,7 @@ export function AdminNav(): React.JSX.Element {
       className="mb-6 flex items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-800"
     >
       <div className="flex items-center gap-1">
-        {TABS.map((tab) => {
+        {visibleTabs(staffRole).map((tab) => {
           // Use startsWith so `/admin/payouts/abc` still highlights
           // `Payouts`. The routes themselves never share a prefix with
           // each other so false-positive overlap is a non-issue.

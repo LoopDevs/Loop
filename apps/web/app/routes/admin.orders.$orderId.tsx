@@ -11,7 +11,8 @@ import {
   type AdminPayoutView,
 } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
-import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
+import { OrderDeliveryPanel } from '~/components/features/admin/OrderDeliveryPanel';
+import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
@@ -56,11 +57,13 @@ function TimelineRow({ label, iso }: { label: string; iso: string | null }): Rea
  * procurement metadata, state timeline, and any failure transcript.
  */
 // A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
+// ADR 037: support-visible — order reads + the redemption-refetch
+// delivery-unsticking action are both in support's permission set.
 export default function AdminOrderDetailRoute(): React.JSX.Element {
   return (
-    <RequireAdmin>
+    <RequireStaff minimum="support">
       <AdminOrderDetailRouteInner />
-    </RequireAdmin>
+    </RequireStaff>
   );
 }
 
@@ -107,6 +110,12 @@ function AdminOrderDetailRouteInner(): React.JSX.Element {
       ) : (
         <>
           <Detail row={query.data} />
+          {/* ADR 037 §3: delivery panel — redemption status + the
+              support-allowed refetch re-drive. Self-hides for
+              non-fulfilled states. */}
+          {orderId !== undefined ? (
+            <OrderDeliveryPanel orderId={orderId} orderState={query.data.state} />
+          ) : null}
           {orderId !== undefined ? <OrderPayoutSection orderId={orderId} /> : null}
         </>
       )}

@@ -6,20 +6,24 @@
 
 ```
 app/
-├── routes/           ← File-based routes (React Router v7, 35 routes)
+├── routes/           ← File-based routes (React Router v7, 36 routes)
 │   ├── home.tsx, map.tsx, gift-card.$name.tsx, brand.$slug.tsx, auth.tsx,
 │   │   onboarding.tsx, calculator.tsx, sitemap.tsx,
 │   │   privacy.tsx, terms.tsx, not-found.tsx
 │   ├── orders.tsx, orders.$id.tsx          ← order history + detail
 │   ├── cashback.tsx, cashback.$slug.tsx    ← user cashback dashboard
 │   ├── settings.*.tsx                      ← profile / wallet / cashback / home-currency
-│   └── admin.*.tsx (17 routes)             ← admin panel: treasury / cashback /
+│   └── admin.*.tsx (19 routes)             ← admin panel: treasury / cashback /
 │                                             orders / users / merchants / operators /
-│                                             payouts / assets / audit / stuck-orders
+│                                             payouts / assets / audit / stuck-orders /
+│                                             skips (watcher skip-rows) / staff (ADR 037
+│                                             role management, admin-only)
 ├── components/
 │   ├── features/     ← Domain components, grouped by feature:
-│   │   ├── admin/    ← ~40 components (treasury, cashback, operator, supplier,
-│   │   │               payout, mix-axis-matrix cards + csv export)
+│   │   ├── admin/    ← ~45 components (treasury, cashback, operator, supplier,
+│   │   │               payout, mix-axis-matrix cards + csv export; ADR 037 adds
+│   │   │               RequireStaff role gate, role-aware AdminNav, UserWalletCard,
+│   │   │               OrderDeliveryPanel, AdminLookupSearch)
 │   │   ├── auth/     ← social login button, email+OTP flow
 │   │   ├── cashback/ ← flywheel chip, balance, pending-payouts, rail-mix
 │   │   ├── home/     ← stats bands (cashback + flywheel)
@@ -36,10 +40,13 @@ app/
 │                       Skeleton, Spinner, ToastContainer)
 ├── hooks/            ← TanStack Query wrappers + lifecycle (use-auth, use-merchants,
 │                       use-orders, use-wallet, use-native-platform,
-│                       use-session-restore, query-retry)
+│                       use-session-restore, query-retry,
+│                       use-staff-role — ADR 037 staffRole resolver over the ['me'] line)
 ├── services/         ← Typed API client (api-client, auth, clusters, merchants,
-│                       orders, orders-loop, wallet, config, admin, user,
-│                       public-stats, parse-error-response)
+│                       orders, orders-loop, wallet, config, admin (+ per-surface admin-*
+│                       slices incl. ADR 037 admin-staff / admin-watcher-skips /
+│                       admin-user-wallet / admin-lookup / admin-order-redemption),
+│                       user, public-stats, parse-error-response)
 ├── stores/           ← Zustand (auth.store, purchase.store, ui.store)
 ├── native/           ← Capacitor plugin wrappers (platform, haptics, secure-storage,
 │                       biometrics, app-lock, back-button, clipboard, keyboard, network,
