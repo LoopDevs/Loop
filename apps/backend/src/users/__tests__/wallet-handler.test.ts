@@ -16,8 +16,21 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
+// ADR 031: `interestApyBps` is only advertised when the on-chain
+// mint path is enabled — a mutable holder lets the truthfulness
+// tests flip the flag per case.
+const { envState } = vi.hoisted(() => ({
+  envState: {
+    env: { INTEREST_APY_BASIS_POINTS: 400, LOOP_INTEREST_ONCHAIN_ENABLED: true } as {
+      INTEREST_APY_BASIS_POINTS: number;
+      LOOP_INTEREST_ONCHAIN_ENABLED: boolean;
+    },
+  },
+}));
 vi.mock('../../env.js', () => ({
-  env: { INTEREST_APY_BASIS_POINTS: 400 },
+  get env() {
+    return envState.env;
+  },
 }));
 
 const { resolveUserMock } = vi.hoisted(() => ({ resolveUserMock: vi.fn() }));
@@ -68,6 +81,7 @@ beforeEach(() => {
   resolveUserMock.mockReset();
   trustlinesMock.mockReset();
   assetsState.assets = [{ code: 'GBPLOOP', issuer: GBPLOOP_ISSUER }];
+  envState.env = { INTEREST_APY_BASIS_POINTS: 400, LOOP_INTEREST_ONCHAIN_ENABLED: true };
 });
 
 describe('getMyWalletHandler', () => {
@@ -197,5 +211,23 @@ describe('getMyWalletHandler', () => {
       interestApyBps: 400,
       stale: true,
     });
+  });
+});
+
+describe('interestApyBps truthfulness (ADR 031 Phase D)', () => {
+  it('advertises the APY only while the on-chain mint path is enabled', async () => {
+    resolveUserMock.mockResolvedValue(
+      activatedUser({ walletAddress: null, walletProvisioning: 'none' }),
+    );
+    envState.env = { INTEREST_APY_BASIS_POINTS: 400, LOOP_INTEREST_ONCHAIN_ENABLED: false };
+    // Legacy off-chain accrual may be configured (APY 400) but never
+    // moves the on-chain balance this surface shows — the chip must
+    // read 0, not 400.
+    const res = await getMyWalletHandler(makeCtx());
+    expect((await bodyOf(res))['interestApyBps']).toBe(0);
+
+    envState.env = { INTEREST_APY_BASIS_POINTS: 400, LOOP_INTEREST_ONCHAIN_ENABLED: true };
+    const res2 = await getMyWalletHandler(makeCtx());
+    expect((await bodyOf(res2))['interestApyBps']).toBe(400);
   });
 });

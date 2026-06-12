@@ -58,7 +58,12 @@ export async function getMyWalletHandler(c: Context): Promise<Response> {
   const base = {
     address: user.walletAddress,
     provisioning: user.walletProvisioning,
-    interestApyBps: env.INTEREST_APY_BASIS_POINTS,
+    // ADR 031 Phase D truthfulness: this surface shows the ON-CHAIN
+    // balance, so the rate chip must only advertise an APY the
+    // on-chain mint path (`credits/interest-mint.ts`) will actually
+    // pay. Legacy off-chain accrual (mirror-only) does not move the
+    // wallet balance and must not be advertised here; 0 = no rate chip.
+    interestApyBps: env.LOOP_INTEREST_ONCHAIN_ENABLED ? env.INTEREST_APY_BASIS_POINTS : 0,
   };
 
   // No on-chain account to read until the wallet exists.

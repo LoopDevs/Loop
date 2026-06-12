@@ -267,6 +267,13 @@
       "when": 1780100600000,
       "tag": "0037_users_wallet_provisioning",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1780100700000,
+      "tag": "0038_interest_mint_onchain",
+      "breakpoints": true
     }
   ]
 }

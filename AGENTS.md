@@ -280,6 +280,16 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # PRIVY_APP_ID=<app-id>
 # PRIVY_APP_SECRET=<app-secret>        — never logged (pino redaction)
 
+# ADR 031 / ADR 036 Phase D: nightly ON-CHAIN interest mints. true →
+# the interest-mint worker (credits/interest-mint.ts) replaces the
+# legacy off-chain accrual scheduler, which is hard-gated off while
+# the flag is set — two interest writers must never coexist. Mints
+# sign with the per-asset ISSUER secret (issuer payment = native
+# mint); parseEnv boot-fails if a secret mismatches its configured
+# issuer address. APY source stays INTEREST_APY_BASIS_POINTS.
+# LOOP_INTEREST_ONCHAIN_ENABLED=false
+# LOOP_STELLAR_GBPLOOP_ISSUER_SECRET=<S...>   — never logged (and USDLOOP/EURLOOP)
+
 # A2-1907 runtime kill switches (read live from process.env, no
 # redeploy). Combined orders switch plus per-path overrides — a set
 # per-path var wins for its path; unset falls back to the combined.

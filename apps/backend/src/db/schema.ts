@@ -836,13 +836,18 @@ export const pendingPayouts = pgTable(
     //   - 'burn' — redemption issuer-return: forwards LOOP received at
     //     the deposit account back to the asset's issuer (native
     //     Stellar burn) after a loop_asset deposit pays an order.
+    //   - 'interest_mint' — ADR 031 / ADR 036 Phase D nightly interest:
+    //     an on-chain mint (payment FROM the issuer account) to the
+    //     user's activated embedded wallet, enqueued in the same txn
+    //     as the `credit_transactions type='interest'` mirror credit.
+    //     Signed with the per-asset issuer keypair, not the operator.
     // Default 'order_cashback' preserves the backfill semantics for
     // pre-0018 rows. `.$type` narrows the TypeScript side to the same
     // literal set the SQL CHECK enforces.
     kind: text('kind')
       .notNull()
       .default('order_cashback')
-      .$type<'order_cashback' | 'emission' | 'burn'>(),
+      .$type<'order_cashback' | 'emission' | 'burn' | 'interest_mint'>(),
     // The LOOP asset + issuer pinned at write-time. If an operator
     // changes the issuer env var later, in-flight rows still reference
     // the issuer at the time the intent was built — otherwise a rotate
@@ -924,14 +929,22 @@ export const pendingPayouts = pgTable(
     check('pending_payouts_attempts_non_negative', sql`${t.attempts} >= 0`),
     // A2-901 / ADR-024 §2 + ADR 036: discriminator + per-kind shape
     // invariants. Emissions are user-addressed with no source order;
-    // burns reference the redeemed order and target the issuer.
-    check('pending_payouts_kind_known', sql`${t.kind} IN ('order_cashback', 'emission', 'burn')`),
+    // burns reference the redeemed order and target the issuer;
+    // interest mints (ADR 031 Phase D) are user-addressed with no
+    // source order — their idempotency fence is the same-txn
+    // `credit_transactions` period-cursor unique index, traceable via
+    // the `interest_mint_snapshots` audit table.
+    check(
+      'pending_payouts_kind_known',
+      sql`${t.kind} IN ('order_cashback', 'emission', 'burn', 'interest_mint')`,
+    ),
     check(
       'pending_payouts_kind_shape',
       sql`
         (${t.kind} = 'order_cashback' AND ${t.orderId} IS NOT NULL)
         OR (${t.kind} = 'emission' AND ${t.orderId} IS NULL)
         OR (${t.kind} = 'burn' AND ${t.orderId} IS NOT NULL)
+        OR (${t.kind} = 'interest_mint' AND ${t.orderId} IS NULL)
       `,
     ),
     // A4-027: pin asset_code + asset_issuer at the DB layer. The app
@@ -1029,6 +1042,104 @@ export const socialIdTokenUses = pgTable(
  * read shape ("this user's favourites, newest first"). See migration
  * `0032_user_favorite_merchants.sql` for the SQL + the rollback path.
  */
+/**
+ * Nightly interest-mint snapshots (ADR 031 / ADR 036 Phase D,
+ * migration 0038). One row per (user, asset, UTC-day period) the
+ * interest-mint worker processed — the auditable record of WHAT
+ * on-chain balance the night's mint was computed from, and the
+ * carry-accumulator that lets sub-penny accruals pay out exactly
+ * over time.
+ *
+ * Math (all bigint):
+ *
+ *   accrual_stroops = floor(balance_stroops × apyBps / (10_000 × 365))
+ *   payable         = carry_before_stroops + accrual_stroops
+ *   minted_minor    = payable / 100_000        (1 minor unit = 1e5 stroops)
+ *   carry_after     = payable % 100_000
+ *
+ * The carry exists because the `user_credits` mirror is integer
+ * minor units (pence/cents) while Stellar amounts have 7 decimals:
+ * minting the raw 7-decimal accrual would leave the mirror unable to
+ * record the sub-minor fraction and the asset-drift equation would
+ * diverge monotonically. Instead the on-chain mint and the mirror
+ * credit are BOTH `minted_minor` (× 1e5 stroops on-chain) — always
+ * equal, always drift-neutral — and the fractional remainder carries
+ * forward here until it crosses a whole minor unit.
+ *
+ * Inserted in the SAME transaction as the `credit_transactions
+ * type='interest'` row + `user_credits` bump + `pending_payouts
+ * kind='interest_mint'` row, so the snapshot is also the per-user
+ * idempotency fence for a re-run of the same period (unique below;
+ * the period-cursor partial unique on credit_transactions is the
+ * second, money-level fence).
+ */
+export const interestMintSnapshots = pgTable(
+  'interest_mint_snapshots',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    assetCode: text('asset_code').notNull(),
+    assetIssuer: text('asset_issuer').notNull(),
+    /** Fiat currency the mirror credit lands in (1:1 with assetCode). */
+    currency: char('currency', { length: 3 }).notNull(),
+    /** UTC calendar day, `YYYY-MM-DD` — same shape as credit_transactions.period_cursor. */
+    periodCursor: text('period_cursor').notNull(),
+    /** On-chain balance read from Horizon at snapshot time (stroops). */
+    balanceStroops: bigint('balance_stroops', { mode: 'bigint' }).notNull(),
+    /** This night's raw accrual, floored to 7 decimals (stroops). */
+    accrualStroops: bigint('accrual_stroops', { mode: 'bigint' }).notNull(),
+    /** Sub-minor remainder carried IN from the previous snapshot. */
+    carryBeforeStroops: bigint('carry_before_stroops', { mode: 'bigint' }).notNull(),
+    /** Sub-minor remainder carried OUT to the next snapshot (< 1e5). */
+    carryAfterStroops: bigint('carry_after_stroops', { mode: 'bigint' }).notNull(),
+    /**
+     * The mirror credit / on-chain mint in minor units. 0 = the night
+     * accrued into the carry only (no ledger or payout rows written).
+     */
+    mintedMinor: bigint('minted_minor', { mode: 'bigint' }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Per-user-per-asset-per-night idempotency fence. Also serves the
+    // "latest carry" lookup (max period_cursor per user+asset) as a
+    // covering ordered scan.
+    uniqueIndex('interest_mint_snapshots_user_asset_period_unique').on(
+      t.userId,
+      t.assetCode,
+      t.periodCursor,
+    ),
+    check(
+      'interest_mint_snapshots_asset_code_known',
+      sql`${t.assetCode} IN ('USDLOOP', 'GBPLOOP', 'EURLOOP')`,
+    ),
+    check('interest_mint_snapshots_issuer_format', sql`${t.assetIssuer} ~ '^G[A-Z2-7]{55}$'`),
+    check('interest_mint_snapshots_currency_known', sql`${t.currency} IN ('USD', 'GBP', 'EUR')`),
+    check(
+      'interest_mint_snapshots_non_negative',
+      sql`
+        ${t.balanceStroops} >= 0
+        AND ${t.accrualStroops} >= 0
+        AND ${t.carryBeforeStroops} >= 0
+        AND ${t.mintedMinor} >= 0
+      `,
+    ),
+    // The carry-out is by construction a modulo-1e5 remainder.
+    check(
+      'interest_mint_snapshots_carry_bounded',
+      sql`${t.carryAfterStroops} >= 0 AND ${t.carryAfterStroops} < 100000`,
+    ),
+    // Value conservation: nothing is created or lost between the
+    // accrual, the mint, and the carry. A violating write is a math
+    // bug — fail at the DB layer.
+    check(
+      'interest_mint_snapshots_conservation',
+      sql`${t.carryBeforeStroops} + ${t.accrualStroops} = ${t.mintedMinor} * 100000 + ${t.carryAfterStroops}`,
+    ),
+  ],
+);
+
 export const userFavoriteMerchants = pgTable(
   'user_favorite_merchants',
   {

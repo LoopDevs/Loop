@@ -123,6 +123,7 @@ vi.mock('../../discord.js', () => ({
   notifyPayoutAwaitingTrustline: (args: unknown) => discordMock.notifyPayoutAwaitingTrustline(args),
 }));
 
+import { Keypair } from '@stellar/stellar-sdk';
 import { runPayoutTick } from '../payout-worker.js';
 
 const BASE_ARGS = {
@@ -552,5 +553,124 @@ describe('ADR 036 — issuer-return burn rows', () => {
     const r = await runPayoutTick(BASE_ARGS);
     expect(r.confirmed).toBe(1);
     expect(trustlinesMock.getAccountTrustlines).toHaveBeenCalledWith('GDESTINATION');
+  });
+});
+
+describe('ADR 031 — interest_mint rows sign with the issuer keypair', () => {
+  // Real ed25519 material: the assertion is cryptographic — the
+  // secret handed to submitPayout must DERIVE the row's pinned
+  // issuer account, not merely equal some configured string.
+  const issuerKp = Keypair.random();
+  const operatorKp = Keypair.random();
+  const ISSUER_ARGS = {
+    ...BASE_ARGS,
+    operatorSecret: operatorKp.secret(),
+    operatorAccount: operatorKp.publicKey(),
+    issuerSigners: new Map([
+      ['GBPLOOP', { secret: issuerKp.secret(), account: issuerKp.publicKey() }],
+    ]),
+  };
+
+  function makeMintRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return makeRow({
+      id: 'p-mint',
+      kind: 'interest_mint',
+      orderId: null,
+      assetCode: 'GBPLOOP',
+      assetIssuer: issuerKp.publicKey(),
+      toAddress: 'GDESTINATION',
+      ...overrides,
+    });
+  }
+
+  function trustDestination(): void {
+    // The default trustlines mock keys on `GBPLOOP::GISSUER`; mint
+    // rows pin the real issuer pubkey, so give the destination the
+    // matching trustline explicitly.
+    trustlinesMock.getAccountTrustlines.mockImplementation(async (account: string) => ({
+      account,
+      accountExists: true,
+      trustlines: new Map([
+        [`GBPLOOP::${issuerKp.publicKey()}`, { code: 'GBPLOOP', issuer: issuerKp.publicKey() }],
+      ]),
+      asOfMs: Date.now(),
+    }));
+  }
+
+  it('submits with the issuer secret (keypair derivation matches the pinned issuer)', async () => {
+    trustDestination();
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeMintRow()]);
+    const r = await runPayoutTick(ISSUER_ARGS);
+    expect(r.confirmed).toBe(1);
+    const submitArg = sdkMock.submitPayout.mock.calls[0]?.[0] as { secret: string };
+    // Cryptographic check: the signing secret derives the issuer
+    // account — an issuer payment is a mint; any other key would
+    // transfer from an unrelated account.
+    expect(Keypair.fromSecret(submitArg.secret).publicKey()).toBe(issuerKp.publicKey());
+    expect(submitArg.secret).not.toBe(ISSUER_ARGS.operatorSecret);
+  });
+
+  it('runs the idempotency pre-check against the ISSUER account, not the operator', async () => {
+    trustDestination();
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeMintRow()]);
+    await runPayoutTick(ISSUER_ARGS);
+    expect(horizonMock.findOutboundPaymentByMemo).toHaveBeenCalledWith(
+      expect.objectContaining({ account: issuerKp.publicKey() }),
+    );
+  });
+
+  it('operator-kind rows in the same tick keep the operator path byte-identical', async () => {
+    trustDestination();
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ id: 'p-cash', assetIssuer: issuerKp.publicKey() }),
+      makeMintRow(),
+    ]);
+    const r = await runPayoutTick(ISSUER_ARGS);
+    expect(r.confirmed).toBe(2);
+    const secrets = sdkMock.submitPayout.mock.calls.map((c) => (c[0] as { secret: string }).secret);
+    expect(secrets[0]).toBe(operatorKp.secret()); // order_cashback → operator
+    expect(secrets[1]).toBe(issuerKp.secret()); // interest_mint → issuer
+    const precheckAccounts = horizonMock.findOutboundPaymentByMemo.mock.calls.map(
+      (c) => (c[0] as { account: string }).account,
+    );
+    expect(precheckAccounts).toEqual([operatorKp.publicKey(), issuerKp.publicKey()]);
+  });
+
+  it('missing issuer signer → retriedLater: no claim, no submit, row stays pending', async () => {
+    trustDestination();
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeMintRow()]);
+    const r = await runPayoutTick({ ...ISSUER_ARGS, issuerSigners: new Map() });
+    expect(r.retriedLater).toBe(1);
+    expect(repoMocks.markPayoutSubmitted).not.toHaveBeenCalled();
+    expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+    expect(repoMocks.markPayoutFailed).not.toHaveBeenCalled();
+  });
+
+  it('signer whose account mismatches the row-pinned issuer → retriedLater (never signs with the wrong key)', async () => {
+    trustDestination();
+    const otherKp = Keypair.random();
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeMintRow()]);
+    const r = await runPayoutTick({
+      ...ISSUER_ARGS,
+      issuerSigners: new Map([
+        ['GBPLOOP', { secret: otherKp.secret(), account: otherKp.publicKey() }],
+      ]),
+    });
+    expect(r.retriedLater).toBe(1);
+    expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+  });
+
+  it('interest_mint destinations are user wallets — the trustline probe still applies', async () => {
+    trustlinesMock.getAccountTrustlines.mockImplementationOnce(async (account: string) => ({
+      account,
+      accountExists: true,
+      trustlines: new Map(), // no GBPLOOP trustline
+      asOfMs: Date.now(),
+    }));
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeMintRow()]);
+    const r = await runPayoutTick(ISSUER_ARGS);
+    expect(r.retriedLater).toBe(1);
+    expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+    expect(discordMock.notifyPayoutAwaitingTrustline).toHaveBeenCalledOnce();
   });
 });

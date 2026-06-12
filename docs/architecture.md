@@ -254,7 +254,7 @@ CLOSED ──(N consecutive failures)──→ OPEN ──(cooldown elapsed)─�
 - **4xx responses** do not count as failures (client errors, not upstream outage).
 - When OPEN, upstream proxy handlers return **503** `Service temporarily unavailable` (not 502).
 - The `/health` endpoint bypasses the circuit breaker — it probes upstream directly so external monitors can detect recovery. Probe result is cached 10s (PR #131) to stop an attacker from turning `/health` into an outbound-fetch amplifier; the probe's own fetch timeout is 8s so marginal CTX `/status` latency does not flap the service down prematurely.
-- `/health` now reports four operational classes in one response: CTX reachability, merchant/location freshness, native-auth OTP delivery state, and per-worker runtime state (`payment_watcher`, `procurement_worker`, `payout_worker`, `asset_drift_watcher`, `interest_scheduler`).
+- `/health` now reports four operational classes in one response: CTX reachability, merchant/location freshness, native-auth OTP delivery state, and per-worker runtime state (`payment_watcher`, `procurement_worker`, `payout_worker`, `asset_drift_watcher`, `interest_scheduler`, `interest_mint`, `redemption_backfill`, `wallet_provisioning`).
 - Status-change notifications to the Discord monitoring channel are flap-damped by a rolling window: a healthy→degraded flip requires **5 degraded readings in the last 10 probes**, and a degraded→healthy flip requires **8 healthy readings in the last 10 probes**. On top of that detector, `notifyHealthChange` has a 30-minute per-process cooldown so a noisy incident does not flood the channel. The raw `/health` response body is always the current reading so Fly's liveness probe remains undebounced.
 - One breaker **per upstream endpoint** — `login`, `verify-email`, `refresh-token`, `logout`, `merchants`, `locations`, `gift-cards`. Lazily created via `getUpstreamCircuit(key)` in `circuit-breaker.ts`. Independent so a failing merchants sync can't trip auth, and a failing gift-cards endpoint can't trip clusters.
 
@@ -337,7 +337,7 @@ GET  /api/users/me/cashback-monthly [authenticated — last 12 months of cashbac
 GET  /api/users/me/orders/summary   [authenticated — 5-number orders-page summary header, ADR 010/015]
 GET  /api/users/me/flywheel-stats   [authenticated — caller's LOOP-asset recycled order count + charge, ADR 015]
 GET  /api/users/me/payment-method-share [authenticated — caller's own rail mix, home-currency locked, ADR 010/015]
-GET  /api/me/wallet                [authenticated — embedded-wallet balance surface: address + provisioning + on-chain LOOP balances + interest APY; never-500 last-known-good fallback, ADR 030 C4 / ADR 036]
+GET  /api/me/wallet                [authenticated — embedded-wallet balance surface: address + provisioning + on-chain LOOP balances + interest APY (non-zero only when the ADR 031 on-chain mint path is enabled); never-500 last-known-good fallback, ADR 030 C4 / ADR 036]
 GET  /api/public/cashback-stats    [public — landing-page aggregates, never-500, ADR 009/015/020]
 GET  /api/public/top-cashback-merchants [public — landing-page "best cashback" list, never-500, ADR 011/020]
 GET  /api/public/merchants/:id     [public — per-merchant SEO detail (accepts id or slug), never-500, ADR 011/020]

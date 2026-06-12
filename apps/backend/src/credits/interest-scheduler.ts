@@ -27,6 +27,7 @@
  * skippedAlreadyAccrued` make that visible in the log.
  */
 import { accrueOnePeriod, type AccrualPeriod } from './accrue-interest.js';
+import { env } from '../env.js';
 import { logger } from '../logger.js';
 import {
   markWorkerStarted,
@@ -117,6 +118,21 @@ export async function tickInterestAccrual(config: InterestSchedulerConfig): Prom
  * off to avoid log noise.
  */
 export function startInterestScheduler(config: InterestSchedulerConfig): void {
+  // ADR 031 / ADR 036 Phase D hard gate: this scheduler is the LEGACY
+  // off-chain-only interest writer (mirror credit with no on-chain
+  // mint). While `LOOP_INTEREST_ONCHAIN_ENABLED=true` the interest-
+  // mint worker (`credits/interest-mint.ts`) owns the `interest`
+  // ledger type — two interest writers running together would
+  // double-credit and diverge the asset-drift equation nightly.
+  // `index.ts` never wires both, but throw here so any future
+  // re-wiring boot-fails loudly instead of silently coexisting.
+  if (env.LOOP_INTEREST_ONCHAIN_ENABLED) {
+    throw new Error(
+      'startInterestScheduler: LOOP_INTEREST_ONCHAIN_ENABLED=true — the legacy off-chain ' +
+        'accrual scheduler must not run alongside the on-chain interest-mint worker ' +
+        '(ADR 031 / ADR 036: two interest writers must never coexist)',
+    );
+  }
   stopInterestScheduler();
   if (config.period.apyBasisPoints <= 0) {
     // Defensive — the caller should have filtered; log and no-op.

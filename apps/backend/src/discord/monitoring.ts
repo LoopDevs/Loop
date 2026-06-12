@@ -141,8 +141,15 @@ export function notifyDepositSkipAbandoned(args: {
 export function notifyPayoutFailed(args: {
   payoutId: string;
   userId: string;
-  /** Null for `kind='emission'` payouts (A2-901 / ADR-024 §2 / ADR 036). */
+  /** Null for `kind='emission'` / `kind='interest_mint'` payouts (ADR-024 §2 / ADR 036 / ADR 031). */
   orderId: string | null;
+  /**
+   * `pending_payouts.kind` — labels the Order field for order-less
+   * rows so an interest mint doesn't read as an emission. Optional
+   * for caller compatibility; absent + null orderId renders the
+   * historical `_emission_`.
+   */
+  payoutKind?: string | undefined;
   assetCode: string;
   amount: string;
   kind: string;
@@ -166,7 +173,10 @@ export function notifyPayoutFailed(args: {
       { name: 'User', value: `\`${args.userId.slice(-8)}\``, inline: true },
       {
         name: 'Order',
-        value: args.orderId === null ? '_emission_' : `\`${args.orderId.slice(-8)}\``,
+        value:
+          args.orderId === null
+            ? `_${escapeMarkdown(args.payoutKind ?? 'emission')}_`
+            : `\`${args.orderId.slice(-8)}\``,
         inline: true,
       },
       { name: 'Payout', value: `\`${args.payoutId.slice(-8)}\``, inline: true },

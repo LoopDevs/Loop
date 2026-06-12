@@ -171,21 +171,24 @@ that the role-grant wasn't extended for a new table.
 
 #### Stellar rails (ADR 015 / ADR 016)
 
-| Variable                                | Required    | Default                                            | Description                                                                           |
-| --------------------------------------- | ----------- | -------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `LOOP_STELLAR_DEPOSIT_ADDRESS`          | Yes (prod)  | —                                                  | Operator account receiving inbound deposits.                                          |
-| `LOOP_STELLAR_OPERATOR_SECRET`          | Yes (prod)  | —                                                  | Operator signing secret for outbound payouts.                                         |
-| `LOOP_STELLAR_OPERATOR_SECRET_PREVIOUS` | No          | —                                                  | Prior operator secret during key rotation.                                            |
-| `LOOP_STELLAR_USDC_ISSUER`              | Yes (prod)  | —                                                  | Circle USDC issuer G-account.                                                         |
-| `LOOP_STELLAR_USDLOOP_ISSUER`           | Yes (prod)  | —                                                  | USDLOOP issuer (ADR 015).                                                             |
-| `LOOP_STELLAR_GBPLOOP_ISSUER`           | Yes (prod)  | —                                                  | GBPLOOP issuer.                                                                       |
-| `LOOP_STELLAR_EURLOOP_ISSUER`           | Yes (prod)  | —                                                  | EURLOOP issuer.                                                                       |
-| `LOOP_STELLAR_USDC_FLOOR_STROOPS`       | Recommended | —                                                  | Alert floor on the USDC operator balance; below this triggers `notifyUsdcBelowFloor`. |
-| `LOOP_STELLAR_NETWORK_PASSPHRASE`       | No          | `"Public Global Stellar Network ; September 2015"` | Mainnet passphrase; override for testnet.                                             |
-| `LOOP_STELLAR_HORIZON_URL`              | No          | `https://horizon.stellar.org`                      | Horizon base URL (A2-1513).                                                           |
-| `LOOP_XLM_PRICE_FEED_URL`               | No          | —                                                  | Override XLM price feed (A2-1812).                                                    |
-| `LOOP_FX_FEED_URL`                      | No          | —                                                  | Override FX price feed (A2-1812).                                                     |
-| `LOOP_ASSET_DRIFT_THRESHOLD_STROOPS`    | No          | schema default                                     | Drift watcher alert threshold.                                                        |
+| Variable                                | Required    | Default                                            | Description                                                                                                |
+| --------------------------------------- | ----------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `LOOP_STELLAR_DEPOSIT_ADDRESS`          | Yes (prod)  | —                                                  | Operator account receiving inbound deposits.                                                               |
+| `LOOP_STELLAR_OPERATOR_SECRET`          | Yes (prod)  | —                                                  | Operator signing secret for outbound payouts.                                                              |
+| `LOOP_STELLAR_OPERATOR_SECRET_PREVIOUS` | No          | —                                                  | Prior operator secret during key rotation.                                                                 |
+| `LOOP_STELLAR_USDC_ISSUER`              | Yes (prod)  | —                                                  | Circle USDC issuer G-account.                                                                              |
+| `LOOP_STELLAR_USDLOOP_ISSUER`           | Yes (prod)  | —                                                  | USDLOOP issuer (ADR 015).                                                                                  |
+| `LOOP_STELLAR_GBPLOOP_ISSUER`           | Yes (prod)  | —                                                  | GBPLOOP issuer.                                                                                            |
+| `LOOP_STELLAR_EURLOOP_ISSUER`           | Yes (prod)  | —                                                  | EURLOOP issuer.                                                                                            |
+| `LOOP_STELLAR_USDLOOP_ISSUER_SECRET`    | No          | —                                                  | USDLOOP issuer secret — signs nightly interest mints (ADR 031); boot-validated against the issuer address. |
+| `LOOP_STELLAR_GBPLOOP_ISSUER_SECRET`    | No          | —                                                  | GBPLOOP issuer secret (ADR 031).                                                                           |
+| `LOOP_STELLAR_EURLOOP_ISSUER_SECRET`    | No          | —                                                  | EURLOOP issuer secret (ADR 031).                                                                           |
+| `LOOP_STELLAR_USDC_FLOOR_STROOPS`       | Recommended | —                                                  | Alert floor on the USDC operator balance; below this triggers `notifyUsdcBelowFloor`.                      |
+| `LOOP_STELLAR_NETWORK_PASSPHRASE`       | No          | `"Public Global Stellar Network ; September 2015"` | Mainnet passphrase; override for testnet.                                                                  |
+| `LOOP_STELLAR_HORIZON_URL`              | No          | `https://horizon.stellar.org`                      | Horizon base URL (A2-1513).                                                                                |
+| `LOOP_XLM_PRICE_FEED_URL`               | No          | —                                                  | Override XLM price feed (A2-1812).                                                                         |
+| `LOOP_FX_FEED_URL`                      | No          | —                                                  | Override FX price feed (A2-1812).                                                                          |
+| `LOOP_ASSET_DRIFT_THRESHOLD_STROOPS`    | No          | schema default                                     | Drift watcher alert threshold.                                                                             |
 
 #### CTX operator pool (ADR 013)
 
@@ -195,23 +198,24 @@ that the role-grant wasn't extended for a new table.
 
 #### Background workers
 
-| Variable                                    | Required | Default          | Description                                                                                                                        |
-| ------------------------------------------- | -------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `LOOP_WORKERS_ENABLED`                      | No       | `false`          | Master switch for all outbound workers. Set `true` on prod + Fly staging once Stellar secrets are wired.                           |
-| `LOOP_PAYOUT_WORKER_INTERVAL_SECONDS`       | No       | `30`             | Payout worker tick cadence.                                                                                                        |
-| `LOOP_PAYOUT_MAX_ATTEMPTS`                  | No       | schema default   | Retries before a payout transitions to `failed`.                                                                                   |
-| `LOOP_PAYOUT_WATCHDOG_STALE_SECONDS`        | No       | schema default   | `submitted` payouts older than this get re-picked (A2-602).                                                                        |
-| `LOOP_PAYOUT_FEE_BASE_STROOPS`              | No       | `100`            | A2-1921: Stellar fee for a payout's first submit attempt.                                                                          |
-| `LOOP_PAYOUT_FEE_MULTIPLIER`                | No       | `2`              | A2-1921: per-attempt fee scaling factor (attempt N pays `BASE * MULTIPLIER^(N-1)`).                                                |
-| `LOOP_PAYOUT_FEE_CAP_STROOPS`               | No       | `100000`         | A2-1921: ceiling on the scaled fee.                                                                                                |
-| `LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS`     | No       | schema default   | Horizon payment watcher cadence.                                                                                                   |
-| `LOOP_PROCUREMENT_INTERVAL_SECONDS`         | No       | schema default   | CTX procurement worker cadence.                                                                                                    |
-| `LOOP_ASSET_DRIFT_WATCHER_INTERVAL_SECONDS` | No       | schema default   | Asset drift watcher cadence.                                                                                                       |
-| `INTEREST_APY_BASIS_POINTS`                 | No       | schema default   | APY for the interest-accrual primitive.                                                                                            |
-| `INTEREST_PERIODS_PER_YEAR`                 | No       | schema default   | E.g. `365` for daily, `12` for monthly.                                                                                            |
-| `INTEREST_TICK_INTERVAL_HOURS`              | No       | schema default   | Wall-clock cadence of the interest scheduler.                                                                                      |
-| `LOOP_INTEREST_POOL_ACCOUNT`                | No       | operator account | ADR 009/015: forward-mint pool account the daily interest accrual sub-allocates from. Defaults to the operator account when unset. |
-| `LOOP_INTEREST_POOL_MIN_DAYS_COVER`         | No       | `7`              | Pool watcher pages Discord monitoring when the on-chain pool covers fewer than this many days of forecast interest.                |
+| Variable                                    | Required | Default          | Description                                                                                                                                               |
+| ------------------------------------------- | -------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LOOP_WORKERS_ENABLED`                      | No       | `false`          | Master switch for all outbound workers. Set `true` on prod + Fly staging once Stellar secrets are wired.                                                  |
+| `LOOP_PAYOUT_WORKER_INTERVAL_SECONDS`       | No       | `30`             | Payout worker tick cadence.                                                                                                                               |
+| `LOOP_PAYOUT_MAX_ATTEMPTS`                  | No       | schema default   | Retries before a payout transitions to `failed`.                                                                                                          |
+| `LOOP_PAYOUT_WATCHDOG_STALE_SECONDS`        | No       | schema default   | `submitted` payouts older than this get re-picked (A2-602).                                                                                               |
+| `LOOP_PAYOUT_FEE_BASE_STROOPS`              | No       | `100`            | A2-1921: Stellar fee for a payout's first submit attempt.                                                                                                 |
+| `LOOP_PAYOUT_FEE_MULTIPLIER`                | No       | `2`              | A2-1921: per-attempt fee scaling factor (attempt N pays `BASE * MULTIPLIER^(N-1)`).                                                                       |
+| `LOOP_PAYOUT_FEE_CAP_STROOPS`               | No       | `100000`         | A2-1921: ceiling on the scaled fee.                                                                                                                       |
+| `LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS`     | No       | schema default   | Horizon payment watcher cadence.                                                                                                                          |
+| `LOOP_PROCUREMENT_INTERVAL_SECONDS`         | No       | schema default   | CTX procurement worker cadence.                                                                                                                           |
+| `LOOP_ASSET_DRIFT_WATCHER_INTERVAL_SECONDS` | No       | schema default   | Asset drift watcher cadence.                                                                                                                              |
+| `INTEREST_APY_BASIS_POINTS`                 | No       | schema default   | APY for the interest-accrual primitive.                                                                                                                   |
+| `INTEREST_PERIODS_PER_YEAR`                 | No       | schema default   | E.g. `365` for daily, `12` for monthly.                                                                                                                   |
+| `INTEREST_TICK_INTERVAL_HOURS`              | No       | schema default   | Wall-clock cadence of the interest scheduler.                                                                                                             |
+| `LOOP_INTEREST_ONCHAIN_ENABLED`             | No       | `false`          | ADR 031 Phase D: nightly on-chain interest mints replace the legacy off-chain scheduler (hard-gated off while true). Needs issuer secrets + non-zero APY. |
+| `LOOP_INTEREST_POOL_ACCOUNT`                | No       | operator account | ADR 009/015: forward-mint pool account the daily interest accrual sub-allocates from. Defaults to the operator account when unset.                        |
+| `LOOP_INTEREST_POOL_MIN_DAYS_COVER`         | No       | `7`              | Pool watcher pages Discord monitoring when the on-chain pool covers fewer than this many days of forecast interest.                                       |
 
 #### Embedded wallet (ADR 030)
 

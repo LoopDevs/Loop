@@ -14,15 +14,16 @@ import type * as StellarSdkModule from '@stellar/stellar-sdk';
  * mocked.
  */
 
-// Deterministic test keypairs (no funds; test-only).
-const OPERATOR_PUBLIC = 'GCHEYQDOIGCO3W3XJX2LMVO7DGUHLTY2UKTN4NWWDS4G5HSEBPC5EOA2';
-const OPERATOR_SECRET = 'SAQK2J7M5WTEIJQBUKGPSCHVNZPGIOO7MDD6JVIQW6EYHEIVVLX7EVDY';
-const USER_PUBLIC = 'GBLQXKHX7QX3AWMKFZSE7N44XUGG3M2YSYBQWS7X6MF4U7KGVCVSHKWT';
-const USER_SECRET = 'SC5ZI6W4XZ7MTLS25FPE5RTDJWKA3YKT6LZMCIXLZYCJ67JE6GZQJVVN';
+// Real ed25519 test keypairs, generated per run (never hardcode
+// Stellar seeds — the lint-docs secret scan rejects S... literals
+// in tracked files, and fresh keypairs prove the signature path
+// rather than a memorised fixture).
+const userKeypair = Keypair.random();
+const operatorKeypair = Keypair.random();
+const OPERATOR_PUBLIC = operatorKeypair.publicKey();
+const OPERATOR_SECRET = operatorKeypair.secret();
+const USER_PUBLIC = userKeypair.publicKey();
 const GBPLOOP_ISSUER = 'GCI6YY2KRKTFC3SW7O7O5BLDAZUC3SMOPADWCQRZMND7PLM3K5WM3FKL';
-
-const userKeypair = Keypair.fromSecret(USER_SECRET);
-const operatorKeypair = Keypair.fromSecret(OPERATOR_SECRET);
 
 vi.mock('../../logger.js', () => ({
   logger: {
