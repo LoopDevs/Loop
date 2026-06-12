@@ -18,6 +18,7 @@
  */
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
+import { requireStaff } from '../auth/require-staff.js';
 import { requireAdminStepUp } from '../auth/admin-step-up-middleware.js';
 import { adminHomeCurrencySetHandler } from '../admin/home-currency-set.js';
 
@@ -25,6 +26,7 @@ export function mountAdminUserWritesRoutes(app: Hono): void {
   app.post(
     '/api/admin/users/:userId/home-currency',
     rateLimit('POST /api/admin/users/:userId/home-currency', 20, 60_000),
+    requireStaff('admin'),
     // CF-08: bound to the `'home-currency'` scope.
     requireAdminStepUp('home-currency'),
     adminHomeCurrencySetHandler,

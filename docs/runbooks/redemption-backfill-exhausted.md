@@ -43,8 +43,11 @@ on-call business-hours window (`docs/oncall.md`).
 
 ## Mitigation
 
-1. **Payload exists upstream now**: reset the order's backfill budget so the
-   sweeper re-picks it on the next tick (~2 min):
+1. **Payload exists upstream now**: re-fetch immediately from the admin UI —
+   `POST /api/admin/orders/:orderId/refetch-redemption` (ADR 037; audited,
+   one-shot through the backfill machinery, no cap/backoff, support-tier) —
+   or reset the order's backfill budget so the sweeper re-picks it on the
+   next tick (~2 min):
 
    ```sql
    UPDATE orders

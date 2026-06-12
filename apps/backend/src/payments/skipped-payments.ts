@@ -137,6 +137,33 @@ export async function listPendingSkips(limit = 100): Promise<SkipRow[]> {
   return rows as SkipRow[];
 }
 
+/**
+ * ADR 037 support action — re-open an abandoned skip row so the
+ * sweep retries it with a fresh attempt budget. The `status =
+ * 'abandoned'` guard makes the write idempotent and refuses to
+ * touch `pending` / `resolved` rows; the caller maps a null return
+ * to "not abandoned / not found". Attempts reset to 0 so the
+ * MAX_SKIP_ATTEMPTS budget restarts from scratch.
+ */
+export async function reopenAbandonedSkip(
+  paymentId: string,
+): Promise<{ paymentId: string; attempts: number } | null> {
+  const rows = await db
+    .update(paymentWatcherSkips)
+    .set({ status: 'pending', attempts: 0, lastError: null, updatedAt: sql`NOW()` })
+    .where(
+      sql`${paymentWatcherSkips.paymentId} = ${paymentId} AND ${paymentWatcherSkips.status} = 'abandoned'`,
+    )
+    .returning({
+      paymentId: paymentWatcherSkips.paymentId,
+      attempts: paymentWatcherSkips.attempts,
+    });
+  const row = rows[0];
+  if (row === undefined) return null;
+  log.info({ paymentId }, 'Abandoned skip row reopened for retry (admin action)');
+  return row;
+}
+
 async function setStatus(paymentId: string, status: 'resolved' | 'abandoned'): Promise<void> {
   await db
     .update(paymentWatcherSkips)

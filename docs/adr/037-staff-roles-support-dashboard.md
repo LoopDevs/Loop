@@ -41,12 +41,12 @@ isAdmin semantics — acceptable; revocation runbook notes the window).
 
 ### 3. Permission matrix
 
-| Capability | support | admin |
-| --- | --- | --- |
-| All read views (users, user-360, ledger, orders, payouts, merchants, treasury, wallet state, watcher skip rows, audit) | ✅ | ✅ |
-| Delivery-unsticking actions: re-run redemption fetch for a fulfilled-null order; re-trigger wallet provisioning; re-open an abandoned watcher skip row | ✅ (audited) | ✅ |
-| Money writes: credit adjustments, refunds, emissions, payout retry, cashback config, role grants | ❌ (404) | ✅ + step-up |
-| Bulk CSV exports (Tier-3) and Discord-config | ❌ | ✅ |
+| Capability                                                                                                                                             | support      | admin        |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ | ------------ |
+| All read views (users, user-360, ledger, orders, payouts, merchants, treasury, wallet state, watcher skip rows, audit)                                 | ✅           | ✅           |
+| Delivery-unsticking actions: re-run redemption fetch for a fulfilled-null order; re-trigger wallet provisioning; re-open an abandoned watcher skip row | ✅ (audited) | ✅           |
+| Money writes: credit adjustments, refunds, emissions, payout retry, cashback config, role grants                                                       | ❌ (404)     | ✅ + step-up |
+| Bulk CSV exports (Tier-3) and Discord-config                                                                                                           | ❌           | ✅           |
 
 Rationale: support's job is "find the customer, explain the state, unstick the delivery" — none
 of that moves money. The three support actions are idempotent re-drives of work the customer

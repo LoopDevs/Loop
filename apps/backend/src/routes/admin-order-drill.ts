@@ -19,6 +19,7 @@
  */
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
+import { requireStaff } from '../auth/require-staff.js';
 import { adminGetOrderHandler } from '../admin/orders.js';
 import { adminOrdersActivityHandler } from '../admin/orders-activity.js';
 import { adminPaymentMethodShareHandler } from '../admin/payment-method-share.js';
@@ -76,6 +77,7 @@ export function mountAdminOrderDrillRoutes(app: Hono): void {
   app.get(
     '/api/admin/orders.csv',
     rateLimit('GET /api/admin/orders.csv', 10, 60_000),
+    requireStaff('admin'),
     adminOrdersCsvHandler,
   );
 }

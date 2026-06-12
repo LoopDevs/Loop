@@ -17,6 +17,7 @@
  */
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
+import { requireStaff } from '../auth/require-staff.js';
 import { adminStuckOrdersHandler } from '../admin/stuck-orders.js';
 import { adminStuckPayoutsHandler } from '../admin/stuck-payouts.js';
 import { adminCashbackActivityHandler } from '../admin/cashback-activity.js';
@@ -79,6 +80,7 @@ export function mountAdminDashboardRoutes(app: Hono): void {
   app.get(
     '/api/admin/cashback-realization/daily.csv',
     rateLimit('GET /api/admin/cashback-realization/daily.csv', 10, 60_000),
+    requireStaff('admin'),
     adminCashbackRealizationDailyCsvHandler,
   );
   // Finance-ready CSV: daily × per-currency cashback accrual. Same
@@ -87,6 +89,7 @@ export function mountAdminDashboardRoutes(app: Hono): void {
   app.get(
     '/api/admin/cashback-activity.csv',
     rateLimit('GET /api/admin/cashback-activity.csv', 10, 60_000),
+    requireStaff('admin'),
     adminCashbackActivityCsvHandler,
   );
 }

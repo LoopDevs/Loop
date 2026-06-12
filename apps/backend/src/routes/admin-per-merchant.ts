@@ -39,6 +39,7 @@
  */
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
+import { requireStaff } from '../auth/require-staff.js';
 import { adminMerchantOperatorMixHandler } from '../admin/merchant-operator-mix.js';
 import { adminMerchantStatsCsvHandler } from '../admin/merchant-stats-csv.js';
 import { adminMerchantsFlywheelShareHandler } from '../admin/merchants-flywheel-share.js';
@@ -74,6 +75,7 @@ export function mountAdminPerMerchantRoutes(app: Hono): void {
   app.get(
     '/api/admin/merchant-stats.csv',
     rateLimit('GET /api/admin/merchant-stats.csv', 10, 60_000),
+    requireStaff('admin'),
     adminMerchantStatsCsvHandler,
   );
   // Per-merchant flywheel leaderboard — which merchants see the most
@@ -92,6 +94,7 @@ export function mountAdminPerMerchantRoutes(app: Hono): void {
   app.get(
     '/api/admin/merchants/flywheel-share.csv',
     rateLimit('GET /api/admin/merchants/flywheel-share.csv', 10, 60_000),
+    requireStaff('admin'),
     adminMerchantsFlywheelShareCsvHandler,
   );
   // Per-merchant scalar flywheel stats — the single-merchant drill
@@ -155,6 +158,7 @@ export function mountAdminPerMerchantRoutes(app: Hono): void {
   app.get(
     '/api/admin/merchants/:merchantId/flywheel-activity.csv',
     rateLimit('GET /api/admin/merchants/:merchantId/flywheel-activity.csv', 10, 60_000),
+    requireStaff('admin'),
     adminMerchantFlywheelActivityCsvHandler,
   );
   // Per-merchant top-earners leaderboard (#655) — ranked list of
