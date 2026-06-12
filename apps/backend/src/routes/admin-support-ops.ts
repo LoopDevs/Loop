@@ -43,7 +43,7 @@ import { adminLookupHandler } from '../admin/lookup.js';
  */
 export function mountAdminSupportOpsRoutes(app: Hono): void {
   // Reverse lookup — order id / payment memo / Stellar address →
-  // owning user. Index-backed only (migration 0039 indexes).
+  // owning user. Index-backed only (migration 0042 indexes).
   app.get(
     '/api/admin/lookup',
     rateLimit('GET /api/admin/lookup', 60, 60_000),

@@ -11,12 +11,12 @@
  *   - uuid                 → orders PK
  *   - 20-char base32       → orders.payment_memo
  *                            (partial index `orders_payment_memo`,
- *                            migration 0039; memo format from
+ *                            migration 0042; memo format from
  *                            generatePaymentMemo)
  *   - G + 55-char base32   → users.wallet_address (partial unique,
  *                            migration 0037), falling back to the
  *                            legacy users.stellar_address (partial
- *                            index, migration 0039)
+ *                            index, migration 0042)
  *
  * Anything else is a 400; a well-formed query with no match is the
  * uniform admin 404 (NOT_FOUND).

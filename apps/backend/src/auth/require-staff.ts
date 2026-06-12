@@ -23,7 +23,7 @@ const log = logger.child({ middleware: 'requireStaff' });
  * Role resolution (ADR 037 §1/§2):
  *   1. `staff_roles` row — authoritative when present.
  *   2. Legacy shim — `users.is_admin` ⇒ 'admin' when no row exists
- *      (CTX-allowlist admins; rows created before migration 0039
+ *      (CTX-allowlist admins; rows created before migration 0042
  *      ran are seeded by it).
  *   3. Neither ⇒ not staff ⇒ 404, NOT 403 — don't leak the
  *      existence of the admin surface to a non-staff authenticated
