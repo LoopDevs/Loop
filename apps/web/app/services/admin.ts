@@ -496,3 +496,14 @@ export {
 // moved to `./admin-merchant-flows.ts`. Re-export keeps
 // `routes/admin.cashback.tsx` and paired tests untouched.
 export { type MerchantFlow, listMerchantFlows } from './admin-merchant-flows';
+
+// ADR 037 (staff roles + support dashboard): five new slices.
+// Wire shapes live in `@loop/shared` (staff-roles, admin-watcher-
+// skips, admin-user-wallet, admin-lookup, admin-order-redemption)
+// because the backend sibling emits the same contracts — the
+// shared-type-parity gate holds both sides to one definition.
+export { listAdminStaff, setStaffRole, revokeStaffRole } from './admin-staff';
+export { listWatcherSkips, getWatcherSkip, reopenWatcherSkip } from './admin-watcher-skips';
+export { getAdminUserWallet, reprovisionAdminUserWallet } from './admin-user-wallet';
+export { refetchOrderRedemption } from './admin-order-redemption';
+export { adminLookup } from './admin-lookup';

@@ -4,8 +4,9 @@ import { LOOP_ASSET_CODES, PAYOUT_STATES } from '@loop/shared';
 import type { Route } from './+types/admin.treasury';
 import { getTreasurySnapshot, type TreasurySnapshot } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
+import { useStaffRole } from '~/hooks/use-staff-role';
 import { AdminNav } from '~/components/features/admin/AdminNav';
-import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
+import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { AssetDriftBadge } from '~/components/features/admin/AssetDriftBadge';
 import { PayoutsByAssetTable } from '~/components/features/admin/PayoutsByAssetTable';
@@ -87,13 +88,15 @@ const KNOWN_TYPES = ['cashback', 'interest', 'refund', 'spend', 'withdrawal', 'a
 // A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminTreasuryRoute(): React.JSX.Element {
   return (
-    <RequireAdmin>
+    <RequireStaff minimum="support">
       <AdminTreasuryRouteInner />
-    </RequireAdmin>
+    </RequireStaff>
   );
 }
 
 function AdminTreasuryRouteInner(): React.JSX.Element {
+  // ADR 037: CSV mass exports + Discord-config are admin-only.
+  const { isAdminRole } = useStaffRole();
   const query = useQuery({
     queryKey: ['admin-treasury'],
     queryFn: getTreasurySnapshot,
@@ -462,11 +465,14 @@ function AdminTreasuryRouteInner(): React.JSX.Element {
               flywheel-share CSV on /admin/cashback so ops can pull
               both axes of the recycling story into one spreadsheet
               workbook. */}
-          <CsvDownloadButton
-            path="/api/admin/users/recycling-activity.csv"
-            filename={`users-recycling-activity-${new Date().toISOString().slice(0, 10)}.csv`}
-            label="Recycling CSV"
-          />
+          {/* ADR 037 §3: bulk CSV exports are admin-only. */}
+          {isAdminRole ? (
+            <CsvDownloadButton
+              path="/api/admin/users/recycling-activity.csv"
+              filename={`users-recycling-activity-${new Date().toISOString().slice(0, 10)}.csv`}
+              label="Recycling CSV"
+            />
+          ) : null}
         </div>
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
           Who's closing the flywheel loop right now — users with at least one LOOP-asset paid order
@@ -538,43 +544,47 @@ function AdminTreasuryRouteInner(): React.JSX.Element {
           reconciliation chart so finance pulls both files in one
           visit — less context-switching than finding two separate
           CSV buttons scattered across the page. */}
-      <section>
-        <div className="flex items-baseline justify-between mb-3">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Finance exports</h2>
-        </div>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-          Daily-granularity CSVs for both sides of the reconciliation above (ADR 018 Tier-3).
-          Finance runs these at month-end to tie the ledger to the on-chain Stellar record. Default
-          window is the last 31 days; append <code>?days=366</code> for a full-year pull.
-        </p>
-        <div className="flex flex-wrap gap-3">
-          <CsvDownloadButton
-            path="/api/admin/cashback-activity.csv"
-            filename={`cashback-activity-${new Date().toISOString().slice(0, 10)}.csv`}
-            label="Cashback activity CSV"
-          />
-          <CsvDownloadButton
-            path="/api/admin/payouts-activity.csv"
-            filename={`payouts-activity-${new Date().toISOString().slice(0, 10)}.csv`}
-            label="Payouts activity CSV"
-          />
-          <CsvDownloadButton
-            path="/api/admin/supplier-spend/activity.csv"
-            filename={`supplier-spend-activity-${new Date().toISOString().slice(0, 10)}.csv`}
-            label="Supplier-spend activity CSV"
-          />
-          <CsvDownloadButton
-            path="/api/admin/treasury/credit-flow.csv"
-            filename={`treasury-credit-flow-${new Date().toISOString().slice(0, 10)}.csv`}
-            label="Credit-flow CSV"
-          />
-          <CsvDownloadButton
-            path="/api/admin/treasury.csv"
-            filename={`treasury-snapshot-${new Date().toISOString().slice(0, 10)}.csv`}
-            label="Treasury snapshot CSV"
-          />
-        </div>
-      </section>
+      {/* ADR 037 §3: the finance-exports row is all Tier-3 bulk
+          CSV — admin-only, hidden for support. */}
+      {isAdminRole ? (
+        <section>
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Finance exports</h2>
+          </div>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+            Daily-granularity CSVs for both sides of the reconciliation above (ADR 018 Tier-3).
+            Finance runs these at month-end to tie the ledger to the on-chain Stellar record.
+            Default window is the last 31 days; append <code>?days=366</code> for a full-year pull.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <CsvDownloadButton
+              path="/api/admin/cashback-activity.csv"
+              filename={`cashback-activity-${new Date().toISOString().slice(0, 10)}.csv`}
+              label="Cashback activity CSV"
+            />
+            <CsvDownloadButton
+              path="/api/admin/payouts-activity.csv"
+              filename={`payouts-activity-${new Date().toISOString().slice(0, 10)}.csv`}
+              label="Payouts activity CSV"
+            />
+            <CsvDownloadButton
+              path="/api/admin/supplier-spend/activity.csv"
+              filename={`supplier-spend-activity-${new Date().toISOString().slice(0, 10)}.csv`}
+              label="Supplier-spend activity CSV"
+            />
+            <CsvDownloadButton
+              path="/api/admin/treasury/credit-flow.csv"
+              filename={`treasury-credit-flow-${new Date().toISOString().slice(0, 10)}.csv`}
+              label="Credit-flow CSV"
+            />
+            <CsvDownloadButton
+              path="/api/admin/treasury.csv"
+              filename={`treasury-snapshot-${new Date().toISOString().slice(0, 10)}.csv`}
+              label="Treasury snapshot CSV"
+            />
+          </div>
+        </section>
+      ) : null}
 
       <section>
         <div className="flex items-baseline justify-between mb-3">
@@ -651,18 +661,21 @@ function AdminTreasuryRouteInner(): React.JSX.Element {
         )}
       </section>
 
-      <section>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
-          Discord notifiers
-        </h2>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-          Catalog of signals this backend emits to Discord (ADR 018). Sourced from the{' '}
-          <code className="text-xs">DISCORD_NOTIFIERS</code> const — a catalog-invariant test makes
-          sure a new <code className="text-xs">notify*</code> function can&rsquo;t land without its
-          description, so this list is always in lockstep with the code.
-        </p>
-        <DiscordNotifiersCard />
-      </section>
+      {/* ADR 037 §3: Discord-config is admin-only. */}
+      {isAdminRole ? (
+        <section>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+            Discord notifiers
+          </h2>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+            Catalog of signals this backend emits to Discord (ADR 018). Sourced from the{' '}
+            <code className="text-xs">DISCORD_NOTIFIERS</code> const — a catalog-invariant test
+            makes sure a new <code className="text-xs">notify*</code> function can&rsquo;t land
+            without its description, so this list is always in lockstep with the code.
+          </p>
+          <DiscordNotifiersCard />
+        </section>
+      ) : null}
     </main>
   );
 }

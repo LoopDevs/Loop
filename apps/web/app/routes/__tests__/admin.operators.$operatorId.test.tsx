@@ -72,7 +72,7 @@ describe('<AdminOperatorDetailRoute />', () => {
     authMock.isAuthenticated = false;
     try {
       renderAt();
-      expect(screen.getByText(/Sign in with an admin account/i)).toBeDefined();
+      expect(screen.getByText(/Sign in with a staff account/i)).toBeDefined();
     } finally {
       authMock.isAuthenticated = true;
     }

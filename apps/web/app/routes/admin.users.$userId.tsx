@@ -5,7 +5,8 @@ import type { Route } from './+types/admin.users.$userId';
 import { shouldRetry } from '~/hooks/query-retry';
 import { getAdminUser, getAdminUserCredits, type AdminUserCreditRow } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
-import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
+import { AdminLookupSearch } from '~/components/features/admin/AdminLookupSearch';
+import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { AdminUserFlywheelChip } from '~/components/features/admin/AdminUserFlywheelChip';
 import { CashbackSummaryChip } from '~/components/features/admin/CashbackSummaryChip';
 import { CopyButton } from '~/components/features/admin/CopyButton';
@@ -20,7 +21,9 @@ import { UserOperatorMixCard } from '~/components/features/admin/UserOperatorMix
 import { UserOrdersTable } from '~/components/features/admin/UserOrdersTable';
 import { UserRailMixCard } from '~/components/features/admin/UserRailMixCard';
 import { UserPayoutsTable } from '~/components/features/admin/UserPayoutsTable';
+import { UserWalletCard } from '~/components/features/admin/UserWalletCard';
 import { Spinner } from '~/components/ui/Spinner';
+import { useStaffRole } from '~/hooks/use-staff-role';
 import { ADMIN_LOCALE } from '~/utils/locale';
 
 export function meta(): Route.MetaDescriptors {
@@ -40,18 +43,27 @@ import { formatMinorCurrency as fmtMinor } from '@loop/shared';
  *
  * The credit-adjustment form + the credit-transactions log are
  * follow-up slices (ADR 017 backend is already live).
+ *
+ * ADR 037 — this is the "User 360" surface. Support-visible
+ * (minimum="support"): the profile / credits / wallet / orders /
+ * payouts / ledger reads plus the wallet re-trigger action. The
+ * money-write forms (credit adjustment, emission, home-currency
+ * change) and the CSV mass export render ONLY for the admin role —
+ * hidden, not disabled, so support never sees surfaces it can't use.
  */
 // A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminUserDetailRoute(): React.JSX.Element {
   return (
-    <RequireAdmin>
+    <RequireStaff minimum="support">
       <AdminUserDetailRouteInner />
-    </RequireAdmin>
+    </RequireStaff>
   );
 }
 
 function AdminUserDetailRouteInner(): React.JSX.Element {
   const { userId } = useParams<{ userId: string }>();
+  // ADR 037: admin-only sections key off the resolved role.
+  const { isAdminRole } = useStaffRole();
 
   const userQuery = useQuery({
     queryKey: ['admin-user', userId ?? null],
@@ -85,6 +97,11 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
           ← All users
         </Link>
       </nav>
+
+      {/* ADR 037: global reverse lookup — email / order id / payment
+          memo / Stellar address. Lives on the 360 page because this
+          is where a support ticket usually starts. */}
+      <AdminLookupSearch />
 
       {userQuery.isPending ? (
         <div className="flex justify-center py-12">
@@ -220,7 +237,12 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
         )}
       </section>
 
-      {userQuery.data !== undefined && !userNotFound && userId !== undefined ? (
+      {/* ADR 037 / ADR 030 Phase C: wallet provisioning card with the
+          support-allowed re-trigger action. Renders for both staff
+          roles — unsticking delivery is support's job. */}
+      {userId !== undefined && !userNotFound ? <UserWalletCard userId={userId} /> : null}
+
+      {isAdminRole && userQuery.data !== undefined && !userNotFound && userId !== undefined ? (
         <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
           <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
             <h2 className="text-base font-semibold text-gray-900 dark:text-white">
@@ -244,7 +266,7 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
         </section>
       ) : null}
 
-      {userQuery.data !== undefined && !userNotFound && userId !== undefined ? (
+      {isAdminRole && userQuery.data !== undefined && !userNotFound && userId !== undefined ? (
         <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
           <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
             <h2 className="text-base font-semibold text-gray-900 dark:text-white">
@@ -269,7 +291,7 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
         </section>
       ) : null}
 
-      {userQuery.data !== undefined && !userNotFound && userId !== undefined ? (
+      {isAdminRole && userQuery.data !== undefined && !userNotFound && userId !== undefined ? (
         <section className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
           <header className="border-b border-gray-200 px-6 py-4 dark:border-gray-800">
             <h2 className="text-base font-semibold text-gray-900 dark:text-white">
@@ -412,10 +434,14 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
                 CSV download for a compliance / subject-access export of the last 366 days.
               </p>
             </div>
-            <CsvDownloadButton
-              path={`/api/admin/users/${encodeURIComponent(userId)}/credit-transactions.csv`}
-              filename={`credit-transactions-${userId.slice(0, 8)}-${new Date().toISOString().slice(0, 10)}.csv`}
-            />
+            {/* ADR 037 §3: CSV mass exports are admin-only (PII-mass
+                surface) — hidden for support, not disabled. */}
+            {isAdminRole ? (
+              <CsvDownloadButton
+                path={`/api/admin/users/${encodeURIComponent(userId)}/credit-transactions.csv`}
+                filename={`credit-transactions-${userId.slice(0, 8)}-${new Date().toISOString().slice(0, 10)}.csv`}
+              />
+            ) : null}
           </header>
           <div className="px-6 py-5">
             <CreditTransactionsTable userId={userId} />
