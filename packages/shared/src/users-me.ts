@@ -19,7 +19,7 @@ import type { HomeCurrency, LoopAssetCode } from './loop-asset.js';
 import type { OrderPaymentMethod, OrderState } from './order-state.js';
 import type { CreditTransactionType } from './credit-transaction-type.js';
 import type { PayoutState } from './payout-state.js';
-import type { StaffRole } from './staff-roles.js';
+import type { StaffRole } from './admin-staff.js';
 
 /**
  * `GET /api/users/me` / `POST /api/users/me/home-currency` /

@@ -47,6 +47,8 @@ import { registerAdminPerUserDrillOpenApi } from './admin-per-user-drill.js';
 import { registerAdminSupplierSpendOpenApi } from './admin-supplier-spend.js';
 import { registerAdminTreasuryAssetsOpenApi } from './admin-treasury-assets.js';
 import { registerAdminUserClusterOpenApi } from './admin-user-cluster.js';
+import { registerAdminStaffOpenApi } from './admin-staff.js';
+import { registerAdminSupportOpsOpenApi } from './admin-support-ops.js';
 
 /**
  * Registers all `/api/admin/*` schemas + paths on the supplied
@@ -161,6 +163,14 @@ export function registerAdminOpenApi(
   // flip (ADR 015 deferred). Same audit-envelope contract; lives
   // in its own slice because it isn't a credit/refund/emission.
   registerAdminUserWritesOpenApi(registry, errorResponse, AdminWriteAudit);
+
+  // ADR 037 — staff role management (admin-tier; step-up writes)
+  // and the support-ops cluster (watcher-skip browser + reopen,
+  // per-user wallet card + reprovision, redemption re-fetch,
+  // reverse lookup — support-tier). Both share the AdminWriteAudit
+  // envelope half for their ADR-017 action responses.
+  registerAdminStaffOpenApi(registry, errorResponse, AdminWriteAudit);
+  registerAdminSupportOpsOpenApi(registry, errorResponse, AdminWriteAudit);
 
   // ADR-028 / A4-063: admin step-up auth.
   const StepUpBody = registry.register(

@@ -27,6 +27,7 @@
  */
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
+import { requireStaff } from '../auth/require-staff.js';
 import { adminCashbackMonthlyHandler } from '../admin/cashback-monthly.js';
 import { adminPayoutsMonthlyHandler } from '../admin/payouts-monthly.js';
 import { adminPayoutsActivityHandler } from '../admin/payouts-activity.js';
@@ -78,6 +79,7 @@ export function mountAdminFleetMonthlyRoutes(app: Hono): void {
   app.get(
     '/api/admin/payouts-activity.csv',
     rateLimit('GET /api/admin/payouts-activity.csv', 10, 60_000),
+    requireStaff('admin'),
     adminPayoutsActivityCsvHandler,
   );
   // Tier-3 CSV export of supplier-spend activity (ADR 013/015/018) —
@@ -88,6 +90,7 @@ export function mountAdminFleetMonthlyRoutes(app: Hono): void {
   app.get(
     '/api/admin/supplier-spend/activity.csv',
     rateLimit('GET /api/admin/supplier-spend/activity.csv', 10, 60_000),
+    requireStaff('admin'),
     adminSupplierSpendActivityCsvHandler,
   );
   // Tier-3 CSV of the fleet operator snapshot (ADR 013 / 018 / 022)
@@ -97,6 +100,7 @@ export function mountAdminFleetMonthlyRoutes(app: Hono): void {
   app.get(
     '/api/admin/operators-snapshot.csv',
     rateLimit('GET /api/admin/operators-snapshot.csv', 10, 60_000),
+    requireStaff('admin'),
     adminOperatorsSnapshotCsvHandler,
   );
   // Tier-3 CSV of the credit-flow time series (ADR 009 / 015 / 018).
@@ -106,6 +110,7 @@ export function mountAdminFleetMonthlyRoutes(app: Hono): void {
   app.get(
     '/api/admin/treasury/credit-flow.csv',
     rateLimit('GET /api/admin/treasury/credit-flow.csv', 10, 60_000),
+    requireStaff('admin'),
     adminTreasuryCreditFlowCsvHandler,
   );
 }

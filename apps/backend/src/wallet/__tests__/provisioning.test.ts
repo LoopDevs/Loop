@@ -14,20 +14,15 @@ import type * as StellarSdkModule from '@stellar/stellar-sdk';
  * mocked.
  */
 
-// Deterministic test keypairs (no funds; test-only).
-// Keypairs are generated per test run — the assertions only need the
-// public/secret relationship, and `scripts/lint-docs.sh` §5b rejects
-// any hardcoded 56-char Stellar seed in tracked files (audit A-001).
-const operatorTestKeypair = Keypair.random();
-const userTestKeypair = Keypair.random();
-const OPERATOR_PUBLIC = operatorTestKeypair.publicKey();
-const OPERATOR_SECRET = operatorTestKeypair.secret();
-const USER_PUBLIC = userTestKeypair.publicKey();
-const USER_SECRET = userTestKeypair.secret();
+// Throwaway per-run keypairs (no funds; test-only). Generated rather
+// than hardcoded so the lint-docs Stellar-seed scan (§5b) stays
+// meaningful — a literal S… seed in the tree is always a finding.
+const userKeypair = Keypair.random();
+const operatorKeypair = Keypair.random();
+const OPERATOR_PUBLIC = operatorKeypair.publicKey();
+const OPERATOR_SECRET = operatorKeypair.secret();
+const USER_PUBLIC = userKeypair.publicKey();
 const GBPLOOP_ISSUER = 'GCI6YY2KRKTFC3SW7O7O5BLDAZUC3SMOPADWCQRZMND7PLM3K5WM3FKL';
-
-const userKeypair = Keypair.fromSecret(USER_SECRET);
-const operatorKeypair = Keypair.fromSecret(OPERATOR_SECRET);
 
 vi.mock('../../logger.js', () => ({
   logger: {

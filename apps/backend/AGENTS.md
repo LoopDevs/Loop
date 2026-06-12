@@ -15,6 +15,11 @@ src/
 ├── discord.ts          ← Webhook senders (orders, health, circuit, payout-failed, below-floor)
 ├── openapi.ts          ← OpenAPI 3.1 spec (every new handler registers its path + status codes)
 ├── auth/handler.ts     ← Auth proxy + Loop-native OTP (ADR 013 + ADR 014 social login)
+├── auth/require-staff.ts ← ADR 037 staff gate factory — requireStaff('support'|'admin'):
+│   │                     staff_roles resolution + users.is_admin legacy shim,
+│   │                     404-not-403 concealment, sets `user` + `staffRole` on
+│   │                     context. `auth/require-admin.ts` is now the
+│   │                     requireStaff('admin') alias (zero behavioral change).
 ├── admin/              ← Admin-panel handlers (~60 files) grouped by domain:
 │   │                     ADR 011 cashback config, ADR 015 treasury + asset
 │   │                     drift + settlement lag, ADR 017/018 credit
@@ -24,6 +29,12 @@ src/
 │   │                     drill-down (ADR 018). Every response shape lives in
 │   │                     `@loop/shared/admin-*` (A2-1506) so web + backend +
 │   │                     openapi registration compile against one definition.
+│   │                     ADR 037 adds: staff-roles.ts (role mgmt writes),
+│   │                     watcher-skips.ts (skip browser + reopen),
+│   │                     user-wallet.ts (wallet card + reprovision),
+│   │                     order-refetch-redemption.ts, lookup.ts (reverse
+│   │                     lookup); routes in routes/admin-staff.ts +
+│   │                     routes/admin-support-ops.ts.
 ├── config/handler.ts   ← GET /api/config (feature-flag snapshot — ADR 010)
 ├── public/             ← ADR 020 Tier-1 unauthenticated never-500 surface:
 │   │                     cashback-stats, top-cashback-merchants, cashback-preview,
@@ -45,7 +56,7 @@ src/
 │   ├── procurement.ts  ← paid → procuring → fulfilled worker (USDC-default, XLM-floor fallback, ADR 015)
 │   ├── procurement-redemption.ts ← CTX gift-card detail fetch + waitForRedemption (SSE-first, polling fallback)
 │   ├── pay-with-balance.ts ← POST /api/orders/loop/:id/pay-with-balance — embedded-wallet LOOP redemption: user-signed inner payment + operator fee-bump; watcher settles downstream (ADR 030 C3 / ADR 036)
-│   └── redemption-backfill.ts ← Sweeper re-fetching redemption payloads for fulfilled orders that persisted nulls (migration 0034; pages ops after 10 attempts → runbooks/redemption-backfill-exhausted.md)
+│   └── redemption-backfill.ts ← Sweeper re-fetching redemption payloads for fulfilled orders that persisted nulls (migration 0034; pages ops after 10 attempts → runbooks/redemption-backfill-exhausted.md) + refetchOrderRedemption one-shot for the ADR 037 admin action
 ├── payments/
 │   ├── watcher.ts      ← Horizon payment watcher (matches inbound deposits, accepts USDC/XLM/LOOP assets)
 │   ├── skipped-payments.ts ← Skipped-deposit retry ledger — persists skips before cursor advance, sweeps each tick (audit CRIT #1/#2)
@@ -77,7 +88,10 @@ src/
 │   └── handler.ts      ← GET /api/clusters (protobuf + JSON)
 ├── users/handler.ts    ← GET /me + POST /me/home-currency + PUT /me/stellar-address (ADR 015)
 ├── users/wallet-handler.ts ← GET /api/me/wallet — embedded-wallet balances, never-500 last-known-good (ADR 030 C4)
-├── db/                 ← Drizzle schema + migrations + pool client (ADR 012)
+├── db/                 ← Drizzle schema + migrations + pool client (ADR 012);
+│   │                     staff-roles.ts — ADR 037 role repo (resolution, list,
+│   │                     grant/revoke under a fixed advisory lock with
+│   │                     last-admin protection + is_admin mirror)
 └── images/proxy.ts     ← Image resize proxy with LRU cache + SSRF protection
 ```
 

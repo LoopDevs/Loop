@@ -147,6 +147,19 @@ export const ApiErrorCode = {
   // The caller's embedded wallet isn't provisioned + activated yet,
   // so there is no on-chain balance to pay from.
   WALLET_NOT_ACTIVATED: 'WALLET_NOT_ACTIVATED',
+  // ADR 037 — staff role management. SELF_REVOKE: you cannot revoke
+  // or demote your own admin role (another admin must); LAST_ADMIN:
+  // the write would leave zero effective admins.
+  STAFF_SELF_REVOKE: 'STAFF_SELF_REVOKE',
+  STAFF_LAST_ADMIN: 'STAFF_LAST_ADMIN',
+  // ADR 037 — support delivery-unsticking actions. Each is the
+  // "nothing to re-drive" 409 for its surface: the watcher-skip
+  // reopen (row not abandoned), the wallet reprovision (already
+  // activated), and the redemption re-fetch (order not fulfilled /
+  // no ctx_order_id / payload already present).
+  SKIP_NOT_ABANDONED: 'SKIP_NOT_ABANDONED',
+  WALLET_ALREADY_ACTIVATED: 'WALLET_ALREADY_ACTIVATED',
+  REDEMPTION_NOT_REFETCHABLE: 'REDEMPTION_NOT_REFETCHABLE',
 } as const;
 
 export type ApiErrorCodeValue = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];
