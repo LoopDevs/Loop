@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Merchant } from '@loop/shared';
+import { merchantSlug } from '@loop/shared';
 
 const mockEnv = vi.hoisted(() => ({
   PORT: 8080,
@@ -296,6 +297,32 @@ describe('GET /api/merchants/by-slug/:slug', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { merchant: Merchant };
     expect(body.merchant.id).toBe('m-1');
+  });
+
+  it('resolves distinct country-aware slugs for same-brand-different-country', async () => {
+    // The store keys merchantsBySlug off merchantSlug(merchant) (brand+country),
+    // so `adidas-ca` and `adidas-us` are independently reachable.
+    const ca = merchant('adidas-ca-id', 'adidas', { country: 'CA' });
+    const us = merchant('adidas-us-id', 'adidas', { country: 'US' });
+    const both = [ca, us];
+    mockGetMerchants.mockReturnValue({
+      merchants: both,
+      merchantsById: new Map(both.map((x) => [x.id, x])),
+      merchantsBySlug: new Map(both.map((x) => [merchantSlug(x), x])),
+      loadedAt: Date.now(),
+    });
+
+    const caRes = await app.request('/api/merchants/by-slug/adidas-ca');
+    expect(caRes.status).toBe(200);
+    expect(((await caRes.json()) as { merchant: Merchant }).merchant.id).toBe('adidas-ca-id');
+
+    const usRes = await app.request('/api/merchants/by-slug/adidas-us');
+    expect(usRes.status).toBe(200);
+    expect(((await usRes.json()) as { merchant: Merchant }).merchant.id).toBe('adidas-us-id');
+
+    // The bare brand slug resolves to nothing — no collision.
+    const bareRes = await app.request('/api/merchants/by-slug/adidas');
+    expect(bareRes.status).toBe(404);
   });
 });
 

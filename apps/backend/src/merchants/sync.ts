@@ -185,14 +185,20 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
     }
 
     const merchantsById = new Map(merchants.map((m) => [m.id, m]));
-    // Build merchantsBySlug explicitly so a slug collision (e.g. `T-Mobile`
-    // and `T Mobile` both slugify to `t-mobile`) is visible in logs rather
-    // than silently clobbering the first entry. Frontend links only see
+    // Build merchantsBySlug explicitly so a slug collision is visible in logs
+    // rather than silently clobbering the first entry. Frontend links only see
     // the last-inserted merchant for a given slug, so the operator needs a
     // signal to rename one of the conflicting merchants upstream.
+    //
+    // Slugs are now country-aware (`merchantSlug(m)` keys off CTX's slug, else
+    // brand+country) — so regional variants of one brand (`adidas` in CA / US /
+    // GB) get distinct slugs and no longer collide. A warn here therefore fires
+    // only on a TRUE duplicate: two merchants with the same brand AND country
+    // (the ~8 pre-existing dupe clusters like `lastminute`), which is the real
+    // signal an operator should act on.
     const merchantsBySlug = new Map<string, Merchant>();
     for (const m of merchants) {
-      const slug = merchantSlug(m.name);
+      const slug = merchantSlug(m);
       const existing = merchantsBySlug.get(slug);
       if (existing !== undefined) {
         log.warn(

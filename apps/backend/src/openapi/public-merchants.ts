@@ -41,7 +41,8 @@ export function registerPublicMerchantsOpenApi(
       id: z.string(),
       name: z.string(),
       slug: z.string().openapi({
-        description: 'Marketing slug — matches merchantSlug(name) on the web side.',
+        description:
+          'Country-aware marketing slug — matches merchantSlug(merchant) (CTX slug, else brand-country) on the web side.',
       }),
       logoUrl: z.string().nullable(),
       userCashbackPct: z.string().nullable().openapi({

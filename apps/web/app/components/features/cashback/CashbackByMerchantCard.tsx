@@ -61,7 +61,13 @@ export function CashbackByMerchantCard(): React.JSX.Element | null {
   if (query.data.rows.length === 0) return null;
 
   const currency = query.data.currency;
-  const nameFor = (id: string): string => merchants.find((m) => m.id === id)?.name ?? id;
+  // Resolve the full catalog row so the link uses the country-aware
+  // merchantSlug. Falls back to the raw id (name + slug) when the merchant
+  // has been removed from the catalog (possible for legacy orders).
+  const resolve = (id: string): { name: string; slug: string } => {
+    const m = merchants.find((x) => x.id === id);
+    return m !== undefined ? { name: m.name, slug: merchantSlug(m) } : { name: id, slug: id };
+  };
 
   return (
     <section
@@ -81,8 +87,7 @@ export function CashbackByMerchantCard(): React.JSX.Element | null {
       </header>
       <ul role="list" className="divide-y divide-gray-100 dark:divide-gray-900">
         {query.data.rows.map((row: CashbackByMerchantRow) => {
-          const name = nameFor(row.merchantId);
-          const slug = merchantSlug(name);
+          const { name, slug } = resolve(row.merchantId);
           return (
             <li key={row.merchantId} className="flex items-center justify-between px-5 py-3">
               <div className="min-w-0">

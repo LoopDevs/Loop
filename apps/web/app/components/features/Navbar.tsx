@@ -3,7 +3,13 @@ import { createPortal } from 'react-dom';
 import { useLocation } from 'react-router';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import { useAllMerchants } from '~/hooks/use-merchants';
-import { foldForSearch, groupMerchants, merchantInCountry, merchantSlug } from '@loop/shared';
+import {
+  brandSlug,
+  foldForSearch,
+  groupMerchants,
+  merchantInCountry,
+  merchantSlug,
+} from '@loop/shared';
 import { useAuthStore } from '~/stores/auth.store';
 import { useLocale, useLocalizedNavigate } from '~/i18n/locale';
 import { useAuth } from '~/hooks/use-auth';
@@ -143,7 +149,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
                 id: `g:${g.key}`,
                 name: g.name,
                 logoUrl: g.members.find((m) => m.logoUrl !== undefined)?.logoUrl,
-                to: `/brand/${merchantSlug(g.name)}`,
+                to: `/brand/${brandSlug(g.name)}`,
                 optionCount: g.members.length,
               };
             }
@@ -153,7 +159,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
               name: m.name,
               logoUrl: m.logoUrl,
               savingsPercentage: m.savingsPercentage,
-              to: `/gift-card/${merchantSlug(m.name)}`,
+              to: `/gift-card/${merchantSlug(m)}`,
             };
           })
       : [];

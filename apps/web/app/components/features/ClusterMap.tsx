@@ -75,7 +75,11 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
   // would silently truncate past 100 merchants and popups would fall back to
   // showing the raw merchant id instead of the name.
   const { merchants } = useAllMerchants();
-  const merchantsById = useRef(new Map<string, string>());
+  // id → { display name, country-aware slug }. The slug is precomputed from
+  // the full catalog row here (popup handlers run outside React and only have
+  // the merchant id), so the popup's "Buy" link uses merchantSlug, not a
+  // name-only slug that would drop the country.
+  const merchantsById = useRef(new Map<string, { name: string; slug: string }>());
   const onMerchantSelectRef = useRef(onMerchantSelect);
   // Leaflet popup click handlers run outside React — capture navigate in a
   // ref so the 'popupopen' listener can invoke client-side nav without
@@ -94,7 +98,9 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
   }, [navigate]);
 
   useEffect(() => {
-    merchantsById.current = new Map(merchants.map((m) => [m.id, m.name]));
+    merchantsById.current = new Map(
+      merchants.map((m) => [m.id, { name: m.name, slug: merchantSlug(m) }]),
+    );
   }, [merchants]);
 
   const updateMarkers = useCallback(
@@ -201,8 +207,9 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
         });
 
         const marker = L.marker([lat, lng], { icon });
-        const merchantName = merchantsById.current.get(merchantId) ?? merchantId;
-        const slug = merchantSlug(merchantName);
+        const resolved = merchantsById.current.get(merchantId);
+        const merchantName = resolved?.name ?? merchantId;
+        const slug = resolved?.slug ?? merchantSlug(merchantId);
         // Escape before interpolation: Leaflet sets innerHTML on popup content.
         const safeName = escapeHtml(merchantName);
         const safePinLargeUrl = mapPinUrl ? escapeHtml(getImageProxyUrl(mapPinUrl, 400)) : '';

@@ -51,6 +51,10 @@ export function registerMerchantsOpenApi(
     z.object({
       id: z.string(),
       name: z.string(),
+      slug: z.string().optional().openapi({
+        description:
+          "CTX-provided brand-country slug (e.g. 'adidas-ca'). merchantSlug() prefers it over a derived value. Absent on older records.",
+      }),
       logoUrl: z.string().optional(),
       cardImageUrl: z.string().optional(),
       savingsPercentage: z.number().optional(),
@@ -60,6 +64,9 @@ export function registerMerchantsOpenApi(
       terms: z.string().optional(),
       enabled: z.boolean(),
       locationCount: z.number().optional(),
+      country: z.string().optional().openapi({
+        description: "ISO 3166-1 alpha-2 country code (e.g. 'US', 'GB', 'CA', 'DE').",
+      }),
     }),
   );
 

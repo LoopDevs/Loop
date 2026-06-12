@@ -42,6 +42,12 @@ const normalizeKey = (s: string): string => s.toLowerCase().replace(/\s+/g, ' ')
  * `"Brand"` group; grouping is case-insensitive (so `dots.eco` and `Dots.eco` merge).
  * A group with a single member is returned with `isGroup: false` and renders normally.
  * Input order is preserved within each group and across groups (first-seen brand order).
+ *
+ * The group key is **country-agnostic** — it derives only from the brand-prefix name,
+ * which carries no country token once CTX strips them (`"adidas"`, not `"adidas Canada"`).
+ * So `adidas` in CA, US, and GB collapse into ONE brand group, even though each member
+ * has a distinct country-aware {@link merchantSlug}. The brand page (`/brand/:slug`) keys
+ * off `brandSlug(group.name)` for the same reason; per-member links use `merchantSlug(m)`.
  */
 export function groupMerchants(merchants: Merchant[]): MerchantGroup[] {
   const byKey = new Map<string, { names: Map<string, number>; members: Merchant[] }>();

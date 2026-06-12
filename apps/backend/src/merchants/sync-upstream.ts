@@ -129,6 +129,12 @@ export function mapUpstreamMerchant(item: UpstreamMerchant): Merchant | null {
   return {
     id: item.id,
     name: item.name,
+    // CTX's own brand-country slug (e.g. `adidas-ca`). Carried through so
+    // `merchantSlug()` can prefer it over a derived value — CTX owns the
+    // merchant's country and regenerates the slug on its side, so deferring
+    // to it keeps Loop URLs aligned with CTX once the country-token rename
+    // runs. Absent on older records → `merchantSlug` derives brand-country.
+    ...(item.slug ? { slug: item.slug } : {}),
     ...(item.logoUrl ? { logoUrl: item.logoUrl } : {}),
     ...(item.cardImageUrl ? { cardImageUrl: item.cardImageUrl } : {}),
     ...(savingsPercentage !== undefined ? { savingsPercentage } : {}),

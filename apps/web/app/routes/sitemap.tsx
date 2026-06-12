@@ -1,9 +1,4 @@
-import {
-  COUNTRIES,
-  DEFAULT_LANG,
-  merchantSlug,
-  type PublicTopCashbackMerchantsResponse,
-} from '@loop/shared';
+import { COUNTRIES, DEFAULT_LANG, type PublicTopCashbackMerchantsResponse } from '@loop/shared';
 import { hreflangAlternates, localeUrl } from '~/i18n/seo';
 
 /**
@@ -126,7 +121,7 @@ export async function loader(): Promise<Response> {
 
   if (response !== null) {
     for (const m of response.merchants) {
-      urls.push(urlTag(xDefault(`/cashback/${merchantSlug(m.name)}`), lastmod, 'weekly', '0.8'));
+      urls.push(urlTag(xDefault(`/cashback/${m.slug}`), lastmod, 'weekly', '0.8'));
     }
   }
 

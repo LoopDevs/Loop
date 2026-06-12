@@ -69,13 +69,18 @@ import type { PublicCashbackPreview } from '@loop/shared';
  * cashback amount is what a pre-signup visitor sees, not a ledger
  * number, so defensive-defaulting is fine here.
  */
-function resolveMerchant(idOrSlug: string): { id: string; name: string; currency: string } | null {
+function resolveMerchant(
+  idOrSlug: string,
+): { id: string; name: string; slug: string; currency: string } | null {
   const { merchantsById, merchantsBySlug } = getMerchants();
   const m = merchantsById.get(idOrSlug) ?? merchantsBySlug.get(idOrSlug);
   if (m === undefined) return null;
   return {
     id: m.id,
     name: m.name,
+    // Country-aware slug (CTX slug, else brand+country) so the echoed
+    // `merchantId` round-trips through the country-aware by-slug index.
+    slug: merchantSlug(m),
     currency: m.denominations?.currency ?? 'USD',
   };
 }
@@ -179,7 +184,7 @@ export async function publicCashbackPreviewHandler(c: Context): Promise<Response
     log.warn({ err, merchantId: resolved.id }, 'Cashback config read failed — soft empty');
     c.header('cache-control', 'public, max-age=60');
     return c.json<PublicCashbackPreview>({
-      merchantId: merchantSlug(resolved.name),
+      merchantId: resolved.slug,
       merchantName: resolved.name,
       orderAmountMinor: amountMinor.toString(),
       cashbackPct: null,
@@ -193,7 +198,7 @@ export async function publicCashbackPreviewHandler(c: Context): Promise<Response
 
   c.header('cache-control', 'public, max-age=60');
   return c.json<PublicCashbackPreview>({
-    merchantId: merchantSlug(resolved.name),
+    merchantId: resolved.slug,
     merchantName: resolved.name,
     orderAmountMinor: amountMinor.toString(),
     cashbackPct,

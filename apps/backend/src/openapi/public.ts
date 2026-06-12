@@ -76,6 +76,10 @@ export function registerPublicOpenApi(
     z.object({
       id: z.string(),
       name: z.string(),
+      slug: z.string().openapi({
+        description:
+          'Country-aware URL slug (merchantSlug — CTX slug, else brand-country). Link target for /cashback/:slug.',
+      }),
       logoUrl: z.string().nullable(),
       userCashbackPct: z.string().openapi({
         description: 'numeric(5,2) as string, e.g. "15.00".',

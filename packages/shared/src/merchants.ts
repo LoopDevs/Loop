@@ -12,6 +12,14 @@ export interface MerchantDenominations {
 export interface Merchant {
   id: string;
   name: string;
+  /**
+   * CTX-provided brand-country slug (e.g. `adidas-ca`). The single source
+   * of truth for a merchant's URL slug — `merchantSlug()` prefers it over a
+   * derived value so Loop URLs match CTX's own slug. Optional: older CTX
+   * records (and the legacy mocked fixtures) omit it, in which case
+   * `merchantSlug()` derives `brand-country` from `name` + `country`.
+   */
+  slug?: string | undefined;
   logoUrl?: string | undefined;
   cardImageUrl?: string | undefined;
   /** Savings as a percentage for display (e.g. 4.0 means 4% off). */

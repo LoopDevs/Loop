@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
-import { merchantSlug } from '@loop/shared';
 import type { Route } from './+types/cashback';
 import { canonicalHref, countryLabel } from '~/i18n/seo';
 import { getPublicTopCashbackMerchants, type TopCashbackMerchant } from '~/services/public-stats';
@@ -120,7 +119,7 @@ function CashbackIndexBody(): React.JSX.Element {
 }
 
 function MerchantRow({ merchant }: { merchant: TopCashbackMerchant }): React.JSX.Element {
-  const slug = merchantSlug(merchant.name);
+  const slug = merchant.slug;
   return (
     <li>
       <Link

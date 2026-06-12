@@ -122,12 +122,15 @@ describe('publicTopCashbackMerchantsHandler', () => {
       {
         id: 'argos',
         name: 'Argos',
+        // Country-aware slug; no country on the mock → bare brand slug.
+        slug: 'argos',
         logoUrl: 'https://example.com/argos.png',
         userCashbackPct: '15.00',
       },
       {
         id: 'tesco',
         name: 'Tesco',
+        slug: 'tesco',
         logoUrl: null,
         userCashbackPct: '10.00',
       },
