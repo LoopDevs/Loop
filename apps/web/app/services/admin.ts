@@ -503,10 +503,11 @@ export {
 export { type MerchantFlow, listMerchantFlows } from './admin-merchant-flows';
 
 // ADR 037 (staff roles + support dashboard): five new slices.
-// Wire shapes live in `@loop/shared` (staff-roles, admin-watcher-
-// skips, admin-user-wallet, admin-lookup, admin-order-redemption)
-// because the backend sibling emits the same contracts — the
-// shared-type-parity gate holds both sides to one definition.
+// Wire shapes live in `@loop/shared` (`admin-staff.ts` for role
+// management, `admin-support-ops.ts` for the watcher-skip browser /
+// wallet card / reverse lookup / redemption re-fetch) because the
+// backend emits the same contracts — the shared-type-parity gate
+// holds both sides to one definition.
 export { listAdminStaff, setStaffRole, revokeStaffRole } from './admin-staff';
 export { listWatcherSkips, getWatcherSkip, reopenWatcherSkip } from './admin-watcher-skips';
 export { getAdminUserWallet, reprovisionAdminUserWallet } from './admin-user-wallet';

@@ -4,9 +4,10 @@ import { ApiException, type WalletProvisioningState } from '@loop/shared';
 import { getAdminUserWallet, reprovisionAdminUserWallet } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { useUiStore } from '~/stores/ui.store';
-import { ConfirmDialog } from './ConfirmDialog';
+import { ReasonDialog } from './ReasonDialog';
 import { CopyButton } from './CopyButton';
 import { Spinner } from '~/components/ui/Spinner';
+import { fmtStroops } from '~/utils/format-stellar';
 import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
@@ -15,13 +16,17 @@ import { ADMIN_LOCALE } from '~/utils/locale';
  * Surfaces the user's embedded-wallet provisioning state — the
  * support question is "why hasn't this customer's cashback landed?",
  * and a wallet stuck before `activated` is the most common answer.
- * Shows provider / address / on-chain LOOP balances / attempt
- * telemetry, plus the re-trigger action.
+ * Shows provider / addresses / the on-chain trustline snapshot /
+ * attempt telemetry, plus the re-trigger action. `onChain: null`
+ * means Horizon was unreachable (deliberately no last-known-good
+ * fallback — support needs the truth), so the card renders a retry
+ * hint instead of balances.
  *
  * The reprovision button is a support-allowed delivery-unsticking
  * action (ADR 037 §3 — an idempotent re-drive, no money movement),
  * so unlike the credit/emission forms it renders for both staff
- * roles. Confirm-gated to keep the uniform two-step write UX.
+ * roles. It carries the full ADR 017 contract, so the button opens a
+ * ReasonDialog (2–500 chars, audited).
  */
 const PROVISIONING_UI: Record<WalletProvisioningState, { label: string; classes: string }> = {
   none: {
@@ -41,7 +46,7 @@ const PROVISIONING_UI: Record<WalletProvisioningState, { label: string; classes:
 export function UserWalletCard({ userId }: { userId: string }): React.JSX.Element {
   const queryClient = useQueryClient();
   const addToast = useUiStore((s) => s.addToast);
-  const [confirming, setConfirming] = useState(false);
+  const [reasonOpen, setReasonOpen] = useState(false);
 
   const query = useQuery({
     queryKey: ['admin-user-wallet', userId],
@@ -51,13 +56,13 @@ export function UserWalletCard({ userId }: { userId: string }): React.JSX.Elemen
   });
 
   const reprovision = useMutation({
-    mutationFn: () => reprovisionAdminUserWallet(userId),
-    onSuccess: (res) => {
+    mutationFn: (reason: string) => reprovisionAdminUserWallet({ userId, reason }),
+    onSuccess: (envelope) => {
       addToast(
-        res.enqueued
-          ? 'Wallet re-provisioning enqueued — the sweep picks it up on its next tick.'
-          : 'Re-provision request accepted but nothing was enqueued.',
-        res.enqueued ? 'success' : 'info',
+        envelope.audit.replayed
+          ? 'Re-provision replayed — this re-drive was already enqueued.'
+          : 'Wallet re-provisioning enqueued — the sweep picks it up on its next tick.',
+        'success',
       );
       void queryClient.invalidateQueries({ queryKey: ['admin-user-wallet', userId] });
     },
@@ -69,9 +74,9 @@ export function UserWalletCard({ userId }: { userId: string }): React.JSX.Elemen
     },
   });
 
-  const handleConfirm = (confirmed: boolean): void => {
-    setConfirming(false);
-    if (confirmed) reprovision.mutate();
+  const handleReason = (reason: string | null): void => {
+    setReasonOpen(false);
+    if (reason !== null) reprovision.mutate(reason);
   };
 
   return (
@@ -116,23 +121,34 @@ export function UserWalletCard({ userId }: { userId: string }): React.JSX.Elemen
               </dd>
             </div>
             <div className="sm:col-span-2">
-              <dt className="text-gray-500 dark:text-gray-400">Address</dt>
+              <dt className="text-gray-500 dark:text-gray-400">Wallet address</dt>
               <dd className="font-mono text-xs text-gray-700 dark:text-gray-300 break-all inline-flex items-center gap-1">
-                {query.data.address ?? '—'}
-                {query.data.address !== null ? (
-                  <CopyButton text={query.data.address} label="Copy wallet address" />
+                {query.data.walletAddress ?? '—'}
+                {query.data.walletAddress !== null ? (
+                  <CopyButton text={query.data.walletAddress} label="Copy wallet address" />
                 ) : null}
               </dd>
             </div>
+            {query.data.stellarAddress !== null ? (
+              <div className="sm:col-span-2">
+                <dt className="text-gray-500 dark:text-gray-400">Legacy payout address</dt>
+                <dd className="font-mono text-xs text-gray-700 dark:text-gray-300 break-all inline-flex items-center gap-1">
+                  {query.data.stellarAddress}
+                  <CopyButton text={query.data.stellarAddress} label="Copy legacy payout address" />
+                </dd>
+              </div>
+            ) : null}
             <div>
               <dt className="text-gray-500 dark:text-gray-400">Provisioning attempts</dt>
-              <dd className="tabular-nums text-gray-900 dark:text-white">{query.data.attempts}</dd>
+              <dd className="tabular-nums text-gray-900 dark:text-white">
+                {query.data.provisioningAttempts}
+              </dd>
             </div>
             <div>
               <dt className="text-gray-500 dark:text-gray-400">Last attempt</dt>
               <dd className="text-gray-900 dark:text-white">
-                {query.data.lastAttemptAt !== null
-                  ? new Date(query.data.lastAttemptAt).toLocaleString(ADMIN_LOCALE, {
+                {query.data.provisioningLastAttemptAt !== null
+                  ? new Date(query.data.provisioningLastAttemptAt).toLocaleString(ADMIN_LOCALE, {
                       dateStyle: 'medium',
                       timeStyle: 'short',
                     })
@@ -145,18 +161,26 @@ export function UserWalletCard({ userId }: { userId: string }): React.JSX.Elemen
             <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
               On-chain balances
             </h3>
-            {query.data.balances.length === 0 ? (
+            {query.data.onChain === null ? (
+              <p className="mt-1 text-sm text-amber-700 dark:text-amber-400">
+                Horizon unreachable — on-chain state unknown. Retry shortly.
+              </p>
+            ) : !query.data.onChain.accountExists ? (
               <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                No LOOP-asset balances yet.
+                No on-chain account yet.
+              </p>
+            ) : query.data.onChain.balances.length === 0 ? (
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                No LOOP-asset trustlines yet.
               </p>
             ) : (
               <ul className="mt-1 space-y-1 text-sm">
-                {query.data.balances.map((b) => (
-                  <li key={b.assetCode} className="flex items-baseline gap-2">
-                    <span className="font-mono text-xs text-gray-500 dark:text-gray-400">
-                      {b.assetCode}
-                    </span>
-                    <span className="tabular-nums text-gray-900 dark:text-white">{b.balance}</span>
+                {query.data.onChain.balances.map((b) => (
+                  <li
+                    key={`${b.assetCode}:${b.assetIssuer}`}
+                    className="tabular-nums text-gray-900 dark:text-white"
+                  >
+                    {fmtStroops(b.balanceStroops, b.assetCode)}
                   </li>
                 ))}
               </ul>
@@ -167,7 +191,7 @@ export function UserWalletCard({ userId }: { userId: string }): React.JSX.Elemen
             <div>
               <button
                 type="button"
-                onClick={() => setConfirming(true)}
+                onClick={() => setReasonOpen(true)}
                 disabled={reprovision.isPending}
                 className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
               >
@@ -178,19 +202,12 @@ export function UserWalletCard({ userId }: { userId: string }): React.JSX.Elemen
         </div>
       )}
 
-      <ConfirmDialog
-        open={confirming}
-        title="Re-trigger wallet provisioning"
-        body={
-          <p>
-            Re-enqueue the provisioning sweep for user{' '}
-            <code className="font-mono text-xs">{userId}</code>? This is idempotent — an already
-            in-flight run is not duplicated. The action is audited.
-          </p>
-        }
+      <ReasonDialog
+        open={reasonOpen}
+        title="Reason for re-triggering provisioning?"
+        description="The reason lands in the audit trail and the Discord notification. The re-drive is idempotent — an already in-flight run is not duplicated."
         confirmLabel="Re-trigger"
-        confirmVariant="primary"
-        onResolve={handleConfirm}
+        onResolve={handleReason}
       />
     </section>
   );

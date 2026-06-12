@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router';
-import { ApiException, type AdminLookupResult } from '@loop/shared';
+import { ApiException, type AdminLookupResponse } from '@loop/shared';
 import type * as AdminModule from '~/services/admin';
 import { AdminLookupSearch } from '../AdminLookupSearch';
 
@@ -79,7 +79,7 @@ describe('<AdminLookupSearch />', () => {
       kind: 'order',
       orderId: 'ord-123',
       userId: 'u-1',
-    } satisfies AdminLookupResult);
+    } satisfies AdminLookupResponse);
     renderSearch();
     await submit('ord-123');
     await waitFor(() => {
@@ -90,9 +90,10 @@ describe('<AdminLookupSearch />', () => {
 
   it('navigates to the user 360 when a payment memo resolves to a user', async () => {
     adminMock.adminLookup.mockResolvedValue({
-      kind: 'memo',
+      kind: 'payment_memo',
       userId: 'u-42',
-    } satisfies AdminLookupResult);
+      orderId: 'ord-42',
+    } satisfies AdminLookupResponse);
     renderSearch();
     await submit('LOOPMEMO42');
     await waitFor(() => {
@@ -102,9 +103,9 @@ describe('<AdminLookupSearch />', () => {
 
   it('navigates to the user 360 when a Stellar address resolves to a user', async () => {
     adminMock.adminLookup.mockResolvedValue({
-      kind: 'address',
+      kind: 'stellar_address',
       userId: 'u-77',
-    } satisfies AdminLookupResult);
+    } satisfies AdminLookupResponse);
     renderSearch();
     await submit('GABCDEFstellar');
     await waitFor(() => {
@@ -112,8 +113,12 @@ describe('<AdminLookupSearch />', () => {
     });
   });
 
-  it('shows the no-match hint on kind=none without navigating', async () => {
-    adminMock.adminLookup.mockResolvedValue({ kind: 'none' } satisfies AdminLookupResult);
+  it('shows the no-match hint on a 404 without navigating', async () => {
+    // The backend has no `kind: 'none'` sentinel — a well-formed
+    // identifier with no match is the uniform admin 404.
+    adminMock.adminLookup.mockRejectedValue(
+      new ApiException(404, { code: 'NOT_FOUND', message: 'No order with that id' }),
+    );
     renderSearch();
     await submit('garbage-id');
     await waitFor(() => {

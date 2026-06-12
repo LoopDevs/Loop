@@ -12,7 +12,7 @@ import { shouldRetry } from '~/hooks/query-retry';
 import { getWatcherSkip, listWatcherSkips, reopenWatcherSkip } from '~/services/admin';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { RequireStaff } from '~/components/features/admin/RequireAdmin';
-import { ConfirmDialog } from '~/components/features/admin/ConfirmDialog';
+import { ReasonDialog } from '~/components/features/admin/ReasonDialog';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { Spinner } from '~/components/ui/Spinner';
 import { useUiStore } from '~/stores/ui.store';
@@ -64,6 +64,9 @@ export default function AdminSkipsRoute(): React.JSX.Element {
   );
 }
 
+/** Page size for the keyset walk (backend default; max 100). */
+const PAGE_SIZE = 20;
+
 function AdminSkipsRouteInner(): React.JSX.Element {
   const queryClient = useQueryClient();
   const addToast = useUiStore((s) => s.addToast);
@@ -72,32 +75,38 @@ function AdminSkipsRouteInner(): React.JSX.Element {
   const reasonParam = searchParams.get('reason');
   const status = isStatus(statusParam) ? statusParam : undefined;
   const reason = isReason(reasonParam) ? reasonParam : undefined;
-  const pageParam = Number(searchParams.get('page'));
-  const page = Number.isInteger(pageParam) && pageParam > 1 ? pageParam : 1;
+
+  // Keyset cursor stack (the backend paginates on `before`, the same
+  // convention as /api/admin/orders — there is no page number). The
+  // top of the stack is the cursor for the page on screen; an empty
+  // stack is the newest page.
+  const [cursors, setCursors] = useState<string[]>([]);
+  const before = cursors.length > 0 ? cursors[cursors.length - 1] : undefined;
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reopenTarget, setReopenTarget] = useState<AdminWatcherSkipRow | null>(null);
 
   const query = useQuery({
-    queryKey: ['admin-watcher-skips', status ?? null, reason ?? null, page],
+    queryKey: ['admin-watcher-skips', status ?? null, reason ?? null, before ?? null],
     queryFn: () =>
       listWatcherSkips({
         ...(status !== undefined ? { status } : {}),
         ...(reason !== undefined ? { reason } : {}),
-        page,
+        ...(before !== undefined ? { before } : {}),
+        limit: PAGE_SIZE,
       }),
     retry: shouldRetry,
     staleTime: 10_000,
   });
 
   const reopen = useMutation({
-    mutationFn: (paymentId: string) => reopenWatcherSkip(paymentId),
-    onSuccess: (res, paymentId) => {
+    mutationFn: (args: { paymentId: string; reason: string }) => reopenWatcherSkip(args),
+    onSuccess: (envelope, args) => {
       addToast(
-        res.reopened
-          ? `Skip row ${paymentId} re-opened — the replay sweep re-evaluates it on its next tick.`
-          : `Skip row ${paymentId} was not re-opened (already pending or resolved).`,
-        res.reopened ? 'success' : 'info',
+        envelope.audit.replayed
+          ? `Reopen replayed — skip row ${args.paymentId} was already re-queued.`
+          : `Skip row ${args.paymentId} re-opened — the replay sweep re-evaluates it on its next tick.`,
+        'success',
       );
       void queryClient.invalidateQueries({
         predicate: (q) => String(q.queryKey[0]).startsWith('admin-watcher-skip'),
@@ -115,26 +124,20 @@ function AdminSkipsRouteInner(): React.JSX.Element {
     setSearchParams((params) => {
       if (value.length === 0) params.delete(key);
       else params.set(key, value);
-      params.delete('page');
       return params;
     });
+    setCursors([]);
   };
 
-  const setPage = (next: number): void => {
-    setSearchParams((params) => {
-      if (next <= 1) params.delete('page');
-      else params.set('page', String(next));
-      return params;
-    });
-  };
-
-  const handleReopenResolve = (confirmed: boolean): void => {
+  const handleReopenReason = (reasonText: string | null): void => {
     const target = reopenTarget;
     setReopenTarget(null);
-    if (confirmed && target !== null) reopen.mutate(target.paymentId);
+    if (reasonText === null || target === null) return;
+    reopen.mutate({ paymentId: target.paymentId, reason: reasonText });
   };
 
-  const rows = query.data?.skips ?? [];
+  const rows = query.data?.rows ?? [];
+  const lastRow = rows.length > 0 ? rows[rows.length - 1] : undefined;
 
   return (
     <main className="max-w-5xl mx-auto px-6 py-12 space-y-6">
@@ -285,39 +288,35 @@ function AdminSkipsRouteInner(): React.JSX.Element {
       <nav className="flex items-center justify-between" aria-label="Skips pagination">
         <button
           type="button"
-          onClick={() => setPage(page - 1)}
-          disabled={page <= 1}
+          onClick={() => setCursors((stack) => stack.slice(0, -1))}
+          disabled={cursors.length === 0}
           className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
         >
-          ← Previous
+          ← Newer
         </button>
-        <span className="text-xs text-gray-500 dark:text-gray-400">Page {page}</span>
+        <span className="text-xs text-gray-500 dark:text-gray-400">Page {cursors.length + 1}</span>
         <button
           type="button"
-          onClick={() => setPage(page + 1)}
-          disabled={rows.length === 0}
+          onClick={() => {
+            if (lastRow !== undefined) setCursors((stack) => [...stack, lastRow.createdAt]);
+          }}
+          disabled={lastRow === undefined || rows.length < PAGE_SIZE}
           className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
         >
-          Next →
+          Older →
         </button>
       </nav>
 
-      <ConfirmDialog
+      <ReasonDialog
         open={reopenTarget !== null}
-        title="Re-open skip row"
-        body={
-          reopenTarget !== null ? (
-            <p>
-              Re-open abandoned skip{' '}
-              <code className="font-mono text-xs">{reopenTarget.paymentId}</code> (memo{' '}
-              <code className="font-mono text-xs">{reopenTarget.memo}</code>)? The replay sweep
-              re-evaluates it with a fresh attempt budget. The action is audited.
-            </p>
-          ) : null
+        title={
+          reopenTarget !== null
+            ? `Reason for re-opening skip ${reopenTarget.paymentId}?`
+            : 'Reason for re-opening?'
         }
+        description="The replay sweep re-evaluates the row with a fresh attempt budget. The reason lands in the audit trail and the Discord notification."
         confirmLabel="Reopen"
-        confirmVariant="primary"
-        onResolve={handleReopenResolve}
+        onResolve={handleReopenReason}
       />
     </main>
   );

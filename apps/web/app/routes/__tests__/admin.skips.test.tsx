@@ -50,7 +50,7 @@ vi.mock('~/services/admin', async (importActual) => {
     ...actual,
     listWatcherSkips: (opts: unknown) => adminMock.listWatcherSkips(opts),
     getWatcherSkip: (id: string) => adminMock.getWatcherSkip(id),
-    reopenWatcherSkip: (id: string) => adminMock.reopenWatcherSkip(id),
+    reopenWatcherSkip: (args: unknown) => adminMock.reopenWatcherSkip(args),
     getTreasurySnapshot: vi.fn().mockResolvedValue({
       outstanding: {},
       totals: {},
@@ -117,6 +117,7 @@ const abandonedRow: AdminWatcherSkipRow = {
   reason: 'processing_error',
   attempts: 5,
   status: 'abandoned',
+  lastError: 'markOrderPaid blew up',
   createdAt: '2026-06-10T08:00:00.000Z',
   updatedAt: '2026-06-11T08:00:00.000Z',
 };
@@ -128,9 +129,24 @@ const pendingRow: AdminWatcherSkipRow = {
   reason: 'missing_credit_row',
   attempts: 1,
   status: 'pending',
+  lastError: null,
   createdAt: '2026-06-11T09:00:00.000Z',
   updatedAt: '2026-06-11T09:00:00.000Z',
 };
+
+/** ADR-017 {result, audit} envelope helper — matches the backend. */
+function envelope<T>(result: T, replayed = false): { result: T; audit: Record<string, unknown> } {
+  return {
+    result,
+    audit: {
+      actorUserId: 'staff-1',
+      actorEmail: 'support@loop.test',
+      idempotencyKey: 'k'.repeat(32),
+      appliedAt: '2026-06-12T10:00:00.000Z',
+      replayed,
+    },
+  };
+}
 
 function renderAt(path = '/admin/skips'): void {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -155,7 +171,7 @@ describe('<AdminSkipsRoute />', () => {
   });
 
   it('renders the empty state when no rows match', async () => {
-    adminMock.listWatcherSkips.mockResolvedValue({ skips: [] });
+    adminMock.listWatcherSkips.mockResolvedValue({ rows: [] });
     renderAt();
     await waitFor(() => {
       expect(screen.getByText(/No skip rows match/i)).toBeDefined();
@@ -173,7 +189,7 @@ describe('<AdminSkipsRoute />', () => {
   });
 
   it('renders rows with status pills; reopen only on abandoned rows', async () => {
-    adminMock.listWatcherSkips.mockResolvedValue({ skips: [abandonedRow, pendingRow] });
+    adminMock.listWatcherSkips.mockResolvedValue({ rows: [abandonedRow, pendingRow] });
     renderAt();
     await waitFor(() => {
       expect(screen.getByText('MEMO123')).toBeDefined();
@@ -186,7 +202,7 @@ describe('<AdminSkipsRoute />', () => {
       );
     }
     // Exactly one row-level Reopen button — the abandoned row's
-    // (the always-mounted ConfirmDialog holds the other). Support is
+    // (the always-mounted ReasonDialog holds the other). Support is
     // allowed this write (ADR 037 §3) so it renders for support too.
     const rowButtons = screen
       .getAllByRole('button', { name: 'Reopen' })
@@ -195,47 +211,64 @@ describe('<AdminSkipsRoute />', () => {
   });
 
   it('applies the status filter to the service call', async () => {
-    adminMock.listWatcherSkips.mockResolvedValue({ skips: [abandonedRow] });
+    adminMock.listWatcherSkips.mockResolvedValue({ rows: [abandonedRow] });
     renderAt('/admin/skips?status=abandoned');
     await waitFor(() => {
       expect(adminMock.listWatcherSkips).toHaveBeenCalledWith({
         status: 'abandoned',
-        page: 1,
+        limit: 20,
       });
     });
   });
 
   it('applies the reason filter to the service call', async () => {
-    adminMock.listWatcherSkips.mockResolvedValue({ skips: [] });
+    adminMock.listWatcherSkips.mockResolvedValue({ rows: [] });
     renderAt('/admin/skips?reason=asset_mismatch');
     await waitFor(() => {
       expect(adminMock.listWatcherSkips).toHaveBeenCalledWith({
         reason: 'asset_mismatch',
-        page: 1,
+        limit: 20,
       });
     });
   });
 
-  it('reopen: confirm dialog → service called → success toast', async () => {
-    adminMock.listWatcherSkips.mockResolvedValue({ skips: [abandonedRow] });
-    adminMock.reopenWatcherSkip.mockResolvedValue({ reopened: true });
+  it('reopen: reason dialog → service called with paymentId + reason → success toast', async () => {
+    adminMock.listWatcherSkips.mockResolvedValue({ rows: [abandonedRow] });
+    adminMock.reopenWatcherSkip.mockResolvedValue(
+      envelope({
+        paymentId: 'pay-abandoned-1',
+        priorStatus: 'abandoned',
+        status: 'pending',
+        attempts: 0,
+      }),
+    );
     renderAt();
     const reopenButton = await screen.findByRole('button', { name: 'Reopen' });
     await act(async () => {
       fireEvent.click(reopenButton);
     });
-    // ConfirmDialog: submit its form to confirm. Two "Reopen"
-    // buttons exist now (row + dialog confirm) — pick the dialog one.
-    const dialogConfirm = screen
-      .getAllByRole('button', { name: 'Reopen' })
-      .find((b) => b.closest('dialog') !== null);
-    const form = dialogConfirm?.closest('form');
-    if (form === null || form === undefined) throw new Error('confirm form not found');
+    // ReasonDialog (ADR 017 — the reopen carries an audited reason):
+    // type the reason into the dialog's textarea and submit its form.
+    const openDialog = await waitFor(() => {
+      const d = document.querySelector('dialog[open]');
+      if (!(d instanceof HTMLElement)) throw new Error('no open dialog');
+      return d;
+    });
+    const textarea = openDialog.querySelector('textarea');
+    if (textarea === null) throw new Error('reason textarea not found');
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'deposit re-sent — OPS-7' } });
+    });
+    const form = textarea.closest('form');
+    if (form === null) throw new Error('reason dialog form not found');
     await act(async () => {
       fireEvent.submit(form);
     });
     await waitFor(() => {
-      expect(adminMock.reopenWatcherSkip).toHaveBeenCalledWith('pay-abandoned-1');
+      expect(adminMock.reopenWatcherSkip).toHaveBeenCalledWith({
+        paymentId: 'pay-abandoned-1',
+        reason: 'deposit re-sent — OPS-7',
+      });
     });
     await waitFor(() => {
       expect(
@@ -246,8 +279,8 @@ describe('<AdminSkipsRoute />', () => {
     });
   });
 
-  it('cancelling the confirm dialog does not call the service', async () => {
-    adminMock.listWatcherSkips.mockResolvedValue({ skips: [abandonedRow] });
+  it('cancelling the reason dialog does not call the service', async () => {
+    adminMock.listWatcherSkips.mockResolvedValue({ rows: [abandonedRow] });
     renderAt();
     const reopenButton = await screen.findByRole('button', { name: 'Reopen' });
     await act(async () => {
@@ -260,7 +293,7 @@ describe('<AdminSkipsRoute />', () => {
   });
 
   it('clicking a payment id loads the detail drawer with lastError + snapshot', async () => {
-    adminMock.listWatcherSkips.mockResolvedValue({ skips: [abandonedRow] });
+    adminMock.listWatcherSkips.mockResolvedValue({ rows: [abandonedRow] });
     adminMock.getWatcherSkip.mockResolvedValue({
       ...abandonedRow,
       payment: { amount: '5.0000000', asset_code: 'GBPLOOP' },

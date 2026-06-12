@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Routes, Route } from 'react-router';
-import { ApiException, type AdminStaffMember } from '@loop/shared';
+import { ApiException, type AdminStaffEntry } from '@loop/shared';
 import type * as AdminModule from '~/services/admin';
 import { useUiStore } from '~/stores/ui.store';
 import AdminStaffRoute from '../admin.staff';
@@ -113,21 +113,39 @@ beforeEach(() => {
   }
 });
 
-const supportMember: AdminStaffMember = {
+const supportMember: AdminStaffEntry = {
   userId: 'u-support',
   email: 'sam@loop.test',
   role: 'support',
+  source: 'staff_roles',
   grantedAt: '2026-06-10T10:00:00.000Z',
   grantedByUserId: 'admin-1',
+  grantedByEmail: 'admin@loop.test',
   reason: 'support rotation',
 };
 
-const adminMember: AdminStaffMember = {
+// Migration-0039 seed row: real staff_roles row, no granting actor.
+const adminMember: AdminStaffEntry = {
   userId: 'u-admin',
   email: 'ash@loop.test',
   role: 'admin',
+  source: 'staff_roles',
   grantedAt: '2026-06-01T10:00:00.000Z',
   grantedByUserId: null,
+  grantedByEmail: null,
+  reason: null,
+};
+
+// Deprecated users.is_admin shim — a CTX-allowlist admin with no
+// staff_roles row yet (ADR 037 §1). No grant metadata at all.
+const legacyMember: AdminStaffEntry = {
+  userId: 'u-legacy',
+  email: 'old@loop.test',
+  role: 'admin',
+  source: 'legacy_is_admin',
+  grantedAt: null,
+  grantedByUserId: null,
+  grantedByEmail: null,
   reason: null,
 };
 
@@ -221,8 +239,10 @@ describe('<AdminStaffRoute /> — gate', () => {
 });
 
 describe('<AdminStaffRoute /> — list', () => {
-  it('renders the staff list with role pills and migration-seeded grants', async () => {
-    adminMock.listAdminStaff.mockResolvedValue({ staff: [supportMember, adminMember] });
+  it('renders the staff list with role pills, migration-seeded and legacy grants', async () => {
+    adminMock.listAdminStaff.mockResolvedValue({
+      staff: [supportMember, adminMember, legacyMember],
+    });
     renderAt();
     await waitFor(() => {
       expect(screen.getByText('sam@loop.test')).toBeDefined();
@@ -233,8 +253,12 @@ describe('<AdminStaffRoute /> — list', () => {
     expect(screen.getAllByText('support').some((el) => el.className.includes('rounded-full'))).toBe(
       true,
     );
-    // Null grantedByUserId renders as the migration seed marker.
+    // Grantor email renders when the backend resolved it.
+    expect(screen.getByText('admin@loop.test')).toBeDefined();
+    // Null grantedByUserId on a staff_roles row → migration seed marker.
     expect(screen.getByText('migration')).toBeDefined();
+    // legacy_is_admin shim rows are labelled and have no grant date.
+    expect(screen.getByText('legacy is_admin')).toBeDefined();
   });
 
   it('renders the empty state', async () => {
@@ -273,9 +297,8 @@ describe('<AdminStaffRoute /> — grant', () => {
       envelope({
         userId: 'u-new',
         role: 'support',
+        priorRole: null,
         grantedAt: '2026-06-12T10:00:00.000Z',
-        grantedByUserId: 'admin-1',
-        reason: 'onboarding',
       }),
     );
     renderAt();
@@ -348,7 +371,9 @@ describe('<AdminStaffRoute /> — grant', () => {
 describe('<AdminStaffRoute /> — revoke', () => {
   it('revoke: reason dialog → service called → success toast', async () => {
     adminMock.listAdminStaff.mockResolvedValue({ staff: [supportMember] });
-    adminMock.revokeStaffRole.mockResolvedValue(envelope({ userId: 'u-support', revoked: true }));
+    adminMock.revokeStaffRole.mockResolvedValue(
+      envelope({ userId: 'u-support', priorRole: 'support' }),
+    );
     renderAt();
     const revokeButton = await screen.findByRole('button', { name: 'Revoke' });
     await act(async () => {
