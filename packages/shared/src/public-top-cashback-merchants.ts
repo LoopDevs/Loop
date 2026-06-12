@@ -25,6 +25,13 @@
 export interface TopCashbackMerchant {
   id: string;
   name: string;
+  /**
+   * Country-aware URL slug (`merchantSlug(merchant)` on the backend — CTX
+   * slug, else `brand-country`). Emitted by the backend so marketing tiles
+   * and the sitemap link to `/cashback/:slug` without re-deriving it from
+   * `name` alone, which would drop the country and collide across regions.
+   */
+  slug: string;
   logoUrl: string | null;
   /** numeric(5,2) as string, e.g. `"15.00"`. */
   userCashbackPct: string;

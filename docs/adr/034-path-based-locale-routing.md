@@ -132,3 +132,29 @@ Two deltas from the original plan, both grounded in the live data / current feed
   `Offer.priceCurrency` structured data are deferred until the public merchant feed carries
   country/currency (today it carries neither, so a per-country merchant page would be thin);
   the per-country **landing** pages (home + `/cashback`) ship with full reciprocal `hreflang`.
+
+## Follow-up: country-aware merchant slugs (2026-06)
+
+CTX is stripping country tokens from merchant **names** (`"adidas Canada"` → `"adidas"`)
+while keeping the merchant's `country` field and regenerating its own brand-country slug
+(`adidas-ca`). Loop derives its own slug via `merchantSlug()` in `@loop/shared`, which
+originally keyed off the name alone — so the rename would have collapsed every regional
+variant of a brand to the same bare slug (`adidas`) and broken `merchantsBySlug`
+(last-sync-wins, the rest unreachable).
+
+`merchantSlug()` is now **country-aware** and is the single source of truth for the slug:
+
+1. **Prefer CTX's `slug`** (already brand-country, e.g. `adidas-ca`) — carried through the
+   `mapUpstreamMerchant` mapper onto the `Merchant` record.
+2. **Else derive `brandSlug(name)-<country>`** — `"adidas"` + `CA` → `adidas-ca`;
+   transitional un-renamed `"adidas Canada"` + `CA` → `adidas-canada-ca` (unique, safe).
+3. **Else bare `brandSlug(name)`** — data-gap fallback (no CTX slug, no country).
+
+A separate **country-agnostic** `brandSlug(name)` export backs ADR 032 brand grouping, so
+`adidas` across CA/US/GB groups into ONE brand tile (`/brand/:slug`) while each member keeps
+its distinct per-merchant `merchantSlug`. The public slug-carrying responses
+(`TopCashbackMerchant`, `PublicMerchantDetail`, the cashback-preview echo) now emit the
+country-aware slug from the backend, so the sitemap / marketing tiles link correctly without
+re-deriving from `name`. This unblocks the CTX rename without changing any pre-rename URL
+(untagged merchants keep their bare slug via the fallback). See `architecture.md` →
+_Backend data model_ for the runtime detail.

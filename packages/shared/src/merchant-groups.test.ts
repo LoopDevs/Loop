@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Merchant } from './merchants.js';
 import { splitMerchantName, variantLabel, groupMerchants } from './merchant-groups.js';
+import { brandSlug, merchantSlug } from './slugs.js';
 
 const m = (name: string): Merchant => ({ id: name, name, enabled: true });
 
@@ -63,5 +64,26 @@ describe('groupMerchants', () => {
   it('keeps unrelated brands separate', () => {
     const groups = groupMerchants([m('dots.eco - A'), m('Carma - Hero'), m('Greggs')]);
     expect(groups.map((g) => g.name).sort()).toEqual(['Carma', 'Greggs', 'dots.eco']);
+  });
+
+  // Country-aware slug ↔ country-agnostic grouping (feat/country-aware-merchant-slug).
+  it('groups same-brand-different-country into ONE brand, with distinct per-merchant slugs', () => {
+    const ca: Merchant = { id: 'adidas-ca-id', name: 'adidas', country: 'CA', enabled: true };
+    const us: Merchant = { id: 'adidas-us-id', name: 'adidas', country: 'US', enabled: true };
+    const gb: Merchant = { id: 'adidas-gb-id', name: 'adidas', country: 'GB', enabled: true };
+
+    const groups = groupMerchants([ca, us, gb]);
+    // One brand group, all three members under it (country-agnostic grouping).
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.name).toBe('adidas');
+    expect(groups[0]!.members).toHaveLength(3);
+
+    // The brand page keys off the country-agnostic brandSlug...
+    expect(brandSlug(groups[0]!.name)).toBe('adidas');
+
+    // ...but each member resolves to a DISTINCT country-aware merchantSlug.
+    const slugs = [ca, us, gb].map((x) => merchantSlug(x));
+    expect(slugs).toEqual(['adidas-ca', 'adidas-us', 'adidas-gb']);
+    expect(new Set(slugs).size).toBe(3);
   });
 });

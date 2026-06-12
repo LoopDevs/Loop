@@ -77,9 +77,11 @@ describe('sitemap loader', () => {
       new Response(
         JSON.stringify({
           asOf: '2026-04-20T00:00:00Z',
+          // The backend emits a country-aware `slug` (merchantSlug); the
+          // sitemap links with it directly rather than re-deriving from name.
           merchants: [
-            { name: 'Acme Coffee', userCashbackPct: '5.00' },
-            { name: 'Globex Tools', userCashbackPct: '3.00' },
+            { name: 'Acme Coffee', slug: 'acme-coffee', userCashbackPct: '5.00' },
+            { name: 'Globex Tools', slug: 'globex-tools', userCashbackPct: '3.00' },
           ],
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
@@ -96,7 +98,7 @@ describe('sitemap loader', () => {
       new Response(
         JSON.stringify({
           asOf: '2026-04-20T00:00:00Z',
-          merchants: [{ name: 'Smith & Co', userCashbackPct: '5.00' }],
+          merchants: [{ name: 'Smith & Co', slug: 'smith-co', userCashbackPct: '5.00' }],
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       ),

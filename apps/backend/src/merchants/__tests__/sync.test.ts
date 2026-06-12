@@ -18,8 +18,10 @@ const { envState } = vi.hoisted(() => ({
 
 vi.mock('../../env.js', () => ({ env: envState }));
 
+// Stable warn spy so country-aware slug-collision tests can assert on it.
+const { warnSpy } = vi.hoisted(() => ({ warnSpy: vi.fn() }));
 vi.mock('../../logger.js', () => ({
-  logger: { child: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }) },
+  logger: { child: () => ({ info: vi.fn(), error: vi.fn(), warn: warnSpy }) },
 }));
 
 // Mock circuit breaker to pass through to global fetch (avoids cross-test state leaks)
@@ -43,6 +45,8 @@ vi.stubGlobal('fetch', mockFetch);
 interface FakeUpstreamMerchant {
   id: string;
   name: string;
+  slug?: string;
+  country?: string;
   logoUrl?: string;
   cardImageUrl?: string;
   enabled: boolean;
@@ -75,6 +79,7 @@ function upstreamResponse(
 describe('refreshMerchants', () => {
   beforeEach(() => {
     mockFetch.mockReset();
+    warnSpy.mockClear();
   });
 
   it('fetches all pages and populates the merchant store', async () => {
@@ -427,6 +432,105 @@ describe('refreshMerchants', () => {
       const ids = getMerchants().merchants.map((m) => m.id);
       expect(ids).toEqual(['good-1']);
       envState.LOOP_MERCHANT_DENYLIST = undefined;
+    });
+  });
+
+  // Country-aware slug index (feat/country-aware-merchant-slug). The
+  // by-slug map keys off merchantSlug(merchant) — CTX slug, else
+  // brand+country — so regional variants of one brand no longer collide.
+  describe('country-aware merchantsBySlug', () => {
+    it('gives same-brand-different-country merchants distinct slugs (no collision)', async () => {
+      mockFetch.mockResolvedValueOnce(
+        upstreamResponse(
+          [
+            { id: 'adidas-ca-id', name: 'adidas', country: 'CA', enabled: true },
+            { id: 'adidas-us-id', name: 'adidas', country: 'US', enabled: true },
+            { id: 'adidas-gb-id', name: 'adidas', country: 'GB', enabled: true },
+          ],
+          1,
+          1,
+        ),
+      );
+
+      await refreshMerchants();
+      const { merchantsBySlug } = getMerchants();
+      expect(merchantsBySlug.get('adidas-ca')?.id).toBe('adidas-ca-id');
+      expect(merchantsBySlug.get('adidas-us')?.id).toBe('adidas-us-id');
+      expect(merchantsBySlug.get('adidas-gb')?.id).toBe('adidas-gb-id');
+      // No bare-brand collision — all three reachable, none clobbered.
+      expect(merchantsBySlug.get('adidas')).toBeUndefined();
+      // ...and the collision warn does NOT fire for distinct (brand, country).
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('prefers the CTX-provided slug over a derived one', async () => {
+      mockFetch.mockResolvedValueOnce(
+        upstreamResponse(
+          [
+            {
+              id: 'nike-ca-id',
+              name: 'Nike Canada',
+              country: 'CA',
+              slug: 'nike-ca',
+              enabled: true,
+            },
+          ],
+          1,
+          1,
+        ),
+      );
+
+      await refreshMerchants();
+      const { merchantsBySlug, merchantsById } = getMerchants();
+      // CTX slug wins — not the derived `nike-canada-ca`.
+      expect(merchantsBySlug.get('nike-ca')?.id).toBe('nike-ca-id');
+      expect(merchantsBySlug.get('nike-canada-ca')).toBeUndefined();
+      // The CTX slug is carried onto the Merchant record.
+      expect(merchantsById.get('nike-ca-id')?.slug).toBe('nike-ca');
+    });
+
+    it('transitional: un-renamed "Brand Country" + country still yields a unique slug', async () => {
+      mockFetch.mockResolvedValueOnce(
+        upstreamResponse(
+          [
+            // Old name form (country token still in the name), no CTX slug.
+            { id: 'puma-ca-id', name: 'Puma Canada', country: 'CA', enabled: true },
+            { id: 'puma-us-id', name: 'Puma', country: 'US', enabled: true },
+          ],
+          1,
+          1,
+        ),
+      );
+
+      await refreshMerchants();
+      const { merchantsBySlug } = getMerchants();
+      expect(merchantsBySlug.get('puma-canada-ca')?.id).toBe('puma-ca-id');
+      expect(merchantsBySlug.get('puma-us')?.id).toBe('puma-us-id');
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('warns only on a TRUE duplicate (same brand AND country)', async () => {
+      mockFetch.mockResolvedValueOnce(
+        upstreamResponse(
+          [
+            { id: 'lastminute-1', name: 'lastminute', country: 'GB', enabled: true },
+            { id: 'lastminute-2', name: 'lastminute', country: 'GB', enabled: true },
+          ],
+          1,
+          1,
+        ),
+      );
+
+      await refreshMerchants();
+      const { merchantsBySlug } = getMerchants();
+      // Last-write-wins on a true collision; the warn fires for the operator.
+      expect(merchantsBySlug.get('lastminute-gb')?.id).toBe('lastminute-2');
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]![0]).toMatchObject({
+        slug: 'lastminute-gb',
+        keptId: 'lastminute-2',
+        droppedId: 'lastminute-1',
+      });
     });
   });
 });

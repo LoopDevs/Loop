@@ -1,6 +1,6 @@
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { MerchantGroup } from '@loop/shared';
-import { merchantSlug } from '@loop/shared';
+import { brandSlug } from '@loop/shared';
 import { getImageProxyUrl } from '~/utils/image';
 import { triggerHaptic } from '~/native/haptics';
 import { LazyImage } from '~/components/ui/LazyImage';
@@ -33,7 +33,10 @@ export function MerchantGroupCard({
   eager = false,
   lookupCashback,
 }: MerchantGroupCardProps): React.JSX.Element {
-  const slug = merchantSlug(group.name);
+  // Brand tile → country-agnostic brandSlug so the `/brand/:slug` link
+  // matches the brand page's country-agnostic group lookup (one tile per
+  // brand across all countries).
+  const slug = brandSlug(group.name);
 
   // Representative imagery: prefer a member that has both a card image and
   // a logo, else fall back to the first member that has each individually.

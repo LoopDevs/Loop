@@ -23,7 +23,8 @@
 export interface PublicMerchantDetail {
   id: string;
   name: string;
-  /** Marketing URL slug (same as `merchantSlug(name)` on the web side). */
+  /** Country-aware marketing URL slug (same as `merchantSlug(merchant)` —
+   * CTX slug, else brand-country — on the web side). */
   slug: string;
   logoUrl: string | null;
   /** numeric(5,2) as string, e.g. `"15.00"`. null when no active config — the "coming soon" SEO state. */

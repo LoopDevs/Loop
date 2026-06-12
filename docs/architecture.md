@@ -75,6 +75,14 @@ locationStore: {
 
 Hot-swap is safe in Node.js because JS is single-threaded — the store reference is replaced atomically on each refresh. No locks needed.
 
+**Merchant slugs are country-aware (CTX-sourced).** `merchantsBySlug` is keyed off `merchantSlug(merchant)` from `@loop/shared`, which is the single source of truth shared with every frontend link. The slug is unique per `(brand, country)`:
+
+1. **Prefer CTX's `slug`** field when present — CTX owns the merchant's country and regenerates its own brand-country slug (e.g. `adidas-ca`), so Loop defers to it verbatim. The CTX `slug` is carried through `mapUpstreamMerchant` onto the `Merchant` record.
+2. **Else derive `brandSlug(name)-<country>`** — `"adidas"` + `CA` → `adidas-ca`. The transitional un-renamed form `"adidas Canada"` + `CA` → `adidas-canada-ca` (ugly but unique).
+3. **Else fall back to bare `brandSlug(name)`** — a data-gap fallback for merchants tagged with neither a CTX slug nor a country (preserves the pre-country behaviour).
+
+This makes the sync safe against CTX's country-token rename (`"adidas Canada"` → `"adidas"`, country kept): regional variants of one brand no longer collapse to the same bare slug and overwrite each other in `merchantsBySlug`. The slug-collision warn in `merchants/sync.ts` now fires only on a **true** duplicate — same brand AND country (the ~8 pre-existing dupe clusters like `lastminute`). Brand grouping (ADR 032, `/brand/:slug`) keys off the **country-agnostic** `brandSlug(name)` instead, so `adidas` across CA/US/GB collapses into ONE brand tile while each member keeps its distinct per-merchant `merchantSlug`.
+
 ---
 
 ## Clustering algorithm

@@ -25,6 +25,7 @@ import { desc, eq, sql } from 'drizzle-orm';
 // (ADR 019 single-source rule). Re-exported below for existing backend
 // callers that import the symbol relative to this module.
 import type { PublicTopCashbackMerchantsResponse, TopCashbackMerchant } from '@loop/shared';
+import { merchantSlug } from '@loop/shared';
 import { db } from '../db/client.js';
 import { merchantCashbackConfigs } from '../db/schema.js';
 import { getMerchants } from '../merchants/sync.js';
@@ -75,6 +76,7 @@ async function compute(limit: number): Promise<PublicTopCashbackMerchantsRespons
     merchants.push({
       id: m.id,
       name: m.name,
+      slug: merchantSlug(m),
       logoUrl: m.logoUrl ?? null,
       userCashbackPct: row.userCashbackPct,
     });

@@ -52,26 +52,27 @@ interface ConfigRow {
   userCashbackPct: string;
 }
 
-function resolveMerchant(
-  idOrSlug: string,
-): { id: string; name: string; logoUrl: string | null } | null {
-  const { merchantsById, merchantsBySlug } = getMerchants();
-  const byId = merchantsById.get(idOrSlug);
-  if (byId !== undefined) {
-    return { id: byId.id, name: byId.name, logoUrl: byId.logoUrl ?? null };
-  }
-  const bySlug = merchantsBySlug.get(idOrSlug);
-  if (bySlug !== undefined) {
-    return { id: bySlug.id, name: bySlug.name, logoUrl: bySlug.logoUrl ?? null };
-  }
-  return null;
-}
-
-async function compute(resolved: {
+/**
+ * Resolved merchant for the public detail view. Carries `slug` — the
+ * country-aware {@link merchantSlug} computed from the full catalog row
+ * (CTX slug, else brand+country) — so the SEO landing page emits a URL
+ * that round-trips through the country-aware `merchantsBySlug` index.
+ */
+interface ResolvedMerchant {
   id: string;
   name: string;
+  slug: string;
   logoUrl: string | null;
-}): Promise<PublicMerchantDetail> {
+}
+
+function resolveMerchant(idOrSlug: string): ResolvedMerchant | null {
+  const { merchantsById, merchantsBySlug } = getMerchants();
+  const m = merchantsById.get(idOrSlug) ?? merchantsBySlug.get(idOrSlug);
+  if (m === undefined) return null;
+  return { id: m.id, name: m.name, slug: merchantSlug(m), logoUrl: m.logoUrl ?? null };
+}
+
+async function compute(resolved: ResolvedMerchant): Promise<PublicMerchantDetail> {
   // Active config is 0 or 1 row per merchantId.
   const rows = (await db
     .select({ userCashbackPct: merchantCashbackConfigs.userCashbackPct })
@@ -87,7 +88,7 @@ async function compute(resolved: {
   return {
     id: resolved.id,
     name: resolved.name,
-    slug: merchantSlug(resolved.name),
+    slug: resolved.slug,
     logoUrl: resolved.logoUrl,
     userCashbackPct: rows[0]?.userCashbackPct ?? null,
     asOf: new Date().toISOString(),
@@ -127,7 +128,7 @@ export async function publicMerchantHandler(c: Context): Promise<Response> {
     return c.json<PublicMerchantDetail>({
       id: resolved.id,
       name: resolved.name,
-      slug: merchantSlug(resolved.name),
+      slug: resolved.slug,
       logoUrl: resolved.logoUrl,
       userCashbackPct: null,
       asOf: new Date().toISOString(),

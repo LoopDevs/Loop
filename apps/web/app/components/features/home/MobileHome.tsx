@@ -3,7 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Merchant, MerchantGroup } from '@loop/shared';
-import { foldForSearch, groupMerchants, merchantInCountry, merchantSlug } from '@loop/shared';
+import {
+  brandSlug,
+  foldForSearch,
+  groupMerchants,
+  merchantInCountry,
+  merchantSlug,
+} from '@loop/shared';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
 import { useOrders } from '~/hooks/use-orders';
 import { useAuth } from '~/hooks/use-auth';
@@ -225,7 +231,7 @@ export function MobileHome(): React.JSX.Element {
           {quickBuy.map((m) => (
             <Link
               key={m.id}
-              to={`/gift-card/${merchantSlug(m.name)}`}
+              to={`/gift-card/${merchantSlug(m)}`}
               className="flex-shrink-0 w-[72px] flex flex-col items-center gap-1.5"
             >
               <BrandTile merchant={m} size={64} />
@@ -564,7 +570,7 @@ function DirectoryCell({
     typeof merchant.savingsPercentage === 'number' && merchant.savingsPercentage > 0;
   return (
     <Link
-      to={`/gift-card/${merchantSlug(merchant.name)}`}
+      to={`/gift-card/${merchantSlug(merchant)}`}
       className="rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 p-3 flex flex-col gap-2 active:scale-[0.98] transition-transform"
     >
       <div className="flex items-start justify-between gap-2">
@@ -604,7 +610,7 @@ function DirectoryGroupCell({ group }: { group: MerchantGroup }): React.JSX.Elem
   const maxSavings = group.members.reduce((acc, m) => Math.max(acc, m.savingsPercentage ?? 0), 0);
   return (
     <Link
-      to={`/brand/${merchantSlug(group.name)}`}
+      to={`/brand/${brandSlug(group.name)}`}
       className="rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 p-3 flex flex-col gap-2 active:scale-[0.98] transition-transform"
     >
       <div className="flex items-start justify-between gap-2">

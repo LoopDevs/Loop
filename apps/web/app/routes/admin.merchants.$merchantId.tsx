@@ -128,7 +128,7 @@ function AdminMerchantDetailRouteInner(): React.JSX.Element {
                 (ADR 021) has no public URL. */}
             {merchant !== undefined ? (
               <Link
-                to={`/cashback/${merchantSlug(merchant.name)}`}
+                to={`/cashback/${merchantSlug(merchant)}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"

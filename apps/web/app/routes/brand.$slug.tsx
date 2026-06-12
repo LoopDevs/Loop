@@ -1,7 +1,7 @@
 import { useParams, useNavigate } from 'react-router';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Route } from './+types/brand.$slug';
-import { groupMerchants, merchantSlug, variantLabel } from '@loop/shared';
+import { brandSlug, groupMerchants, variantLabel } from '@loop/shared';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { Navbar } from '~/components/features/Navbar';
@@ -40,7 +40,10 @@ export default function BrandRoute(): React.JSX.Element {
   const { merchants, isLoading, isError } = useAllMerchants();
   const { lookup: lookupCashback } = useMerchantsCashbackRatesMap();
 
-  const group = groupMerchants(merchants).find((g) => merchantSlug(g.name) === slug);
+  // Country-agnostic brand lookup: one brand tile covers every country, so we
+  // match on brandSlug (no country dimension) — the same key MerchantGroupCard
+  // / DirectoryGroupCell link with. Per-variant links inside use merchantSlug.
+  const group = groupMerchants(merchants).find((g) => brandSlug(g.name) === slug);
 
   const handleBack = (): void => {
     if (window.history.length > 1) {

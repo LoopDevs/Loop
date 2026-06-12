@@ -117,7 +117,7 @@ export function MerchantCard({
   userCashbackPct = null,
   displayName,
 }: MerchantCardProps): React.JSX.Element {
-  const slug = merchantSlug(merchant.name);
+  const slug = merchantSlug(merchant);
   const cardImgUrl =
     merchant.cardImageUrl !== undefined ? getImageProxyUrl(merchant.cardImageUrl, 640) : undefined;
   const logoImgUrl =
