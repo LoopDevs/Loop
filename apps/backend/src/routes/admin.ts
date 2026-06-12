@@ -81,7 +81,7 @@ import type { User } from '../db/users.js';
 import { sanitizeAdminReadQueryString } from '../admin/read-audit.js';
 import { privateNoStoreResponse } from '../middleware/cache-control.js';
 import { requireAuth } from '../auth/handler.js';
-import { requireAdmin } from '../auth/require-admin.js';
+import { requireStaff } from '../auth/require-staff.js';
 import { notifyAdminBulkRead } from '../discord.js';
 import { mountAdminCashbackConfigRoutes } from './admin-cashback-config.js';
 import { mountAdminCreditWritesRoutes } from './admin-credit-writes.js';
@@ -97,6 +97,8 @@ import { mountAdminPayoutsRoutes } from './admin-payouts.js';
 import { mountAdminPerMerchantRoutes } from './admin-per-merchant.js';
 import { mountAdminTreasuryRoutes } from './admin-treasury.js';
 import { mountAdminUserClusterRoutes } from './admin-user-cluster.js';
+import { mountAdminStaffRoutes } from './admin-staff.js';
+import { mountAdminSupportOpsRoutes } from './admin-support-ops.js';
 
 /** Mounts all `/api/admin/*` routes on the supplied Hono app. */
 export function mountAdminRoutes(app: Hono): void {
@@ -123,7 +125,19 @@ export function mountAdminRoutes(app: Hono): void {
   app.use('/api/admin/*', privateNoStoreResponse);
 
   app.use('/api/admin/*', requireAuth);
-  app.use('/api/admin/*', requireAdmin);
+  // ADR 037: the namespace blanket is the STAFF gate — it resolves
+  // the caller's role (staff_roles row, falling back to the
+  // deprecated users.is_admin shim), 404s non-staff, and sets
+  // `user` + `staffRole` on context. Tiering is then declared PER
+  // MOUNT: admin-only surfaces (money writes, CSV exports,
+  // Discord config, role management, step-up mint) each carry an
+  // explicit `requireStaff('admin')` next to their rateLimit;
+  // support-visible reads + the three delivery-unsticking actions
+  // ride the blanket alone. staff-route-gating.test.ts walks
+  // `app.routes` and fails if a mount is missing its tier
+  // declaration, so a new endpoint cannot silently default to
+  // support-visible.
+  app.use('/api/admin/*', requireStaff('support'));
 
   // A2-2008: admin read audit. Every admin GET emits a Pino access-log
   // line tagged `audit-read` so the line-item read trail survives off
@@ -230,6 +244,12 @@ export function mountAdminRoutes(app: Hono): void {
   // ./admin-credit-writes.ts (mirrors openapi #1175).
   mountAdminCreditWritesRoutes(app);
 
+  // ADR 037 — staff role management (admin-tier; step-up-gated
+  // writes) + the support-ops cluster (watcher-skip browser, wallet
+  // card, redemption re-fetch, reverse lookup — support-tier).
+  mountAdminStaffRoutes(app);
+  mountAdminSupportOpsRoutes(app);
+
   // Admin user-property writes — currently just the home-currency
   // flip (ADR 015 deferred § "self-serve home-currency change —
   // currently support-mediated"). Same step-up + idempotency
@@ -243,9 +263,13 @@ export function mountAdminRoutes(app: Hono): void {
   // step-up tokens — but NOT under requireAdminStepUp itself
   // (chicken-and-egg: the admin can't have a step-up token before
   // they hit this endpoint to get one).
+  // ADR 037: admin-tier — step-up tokens only gate admin-only money
+  // writes, so support has no business minting one (and must not
+  // learn the endpoint exists: 404).
   app.post(
     '/api/admin/step-up',
     rateLimit('POST /api/admin/step-up', 30, 60_000),
+    requireStaff('admin'),
     adminStepUpHandler,
   );
 }

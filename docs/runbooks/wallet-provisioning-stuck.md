@@ -50,7 +50,10 @@ off-chain). Many alerts in a short window = a systemic failure
 ## Mitigation
 
 The sweeper has stopped (attempts ≥ 10). After fixing the root cause,
-re-arm the row by resetting its budget:
+re-arm the row — or use the admin UI:
+`POST /api/admin/users/:userId/wallet/reprovision` (ADR 037; audited,
+resets the budget AND re-enqueues the drive immediately, support-tier).
+The SQL equivalent resets the budget only:
 
 ```sql
 UPDATE users

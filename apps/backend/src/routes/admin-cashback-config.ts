@@ -23,6 +23,7 @@
  */
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
+import { requireStaff } from '../auth/require-staff.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '../admin/handler.js';
 import { adminConfigsHistoryHandler } from '../admin/configs-history.js';
 import { adminCashbackConfigsCsvHandler } from '../admin/cashback-configs-csv.js';
@@ -47,6 +48,7 @@ export function mountAdminCashbackConfigRoutes(app: Hono): void {
   app.get(
     '/api/admin/merchant-cashback-configs.csv',
     rateLimit('GET /api/admin/merchant-cashback-configs.csv', 10, 60_000),
+    requireStaff('admin'),
     adminCashbackConfigsCsvHandler,
   );
   // Tier-3 CSV export of the full merchant catalog + joined
@@ -57,6 +59,7 @@ export function mountAdminCashbackConfigRoutes(app: Hono): void {
   app.get(
     '/api/admin/merchants-catalog.csv',
     rateLimit('GET /api/admin/merchants-catalog.csv', 10, 60_000),
+    requireStaff('admin'),
     adminMerchantsCatalogCsvHandler,
   );
   // Fleet-wide history feed — "the last N config changes across every
@@ -70,6 +73,7 @@ export function mountAdminCashbackConfigRoutes(app: Hono): void {
   app.put(
     '/api/admin/merchant-cashback-configs/:merchantId',
     rateLimit('PUT /api/admin/merchant-cashback-configs/:merchantId', 60, 60_000),
+    requireStaff('admin'),
     upsertConfigHandler,
   );
   app.get(

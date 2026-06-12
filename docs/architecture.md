@@ -439,7 +439,29 @@ GET  /api/admin/users/:userId/operator-mix              [admin — per-user × p
 POST /api/admin/merchants/resync                        [admin — force an immediate CTX merchant-catalog sweep, ADR 011]
 GET  /api/admin/discord/notifiers                       [admin — static catalog of Discord notifiers, ADR 018]
 POST /api/admin/discord/test                            [admin — fire a benign test ping at a Discord channel, ADR 018]
+GET  /api/admin/staff                                   [admin — staff list incl. legacy is_admin shim entries + grant metadata, ADR 037]
+PUT  /api/admin/staff/:userId/role                      [admin — grant/change a staff role; step-up + ADR-017 envelope; last-admin + self-demotion guards, ADR 037]
+DELETE /api/admin/staff/:userId/role                    [admin — revoke staff access; step-up + ADR-017 envelope; last-admin + self-revoke guards, ADR 037]
+GET  /api/admin/lookup?q=                               [staff — reverse lookup: order id | payment memo | Stellar address → owning user; index-backed only, ADR 037]
+GET  /api/admin/watcher-skips                           [staff — payment_watcher_skips browser, ?status/?reason filters + ?before keyset cursor, ADR 037]
+GET  /api/admin/watcher-skips/:paymentId                [staff — skip-row detail incl. the Horizon payment snapshot, ADR 037]
+POST /api/admin/watcher-skips/:paymentId/reopen         [staff — support action: abandoned → pending with attempts reset; ADR-017 envelope, ADR 037]
+GET  /api/admin/users/:userId/wallet                    [staff — wallet card: provider/wallet_id/addresses/provisioning + on-chain balances via the trustline reader, ADR 030/037]
+POST /api/admin/users/:userId/wallet/reprovision        [staff — support action: reset provisioning attempts + re-enqueue the drive; ADR-017 envelope, ADR 037]
+POST /api/admin/orders/:orderId/refetch-redemption      [staff — support action: one-shot redemption re-fetch via the backfill machinery; ADR-017 envelope, ADR 037]
 ```
+
+Since ADR 037 the `/api/admin/*` namespace is staff-gated, not
+admin-gated: the blanket middleware is `requireStaff('support')`
+(resolving the role from `staff_roles`, falling back to the
+deprecated `users.is_admin` shim) and admin-only mounts each carry
+an explicit per-route `requireStaff('admin')`. Endpoints tagged
+`[admin]` above 404 for support; `[staff]` endpoints accept both
+roles. The split follows the ADR 037 matrix: all read views are
+support-visible EXCEPT bulk CSV exports (every `.csv` path) and the
+Discord config trio, which stay admin-only along with every money
+write, role management, and the step-up mint. Non-staff users get
+the same 404 concealment as before.
 
 Full request/response shapes — including field types, pagination
 envelopes, and error codes per endpoint — are generated from the backend
