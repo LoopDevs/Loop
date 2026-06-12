@@ -9,16 +9,16 @@
  *   (ADR 028); carries the full ADR 017 envelope (idempotency,
  *   2..500 char reason, Discord audit).
  * - `DELETE /api/admin/staff/:userId/role` — revoke. Same gating +
- *   envelope. Role changes take effect within the 15-min token TTL
- *   (ADR 037 §2).
+ *   envelope (the reason travels in the request body). Role changes
+ *   take effect within the 15-min token TTL (ADR 037 §2).
  *
- * Wire shapes live in `@loop/shared/staff-roles.ts` (ADR 019) —
+ * Wire shapes live in `@loop/shared/admin-staff.ts` (ADR 019) —
  * the backend sibling (`feat/staff-roles-backend`) emits them.
  */
 import type {
+  AdminStaffGrantResult,
   AdminStaffListResponse,
-  AdminStaffRoleRevokeResult,
-  AdminStaffRoleSetResult,
+  AdminStaffRevokeResult,
   StaffRole,
 } from '@loop/shared';
 import { generateIdempotencyKey, type AdminWriteEnvelope } from './admin-write-envelope';
@@ -37,8 +37,8 @@ export async function setStaffRole(args: {
   userId: string;
   role: StaffRole;
   reason: string;
-}): Promise<AdminWriteEnvelope<AdminStaffRoleSetResult>> {
-  return authenticatedRequest<AdminWriteEnvelope<AdminStaffRoleSetResult>>(
+}): Promise<AdminWriteEnvelope<AdminStaffGrantResult>> {
+  return authenticatedRequest<AdminWriteEnvelope<AdminStaffGrantResult>>(
     `/api/admin/staff/${encodeURIComponent(args.userId)}/role`,
     {
       method: 'PUT',
@@ -58,8 +58,8 @@ export async function setStaffRole(args: {
 export async function revokeStaffRole(args: {
   userId: string;
   reason: string;
-}): Promise<AdminWriteEnvelope<AdminStaffRoleRevokeResult>> {
-  return authenticatedRequest<AdminWriteEnvelope<AdminStaffRoleRevokeResult>>(
+}): Promise<AdminWriteEnvelope<AdminStaffRevokeResult>> {
+  return authenticatedRequest<AdminWriteEnvelope<AdminStaffRevokeResult>>(
     `/api/admin/staff/${encodeURIComponent(args.userId)}/role`,
     {
       method: 'DELETE',

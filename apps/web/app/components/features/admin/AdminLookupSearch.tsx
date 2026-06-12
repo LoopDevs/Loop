@@ -13,9 +13,10 @@ import { adminLookup } from '~/services/admin';
  *     directory search (server-side ILIKE).
  *   - order id / payment memo / Stellar address → `GET
  *     /api/admin/lookup?q=` resolves the owner, then we navigate:
- *       kind=order            → /admin/orders/:orderId
- *       kind=memo / address   → /admin/users/:userId
- *       kind=none             → inline "no match" hint.
+ *       kind=order                            → /admin/orders/:orderId
+ *       kind=payment_memo / stellar_address   → /admin/users/:userId
+ *       404 NOT_FOUND (well-formed, no match) → inline "no match"
+ *       hint (the backend has no `kind: 'none'` sentinel).
  *
  * Renders on the admin home and the user-360 page so "find the
  * customer" never requires knowing which identifier class you're
@@ -33,13 +34,15 @@ export function AdminLookupSearch(): React.JSX.Element {
         void navigate(`/admin/orders/${encodeURIComponent(res.orderId)}`);
         return;
       }
-      if ((res.kind === 'memo' || res.kind === 'address') && res.userId !== undefined) {
-        void navigate(`/admin/users/${encodeURIComponent(res.userId)}`);
-        return;
-      }
-      setNoMatch('No order, memo, or address matched that identifier.');
+      // payment_memo / stellar_address — "find the customer" lands on
+      // the user 360 (the memo's order is one click away from there).
+      void navigate(`/admin/users/${encodeURIComponent(res.userId)}`);
     },
     onError: (err) => {
+      if (err instanceof ApiException && err.status === 404) {
+        setNoMatch('No order, memo, or address matched that identifier.');
+        return;
+      }
       setNoMatch(err instanceof ApiException ? err.message : 'Lookup failed.');
     },
   });

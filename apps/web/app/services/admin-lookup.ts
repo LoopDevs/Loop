@@ -6,12 +6,16 @@
  *   queries don't come here — the search box routes those to the
  *   existing `/api/admin/users?q=` directory search.
  *
- * Wire shape lives in `@loop/shared/admin-lookup.ts`.
+ * A well-formed identifier with no match is a 404 (`NOT_FOUND`) per
+ * the uniform admin convention — callers branch on the ApiException
+ * status, not a `kind: 'none'` sentinel.
+ *
+ * Wire shape lives in `@loop/shared/admin-support-ops.ts`.
  */
-import type { AdminLookupResult } from '@loop/shared';
+import type { AdminLookupResponse } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
 
 /** `GET /api/admin/lookup?q=…` */
-export async function adminLookup(q: string): Promise<AdminLookupResult> {
-  return authenticatedRequest<AdminLookupResult>(`/api/admin/lookup?q=${encodeURIComponent(q)}`);
+export async function adminLookup(q: string): Promise<AdminLookupResponse> {
+  return authenticatedRequest<AdminLookupResponse>(`/api/admin/lookup?q=${encodeURIComponent(q)}`);
 }

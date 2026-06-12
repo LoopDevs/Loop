@@ -5,40 +5,48 @@
  * payment watcher persisted before advancing its Horizon cursor —
  * comprehensive audit 2026-06-11 CRIT #1/#2):
  *
- * - `GET /api/admin/watcher-skips?status=&reason=&page=` — list.
+ * - `GET /api/admin/watcher-skips?status=&reason=&limit=&before=` —
+ *   keyset-paginated list, newest first (same `before` convention as
+ *   `/api/admin/orders` — pass the last row's `createdAt` to page).
  * - `GET /api/admin/watcher-skips/:paymentId` — detail (adds the
- *   snapshotted Horizon `payment` jsonb + `lastError`).
+ *   snapshotted Horizon `payment` jsonb).
  * - `POST /api/admin/watcher-skips/:paymentId/reopen` — flips an
  *   abandoned row back to pending so the sweep re-evaluates it.
- *   Support-allowed (ADR 037 §3) but still carries an idempotency
- *   key per the uniform ADR 017 audit discipline.
+ *   Support-allowed (ADR 037 §3) but carries the full ADR 017
+ *   contract: idempotency key + 2..500 char reason in the body,
+ *   `{ result, audit }` envelope back. A row that isn't abandoned
+ *   409s (`SKIP_NOT_ABANDONED`).
  *
- * Wire shapes live in `@loop/shared/admin-watcher-skips.ts`.
+ * Wire shapes live in `@loop/shared/admin-support-ops.ts`.
  */
 import type {
   AdminWatcherSkipDetail,
   AdminWatcherSkipReopenResult,
-  AdminWatcherSkipsResponse,
+  AdminWatcherSkipsListResponse,
   WatcherSkipReason,
   WatcherSkipStatus,
 } from '@loop/shared';
-import { generateIdempotencyKey } from './admin-write-envelope';
+import { generateIdempotencyKey, type AdminWriteEnvelope } from './admin-write-envelope';
 import { authenticatedRequest } from './api-client';
 
-/** `GET /api/admin/watcher-skips` — filterable, page-numbered list. */
+/** `GET /api/admin/watcher-skips` — filterable keyset list. */
 export async function listWatcherSkips(
   opts: {
     status?: WatcherSkipStatus;
     reason?: WatcherSkipReason;
-    page?: number;
+    /** ISO-8601 keyset cursor — returns rows strictly older than this. */
+    before?: string;
+    /** 1–100; backend default 20. */
+    limit?: number;
   } = {},
-): Promise<AdminWatcherSkipsResponse> {
+): Promise<AdminWatcherSkipsListResponse> {
   const params = new URLSearchParams();
   if (opts.status !== undefined) params.set('status', opts.status);
   if (opts.reason !== undefined) params.set('reason', opts.reason);
-  if (opts.page !== undefined) params.set('page', String(opts.page));
+  if (opts.before !== undefined) params.set('before', opts.before);
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
   const qs = params.toString();
-  return authenticatedRequest<AdminWatcherSkipsResponse>(
+  return authenticatedRequest<AdminWatcherSkipsListResponse>(
     `/api/admin/watcher-skips${qs.length > 0 ? `?${qs}` : ''}`,
   );
 }
@@ -54,12 +62,16 @@ export async function getWatcherSkip(paymentId: string): Promise<AdminWatcherSki
  * `POST /api/admin/watcher-skips/:paymentId/reopen` — re-queue an
  * abandoned skip row for the replay sweep.
  */
-export async function reopenWatcherSkip(paymentId: string): Promise<AdminWatcherSkipReopenResult> {
-  return authenticatedRequest<AdminWatcherSkipReopenResult>(
-    `/api/admin/watcher-skips/${encodeURIComponent(paymentId)}/reopen`,
+export async function reopenWatcherSkip(args: {
+  paymentId: string;
+  reason: string;
+}): Promise<AdminWriteEnvelope<AdminWatcherSkipReopenResult>> {
+  return authenticatedRequest<AdminWriteEnvelope<AdminWatcherSkipReopenResult>>(
+    `/api/admin/watcher-skips/${encodeURIComponent(args.paymentId)}/reopen`,
     {
       method: 'POST',
       headers: { 'Idempotency-Key': generateIdempotencyKey() },
+      body: { reason: args.reason },
     },
   );
 }

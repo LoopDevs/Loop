@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { ApiException, type AdminStaffMember, type StaffRole } from '@loop/shared';
+import { ApiException, type AdminStaffEntry, type StaffRole } from '@loop/shared';
 import type { Route } from './+types/admin.staff';
 import { shouldRetry } from '~/hooks/query-retry';
 import { useAdminStepUp } from '~/hooks/use-admin-step-up';
@@ -56,7 +56,7 @@ function AdminStaffRouteInner(): React.JSX.Element {
   const queryClient = useQueryClient();
   const addToast = useUiStore((s) => s.addToast);
   const stepUp = useAdminStepUp();
-  const [revokeTarget, setRevokeTarget] = useState<AdminStaffMember | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<AdminStaffEntry | null>(null);
 
   const staffQuery = useQuery({
     queryKey: ['admin-staff'],
@@ -159,15 +159,25 @@ function AdminStaffRouteInner(): React.JSX.Element {
                       </span>
                     </td>
                     <td className="px-6 py-3 whitespace-nowrap text-gray-600 dark:text-gray-400">
-                      {new Date(member.grantedAt).toLocaleString(ADMIN_LOCALE, {
-                        dateStyle: 'short',
-                        timeStyle: 'short',
-                      })}
+                      {member.grantedAt !== null
+                        ? new Date(member.grantedAt).toLocaleString(ADMIN_LOCALE, {
+                            dateStyle: 'short',
+                            timeStyle: 'short',
+                          })
+                        : '—'}
                     </td>
-                    <td className="px-6 py-3 font-mono text-xs text-gray-600 dark:text-gray-400">
-                      {member.grantedByUserId !== null
-                        ? `${member.grantedByUserId.slice(0, 8)}…`
-                        : 'migration'}
+                    <td className="px-6 py-3 text-xs text-gray-600 dark:text-gray-400">
+                      {member.grantedByEmail ??
+                        (member.grantedByUserId !== null ? (
+                          <span className="font-mono">{`${member.grantedByUserId.slice(0, 8)}…`}</span>
+                        ) : member.source === 'legacy_is_admin' ? (
+                          // CTX-allowlist admin with no staff_roles row
+                          // yet — the deprecated users.is_admin shim
+                          // (ADR 037 §1).
+                          'legacy is_admin'
+                        ) : (
+                          'migration'
+                        ))}
                     </td>
                     <td
                       className="max-w-xs truncate px-6 py-3 text-xs text-gray-600 dark:text-gray-400"

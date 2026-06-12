@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Routes, Route } from 'react-router';
-import type { AdminUserWalletView } from '@loop/shared';
+import type { AdminUserWalletResponse } from '@loop/shared';
 import type * as AdminModule from '~/services/admin';
 import AdminUserDetailRoute from '../admin.users.$userId';
 
@@ -146,14 +146,20 @@ const targetUser = {
   updatedAt: '2026-05-01T00:00:00.000Z',
 };
 
-const wallet: AdminUserWalletView = {
+const wallet: AdminUserWalletResponse = {
+  userId: 'u-360',
   provider: 'privy',
   walletId: 'wal-1',
-  address: 'GWALLET360',
+  walletAddress: 'GWALLET360',
+  stellarAddress: null,
   provisioning: 'wallet_created',
-  balances: [],
-  attempts: 2,
-  lastAttemptAt: '2026-06-11T00:00:00.000Z',
+  provisioningAttempts: 2,
+  provisioningLastAttemptAt: '2026-06-11T00:00:00.000Z',
+  onChain: {
+    accountExists: false,
+    balances: [],
+    asOf: '2026-06-11T00:00:00.000Z',
+  },
 };
 
 beforeEach(() => {
