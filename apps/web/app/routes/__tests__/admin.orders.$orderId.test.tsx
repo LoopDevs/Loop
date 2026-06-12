@@ -9,6 +9,25 @@ import AdminOrderDetailRoute, { fmtMinor } from '../admin.orders.$orderId';
 
 afterEach(cleanup);
 
+// The route now mounts OrderDeliveryPanel (ADR 037), which reads the
+// ui.store for toasts — the store resolves the initial theme via
+// window.matchMedia at import time, which jsdom doesn't implement.
+vi.hoisted(() => {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    }),
+  });
+});
+
 const { adminMock, authMock } = vi.hoisted(() => ({
   adminMock: {
     getAdminOrder: vi.fn(),
@@ -117,7 +136,11 @@ describe('<AdminOrderDetailRoute />', () => {
     await waitFor(() => {
       expect(screen.getByText('bbbb2222')).toBeDefined();
     });
-    expect(screen.getByText(/fulfilled/)).toBeDefined();
+    // 'fulfilled' also appears in the ADR 037 delivery panel copy —
+    // assert the state pill specifically.
+    expect(
+      screen.getAllByText(/fulfilled/).some((el) => el.className.includes('rounded-full')),
+    ).toBe(true);
     // Cashback split percentages render.
     expect(screen.getAllByText(/80\.00%/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/10\.00%/).length).toBeGreaterThan(0);

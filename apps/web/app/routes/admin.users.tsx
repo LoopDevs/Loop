@@ -11,7 +11,7 @@ import {
 } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { AdminNav } from '~/components/features/admin/AdminNav';
-import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
+import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { TopUsersTable } from '~/components/features/admin/TopUsersTable';
 import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
@@ -40,9 +40,9 @@ function truncId(s: string): string {
 // A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminUsersRoute(): React.JSX.Element {
   return (
-    <RequireAdmin>
+    <RequireStaff minimum="support">
       <AdminUsersRouteInner />
-    </RequireAdmin>
+    </RequireStaff>
   );
 }
 
