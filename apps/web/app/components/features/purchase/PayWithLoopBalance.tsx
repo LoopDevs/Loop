@@ -2,11 +2,7 @@ import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ApiException, CURRENCY_TO_ASSET_CODE, isHomeCurrency } from '@loop/shared';
 import type { CreateLoopOrderResponse, LoopOrderView } from '~/services/orders-loop';
-import {
-  payLoopOrderWithBalance,
-  loopBalanceCoversCharge,
-  balanceToStroops,
-} from '~/services/wallet';
+import { redeemLoopOrder, loopBalanceCoversCharge, balanceToStroops } from '~/services/wallet';
 import { useWallet, WALLET_QUERY_KEY } from '~/hooks/use-wallet';
 import { fmtLoopBalance } from '~/components/features/wallet/WalletCard';
 import { triggerHaptic, triggerHapticNotification } from '~/native/haptics';
@@ -25,7 +21,7 @@ export interface PayWithLoopBalanceProps {
  * Offered above the crypto deposit instructions while the order sits
  * in `pending_payment` and the user's on-chain LOOP balance for the
  * order's currency covers the charge. Tapping POSTs
- * `pay-with-balance`; everything downstream is the EXISTING pipeline
+ * `redeem`; everything downstream is the EXISTING pipeline
  * — the parent's `['loop-order', id]` poll (which we invalidate for
  * an immediate refetch) follows the watcher through paid → procuring
  * → fulfilled exactly as a wallet-app payment would. No signing UI,
@@ -101,7 +97,7 @@ export function PayWithLoopBalance({
     setError(null);
     void triggerHaptic();
     try {
-      await payLoopOrderWithBalance(create.orderId);
+      await redeemLoopOrder(create.orderId);
       setPaidFromBalance(true);
       void triggerHapticNotification('success');
       // Same polling state as the crypto path: the parent's

@@ -11,7 +11,7 @@ import type { MeWalletResponse } from '~/services/wallet';
 
 const { ordersMock, walletMock, authMock } = vi.hoisted(() => ({
   ordersMock: { getLoopOrder: vi.fn() },
-  walletMock: { getMyWallet: vi.fn(), payLoopOrderWithBalance: vi.fn() },
+  walletMock: { getMyWallet: vi.fn(), redeemLoopOrder: vi.fn() },
   authMock: { isAuthenticated: true },
 }));
 
@@ -30,7 +30,7 @@ vi.mock('~/services/wallet', async () => {
   return {
     ...actual,
     getMyWallet: () => walletMock.getMyWallet(),
-    payLoopOrderWithBalance: (orderId: string) => walletMock.payLoopOrderWithBalance(orderId),
+    redeemLoopOrder: (orderId: string) => walletMock.redeemLoopOrder(orderId),
   };
 });
 
@@ -47,7 +47,7 @@ afterEach(cleanup);
 beforeEach(() => {
   ordersMock.getLoopOrder.mockReset();
   walletMock.getMyWallet.mockReset();
-  walletMock.payLoopOrderWithBalance.mockReset();
+  walletMock.redeemLoopOrder.mockReset();
   authMock.isAuthenticated = true;
 });
 
@@ -100,6 +100,7 @@ function mkWallet(overrides: Partial<MeWalletResponse> = {}): MeWalletResponse {
     provisioning: 'activated',
     balances: [{ assetCode: 'USDLOOP', balance: '50.0000000' }],
     interestApyBps: 300,
+    stale: false,
     ...overrides,
   };
 }
@@ -177,7 +178,7 @@ describe('PayWithLoopBalance (via LoopPaymentStep)', () => {
   it('tap → POSTs with the order id and the SAME polling query advances the state', async () => {
     ordersMock.getLoopOrder.mockResolvedValue(mkOrder());
     walletMock.getMyWallet.mockResolvedValue(mkWallet());
-    walletMock.payLoopOrderWithBalance.mockImplementation(() => {
+    walletMock.redeemLoopOrder.mockImplementation(() => {
       // From here the watcher (mocked: the next poll) reports paid —
       // exactly what the crypto path would see after a deposit.
       ordersMock.getLoopOrder.mockResolvedValue(mkOrder({ state: 'paid' }));
@@ -187,9 +188,9 @@ describe('PayWithLoopBalance (via LoopPaymentStep)', () => {
     const button = await screen.findByRole('button', { name: BUTTON_RE });
     fireEvent.click(button);
     await waitFor(() => {
-      expect(walletMock.payLoopOrderWithBalance).toHaveBeenCalledWith(ORDER_ID);
+      expect(walletMock.redeemLoopOrder).toHaveBeenCalledWith(ORDER_ID);
     });
-    // The pay-with-balance path invalidates ['loop-order', id], so the
+    // The redeem path invalidates ['loop-order', id], so the
     // existing poll refetches immediately and the shared state machine
     // moves to "Payment received" without any forked polling logic.
     await waitFor(() => {
@@ -202,7 +203,7 @@ describe('PayWithLoopBalance (via LoopPaymentStep)', () => {
     ordersMock.getLoopOrder.mockResolvedValue(mkOrder());
     walletMock.getMyWallet.mockResolvedValue(mkWallet());
     let release: (v: { state: string }) => void = () => {};
-    walletMock.payLoopOrderWithBalance.mockImplementation(
+    walletMock.redeemLoopOrder.mockImplementation(
       () =>
         new Promise<{ state: string }>((resolve) => {
           release = resolve;
@@ -214,14 +215,14 @@ describe('PayWithLoopBalance (via LoopPaymentStep)', () => {
     fireEvent.click(button);
     release({ state: 'paid' });
     await waitFor(() => {
-      expect(walletMock.payLoopOrderWithBalance).toHaveBeenCalledTimes(1);
+      expect(walletMock.redeemLoopOrder).toHaveBeenCalledTimes(1);
     });
   });
 
   it('surfaces a banner (keeping the crypto path) on 400 INSUFFICIENT_BALANCE', async () => {
     ordersMock.getLoopOrder.mockResolvedValue(mkOrder());
     walletMock.getMyWallet.mockResolvedValue(mkWallet());
-    walletMock.payLoopOrderWithBalance.mockRejectedValue(
+    walletMock.redeemLoopOrder.mockRejectedValue(
       new ApiException(400, { code: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance' }),
     );
     renderStep();
@@ -235,7 +236,7 @@ describe('PayWithLoopBalance (via LoopPaymentStep)', () => {
   it('surfaces a temporary-unavailability banner on 503', async () => {
     ordersMock.getLoopOrder.mockResolvedValue(mkOrder());
     walletMock.getMyWallet.mockResolvedValue(mkWallet());
-    walletMock.payLoopOrderWithBalance.mockRejectedValue(
+    walletMock.redeemLoopOrder.mockRejectedValue(
       new ApiException(503, { code: 'SERVICE_UNAVAILABLE', message: 'Service unavailable' }),
     );
     renderStep();

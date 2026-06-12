@@ -43,6 +43,7 @@ function wallet(overrides: Partial<MeWalletResponse> = {}): MeWalletResponse {
     provisioning: 'activated',
     balances: [{ assetCode: 'GBPLOOP', balance: '42.5000000' }],
     interestApyBps: 300,
+    stale: false,
     ...overrides,
   };
 }

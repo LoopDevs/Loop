@@ -6,7 +6,7 @@ vi.mock('../api-client', () => ({
 
 import {
   getMyWallet,
-  payLoopOrderWithBalance,
+  redeemLoopOrder,
   balanceToStroops,
   minorToStroops,
   loopBalanceCoversCharge,
@@ -40,11 +40,11 @@ describe('getMyWallet', () => {
   });
 });
 
-describe('payLoopOrderWithBalance', () => {
-  it('POSTs /api/orders/loop/:id/pay-with-balance', async () => {
+describe('redeemLoopOrder', () => {
+  it('POSTs /api/orders/loop/:id/redeem', async () => {
     mockAuth.mockResolvedValue({ state: 'paid' });
-    const result = await payLoopOrderWithBalance('order-123');
-    expect(mockAuth).toHaveBeenCalledWith('/api/orders/loop/order-123/pay-with-balance', {
+    const result = await redeemLoopOrder('order-123');
+    expect(mockAuth).toHaveBeenCalledWith('/api/orders/loop/order-123/redeem', {
       method: 'POST',
     });
     expect(result).toEqual({ state: 'paid' });
@@ -52,8 +52,8 @@ describe('payLoopOrderWithBalance', () => {
 
   it('URI-encodes the order id', async () => {
     mockAuth.mockResolvedValue({ state: 'paid' });
-    await payLoopOrderWithBalance('a/b');
-    expect(mockAuth).toHaveBeenCalledWith('/api/orders/loop/a%2Fb/pay-with-balance', {
+    await redeemLoopOrder('a/b');
+    expect(mockAuth).toHaveBeenCalledWith('/api/orders/loop/a%2Fb/redeem', {
       method: 'POST',
     });
   });

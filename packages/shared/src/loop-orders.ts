@@ -129,3 +129,20 @@ export interface LoopOrderView {
 export interface LoopOrderListResponse {
   orders: LoopOrderView[];
 }
+
+/**
+ * `POST /api/orders/loop/:id/redeem` 200 response (ADR 030 C3 /
+ * ADR 036 token redemption). `state` is the order's state after the
+ * redemption payment was submitted; clients keep polling
+ * `GET /api/orders/loop/:id` exactly as they do for the crypto
+ * deposit path — the deposit watcher remains the authoritative state
+ * machine.
+ *
+ * Error contract: 400 `{ code: 'INSUFFICIENT_BALANCE' }` when the
+ * up-front Horizon read says the matching LOOP-asset balance doesn't
+ * cover the charge; 503 when the wallet provider / Horizon is
+ * unavailable.
+ */
+export interface RedeemLoopOrderResponse {
+  state: string;
+}

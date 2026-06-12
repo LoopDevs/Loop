@@ -2,7 +2,7 @@
  * Embedded-wallet API (ADR 030 Phase C).
  *
  * Thin wrappers over `GET /api/me/wallet` (balance surface) and
- * `POST /api/orders/loop/:id/pay-with-balance` (one-tap pay). Wire
+ * `POST /api/orders/loop/:id/redeem` (one-tap redemption). Wire
  * shapes live in `@loop/shared/me-wallet.ts` (ADR 019); this module
  * holds fetchers, local re-exports, and the pure cover-math helpers
  * the checkout button needs.
@@ -15,14 +15,20 @@
  * is involved.
  */
 import type {
-  MeWalletBalance,
-  MeWalletResponse,
-  PayWithBalanceResponse,
+  RedeemLoopOrderResponse,
+  UserWalletBalance,
+  UserWalletResponse,
   WalletProvisioningState,
 } from '@loop/shared';
 import { authenticatedRequest } from './api-client';
 
-export type { MeWalletBalance, MeWalletResponse, PayWithBalanceResponse, WalletProvisioningState };
+// Historical web-side names for the `GET /api/me/wallet` contract —
+// the canonical shapes live in `@loop/shared/users-wallet.ts`
+// (`UserWalletResponse` adds the `stale` last-known-good flag the
+// backend emits; this surface tolerates it).
+export type MeWalletBalance = UserWalletBalance;
+export type MeWalletResponse = UserWalletResponse;
+export type { RedeemLoopOrderResponse, WalletProvisioningState };
 
 /**
  * `GET /api/me/wallet` — the caller's embedded-wallet surface:
@@ -33,7 +39,7 @@ export async function getMyWallet(): Promise<MeWalletResponse> {
 }
 
 /**
- * `POST /api/orders/loop/:id/pay-with-balance` — one-tap payment of a
+ * `POST /api/orders/loop/:id/redeem` — one-tap payment of a
  * `pending_payment` Loop-native order from the user's on-chain LOOP
  * balance. Idempotent on order id server-side, so a double-tap can't
  * double-spend. The response carries the order's post-submit `state`;
@@ -44,9 +50,9 @@ export async function getMyWallet(): Promise<MeWalletResponse> {
  * the balance doesn't cover the charge, 503 when the wallet provider
  * or Horizon is unavailable.
  */
-export async function payLoopOrderWithBalance(orderId: string): Promise<PayWithBalanceResponse> {
-  return authenticatedRequest<PayWithBalanceResponse>(
-    `/api/orders/loop/${encodeURIComponent(orderId)}/pay-with-balance`,
+export async function redeemLoopOrder(orderId: string): Promise<RedeemLoopOrderResponse> {
+  return authenticatedRequest<RedeemLoopOrderResponse>(
+    `/api/orders/loop/${encodeURIComponent(orderId)}/redeem`,
     { method: 'POST' },
   );
 }

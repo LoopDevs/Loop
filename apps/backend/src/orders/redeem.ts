@@ -1,7 +1,10 @@
 /**
- * One-tap "pay with Loop balance" (ADR 030 Phase C3 / ADR 036).
+ * One-tap redemption (ADR 030 Phase C3 / ADR 036). UI copy may still
+ * say "pay with your Loop balance" — the balance IS the tokens — but
+ * the engineering name for this surface is ADR 036's own term:
+ * redemption (the user's LOOP returning to the system).
  *
- * `POST /api/orders/loop/:id/pay-with-balance` — the server-side
+ * `POST /api/orders/loop/:id/redeem` — the server-side
  * redemption orchestration: instead of the user manually sending
  * LOOP-asset to the deposit address from an external wallet, the
  * backend builds the payment FROM the user's embedded wallet,
@@ -67,7 +70,7 @@ import { getWalletProvider } from '../wallet/provider.js';
 import { WalletProviderError } from '../wallet/provider.js';
 import { attachUserWalletSignature } from '../wallet/user-signer.js';
 
-const log = logger.child({ handler: 'pay-with-balance' });
+const log = logger.child({ handler: 'redeem' });
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -91,7 +94,7 @@ const ALREADY_PAID_STATES = new Set(['paid', 'procuring', 'fulfilled']);
 const inFlightOrders = new Set<string>();
 
 /** Test seam. */
-export function __resetPayWithBalanceFenceForTests(): void {
+export function __resetRedeemFenceForTests(): void {
   inFlightOrders.clear();
 }
 
@@ -102,7 +105,7 @@ function stroopsToAmount(stroops: bigint): string {
   return `${whole}.${frac}`;
 }
 
-export interface BuildPayWithBalanceArgs {
+export interface BuildRedeemArgs {
   /** User wallet account (address + current sequence) — pre-loaded. */
   userAccount: Account;
   depositAddress: string;
@@ -124,7 +127,7 @@ export interface BuildPayWithBalanceArgs {
  * Horizon requires the inner bid to be a valid fee field; BASE_FEE
  * keeps the envelope well-formed under every SDK validation path.
  */
-export function buildPayWithBalanceTransaction(args: BuildPayWithBalanceArgs): Transaction {
+export function buildRedeemTransaction(args: BuildRedeemArgs): Transaction {
   return new TransactionBuilder(args.userAccount, {
     fee: BASE_FEE,
     networkPassphrase: args.networkPassphrase,
@@ -153,7 +156,7 @@ export function feeBumpBaseFee(): string {
   return String(Math.floor(capped));
 }
 
-export async function payWithBalanceHandler(c: Context): Promise<Response> {
+export async function redeemLoopOrderHandler(c: Context): Promise<Response> {
   if (!env.LOOP_AUTH_NATIVE_ENABLED) {
     // Mirror the loop-order handlers' 404 policy while the flag is off.
     return c.json({ code: 'NOT_FOUND', message: 'Not found' }, 404);
@@ -210,7 +213,7 @@ export async function payWithBalanceHandler(c: Context): Promise<Response> {
     );
   }
   if (env.LOOP_STELLAR_DEPOSIT_ADDRESS === undefined) {
-    log.error('LOOP_STELLAR_DEPOSIT_ADDRESS unset — refusing pay-with-balance');
+    log.error('LOOP_STELLAR_DEPOSIT_ADDRESS unset — refusing redemption');
     return c.json(
       { code: 'SERVICE_UNAVAILABLE', message: 'On-chain payment temporarily unavailable' },
       503,
@@ -274,7 +277,7 @@ export async function payWithBalanceHandler(c: Context): Promise<Response> {
     try {
       snapshot = await getAccountTrustlines(walletAddress);
     } catch (err) {
-      log.warn({ err, orderId }, 'Horizon balance read failed during pay-with-balance');
+      log.warn({ err, orderId }, 'Horizon balance read failed during redeem');
       return c.json(
         { code: 'SERVICE_UNAVAILABLE', message: 'Balance check temporarily unavailable' },
         503,
@@ -298,13 +301,13 @@ export async function payWithBalanceHandler(c: Context): Promise<Response> {
       const loaded = await server.loadAccount(walletAddress);
       userAccount = new Account(walletAddress, loaded.sequenceNumber());
     } catch (err) {
-      log.warn({ err, orderId }, 'Horizon loadAccount failed during pay-with-balance');
+      log.warn({ err, orderId }, 'Horizon loadAccount failed during redeem');
       return c.json(
         { code: 'SERVICE_UNAVAILABLE', message: 'Stellar temporarily unavailable' },
         503,
       );
     }
-    const innerTx = buildPayWithBalanceTransaction({
+    const innerTx = buildRedeemTransaction({
       userAccount,
       depositAddress: env.LOOP_STELLAR_DEPOSIT_ADDRESS,
       asset: { code: asset.code, issuer: asset.issuer },
@@ -364,7 +367,7 @@ export async function payWithBalanceHandler(c: Context): Promise<Response> {
           );
         }
         if (err.kind === 'transient_horizon' || err.kind === 'transient_rebuild') {
-          log.warn({ err: err.message, orderId }, 'Transient Horizon failure on pay-with-balance');
+          log.warn({ err: err.message, orderId }, 'Transient Horizon failure on redeem');
           return c.json(
             { code: 'SERVICE_UNAVAILABLE', message: 'Stellar temporarily unavailable' },
             503,
@@ -372,7 +375,7 @@ export async function payWithBalanceHandler(c: Context): Promise<Response> {
         }
         log.error(
           { err: err.message, kind: err.kind, resultCodes: err.resultCodes, orderId },
-          'Terminal submit failure on pay-with-balance',
+          'Terminal submit failure on redeem',
         );
         return c.json({ code: 'INTERNAL_ERROR', message: 'Payment submission failed' }, 500);
       }

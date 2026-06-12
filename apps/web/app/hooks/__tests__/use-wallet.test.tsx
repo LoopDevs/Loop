@@ -42,11 +42,11 @@ function activatedWallet(): MeWalletResponse {
   return {
     address: 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW',
     provisioning: 'activated',
-    balances: [
-      { assetCode: 'GBPLOOP', balance: '42.5000000' },
-      { assetCode: 'XLM', balance: '0.0000000' },
-    ],
+    // Canonical `UserWalletResponse` lists only configured LOOP
+    // assets (users-wallet.ts) — non-LOOP trustlines never appear.
+    balances: [{ assetCode: 'GBPLOOP', balance: '42.5000000' }],
     interestApyBps: 300,
+    stale: false,
   };
 }
 

@@ -46,7 +46,7 @@ import {
   loopGetOrderHandler,
   loopListOrdersHandler,
 } from '../orders/loop-handler.js';
-import { payWithBalanceHandler } from '../orders/pay-with-balance.js';
+import { redeemLoopOrderHandler } from '../orders/redeem.js';
 
 /** Mounts all `/api/orders/*` routes on the supplied Hono app. */
 export function mountOrderRoutes(app: Hono): void {
@@ -78,16 +78,17 @@ export function mountOrderRoutes(app: Hono): void {
     rateLimit('POST /api/orders/loop', 10, 60_000),
     loopCreateOrderHandler,
   );
-  // ADR 030 Phase C3 — server-orchestrated "pay with Loop balance".
+  // ADR 030 Phase C3 / ADR 036 — server-orchestrated redemption
+  // (UI: "pay with Loop balance" — the balance IS the tokens).
   // Shares the loop-orders kill switch: an operator gating the
   // loop-native order surface must also stop new on-chain payments
   // for orders already created. 10/min mirrors order creation —
   // one payment per order with retry headroom.
   app.post(
-    '/api/orders/loop/:id/pay-with-balance',
+    '/api/orders/loop/:id/redeem',
     killSwitch('orders-loop'),
-    rateLimit('POST /api/orders/loop/:id/pay-with-balance', 10, 60_000),
-    payWithBalanceHandler,
+    rateLimit('POST /api/orders/loop/:id/redeem', 10, 60_000),
+    redeemLoopOrderHandler,
   );
 
   // GET literals BEFORE GET parameter routes.
