@@ -29,10 +29,13 @@ disease; this ADR pins the single canonical model.
    reconciles them.
 3. **Interest.** While the user holds LOOP, the system credits interest **nightly at midnight
    UTC** (APR/365 per night, e.g. 4%/365) — as an **on-chain mint** to the holder, mirrored into
-   `user_credits` in the same operation. (Implementation: ADR 031's nightly-mint work. The current
-   `accrue-interest.ts` credits the mirror only and MUST stay disabled —
-   `INTEREST_APY_BASIS_POINTS` unset — until the on-chain half exists, or the halves diverge
-   nightly.)
+   `user_credits` in the same operation. (Implemented 2026-06-12 per ADR 031:
+   `credits/interest-mint.ts` behind `LOOP_INTEREST_ONCHAIN_ENABLED` — issuer-signed mint +
+   mirror credit enqueued in one transaction, audited in `interest_mint_snapshots`. The legacy
+   `accrue-interest.ts` credits the mirror only and is hard-gated off while the flag is set —
+   `startInterestScheduler` throws — because two interest writers would diverge the halves
+   nightly; in cashback-mode deployments it additionally stays disabled via
+   `INTEREST_APY_BASIS_POINTS=0` until the flag flips.)
 4. **Redeem.** The only ways value exits, both implemented as the user's LOOP returning to the
    system, extinguishing **both halves** (debit `user_credits`; tokens returned to the **issuer
    account**, which burns them natively on Stellar — no separate treasury account):

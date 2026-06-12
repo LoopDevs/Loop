@@ -1,5 +1,6 @@
 import { createPrivateKey } from 'node:crypto';
 import { z } from 'zod';
+import { Keypair } from '@stellar/stellar-sdk';
 import { DEFAULT_CLIENT_IDS, STELLAR_PUBKEY_REGEX } from '@loop/shared';
 
 const STELLAR_ADDRESS_MESSAGE = 'must be a valid Stellar public key (G...)';
@@ -512,6 +513,45 @@ export const EnvSchema = z.object({
     .regex(STELLAR_PUBKEY_REGEX, { message: STELLAR_ADDRESS_MESSAGE })
     .optional(),
 
+  // Per-asset ISSUER secret keys (ADR 031 / ADR 036 Phase D). A
+  // payment FROM the issuer account is a native mint on Stellar —
+  // the nightly interest worker enqueues `kind='interest_mint'`
+  // payout rows and the payout worker signs those (and only those)
+  // with the matching issuer keypair instead of the operator key.
+  // `parseEnv` below boot-fails when a secret is set without its
+  // `LOOP_STELLAR_<ASSET>_ISSUER` address, or when the keypair
+  // derived from the secret doesn't match that address — a mismatch
+  // would sign mint payments from a *different* account (a transfer,
+  // not a mint), silently corrupting issuance accounting.
+  // Never logged (pino redaction). Rotation: an issuer key rotation
+  // is a treasury event (the asset identity is the issuer account),
+  // not an env-var swap — see docs/runbooks/stellar-operator-rotation.md.
+  LOOP_STELLAR_USDLOOP_ISSUER_SECRET: z
+    .string()
+    .regex(/^S[A-Z2-7]{55}$/, { message: 'must be a valid Stellar secret key (S...)' })
+    .optional(),
+  LOOP_STELLAR_GBPLOOP_ISSUER_SECRET: z
+    .string()
+    .regex(/^S[A-Z2-7]{55}$/, { message: 'must be a valid Stellar secret key (S...)' })
+    .optional(),
+  LOOP_STELLAR_EURLOOP_ISSUER_SECRET: z
+    .string()
+    .regex(/^S[A-Z2-7]{55}$/, { message: 'must be a valid Stellar secret key (S...)' })
+    .optional(),
+
+  // ADR 031 / ADR 036 Phase D: nightly on-chain interest mints.
+  // When true (and at least one issuer SECRET above is configured,
+  // and INTEREST_APY_BASIS_POINTS > 0, and LOOP_WORKERS_ENABLED),
+  // the interest-mint worker replaces the legacy off-chain-only
+  // accrual scheduler: each UTC day it snapshots activated-wallet
+  // LOOP balances from Horizon, credits the `user_credits` mirror
+  // (`credit_transactions type='interest'`) and enqueues an
+  // on-chain mint (`pending_payouts kind='interest_mint'`) in one
+  // transaction per user. The legacy `accrue-interest.ts` path is
+  // hard-gated off while this flag is true — two interest writers
+  // must never coexist (the halves would diverge nightly).
+  LOOP_INTEREST_ONCHAIN_ENABLED: envBoolean.default(false),
+
   // Procurement USDC-reserve floor (ADR 015). When the operator account's
   // USDC balance drops below this many stroops (7 decimals; 10^7 = 1 USDC),
   // procurement falls back to paying CTX in XLM instead — trades a small
@@ -918,6 +958,59 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
         `Invalid environment variables — LOOP_WALLET_PROVIDER=privy requires ${missing.join(
           ' and ',
         )} to be set (ADR 030). Unset LOOP_WALLET_PROVIDER to disable the wallet layer instead.`,
+      );
+    }
+  }
+
+  // ADR 031 / ADR 036 Phase D: issuer-secret ↔ issuer-address pinning.
+  // A `LOOP_STELLAR_<ASSET>_ISSUER_SECRET` whose derived public key
+  // doesn't match the configured `LOOP_STELLAR_<ASSET>_ISSUER` would
+  // make the payout worker sign `interest_mint` payments from a
+  // different account — a transfer rather than a mint, corrupting
+  // issuance accounting silently. Boot-fail on mismatch (and on a
+  // secret with no address to validate against) rather than
+  // discovering it on the first nightly mint.
+  const issuerPairs: Array<[string, string | undefined, string | undefined]> = [
+    [
+      'USDLOOP',
+      parsed.data.LOOP_STELLAR_USDLOOP_ISSUER,
+      parsed.data.LOOP_STELLAR_USDLOOP_ISSUER_SECRET,
+    ],
+    [
+      'GBPLOOP',
+      parsed.data.LOOP_STELLAR_GBPLOOP_ISSUER,
+      parsed.data.LOOP_STELLAR_GBPLOOP_ISSUER_SECRET,
+    ],
+    [
+      'EURLOOP',
+      parsed.data.LOOP_STELLAR_EURLOOP_ISSUER,
+      parsed.data.LOOP_STELLAR_EURLOOP_ISSUER_SECRET,
+    ],
+  ];
+  for (const [asset, issuerAddress, issuerSecret] of issuerPairs) {
+    if (issuerSecret === undefined) continue;
+    if (issuerAddress === undefined) {
+      throw new Error(
+        `Invalid environment variables — LOOP_STELLAR_${asset}_ISSUER_SECRET is set but ` +
+          `LOOP_STELLAR_${asset}_ISSUER is not (ADR 031). The secret must be validated against the ` +
+          `configured issuer address; set both or neither.`,
+      );
+    }
+    let derived: string;
+    try {
+      derived = Keypair.fromSecret(issuerSecret).publicKey();
+    } catch {
+      throw new Error(
+        `Invalid environment variables — LOOP_STELLAR_${asset}_ISSUER_SECRET is not a valid ` +
+          `Stellar secret key (Keypair derivation failed).`,
+      );
+    }
+    if (derived !== issuerAddress) {
+      throw new Error(
+        `Invalid environment variables — LOOP_STELLAR_${asset}_ISSUER_SECRET derives account ` +
+          `${derived}, which does not match LOOP_STELLAR_${asset}_ISSUER (${issuerAddress}). ` +
+          `Signing interest mints with a non-issuer key would transfer instead of mint (ADR 031); ` +
+          `fix the key material before booting.`,
       );
     }
   }

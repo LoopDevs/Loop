@@ -5,7 +5,7 @@
 `#ops-alerts` Discord embed titled **"🔴 Stellar Payout Failed"**
 with fields:
 
-- `Kind` — `order_cashback`, `emission`, or `burn` (ADR 036)
+- `Kind` — `order_cashback`, `emission`, `burn` (ADR 036), or `interest_mint` (ADR 031)
 - `Asset` — `USDLOOP` / `GBPLOOP` / `EURLOOP`
 - `Amount` — stroops (1 LOOP = 10⁷ stroops)
 - `Attempts` — number of submit retries before this terminal failure
@@ -21,11 +21,12 @@ worker (ADR 016).
 
 ## Severity
 
-| Kind             | Severity | Why                                                                                                                                                                                                                                                                                                     |
-| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `emission`       | **P1**   | LEGACY pre-ADR-036 rows: the user's balance was debited at send (ADR-024 §3) but the payout never landed — they're owed money. Same-day response. Post-ADR-036 emissions carry no debit but the user is still awaiting an owed on-chain backfill.                                                       |
-| `burn`           | **P1**   | A redemption's issuer-return failed (ADR 036): the mirror is already debited and the received LOOP is stranded at the deposit account, so the drift watcher's in-flight-burn term stays elevated. Operator-side only — the destination is our own issuer, so failures imply config or Horizon problems. |
-| `order_cashback` | **P2**   | Order was fulfilled and the cashback is owed; the user expects an on-chain top-up that hasn't arrived. Next-business-day OK.                                                                                                                                                                            |
+| Kind             | Severity | Why                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `emission`       | **P1**   | LEGACY pre-ADR-036 rows: the user's balance was debited at send (ADR-024 §3) but the payout never landed — they're owed money. Same-day response. Post-ADR-036 emissions carry no debit but the user is still awaiting an owed on-chain backfill.                                                                                                                                                      |
+| `burn`           | **P1**   | A redemption's issuer-return failed (ADR 036): the mirror is already debited and the received LOOP is stranded at the deposit account, so the drift watcher's in-flight-burn term stays elevated. Operator-side only — the destination is our own issuer, so failures imply config or Horizon problems.                                                                                                |
+| `order_cashback` | **P2**   | Order was fulfilled and the cashback is owed; the user expects an on-chain top-up that hasn't arrived. Next-business-day OK.                                                                                                                                                                                                                                                                           |
+| `interest_mint`  | **P2**   | A nightly interest mint failed (ADR 031): the `user_credits` mirror was already credited in the same txn that queued the row, so the drift watcher's in-flight-mint term stays elevated until the mint lands. Signed by the ISSUER key — failures are operator/config-side (issuer secret unset or mismatched, issuer account unfunded for fees, Horizon). Never user-side beyond a missing trustline. |
 
 Bump severity by one tier if `Attempts >= 5` AND the same
 `(userId, reason)` pair has fired more than once in 24h — this is a
@@ -75,6 +76,22 @@ pinned `asset_issuer` env var is wrong or the issuer account was
 merged. Verify `LOOP_STELLAR_<CODE>_ISSUER`, then re-queue with
 `/admin/payouts/<id>/retry`. Never compensate a burn: the mirror
 debit it pairs with is correct; the burn just needs to land.
+
+### Interest mint (`kind='interest_mint'`)
+
+The source is the asset's ISSUER account (`LOOP_STELLAR_<CODE>_ISSUER_SECRET`
+— an issuer payment is a native mint, ADR 031). Checklist:
+
+- Secret unset / mismatched → the worker leaves rows `pending` (never
+  `failed`); a `failed` row means the submit itself bounced. Check the
+  issuer account has XLM for fees and exists on the network.
+- `op_no_trust` → the user's wallet lost its trustline (shouldn't
+  happen for sponsored embedded wallets); the row would have stayed
+  pending behind the probe — treat as state corruption and escalate.
+- Never compensate by re-crediting the mirror: the mirror credit
+  already landed with the queue insert. Fix the cause and re-queue via
+  `/admin/payouts/<id>/retry`; the snapshot row in
+  `interest_mint_snapshots` is the audit anchor for the night.
 
 ### Order cashback (`kind='order_cashback'`)
 

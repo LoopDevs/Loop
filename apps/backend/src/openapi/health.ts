@@ -114,6 +114,7 @@ export function registerHealthOpenApi(
         z.object({
           name: z.enum([
             'asset_drift_watcher',
+            'interest_mint',
             'interest_scheduler',
             'payment_watcher',
             'payout_worker',

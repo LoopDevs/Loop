@@ -293,6 +293,15 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # LOOP_STELLAR_GBPLOOP_ISSUER=G...
 # LOOP_STELLAR_EURLOOP_ISSUER=G...
 
+# Per-asset issuer SECRETS (ADR 031 / ADR 036 Phase D). The payout
+# worker signs `kind='interest_mint'` rows (nightly on-chain interest)
+# with the issuer keypair — an issuer payment is a native Stellar
+# mint. Boot-fails when a secret is set without its issuer address or
+# when the derived public key mismatches it. Never logged.
+# LOOP_STELLAR_USDLOOP_ISSUER_SECRET=S...
+# LOOP_STELLAR_GBPLOOP_ISSUER_SECRET=S...
+# LOOP_STELLAR_EURLOOP_ISSUER_SECRET=S...
+
 # Horizon endpoint (A2-1513 / A2-1525). Default `https://horizon.stellar.org`.
 # Override for staging → Testnet Horizon. Required through env.ts so a
 # bad URL fails parseEnv at boot rather than the first live call.
@@ -361,6 +370,15 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # INTEREST_APY_BASIS_POINTS=0                  # 250 = 2.50% APY
 # INTEREST_PERIODS_PER_YEAR=365                # daily
 # INTEREST_TICK_INTERVAL_HOURS=24              # how often the worker ticks
+
+# ADR 031 / ADR 036 Phase D: nightly on-chain interest mints. true →
+# the interest-mint worker (UTC-day periods, Horizon balance snapshots
+# into `interest_mint_snapshots`, mirror credit + issuer-signed mint
+# in one txn per user) REPLACES the legacy off-chain scheduler above,
+# which is hard-gated off while this flag is set — two interest
+# writers must never coexist. Requires INTEREST_APY_BASIS_POINTS > 0
+# and at least one LOOP_STELLAR_*_ISSUER_SECRET.
+# LOOP_INTEREST_ONCHAIN_ENABLED=false
 
 # ADR 009/015 interest forward-mint pool. Daily accrual sub-allocates
 # from this pre-minted on-chain pool; defaults to the operator account

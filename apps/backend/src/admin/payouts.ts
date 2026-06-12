@@ -25,8 +25,8 @@ export interface AdminPayoutView {
    * no longer true.
    */
   orderId: string | null;
-  /** ADR-024 §2 / ADR 036 discriminator — `order_cashback`, `emission`, or `burn`. */
-  kind: 'order_cashback' | 'emission' | 'burn';
+  /** ADR-024 §2 / ADR 036 / ADR 031 discriminator — `order_cashback`, `emission`, `burn`, or `interest_mint`. */
+  kind: 'order_cashback' | 'emission' | 'burn' | 'interest_mint';
   assetCode: string;
   assetIssuer: string;
   toAddress: string;
@@ -46,7 +46,7 @@ export interface PayoutRow {
   id: string;
   userId: string;
   orderId: string | null;
-  kind: 'order_cashback' | 'emission' | 'burn';
+  kind: 'order_cashback' | 'emission' | 'burn' | 'interest_mint';
   assetCode: string;
   assetIssuer: string;
   toAddress: string;
@@ -135,21 +135,23 @@ export async function adminListPayoutsHandler(c: Context): Promise<Response> {
     );
   }
 
-  // ADR-024 §2 + ADR 036: kind discriminator filter. Treasury wants to split
-  // order-cashback (cashback owed on a fulfilled order) from
-  // emission (admin on-chain backfill) / burn (redemption
-  // issuer-return) flows visually.
+  // ADR-024 §2 + ADR 036 + ADR 031: kind discriminator filter.
+  // Treasury wants to split order-cashback (cashback owed on a
+  // fulfilled order) from emission (admin on-chain backfill) / burn
+  // (redemption issuer-return) / interest_mint (nightly issuer-signed
+  // interest) flows visually.
   const kindParam = c.req.query('kind');
   if (
     kindParam !== undefined &&
     kindParam !== 'order_cashback' &&
     kindParam !== 'emission' &&
-    kindParam !== 'burn'
+    kindParam !== 'burn' &&
+    kindParam !== 'interest_mint'
   ) {
     return c.json(
       {
         code: 'VALIDATION_ERROR',
-        message: 'kind must be one of: order_cashback, emission, burn',
+        message: 'kind must be one of: order_cashback, emission, burn, interest_mint',
       },
       400,
     );

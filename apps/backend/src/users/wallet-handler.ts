@@ -20,6 +20,7 @@ import { logger } from '../logger.js';
 import type { UserWalletBalance, UserWalletResponse } from '@loop/shared';
 import { resolveLoopAuthenticatedUser } from '../auth/authenticated-user.js';
 import { configuredLoopPayableAssets } from '../credits/payout-asset.js';
+import { ONCHAIN_MINT_ELIGIBLE_ASSETS } from '../credits/interest-mint.js';
 import { getAccountTrustlines } from '../payments/horizon-trustlines.js';
 
 const log = logger.child({ handler: 'me-wallet' });
@@ -55,18 +56,29 @@ export async function getMyWalletHandler(c: Context): Promise<Response> {
     return c.json({ code: 'UNAUTHORIZED', message: 'Authentication required' }, 401);
   }
 
+  const assets = configuredLoopPayableAssets();
+  // 2026-06-15 cold audit v-wallet P0 follow-up: the mint worker only
+  // ever pays ONCHAIN_MINT_ELIGIBLE_ASSETS (GBPLOOP) — advertising the
+  // global APY regardless of whether this deployment even has that
+  // asset configured is false advertising for every USD/EUR-only
+  // deployment (or one where GBPLOOP's issuer isn't set up yet).
+  const hasEligibleAsset = assets.some((a) => ONCHAIN_MINT_ELIGIBLE_ASSETS.has(a.code));
   const base = {
     address: user.walletAddress,
     provisioning: user.walletProvisioning,
-    interestApyBps: env.INTEREST_APY_BASIS_POINTS,
+    // ADR 031 Phase D truthfulness: this surface shows the ON-CHAIN
+    // balance, so the rate chip must only advertise an APY the
+    // on-chain mint path (`credits/interest-mint.ts`) will actually
+    // pay. Legacy off-chain accrual (mirror-only) does not move the
+    // wallet balance and must not be advertised here; 0 = no rate chip.
+    interestApyBps:
+      env.LOOP_INTEREST_ONCHAIN_ENABLED && hasEligibleAsset ? env.INTEREST_APY_BASIS_POINTS : 0,
   };
 
   // No on-chain account to read until the wallet exists.
   if (user.walletAddress === null) {
     return c.json<UserWalletResponse>({ ...base, balances: [], stale: false });
   }
-
-  const assets = configuredLoopPayableAssets();
   try {
     const snapshot = await getAccountTrustlines(user.walletAddress);
     const balances: UserWalletBalance[] = [];

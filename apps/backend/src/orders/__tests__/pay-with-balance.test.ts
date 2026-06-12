@@ -16,10 +16,12 @@ import type * as StellarSdkModule from '@stellar/stellar-sdk';
  * mocked.
  */
 
-// Freshly generated per test run (no funds; test-only) — avoids a
-// hardcoded-looking secret sitting in the repo despite being fake.
-const operatorKeypair = Keypair.random();
+// Real ed25519 test keypairs, generated per run (never hardcode
+// Stellar seeds — the lint-docs secret scan rejects S... literals
+// in tracked files, and fresh keypairs prove the signature path
+// rather than a memorised fixture).
 const userKeypair = Keypair.random();
+const operatorKeypair = Keypair.random();
 const OPERATOR_PUBLIC = operatorKeypair.publicKey();
 const OPERATOR_SECRET = operatorKeypair.secret();
 const USER_PUBLIC = userKeypair.publicKey();

@@ -227,7 +227,9 @@ function Detail({ row }: { row: AdminPayoutView }): React.JSX.Element {
               ? 'Emission (admin on-chain backfill, ADR 036)'
               : row.kind === 'burn'
                 ? 'Burn (redemption issuer-return, ADR 036)'
-                : 'Order cashback'}
+                : row.kind === 'interest_mint'
+                  ? 'Interest mint (nightly issuer-signed mint, ADR 031)'
+                  : 'Order cashback'}
           </dd>
         </div>
         <div>

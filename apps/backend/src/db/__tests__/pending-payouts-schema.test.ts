@@ -6,7 +6,7 @@ type PendingPayoutRow = typeof pendingPayouts.$inferSelect;
 type PendingPayoutInsert = typeof pendingPayouts.$inferInsert;
 
 /**
- * ADR-024 §2 + ADR 036: `pending_payouts` serves three payout flows:
+ * ADR-024 §2 + ADR 036 + ADR 031: `pending_payouts` serves four flows:
  *
  *   - `kind='order_cashback'` → order-fulfilment cashback payouts;
  *     `order_id` is NOT NULL and references `orders`.
@@ -14,6 +14,8 @@ type PendingPayoutInsert = typeof pendingPayouts.$inferInsert;
  *     "withdrawal", relabelled by migration 0038); `order_id IS NULL`.
  *   - `kind='burn'`           → redemption issuer-return enqueued by
  *     markOrderPaid; `order_id` is NOT NULL.
+ *   - `kind='interest_mint'`  → nightly issuer-signed interest mint
+ *     (migration 0038); `order_id IS NULL`.
  *
  * These tests guard the Drizzle mirror of the SQL migration: any
  * drift between the migration CHECKs and the TypeScript types means
@@ -66,11 +68,12 @@ describe('pending_payouts schema (A2-901 / ADR-024 §2)', () => {
     expect(pendingPayouts.kind.default).toBe('order_cashback');
   });
 
-  it('kind admits only the three known values', () => {
+  it('kind admits only the four known values', () => {
     // Compile-time: the $type<> narrowing on the column is exactly the
-    // three-member union — no fourth kind can be inserted or selected.
+    // four-member union (ADR 031 added 'interest_mint' in migration
+    // 0038) — no fifth kind can be inserted or selected.
     expectTypeOf<PendingPayoutRow['kind']>().toEqualTypeOf<
-      'order_cashback' | 'emission' | 'burn'
+      'order_cashback' | 'emission' | 'burn' | 'interest_mint'
     >();
     // Runtime: the schema object declares the CHECK constraint that
     // pins the same invariant in Postgres.

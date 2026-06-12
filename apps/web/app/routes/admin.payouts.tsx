@@ -33,18 +33,20 @@ const STATES: readonly (PayoutState | 'all')[] = [
   'failed',
 ];
 
-// ADR-024 §2 / ADR 036: discriminator filter for the three payout flows.
-// `order_cashback` is the order-fulfilment payout; `emission` is the admin
-// on-chain backfill (ex-withdrawal — no mirror debit, ADR 036); `burn` is
-// the redemption issuer-return. Treasury wants to drill into one without
-// scrolling.
-const KINDS = ['all', 'order_cashback', 'emission', 'burn'] as const;
+// ADR-024 §2 / ADR 036 / ADR 031: discriminator filter for the four payout
+// flows. `order_cashback` is the order-fulfilment payout; `emission` is the
+// admin on-chain backfill (ex-withdrawal — no mirror debit, ADR 036); `burn`
+// is the redemption issuer-return; `interest_mint` is the nightly
+// issuer-signed interest mint (ADR 031). Treasury wants to drill into one
+// without scrolling.
+const KINDS = ['all', 'order_cashback', 'emission', 'burn', 'interest_mint'] as const;
 type KindFilter = (typeof KINDS)[number];
 
 function kindLabel(k: KindFilter): string {
   if (k === 'all') return 'All kinds';
   if (k === 'order_cashback') return 'Order cashback';
   if (k === 'emission') return 'Emission';
+  if (k === 'interest_mint') return 'Interest mint';
   return 'Burn';
 }
 
@@ -327,7 +329,13 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
                     </Link>
                   </td>
                   <td className="px-3 py-2 text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">
-                    {p.kind === 'emission' ? 'Emission' : p.kind === 'burn' ? 'Burn' : 'Cashback'}
+                    {p.kind === 'emission'
+                      ? 'Emission'
+                      : p.kind === 'burn'
+                        ? 'Burn'
+                        : p.kind === 'interest_mint'
+                          ? 'Interest'
+                          : 'Cashback'}
                   </td>
                   <td className="px-3 py-2">
                     <span
