@@ -19,6 +19,7 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
+import { getStaffRole } from '../db/staff-roles.js';
 import { orders, userCredits, users, HOME_CURRENCIES } from '../db/schema.js';
 import { resolveLoopAuthenticatedUser } from '../auth/authenticated-user.js';
 import { type User } from '../db/users.js';
@@ -30,6 +31,12 @@ export interface UserMeView {
   id: string;
   email: string;
   isAdmin: boolean;
+  /**
+   * ADR 037 staff role — 'admin' | 'support' | null (not staff).
+   * Resolved with requireStaff semantics: staff_roles row wins,
+   * legacy users.is_admin shim when no row exists.
+   */
+  staffRole: 'admin' | 'support' | null;
   /** ADR 015 — USD / GBP / EUR. Drives order denomination + cashback asset. */
   homeCurrency: string;
   /** ADR 015 — Stellar address for on-chain cashback payouts. Null when unlinked. */
@@ -59,10 +66,22 @@ async function resolveHomeCurrencyBalance(userId: string, homeCurrency: string):
 
 export async function toView(row: User): Promise<UserMeView> {
   const balanceMinor = await resolveHomeCurrencyBalance(row.id, row.homeCurrency);
+  // ADR 037: resolve the staff role with the same semantics as
+  // requireStaff — staff_roles row wins; legacy users.is_admin shim
+  // ('admin') when no row exists; lookup failure falls back to the
+  // shim so /users/me never 500s on a staff-table blip.
+  let staffRole: UserMeView['staffRole'] = null;
+  try {
+    const staffRow = await getStaffRole(row.id);
+    staffRole = staffRow?.role ?? (row.isAdmin ? 'admin' : null);
+  } catch {
+    staffRole = row.isAdmin ? 'admin' : null;
+  }
   return {
     id: row.id,
     email: row.email,
     isAdmin: row.isAdmin,
+    staffRole,
     homeCurrency: row.homeCurrency,
     stellarAddress: row.stellarAddress,
     homeCurrencyBalanceMinor: balanceMinor.toString(),

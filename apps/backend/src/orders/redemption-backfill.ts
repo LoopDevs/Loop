@@ -182,41 +182,8 @@ export async function runRedemptionBackfillTick(args?: {
     }
 
     if (redemption.code !== null || redemption.pin !== null || redemption.url !== null) {
-      // Recovered. The state + still-NULL guards make the write
-      // idempotent against a concurrent recovery (admin manual fix,
-      // second instance) — losing the race is a no-op.
-      const updated = await db
-        .update(orders)
-        .set({
-          redeemCode: redemption.code,
-          redeemPin: redemption.pin,
-          redeemUrl: redemption.url,
-          redemptionBackfillAttempts: row.attempts + 1,
-          redemptionBackfillLastAttemptAt: new Date(now),
-        })
-        .where(
-          and(
-            eq(orders.id, row.id),
-            eq(orders.state, 'fulfilled'),
-            isNull(orders.redeemCode),
-            isNull(orders.redeemPin),
-            isNull(orders.redeemUrl),
-          ),
-        )
-        .returning({ id: orders.id });
-      if (updated.length > 0) {
+      if (await persistRecoveredRedemption(row, redemption, now)) {
         result.recovered++;
-        log.info(
-          {
-            orderId: row.id,
-            ctxOrderId: row.ctxOrderId,
-            attempt: row.attempts + 1,
-            hasCode: redemption.code !== null,
-            hasPin: redemption.pin !== null,
-            hasUrl: redemption.url !== null,
-          },
-          'Redemption backfill recovered payload for fulfilled order',
-        );
       }
       continue;
     }
@@ -226,6 +193,127 @@ export async function runRedemptionBackfillTick(args?: {
   }
 
   return result;
+}
+
+/**
+ * Persists a recovered payload. The state + still-NULL guards make
+ * the write idempotent against a concurrent recovery (admin manual
+ * fix, second instance) — losing the race is a no-op (false).
+ */
+async function persistRecoveredRedemption(
+  row: BackfillRow,
+  redemption: { code: string | null; pin: string | null; url: string | null },
+  now: number,
+): Promise<boolean> {
+  const updated = await db
+    .update(orders)
+    .set({
+      redeemCode: redemption.code,
+      redeemPin: redemption.pin,
+      redeemUrl: redemption.url,
+      redemptionBackfillAttempts: row.attempts + 1,
+      redemptionBackfillLastAttemptAt: new Date(now),
+    })
+    .where(
+      and(
+        eq(orders.id, row.id),
+        eq(orders.state, 'fulfilled'),
+        isNull(orders.redeemCode),
+        isNull(orders.redeemPin),
+        isNull(orders.redeemUrl),
+      ),
+    )
+    .returning({ id: orders.id });
+  if (updated.length === 0) return false;
+  log.info(
+    {
+      orderId: row.id,
+      ctxOrderId: row.ctxOrderId,
+      attempt: row.attempts + 1,
+      hasCode: redemption.code !== null,
+      hasPin: redemption.pin !== null,
+      hasUrl: redemption.url !== null,
+    },
+    'Redemption backfill recovered payload for fulfilled order',
+  );
+  return true;
+}
+
+/**
+ * ADR 037 support action — one-shot redemption re-fetch for a
+ * single order, through the SAME machinery as the sweeper
+ * (`fetchRedemption` + the idempotent persist guards + the
+ * attempts bookkeeping). Differences from a sweep tick, both
+ * deliberate:
+ *
+ *   - no backoff gate and no attempts cap — the action exists
+ *     precisely for orders the sweeper has exhausted (runbook:
+ *     redemption-backfill-exhausted.md), and a human clicking it
+ *     IS the rate limiter (plus the route's 10/min).
+ *   - exhaustion paging still only fires when the bump crosses the
+ *     cap exactly, so repeated admin re-drives past the cap don't
+ *     re-page ops on every click.
+ */
+export type AdminRedemptionRefetchOutcome =
+  | { kind: 'order_not_found' }
+  | { kind: 'not_eligible'; reason: 'not_fulfilled' | 'no_ctx_order_id' | 'already_present' }
+  | { kind: 'pool_unavailable' }
+  | {
+      kind: 'recovered' | 'still_empty';
+      attempts: number;
+      hasCode: boolean;
+      hasPin: boolean;
+      hasUrl: boolean;
+    };
+
+export async function refetchOrderRedemption(
+  orderId: string,
+  nowMs?: number,
+): Promise<AdminRedemptionRefetchOutcome> {
+  const now = nowMs ?? Date.now();
+  const [row] = await db
+    .select({
+      id: orders.id,
+      userId: orders.userId,
+      merchantId: orders.merchantId,
+      state: orders.state,
+      ctxOrderId: orders.ctxOrderId,
+      fulfilledAt: orders.fulfilledAt,
+      redeemCode: orders.redeemCode,
+      redeemPin: orders.redeemPin,
+      redeemUrl: orders.redeemUrl,
+      attempts: orders.redemptionBackfillAttempts,
+    })
+    .from(orders)
+    .where(eq(orders.id, orderId));
+  if (row === undefined) return { kind: 'order_not_found' };
+  if (row.state !== 'fulfilled') return { kind: 'not_eligible', reason: 'not_fulfilled' };
+  if (row.ctxOrderId === null) return { kind: 'not_eligible', reason: 'no_ctx_order_id' };
+  if (row.redeemCode !== null || row.redeemPin !== null || row.redeemUrl !== null) {
+    return { kind: 'not_eligible', reason: 'already_present' };
+  }
+
+  let redemption: { code: string | null; pin: string | null; url: string | null };
+  try {
+    redemption = await fetchRedemption(row.ctxOrderId);
+  } catch (err) {
+    if (err instanceof OperatorPoolUnavailableError) return { kind: 'pool_unavailable' };
+    throw err;
+  }
+
+  const presence = {
+    hasCode: redemption.code !== null,
+    hasPin: redemption.pin !== null,
+    hasUrl: redemption.url !== null,
+  };
+  if (presence.hasCode || presence.hasPin || presence.hasUrl) {
+    const won = await persistRecoveredRedemption(row, redemption, now);
+    // Losing the persist race means a concurrent writer landed a
+    // payload — for the support user that's still "recovered".
+    return { kind: 'recovered', attempts: won ? row.attempts + 1 : row.attempts, ...presence };
+  }
+  await recordEmptyAttempt(row, now);
+  return { kind: 'still_empty', attempts: row.attempts + 1, ...presence };
 }
 
 interface BackfillRow {
@@ -241,12 +329,14 @@ interface BackfillRow {
  * Bumps the attempts counter + last-attempt timestamp after an empty
  * or failed re-fetch, and pages ops once when the bump crosses the
  * cap. The attempts guard on the UPDATE keeps a racing sweeper from
- * double-counting (and double-paging) the same attempt.
+ * double-counting (and double-paging) the same attempt. `result` is
+ * the sweep tick's tally; the ADR-037 one-shot admin path passes
+ * none.
  */
 async function recordEmptyAttempt(
   row: BackfillRow,
   now: number,
-  result: RedemptionBackfillTickResult,
+  result?: RedemptionBackfillTickResult,
 ): Promise<void> {
   const nextAttempts = row.attempts + 1;
   const updated = await db
@@ -258,8 +348,12 @@ async function recordEmptyAttempt(
     .where(and(eq(orders.id, row.id), eq(orders.redemptionBackfillAttempts, row.attempts)))
     .returning({ id: orders.id });
   if (updated.length === 0) return; // raced — the other writer owns the bump
-  if (nextAttempts >= REDEMPTION_BACKFILL_MAX_ATTEMPTS) {
-    result.exhausted++;
+  // `===` not `>=`: the sweeper can only ever land exactly on the cap
+  // (its SQL filter excludes rows at/past the cap), and the ADR-037
+  // admin re-drive keeps bumping past it — re-paging ops on every
+  // post-exhaustion click would be noise.
+  if (nextAttempts === REDEMPTION_BACKFILL_MAX_ATTEMPTS) {
+    if (result !== undefined) result.exhausted++;
     log.error(
       { orderId: row.id, ctxOrderId: row.ctxOrderId, attempts: nextAttempts },
       'Redemption backfill exhausted — order fulfilled but still has no redemption payload',

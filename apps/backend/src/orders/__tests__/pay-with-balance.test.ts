@@ -16,15 +16,16 @@ import type * as StellarSdkModule from '@stellar/stellar-sdk';
  * mocked.
  */
 
-const OPERATOR_PUBLIC = 'GCHEYQDOIGCO3W3XJX2LMVO7DGUHLTY2UKTN4NWWDS4G5HSEBPC5EOA2';
-const OPERATOR_SECRET = 'SAQK2J7M5WTEIJQBUKGPSCHVNZPGIOO7MDD6JVIQW6EYHEIVVLX7EVDY';
-const USER_PUBLIC = 'GBLQXKHX7QX3AWMKFZSE7N44XUGG3M2YSYBQWS7X6MF4U7KGVCVSHKWT';
-const USER_SECRET = 'SC5ZI6W4XZ7MTLS25FPE5RTDJWKA3YKT6LZMCIXLZYCJ67JE6GZQJVVN';
+// Throwaway per-run keypairs (no funds; test-only). Generated rather
+// than hardcoded so the lint-docs Stellar-seed scan (§5b) stays
+// meaningful — a literal S… seed in the tree is always a finding.
+const userKeypair = Keypair.random();
+const operatorKeypair = Keypair.random();
+const OPERATOR_PUBLIC = operatorKeypair.publicKey();
+const OPERATOR_SECRET = operatorKeypair.secret();
+const USER_PUBLIC = userKeypair.publicKey();
 const GBPLOOP_ISSUER = 'GCI6YY2KRKTFC3SW7O7O5BLDAZUC3SMOPADWCQRZMND7PLM3K5WM3FKL';
 const DEPOSIT_ADDRESS = 'GCKEGFRZD6UZ3A7VCZ6VHV2V6S5K6VXNDIGPMYBBKRI3MFKXCBWCAAYO';
-
-const userKeypair = Keypair.fromSecret(USER_SECRET);
-const operatorKeypair = Keypair.fromSecret(OPERATOR_SECRET);
 
 vi.mock('../../logger.js', () => ({
   logger: {

@@ -20,6 +20,7 @@
  */
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
+import { requireStaff } from '../auth/require-staff.js';
 import { treasuryHandler } from '../admin/treasury.js';
 import { adminTreasurySnapshotCsvHandler } from '../admin/treasury-snapshot-csv.js';
 import { adminTreasuryCreditFlowHandler } from '../admin/treasury-credit-flow.js';
@@ -42,6 +43,7 @@ export function mountAdminTreasuryRoutes(app: Hono): void {
   app.get(
     '/api/admin/treasury.csv',
     rateLimit('GET /api/admin/treasury.csv', 10, 60_000),
+    requireStaff('admin'),
     adminTreasurySnapshotCsvHandler,
   );
   // Treasury credit-flow time-series (ADR 009/015) — per-day credited

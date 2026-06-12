@@ -37,6 +37,7 @@
  */
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
+import { requireStaff } from '../auth/require-staff.js';
 import { adminListOrdersHandler } from '../admin/orders.js';
 import { adminMerchantFlowsHandler } from '../admin/merchant-flows.js';
 import { adminDiscordConfigHandler } from '../admin/discord-config.js';
@@ -80,6 +81,7 @@ export function mountAdminOpsTailRoutes(app: Hono): void {
   app.get(
     '/api/admin/discord/config',
     rateLimit('GET /api/admin/discord/config', 60, 60_000),
+    requireStaff('admin'),
     adminDiscordConfigHandler,
   );
   // User search by email fragment (ADR 011 — admin panel navigation).
@@ -95,6 +97,7 @@ export function mountAdminOpsTailRoutes(app: Hono): void {
   app.get(
     '/api/admin/user-credits.csv',
     rateLimit('GET /api/admin/user-credits.csv', 20, 60_000),
+    requireStaff('admin'),
     adminUserCreditsCsvHandler,
   );
   // Ledger integrity check (ADR 009 invariant). Left-joins user_credits
@@ -150,6 +153,7 @@ export function mountAdminOpsTailRoutes(app: Hono): void {
   app.get(
     '/api/admin/audit-tail.csv',
     rateLimit('GET /api/admin/audit-tail.csv', 10, 60_000),
+    requireStaff('admin'),
     adminAuditTailCsvHandler,
   );
   // User cluster — directory + lookups + per-user drill
@@ -161,6 +165,7 @@ export function mountAdminOpsTailRoutes(app: Hono): void {
   app.post(
     '/api/admin/merchants/resync',
     rateLimit('POST /api/admin/merchants/resync', 2, 60_000),
+    requireStaff('admin'),
     adminMerchantsResyncHandler,
   );
   // Discord notifier catalog (ADR 018). Static read of the
@@ -169,6 +174,7 @@ export function mountAdminOpsTailRoutes(app: Hono): void {
   app.get(
     '/api/admin/discord/notifiers',
     rateLimit('GET /api/admin/discord/notifiers', 60, 60_000),
+    requireStaff('admin'),
     adminDiscordNotifiersHandler,
   );
   // Manual Discord test ping. Admin picks a channel, backend fires a
@@ -178,6 +184,7 @@ export function mountAdminOpsTailRoutes(app: Hono): void {
   app.post(
     '/api/admin/discord/test',
     rateLimit('POST /api/admin/discord/test', 10, 60_000),
+    requireStaff('admin'),
     adminDiscordTestHandler,
   );
 }
