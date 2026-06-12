@@ -44,6 +44,7 @@ export function registerUsersProfileOpenApi(
       id: z.string().uuid(),
       email: z.string().email(),
       isAdmin: z.boolean(),
+      staffRole: z.enum(['admin', 'support']).nullable(), // ADR 037
       homeCurrency: z.enum(['USD', 'GBP', 'EUR']).openapi({
         description:
           'Fiat the account is denominated in (ADR 015). Drives order pricing + the LOOP-asset cashback payout.',

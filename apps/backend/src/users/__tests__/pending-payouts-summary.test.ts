@@ -29,6 +29,7 @@ vi.mock('../../db/client.js', () => ({
 }));
 
 vi.mock('../../db/schema.js', () => ({
+  staffRoles: { userId: 'user_id', role: 'role' },
   users: {},
   creditTransactions: {},
   userCredits: {},
