@@ -275,7 +275,7 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # → OFF: getWalletProvider() returns null. 'privy' → Privy REST adapter
 # (fetch + Zod, no SDK dep); PRIVY_APP_ID + PRIVY_APP_SECRET then
 # required (parseEnv cross-field check). Phase C wires the flows:
-# signup provisioning + sweeper, payout targeting, pay-with-balance,
+# signup provisioning + sweeper, payout targeting, order redemption,
 # GET /api/me/wallet.
 # LOOP_WALLET_PROVIDER=
 # PRIVY_APP_ID=<app-id>

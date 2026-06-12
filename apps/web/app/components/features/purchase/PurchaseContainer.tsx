@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Merchant } from '@loop/shared';
 import { useAuthStore } from '~/stores/auth.store';
 import { usePurchaseStore } from '~/stores/purchase.store';
 import { createOrder } from '~/services/orders';
 import { createLoopOrder, type CreateLoopOrderResponse } from '~/services/orders-loop';
 import { requestOtp, verifyOtp } from '~/services/auth';
+import { getMyCredits } from '~/services/user';
 import { useAppConfig } from '~/hooks/use-app-config';
 import { useMerchantCashbackRate } from '~/hooks/use-merchants';
+import { useWallet } from '~/hooks/use-wallet';
+import { shouldRetry } from '~/hooks/query-retry';
+import { hasPositiveBalance } from '~/components/features/cashback/LinkWalletNudge';
 import { AmountSelection } from './AmountSelection';
 import { EarnedCashbackCard } from './EarnedCashbackCard';
 import { LoopPaymentStep } from './LoopPaymentStep';
@@ -63,7 +67,33 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
   // credit are gated behind `phase1Only=false` because they belong
   // to the Tranche 2 cashback flywheel. Default USDC because the
   // marketing copy + treasury docs lead with it.
-  const [paymentMethod, setPaymentMethod] = useState<'usdc' | 'xlm'>('usdc');
+  const [paymentMethod, setPaymentMethod] = useState<'usdc' | 'xlm' | 'credit'>('usdc');
+
+  // ADR 036 OQ3 (resolved 2026-06-12): balance = tokens once
+  // activated; mirror is reconciliation-only (ADR 036). A
+  // wallet-activated user spends their balance as token redemption —
+  // the PayWithLoopBalance button on the payment screen — so the
+  // `credit` rail (inline mirror debit) must NOT be offered to them
+  // (the backend rejects it with CREDIT_METHOD_RETIRED anyway). Users
+  // not yet activated are the migration window: their mirror balance
+  // has no emitted tokens, so `credit` stays available while they
+  // still hold one. Same ['me', 'credits'] cache line as the
+  // settings/cashback card.
+  const { isActivated } = useWallet();
+  const creditsQuery = useQuery({
+    queryKey: ['me', 'credits'],
+    queryFn: getMyCredits,
+    enabled: isAuthenticated && config.loopOrdersEnabled && !config.phase1Only,
+    retry: shouldRetry,
+    staleTime: 30_000,
+  });
+  const offerCredit =
+    !config.phase1Only && !isActivated && hasPositiveBalance(creditsQuery.data?.credits);
+  // If activation lands (or the balance drains) while 'credit' is
+  // selected, fall back to USDC rather than submitting a rail the
+  // backend will reject.
+  const effectivePaymentMethod =
+    paymentMethod === 'credit' && !offerCredit ? 'usdc' : paymentMethod;
 
   // Cashback-rate preview (ADR 011 / 015). Null when the merchant
   // has no active config or the fetch fails — in both cases we just
@@ -333,10 +363,10 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
             merchantId: merchant.id,
             amountMinor: Math.round(amount * 100),
             currency: merchant.denominations?.currency ?? 'USD',
-            // A4-040: was hardcoded to 'usdc'; user now picks USDC or XLM
-            // before confirming. Tranche 2 will widen this to credit /
-            // loop_asset once `phase1Only=false` exposes those rails.
-            paymentMethod,
+            // A4-040: was hardcoded to 'usdc'; user now picks the rail
+            // before confirming. `credit` is migration-window only —
+            // hidden once the wallet activates (ADR 036 OQ3).
+            paymentMethod: effectivePaymentMethod,
           },
           { idempotencyKey: idempotencyKeyRef.current },
         );
@@ -391,24 +421,32 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
           <legend className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             Pay with
           </legend>
-          <div role="radiogroup" aria-label="Payment rail" className="grid grid-cols-2 gap-2">
-            {(['usdc', 'xlm'] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                role="radio"
-                aria-checked={paymentMethod === m}
-                onClick={() => setPaymentMethod(m)}
-                disabled={isCreatingOrder}
-                className={`py-3 px-4 min-h-[44px] rounded-lg border text-sm font-semibold transition-colors ${
-                  paymentMethod === m
-                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                    : 'border-gray-200 dark:border-gray-700 hover:border-blue-400'
-                }`}
-              >
-                {m.toUpperCase()}
-              </button>
-            ))}
+          <div
+            role="radiogroup"
+            aria-label="Payment rail"
+            className={`grid gap-2 ${offerCredit ? 'grid-cols-3' : 'grid-cols-2'}`}
+          >
+            {/* ADR 036: the credit rail only renders for the
+                not-yet-activated migration window (see offerCredit). */}
+            {(offerCredit ? (['usdc', 'xlm', 'credit'] as const) : (['usdc', 'xlm'] as const)).map(
+              (m) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="radio"
+                  aria-checked={effectivePaymentMethod === m}
+                  onClick={() => setPaymentMethod(m)}
+                  disabled={isCreatingOrder}
+                  className={`py-3 px-4 min-h-[44px] rounded-lg border text-sm font-semibold transition-colors ${
+                    effectivePaymentMethod === m
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                      : 'border-gray-200 dark:border-gray-700 hover:border-blue-400'
+                  }`}
+                >
+                  {m === 'credit' ? 'Loop credit' : m.toUpperCase()}
+                </button>
+              ),
+            )}
           </div>
         </fieldset>
       )}

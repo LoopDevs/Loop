@@ -1,5 +1,5 @@
 /**
- * `POST /api/orders/loop/{id}/pay-with-balance` registration
+ * `POST /api/orders/loop/{id}/redeem` registration
  * (ADR 030 Phase C3 / ADR 036).
  *
  * Server-orchestrated LOOP-asset redemption: the backend builds the
@@ -11,12 +11,12 @@
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 
-export function registerOrdersPayWithBalanceOpenApi(
+export function registerOrdersRedeemOpenApi(
   registry: OpenAPIRegistry,
   errorResponse: ReturnType<OpenAPIRegistry['register']>,
 ): void {
-  const PayWithBalanceResponse = registry.register(
-    'PayWithBalanceResponse',
+  const RedeemLoopOrderResponse = registry.register(
+    'RedeemLoopOrderResponse',
     z.object({
       state: z.enum(['pending_payment', 'paid', 'procuring', 'fulfilled']).openapi({
         description:
@@ -27,8 +27,9 @@ export function registerOrdersPayWithBalanceOpenApi(
 
   registry.registerPath({
     method: 'post',
-    path: '/api/orders/loop/{id}/pay-with-balance',
-    summary: 'Pay a loop_asset order from the embedded-wallet balance (ADR 030 C3).',
+    path: '/api/orders/loop/{id}/redeem',
+    summary:
+      'Redeem a loop_asset order from the embedded-wallet LOOP balance (ADR 030 C3 / ADR 036).',
     description:
       "One-tap redemption: builds a LOOP-asset payment from the caller's embedded wallet to the Loop deposit address carrying the order's payment memo, signs it via the wallet provider, wraps it in an operator fee-bump (the wallet holds zero XLM), and submits to Horizon. Idempotent per order — already-paid orders return 200 with their current state; a concurrent in-flight call is fenced with 400 `PAYMENT_IN_FLIGHT`. Downstream settlement (mirror debit + issuer-return burn, ADR 036) is driven by the payment watcher, not this endpoint.",
     tags: ['Orders'],
@@ -39,7 +40,7 @@ export function registerOrdersPayWithBalanceOpenApi(
     responses: {
       200: {
         description: 'Payment submitted (or already landed) — current order state',
-        content: { 'application/json': { schema: PayWithBalanceResponse } },
+        content: { 'application/json': { schema: RedeemLoopOrderResponse } },
       },
       400: {
         description:

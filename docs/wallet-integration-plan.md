@@ -52,7 +52,7 @@ New order payment path (web sends `paymentMethod: 'loop_asset'` exactly as today
 shape change):
 
 1. Order created as today (`pending_payment`, memo issued).
-2. NEW: `POST /api/orders/loop/:id/pay-with-balance` (authed, rate-limited, idempotent on
+2. NEW: `POST /api/orders/loop/:id/redeem` (authed, rate-limited, idempotent on
    order id): server builds a payment tx — source: user's embedded wallet, destination:
    deposit address, asset: the matching LOOP asset, amount: `chargeMinor`, memo: the order's
    payment memo; fee-bump or sponsor the fee from the operator (user holds zero XLM —
@@ -107,7 +107,7 @@ holders-only first (matches "whilst they have loop tokens"); revisit with ADR 03
 
 - Everything is feature-flagged (`LOOP_WALLET_PROVIDER`) and testable with mocked transport +
   real-ed25519 local signing; first real-credential validation on **testnet** (operator +
-  issuer test accounts) via a scripted walk: provision → activate → payout → pay-with-balance
+  issuer test accounts) via a scripted walk: provision → activate → payout → redeem
   → burn → interest mint; then staging with real Privy app; then production behind the flag.
 - The e2e-real workflow gains a wallet leg only after staging soak.
 
