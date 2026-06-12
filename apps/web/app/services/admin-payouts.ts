@@ -44,10 +44,10 @@ import { authenticatedRequest } from './api-client';
 export interface AdminPayoutView {
   id: string;
   userId: string;
-  /** NULL for `kind='emission'` rows (ADR-024 §2 / ADR 036). */
+  /** NULL for `kind='emission'` / `kind='interest_mint'` rows (ADR-024 §2 / ADR 036 / ADR 031). */
   orderId: string | null;
-  /** ADR-024 §2 discriminator. */
-  kind: 'order_cashback' | 'emission' | 'burn';
+  /** ADR-024 §2 / ADR 036 / ADR 031 discriminator. */
+  kind: 'order_cashback' | 'emission' | 'burn' | 'interest_mint';
   assetCode: string;
   assetIssuer: string;
   toAddress: string;
@@ -68,8 +68,8 @@ export async function listPayouts(opts: {
   state?: PayoutState;
   userId?: string;
   assetCode?: LoopAssetCode;
-  /** ADR-024 §2 / ADR 036 — filter by payout discriminator. */
-  kind?: 'order_cashback' | 'emission' | 'burn';
+  /** ADR-024 §2 / ADR 036 / ADR 031 — filter by payout discriminator. */
+  kind?: 'order_cashback' | 'emission' | 'burn' | 'interest_mint';
   limit?: number;
   before?: string;
 }): Promise<{ payouts: AdminPayoutView[] }> {

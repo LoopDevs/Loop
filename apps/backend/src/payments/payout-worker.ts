@@ -31,6 +31,7 @@ import { Keypair } from '@stellar/stellar-sdk';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { listClaimablePayouts } from '../credits/pending-payouts.js';
+import { resolveIssuerSigners } from './issuer-signers.js';
 import {
   runStuckPayoutWatchdog,
   STUCK_PAYOUT_WATCHDOG_INTERVAL_MS,
@@ -69,6 +70,13 @@ export interface RunPayoutTickArgs {
    * keypair derivation.
    */
   operatorAccount: string;
+  /**
+   * ADR 031: per-asset issuer signers for `kind='interest_mint'`
+   * rows (issuer payment = mint). See `PayOneArgs.issuerSigners`.
+   * Optional so operator-only deployments (no on-chain interest)
+   * change nothing.
+   */
+  issuerSigners?: ReadonlyMap<string, { secret: string; account: string }>;
   horizonUrl: string;
   networkPassphrase: string;
   maxAttempts: number;
@@ -128,6 +136,7 @@ let stuckPayoutWatchdogTimer: ReturnType<typeof setInterval> | null = null;
 export function startPayoutWorker(args: {
   operatorSecret: string;
   operatorAccount: string;
+  issuerSigners?: ReadonlyMap<string, { secret: string; account: string }>;
   horizonUrl: string;
   networkPassphrase: string;
   intervalMs: number;
@@ -143,6 +152,7 @@ export function startPayoutWorker(args: {
       const r = await runPayoutTick({
         operatorSecret: args.operatorSecret,
         operatorAccount: args.operatorAccount,
+        ...(args.issuerSigners !== undefined ? { issuerSigners: args.issuerSigners } : {}),
         horizonUrl: args.horizonUrl,
         networkPassphrase: args.networkPassphrase,
         maxAttempts: args.maxAttempts,
@@ -210,6 +220,12 @@ export function resolvePayoutConfig(): {
    * key in production treasury topologies).
    */
   operatorAccount: string;
+  /**
+   * ADR 031: validated per-asset issuer signers (empty map when no
+   * `LOOP_STELLAR_*_ISSUER_SECRET` is configured). `interest_mint`
+   * rows sign with these; everything else uses the operator pair.
+   */
+  issuerSigners: ReadonlyMap<string, { secret: string; account: string }>;
   horizonUrl: string;
   networkPassphrase: string;
   maxAttempts: number;
@@ -235,6 +251,9 @@ export function resolvePayoutConfig(): {
   return {
     operatorSecret: env.LOOP_STELLAR_OPERATOR_SECRET,
     operatorAccount,
+    // parseEnv boot-validated every configured issuer secret against
+    // its issuer address, so this resolve cannot throw at this point.
+    issuerSigners: resolveIssuerSigners(),
     horizonUrl,
     networkPassphrase: env.LOOP_STELLAR_NETWORK_PASSPHRASE,
     maxAttempts: env.LOOP_PAYOUT_MAX_ATTEMPTS,

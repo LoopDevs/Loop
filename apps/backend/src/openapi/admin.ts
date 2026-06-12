@@ -97,9 +97,9 @@ export function registerAdminOpenApi(
         description:
           'Source order id for `kind=order_cashback` and `kind=burn` payouts. NULL for emission payouts (ADR-024 §2 / ADR 036).',
       }),
-      kind: z.enum(['order_cashback', 'emission', 'burn']).openapi({
+      kind: z.enum(['order_cashback', 'emission', 'burn', 'interest_mint']).openapi({
         description:
-          'Discriminator: `order_cashback` is the order-fulfilment payout; `emission` is the ADR-024 admin write re-scoped by ADR 036 (on-chain backfill, no mirror debit); `burn` is the ADR 036 redemption issuer-return.',
+          'Discriminator: `order_cashback` is the order-fulfilment payout; `emission` is the ADR-024 admin write re-scoped by ADR 036 (on-chain backfill, no mirror debit); `burn` is the ADR 036 redemption issuer-return; `interest_mint` is the ADR 031 nightly issuer-signed interest mint.',
       }),
       assetCode: z
         .string()

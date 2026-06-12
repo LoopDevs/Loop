@@ -11,7 +11,7 @@
 | A     | RS256 + `kid` token signing, `/.well-known/jwks.json`, dual-verify window, rotation runbook                                       | building                                                          |
 | B     | `WalletProvider` interface, Privy REST adapter (fetch+Zod), rawSign→decorated-signature bridge, `users.wallet_provider/wallet_id` | building                                                          |
 | C     | Provisioning + payout targeting + one-tap redemption + balance surface                                                            | built — `feat/wallet-phase-c-flows` (backend; web wiring pending) |
-| D     | Nightly on-chain interest mints (midnight UTC, APR/365)                                                                           | spec below                                                        |
+| D     | Nightly on-chain interest mints (midnight UTC, APR/365)                                                                           | built — `feat/wallet-phase-d-interest` (see notes below)          |
 
 ## Phase C — flows
 
@@ -93,6 +93,61 @@ Worker at 00:00 UTC (gated `LOOP_INTEREST_ONCHAIN_ENABLED` + issuer secret confi
 
 Open per ADR 036 Q4: interest on earned-but-not-yet-emitted balance — Phase D ships
 holders-only first (matches "whilst they have loop tokens"); revisit with ADR 031.
+
+### Phase D — as built (ADR 031 implementation notes)
+
+Gate: `LOOP_INTEREST_ONCHAIN_ENABLED=true` + `INTEREST_APY_BASIS_POINTS > 0` +
+≥ 1 `LOOP_STELLAR_<ASSET>_ISSUER_SECRET` (boot-validated by `parseEnv` against the
+configured issuer address via Keypair derivation) + `LOOP_WORKERS_ENABLED`.
+
+1. **Worker** `credits/interest-mint.ts` — tick-based (10-min interval, NOT wall-clock
+   cron); the period key is the current UTC date (`YYYY-MM-DD`) and a
+   `watcher_cursors` row (`name='interest_mint'`) records the last completed period,
+   so a process down across midnight self-heals on its first tick. A _fully missed_
+   UTC day is deliberately not retro-minted (no balance snapshot exists for it) —
+   the gap logs loudly; compensate via admin emission if required.
+2. **Eligibility**: `wallet_provisioning='activated'` + > 0 on-chain balance of an
+   asset with a validated issuer signer (Horizon trustline read). Each eligible
+   holder gets one `interest_mint_snapshots` row per night (migration 0038) — the
+   audit record of the balance the mint was computed from AND the idempotency fence.
+3. **Sub-minor carry (deviation from the original "mint the 7-decimal accrual"
+   sketch)**: the accrual `floor(balance × apyBps / (10_000 × 365))` is computed in
+   stroops (7 decimals, dust < 1 stroop skipped), but the `user_credits` mirror is
+   integer minor units — minting raw stroops would diverge the drift equation
+   monotonically. The payable therefore floors to whole minor units with the
+   remainder carried per (user, asset) in the snapshot chain
+   (`carry + accrual = minted×1e5 + carryAfter`, DB CHECK-enforced). Mint and
+   mirror credit are always exactly equal; small balances accumulate sub-penny
+   accruals until they cross a penny.
+4. **Atomicity (ADR 036 §3)**: one DB txn per user writes snapshot +
+   `credit_transactions type='interest'` (period-cursor partial unique = second
+   fence) + `user_credits` bump + `pending_payouts kind='interest_mint'`. The payout
+   worker drives the on-chain mint with the existing retry/classify machinery,
+   signing `interest_mint` rows with the **issuer** keypair (issuer payment = native
+   mint) and running the idempotency pre-check against the issuer's history; all
+   other kinds keep the operator path byte-identical.
+5. **Legacy retirement**: `accrue-interest.ts` / `interest-scheduler.ts` are
+   structurally never started while the flag is on (`index.ts` branches), and
+   `startInterestScheduler` additionally hard-throws on the flag — two interest
+   writers can never coexist. The interest forward-mint pool watcher is also not
+   started on the on-chain branch (the pool is a legacy-path construct; its drift
+   term reads zero here and retires when the legacy path is deleted).
+6. **Drift watcher**: equation is now
+   `drift = onChain − pool − inFlightBurns + inFlightInterestMints − mirror × 1e5` —
+   in-flight mints are on the mirror but not yet on-chain, so they ADD to the
+   circulation side (mirror image of the burn term); all three states
+   (queued/submitted/confirmed) are drift-neutral and a mirror credit with no queued
+   mint still pages (that is the alert this term must not mask).
+7. **`GET /api/me/wallet`** reports `interestApyBps` only while the on-chain path is
+   enabled (the surface shows on-chain balances; legacy mirror-only accrual is not
+   advertised). Mint payout failures ride the existing `notifyPayoutFailed` alert →
+   `docs/runbooks/payout-failed-alert.md` (no new alert).
+8. **Testnet walk** `apps/backend/src/scripts/wallet-testnet-walk.ts`
+   (`npm run walk:wallet-testnet -w @loop/backend`) — the pre-staging gate:
+   provision → sponsored activation → emission → pay-with-balance redemption →
+   watcher tick (mirror debit + burn) → interest-mint tick → issuer-signed mint
+   confirm, with a PASS/FAIL report. Required env is documented at the top of the
+   script (testnet operator/issuer secrets, real Privy creds, scratch DATABASE_URL).
 
 ## Operator setup (Ash) — Privy dashboard
 

@@ -91,6 +91,37 @@ export async function sumInFlightBurnStroops(args: {
 }
 
 /**
+ * ADR 031 / ADR 036 Phase D: sum of `amount_stroops` across in-flight
+ * `kind='interest_mint'` rows for one asset. Mirror image of the burn
+ * sum above: the nightly interest txn credits the `user_credits`
+ * mirror AND enqueues the issuer-signed mint in one transaction, so
+ * until the mint confirms the mirror is AHEAD of on-chain circulation
+ * by the queued amount. The asset-drift watcher ADDS this to the
+ * circulation side of its equation so an in-flight mint reads as
+ * drift-neutral. Confirmed mints are excluded — the issuer payment
+ * raised on-chain circulation itself. `failed` rows stay included
+ * (mirror credited, chain pending ops intervention) — same posture
+ * as in-flight burns.
+ */
+export async function sumInFlightInterestMintStroops(args: {
+  assetCode: string;
+  assetIssuer: string;
+}): Promise<bigint> {
+  const [row] = await db
+    .select({
+      total: sql<string>`COALESCE(SUM(${pendingPayouts.amountStroops}), 0)::text`,
+    })
+    .from(pendingPayouts)
+    .where(
+      sql`${pendingPayouts.kind} = 'interest_mint'
+        AND ${pendingPayouts.assetCode} = ${args.assetCode}
+        AND ${pendingPayouts.assetIssuer} = ${args.assetIssuer}
+        AND ${pendingPayouts.state} IN ('pending', 'submitted', 'failed')`,
+    );
+  return BigInt(row?.total ?? '0');
+}
+
+/**
  * Returns the oldest pending payouts, newest-paid-first a bad idea —
  * an incident backlog should drain in the order the orders fulfilled.
  */

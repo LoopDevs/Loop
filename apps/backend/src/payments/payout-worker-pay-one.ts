@@ -53,9 +53,42 @@ export interface PayOneArgs {
    * the SDK on every tick.
    */
   operatorAccount: string;
+  /**
+   * ADR 031 / ADR 036 Phase D: per-asset issuer signers, keyed by
+   * LOOP asset code. `kind='interest_mint'` rows are payments FROM
+   * the issuer account (a native mint), so they sign with the
+   * issuer keypair instead of the operator's — and the idempotency
+   * pre-check scans the issuer's payment history accordingly. Every
+   * other kind keeps the operator path byte-identical. Resolved in
+   * `resolvePayoutConfig` (boot-validated against the configured
+   * issuer addresses); absent/empty leaves `interest_mint` rows
+   * pending until the secrets are configured.
+   */
+  issuerSigners?: ReadonlyMap<string, { secret: string; account: string }> | undefined;
   horizonUrl: string;
   networkPassphrase: string;
   maxAttempts: number;
+}
+
+/**
+ * Per-row signer selection (ADR 031). Returns null when the row
+ * needs an issuer signer that isn't configured (or whose validated
+ * account no longer matches the row's pinned issuer — e.g. the env
+ * was re-pointed after the row was written): the row must stay
+ * pending rather than sign with the wrong key.
+ */
+function resolveRowSigner(
+  row: PendingPayout,
+  args: PayOneArgs,
+): { secret: string; account: string } | null {
+  if (row.kind !== 'interest_mint') {
+    return { secret: args.operatorSecret, account: args.operatorAccount };
+  }
+  const signer = args.issuerSigners?.get(row.assetCode);
+  if (signer === undefined || signer.account !== row.assetIssuer) {
+    return null;
+  }
+  return signer;
 }
 
 /**
@@ -130,18 +163,33 @@ export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayO
     const outcome = await probeTrustline(row);
     if (outcome !== null) return outcome;
   }
+  // ADR 031: pick the signing keypair per row. Interest mints sign
+  // with (and pre-check against) the asset's ISSUER account — an
+  // issuer payment is a native mint; everything else keeps the
+  // operator path exactly as before. A missing/mismatched issuer
+  // signer leaves the row pending: signing a "mint" with any other
+  // key would transfer from an unrelated account.
+  const signer = resolveRowSigner(row, args);
+  if (signer === null) {
+    log.warn(
+      { payoutId: row.id, kind: row.kind, assetCode: row.assetCode },
+      'No validated issuer signer for interest mint — leaving payout in pending until LOOP_STELLAR_*_ISSUER_SECRET is configured',
+    );
+    return 'retriedLater';
+  }
   // Idempotency pre-check (ADR 016). If the prior submit landed
   // async between the last tick and this one, we observe the
   // payment in Horizon history and converge without issuing a
-  // second tx. A4-104: scan the operator account (the signer) — the
-  // earlier code reused `row.assetIssuer` here on the assumption
-  // that operator == issuer for LOOP-branded assets. That collapses
-  // for any treasury topology that splits issuer (cold) from
-  // operator (hot), so the pre-check would scan the wrong history
-  // and miss prior submits, opening a double-pay path.
+  // second tx. A4-104: scan the SIGNER's account — the earlier code
+  // reused `row.assetIssuer` here on the assumption that operator ==
+  // issuer for LOOP-branded assets. That collapses for any treasury
+  // topology that splits issuer (cold) from operator (hot), so the
+  // pre-check would scan the wrong history and miss prior submits,
+  // opening a double-pay path. For interest mints the signer IS the
+  // issuer (ADR 031), so the scan correctly targets issuer history.
   try {
     const prior = await findOutboundPaymentByMemo({
-      account: args.operatorAccount,
+      account: signer.account,
       to: row.toAddress,
       memo: row.memoText,
     });
@@ -220,7 +268,7 @@ export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayO
       multiplier: env.LOOP_PAYOUT_FEE_MULTIPLIER,
     });
     const { txHash } = await submitPayout({
-      secret: args.operatorSecret,
+      secret: signer.secret,
       horizonUrl: args.horizonUrl,
       networkPassphrase: args.networkPassphrase,
       feeStroops,
@@ -273,6 +321,7 @@ async function handleSubmitError(
       payoutId: row.id,
       userId: row.userId,
       orderId: row.orderId,
+      payoutKind: row.kind,
       assetCode: row.assetCode,
       amount: row.amountStroops.toString(),
       kind: err.kind,
@@ -289,6 +338,7 @@ async function handleSubmitError(
     payoutId: row.id,
     userId: row.userId,
     orderId: row.orderId,
+    payoutKind: row.kind,
     assetCode: row.assetCode,
     amount: row.amountStroops.toString(),
     kind: 'unclassified',

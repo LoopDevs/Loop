@@ -36,7 +36,12 @@ src/
 │   ├── pending-payouts.ts ← Pending-payout repo (insert / list / state transitions / in-flight burn sum) (ADR 015/016/036)
 │   ├── emissions.ts    ← Admin emission queue primitive — no mirror debit (ADR 024 re-scoped by ADR 036)
 │   ├── payout-compensation.ts ← Compensation for LEGACY debited emissions only (ADR 024 §5 / ADR 036)
-│   └── accrue-interest.ts ← Daily APY accrual primitive on user_credits
+│   ├── accrue-interest.ts ← LEGACY daily APY accrual primitive on user_credits (off-chain
+│   │                     only — hard-gated off while LOOP_INTEREST_ONCHAIN_ENABLED=true)
+│   └── interest-mint.ts ← ADR 031/036 Phase D nightly ON-CHAIN interest: UTC-day periods
+│                         (watcher_cursors name='interest_mint'), Horizon balance snapshots
+│                         → interest_mint_snapshots (migration 0038, sub-minor carry),
+│                         mirror credit + kind='interest_mint' payout in one txn per user
 ├── orders/
 │   ├── handler.ts      ← Legacy CTX-proxy order creation
 │   ├── loop-handler.ts ← Loop-native order creation with FX-pin (ADR 010 + 015)
@@ -53,7 +58,11 @@ src/
 │   ├── horizon-balances.ts ← Horizon /accounts balance reader with 30s cache
 │   ├── price-feed.ts   ← XLM + USDC stroops-per-cent + convertMinorUnits FX
 │   ├── payout-submit.ts ← @stellar/stellar-sdk sign+submit wrapper with classified error kinds (ADR 016)
-│   └── payout-worker.ts ← Outbound LOOP-asset payout worker with memo-idempotent retry (ADR 016)
+│   ├── issuer-signers.ts ← ADR 031 per-asset issuer keypairs (LOOP_STELLAR_*_ISSUER_SECRET,
+│   │                     boot-validated against the issuer address) for interest-mint signing
+│   └── payout-worker.ts ← Outbound LOOP-asset payout worker with memo-idempotent retry (ADR 016);
+│                         kind='interest_mint' rows sign with the ISSUER keypair (mint), all
+│                         other kinds with the operator key (ADR 031)
 ├── wallet/             ← ADR 030 — provider-agnostic embedded wallet.
 │   │                     OFF by default (LOOP_WALLET_PROVIDER='').
 │   ├── provider.ts     ← WalletProvider interface + getWalletProvider() env factory

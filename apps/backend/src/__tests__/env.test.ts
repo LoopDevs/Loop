@@ -9,6 +9,7 @@ vi.hoisted(() => {
   }
 });
 
+import { Keypair } from '@stellar/stellar-sdk';
 import { parseEnv, CANONICAL_MAINNET_USDC_ISSUER } from '../env.js';
 
 // Minimum viable env — everything else is optional or has a default.
@@ -341,5 +342,60 @@ describe('parseEnv', () => {
     it('ignores stray PRIVY_* credentials when the provider is unset', () => {
       expect(() => parseEnv({ ...base, PRIVY_APP_SECRET: 'sec456' })).not.toThrow();
     });
+  });
+});
+
+describe('parseEnv — ADR 031 issuer-secret pinning', () => {
+  // Real ed25519 material: the check derives the public key from the
+  // secret, so the fixtures must be a genuine keypair.
+  const issuerKp = Keypair.random();
+  const otherKp = Keypair.random();
+
+  it('accepts a secret whose derived account matches the configured issuer address', () => {
+    const env = parseEnv({
+      ...base,
+      LOOP_STELLAR_GBPLOOP_ISSUER: issuerKp.publicKey(),
+      LOOP_STELLAR_GBPLOOP_ISSUER_SECRET: issuerKp.secret(),
+    });
+    expect(env.LOOP_STELLAR_GBPLOOP_ISSUER_SECRET).toBe(issuerKp.secret());
+  });
+
+  it('boot-fails when the derived account mismatches the issuer address', () => {
+    expect(() =>
+      parseEnv({
+        ...base,
+        LOOP_STELLAR_GBPLOOP_ISSUER: otherKp.publicKey(),
+        LOOP_STELLAR_GBPLOOP_ISSUER_SECRET: issuerKp.secret(),
+      }),
+    ).toThrow(/does not match LOOP_STELLAR_GBPLOOP_ISSUER/);
+  });
+
+  it('boot-fails on an orphan secret (no issuer address to validate against)', () => {
+    expect(() =>
+      parseEnv({
+        ...base,
+        LOOP_STELLAR_GBPLOOP_ISSUER_SECRET: issuerKp.secret(),
+      }),
+    ).toThrow(/LOOP_STELLAR_GBPLOOP_ISSUER is not/);
+  });
+
+  it('rejects malformed issuer secrets at the schema layer', () => {
+    expect(() =>
+      parseEnv({
+        ...base,
+        LOOP_STELLAR_GBPLOOP_ISSUER: issuerKp.publicKey(),
+        LOOP_STELLAR_GBPLOOP_ISSUER_SECRET: 'not-a-secret',
+      }),
+    ).toThrow(/LOOP_STELLAR_GBPLOOP_ISSUER_SECRET/);
+  });
+
+  it('LOOP_INTEREST_ONCHAIN_ENABLED parses as a strict boolean and defaults false', () => {
+    expect(parseEnv(base).LOOP_INTEREST_ONCHAIN_ENABLED).toBe(false);
+    expect(
+      parseEnv({ ...base, LOOP_INTEREST_ONCHAIN_ENABLED: 'true' }).LOOP_INTEREST_ONCHAIN_ENABLED,
+    ).toBe(true);
+    expect(() => parseEnv({ ...base, LOOP_INTEREST_ONCHAIN_ENABLED: 'sure' })).toThrow(
+      /LOOP_INTEREST_ONCHAIN_ENABLED/,
+    );
   });
 });

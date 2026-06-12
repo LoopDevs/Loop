@@ -42,7 +42,8 @@ export function registerUsersWalletOpenApi(
           'On-chain LOOP-asset balances. Empty until the wallet is activated; only configured LOOP assets appear.',
       }),
       interestApyBps: z.number().int().openapi({
-        description: 'Interest APY in basis points. 0 = interest off.',
+        description:
+          'On-chain interest APY in basis points (ADR 031 nightly mints). Non-zero only when LOOP_INTEREST_ONCHAIN_ENABLED is set with a non-zero APY — the legacy off-chain accrual never moves the on-chain balance and is not advertised here. 0 = no rate chip.',
       }),
       stale: z.boolean().openapi({
         description:
