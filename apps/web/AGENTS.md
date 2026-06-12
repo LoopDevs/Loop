@@ -31,16 +31,19 @@ app/
 │   │   ├── order/    ← per-order payout card
 │   │   ├── orders/   ← loop-orders list + summary header
 │   │   ├── purchase/ ← amount → payment → complete / redeem state machine
-│   │   ├── wallet/   ← Stellar trustline status / setup cards
+│   │   │               (incl. PayWithLoopBalance — ADR 030 one-tap pay)
+│   │   ├── wallet/   ← Stellar trustline status / setup cards, WalletCard
+│   │   │               (ADR 030 embedded-wallet balance surface)
 │   │   └── top-level: Navbar, Footer, MerchantCard, MerchantGroupCard, ClusterMap, MapBottomSheet,
 │   │                  NativeTabBar, NativeBackButton, FixedSearchButton
 │   └── ui/           ← Primitives (Button, Input, LazyImage, OfflineBanner,
 │                       Skeleton, Spinner, ToastContainer)
 ├── hooks/            ← TanStack Query wrappers + lifecycle (use-auth, use-merchants,
-│                       use-orders, use-native-platform, use-session-restore, query-retry,
+│                       use-orders, use-wallet, use-native-platform,
+│                       use-session-restore, query-retry,
 │                       use-staff-role — ADR 037 staffRole resolver over the ['me'] line)
 ├── services/         ← Typed API client (api-client, auth, clusters, merchants,
-│                       orders, orders-loop, config, admin (+ per-surface admin-*
+│                       orders, orders-loop, wallet, config, admin (+ per-surface admin-*
 │                       slices incl. ADR 037 admin-staff / admin-watcher-skips /
 │                       admin-user-wallet / admin-lookup / admin-order-redemption),
 │                       user, public-stats, parse-error-response)
