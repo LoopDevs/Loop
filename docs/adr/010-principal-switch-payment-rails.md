@@ -146,8 +146,36 @@ On a `paid → refund_pending` transition:
 - Chargebacks become Loop's problem if we ever add card rails — not
   a concern for XLM / USDC, but reserved for Phase 2 thinking.
 
+## Phase-1 account topology (known limitation)
+
+In the current production deployment `LOOP_STELLAR_OPERATOR_SECRET`'s
+public key **equals** `LOOP_STELLAR_DEPOSIT_ADDRESS` — i.e. the account
+users pay **into** (inbound deposits) is the same account Loop pays CTX
+**out of** (outbound settlement). It works for a single-account Phase-1
+launch, but it has two consequences worth an explicit decision before
+real volume:
+
+- **No custody/operator separation.** Inbound user funds and outbound
+  treasury settlement share one keypair; there's no segregation between
+  "money we're holding for users" and "money we spend operationally".
+- **Reconciliation runs against a mixed-traffic account.** The pay-CTX
+  idempotency lookup (`findOutboundPaymentByMemo`,
+  `apps/backend/src/orders/pay-ctx.ts`) scans the operator account's
+  payment history — which on this shared account also contains inbound
+  user deposits. The lookup filters to `from === operator` + `memo` +
+  (post-stranded-order-hardening) amount/asset, so it's correct today,
+  but the safety margin is thinner than with a dedicated operator
+  account.
+
+Phase-2 should split these into distinct accounts (deposit/custody vs.
+operator/settlement). Tracked as a topology follow-up, not a launch
+blocker.
+
 ## References
 
 - Session transcript 2026-04-21, principal-switch discussion.
 - `apps/backend/src/orders/` (current affiliate flow, to be
   rewritten as part of this ADR's implementation).
+- Stranded-order investigation 2026-06-13 (pre-#1366 fulfilled-but-unpaid
+  test orders; surfaced the shared-account topology + the idempotency
+  amount-verification gap).

@@ -40,6 +40,24 @@ export class PayCtxConfigError extends Error {
   }
 }
 
+/**
+ * Thrown when the idempotency lookup finds a prior outbound payment
+ * with this order's memo but a DIFFERENT amount or asset than this
+ * order requires. That means the memo isn't actually a prior submit
+ * of *this* order (CTX memo collision, or a tampered/duplicated URI):
+ * skipping would leave CTX unpaid for this order, and blindly
+ * re-submitting against a colliding memo could double-pay. Fail-closed
+ * so `procureOne` marks the order `failed` and an operator
+ * investigates instead. Distinct from the (expected) idempotent
+ * same-amount re-run, which still skips silently.
+ */
+export class PayCtxReconcileError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PayCtxReconcileError';
+  }
+}
+
 export interface PayCtxArgs {
   /** CTX destination address from the SEP-7 URI. */
   destination: string;
@@ -71,6 +89,31 @@ export interface PayCtxResult {
  *     the `.kind` field tells the caller which).
  *   - Any other thrown error from the idempotency lookup or SDK.
  */
+/**
+ * Decimal-string → stroops (1 XLM = 10^7 stroops) as bigint, so two
+ * amount strings that differ only in trailing-zero / format
+ * (`"0.12"` vs `"0.1200000"`) compare equal and we don't false-alarm
+ * the reconcile guard. Returns null on a non-decimal string so callers
+ * treat an unparseable amount as a mismatch (fail-closed).
+ */
+export function decimalToStroops(s: string): bigint | null {
+  const trimmed = s.trim();
+  if (!/^\d+(\.\d+)?$/.test(trimmed)) return null;
+  const parts = trimmed.split('.');
+  const whole = parts[0] ?? '0';
+  const frac = parts[1] ?? '';
+  if (frac.length > 7) return null; // more precision than stroops can hold
+  const fracPadded = frac.padEnd(7, '0');
+  return BigInt(whole) * 10_000_000n + BigInt(fracPadded);
+}
+
+function amountsEqual(a: string, b: string): boolean {
+  const sa = decimalToStroops(a);
+  const sb = decimalToStroops(b);
+  if (sa === null || sb === null) return false;
+  return sa === sb;
+}
+
 export async function payCtxOrder(args: PayCtxArgs): Promise<PayCtxResult> {
   const cfg = resolvePayoutConfig();
   if (cfg === null) {
@@ -86,6 +129,32 @@ export async function payCtxOrder(args: PayCtxArgs): Promise<PayCtxResult> {
     memo: args.memo,
   });
   if (prior !== null) {
+    // A memo + destination match alone is NOT proof we already paid
+    // THIS order — the amount and asset must match too. CTX issues a
+    // shared custodial destination + per-order memo, so the only
+    // legitimate prior match is an earlier submit of the same order,
+    // which carries the same SEP-7 amount and is native XLM. A
+    // mismatch means a memo collision (or a tampered URI): treating it
+    // as "already paid" is exactly the silent-strand failure mode, so
+    // fail-closed instead.
+    const amountMatches = amountsEqual(prior.amount, args.amount);
+    const isNative = prior.assetCode === null;
+    if (!amountMatches || !isNative) {
+      log.error(
+        {
+          memo: args.memo,
+          destination: args.destination,
+          wantAmount: args.amount,
+          priorAmount: prior.amount,
+          priorAssetCode: prior.assetCode,
+          priorTxHash: prior.txHash,
+        },
+        'CTX idempotency match has mismatched amount/asset — refusing to treat as paid',
+      );
+      throw new PayCtxReconcileError(
+        `prior payment for memo ${args.memo} mismatches order (amount ${prior.amount} vs ${args.amount}, asset ${prior.assetCode ?? 'native'})`,
+      );
+    }
     log.info(
       { memo: args.memo, destination: args.destination, txHash: prior.txHash },
       'CTX payment already on chain — skipping submit',

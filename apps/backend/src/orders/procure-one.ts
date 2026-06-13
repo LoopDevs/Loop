@@ -26,7 +26,7 @@ import { notifyCashbackCredited, notifyUsdcBelowFloor } from '../discord.js';
 import { getMerchants } from '../merchants/sync.js';
 import { waitForRedemption } from './procurement-redemption.js';
 import { parseSep7PayUri } from './sep7.js';
-import { payCtxOrder, PayCtxConfigError } from './pay-ctx.js';
+import { payCtxOrder, PayCtxConfigError, PayCtxReconcileError } from './pay-ctx.js';
 import { PayoutSubmitError } from '../payments/payout-submit.js';
 import {
   pickProcurementAsset,
@@ -238,6 +238,15 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
       if (err instanceof PayCtxConfigError) {
         log.error({ orderId: order.id, err: err.message }, 'CTX payment config error');
         await markOrderFailed(order.id, `CTX payment config: ${err.message}`);
+        return 'failed';
+      }
+      // Idempotency match with a mismatched amount/asset (memo collision
+      // or tampered URI). Fail the order loudly — neither skipping
+      // (CTX unpaid) nor blind re-submit (possible double-pay) is safe;
+      // an operator must reconcile. See PayCtxReconcileError.
+      if (err instanceof PayCtxReconcileError) {
+        log.error({ orderId: order.id, err: err.message }, 'CTX payment reconcile mismatch');
+        await markOrderFailed(order.id, `CTX payment reconcile: ${err.message}`);
         return 'failed';
       }
       // Submit-side error. Transient kinds (transient_horizon,

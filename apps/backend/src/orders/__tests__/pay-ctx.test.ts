@@ -40,7 +40,12 @@ vi.mock('../../payments/horizon-find-outbound.js', () => ({
   findOutboundPaymentByMemo: (...args: unknown[]) => findOutboundMock(...args),
 }));
 
-import { payCtxOrder, PayCtxConfigError } from '../pay-ctx.js';
+import {
+  payCtxOrder,
+  PayCtxConfigError,
+  PayCtxReconcileError,
+  decimalToStroops,
+} from '../pay-ctx.js';
 import { PayoutSubmitError } from '../../payments/payout-submit.js';
 
 beforeEach(() => {
@@ -80,6 +85,37 @@ describe('payCtxOrder', () => {
     expect(submitMock).not.toHaveBeenCalled();
   });
 
+  it('skips submit when the prior amount differs only in trailing-zero format', async () => {
+    findOutboundMock.mockResolvedValueOnce({
+      txHash: 'prior-tx',
+      amount: '0.1000000',
+      assetCode: null,
+    });
+    const r = await payCtxOrder({ destination: 'GCTX', amount: '0.1', memo: 'order-1' });
+    expect(r).toEqual({ txHash: 'prior-tx', submitted: false });
+    expect(submitMock).not.toHaveBeenCalled();
+  });
+
+  it('throws PayCtxReconcileError when a memo match has a different amount (collision)', async () => {
+    findOutboundMock.mockResolvedValueOnce({ txHash: 'prior-tx', amount: '0.05', assetCode: null });
+    await expect(
+      payCtxOrder({ destination: 'GCTX', amount: '0.1', memo: 'order-1' }),
+    ).rejects.toThrow(PayCtxReconcileError);
+    expect(submitMock).not.toHaveBeenCalled();
+  });
+
+  it('throws PayCtxReconcileError when a memo match is a non-native asset', async () => {
+    findOutboundMock.mockResolvedValueOnce({
+      txHash: 'prior-tx',
+      amount: '0.1',
+      assetCode: 'USDC',
+    });
+    await expect(
+      payCtxOrder({ destination: 'GCTX', amount: '0.1', memo: 'order-1' }),
+    ).rejects.toThrow(PayCtxReconcileError);
+    expect(submitMock).not.toHaveBeenCalled();
+  });
+
   it('throws PayCtxConfigError when LOOP_STELLAR_OPERATOR_SECRET is unset', async () => {
     cfgState.current = null;
     await expect(payCtxOrder({ destination: 'GCTX', amount: '0.1', memo: 'm' })).rejects.toThrow(
@@ -95,5 +131,21 @@ describe('payCtxOrder', () => {
     await expect(payCtxOrder({ destination: 'GCTX', amount: '0.1', memo: 'm' })).rejects.toThrow(
       PayoutSubmitError,
     );
+  });
+});
+
+describe('decimalToStroops', () => {
+  it('parses whole and fractional XLM amounts', () => {
+    expect(decimalToStroops('0.1')).toBe(1_000_000n);
+    expect(decimalToStroops('0.1000000')).toBe(1_000_000n);
+    expect(decimalToStroops('1')).toBe(10_000_000n);
+    expect(decimalToStroops('0.1226242')).toBe(1_226_242n);
+    expect(decimalToStroops(' 0.05 ')).toBe(500_000n);
+  });
+  it('returns null for non-decimal or over-precise strings', () => {
+    expect(decimalToStroops('')).toBeNull();
+    expect(decimalToStroops('abc')).toBeNull();
+    expect(decimalToStroops('0.12345678')).toBeNull(); // > 7 dp
+    expect(decimalToStroops('1.2.3')).toBeNull();
   });
 });

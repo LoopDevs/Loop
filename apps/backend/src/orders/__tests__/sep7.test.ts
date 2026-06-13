@@ -49,4 +49,23 @@ describe('parseSep7PayUri', () => {
     const r = parseSep7PayUri('web+stellar:pay?destination=GCTX&amount=0.1&memo=');
     expect(r).toEqual({ ok: false, error: 'missing-memo' });
   });
+
+  it('accepts an explicit MEMO_TEXT memo_type', () => {
+    const r = parseSep7PayUri(
+      'web+stellar:pay?destination=GCTX&amount=0.1&memo=order-1&memo_type=MEMO_TEXT',
+    );
+    expect(r).toEqual({
+      ok: true,
+      value: { destination: 'GCTX', amount: '0.1', memo: 'order-1' },
+    });
+  });
+
+  it('rejects a non-text memo_type as unsupported-memo-type (we only submit text)', () => {
+    for (const t of ['MEMO_ID', 'MEMO_HASH', 'MEMO_RETURN', 'id', 'hash']) {
+      const r = parseSep7PayUri(
+        `web+stellar:pay?destination=GCTX&amount=0.1&memo=123&memo_type=${t}`,
+      );
+      expect(r).toEqual({ ok: false, error: 'unsupported-memo-type' });
+    }
+  });
 });

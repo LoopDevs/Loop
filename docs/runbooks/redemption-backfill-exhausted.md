@@ -29,6 +29,17 @@ on-call business-hours window (`docs/oncall.md`).
 3. Check CTX's order status (paid? fulfilled?) in the same response, and the
    monitoring channel for correlated `notifyOperatorPoolExhausted` /
    circuit-open alerts that could explain failed attempts.
+4. **Confirm CTX was actually paid — do not assume it.** A `fulfilled` Loop
+   order normally implies `payCtxOrder` succeeded (post-#1366 the order is
+   marked `failed`, never `fulfilled`, on any payment error). That invariant
+   does **not** hold for orders fulfilled before #1366 merged (2026-05-14),
+   where the pay-CTX hop didn't exist and orders reached `fulfilled` purely on
+   the redemption-wait timeout. Verify with BOTH (a) CTX's `status`/paid flag
+   from step 2 and (b) an on-chain check that the operator account actually
+   sent this order's memo —
+   `GET https://horizon.stellar.org/accounts/<operator>/payments?join=transactions`,
+   match `memo` + `amount`. This three-way split (Loop state ✕ CTX state ✕
+   on-chain) decides the mitigation below.
 
 ## Mitigation
 
@@ -44,10 +55,19 @@ on-call business-hours window (`docs/oncall.md`).
      AND redeem_code IS NULL AND redeem_pin IS NULL AND redeem_url IS NULL;
    ```
 
-2. **Payload still empty upstream**: open a CTX support ticket quoting the
-   full `ctx_order_id` from the alert (it is the supplier's id) and ask why a
-   fulfilled order carries no redemption payload. Do **not** refund yet — CTX
-   has been paid and may still deliver the card; a refund now double-spends.
+2. **Payload still empty upstream — branch on the Diagnosis step 4 result:**
+   - **CTX paid + on-chain payment exists** → genuine slow issuance. Open a CTX
+     support ticket quoting the full `ctx_order_id` and ask why a paid order
+     carries no redemption payload. Do **not** refund yet — CTX has been paid
+     and may still deliver; a refund now double-spends.
+   - **CTX unpaid + NO matching on-chain payment** → the order was never paid
+     (pre-#1366 strand, or a regression). There is nothing to double-spend, so
+     the "don't refund" rule above does **not** apply. The order was never
+     truly fulfilled: mark it `failed` with a reason, and if it's a real
+     customer, refund their inbound payment via the admin credit path (ADR 017).
+   - **CTX unpaid but a matching on-chain payment exists** → we paid but CTX
+     couldn't reconcile (memo / amount / memo-type mismatch). Open a CTX ticket,
+     do **not** re-pay, and recover via the ticket before any refund.
 
 3. Post the chosen path in `#ops-alerts` (no silent fixes).
 

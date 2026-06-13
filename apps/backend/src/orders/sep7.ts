@@ -31,7 +31,8 @@ export type Sep7ParseError =
   | 'wrong-scheme'
   | 'missing-destination'
   | 'missing-amount'
-  | 'missing-memo';
+  | 'missing-memo'
+  | 'unsupported-memo-type';
 
 export type Sep7ParseResult =
   | { ok: true; value: ParsedSep7Pay }
@@ -54,7 +55,19 @@ const STELLAR_PAY_PREFIX = 'web+stellar:pay?';
  * - `missing-memo`: no `memo` query param. CTX uses a shared custodial
  *   wallet + per-order memo to match incoming payments — a memoless
  *   payment is unrecoverable, so fail-closed.
+ * - `unsupported-memo-type`: the URI declares a `memo_type` other than
+ *   `MEMO_TEXT`. The payment submitter (`submitNativePayment`) only
+ *   builds `Memo.text`, and the idempotency lookup
+ *   (`findOutboundPaymentByMemo`) only matches `memo_type='text'`, so a
+ *   `MEMO_ID` / `MEMO_HASH` / `MEMO_RETURN` URI would otherwise be sent
+ *   as the wrong memo type — CTX could never reconcile it and the order
+ *   would strand `unpaid` after we'd already spent the XLM. Fail-closed
+ *   so the order is marked `failed` (and surfaced) instead of silently
+ *   mis-paid. CTX has only ever issued `MEMO_TEXT` in practice; this is
+ *   a guard against a future upstream change, not current behaviour.
  */
+const SUPPORTED_MEMO_TYPES = new Set(['', 'text', 'MEMO_TEXT']);
+
 export function parseSep7PayUri(uri: string): Sep7ParseResult {
   if (!uri.startsWith(STELLAR_PAY_PREFIX)) {
     return { ok: false, error: 'wrong-scheme' };
@@ -66,8 +79,13 @@ export function parseSep7PayUri(uri: string): Sep7ParseResult {
   const destination = params.get('destination') ?? '';
   const amount = params.get('amount') ?? '';
   const memo = params.get('memo') ?? '';
+  // SEP-7 omits `memo_type` for text memos; treat absent as text.
+  const memoType = params.get('memo_type') ?? '';
   if (destination === '') return { ok: false, error: 'missing-destination' };
   if (amount === '') return { ok: false, error: 'missing-amount' };
   if (memo === '') return { ok: false, error: 'missing-memo' };
+  if (!SUPPORTED_MEMO_TYPES.has(memoType)) {
+    return { ok: false, error: 'unsupported-memo-type' };
+  }
   return { ok: true, value: { destination, amount, memo } };
 }
