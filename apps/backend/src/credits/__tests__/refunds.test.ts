@@ -1,13 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
- * Mirrors the credit-adjustments repo test pattern. db.transaction(cb)
- * calls cb with a chainable mock; each call records the writes so
- * assertions can read them back.
+ * Mirrors the credit-adjustments repo test pattern (chainable-db
+ * mock). `applyAdminRefund` issues up to three selects inside the txn,
+ * in order:
+ *
+ *   1. The CF-06 order row (`FOR UPDATE` on `orders`) — validates
+ *      existence / ownership / currency / over-refund.
+ *   2. The CF-06 daily-cap sum (`ABS(amount_minor)` for today's
+ *      refunds; only when the cap is enabled) — terminates with the
+ *      awaited `.where(...)`, no `.for('update')`.
+ *   3. The `FOR UPDATE` read of the `user_credits` balance row.
+ *
+ * The mock serves these in FIFO order from `forUpdateResponses`: a
+ * test stages the order row first, then (if the cap is on) the cap
+ * sum, then the balance row. The `.where(...)` thenable resolves the
+ * next queued response AND is chainable to `.for('update')` so both
+ * the awaited cap-sum query and the `.for('update')` lock reads pull
+ * from the same queue.
  */
 const { dbMock, state } = vi.hoisted(() => {
   interface State {
-    forUpdateRows: unknown[];
+    /** FIFO queue served by `.for('update')` and awaited `.where(...)`. */
+    forUpdateResponses: unknown[];
     insertCreditCalls: unknown[];
     insertUserCreditsCalls: unknown[];
     updateSets: unknown[];
@@ -17,7 +32,7 @@ const { dbMock, state } = vi.hoisted(() => {
     creditInsertError: Error | null;
   }
   const s: State = {
-    forUpdateRows: [],
+    forUpdateResponses: [],
     insertCreditCalls: [],
     insertUserCreditsCalls: [],
     updateSets: [],
@@ -28,8 +43,17 @@ const { dbMock, state } = vi.hoisted(() => {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
   chain['select'] = vi.fn(() => chain);
   chain['from'] = vi.fn(() => chain);
-  chain['where'] = vi.fn(() => chain);
-  chain['for'] = vi.fn(async () => s.forUpdateRows);
+  chain['execute'] = vi.fn(async () => []);
+  chain['where'] = vi.fn(() => {
+    const thenable: {
+      then: (resolve: (v: unknown) => unknown) => unknown;
+      for: ReturnType<typeof vi.fn>;
+    } = {
+      then: (resolve) => resolve(s.forUpdateResponses.shift() ?? []),
+      for: vi.fn(async () => s.forUpdateResponses.shift() ?? []),
+    };
+    return thenable;
+  });
   chain['insert'] = vi.fn((table: unknown) => {
     const name = (table as Record<string, unknown>)['__name'];
     (chain as unknown as { _lastInsert: string | undefined })['_lastInsert'] =
@@ -58,7 +82,14 @@ const { dbMock, state } = vi.hoisted(() => {
 
 vi.mock('../../db/client.js', () => ({ db: dbMock }));
 vi.mock('../../db/schema.js', () => ({
-  creditTransactions: { __name: 'creditTransactions' },
+  creditTransactions: {
+    __name: 'creditTransactions',
+    type: 'type',
+    currency: 'currency',
+    createdAt: 'created_at',
+    amountMinor: 'amount_minor',
+  },
+  orders: { __name: 'orders', id: 'id' },
   userCredits: {
     userId: 'user_id',
     currency: 'currency',
@@ -66,19 +97,40 @@ vi.mock('../../db/schema.js', () => ({
   },
 }));
 
-import { applyAdminRefund, RefundAlreadyIssuedError } from '../refunds.js';
+const { envMock } = vi.hoisted(() => ({
+  envMock: {
+    ADMIN_DAILY_ADJUSTMENT_CAP_MINOR: 0n,
+  },
+}));
+vi.mock('../../env.js', () => ({ env: envMock }));
+
+import { applyAdminRefund, RefundAlreadyIssuedError, RefundOrderInvalidError } from '../refunds.js';
+import { DailyAdjustmentLimitError } from '../adjustments.js';
+
+/** A matching order row the validation accepts (USD, charge 5000). */
+function okOrder(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    orderUserId: 'u-1',
+    chargeMinor: 5000n,
+    chargeCurrency: 'USD',
+    ...overrides,
+  };
+}
 
 beforeEach(() => {
-  state.forUpdateRows = [];
+  state.forUpdateResponses = [];
   state.insertCreditCalls = [];
   state.insertUserCreditsCalls = [];
   state.updateSets = [];
   state.returnedCreditRow = null;
   state.creditInsertError = null;
+  envMock.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 0n;
 });
 
 describe('applyAdminRefund', () => {
   it('happy path: inserts refund row + creates balance row when user has no prior balance', async () => {
+    // [order row, user_credits row] (cap disabled → no cap query).
+    state.forUpdateResponses = [[okOrder()], []];
     state.returnedCreditRow = { id: 'ct-1', createdAt: new Date('2026-04-23') };
     const result = await applyAdminRefund({
       userId: 'u-1',
@@ -108,7 +160,10 @@ describe('applyAdminRefund', () => {
   });
 
   it('bumps an existing balance row rather than inserting', async () => {
-    state.forUpdateRows = [{ userId: 'u-1', currency: 'USD', balanceMinor: 2000n }];
+    state.forUpdateResponses = [
+      [okOrder()],
+      [{ userId: 'u-1', currency: 'USD', balanceMinor: 2000n }],
+    ];
     state.returnedCreditRow = { id: 'ct-2', createdAt: new Date() };
     const result = await applyAdminRefund({
       userId: 'u-1',
@@ -146,6 +201,7 @@ describe('applyAdminRefund', () => {
   });
 
   it('A2-901: translates the partial-unique-index violation to RefundAlreadyIssuedError', async () => {
+    state.forUpdateResponses = [[okOrder()], []];
     const pgErr = Object.assign(new Error('duplicate key value'), {
       code: '23505',
       constraint_name: 'credit_transactions_reference_unique',
@@ -165,6 +221,7 @@ describe('applyAdminRefund', () => {
   // A2-908: reason passes through to the ledger insert so ops can
   // reconstruct the "why" past the 24h idempotency-key TTL sweep.
   it('A2-908: persists operator reason on the credit_transactions row', async () => {
+    state.forUpdateResponses = [[okOrder()], []];
     state.returnedCreditRow = { id: 'ct-reason', createdAt: new Date() };
     await applyAdminRefund({
       userId: 'u-1',
@@ -180,6 +237,7 @@ describe('applyAdminRefund', () => {
   });
 
   it('A2-908: omits reason field when caller provides none (backwards compat)', async () => {
+    state.forUpdateResponses = [[okOrder()], []];
     state.returnedCreditRow = { id: 'ct-no-reason', createdAt: new Date() };
     await applyAdminRefund({
       userId: 'u-1',
@@ -192,6 +250,7 @@ describe('applyAdminRefund', () => {
   });
 
   it('rethrows unrelated pg errors', async () => {
+    state.forUpdateResponses = [[okOrder()], []];
     state.creditInsertError = Object.assign(new Error('fk violation'), {
       code: '23503',
       constraint_name: 'credit_transactions_user_id_users_id_fk',
@@ -205,5 +264,155 @@ describe('applyAdminRefund', () => {
         adminUserId: 'admin-1',
       }),
     ).rejects.not.toBeInstanceOf(RefundAlreadyIssuedError);
+  });
+
+  describe('CF-06 order validation', () => {
+    it('rejects a refund against an order that does not exist (order_not_found)', async () => {
+      state.forUpdateResponses = [[]]; // no order row
+      await expect(
+        applyAdminRefund({
+          userId: 'u-1',
+          currency: 'USD',
+          amountMinor: 500n,
+          orderId: 'o-missing',
+          adminUserId: 'admin-1',
+        }),
+      ).rejects.toMatchObject({ name: 'RefundOrderInvalidError', reason: 'order_not_found' });
+      // Nothing was written.
+      expect(state.insertCreditCalls).toHaveLength(0);
+      expect(state.insertUserCreditsCalls).toHaveLength(0);
+    });
+
+    it('rejects a refund against an order owned by a different user (IDOR)', async () => {
+      state.forUpdateResponses = [[okOrder({ orderUserId: 'someone-else' })]];
+      await expect(
+        applyAdminRefund({
+          userId: 'u-1',
+          currency: 'USD',
+          amountMinor: 500n,
+          orderId: 'o-1',
+          adminUserId: 'admin-1',
+        }),
+      ).rejects.toMatchObject({
+        name: 'RefundOrderInvalidError',
+        reason: 'order_user_mismatch',
+      });
+      expect(state.insertCreditCalls).toHaveLength(0);
+    });
+
+    it('rejects a refund whose currency differs from the order charge currency', async () => {
+      state.forUpdateResponses = [[okOrder({ chargeCurrency: 'GBP' })]];
+      await expect(
+        applyAdminRefund({
+          userId: 'u-1',
+          currency: 'USD',
+          amountMinor: 500n,
+          orderId: 'o-1',
+          adminUserId: 'admin-1',
+        }),
+      ).rejects.toMatchObject({ name: 'RefundOrderInvalidError', reason: 'currency_mismatch' });
+      expect(state.insertCreditCalls).toHaveLength(0);
+    });
+
+    it('rejects an over-refund (amount exceeds the order charge)', async () => {
+      state.forUpdateResponses = [[okOrder({ chargeMinor: 5000n })]];
+      await expect(
+        applyAdminRefund({
+          userId: 'u-1',
+          currency: 'USD',
+          amountMinor: 5001n,
+          orderId: 'o-1',
+          adminUserId: 'admin-1',
+        }),
+      ).rejects.toMatchObject({ name: 'RefundOrderInvalidError', reason: 'exceeds_charge' });
+      expect(state.insertCreditCalls).toHaveLength(0);
+    });
+
+    it('allows a refund exactly equal to the order charge', async () => {
+      state.forUpdateResponses = [[okOrder({ chargeMinor: 5000n })], []];
+      state.returnedCreditRow = { id: 'ct-eq', createdAt: new Date() };
+      const result = await applyAdminRefund({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 5000n,
+        orderId: 'o-1',
+        adminUserId: 'admin-1',
+      });
+      expect(result.amountMinor).toBe(5000n);
+      expect(state.insertCreditCalls).toHaveLength(1);
+    });
+
+    it('RefundOrderInvalidError is the exported class', async () => {
+      state.forUpdateResponses = [[]];
+      await expect(
+        applyAdminRefund({
+          userId: 'u-1',
+          currency: 'USD',
+          amountMinor: 1n,
+          orderId: 'o-missing',
+          adminUserId: 'admin-1',
+        }),
+      ).rejects.toBeInstanceOf(RefundOrderInvalidError);
+    });
+  });
+
+  describe('CF-06 daily refund cap', () => {
+    it('skips the cap check when the cap is 0 (disabled)', async () => {
+      envMock.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 0n;
+      // Only [order, balance] — no cap query is issued.
+      state.forUpdateResponses = [[okOrder({ chargeMinor: 10_000_000n })], []];
+      state.returnedCreditRow = { id: 'ct-nocap', createdAt: new Date() };
+      await expect(
+        applyAdminRefund({
+          userId: 'u-1',
+          currency: 'USD',
+          amountMinor: 9_000_000n,
+          orderId: 'o-1',
+          adminUserId: 'admin-1',
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    it('allows a refund when today-refunds + amount stays under the cap', async () => {
+      envMock.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 1_000_000n;
+      // [order, cap-sum(used=400000), balance]
+      state.forUpdateResponses = [
+        [okOrder({ chargeMinor: 1_000_000n })],
+        [{ usedMinor: '400000' }],
+        [],
+      ];
+      state.returnedCreditRow = { id: 'ct-undercap', createdAt: new Date() };
+      const result = await applyAdminRefund({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 500_000n,
+        orderId: 'o-1',
+        adminUserId: 'admin-1',
+      });
+      expect(result.newBalanceMinor).toBe(500_000n);
+      // The cap path took the advisory lock.
+      expect(dbMock['execute']!).toHaveBeenCalledOnce();
+    });
+
+    it('rejects with DailyAdjustmentLimitError when today-refunds + amount exceeds the cap', async () => {
+      envMock.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 1_000_000n;
+      // [order, cap-sum(used=900000)] — the cap throw happens before
+      // the balance read, so no balance row is queued.
+      state.forUpdateResponses = [
+        [okOrder({ chargeMinor: 1_000_000n })],
+        [{ usedMinor: '900000' }],
+      ];
+      await expect(
+        applyAdminRefund({
+          userId: 'u-1',
+          currency: 'USD',
+          amountMinor: 200_000n,
+          orderId: 'o-1',
+          adminUserId: 'admin-1',
+        }),
+      ).rejects.toThrow(DailyAdjustmentLimitError);
+      expect(state.insertCreditCalls).toHaveLength(0);
+      expect(state.insertUserCreditsCalls).toHaveLength(0);
+    });
   });
 });

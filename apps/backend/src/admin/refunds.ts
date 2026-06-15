@@ -20,7 +20,12 @@ import { UUID_RE } from '../uuid.js';
 import { z } from 'zod';
 import { HOME_CURRENCIES } from '../db/schema.js';
 import type { User } from '../db/users.js';
-import { applyAdminRefund, RefundAlreadyIssuedError } from '../credits/refunds.js';
+import {
+  applyAdminRefund,
+  RefundAlreadyIssuedError,
+  RefundOrderInvalidError,
+} from '../credits/refunds.js';
+import { DailyAdjustmentLimitError } from '../credits/adjustments.js';
 import { notifyAdminAudit } from '../discord.js';
 import { logger } from '../logger.js';
 import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
@@ -163,6 +168,34 @@ export async function adminRefundHandler(c: Context): Promise<Response> {
           message: err.message,
         },
         409,
+      );
+    }
+    // CF-06: order-validation rejections. `order_not_found` is a 404;
+    // the rest are 409 (the request is well-formed but conflicts with
+    // the bound order's state — wrong owner, wrong currency, or an
+    // over-refund).
+    if (err instanceof RefundOrderInvalidError) {
+      if (err.reason === 'order_not_found') {
+        return c.json({ code: 'ORDER_NOT_FOUND', message: err.message }, 404);
+      }
+      const code =
+        err.reason === 'order_user_mismatch'
+          ? 'ORDER_USER_MISMATCH'
+          : err.reason === 'currency_mismatch'
+            ? 'REFUND_CURRENCY_MISMATCH'
+            : 'REFUND_EXCEEDS_CHARGE';
+      return c.json({ code, message: err.message }, 409);
+    }
+    // CF-06: the fleet-wide daily refund cap hit. Mirror the
+    // credit-adjustment / compensation handlers' 429 mapping so the
+    // admin UI shares one DAILY_LIMIT_EXCEEDED branch.
+    if (err instanceof DailyAdjustmentLimitError) {
+      return c.json(
+        {
+          code: 'DAILY_LIMIT_EXCEEDED',
+          message: `Daily ${err.currency} refund cap (${err.capMinor} minor) hit — ${err.usedMinor} used today, attempted ${err.attemptedDelta}`,
+        },
+        429,
       );
     }
     log.error({ err, userId, adminUserId: actor.id }, 'Refund failed');

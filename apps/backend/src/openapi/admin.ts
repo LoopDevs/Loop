@@ -173,6 +173,24 @@ export function registerAdminOpenApi(
       kind: z.literal('otp').optional().openapi({
         description: 'Reserved for ADR-028 Phase-2. Defaults to "otp".',
       }),
+      // CF-08: optional action-class binding. Mirrors STEP_UP_SCOPES
+      // in src/auth/admin-step-up.ts (kept inline so the spec module
+      // stays free of runtime auth imports).
+      scope: z
+        .enum([
+          'admin-write',
+          'credit-adjustment',
+          'refund',
+          'withdrawal',
+          'payout-retry',
+          'payout-compensation',
+          'home-currency',
+        ])
+        .optional()
+        .openapi({
+          description:
+            'CF-08: action class to bind the minted token to. Omitted → the wildcard `admin-write` scope (satisfies every gate; backward-safe default). A narrower value binds the token to one destructive-write class so it cannot be replayed against a different one.',
+        }),
     }),
   );
   const StepUpResponse = registry.register(

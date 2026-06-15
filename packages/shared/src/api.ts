@@ -100,6 +100,17 @@ export const ApiErrorCode = {
   PENDING_PAYOUTS: 'PENDING_PAYOUTS',
   FAILED_UNCOMPENSATED_WITHDRAWALS: 'FAILED_UNCOMPENSATED_WITHDRAWALS',
   REFUND_ALREADY_ISSUED: 'REFUND_ALREADY_ISSUED',
+  // CF-06 admin-refund order validation. The bound order must exist
+  // (ORDER_NOT_FOUND → 404), belong to the refund target
+  // (ORDER_USER_MISMATCH → 409, defends against IDOR / fabricated
+  // orders), have been charged in the refund currency
+  // (REFUND_CURRENCY_MISMATCH → 409), and the amount must not exceed
+  // the order's charge (REFUND_EXCEEDS_CHARGE → 409, defends against
+  // over-refund).
+  ORDER_NOT_FOUND: 'ORDER_NOT_FOUND',
+  ORDER_USER_MISMATCH: 'ORDER_USER_MISMATCH',
+  REFUND_CURRENCY_MISMATCH: 'REFUND_CURRENCY_MISMATCH',
+  REFUND_EXCEEDS_CHARGE: 'REFUND_EXCEEDS_CHARGE',
   WITHDRAWAL_ALREADY_ISSUED: 'WITHDRAWAL_ALREADY_ISSUED',
   ALREADY_COMPENSATED: 'ALREADY_COMPENSATED',
   PAYOUT_NOT_COMPENSABLE: 'PAYOUT_NOT_COMPENSABLE',
@@ -121,6 +132,10 @@ export const ApiErrorCode = {
   STEP_UP_INVALID: 'STEP_UP_INVALID',
   STEP_UP_SUBJECT_MISMATCH: 'STEP_UP_SUBJECT_MISMATCH',
   STEP_UP_UNAVAILABLE: 'STEP_UP_UNAVAILABLE',
+  // CF-08: a step-up token minted for one action class was replayed
+  // against a different one. The admin UI re-prompts (same flow as
+  // STEP_UP_INVALID) but minting for the correct action.
+  STEP_UP_PURPOSE_MISMATCH: 'STEP_UP_PURPOSE_MISMATCH',
   // Admin home-currency change (ADR 015 deferred § support-mediated
   // change). USER_NOT_FOUND is shared with other lookups but the
   // home-currency-set handler is the first to surface it from an

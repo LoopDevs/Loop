@@ -123,6 +123,75 @@ describe('signAdminStepUpToken / verifyAdminStepUpToken', () => {
     expect(verifyAdminStepUpToken('a..b').ok).toBe(false);
   });
 
+  describe('CF-08 scope claim', () => {
+    it('defaults to the wildcard scope when none is supplied', () => {
+      const { token, claims } = signAdminStepUpToken({ sub: 'a', email: 'a@b.c' });
+      expect(claims.scope).toBe('admin-write');
+      const verified = verifyAdminStepUpToken(token);
+      expect(verified.ok).toBe(true);
+      if (verified.ok) expect(verified.claims.scope).toBe('admin-write');
+    });
+
+    it('round-trips a narrowed scope', () => {
+      const { token, claims } = signAdminStepUpToken({
+        sub: 'a',
+        email: 'a@b.c',
+        scope: 'withdrawal',
+      });
+      expect(claims.scope).toBe('withdrawal');
+      const verified = verifyAdminStepUpToken(token);
+      expect(verified.ok).toBe(true);
+      if (verified.ok) expect(verified.claims.scope).toBe('withdrawal');
+    });
+
+    it('treats a scope-less wire token as the wildcard (backward-safe rotation)', () => {
+      // A token minted before the `scope` claim existed has no `scope`
+      // field on the wire — it must verify as the wildcard so an
+      // in-flight token survives the upgrade window.
+      const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString(
+        'base64url',
+      );
+      const payload = Buffer.from(
+        JSON.stringify({
+          sub: 'a',
+          email: 'a@b.c',
+          purpose: 'admin-step-up',
+          aud: 'admin-write',
+          iss: 'loop-api',
+          iat: Math.floor(Date.now() / 1000),
+          exp: Math.floor(Date.now() / 1000) + 60,
+          // no `scope`
+        }),
+      ).toString('base64url');
+      const sig = createHmac('sha256', TEST_KEY).update(`${header}.${payload}`).digest('base64url');
+      const verified = verifyAdminStepUpToken(`${header}.${payload}.${sig}`);
+      expect(verified.ok).toBe(true);
+      if (verified.ok) expect(verified.claims.scope).toBe('admin-write');
+    });
+
+    it('rejects an unknown scope as malformed (not a silent wildcard)', () => {
+      const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString(
+        'base64url',
+      );
+      const payload = Buffer.from(
+        JSON.stringify({
+          sub: 'a',
+          email: 'a@b.c',
+          purpose: 'admin-step-up',
+          aud: 'admin-write',
+          iss: 'loop-api',
+          scope: 'not-a-real-scope', // ← unknown
+          iat: Math.floor(Date.now() / 1000),
+          exp: Math.floor(Date.now() / 1000) + 60,
+        }),
+      ).toString('base64url');
+      const sig = createHmac('sha256', TEST_KEY).update(`${header}.${payload}`).digest('base64url');
+      const verified = verifyAdminStepUpToken(`${header}.${payload}.${sig}`);
+      expect(verified.ok).toBe(false);
+      if (!verified.ok) expect(verified.reason).toBe('malformed');
+    });
+  });
+
   // Rotation behaviour (current + previous keys both verify) lives in
   // the shared verify path that mirrors `tokens.ts`'s rotation
   // semantics. Not retested here — exercising rotation needs env.ts

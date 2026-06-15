@@ -42,11 +42,13 @@ export function mountAdminCreditWritesRoutes(app: Hono): void {
   // it's an explicit ops action, not a polled surface. Idempotency-Key
   // header required; missing header is a 400 at the handler edge.
   // ADR-028 / A4-063: gated behind the step-up auth middleware so a
-  // captured bearer token alone can't issue credit adjustments.
+  // captured bearer token alone can't issue credit adjustments. CF-08:
+  // bound to the `'credit-adjustment'` scope — a token narrowed to a
+  // different class won't satisfy this gate (a wildcard token still does).
   app.post(
     '/api/admin/users/:userId/credit-adjustments',
     rateLimit('POST /api/admin/users/:userId/credit-adjustments', 20, 60_000),
-    requireAdminStepUp(),
+    requireAdminStepUp('credit-adjustment'),
     adminCreditAdjustmentHandler,
   );
   // Refund write (A2-901 + ADR 017). Separate surface from credit-
@@ -54,10 +56,14 @@ export function mountAdminCreditWritesRoutes(app: Hono): void {
   // an order id, with DB-level dupe rejection via the partial unique
   // index on (type, reference_type, reference_id) from migration 0013.
   // Same rate limit and idempotency discipline as the adjustment
-  // write.
+  // write. CF-06: refund is a positive `credit_transactions` row that
+  // mints user balance, so it carries the same ADR-028 step-up gate as
+  // its sibling money-up writers — a captured bearer alone must not be
+  // able to credit balances via this path. CF-08: bound to `'refund'`.
   app.post(
     '/api/admin/users/:userId/refunds',
     rateLimit('POST /api/admin/users/:userId/refunds', 20, 60_000),
+    requireAdminStepUp('refund'),
     adminRefundHandler,
   );
   // ADR-024 / A2-901 — admin-mediated withdrawal: debit user's
@@ -65,11 +71,12 @@ export function mountAdminCreditWritesRoutes(app: Hono): void {
   // rate limit + idempotency discipline as refund. ADR-028 / A4-063
   // step-up gate also applies — a stolen bearer must NOT be able to
   // issue an outbound on-chain payout to an attacker-chosen address.
+  // CF-08: bound to the `'withdrawal'` scope.
   app.post(
     '/api/admin/users/:userId/withdrawals',
     killSwitch('withdrawals'),
     rateLimit('POST /api/admin/users/:userId/withdrawals', 20, 60_000),
-    requireAdminStepUp(),
+    requireAdminStepUp('withdrawal'),
     adminWithdrawalHandler,
   );
 }

@@ -104,4 +104,73 @@ describe('requireAdminStepUp', () => {
     await middleware(ctx, next);
     expect(next).toHaveBeenCalled();
   });
+
+  describe('CF-08 scope binding', () => {
+    it('a wildcard-scoped token (mint default) satisfies a scoped gate', async () => {
+      // No `scope` passed → defaults to the `'admin-write'` wildcard.
+      const { token } = signAdminStepUpToken({ sub: 'admin-1', email: 'a@example.com' });
+      const middleware = requireAdminStepUp('refund');
+      const { ctx } = makeCtx({
+        auth: { kind: 'loop', userId: 'admin-1' },
+        headers: { 'X-Admin-Step-Up': token },
+      });
+      const next = vi.fn(noopNext);
+      await middleware(ctx, next);
+      expect(next).toHaveBeenCalled();
+    });
+
+    it('a token narrowed to the gate action passes', async () => {
+      const { token } = signAdminStepUpToken({
+        sub: 'admin-1',
+        email: 'a@example.com',
+        scope: 'refund',
+      });
+      const middleware = requireAdminStepUp('refund');
+      const { ctx, store } = makeCtx({
+        auth: { kind: 'loop', userId: 'admin-1' },
+        headers: { 'X-Admin-Step-Up': token },
+      });
+      const next = vi.fn(noopNext);
+      await middleware(ctx, next);
+      expect(next).toHaveBeenCalled();
+      expect(store.get('stepUp')).toMatchObject({ scope: 'refund' });
+    });
+
+    it('401 STEP_UP_PURPOSE_MISMATCH when a narrowed token is replayed against a different action', async () => {
+      // A step-up confirmed for a refund must NOT be reusable for a
+      // withdrawal — this is the core CF-08 protection.
+      const { token } = signAdminStepUpToken({
+        sub: 'admin-1',
+        email: 'a@example.com',
+        scope: 'refund',
+      });
+      const middleware = requireAdminStepUp('withdrawal');
+      const { ctx } = makeCtx({
+        auth: { kind: 'loop', userId: 'admin-1' },
+        headers: { 'X-Admin-Step-Up': token },
+      });
+      const res = (await middleware(ctx, noopNext)) as Response;
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { code: string };
+      expect(body.code).toBe('STEP_UP_PURPOSE_MISMATCH');
+    });
+
+    it('a gate mounted without an action accepts a narrowed token (backward-safe)', async () => {
+      // Existing mounts that call `requireAdminStepUp()` with no
+      // argument keep accepting any valid token regardless of scope.
+      const { token } = signAdminStepUpToken({
+        sub: 'admin-1',
+        email: 'a@example.com',
+        scope: 'refund',
+      });
+      const middleware = requireAdminStepUp();
+      const { ctx } = makeCtx({
+        auth: { kind: 'loop', userId: 'admin-1' },
+        headers: { 'X-Admin-Step-Up': token },
+      });
+      const next = vi.fn(noopNext);
+      await middleware(ctx, next);
+      expect(next).toHaveBeenCalled();
+    });
+  });
 });

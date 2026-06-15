@@ -21,14 +21,51 @@
  * back to a different state (cancelled, refunded) is a separate
  * support-mediated action.
  */
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, gte, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { creditTransactions, userCredits } from '../db/schema.js';
+import { creditTransactions, orders, userCredits } from '../db/schema.js';
+import { env } from '../env.js';
+import { adjustmentCapLockKey, DailyAdjustmentLimitError } from './adjustments.js';
+
+/**
+ * CF-06: advisory-lock scope for the refund daily-cap bucket. Refund
+ * rows carry `referenceType='order'` (the refunded order, not the
+ * acting admin), so — like the fleet-wide payout-compensation cap
+ * (A4-020) — there is no per-admin attribution to key on. The cap is
+ * therefore fleet-wide per currency per UTC day: the sum of all
+ * `type='refund'` magnitudes plus the new attempt must stay under
+ * `ADMIN_DAILY_ADJUSTMENT_CAP_MINOR`. This closes the gap where the
+ * adjustment cap query (filtered on `type='adjustment'`) was blind to
+ * refunds, leaving total per-day refund volume unbounded by count of
+ * distinct order ids.
+ */
+const REFUND_CAP_LOCK_SCOPE = 'refund';
 
 export class RefundAlreadyIssuedError extends Error {
   constructor(public readonly orderId: string) {
     super(`A refund has already been issued for order ${orderId}`);
     this.name = 'RefundAlreadyIssuedError';
+  }
+}
+
+/**
+ * CF-06: the refund references an order that doesn't exist, belongs to
+ * a different user than the refund target, was charged in a different
+ * currency, or whose charge amount the refund would exceed. The
+ * handler maps this to a 400/404/409 at the API edge. Carries a
+ * machine-readable `reason` so the handler can pick the right status.
+ */
+export class RefundOrderInvalidError extends Error {
+  constructor(
+    public readonly reason:
+      | 'order_not_found'
+      | 'order_user_mismatch'
+      | 'currency_mismatch'
+      | 'exceeds_charge',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'RefundOrderInvalidError';
   }
 }
 
@@ -67,6 +104,94 @@ export async function applyAdminRefund(args: {
 
   try {
     return await db.transaction(async (tx) => {
+      // CF-06: validate the bound order before crediting anything.
+      // Without this an admin (or a captured bearer) could mint a
+      // refund credit to any user against a fabricated UUID, against
+      // an order that belongs to a *different* user (IDOR), or for
+      // more than the order ever cost (over-refund). Lock the order
+      // row FOR UPDATE so the charge amount can't shift under us.
+      const [order] = await tx
+        .select({
+          orderUserId: orders.userId,
+          chargeMinor: orders.chargeMinor,
+          chargeCurrency: orders.chargeCurrency,
+        })
+        .from(orders)
+        .where(eq(orders.id, args.orderId))
+        .for('update');
+      if (order === undefined) {
+        throw new RefundOrderInvalidError(
+          'order_not_found',
+          `Order ${args.orderId} does not exist`,
+        );
+      }
+      if (order.orderUserId !== args.userId) {
+        throw new RefundOrderInvalidError(
+          'order_user_mismatch',
+          `Order ${args.orderId} belongs to a different user`,
+        );
+      }
+      // The refund credits the user's home-currency balance; that must
+      // be the currency the order charged them in, otherwise the
+      // "reverses the spend of this order" invariant (ADR-017/009)
+      // doesn't hold and the amount bound below would compare across
+      // currencies.
+      if (order.chargeCurrency !== args.currency) {
+        throw new RefundOrderInvalidError(
+          'currency_mismatch',
+          `Refund currency ${args.currency} does not match order charge currency ${order.chargeCurrency}`,
+        );
+      }
+      // Over-refund fence: a refund can never exceed what the user was
+      // charged for the order. The partial unique index on
+      // (type='refund', reference_type='order', reference_id) already
+      // limits this to a single refund per order, so the bound is the
+      // whole charge.
+      if (args.amountMinor > order.chargeMinor) {
+        throw new RefundOrderInvalidError(
+          'exceeds_charge',
+          `Refund ${args.amountMinor} exceeds order charge ${order.chargeMinor}`,
+        );
+      }
+
+      // CF-06: enforce the daily admin-write cap on refunds. The
+      // adjustment cap query filters on `type='adjustment'`, so refund
+      // rows (`type='refund'`) bypassed the magnitude circuit-breaker
+      // entirely. Apply a fleet-wide refund cap (per currency, per UTC
+      // day, all admins combined) under the same advisory-lock
+      // derivation the adjustment / compensation writers use, so two
+      // concurrent refunds in the same bucket can't jointly exceed it.
+      const capMinor = env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR;
+      if (capMinor > 0n) {
+        const dayStart = new Date();
+        dayStart.setUTCHours(0, 0, 0, 0);
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(${adjustmentCapLockKey(REFUND_CAP_LOCK_SCOPE, args.currency, dayStart)})`,
+        );
+        const [dayRow] = await tx
+          .select({
+            usedMinor: sql<string>`COALESCE(SUM(ABS(${creditTransactions.amountMinor}))::text, '0')`,
+          })
+          .from(creditTransactions)
+          .where(
+            and(
+              eq(creditTransactions.type, 'refund'),
+              eq(creditTransactions.currency, args.currency),
+              gte(creditTransactions.createdAt, dayStart),
+            ),
+          );
+        const used = BigInt(dayRow?.usedMinor ?? '0');
+        if (used + args.amountMinor > capMinor) {
+          throw new DailyAdjustmentLimitError(
+            args.currency,
+            dayStart,
+            used,
+            capMinor,
+            args.amountMinor,
+          );
+        }
+      }
+
       // Lock the (userId, currency) row FOR UPDATE so a concurrent
       // adjustment / accrual doesn't read a stale priorBalance.
       const [existing] = await tx

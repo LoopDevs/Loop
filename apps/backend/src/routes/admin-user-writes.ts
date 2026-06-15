@@ -25,7 +25,8 @@ export function mountAdminUserWritesRoutes(app: Hono): void {
   app.post(
     '/api/admin/users/:userId/home-currency',
     rateLimit('POST /api/admin/users/:userId/home-currency', 20, 60_000),
-    requireAdminStepUp(),
+    // CF-08: bound to the `'home-currency'` scope.
+    requireAdminStepUp('home-currency'),
     adminHomeCurrencySetHandler,
   );
 }

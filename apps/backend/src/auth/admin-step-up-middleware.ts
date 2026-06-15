@@ -18,6 +18,12 @@
  *   - Subject mismatch (step-up token's `sub` ≠ bearer token's
  *     `sub`) → 401 `STEP_UP_SUBJECT_MISMATCH` (defends against
  *     replaying admin A's step-up against admin B's session).
+ *   - Scope mismatch (CF-08): the gate was mounted with a specific
+ *     `action` but the token's `scope` is a *different* narrow scope
+ *     → 401 `STEP_UP_PURPOSE_MISMATCH`. A wildcard-scoped token
+ *     (`'admin-write'`, the mint default) satisfies any action, so
+ *     this only fires when an admin deliberately narrowed a token to
+ *     one class and then replayed it against another class.
  *   - Backend not configured (`LOOP_ADMIN_STEP_UP_SIGNING_KEY`
  *     unset) → 503 `STEP_UP_UNAVAILABLE`. Fail closed: surface
  *     ships disabled if the operator hasn't generated the key.
@@ -32,6 +38,8 @@ import type { Context, MiddlewareHandler } from 'hono';
 import {
   isAdminStepUpConfigured,
   verifyAdminStepUpToken,
+  STEP_UP_SCOPE_WILDCARD,
+  type AdminStepUpScope,
   type AdminStepUpVerifyResult,
 } from './admin-step-up.js';
 import { logger } from '../logger.js';
@@ -45,11 +53,17 @@ interface AuthLike {
 
 /**
  * Returns the middleware handler. Exported as a factory rather than a
- * direct middleware export so future scope changes (e.g. per-action
- * audit-tag) can flow through configuration without changing the
- * import shape.
+ * direct middleware export so the per-action scope binding (CF-08)
+ * flows through configuration without changing the import shape.
+ *
+ * @param action — CF-08 action class this gate guards. Omitted (the
+ *   prior call shape) means "any narrow scope is accepted" — the gate
+ *   only verifies freshness, not which class the token was minted for,
+ *   so existing mounts keep working unchanged. Pass a specific scope
+ *   to additionally require that a *narrowed* token was minted for
+ *   exactly this class (a wildcard token still satisfies it).
  */
-export function requireAdminStepUp(): MiddlewareHandler {
+export function requireAdminStepUp(action?: AdminStepUpScope): MiddlewareHandler {
   return async (c: Context, next) => {
     if (!isAdminStepUpConfigured()) {
       log.error('admin step-up gate hit but LOOP_ADMIN_STEP_UP_SIGNING_KEY is unset');
@@ -111,6 +125,31 @@ export function requireAdminStepUp(): MiddlewareHandler {
         {
           code: 'STEP_UP_SUBJECT_MISMATCH',
           message: 'Step-up token belongs to a different admin session.',
+        },
+        401,
+      );
+    }
+
+    // CF-08 scope binding. If this gate guards a specific action and
+    // the presented token was minted for a *different* narrow scope,
+    // reject — a step-up confirmed for (say) a refund must not be
+    // silently reusable for a withdrawal. A wildcard-scoped token
+    // (`'admin-write'`, the mint default) satisfies every action, so
+    // the common "one generic token, replayed across writes" flow is
+    // unaffected; this only fires for deliberately-narrowed tokens.
+    if (
+      action !== undefined &&
+      verified.claims.scope !== STEP_UP_SCOPE_WILDCARD &&
+      verified.claims.scope !== action
+    ) {
+      log.warn(
+        { tokenScope: verified.claims.scope, requiredAction: action },
+        'admin step-up scope mismatch',
+      );
+      return c.json(
+        {
+          code: 'STEP_UP_PURPOSE_MISMATCH',
+          message: 'Step-up token was confirmed for a different action. Re-confirm to continue.',
         },
         401,
       );

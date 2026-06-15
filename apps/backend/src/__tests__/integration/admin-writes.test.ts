@@ -390,13 +390,15 @@ describeIf('admin refund write — real postgres ladder + duplicate guard', () =
   });
 
   it('refund happy path: order-bound credit-tx + balance bumped', async () => {
-    const { targetUser, bearer, orderId } = await seed();
+    const { targetUser, bearer, stepUp, orderId } = await seed();
     const res = await app.request(`http://localhost/api/admin/users/${targetUser.id}/refunds`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${bearer}`,
         'idempotency-key': idemKey(),
+        // CF-06: refund is now step-up-gated like its sibling writers.
+        'X-Admin-Step-Up': stepUp,
       },
       body: JSON.stringify({
         amountMinor: '1000',
@@ -427,12 +429,14 @@ describeIf('admin refund write — real postgres ladder + duplicate guard', () =
   });
 
   it('rejects a second refund for the same orderId with 409 REFUND_ALREADY_ISSUED', async () => {
-    const { targetUser, bearer, orderId } = await seed();
+    const { targetUser, bearer, stepUp, orderId } = await seed();
     const url = `http://localhost/api/admin/users/${targetUser.id}/refunds`;
     const headers = (key: string): Record<string, string> => ({
       'Content-Type': 'application/json',
       Authorization: `Bearer ${bearer}`,
       'idempotency-key': key,
+      // CF-06: refund is now step-up-gated like its sibling writers.
+      'X-Admin-Step-Up': stepUp,
     });
     const body = JSON.stringify({
       amountMinor: '500',
@@ -752,6 +756,8 @@ describeIf('admin withdrawal write — real postgres ladder + atomic two-row txn
             'Content-Type': 'application/json',
             Authorization: `Bearer ${bearer}`,
             'idempotency-key': idemKey(),
+            // CF-07: compensate is now step-up-gated like its sibling /retry.
+            'X-Admin-Step-Up': stepUp,
           },
           body: JSON.stringify({ reason: 'race compensate' }),
         }),
@@ -1026,7 +1032,7 @@ describeIf('admin payout-compensation write — fleet-wide daily cap race', () =
     // 500 each; one fits, two would total 1000 > 700.
     env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 700n;
     try {
-      const { targetUser, bearer } = await seed();
+      const { targetUser, bearer, stepUp } = await seed();
       const payoutA = await seedFailedWithdrawalPayout({
         userId: targetUser.id,
         amountStroops: 500n * 100_000n,
@@ -1047,6 +1053,8 @@ describeIf('admin payout-compensation write — fleet-wide daily cap race', () =
             'Content-Type': 'application/json',
             Authorization: `Bearer ${bearer}`,
             'idempotency-key': idemKey(),
+            // CF-07: compensate is now step-up-gated.
+            'X-Admin-Step-Up': stepUp,
           },
           body: JSON.stringify({ reason: 'concurrent cap race test' }),
         });
@@ -1099,7 +1107,7 @@ describeIf('admin payout-compensation write — fleet-wide daily cap race', () =
     const previousCap = env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR;
     env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 700n;
     try {
-      const { targetUser, bearer } = await seed();
+      const { targetUser, bearer, stepUp } = await seed();
       const payoutId = await seedFailedWithdrawalPayout({
         userId: targetUser.id,
         amountStroops: 500n * 100_000n,
@@ -1141,6 +1149,8 @@ describeIf('admin payout-compensation write — fleet-wide daily cap race', () =
             'Content-Type': 'application/json',
             Authorization: `Bearer ${bearer}`,
             'idempotency-key': idemKey(),
+            // CF-07: compensate is now step-up-gated.
+            'X-Admin-Step-Up': stepUp,
           },
           body: JSON.stringify({ reason: 'must wait for the cap lock' }),
         }),
