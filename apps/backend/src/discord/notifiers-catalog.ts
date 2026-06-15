@@ -98,6 +98,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       'Fires when every operator in the CTX pool is unhealthy — procurement is blocked. Throttled to once per 15 min per deployment so a sustained outage stays loud without flooding the channel (ADR 013).',
   },
   {
+    name: 'notifyOperatorCredentialExpired',
+    channel: 'monitoring',
+    description:
+      'CF-13: fires when a CTX operator returns 401 ("token invalid") — its bearer expired or was revoked. operatorFetch pulls the operator from rotation (forces its breaker open) and fails over to a healthy sibling. Per-operator 10-min dedup so a sustained 401 produces one alert per operator per ten minutes (ADR 013).',
+  },
+  {
     name: 'notifyCtxSchemaDrift',
     channel: 'monitoring',
     description:

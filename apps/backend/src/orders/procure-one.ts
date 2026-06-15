@@ -19,7 +19,11 @@ import {
   revertOrderProcuringToPaid,
 } from './transitions.js';
 import type { Order } from './repo.js';
-import { operatorFetch, OperatorPoolUnavailableError } from '../ctx/operator-pool.js';
+import {
+  operatorFetch,
+  OperatorPoolUnavailableError,
+  OperatorRateLimitedError,
+} from '../ctx/operator-pool.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { notifyCashbackCredited, notifyUsdcBelowFloor } from '../discord.js';
@@ -306,6 +310,20 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
     }
     return 'fulfilled';
   } catch (err) {
+    // CF-12: a CTX 429 across every reachable operator is transient
+    // back-pressure, not an order failure. Revert procuring → paid so
+    // a later tick re-picks the order once CTX's rate-limit clears —
+    // marking it `failed` here would turn a rate-limit into a
+    // self-sustaining hot loop that loses real paid orders. Same
+    // revert/defer shape as the pool-unavailable path below.
+    if (err instanceof OperatorRateLimitedError) {
+      await revertOrderProcuringToPaid(order.id);
+      log.warn(
+        { orderId: order.id, retryAfterMs: err.retryAfterMs },
+        'CTX rate-limited (429) — reverted procuring → paid for retry on a later tick',
+      );
+      return 'skipped';
+    }
     if (err instanceof OperatorPoolUnavailableError) {
       // A4-101: revert state back to `paid` so the next
       // procurement tick re-picks the order. Earlier behaviour
@@ -314,6 +332,12 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
       // there until the stuck-sweep marked it `failed`
       // (~15 min later) under what is fundamentally a transient
       // ops-pool outage with no CTX call ever made.
+      //
+      // CF-13: this path now also fires when every operator's bearer
+      // returned 401 (expired). The credential alert has already been
+      // sent; reverting keeps the order retryable for when ops
+      // restores a bearer, rather than failing real paid orders while
+      // a credential is rotated.
       await revertOrderProcuringToPaid(order.id);
       log.warn(
         { orderId: order.id },

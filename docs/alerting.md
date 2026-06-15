@@ -68,6 +68,10 @@ not want every notifier paging on-call):
 - `notifyAssetDrift` (over-minted) — ADR-015 safety-critical; blocks
   issuance until explained.
 - `notifyOperatorPoolExhausted` — procurement can't proceed.
+- `notifyOperatorCredentialExpired` (CF-13) — a CTX operator bearer
+  returned 401 (expired/revoked). Degraded-not-down while a healthy
+  sibling fails over; paging-grade if it fires for every operator. The
+  fix is operator-side (re-mint the bearer), not auto-recoverable.
 - `notifyHealthChange` `'degraded'` — only after the rolling window
   confirms; already heavily dedup'd.
 

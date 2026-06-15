@@ -71,6 +71,24 @@ auth flow per-operator, so all of them lose tokens at once.
 3. Workers re-read on the next tick; operators come back HALF_OPEN
    → `closed` after the first successful probe.
 
+### Single-operator 401 (CF-13 — `notifyOperatorCredentialExpired`)
+
+A distinct, earlier-firing alert titled **"🔴 CTX Operator Credential
+Expired (401)"** fires when ONE operator returns 401 (its bearer
+expired/revoked) — before the whole pool is exhausted. `operatorFetch`
+forces that operator's circuit OPEN, pulls it from rotation, and fails
+over to a healthy sibling, so procurement keeps running **degraded**
+(the embed's `Failed over` field says `yes`). The order is NOT failed —
+a tick that 401s on every reachable operator reverts `procuring → paid`
+to retry later (`procure-one.ts`).
+
+Action: re-mint that single operator's bearer and update its entry in
+`CTX_OPERATOR_POOL` (same `fly secrets set` as the all-401 case above).
+No restart needed — the operator comes back HALF_OPEN → `closed` after
+the cooldown's first successful probe. If `Failed over` says `no`, this
+operator was the last healthy one and the pool-exhausted alert will
+follow — treat as P0.
+
 ### Loop-side bug
 
 If only Loop is reporting "all operators down" but CTX is otherwise

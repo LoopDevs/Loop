@@ -409,6 +409,64 @@ export function notifyOperatorPoolExhausted(args: { poolSize: number; reason: st
   });
 }
 
+/**
+ * CF-13: per-operator dedup so a single expired operator bearer
+ * doesn't flood `#monitoring` with one alert per request while it
+ * keeps returning 401. 10-minute window matches the circuit-breaker
+ * and CTX-schema-drift dedup cadence — long enough to stay quiet
+ * during a sustained outage, short enough that "still expired" fires
+ * within an ops rotation.
+ */
+const OPERATOR_CREDENTIAL_DEDUP_MS = 10 * 60 * 1000;
+const operatorCredentialLastNotified = new Map<string, number>();
+
+/** Test helper — wipe the per-operator credential-alert dedup map. */
+export function __resetOperatorCredentialDedupForTests(): void {
+  operatorCredentialLastNotified.clear();
+}
+
+/**
+ * Notify: a CTX operator returned 401 ("token invalid") — its bearer
+ * has expired or been revoked (CF-13). Operator bearers are static
+ * and not yet auto-rotated (ADR 013 / `project_ctx_refresh_rotation`),
+ * so the operator-side action is to re-mint and re-deploy the bearer
+ * in `CTX_OPERATOR_POOL`. `operatorFetch` has already pulled the
+ * operator from rotation (forced its breaker OPEN) and failed over to
+ * a healthy sibling, so this is a degraded-not-down signal unless it
+ * fires for every operator. Per-operator 10-minute dedup so a sustained
+ * 401 produces one alert per operator per ten minutes, not one per
+ * request.
+ */
+export function notifyOperatorCredentialExpired(args: {
+  operatorId: string;
+  poolSize: number;
+  failedOver: boolean;
+}): void {
+  const now = Date.now();
+  const last = operatorCredentialLastNotified.get(args.operatorId);
+  if (last !== undefined && now - last < OPERATOR_CREDENTIAL_DEDUP_MS) {
+    return;
+  }
+  operatorCredentialLastNotified.set(args.operatorId, now);
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🔴 CTX Operator Credential Expired (401)',
+    description: truncate(
+      `Operator \`${escapeMarkdown(args.operatorId)}\` returned 401 from CTX — its bearer has expired or been revoked. It has been pulled from rotation. Re-mint the bearer and update \`CTX_OPERATOR_POOL\` (ADR 013). ${
+        args.failedOver
+          ? 'A healthy sibling operator served the request, so procurement continues degraded.'
+          : 'No healthy sibling was available — procurement is blocked until a bearer is restored.'
+      }`,
+      DESCRIPTION_MAX,
+    ),
+    color: RED,
+    fields: [
+      { name: 'Operator', value: `\`${escapeMarkdown(args.operatorId)}\``, inline: true },
+      { name: 'Pool size', value: String(args.poolSize), inline: true },
+      { name: 'Failed over', value: args.failedOver ? 'yes' : 'no', inline: true },
+    ],
+  });
+}
+
 // `notifyCircuitBreaker` (A2-1326) and its per-(name, state) dedup
 // state live in `./monitoring-circuit-breaker.ts`. Re-exported below
 // alongside `__resetCircuitNotifyDedupForTests` so existing import

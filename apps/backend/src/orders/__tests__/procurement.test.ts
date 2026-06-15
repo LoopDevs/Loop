@@ -29,9 +29,19 @@ vi.mock('../../ctx/operator-pool.js', () => {
       this.name = 'OperatorPoolUnavailableError';
     }
   }
+  // CF-12: procure-one imports this for the rate-limit defer branch.
+  class OperatorRateLimitedError extends Error {
+    readonly retryAfterMs: number | null;
+    constructor(message: string, retryAfterMs: number | null = null) {
+      super(message);
+      this.name = 'OperatorRateLimitedError';
+      this.retryAfterMs = retryAfterMs;
+    }
+  }
   return {
     operatorFetch: (url: string, init?: RequestInit) => operatorFetchMock(url, init),
     OperatorPoolUnavailableError,
+    OperatorRateLimitedError,
     // waitForRedemption asks the pool for SSE credentials. Returning
     // null skips the SSE attempt entirely and the polling fallback
     // exercises the same fetch path the legacy one-shot did — which
@@ -148,7 +158,7 @@ import {
   pickProcurementAsset,
   __resetBelowFloorAlertForTests,
 } from '../procurement.js';
-import { OperatorPoolUnavailableError } from '../../ctx/operator-pool.js';
+import { OperatorPoolUnavailableError, OperatorRateLimitedError } from '../../ctx/operator-pool.js';
 
 type AnyOrder = {
   id: string;
@@ -420,6 +430,18 @@ describe('runProcurementTick', () => {
     // A4-101: row is reverted from `procuring` back to `paid` so
     // the next tick re-picks it. Earlier behaviour left it
     // procuring and the stuck-sweep failed it ~15 min later.
+    expect(revertProcuringMock).toHaveBeenCalledWith('o-1');
+  });
+
+  it('CF-12: CTX rate-limit (429) → reverts to paid, skipped, NOT failed', async () => {
+    state.paid = [makeOrder({ id: 'o-1' })];
+    operatorFetchMock.mockRejectedValue(new OperatorRateLimitedError('all operators 429', 5000));
+    const r = await runProcurementTick();
+    expect(r.skipped).toBe(1);
+    expect(r.failed).toBe(0);
+    expect(markFailedMock).not.toHaveBeenCalled();
+    // CF-12: a transient rate-limit must defer, not fail real paid
+    // orders into a self-sustaining hot loop.
     expect(revertProcuringMock).toHaveBeenCalledWith('o-1');
   });
 

@@ -411,3 +411,92 @@ describe('A2-1305 — outbound X-Request-Id propagation', () => {
     expect(headers.get('X-Request-Id')).toBe('req-caller-override');
   });
 });
+
+describe('CF-12 — 429 rate-limit is an upstream-health signal, not a success', () => {
+  it('does NOT reset the failure counter on a 429 (429 is not a success)', async () => {
+    const cb = createCircuitBreaker({ failureThreshold: 3 });
+
+    // Two 500s push consecutiveFailures to 2.
+    mockFetch.mockResolvedValueOnce(new Response('err', { status: 500 }));
+    await cb.fetch('http://x');
+    mockFetch.mockResolvedValueOnce(new Response('err', { status: 500 }));
+    await cb.fetch('http://x');
+    expect(cb.getState()).toBe('closed');
+
+    // A 429 must NOT reset the counter — if it counted as a success
+    // the next 500 would only bring us to 1 and never open. Because the
+    // 429 counts as a failure, the counter reaches the threshold of 3
+    // on this very call and the breaker opens.
+    mockFetch.mockResolvedValueOnce(new Response('slow down', { status: 429 }));
+    await cb.fetch('http://x');
+    expect(cb.getState()).toBe('open');
+  });
+
+  it('opens after consecutive 429s reach the threshold', async () => {
+    const cb = createCircuitBreaker({ failureThreshold: 3 });
+    for (let i = 0; i < 3; i++) {
+      mockFetch.mockResolvedValueOnce(new Response('slow down', { status: 429 }));
+      await cb.fetch('http://x');
+    }
+    expect(cb.getState()).toBe('open');
+  });
+
+  it('other 4xx still do NOT trip the circuit', async () => {
+    const cb = createCircuitBreaker({ failureThreshold: 2 });
+    for (let i = 0; i < 5; i++) {
+      mockFetch.mockResolvedValueOnce(new Response('forbidden', { status: 403 }));
+      await cb.fetch('http://x');
+    }
+    expect(cb.getState()).toBe('closed');
+  });
+});
+
+describe('CF-13 — forceOpen trips the circuit out-of-band', () => {
+  it('opens immediately on forceOpen without any failed fetch', () => {
+    const cb = createCircuitBreaker({ failureThreshold: 5 });
+    expect(cb.getState()).toBe('closed');
+    cb.forceOpen();
+    expect(cb.getState()).toBe('open');
+  });
+
+  it('a forceOpen circuit fast-fails subsequent requests with CircuitOpenError', async () => {
+    const cb = createCircuitBreaker({ failureThreshold: 5, cooldownMs: 60_000 });
+    cb.forceOpen();
+    mockFetch.mockReset();
+    await expect(cb.fetch('http://x')).rejects.toThrow(CircuitOpenError);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('fires the open notification once on forceOpen', () => {
+    const cb = createCircuitBreaker({ name: 'operator:op-1' });
+    cb.forceOpen();
+    expect(mockNotify).toHaveBeenCalledTimes(1);
+    expect(mockNotify).toHaveBeenCalledWith(
+      'open',
+      expect.any(Number),
+      expect.any(Number),
+      'operator:op-1',
+    );
+  });
+
+  it('is a no-op when already OPEN (does not re-notify or extend cooldown)', async () => {
+    const cb = createCircuitBreaker({ name: 'operator:op-1' });
+    cb.forceOpen();
+    expect(mockNotify).toHaveBeenCalledTimes(1);
+    cb.forceOpen();
+    cb.forceOpen();
+    expect(mockNotify).toHaveBeenCalledTimes(1);
+    expect(cb.getState()).toBe('open');
+  });
+
+  it('recovers via a HALF_OPEN probe after the cooldown elapses', async () => {
+    const cb = createCircuitBreaker({ cooldownMs: 30 });
+    cb.forceOpen();
+    expect(cb.getState()).toBe('open');
+    await new Promise((r) => setTimeout(r, 50));
+    mockFetch.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+    const res = await cb.fetch('http://x');
+    expect(res.status).toBe(200);
+    expect(cb.getState()).toBe('closed');
+  });
+});
