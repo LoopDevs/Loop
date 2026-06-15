@@ -6,6 +6,13 @@ import { triggerHaptic, triggerHapticNotification } from '~/native/haptics';
 import { openWebView } from '~/native/webview';
 import { Input } from '~/components/ui/Input';
 import { buildChallengeBarScript } from '~/utils/redeem-challenge-bar';
+import { parseGiftCardMessage } from '~/utils/redeem-message';
+
+// Defensive cap on a CTX-supplied inject/scrape script. The backend already
+// Zod-validates + size-caps these (audit CF-02), so this is belt-and-braces
+// against a script that somehow arrives oversized — we skip it rather than
+// inject an unbounded blob into the merchant WebView.
+const MAX_SCRIPT_LEN = 100_000;
 
 interface RedeemFlowProps {
   merchantName: string;
@@ -65,10 +72,10 @@ export function RedeemFlow({
     //   2. Provider-supplied injectChallenge (auto-fill if possible).
     //   3. Provider-supplied scrapeResult (capture code + postMessage).
     const injectScripts: string[] = [buildChallengeBarScript(challengeCode)];
-    if (scripts?.injectChallenge) {
+    if (scripts?.injectChallenge && scripts.injectChallenge.length <= MAX_SCRIPT_LEN) {
       injectScripts.push(scripts.injectChallenge);
     }
-    if (scripts?.scrapeResult) {
+    if (scripts?.scrapeResult && scripts.scrapeResult.length <= MAX_SCRIPT_LEN) {
       injectScripts.push(scripts.scrapeResult);
     }
 
@@ -79,20 +86,16 @@ export function RedeemFlow({
         url: redeemUrl,
         scripts: injectScripts,
         onMessage: (data) => {
-          // Check for gift card result from scrapeResult script
-          if (
-            data !== null &&
-            typeof data === 'object' &&
-            'type' in data &&
-            (data as Record<string, unknown>).type === 'loop:giftcard'
-          ) {
-            const result = data as { code?: string; pin?: string };
-            if (result.code) {
-              receivedCodeRef.current = true;
-              void triggerHapticNotification('success');
-              store.setComplete(result.code, result.pin);
-              void controller.close();
-            }
+          // CF-02 / WEB-S2: the scrapeResult script runs in the merchant page;
+          // its postMessage is untrusted input. Accept only a strictly-valid
+          // `loop:giftcard` payload (short, printable code/pin) — a forged
+          // shape or garbage blob is ignored, not driven into setComplete.
+          const result = parseGiftCardMessage(data);
+          if (result !== null) {
+            receivedCodeRef.current = true;
+            void triggerHapticNotification('success');
+            store.setComplete(result.code, result.pin);
+            void controller.close();
           }
         },
         onClose: () => {
