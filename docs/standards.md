@@ -1027,7 +1027,7 @@ structure:
 jobs:
   quality: # typecheck + lint + format:check + lint:docs (flyctl validate)
   test-unit: # vitest run --coverage on backend and web
-  audit: # repo audit policy gate (high/critical always fail; moderate set must be explicitly accepted)
+  audit: # repo audit policy gate (critical always fails; high + moderate sets must be explicitly accepted)
   build: # backend tsup + web SSR build + web mobile static export
   test-e2e-mocked: # playwright mocked suite — runs on every push (audit A-003)
   test-e2e: # playwright real-upstream suite — PR-only
@@ -1037,34 +1037,41 @@ jobs:
 ### Security audit policy
 
 - `npm run audit` is the only supported dependency-audit gate.
-- High and critical advisories always fail the gate.
-- Moderate advisories do **not** pass silently. The checked-in script
+- **Critical** advisories always fail the gate — never auto-accepted.
+- **High** and **moderate** advisories do **not** pass silently. The
+  checked-in script
   [scripts/check-audit-policy.mjs](/Users/ash/code/loop-app/scripts/check-audit-policy.mjs)
-  pins the currently accepted moderate set exactly; a new moderate, or a
-  removed one that leaves stale policy behind, fails CI until the policy
-  is reviewed and updated.
-- Current accepted moderates (the authoritative set, with full
-  rationale per entry, is `ACCEPTED_MODERATE_VULNS` in
-  `scripts/check-audit-policy.mjs` — keep this list in sync with it):
-  - `@esbuild-kit/core-utils`
-  - `@esbuild-kit/esm-loader`
-  - `drizzle-kit`
-  - `esbuild`
-  - `hono`
-- The `drizzle-kit` / `@esbuild-kit/*` / `esbuild` cluster remains
-  accepted only because the available fix path is a major-version move
-  that needs a deliberate migration. `hono` covers three moderate
-  advisories on `hono <= 4.12.17`, none of which reach an exploitable
-  code path in Loop: (a) JSX-SSR CSS injection — Loop's SSR is React
-  Router v7, not Hono JSX; (b) Hono JWT `verify()` NumericDate-claim
-  gap — Loop uses its own verifier (`apps/backend/src/auth/tokens.ts`)
-  with explicit `iat`/`exp`/`iss`/`aud` checks and never imports Hono
-  JWT; (c) Cache-Middleware `Vary` gap — Loop doesn't mount Hono Cache
-  Middleware. The fix needs `hono@4.12.18+`, outside the
-  `@hono/zod-openapi` peer-dep range — revisit when that constraint
-  relaxes. (`postcss` was previously listed; its transitive bump landed
-  and the gate would now flag it as stale policy.) None of this is a
-  blanket waiver for future moderate findings.
+  pins the currently accepted set for each tier exactly (`ACCEPTED_HIGH_VULNS`,
+  `ACCEPTED_MODERATE_VULNS`); a new advisory at either tier, or a removed one
+  that leaves stale policy behind, fails CI until the policy is reviewed and
+  updated. An advisory's tier can shift over time, so a package lives in
+  whichever map matches its **current** observed severity.
+- Current accepted **highs** (authoritative set + per-entry rationale in
+  `ACCEPTED_HIGH_VULNS`): `esbuild`, `vite`, `vite-node`, `tsx`, `tsup`,
+  `drizzle-kit`, `@react-router/dev`. These are the esbuild dev-server /
+  build-toolchain advisory chain (GHSA-67mh-4wv8-2f99 + GHSA-gv7w-rqvm-qjhr,
+  esbuild `<=0.28.0`, re-rated moderate→high on 2026-06). Accepted because the
+  chain is **dev/build-time only** — esbuild and its dependents are never in
+  the deployed runtime (the backend ships compiled `dist`; the web client is
+  built ahead of deploy), so the dev-server-SSRF / `NPM_CONFIG_REGISTRY`-RCE
+  vectors are unreachable by any deployed surface. Fixes are semver-major
+  (esbuild/vite/tsup/drizzle-kit/@react-router/dev) or a non-major `tsx` bump
+  tracked as a follow-up.
+- Current accepted **moderates** (`ACCEPTED_MODERATE_VULNS`):
+  `@esbuild-kit/core-utils`, `@esbuild-kit/esm-loader`, `hono`. The
+  `@esbuild-kit/*` pair rides the deprecated drizzle-kit loader chain (major
+  fix). `hono` covers three moderate advisories on `hono <= 4.12.17`, none of
+  which reach an exploitable code path in Loop: (a) JSX-SSR CSS injection —
+  Loop's SSR is React Router v7, not Hono JSX; (b) Hono JWT `verify()`
+  NumericDate-claim gap — Loop uses its own verifier
+  (`apps/backend/src/auth/tokens.ts`) with explicit `iat`/`exp`/`iss`/`aud`
+  checks and never imports Hono JWT; (c) Cache-Middleware `Vary` gap — Loop
+  doesn't mount Hono Cache Middleware. The openapi layer is
+  `@asteasolutions/zod-to-openapi` (peer `zod ^4` only — **no** hono
+  constraint), so hono is bumpable; the deferral is a deliberate choice not to
+  take a minor hono bump mid-audit, revisited on the next dependency sweep.
+  (`esbuild` + `drizzle-kit` were previously here; the 2026-06 re-rating moved
+  them to the high set.) None of this is a blanket waiver for future findings.
 
 ### Branch protection on `main`
 
