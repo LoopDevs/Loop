@@ -35,6 +35,19 @@ interface CircuitBreaker {
   getState: () => CircuitState;
   /** Resets the circuit to CLOSED (useful for testing). */
   reset: () => void;
+  /**
+   * CF-13: immediately trip the circuit OPEN regardless of the
+   * consecutive-failure count. Used when a caller has out-of-band
+   * proof the upstream is unhealthy in a way a single response can't
+   * recover from — e.g. an operator bearer that returns 401 ("token
+   * invalid") is dead until rotated, so there's no value in waiting
+   * for five of them. The standard `cooldownMs` still applies, after
+   * which a HALF_OPEN probe re-tests the credential. No-op if the
+   * circuit is already OPEN so a burst of 401s doesn't push `openedAt`
+   * forward and extend the cooldown indefinitely (same guard as
+   * `onFailure`).
+   */
+  forceOpen: () => void;
 }
 
 /**
@@ -169,8 +182,15 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
       }
 
       // Treat 5xx as upstream failures for circuit-breaker purposes.
-      // 4xx are client errors and should NOT trip the circuit.
-      if (response.status >= 500) {
+      // 4xx are client errors and should NOT trip the circuit — with
+      // one exception: CF-12 — a 429 ("too many requests") is an
+      // upstream-health signal, not a client bug. Counting it as a
+      // success would reset `consecutiveFailures` to 0 on every
+      // rate-limited response, so the breaker would never open under a
+      // CTX rate-limit storm and the caller would keep hammering at
+      // full cadence. Credit it toward the failure threshold so the
+      // breaker opens and the existing cooldown backs us off.
+      if (response.status >= 500 || response.status === 429) {
         onFailure();
       } else {
         onSuccess();
@@ -196,7 +216,25 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
     clearProbeTimer();
   }
 
-  return { fetch: wrappedFetch, getState, reset };
+  /**
+   * CF-13: trip the circuit OPEN out-of-band. Bumps the failure
+   * counter to the threshold and opens immediately so an expired
+   * operator credential (CTX 401) pulls the operator from rotation
+   * without waiting for five consecutive failures. No-op when already
+   * OPEN — re-tripping would push `openedAt` forward and extend the
+   * cooldown indefinitely under a burst of 401s.
+   */
+  function forceOpen(): void {
+    if (state === 'open') return;
+    halfOpenInFlight = false;
+    clearProbeTimer();
+    consecutiveFailures = Math.max(consecutiveFailures, failureThreshold);
+    openedAt = Date.now();
+    transitionTo('open');
+    notifyCircuitBreaker('open', consecutiveFailures, Math.round(cooldownMs / 1000), name);
+  }
+
+  return { fetch: wrappedFetch, getState, reset, forceOpen };
 }
 
 /**

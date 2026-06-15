@@ -7,14 +7,17 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-// The pool fires a Discord alert on exhaustion. Mock the module so
-// tests assert on the spy without actually reaching fetch(). Keeping
-// the mock here (not in a separate file) keeps the test-scope narrow.
-const { mockNotifyExhausted } = vi.hoisted(() => ({
+// The pool fires Discord alerts on exhaustion (pool down) and on a
+// 401-expired operator credential (CF-13). Mock the module so tests
+// assert on the spies without actually reaching fetch(). Keeping the
+// mock here (not in a separate file) keeps the test-scope narrow.
+const { mockNotifyExhausted, mockNotifyCredentialExpired } = vi.hoisted(() => ({
   mockNotifyExhausted: vi.fn(),
+  mockNotifyCredentialExpired: vi.fn(),
 }));
 vi.mock('../../discord.js', () => ({
   notifyOperatorPoolExhausted: mockNotifyExhausted,
+  notifyOperatorCredentialExpired: mockNotifyCredentialExpired,
 }));
 
 /**
@@ -23,6 +26,12 @@ vi.mock('../../discord.js', () => ({
  * closed breaker that passes fetches through; tests that need
  * exhaustion flip `breakerFactoryState.forceOpen = true` BEFORE
  * the pool inits.
+ *
+ * CF-13: each created breaker also tracks its OWN open state so a test
+ * can `forceOpen()` a single operator (via the real `operatorFetch`
+ * 401 path) and have only that operator pulled from rotation, while
+ * the global `forceOpen` flag still forces ALL operators open for the
+ * exhaustion tests.
  */
 const { breakerFactoryState } = vi.hoisted(() => ({
   breakerFactoryState: { forceOpen: false },
@@ -31,20 +40,29 @@ vi.mock('../../circuit-breaker.js', async (importActual) => {
   const actual = (await importActual()) as typeof CircuitBreakerModule;
   return {
     ...actual,
-    createCircuitBreaker: () => ({
-      // Returning 'open' short-circuits pickHealthyOperator — it skips
-      // every operator and returns null, tripping the exhausted path.
-      getState: () => (breakerFactoryState.forceOpen ? 'open' : 'closed'),
-      getStats: () => ({
-        state: breakerFactoryState.forceOpen ? 'open' : 'closed',
-        consecutiveFailures: 0,
-        openedAt: null,
-        lastSuccessAt: null,
-        lastFailureAt: null,
-      }),
-      fetch: (url: string | URL, init?: RequestInit) => fetch(url, init),
-      reset: () => {},
-    }),
+    createCircuitBreaker: () => {
+      let selfForcedOpen = false;
+      const isOpen = (): boolean => breakerFactoryState.forceOpen || selfForcedOpen;
+      return {
+        // Returning 'open' short-circuits pickHealthyOperator — it skips
+        // every operator and returns null, tripping the exhausted path.
+        getState: () => (isOpen() ? 'open' : 'closed'),
+        getStats: () => ({
+          state: isOpen() ? 'open' : 'closed',
+          consecutiveFailures: 0,
+          openedAt: null,
+          lastSuccessAt: null,
+          lastFailureAt: null,
+        }),
+        fetch: (url: string | URL, init?: RequestInit) => fetch(url, init),
+        reset: () => {
+          selfForcedOpen = false;
+        },
+        forceOpen: () => {
+          selfForcedOpen = true;
+        },
+      };
+    },
     CircuitOpenError: actual.CircuitOpenError,
   };
 });
@@ -56,6 +74,8 @@ import {
   __resetOperatorPoolForTests,
   __resetPoolExhaustedAlertForTests,
   OperatorPoolUnavailableError,
+  OperatorRateLimitedError,
+  parseRetryAfterMs,
 } from '../operator-pool.js';
 
 // The pool snapshots env at first access; resetting the module state
@@ -64,6 +84,7 @@ beforeEach(() => {
   __resetOperatorPoolForTests();
   __resetPoolExhaustedAlertForTests();
   mockNotifyExhausted.mockReset();
+  mockNotifyCredentialExpired.mockReset();
   breakerFactoryState.forceOpen = false;
   delete process.env['CTX_OPERATOR_POOL'];
 });
@@ -295,6 +316,142 @@ describe('operatorFetch', () => {
     const callerController = new AbortController();
     await operatorFetch('https://example.local/x', { signal: callerController.signal });
     expect(captured[0]?.signal).toBe(callerController.signal);
+  });
+
+  // ── CF-12: 429 handling ────────────────────────────────────────────
+  it('CF-12: fails over to the next operator on a 429', async () => {
+    const bearers: string[] = [];
+    let call = 0;
+    fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
+      bearers.push(new Headers(init?.headers).get('Authorization') ?? '');
+      call++;
+      if (call === 1) return new Response('slow down', { status: 429 });
+      return new Response('ok', { status: 200 });
+    });
+    const res = await operatorFetch('https://example.local/x');
+    expect(res.status).toBe(200);
+    expect(bearers).toHaveLength(2);
+    expect(bearers[0]).not.toBe(bearers[1]);
+  });
+
+  it('CF-12: throws OperatorRateLimitedError (not a 429 response) when every operator is rate-limited', async () => {
+    fetchMock = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(
+        new Response('slow down', { status: 429, headers: { 'Retry-After': '7' } }),
+      );
+    const err = await operatorFetch('https://example.local/x').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OperatorRateLimitedError);
+    // Retry-After parsed from the last 429 (7s → 7000ms).
+    expect((err as OperatorRateLimitedError).retryAfterMs).toBe(7000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('CF-12: a 429 storm does NOT fire the pool-exhausted page (back-pressure, not outage)', async () => {
+    fetchMock = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response('slow down', { status: 429 }));
+    await operatorFetch('https://example.local/x').catch(() => {});
+    expect(mockNotifyExhausted).not.toHaveBeenCalled();
+  });
+
+  it('CF-12: rate-limited error carries null retryAfterMs when CTX sends no usable header', async () => {
+    fetchMock = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response('slow down', { status: 429 }));
+    const err = await operatorFetch('https://example.local/x').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OperatorRateLimitedError);
+    expect((err as OperatorRateLimitedError).retryAfterMs).toBeNull();
+  });
+
+  // ── CF-13: expired operator bearer (401) ───────────────────────────
+  it('CF-13: marks the 401 operator unhealthy, fails over, and serves from a healthy sibling', async () => {
+    const bearers: string[] = [];
+    let call = 0;
+    fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
+      bearers.push(new Headers(init?.headers).get('Authorization') ?? '');
+      call++;
+      if (call === 1) return new Response('token invalid', { status: 401 });
+      return new Response('ok', { status: 200 });
+    });
+    const res = await operatorFetch('https://example.local/x');
+    expect(res.status).toBe(200);
+    expect(bearers).toHaveLength(2);
+    expect(bearers[0]).not.toBe(bearers[1]);
+    // The 401'd operator was forced OPEN, so the health snapshot shows it.
+    const states = getOperatorHealth().map((h) => h.state);
+    expect(states.filter((s) => s === 'open')).toHaveLength(1);
+  });
+
+  it('CF-13: alerts via notifyOperatorCredentialExpired on a 401', async () => {
+    let call = 0;
+    fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async () => {
+      call++;
+      if (call === 1) return new Response('token invalid', { status: 401 });
+      return new Response('ok', { status: 200 });
+    });
+    await operatorFetch('https://example.local/x');
+    expect(mockNotifyCredentialExpired).toHaveBeenCalledTimes(1);
+    const [args] = mockNotifyCredentialExpired.mock.calls[0] as [
+      { operatorId: string; poolSize: number; failedOver: boolean },
+    ];
+    expect(args.poolSize).toBe(2);
+    // A sibling was available, so failover was possible.
+    expect(args.failedOver).toBe(true);
+  });
+
+  it('CF-13: throws OperatorPoolUnavailableError (transient → defer) when every operator 401s', async () => {
+    fetchMock = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response('token invalid', { status: 401 }));
+    const err = await operatorFetch('https://example.local/x').catch((e: unknown) => e);
+    // Transient pool error so the procurement tick defers — NOT a 401
+    // response the caller would treat as a hard order failure.
+    expect(err).toBeInstanceOf(OperatorPoolUnavailableError);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Both operators 401'd — both forced OPEN.
+    expect(getOperatorHealth().every((h) => h.state === 'open')).toBe(true);
+  });
+
+  it('CF-13: a plain 401-then-401 alerts per attempt but defers (no order-failing 401 returned)', async () => {
+    fetchMock = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response('token invalid', { status: 401 }));
+    await operatorFetch('https://example.local/x').catch(() => {});
+    // One alert per 401'd operator (2 attempts in a 2-entry pool).
+    expect(mockNotifyCredentialExpired).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('parseRetryAfterMs', () => {
+  it('parses delta-seconds form', () => {
+    expect(parseRetryAfterMs('120')).toBe(120_000);
+    expect(parseRetryAfterMs('0')).toBe(0);
+  });
+
+  it('returns null for absent / empty / unparseable header', () => {
+    expect(parseRetryAfterMs(null)).toBeNull();
+    expect(parseRetryAfterMs('')).toBeNull();
+    expect(parseRetryAfterMs('   ')).toBeNull();
+    expect(parseRetryAfterMs('not-a-date')).toBeNull();
+  });
+
+  it('parses HTTP-date form into a non-negative delta', () => {
+    const future = new Date(Date.now() + 30_000).toUTCString();
+    const ms = parseRetryAfterMs(future);
+    expect(ms).not.toBeNull();
+    // ~30s in the future, allow timing slack.
+    expect(ms!).toBeGreaterThan(20_000);
+    expect(ms!).toBeLessThanOrEqual(30_000);
+  });
+
+  it('clamps a past HTTP-date to 0', () => {
+    const past = new Date(Date.now() - 60_000).toUTCString();
+    expect(parseRetryAfterMs(past)).toBe(0);
+  });
+
+  it('caps a pathologically large value at 5 minutes', () => {
+    expect(parseRetryAfterMs('999999')).toBe(5 * 60 * 1000);
   });
 });
 

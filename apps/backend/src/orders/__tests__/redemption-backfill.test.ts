@@ -30,7 +30,17 @@ vi.mock('../../ctx/operator-pool.js', () => {
       this.name = 'OperatorPoolUnavailableError';
     }
   }
-  return { OperatorPoolUnavailableError };
+  // CF-12: backfill now also aborts (without burning attempts) on a
+  // CTX rate-limit; the module imports this error for the instanceof.
+  class OperatorRateLimitedError extends Error {
+    readonly retryAfterMs: number | null;
+    constructor(message: string, retryAfterMs: number | null = null) {
+      super(message);
+      this.name = 'OperatorRateLimitedError';
+      this.retryAfterMs = retryAfterMs;
+    }
+  }
+  return { OperatorPoolUnavailableError, OperatorRateLimitedError };
 });
 
 // db mock — select chain resolves the stashed candidate rows; update
@@ -67,7 +77,7 @@ const { dbMock, dbState } = vi.hoisted(() => {
 });
 vi.mock('../../db/client.js', () => ({ db: dbMock }));
 
-import { OperatorPoolUnavailableError } from '../../ctx/operator-pool.js';
+import { OperatorPoolUnavailableError, OperatorRateLimitedError } from '../../ctx/operator-pool.js';
 import {
   runRedemptionBackfillTick,
   redemptionBackfillDelayMs,
@@ -215,6 +225,17 @@ describe('runRedemptionBackfillTick', () => {
     expect(fetchRedemptionMock).toHaveBeenCalledTimes(1);
     expect(dbState.updates).toHaveLength(0);
     expect(notifyExhaustedMock).not.toHaveBeenCalled();
+  });
+
+  it('CF-12: aborts the tick on a CTX rate-limit (429) without burning attempts', async () => {
+    dbState.rows = [makeRow({ id: 'order-1' }), makeRow({ id: 'order-2', ctxOrderId: 'ctx-2' })];
+    fetchRedemptionMock.mockRejectedValueOnce(new OperatorRateLimitedError('rate limited', 5000));
+    const r = await runRedemptionBackfillTick({ now: NOW });
+    // A 429 is our-side back-pressure, not evidence CTX has no payload —
+    // abort like a pool outage so neither row burns a retry.
+    expect(r.abortedPoolUnavailable).toBe(true);
+    expect(fetchRedemptionMock).toHaveBeenCalledTimes(1);
+    expect(dbState.updates).toHaveLength(0);
   });
 
   it('a non-pool fetch error records the attempt and continues to the next row', async () => {

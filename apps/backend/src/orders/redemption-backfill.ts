@@ -35,7 +35,7 @@ import { db } from '../db/client.js';
 import { orders } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { notifyRedemptionBackfillExhausted } from '../discord.js';
-import { OperatorPoolUnavailableError } from '../ctx/operator-pool.js';
+import { OperatorPoolUnavailableError, OperatorRateLimitedError } from '../ctx/operator-pool.js';
 import { fetchRedemption } from './procurement-redemption.js';
 import {
   markWorkerStarted,
@@ -160,14 +160,15 @@ export async function runRedemptionBackfillTick(args?: {
     try {
       redemption = await fetchRedemption(row.ctxOrderId);
     } catch (err) {
-      if (err instanceof OperatorPoolUnavailableError) {
-        // Pool-wide outage — every subsequent row would hit the same
-        // wall. Abort WITHOUT bumping attempts: this is our outage,
-        // not evidence that CTX has no payload for the order, and it
-        // shouldn't consume the order's retry budget.
+      if (err instanceof OperatorPoolUnavailableError || err instanceof OperatorRateLimitedError) {
+        // Pool-wide outage or CTX rate-limit (CF-12) — every subsequent
+        // row would hit the same wall. Abort WITHOUT bumping attempts:
+        // this is our-side back-pressure / outage, not evidence that
+        // CTX has no payload for the order, and it shouldn't consume
+        // the order's retry budget.
         log.warn(
-          { orderId: row.id },
-          'Operator pool unavailable — aborting redemption-backfill tick without burning attempts',
+          { orderId: row.id, rateLimited: err instanceof OperatorRateLimitedError },
+          'Operator pool unavailable / rate-limited — aborting redemption-backfill tick without burning attempts',
         );
         result.abortedPoolUnavailable = true;
         break;

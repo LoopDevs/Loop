@@ -68,12 +68,15 @@ import {
   notifyPegBreakOnFulfillment,
   notifyUsdcBelowFloor,
   notifyOperatorPoolExhausted,
+  notifyOperatorCredentialExpired,
   __resetPoolDepletionDedupForTests,
+  __resetOperatorCredentialDedupForTests,
 } from '../monitoring.js';
 
 beforeEach(() => {
   sendWebhookMock.mockReset();
   __resetPoolDepletionDedupForTests();
+  __resetOperatorCredentialDedupForTests();
 });
 
 interface Embed {
@@ -261,5 +264,34 @@ describe('notifyOperatorPoolExhausted', () => {
     expect(e.color).toBe(0xe74c3c);
     expect(e.fields!.find((f) => f.name === 'Pool size')!.value).toBe('3');
     expect(e.fields!.find((f) => f.name === 'Last error')!.value).toContain('all 3 operators');
+  });
+});
+
+describe('notifyOperatorCredentialExpired (CF-13)', () => {
+  it('emits red with operator id + pool size + failed-over flag', () => {
+    notifyOperatorCredentialExpired({ operatorId: 'op-primary', poolSize: 2, failedOver: true });
+    const e = lastEmbed();
+    expect(e.title).toBe('🔴 CTX Operator Credential Expired (401)');
+    expect(e.color).toBe(0xe74c3c);
+    expect(e.fields!.find((f) => f.name === 'Operator')!.value).toContain('op-primary');
+    expect(e.fields!.find((f) => f.name === 'Pool size')!.value).toBe('2');
+    expect(e.fields!.find((f) => f.name === 'Failed over')!.value).toBe('yes');
+    expect(e.description).toContain('healthy sibling');
+  });
+
+  it('says procurement is blocked when no sibling failover was possible', () => {
+    notifyOperatorCredentialExpired({ operatorId: 'op-only', poolSize: 1, failedOver: false });
+    const e = lastEmbed();
+    expect(e.fields!.find((f) => f.name === 'Failed over')!.value).toBe('no');
+    expect(e.description).toContain('procurement is blocked');
+  });
+
+  it('dedups per-operator within the 10-minute window', () => {
+    notifyOperatorCredentialExpired({ operatorId: 'op-a', poolSize: 2, failedOver: true });
+    notifyOperatorCredentialExpired({ operatorId: 'op-a', poolSize: 2, failedOver: true });
+    expect(sendWebhookMock).toHaveBeenCalledTimes(1);
+    // A different operator is a distinct dedup key — fires independently.
+    notifyOperatorCredentialExpired({ operatorId: 'op-b', poolSize: 2, failedOver: true });
+    expect(sendWebhookMock).toHaveBeenCalledTimes(2);
   });
 });
