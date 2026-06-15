@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { formatMinorCurrency } from '@loop/shared';
 import {
   getCashbackMonthly,
   type CashbackMonthlyEntry,
@@ -216,17 +217,12 @@ export function monthLabel(ym: string): string {
 /**
  * Minor units → localised currency string with no decimals. The
  * chart is a summary view; pennies aren't load-bearing.
+ *
+ * CF-23 / WEB-M4: delegates to the bigint-exact shared formatter so
+ * fleet/treasury aggregates above 2^53 minor units (these labels feed
+ * the admin monthly + treasury charts, not just per-user balances)
+ * stay precise instead of silently rounding through `Number(minor)/100`.
  */
 export function formatMinor(minor: string, currency: string): string {
-  const n = Number(minor);
-  if (!Number.isFinite(n)) return '—';
-  try {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 0,
-    }).format(n / 100);
-  } catch {
-    return `${(n / 100).toFixed(0)} ${currency}`;
-  }
+  return formatMinorCurrency(minor, currency, { fractionDigits: 0 });
 }

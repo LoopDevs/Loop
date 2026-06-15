@@ -5,7 +5,9 @@ import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Merchant, MerchantGroup } from '@loop/shared';
 import {
   brandSlug,
+  currencyOf,
   foldForSearch,
+  formatMinorCurrency,
   groupMerchants,
   merchantInCountry,
   merchantSlug,
@@ -123,6 +125,12 @@ export function MobileHome(): React.JSX.Element {
   const cashbackCents =
     backendCents !== null && Number.isFinite(backendCents) ? backendCents : fallbackCents;
 
+  // WEB-M1: currency for the savings hero. Prefer the ledger's home
+  // currency from the cashback-summary; fall back to the routed
+  // country's display currency (ADR-034) so the figure reads £/€ for a
+  // GB/EU visitor even before the authed summary loads.
+  const heroCurrency = summaryQuery.data?.currency ?? currencyOf(country) ?? 'USD';
+
   // Quick buy — top 6 by savings, only those with logos so the tile
   // row reads as populated.
   const quickBuy = useMemo(
@@ -212,6 +220,7 @@ export function MobileHome(): React.JSX.Element {
           ordersCount={ordersCount}
           isAuthenticated={isAuthenticated}
           phase1Only={phase1Only}
+          currency={heroCurrency}
         />
       </div>
 
@@ -418,11 +427,19 @@ export function SavingsHero({
   ordersCount,
   isAuthenticated,
   phase1Only,
+  currency = 'USD',
 }: {
   cashbackCents: number;
   ordersCount: number;
   isAuthenticated: boolean;
   phase1Only: boolean;
+  /**
+   * Home/ledger currency for the hero figures (WEB-M1). Defaults to
+   * `USD` so legacy call sites / tests still render `$`; the parent
+   * threads the user's `cashback-summary` currency (or the routed
+   * country's currency) so a GB/EU user sees £/€ on this headline.
+   */
+  currency?: string;
 }): React.JSX.Element {
   // Unauth or no-orders state — show a teaser instead of "$0.00"
   // which reads as a bug. Matches the design's ink face but with a
@@ -462,7 +479,7 @@ export function SavingsHero({
         className="text-[44px] font-extrabold leading-none mb-1"
         style={{ letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums' }}
       >
-        {empty ? '$0.00' : formatCashback(cashbackCents)}
+        {empty ? formatCashback(0, currency) : formatCashback(cashbackCents, currency)}
       </div>
       <div className="text-[13px] text-white/65 mb-4">
         {empty
@@ -478,7 +495,7 @@ export function SavingsHero({
         </div>
         <div className="text-right">
           <div className="text-[16px] font-bold" style={{ fontVariantNumeric: 'tabular-nums' }}>
-            {empty ? '—' : avgBackLabel(cashbackCents, ordersCount)}
+            {empty ? '—' : avgBackLabel(cashbackCents, ordersCount, currency)}
           </div>
           <div className="text-[11px] opacity-55 mt-0.5">{avgLabel}</div>
         </div>
@@ -487,15 +504,19 @@ export function SavingsHero({
   );
 }
 
-function formatCashback(cents: number): string {
-  const dollars = cents / 100;
-  return `$${dollars.toFixed(2)}`;
+// WEB-M1: format the hero figures in the user's home/ledger currency
+// instead of a hardcoded `$`, so a GB/EU ledger reads £/€ on the most
+// prominent money figure on the home screen (ADR-034 locale model).
+function formatCashback(cents: number, currency: string): string {
+  return formatMinorCurrency(cents, currency);
 }
 
-function avgBackLabel(cashbackCents: number, ordersCount: number): string {
+function avgBackLabel(cashbackCents: number, ordersCount: number, currency: string): string {
   if (ordersCount === 0) return '—';
-  const avgCents = cashbackCents / ordersCount;
-  return `$${(avgCents / 100).toFixed(2)}`;
+  // Round to the nearest minor unit before formatting so the average
+  // renders as exact cents (formatMinorCurrency floors otherwise).
+  const avgCents = Math.round(cashbackCents / ordersCount);
+  return formatMinorCurrency(avgCents, currency);
 }
 
 function BrandTile({

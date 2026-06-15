@@ -41,8 +41,25 @@ describe('SavingsHero', () => {
         />,
       );
       // 1234 cents → $12.34 in the hero, $4.11 average across 3 orders.
+      // (currency defaults to USD when the prop is omitted.)
       expect(screen.getByText('$12.34')).toBeTruthy();
       expect(screen.getByText('$4.11')).toBeTruthy();
+    });
+
+    it('formats the hero + average figures in the active currency (WEB-M1)', () => {
+      render(
+        <SavingsHero
+          cashbackCents={1234}
+          ordersCount={3}
+          isAuthenticated={true}
+          phase1Only={true}
+          currency="GBP"
+        />,
+      );
+      // Same amounts, GBP ledger → £12.34 hero, £4.11 average.
+      expect(screen.getByText('£12.34')).toBeTruthy();
+      expect(screen.getByText('£4.11')).toBeTruthy();
+      expect(screen.queryByText('$12.34')).toBeNull();
     });
   });
 
@@ -80,6 +97,21 @@ describe('SavingsHero', () => {
       // Avg row shows '—' rather than $0.00 to avoid the noise of
       // a divide-by-zero stat.
       expect(screen.getByText('—')).toBeTruthy();
+    });
+
+    it('renders the empty-state zero in the active currency, not a hardcoded $', () => {
+      render(
+        <SavingsHero
+          cashbackCents={0}
+          ordersCount={0}
+          isAuthenticated={true}
+          phase1Only={true}
+          currency="GBP"
+        />,
+      );
+      // WEB-M1: a GBP ledger shows £0.00, never $0.00.
+      expect(screen.getByText('£0.00')).toBeTruthy();
+      expect(screen.queryByText('$0.00')).toBeNull();
     });
 
     it('treats unauthenticated viewers as empty regardless of order count', () => {
