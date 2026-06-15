@@ -1038,14 +1038,21 @@ jobs:
 
 - `npm run audit` is the only supported dependency-audit gate.
 - **Critical** advisories always fail the gate — never auto-accepted.
-- **High** and **moderate** advisories do **not** pass silently. The
-  checked-in script
-  [scripts/check-audit-policy.mjs](/Users/ash/code/loop-app/scripts/check-audit-policy.mjs)
-  pins the currently accepted set for each tier exactly (`ACCEPTED_HIGH_VULNS`,
-  `ACCEPTED_MODERATE_VULNS`); a new advisory at either tier, or a removed one
-  that leaves stale policy behind, fails CI until the policy is reviewed and
-  updated. An advisory's tier can shift over time, so a package lives in
-  whichever map matches its **current** observed severity.
+- **High** advisories hard-fail unless the package is in `ACCEPTED_HIGH_VULNS`
+  (with rationale) in
+  [scripts/check-audit-policy.mjs](/Users/ash/code/loop-app/scripts/check-audit-policy.mjs):
+  a **new** high not on the list fails CI until a human evaluates it
+  (runtime-reachable?) and either fixes or accepts it. An accepted entry that
+  is no longer observed only **warns** — the npm advisory feed flaps live
+  (the same dependency tree returned 7→5→6 highs within minutes on
+  2026-06-15), so failing on disappearance would re-break `main` on every
+  registry update for no security benefit; keeping extra accepted entries is
+  intentional and safe.
+- **Moderate** advisories are **advisory-only** pre-launch — surfaced by the
+  script and by Dependabot, never blocking a merge (consistent with the
+  trivy / gitleaks / sbom jobs). `ACCEPTED_MODERATE_VULNS` documents rationale
+  for the long-standing ones. **Tighten moderate to a hard gate before public
+  launch.**
 - Current accepted **highs** (authoritative set + per-entry rationale in
   `ACCEPTED_HIGH_VULNS`): `esbuild`, `vite`, `vite-node`, `tsx`, `tsup`,
   `drizzle-kit`, `@react-router/dev`. These are the esbuild dev-server /
