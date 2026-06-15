@@ -99,6 +99,35 @@ describe('useAllMerchants', () => {
     render(withProvider(<Probe />));
     await waitFor(() => expect(screen.getByTestId('count').textContent).toBe('2'));
   });
+
+  // PERF-003 (audit 2026-06-15-cold / CF-29): the full catalog must not
+  // re-download on every tab focus, and its stale window is widened to
+  // 30 min so routine navigation doesn't re-pay the multi-hundred-KB
+  // fetch. Assert the resolved query options rather than simulating
+  // focus (deterministic + no FocusManager flakiness in jsdom).
+  it('disables focus-refetch and uses a 30-min staleTime for the catalog (PERF-003)', async () => {
+    merchantsMock.fetchAllMerchants.mockResolvedValue({ merchants: [], total: 0 });
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0, throwOnError: false } },
+    });
+    function Probe(): React.ReactElement {
+      const r = useAllMerchants();
+      return <span data-testid="loaded">{String(!r.isLoading)}</span>;
+    }
+    render(<QueryClientProvider client={client}>{<Probe />}</QueryClientProvider>);
+    await waitFor(() => expect(screen.getByTestId('loaded').textContent).toBe('true'));
+
+    // `Query.options` is typed as the narrow base `QueryOptions`, which
+    // omits the observer-level `refetchOnWindowFocus`/`staleTime` keys
+    // even though they're present at runtime (the hook sets them).
+    // Read them through a precise cast — no `any` (project rule).
+    const query = client.getQueryCache().find({ queryKey: ['merchants-all'] });
+    const opts = query?.options as
+      | { refetchOnWindowFocus?: boolean; staleTime?: number }
+      | undefined;
+    expect(opts?.refetchOnWindowFocus).toBe(false);
+    expect(opts?.staleTime).toBe(30 * 60 * 1000);
+  });
 });
 
 describe('useMerchantBySlug', () => {

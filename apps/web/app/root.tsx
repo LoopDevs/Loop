@@ -9,10 +9,9 @@ import {
   useLocation,
 } from 'react-router';
 import { QueryClient, QueryCache, MutationCache, QueryClientProvider } from '@tanstack/react-query';
-import * as Sentry from '@sentry/react';
-import { scrubSentryEvent } from '~/utils/sentry-scrubber';
+import { initSentryLazily, captureExceptionLazily } from '~/utils/sentry-lazy';
 import { scrubErrorForSentry } from '~/utils/sentry-error-scrubber';
-import { forwardQueryErrorToSentry } from '~/utils/query-error-reporting';
+import { forwardQueryErrorToSentry, type SentryLike } from '~/utils/query-error-reporting';
 import type { Route } from './+types/root';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useSessionRestore } from '~/hooks/use-session-restore';
@@ -40,46 +39,16 @@ const Onboarding = lazy(() =>
   import('~/components/features/onboarding/Onboarding').then((m) => ({ default: m.Onboarding })),
 );
 
-// Initialize Sentry on client side
-if (typeof window !== 'undefined' && import.meta.env.VITE_SENTRY_DSN) {
-  Sentry.init({
-    dsn: import.meta.env.VITE_SENTRY_DSN,
-    // A2-1310: prefer the explicit `VITE_LOOP_ENV` deploy tag so a
-    // staging build bucketed as `MODE=production` can still report
-    // events as `staging`. Falls back to `MODE` so existing deploys
-    // without the env var set continue to behave as before.
-    environment: (import.meta.env.VITE_LOOP_ENV as string | undefined) ?? import.meta.env.MODE,
-    // A2-1309: release tag pivots a Sentry event back to the deploy
-    // artifact. CI/CD sets `VITE_SENTRY_RELEASE` to the git SHA at
-    // build time; left unset on dev so Sentry omits the attribute.
-    ...(import.meta.env.VITE_SENTRY_RELEASE !== undefined &&
-    import.meta.env.VITE_SENTRY_RELEASE !== ''
-      ? { release: import.meta.env.VITE_SENTRY_RELEASE as string }
-      : {}),
-    // A2-1324: enable standalone CLS + LCP spans so Core Web Vitals
-    // land in Sentry as their own metrics (not just attached to a
-    // sampled trace). At 10% trace sampling, ~90% of pageloads
-    // wouldn't ship LCP/CLS otherwise; standalone spans bypass the
-    // trace-sample gate so RUM data covers the full traffic. INP and
-    // long-task spans are on by default and stay that way.
-    // `enableLongAnimationFrame` flips on so jank attribution surfaces
-    // in the trace timeline (rendering blocked > 50ms).
-    integrations: [
-      Sentry.browserTracingIntegration({
-        enableLongAnimationFrame: true,
-        _experiments: {
-          enableStandaloneClsSpans: true,
-          enableStandaloneLcpSpans: true,
-        },
-      }),
-    ],
-    tracesSampleRate: import.meta.env.PROD ? 0.1 : 1.0,
-    // A2-1308: scrub known-secret keys out of every captured event.
-    // Mirror of the backend Sentry init; utility is duplicated across
-    // apps/web and apps/backend (they don't share a build).
-    beforeSend: (event) => scrubSentryEvent(event),
-  });
-}
+// PERF-004 (audit 2026-06-15-cold / CF-29): Sentry is ~540 KB — the
+// single largest module in the web bundle. Loading it statically pulled
+// the whole SDK into the always-loaded root chunk so every visitor paid
+// for it on first paint, even on DSN-unset deploys. `initSentryLazily`
+// keeps the SDK out of the critical path: it's code-split into its own
+// chunk fetched via dynamic `import('@sentry/react')` on idle / after
+// first paint. Init behaviour (DSN gate, browserTracing, sampling,
+// scrubber) is preserved verbatim in `~/utils/sentry-lazy`. No-op on the
+// server and when no DSN is configured.
+initSentryLazily();
 
 // A2-1322: forward unexpected TanStack Query / Mutation failures into
 // Sentry. Before this hook, call-site `onError` was the only way errors
@@ -88,10 +57,30 @@ if (typeof window !== 'undefined' && import.meta.env.VITE_SENTRY_DSN) {
 // `forwardQueryErrorToSentry` skips expected 4xx outcomes (401 on an
 // admin surface visited by a non-admin, 422 on a validation denial, etc.)
 // so Sentry signal stays meaningful.
+//
+// PERF-004: `forwardQueryErrorToSentry` only needs a `captureException`
+// surface. Pass a thin adapter that lazy-loads the SDK on demand
+// (`captureExceptionLazily`) rather than the eagerly-imported module, so
+// the cache wiring no longer roots `@sentry/react` in the root chunk.
+// `captureExceptionLazily` already loads + inits the SDK on first call,
+// so an error fired before the idle init still reports.
+const sentryCaptureAdapter: SentryLike = {
+  captureException: (exception, hint) => {
+    void captureExceptionLazily(exception, hint);
+    // Synchronous return contract — the lazy event id isn't awaited here
+    // (the query/mutation cache discards the return value). Empty-string
+    // placeholder keeps the type honest without faking an id.
+    return '';
+  },
+};
 const queryClient = new QueryClient({
   queryCache: new QueryCache({
     onError: (err, query) => {
-      forwardQueryErrorToSentry(err, { source: 'tanstack-query', key: query.queryKey }, Sentry);
+      forwardQueryErrorToSentry(
+        err,
+        { source: 'tanstack-query', key: query.queryKey },
+        sentryCaptureAdapter,
+      );
     },
   }),
   mutationCache: new MutationCache({
@@ -99,7 +88,7 @@ const queryClient = new QueryClient({
       forwardQueryErrorToSentry(
         err,
         { source: 'tanstack-mutation', key: mutation.options.mutationKey },
-        Sentry,
+        sentryCaptureAdapter,
       );
     },
   }),
@@ -162,6 +151,18 @@ if (typeof window !== 'undefined') {
   // Revalidate in the background. On a cache hit, home still shows
   // instantly with the stale data; the cache update on success is
   // picked up by subscribed useAllMerchants consumers.
+  //
+  // PERF-003 (audit 2026-06-15-cold / CF-29): this prefetch already runs
+  // exactly once per page load (module scope), not per route — but its
+  // 5-min staleTime meant any cold load with a >5-min-old localStorage
+  // seed re-downloaded the full ~1,134-record catalog even on routes
+  // that never render it. Align with `useAllMerchants`' 30-min staleTime
+  // so `prefetchQuery` treats a recently-seeded entry as fresh and skips
+  // the network round-trip entirely — the catalog syncs on a multi-hour
+  // cadence, so 30 min still revalidates well within a session, and the
+  // localStorage cache covers freshness across loads. The fetch still
+  // fires (and refreshes the disk cache) when the seed is stale or
+  // absent, so cold-start data is never missing.
   void queryClient.prefetchQuery({
     queryKey: ['merchants-all'],
     queryFn: async () => {
@@ -174,7 +175,7 @@ if (typeof window !== 'undefined') {
       }
       return data;
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30 * 60 * 1000,
   });
 }
 
@@ -579,8 +580,19 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps): React.JSX.El
   // `Request`, and redacts email / bearer / stellar-secret shapes
   // out of the error message before Sentry sees it.
   useEffect(() => {
-    const id = Sentry.captureException(scrubErrorForSentry(error));
-    setEventId(id);
+    // PERF-004: capture via the lazy loader. The SDK chunk loads on
+    // demand, so the event id arrives asynchronously and is pinned to
+    // state once it resolves (the boundary stays mounted for the
+    // lifetime of the error, so a late `setEventId` lands on the right
+    // render). A discarded promise here can't desync the displayed id
+    // because the effect is keyed on `[error]` and re-runs per failure.
+    let active = true;
+    void captureExceptionLazily(scrubErrorForSentry(error)).then((id) => {
+      if (active && id !== undefined && id !== '') setEventId(id);
+    });
+    return () => {
+      active = false;
+    };
   }, [error]);
 
   let message = 'Oops!';
