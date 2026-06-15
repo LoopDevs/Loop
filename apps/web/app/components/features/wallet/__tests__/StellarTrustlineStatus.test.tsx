@@ -7,8 +7,9 @@ import { StellarTrustlineStatus } from '../StellarTrustlineStatus';
 
 afterEach(cleanup);
 
-const { userMock } = vi.hoisted(() => ({
+const { userMock, authMock } = vi.hoisted(() => ({
   userMock: { getUserStellarTrustlines: vi.fn() },
+  authMock: { isAuthenticated: true },
 }));
 
 vi.mock('~/services/user', async (importActual) => {
@@ -20,6 +21,14 @@ vi.mock('~/services/user', async (importActual) => {
 });
 
 vi.mock('~/hooks/query-retry', () => ({ shouldRetry: () => false }));
+vi.mock('~/hooks/use-auth', () => ({
+  useAuth: () => ({ isAuthenticated: authMock.isAuthenticated }),
+}));
+
+afterEach(() => {
+  authMock.isAuthenticated = true;
+  userMock.getUserStellarTrustlines.mockReset();
+});
 
 function renderStatus(): HTMLElement {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -41,6 +50,19 @@ const STUB_ROW_PRESENT = {
 const STUB_ROW_ABSENT = { ...STUB_ROW_PRESENT, present: false };
 
 describe('<StellarTrustlineStatus />', () => {
+  it('does not fire the authed trustlines query when unauthenticated (CF-24)', async () => {
+    authMock.isAuthenticated = false;
+    userMock.getUserStellarTrustlines.mockResolvedValue({
+      address: null,
+      accountLinked: false,
+      accountExists: false,
+      rows: [STUB_ROW_ABSENT],
+    });
+    renderStatus();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(userMock.getUserStellarTrustlines).not.toHaveBeenCalled();
+  });
+
   it('self-hides when no wallet is linked', async () => {
     userMock.getUserStellarTrustlines.mockResolvedValue({
       address: null,
