@@ -119,6 +119,7 @@ export async function createOrderHandler(c: Context): Promise<Response> {
         'missing-destination': 'Order payment URL missing destination',
         'missing-amount': 'Order payment URL missing amount',
         'missing-memo': 'Order payment URL missing memo',
+        'unsupported-memo-type': 'Order payment URL uses an unsupported memo type',
       };
       log.error(
         {
