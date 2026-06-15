@@ -37,6 +37,7 @@ import { logger } from '../logger.js';
 import { notifyRedemptionBackfillExhausted } from '../discord.js';
 import { OperatorPoolUnavailableError, OperatorRateLimitedError } from '../ctx/operator-pool.js';
 import { fetchRedemption } from './procurement-redemption.js';
+import { encryptRedeemField } from './redeem-crypto.js';
 import {
   markWorkerStarted,
   markWorkerStopped,
@@ -189,8 +190,11 @@ export async function runRedemptionBackfillTick(args?: {
       const updated = await db
         .update(orders)
         .set({
-          redeemCode: redemption.code,
-          redeemPin: redemption.pin,
+          // CF-25 / X-PRIV-03: same envelope as the primary fulfillment
+          // write — encrypt code + PIN at rest, leave the URL plaintext.
+          // No-op passthrough when LOOP_REDEEM_ENCRYPTION_KEY is unset.
+          redeemCode: encryptRedeemField(redemption.code),
+          redeemPin: encryptRedeemField(redemption.pin),
           redeemUrl: redemption.url,
           redemptionBackfillAttempts: row.attempts + 1,
           redemptionBackfillLastAttemptAt: new Date(now),

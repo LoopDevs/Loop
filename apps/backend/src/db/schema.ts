@@ -483,9 +483,16 @@ export const orders = pgTable(
     // redeem by URL + challenge code (no static code/pin), and
     // others by a code that may or may not carry a PIN.
     //
-    // Sensitive: these fields ARE the gift card. Postgres-at-rest
-    // encryption on Fly volumes is the current defence; a future
-    // slice can wrap with a per-row envelope once we have KMS.
+    // Sensitive: these fields ARE the gift card. CF-25 / X-PRIV-03:
+    // `redeem_code` + `redeem_pin` (the spendable bearer secrets) are
+    // AES-256-GCM envelope-encrypted at the application layer when
+    // `LOOP_REDEEM_ENCRYPTION_KEY` is set (orders/redeem-crypto.ts) —
+    // the column stays `text`, holding `enc:v1:<base64url>` ciphertext
+    // instead of plaintext. `redeem_url` is the redemption landing
+    // page, not the secret, so it stays plaintext. Migration 0035 also
+    // revokes `loop_readonly`'s SELECT on the two secret columns. Key
+    // unset → plaintext storage (legacy), backward-safe on read. Fly
+    // volume at-rest encryption remains the disk-theft backstop.
     redeemCode: text('redeem_code'),
     redeemPin: text('redeem_pin'),
     redeemUrl: text('redeem_url'),

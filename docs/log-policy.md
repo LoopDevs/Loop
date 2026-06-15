@@ -89,12 +89,12 @@ so a regression that drops a path fails CI, not prod.
 
 ## Access RBAC
 
-| Role             | Can read                                                     |
-| ---------------- | ------------------------------------------------------------ |
-| `loop-admin`     | Fly logs (via `flyctl`), Sentry, Discord audit               |
-| `loop-readonly`  | Postgres SELECT only — no log access                         |
-| `support`        | Discord audit channel (read-only via per-channel permission) |
-| External vendors | None                                                         |
+| Role             | Can read                                                                                                                                                                                                                                     |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `loop-admin`     | Fly logs (via `flyctl`), Sentry, Discord audit                                                                                                                                                                                               |
+| `loop-readonly`  | Postgres SELECT only — no log access. **SELECT on `orders.redeem_code` / `redeem_pin` revoked (migration 0035, CF-25); even with the column read those values are AES-256-GCM ciphertext at rest when `LOOP_REDEEM_ENCRYPTION_KEY` is set.** |
+| `support`        | Discord audit channel (read-only via per-channel permission)                                                                                                                                                                                 |
+| External vendors | None                                                                                                                                                                                                                                         |
 
 Role assignments live in 1Password's "Loop · Access" vault; rotating
 out a maintainer is a single-vault change plus a `flyctl` token

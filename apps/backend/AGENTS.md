@@ -42,7 +42,8 @@ src/
 │   ├── transitions.ts  ← markOrderPaid / markOrderProcuring / markOrderFulfilled (writes ledger + pending_payouts inside one txn)
 │   ├── procurement.ts  ← paid → procuring → fulfilled worker (USDC-default, XLM-floor fallback, ADR 015)
 │   ├── procurement-redemption.ts ← CTX gift-card detail fetch + waitForRedemption (SSE-first, polling fallback)
-│   └── redemption-backfill.ts ← Sweeper re-fetching redemption payloads for fulfilled orders that persisted nulls (migration 0034; pages ops after 10 attempts → runbooks/redemption-backfill-exhausted.md)
+│   ├── redemption-backfill.ts ← Sweeper re-fetching redemption payloads for fulfilled orders that persisted nulls (migration 0034; pages ops after 10 attempts → runbooks/redemption-backfill-exhausted.md)
+│   └── redeem-crypto.ts ← AES-256-GCM envelope for redeem_code/redeem_pin at rest (CF-25; LOOP_REDEEM_ENCRYPTION_KEY; encrypt-on-write, decrypt-on-read, legacy-plaintext passthrough)
 ├── payments/
 │   ├── watcher.ts      ← Horizon payment watcher (matches inbound deposits, accepts USDC/XLM/LOOP assets)
 │   ├── skipped-payments.ts ← Skipped-deposit retry ledger — persists skips before cursor advance, sweeps each tick (audit CRIT #1/#2)
