@@ -5,6 +5,7 @@ import {
   type UserPendingPayoutView,
 } from '~/services/user';
 import { shouldRetry } from '~/hooks/query-retry';
+import { useAuth } from '~/hooks/use-auth';
 import { formatAssetAmount } from '~/components/features/cashback/PendingPayoutsCard';
 
 /**
@@ -56,13 +57,21 @@ function formatDate(iso: string): string {
 }
 
 export function OrderPayoutCard({ orderId }: { orderId: string }): React.JSX.Element | null {
+  // Audit CF-24: gate on auth (A2-1156 cold-start 401/refresh-storm guard).
+  const { isAuthenticated } = useAuth();
   const query = useQuery({
     queryKey: ['order', orderId, 'payout'],
     queryFn: () => getUserPayoutByOrder(orderId),
-    enabled: orderId.length > 0,
+    enabled: isAuthenticated && orderId.length > 0,
     retry: shouldRetry,
     staleTime: 30_000,
-    refetchInterval: 30_000,
+    // Poll only while the payout can still change. `confirmed`/`failed` are
+    // terminal — keep polling those forever (W-02) wastes a request every 30s
+    // on every open order page. Stop once we have terminal data.
+    refetchInterval: (q) => {
+      const state = q.state.data?.state;
+      return state === 'confirmed' || state === 'failed' ? false : 30_000;
+    },
   });
 
   if (query.isPending || query.isError) return null;

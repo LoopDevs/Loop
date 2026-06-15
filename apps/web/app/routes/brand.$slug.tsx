@@ -1,7 +1,9 @@
+import { useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Route } from './+types/brand.$slug';
-import { brandSlug, groupMerchants, variantLabel } from '@loop/shared';
+import { brandSlug, groupMerchants, merchantInCountry, variantLabel } from '@loop/shared';
+import { useLocale } from '~/i18n/locale';
 import { useAllMerchants, useMerchantsCashbackRatesMap } from '~/hooks/use-merchants';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { Navbar } from '~/components/features/Navbar';
@@ -39,11 +41,20 @@ export default function BrandRoute(): React.JSX.Element {
   const navigate = useNavigate();
   const { merchants, isLoading, isError } = useAllMerchants();
   const { lookup: lookupCashback } = useMerchantsCashbackRatesMap();
+  const { country } = useLocale();
 
-  // Country-agnostic brand lookup: one brand tile covers every country, so we
-  // match on brandSlug (no country dimension) — the same key MerchantGroupCard
-  // / DirectoryGroupCell link with. Per-variant links inside use merchantSlug.
-  const group = groupMerchants(merchants).find((g) => brandSlug(g.name) === slug);
+  // Audit CF-31 / ADR 034: scope to the active country BEFORE grouping, exactly
+  // as home.tsx does — otherwise a `/us/en` visitor's brand page mixes in
+  // CA/GB/EUR variants. The brand key itself stays country-agnostic
+  // (brandSlug), but the variants listed are only those available here.
+  const countryMerchants = useMemo(
+    () => merchants.filter((m) => merchantInCountry(m, country)),
+    [merchants, country],
+  );
+  const group = useMemo(
+    () => groupMerchants(countryMerchants).find((g) => brandSlug(g.name) === slug),
+    [countryMerchants, slug],
+  );
 
   const handleBack = (): void => {
     if (window.history.length > 1) {

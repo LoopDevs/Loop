@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { getUserStellarTrustlines } from '~/services/user';
 import { shouldRetry } from '~/hooks/query-retry';
+import { useAuth } from '~/hooks/use-auth';
 
 /**
  * `/settings/wallet` — live per-LOOP-asset trustline status. Complements
@@ -26,9 +27,15 @@ import { shouldRetry } from '~/hooks/query-retry';
  * surface that adopts this signal will dedupe the fetch.
  */
 export function StellarTrustlineStatus(): React.JSX.Element | null {
+  // A2-1156 / audit CF-24: gate on auth so the query doesn't fire before the
+  // access token exists on a cold start — an authed request with no token 401s
+  // and triggers a refresh storm. `enabled` is the established pattern for
+  // every authed query hook (use-orders, use-favorites).
+  const { isAuthenticated } = useAuth();
   const query = useQuery({
     queryKey: ['me', 'stellar-trustlines'],
     queryFn: getUserStellarTrustlines,
+    enabled: isAuthenticated,
     retry: shouldRetry,
     staleTime: 30_000,
     refetchInterval: 60_000,

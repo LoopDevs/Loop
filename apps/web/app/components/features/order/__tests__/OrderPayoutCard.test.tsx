@@ -7,10 +7,11 @@ import { OrderPayoutCard } from '../OrderPayoutCard';
 
 afterEach(cleanup);
 
-const { userMock } = vi.hoisted(() => ({
+const { userMock, authMock } = vi.hoisted(() => ({
   userMock: {
     getUserPayoutByOrder: vi.fn(),
   },
+  authMock: { isAuthenticated: true },
 }));
 
 vi.mock('~/services/user', async (importActual) => {
@@ -22,6 +23,14 @@ vi.mock('~/services/user', async (importActual) => {
 });
 
 vi.mock('~/hooks/query-retry', () => ({ shouldRetry: () => false }));
+vi.mock('~/hooks/use-auth', () => ({
+  useAuth: () => ({ isAuthenticated: authMock.isAuthenticated }),
+}));
+
+afterEach(() => {
+  authMock.isAuthenticated = true;
+  userMock.getUserPayoutByOrder.mockReset();
+});
 
 function renderCard(orderId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'): void {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -33,6 +42,15 @@ function renderCard(orderId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'): void {
 }
 
 describe('<OrderPayoutCard />', () => {
+  it('does not fire the authed payout query when unauthenticated (CF-24)', async () => {
+    authMock.isAuthenticated = false;
+    userMock.getUserPayoutByOrder.mockResolvedValue(null);
+    renderCard();
+    // Give any (incorrectly-enabled) query a tick to fire.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(userMock.getUserPayoutByOrder).not.toHaveBeenCalled();
+  });
+
   it('renders nothing when no payout exists for the order (null response)', async () => {
     userMock.getUserPayoutByOrder.mockResolvedValue(null);
     const { container } = render(
