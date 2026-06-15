@@ -11,13 +11,21 @@ Discord `#ops-alerts` embed titled **"🟡 USDC Reserve Below Floor"** from
 
 ## Diagnosis
 
-1. Confirm the balance on Horizon:
+1. Derive the operator account's public key from its secret. There is no
+   `LOOP_STELLAR_OPERATOR_ID` env var — the account ID is derived from
+   `LOOP_STELLAR_OPERATOR_SECRET` (`apps/backend/src/env.ts`):
    ```bash
-   curl -s "https://horizon.stellar.org/accounts/$LOOP_STELLAR_OPERATOR_ID" | jq '.balances'
+   # Run from apps/backend so the @stellar/stellar-sdk dep resolves.
+   # Reads LOOP_STELLAR_OPERATOR_SECRET from the environment (never printed).
+   OPERATOR_PUBKEY=$(node -e "import('@stellar/stellar-sdk').then(s => console.log(s.Keypair.fromSecret(process.env.LOOP_STELLAR_OPERATOR_SECRET).publicKey()))")
    ```
-2. Confirm the configured floor:
+2. Confirm the balance on Horizon:
    ```bash
-   fly secrets list -a loopfinance-api | grep LOOP_USDC_FLOOR_STROOPS
+   curl -s "https://horizon.stellar.org/accounts/$OPERATOR_PUBKEY" | jq '.balances'
+   ```
+3. Confirm the configured floor:
+   ```bash
+   fly secrets list -a loopfinance-api | grep LOOP_STELLAR_USDC_FLOOR_STROOPS
    ```
 
 ## Mitigation
@@ -26,7 +34,7 @@ Top up the operator account's USDC balance from treasury. Procurement switches b
 
 ## Resolution
 
-Close once a fresh balance read is above `LOOP_USDC_FLOOR_STROOPS` and no further below-floor alerts fire.
+Close once a fresh balance read is above `LOOP_STELLAR_USDC_FLOOR_STROOPS` and no further below-floor alerts fire.
 
 ## Related
 

@@ -15,7 +15,11 @@ err() {
 # ─── 1. Every env var in env.ts must be in .env.example ─────────────────────
 
 echo "Checking env vars..."
-grep -E '^\s+[A-Z_]+:' apps/backend/src/env.ts | sed 's/[[:space:]]*//' | cut -d: -f1 | while read -r var; do
+# Var names may contain digits (LOOP_PHASE_1_ONLY, MAXMIND_GEOLITE2_PATH);
+# the name must START with a letter/underscore (env vars never start with a
+# digit) and may then contain digits. A bare `[A-Z_]+` was digit-blind and
+# silently skipped every digit-bearing var (cold audit D-04).
+grep -E '^\s+[A-Z_][A-Z0-9_]*:' apps/backend/src/env.ts | sed 's/[[:space:]]*//' | cut -d: -f1 | while read -r var; do
   if ! grep -q "^${var}=\|^# *${var}" apps/backend/.env.example 2>/dev/null; then
     err "Env var '$var' is in env.ts but missing from .env.example"
   fi

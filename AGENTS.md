@@ -243,6 +243,14 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # 503 STEP_UP_UNAVAILABLE.
 # LOOP_ADMIN_STEP_UP_SIGNING_KEY=<at-least-32-char-random-secret>
 
+# Phase 1 (Tranche 1 / MVP) launch gate. true → web client hides every
+# Phase 2+ cashback/wallet/LOOP-asset surface so the app reads as a pure
+# XLM-via-CTX gift-card store (discount badges stay). Server-side only —
+# flip to false to launch cashback (v1.1), no app-store resubmission.
+# Pair with the Phase 2 backend gates off (LOOP_WORKERS_ENABLED=false,
+# unset LOOP_STELLAR_*_ISSUER, INTEREST_APY_BASIS_POINTS=0).
+# LOOP_PHASE_1_ONLY=false
+
 # Transactional email (ADR 013) — required set when
 # LOOP_AUTH_NATIVE_ENABLED=true in production (`console` is dev-only).
 # Reply-To is optional; email-validated at boot by env.ts.

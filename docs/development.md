@@ -177,6 +177,14 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # entirely.
 # DISABLE_RATE_LIMITING=1
 
+# ── Region selector / geo (ADR 033) ──────────────────────────────────
+# Path to an operator-provided MaxMind GeoLite2-Country .mmdb. Powers the
+# GET /api/public/geo first-guess for the region selector. Unset → that
+# endpoint returns the US default and the web client falls back to
+# navigator.language. In production it is baked into the image at the
+# Dockerfile path (see docs/deployment.md); set it here for local geo work.
+# MAXMIND_GEOLITE2_PATH=/etc/loop/GeoLite2-Country.mmdb
+
 # ── Loop-native auth (ADR 013 / 014) ─────────────────────────────────
 # HS256 signing key; ≥32 chars. Absent → Loop-native auth endpoints
 # are inert and CTX-proxy auth is the only path. `_PREVIOUS` is only
@@ -189,6 +197,17 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # /verify-otp / /refresh take the Loop-native path (Loop sends the
 # email, mints its own JWTs).
 # LOOP_AUTH_NATIVE_ENABLED=true
+
+# Phase 1 (Tranche 1 / MVP) launch gate. When true, the web client hides
+# every Phase 2+ surface — cashback navbar links, /settings/wallet,
+# /settings/cashback, /cashback, the onboarding currency picker +
+# wallet-intro screens, and "you've earned X cashback" copy — so the app
+# reads as a pure XLM-via-CTX gift-card store. Discount badges stay (they
+# ARE the Tranche 1 proposition). Server-side only; flip back to false to
+# launch cashback as v1.1 with no app-store resubmission. Pair with the
+# Phase 2 backend gates off too (LOOP_WORKERS_ENABLED=false, unset
+# LOOP_STELLAR_*_ISSUER, INTEREST_APY_BASIS_POINTS=0 — all defaults).
+# LOOP_PHASE_1_ONLY=false
 
 # Admin step-up auth (ADR 028 / A4-063). ≥32 chars, deliberately
 # separate from LOOP_JWT_SIGNING_KEY so a JWT-key compromise doesn't
