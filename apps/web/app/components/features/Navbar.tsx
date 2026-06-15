@@ -386,6 +386,17 @@ export function Navbar(_props: NavbarProps = {}): React.JSX.Element {
         minWidth: '320px',
       }}
     >
+      {/* A11Y-010 / CF-35: skip-to-content link — the first focusable element
+          in the shared chrome so keyboard/SR users can jump past the logo,
+          search combobox, nav links, country selector, and account menu
+          straight to the route's <main id="main"> landmark. Visually hidden
+          until focused. */}
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-2 focus:z-[1200] focus:rounded-md focus:bg-blue-600 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white"
+      >
+        Skip to main content
+      </a>
       <div className="container mx-auto px-4">
         <div className="flex items-center gap-3 py-3 sm:py-4">
           {/* Logo — web only (native shows the launcher mark). */}

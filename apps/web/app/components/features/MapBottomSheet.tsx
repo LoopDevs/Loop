@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { Merchant } from '@loop/shared';
 import { LazyImage } from '~/components/ui/LazyImage';
 import { getImageProxyUrl } from '~/utils/image';
 import { PurchaseContainer } from '~/components/features/purchase/PurchaseContainer';
+import { useFocusTrap } from '~/hooks/use-focus-trap';
 
 interface MapBottomSheetProps {
   merchant: Merchant;
@@ -37,6 +38,11 @@ export function MapBottomSheet({ merchant, onClose }: MapBottomSheetProps): Reac
   const [isClosing, setIsClosing] = useState(false);
   const dragStartYRef = useRef<number | null>(null);
   const sheetRef = useRef<HTMLDivElement | null>(null);
+  // A11Y-005: the dialog root (for the focus trap) and the close button
+  // (where focus lands on open). Distinct from `sheetRef`, which drives the
+  // drag transform.
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const DISMISS_THRESHOLD_PX = 120;
   // Enough to guarantee the sheet leaves the viewport regardless of
   // the device height — browsers clamp to the viewport bottom anyway.
@@ -49,15 +55,16 @@ export function MapBottomSheet({ merchant, onClose }: MapBottomSheetProps): Reac
     setIsClosing(true);
   };
 
-  // Keyboard dismiss. No autofocus inside the sheet — PurchaseContainer
-  // manages its own focus flow (e.g., amount input) once mounted.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') startClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  // A11Y-005 / CF-35: trap focus inside the sheet, move focus to the close
+  // button on open, restore focus to the triggering pin on close, and close
+  // on Escape. Replaces the prior bare Escape listener that left keyboard
+  // users stuck behind the open sheet with no focusable dismiss.
+  useFocusTrap({
+    active: true,
+    containerRef: dialogRef,
+    onClose: startClose,
+    initialFocusRef: closeButtonRef,
+  });
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
     if (isClosing) return;
@@ -100,27 +107,23 @@ export function MapBottomSheet({ merchant, onClose }: MapBottomSheetProps): Reac
 
   return (
     <>
-      {/* Light backdrop so the map + pin underneath still shows; user
-          can dismiss with a tap, Escape, or via the close affordance
-          on the sheet itself. */}
+      {/* Light backdrop so the map + pin underneath still shows; user can
+          dismiss with a tap. Keyboard dismissal is the explicit close
+          button + Escape (handled by the focus trap), so the backdrop is
+          presentational and out of the tab order. */}
       <div
-        role="button"
-        tabIndex={-1}
-        aria-label="Close merchant details"
+        aria-hidden="true"
         className={`fixed inset-0 z-[1000] bg-black/25 transition-opacity duration-300 ${
           isClosing ? 'opacity-0' : 'animate-fade-in opacity-100'
         }`}
         onClick={startClose}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            startClose();
-          }
-        }}
       />
 
       <div
-        ref={sheetRef}
+        ref={(node) => {
+          sheetRef.current = node;
+          dialogRef.current = node;
+        }}
         role="dialog"
         aria-modal="true"
         aria-label={`${merchant.name} purchase`}
@@ -179,6 +182,27 @@ export function MapBottomSheet({ merchant, onClose }: MapBottomSheetProps): Reac
               <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-blue-700 pointer-events-none" />
             )}
             <div className="absolute top-2 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/75 shadow-sm pointer-events-none" />
+            {/* A11Y-005: a real, focusable close button — the only previous
+                dismissal was an undiscoverable Escape. `pointer-events-auto`
+                opts back in over the cover's `pointer-events-none`. */}
+            <button
+              ref={closeButtonRef}
+              type="button"
+              onClick={startClose}
+              aria-label={`Close ${merchant.name} details`}
+              className="absolute top-2 right-2 z-10 pointer-events-auto h-9 w-9 rounded-full bg-black/45 text-white backdrop-blur-md shadow flex items-center justify-center"
+            >
+              <svg
+                viewBox="0 0 16 16"
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+              </svg>
+            </button>
             <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/70 via-black/30 to-transparent pointer-events-none" />
             <div className="absolute bottom-3 left-4 right-4 flex items-center gap-3 pointer-events-none">
               <div className="h-12 w-12 rounded-lg bg-white dark:bg-gray-800 shadow-sm flex items-center justify-center overflow-hidden flex-shrink-0">

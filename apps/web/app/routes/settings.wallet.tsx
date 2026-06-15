@@ -192,16 +192,38 @@ function SettingsWalletBody(): React.JSX.Element {
           <strong>{user.homeCurrency}</strong>, so payouts arrive as <strong>{assetCode}</strong>.
         </p>
         <div role="radiogroup" aria-label="Home currency" className="flex flex-wrap gap-2">
-          {HOME_CURRENCIES.map((code) => {
+          {HOME_CURRENCIES.map((code, i) => {
             const active = code === user.homeCurrency;
+            // A11Y-021 / CF-35: WAI-ARIA radiogroup keyboard contract — one
+            // roving tab stop (the selected currency, or the first), with
+            // Arrow/Home/End moving selection. The active radio stays
+            // focusable (only `isPending` disables it) so it can be the tab
+            // stop; `handleCurrencyChange` already no-ops on re-select.
+            const selectedIndex = HOME_CURRENCIES.indexOf(user.homeCurrency);
+            const tabStop = selectedIndex === -1 ? 0 : selectedIndex;
             return (
               <button
                 key={code}
                 type="button"
                 role="radio"
                 aria-checked={active}
+                tabIndex={i === tabStop ? 0 : -1}
                 onClick={() => handleCurrencyChange(code)}
-                disabled={currencyMutation.isPending || active}
+                onKeyDown={(e) => {
+                  const len = HOME_CURRENCIES.length;
+                  let next: number | null = null;
+                  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (i + 1) % len;
+                  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (i - 1 + len) % len;
+                  else if (e.key === 'Home') next = 0;
+                  else if (e.key === 'End') next = len - 1;
+                  if (next === null) return;
+                  e.preventDefault();
+                  const nextCode = HOME_CURRENCIES[next]!;
+                  handleCurrencyChange(nextCode);
+                  const group = e.currentTarget.closest('[role="radiogroup"]');
+                  group?.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus();
+                }}
+                disabled={currencyMutation.isPending}
                 className={`rounded-lg border px-4 py-2 text-sm font-medium disabled:cursor-not-allowed ${
                   active
                     ? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'

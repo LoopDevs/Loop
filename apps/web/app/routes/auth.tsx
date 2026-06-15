@@ -426,10 +426,14 @@ export default function AuthRoute(): React.JSX.Element {
       <>
         {!isNative && <Navbar />}
         <PageHeader title="Account" fallbackHref="/" />
-        {/* Native only clears the PageHeader row (`h-14` = 3.5rem);
+        {/* A11Y-010 / CF-35: <main> landmark + skip-link target.
+            Native only clears the PageHeader row (`h-14` = 3.5rem);
             NativeShell's `native-safe-page` already adds the
             safe-top padding. Web: `pt-20` clears the fixed Navbar. */}
-        <div className={`flex flex-col items-center px-4 pb-4 ${isNative ? 'pt-16' : 'pt-20'}`}>
+        <main
+          id="main"
+          className={`flex flex-col items-center px-4 pb-4 ${isNative ? 'pt-16' : 'pt-20'}`}
+        >
           <div className="w-full max-w-sm text-center">
             <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
               <span className="text-2xl">👤</span>
@@ -476,7 +480,7 @@ export default function AuthRoute(): React.JSX.Element {
               </Button>
             </div>
           </div>
-        </div>
+        </main>
       </>
     );
   }
@@ -526,8 +530,8 @@ export default function AuthRoute(): React.JSX.Element {
         </div>
       </div>
 
-      {/* Form panel */}
-      <div className="flex flex-1 items-center justify-center bg-surface px-6 py-12">
+      {/* Form panel — A11Y-010 / CF-35: <main> landmark + skip-link target. */}
+      <main id="main" className="flex flex-1 items-center justify-center bg-surface px-6 py-12">
         <div className="w-full max-w-sm">
           <BackToSite />
           <div className="mb-8 text-center lg:text-left">
@@ -575,7 +579,12 @@ export default function AuthRoute(): React.JSX.Element {
                   // sets this.
                   autoComplete="email"
                 />
-                {error !== null && <p className="text-red-500 text-sm">{error}</p>}
+                {/* A11Y-013 / CF-35: announce sign-in failures to SR users. */}
+                {error !== null && (
+                  <p role="alert" className="text-red-500 text-sm">
+                    {error}
+                  </p>
+                )}
                 <Button type="submit" className="w-full" disabled={isLoading}>
                   {isLoading ? 'Sending…' : 'Send verification code'}
                 </Button>
@@ -630,7 +639,7 @@ export default function AuthRoute(): React.JSX.Element {
             </form>
           )}
         </div>
-      </div>
+      </main>
     </div>
   );
 }

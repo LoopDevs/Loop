@@ -455,6 +455,11 @@ export function Onboarding({ onComplete }: OnboardingProps = {}): React.JSX.Elem
                 pointerEvents: state === 'active' ? 'auto' : 'none',
               }}
               aria-hidden={state !== 'active'}
+              // A11Y-019 / CF-35: `inert` removes inactive slides from the
+              // tab order AND from AT — previously the email/OTP inputs of
+              // hidden slides stayed Tab-focusable inside an `aria-hidden`
+              // subtree (an ARIA violation). `inert` closes both gaps.
+              inert={state !== 'active'}
             >
               {renderStep(i, i === step)}
             </div>

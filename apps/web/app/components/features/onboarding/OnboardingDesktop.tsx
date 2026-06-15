@@ -122,8 +122,8 @@ export function OnboardingDesktop({ onComplete }: OnboardingDesktopProps = {}): 
     <div className="flex min-h-screen">
       <SlidePanel />
 
-      {/* Form panel */}
-      <div className="flex flex-1 items-center justify-center bg-surface px-8 py-12">
+      {/* Form panel — A11Y-010 / CF-35: <main> landmark + skip-link target. */}
+      <main id="main" className="flex flex-1 items-center justify-center bg-surface px-8 py-12">
         <div className="w-full max-w-sm">
           <BackToSite />
           <LoopLogo className="mb-6 h-8 w-auto text-ink lg:hidden" />
@@ -215,7 +215,7 @@ export function OnboardingDesktop({ onComplete }: OnboardingDesktopProps = {}): 
             </>
           )}
         </div>
-      </div>
+      </main>
     </div>
   );
 }

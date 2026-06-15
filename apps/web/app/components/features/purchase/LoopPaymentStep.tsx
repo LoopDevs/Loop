@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   getLoopOrder,
@@ -32,6 +32,10 @@ export interface LoopPaymentStepProps {
  */
 export function LoopPaymentStep({ create, onTerminal }: LoopPaymentStepProps): React.JSX.Element {
   const [notifiedTerminal, setNotifiedTerminal] = useState(false);
+  // A11Y-001 / CF-35: move focus to the redemption block once the order
+  // reaches `fulfilled` so an SR user lands on the gift card code/PIN
+  // instead of the change being announced silently somewhere off-screen.
+  const redemptionRef = useRef<HTMLDivElement>(null);
 
   const orderQuery = useQuery({
     queryKey: ['loop-order', create.orderId],
@@ -60,6 +64,11 @@ export function LoopPaymentStep({ create, onTerminal }: LoopPaymentStepProps): R
 
   const stateLabel =
     orderQuery.data !== undefined ? loopOrderStateLabel(orderQuery.data.state) : 'Creating order…';
+  const isFulfilled = orderQuery.data?.state === 'fulfilled';
+
+  useEffect(() => {
+    if (isFulfilled) redemptionRef.current?.focus();
+  }, [isFulfilled]);
 
   return (
     <section className="max-w-md mx-auto px-5 py-8 flex flex-col gap-5">
@@ -67,11 +76,18 @@ export function LoopPaymentStep({ create, onTerminal }: LoopPaymentStepProps): R
         <div className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
           Order {create.orderId.slice(0, 8)}
         </div>
-        <h2 className="text-2xl font-semibold text-gray-900 dark:text-white">{stateLabel}</h2>
+        {/* A11Y-001 / CF-35: the state label updates via a 3s poll — wrap it
+            in a polite live region so "Waiting for payment" → "Payment
+            received" → "Buying…" → "Ready" is announced to SR users. */}
+        <h2 aria-live="polite" className="text-2xl font-semibold text-gray-900 dark:text-white">
+          {stateLabel}
+        </h2>
       </header>
 
-      {orderQuery.data?.state === 'fulfilled' ? (
-        <RedemptionBody order={orderQuery.data} />
+      {isFulfilled ? (
+        <div ref={redemptionRef} tabIndex={-1} role="status">
+          <RedemptionBody order={orderQuery.data!} />
+        </div>
       ) : create.payment.method === 'credit' ? (
         <CreditPaymentBody order={orderQuery.data} />
       ) : // A2-1504 + 2026-05-05 mobile-first revision: the stellar-funded
@@ -114,7 +130,10 @@ export function LoopPaymentStep({ create, onTerminal }: LoopPaymentStepProps): R
       )}
 
       {orderQuery.data?.state === 'failed' && (
-        <div className="rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-700 dark:text-red-300">
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-700 dark:text-red-300"
+        >
           {orderQuery.data.failureReason ?? 'Order failed.'}
         </div>
       )}
@@ -356,6 +375,13 @@ function Row({
           </button>
         ) : null}
       </div>
+      {/* UX-001 / CF-35: confirm copy to assistive tech — these values
+          (memo / code / PIN) are the ones most worth confirming. */}
+      {copyable === true ? (
+        <span aria-live="polite" className="sr-only">
+          {copied ? `${label} copied to clipboard.` : ''}
+        </span>
+      ) : null}
     </div>
   );
 }

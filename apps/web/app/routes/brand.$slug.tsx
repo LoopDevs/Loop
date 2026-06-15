@@ -67,7 +67,8 @@ export default function BrandRoute(): React.JSX.Element {
   return (
     <div>
       {!isNative && <Navbar />}
-      <div className={isNative ? '' : 'pt-20'}>
+      {/* A11Y-010 / CF-35: <main> landmark + skip-link target. */}
+      <main id="main" className={isNative ? '' : 'pt-20'}>
         <div className="container mx-auto px-4 py-8 max-w-6xl">
           <button
             onClick={handleBack}
@@ -115,7 +116,7 @@ export default function BrandRoute(): React.JSX.Element {
             </>
           )}
         </div>
-      </div>
+      </main>
       {!isNative && <Footer />}
     </div>
   );

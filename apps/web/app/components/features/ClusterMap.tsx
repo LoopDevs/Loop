@@ -180,7 +180,17 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
           iconAnchor: [20, 20],
         });
 
-        const marker = L.marker([lat, lng], { icon });
+        // A11Y-006: `keyboard: true` makes the marker focusable and lets
+        // Enter/Space fire its click handler; `alt`/`title` give it an
+        // accessible name so SR users hear "cluster of N" instead of an
+        // unlabeled graphic.
+        const clusterLabel = `Cluster of ${count} ${count === 1 ? 'location' : 'locations'}. Activate to zoom in.`;
+        const marker = L.marker([lat, lng], {
+          icon,
+          keyboard: true,
+          title: clusterLabel,
+          alt: clusterLabel,
+        });
         // `setZoom` keeps the current centre, so clicking a cluster just
         // zoomed in on wherever the user was looking. Pan to the cluster
         // AND zoom via `setView` so the interaction feels like drilling
@@ -206,10 +216,18 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
           iconAnchor: [16, 16],
         });
 
-        const marker = L.marker([lat, lng], { icon });
         const resolved = merchantsById.current.get(merchantId);
         const merchantName = resolved?.name ?? merchantId;
         const slug = resolved?.slug ?? merchantSlug(merchantId);
+        // A11Y-006: focusable + named pin so keyboard/SR users can reach
+        // each merchant. Enter/Space fires the same click handler as a tap.
+        const pinLabel = `${merchantName}. Activate to view and buy a gift card.`;
+        const marker = L.marker([lat, lng], {
+          icon,
+          keyboard: true,
+          title: pinLabel,
+          alt: pinLabel,
+        });
         // Escape before interpolation: Leaflet sets innerHTML on popup content.
         const safeName = escapeHtml(merchantName);
         const safePinLargeUrl = mapPinUrl ? escapeHtml(getImageProxyUrl(mapPinUrl, 400)) : '';
@@ -397,10 +415,13 @@ export default function ClusterMap({ onMerchantSelect }: ClusterMapProps): React
       const map = L.map(mapContainerRef.current, {
         center: [40, -98],
         zoom: 4,
-        // Gestures (pinch / double-tap) are the primary zoom affordance
-        // on mobile; the +/- buttons duplicate that and take screen
-        // real estate. Web users can still pinch on a trackpad.
-        zoomControl: false,
+        // A11Y-006: restore the +/- zoom control. Gestures (pinch /
+        // double-tap) are the primary affordance on mobile, but the
+        // buttons are the only keyboard-operable zoom for users who can't
+        // pinch — removing them left keyboard users with no zoom at all.
+        // (Leaflet's `keyboard: true` also enables +/- arrow-key zoom when
+        // the map has focus; the visible control is the discoverable path.)
+        zoomControl: true,
         // Default Leaflet attribution bar takes a visible strip along
         // the bottom. Suppress it here; the license-required credits
         // are still surfaced via the "ⓘ" button rendered below the map

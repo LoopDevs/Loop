@@ -64,4 +64,47 @@ describe('CountrySelector', () => {
     fireEvent.click(screen.getByRole('option', { name: /Germany/ }));
     expect(screen.getByTestId('loc').textContent).toBe('/de/en');
   });
+
+  // A11Y-004 / CF-35 — focus trap, focus restore, listbox keyboard nav.
+  it('moves focus to the search input on open', () => {
+    renderAt('/us/en');
+    fireEvent.click(screen.getByRole('button', { name: /Country:/ }));
+    expect(document.activeElement).toBe(screen.getByLabelText('Search countries'));
+  });
+
+  it('restores focus to the trigger when closed via the close button', () => {
+    renderAt('/us/en');
+    const trigger = screen.getByRole('button', { name: /Country:/ });
+    trigger.focus();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('button', { name: /close country picker/i }));
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('restores focus to the trigger when closed via Escape', () => {
+    renderAt('/us/en');
+    const trigger = screen.getByRole('button', { name: /Country:/ });
+    trigger.focus();
+    fireEvent.click(trigger);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('exposes aria-activedescendant on the combobox and advances it with ArrowDown', () => {
+    renderAt('/us/en');
+    fireEvent.click(screen.getByRole('button', { name: /Country:/ }));
+    const input = screen.getByLabelText('Search countries');
+    expect(input.getAttribute('aria-activedescendant')).toBe('country-option-0');
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(input.getAttribute('aria-activedescendant')).toBe('country-option-1');
+  });
+
+  it('selects the active option on Enter', () => {
+    renderAt('/gb/en/cashback');
+    fireEvent.click(screen.getByRole('button', { name: /Country:/ }));
+    const input = screen.getByLabelText('Search countries');
+    fireEvent.change(input, { target: { value: 'ger' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.getByTestId('loc').textContent).toBe('/de/en/cashback');
+  });
 });
