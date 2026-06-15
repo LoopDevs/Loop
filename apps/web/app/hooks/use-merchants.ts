@@ -35,7 +35,12 @@ export function useMerchants(options: UseMerchantsOptions = {}): UseMerchantsRes
     queryKey: ['merchants', { page, limit, q }],
     queryFn: () => fetchMerchants({ page, limit, ...(q !== undefined ? { q } : {}) }),
     staleTime: 5 * 60 * 1000,
-    refetchOnWindowFocus: true,
+    // PERF-003 (audit 2026-06-15-cold / CF-29): the merchant catalog
+    // churns slowly (synced on a multi-hour cadence). Re-fetching the
+    // list on every tab focus once staleTime lapses is wasted bandwidth
+    // + main-thread JSON parse for no fresher data. staleTime governs
+    // freshness; a focus-refetch buys nothing here.
+    refetchOnWindowFocus: false,
     refetchOnReconnect: true,
     retry: shouldRetry,
   });
@@ -66,9 +71,20 @@ export function useAllMerchants(): {
 } {
   const query = useQuery<MerchantAllResponse, Error>({
     queryKey: ['merchants-all'],
+    // PERF-003 (audit 2026-06-15-cold / CF-29): this is the full
+    // ~1,134-record catalog (multi-hundred-KB JSON). Two cadence fixes:
+    //  - longer `staleTime` (30 min) — the catalog syncs on a multi-hour
+    //    cadence, and the `loop_merchants_all_v1` localStorage cache in
+    //    root.tsx already covers cold-start render, so a 5-min stale
+    //    window forced a redundant background refetch on routine
+    //    navigation. 30 min still revalidates well within a session.
+    //  - `refetchOnWindowFocus: false` — previously the whole payload
+    //    re-downloaded on every tab focus once staleTime lapsed,
+    //    including on routes that never render the catalog. staleTime +
+    //    the localStorage cache cover freshness without the focus tax.
     queryFn: () => fetchAllMerchants(),
-    staleTime: 5 * 60 * 1000,
-    refetchOnWindowFocus: true,
+    staleTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
     refetchOnReconnect: true,
     retry: shouldRetry,
   });
