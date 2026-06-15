@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { ApiException } from '@loop/shared';
+import { ApiException, formatMinorCurrency } from '@loop/shared';
 import type { LoopAssetCode } from '@loop/shared';
 import { getAssetCirculation } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -46,21 +46,14 @@ export function formatStroops(stroops: bigint, assetCode: string): string {
   return `${sign}${whole.toString()}${fraction} ${assetCode}`;
 }
 
-/** `"1500"` + `"USD"` → `"$15.00"`. Uses Intl; falls back for unknown codes. */
+/**
+ * `1500n` + `"USD"` → `"$15.00"`. CF-23 / WEB-M5: delegates to the
+ * bigint-exact shared formatter so the ledger-liability total (sum of
+ * every `user_credits.balance_minor`) stays precise past 2^53 minor
+ * units instead of casting the whole bigint through `Number()/100`.
+ */
 export function formatMinor(minor: bigint, fiat: string): string {
-  const negative = minor < 0n;
-  const abs = negative ? -minor : minor;
-  const n = Number(abs);
-  if (!Number.isFinite(n)) return `${negative ? '-' : ''}${abs.toString()} ${fiat}`;
-  try {
-    const formatted = new Intl.NumberFormat(ADMIN_LOCALE, {
-      style: 'currency',
-      currency: fiat,
-    }).format(n / 100);
-    return negative ? `-${formatted}` : formatted;
-  } catch {
-    return `${negative ? '-' : ''}${(n / 100).toFixed(2)} ${fiat}`;
-  }
+  return formatMinorCurrency(minor, fiat, { locale: ADMIN_LOCALE });
 }
 
 function formatAsOf(ms: number): string {

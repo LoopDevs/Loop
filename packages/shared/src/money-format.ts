@@ -11,12 +11,10 @@
  *
  * Scope: two helpers, both pure, both bigint-safe.
  *
- * Non-goals:
- *   - 0-decimal chart variant (lives in `MonthlyCashbackChart` —
- *     different contract: rounds to whole units for the bar chart).
- *   - Number-input formatters (the `fmtMinor` in `admin.users.$userId`
- *     uses `Number()` and is fine for per-user balances; only
- *     fleet-wide sums risk 2^53 overflow).
+ * `formatMinorCurrency` covers the 0-decimal chart variant via
+ * `opts.fractionDigits` (CF-23 — the bar charts and treasury summaries
+ * now delegate here instead of carrying their own lossy `Number()/100`
+ * helpers).
  *
  * Keep this module dependency-free — no React, no DOM, no platform
  * APIs beyond `Intl.NumberFormat` which is runtime-universal.
@@ -32,42 +30,87 @@
  * backend JSON (admin aggregates serialise bigints as strings to
  * survive JSON.stringify); numbers are tolerated for legacy call
  * sites but internally converted to bigint so the same pad/slice
- * arithmetic applies. The 2^53 precision window is not enough for
- * fleet-wide lifetime-cashback totals at scale, so the helper never
- * relies on it — the Number cast only touches the whole/frac
- * components after the bigint split.
+ * arithmetic applies.
+ *
+ * Bigint-exact at every magnitude (CF-23 / P2-SHARED-01). The whole
+ * part is formatted by `Intl.NumberFormat` over the **bigint** of
+ * major units — `Intl` consumes `bigint` natively and never routes it
+ * through a `Number`, so values past 2^53 minor units (≈ $90T in
+ * cents — the exact fleet/solvency aggregates this module exists to
+ * protect) group correctly instead of silently rounding. The two-
+ * decimal fraction (`abs % 100n`, padded) is spliced into the parts
+ * stream, so no IEEE-754 division ever touches the displayed digits.
  *
  * Non-integer numbers are floored (drops to minor-unit precision);
  * non-finite numbers return `"—"` so a bad backend row doesn't
  * render `NaN` to operators.
  *
- * Unknown ISO codes → falls back to `"<amount> <code>"`. Intl's
- * behaviour with unassigned 3-letter codes is engine-defined
- * (V8 accepts `XYZ`; JSC may not), so the fallback catches
- * engine-level throws rather than depending on the silent-accept.
+ * `opts.fractionDigits` (default `2`) drops to `0` for summary/chart
+ * surfaces ("$1,234" bars). `opts.locale` (default `en-US`, the
+ * admin-facing policy — A2-1521 + `apps/web/app/utils/locale.ts`)
+ * lets user-facing surfaces pass the browser locale.
  *
- * Locale is pinned `en-US` per the admin-facing policy (A2-1521 +
- * `apps/web/app/utils/locale.ts`). User-facing surfaces that want
- * the browser locale should format themselves with `USER_LOCALE`;
- * they're rendering per-user amounts where Number-cast is safe.
+ * Unknown ISO codes → falls back to `"<amount> <code>"` built from the
+ * same bigint split (still exact). Intl's behaviour with unassigned
+ * 3-letter codes is engine-defined (V8 accepts `XYZ`; JSC may not), so
+ * the fallback catches engine-level throws rather than depending on
+ * the silent-accept.
  */
-export function formatMinorCurrency(minor: bigint | string | number, currency: string): string {
+export function formatMinorCurrency(
+  minor: bigint | string | number,
+  currency: string,
+  opts?: { fractionDigits?: 0 | 2; locale?: string },
+): string {
   const big = coerceMinor(minor);
   if (big === null) return '—';
+  const fractionDigits = opts?.fractionDigits ?? 2;
+  const locale = opts?.locale ?? 'en-US';
   const neg = big < 0n;
   const abs = neg ? -big : big;
-  const major = Number(abs / 100n);
-  const frac = Number(abs % 100n) / 100;
-  const total = (neg ? -1 : 1) * (major + frac);
+  // Bigint-exact split: major units stay a bigint so Intl groups them
+  // without a lossy Number cast; the fraction is a fixed-width string.
+  const major = abs / 100n;
+  const fracStr = (abs % 100n).toString().padStart(2, '0');
+  const sign = neg ? '-' : '';
   try {
-    return new Intl.NumberFormat('en-US', {
+    // Format the integer-major bigint with zero fraction, then splice
+    // our own `.NN` in (2-decimal case) so the whole part is never
+    // coerced through a Number.
+    const nf = new Intl.NumberFormat(locale, {
       style: 'currency',
       currency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(total);
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    });
+    if (fractionDigits === 0) {
+      const formatted = nf.format(major);
+      return neg ? `-${formatted}` : formatted;
+    }
+    // Insert the fraction directly after the integer run (handles both
+    // leading- and trailing-symbol locales) so grouping stays intact.
+    // Use the locale's own decimal separator (`,` in de-DE, `.` in
+    // en-US) so a non-en-US caller doesn't get a mixed `1.234,56`.
+    const decimalSep = decimalSeparator(locale);
+    const parts = nf.formatToParts(major);
+    let out = '';
+    let inserted = false;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]!;
+      out += part.value;
+      const next = parts[i + 1];
+      if (
+        !inserted &&
+        part.type === 'integer' &&
+        (next === undefined || (next.type !== 'integer' && next.type !== 'group'))
+      ) {
+        out += `${decimalSep}${fracStr}`;
+        inserted = true;
+      }
+    }
+    return neg ? `-${out}` : out;
   } catch {
-    return `${total.toFixed(2)} ${currency}`;
+    const frac = fractionDigits === 0 ? '' : `.${fracStr}`;
+    return `${sign}${major.toString()}${frac} ${currency}`;
   }
 }
 
@@ -82,6 +125,15 @@ function coerceMinor(minor: bigint | string | number): bigint | null {
   } catch {
     return null;
   }
+}
+
+/** The locale's decimal separator (`.` en-US, `,` de-DE). Defaults to `.`. */
+function decimalSeparator(locale: string): string {
+  return (
+    new Intl.NumberFormat(locale, { minimumFractionDigits: 1 })
+      .formatToParts(1.1)
+      .find((p) => p.type === 'decimal')?.value ?? '.'
+  );
 }
 
 /**

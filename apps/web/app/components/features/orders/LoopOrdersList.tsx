@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { assertNever } from '@loop/shared';
+import { assertNever, formatMinorCurrency } from '@loop/shared';
 import { listLoopOrders, loopOrderStateLabel, type LoopOrderView } from '~/services/orders-loop';
 import { useAllMerchants } from '~/hooks/use-merchants';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -107,7 +107,9 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
             </div>
             {hasEarnedCashback ? (
               <div className="mt-0.5 text-[11px] font-medium text-green-700 dark:text-green-400 tabular-nums">
-                +{formatMinor(order.userCashbackMinor)} cashback
+                {/* WEB-M2: render the currency symbol/code so £1.25 isn't
+                    ambiguous with $1.25 on the always-visible row. */}
+                +{formatMinorCurrency(order.userCashbackMinor, order.currency)} cashback
               </div>
             ) : null}
           </div>

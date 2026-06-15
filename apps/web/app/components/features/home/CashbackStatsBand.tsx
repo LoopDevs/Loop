@@ -1,24 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
+import { formatMinorCurrency } from '@loop/shared';
 import { getPublicCashbackStats, type PerCurrencyCashback } from '~/services/public-stats';
 
 /**
- * Formats a per-currency minor amount as localised currency. Falls
- * back to a plain `<value> <code>` string for currencies that
- * `Intl.NumberFormat` doesn't know (shouldn't happen in practice —
- * we only ever emit USD/GBP/EUR today — but the guard costs nothing).
+ * Formats a per-currency minor amount as localised currency (no
+ * decimals — this is a marketing headline). CF-23 / WEB-M3: delegates
+ * to the bigint-exact shared formatter because these are fleet-wide
+ * `totalCashbackByCurrency` aggregates that can exceed 2^53 minor
+ * units at scale, where the old `Number(amountMinor)/100` silently
+ * lost precision. Falls back to `<value> <code>` for unknown codes.
  */
 export function fmtPerCurrency(entry: PerCurrencyCashback): string {
-  const n = Number(entry.amountMinor);
-  if (!Number.isFinite(n)) return '—';
-  try {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: entry.currency,
-      maximumFractionDigits: 0,
-    }).format(n / 100);
-  } catch {
-    return `${(n / 100).toFixed(0)} ${entry.currency}`;
-  }
+  return formatMinorCurrency(entry.amountMinor, entry.currency, { fractionDigits: 0 });
 }
 
 /**

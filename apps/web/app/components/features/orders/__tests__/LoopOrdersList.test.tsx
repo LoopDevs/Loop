@@ -130,9 +130,10 @@ describe('LoopOrdersList', () => {
     });
     render(wrap(<LoopOrdersList enabled={true} />));
     await waitFor(() => screen.getByText('Target'));
-    // `250` minor = `2.50` major — rendered with a leading `+` so it
-    // reads as a credit, not as noise next to the face-value amount.
-    expect(screen.getByText('+2.50 cashback')).toBeDefined();
+    // `250` minor = `2.50` major — rendered with a leading `+` and the
+    // order's currency symbol (WEB-M2) so a GBP credit reads as `£2.50`,
+    // not ambiguously as `2.50` (which could be $ or £).
+    expect(screen.getByText('+£2.50 cashback')).toBeDefined();
   });
 
   it('hides the cashback pill when userCashbackMinor is zero', async () => {
