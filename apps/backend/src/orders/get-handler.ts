@@ -44,10 +44,14 @@ export const GetOrderUpstreamResponse = z
     redeemType: z.string().optional(),
     redeemUrl: z.string().optional(),
     redeemUrlChallenge: z.string().optional(),
+    // CF-02: cap the CTX-supplied inject/scrape scripts at the trust boundary.
+    // These run in the merchant redemption WebView, so bound their size here
+    // (100KB is generous for a real auto-fill/scrape snippet) rather than
+    // forward an unbounded blob from upstream to the client.
     redeemScripts: z
       .object({
-        injectChallenge: z.string().optional(),
-        scrapeResult: z.string().optional(),
+        injectChallenge: z.string().max(100_000).optional(),
+        scrapeResult: z.string().max(100_000).optional(),
       })
       .optional(),
     created: z.string(),
