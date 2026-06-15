@@ -40,16 +40,22 @@ export function PaymentStep({
   const store = usePurchaseStore();
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState<string>('');
+  const [secondsLeft, setSecondsLeft] = useState<number>(0);
   const [expired, setExpired] = useState(false);
   const consecutiveErrors = useRef(0);
-  const [copied, setCopied] = useState(false);
+  // A11Y-003 / CF-35: per-field copied state. A single shared boolean made
+  // copying the address flip BOTH "Copy address" and "Copy memo" to
+  // "Copied!" — a real bug for ALL users that can lead to sending a Stellar
+  // payment without (or with the wrong) memo, stranding funds at CTX.
+  // Track which field was last copied so only that button confirms.
+  const [copiedField, setCopiedField] = useState<'address' | 'memo' | null>(null);
   const [connectionIssue, setConnectionIssue] = useState(false);
 
-  const handleCopy = async (text: string): Promise<void> => {
+  const handleCopy = async (text: string, field: 'address' | 'memo'): Promise<void> => {
     const ok = await copyToClipboard(text);
     if (ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCopiedField(field);
+      setTimeout(() => setCopiedField((f) => (f === field ? null : f)), 2000);
     }
   };
 
@@ -76,14 +82,30 @@ export function PaymentStep({
     const remaining = expiresAt - Math.floor(Date.now() / 1000);
     if (remaining <= 0) {
       setTimeLeft('0:00');
+      setSecondsLeft(0);
       setExpired(true);
       return false;
     }
     const mins = Math.floor(remaining / 60);
     const secs = remaining % 60;
     setTimeLeft(`${mins}:${secs.toString().padStart(2, '0')}`);
+    setSecondsLeft(remaining);
     return true;
   }, [expiresAt]);
+
+  // WCAG 2.2.1 (Timing Adjustable) / A11Y-002: the countdown is announced
+  // politely on a coarse cadence so SR users hear time running low without
+  // a per-second barrage, and an explicit "Start over" affordance gives a
+  // way to restart the window rather than silently losing the order. The
+  // order TTL is server-authoritative, so the recovery is restart (mint a
+  // fresh order) rather than extend-in-place.
+  const countdownAnnouncement = expired
+    ? 'Payment window expired.'
+    : secondsLeft > 0 && secondsLeft <= 60
+      ? `Less than a minute left to pay: ${timeLeft} remaining.`
+      : secondsLeft > 0 && secondsLeft % 60 === 0
+        ? `${Math.floor(secondsLeft / 60)} minutes left to pay.`
+        : '';
 
   useEffect(() => {
     updateCountdown();
@@ -180,7 +202,23 @@ export function PaymentStep({
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-6">
-      <div className="text-center mb-6">
+      {/* A11Y-002 / CF-35: politely announce the countdown so SR users
+          hear time running low. Visually hidden — the visible timer below
+          carries the same info for sighted users. */}
+      <div aria-live="polite" className="sr-only">
+        {countdownAnnouncement}
+      </div>
+      {/* A11Y-001/-002 / UX-001: confirm copy actions to assistive tech. */}
+      <div aria-live="polite" className="sr-only">
+        {copiedField === 'address'
+          ? 'Payment address copied to clipboard.'
+          : copiedField === 'memo'
+            ? 'Memo copied to clipboard.'
+            : ''}
+      </div>
+      {/* A11Y-001 / CF-35: payment-state region announced politely so an SR
+          user paying for a gift card hears that we're waiting / confirmed. */}
+      <div className="text-center mb-6" aria-live="polite">
         <Spinner size="sm" />
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
           Waiting for payment — your {merchantName} gift card will be sent once payment is
@@ -239,11 +277,12 @@ export function PaymentStep({
         <button
           type="button"
           onClick={() => {
-            void handleCopy(paymentAddress);
+            void handleCopy(paymentAddress, 'address');
           }}
+          aria-label="Copy payment address"
           className="text-xs text-blue-600 dark:text-blue-400 mt-1"
         >
-          {copied ? 'Copied!' : 'Copy address'}
+          {copiedField === 'address' ? 'Copied!' : 'Copy address'}
         </button>
       </div>
 
@@ -258,17 +297,21 @@ export function PaymentStep({
           <button
             type="button"
             onClick={() => {
-              void handleCopy(memo);
+              void handleCopy(memo, 'memo');
             }}
+            aria-label="Copy required memo"
             className="text-xs text-blue-600 dark:text-blue-400 mt-1"
           >
-            {copied ? 'Copied!' : 'Copy memo'}
+            {copiedField === 'memo' ? 'Copied!' : 'Copy memo'}
           </button>
         </div>
       )}
 
       {connectionIssue && !expired && (
-        <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 text-center text-sm text-yellow-700 dark:text-yellow-300 mb-4">
+        <div
+          role="alert"
+          className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 text-center text-sm text-yellow-700 dark:text-yellow-300 mb-4"
+        >
           Connection issue — still checking for your payment...
         </div>
       )}
@@ -281,8 +324,24 @@ export function PaymentStep({
         </p>
       </div>
 
+      {/* WCAG 2.2.1 / A11Y-002: the countdown is a hard limit, so always offer
+          an explicit way to restart the window rather than only after it
+          silently expires. Pre-expiry this is a low-key link; on expiry it
+          becomes the primary recovery action below. */}
+      {!expired && (
+        <div className="text-center mb-2">
+          <button
+            type="button"
+            onClick={store.reset}
+            className="text-xs text-gray-500 dark:text-gray-400 underline"
+          >
+            Need more time? Start over with a fresh payment window
+          </button>
+        </div>
+      )}
+
       {expired && (
-        <div className="text-center">
+        <div className="text-center" role="alert">
           <p className="text-red-500 text-sm mb-3">Payment window expired. Please try again.</p>
           <Button variant="secondary" onClick={store.reset}>
             Start over

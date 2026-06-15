@@ -50,6 +50,19 @@ export function useLocale(): Locale {
   return normalizeLocale(params.country, params.lang);
 }
 
+// RTL languages we'd ever route (ADR 034 §7). Forward-looking — only `en`
+// ships today — but kept here so `<html dir>` is derived, not hardcoded, the
+// moment a script-RTL language is added.
+const RTL_LANGS = new Set(['ar', 'he', 'fa', 'ur']);
+
+/**
+ * Document writing direction for a language segment (A11Y-011 / I18N-003).
+ * `'rtl'` for Arabic/Hebrew/Farsi/Urdu, `'ltr'` otherwise.
+ */
+export function getLangDir(lang: string): 'ltr' | 'rtl' {
+  return RTL_LANGS.has(lang.toLowerCase()) ? 'rtl' : 'ltr';
+}
+
 /**
  * The locale of the **current** route, or `null` when this route is not under
  * the `/:country/:lang` layout. Unlike {@link useLocale}, it does NOT default to

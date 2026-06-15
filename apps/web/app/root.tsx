@@ -33,6 +33,7 @@ import { shouldRetry } from '~/hooks/query-retry';
 import { NativeTabBar } from '~/components/features/NativeTabBar';
 import { LoopLogo } from '~/components/ui/LoopLogo';
 import { fetchAllMerchants } from '~/services/merchants';
+import { getLangDir, useLocale } from '~/i18n/locale';
 import './app.css';
 
 const Onboarding = lazy(() =>
@@ -496,6 +497,18 @@ export default function App(): React.JSX.Element {
   const { isRestoring } = useSessionRestore();
   const { isNative } = useNativePlatform();
   const isAuthenticated = useAuthStore((s) => s.accessToken !== null);
+  // A11Y-011 / I18N-003 / CF-35: drive `<html lang>` / `<html dir>` from the
+  // active ADR-034 locale instead of the hardcoded `lang="en"` in Layout.
+  // Today benign (only `en` ships) but a forward-block: a `/de/de` route
+  // would otherwise still report `lang="en"` and give SRs the wrong
+  // pronunciation. `Layout` renders the document shell outside the router,
+  // so this effect (inside the router) is where the URL locale is known.
+  const locale = useLocale();
+  useEffect(() => {
+    const el = document.documentElement;
+    el.setAttribute('lang', locale.lang);
+    el.setAttribute('dir', getLangDir(locale.lang));
+  }, [locale.lang]);
   // Pins the onboarding UI once we enter it so a mid-flow
   // `setSession` (fired by the OTP-verify step) doesn't flip the
   // outer gate and yank the user past the welcome-in payoff. Unpins

@@ -8,6 +8,7 @@ import {
   stripLocale,
   useLocale,
 } from '~/i18n/locale';
+import { useFocusTrap } from '~/hooks/use-focus-trap';
 
 /**
  * Country picker (ADR 034 §4). Replaces the four-region selector (ADR 033). With
@@ -24,21 +25,18 @@ export function CountrySelector(): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  // A11Y-004: active-descendant index for keyboard listbox navigation. The
+  // search input keeps DOM focus; arrow keys move this highlight, Enter
+  // selects it, and `aria-activedescendant` tells the SR which option is
+  // current without moving focus off the input.
+  const [activeIndex, setActiveIndex] = useState(0);
 
   const current = useMemo(
     () => COUNTRIES.find((c) => c.code.toLowerCase() === locale.country) ?? COUNTRIES[0]!,
     [locale.country],
   );
-
-  useEffect(() => {
-    if (!open) return undefined;
-    inputRef.current?.focus();
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open]);
 
   const folded = foldForSearch(query);
   const matches = useMemo(
@@ -50,6 +48,29 @@ export function CountrySelector(): React.JSX.Element {
           ),
     [folded],
   );
+
+  // A11Y-004: trap focus inside the modal, move focus to the search input on
+  // open, restore it to the trigger on close, and close on Escape.
+  useFocusTrap({
+    active: open,
+    containerRef: dialogRef,
+    onClose: () => setOpen(false),
+    initialFocusRef: inputRef,
+  });
+
+  // Reset the active option to the top whenever the query (and so the match
+  // set) changes, and clamp it within bounds.
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [folded]);
+
+  // Keep the highlighted option scrolled into view as the user arrows.
+  useEffect(() => {
+    if (!open) return;
+    const el = listRef.current?.querySelector<HTMLElement>(`#country-option-${activeIndex}`);
+    // `scrollIntoView` is unimplemented in jsdom; guard so tests don't throw.
+    el?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeIndex, open]);
 
   const choose = (code: string): void => {
     const lower = code.toLowerCase();
@@ -97,36 +118,92 @@ export function CountrySelector(): React.JSX.Element {
           className="fixed inset-0 z-[1300] flex items-start justify-center bg-black/40 px-4 pt-[12vh]"
         >
           <div
+            ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-label="Choose your country"
             onMouseDown={(e) => e.stopPropagation()}
             className="w-full max-w-sm overflow-hidden rounded-xl bg-white shadow-2xl"
           >
-            <div className="border-b border-gray-100 p-3">
+            <div className="flex items-center gap-2 border-b border-gray-100 p-3">
               <input
                 ref={inputRef}
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  // A11Y-004: arrow-key listbox navigation driven from the
+                  // search input via aria-activedescendant.
+                  if (matches.length === 0) return;
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setActiveIndex((i) => (i + 1) % matches.length);
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setActiveIndex((i) => (i - 1 + matches.length) % matches.length);
+                  } else if (e.key === 'Home') {
+                    e.preventDefault();
+                    setActiveIndex(0);
+                  } else if (e.key === 'End') {
+                    e.preventDefault();
+                    setActiveIndex(matches.length - 1);
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const c = matches[activeIndex];
+                    if (c) choose(c.code);
+                  }
+                }}
                 placeholder="Search countries"
                 aria-label="Search countries"
+                role="combobox"
+                aria-expanded="true"
+                aria-controls="country-listbox"
+                aria-activedescendant={
+                  matches.length > 0 ? `country-option-${activeIndex}` : undefined
+                }
                 className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm text-ink outline-none focus:border-blue-500"
               />
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label="Close country picker"
+                className="shrink-0 rounded-md p-1.5 text-ink-muted hover:bg-gray-100"
+              >
+                <svg
+                  aria-hidden
+                  viewBox="0 0 16 16"
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                >
+                  <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+                </svg>
+              </button>
             </div>
-            <ul role="listbox" aria-label="Countries" className="max-h-[50vh] overflow-y-auto py-1">
-              {matches.map((c) => {
+            <ul
+              ref={listRef}
+              id="country-listbox"
+              role="listbox"
+              aria-label="Countries"
+              className="max-h-[50vh] overflow-y-auto py-1"
+            >
+              {matches.map((c, i) => {
                 const selected = c.code.toLowerCase() === locale.country;
+                const isActive = i === activeIndex;
                 return (
                   <li key={c.code}>
                     <button
                       type="button"
+                      id={`country-option-${i}`}
                       role="option"
                       aria-selected={selected}
+                      tabIndex={-1}
                       onClick={() => choose(c.code)}
-                      className={`flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm transition-colors hover:bg-gray-50 ${
-                        selected ? 'font-semibold text-blue-600' : 'text-ink'
-                      }`}
+                      onMouseEnter={() => setActiveIndex(i)}
+                      className={`flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm transition-colors ${
+                        isActive ? 'bg-gray-100' : 'hover:bg-gray-50'
+                      } ${selected ? 'font-semibold text-blue-600' : 'text-ink'}`}
                     >
                       <FlagIcon code={c.code} emoji={c.flag} />
                       <span className="flex-1">{c.label}</span>

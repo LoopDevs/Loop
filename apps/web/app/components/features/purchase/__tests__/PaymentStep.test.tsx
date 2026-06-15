@@ -120,7 +120,7 @@ describe('PaymentStep — retry budget (audit A-030)', () => {
 describe('PaymentStep — copy-to-clipboard', () => {
   it('copies the payment address when its copy button is clicked', async () => {
     render(<PaymentStep {...baseProps} expiresAt={Math.floor(Date.now() / 1000) + 600} />);
-    const copyAddressButton = screen.getByRole('button', { name: /copy address/i });
+    const copyAddressButton = screen.getByRole('button', { name: /copy payment address/i });
     await act(async () => {
       fireEvent.click(copyAddressButton);
     });
@@ -130,11 +130,49 @@ describe('PaymentStep — copy-to-clipboard', () => {
 
   it('copies the memo when its copy button is clicked', async () => {
     render(<PaymentStep {...baseProps} expiresAt={Math.floor(Date.now() / 1000) + 600} />);
-    const copyMemoButton = screen.getByRole('button', { name: /copy memo/i });
+    const copyMemoButton = screen.getByRole('button', { name: /copy required memo/i });
     await act(async () => {
       fireEvent.click(copyMemoButton);
     });
     expect(mockCopy).toHaveBeenCalledTimes(1);
     expect(mockCopy).toHaveBeenCalledWith(baseProps.memo);
+  });
+
+  // A11Y-003 / CF-35: the memo-strand bug. A single shared `copied` boolean
+  // used to flip BOTH copy buttons to "Copied!" — making a user believe they
+  // copied the memo when they only copied the address (Stellar payment with
+  // a wrong/absent memo strands funds at CTX). Each button must own its state.
+  it('copying the address does NOT flip the memo button to "Copied!"', async () => {
+    render(<PaymentStep {...baseProps} expiresAt={Math.floor(Date.now() / 1000) + 600} />);
+    const copyAddressButton = screen.getByRole('button', { name: /copy payment address/i });
+    await act(async () => {
+      fireEvent.click(copyAddressButton);
+    });
+    // Address confirms; memo button keeps its idle label.
+    expect(copyAddressButton.textContent).toBe('Copied!');
+    expect(screen.getByRole('button', { name: /copy required memo/i }).textContent).toBe(
+      'Copy memo',
+    );
+  });
+
+  it('copying the memo does NOT flip the address button to "Copied!"', async () => {
+    render(<PaymentStep {...baseProps} expiresAt={Math.floor(Date.now() / 1000) + 600} />);
+    const copyMemoButton = screen.getByRole('button', { name: /copy required memo/i });
+    await act(async () => {
+      fireEvent.click(copyMemoButton);
+    });
+    expect(copyMemoButton.textContent).toBe('Copied!');
+    expect(screen.getByRole('button', { name: /copy payment address/i }).textContent).toBe(
+      'Copy address',
+    );
+  });
+});
+
+describe('PaymentStep — WCAG 2.2.1 timing (CF-35)', () => {
+  it('offers an explicit start-over affordance before the window expires', () => {
+    render(<PaymentStep {...baseProps} expiresAt={Math.floor(Date.now() / 1000) + 600} />);
+    expect(
+      screen.getByRole('button', { name: /start over with a fresh payment window/i }),
+    ).toBeTruthy();
   });
 });

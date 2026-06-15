@@ -8,6 +8,7 @@ import { createLoopOrder, type CreateLoopOrderResponse } from '~/services/orders
 import { requestOtp, verifyOtp } from '~/services/auth';
 import { useAppConfig } from '~/hooks/use-app-config';
 import { useMerchantCashbackRate } from '~/hooks/use-merchants';
+import { useRadioGroupKeys } from '~/hooks/use-radio-group-keys';
 import { AmountSelection } from './AmountSelection';
 import { EarnedCashbackCard } from './EarnedCashbackCard';
 import { LoopPaymentStep } from './LoopPaymentStep';
@@ -24,6 +25,10 @@ interface PurchaseContainerProps {
 }
 
 type AuthStep = 'email' | 'otp';
+
+// A4-040: Tranche-1 payment rails. Shared so the radiogroup render and the
+// roving-tabindex keyboard hook agree on order.
+const PAYMENT_RAILS = ['usdc', 'xlm'] as const;
 
 /**
  * Orchestrates the purchase flow: inline auth → amount → payment → complete.
@@ -69,6 +74,15 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
   // has no active config or the fetch fails — in both cases we just
   // don't surface the estimate, which is safer than showing $0.
   const { userCashbackPct } = useMerchantCashbackRate(merchant.id);
+
+  // A11Y-021 / CF-35: roving-tabindex + arrow-key nav for the payment-rail
+  // radiogroup. Hook must run unconditionally (Rules of Hooks) even when the
+  // group only renders for loop-native orders.
+  const railKeys = useRadioGroupKeys<'usdc' | 'xlm'>({
+    options: PAYMENT_RAILS,
+    selected: paymentMethod,
+    onSelect: setPaymentMethod,
+  });
 
   // Inline auth state
   const [authStep, setAuthStep] = useState<AuthStep>('email');
@@ -253,7 +267,11 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
               required
               label="Email address"
             />
-            {authError !== null && <p className="text-red-500 text-sm">{authError}</p>}
+            {authError !== null && (
+              <p role="alert" className="text-red-500 text-sm">
+                {authError}
+              </p>
+            )}
             <Button
               type="submit"
               className="w-full"
@@ -283,7 +301,11 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
               autoFocus
               label="Verification code"
             />
-            {authError !== null && <p className="text-red-500 text-sm">{authError}</p>}
+            {authError !== null && (
+              <p role="alert" className="text-red-500 text-sm">
+                {authError}
+              </p>
+            )}
             <Button
               type="submit"
               className="w-full"
@@ -392,13 +414,15 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
             Pay with
           </legend>
           <div role="radiogroup" aria-label="Payment rail" className="grid grid-cols-2 gap-2">
-            {(['usdc', 'xlm'] as const).map((m) => (
+            {PAYMENT_RAILS.map((m, i) => (
               <button
                 key={m}
                 type="button"
                 role="radio"
                 aria-checked={paymentMethod === m}
+                tabIndex={railKeys.rovingTabIndex(i)}
                 onClick={() => setPaymentMethod(m)}
+                onKeyDown={(e) => railKeys.onKeyDown(e, i)}
                 disabled={isCreatingOrder}
                 className={`py-3 px-4 min-h-[44px] rounded-lg border text-sm font-semibold transition-colors ${
                   paymentMethod === m
@@ -423,7 +447,9 @@ export function PurchaseContainer({ merchant }: PurchaseContainerProps): React.J
       />
 
       {orderError !== null && (
-        <p className="mt-3 text-sm text-red-600 dark:text-red-400">{orderError}</p>
+        <p role="alert" className="mt-3 text-sm text-red-600 dark:text-red-400">
+          {orderError}
+        </p>
       )}
     </div>
   );

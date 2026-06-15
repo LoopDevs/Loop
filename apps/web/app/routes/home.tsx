@@ -115,212 +115,231 @@ function HomeContent(): React.JSX.Element {
     <div>
       {!isNative && <Navbar />}
 
-      {/* Desktop hero + directory, hidden on mobile widths. Skipped
+      {/* A11Y-010 / CF-35: <main> landmark + skip-link target. Wraps the
+          desktop directory and the mobile dashboard but not the Navbar. */}
+      <main id="main">
+        {/* Desktop hero + directory, hidden on mobile widths. Skipped
           on native regardless — mobile widths always get
           MobileHome, and desktop layouts aren't applicable inside a
           phone webview. Rendered first so Playwright selectors that
           do `a[href^="/gift-card/"].first()` pick the visible
           desktop link, not the hidden mobile one sitting in the DOM. */}
-      <div className={isNative ? 'hidden' : 'hidden md:block'}>
-        {/* Hero — skipped on native where the app goes straight to the merchant
+        <div className={isNative ? 'hidden' : 'hidden md:block'}>
+          {/* Hero — skipped on native where the app goes straight to the merchant
             grid. The pitch section is for web visitors who need convincing; on
             mobile the user has already installed the app. */}
-        {!isNative && (
-          <section className="relative overflow-hidden border-b border-line bg-surface">
-            {/* Clean light hero — subtle grid texture + a soft blue glow
+          {!isNative && (
+            <section className="relative overflow-hidden border-b border-line bg-surface">
+              {/* Clean light hero — subtle grid texture + a soft blue glow
                 top-centre for depth, no heavy photography. */}
-            <div className="absolute inset-0 bg-grid opacity-60" aria-hidden="true" />
-            <div
-              className="absolute inset-x-0 -top-40 h-96 bg-[radial-gradient(closest-side,rgba(26,86,219,0.10),transparent)]"
-              aria-hidden="true"
-            />
-            <div className="relative mx-auto max-w-4xl text-center px-6 pt-20 pb-16 sm:pt-28 sm:pb-20">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-100">
-                <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
-                {phase1Only ? 'Up to 15% off, instantly' : 'Cashback on every order'}
-              </span>
-              <h1 className="mt-6 text-4xl sm:text-6xl font-semibold tracking-[-0.03em] text-ink leading-[1.05]">
-                {phase1Only ? (
-                  <>
-                    Instant <span className="text-blue-600">cashback</span>
-                    <br className="hidden sm:block" /> everywhere you shop.
-                  </>
-                ) : (
-                  <>
-                    Earn cashback on
-                    <br className="hidden sm:block" /> every{' '}
-                    <span className="text-blue-600">gift card</span>
-                  </>
-                )}
-              </h1>
-              <p className="mt-5 text-lg text-ink-muted max-w-xl mx-auto">
-                {phase1Only
-                  ? 'Buy from merchants you already shop at. Save up to 15% instantly. Pay with XLM or USDC, redeem online or in-store.'
-                  : 'Buy from merchants you already shop at. Every order pays back to your Loop balance — withdraw on-chain whenever you’re ready.'}
-              </p>
-              <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
-                {!isAuthenticated && (
-                  <Link
-                    to="/onboarding"
-                    className="inline-flex items-center justify-center rounded-md bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-xs hover:bg-blue-700 active:bg-blue-800 transition-colors"
+              <div className="absolute inset-0 bg-grid opacity-60" aria-hidden="true" />
+              <div
+                className="absolute inset-x-0 -top-40 h-96 bg-[radial-gradient(closest-side,rgba(26,86,219,0.10),transparent)]"
+                aria-hidden="true"
+              />
+              <div className="relative mx-auto max-w-4xl text-center px-6 pt-20 pb-16 sm:pt-28 sm:pb-20">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-100">
+                  <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
+                  {phase1Only ? 'Up to 15% off, instantly' : 'Cashback on every order'}
+                </span>
+                <h1 className="mt-6 text-4xl sm:text-6xl font-semibold tracking-[-0.03em] text-ink leading-[1.05]">
+                  {phase1Only ? (
+                    <>
+                      Instant <span className="text-blue-600">cashback</span>
+                      <br className="hidden sm:block" /> everywhere you shop.
+                    </>
+                  ) : (
+                    <>
+                      Earn cashback on
+                      <br className="hidden sm:block" /> every{' '}
+                      <span className="text-blue-600">gift card</span>
+                    </>
+                  )}
+                </h1>
+                <p className="mt-5 text-lg text-ink-muted max-w-xl mx-auto">
+                  {phase1Only
+                    ? 'Buy from merchants you already shop at. Save up to 15% instantly. Pay with XLM or USDC, redeem online or in-store.'
+                    : 'Buy from merchants you already shop at. Every order pays back to your Loop balance — withdraw on-chain whenever you’re ready.'}
+                </p>
+                <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
+                  {!isAuthenticated && (
+                    <Link
+                      to="/onboarding"
+                      className="inline-flex items-center justify-center rounded-md bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-xs hover:bg-blue-700 active:bg-blue-800 transition-colors"
+                    >
+                      Get started — it’s free
+                    </Link>
+                  )}
+                  <a
+                    href="#directory"
+                    className="inline-flex items-center justify-center gap-1 rounded-md border border-line-strong bg-white px-5 py-3 text-sm font-semibold text-ink hover:bg-gray-50 transition-colors"
                   >
-                    Get started — it’s free
-                  </Link>
-                )}
-                <a
-                  href="#directory"
-                  className="inline-flex items-center justify-center gap-1 rounded-md border border-line-strong bg-white px-5 py-3 text-sm font-semibold text-ink hover:bg-gray-50 transition-colors"
-                >
-                  Browse brands
-                  <span aria-hidden="true">→</span>
-                </a>
+                    Browse brands
+                    <span aria-hidden="true">→</span>
+                  </a>
+                </div>
+                <div className="mt-12 grid grid-cols-3 gap-4 max-w-2xl mx-auto">
+                  <Feature
+                    icon={
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M13 10V3L4 14h7v7l9-11h-7z"
+                        />
+                      </svg>
+                    }
+                    label="Instant delivery"
+                  />
+                  <Feature
+                    icon={
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+                        />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                        />
+                      </svg>
+                    }
+                    label="500,000+ locations"
+                  />
+                  <Feature
+                    icon={
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      </svg>
+                    }
+                    label={phase1Only ? 'Save on every order' : 'Cashback every order'}
+                  />
+                </div>
               </div>
-              <div className="mt-12 grid grid-cols-3 gap-4 max-w-2xl mx-auto">
-                <Feature
-                  icon={
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M13 10V3L4 14h7v7l9-11h-7z"
-                      />
-                    </svg>
-                  }
-                  label="Instant delivery"
-                />
-                <Feature
-                  icon={
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-                      />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-                      />
-                    </svg>
-                  }
-                  label="500,000+ locations"
-                />
-                <Feature
-                  icon={
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                      />
-                    </svg>
-                  }
-                  label={phase1Only ? 'Save on every order' : 'Cashback every order'}
-                />
-              </div>
-            </div>
-          </section>
-        )}
-
-        <div className="container mx-auto px-4 py-12 lg:py-20">
-          {isError && (
-            <p className="text-center text-red-500 mb-8">
-              Failed to load merchants. Please try again.
-            </p>
+            </section>
           )}
 
-          {/* "Recently purchased" + "Your favourites" strips — both
+          <div className="container mx-auto px-4 py-12 lg:py-20">
+            {isError && (
+              <p className="text-center text-red-500 mb-8">
+                Failed to load merchants. Please try again.
+              </p>
+            )}
+
+            {/* "Recently purchased" + "Your favourites" strips — both
               self-gate on isAuthenticated and a non-empty list, so
               brand-new and signed-out users see the existing layout
               unchanged. Recently-purchased renders first because a
               returning buyer is most likely to want to repeat-purchase
               before they want to browse pinned-but-unused merchants. */}
-          <RecentlyPurchasedStrip variant="desktop" />
-          <FavoritesStrip variant="desktop" />
+            <RecentlyPurchasedStrip variant="desktop" />
+            <FavoritesStrip variant="desktop" />
 
-          {/* Featured — rendered (with skeletons) during load too, so it
+            {/* Featured — rendered (with skeletons) during load too, so it
               reserves its space from first paint instead of popping in
               above "All Merchants" once data resolves. Hidden only when
               loading has finished AND there's genuinely nothing featured. */}
-          {(visibleLoading || visibleFeatured.length > 0) && (
-            <section className="mb-16">
-              <div className="text-center mb-10">
-                <h2 className="text-3xl font-semibold tracking-[-0.02em] text-ink mb-3">
-                  Top cashback rates
-                </h2>
-                <p className="text-base text-ink-muted max-w-2xl mx-auto">
-                  Featured merchants with the highest cashback on Loop right now.
-                </p>
-              </div>
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-                {visibleLoading
-                  ? Array.from({ length: 6 }).map((_, i) => <MerchantCardSkeleton key={i} />)
-                  : visibleFeatured.map((merchant, i) => (
-                      <MerchantCard
-                        key={merchant.id}
-                        merchant={merchant}
-                        displayIndex={i}
-                        eager={i < 4}
-                        userCashbackPct={lookupCashback(merchant.id)}
-                      />
-                    ))}
-              </div>
-            </section>
-          )}
+            {(visibleLoading || visibleFeatured.length > 0) && (
+              <section className="mb-16">
+                <div className="text-center mb-10">
+                  <h2 className="text-3xl font-semibold tracking-[-0.02em] text-ink mb-3">
+                    Top cashback rates
+                  </h2>
+                  <p className="text-base text-ink-muted max-w-2xl mx-auto">
+                    Featured merchants with the highest cashback on Loop right now.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                  {visibleLoading
+                    ? Array.from({ length: 6 }).map((_, i) => <MerchantCardSkeleton key={i} />)
+                    : visibleFeatured.map((merchant, i) => (
+                        <MerchantCard
+                          key={merchant.id}
+                          merchant={merchant}
+                          displayIndex={i}
+                          eager={i < 4}
+                          userCashbackPct={lookupCashback(merchant.id)}
+                        />
+                      ))}
+                </div>
+              </section>
+            )}
 
-          {/* All merchants — the skeleton grid uses the SAME column /
+            {/* All merchants — the skeleton grid uses the SAME column /
               gap classes as the populated grid so the column count
               doesn't jump (was lg:4 skeletons → lg:3 populated). */}
-          <section id="directory" className="scroll-mt-24">
-            <div className="text-center mb-12">
-              <h2 className="text-3xl font-semibold tracking-[-0.02em] text-ink mb-3">
-                All merchants
-              </h2>
-              <p className="text-base text-ink-muted max-w-2xl mx-auto">
-                Browse our complete collection of gift cards.
-              </p>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
-              {visibleLoading
-                ? Array.from({ length: 8 }).map((_, i) => <MerchantCardSkeleton key={i} />)
-                : groupedMerchants.map((g, i) =>
-                    g.isGroup ? (
-                      <MerchantGroupCard
-                        key={`g:${g.key}`}
-                        group={g}
-                        displayIndex={i + 6}
-                        eager={i < 4}
-                        lookupCashback={lookupCashback}
-                      />
-                    ) : (
-                      <MerchantCard
-                        key={g.members[0]!.id}
-                        merchant={g.members[0]!}
-                        displayIndex={i + 6}
-                        eager={i < 4}
-                        userCashbackPct={lookupCashback(g.members[0]!.id)}
-                      />
-                    ),
-                  )}
-            </div>
-          </section>
+            <section id="directory" className="scroll-mt-24">
+              <div className="text-center mb-12">
+                <h2 className="text-3xl font-semibold tracking-[-0.02em] text-ink mb-3">
+                  All merchants
+                </h2>
+                <p className="text-base text-ink-muted max-w-2xl mx-auto">
+                  Browse our complete collection of gift cards.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
+                {visibleLoading
+                  ? Array.from({ length: 8 }).map((_, i) => <MerchantCardSkeleton key={i} />)
+                  : groupedMerchants.map((g, i) =>
+                      g.isGroup ? (
+                        <MerchantGroupCard
+                          key={`g:${g.key}`}
+                          group={g}
+                          displayIndex={i + 6}
+                          eager={i < 4}
+                          lookupCashback={lookupCashback}
+                        />
+                      ) : (
+                        <MerchantCard
+                          key={g.members[0]!.id}
+                          merchant={g.members[0]!}
+                          displayIndex={i + 6}
+                          eager={i < 4}
+                          userCashbackPct={lookupCashback(g.members[0]!.id)}
+                        />
+                      ),
+                    )}
+              </div>
+            </section>
+          </div>
+
+          {!isNative && <Footer />}
         </div>
 
-        {!isNative && <Footer />}
-      </div>
-
-      {/* Mobile + native: the new dashboard+directory layout. Web
+        {/* Mobile + native: the new dashboard+directory layout. Web
           renders it at `<md` widths alongside the Navbar; native
           has no Navbar so it's the whole chrome. Desktop (md+)
           hides it via the wrapper class; placed after the desktop
           tree so Playwright selectors pick the visible variant. */}
-      <div className={isNative ? '' : 'md:hidden'}>
-        <MobileHome />
-      </div>
+        <div className={isNative ? '' : 'md:hidden'}>
+          <MobileHome />
+        </div>
+      </main>
     </div>
   );
 }

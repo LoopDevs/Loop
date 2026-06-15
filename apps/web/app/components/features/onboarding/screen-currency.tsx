@@ -8,6 +8,7 @@
  * endpoint's 409 branch is unreachable here).
  */
 import { currencyOf } from '@loop/shared';
+import { useRadioGroupKeys } from '~/hooks/use-radio-group-keys';
 
 interface ScreenCopy {
   eyebrow?: string;
@@ -59,6 +60,15 @@ export function CurrencyPickerScreen({
   onSelect,
   error,
 }: CurrencyPickerScreenProps): React.JSX.Element {
+  // A11Y-007 / CF-35: proper WAI-ARIA radiogroup keyboard behaviour — a
+  // single roving tab stop + Arrow/Home/End navigation. The previous
+  // `tabIndex={active?0:-1}` on every radio made all three simultaneous tab
+  // stops with no arrow keys.
+  const { rovingTabIndex, onKeyDown } = useRadioGroupKeys({
+    options: OPTIONS.map((o) => o.code),
+    selected,
+    onSelect,
+  });
   return (
     <div className="flex-1 flex flex-col px-6">
       <div className="flex-1 flex flex-col justify-center gap-8">
@@ -78,7 +88,7 @@ export function CurrencyPickerScreen({
         </header>
 
         <div role="radiogroup" aria-label="Home currency" className="flex flex-col gap-3">
-          {OPTIONS.map((opt) => {
+          {OPTIONS.map((opt, i) => {
             const isSelected = selected === opt.code;
             return (
               <button
@@ -86,8 +96,9 @@ export function CurrencyPickerScreen({
                 type="button"
                 role="radio"
                 aria-checked={isSelected}
-                tabIndex={active ? 0 : -1}
+                tabIndex={active ? rovingTabIndex(i) : -1}
                 onClick={() => onSelect(opt.code)}
+                onKeyDown={(e) => onKeyDown(e, i)}
                 className={[
                   'w-full rounded-2xl px-5 py-4 border text-left flex items-center gap-4 cursor-pointer active:scale-[0.98] transition-transform',
                   isSelected
@@ -110,15 +121,29 @@ export function CurrencyPickerScreen({
                   </span>
                   <span className="text-[13px] text-gray-500 dark:text-gray-400">{opt.hint}</span>
                 </span>
+                {/* A11Y-007: selected state was color-only — add a checkmark
+                    glyph so the choice doesn't rely on hue alone. */}
                 <span
                   aria-hidden
                   className={[
-                    'flex-shrink-0 w-5 h-5 rounded-full border-2',
+                    'flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center',
                     isSelected
-                      ? 'border-blue-600 bg-blue-600'
+                      ? 'border-blue-600 bg-blue-600 text-white'
                       : 'border-line-strong bg-transparent',
                   ].join(' ')}
-                />
+                >
+                  {isSelected ? (
+                    <svg
+                      viewBox="0 0 12 12"
+                      className="h-3 w-3"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <path d="M2.5 6.5 5 9l4.5-5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  ) : null}
+                </span>
               </button>
             );
           })}

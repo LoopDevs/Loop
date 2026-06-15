@@ -50,7 +50,8 @@ export default function MapRoute(): React.JSX.Element {
   return (
     <div className={`flex flex-col ${isNative ? 'native-full-bleed' : 'h-screen'}`}>
       {!isNative && <Navbar />}
-      <div className="flex-1 relative">
+      {/* A11Y-010 / CF-35: <main> landmark + skip-link target. */}
+      <main id="main" className="flex-1 relative">
         <Suspense
           fallback={
             <div className="flex items-center justify-center h-full">
@@ -67,7 +68,7 @@ export default function MapRoute(): React.JSX.Element {
             <MapBottomSheet merchant={selectedMerchant} onClose={handleClose} />
           </div>
         )}
-      </div>
+      </main>
     </div>
   );
 }
