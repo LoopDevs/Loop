@@ -86,20 +86,25 @@ export function mountAdminPayoutsRoutes(app: Hono): void {
   // ADR-028 / A4-063 step-up gate: re-trying an outbound on-chain payout
   // is destructive (it can cause a duplicate transfer if the prior
   // submit reached Horizon but the response was lost) and a stolen
-  // bearer must NOT be able to fire it.
+  // bearer must NOT be able to fire it. CF-08: bound to `'payout-retry'`.
   app.post(
     '/api/admin/payouts/:id/retry',
     rateLimit('POST /api/admin/payouts/:id/retry', 20, 60_000),
-    requireAdminStepUp(),
+    requireAdminStepUp('payout-retry'),
     adminRetryPayoutHandler,
   );
   // POST /api/admin/payouts/:id/compensate — re-credit a user after a
   // permanently-failed withdrawal payout (ADR-024 §5). Same rate limit
-  // as retry: rare, finance-reviewed, one-at-a-time.
+  // as retry: rare, finance-reviewed, one-at-a-time. CF-07: compensation
+  // re-credits the user's balance (a positive `type='adjustment'` row),
+  // so it carries the same ADR-028 step-up gate as its sibling
+  // `/retry` — a captured bearer alone must not be able to re-credit a
+  // balance. CF-08: bound to the `'payout-compensation'` scope.
   app.post(
     '/api/admin/payouts/:id/compensate',
     killSwitch('withdrawals'),
     rateLimit('POST /api/admin/payouts/:id/compensate', 20, 60_000),
+    requireAdminStepUp('payout-compensation'),
     adminPayoutCompensationHandler,
   );
   // Finance-ready CSV export of pending_payouts rows. Lower rate

@@ -30,6 +30,24 @@
   `admin-step-up.store.ts` Zustand store, `services/admin-step-up.ts`, with
   auto-prompt on 401 `STEP_UP_REQUIRED`. Tested. Both halves of the Phase-1
   slice are shipped.
+- **2026-06-15** Cold-audit money-write hardening (CF-06 / CF-07 / CF-08):
+  - **CF-06 / CF-07** — closed the two money-up writers that were missing the
+    gate. `POST /api/admin/users/:userId/refunds` (mints a positive
+    `credit_transactions` row) and `POST /api/admin/payouts/:id/compensate`
+    (re-credits a user's balance) now carry `requireAdminStepUp()` like their
+    siblings. The home-currency write (`/api/admin/users/:userId/home-currency`)
+    is also gated. The full step-up-gated set is now: credit-adjust, refund,
+    withdrawal, payout-retry, payout-compensation, home-currency.
+  - **CF-08** — the step-up token now carries a `scope` claim binding it to an
+    action class. `requireAdminStepUp(action)` rejects a token _narrowed_ to a
+    different class with 401 `STEP_UP_PURPOSE_MISMATCH`, so a step-up confirmed
+    for (say) a refund cannot be silently replayed against a withdrawal. The
+    default `scope: 'admin-write'` is a wildcard that satisfies every gate, so
+    the existing web flow (one generic token replayed across writes) is
+    unchanged — narrowing is opt-in at mint time via the `scope` body field on
+    `POST /api/admin/step-up`. This is defence-in-depth; it does not by itself
+    make the OTP a truly independent second factor (the passwordless-OTP
+    limitation below still stands — WebAuthn is the Phase-2 fix).
 
 ### Activation gate / deploy ordering
 

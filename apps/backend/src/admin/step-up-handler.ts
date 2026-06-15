@@ -24,7 +24,11 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { logger } from '../logger.js';
-import { isAdminStepUpConfigured, signAdminStepUpToken } from '../auth/admin-step-up.js';
+import {
+  isAdminStepUpConfigured,
+  signAdminStepUpToken,
+  STEP_UP_SCOPES,
+} from '../auth/admin-step-up.js';
 import type { LoopAuthContext } from '../auth/handler.js';
 import { findLiveOtp, incrementOtpAttempts, markOtpConsumed } from '../auth/otps.js';
 import { normalizeEmail, NonAsciiEmailError } from '../auth/normalize-email.js';
@@ -36,6 +40,14 @@ const StepUpBody = z.object({
   otp: z.string().min(1).max(20),
   /** Reserved for ADR-028 Phase-2 (password / webauthn variants). */
   kind: z.literal('otp').optional().default('otp'),
+  /**
+   * CF-08: optional action class to bind the minted token to. Omitted
+   * → the wildcard `'admin-write'` scope (backward-safe; the token
+   * satisfies every gate, matching the prior behaviour the web client
+   * relies on). A narrower value binds the token to one class so it
+   * can't be replayed against a different destructive write.
+   */
+  scope: z.enum(STEP_UP_SCOPES).optional(),
 });
 
 export async function adminStepUpHandler(c: Context): Promise<Response> {
@@ -90,8 +102,14 @@ export async function adminStepUpHandler(c: Context): Promise<Response> {
     const { token, claims } = signAdminStepUpToken({
       sub: auth.userId,
       email,
+      // CF-08: undefined → signAdminStepUpToken defaults to the
+      // wildcard scope, preserving the prior "any write" behaviour.
+      ...(parsed.data.scope !== undefined ? { scope: parsed.data.scope } : {}),
     });
-    log.info({ adminId: auth.userId, expSec: claims.exp }, 'admin step-up token issued');
+    log.info(
+      { adminId: auth.userId, expSec: claims.exp, scope: claims.scope },
+      'admin step-up token issued',
+    );
     return c.json({
       stepUpToken: token,
       expiresAt: new Date(claims.exp * 1000).toISOString(),

@@ -13,25 +13,54 @@ import type { Context } from 'hono';
  * sibling cashback-config handler suite (`handler.test.ts`).
  */
 
-const { applyMock, lookupMock, storeMock, notifyMock, RefundAlreadyIssuedError } = vi.hoisted(
-  () => {
-    class RefundAlreadyIssuedError extends Error {
-      constructor(public readonly orderId: string) {
-        super(`A refund has already been issued for order ${orderId}`);
-        this.name = 'RefundAlreadyIssuedError';
-      }
+const {
+  applyMock,
+  lookupMock,
+  storeMock,
+  notifyMock,
+  RefundAlreadyIssuedError,
+  RefundOrderInvalidError,
+  DailyAdjustmentLimitError,
+} = vi.hoisted(() => {
+  class RefundAlreadyIssuedError extends Error {
+    constructor(public readonly orderId: string) {
+      super(`A refund has already been issued for order ${orderId}`);
+      this.name = 'RefundAlreadyIssuedError';
     }
-    return {
-      applyMock: vi.fn(),
-      lookupMock: vi.fn(
-        async (_args?: unknown): Promise<null | { body: unknown; status: number }> => null,
-      ),
-      storeMock: vi.fn(async (_args?: unknown): Promise<void> => undefined),
-      notifyMock: vi.fn(),
-      RefundAlreadyIssuedError,
-    };
-  },
-);
+  }
+  class RefundOrderInvalidError extends Error {
+    constructor(
+      public readonly reason: string,
+      message: string,
+    ) {
+      super(message);
+      this.name = 'RefundOrderInvalidError';
+    }
+  }
+  class DailyAdjustmentLimitError extends Error {
+    constructor(
+      public readonly currency: string,
+      public readonly dayStartUtc: Date,
+      public readonly usedMinor: bigint,
+      public readonly capMinor: bigint,
+      public readonly attemptedDelta: bigint,
+    ) {
+      super('Daily admin adjustment cap would be exceeded');
+      this.name = 'DailyAdjustmentLimitError';
+    }
+  }
+  return {
+    applyMock: vi.fn(),
+    lookupMock: vi.fn(
+      async (_args?: unknown): Promise<null | { body: unknown; status: number }> => null,
+    ),
+    storeMock: vi.fn(async (_args?: unknown): Promise<void> => undefined),
+    notifyMock: vi.fn(),
+    RefundAlreadyIssuedError,
+    RefundOrderInvalidError,
+    DailyAdjustmentLimitError,
+  };
+});
 
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -77,6 +106,11 @@ vi.mock('../idempotency.js', () => ({
 vi.mock('../../credits/refunds.js', () => ({
   applyAdminRefund: applyMock,
   RefundAlreadyIssuedError,
+  RefundOrderInvalidError,
+}));
+
+vi.mock('../../credits/adjustments.js', () => ({
+  DailyAdjustmentLimitError,
 }));
 
 vi.mock('../../discord.js', () => ({
@@ -315,5 +349,68 @@ describe('adminRefundHandler — ADR-017 invariants', () => {
     expect(res.status).toBe(500);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('INTERNAL_ERROR');
+  });
+
+  describe('CF-06 order-validation error mapping', () => {
+    it('404 ORDER_NOT_FOUND when the bound order does not exist', async () => {
+      applyMock.mockRejectedValueOnce(
+        new RefundOrderInvalidError('order_not_found', 'Order does not exist'),
+      );
+      const res = await adminRefundHandler(
+        makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
+      );
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { code: string };
+      expect(body.code).toBe('ORDER_NOT_FOUND');
+      expect(notifyMock).not.toHaveBeenCalled();
+    });
+
+    it('409 ORDER_USER_MISMATCH when the order belongs to another user (IDOR)', async () => {
+      applyMock.mockRejectedValueOnce(
+        new RefundOrderInvalidError('order_user_mismatch', 'belongs to a different user'),
+      );
+      const res = await adminRefundHandler(
+        makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
+      );
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { code: string };
+      expect(body.code).toBe('ORDER_USER_MISMATCH');
+    });
+
+    it('409 REFUND_CURRENCY_MISMATCH when the refund currency differs from the order charge', async () => {
+      applyMock.mockRejectedValueOnce(
+        new RefundOrderInvalidError('currency_mismatch', 'currency mismatch'),
+      );
+      const res = await adminRefundHandler(
+        makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
+      );
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { code: string };
+      expect(body.code).toBe('REFUND_CURRENCY_MISMATCH');
+    });
+
+    it('409 REFUND_EXCEEDS_CHARGE on an over-refund', async () => {
+      applyMock.mockRejectedValueOnce(
+        new RefundOrderInvalidError('exceeds_charge', 'exceeds order charge'),
+      );
+      const res = await adminRefundHandler(
+        makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
+      );
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { code: string };
+      expect(body.code).toBe('REFUND_EXCEEDS_CHARGE');
+    });
+
+    it('429 DAILY_LIMIT_EXCEEDED when the fleet-wide refund cap is hit', async () => {
+      applyMock.mockRejectedValueOnce(
+        new DailyAdjustmentLimitError('USD', new Date(0), 900_000n, 1_000_000n, 200_000n),
+      );
+      const res = await adminRefundHandler(
+        makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
+      );
+      expect(res.status).toBe(429);
+      const body = (await res.json()) as { code: string };
+      expect(body.code).toBe('DAILY_LIMIT_EXCEEDED');
+    });
   });
 });

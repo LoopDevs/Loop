@@ -20,6 +20,15 @@
  * checks `aud === 'loop-clients'` which doesn't match) and a
  * stolen access token unusable as a step-up (the step-up verifier
  * checks `purpose === 'admin-step-up'`).
+ *
+ * CF-08 (cold audit 2026-06-15): the token also carries a `scope`
+ * claim binding it to an action class. A token minted for a
+ * *specific* action (e.g. `'refund'`) cannot be silently replayed
+ * against a *different* destructive write — the gate middleware
+ * rejects a scope mismatch. The default `'admin-write'` scope is a
+ * wildcard that satisfies every gate, so a caller that doesn't ask
+ * for a narrower scope keeps the prior "one token, any write"
+ * behaviour (backward-safe). Narrowing is opt-in at mint time.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { env } from '../env.js';
@@ -35,6 +44,32 @@ const STEP_UP_PURPOSE = 'admin-step-up';
 const STEP_UP_AUDIENCE = 'admin-write';
 const STEP_UP_ISSUER = 'loop-api';
 
+/**
+ * CF-08: action-class scopes a step-up token can be bound to. The
+ * wildcard `'admin-write'` (the default at mint time) satisfies every
+ * gate — that's the backward-safe behaviour the web client relies on
+ * today (it mints one generic token and replays it across writes). A
+ * narrower scope (`'credit-adjustment'` / `'refund'` / `'withdrawal'`
+ * / `'payout-retry'` / `'payout-compensation'` / `'home-currency'`)
+ * is opt-in and binds the token to that single class — the gate
+ * middleware rejects it on any other class with `STEP_UP_PURPOSE_MISMATCH`.
+ */
+export const STEP_UP_SCOPE_WILDCARD = 'admin-write';
+export const STEP_UP_SCOPES = [
+  STEP_UP_SCOPE_WILDCARD,
+  'credit-adjustment',
+  'refund',
+  'withdrawal',
+  'payout-retry',
+  'payout-compensation',
+  'home-currency',
+] as const;
+export type AdminStepUpScope = (typeof STEP_UP_SCOPES)[number];
+
+export function isAdminStepUpScope(s: unknown): s is AdminStepUpScope {
+  return typeof s === 'string' && (STEP_UP_SCOPES as readonly string[]).includes(s);
+}
+
 export interface AdminStepUpClaims {
   /** Admin user id — must match the bearer access token's `sub` at the gate. */
   sub: string;
@@ -45,6 +80,12 @@ export interface AdminStepUpClaims {
   /** Fixed string `'admin-write'`; rejects tokens minted for other surfaces. */
   aud: typeof STEP_UP_AUDIENCE;
   iss: typeof STEP_UP_ISSUER;
+  /**
+   * CF-08 action-class binding. `'admin-write'` is the wildcard that
+   * satisfies every gate (backward-safe default); a narrower value
+   * binds the token to a single destructive-write class.
+   */
+  scope: AdminStepUpScope;
   iat: number;
   exp: number;
 }
@@ -52,6 +93,12 @@ export interface AdminStepUpClaims {
 export interface SignAdminStepUpOptions {
   sub: string;
   email: string;
+  /**
+   * CF-08: action class this token is minted for. Defaults to the
+   * wildcard `'admin-write'` so existing callers keep "any write"
+   * semantics. Pass a narrower scope to bind the token to one class.
+   */
+  scope?: AdminStepUpScope;
   /** Override `now` for tests; seconds since epoch. */
   now?: number;
   /** Override TTL for tests; defaults to ADMIN_STEP_UP_TTL_SECONDS. */
@@ -122,6 +169,7 @@ export function signAdminStepUpToken(opts: SignAdminStepUpOptions): {
     purpose: STEP_UP_PURPOSE,
     aud: STEP_UP_AUDIENCE,
     iss: STEP_UP_ISSUER,
+    scope: opts.scope ?? STEP_UP_SCOPE_WILDCARD,
     iat: nowSec,
     exp: nowSec + (opts.ttlSeconds ?? ADMIN_STEP_UP_TTL_SECONDS),
   };
@@ -196,6 +244,20 @@ export function verifyAdminStepUpToken(token: string): AdminStepUpVerifyResult {
   if (obj['exp'] < Math.floor(Date.now() / 1000)) {
     return { ok: false, reason: 'expired' };
   }
+  // CF-08: `scope` is optional on the wire for backward-safety —
+  // tokens minted before this claim existed (or with the field
+  // absent) are treated as the wildcard so a rotation window doesn't
+  // hard-fail in-flight tokens. A *present* scope must be a known
+  // value; an unknown string is a malformed token, not a silent
+  // wildcard.
+  let scope: AdminStepUpScope;
+  if (obj['scope'] === undefined) {
+    scope = STEP_UP_SCOPE_WILDCARD;
+  } else if (isAdminStepUpScope(obj['scope'])) {
+    scope = obj['scope'];
+  } else {
+    return { ok: false, reason: 'malformed' };
+  }
   return {
     ok: true,
     claims: {
@@ -204,6 +266,7 @@ export function verifyAdminStepUpToken(token: string): AdminStepUpVerifyResult {
       purpose: STEP_UP_PURPOSE,
       aud: STEP_UP_AUDIENCE,
       iss: STEP_UP_ISSUER,
+      scope,
       iat: obj['iat'],
       exp: obj['exp'],
     },

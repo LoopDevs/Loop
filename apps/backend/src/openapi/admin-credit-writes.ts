@@ -126,7 +126,7 @@ export function registerAdminCreditWritesOpenApi(
     path: '/api/admin/users/{userId}/credit-adjustments',
     summary: 'Apply a signed admin credit adjustment (ADR 017).',
     description:
-      "Writes a signed `credit_transactions` row (`type='adjustment'`) and atomically bumps `user_credits.balance_minor`. All five ADR-017 invariants enforced: actor from `requireAdmin`, `Idempotency-Key` header required, `reason` body field (2..500 chars), append-only ledger, Discord audit fanout AFTER commit. Response envelope is uniform across admin writes: `{ result, audit }`, where `audit.replayed: true` indicates a snapshot replay.",
+      "Writes a signed `credit_transactions` row (`type='adjustment'`) and atomically bumps `user_credits.balance_minor`. All five ADR-017 invariants enforced: actor from `requireAdmin`, `Idempotency-Key` header required, `reason` body field (2..500 chars), append-only ledger, Discord audit fanout AFTER commit. Response envelope is uniform across admin writes: `{ result, audit }`, where `audit.replayed: true` indicates a snapshot replay. ADR-028 step-up gate enforced at the route — a captured bearer alone cannot issue an adjustment.",
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     request: {
@@ -135,6 +135,9 @@ export function registerAdminCreditWritesOpenApi(
         'idempotency-key': z.string().min(16).max(128).openapi({
           description:
             'Required. Scoped to (admin_user_id, key); repeats replay the stored snapshot.',
+        }),
+        'x-admin-step-up': z.string().openapi({
+          description: 'ADR-028 step-up JWT minted by `POST /api/admin/step-up`. 5-minute TTL.',
         }),
       }),
       body: {
@@ -151,7 +154,7 @@ export function registerAdminCreditWritesOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       401: {
-        description: 'Missing or invalid bearer',
+        description: 'Missing or invalid bearer / missing or invalid step-up token',
         content: { 'application/json': { schema: errorResponse } },
       },
       404: {
@@ -173,6 +176,10 @@ export function registerAdminCreditWritesOpenApi(
           'Internal error applying the adjustment (`INTERNAL_ERROR`), or the stored replay snapshot for this Idempotency-Key is unreadable (`IDEMPOTENCY_SNAPSHOT_CORRUPT` — the write is never re-executed)',
         content: { 'application/json': { schema: errorResponse } },
       },
+      503: {
+        description: 'Step-up auth unavailable on this deployment (`STEP_UP_UNAVAILABLE`)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
     },
   });
 
@@ -186,7 +193,7 @@ export function registerAdminCreditWritesOpenApi(
     path: '/api/admin/users/{userId}/refunds',
     summary: 'Issue a refund credit bound to an order (A2-901 + ADR 017).',
     description:
-      "Writes a positive-amount `credit_transactions` row (`type='refund'`, `reference_type='order'`, `reference_id=<orderId>`) and atomically bumps `user_credits.balance_minor`. Idempotent in two layers: the admin idempotency key replays the stored snapshot on repeat (ADR 017), and the DB partial unique index on (type, reference_type, reference_id) rejects a second refund row for the same order with 409 `REFUND_ALREADY_ISSUED`.",
+      "Writes a positive-amount `credit_transactions` row (`type='refund'`, `reference_type='order'`, `reference_id=<orderId>`) and atomically bumps `user_credits.balance_minor`. Idempotent in two layers: the admin idempotency key replays the stored snapshot on repeat (ADR 017), and the DB partial unique index on (type, reference_type, reference_id) rejects a second refund row for the same order with 409 `REFUND_ALREADY_ISSUED`. CF-06: gated behind the ADR-028 step-up auth middleware (a captured bearer alone cannot mint a refund credit); the bound order is validated (must exist, belong to the target user, share the charge currency, and the amount must not exceed the order's charge); and the refund counts against a fleet-wide daily cap.",
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     request: {
@@ -195,6 +202,9 @@ export function registerAdminCreditWritesOpenApi(
         'idempotency-key': z.string().min(16).max(128).openapi({
           description:
             'Required. Scoped to (admin_user_id, key); repeats replay the stored snapshot.',
+        }),
+        'x-admin-step-up': z.string().openapi({
+          description: 'ADR-028 step-up JWT minted by `POST /api/admin/step-up`. 5-minute TTL.',
         }),
       }),
       body: {
@@ -211,25 +221,31 @@ export function registerAdminCreditWritesOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       401: {
-        description: 'Missing or invalid bearer',
+        description: 'Missing or invalid bearer / missing or invalid step-up token',
         content: { 'application/json': { schema: errorResponse } },
       },
       404: {
         description:
-          'Not found — also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
+          'Bound order does not exist (`ORDER_NOT_FOUND`). Also returned to authenticated non-admin callers: requireAdmin masks the admin surface as 404 by design (see src/auth/require-admin.ts).',
         content: { 'application/json': { schema: errorResponse } },
       },
       409: {
-        description: 'A refund has already been issued for this order (REFUND_ALREADY_ISSUED)',
+        description:
+          'A refund has already been issued for this order (`REFUND_ALREADY_ISSUED`), the order belongs to a different user (`ORDER_USER_MISMATCH`), the order was charged in a different currency (`REFUND_CURRENCY_MISMATCH`), or the amount exceeds the order charge (`REFUND_EXCEEDS_CHARGE`)',
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {
-        description: 'Rate limit exceeded (20/min per IP)',
+        description:
+          'Rate limit exceeded (20/min per IP), or the fleet-wide daily refund cap would be exceeded (`DAILY_LIMIT_EXCEEDED`, CF-06)',
         content: { 'application/json': { schema: errorResponse } },
       },
       500: {
         description:
           'Internal error applying the refund (`INTERNAL_ERROR`), or the stored replay snapshot for this Idempotency-Key is unreadable (`IDEMPOTENCY_SNAPSHOT_CORRUPT` — the write is never re-executed)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      503: {
+        description: 'Step-up auth unavailable on this deployment (`STEP_UP_UNAVAILABLE`)',
         content: { 'application/json': { schema: errorResponse } },
       },
     },
