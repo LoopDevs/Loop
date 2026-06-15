@@ -243,6 +243,12 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # 503 STEP_UP_UNAVAILABLE.
 # LOOP_ADMIN_STEP_UP_SIGNING_KEY=<at-least-32-char-random-secret>
 
+# Gift-card redeem-secret envelope key (CF-25 / X-PRIV-03). Set → AES-256-GCM
+# encrypts orders.redeem_code + redeem_pin at rest (redeem_url stays plaintext).
+# 32 bytes as base64/hex. Absent → plaintext storage + a single boot warn;
+# backward-safe (old plaintext rows still decrypt). `openssl rand -base64 32`.
+# LOOP_REDEEM_ENCRYPTION_KEY=<32-byte-base64-or-hex-secret>
+
 # Transactional email (ADR 013) — required set when
 # LOOP_AUTH_NATIVE_ENABLED=true in production (`console` is dev-only).
 # Reply-To is optional; email-validated at boot by env.ts.

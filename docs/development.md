@@ -198,6 +198,16 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # LOOP_ADMIN_STEP_UP_SIGNING_KEY=...(≥32 chars)
 # LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS=...(≥32 chars)
 
+# Gift-card redeem-secret envelope key (CF-25 / X-PRIV-03). 32 bytes as
+# base64 or hex (`openssl rand -base64 32`). Set → AES-256-GCM encrypts
+# orders.redeem_code + redeem_pin at rest (redeem_url stays plaintext —
+# it's the redemption landing page, not the bearer secret). Absent →
+# plaintext storage (legacy) + a single boot warn. Backward-safe: old
+# plaintext rows and key-unset writes pass through decrypt untouched, so
+# setting the key activates encryption for new writes with no backfill.
+# Keep separate from the JWT/step-up keys.
+# LOOP_REDEEM_ENCRYPTION_KEY=...(32-byte base64 or hex)
+
 # ── Transactional email (ADR 013) ────────────────────────────────────
 # Dev default is the `console` stub (logs the OTP to stdout — grab the
 # code from `npm run dev:backend` output). Production refuses to boot

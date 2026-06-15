@@ -24,9 +24,38 @@ import { and, desc, eq, lt } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { orders } from '../db/schema.js';
 import { env } from '../env.js';
+import { logger } from '../logger.js';
 import type { LoopAuthContext } from '../auth/handler.js';
 import { type OrderPaymentMethod } from '../db/schema.js';
 import { type LoopOrderView as SharedLoopOrderView } from '@loop/shared';
+import { decryptRedeemField, RedeemDecryptError } from './redeem-crypto.js';
+
+const log = logger.child({ area: 'loop-order-reads' });
+
+/**
+ * CF-25 / X-PRIV-03: decrypt a stored redeem secret for the owner-
+ * scoped read. Legacy plaintext rows pass through untouched. A decrypt
+ * failure (tampered ciphertext, or the key was rotated away / unset
+ * after a row was encrypted) returns null + logs — the order still
+ * renders, the field reads as "redemption unavailable", and we never
+ * serve a forged/unverifiable code. The order id is safe to log; the
+ * code/PIN never is.
+ */
+function readRedeemField(
+  orderId: string,
+  field: 'code' | 'pin',
+  stored: string | null,
+): string | null {
+  try {
+    return decryptRedeemField(stored);
+  } catch (err) {
+    if (err instanceof RedeemDecryptError) {
+      log.error({ orderId, field }, 'Failed to decrypt redeem field — serving null');
+      return null;
+    }
+    throw err;
+  }
+}
 
 /**
  * A2-1504: wire view type is now canonical in `@loop/shared`
@@ -86,8 +115,10 @@ function orderToView(row: {
       row.paymentMethod === 'credit' ? null : (env.LOOP_STELLAR_DEPOSIT_ADDRESS ?? null),
     userCashbackMinor: row.userCashbackMinor.toString(),
     ctxOrderId: row.ctxOrderId,
-    redeemCode: row.redeemCode,
-    redeemPin: row.redeemPin,
+    // CF-25 / X-PRIV-03: code + PIN are envelope-encrypted at rest;
+    // decrypt for the owner here. Legacy plaintext passes through.
+    redeemCode: readRedeemField(row.id, 'code', row.redeemCode),
+    redeemPin: readRedeemField(row.id, 'pin', row.redeemPin),
     redeemUrl: row.redeemUrl,
     failureReason: row.failureReason,
     createdAt: row.createdAt.toISOString(),

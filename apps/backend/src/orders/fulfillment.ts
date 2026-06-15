@@ -28,6 +28,7 @@ import { logger } from '../logger.js';
 import { isHomeCurrency } from '@loop/shared';
 import { buildPayoutIntent } from '../credits/payout-builder.js';
 import { notifyPegBreakOnFulfillment } from '../discord.js';
+import { encryptRedeemField } from './redeem-crypto.js';
 import type { Order } from './repo.js';
 
 const log = logger.child({ area: 'order-transitions' });
@@ -75,8 +76,12 @@ export async function markOrderFulfilled(
         state: 'fulfilled',
         ctxOrderId: opts.ctxOrderId,
         fulfilledAt: new Date(),
-        redeemCode: opts.redemption?.code ?? null,
-        redeemPin: opts.redemption?.pin ?? null,
+        // CF-25 / X-PRIV-03: code + PIN are spendable bearer secrets —
+        // envelope-encrypt them at rest. `redeem_url` is the redemption
+        // landing page, not the secret, so it stays plaintext. Encryption
+        // is a no-op passthrough when LOOP_REDEEM_ENCRYPTION_KEY is unset.
+        redeemCode: encryptRedeemField(opts.redemption?.code),
+        redeemPin: encryptRedeemField(opts.redemption?.pin),
         redeemUrl: opts.redemption?.url ?? null,
       })
       .where(and(eq(orders.id, orderId), eq(orders.state, 'procuring')))

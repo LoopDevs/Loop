@@ -7,6 +7,11 @@ vi.hoisted(() => {
   process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
   process.env['LOOP_STELLAR_DEPOSIT_ADDRESS'] =
     'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
+  // CF-25 / X-PRIV-03: set the redeem envelope key (a fixed, valid
+  // 32-byte base64 value) so env.ts parses it at import and the read
+  // handler decrypts on the way out. Inlined because the hoisted block
+  // runs before module-scope consts are initialised.
+  process.env['LOOP_REDEEM_ENCRYPTION_KEY'] = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
 });
 
 vi.mock('../../logger.js', () => ({
@@ -46,6 +51,7 @@ vi.mock('../../db/schema.js', async () => {
 });
 
 import { loopGetOrderHandler } from '../loop-handler.js';
+import { encryptRedeemField, resetRedeemKeyCache } from '../redeem-crypto.js';
 
 const LOOP_AUTH: LoopAuthContext = {
   kind: 'loop',
@@ -72,6 +78,7 @@ function makeCtx(opts: { auth?: LoopAuthContext; param?: string }): Context {
 
 beforeEach(() => {
   orderState.row = undefined;
+  resetRedeemKeyCache();
 });
 
 describe('loopGetOrderHandler', () => {
@@ -184,5 +191,69 @@ describe('loopGetOrderHandler', () => {
     expect(body['state']).toBe('fulfilled');
     expect(body['ctxOrderId']).toBe('ctx-abc');
     expect(body['fulfilledAt']).toBe('2026-04-21T01:00:00.000Z');
+  });
+
+  it('CF-25: decrypts envelope-encrypted redeem code + PIN for the owner', async () => {
+    // The row holds ciphertext at rest (as the fulfillment write would
+    // have stored it); the read handler must surface the plaintext.
+    const storedCode = encryptRedeemField('GIFT-CARD-9999');
+    const storedPin = encryptRedeemField('1234');
+    expect(storedCode).toMatch(/^enc:v1:/); // sanity: actually encrypted
+    orderState.row = {
+      id: 'order-4',
+      userId: 'user-uuid',
+      merchantId: 'm1',
+      faceValueMinor: 10_000n,
+      currency: 'USD',
+      chargeMinor: 10_000n,
+      chargeCurrency: 'USD',
+      paymentMethod: 'usdc',
+      paymentMemo: 'MEMO',
+      userCashbackMinor: 0n,
+      ctxOrderId: 'ctx-xyz',
+      redeemCode: storedCode,
+      redeemPin: storedPin,
+      redeemUrl: 'https://merchant.example/redeem',
+      state: 'fulfilled',
+      failureReason: null,
+      createdAt: new Date(),
+      paidAt: new Date(),
+      fulfilledAt: new Date(),
+      failedAt: null,
+    };
+    const res = await loopGetOrderHandler(makeCtx({ auth: LOOP_AUTH, param: 'order-4' }));
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['redeemCode']).toBe('GIFT-CARD-9999');
+    expect(body['redeemPin']).toBe('1234');
+    expect(body['redeemUrl']).toBe('https://merchant.example/redeem'); // url stays plaintext
+  });
+
+  it('CF-25: passes through a legacy plaintext redeem code unchanged', async () => {
+    orderState.row = {
+      id: 'order-5',
+      userId: 'user-uuid',
+      merchantId: 'm1',
+      faceValueMinor: 10_000n,
+      currency: 'USD',
+      chargeMinor: 10_000n,
+      chargeCurrency: 'USD',
+      paymentMethod: 'usdc',
+      paymentMemo: 'MEMO',
+      userCashbackMinor: 0n,
+      ctxOrderId: 'ctx-legacy',
+      redeemCode: 'LEGACY-PLAINTEXT-CODE', // captured before this slice
+      redeemPin: null,
+      redeemUrl: null,
+      state: 'fulfilled',
+      failureReason: null,
+      createdAt: new Date(),
+      paidAt: new Date(),
+      fulfilledAt: new Date(),
+      failedAt: null,
+    };
+    const res = await loopGetOrderHandler(makeCtx({ auth: LOOP_AUTH, param: 'order-5' }));
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['redeemCode']).toBe('LEGACY-PLAINTEXT-CODE');
+    expect(body['redeemPin']).toBeNull();
   });
 });

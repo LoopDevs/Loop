@@ -283,6 +283,23 @@ export const EnvSchema = z.object({
     })
     .optional(),
 
+  // Gift-card redeem-secret envelope key (CF-25 / X-PRIV-03). When set,
+  // `orders.redeem_code` / `redeem_pin` are AES-256-GCM-encrypted at
+  // rest (orders/redeem-crypto.ts) so a logical DB read (leaked
+  // DATABASE_URL, rogue loop_readonly SELECT, backup exfiltration)
+  // sees ciphertext, not spendable bearer codes. `redeem_url` stays
+  // plaintext (it's the redemption landing page, not the secret).
+  //
+  // 32 bytes, supplied as base64 / base64url or hex. Validated at boot
+  // (below) so a wrong-length key fails loudly instead of silently
+  // writing un-decryptable ciphertext. Absent → encryption is disabled
+  // and codes are stored plaintext (legacy behaviour); index.ts logs a
+  // single boot warn while unset. Decrypt is backward-safe: old
+  // plaintext rows and key-unset writes pass through untouched, so
+  // setting the key activates encryption for new writes without a
+  // backfill or boot break. NOT a JWT/HMAC secret — keep it separate.
+  LOOP_REDEEM_ENCRYPTION_KEY: z.string().optional(),
+
   // Loop-native auth feature flag (ADR 013). When true, /request-otp
   // (and, as they ship, /verify-otp + /refresh) take the Loop-native
   // path: Loop sends the OTP email and mints its own JWTs. Default
@@ -736,6 +753,27 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
         `+ DEFAULT_LOOP_MARGIN_PCT_OF_CTX (${loopMargin}%) exceeds 100% of face value. ` +
         `Wholesale (what Loop pays CTX) would go negative.`,
     );
+  }
+
+  // CF-25 / X-PRIV-03: validate the redeem envelope key decodes to
+  // exactly 32 bytes when present. A wrong-length key would silently
+  // write ciphertext nobody can later decrypt (the read path throws on
+  // every order), so fail at boot instead. Optional → no constraint.
+  if (
+    parsed.data.LOOP_REDEEM_ENCRYPTION_KEY !== undefined &&
+    parsed.data.LOOP_REDEEM_ENCRYPTION_KEY !== ''
+  ) {
+    const raw = parsed.data.LOOP_REDEEM_ENCRYPTION_KEY;
+    const bytes = /^[0-9a-fA-F]{64}$/.test(raw)
+      ? Buffer.from(raw, 'hex')
+      : Buffer.from(raw, 'base64');
+    if (bytes.length !== 32) {
+      throw new Error(
+        `Invalid environment variables — LOOP_REDEEM_ENCRYPTION_KEY must decode to 32 bytes ` +
+          `(got ${bytes.length}); supply 32 random bytes as base64 or hex ` +
+          `(e.g. \`openssl rand -base64 32\`).`,
+      );
+    }
   }
 
   return parsed.data;
