@@ -167,13 +167,18 @@ export function extractCursor(href: string): string | null {
   }
 }
 
-// `findOutboundPaymentByMemo` (the ADR-016 payout-submit
-// idempotency lookup — "have we already sent this memo to this
-// address?") lives in `./horizon-find-outbound.ts`. Re-exported
-// here so the wide network of import sites (payout submit
-// worker, retry handler, tests) keeps resolving against
-// `'../payments/horizon.js'`.
-export { findOutboundPaymentByMemo } from './horizon-find-outbound.js';
+// The ADR-016 payout-submit idempotency lookups
+// (`findOutboundPaymentByMemo` — "have we already sent this memo to
+// this address?" — and `getOutboundPaymentByTxHash` — the CF-18
+// authoritative "did THIS tx land?" point lookup) live in
+// `./horizon-find-outbound.ts`. Re-exported here so the wide network of
+// import sites (payout submit worker, retry handler, tests) keeps
+// resolving against `'../payments/horizon.js'`.
+export {
+  findOutboundPaymentByMemo,
+  getOutboundPaymentByTxHash,
+  type OutboundPaymentMatch,
+} from './horizon-find-outbound.js';
 
 /**
  * Ergonomic guard: "is this payment a successful, incoming payment

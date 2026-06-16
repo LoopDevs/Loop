@@ -123,6 +123,17 @@ export async function payCtxOrder(args: PayCtxArgs): Promise<PayCtxResult> {
   // Idempotency check first. The lookup walks Horizon's outbound
   // payments from the operator account; a prior submit lands on
   // page 1 within seconds, so the typical cost is one Horizon hit.
+  //
+  // CF-18: this path benefits from the deeper default page window (the
+  // scan was widened from ~600 to ~1600 records, which matters here
+  // because operator==deposit interleaves inbound deposits into the same
+  // feed). We deliberately do NOT pass `expectedAmountStroops` /
+  // `expectedAssetCode` to the scan: pay-ctx's idempotency must FAIL
+  // CLOSED on a memo collision (a same-memo prior payment with a
+  // different amount/asset means the URI was reused or tampered, and
+  // submitting a second tx could double-pay) — so we want the first
+  // memo+from+to hit returned here and reconciled below, not silently
+  // skipped. The amount+asset assertion lives in the reconcile block.
   const prior = await findOutboundPaymentByMemo({
     account: cfg.operatorAccount,
     to: args.destination,

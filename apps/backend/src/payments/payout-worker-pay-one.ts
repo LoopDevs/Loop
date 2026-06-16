@@ -19,9 +19,10 @@ import {
   markPayoutConfirmed,
   markPayoutFailed,
   reclaimSubmittedPayout,
+  recordPayoutTxHash,
   type PendingPayout,
 } from '../credits/pending-payouts.js';
-import { findOutboundPaymentByMemo } from './horizon.js';
+import { findOutboundPaymentByMemo, getOutboundPaymentByTxHash } from './horizon.js';
 import { getAccountTrustlines } from './horizon-trustlines.js';
 import { submitPayout, PayoutSubmitError } from './payout-submit.js';
 import { feeForAttempt } from './fee-strategy.js';
@@ -117,41 +118,46 @@ export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayO
   }
 
   // Idempotency pre-check (ADR 016). If the prior submit landed
-  // async between the last tick and this one, we observe the
-  // payment in Horizon history and converge without issuing a
-  // second tx. A4-104: scan the operator account (the signer) — the
-  // earlier code reused `row.assetIssuer` here on the assumption
-  // that operator == issuer for LOOP-branded assets. That collapses
-  // for any treasury topology that splits issuer (cold) from
-  // operator (hot), so the pre-check would scan the wrong history
-  // and miss prior submits, opening a double-pay path.
+  // async between the last tick and this one, we converge without
+  // issuing a second tx.
+  //
+  // CF-18: two checks, authoritative first.
+  //
+  //   1. If a prior attempt persisted its tx hash (recordPayoutTxHash
+  //      fires before the network submit), ask Horizon DIRECTLY whether
+  //      that exact tx landed. A point lookup by hash has NO history
+  //      window, so a re-picked stuck payout converges correctly no
+  //      matter how many inbound deposits have interleaved on the shared
+  //      deposit+operator account. This is the durable fix for the
+  //      double-pay window.
+  //
+  //   2. Fallback to the memo scan only when no hash was persisted (a
+  //      crash between sign and persist, or a row created before this
+  //      change). The scan is amount+asset matched (P2-1) so a memo
+  //      collision can't converge the wrong payment.
+  //
+  // A4-104: scan the operator account (the signer), not row.assetIssuer
+  // — that collapses for a topology splitting cold issuer from hot
+  // operator and would scan the wrong history.
   try {
+    if (row.txHash !== null) {
+      const landed = await getOutboundPaymentByTxHash(row.txHash);
+      if (landed?.landed === true) {
+        return await convergeConfirmed(row, row.txHash, 'authoritative-hash');
+      }
+      // landed=false (tx on chain but failed) or null (never landed):
+      // fall through to (re-)submit. A new submit builds a fresh tx with
+      // a new sequence, so the failed/absent hash won't collide.
+    }
     const prior = await findOutboundPaymentByMemo({
       account: args.operatorAccount,
       to: row.toAddress,
       memo: row.memoText,
+      expectedAmountStroops: row.amountStroops,
+      expectedAssetCode: row.assetCode,
     });
     if (prior !== null) {
-      // markPayoutConfirmed is state-guarded on 'submitted'. A
-      // row still in 'pending' must transition → 'submitted' first
-      // so the confirm actually applies; otherwise the guard
-      // blocks and the row stays pending forever.
-      if (row.state === 'pending') {
-        const claimed = await markPayoutSubmitted(row.id);
-        if (claimed === null) {
-          return 'skippedRace';
-        }
-      }
-      const confirmed = await markPayoutConfirmed({ id: row.id, txHash: prior.txHash });
-      if (confirmed === null) {
-        // Another worker already transitioned.
-        return 'skippedRace';
-      }
-      log.info(
-        { payoutId: row.id, txHash: prior.txHash, priorState: row.state },
-        'Payout converged via idempotency check — prior submit had landed',
-      );
-      return 'skippedAlreadyLanded';
+      return await convergeConfirmed(row, prior.txHash, 'memo-scan');
     }
   } catch (err) {
     log.warn(
@@ -217,6 +223,20 @@ export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayO
         amountStroops: row.amountStroops,
         memoText: row.memoText,
       },
+      // CF-18: persist the deterministic hash BEFORE the network submit
+      // so a crash / lost-response after the tx lands is recoverable via
+      // the authoritative hash lookup on the next re-pick. A persist
+      // failure aborts the submit (throws PayoutSubmitError) — better to
+      // retry than to send a tx we can't later prove we sent.
+      onSigned: async (signedHash) => {
+        const stamped = await recordPayoutTxHash({ id: row.id, txHash: signedHash });
+        if (stamped === null) {
+          // Row moved out from under us between claim and stamp (another
+          // worker confirmed/failed it). Abort: do NOT submit a second
+          // tx on a row we no longer own.
+          throw new Error('row no longer in submitted state — aborting submit');
+        }
+      },
     });
     const confirmed = await markPayoutConfirmed({ id: row.id, txHash });
     if (confirmed === null) {
@@ -230,6 +250,37 @@ export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayO
   } catch (err) {
     return handleSubmitError(row, err, args.maxAttempts);
   }
+}
+
+/**
+ * CF-18: converge a row to `confirmed` after an idempotency check
+ * proved a prior submit landed. `markPayoutConfirmed` is state-guarded
+ * on `submitted`, so a row still in `pending` (e.g. the row never
+ * actually claimed because the prior submit happened in an earlier
+ * process) must transition → `submitted` first or the confirm no-ops
+ * and the row sticks forever. Returns the appropriate `PayOutcome`.
+ */
+async function convergeConfirmed(
+  row: PendingPayout,
+  txHash: string,
+  via: 'authoritative-hash' | 'memo-scan',
+): Promise<PayOutcome> {
+  if (row.state === 'pending') {
+    const claimed = await markPayoutSubmitted(row.id);
+    if (claimed === null) {
+      return 'skippedRace';
+    }
+  }
+  const confirmed = await markPayoutConfirmed({ id: row.id, txHash });
+  if (confirmed === null) {
+    // Another worker already transitioned.
+    return 'skippedRace';
+  }
+  log.info(
+    { payoutId: row.id, txHash, priorState: row.state, via },
+    'Payout converged via idempotency check — prior submit had landed',
+  );
+  return 'skippedAlreadyLanded';
 }
 
 async function handleSubmitError(

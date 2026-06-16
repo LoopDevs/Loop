@@ -78,6 +78,33 @@ export async function markPayoutSubmitted(id: string): Promise<PendingPayout | n
 }
 
 /**
+ * CF-18: persist the deterministic tx hash on a `submitted` row BEFORE
+ * the network submit lands it. State stays `submitted` (this is not a
+ * confirmation — the tx may not be in a ledger yet); we only stamp the
+ * hash so a later re-pick can ask Horizon "did THIS tx land?" directly,
+ * with no dependence on the bounded memo-scan window.
+ *
+ * State-guarded on `submitted` so it only ever writes a row the worker
+ * has already claimed for this attempt. Returns null on a race (the row
+ * moved out from under us) — the caller treats that as a transient
+ * persist failure and fails closed, aborting the submit.
+ *
+ * Deliberately does NOT bump attempts or touch timestamps — it's a pure
+ * hash stamp within an in-flight submit.
+ */
+export async function recordPayoutTxHash(args: {
+  id: string;
+  txHash: string;
+}): Promise<PendingPayout | null> {
+  const [row] = await db
+    .update(pendingPayouts)
+    .set({ txHash: args.txHash })
+    .where(and(eq(pendingPayouts.id, args.id), eq(pendingPayouts.state, 'submitted')))
+    .returning();
+  return row ?? null;
+}
+
+/**
  * State-guarded transition: `submitted → confirmed` with the Stellar
  * tx hash. A Horizon-side confirmation watcher calls this once the
  * tx is sealed into a ledger.

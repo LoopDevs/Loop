@@ -172,9 +172,41 @@ grinding forever.
    and if it does, the classification above says "retry fresh"
    rather than "fail".
 
-The combination — pre-flight memo check + fresh-seq rebuild +
-bounded attempts + strict transient/terminal split — gives us
-at-least-once delivery without at-least-twice risk.
+The combination — pre-flight check + fresh-seq rebuild + bounded
+attempts + strict transient/terminal split — gives us at-least-once
+delivery without at-least-twice risk.
+
+**CF-18 — authoritative tx-hash idempotency (no history window).**
+The original pre-check was a bounded scan of the operator account's
+`/payments` feed (newest-first, capped pages) for a matching memo.
+Because the deposit account == the operator account (ADR 010), that
+feed interleaves _every_ inbound user deposit with outbound payouts,
+so under deposit volume a re-picked stuck payout's prior landed tx
+could scroll past the page cap → the scan returned `null` → the
+worker re-submitted → double-pay. Two changes close the window:
+
+1. **Persist the deterministic hash _before_ the network submit.**
+   `submitPayout` computes `tx.hash()` after signing (fully
+   determined by the envelope) and fires an `onSigned(hash)` hook;
+   the worker stamps it on the `pending_payouts` row
+   (`recordPayoutTxHash`, state stays `submitted`) before the submit
+   network call. A persist failure aborts the submit fail-closed.
+2. **Authoritative point lookup on re-pick.** When a re-picked row
+   already carries a persisted hash, the worker calls
+   `getOutboundPaymentByTxHash` (`GET /transactions/{hash}`) — a
+   single point lookup with **no history window**. `successful=true`
+   → converge to `confirmed`; `404`/failed → safe to re-submit (a
+   404/failed tx moved no value, and a fresh submit builds a new
+   sequence anyway). The bounded memo scan remains only as a
+   fallback for rows without a persisted hash, hardened with an
+   outbound-only (`from == operator`) filter, a deeper default page
+   window (~1,600 records), and optional amount+asset matching so a
+   memo collision can't converge the wrong payment (P2-1). pay-ctx
+   keeps its fail-closed reconcile (it has no row to persist into)
+   and benefits from the deeper window.
+
+No schema migration: the `tx_hash` column already exists (it was
+previously written only on `confirmed`).
 
 ### What doesn't change
 
