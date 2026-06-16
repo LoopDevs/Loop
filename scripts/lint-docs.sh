@@ -13,9 +13,15 @@ err() {
 }
 
 # ─── 1. Every env var in env.ts must be in .env.example ─────────────────────
+#
+# The name pattern is digit-aware ([A-Z][A-Z0-9_]*): an env var name
+# never starts with a digit but may contain one (LOOP_PHASE_1_ONLY,
+# MAXMIND_GEOLITE2_PATH, and any future *_V2 / *_2026). The earlier
+# digit-blind [A-Z_]+ silently skipped those, so a digit-bearing var
+# could be dropped from .env.example without failing CI (D-04 / CF-33).
 
 echo "Checking env vars..."
-grep -E '^\s+[A-Z_]+:' apps/backend/src/env.ts | sed 's/[[:space:]]*//' | cut -d: -f1 | while read -r var; do
+grep -E '^\s+[A-Z][A-Z0-9_]*:' apps/backend/src/env.ts | sed 's/[[:space:]]*//' | cut -d: -f1 | while read -r var; do
   if ! grep -q "^${var}=\|^# *${var}" apps/backend/.env.example 2>/dev/null; then
     err "Env var '$var' is in env.ts but missing from .env.example"
   fi

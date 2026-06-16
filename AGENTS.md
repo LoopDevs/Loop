@@ -249,6 +249,14 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # backward-safe (old plaintext rows still decrypt). `openssl rand -base64 32`.
 # LOOP_REDEEM_ENCRYPTION_KEY=<32-byte-base64-or-hex-secret>
 
+# Phase 1 launch gate. true → web hides every Phase 2+ surface (cashback
+# links, /settings/wallet, /settings/cashback, /cashback, onboarding
+# currency picker + wallet-intro, "you've earned X" copy); discount
+# badges stay. UI-side equivalent of the backend Phase 2 gates
+# (LOOP_WORKERS_ENABLED / LOOP_AUTH_NATIVE_ENABLED / INTEREST_APY_BASIS_POINTS).
+# Flip back to false to launch cashback — server-side only. Default false.
+# LOOP_PHASE_1_ONLY=true
+
 # Transactional email (ADR 013) — required set when
 # LOOP_AUTH_NATIVE_ENABLED=true in production (`console` is dev-only).
 # Reply-To is optional; email-validated at boot by env.ts.

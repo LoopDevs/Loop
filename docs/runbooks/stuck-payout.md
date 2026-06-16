@@ -31,10 +31,17 @@
    ```bash
    fly logs -a loopfinance-api | grep -E "payout-submit|payout-watchdog" | tail -50
    ```
-4. Check operator account funding on Horizon:
+4. Check operator account funding on Horizon. There is **no**
+   `LOOP_STELLAR_OPERATOR_ID` env var — derive the public key from the
+   signer secret (`LOOP_STELLAR_OPERATOR_SECRET`) on a trusted machine,
+   then read Horizon:
    ```bash
-   curl -s "https://horizon.stellar.org/accounts/$LOOP_STELLAR_OPERATOR_ID" | jq '.balances'
+   OPERATOR_PUBKEY=$(fly ssh console -a loopfinance-api -C \
+     "node -e \"const{Keypair}=require('@stellar/stellar-sdk');console.log(Keypair.fromSecret(process.env.LOOP_STELLAR_OPERATOR_SECRET).publicKey())\"")
+   curl -s "https://horizon.stellar.org/accounts/$OPERATOR_PUBKEY" | jq '.balances'
    ```
+   (`/health` also reports the active operator account id — see
+   [`stellar-operator-rotation.md`](./stellar-operator-rotation.md).)
    Operator balance below the per-asset floor → submit will keep
    failing with `op_underfunded` until refilled.
 

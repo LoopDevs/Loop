@@ -164,6 +164,14 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # unless DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT=1.
 # IMAGE_PROXY_ALLOWED_HOSTS=spend.ctx.com,ctx-spend.s3.us-west-2.amazonaws.com
 
+# Path to an operator-provided MaxMind GeoLite2-Country .mmdb (ADR 033),
+# powering the GET /api/public/geo first-guess for the region selector.
+# In prod it's baked into the image at build time (the Dockerfile sets
+# this path — see docs/deployment.md GeoLite2 section). Unset → /geo
+# returns the US default and the web client falls back to
+# navigator.language. Optional locally; only needed to test geo wiring.
+# MAXMIND_GEOLITE2_PATH=/etc/loop/GeoLite2-Country.mmdb
+
 # Rate-limit trust boundary (audit A-023). Set TRUST_PROXY=true only
 # when running behind a trusted edge proxy that rewrites
 # X-Forwarded-For (Fly.io, Cloudflare, etc.). Otherwise leave unset so
@@ -189,6 +197,17 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # /verify-otp / /refresh take the Loop-native path (Loop sends the
 # email, mints its own JWTs).
 # LOOP_AUTH_NATIVE_ENABLED=true
+
+# Phase 1 launch gate. When true, the web client hides every Phase 2+
+# surface (cashback navbar links, /settings/wallet, /settings/cashback,
+# /cashback, the onboarding currency picker + wallet-intro screens,
+# "you've earned X cashback" copy). Discount badges stay — they ARE the
+# Phase 1 user proposition. UI-side equivalent of the backend Phase 2
+# gates (LOOP_WORKERS_ENABLED / LOOP_AUTH_NATIVE_ENABLED /
+# INTEREST_APY_BASIS_POINTS — keep those off in a Phase 1 deploy too).
+# Flip back to false to launch cashback — server-side only, no app store
+# resubmission. Default false.
+# LOOP_PHASE_1_ONLY=true
 
 # Admin step-up auth (ADR 028 / A4-063). ≥32 chars, deliberately
 # separate from LOOP_JWT_SIGNING_KEY so a JWT-key compromise doesn't
