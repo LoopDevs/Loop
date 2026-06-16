@@ -293,6 +293,11 @@ export {
 // untouched, and lets future writer-slice extractions share the
 // primitives without a circular import back into admin.ts.
 export type { AdminWriteAudit, AdminWriteEnvelope } from './admin-write-envelope';
+// CF-09: `generateIdempotencyKey` is re-exported so forms/routes can
+// mint one stable key per action attempt and thread it through the
+// writer's `idempotencyKey` arg — reused across the step-up retry +
+// any post-completion re-click so ADR-017 dedup holds for both.
+export { generateIdempotencyKey } from './admin-write-envelope';
 
 // A2-1165 (slice 25): admin payouts surface lives in
 // `./admin-payouts.ts`. `retryPayout` is the third writer slice

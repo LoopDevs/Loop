@@ -105,8 +105,8 @@ export function notifyAdminAudit(args: {
  *
  * Fires on:
  *   - any `GET /api/admin/*.csv` 200 response
- *   - admin GETs flagged as "bulk" by the middleware (large-page
- *     full lists)
+ *   - CF-10: admin GETs whose JSON list body returns a bulk row count
+ *     past the middleware threshold (cursor-walking PII pulls)
  *
  * The Pino access log (server-side, ships off-host via Fly logflow)
  * is the line-item read audit; this Discord post is the human-visible
@@ -117,12 +117,17 @@ export function notifyAdminBulkRead(args: {
   endpoint: string;
   /** Optional query string (truncated) for context. */
   queryString?: string;
+  /** CF-10: row count for a bulk JSON list read (omitted for CSV exports). */
+  rowCount?: number;
 }): void {
   const actorTail = args.actorUserId.slice(-8);
   const fields: Array<{ name: string; value: string; inline?: boolean }> = [
     { name: 'Actor', value: `\`${actorTail}\``, inline: true },
     { name: 'Endpoint', value: `\`${escapeMarkdown(args.endpoint)}\``, inline: true },
   ];
+  if (args.rowCount !== undefined) {
+    fields.push({ name: 'Rows', value: `${args.rowCount}`, inline: true });
+  }
   if (args.queryString !== undefined && args.queryString.length > 0) {
     fields.push({
       name: 'Query',

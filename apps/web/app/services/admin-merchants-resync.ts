@@ -38,17 +38,21 @@ export interface AdminMerchantResyncResponse {
 
 /**
  * `POST /api/admin/merchants/resync` — ADR-017 admin write that forces
- * an immediate CTX catalog sweep. Service-generated `Idempotency-Key`
- * makes a double-click coalesce into a single upstream sweep.
+ * an immediate CTX catalog sweep.
+ *
+ * CF-09: pass `idempotencyKey` to reuse one key across a re-click
+ * (mint it once when the operator confirms). Defaults to a fresh
+ * per-call key so a natural double-click coalesces into one sweep.
  */
 export async function resyncMerchants(args: {
   reason: string;
+  idempotencyKey?: string;
 }): Promise<AdminWriteEnvelope<AdminMerchantResyncResponse>> {
   return authenticatedRequest<AdminWriteEnvelope<AdminMerchantResyncResponse>>(
     '/api/admin/merchants/resync',
     {
       method: 'POST',
-      headers: { 'Idempotency-Key': generateIdempotencyKey() },
+      headers: { 'Idempotency-Key': args.idempotencyKey ?? generateIdempotencyKey() },
       body: { reason: args.reason },
     },
   );

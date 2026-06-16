@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiException, formatMinorCurrency, STELLAR_PUBKEY_REGEX } from '@loop/shared';
 import {
   applyAdminWithdrawal,
+  generateIdempotencyKey,
   type AdminWriteEnvelope,
   type WithdrawalResult,
 } from '~/services/admin';
@@ -59,6 +60,9 @@ export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.J
     currency: Currency;
     destinationAddress: string;
     reason: string;
+    // CF-09: minted once at confirm time, reused on the step-up retry
+    // so ADR-017 dedup covers the post-completion re-click.
+    idempotencyKey: string;
   } | null>(null);
 
   // ADR-028 / A4-063: same step-up wrap as the credit-adjust form.
@@ -119,6 +123,7 @@ export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.J
       currency,
       destinationAddress: trimmedAddress,
       reason: trimmedReason,
+      idempotencyKey: generateIdempotencyKey(),
     });
   };
 
@@ -132,6 +137,7 @@ export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.J
       currency: payload.currency,
       destinationAddress: payload.destinationAddress,
       reason: payload.reason,
+      idempotencyKey: payload.idempotencyKey,
     });
   };
 

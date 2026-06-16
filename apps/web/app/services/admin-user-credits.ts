@@ -74,18 +74,23 @@ export interface AdminCreditTransactionView {
 /**
  * `POST /api/admin/users/:userId/credit-adjustments` — ADR 017 admin
  * write. Positive `amountMinor` credits, negative debits.
+ *
+ * CF-09: pass `idempotencyKey` to reuse one key across the step-up
+ * retry + a post-completion re-click (the form mints it once when the
+ * operator confirms). Defaults to a fresh per-call key.
  */
 export async function applyCreditAdjustment(args: {
   userId: string;
   amountMinor: string;
   currency: 'USD' | 'GBP' | 'EUR';
   reason: string;
+  idempotencyKey?: string;
 }): Promise<AdminWriteEnvelope<CreditAdjustmentResult>> {
   return authenticatedRequest<AdminWriteEnvelope<CreditAdjustmentResult>>(
     `/api/admin/users/${encodeURIComponent(args.userId)}/credit-adjustments`,
     {
       method: 'POST',
-      headers: { 'Idempotency-Key': generateIdempotencyKey() },
+      headers: { 'Idempotency-Key': args.idempotencyKey ?? generateIdempotencyKey() },
       body: {
         amountMinor: args.amountMinor,
         currency: args.currency,
@@ -100,6 +105,10 @@ export async function applyCreditAdjustment(args: {
 /**
  * `POST /api/admin/users/:userId/withdrawals` — ADR 024 admin write.
  * Debits the off-chain balance and queues a LOOP-asset payout.
+ *
+ * CF-09: pass `idempotencyKey` to reuse one key across the step-up
+ * retry + a post-completion re-click (the form mints it once when the
+ * operator confirms). Defaults to a fresh per-call key.
  */
 export async function applyAdminWithdrawal(args: {
   userId: string;
@@ -107,12 +116,13 @@ export async function applyAdminWithdrawal(args: {
   currency: 'USD' | 'GBP' | 'EUR';
   destinationAddress: string;
   reason: string;
+  idempotencyKey?: string;
 }): Promise<AdminWriteEnvelope<WithdrawalResult>> {
   return authenticatedRequest<AdminWriteEnvelope<WithdrawalResult>>(
     `/api/admin/users/${encodeURIComponent(args.userId)}/withdrawals`,
     {
       method: 'POST',
-      headers: { 'Idempotency-Key': generateIdempotencyKey() },
+      headers: { 'Idempotency-Key': args.idempotencyKey ?? generateIdempotencyKey() },
       body: {
         amountMinor: args.amountMinor,
         currency: args.currency,

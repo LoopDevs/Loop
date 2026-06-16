@@ -26,12 +26,14 @@ export async function setUserHomeCurrency(args: {
   userId: string;
   homeCurrency: 'USD' | 'GBP' | 'EUR';
   reason: string;
+  /** CF-09: reuse one key across the step-up retry + re-click. */
+  idempotencyKey?: string;
 }): Promise<AdminWriteEnvelope<HomeCurrencySetResult>> {
   return authenticatedRequest<AdminWriteEnvelope<HomeCurrencySetResult>>(
     `/api/admin/users/${encodeURIComponent(args.userId)}/home-currency`,
     {
       method: 'POST',
-      headers: { 'Idempotency-Key': generateIdempotencyKey() },
+      headers: { 'Idempotency-Key': args.idempotencyKey ?? generateIdempotencyKey() },
       body: {
         homeCurrency: args.homeCurrency,
         reason: args.reason,
