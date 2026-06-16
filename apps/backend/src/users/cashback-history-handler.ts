@@ -20,6 +20,7 @@ import { creditTransactions, userCredits } from '../db/schema.js';
 import { resolveLoopAuthenticatedUser } from '../auth/authenticated-user.js';
 import { type User } from '../db/users.js';
 import { logger } from '../logger.js';
+import { csvEscape } from '../csv/csv-escape.js';
 
 const log = logger.child({ handler: 'users' });
 
@@ -158,7 +159,7 @@ export async function getCashbackHistoryCsvHandler(c: Context): Promise<Response
         r.referenceType ?? '',
         r.referenceId ?? '',
       ];
-      return cols.map(csvField).join(',');
+      return cols.map(csvEscape).join(',');
     })
     .join('\r\n');
 
@@ -167,17 +168,6 @@ export async function getCashbackHistoryCsvHandler(c: Context): Promise<Response
   c.header('Cache-Control', 'private, no-store');
   c.header('X-Result-Count', String(rows.length));
   return c.body(header + body);
-}
-
-/**
- * RFC 4180 CSV field encoder. Wraps in double quotes + doubles internal
- * quotes when the value contains any of: comma, double quote, CR, LF.
- */
-function csvField(value: string): string {
-  if (/[",\r\n]/.test(value)) {
-    return `"${value.replace(/"/g, '""')}"`;
-  }
-  return value;
 }
 
 /**

@@ -198,23 +198,25 @@ that the role-grant wasn't extended for a new table.
 
 #### Background workers
 
-| Variable                                    | Required | Default          | Description                                                                                                                        |
-| ------------------------------------------- | -------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `LOOP_WORKERS_ENABLED`                      | No       | `false`          | Master switch for all outbound workers. Set `true` on prod + Fly staging once Stellar secrets are wired.                           |
-| `LOOP_PAYOUT_WORKER_INTERVAL_SECONDS`       | No       | `30`             | Payout worker tick cadence.                                                                                                        |
-| `LOOP_PAYOUT_MAX_ATTEMPTS`                  | No       | schema default   | Retries before a payout transitions to `failed`.                                                                                   |
-| `LOOP_PAYOUT_WATCHDOG_STALE_SECONDS`        | No       | schema default   | `submitted` payouts older than this get re-picked (A2-602).                                                                        |
-| `LOOP_PAYOUT_FEE_BASE_STROOPS`              | No       | `100`            | A2-1921: Stellar fee for a payout's first submit attempt.                                                                          |
-| `LOOP_PAYOUT_FEE_MULTIPLIER`                | No       | `2`              | A2-1921: per-attempt fee scaling factor (attempt N pays `BASE * MULTIPLIER^(N-1)`).                                                |
-| `LOOP_PAYOUT_FEE_CAP_STROOPS`               | No       | `100000`         | A2-1921: ceiling on the scaled fee.                                                                                                |
-| `LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS`     | No       | schema default   | Horizon payment watcher cadence.                                                                                                   |
-| `LOOP_PROCUREMENT_INTERVAL_SECONDS`         | No       | schema default   | CTX procurement worker cadence.                                                                                                    |
-| `LOOP_ASSET_DRIFT_WATCHER_INTERVAL_SECONDS` | No       | schema default   | Asset drift watcher cadence.                                                                                                       |
-| `INTEREST_APY_BASIS_POINTS`                 | No       | schema default   | APY for the interest-accrual primitive.                                                                                            |
-| `INTEREST_PERIODS_PER_YEAR`                 | No       | schema default   | E.g. `365` for daily, `12` for monthly.                                                                                            |
-| `INTEREST_TICK_INTERVAL_HOURS`              | No       | schema default   | Wall-clock cadence of the interest scheduler.                                                                                      |
-| `LOOP_INTEREST_POOL_ACCOUNT`                | No       | operator account | ADR 009/015: forward-mint pool account the daily interest accrual sub-allocates from. Defaults to the operator account when unset. |
-| `LOOP_INTEREST_POOL_MIN_DAYS_COVER`         | No       | `7`              | Pool watcher pages Discord monitoring when the on-chain pool covers fewer than this many days of forecast interest.                |
+| Variable                                    | Required | Default          | Description                                                                                                                               |
+| ------------------------------------------- | -------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `LOOP_WORKERS_ENABLED`                      | No       | `false`          | Master switch for all outbound workers. Set `true` on prod + Fly staging once Stellar secrets are wired.                                  |
+| `LOOP_PAYOUT_WORKER_INTERVAL_SECONDS`       | No       | `30`             | Payout worker tick cadence.                                                                                                               |
+| `LOOP_PAYOUT_MAX_ATTEMPTS`                  | No       | schema default   | Retries before a payout transitions to `failed`.                                                                                          |
+| `LOOP_PAYOUT_WATCHDOG_STALE_SECONDS`        | No       | schema default   | `submitted` payouts older than this get re-picked (A2-602).                                                                               |
+| `LOOP_PAYOUT_FEE_BASE_STROOPS`              | No       | `100`            | A2-1921: Stellar fee for a payout's first submit attempt.                                                                                 |
+| `LOOP_PAYOUT_FEE_MULTIPLIER`                | No       | `2`              | A2-1921: per-attempt fee scaling factor (attempt N pays `BASE * MULTIPLIER^(N-1)`).                                                       |
+| `LOOP_PAYOUT_FEE_CAP_STROOPS`               | No       | `100000`         | A2-1921: ceiling on the scaled fee.                                                                                                       |
+| `LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS`     | No       | schema default   | Horizon payment watcher cadence.                                                                                                          |
+| `LOOP_PROCUREMENT_INTERVAL_SECONDS`         | No       | schema default   | CTX procurement worker cadence.                                                                                                           |
+| `LOOP_ASSET_DRIFT_WATCHER_INTERVAL_SECONDS` | No       | schema default   | Asset drift watcher cadence.                                                                                                              |
+| `INTEREST_APY_BASIS_POINTS`                 | No       | schema default   | APY for the interest-accrual primitive.                                                                                                   |
+| `INTEREST_PERIODS_PER_YEAR`                 | No       | schema default   | E.g. `365` for daily, `12` for monthly.                                                                                                   |
+| `INTEREST_TICK_INTERVAL_HOURS`              | No       | schema default   | Wall-clock cadence of the interest scheduler.                                                                                             |
+| `LOOP_INTEREST_POOL_ACCOUNT`                | No       | operator account | ADR 009/015: forward-mint pool account the daily interest accrual sub-allocates from. Defaults to the operator account when unset.        |
+| `LOOP_INTEREST_POOL_MIN_DAYS_COVER`         | No       | `7`              | Pool watcher pages Discord monitoring when the on-chain pool covers fewer than this many days of forecast interest.                       |
+| `LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS`        | No       | `1`              | CF-26 / X-PRIV-07/08: cadence of the auth-row retention purge sweep (runs under `LOOP_WORKERS_ENABLED`). Runbook: `docs/runbooks/dsr.md`. |
+| `LOOP_AUTH_ROW_RETENTION_DAYS`              | No       | `30`             | CF-26 / X-PRIV-07/08: grace before an expired/consumed OTP row or a dead refresh-token row is deleted. Must exceed the refresh horizon.   |
 
 #### Runtime kill switches (A2-1907)
 

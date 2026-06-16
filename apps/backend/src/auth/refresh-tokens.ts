@@ -10,7 +10,7 @@
  * signature verifies.
  */
 import { createHash } from 'node:crypto';
-import { and, eq, isNull, gt } from 'drizzle-orm';
+import { and, eq, isNull, isNotNull, gt, lt, or } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { refreshTokens } from '../db/schema.js';
 
@@ -155,4 +155,43 @@ export async function revokeAllRefreshTokensForUser(userId: string): Promise<voi
     .update(refreshTokens)
     .set({ revokedAt: now })
     .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
+}
+
+/**
+ * CF-26 / X-PRIV-08: the retention sweep the schema comment on
+ * `refresh_tokens_expires` has promised all along but that never
+ * existed. Deletes rows that are dead AND past the retention grace:
+ *
+ *   - `expires_at < now - retentionMs` — the token is past its refresh
+ *     horizon; it can never authenticate again.
+ *   - OR `revoked_at < now - retentionMs` — the token was rotated or
+ *     security-revoked long enough ago that the token-theft reuse
+ *     signal (findRefreshTokenRecord distinguishing "revoked" from
+ *     "never existed") is no longer actionable.
+ *
+ * A row that is neither expired nor revoked is live and never touched.
+ * The `retentionMs` grace keeps a just-rotated row around briefly so a
+ * racing reuse attempt still trips the family-wide revoke (A2-1608)
+ * rather than looking like a forged jti. Each row carries a
+ * `token_hash` (PII-adjacent) + `user_id`, so leaving dead rows
+ * forever is the same unbounded-growth problem as the OTP table.
+ *
+ * Uses the `refresh_tokens_expires` index for the expired-branch range
+ * scan. Returns the number of rows deleted.
+ */
+export async function purgeDeadRefreshTokens(args: {
+  retentionMs: number;
+  now?: Date;
+}): Promise<number> {
+  const cutoff = new Date((args.now ?? new Date()).getTime() - args.retentionMs);
+  const deleted = await db
+    .delete(refreshTokens)
+    .where(
+      or(
+        lt(refreshTokens.expiresAt, cutoff),
+        and(isNotNull(refreshTokens.revokedAt), lt(refreshTokens.revokedAt, cutoff)),
+      ),
+    )
+    .returning({ jti: refreshTokens.jti });
+  return deleted.length;
 }

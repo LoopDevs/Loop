@@ -156,3 +156,30 @@ export async function incrementOtpAttempts(args: { email: string; now?: Date }):
       )`,
     );
 }
+
+/**
+ * CF-26 / X-PRIV-07: retention sweep. Deletes OTP rows whose
+ * `expires_at` is older than `now - retentionMs`. An expired OTP is
+ * never re-used (verify-otp only matches live, unconsumed rows), and
+ * the table holds `email` + a code hash, so an unbounded `otps` table
+ * is a slowly-growing PII store with no lawful retention basis.
+ *
+ * We key the sweep on `expires_at` (not `consumed_at`) so it reclaims
+ * both branches uniformly: a consumed row's `expires_at` is in the
+ * past once the 10-min TTL elapses, and an abandoned (never-verified)
+ * row expires on the same clock. The `retentionMs` grace keeps very
+ * recently-expired rows around briefly so an in-flight verify against
+ * a just-expired code still returns the same 401 it would today rather
+ * than a "row vanished" edge case.
+ *
+ * Uses the `otps_email_expires` index for the range scan. Returns the
+ * number of rows deleted so the worker can log a non-zero sweep.
+ */
+export async function purgeExpiredOtps(args: { retentionMs: number; now?: Date }): Promise<number> {
+  const cutoff = new Date((args.now ?? new Date()).getTime() - args.retentionMs);
+  const deleted = await db
+    .delete(otps)
+    .where(lt(otps.expiresAt, cutoff))
+    .returning({ id: otps.id });
+  return deleted.length;
+}

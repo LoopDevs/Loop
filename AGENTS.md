@@ -283,6 +283,13 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # production + Fly staging after LOOP_STELLAR_OPERATOR_SECRET is wired.
 # LOOP_WORKERS_ENABLED=true
 
+# CF-26 / X-PRIV-07/08: auth-row retention purge sweep. Runs under
+# LOOP_WORKERS_ENABLED; DELETE-only sweep of expired/consumed OTP rows
+# + dead refresh-token rows past the retention grace. Runbook:
+# docs/runbooks/dsr.md.
+# LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS=1
+# LOOP_AUTH_ROW_RETENTION_DAYS=30
+
 # A2-1907 runtime kill switches (read live from process.env, no
 # redeploy). Combined orders switch plus per-path overrides — a set
 # per-path var wins for its path; unset falls back to the combined.

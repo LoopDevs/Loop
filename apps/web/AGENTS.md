@@ -6,7 +6,7 @@
 
 ```
 app/
-├── routes/           ← File-based routes (React Router v7, 34 routes)
+├── routes/           ← File-based routes (React Router v7, 35 routes)
 │   ├── home.tsx, map.tsx, gift-card.$name.tsx, brand.$slug.tsx, auth.tsx,
 │   │   onboarding.tsx, calculator.tsx, sitemap.tsx,
 │   │   privacy.tsx, terms.tsx, not-found.tsx

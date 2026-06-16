@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { dbMock, state } = vi.hoisted(() => {
+const { dbMock, state, deleteSpy } = vi.hoisted(() => {
   const s: {
     findFirstResult: unknown;
     insertCalls: unknown[];
@@ -15,6 +15,8 @@ const { dbMock, state } = vi.hoisted(() => {
     return m;
   });
   m['update'] = vi.fn(() => m);
+  const deleteSpy = vi.fn(() => m);
+  m['delete'] = deleteSpy;
   m['set'] = vi.fn((v: unknown) => {
     s.updateSetArgs.push(v);
     return m;
@@ -35,7 +37,7 @@ const { dbMock, state } = vi.hoisted(() => {
       findFirst: vi.fn(async () => s.findFirstResult),
     },
   };
-  return { dbMock: { ...m, query }, state: s };
+  return { dbMock: { ...m, query }, state: s, deleteSpy };
 });
 
 vi.mock('../../db/client.js', () => ({ db: dbMock }));
@@ -59,6 +61,7 @@ import {
   revokeRefreshToken,
   tryRevokeIfLive,
   revokeAllRefreshTokensForUser,
+  purgeDeadRefreshTokens,
 } from '../refresh-tokens.js';
 
 beforeEach(() => {
@@ -216,5 +219,21 @@ describe('revokeAllRefreshTokensForUser', () => {
     expect(state.updateSetArgs).toHaveLength(1);
     const s = state.updateSetArgs[0] as Record<string, unknown>;
     expect(s['revokedAt']).toBeInstanceOf(Date);
+  });
+});
+
+describe('purgeDeadRefreshTokens', () => {
+  it('issues a delete and returns the count of reaped rows', async () => {
+    // RETURNING from the DELETE — two dead rows reclaimed.
+    state.returningRows = [{ jti: 'jti-dead-1' }, { jti: 'jti-dead-2' }];
+    const n = await purgeDeadRefreshTokens({ retentionMs: 30 * 24 * 60 * 60 * 1000 });
+    expect(deleteSpy).toHaveBeenCalled();
+    expect(n).toBe(2);
+  });
+
+  it('returns 0 when no dead rows were past the retention grace', async () => {
+    state.returningRows = [];
+    const n = await purgeDeadRefreshTokens({ retentionMs: 1000 });
+    expect(n).toBe(0);
   });
 });

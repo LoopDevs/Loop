@@ -15,6 +15,8 @@ src/
 ├── discord.ts          ← Webhook senders (orders, health, circuit, payout-failed, below-floor)
 ├── openapi.ts          ← OpenAPI 3.1 spec (every new handler registers its path + status codes)
 ├── auth/handler.ts     ← Auth proxy + Loop-native OTP (ADR 013 + ADR 014 social login)
+├── auth/auth-row-purge.ts ← Retention sweep deleting expired/consumed OTP rows + dead refresh-token rows past LOOP_AUTH_ROW_RETENTION_DAYS (CF-26 / X-PRIV-07/08; gated on LOOP_WORKERS_ENABLED; runbooks/dsr.md)
+├── csv/csv-escape.ts   ← Shared CSV cell escaper (RFC 4180 + formula-injection guard; CF-26 / X-PRIV-11). admin/csv-escape.ts re-exports it; user + tax-script exporters import it directly
 ├── admin/              ← Admin-panel handlers (~60 files) grouped by domain:
 │   │                     ADR 011 cashback config, ADR 015 treasury + asset
 │   │                     drift + settlement lag, ADR 017/018 credit
