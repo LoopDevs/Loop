@@ -625,13 +625,26 @@ export const orders = pgTable(
       'orders_payment_method_known',
       sql`${t.paymentMethod} IN ('xlm', 'usdc', 'credit', 'loop_asset')`,
     ),
+    // A2-705: charge-side currency (what the user is billed in). Stays
+    // pinned to the three cashback home currencies — the user is always
+    // charged in their home currency (1:1 with a LOOP asset). An
+    // extended-market card (ADR 035) is FX-pinned to the home currency
+    // at order creation, so the extended code only ever lands in
+    // `orders.currency` below, never here.
     check('orders_charge_currency_known', sql`${t.chargeCurrency} IN ('USD', 'GBP', 'EUR')`),
-    // A2-705: catalog-side currency (what CTX denominates the gift
-    // card in). Paired with `orders_charge_currency_known` — both
-    // currencies on this row must be one of the three Loop-asset
-    // currencies. Adding a fourth is a deliberate migration against
-    // this CHECK and `user_credits_currency_known`.
-    check('orders_currency_known', sql`${t.currency} IN ('USD', 'GBP', 'EUR')`),
+    // A2-705 / CF-19: catalog-side currency (what the supplier
+    // denominates the gift card in). Mirror of migration 0037 — admits
+    // the three home currencies plus the ADR-035 extended display
+    // markets (AED/INR/SAR/AUD/MXN), which are orderable on the XLM rail
+    // but have no cashback band. Deliberately WIDER than
+    // `orders_charge_currency_known` / `user_credits_currency_known`:
+    // those stay USD/GBP/EUR because the cashback ledger has no extended
+    // asset. Keep this list in lock-step with `ORDERABLE_CURRENCIES` in
+    // `@loop/shared` and migration 0037.
+    check(
+      'orders_currency_known',
+      sql`${t.currency} IN ('USD', 'GBP', 'EUR', 'AED', 'INR', 'SAR', 'AUD', 'MXN')`,
+    ),
     check(
       'orders_percentages_sum',
       sql`${t.wholesalePct} + ${t.userCashbackPct} + ${t.loopMarginPct} <= 100`,

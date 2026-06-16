@@ -11,6 +11,7 @@ import {
   stroopsPerCent,
   usdcStroopsPerCent,
   convertMinorUnits,
+  CurrencyRateUnavailableError,
   __resetPriceFeedForTests,
   __resetFxFeedForTests,
 } from '../price-feed.js';
@@ -363,5 +364,66 @@ describe('convertMinorUnits', () => {
   it('throws when the destination rate is missing from the feed', async () => {
     fetchSpy = stubFeed({ base: 'USD', rates: { GBP: 0.78 } });
     await expect(convertMinorUnits(5000n, 'USD', 'EUR')).rejects.toThrow(/no rate for USD→EUR/);
+  });
+
+  // ── CF-19 / ADR 035: extended-market source currencies ──────────────
+  describe('extended order currencies (CF-19 / ADR 035)', () => {
+    it('requests every rate currency (home + extended) in one round-trip', async () => {
+      const captured: string[] = [];
+      fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+        captured.push(String(url));
+        return new Response(
+          JSON.stringify({ base: 'USD', rates: { GBP: 0.78, EUR: 0.92, AED: 3.67 } }),
+          { status: 200 },
+        );
+      });
+      await convertMinorUnits(5000n, 'AED', 'USD');
+      // Default Frankfurter URL must enumerate the extended currencies so
+      // the feed returns them when it serves them.
+      expect(captured[0]!).toContain('to=');
+      for (const code of ['GBP', 'EUR', 'AED', 'INR', 'SAR', 'AUD', 'MXN']) {
+        expect(captured[0]!).toContain(code);
+      }
+    });
+
+    it('converts an AED-priced card to USD when the feed serves AED', async () => {
+      // 1 USD = 3.67 AED → 3670 AED minor (36.70 AED) = 1000 USD cents.
+      fetchSpy = stubFeed({ base: 'USD', rates: { AED: 3.67 } });
+      expect(await convertMinorUnits(3670n, 'AED', 'USD')).toBe(1000n);
+    });
+
+    it('two-hops an extended currency to a non-USD home currency (AED→GBP)', async () => {
+      // 3670 AED minor / 3.67 = $10.00 → $10 × 0.78 = 780 GBP pence.
+      fetchSpy = stubFeed({ base: 'USD', rates: { AED: 3.67, GBP: 0.78 } });
+      expect(await convertMinorUnits(3670n, 'AED', 'GBP')).toBe(780n);
+    });
+
+    it('FAILS GRACEFULLY with CurrencyRateUnavailableError when the feed lacks an extended rate', async () => {
+      // The rates service doesn't serve AED yet — the feed returns only
+      // home currencies. The order path must NOT crash or charge a wrong
+      // amount; it surfaces a typed "coming soon" error instead.
+      fetchSpy = stubFeed({ base: 'USD', rates: { GBP: 0.78, EUR: 0.92 } });
+      await expect(convertMinorUnits(3670n, 'AED', 'USD')).rejects.toBeInstanceOf(
+        CurrencyRateUnavailableError,
+      );
+    });
+
+    it('the typed error names the unavailable currency', async () => {
+      fetchSpy = stubFeed({ base: 'USD', rates: { GBP: 0.78 } });
+      await expect(convertMinorUnits(500n, 'MXN', 'GBP')).rejects.toMatchObject({
+        name: 'CurrencyRateUnavailableError',
+        currency: 'MXN',
+      });
+    });
+
+    it('a missing SUPPORTED currency (GBP) stays a plain Error, not the typed one', async () => {
+      // Distinguish a genuine feed outage for a currency we DO support
+      // (→ 503 SERVICE_UNAVAILABLE) from an unbuilt extended market.
+      fetchSpy = stubFeed({ base: 'USD', rates: { EUR: 0.92 } });
+      const err = await convertMinorUnits(5000n, 'USD', 'GBP').catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(CurrencyRateUnavailableError);
+      expect((err as Error).message).toMatch(/no rate for USD→GBP/);
+    });
   });
 });

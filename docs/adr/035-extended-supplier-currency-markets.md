@@ -4,6 +4,33 @@
 
 Accepted (extends ADR 034's per-country model)
 
+**Order-path update (CF-19, 2026-06):** the original decision below claimed
+"No backend change" — accurate for the legacy CTX-proxy path but **wrong for the
+loop-native path**, which hard-rejected any non-USD/GBP/EUR gift-card currency at
+400 and whose FX feed + DB CHECKs were pinned to the three home currencies. So
+the five display markets were geo-redirected and sitemap-indexed but structurally
+**unbuyable** via loop-native (~286 SEO-promoted merchants). The Loop side is now
+wired:
+
+- `ORDERABLE_CURRENCIES` in `@loop/shared` (home + extended) is the order-path
+  currency set; the loop-native handler validates against it (not `HOME_CURRENCIES`,
+  which stays the cashback/ledger set — these markets remain display-only, no
+  LOOP asset).
+- The FX path (`price-feed-fx.ts`) requests the extended currencies from the rates
+  feed and converts an extended-market card to the user's home charge currency.
+- Migration `0037_orders_currency_extended_markets` widens the
+  `orders_currency_known` CHECK to admit AED/INR/SAR/AUD/MXN. The
+  charge/cashback CHECKs (`orders_charge_currency_known`,
+  `user_credits_currency_known`, `credit_transactions_currency_known`,
+  `users_home_currency_known`) deliberately stay USD/GBP/EUR.
+
+**External dependency (not in Loop's repo):** a market only goes live end-to-end
+once the external rates service (`~/code/rates`) actually serves a fiat→crypto
+rate for the currency (task #8). Until then an extended-market order returns a
+clean `CURRENCY_NOT_AVAILABLE` 503 ("ordering for this market is coming soon") —
+it never crashes, 500s, or computes a wrong charge. This PR makes Loop _ready and
+safe_; flipping a market live is purely a rates-service capability.
+
 ## Context
 
 The supplier-coverage program (June 2026) onboarded every SVS / Tillo / EzPin product
@@ -62,4 +89,7 @@ as **display-only** countries in the ADR 034 model:
   precedent).
 - The catalogue still holds ~20 thinner foreign currencies that remain API-orderable but
   unrouted. No data is lost; they're one threshold-crossing away from being surfaced.
-- **No backend change** — CTX already creates and prices these merchants.
+- ~~**No backend change** — CTX already creates and prices these merchants.~~ Superseded
+  by the CF-19 order-path update above: the legacy CTX-proxy path needed none, but the
+  loop-native path (handler currency gate, FX feed, and the `orders_currency_known` DB
+  CHECK) all had to widen for these markets to be buyable. See the Status banner.

@@ -285,4 +285,9 @@ export async function requiredStroopsForCharge(
 // below so the existing import path (`'../payments/price-feed.js'`)
 // used by `amount-sufficient.ts`, `loop-handler.ts`, and the test
 // suite resolves unchanged.
-export { usdcStroopsPerCent, convertMinorUnits, __resetFxFeedForTests } from './price-feed-fx.js';
+export {
+  usdcStroopsPerCent,
+  convertMinorUnits,
+  CurrencyRateUnavailableError,
+  __resetFxFeedForTests,
+} from './price-feed-fx.js';

@@ -260,6 +260,13 @@
       "when": 1780100400000,
       "tag": "0036_perf_admin_and_stats_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1780100500000,
+      "tag": "0037_orders_currency_extended_markets",
+      "breakpoints": true
     }
   ]
 }
