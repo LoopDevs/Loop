@@ -147,14 +147,15 @@ export async function listClaimablePayouts(opts: {
 }
 
 // State transitions (`reclaimSubmittedPayout`, `markPayoutSubmitted`,
-// `markPayoutConfirmed`, `markPayoutFailed`, `resetPayoutToPending`)
-// live in `./pending-payouts-transitions.ts`. Re-exported below so
-// the wide network of import sites — submit worker, watchdog,
-// admin handlers, tests — keeps resolving against the historical
-// `'../credits/pending-payouts.js'` path.
+// `recordPayoutTxHash`, `markPayoutConfirmed`, `markPayoutFailed`,
+// `resetPayoutToPending`) live in `./pending-payouts-transitions.ts`.
+// Re-exported below so the wide network of import sites — submit
+// worker, watchdog, admin handlers, tests — keeps resolving against the
+// historical `'../credits/pending-payouts.js'` path.
 export {
   reclaimSubmittedPayout,
   markPayoutSubmitted,
+  recordPayoutTxHash,
   markPayoutConfirmed,
   markPayoutFailed,
   resetPayoutToPending,

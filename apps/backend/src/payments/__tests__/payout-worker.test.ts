@@ -27,6 +27,12 @@ const { repoMocks } = vi.hoisted(() => ({
       id: args.id,
       attempts: args.expectedAttempts + 1,
     })),
+    // CF-18: hash stamp on a `submitted` row before the network submit.
+    // Default returns a row (success); tests that exercise the
+    // persist-failure path override it to null.
+    recordPayoutTxHash: vi.fn<(args: { id: string; txHash: string }) => Promise<unknown>>(
+      async (args: { id: string; txHash: string }) => ({ id: args.id, txHash: args.txHash }),
+    ),
   },
 }));
 vi.mock('../../credits/pending-payouts.js', () => ({
@@ -38,6 +44,7 @@ vi.mock('../../credits/pending-payouts.js', () => ({
   markPayoutFailed: (args: { id: string; reason: string }) => repoMocks.markPayoutFailed(args),
   reclaimSubmittedPayout: (args: { id: string; expectedAttempts: number }) =>
     repoMocks.reclaimSubmittedPayout(args),
+  recordPayoutTxHash: (args: { id: string; txHash: string }) => repoMocks.recordPayoutTxHash(args),
 }));
 
 const { horizonMock } = vi.hoisted(() => ({
@@ -47,10 +54,17 @@ const { horizonMock } = vi.hoisted(() => ({
         args: unknown,
       ) => Promise<{ txHash: string; amount: string; assetCode: string | null } | null>
     >(async () => null),
+    // CF-18: authoritative point lookup by tx hash. Default "never
+    // landed" (null) so rows without a persisted hash fall through to
+    // the memo scan exactly as before.
+    getOutboundPaymentByTxHash: vi.fn<(hash: string) => Promise<{ landed: boolean } | null>>(
+      async () => null,
+    ),
   },
 }));
 vi.mock('../horizon.js', () => ({
   findOutboundPaymentByMemo: (args: unknown) => horizonMock.findOutboundPaymentByMemo(args),
+  getOutboundPaymentByTxHash: (hash: string) => horizonMock.getOutboundPaymentByTxHash(hash),
 }));
 
 // Trustline pre-check (A4-062 follow-up — Phase-2 trustline-probe).
@@ -98,17 +112,24 @@ const { sdkMock, PayoutSubmitErrorMock } = vi.hoisted(() => {
   return {
     PayoutSubmitErrorMock,
     sdkMock: {
-      submitPayout: vi.fn<(args: unknown) => Promise<{ txHash: string; ledger: number | null }>>(
-        async () => ({
-          txHash: 'tx-hash',
-          ledger: 1,
-        }),
-      ),
+      // CF-18: the real submitPayout fires `onSigned(hash)` before the
+      // network submit. Mirror that here so the worker's persist step
+      // (recordPayoutTxHash) is exercised on the default happy path.
+      submitPayout: vi.fn<
+        (args: { onSigned?: (h: string) => Promise<void> | void }) => Promise<{
+          txHash: string;
+          ledger: number | null;
+        }>
+      >(async (args) => {
+        await args.onSigned?.('tx-hash');
+        return { txHash: 'tx-hash', ledger: 1 };
+      }),
     },
   };
 });
 vi.mock('../payout-submit.js', () => ({
-  submitPayout: (args: unknown) => sdkMock.submitPayout(args),
+  submitPayout: (args: { onSigned?: (h: string) => Promise<void> | void }) =>
+    sdkMock.submitPayout(args),
   PayoutSubmitError: PayoutSubmitErrorMock,
 }));
 
@@ -200,6 +221,10 @@ function makeRow(overrides: Record<string, unknown> = {}): Record<string, unknow
     memoText: 'order-abc',
     state: 'pending',
     attempts: 0,
+    // CF-18: rows start with no persisted hash. The authoritative
+    // hash-lookup pre-check only fires when this is non-null (a re-pick
+    // of a row whose prior attempt recorded its hash).
+    txHash: null,
     ...overrides,
   };
 }
@@ -210,7 +235,9 @@ beforeEach(() => {
   repoMocks.markPayoutConfirmed.mockReset();
   repoMocks.markPayoutFailed.mockReset();
   repoMocks.reclaimSubmittedPayout.mockReset();
+  repoMocks.recordPayoutTxHash.mockReset();
   horizonMock.findOutboundPaymentByMemo.mockReset();
+  horizonMock.getOutboundPaymentByTxHash.mockReset();
   sdkMock.submitPayout.mockReset();
   // Sensible defaults.
   repoMocks.listClaimablePayouts.mockResolvedValue([]);
@@ -228,8 +255,18 @@ beforeEach(() => {
     id: args.id,
     reason: args.reason,
   }));
+  repoMocks.recordPayoutTxHash.mockImplementation(async (args: { id: string; txHash: string }) => ({
+    id: args.id,
+    txHash: args.txHash,
+  }));
   horizonMock.findOutboundPaymentByMemo.mockResolvedValue(null);
-  sdkMock.submitPayout.mockResolvedValue({ txHash: 'tx-hash', ledger: 1 });
+  horizonMock.getOutboundPaymentByTxHash.mockResolvedValue(null);
+  sdkMock.submitPayout.mockImplementation(
+    async (args: { onSigned?: (h: string) => Promise<void> | void }) => {
+      await args.onSigned?.('tx-hash');
+      return { txHash: 'tx-hash', ledger: 1 };
+    },
+  );
   discordMock.notifyPayoutFailed.mockClear();
   compensationMock.applyAdminPayoutCompensation.mockReset();
   compensationMock.applyAdminPayoutCompensation.mockResolvedValue({
@@ -388,6 +425,114 @@ describe('runPayoutTick', () => {
     expect(r.retriedLater).toBe(1);
     expect(repoMocks.markPayoutSubmitted).not.toHaveBeenCalled();
     expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+  });
+
+  // ─────────────────────────── CF-18 ───────────────────────────
+  // Authoritative tx-hash idempotency + hash persistence before submit.
+
+  it('CF-18: pre-check matches the memo scan with amount+asset pinned (P2-1)', async () => {
+    // The memo scan must be called with the row's expected amount +
+    // asset so a memo collision can't converge the wrong payment.
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
+    await runPayoutTick(BASE_ARGS);
+    expect(horizonMock.findOutboundPaymentByMemo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        account: 'GOPERATOR',
+        to: 'GDESTINATION',
+        memo: 'order-abc',
+        expectedAmountStroops: 50_000_000n,
+        expectedAssetCode: 'GBPLOOP',
+      }),
+    );
+  });
+
+  it('CF-18: re-pick with a persisted hash that landed → converges via authoritative lookup, no scan, no submit', async () => {
+    // A watchdog re-pick of a row whose prior attempt recorded its hash
+    // (onSigned → recordPayoutTxHash). The authoritative point lookup
+    // proves the tx landed regardless of how many inbound deposits have
+    // scrolled the memo-scan window — the core CF-18 fix.
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ state: 'submitted', attempts: 1, txHash: 'persisted-landed-hash' }),
+    ]);
+    horizonMock.getOutboundPaymentByTxHash.mockResolvedValue({ landed: true });
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.skippedAlreadyLanded).toBe(1);
+    expect(horizonMock.getOutboundPaymentByTxHash).toHaveBeenCalledWith('persisted-landed-hash');
+    // The window-bound memo scan is NOT consulted — no window dependency.
+    expect(horizonMock.findOutboundPaymentByMemo).not.toHaveBeenCalled();
+    expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+    expect(repoMocks.markPayoutConfirmed).toHaveBeenCalledWith({
+      id: 'p-1',
+      txHash: 'persisted-landed-hash',
+    });
+  });
+
+  it('CF-18: re-pick with a persisted hash that FAILED on chain → falls through to re-submit', async () => {
+    // A persisted hash for a tx that landed but failed (e.g. tx_bad_seq
+    // sealed as a failed tx) moved no value, so re-submission is safe.
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ state: 'submitted', attempts: 1, txHash: 'persisted-failed-hash' }),
+    ]);
+    horizonMock.getOutboundPaymentByTxHash.mockResolvedValue({ landed: false });
+    // Memo scan also finds nothing (the prior failed tx isn't a match).
+    horizonMock.findOutboundPaymentByMemo.mockResolvedValue(null);
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.confirmed).toBe(1);
+    expect(horizonMock.getOutboundPaymentByTxHash).toHaveBeenCalledWith('persisted-failed-hash');
+    expect(sdkMock.submitPayout).toHaveBeenCalledTimes(1);
+  });
+
+  it('CF-18: re-pick with a persisted hash that never landed (404 → null) → re-submits', async () => {
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ state: 'submitted', attempts: 1, txHash: 'persisted-never-landed' }),
+    ]);
+    horizonMock.getOutboundPaymentByTxHash.mockResolvedValue(null);
+    horizonMock.findOutboundPaymentByMemo.mockResolvedValue(null);
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.confirmed).toBe(1);
+    expect(sdkMock.submitPayout).toHaveBeenCalledTimes(1);
+  });
+
+  it('CF-18: authoritative lookup throwing fails closed (no submit)', async () => {
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ state: 'submitted', attempts: 1, txHash: 'persisted-hash' }),
+    ]);
+    horizonMock.getOutboundPaymentByTxHash.mockRejectedValue(new Error('horizon 503'));
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.retriedLater).toBe(1);
+    expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+  });
+
+  it('CF-18: the deterministic hash is persisted (recordPayoutTxHash) BEFORE submit returns', async () => {
+    // The happy-path submitPayout mock fires onSigned('tx-hash'); the
+    // worker must persist it via recordPayoutTxHash so a crash after the
+    // tx lands is recoverable on the next re-pick.
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.confirmed).toBe(1);
+    expect(repoMocks.recordPayoutTxHash).toHaveBeenCalledWith({ id: 'p-1', txHash: 'tx-hash' });
+  });
+
+  it('CF-18: a hash-persist failure aborts the submit (fail-closed)', async () => {
+    // recordPayoutTxHash returning null means the row moved out from
+    // under us between claim and stamp. onSigned throws → submitPayout
+    // surfaces it as terminal_other → the row is not double-submitted.
+    repoMocks.listClaimablePayouts.mockResolvedValue([makeRow()]);
+    repoMocks.recordPayoutTxHash.mockResolvedValue(null);
+    // Use the REAL submitPayout contract: onSigned throws inside it →
+    // it would throw PayoutSubmitError('terminal_other'). Simulate that
+    // by having the mock invoke onSigned and surface its throw.
+    sdkMock.submitPayout.mockImplementation(
+      async (args: { onSigned?: (h: string) => Promise<void> | void }) => {
+        await args.onSigned?.('tx-hash'); // throws → propagates
+        return { txHash: 'tx-hash', ledger: 1 };
+      },
+    );
+    const r = await runPayoutTick(BASE_ARGS);
+    // The throw is an unclassified error → handleSubmitError → failed
+    // (no second submit; markPayoutConfirmed never called).
+    expect(r.confirmed).toBe(0);
+    expect(repoMocks.markPayoutConfirmed).not.toHaveBeenCalled();
   });
 
   it('transient_horizon under the attempts cap → retriedLater, no markFailed', async () => {

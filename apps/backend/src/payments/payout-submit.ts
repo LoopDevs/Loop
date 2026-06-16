@@ -47,6 +47,19 @@ export interface PayoutSubmitArgs {
    * retries.
    */
   feeStroops?: string;
+  /**
+   * CF-18: fired with the deterministic tx hash AFTER the tx is built
+   * + signed but BEFORE it's submitted to the network. The worker
+   * persists this hash to the `pending_payouts` row so that, if the
+   * submit network call lands the tx but we crash / lose the response
+   * before recording it, the next re-pick can ask Horizon directly
+   * ("did THIS hash land?") instead of relying on the bounded memo
+   * scan — closing the double-pay window. Awaited so a persist failure
+   * aborts the submit (fail-closed: better to retry than to submit
+   * without having recorded the hash). Errors thrown here propagate as
+   * a `terminal_other` PayoutSubmitError below.
+   */
+  onSigned?: (txHash: string) => Promise<void> | void;
 }
 
 export interface PayoutSubmitResult {
@@ -120,6 +133,15 @@ export interface NativePaymentSubmitArgs {
   };
   timeoutSeconds?: number;
   feeStroops?: string;
+  /**
+   * CF-18: fired with the deterministic tx hash after sign, before
+   * submit. See `PayoutSubmitArgs.onSigned`. The pay-CTX path has no
+   * `pending_payouts` row to persist into (its idempotency is the
+   * `Idempotency-Key: order.id` CTX returns + the memo scan), so it
+   * passes nothing today; the hook is here for symmetry and any future
+   * order-side hash persistence.
+   */
+  onSigned?: (txHash: string) => Promise<void> | void;
 }
 
 /**
@@ -185,9 +207,26 @@ export async function submitNativePayment(
     );
   }
 
+  // CF-18: deterministic hash known before the network submit (see
+  // `submitPayout`). Persist via `onSigned` before submitting if a
+  // caller wired it; abort fail-closed on a persist failure.
+  const signedHash = tx.hash().toString('hex');
+  if (args.onSigned !== undefined) {
+    try {
+      await args.onSigned(signedHash);
+    } catch (err) {
+      throw new PayoutSubmitError(
+        'terminal_other',
+        err instanceof Error
+          ? `onSigned persist failed: ${err.message}`
+          : 'onSigned persist failed',
+      );
+    }
+  }
+
   try {
     const res = await server.submitTransaction(tx);
-    const hash = (res as { hash?: string }).hash ?? tx.hash().toString('hex');
+    const hash = (res as { hash?: string }).hash ?? signedHash;
     const ledger = (res as { ledger?: number }).ledger ?? null;
     return { txHash: hash, ledger };
   } catch (err) {
@@ -266,11 +305,31 @@ export async function submitPayout(args: PayoutSubmitArgs): Promise<PayoutSubmit
     );
   }
 
+  // CF-18: record the deterministic hash BEFORE the network submit.
+  // `tx.hash()` is fully determined by the signed tx (seq + ops + memo +
+  // fee + network), so we know it without contacting Horizon. If
+  // `onSigned` throws (the row persist failed), abort: a failed persist
+  // means we can't safely prove later whether this submit landed, so
+  // fail-closed and let the next tick retry.
+  const signedHash = tx.hash().toString('hex');
+  if (args.onSigned !== undefined) {
+    try {
+      await args.onSigned(signedHash);
+    } catch (err) {
+      throw new PayoutSubmitError(
+        'terminal_other',
+        err instanceof Error
+          ? `onSigned persist failed: ${err.message}`
+          : 'onSigned persist failed',
+      );
+    }
+  }
+
   try {
     const res = await server.submitTransaction(tx);
     // Types on the SDK's submit response differ across versions;
     // narrow defensively. `hash` is stable across 10-15.x.
-    const hash = (res as { hash?: string }).hash ?? tx.hash().toString('hex');
+    const hash = (res as { hash?: string }).hash ?? signedHash;
     const ledger = (res as { ledger?: number }).ledger ?? null;
     return { txHash: hash, ledger };
   } catch (err) {

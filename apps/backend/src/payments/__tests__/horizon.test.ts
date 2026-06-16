@@ -10,6 +10,7 @@ import {
   listAccountPayments,
   isMatchingIncomingPayment,
   findOutboundPaymentByMemo,
+  getOutboundPaymentByTxHash,
   type HorizonPayment,
 } from '../horizon.js';
 
@@ -387,5 +388,153 @@ describe('findOutboundPaymentByMemo', () => {
     await expect(
       findOutboundPaymentByMemo({ account: ACCOUNT, to: TO, memo: MEMO }),
     ).rejects.toThrow(/Horizon 503/);
+  });
+
+  // ─────────────────────────── CF-18 ───────────────────────────
+
+  it('CF-18: finds the prior payout even when many interleaved inbound deposits precede it', async () => {
+    // The operator account == deposit account (ADR 010), so the feed
+    // interleaves inbound user deposits with our outbound payouts. The
+    // prior payout we're looking for is buried behind 250 inbound
+    // deposits (which were pushing it out of the old ~600-record / 3
+    // page window in conjunction with other traffic). With the deeper
+    // default window + outbound-only filter the scan still finds it.
+    const inbound = (i: number): HorizonPayment => ({
+      id: `in-${i}`,
+      paging_token: `pt-in-${i}`,
+      type: 'payment',
+      from: 'GSOMEDEPOSITOR',
+      to: ACCOUNT, // inbound: someone paid US
+      asset_type: 'native',
+      amount: '1.0000000',
+      transaction_hash: `tx-in-${i}`,
+      transaction_successful: true,
+      transaction: { memo: `deposit-${i}`, memo_type: 'text', successful: true },
+    });
+    // Page 1: 200 inbound deposits. Page 2: 50 inbound + the real
+    // outbound payout. Old default (3 pages × 200) would still have hit
+    // it, but a fixed cap that ALWAYS sits in front of the match is the
+    // failure mode — assert the outbound-only filter doesn't false-match
+    // any of the 250 inbound records and the match is the outbound one.
+    const page1 = Array.from({ length: 200 }, (_, i) => inbound(i));
+    const page2 = [...Array.from({ length: 50 }, (_, i) => inbound(200 + i)), outboundPayment()];
+    fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(
+        paymentResponse(page1, 'https://horizon.stellar.org/acc/pmts?cursor=pt-page2'),
+      )
+      .mockResolvedValueOnce(paymentResponse(page2));
+    const hit = await findOutboundPaymentByMemo({ account: ACCOUNT, to: TO, memo: MEMO });
+    expect(hit).toEqual({ txHash: 'tx-abc', amount: '5.0000000', assetCode: 'GBPLOOP' });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('CF-18: scans up to the deeper default window (8 pages, ~1600 records)', async () => {
+    // Every page is non-matching with a next cursor; the scan should run
+    // the full default of 8 pages before giving up (vs the old 3).
+    fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockImplementation(async () =>
+        paymentResponse(
+          [outboundPayment({ transaction: { memo: 'nope', memo_type: 'text' } })],
+          'https://horizon.stellar.org/acc/pmts?cursor=x',
+        ),
+      );
+    const hit = await findOutboundPaymentByMemo({ account: ACCOUNT, to: TO, memo: MEMO });
+    expect(hit).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(8);
+  });
+
+  it('CF-18 / P2-1: a memo+from+to hit with a mismatched amount is skipped, not returned', async () => {
+    // Collision: same memo + destination but a DIFFERENT amount. With
+    // expectedAmountStroops pinned the scan must NOT converge on it.
+    fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(paymentResponse([outboundPayment({ amount: '9.9999999' })]));
+    const hit = await findOutboundPaymentByMemo({
+      account: ACCOUNT,
+      to: TO,
+      memo: MEMO,
+      expectedAmountStroops: 50_000_000n, // 5.0000000 — not 9.9999999
+      expectedAssetCode: 'GBPLOOP',
+    });
+    expect(hit).toBeNull();
+  });
+
+  it('CF-18 / P2-1: a memo+from+to hit with a mismatched asset is skipped', async () => {
+    fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(paymentResponse([outboundPayment({ asset_code: 'EURLOOP' })]));
+    const hit = await findOutboundPaymentByMemo({
+      account: ACCOUNT,
+      to: TO,
+      memo: MEMO,
+      expectedAmountStroops: 50_000_000n,
+      expectedAssetCode: 'GBPLOOP',
+    });
+    expect(hit).toBeNull();
+  });
+
+  it('CF-18 / P2-1: returns the match when amount+asset both line up (trailing-zero tolerant)', async () => {
+    fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(paymentResponse([outboundPayment({ amount: '5.0000000' })]));
+    const hit = await findOutboundPaymentByMemo({
+      account: ACCOUNT,
+      to: TO,
+      memo: MEMO,
+      expectedAmountStroops: 50_000_000n,
+      expectedAssetCode: 'GBPLOOP',
+    });
+    expect(hit?.txHash).toBe('tx-abc');
+  });
+});
+
+describe('getOutboundPaymentByTxHash (CF-18 authoritative lookup)', () => {
+  function txResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/hal+json' },
+    });
+  }
+
+  it('returns { landed: true } for a successful sealed tx', async () => {
+    fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(txResponse({ hash: 'abc', successful: true }));
+    expect(await getOutboundPaymentByTxHash('abc')).toEqual({ landed: true });
+  });
+
+  it('returns { landed: false } for a tx that sealed but failed', async () => {
+    fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(txResponse({ hash: 'abc', successful: false }));
+    expect(await getOutboundPaymentByTxHash('abc')).toEqual({ landed: false });
+  });
+
+  it('returns null on 404 (tx never reached a ledger)', async () => {
+    fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce(txResponse({}, 404));
+    expect(await getOutboundPaymentByTxHash('abc')).toBeNull();
+  });
+
+  it('throws on a non-404 transport error (fail-closed)', async () => {
+    fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce(txResponse('down', 503));
+    await expect(getOutboundPaymentByTxHash('abc')).rejects.toThrow(/Horizon 503/);
+  });
+
+  it('throws on schema drift', async () => {
+    fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(txResponse({ hash: 'abc' /* no successful */ }));
+    await expect(getOutboundPaymentByTxHash('abc')).rejects.toThrow(/schema drift/);
+  });
+
+  it('hits the GET /transactions/{hash} endpoint with the hash', async () => {
+    fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(txResponse({ hash: 'deadbeef', successful: true }));
+    await getOutboundPaymentByTxHash('deadbeef');
+    const url = fetchSpy.mock.calls[0]![0] as URL;
+    expect(url.toString()).toContain('/transactions/deadbeef');
   });
 });

@@ -49,6 +49,10 @@ vi.mock('../../payments/horizon.js', async (importActual) => {
   return {
     ...actual,
     findOutboundPaymentByMemo: vi.fn(async () => null),
+    // CF-18: authoritative tx-hash lookup. Default "never landed" so a
+    // row without a persisted hash never short-circuits; tests that
+    // exercise the authoritative path override per-test.
+    getOutboundPaymentByTxHash: vi.fn(async () => null),
   };
 });
 
@@ -102,7 +106,7 @@ import { findOrCreateUserByEmail } from '../../db/users.js';
 import { runPayoutTick } from '../../payments/payout-worker.js';
 import { reclaimSubmittedPayout, listClaimablePayouts } from '../../credits/pending-payouts.js';
 import { submitPayout, PayoutSubmitError } from '../../payments/payout-submit.js';
-import { findOutboundPaymentByMemo } from '../../payments/horizon.js';
+import { findOutboundPaymentByMemo, getOutboundPaymentByTxHash } from '../../payments/horizon.js';
 import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
 
 const describeIf = RUN_INTEGRATION ? describe : describe.skip;
@@ -128,6 +132,9 @@ async function seedPayout(args: {
   state: 'pending' | 'submitted';
   attempts?: number;
   submittedAt?: Date | null;
+  // CF-18: persisted tx hash (set on re-pick rows whose prior attempt
+  // recorded it before the network submit).
+  txHash?: string | null;
 }): Promise<{ payoutId: string; userId: string }> {
   const user = await findOrCreateUserByEmail(`payout-${Date.now()}-${Math.random()}@test.local`);
   await db.update(users).set({ homeCurrency: 'USD' }).where(eq(users.id, user.id));
@@ -147,6 +154,7 @@ async function seedPayout(args: {
       state: args.state,
       attempts: args.attempts ?? 0,
       submittedAt: args.submittedAt ?? null,
+      txHash: args.txHash ?? null,
     })
     .returning({ id: pendingPayouts.id });
   if (row === undefined) throw new Error('seed: pending_payouts insert returned no row');
@@ -162,6 +170,33 @@ describeIf('payout-worker integration — idempotency pre-check convergence', ()
     await truncateAllTables();
     vi.mocked(submitPayout).mockReset();
     vi.mocked(findOutboundPaymentByMemo).mockReset();
+    vi.mocked(getOutboundPaymentByTxHash).mockReset();
+    vi.mocked(getOutboundPaymentByTxHash).mockResolvedValue(null);
+  });
+
+  it('CF-18: re-pick of a submitted row with a persisted, landed tx hash converges via authoritative lookup', async () => {
+    // The double-pay window (CF-18): a stuck `submitted` row re-picked by
+    // the watchdog whose prior submit DID land but scrolled off the
+    // bounded memo-scan window. The persisted hash + authoritative point
+    // lookup converge it to `confirmed` without a memo scan or a second
+    // submit, regardless of how interleaved the operator feed is.
+    const { payoutId } = await seedPayout({
+      state: 'submitted',
+      attempts: 1,
+      submittedAt: new Date(Date.now() - 600_000), // stale → re-picked
+      txHash: 'persisted-landed-hash',
+    });
+    vi.mocked(getOutboundPaymentByTxHash).mockResolvedValueOnce({ landed: true });
+
+    const tick = await runPayoutTick({ ...DEFAULT_TICK_ARGS, watchdogStaleSeconds: 300 });
+    expect(tick.skippedAlreadyLanded).toBe(1);
+    expect(submitPayout).not.toHaveBeenCalled();
+    // The window-bound scan is never consulted — no window dependency.
+    expect(findOutboundPaymentByMemo).not.toHaveBeenCalled();
+
+    const [row] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, payoutId));
+    expect(row!.state).toBe('confirmed');
+    expect(row!.txHash).toBe('persisted-landed-hash');
   });
 
   it('pending row + prior on-chain payment → converges to confirmed without re-submitting', async () => {
@@ -220,6 +255,8 @@ describeIf('payout-worker integration — A2-602 watchdog re-claim CAS', () => {
     await truncateAllTables();
     vi.mocked(submitPayout).mockReset();
     vi.mocked(findOutboundPaymentByMemo).mockReset();
+    vi.mocked(getOutboundPaymentByTxHash).mockReset();
+    vi.mocked(getOutboundPaymentByTxHash).mockResolvedValue(null);
   });
 
   it('two concurrent reclaims on the same stale row — only one wins the CAS on attempts', async () => {
@@ -306,6 +343,8 @@ describeIf('payout-worker integration — fee-bump curve across attempts', () =>
     await truncateAllTables();
     vi.mocked(submitPayout).mockReset();
     vi.mocked(findOutboundPaymentByMemo).mockReset();
+    vi.mocked(getOutboundPaymentByTxHash).mockReset();
+    vi.mocked(getOutboundPaymentByTxHash).mockResolvedValue(null);
   });
 
   it('transient failures escalate fee across watchdog re-pickups', async () => {

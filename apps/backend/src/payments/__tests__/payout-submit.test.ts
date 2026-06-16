@@ -188,6 +188,41 @@ describe('submitPayout — happy path', () => {
   });
 });
 
+describe('submitPayout — CF-18 onSigned (persist hash before submit)', () => {
+  it('fires onSigned with the deterministic hash BEFORE the network submit', async () => {
+    const order: string[] = [];
+    mocks.submitTransactionMock.mockImplementationOnce(async (tx: unknown) => {
+      order.push('submit');
+      sdkState.submittedTxs.push(tx);
+      return sdkState.submitResult;
+    });
+    const onSigned = vi.fn(async (hash: string) => {
+      order.push(`onSigned:${hash}`);
+    });
+    await submitPayout({ ...BASE_ARGS, onSigned });
+    // onSigned ran first, with the client-computed (deterministic) hash.
+    expect(onSigned).toHaveBeenCalledWith('client-computed-hash');
+    expect(order).toEqual(['onSigned:client-computed-hash', 'submit']);
+  });
+
+  it('aborts (terminal_other) without submitting when onSigned throws — the persist failed', async () => {
+    const onSigned = vi.fn(async () => {
+      throw new Error('row vanished');
+    });
+    await expect(submitPayout({ ...BASE_ARGS, onSigned })).rejects.toMatchObject({
+      kind: 'terminal_other',
+    });
+    // The network submit must NOT have run — no double-pay.
+    expect(mocks.submitTransactionMock).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op when onSigned is not provided (legacy callers)', async () => {
+    const res = await submitPayout(BASE_ARGS);
+    expect(res.txHash).toBe('tx-hash-from-horizon');
+    expect(mocks.submitTransactionMock).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('submitPayout — keypair + asset errors', () => {
   it('throws terminal_bad_auth when Keypair.fromSecret throws', async () => {
     await expect(submitPayout({ ...BASE_ARGS, secret: 'invalid' })).rejects.toMatchObject({
