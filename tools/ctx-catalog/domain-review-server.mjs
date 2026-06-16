@@ -6,16 +6,32 @@
  * right brand. ✓ confirms, ✗ marks "no good". Saves to
  * /tmp/ctx-domain-review.json → feeds the correct-domain re-scrape.
  *
- *   node scripts/domain-review-server.mjs   # → http://localhost:7655
+ *   node scripts/domain-review-server.mjs   # prints http://127.0.0.1:7655/?token=…
+ *
+ * Binds loopback-only and requires a shared token (REVIEW_SERVER_TOKEN, else a
+ * per-boot random one printed at startup) on every request — it writes the
+ * domain-review decisions that drive the re-scrape, so it must not be
+ * network-reachable (T-01).
  */
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 
 const PORT = 7655;
 const QUEUE = '/tmp/ctx-domain-guesses.json';
 const DECISIONS = '/tmp/ctx-domain-review.json';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
+
+// T-01: bind loopback only + require a shared token on every request.
+const HOST = '127.0.0.1';
+const TOKEN = process.env.REVIEW_SERVER_TOKEN || randomBytes(24).toString('hex');
+function tokenOk(url, req) {
+  const got = url.searchParams.get('token') || req.headers['x-review-token'] || '';
+  const a = Buffer.from(String(got));
+  const b = Buffer.from(TOKEN);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Domain review</title>
 <style>
@@ -53,8 +69,13 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Domain rev
 <main id="list"></main>
 <script>
 let rows=[],dec={},filter="pending",t=null;
+// T-01: token from the page URL; same-origin requests send it as a header, the
+// favicon proxy carries it as a query param.
+const TOKEN=new URLSearchParams(location.search).get("token")||"";
+const tfetch=(u,o={})=>fetch(u,{...o,headers:{...(o.headers||{}),"x-review-token":TOKEN}});
+const favUrl=d=>"/favicon?token="+encodeURIComponent(TOKEN)+"&d="+encodeURIComponent(d||"");
 const $=s=>document.querySelector(s);
-async function boot(){rows=await(await fetch("/data")).json();dec=await(await fetch("/decisions")).json();render();}
+async function boot(){rows=await(await tfetch("/data")).json();dec=await(await tfetch("/decisions")).json();render();}
 function st(id){return dec[id]?.status||"pending";}
 function render(){
   const L=$("#list");L.innerHTML="";let ok=0,no=0,pend=0;
@@ -66,25 +87,30 @@ function row(r){
   const d=dec[r.id]||(dec[r.id]={domain:r.guess||"",status:"pending"});
   const el=document.createElement("div");el.className="row"+(d.status==="ok"?" ok":d.status==="no"?" no":"");
   el.innerHTML=
-    '<img class="fav" src="/favicon?d='+encodeURIComponent(d.domain||"")+'">'+
+    '<img class="fav" src="'+favUrl(d.domain)+'">'+
     '<div class="nm"><div class="n">'+esc(r.name)+'</div><div class="c">'+esc(r.country)+' · '+esc((r.providers||[]).join(","))+'</div></div>'+
     '<input class="dom" value="'+esc(d.domain||"")+'" placeholder="brand.com">'+
     '<a class="open" target="_blank" href="https://'+esc(d.domain||"")+'">open &#8599;</a>'+
     '<div class="v"><button class="yes'+(d.status==="ok"?" on":"")+'">&#10003;</button><button class="no'+(d.status==="no"?" on":"")+'">&#10007;</button></div>';
   const inp=el.querySelector("input"),fav=el.querySelector(".fav"),link=el.querySelector("a.open");
-  inp.oninput=()=>{d.domain=inp.value.trim();link.href="https://"+d.domain;fav.src="/favicon?d="+encodeURIComponent(d.domain);save();};
+  inp.oninput=()=>{d.domain=inp.value.trim();link.href="https://"+d.domain;fav.src=favUrl(d.domain);save();};
   el.querySelector(".yes").onclick=()=>{d.status=d.status==="ok"?"pending":"ok";save();render();};
   el.querySelector(".no").onclick=()=>{d.status=d.status==="no"?"pending":"no";save();render();};
   return el;
 }
-function save(){$("#save").textContent="saving…";clearTimeout(t);t=setTimeout(async()=>{await fetch("/save",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(dec)});$("#save").textContent="saved ✓";},300);}
+function save(){$("#save").textContent="saving…";clearTimeout(t);t=setTimeout(async()=>{await tfetch("/save",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(dec)});$("#save").textContent="saved ✓";},300);}
 $("#filters").onclick=e=>{if(e.target.dataset.f){filter=e.target.dataset.f;document.querySelectorAll("#filters button").forEach(b=>b.classList.toggle("active",b===e.target));render();}};
-function esc(s){return(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c]));}
+function esc(s){return(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 boot();
 </script></body></html>`;
 
 createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
+  // T-01: gate every request on the shared token.
+  if (!tokenOk(url, req)) {
+    res.writeHead(403, { 'content-type': 'text/plain' });
+    return res.end('forbidden: missing or bad ?token / X-Review-Token');
+  }
   if (url.pathname === '/') {
     res.writeHead(200, { 'content-type': 'text/html' });
     return res.end(PAGE);
@@ -114,14 +140,17 @@ createServer(async (req, res) => {
   }
   if (url.pathname === '/favicon') {
     const d = url.searchParams.get('d');
-    if (!d) {
+    // Only accept a bare hostname — keeps the value inside the fixed
+    // icons.duckduckgo.com path (no scheme/path/userinfo injection, no SSRF).
+    if (!d || !/^[a-z0-9.-]{1,253}$/i.test(d)) {
       res.writeHead(204);
       return res.end();
     }
     try {
-      const r = await fetch(`https://icons.duckduckgo.com/ip3/${d}.ico`, {
+      const r = await fetch(`https://icons.duckduckgo.com/ip3/${encodeURIComponent(d)}.ico`, {
         headers: { 'User-Agent': UA },
         signal: AbortSignal.timeout(8000),
+        redirect: 'error',
       });
       const ct = r.headers.get('content-type') || '';
       if (!r.ok || !ct.startsWith('image/')) {
@@ -137,4 +166,4 @@ createServer(async (req, res) => {
   }
   res.writeHead(404);
   res.end('not found');
-}).listen(PORT, () => console.log(`Domain review → http://localhost:${PORT}`));
+}).listen(PORT, HOST, () => console.log(`Domain review → http://${HOST}:${PORT}/?token=${TOKEN}`));

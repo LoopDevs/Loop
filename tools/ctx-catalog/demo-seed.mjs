@@ -26,6 +26,10 @@
  *
  * Re-running is safe: it clears this user's previously-seeded orders/credits
  * first, so the balance doesn't compound across runs.
+ *
+ * Production guard (T-03): runs unattended only against a local DATABASE_URL
+ * host (localhost / 127.0.0.1). Any other host requires --yes-non-prod AND
+ * NODE_ENV !== 'production'; it always refuses when NODE_ENV=production.
  */
 import postgres from 'postgres';
 
@@ -43,6 +47,45 @@ const currency = (args.currency ?? 'USD').toUpperCase();
 if (!['USD', 'GBP', 'EUR'].includes(currency)) {
   console.error(`--currency must be USD|GBP|EUR (got ${currency})`);
   process.exit(1);
+}
+
+// T-03: this script issues destructive ledger DELETEs (orders, credits,
+// payouts) and overwrites a balance. Guard hard against running it against a
+// production DB if DATABASE_URL is mispointed (a common state after deploy/
+// migration tooling exports it in the same shell). Allow only when the target
+// host is clearly local, OR the operator passes --yes-non-prod AND NODE_ENV is
+// not production. Abort loudly otherwise.
+const LOCAL_DB_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0', '']);
+function dbHost(connStr) {
+  try {
+    return new URL(connStr).hostname.toLowerCase();
+  } catch {
+    return null; // unparseable → treat as non-local (fail safe)
+  }
+}
+const host = dbHost(DATABASE_URL);
+const isLocalDb = host !== null && LOCAL_DB_HOSTS.has(host);
+// The flag may parse as `true` (followed by another --flag) or as a trailing
+// undefined value (last arg); treat its mere presence as acknowledgement.
+const yesNonProd = 'yes-non-prod' in args;
+if (!isLocalDb) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error(
+      `✗ Refusing to run: NODE_ENV=production. demo-seed.mjs performs destructive ledger\n` +
+        `  DELETEs and is never safe against a production database.`,
+    );
+    process.exit(1);
+  }
+  if (!yesNonProd) {
+    console.error(
+      `✗ Refusing to run against non-local DATABASE_URL host "${host ?? '(unparseable)'}".\n` +
+        `  demo-seed.mjs DELETEs this user's orders/credits/payouts. If this DB is genuinely\n` +
+        `  a disposable non-prod target, re-run with --yes-non-prod (NODE_ENV must not be\n` +
+        `  'production'). Local hosts (localhost / 127.0.0.1) run without the flag.`,
+    );
+    process.exit(1);
+  }
+  console.warn(`⚠ Running against non-local DB host "${host}" (--yes-non-prod acknowledged).`);
 }
 // A plausible linked Stellar address so the wallet surfaces read as "connected"
 // in the cashback take (display-only; never used to sign).
