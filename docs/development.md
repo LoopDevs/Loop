@@ -116,6 +116,12 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # Comma-separated CTX user IDs allowed to hit /api/admin/*. Absent →
 # admin surface is locked (401 Unauthorized on every admin endpoint).
 # ADMIN_CTX_USER_IDS=abc-123-xyz,def-456-uvw
+# CF-30: native-auth admin allowlist (ADR 013). Comma-separated verified
+# emails granted admin on the Loop-native path — ADMIN_CTX_USER_IDS is
+# keyed on ctx_user_id, which native users never carry, so this is the
+# only way to reach /api/admin/* when LOOP_AUTH_NATIVE_ENABLED=true.
+# Case-insensitive; granted only on an OTP/provider-verified email.
+# ADMIN_EMAILS=ops@loopfinance.io,admin@loopfinance.io
 
 # A2-1610: per-admin per-currency daily cap on credit adjustments,
 # in minor units. Default 100000000 (1,000,000 units minor =

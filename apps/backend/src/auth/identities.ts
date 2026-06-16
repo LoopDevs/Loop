@@ -16,16 +16,35 @@
  * safe — the social-handler enforces `email_verified = true` before
  * calling this function.
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { userIdentities, users, type SocialProvider } from '../db/schema.js';
-import type { User } from '../db/users.js';
+import { isAdminEmail, type User } from '../db/users.js';
 import { normalizeEmail } from './normalize-email.js';
 
 export interface ResolveOrCreateArgs {
   provider: SocialProvider;
   providerSub: string;
   email: string;
+}
+
+/**
+ * CF-30: config-parity reconcile for an existing user row on a verified
+ * social login. The `ADMIN_EMAILS` allowlist is the source of truth
+ * (env, not DB) — mirroring the CTX path's recompute-on-upsert. If a
+ * grant/revoke was deployed after the row was created, bring `is_admin`
+ * in line on next login instead of leaving it stuck at the create-time
+ * value. Returns the (possibly updated) user. No-ops when already in
+ * sync, so the common path stays a single SELECT.
+ */
+async function reconcileAdmin(user: User, isAdmin: boolean): Promise<User> {
+  if (user.isAdmin === isAdmin) return user;
+  const [updated] = await db
+    .update(users)
+    .set({ isAdmin, updatedAt: sql`NOW()` })
+    .where(eq(users.id, user.id))
+    .returning();
+  return updated ?? { ...user, isAdmin };
 }
 
 /**
@@ -42,6 +61,10 @@ export async function resolveOrCreateUserForIdentity(
   // provider would have accepted is filtered here. NonAsciiEmailError
   // bubbles up to the social-login handler which maps it to 400.
   const email = normalizeEmail(args.email);
+  // CF-30: the social handler enforces `email_verified=true` before
+  // calling this verb, so the email is provider-verified here and it's
+  // safe to consult the native admin allowlist.
+  const isAdmin = isAdminEmail(email);
 
   // Step 1 — known (provider, sub).
   const knownIdentity = await db.query.userIdentities.findFirst({
@@ -53,7 +76,7 @@ export async function resolveOrCreateUserForIdentity(
   if (knownIdentity !== undefined && knownIdentity !== null) {
     const user = await db.query.users.findFirst({ where: eq(users.id, knownIdentity.userId) });
     if (user !== undefined && user !== null) {
-      return { user, created: false };
+      return { user: await reconcileAdmin(user, isAdmin), created: false };
     }
     // Dangling identity row (user deleted under us) — drop to
     // step 3 so we create a fresh user and re-link the identity
@@ -78,7 +101,7 @@ export async function resolveOrCreateUserForIdentity(
         // insert harmlessly no-ops.
         target: [userIdentities.provider, userIdentities.providerSub],
       });
-    return { user: existingUser, created: false };
+    return { user: await reconcileAdmin(existingUser, isAdmin), created: false };
   }
 
   // Step 3 — brand-new user. Create the users row, then the
@@ -97,8 +120,12 @@ export async function resolveOrCreateUserForIdentity(
       .insert(users)
       .values({
         email,
-        // isAdmin defaults to false; CTX-anchored admin allowlist
-        // doesn't apply to social-native users.
+        // CF-30: native admin grant via the `ADMIN_EMAILS` allowlist —
+        // the email is provider-verified by the time we reach here. The
+        // raced path below re-SELECTs the winner's row, which a parallel
+        // caller inserted with the same allowlist value (same env), so
+        // no in-transaction reconcile is needed.
+        isAdmin,
       })
       .onConflictDoNothing()
       .returning();

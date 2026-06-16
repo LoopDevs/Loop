@@ -1,12 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type * as SchemaModule from '../../db/schema.js';
 
+// CF-30: set the native-auth admin allowlist before env.ts loads — the
+// `isAdminEmail` allowlist (db/users.ts) is built once at module load.
+// `apple-admin@loop.com` and `google-admin@loop.com` are the two
+// allowlisted social emails exercised below (case-insensitive match).
+vi.hoisted(() => {
+  process.env['ADMIN_EMAILS'] = 'apple-admin@loop.com, google-admin@loop.com';
+});
+
 /**
  * Mock db with:
  *   - query.userIdentities.findFirst → controlled by state.identity
  *   - query.users.findFirst         → controlled by state.user
  *   - insert().values().returning() → returns state.insertedUser
  *   - insert().values().onConflictDoNothing() → no-op
+ *   - update().set().where().returning() → CF-30 reconcileAdmin path
  *   - db.transaction(cb) → cb(db) so we observe writes on the mock
  */
 const { dbMock, state } = vi.hoisted(() => {
@@ -15,7 +24,16 @@ const { dbMock, state } = vi.hoisted(() => {
     user: unknown;
     insertedUser: unknown;
     insertCalls: Array<{ table: string; values: unknown }>;
-  } = { identity: undefined, user: undefined, insertedUser: null, insertCalls: [] };
+    updateSet: unknown;
+    updateReturns: unknown;
+  } = {
+    identity: undefined,
+    user: undefined,
+    insertedUser: null,
+    insertCalls: [],
+    updateSet: null,
+    updateReturns: null,
+  };
   const m: Record<string, ReturnType<typeof vi.fn>> = {};
   let lastInsertTable = '';
   m['insert'] = vi.fn((table: unknown) => {
@@ -29,6 +47,15 @@ const { dbMock, state } = vi.hoisted(() => {
   });
   m['returning'] = vi.fn(async () => (s.insertedUser === null ? [] : [s.insertedUser]));
   m['onConflictDoNothing'] = vi.fn(() => m);
+  // CF-30 config-parity reconcile (reconcileAdmin) runs on the OUTER db
+  // (not the tx) via update().set().where().returning(). Capture the
+  // set() payload and return state.updateReturns.
+  m['update'] = vi.fn(() => ({
+    set: vi.fn((v: unknown) => {
+      s.updateSet = v;
+      return { where: vi.fn(() => ({ returning: vi.fn(async () => [s.updateReturns]) })) };
+    }),
+  }));
   // A2-570: the inserted-user re-SELECT path needs a `tx.query.users.findFirst`
   // mock — the transaction callback receives the same `m` mock object, so we
   // attach a `query` property here. Returns whatever state.user has set.
@@ -85,6 +112,8 @@ beforeEach(() => {
   state.user = undefined;
   state.insertedUser = null;
   state.insertCalls = [];
+  state.updateSet = null;
+  state.updateReturns = null;
   for (const fn of Object.values(dbMock)) {
     if (typeof fn === 'function' && 'mockClear' in fn) {
       (fn as unknown as { mockClear: () => void }).mockClear();
@@ -207,6 +236,83 @@ describe('resolveOrCreateUserForIdentity', () => {
     expect(state.insertCalls).toHaveLength(2);
     expect(state.insertCalls[0]!.table).toBe('users');
     expect(state.insertCalls[1]!.table).toBe('userIdentities');
+  });
+
+  // ── CF-30: native-auth admin grant on the social path ──────────────
+  it('CF-30: step 3 (new user) inserts isAdmin=true for an allowlisted verified email', async () => {
+    state.identity = undefined;
+    state.user = undefined;
+    state.insertedUser = {
+      id: 'u-admin',
+      email: 'apple-admin@loop.com',
+      isAdmin: true,
+    };
+    const out = await resolveOrCreateUserForIdentity({
+      provider: 'apple',
+      providerSub: 'apple-admin-sub',
+      // Mixed case — must still match the allowlist.
+      email: 'Apple-Admin@Loop.com',
+    });
+    expect(out.created).toBe(true);
+    expect(out.user.isAdmin).toBe(true);
+    const userValues = state.insertCalls[0]!.values as Record<string, unknown>;
+    expect(userValues['email']).toBe('apple-admin@loop.com');
+    expect(userValues['isAdmin']).toBe(true);
+  });
+
+  it('CF-30: step 3 (new user) inserts isAdmin=false for a non-allowlisted email', async () => {
+    state.identity = undefined;
+    state.user = undefined;
+    state.insertedUser = { id: 'u-plain', email: 'plain@loop.com', isAdmin: false };
+    await resolveOrCreateUserForIdentity({
+      provider: 'google',
+      providerSub: 'plain-sub',
+      email: 'plain@loop.com',
+    });
+    const userValues = state.insertCalls[0]!.values as Record<string, unknown>;
+    expect(userValues['isAdmin']).toBe(false);
+  });
+
+  it('CF-30: step 1 (known identity) reconciles a stale non-admin row when now allowlisted', async () => {
+    state.identity = { userId: 'u-g', providerSub: 'g-sub', provider: 'google' };
+    // Row predates the grant → isAdmin=false; email now allowlisted.
+    state.user = { id: 'u-g', email: 'google-admin@loop.com', isAdmin: false };
+    state.updateReturns = { id: 'u-g', email: 'google-admin@loop.com', isAdmin: true };
+    const out = await resolveOrCreateUserForIdentity({
+      provider: 'google',
+      providerSub: 'g-sub',
+      email: 'google-admin@loop.com',
+    });
+    expect(out.user.isAdmin).toBe(true);
+    expect(dbMock['update']!).toHaveBeenCalled();
+    expect(state.updateSet).toEqual(expect.objectContaining({ isAdmin: true }));
+  });
+
+  it('CF-30: step 2 (email link) reconciles a stale admin row when no longer allowlisted', async () => {
+    state.identity = undefined;
+    // Email NOT on the allowlist but the row is flagged admin (grant
+    // was revoked in config) → demote on next verified login.
+    state.user = { id: 'u-stale', email: 'ex-admin@loop.com', isAdmin: true };
+    state.updateReturns = { id: 'u-stale', email: 'ex-admin@loop.com', isAdmin: false };
+    const out = await resolveOrCreateUserForIdentity({
+      provider: 'apple',
+      providerSub: 'ex-sub',
+      email: 'ex-admin@loop.com',
+    });
+    expect(out.user.isAdmin).toBe(false);
+    expect(state.updateSet).toEqual(expect.objectContaining({ isAdmin: false }));
+  });
+
+  it('CF-30: no reconcile write when the existing row already matches the allowlist', async () => {
+    state.identity = { userId: 'u-ok', providerSub: 'ok-sub', provider: 'google' };
+    state.user = { id: 'u-ok', email: 'google-admin@loop.com', isAdmin: true };
+    const out = await resolveOrCreateUserForIdentity({
+      provider: 'google',
+      providerSub: 'ok-sub',
+      email: 'google-admin@loop.com',
+    });
+    expect(out.user.isAdmin).toBe(true);
+    expect(dbMock['update']!).not.toHaveBeenCalled();
   });
 });
 

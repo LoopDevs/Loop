@@ -4,9 +4,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // process.env at module-load and the allowlist is built once from it.
 vi.hoisted(() => {
   process.env['ADMIN_CTX_USER_IDS'] = 'ctx-admin-1, ctx-admin-2';
+  // CF-30: native-auth admin allowlist (case-insensitive, with a
+  // mixed-case entry to prove normalization).
+  process.env['ADMIN_EMAILS'] = 'Admin@Loop.com, ops@loop.com';
 });
 
-const { dbMock, returned, findFirstMock } = vi.hoisted(() => {
+const { dbMock, returned, findFirstMock, updateChain } = vi.hoisted(() => {
   const state = { row: null as unknown };
   const m: Record<string, ReturnType<typeof vi.fn>> = {};
   m['insert'] = vi.fn(() => m);
@@ -16,12 +19,30 @@ const { dbMock, returned, findFirstMock } = vi.hoisted(() => {
   m['returning'] = vi.fn(async () => [state.row]);
   m['query'] = vi.fn(() => m) as unknown as ReturnType<typeof vi.fn>;
   const findFirst = vi.fn(async (_args: unknown) => state.row ?? null);
-  return { dbMock: m, returned: state, findFirstMock: findFirst };
+  // CF-30 config-parity reconcile path: db.update().set().where().returning().
+  // Separate chain object so its `returning` is independent of the
+  // insert chain's. `setCall` captures the values passed to .set().
+  const u: { setCall: unknown; returns: unknown } = { setCall: null, returns: null };
+  m['update'] = vi.fn(() => ({
+    set: vi.fn((v: unknown) => {
+      u.setCall = v;
+      return {
+        where: vi.fn(() => ({ returning: vi.fn(async () => [u.returns]) })),
+      };
+    }),
+  })) as unknown as ReturnType<typeof vi.fn>;
+  return {
+    dbMock: m,
+    returned: state,
+    findFirstMock: findFirst,
+    updateChain: u,
+  };
 });
 
 vi.mock('../client.js', () => ({
   db: {
     insert: dbMock['insert'],
+    update: dbMock['update'],
     query: {
       users: {
         findFirst: findFirstMock,
@@ -37,7 +58,7 @@ vi.mock('../schema.js', () => ({
   },
 }));
 
-import { upsertUserFromCtx, getUserById, findOrCreateUserByEmail } from '../users.js';
+import { upsertUserFromCtx, getUserById, findOrCreateUserByEmail, isAdminEmail } from '../users.js';
 
 beforeEach(() => {
   for (const fn of Object.values(dbMock)) {
@@ -45,6 +66,8 @@ beforeEach(() => {
   }
   findFirstMock.mockClear();
   returned.row = null;
+  updateChain.setCall = null;
+  updateChain.returns = null;
 });
 
 describe('upsertUserFromCtx', () => {
@@ -156,5 +179,73 @@ describe('findOrCreateUserByEmail', () => {
     await expect(findOrCreateUserByEmail('x@y.com')).rejects.toThrow(
       /no row returned after conflict/,
     );
+  });
+});
+
+describe('CF-30: isAdminEmail (native-auth admin allowlist)', () => {
+  it('returns true for an allowlisted email (case-insensitive)', () => {
+    // ADMIN_EMAILS = 'Admin@Loop.com, ops@loop.com'.
+    expect(isAdminEmail('admin@loop.com')).toBe(true);
+    expect(isAdminEmail('ADMIN@LOOP.COM')).toBe(true);
+    expect(isAdminEmail(' ops@loop.com ')).toBe(true);
+  });
+
+  it('returns false for a non-allowlisted email', () => {
+    expect(isAdminEmail('nobody@loop.com')).toBe(false);
+    expect(isAdminEmail('admin@evil.com')).toBe(false);
+  });
+});
+
+describe('CF-30: findOrCreateUserByEmail honours the native admin allowlist', () => {
+  it('grants isAdmin=true on insert for an allowlisted (verified) email', async () => {
+    returned.row = null; // no existing row → insert path
+    const inserted = { id: 'uuid-a1', ctxUserId: null, email: 'admin@loop.com', isAdmin: true };
+    dbMock['returning']!.mockResolvedValueOnce([inserted]);
+    const user = await findOrCreateUserByEmail('Admin@Loop.com');
+    expect(user.isAdmin).toBe(true);
+    expect(dbMock['values']!).toHaveBeenCalledWith(
+      expect.objectContaining({ email: 'admin@loop.com', isAdmin: true }),
+    );
+  });
+
+  it('grants isAdmin=false on insert for a non-allowlisted email', async () => {
+    returned.row = null;
+    const inserted = { id: 'uuid-a2', ctxUserId: null, email: 'user@loop.com', isAdmin: false };
+    dbMock['returning']!.mockResolvedValueOnce([inserted]);
+    await findOrCreateUserByEmail('user@loop.com');
+    expect(dbMock['values']!).toHaveBeenCalledWith(expect.objectContaining({ isAdmin: false }));
+  });
+
+  it('config-parity reconcile: promotes a pre-existing non-admin row when the email is now allowlisted', async () => {
+    // Row created before the grant was deployed (isAdmin=false), email
+    // now on the allowlist → reconcile flips it to true on next login.
+    returned.row = { id: 'uuid-a3', ctxUserId: null, email: 'ops@loop.com', isAdmin: false };
+    updateChain.returns = { id: 'uuid-a3', ctxUserId: null, email: 'ops@loop.com', isAdmin: true };
+    const user = await findOrCreateUserByEmail('ops@loop.com');
+    expect(user.isAdmin).toBe(true);
+    expect(dbMock['update']!).toHaveBeenCalled();
+    expect(updateChain.setCall).toEqual(expect.objectContaining({ isAdmin: true }));
+    // No insert — the row already existed.
+    expect(dbMock['insert']!).not.toHaveBeenCalled();
+  });
+
+  it('config-parity reconcile: demotes a pre-existing admin row when the email is no longer allowlisted', async () => {
+    returned.row = { id: 'uuid-a4', ctxUserId: null, email: 'stale@loop.com', isAdmin: true };
+    updateChain.returns = {
+      id: 'uuid-a4',
+      ctxUserId: null,
+      email: 'stale@loop.com',
+      isAdmin: false,
+    };
+    const user = await findOrCreateUserByEmail('stale@loop.com');
+    expect(user.isAdmin).toBe(false);
+    expect(updateChain.setCall).toEqual(expect.objectContaining({ isAdmin: false }));
+  });
+
+  it('no reconcile write when the existing row already matches the allowlist', async () => {
+    returned.row = { id: 'uuid-a5', ctxUserId: null, email: 'admin@loop.com', isAdmin: true };
+    const user = await findOrCreateUserByEmail('admin@loop.com');
+    expect(user.isAdmin).toBe(true);
+    expect(dbMock['update']!).not.toHaveBeenCalled();
   });
 });
