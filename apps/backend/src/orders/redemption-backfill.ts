@@ -97,6 +97,17 @@ export interface RedemptionBackfillTickResult {
  * Single sweep pass. Safe to call repeatedly — the WHERE guards on
  * the persist UPDATE mean a concurrent writer (or a second sweeper)
  * can't double-write or clobber a payload that landed in between.
+ *
+ * CF-14 (x-concurrency-financial X-2) cross-instance safety: already
+ * safe without `SKIP LOCKED`. The candidate `SELECT` is a plain read,
+ * but every mutation is a guarded compare-and-set: the recovery UPDATE
+ * re-asserts `state='fulfilled' AND redeem* IS NULL`, and
+ * `recordEmptyAttempt` CAS-es on `redemptionBackfillAttempts =
+ * row.attempts`. So when two Fly machines run this sweep at once they
+ * may both re-`fetchRedemption` the same `ctx_order_id` (an idempotent,
+ * read-only supplier call — wasted cost, no money/correctness bug) but
+ * exactly one wins the attempt bump and the at-cap page. No shared
+ * sequenced resource, no double-process.
  */
 export async function runRedemptionBackfillTick(args?: {
   limit?: number;

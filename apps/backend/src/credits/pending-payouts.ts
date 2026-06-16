@@ -80,6 +80,38 @@ export async function listPendingPayouts(limit = 20): Promise<PendingPayout[]> {
  *
  * Ordering: pending first (fresh work) then stale submitted (watchdog
  * recovery). Both ordered by createdAt ASC so a backlog drains FIFO.
+ *
+ * CF-14 (x-concurrency-financial X-2): the candidate read takes a
+ * `FOR UPDATE SKIP LOCKED` row lock. All Loop background workers run
+ * in-process on EVERY Fly machine — there is no leader election or
+ * `[processes] worker count=1`, and `auto_start_machines=true` boots a
+ * second machine under request load. With a plain `SELECT`, two
+ * machines' payout workers read the SAME candidate set every tick;
+ * the per-row `markPayoutSubmitted` state-CAS still guarantees a row
+ * is claimed by at most one of them (no double-pay), but both machines
+ * then sign txs against the SAME operator account and collide on the
+ * Stellar sequence number → `tx_bad_seq` churn that burns the attempt
+ * budget and can drive legit payouts to terminal `failed` under scale.
+ *
+ * `FOR UPDATE SKIP LOCKED` closes the read→claim window: a row another
+ * worker is mid-claim on (locked but not yet committed `submitted`) is
+ * SKIPPED here, so concurrent instances pull disjoint candidate sets
+ * instead of fighting over the same rows. The durable claim is still
+ * the per-row state-CAS in `payOne`; this lock is what stops the two
+ * instances from each running the (wasteful) trustline + idempotency
+ * Horizon reads on a row the other is about to win, and — in the
+ * common case where the backlog fits one tick's batch — leaves the
+ * second instance with nothing to pick, so the operator sequence stays
+ * serialised.
+ *
+ * Scope (proportionate, per the finding): this is a row-level claim,
+ * not full leader election. With a backlog larger than one batch, two
+ * instances can still claim DISJOINT batches and submit concurrently —
+ * the residual sequence-collision risk a single-flight worker
+ * (`pg_advisory_lock` leader / `[processes] worker count=1`) would
+ * close. That stays deferred; `min_machines_running=1` plus the small
+ * per-tick batch bounds it. The lock keeps single-instance behaviour
+ * identical (it only ever changes what a concurrent instance sees).
  */
 export async function listClaimablePayouts(opts: {
   limit?: number;
@@ -87,25 +119,31 @@ export async function listClaimablePayouts(opts: {
   maxAttempts: number;
 }): Promise<PendingPayout[]> {
   const limit = opts.limit ?? 20;
-  return db
-    .select()
-    .from(pendingPayouts)
-    .where(
-      sql`(${pendingPayouts.state} = 'pending')
+  return (
+    db
+      .select()
+      .from(pendingPayouts)
+      .where(
+        sql`(${pendingPayouts.state} = 'pending')
         OR (
           ${pendingPayouts.state} = 'submitted'
           AND ${pendingPayouts.submittedAt} < NOW() - make_interval(secs => ${opts.staleSeconds})
           AND ${pendingPayouts.attempts} < ${opts.maxAttempts}
         )`,
-    )
-    .orderBy(
-      // `pending` before `submitted` so fresh work drains before the
-      // watchdog backlog. `<` orders alphabetically so 'pending' >
-      // 'submitted' — flip with a CASE.
-      sql`CASE WHEN ${pendingPayouts.state} = 'pending' THEN 0 ELSE 1 END`,
-      asc(pendingPayouts.createdAt),
-    )
-    .limit(limit);
+      )
+      .orderBy(
+        // `pending` before `submitted` so fresh work drains before the
+        // watchdog backlog. `<` orders alphabetically so 'pending' >
+        // 'submitted' — flip with a CASE.
+        sql`CASE WHEN ${pendingPayouts.state} = 'pending' THEN 0 ELSE 1 END`,
+        asc(pendingPayouts.createdAt),
+      )
+      .limit(limit)
+      // CF-14: skip rows another instance's payout worker is mid-claim
+      // on. See the docstring above for why this is the row-level claim
+      // the finding asks for.
+      .for('update', { skipLocked: true })
+  );
 }
 
 // State transitions (`reclaimSubmittedPayout`, `markPayoutSubmitted`,

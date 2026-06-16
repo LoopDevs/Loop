@@ -19,13 +19,22 @@
  *          gets the admin-retry path).
  *        - terminal → markPayoutFailed immediately.
  *
- * No parallelism across rows — the operator account's sequence
- * numbers serialise, so two in-flight submits would race. Small
- * batch per tick (default 5) caps outstanding risk.
+ * No parallelism across rows WITHIN a tick — each row's submit awaits
+ * the previous one so the operator account's sequence numbers
+ * serialise. Small batch per tick (default 5) caps outstanding risk.
  *
- * Not wired into `index.ts` yet — the interval loop lands alongside
- * the payment watcher + procurement worker once an operator has
- * dry-run on testnet.
+ * CF-14 (x-concurrency-financial X-2): that single-process serialise
+ * assumption does NOT hold across Fly machines — every machine runs
+ * this worker (no leader election / `[processes] worker count=1`), and
+ * `auto_start_machines=true` boots a second one under load. The row
+ * claim now takes `FOR UPDATE SKIP LOCKED` (`listClaimablePayouts`) so
+ * two instances pull disjoint candidate sets instead of fighting over
+ * the same rows and colliding on the operator sequence number
+ * (`tx_bad_seq`). That is a row-level claim, not full leader election:
+ * a backlog larger than one batch can still have two instances claim
+ * disjoint batches and submit concurrently. `min_machines_running=1`
+ * masks the residual today; the single-flight worker is deferred. See
+ * `listClaimablePayouts` for the full reasoning.
  */
 import { Keypair } from '@stellar/stellar-sdk';
 import { env } from '../env.js';

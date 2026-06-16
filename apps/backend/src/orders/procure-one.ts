@@ -99,6 +99,17 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
   // the `ctxOperatorId` we stash is a best-effort audit label —
   // we pick "primary" as a placeholder the recovery sweep can join
   // against.
+  //
+  // CF-14 (x-concurrency-financial X-2) cross-instance safety: this is
+  // already a state-guarded claim. `markOrderProcuring` is an atomic
+  // `UPDATE ... WHERE state='paid' → 'procuring' RETURNING`, so when
+  // the procurement worker runs on two Fly machines at once exactly
+  // one machine wins the row (the other gets `null` → `skipped`).
+  // Unlike the payout worker there is no shared-sequence-number
+  // resource across rows — each CTX wholesale purchase is an
+  // independent HTTP call, not a tx against one operator account — so
+  // no `SKIP LOCKED` is needed; the worst a duplicate read costs is a
+  // wasted candidate scan, never a double-procure or a collision.
   const transitioned = await markOrderProcuring(order.id, { ctxOperatorId: 'pool' });
   if (transitioned === null) {
     // Another worker already claimed it; skip.

@@ -70,6 +70,17 @@ function todayUtcCursor(now: Date = new Date()): string {
  * than racing. The period cursor is the dedup guarantee, but the
  * primitive does one txn per user, and two schedulers hammering the
  * same rows add no throughput — just contention.
+ *
+ * CF-14 (x-concurrency-financial X-2) cross-instance safety: the
+ * `tickInFlight` boolean is PER-PROCESS, so it does NOT stop two Fly
+ * machines from both ticking the same UTC-date cursor. The actual
+ * cross-instance guard is the period-cursor partial unique index
+ * (migration 0012): the per-user `credit_transactions` insert carries
+ * `periodCursor`, so the second machine's insert hits a unique
+ * violation that `accrueOnePeriod` swallows as `skippedAlreadyAccrued`
+ * — no double-accrual. Each accrual is also a per-user `FOR UPDATE`
+ * txn, so balances never tear. Holds by the index + the row lock, not
+ * by the boolean; no `SKIP LOCKED` needed.
  */
 export async function tickInterestAccrual(config: InterestSchedulerConfig): Promise<void> {
   if (tickInFlight) {
