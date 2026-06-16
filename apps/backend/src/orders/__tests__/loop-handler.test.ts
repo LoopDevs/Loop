@@ -104,9 +104,27 @@ vi.mock('../../db/schema.js', async () => {
 // FX conversion — tests don't need a real rate feed; echo the input so
 // the handler path exercises the charge_minor = face_value case
 // (user.home_currency === request.currency). Tests that exercise
-// cross-currency FX mock this with a different implementation.
+// cross-currency FX or the CF-19 "no rate yet" path swap in
+// `fxState.impl` (set per-test, reset in beforeEach).
+const { fxState, CurrencyRateUnavailableError } = vi.hoisted(() => {
+  class CurrencyRateUnavailableError extends Error {
+    readonly currency: string;
+    constructor(currency: string) {
+      super(`no rate for ${currency}`);
+      this.name = 'CurrencyRateUnavailableError';
+      this.currency = currency;
+    }
+  }
+  const fxState: { impl: (amount: bigint, from: string, to: string) => Promise<bigint> } = {
+    impl: async (amount: bigint) => amount,
+  };
+  return { fxState, CurrencyRateUnavailableError };
+});
 vi.mock('../../payments/price-feed.js', () => ({
-  convertMinorUnits: vi.fn(async (amount: bigint) => amount),
+  convertMinorUnits: vi.fn((amount: bigint, from: string, to: string) =>
+    fxState.impl(amount, from, to),
+  ),
+  CurrencyRateUnavailableError,
 }));
 // Payout-asset resolver — loop_asset orders read issuer from here.
 const { payoutAssetState } = vi.hoisted(() => ({
@@ -177,6 +195,7 @@ beforeEach(() => {
   getMerchantsMock.mockReset();
   balanceState.rows = [];
   payoutAssetState.issuer = null;
+  fxState.impl = async (amount: bigint) => amount;
   userState.user = {
     id: 'user-uuid',
     email: 'a@b.com',
@@ -389,7 +408,9 @@ describe('loopCreateOrderHandler', () => {
     expect(res.status).toBe(401);
   });
 
-  it('rejects with 400 when the request currency is not a supported home currency', async () => {
+  it('rejects with 400 when the request currency is not an orderable currency', async () => {
+    // JPY is neither a home nor an ADR-035 extended market currency —
+    // it's catalogue-only / unrouted, so the order path declines it.
     const { ctx } = makeCtx({
       auth: LOOP_AUTH,
       body: {
@@ -401,8 +422,89 @@ describe('loopCreateOrderHandler', () => {
     });
     const res = await loopCreateOrderHandler(ctx);
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { message: string };
-    expect(body.message).toMatch(/USD, GBP, or EUR/);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.message).toMatch(/Unsupported gift-card currency/);
+  });
+
+  // ── CF-19 / ADR 035: extended-market order path ─────────────────────
+  it('accepts an extended-market currency (AED) and FX-pins the charge to the home currency', async () => {
+    // Catalog currency AED, user home GBP. FX mock converts AED→GBP.
+    fxState.impl = async (_amount: bigint, from: string, to: string) => {
+      expect(from).toBe('AED');
+      expect(to).toBe('GBP');
+      return 2723n; // pretend FX result, in GBP pence
+    };
+    createOrderMock.mockResolvedValueOnce({
+      id: 'order-uuid',
+      userId: 'user-uuid',
+      merchantId: 'm1',
+      faceValueMinor: 10_000n,
+      currency: 'AED',
+      chargeMinor: 2723n,
+      chargeCurrency: 'GBP',
+      paymentMethod: 'xlm',
+      paymentMemo: 'MEMO-ABCDEFGHIJKLMNOP',
+    });
+    const { ctx } = makeCtx({
+      auth: LOOP_AUTH,
+      body: {
+        merchantId: 'm1',
+        amountMinor: 10_000,
+        currency: 'AED',
+        paymentMethod: 'xlm',
+      },
+    });
+    const res = await loopCreateOrderHandler(ctx);
+    expect(res.status).toBe(200);
+    // Catalog currency persisted as AED; charge currency is the home (GBP).
+    expect(createOrderMock).toHaveBeenCalledWith(
+      expect.objectContaining({ currency: 'AED', chargeCurrency: 'GBP', chargeMinor: 2723n }),
+    );
+  });
+
+  it('returns 503 CURRENCY_NOT_AVAILABLE when the rates service has no rate for the extended currency yet', async () => {
+    // CF-19: the market is SEO-promoted but the external rates service
+    // doesn't serve INR yet. Fail gracefully ("coming soon") — never
+    // create the order, never 500, never a wrong charge.
+    fxState.impl = async () => {
+      throw new CurrencyRateUnavailableError('INR');
+    };
+    const { ctx } = makeCtx({
+      auth: LOOP_AUTH,
+      body: {
+        merchantId: 'm1',
+        amountMinor: 10_000,
+        currency: 'INR',
+        paymentMethod: 'xlm',
+      },
+    });
+    const res = await loopCreateOrderHandler(ctx);
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('CURRENCY_NOT_AVAILABLE');
+    expect(body.message).toMatch(/coming soon/i);
+    // The order must NOT have been created on the no-rate path.
+    expect(createOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('a generic FX feed outage stays 503 SERVICE_UNAVAILABLE (not CURRENCY_NOT_AVAILABLE)', async () => {
+    fxState.impl = async () => {
+      throw new Error('FX feed 500');
+    };
+    const { ctx } = makeCtx({
+      auth: LOOP_AUTH,
+      body: {
+        merchantId: 'm1',
+        amountMinor: 10_000,
+        currency: 'GBP',
+        paymentMethod: 'xlm',
+      },
+    });
+    const res = await loopCreateOrderHandler(ctx);
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('SERVICE_UNAVAILABLE');
   });
 
   it('credit path — also rejected with 400 when balance is sufficient (A4-110b)', async () => {

@@ -62,10 +62,10 @@ export function registerOrdersLoopOpenApi(
         description:
           'Gift-card face value in the catalog currency, minor units. Number OR digit-string so BigInt values survive the wire.',
       }),
-      currency: z
-        .string()
-        .length(3)
-        .openapi({ description: 'ISO 4217 three-letter code, uppercase.' }),
+      currency: z.string().length(3).openapi({
+        description:
+          'Gift-card catalog currency — ISO 4217 three-letter code, uppercase. One of the home currencies (USD/GBP/EUR) or an ADR-035 extended display market (AED/INR/SAR/AUD/MXN). The charge is FX-pinned to the user’s home currency at creation.',
+      }),
       paymentMethod: LoopPaymentMethod,
     }),
   );
@@ -171,10 +171,14 @@ export function registerOrdersLoopOpenApi(
       // A4-102: handler emits 503 for FX / deposit-config / asset-config
       // failures (loop-handler.ts) — the route was previously declaring
       // 402 (which is never emitted; insufficient credit returns 400
-      // INSUFFICIENT_CREDITS).
+      // INSUFFICIENT_CREDITS). CF-19 adds CURRENCY_NOT_AVAILABLE here:
+      // an ADR-035 extended-market currency (AED/INR/SAR/AUD/MXN) the
+      // external rates service doesn't serve yet — a clean "coming soon"
+      // rather than a wrong charge, distinct from a SERVICE_UNAVAILABLE
+      // feed outage for a supported currency.
       503: {
         description:
-          'FX feed unavailable, deposit address unconfigured, or LOOP-asset issuer not configured for the requested currency',
+          'SERVICE_UNAVAILABLE (FX feed outage, deposit address unconfigured, or LOOP-asset issuer not configured for the requested currency) or CURRENCY_NOT_AVAILABLE (ADR-035 extended-market currency not yet served by the rates feed — ordering coming soon)',
         content: { 'application/json': { schema: errorResponse } },
       },
     },

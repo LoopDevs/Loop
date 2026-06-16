@@ -148,6 +148,16 @@ export const ApiErrorCode = {
   // User favourites (per-user merchant pin list).
   MERCHANT_NOT_FOUND: 'MERCHANT_NOT_FOUND',
   FAVORITES_LIMIT_EXCEEDED: 'FAVORITES_LIMIT_EXCEEDED',
+  // CF-19 (ADR 035): an extended-market order (AED/INR/SAR/AUD/MXN) was
+  // requested but the external rates service doesn't yet serve a live
+  // fiat→crypto rate for that currency. Returned 503 from
+  // `POST /api/orders/loop` so the SEO-promoted display markets fail
+  // gracefully ("ordering for this market is coming soon") instead of
+  // crashing or charging a wrong amount. Goes away once the rates
+  // service serves the currency — purely an external dependency, not a
+  // user-input problem. Distinct from SERVICE_UNAVAILABLE (a genuine FX
+  // feed outage for a currency we DO support).
+  CURRENCY_NOT_AVAILABLE: 'CURRENCY_NOT_AVAILABLE',
 } as const;
 
 export type ApiErrorCodeValue = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];

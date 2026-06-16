@@ -25,9 +25,9 @@ import { logger } from '../logger.js';
 import { getMerchants } from '../merchants/sync.js';
 import type { LoopAuthContext } from '../auth/handler.js';
 import { ORDER_PAYMENT_METHODS } from '../db/schema.js';
-import { isHomeCurrency, type CreateLoopOrderResponse } from '@loop/shared';
+import { isHomeCurrency, isOrderableCurrency, type CreateLoopOrderResponse } from '@loop/shared';
 import { getUserById } from '../db/users.js';
-import { convertMinorUnits } from '../payments/price-feed.js';
+import { convertMinorUnits, CurrencyRateUnavailableError } from '../payments/price-feed.js';
 import {
   createOrder,
   findOrderByIdempotencyKey,
@@ -256,11 +256,20 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     );
     return c.json({ code: 'INTERNAL_ERROR', message: 'Invalid account currency' }, 500);
   }
-  if (!isHomeCurrency(parsed.data.currency)) {
+  // CF-19 (ADR 035): accept the three cashback home currencies AND the
+  // extended display markets (AED/INR/SAR/AUD/MXN). The gift-card
+  // currency is the *catalog* currency — distinct from the user's
+  // cashback home currency, which stays USD/GBP/EUR (extended markets
+  // are display-only, no LOOP asset). An extended-market card is
+  // FX-pinned to the user's home currency below, so `orders.currency`
+  // may be extended but `orders.charge_currency` is always a home
+  // currency. Validate against the orderable-currency set, NOT
+  // `isHomeCurrency` (which is the cashback/ledger set).
+  if (!isOrderableCurrency(parsed.data.currency)) {
     return c.json(
       {
         code: 'VALIDATION_ERROR',
-        message: 'currency must be USD, GBP, or EUR',
+        message: 'Unsupported gift-card currency',
       },
       400,
     );
@@ -268,8 +277,14 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
 
   // FX-pin the user's charge. Same-currency short-circuits (no feed
   // hit); cross-currency calls through to the Frankfurter cache in
-  // price-feed.ts. A feed failure bubbles as a 503 rather than
-  // silently charging the wrong amount.
+  // price-feed.ts. Two distinct failure modes are surfaced cleanly so
+  // an order is NEVER created with a wrong charge:
+  //   - CF-19: an extended-market currency the external rates service
+  //     doesn't serve yet → CURRENCY_NOT_AVAILABLE ("coming soon"). The
+  //     market is SEO-promoted but not yet buyable; this is a clean,
+  //     specific signal, not a crash. Goes away when rates serves it.
+  //   - A genuine FX feed outage for a supported currency → 503
+  //     SERVICE_UNAVAILABLE (retryable).
   let chargeMinor: bigint;
   try {
     chargeMinor = await convertMinorUnits(
@@ -278,6 +293,19 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
       user.homeCurrency,
     );
   } catch (err) {
+    if (err instanceof CurrencyRateUnavailableError) {
+      log.warn(
+        { userId: auth.userId, currency: parsed.data.currency },
+        'extended-market order rejected — no live rate for currency yet (CF-19)',
+      );
+      return c.json(
+        {
+          code: 'CURRENCY_NOT_AVAILABLE',
+          message: 'Ordering for this market is coming soon',
+        },
+        503,
+      );
+    }
     log.error({ err, userId: auth.userId }, 'FX conversion failed at order creation');
     return c.json(
       {
