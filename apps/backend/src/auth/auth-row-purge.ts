@@ -55,6 +55,14 @@ export interface AuthRowPurgeTickResult {
  * refresh-token delete, and either error propagates to the caller (the
  * interval loop swallows it for the next tick).
  *
+ * CF-14 (x-concurrency-financial X-2) cross-instance safety: already
+ * safe without `SKIP LOCKED`. Both sweeps are pure `DELETE ... WHERE
+ * <expired/dead past grace>` — there is no SELECT-then-mutate gap and
+ * no shared sequenced resource. Two Fly machines running the purge at
+ * once just contend on Postgres row locks for the same dead rows; a
+ * row one machine deletes is simply not re-deleted by the other.
+ * DELETE-WHERE is inherently idempotent across instances.
+ *
  * @param retentionMs grace before a dead row is eligible for deletion.
  *        Defaults to `LOOP_AUTH_ROW_RETENTION_DAYS`.
  */

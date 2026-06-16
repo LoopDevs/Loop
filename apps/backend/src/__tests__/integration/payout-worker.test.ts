@@ -32,7 +32,7 @@
  * Gated on `LOOP_E2E_DB=1` like the sibling integration suites.
  */
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
-import { eq, sql } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 
 const RUN_INTEGRATION = process.env['LOOP_E2E_DB'] === '1';
 
@@ -100,7 +100,7 @@ import { db } from '../../db/client.js';
 import { users, pendingPayouts } from '../../db/schema.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
 import { runPayoutTick } from '../../payments/payout-worker.js';
-import { reclaimSubmittedPayout } from '../../credits/pending-payouts.js';
+import { reclaimSubmittedPayout, listClaimablePayouts } from '../../credits/pending-payouts.js';
 import { submitPayout, PayoutSubmitError } from '../../payments/payout-submit.js';
 import { findOutboundPaymentByMemo } from '../../payments/horizon.js';
 import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
@@ -357,5 +357,145 @@ describeIf('payout-worker integration — fee-bump curve across attempts', () =>
     const [final] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, payoutId));
     expect(final!.state).toBe('confirmed');
     expect(final!.attempts).toBe(2);
+  });
+});
+
+describeIf('payout-worker integration — CF-14 FOR UPDATE SKIP LOCKED claim', () => {
+  beforeAll(async () => {
+    await ensureMigrated();
+  });
+
+  beforeEach(async () => {
+    await truncateAllTables();
+  });
+
+  it('a concurrent claim SKIPs rows another transaction holds locked (no same-row double-process)', async () => {
+    // Seed two claimable `pending` rows. Open a transaction (instance
+    // A) that SELECTs them `FOR UPDATE SKIP LOCKED` and holds the
+    // lock; while it's held, a second claim (instance B, via the real
+    // `listClaimablePayouts` in its own implicit txn) must SKIP both
+    // locked rows and return nothing — proving two instances never get
+    // the same row in-flight, which is the read→claim race CF-14 closes.
+    const a = await seedPayout({ state: 'pending' });
+    const b = await seedPayout({ state: 'pending' });
+
+    // Coordinate the two transactions with explicit gates so the
+    // assertion runs deterministically while instance A still holds
+    // the locks (rather than relying on timing).
+    let releaseA: () => void = () => undefined;
+    const aHoldsLocks = new Promise<void>((resolve) => {
+      // resolve once A has acquired its locks
+      releaseA = resolve;
+    });
+    let allowAToCommit: () => void = () => undefined;
+    const aMayCommit = new Promise<void>((resolve) => {
+      allowAToCommit = resolve;
+    });
+
+    const instanceA = db.transaction(async (tx) => {
+      const locked = await tx
+        .select({ id: pendingPayouts.id })
+        .from(pendingPayouts)
+        .where(eq(pendingPayouts.state, 'pending'))
+        .for('update', { skipLocked: true });
+      // A holds locks on both rows now.
+      expect(locked.map((r) => r.id).sort()).toEqual([a.payoutId, b.payoutId].sort());
+      releaseA();
+      // Hold the transaction (and its row locks) open until B has run.
+      await aMayCommit;
+    });
+
+    await aHoldsLocks;
+
+    // Instance B claims while A holds the locks → SKIP LOCKED hides
+    // both rows from B.
+    const bRows = await listClaimablePayouts({ limit: 20, staleSeconds: 300, maxAttempts: 5 });
+    expect(bRows).toHaveLength(0);
+
+    allowAToCommit();
+    await instanceA;
+
+    // After A commits and releases, a fresh claim sees both rows again
+    // (single-instance behaviour is unchanged — the lock only ever
+    // affects what a concurrent instance sees).
+    const afterRelease = await listClaimablePayouts({
+      limit: 20,
+      staleSeconds: 300,
+      maxAttempts: 5,
+    });
+    expect(afterRelease.map((r) => r.id).sort()).toEqual([a.payoutId, b.payoutId].sort());
+  });
+
+  it('two concurrent claims partition the queue — no row id appears in both result sets', async () => {
+    // Six claimable rows, two instances each claiming a batch of three.
+    // `FOR UPDATE SKIP LOCKED` must hand each instance a DISJOINT set —
+    // the union covers six distinct rows with no overlap. This is the
+    // cross-instance single-flight property the plain `SELECT` lacked
+    // (both would have returned the same first three rows).
+    //
+    // Deterministic via explicit transaction gating rather than racing
+    // two `Promise.all` selects: A acquires + holds its locked batch,
+    // THEN B acquires its batch while A still holds — so B is forced to
+    // SKIP A's rows. This pins the partition behaviour without relying
+    // on the two queries happening to overlap in wall-clock time.
+    const seeded = [];
+    for (let i = 0; i < 6; i++) {
+      // Sequential seed so created_at ordering is stable.
+      seeded.push(await seedPayout({ state: 'pending' }));
+    }
+    const seededIds = seeded.map((s) => s.payoutId).sort();
+
+    let releaseA: () => void = () => undefined;
+    const aHoldsLocks = new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+    let allowAToCommit: () => void = () => undefined;
+    const aMayCommit = new Promise<void>((resolve) => {
+      allowAToCommit = resolve;
+    });
+
+    let idsA: string[] = [];
+    const instanceA = db.transaction(async (tx) => {
+      const rows = await tx
+        .select({ id: pendingPayouts.id })
+        .from(pendingPayouts)
+        .where(eq(pendingPayouts.state, 'pending'))
+        .orderBy(asc(pendingPayouts.createdAt))
+        .limit(3)
+        .for('update', { skipLocked: true });
+      idsA = rows.map((r) => r.id);
+      releaseA();
+      await aMayCommit;
+    });
+
+    await aHoldsLocks;
+
+    // B claims its own batch of 3 while A holds the first 3 → SKIP
+    // LOCKED forces B onto the remaining rows.
+    const setB = await listClaimablePayouts({ limit: 3, staleSeconds: 300, maxAttempts: 5 });
+    const idsB = setB.map((r) => r.id);
+
+    allowAToCommit();
+    await instanceA;
+
+    expect(idsA).toHaveLength(3);
+    expect(idsB).toHaveLength(3);
+    const overlap = idsA.filter((id) => idsB.includes(id));
+    expect(overlap).toEqual([]); // no row claimed by both instances
+
+    // Together the two disjoint batches cover all six distinct seeded rows.
+    const union = [...idsA, ...idsB].sort();
+    expect(new Set(union).size).toBe(6);
+    expect(union).toEqual(seededIds);
+  });
+
+  it('single instance: behaviour is unchanged — all claimable rows are returned', async () => {
+    // Regression guard: the lock must not change what a lone worker
+    // sees. One instance still gets every claimable row in FIFO order.
+    const a = await seedPayout({ state: 'pending' });
+    const b = await seedPayout({ state: 'pending' });
+
+    const rows = await listClaimablePayouts({ limit: 20, staleSeconds: 300, maxAttempts: 5 });
+    expect(rows.map((r) => r.id).sort()).toEqual([a.payoutId, b.payoutId].sort());
   });
 });
