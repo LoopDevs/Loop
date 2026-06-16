@@ -385,9 +385,11 @@ export const refreshTokens = pgTable(
   },
   (t) => [
     index('refresh_tokens_user').on(t.userId),
-    // Used by a periodic cleanup job that trims fully-expired rows
-    // after the refresh horizon; also used to reject a token whose
-    // row is missing from the table entirely.
+    // Used by the periodic auth-row purge sweep (CF-26 / X-PRIV-08,
+    // `auth/refresh-tokens.ts:purgeDeadRefreshTokens`, driven by
+    // `auth-row-purge.ts`) that trims fully-expired rows after the
+    // refresh horizon; also used to reject a token whose row is missing
+    // from the table entirely.
     index('refresh_tokens_expires').on(t.expiresAt),
   ],
 );

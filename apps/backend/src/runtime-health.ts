@@ -2,6 +2,7 @@ import { env } from './env.js';
 
 export type RuntimeWorkerName =
   | 'asset_drift_watcher'
+  | 'auth_row_purge'
   | 'interest_scheduler'
   | 'payment_watcher'
   | 'payout_worker'

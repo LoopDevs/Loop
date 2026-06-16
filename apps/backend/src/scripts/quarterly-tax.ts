@@ -35,6 +35,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sql } from 'drizzle-orm';
 import { db, closeDb } from '../db/client.js';
+import { csvEscape } from '../csv/csv-escape.js';
 
 interface QuarterRange {
   /** Inclusive ISO datetime of the first ms of the quarter. */
@@ -63,13 +64,18 @@ function parseQuarter(arg: string): QuarterRange | null {
   };
 }
 
+/**
+ * X-PRIV-11: this script previously defined a local RFC-4180-only
+ * escaper with no formula-injection guard, even though an accountant
+ * opens the output in Excel. Coerce the cell to a string here (rows
+ * carry bigint / string aggregates) and delegate the actual escape to
+ * the shared `csvEscape`, which also prefixes `=`/`+`/`-`/`@`/tab/CR
+ * leading chars with `'` so a `merchant_id`-shaped value can't be
+ * evaluated as a formula.
+ */
 function csvField(value: unknown): string {
   if (value === null || value === undefined) return '';
-  const s = String(value);
-  // RFC 4180: a field that contains comma / quote / newline must be
-  // quoted, with embedded quotes doubled.
-  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
+  return csvEscape(String(value));
 }
 
 function csvRow(fields: readonly unknown[]): string {

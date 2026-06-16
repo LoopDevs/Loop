@@ -23,6 +23,7 @@ import {
 } from './payments/interest-pool-watcher.js';
 import { configuredLoopPayableAssets } from './credits/payout-asset.js';
 import { startInterestScheduler, stopInterestScheduler } from './credits/interest-scheduler.js';
+import { startAuthRowPurge, stopAuthRowPurge } from './auth/auth-row-purge.js';
 import { markWorkerBlocked, markWorkerDisabled } from './runtime-health.js';
 
 // A4-093: production gate for loop-native auth. The OTP send path
@@ -185,6 +186,15 @@ if (env.LOOP_WORKERS_ENABLED) {
   } else {
     markWorkerDisabled('interest_scheduler', 'interest APY is zero');
   }
+
+  // CF-26 / X-PRIV-07/08: auth-row retention purge. Deletes expired/
+  // consumed OTP rows and dead refresh-token rows past the retention
+  // grace so neither PII-bearing table grows without bound. DELETE-only,
+  // no Stellar / CTX dependency — gated here purely to share the
+  // workers' lifecycle. Runbook: docs/runbooks/dsr.md.
+  startAuthRowPurge({
+    intervalMs: env.LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS * 60 * 60 * 1000,
+  });
 } else {
   markWorkerDisabled('payment_watcher', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('procurement_worker', 'LOOP_WORKERS_ENABLED is false');
@@ -192,6 +202,7 @@ if (env.LOOP_WORKERS_ENABLED) {
   markWorkerDisabled('payout_worker', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('asset_drift_watcher', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('interest_scheduler', 'LOOP_WORKERS_ENABLED is false');
+  markWorkerDisabled('auth_row_purge', 'LOOP_WORKERS_ENABLED is false');
 }
 
 logger.info({ port: env.PORT }, 'Loop backend starting');
@@ -226,6 +237,7 @@ function shutdown(signal: string): void {
   stopAssetDriftWatcher();
   stopInterestScheduler();
   stopInterestPoolWatcher();
+  stopAuthRowPurge();
 
   server.close(() => {
     void Promise.allSettled([sentryFlush(5000), closeDb()]).finally(() => {

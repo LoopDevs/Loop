@@ -228,3 +228,61 @@ export async function getUserPaymentMethodShare(
     `/api/users/me/payment-method-share${qs.length > 0 ? `?${qs}` : ''}`,
   );
 }
+
+// ─── DSR: data export / account deletion (CF-26 / X-PRIV-01) ─────────────────
+// GDPR Art. 15/17 + Apple App Store Guideline 5.1.1(v). The backend
+// primitives already exist (`apps/backend/src/users/dsr-export.ts` +
+// `dsr-delete.ts`); these wire them to the in-app privacy screen.
+
+/**
+ * `GET /api/users/me/dsr/export` — full machine-readable export of
+ * every row Loop holds keyed to the caller. Returns the parsed JSON
+ * envelope; `downloadMyData` wraps this to push it as a file. Redeem
+ * codes/PINs are intentionally excluded server-side (shown only as a
+ * boolean) — see the backend module header.
+ */
+export async function getMyDataExport(): Promise<unknown> {
+  return authenticatedRequest<unknown>('/api/users/me/dsr/export');
+}
+
+/**
+ * Fetches the DSR export and triggers a browser download of the JSON.
+ * Web-only convenience (uses DOM APIs); the caller gates it behind a
+ * platform check. Returns once the click has been dispatched.
+ */
+export async function downloadMyData(): Promise<void> {
+  const payload = await getMyDataExport();
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: 'application/json',
+  });
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `loop-data-export-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    // Revoke on the next tick so the click's navigation has read the
+    // blob URL before we tear it down.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+}
+
+/**
+ * `POST /api/users/me/dsr/delete` — request account deletion
+ * (anonymisation per ADR-009; the credit ledger is append-only). On
+ * success the caller's session is dead server-side, so the next authed
+ * request 401s — callers should clear local session + redirect.
+ *
+ * Throws `ApiException` with a typed 409 `code` when deletion is
+ * blocked by money/fulfilment in flight (`PENDING_PAYOUTS`,
+ * `IN_FLIGHT_ORDERS`, `FAILED_UNCOMPENSATED_WITHDRAWALS`) so the UI can
+ * render the matching instruction.
+ */
+export async function requestAccountDeletion(): Promise<{ ok: boolean }> {
+  return authenticatedRequest<{ ok: boolean }>('/api/users/me/dsr/delete', {
+    method: 'POST',
+  });
+}

@@ -466,6 +466,21 @@ export default function AuthRoute(): React.JSX.Element {
                   Link a Stellar address to receive on-chain cashback.
                 </p>
               </Link>
+              {/* CF-26 / X-PRIV-01: in-app data export + account deletion.
+                  Always shown (not Phase2Gate'd) — GDPR Art. 15/17 +
+                  Apple Guideline 5.1.1(v) require an in-app path. */}
+              <Link
+                to="/settings/privacy"
+                className="block w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 text-left text-gray-900 dark:text-white hover:border-gray-400 dark:hover:border-gray-600 transition-colors"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">Privacy &amp; data</span>
+                  <span className="text-gray-400 dark:text-gray-500">›</span>
+                </div>
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  Export your data or delete your account.
+                </p>
+              </Link>
               <Button
                 variant="secondary"
                 className="w-full"

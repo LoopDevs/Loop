@@ -611,6 +611,19 @@ export const EnvSchema = z.object({
   INTEREST_APY_BASIS_POINTS: z.coerce.number().int().min(0).max(10_000).default(0),
   INTEREST_PERIODS_PER_YEAR: z.coerce.number().int().positive().default(365),
   INTEREST_TICK_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
+
+  // CF-26 / X-PRIV-07/08: auth-row retention purge. Periodic sweep
+  // (gated with the other workers on LOOP_WORKERS_ENABLED) that deletes
+  // expired/consumed OTP rows and dead (expired or long-revoked)
+  // refresh-token rows past the retention grace. Both tables hold PII
+  // (email / token hash) with no lawful basis to retain dead rows. The
+  // interval is hourly by default — retention hygiene is not latency-
+  // sensitive. The retention window defaults to 30 days, comfortably
+  // past the refresh horizon so a live session is never reaped, and
+  // long enough that the token-theft reuse signal (A2-1608) and the
+  // just-expired-OTP 401 edge stay intact.
+  LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS: z.coerce.number().int().positive().default(1),
+  LOOP_AUTH_ROW_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

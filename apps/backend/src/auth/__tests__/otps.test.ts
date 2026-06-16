@@ -5,11 +5,24 @@ const { dbMock, returned } = vi.hoisted(() => {
     insertedRow: unknown;
     selectRows: unknown[];
     updateRows: unknown[];
-  } = { insertedRow: null, selectRows: [], updateRows: [] };
+    deletedRows: unknown[];
+    lastOp: 'insert' | 'delete' | null;
+  } = { insertedRow: null, selectRows: [], updateRows: [], deletedRows: [], lastOp: null };
   const m: Record<string, ReturnType<typeof vi.fn>> = {};
-  m['insert'] = vi.fn(() => m);
+  m['insert'] = vi.fn(() => {
+    state.lastOp = 'insert';
+    return m;
+  });
   m['values'] = vi.fn(() => m);
-  m['returning'] = vi.fn(async () => [state.insertedRow]);
+  // `.returning()` serves both insert (single row) and delete (row
+  // list) call sites — branch on which builder kicked off the chain.
+  m['returning'] = vi.fn(async () =>
+    state.lastOp === 'delete' ? state.deletedRows : [state.insertedRow],
+  );
+  m['delete'] = vi.fn(() => {
+    state.lastOp = 'delete';
+    return m;
+  });
   m['select'] = vi.fn(() => m);
   m['from'] = vi.fn(() => m);
   // `.where` must stay chainable (findLiveOtp then .orderBy.limit)
@@ -50,6 +63,7 @@ import {
   markOtpConsumed,
   countRecentOtpsForEmail,
   incrementOtpAttempts,
+  purgeExpiredOtps,
   OTP_LENGTH,
 } from '../otps.js';
 
@@ -59,6 +73,8 @@ beforeEach(() => {
   }
   returned.insertedRow = null;
   returned.selectRows = [];
+  returned.deletedRows = [];
+  returned.lastOp = null;
 });
 
 describe('generateOtpCode', () => {
@@ -148,5 +164,20 @@ describe('incrementOtpAttempts', () => {
     await incrementOtpAttempts({ email: 'a@b.com' });
     expect(dbMock['update']!).toHaveBeenCalled();
     expect(dbMock['set']!).toHaveBeenCalled();
+  });
+});
+
+describe('purgeExpiredOtps', () => {
+  it('issues a delete and returns the deleted row count', async () => {
+    returned.deletedRows = [{ id: 'r-1' }, { id: 'r-2' }, { id: 'r-3' }];
+    const n = await purgeExpiredOtps({ retentionMs: 30 * 24 * 60 * 60 * 1000 });
+    expect(dbMock['delete']!).toHaveBeenCalled();
+    expect(n).toBe(3);
+  });
+
+  it('returns 0 when nothing matched', async () => {
+    returned.deletedRows = [];
+    const n = await purgeExpiredOtps({ retentionMs: 1000 });
+    expect(n).toBe(0);
   });
 });

@@ -335,6 +335,14 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # LOOP_INTEREST_POOL_ACCOUNT=G...(55 chars)
 # LOOP_INTEREST_POOL_MIN_DAYS_COVER=7
 
+# CF-26 / X-PRIV-07/08 auth-row retention purge. Periodic DELETE-only
+# sweep (runs under LOOP_WORKERS_ENABLED) that reaps expired/consumed
+# OTP rows + dead refresh-token rows past the retention grace so
+# neither PII-bearing table grows without bound. Runbook:
+# docs/runbooks/dsr.md.
+# LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS=1         # sweep cadence (hours)
+# LOOP_AUTH_ROW_RETENTION_DAYS=30              # grace before a dead row is reaped
+
 # ── Runtime kill switches (A2-1907) ──────────────────────────────────
 # Set any to `true` and the matching surface returns 503
 # SUBSYSTEM_DISABLED on the next request — no redeploy. Runbook:
