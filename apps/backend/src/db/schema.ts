@@ -84,6 +84,12 @@ export const users = pgTable(
     uniqueIndex('users_email_loop_native_unique')
       .on(sql`LOWER(${t.email})`)
       .where(sql`${t.ctxUserId} IS NULL`),
+    // CF-29 / PERF-006: `user-by-email` resolves ctx-backed users via
+    // `LOWER(email) = x`. The functional unique above is partial
+    // (`WHERE ctx_user_id IS NULL`) so it can't serve the lookup for
+    // CTX-proxied rows. A non-partial functional index covers the
+    // equality lookup across both identity planes. (Migration 0036.)
+    index('users_email_lower').on(sql`LOWER(${t.email})`),
     // CHECK gates the enum at the DB boundary; the TypeScript union
     // (HOME_CURRENCIES) gates it in-app. Both agree — either layer
     // catching a bad write is a tripwire on the other layer drifting.
@@ -130,6 +136,11 @@ export const userCredits = pgTable(
     // dropped by migration 0017 — PK's underlying index covers the same
     // lookups.
     primaryKey({ columns: [t.userId, t.currency], name: 'user_credits_pkey' }),
+    // CF-29 / PERF-007: the drift watcher's `sumOutstandingLiability`
+    // does `SUM(balance_minor) WHERE currency = X`. The PK leads with
+    // `user_id`, so a bare currency predicate can't use it → seq scan
+    // once per LOOP asset (3) per drift tick (300s). (Migration 0036.)
+    index('user_credits_currency').on(t.currency),
     // Negative balance is always a bug (we'd be owing the user
     // more than we've booked). Database-level guard so a bad
     // downstream transaction doesn't silently corrupt the ledger.
@@ -184,6 +195,13 @@ export const creditTransactions = pgTable(
   },
   (t) => [
     index('credit_transactions_user_created').on(t.userId, t.createdAt),
+    // CF-29 / PERF-001 + PERF-005: the composite `(user_id, created_at)`
+    // above can't serve an unfiltered range or a `WHERE type='cashback'`
+    // roll-up (leading column is user_id). This `(type, created_at)`
+    // index backs both the admin treasury / cashback-realization
+    // aggregates and the public cashback-stats endpoint (distinct-user
+    // count + per-currency SUM over `type='cashback'`). (Migration 0036.)
+    index('credit_transactions_type_created').on(t.type, t.createdAt),
     index('credit_transactions_reference').on(t.referenceType, t.referenceId),
     // Partial unique index enforces period-level idempotency for
     // interest accrual. A re-tick with the same `periodCursor`
@@ -533,6 +551,32 @@ export const orders = pgTable(
   },
   (t) => [
     index('orders_user_created').on(t.userId, t.createdAt),
+    // CF-29 / PERF-005: plain btree on created_at. The composite
+    // `(user_id, created_at)` above can't serve an unfiltered range
+    // (leading column user_id), so `orders-activity` (default dashboard
+    // sparkline) and other all-orders time-series views seq-scan the
+    // whole table. (Migration 0036.)
+    index('orders_created_at').on(t.createdAt),
+    // CF-29 / PERF-006: operator-stats / operators-snapshot-csv filter
+    // `ctx_operator_id IS NOT NULL AND created_at >= since`. The
+    // single-column `orders_ctx_operator` below can't serve the range;
+    // this composite covers the operator-scoped time window.
+    // (Migration 0036.)
+    index('orders_ctx_operator_created').on(t.ctxOperatorId, t.createdAt),
+    // CF-29 / PERF-006: users-recycling-activity filters
+    // `payment_method='loop_asset' AND created_at >= 90d` with no index
+    // on either column. Partial scoped to loop_asset orders.
+    // (Migration 0036.)
+    index('orders_loop_asset_created')
+      .on(t.createdAt)
+      .where(sql`${t.paymentMethod} = 'loop_asset'`),
+    // CF-29 / PERF-006: stuck-orders polls `state IN ('paid','procuring')`.
+    // `procuring` has `orders_procuring_procured_at` but `paid` had no
+    // supporting index. Partial covering both in-flight states.
+    // (Migration 0036.)
+    index('orders_paid_procuring_created')
+      .on(t.createdAt)
+      .where(sql`${t.state} IN ('paid', 'procuring')`),
     // Used by the payment-watcher job to find rows awaiting their
     // on-chain deposit. Partial index: only pending rows are hot.
     index('orders_pending_payment')
@@ -816,6 +860,20 @@ export const pendingPayouts = pgTable(
     uniqueIndex('pending_payouts_order_unique').on(t.orderId),
     // Worker picks up pending rows in FIFO order on each tick.
     index('pending_payouts_state_created').on(t.state, t.createdAt),
+    // CF-29 / PERF-006: payouts-by-asset does `GROUP BY asset_code,
+    // state` over the full table with no asset_code index. (The audit's
+    // `INCLUDE (amount_stroops)` is omitted — drizzle 0.45's index DSL
+    // can't represent INCLUDE and the migration↔schema parity gate would
+    // flag the drift; the composite still serves the grouped scan.)
+    // (Migration 0036.)
+    index('pending_payouts_asset_state').on(t.assetCode, t.state),
+    // CF-29 / PERF-006: settlement-lag / payouts-activity filter
+    // `state='confirmed' AND confirmed_at >= since` with no confirmed_at
+    // index. Partial scoped to confirmed rows keeps it small.
+    // (Migration 0036.)
+    index('pending_payouts_confirmed_at')
+      .on(t.confirmedAt)
+      .where(sql`${t.state} = 'confirmed'`),
     // A2-716: composite (user_id, created_at desc) so
     // `listPayoutsForUser` (admin user-detail page) gets an index-
     // only scan + sort. Replaces the prior single-column

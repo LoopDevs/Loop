@@ -53,7 +53,11 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
-import { publicCashbackStatsHandler, __resetPublicCashbackStatsCache } from '../cashback-stats.js';
+import {
+  publicCashbackStatsHandler,
+  __resetPublicCashbackStatsCache,
+  __expirePublicCashbackStatsCache,
+} from '../cashback-stats.js';
 
 function makeCtx(): Context {
   const headers = new Map<string, string>();
@@ -135,6 +139,9 @@ describe('publicCashbackStatsHandler', () => {
     const firstBody = (await first.json()) as Record<string, unknown>;
     expect(firstBody['totalUsersWithCashback']).toBe(42);
 
+    // Expire the TTL memo so the second request recomputes (and hits the
+    // injected DB failure) rather than serving the still-fresh snapshot.
+    __expirePublicCashbackStatsCache();
     state.throwOn = 'cashback';
     const second = await publicCashbackStatsHandler(makeCtx());
     expect(second.status).toBe(200);
@@ -147,5 +154,36 @@ describe('publicCashbackStatsHandler', () => {
   it('emits cache-control: public, max-age=300 on the happy path', async () => {
     const res = await publicCashbackStatsHandler(makeCtx());
     expect(res.headers.get('cache-control')).toBe('public, max-age=300');
+  });
+
+  it('CF-29/PERF-001: serves the TTL memo without re-querying the DB inside the window', async () => {
+    state.users = 7;
+    state.fulfilled = 3;
+    state.cashback = [{ currency: 'USD', amount_minor: 100n }];
+    const first = await publicCashbackStatsHandler(makeCtx());
+    expect(first.status).toBe(200);
+    const callsAfterFirst = state.calls.length;
+    expect(callsAfterFirst).toBeGreaterThan(0); // first call did compute
+
+    // Second request inside the TTL window — must serve the memo and
+    // issue zero new DB queries (the crawler-storm guard).
+    const second = await publicCashbackStatsHandler(makeCtx());
+    expect(second.status).toBe(200);
+    expect(second.headers.get('cache-control')).toBe('public, max-age=300');
+    expect(state.calls.length).toBe(callsAfterFirst); // no extra queries
+    const body = (await second.json()) as Record<string, unknown>;
+    expect(body['totalUsersWithCashback']).toBe(7);
+  });
+
+  it('CF-29/PERF-001: recomputes once the memo is expired', async () => {
+    state.users = 1;
+    await publicCashbackStatsHandler(makeCtx());
+    const callsAfterFirst = state.calls.length;
+    __expirePublicCashbackStatsCache();
+    state.users = 99;
+    const res = await publicCashbackStatsHandler(makeCtx());
+    expect(state.calls.length).toBeGreaterThan(callsAfterFirst); // recomputed
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['totalUsersWithCashback']).toBe(99);
   });
 });
