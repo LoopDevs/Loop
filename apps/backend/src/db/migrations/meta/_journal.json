@@ -253,6 +253,13 @@
       "when": 1780100300000,
       "tag": "0035_orders_redeem_revoke_readonly",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1780100400000,
+      "tag": "0036_perf_admin_and_stats_indexes",
+      "breakpoints": true
     }
   ]
 }

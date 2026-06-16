@@ -21,6 +21,19 @@
  *     preferable to hammering the DB on every landing-page hit.
  *   - On the fallback path we emit `max-age=60` instead — serve
  *     stale briefly, refresh soon.
+ *
+ * CF-29 / x-perf PERF-001: this is a crawler-exposed surface whose
+ * three aggregates scan the full `credit_transactions` / `orders`
+ * tables. The HTTP `Cache-Control` only deduplicates at a CDN edge —
+ * a crawler storm (or many edge regions) still triggers a real
+ * recompute per cache-miss. We add a process-level TTL compute cache:
+ * `computeStats()` runs at most once per `COMPUTE_TTL_MS`; every other
+ * request inside the window serves the memoised snapshot without
+ * touching the DB. The three aggregates also now run via `Promise.all`
+ * (independent reads, were awaited sequentially), and migration 0036
+ * adds `credit_transactions(type, created_at)` so the cashback roll-up
+ * is an index range scan rather than a full-table seq scan. Response
+ * shape is unchanged.
  */
 import type { Context } from 'hono';
 import { sql } from 'drizzle-orm';
@@ -35,10 +48,21 @@ export type { PerCurrencyCashback, PublicCashbackStats };
 
 const log = logger.child({ handler: 'public-cashback-stats' });
 
-// In-memory last-known-good snapshot. The tier that makes this
-// "never 500" — if the DB read throws, we serve this instead.
+// CF-29 / PERF-001: how long a freshly-computed snapshot is served
+// from process memory before the next request triggers a recompute.
+// Matches the 5-min HTTP `Cache-Control` so the in-process memo and the
+// CDN TTL expire together; a crawler storm inside the window costs zero
+// DB queries.
+const COMPUTE_TTL_MS = 5 * 60 * 1000;
+
+// In-memory snapshot. Two roles in one cell:
+//   1. TTL compute cache (CF-29 / PERF-001) — `computedAt` gates when a
+//      recompute is allowed; inside the window we serve `value` straight
+//      back without a DB round-trip.
+//   2. Last-known-good fallback — the tier that makes this "never 500":
+//      if a recompute throws, we serve the last good `value` instead.
 // Reset on process restart; fallback-to-zero is the bootstrap state.
-let lastKnownGood: PublicCashbackStats | null = null;
+let cache: { value: PublicCashbackStats; computedAt: number } | null = null;
 
 interface UsersRow {
   n: string | number;
@@ -62,42 +86,39 @@ function toStringBigint(value: string | number | bigint): string {
   return value;
 }
 
+function rowsOf<T>(result: unknown): T[] {
+  return (Array.isArray(result) ? (result as T[]) : ((result as { rows?: T[] }).rows ?? [])) as T[];
+}
+
 async function computeStats(): Promise<PublicCashbackStats> {
-  // COUNT(DISTINCT user_id) WHERE type = 'cashback'. One row back.
-  const usersResult = await db.execute(sql`
-    SELECT COUNT(DISTINCT user_id)::text AS n
-    FROM credit_transactions
-    WHERE type = 'cashback'
-  `);
-  const usersRows = (
-    Array.isArray(usersResult)
-      ? (usersResult as unknown as UsersRow[])
-      : ((usersResult as unknown as { rows?: UsersRow[] }).rows ?? [])
-  ) as UsersRow[];
+  // CF-29 / PERF-001: the three aggregates are independent reads — run
+  // them concurrently rather than awaiting each in series. The
+  // `type='cashback'` predicates are served by the
+  // `credit_transactions(type, created_at)` index (migration 0036).
+  const [usersResult, ordersResult, cashbackResult] = await Promise.all([
+    // COUNT(DISTINCT user_id) WHERE type = 'cashback'. One row back.
+    db.execute(sql`
+      SELECT COUNT(DISTINCT user_id)::text AS n
+      FROM credit_transactions
+      WHERE type = 'cashback'
+    `),
+    db.execute(sql`
+      SELECT COUNT(*)::text AS n FROM orders WHERE state = 'fulfilled'
+    `),
+    db.execute(sql`
+      SELECT
+        currency,
+        COALESCE(SUM(amount_minor), 0)::bigint AS amount_minor
+      FROM credit_transactions
+      WHERE type = 'cashback'
+      GROUP BY currency
+      ORDER BY currency ASC
+    `),
+  ]);
 
-  const ordersResult = await db.execute(sql`
-    SELECT COUNT(*)::text AS n FROM orders WHERE state = 'fulfilled'
-  `);
-  const ordersRows = (
-    Array.isArray(ordersResult)
-      ? (ordersResult as unknown as OrdersRow[])
-      : ((ordersResult as unknown as { rows?: OrdersRow[] }).rows ?? [])
-  ) as OrdersRow[];
-
-  const cashbackResult = await db.execute(sql`
-    SELECT
-      currency,
-      COALESCE(SUM(amount_minor), 0)::bigint AS amount_minor
-    FROM credit_transactions
-    WHERE type = 'cashback'
-    GROUP BY currency
-    ORDER BY currency ASC
-  `);
-  const cashbackRows = (
-    Array.isArray(cashbackResult)
-      ? (cashbackResult as unknown as CashbackRow[])
-      : ((cashbackResult as unknown as { rows?: CashbackRow[] }).rows ?? [])
-  ) as CashbackRow[];
+  const usersRows = rowsOf<UsersRow>(usersResult);
+  const ordersRows = rowsOf<OrdersRow>(ordersResult);
+  const cashbackRows = rowsOf<CashbackRow>(cashbackResult);
 
   return {
     totalUsersWithCashback: toNumber(usersRows[0]?.n ?? 0),
@@ -110,15 +131,29 @@ async function computeStats(): Promise<PublicCashbackStats> {
   };
 }
 
-/** Test-only: reset the last-known-good snapshot. Exported without underscore-prefix convention to keep the hatch obvious. */
+/** Test-only: drop the snapshot entirely (both the TTL memo and the last-known-good fallback). Exported without underscore-prefix convention to keep the hatch obvious. */
 export function __resetPublicCashbackStatsCache(): void {
-  lastKnownGood = null;
+  cache = null;
+}
+
+/** Test-only: mark the existing snapshot stale without dropping it, so the next request recomputes while the last-known-good fallback stays available. */
+export function __expirePublicCashbackStatsCache(): void {
+  if (cache !== null) cache.computedAt = 0;
 }
 
 export async function publicCashbackStatsHandler(c: Context): Promise<Response> {
+  // CF-29 / PERF-001: serve the memoised snapshot without a DB round-trip
+  // while it is still fresh. This is the storm guard — a crawler burst
+  // inside the TTL window costs zero queries regardless of how many
+  // requests slip past the CDN edge.
+  if (cache !== null && Date.now() - cache.computedAt < COMPUTE_TTL_MS) {
+    c.header('cache-control', 'public, max-age=300');
+    return c.json<PublicCashbackStats>(cache.value);
+  }
+
   try {
     const snapshot = await computeStats();
-    lastKnownGood = snapshot;
+    cache = { value: snapshot, computedAt: Date.now() };
     c.header('cache-control', 'public, max-age=300');
     return c.json<PublicCashbackStats>(snapshot);
   } catch (err) {
@@ -126,8 +161,10 @@ export async function publicCashbackStatsHandler(c: Context): Promise<Response> 
     // Fallback cadence: serve stale briefly so the DB has time to
     // recover before the CDN asks again.
     c.header('cache-control', 'public, max-age=60');
-    if (lastKnownGood !== null) {
-      return c.json<PublicCashbackStats>(lastKnownGood);
+    if (cache !== null) {
+      // Last-known-good — a recompute failed but we have a prior good
+      // snapshot. (Its TTL has lapsed, hence we got here.)
+      return c.json<PublicCashbackStats>(cache.value);
     }
     // Bootstrap path — no prior snapshot. Serve zeros rather than
     // 5xx; the landing page renders "— cashback earned so far" etc.
