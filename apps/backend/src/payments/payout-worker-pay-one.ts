@@ -26,6 +26,12 @@ import { getAccountTrustlines } from './horizon-trustlines.js';
 import { submitPayout, PayoutSubmitError } from './payout-submit.js';
 import { feeForAttempt } from './fee-strategy.js';
 import { notifyPayoutFailed, notifyPayoutAwaitingTrustline } from '../discord.js';
+import {
+  applyAdminPayoutCompensation,
+  AlreadyCompensatedError,
+  PayoutNotCompensableError,
+} from '../credits/payout-compensation.js';
+import { isLoopAssetCode, currencyForLoopAsset } from '@loop/shared';
 
 const log = logger.child({ area: 'payout-worker' });
 
@@ -259,6 +265,7 @@ async function handleSubmitError(
       reason,
       attempts: usedAttempts,
     });
+    await autoCompensateFailedWithdrawal(row, `[${err.kind}] ${reason}`);
     return 'failed';
   }
 
@@ -275,5 +282,88 @@ async function handleSubmitError(
     reason,
     attempts: usedAttempts,
   });
+  await autoCompensateFailedWithdrawal(row, reason);
   return 'failed';
+}
+
+/**
+ * CF-21 (x-flows F5-2): auto-compensate a user whose withdrawal payout
+ * terminally failed. `applyAdminWithdrawal` already debited their
+ * off-chain balance + queued this row; a terminal on-chain failure
+ * leaves them net-negative (debited, no payout) until a human noticed
+ * the Discord page and ran the manual compensation. Re-credit
+ * automatically via the established ADR-024 §5 primitive.
+ *
+ * Scope: `kind='withdrawal'` only. Order-cashback failures are NOT
+ * compensated — an unpaid cashback payout means the off-chain ledger
+ * credit simply has no on-chain mirror yet (the user keeps the credit;
+ * the divergence is a settlement-backlog handled by drift recovery),
+ * not a net-negative balance. The primitive itself also refuses any
+ * non-withdrawal row.
+ *
+ * Idempotent + non-throwing:
+ *   - The primitive's `SELECT ... FOR UPDATE` re-checks `state='failed'
+ *     AND compensated_at IS NULL`, so a re-pick / concurrent admin
+ *     compensation surfaces `AlreadyCompensatedError` rather than a
+ *     double-credit.
+ *   - Any throw (the daily admin-write cap, a DB blip) is logged but
+ *     swallowed — the row is already terminally `failed` and ops has
+ *     been paged via `notifyPayoutFailed`; a compensation blip must
+ *     never re-throw out of the worker tick and abort the batch.
+ */
+async function autoCompensateFailedWithdrawal(row: PendingPayout, reason: string): Promise<void> {
+  if (row.kind !== 'withdrawal') return;
+  if (!isLoopAssetCode(row.assetCode)) {
+    log.error(
+      { payoutId: row.id, assetCode: row.assetCode },
+      'CF-21: failed withdrawal has non-LOOP asset code — cannot auto-compensate; manual review',
+    );
+    return;
+  }
+  const currency = currencyForLoopAsset(row.assetCode);
+  // 1 stroop = 0.00001 minor; mirrors the /100_000n factor
+  // applyAdminWithdrawal used in reverse. For any row this primitive
+  // emitted the conversion is exact (the primitive re-asserts it under
+  // the row lock).
+  const amountMinor = row.amountStroops / 100_000n;
+  try {
+    const applied = await applyAdminPayoutCompensation({
+      userId: row.userId,
+      currency,
+      amountMinor,
+      payoutId: row.id,
+      reason: `auto-compensation: withdrawal payout failed (${reason})`.slice(0, 500),
+    });
+    log.warn(
+      {
+        payoutId: row.id,
+        userId: row.userId,
+        currency,
+        amountMinor: amountMinor.toString(),
+        newBalanceMinor: applied.newBalanceMinor.toString(),
+      },
+      'CF-21: failed withdrawal auto-compensated — user re-credited',
+    );
+  } catch (err) {
+    if (err instanceof AlreadyCompensatedError) {
+      log.info({ payoutId: row.id }, 'CF-21: failed withdrawal already compensated — no-op');
+      return;
+    }
+    if (err instanceof PayoutNotCompensableError) {
+      // The row moved out from under us (a concurrent admin retry reset
+      // it, etc.) or a precondition mismatch. Non-fatal at the worker
+      // level — ops has been paged via notifyPayoutFailed.
+      log.warn(
+        { payoutId: row.id, err: err.message },
+        'CF-21: auto-compensation precondition not met — leaving for manual review',
+      );
+      return;
+    }
+    // Daily-cap hit or a DB blip. Swallow — the row is terminally
+    // failed and ops is already paged; do not abort the tick.
+    log.error(
+      { err, payoutId: row.id },
+      'CF-21: auto-compensation threw — user NOT re-credited; manual compensation needed',
+    );
+  }
 }

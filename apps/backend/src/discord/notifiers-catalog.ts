@@ -134,6 +134,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       "A4-023: fires when an order's pinned chargeCurrency diverges from the user's home_currency at fulfillment time. Off-chain cashback ledger row writes; on-chain payout is skipped. Ops gets a paging-grade signal so the 1:1 LOOP-asset peg can be restored manually before reconciliation drift accumulates.",
   },
   {
+    name: 'notifyOrderFailedAfterCtxPaid',
+    channel: 'monitoring',
+    description:
+      'CF-20 (x-flows F1-1): fires when an order fails AFTER Loop already paid CTX (operator XLM/USDC spent) and the user already paid Loop. The worker auto-refunds the user off-chain; ops must chase the wholesale cost back from CTX (operator-side debt). Title escalates to a P0 shape when the auto-refund itself failed (user + treasury both out).',
+  },
+  {
     name: 'notifyInterestPoolLow',
     channel: 'monitoring',
     description:

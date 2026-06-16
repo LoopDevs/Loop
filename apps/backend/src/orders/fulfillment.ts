@@ -68,8 +68,12 @@ export async function markOrderFulfilled(
   const txnResult = await db.transaction<{
     order: Order;
     pegBreak: PegBreakAlert | null;
+    // CF-16: whether the durable peg-break pending_payouts row was
+    // written inside the txn (drives the post-commit log only).
+    pegBreakDurableRow: boolean;
   } | null>(async (tx) => {
     let pegBreak: PegBreakAlert | null = null;
+    let pegBreakDurableRow = false;
     const updated = await tx
       .update(orders)
       .set({
@@ -147,15 +151,73 @@ export async function markOrderFulfilled(
         // at order creation), but would indicate support-mediated
         // home-currency change after an order was placed.
         if (order.chargeCurrency !== userRow.homeCurrency) {
-          // A4-023: peg break. Off-chain cashback already wrote
-          // (above), but on-chain payout is skipped. Surface
-          // beyond a log line — emit a Discord alert so ops can
-          // manually compensate the on-chain side and restore
-          // the 1:1 invariant. Capture the payload here; the log
-          // + fire-and-forget notify happen after the transaction
-          // resolves (see below) so a rollback can't alert on
-          // ledger writes that never committed. A Discord blip
-          // never blocks the order's transition.
+          // A4-023 peg break: the order's pinned chargeCurrency no
+          // longer matches the user's home currency (support-mediated
+          // home-currency change after the order was placed). The
+          // off-chain cashback already wrote (above) in chargeCurrency.
+          //
+          // CF-16 (x-flows F2-1): build the matching on-chain payout in
+          // the order's chargeCurrency — exactly what the peg-break
+          // runbook prescribes ("issue the on-chain payout in the
+          // order's chargeCurrency") — and write a DURABLE
+          // pending_payouts row so the payout worker actually drives
+          // the on-chain emission later. Previously this path only
+          // emitted a Discord warn, so a missed alert meant a permanent
+          // off-chain/on-chain divergence with nothing to reconcile it.
+          //
+          // The pending_payouts_order_unique index keeps this idempotent
+          // against a re-run; the worker's trustline pre-check + issuer
+          // gate handle the user-not-ready cases. We pass the order's
+          // chargeCurrency (a LOOP home currency) as the asset selector
+          // so buildPayoutIntent picks the chargeCurrency LOOP asset,
+          // not the user's new home-currency asset.
+          let durableRowWritten = false;
+          if (isHomeCurrency(order.chargeCurrency)) {
+            const decision = buildPayoutIntent({
+              stellarAddress: userRow.stellarAddress,
+              homeCurrency: order.chargeCurrency,
+              userCashbackMinor: order.userCashbackMinor,
+            });
+            if (decision.kind === 'pay') {
+              const inserted = await tx
+                .insert(pendingPayouts)
+                .values({
+                  userId: order.userId,
+                  orderId: order.id,
+                  assetCode: decision.intent.assetCode,
+                  assetIssuer: decision.intent.assetIssuer,
+                  toAddress: decision.intent.to,
+                  amountStroops: decision.intent.amountStroops,
+                  memoText: decision.intent.memoText,
+                })
+                .onConflictDoNothing({ target: pendingPayouts.orderId })
+                .returning({ id: pendingPayouts.id });
+              durableRowWritten = inserted.length > 0;
+            } else {
+              // no_address / no_issuer / no_cashback — same skip
+              // reasons as the happy path. The Discord alert below
+              // still fires so ops can drive the on-chain side
+              // manually once the user is ready (links a wallet, etc.).
+              log.info(
+                { orderId: order.id, reason: decision.reason },
+                'CF-16: peg-break durable payout row skipped (builder skip reason); Discord alert still fires',
+              );
+            }
+          } else {
+            // chargeCurrency isn't a LOOP home currency — can't pin an
+            // asset. Should not happen (charge currency is pinned to a
+            // LOOP currency at order creation); alert-only fallback.
+            log.error(
+              { orderId: order.id, chargeCurrency: order.chargeCurrency },
+              'CF-16: peg-break chargeCurrency is not a LOOP home currency — cannot build durable payout row',
+            );
+          }
+          // Surface beyond a log line — emit a Discord alert so ops can
+          // confirm the on-chain side. Capture the payload here; the
+          // log + fire-and-forget notify happen after the transaction
+          // resolves (see below) so a rollback can't alert on ledger
+          // writes that never committed. A Discord blip never blocks
+          // the order's transition.
           pegBreak = {
             orderId: order.id,
             userId: order.userId,
@@ -163,6 +225,7 @@ export async function markOrderFulfilled(
             userHomeCurrency: userRow.homeCurrency,
             cashbackMinor: order.userCashbackMinor.toString(),
           };
+          pegBreakDurableRow = durableRowWritten;
         } else {
           const decision = buildPayoutIntent({
             stellarAddress: userRow.stellarAddress,
@@ -191,7 +254,7 @@ export async function markOrderFulfilled(
         }
       }
     }
-    return { order, pegBreak };
+    return { order, pegBreak, pegBreakDurableRow };
   });
   if (txnResult === null) return null;
   if (txnResult.pegBreak !== null) {
@@ -200,8 +263,16 @@ export async function markOrderFulfilled(
         orderId: txnResult.pegBreak.orderId,
         chargeCurrency: txnResult.pegBreak.chargeCurrency,
         userHomeCurrency: txnResult.pegBreak.userHomeCurrency,
+        // CF-16: true → a durable pending_payouts row in chargeCurrency
+        // was written, so the payout worker will drive the on-chain
+        // emission (no longer alert-only). false → builder skip
+        // (no wallet / no issuer) or non-LOOP chargeCurrency; ops drives
+        // it manually per the runbook.
+        durablePayoutRowWritten: txnResult.pegBreakDurableRow,
       },
-      'A4-023: order charge currency diverged from user home currency — on-chain payout skipped, peg break Discord notification sent',
+      txnResult.pegBreakDurableRow
+        ? 'A4-023/CF-16: order charge currency diverged from user home currency — durable on-chain payout row written in chargeCurrency, peg break Discord notification sent'
+        : 'A4-023/CF-16: order charge currency diverged from user home currency — durable payout row NOT written (no wallet/issuer); peg break Discord notification sent',
     );
     notifyPegBreakOnFulfillment(txnResult.pegBreak);
   }

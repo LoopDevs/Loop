@@ -104,7 +104,13 @@ const { envMock } = vi.hoisted(() => ({
 }));
 vi.mock('../../env.js', () => ({ env: envMock }));
 
-import { applyAdminRefund, RefundAlreadyIssuedError, RefundOrderInvalidError } from '../refunds.js';
+import {
+  applyAdminRefund,
+  applyOrderAutoRefund,
+  AUTO_REFUND_SYSTEM_ACTOR,
+  RefundAlreadyIssuedError,
+  RefundOrderInvalidError,
+} from '../refunds.js';
 import { DailyAdjustmentLimitError } from '../adjustments.js';
 
 /** A matching order row the validation accepts (USD, charge 5000). */
@@ -414,5 +420,53 @@ describe('applyAdminRefund', () => {
       expect(state.insertCreditCalls).toHaveLength(0);
       expect(state.insertUserCreditsCalls).toHaveLength(0);
     });
+  });
+});
+
+describe('applyOrderAutoRefund (CF-20)', () => {
+  it('delegates to applyAdminRefund with the system actor + reason prefix', async () => {
+    state.forUpdateResponses = [[okOrder()], []];
+    state.returnedCreditRow = { id: 'ct-auto', createdAt: new Date('2026-06-15') };
+    const result = await applyOrderAutoRefund({
+      userId: 'u-1',
+      currency: 'USD',
+      amountMinor: 500n,
+      orderId: 'o-1',
+      reason: 'order failed after CTX paid: timeout',
+    });
+    expect(result.amountMinor).toBe(500n);
+    // Same validated refund row shape as the admin path — positive,
+    // type='refund', order-scoped.
+    expect(state.insertCreditCalls[0]).toMatchObject({
+      userId: 'u-1',
+      type: 'refund',
+      amountMinor: 500n,
+      currency: 'USD',
+      referenceType: 'order',
+      referenceId: 'o-1',
+    });
+    // The reason carries the greppable system-actor prefix so an auto
+    // refund is distinguishable from an operator-issued one on the row.
+    expect((state.insertCreditCalls[0] as { reason: string }).reason).toContain(
+      AUTO_REFUND_SYSTEM_ACTOR,
+    );
+    expect((state.insertCreditCalls[0] as { reason: string }).reason).toContain(
+      'order failed after CTX paid: timeout',
+    );
+  });
+
+  it('over-refund / wrong-currency fences still apply (it is the admin primitive underneath)', async () => {
+    // Order charged 5000 USD; an auto-refund for 9000 must be rejected
+    // by the same over-refund fence applyAdminRefund enforces.
+    state.forUpdateResponses = [[okOrder({ chargeMinor: 5000n })]];
+    await expect(
+      applyOrderAutoRefund({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 9000n,
+        orderId: 'o-1',
+        reason: 'x',
+      }),
+    ).rejects.toBeInstanceOf(RefundOrderInvalidError);
   });
 });
