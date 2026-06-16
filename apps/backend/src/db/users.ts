@@ -21,6 +21,36 @@ const adminCtxUserIds = new Set(
 );
 
 /**
+ * CF-30: Admin allowlist for LOOP-NATIVE users — verified emails parsed
+ * from `ADMIN_EMAILS` once at module load. The CTX allowlist above is
+ * keyed on `ctx_user_id`, which UUID-anchored native users never carry,
+ * so without this an `LOOP_AUTH_NATIVE_ENABLED=true` deployment leaves
+ * `/api/admin/*` unreachable to everyone (every native session is
+ * `is_admin = false`). Emails are normalized lowercase + trim to match
+ * the canonical form persisted on `users.email`. Same module-load
+ * caching rationale as the CTX set: env is immutable after boot, so a
+ * grant/revoke is a config change (re-deploy), not a DB write.
+ */
+const adminEmails = new Set(
+  (env.ADMIN_EMAILS ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0),
+);
+
+/**
+ * CF-30: True when `email` is on the `ADMIN_EMAILS` allowlist. Callers
+ * MUST only pass a provider/OTP-verified email — granting admin off an
+ * unverified address would let anyone claim an allowlisted identity.
+ * Both native entry points (`findOrCreateUserByEmail` on OTP-verify,
+ * `resolveOrCreateUserForIdentity` on `email_verified` social login)
+ * satisfy that. An empty allowlist (the default) always returns false.
+ */
+export function isAdminEmail(email: string): boolean {
+  return adminEmails.has(email.toLowerCase().trim());
+}
+
+/**
  * Upsert a Loop user from a CTX identity. Called from `requireAdmin`
  * (and, later, from `requireAuth` when the identity takeover lands
  * — ADR 013). The email is best-effort — if the bearer's JWT didn't
@@ -106,10 +136,29 @@ export async function findOrCreateUserByEmail(email: string): Promise<User> {
   // forgets the upstream guard — both shapes converge to the same
   // canonical string.
   const normalised = email.toLowerCase().trim();
+  // CF-30: the email reaching here is OTP/provider-verified (callers
+  // route through verify-otp / email_verified social login), so it's
+  // safe to consult the native admin allowlist.
+  const isAdmin = isAdminEmail(normalised);
   const existing = await db.query.users.findFirst({
     where: eq(users.email, normalised),
   });
-  if (existing !== undefined && existing !== null) return existing;
+  if (existing !== undefined && existing !== null) {
+    // CF-30: config-parity reconcile. The allowlist is the source of
+    // truth (env, not DB), mirroring the CTX path's recompute-on-upsert.
+    // If a grant/revoke was deployed after this row was created, bring
+    // `is_admin` in line on next verified login rather than leaving it
+    // stuck at the create-time value.
+    if (existing.isAdmin !== isAdmin) {
+      const [updated] = await db
+        .update(users)
+        .set({ isAdmin, updatedAt: sql`NOW()` })
+        .where(eq(users.id, existing.id))
+        .returning();
+      return updated ?? { ...existing, isAdmin };
+    }
+    return existing;
+  }
   // INSERT ... ON CONFLICT DO NOTHING — if a concurrent signup raced
   // us past the SELECT, the unique index trips and no row is
   // returned. We then re-SELECT to find the row the winning caller
@@ -118,8 +167,9 @@ export async function findOrCreateUserByEmail(email: string): Promise<User> {
     .insert(users)
     .values({
       email: normalised,
-      // isAdmin defaults to false in the schema. Loop-native users get
-      // admin via a future migration to key allowlists on Loop UUIDs.
+      // CF-30: native admin grant via the `ADMIN_EMAILS` allowlist —
+      // the email is verified by the time we reach here.
+      isAdmin,
     })
     .onConflictDoNothing()
     .returning();
@@ -129,6 +179,15 @@ export async function findOrCreateUserByEmail(email: string): Promise<User> {
   });
   if (raced === undefined || raced === null) {
     throw new Error('findOrCreateUserByEmail: no row returned after conflict');
+  }
+  // CF-30: same config-parity reconcile on the raced winner.
+  if (raced.isAdmin !== isAdmin) {
+    const [updated] = await db
+      .update(users)
+      .set({ isAdmin, updatedAt: sql`NOW()` })
+      .where(eq(users.id, raced.id))
+      .returning();
+    return updated ?? { ...raced, isAdmin };
   }
   return raced;
 }

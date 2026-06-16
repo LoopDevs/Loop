@@ -216,6 +216,21 @@ export const EnvSchema = z.object({
   // future refinement once the user-profile sync job lands.
   ADMIN_CTX_USER_IDS: z.string().default(''),
 
+  // CF-30: Comma-separated list of verified emails granted admin
+  // privileges on the LOOP-NATIVE auth path (ADR 013). The
+  // `ADMIN_CTX_USER_IDS` allowlist above is keyed on `ctx_user_id`,
+  // which UUID-anchored Loop-native users never carry — so without
+  // this var every native session resolves `is_admin = false` and the
+  // entire `/api/admin/*` surface is unreachable once
+  // `LOOP_AUTH_NATIVE_ENABLED=true`. Evaluated at native user
+  // create/login to set `users.is_admin` (config-not-DB-write parity
+  // with the CTX path). Only granted on a provider/OTP-verified email:
+  // both native entry points (`findOrCreateUserByEmail` on OTP,
+  // `resolveOrCreateUserForIdentity` on social) are reached only after
+  // the email is verified. Matched case-insensitively (normalized
+  // lowercase + trim, same canonical form as the user row's email).
+  ADMIN_EMAILS: z.string().default(''),
+
   // Defaults for the cashback split when a merchant has no admin-set
   // `merchant_cashback_configs` row (ADR 011). Applied in
   // `computeCashbackSplit` as a fallback so newly-synced merchants
