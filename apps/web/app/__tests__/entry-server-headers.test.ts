@@ -18,7 +18,9 @@ describe('A2-1604 — web security headers at serve time', () => {
     expect(h['Referrer-Policy']).toBe('strict-origin-when-cross-origin');
     expect(h['Strict-Transport-Security']).toContain('max-age=');
     expect(h['Permissions-Policy']).toContain('camera=()');
-    expect(h['Cross-Origin-Opener-Policy']).toBe('same-origin');
+    // CF-27: relaxed from `same-origin` to `same-origin-allow-popups`
+    // so the Sign in with Apple popup keeps its window.opener link.
+    expect(h['Cross-Origin-Opener-Policy']).toBe('same-origin-allow-popups');
     expect(h['Cross-Origin-Resource-Policy']).toBe('same-origin');
   });
 

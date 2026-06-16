@@ -50,13 +50,15 @@ export function buildSecurityHeaders(options: SecurityHeadersOptions = {}): Reco
   // there's no request-time hook to mint a nonce there.
   const scriptSrcDirective =
     options.inlineScriptNonce !== undefined
-      ? `script-src 'self' 'nonce-${options.inlineScriptNonce}' https://accounts.google.com`
-      : `script-src 'self' 'unsafe-inline' https://accounts.google.com`;
+      ? `script-src 'self' 'nonce-${options.inlineScriptNonce}' https://accounts.google.com https://appleid.cdn-apple.com`
+      : `script-src 'self' 'unsafe-inline' https://accounts.google.com https://appleid.cdn-apple.com`;
   const csp = [
     "default-src 'self'",
     // accounts.google.com/gsi/client: Google Identity Services SDK
     // loaded on demand when the sign-in route mounts and the
     // deployment has a Google client id configured (ADR 014).
+    // appleid.cdn-apple.com: Sign in with Apple JS SDK, loaded the same
+    // way when an Apple Service ID is configured (CF-27 / ADR 014).
     scriptSrcDirective,
     `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com`,
     `font-src 'self' https://fonts.gstatic.com`,
@@ -65,9 +67,10 @@ export function buildSecurityHeaders(options: SecurityHeadersOptions = {}): Reco
     // from `a.basemaps.cartocdn.com` etc., so the bare-domain entry would
     // block every tile load. Use the wildcard form for both CARTO and OSM.
     `img-src 'self' data: blob: ${apiOrigin} https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://*.googleusercontent.com`,
-    `connect-src 'self' ${apiOrigin} https://*.ingest.sentry.io https://*.ingest.de.sentry.io https://accounts.google.com`,
-    // Google renders its sign-in button inside an iframe it owns.
-    `frame-src https://accounts.google.com`,
+    `connect-src 'self' ${apiOrigin} https://*.ingest.sentry.io https://*.ingest.de.sentry.io https://accounts.google.com https://appleid.apple.com`,
+    // Google renders its sign-in button inside an iframe it owns; Apple's
+    // JS SDK opens appleid.apple.com (popup, and an iframe for state).
+    `frame-src https://accounts.google.com https://appleid.apple.com`,
     "frame-ancestors 'none'",
     "base-uri 'none'",
     "form-action 'self'",
@@ -93,7 +96,12 @@ export function buildSecurityHeaders(options: SecurityHeadersOptions = {}): Reco
     // re-enable as `payment=(self)` if/when the Payment Request
     // API is wired in.
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=(self), payment=()',
-    'Cross-Origin-Opener-Policy': 'same-origin',
+    // `same-origin-allow-popups` (not the stricter `same-origin`) so the
+    // Sign in with Apple popup (`appleid.apple.com`) keeps its
+    // `window.opener` reference and can post the authorization back to us
+    // (CF-27). Same-origin documents are still isolated from cross-origin
+    // openers — only popups we open ourselves retain the link.
+    'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
     'Cross-Origin-Resource-Policy': 'same-origin',
   };
 }

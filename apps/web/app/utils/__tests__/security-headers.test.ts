@@ -49,6 +49,20 @@ describe('buildSecurityHeaders', () => {
     expect(csp).toContain('ingest.sentry.io');
   });
 
+  it('CF-27: allows the Sign in with Apple JS SDK + popup origins', () => {
+    const csp = h['Content-Security-Policy'] ?? '';
+    const directive = (name: string): string =>
+      csp
+        .split(';')
+        .map((d) => d.trim())
+        .find((d) => d.startsWith(`${name} `)) ?? '';
+    // SDK script host.
+    expect(directive('script-src')).toContain('https://appleid.cdn-apple.com');
+    // Popup OAuth host (postMessage target / iframe).
+    expect(directive('connect-src')).toContain('https://appleid.apple.com');
+    expect(directive('frame-src')).toContain('https://appleid.apple.com');
+  });
+
   it('sets anti-clickjacking + MIME-sniff + referrer + HSTS headers', () => {
     expect(h['X-Frame-Options']).toBe('DENY');
     expect(h['X-Content-Type-Options']).toBe('nosniff');
@@ -68,7 +82,10 @@ describe('buildSecurityHeaders', () => {
   });
 
   it('sets cross-origin isolation headers', () => {
-    expect(h['Cross-Origin-Opener-Policy']).toBe('same-origin');
+    // CF-27: `same-origin-allow-popups` (not `same-origin`) so the Sign
+    // in with Apple popup retains its window.opener link to post the
+    // authorization back. Same-origin docs stay isolated regardless.
+    expect(h['Cross-Origin-Opener-Policy']).toBe('same-origin-allow-popups');
     expect(h['Cross-Origin-Resource-Policy']).toBe('same-origin');
   });
 

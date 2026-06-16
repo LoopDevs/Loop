@@ -15,6 +15,7 @@ import { PageHeader } from '~/components/ui/PageHeader';
 import { Button } from '~/components/ui/Button';
 import { Input } from '~/components/ui/Input';
 import { GoogleSignInButton } from '~/components/features/auth/GoogleSignInButton';
+import { AppleSignInButton } from '~/components/features/auth/AppleSignInButton';
 import { checkBiometrics, authenticateWithBiometrics } from '~/native/biometrics';
 import { isAppLockEnabled, setAppLockEnabled } from '~/native/app-lock';
 import {
@@ -351,13 +352,20 @@ export default function AuthRoute(): React.JSX.Element {
     requestOtp,
     verifyOtp: verifyAndStore,
     signInWithGoogle,
+    signInWithApple,
     logout,
   } = useAuth();
   const { isNative } = useNativePlatform();
   const { config } = useAppConfig();
-  const googleClientId = isNative
-    ? (config.social.googleClientIdIos ?? config.social.googleClientIdAndroid)
-    : config.social.googleClientIdWeb;
+  // CF-27 / audit M-02: Google's GSI web SDK is blocked inside the
+  // Capacitor WebView (`disallowed_useragent`), so the Google button is
+  // web-only. Native users get Sign in with Apple (Apple's JS SDK does
+  // run in WKWebView) + email-OTP. Web keeps Google + Apple + email-OTP.
+  const googleClientId = isNative ? null : config.social.googleClientIdWeb;
+  // CF-27 / audit M-01: Sign in with Apple — required by App Store
+  // Guideline 4.8 wherever a third-party social login (Google) ships.
+  // Apple uses one Service ID across web + native.
+  const appleServiceId = config.social.appleServiceId;
 
   const [step, setStep] = useState<AuthStep>('email');
   const [email, setEmail] = useState('');
@@ -404,6 +412,24 @@ export default function AuthRoute(): React.JSX.Element {
         });
     },
     // signInWithGoogle identity is stable via useAuthStore; the
+    // setters from local useState are stable too.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const handleAppleCredential = useCallback(
+    (idToken: string) => {
+      setError(null);
+      setIsLoading(true);
+      void signInWithApple(idToken)
+        .catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : 'Apple sign-in failed.');
+        })
+        .finally(() => {
+          setIsLoading(false);
+        });
+    },
+    // signInWithApple identity is stable via useAuthStore; the
     // setters from local useState are stable too.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -546,20 +572,34 @@ export default function AuthRoute(): React.JSX.Element {
 
           {step === 'email' ? (
             <div className="space-y-4">
-              {googleClientId !== null && googleClientId.length > 0 ? (
-                <>
-                  <GoogleSignInButton
-                    clientId={googleClientId}
-                    onCredential={handleGoogleCredential}
-                  />
-                  <div className="relative flex items-center justify-center my-2">
-                    <span className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-px bg-gray-200 dark:bg-gray-800" />
-                    <span className="relative bg-white dark:bg-gray-950 px-3 text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                      or
-                    </span>
-                  </div>
-                </>
-              ) : null}
+              {(() => {
+                const google =
+                  googleClientId !== null && googleClientId.length > 0 ? googleClientId : null;
+                const apple =
+                  appleServiceId !== null && appleServiceId.length > 0 ? appleServiceId : null;
+                if (google === null && apple === null) return null;
+                return (
+                  <>
+                    <div className="space-y-3">
+                      {google !== null ? (
+                        <GoogleSignInButton
+                          clientId={google}
+                          onCredential={handleGoogleCredential}
+                        />
+                      ) : null}
+                      {apple !== null ? (
+                        <AppleSignInButton serviceId={apple} onCredential={handleAppleCredential} />
+                      ) : null}
+                    </div>
+                    <div className="relative flex items-center justify-center my-2">
+                      <span className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-px bg-gray-200 dark:bg-gray-800" />
+                      <span className="relative bg-white dark:bg-gray-950 px-3 text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                        or
+                      </span>
+                    </div>
+                  </>
+                );
+              })()}
               <form
                 onSubmit={(e) => {
                   void handleEmailSubmit(e);
