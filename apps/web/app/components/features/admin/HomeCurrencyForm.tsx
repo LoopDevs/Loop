@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiException } from '@loop/shared';
 import {
+  generateIdempotencyKey,
   setUserHomeCurrency,
   type AdminWriteEnvelope,
   type HomeCurrencySetResult,
@@ -41,6 +42,8 @@ export function HomeCurrencyForm({ userId, currentHomeCurrency }: Props): React.
   const [pendingPayload, setPendingPayload] = useState<{
     homeCurrency: Currency;
     reason: string;
+    // CF-09: minted once at confirm time, reused on the step-up retry.
+    idempotencyKey: string;
   } | null>(null);
 
   const stepUp = useAdminStepUp();
@@ -81,14 +84,23 @@ export function HomeCurrencyForm({ userId, currentHomeCurrency }: Props): React.
       return;
     }
 
-    setPendingPayload({ homeCurrency: target, reason: trimmedReason });
+    setPendingPayload({
+      homeCurrency: target,
+      reason: trimmedReason,
+      idempotencyKey: generateIdempotencyKey(),
+    });
   };
 
   const handleConfirm = (confirmed: boolean): void => {
     const payload = pendingPayload;
     setPendingPayload(null);
     if (!confirmed || payload === null) return;
-    mutation.mutate({ userId, homeCurrency: payload.homeCurrency, reason: payload.reason });
+    mutation.mutate({
+      userId,
+      homeCurrency: payload.homeCurrency,
+      reason: payload.reason,
+      idempotencyKey: payload.idempotencyKey,
+    });
   };
 
   const dialogBody =

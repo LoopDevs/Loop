@@ -86,9 +86,11 @@ export async function listCashbackConfigs(): Promise<{ configs: MerchantCashback
 
 /**
  * `PUT /api/admin/merchant-cashback-configs/:merchantId` — ADR 017
- * admin write. Service generates a per-click `Idempotency-Key` so
- * a double-submit of the form can't apply the edit twice; response
- * is the standard `{ result, audit }` envelope.
+ * admin write. Response is the standard `{ result, audit }` envelope.
+ *
+ * CF-09: pass `idempotencyKey` to reuse one key across a re-submit
+ * (mint it once when the operator confirms). Defaults to a fresh
+ * per-call key so the natural double-click case is still covered.
  */
 export async function upsertCashbackConfig(
   merchantId: string,
@@ -99,12 +101,13 @@ export async function upsertCashbackConfig(
     active?: boolean;
     reason: string;
   },
+  options: { idempotencyKey?: string } = {},
 ): Promise<AdminWriteEnvelope<MerchantCashbackConfig>> {
   return authenticatedRequest<AdminWriteEnvelope<MerchantCashbackConfig>>(
     `/api/admin/merchant-cashback-configs/${encodeURIComponent(merchantId)}`,
     {
       method: 'PUT',
-      headers: { 'Idempotency-Key': generateIdempotencyKey() },
+      headers: { 'Idempotency-Key': options.idempotencyKey ?? generateIdempotencyKey() },
       body,
     },
   );

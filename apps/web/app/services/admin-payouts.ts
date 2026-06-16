@@ -103,18 +103,27 @@ export async function getAdminPayoutByOrder(orderId: string): Promise<AdminPayou
 
 /**
  * `POST /api/admin/payouts/:id/retry` — ADR 017 admin write. Flips a
- * failed row back to pending. Service-generated `Idempotency-Key`
- * makes a double-click produce at most one state transition.
+ * failed row back to pending.
+ *
+ * CF-09: pass `idempotencyKey` when the caller has already minted one
+ * for this action attempt (the form mints it once when the operator
+ * confirms, then reuses it across the step-up retry) so the
+ * ADR-017 dedup also covers the post-completion re-click case — a
+ * second click after the request settles must re-send the SAME key,
+ * not a fresh one the backend has never seen. Defaults to a fresh
+ * per-call key so the natural double-click case is still covered for
+ * callers that don't thread one through.
  */
 export async function retryPayout(args: {
   id: string;
   reason: string;
+  idempotencyKey?: string;
 }): Promise<AdminWriteEnvelope<AdminPayoutView>> {
   return authenticatedRequest<AdminWriteEnvelope<AdminPayoutView>>(
     `/api/admin/payouts/${encodeURIComponent(args.id)}/retry`,
     {
       method: 'POST',
-      headers: { 'Idempotency-Key': generateIdempotencyKey() },
+      headers: { 'Idempotency-Key': args.idempotencyKey ?? generateIdempotencyKey() },
       body: { reason: args.reason },
       // ADR-028 / A4-063: gated by step-up auth.
       withStepUp: true,

@@ -4,7 +4,9 @@ import { Link, useParams } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { Route } from './+types/admin.payouts.$id';
 import { shouldRetry } from '~/hooks/query-retry';
+import { useAdminStepUp } from '~/hooks/use-admin-step-up';
 import {
+  generateIdempotencyKey,
   getAdminPayout,
   retryPayout,
   type AdminPayoutView,
@@ -14,6 +16,7 @@ import { AdminNav } from '~/components/features/admin/AdminNav';
 import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { CopyButton } from '~/components/features/admin/CopyButton';
 import { ReasonDialog } from '~/components/features/admin/ReasonDialog';
+import { StepUpModal } from '~/components/features/admin/StepUpModal';
 import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
 import { fmtStroops } from '~/utils/format-stellar';
@@ -75,8 +78,15 @@ function AdminPayoutDetailRouteInner(): React.JSX.Element {
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [retryDialogId, setRetryDialogId] = useState<string | null>(null);
+
+  // W-01 / CF-09: same step-up wrap as the payouts list route — a 401
+  // STEP_UP_REQUIRED opens the OTP modal + retries instead of dead-
+  // ending. The idempotency key is minted per attempt and reused on
+  // the step-up retry so the ADR-017 dedup holds.
+  const stepUp = useAdminStepUp();
   const retryMutation = useMutation({
-    mutationFn: retryPayout,
+    mutationFn: (args: { id: string; reason: string; idempotencyKey: string }) =>
+      stepUp.runWithStepUp(() => retryPayout(args)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['admin-payout'] });
       void queryClient.invalidateQueries({ queryKey: ['admin-payouts'] });
@@ -101,7 +111,8 @@ function AdminPayoutDetailRouteInner(): React.JSX.Element {
     if (id === null || reason === null) return;
     setRetrying(true);
     setRetryError(null);
-    retryMutation.mutate({ id, reason });
+    // CF-09: one key per action attempt, reused across the step-up retry.
+    retryMutation.mutate({ id, reason, idempotencyKey: generateIdempotencyKey() });
   };
 
   const notFound = query.error instanceof ApiException && query.error.status === 404;
@@ -115,6 +126,9 @@ function AdminPayoutDetailRouteInner(): React.JSX.Element {
         confirmLabel="Retry payout"
         onResolve={handleRetryReasonResolve}
       />
+      {stepUp.modalOpen && (
+        <StepUpModal onConfirm={stepUp.handleStepUpConfirm} onCancel={stepUp.handleStepUpCancel} />
+      )}
       <AdminNav />
       <nav aria-label="Back to payouts list">
         <Link

@@ -159,6 +159,25 @@ describe('notifyAdminBulkRead', () => {
     const e = lastEmbed();
     expect(e.fields.find((f) => f.name === 'Query')).toBeUndefined();
   });
+
+  it('includes a Rows field for a bulk JSON list read (CF-10)', () => {
+    notifyAdminBulkRead({
+      actorUserId: 'admin',
+      endpoint: 'GET /api/admin/users',
+      rowCount: 100,
+    });
+    const e = lastEmbed();
+    expect(e.fields.find((f) => f.name === 'Rows')?.value).toBe('100');
+  });
+
+  it('omits the Rows field for a CSV export (no rowCount supplied)', () => {
+    notifyAdminBulkRead({
+      actorUserId: 'admin',
+      endpoint: 'GET /api/admin/users.csv',
+    });
+    const e = lastEmbed();
+    expect(e.fields.find((f) => f.name === 'Rows')).toBeUndefined();
+  });
 });
 
 describe('notifyCashbackConfigChanged', () => {

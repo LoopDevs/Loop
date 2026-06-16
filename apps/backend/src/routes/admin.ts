@@ -78,7 +78,11 @@
 import type { Context, Hono } from 'hono';
 import { logger } from '../logger.js';
 import type { User } from '../db/users.js';
-import { sanitizeAdminReadQueryString } from '../admin/read-audit.js';
+import {
+  BULK_LIST_ROW_THRESHOLD,
+  countAdminListRows,
+  sanitizeAdminReadQueryString,
+} from '../admin/read-audit.js';
 import { privateNoStoreResponse } from '../middleware/cache-control.js';
 import { requireAuth } from '../auth/handler.js';
 import { requireAdmin } from '../auth/require-admin.js';
@@ -125,15 +129,22 @@ export function mountAdminRoutes(app: Hono): void {
   app.use('/api/admin/*', requireAuth);
   app.use('/api/admin/*', requireAdmin);
 
-  // A2-2008: admin read audit. Every admin GET emits a Pino access-log
-  // line tagged `audit-read` so the line-item read trail survives off
-  // the host (Fly logflow ships logs externally — harder to tamper with
-  // than a DB row). Bulk reads (CSV downloads + sufficiently-large list
-  // pulls) additionally fire a Discord ping in #admin-audit so a human
-  // sees the export-in-progress signal alongside the existing write
-  // stream. Single-row drills stay log-only — sending every drill to
-  // Discord would flood the channel and dilute the signal on real
-  // bulk-exfil patterns.
+  // A2-2008 / CF-10: admin read audit. Every admin GET emits a Pino
+  // access-log line tagged `audit-read` so the line-item read trail
+  // survives off the host (Fly logflow ships logs externally — harder
+  // to tamper with than a DB row). Bulk reads additionally fire a
+  // Discord ping in #admin-audit so a human sees the export-in-progress
+  // signal alongside the existing write stream. A read counts as "bulk"
+  // when EITHER:
+  //   - the path is a `.csv` export (any size), OR
+  //   - CF-10: a JSON list response returns ≥ BULK_LIST_ROW_THRESHOLD
+  //     rows. The original A2-2008 tripwire only wired the `.csv` path,
+  //     leaving cursor-walking JSON list pulls (`/users`, `/top-users`,
+  //     `/recycling-activity` — all email-bearing) unmonitored. A
+  //     near-max page is the fingerprint of a PII exfil walk.
+  // Single-row drills + small filtered lists stay log-only — sending
+  // every drill to Discord would flood the channel and dilute the
+  // signal on real bulk-exfil patterns.
   app.use('/api/admin/*', async (c, next) => {
     await next();
     if (c.req.method !== 'GET') return;
@@ -145,6 +156,23 @@ export function mountAdminRoutes(app: Hono): void {
     const query = sanitizeAdminReadQueryString(c.req.url.split('?')[1] ?? '');
     const isCsv = path.endsWith('.csv');
 
+    // CF-10: count list rows in non-CSV JSON responses. Clone the
+    // response so reading the body doesn't drain the stream the client
+    // is waiting on. Body-read failures fall back to rowCount=0 (never
+    // throws) so the audit pass can't break the response path.
+    let rowCount = 0;
+    if (!isCsv) {
+      try {
+        const clone = c.res.clone();
+        const body = await clone.text();
+        rowCount = countAdminListRows(body, clone.headers.get('content-type'));
+      } catch {
+        rowCount = 0;
+      }
+    }
+    const isBulkList = rowCount >= BULK_LIST_ROW_THRESHOLD;
+    const isBulk = isCsv || isBulkList;
+
     logger.info(
       {
         area: 'admin-read-audit',
@@ -152,16 +180,18 @@ export function mountAdminRoutes(app: Hono): void {
         method: c.req.method,
         path,
         query: query !== undefined ? query.slice(0, 200) : undefined,
-        isBulk: isCsv,
+        isBulk,
+        ...(isBulkList ? { rowCount } : {}),
       },
       'Admin read',
     );
 
-    if (isCsv) {
+    if (isBulk) {
       notifyAdminBulkRead({
         actorUserId: actor.id,
         endpoint: `${c.req.method} ${path}`,
         ...(query !== undefined ? { queryString: query } : {}),
+        ...(isBulkList ? { rowCount } : {}),
       });
     }
   });

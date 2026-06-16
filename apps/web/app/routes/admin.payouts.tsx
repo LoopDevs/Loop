@@ -3,12 +3,20 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { isLoopAssetCode } from '@loop/shared';
 import type { Route } from './+types/admin.payouts';
-import { listPayouts, retryPayout, type AdminPayoutView, type PayoutState } from '~/services/admin';
+import {
+  generateIdempotencyKey,
+  listPayouts,
+  retryPayout,
+  type AdminPayoutView,
+  type PayoutState,
+} from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
+import { useAdminStepUp } from '~/hooks/use-admin-step-up';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { ReasonDialog } from '~/components/features/admin/ReasonDialog';
+import { StepUpModal } from '~/components/features/admin/StepUpModal';
 import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
 import { fmtStroops } from '~/utils/format-stellar';
@@ -111,8 +119,20 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [reasonDialogId, setReasonDialogId] = useState<string | null>(null);
+
+  // W-01 / CF-09: payout-retry is a step-up-gated ADR-028 write. Wrap
+  // the mutationFn in `runWithStepUp` so a 401 STEP_UP_REQUIRED opens
+  // the OTP modal + retries instead of dead-ending on a raw error —
+  // matching the credit-adjust / withdrawal forms.
+  const stepUp = useAdminStepUp();
   const retryMutation = useMutation({
-    mutationFn: retryPayout,
+    // CF-09: the idempotency key is minted once per retry attempt (at
+    // reason-confirm time) and carried on `args` so the step-up retry —
+    // and any post-completion re-click — re-sends the SAME key. The
+    // backend's ADR-017 dedup then collapses the re-fire into a replay
+    // rather than a second state transition.
+    mutationFn: (args: { id: string; reason: string; idempotencyKey: string }) =>
+      stepUp.runWithStepUp(() => retryPayout(args)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['admin-payouts'] });
       void queryClient.invalidateQueries({ queryKey: ['admin-treasury'] });
@@ -138,7 +158,9 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
     if (id === null || reason === null) return;
     setRetryingId(id);
     setRetryError(null);
-    retryMutation.mutate({ id, reason });
+    // CF-09: one key per action attempt — minted here, reused on the
+    // step-up retry inside `runWithStepUp`.
+    retryMutation.mutate({ id, reason, idempotencyKey: generateIdempotencyKey() });
   };
 
   const setState = (next: PayoutState | 'all'): void => {
@@ -166,6 +188,9 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
         confirmLabel="Retry payout"
         onResolve={handleReasonResolve}
       />
+      {stepUp.modalOpen && (
+        <StepUpModal onConfirm={stepUp.handleStepUpConfirm} onCancel={stepUp.handleStepUpCancel} />
+      )}
       <AdminNav />
       <header className="flex items-start justify-between gap-4">
         <div>

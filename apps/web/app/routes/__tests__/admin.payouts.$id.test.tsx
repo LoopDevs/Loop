@@ -1,22 +1,27 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { render, screen, cleanup, waitFor, fireEvent, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Routes, Route } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type * as AdminModule from '~/services/admin';
 import AdminPayoutDetailRoute from '../admin.payouts.$id';
 import { fmtStroops } from '~/utils/format-stellar';
+import { useAuthStore } from '~/stores/auth.store';
 
 afterEach(cleanup);
 
-const { adminMock, authMock } = vi.hoisted(() => ({
+const { adminMock, authMock, stepUpMock } = vi.hoisted(() => ({
   adminMock: {
     getAdminPayout: vi.fn(),
     retryPayout: vi.fn(),
   },
   authMock: {
     isAuthenticated: true,
+  },
+  stepUpMock: {
+    requestOtp: vi.fn(),
+    mintAdminStepUp: vi.fn(),
   },
 }));
 
@@ -37,9 +42,36 @@ vi.mock('~/services/admin', async (importActual) => {
   };
 });
 
+// CF-09: the StepUpModal mints a token via these two services. Mock
+// them so the step-up flow drives to completion in the test without a
+// real backend.
+vi.mock('~/services/auth', () => ({
+  requestOtp: (email: string) => stepUpMock.requestOtp(email),
+}));
+vi.mock('~/services/admin-step-up', () => ({
+  mintAdminStepUp: (otp: string) => stepUpMock.mintAdminStepUp(otp),
+}));
+
 vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: authMock.isAuthenticated }),
 }));
+
+// jsdom doesn't ship a complete <dialog> implementation: showModal +
+// close are missing on HTMLDialogElement. Polyfill the minimum surface
+// ReasonDialog / StepUpModal exercise so the dialogs open / close.
+beforeEach(() => {
+  const proto = HTMLDialogElement.prototype as any;
+  if (typeof proto.showModal !== 'function') {
+    proto.showModal = function (this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    };
+  }
+  if (typeof proto.close !== 'function') {
+    proto.close = function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    };
+  }
+});
 
 // A2-1101: RequireAdmin gates the admin shell on /api/users/me.isAdmin.
 import type * as UserModule from '~/services/user';
@@ -151,5 +183,109 @@ describe('<AdminPayoutDetailRoute />', () => {
     await waitFor(() => {
       expect(screen.getByText(/Failed to load payout/)).toBeDefined();
     });
+  });
+});
+
+describe('<AdminPayoutDetailRoute /> step-up retry (W-01 / CF-09)', () => {
+  const failedRow = {
+    ...baseRow,
+    state: 'failed' as const,
+    failedAt: '2026-04-20T10:03:00.000Z',
+    lastError: 'op_underfunded',
+    txHash: null,
+    confirmedAt: null,
+  };
+
+  beforeEach(() => {
+    adminMock.getAdminPayout.mockReset();
+    adminMock.retryPayout.mockReset();
+    stepUpMock.requestOtp.mockReset();
+    stepUpMock.mintAdminStepUp.mockReset();
+    // StepUpModal reads the admin email from the auth store to send the OTP.
+    useAuthStore.setState({ email: 'admin@loop.test' });
+  });
+
+  // Drive the failed row → Retry button → ReasonDialog → mutate.
+  async function clickRetryWithReason(reason: string): Promise<void> {
+    adminMock.getAdminPayout.mockResolvedValue(failedRow);
+    renderAt();
+    const retryBtn = await screen.findByRole('button', { name: /Retry payout/ });
+    await act(async () => {
+      fireEvent.click(retryBtn);
+    });
+    const textarea = await screen.findByRole('textbox');
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: reason } });
+    });
+    const form = textarea.closest('form');
+    if (form === null) throw new Error('reason dialog form not found');
+    await act(async () => {
+      fireEvent.submit(form);
+    });
+  }
+
+  it('opens the StepUpModal instead of dead-ending on 401 STEP_UP_REQUIRED', async () => {
+    adminMock.retryPayout.mockRejectedValue(
+      new ApiException(401, { code: 'STEP_UP_REQUIRED', message: 'Step-up required' }),
+    );
+    await clickRetryWithReason('retry stuck payout');
+    // The modal must appear — the W-01 dead-end was that no modal mounted.
+    await waitFor(() => {
+      expect(screen.getByText(/Confirm with your verification code/)).toBeDefined();
+    });
+    // The raw "Retry failed" error must NOT be shown — the flow elevates instead.
+    expect(screen.queryByText(/Retry failed:/)).toBeNull();
+  });
+
+  it('reuses the same Idempotency-Key across the step-up retry (CF-09)', async () => {
+    // First call rejects with step-up, second (post-mint) resolves.
+    adminMock.retryPayout
+      .mockRejectedValueOnce(
+        new ApiException(401, { code: 'STEP_UP_REQUIRED', message: 'Step-up required' }),
+      )
+      .mockResolvedValueOnce({
+        result: { ...failedRow, state: 'pending' },
+        audit: {
+          actorUserId: 'admin',
+          actorEmail: 'admin@loop.test',
+          idempotencyKey: 'k',
+          appliedAt: '2026-04-20T10:05:00.000Z',
+          replayed: false,
+        },
+      });
+    stepUpMock.requestOtp.mockResolvedValue(undefined);
+    stepUpMock.mintAdminStepUp.mockResolvedValue({
+      stepUpToken: 'tok',
+      expiresAt: '2026-04-20T10:10:00.000Z',
+    });
+
+    await clickRetryWithReason('retry stuck payout');
+
+    // Modal opens; send + confirm the code.
+    const sendBtn = await screen.findByRole('button', { name: /Send code/ });
+    await act(async () => {
+      fireEvent.click(sendBtn);
+    });
+    const otpInput = await screen.findByLabelText(/Verification code/);
+    await act(async () => {
+      fireEvent.change(otpInput, { target: { value: '123456' } });
+    });
+    const confirmBtn = await screen.findByRole('button', { name: 'Confirm' });
+    await act(async () => {
+      fireEvent.click(confirmBtn);
+    });
+
+    await waitFor(() => {
+      expect(adminMock.retryPayout).toHaveBeenCalledTimes(2);
+    });
+    const firstArgs = adminMock.retryPayout.mock.calls[0]?.[0] as
+      | { idempotencyKey?: string }
+      | undefined;
+    const secondArgs = adminMock.retryPayout.mock.calls[1]?.[0] as
+      | { idempotencyKey?: string }
+      | undefined;
+    expect(firstArgs?.idempotencyKey).toBeDefined();
+    // The retry must re-send the SAME key so ADR-017 dedup collapses it.
+    expect(secondArgs?.idempotencyKey).toBe(firstArgs?.idempotencyKey);
   });
 });

@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiException, formatMinorCurrency } from '@loop/shared';
 import {
   applyCreditAdjustment,
+  generateIdempotencyKey,
   type AdminWriteEnvelope,
   type CreditAdjustmentResult,
 } from '~/services/admin';
@@ -79,6 +80,11 @@ export function CreditAdjustmentForm({ userId, defaultCurrency }: Props): React.
     amountMinorBigInt: bigint;
     currency: Currency;
     reason: string;
+    // CF-09: minted once when the operator confirms the intent
+    // (pendingPayload is set), then threaded through the writer and
+    // reused on the step-up retry so ADR-017 dedup also covers the
+    // post-completion re-click — a re-fire re-sends the SAME key.
+    idempotencyKey: string;
   } | null>(null);
 
   // ADR-028 / A4-063: wraps the mutationFn so the step-up auth dance
@@ -136,6 +142,7 @@ export function CreditAdjustmentForm({ userId, defaultCurrency }: Props): React.
       amountMinorBigInt: parsed.minorBigInt,
       currency,
       reason: trimmedReason,
+      idempotencyKey: generateIdempotencyKey(),
     });
   };
 
@@ -148,6 +155,7 @@ export function CreditAdjustmentForm({ userId, defaultCurrency }: Props): React.
       amountMinor: payload.amountMinor,
       currency: payload.currency,
       reason: payload.reason,
+      idempotencyKey: payload.idempotencyKey,
     });
   };
 
