@@ -354,15 +354,35 @@ describe('markOrderFulfilled', () => {
     expect(state.insertPendingPayoutCalls).toHaveLength(0);
   });
 
-  it('skips the payout when order.chargeCurrency diverges from user.home_currency', async () => {
-    // Happens only if the user's home currency was changed post-
-    // order by support. The ledger still wrote in charge_currency;
-    // paying out in a different LOOP asset would send the wrong
-    // denomination, so log + skip.
+  it('CF-16: peg break writes a DURABLE payout row in the order chargeCurrency (was alert-only)', async () => {
+    // Happens only if the user's home currency was changed post-order
+    // by support. The ledger wrote in charge_currency; CF-16 (x-flows
+    // F2-1) now also writes a durable pending_payouts row in the
+    // order's chargeCurrency asset (USDLOOP here) so the on-chain
+    // emission is actually reconciled — previously only a Discord warn
+    // fired, leaving a permanent off-chain/on-chain divergence.
     state.returningRows = [{ ...baseOrder, chargeCurrency: 'USD' }];
     state.userLookupRows = [{ stellarAddress: 'GDESTINATION', homeCurrency: 'GBP' }];
     await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+    expect(state.insertPendingPayoutCalls).toHaveLength(1);
+    // Asset is pinned to the order's chargeCurrency, NOT the user's new
+    // home currency — matches the peg-break runbook.
+    expect(state.insertPendingPayoutCalls[0]).toMatchObject({
+      orderId: 'o-1',
+      assetCode: 'USDLOOP',
+    });
+    // The Discord alert still fires (runbook reference).
+    expect(notifyPegBreakMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('CF-16: peg break with no linked wallet → no durable row, still alerts', async () => {
+    state.returningRows = [{ ...baseOrder, chargeCurrency: 'USD' }];
+    state.userLookupRows = [{ stellarAddress: null, homeCurrency: 'GBP' }];
+    await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+    // builder skip (no_address) → no durable row, but ops still paged
+    // so they can drive the on-chain side once the user links a wallet.
     expect(state.insertPendingPayoutCalls).toHaveLength(0);
+    expect(notifyPegBreakMock).toHaveBeenCalledTimes(1);
   });
 
   it('pays out a cross-FX order where catalog currency differs from home (ledger is home-denominated)', async () => {

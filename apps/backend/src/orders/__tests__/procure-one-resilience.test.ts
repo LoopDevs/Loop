@@ -64,15 +64,33 @@ vi.mock('../pay-ctx.js', async (importActual) => {
 });
 
 // Everything else procureOne references — stubbed so the module loads.
-vi.mock('../../discord.js', () => ({
-  notifyCashbackCredited: vi.fn(),
-  notifyUsdcBelowFloor: vi.fn(),
+const { notifyOrderFailedAfterCtxPaidMock, notifyCashbackCreditedMock } = vi.hoisted(() => ({
+  notifyOrderFailedAfterCtxPaidMock: vi.fn(),
+  notifyCashbackCreditedMock: vi.fn(),
 }));
+vi.mock('../../discord.js', () => ({
+  notifyCashbackCredited: notifyCashbackCreditedMock,
+  notifyUsdcBelowFloor: vi.fn(),
+  notifyOrderFailedAfterCtxPaid: notifyOrderFailedAfterCtxPaidMock,
+}));
+
+// CF-20: the auto-refund seam. Keep the REAL error classes so
+// `instanceof` in procureOne matches; only `applyOrderAutoRefund` is
+// the spy we drive.
+const { applyOrderAutoRefundMock } = vi.hoisted(() => ({ applyOrderAutoRefundMock: vi.fn() }));
+vi.mock('../../credits/refunds.js', async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return { ...actual, applyOrderAutoRefund: applyOrderAutoRefundMock };
+});
+
 vi.mock('../../merchants/sync.js', () => ({
   getMerchants: () => ({ merchantsById: new Map() }),
 }));
+const { waitForRedemptionMock } = vi.hoisted(() => ({
+  waitForRedemptionMock: vi.fn(async () => ({ code: null, pin: null, url: null })),
+}));
 vi.mock('../procurement-redemption.js', () => ({
-  waitForRedemption: vi.fn(async () => ({ code: null, pin: null, url: null })),
+  waitForRedemption: waitForRedemptionMock,
 }));
 vi.mock('../procurement-asset-picker.js', () => ({
   pickProcurementAsset: () => 'XLM',
@@ -84,6 +102,7 @@ import { procureOne } from '../procure-one.js';
 import { OperatorPoolUnavailableError, OperatorRateLimitedError } from '../../ctx/operator-pool.js';
 import { PayCtxConfigError, PayCtxReconcileError } from '../pay-ctx.js';
 import { PayoutSubmitError } from '../../payments/payout-submit.js';
+import { RefundAlreadyIssuedError, RefundOrderInvalidError } from '../../credits/refunds.js';
 
 function fakeOrder(): Order {
   return {
@@ -91,6 +110,10 @@ function fakeOrder(): Order {
     merchantId: 'amazon',
     currency: 'USD',
     faceValueMinor: 1000n,
+    // CF-20: the auto-refund reads these off the order row.
+    userId: 'user-1',
+    chargeMinor: 1000n,
+    chargeCurrency: 'USD',
   } as unknown as Order;
 }
 
@@ -144,9 +167,25 @@ beforeEach(() => {
   markFulfilled.mockReset();
   operatorFetchMock.mockReset();
   payCtxOrderMock.mockReset();
+  applyOrderAutoRefundMock.mockReset();
+  notifyOrderFailedAfterCtxPaidMock.mockReset();
+  waitForRedemptionMock.mockReset();
   // Claim succeeds — return the order row so procureOne proceeds.
   markProcuring.mockResolvedValue(fakeOrder());
   revertToPaid.mockResolvedValue(fakeOrder());
+  // Default: redemption wait resolves with an empty payload.
+  waitForRedemptionMock.mockResolvedValue({ code: null, pin: null, url: null });
+  // Default: auto-refund resolves successfully.
+  applyOrderAutoRefundMock.mockResolvedValue({
+    id: 'refund-1',
+    userId: 'user-1',
+    currency: 'USD',
+    amountMinor: 1000n,
+    orderId: 'order-1',
+    newBalanceMinor: 1000n,
+    priorBalanceMinor: 0n,
+    createdAt: new Date(),
+  });
   // Fulfillment, if ever reached, returns a no-cashback row.
   markFulfilled.mockResolvedValue({
     id: 'order-1',
@@ -222,6 +261,11 @@ describe('procureOne — CF-28 pay-ctx failure NEVER fulfils (stranded-order gua
     expect(markFulfilled).not.toHaveBeenCalled();
     // And it's a failure, not a transient defer.
     expect(revertToPaid).not.toHaveBeenCalled();
+    // CF-20 guard: pay-ctx FAILED, so CTX was never paid → no
+    // auto-refund and no operator-debt alert. The refund path is for
+    // failures AFTER pay-ctx succeeds, not the pay-ctx failure itself.
+    expect(applyOrderAutoRefundMock).not.toHaveBeenCalled();
+    expect(notifyOrderFailedAfterCtxPaidMock).not.toHaveBeenCalled();
   });
 
   it('missing paymentUrls in the CTX response → failed, never fulfilled (no pay-ctx call)', async () => {
@@ -251,5 +295,95 @@ describe('procureOne — CF-28 pay-ctx failure NEVER fulfils (stranded-order gua
       expect.objectContaining({ ctxOrderId: 'ctx-order-1' }),
     );
     expect(markFailed).not.toHaveBeenCalled();
+    // CF-20: a successfully-fulfilled order is never refunded.
+    expect(applyOrderAutoRefundMock).not.toHaveBeenCalled();
+    expect(notifyOrderFailedAfterCtxPaidMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * CF-20 (x-flows F1-1, v-orders P2-02) — auto-refund + operator-debt
+ * alert when an order fails AFTER pay-ctx has already paid CTX.
+ *
+ * Setup for every case: the operator create-call returns a valid SEP-7
+ * URI and `payCtxOrder` SUCCEEDS (so `ctxPaid` is set), then a
+ * post-payment step (`waitForRedemption`, an unexpected throw) fails.
+ * The user must be auto-refunded and ops paged. Contrast the CF-28
+ * block above where pay-ctx itself fails (CTX never paid → NO refund).
+ */
+describe('procureOne — CF-20 refund after CTX paid', () => {
+  beforeEach(() => {
+    operatorFetchMock.mockResolvedValue(okCtxResponse());
+    payCtxOrderMock.mockResolvedValue({ txHash: 'ctx-pay-tx', submitted: true });
+  });
+
+  it('waitForRedemption throws after pay-ctx → order failed, user auto-refunded, ops paged', async () => {
+    waitForRedemptionMock.mockRejectedValue(new Error('CTX terminal status: rejected'));
+    const outcome = await procureOne(fakeOrder());
+    expect(outcome).toBe('failed');
+    expect(markFailed).toHaveBeenCalledWith('order-1', expect.stringContaining('rejected'));
+    expect(markFulfilled).not.toHaveBeenCalled();
+    // The refund is derived from the order's own charge fields.
+    expect(applyOrderAutoRefundMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        currency: 'USD',
+        amountMinor: 1000n,
+        orderId: 'order-1',
+      }),
+    );
+    expect(notifyOrderFailedAfterCtxPaidMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderId: 'order-1',
+        ctxOrderId: 'ctx-order-1',
+        userId: 'user-1',
+        refunded: true,
+      }),
+    );
+  });
+
+  it('a generic throw after pay-ctx → user auto-refunded, ops paged', async () => {
+    // markOrderFulfilled throwing is a post-pay-ctx failure.
+    markFulfilled.mockRejectedValue(new Error('db blew up after pay-ctx'));
+    const outcome = await procureOne(fakeOrder());
+    expect(outcome).toBe('failed');
+    expect(applyOrderAutoRefundMock).toHaveBeenCalledTimes(1);
+    expect(notifyOrderFailedAfterCtxPaidMock).toHaveBeenCalledWith(
+      expect.objectContaining({ refunded: true }),
+    );
+  });
+
+  it('refund already issued → still treated as refunded, ops still paged', async () => {
+    waitForRedemptionMock.mockRejectedValue(new Error('CTX terminal status: failed'));
+    applyOrderAutoRefundMock.mockRejectedValue(new RefundAlreadyIssuedError('order-1'));
+    const outcome = await procureOne(fakeOrder());
+    expect(outcome).toBe('failed');
+    expect(notifyOrderFailedAfterCtxPaidMock).toHaveBeenCalledWith(
+      expect.objectContaining({ refunded: true }),
+    );
+  });
+
+  it('auto-refund itself failing → ops paged with refunded=false (worst case)', async () => {
+    waitForRedemptionMock.mockRejectedValue(new Error('CTX terminal status: failed'));
+    applyOrderAutoRefundMock.mockRejectedValue(new Error('compensation cap hit'));
+    const outcome = await procureOne(fakeOrder());
+    // The order is still terminally failed; the refund blip must not
+    // re-throw out of procureOne.
+    expect(outcome).toBe('failed');
+    expect(notifyOrderFailedAfterCtxPaidMock).toHaveBeenCalledWith(
+      expect.objectContaining({ refunded: false }),
+    );
+  });
+
+  it('RefundOrderInvalidError → ops paged with refunded=false', async () => {
+    waitForRedemptionMock.mockRejectedValue(new Error('CTX terminal status: error'));
+    applyOrderAutoRefundMock.mockRejectedValue(
+      new RefundOrderInvalidError('order_not_found', 'gone'),
+    );
+    const outcome = await procureOne(fakeOrder());
+    expect(outcome).toBe('failed');
+    expect(notifyOrderFailedAfterCtxPaidMock).toHaveBeenCalledWith(
+      expect.objectContaining({ refunded: false }),
+    );
   });
 });

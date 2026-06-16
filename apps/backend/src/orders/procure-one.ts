@@ -26,7 +26,16 @@ import {
 } from '../ctx/operator-pool.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
-import { notifyCashbackCredited, notifyUsdcBelowFloor } from '../discord.js';
+import {
+  notifyCashbackCredited,
+  notifyUsdcBelowFloor,
+  notifyOrderFailedAfterCtxPaid,
+} from '../discord.js';
+import {
+  applyOrderAutoRefund,
+  RefundAlreadyIssuedError,
+  RefundOrderInvalidError,
+} from '../credits/refunds.js';
 import { getMerchants } from '../merchants/sync.js';
 import { waitForRedemption } from './procurement-redemption.js';
 import { parseSep7PayUri } from './sep7.js';
@@ -150,6 +159,17 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
     }
   }
 
+  // CF-20 (x-flows F1-1, v-orders P2-02): once `payCtxOrder` succeeds
+  // Loop has spent operator XLM/USDC settling to CTX, and the user
+  // already paid Loop (the order reached `paid` before procureOne ran
+  // — `markOrderProcuring` only transitions from `paid`). A later
+  // failure (`waitForRedemption` terminal-reject, an unexpected throw)
+  // would otherwise leave the user debited with no gift card and only
+  // a silent `log.error`. Track the boundary so the terminal-failure
+  // path can auto-refund the user + page ops about the operator-side
+  // CTX debt. `ctxOrderId` is captured alongside for the alert.
+  let ctxPaid = false;
+  let ctxOrderId: string | null = null;
   try {
     const res = await operatorFetch(upstreamUrl('/gift-cards'), {
       method: 'POST',
@@ -223,6 +243,10 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
     }
     try {
       const payRes = await payCtxOrder(sep7.value);
+      // CF-20: from here on a failure leaves Loop having paid CTX.
+      // Pin the boundary + ctx order id for the auto-refund path.
+      ctxPaid = true;
+      ctxOrderId = parsed.data.id;
       log.info(
         {
           orderId: order.id,
@@ -345,11 +369,81 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
       );
       return 'skipped';
     }
+    const reason = err instanceof Error ? err.message.slice(0, 500) : 'Unknown procurement error';
     log.error({ err, orderId: order.id }, 'Procurement threw unexpectedly');
-    await markOrderFailed(
-      order.id,
-      err instanceof Error ? err.message.slice(0, 500) : 'Unknown procurement error',
-    );
+    await markOrderFailed(order.id, reason);
+    // CF-20: if we'd already paid CTX (operator XLM/USDC spent) the
+    // user is now debited for a gift card they'll never get. Refund
+    // the user automatically + page ops about the operator-side CTX
+    // debt. Guarded on `ctxPaid` so a never-paid order (CTX returned
+    // before any settlement) is NOT refunded here.
+    if (ctxPaid) {
+      await autoRefundAfterCtxPaid(order, ctxOrderId, reason);
+    }
     return 'failed';
   }
+}
+
+/**
+ * CF-20 (x-flows F1-1, v-orders P2-02): compensate a user whose order
+ * failed AFTER Loop already paid CTX. Best-effort + non-throwing — the
+ * order is already terminally `failed`; a refund/alert blip must never
+ * re-throw out of `procureOne` and abort the batch tick.
+ *
+ * Refund is idempotent (the partial unique index on the refund row),
+ * so a re-pick of the same order (it can't be re-picked once `failed`,
+ * but the stuck-sweep / a manual reset are theoretical paths) converges
+ * to "already refunded" rather than double-crediting the user.
+ */
+async function autoRefundAfterCtxPaid(
+  order: Order,
+  ctxOrderId: string | null,
+  reason: string,
+): Promise<void> {
+  let refunded = false;
+  try {
+    await applyOrderAutoRefund({
+      userId: order.userId,
+      currency: order.chargeCurrency,
+      amountMinor: order.chargeMinor,
+      orderId: order.id,
+      reason: `order failed after CTX paid: ${reason}`,
+    });
+    refunded = true;
+    log.warn(
+      { orderId: order.id, ctxOrderId, chargeMinor: order.chargeMinor.toString() },
+      'CF-20: order failed after CTX paid — auto-refunded the user; CTX-side debt open',
+    );
+  } catch (refundErr) {
+    if (refundErr instanceof RefundAlreadyIssuedError) {
+      // A prior pass already refunded this order. Treat as success —
+      // the user is whole; still alert so ops knows about the CTX debt.
+      refunded = true;
+      log.warn({ orderId: order.id, ctxOrderId }, 'CF-20: order already auto-refunded');
+    } else if (refundErr instanceof RefundOrderInvalidError) {
+      // Should not happen for a real failed order (it exists, the
+      // currency was pinned at creation). Leave refunded=false so the
+      // alert escalates and ops investigates.
+      log.error(
+        { orderId: order.id, ctxOrderId, reason: refundErr.reason },
+        'CF-20: auto-refund rejected — order/currency invalid; manual refund needed',
+      );
+    } else {
+      log.error(
+        { err: refundErr, orderId: order.id, ctxOrderId },
+        'CF-20: auto-refund threw — user NOT refunded; manual intervention needed',
+      );
+    }
+  }
+  // Always page ops: even a successful auto-refund leaves an open
+  // operator↔CTX debt to reconcile.
+  notifyOrderFailedAfterCtxPaid({
+    orderId: order.id,
+    ctxOrderId,
+    userId: order.userId,
+    chargeMinor: order.chargeMinor.toString(),
+    chargeCurrency: order.chargeCurrency,
+    reason,
+    refunded,
+  });
 }

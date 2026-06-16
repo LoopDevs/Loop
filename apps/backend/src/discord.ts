@@ -22,6 +22,7 @@ export {
   notifyHealthChange,
   notifyPayoutFailed,
   notifyPayoutAwaitingTrustline,
+  notifyOrderFailedAfterCtxPaid,
   notifyUsdcBelowFloor,
   notifyPegBreakOnFulfillment,
   notifyInterestPoolLow,

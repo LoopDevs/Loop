@@ -123,6 +123,56 @@ vi.mock('../../discord.js', () => ({
   notifyPayoutAwaitingTrustline: (args: unknown) => discordMock.notifyPayoutAwaitingTrustline(args),
 }));
 
+// CF-21: the auto-compensation seam. Fully mocked (no importActual) so
+// the test doesn't drag in `env.js` / the real DB client. The worker
+// imports these exact mocked error classes, so its `instanceof` checks
+// resolve against the same identities the tests construct — same
+// pattern as `PayoutSubmitErrorMock` above.
+const { compensationMock, AlreadyCompensatedErrorMock, PayoutNotCompensableErrorMock } = vi.hoisted(
+  () => {
+    class AlreadyCompensatedErrorMock extends Error {
+      constructor(public readonly payoutId: string) {
+        super(`Payout ${payoutId} has already been compensated`);
+        this.name = 'AlreadyCompensatedError';
+      }
+    }
+    class PayoutNotCompensableErrorMock extends Error {
+      constructor(message: string) {
+        super(message);
+        this.name = 'PayoutNotCompensableError';
+      }
+    }
+    return {
+      AlreadyCompensatedErrorMock,
+      PayoutNotCompensableErrorMock,
+      compensationMock: {
+        applyAdminPayoutCompensation: vi.fn<(args: unknown) => Promise<unknown>>(async () => ({
+          id: 'comp-1',
+          payoutId: 'p-1',
+          userId: 'u-1',
+          currency: 'GBP',
+          amountMinor: 500n,
+          priorBalanceMinor: 0n,
+          newBalanceMinor: 500n,
+          createdAt: new Date(),
+        })),
+      },
+    };
+  },
+);
+vi.mock('../../credits/payout-compensation.js', () => ({
+  applyAdminPayoutCompensation: (args: unknown) =>
+    compensationMock.applyAdminPayoutCompensation(args),
+  AlreadyCompensatedError: AlreadyCompensatedErrorMock,
+  PayoutNotCompensableError: PayoutNotCompensableErrorMock,
+}));
+
+// CF-15: the kill-switch seam. Default: nothing killed.
+const { killMock } = vi.hoisted(() => ({ killMock: { isKilled: vi.fn((_s: string) => false) } }));
+vi.mock('../../kill-switches.js', () => ({
+  isKilled: (subsystem: string) => killMock.isKilled(subsystem),
+}));
+
 import { runPayoutTick } from '../payout-worker.js';
 
 const BASE_ARGS = {
@@ -181,6 +231,19 @@ beforeEach(() => {
   horizonMock.findOutboundPaymentByMemo.mockResolvedValue(null);
   sdkMock.submitPayout.mockResolvedValue({ txHash: 'tx-hash', ledger: 1 });
   discordMock.notifyPayoutFailed.mockClear();
+  compensationMock.applyAdminPayoutCompensation.mockReset();
+  compensationMock.applyAdminPayoutCompensation.mockResolvedValue({
+    id: 'comp-1',
+    payoutId: 'p-1',
+    userId: 'u-1',
+    currency: 'GBP',
+    amountMinor: 500n,
+    priorBalanceMinor: 0n,
+    newBalanceMinor: 500n,
+    createdAt: new Date(),
+  });
+  killMock.isKilled.mockReset();
+  killMock.isKilled.mockReturnValue(false);
 });
 
 describe('runPayoutTick', () => {
@@ -509,6 +572,140 @@ describe('runPayoutTick', () => {
     repoMocks.reclaimSubmittedPayout.mockResolvedValue(null);
     const r = await runPayoutTick(BASE_ARGS);
     expect(r.skippedRace).toBe(1);
+    expect(sdkMock.submitPayout).not.toHaveBeenCalled();
+  });
+
+  // ─── CF-21: auto-compensation on terminal withdrawal failure ────────
+
+  it('CF-21: a failed WITHDRAWAL payout auto-compensates the user', async () => {
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ kind: 'withdrawal', orderId: null, attempts: 0 }),
+    ]);
+    sdkMock.submitPayout.mockRejectedValue(
+      new PayoutSubmitErrorMock('terminal_no_trust', 'op_no_trust'),
+    );
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.failed).toBe(1);
+    expect(repoMocks.markPayoutFailed).toHaveBeenCalled();
+    // The user is re-credited via the ADR-024 §5 primitive: currency
+    // derived from assetCode (GBPLOOP→GBP), amount = stroops/100_000.
+    expect(compensationMock.applyAdminPayoutCompensation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'u-1',
+        currency: 'GBP',
+        amountMinor: 500n,
+        payoutId: 'p-1',
+      }),
+    );
+  });
+
+  it('CF-21: a failed ORDER_CASHBACK payout is NOT compensated (no net-negative balance)', async () => {
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ kind: 'order_cashback', attempts: 0 }),
+    ]);
+    sdkMock.submitPayout.mockRejectedValue(
+      new PayoutSubmitErrorMock('terminal_no_trust', 'op_no_trust'),
+    );
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.failed).toBe(1);
+    expect(compensationMock.applyAdminPayoutCompensation).not.toHaveBeenCalled();
+  });
+
+  it('CF-21: compensation is idempotent — AlreadyCompensatedError is swallowed (no throw)', async () => {
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ kind: 'withdrawal', orderId: null }),
+    ]);
+    sdkMock.submitPayout.mockRejectedValue(new PayoutSubmitErrorMock('terminal_no_trust', 'fail'));
+    compensationMock.applyAdminPayoutCompensation.mockRejectedValue(
+      new AlreadyCompensatedErrorMock('p-1'),
+    );
+    const r = await runPayoutTick(BASE_ARGS);
+    // Still counts as failed; the AlreadyCompensated path is a no-op.
+    expect(r.failed).toBe(1);
+  });
+
+  it('CF-21: a compensation throw does not abort the tick or change the outcome', async () => {
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ kind: 'withdrawal', orderId: null }),
+      makeRow({ id: 'p-2', kind: 'withdrawal', orderId: null }),
+    ]);
+    sdkMock.submitPayout.mockRejectedValue(new PayoutSubmitErrorMock('terminal_no_trust', 'fail'));
+    // First compensation throws (cap hit); the second row must still be
+    // processed (no abort).
+    compensationMock.applyAdminPayoutCompensation
+      .mockRejectedValueOnce(new Error('daily cap hit'))
+      .mockResolvedValueOnce({
+        id: 'comp-2',
+        payoutId: 'p-2',
+        userId: 'u-1',
+        currency: 'GBP',
+        amountMinor: 500n,
+        priorBalanceMinor: 0n,
+        newBalanceMinor: 500n,
+        createdAt: new Date(),
+      });
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.failed).toBe(2);
+    expect(compensationMock.applyAdminPayoutCompensation).toHaveBeenCalledTimes(2);
+  });
+
+  it('CF-21: PayoutNotCompensableError is swallowed (precondition moved under us)', async () => {
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ kind: 'withdrawal', orderId: null }),
+    ]);
+    sdkMock.submitPayout.mockRejectedValue(new Error('socket hang up'));
+    compensationMock.applyAdminPayoutCompensation.mockRejectedValue(
+      new PayoutNotCompensableErrorMock('state changed'),
+    );
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.failed).toBe(1);
+  });
+
+  // ─── CF-15: LOOP_KILL_WITHDRAWALS gates the worker ──────────────────
+
+  it('CF-15: withdrawals-kill engaged → withdrawal rows skipped, order_cashback still drains', async () => {
+    killMock.isKilled.mockImplementation((s: string) => s === 'withdrawals');
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ id: 'w-1', kind: 'withdrawal', orderId: null, memoText: 'withdrawal-memo' }),
+      makeRow({ id: 'c-1', kind: 'order_cashback', memoText: 'cashback-memo' }),
+    ]);
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.skippedKilled).toBe(1);
+    // The order_cashback row still submits + confirms.
+    expect(r.confirmed).toBe(1);
+    expect(sdkMock.submitPayout).toHaveBeenCalledTimes(1);
+    // The single submit was the cashback row, never the withdrawal one.
+    expect(sdkMock.submitPayout).toHaveBeenCalledWith(
+      expect.objectContaining({ intent: expect.objectContaining({ memoText: 'cashback-memo' }) }),
+    );
+    expect(sdkMock.submitPayout).not.toHaveBeenCalledWith(
+      expect.objectContaining({ intent: expect.objectContaining({ memoText: 'withdrawal-memo' }) }),
+    );
+  });
+
+  it('CF-15: withdrawals-kill OFF → withdrawal rows process normally', async () => {
+    killMock.isKilled.mockReturnValue(false);
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ id: 'w-1', kind: 'withdrawal', orderId: null }),
+    ]);
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.skippedKilled).toBe(0);
+    expect(r.confirmed).toBe(1);
+    expect(sdkMock.submitPayout).toHaveBeenCalledTimes(1);
+  });
+
+  it('CF-15: the kill switch is read once per tick (live process.env)', async () => {
+    killMock.isKilled.mockImplementation((s: string) => s === 'withdrawals');
+    repoMocks.listClaimablePayouts.mockResolvedValue([
+      makeRow({ id: 'w-1', kind: 'withdrawal', orderId: null }),
+      makeRow({ id: 'w-2', kind: 'withdrawal', orderId: null }),
+    ]);
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.skippedKilled).toBe(2);
+    // One read per tick, not per row.
+    expect(killMock.isKilled).toHaveBeenCalledTimes(1);
+    expect(killMock.isKilled).toHaveBeenCalledWith('withdrawals');
+    // No on-chain submit at all while engaged + only withdrawals queued.
     expect(sdkMock.submitPayout).not.toHaveBeenCalled();
   });
 });

@@ -82,6 +82,60 @@ export interface RefundResult {
   createdAt: Date;
 }
 
+/**
+ * CF-20: synthetic actor id stamped on the `reason` of an automatic
+ * (non-admin) order refund. The `credit_transactions` row does not
+ * carry an actor column — `applyAdminRefund` pins the admin actor only
+ * in the API-boundary idempotency snapshot + Discord audit — so the
+ * only durable signal that a refund was system-issued vs operator-
+ * issued is the reason prefix. Keep it greppable.
+ */
+export const AUTO_REFUND_SYSTEM_ACTOR = 'system:auto-refund';
+
+/**
+ * CF-20 (x-flows F1-1, v-orders P2-02): automatic order refund issued
+ * by the procurement worker when an order fails AFTER Loop has already
+ * paid CTX (operator XLM/USDC spent) and the user has already paid
+ * Loop. Without this the user is left debited with no gift card and
+ * `applyAdminRefund` (admin-only) is the sole recovery, which needs a
+ * human to notice the silent `log.error`.
+ *
+ * Reuses the same validated, idempotent transaction as the admin
+ * refund — the partial unique index on
+ * `(type='refund', reference_type='order', reference_id)` (migration
+ * 0013) makes a second call for the same order a no-op
+ * (`RefundAlreadyIssuedError`). The amount is derived from the order's
+ * own `chargeMinor` / `chargeCurrency` so the worker can't over-refund
+ * or refund the wrong currency: the under-the-row-lock order read
+ * inside `applyAdminRefund` is the authority.
+ *
+ * Returns the `RefundResult` on success. Surfaces
+ * `RefundAlreadyIssuedError` (already refunded — caller treats as a
+ * safe no-op) and `RefundOrderInvalidError` (the order doesn't exist /
+ * mismatches — caller logs; should not happen for a real failed order)
+ * to the caller; both are non-fatal at the worker level.
+ */
+export async function applyOrderAutoRefund(args: {
+  userId: string;
+  currency: string;
+  amountMinor: bigint;
+  orderId: string;
+  /** Free-text suffix appended after the system-actor prefix. */
+  reason: string;
+}): Promise<RefundResult> {
+  return applyAdminRefund({
+    userId: args.userId,
+    currency: args.currency,
+    amountMinor: args.amountMinor,
+    orderId: args.orderId,
+    // No human actor — the worker is the actor. The order-row lock +
+    // amount/currency/ownership fences inside applyAdminRefund still
+    // apply, so this is exactly as safe as an operator-issued refund.
+    adminUserId: AUTO_REFUND_SYSTEM_ACTOR,
+    reason: `${AUTO_REFUND_SYSTEM_ACTOR}: ${args.reason}`,
+  });
+}
+
 export async function applyAdminRefund(args: {
   userId: string;
   currency: string;

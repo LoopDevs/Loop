@@ -30,6 +30,7 @@
 import { Keypair } from '@stellar/stellar-sdk';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
+import { isKilled } from '../kill-switches.js';
 import { listClaimablePayouts } from '../credits/pending-payouts.js';
 import {
   runStuckPayoutWatchdog,
@@ -55,6 +56,14 @@ export interface PayoutTickResult {
   skippedRace: number;
   /** Transient failures left in submitted for the next tick to retry. */
   retriedLater: number;
+  /**
+   * CF-15 (x-flows F9-1): `kind='withdrawal'` rows left untouched
+   * because `LOOP_KILL_WITHDRAWALS` is engaged. Order-cashback rows
+   * keep draining — the kill switch is the operator's "stop outbound
+   * user withdrawals NOW" lever (e.g. a leaked-operator-key incident),
+   * not a full payout halt.
+   */
+  skippedKilled: number;
 }
 
 export interface RunPayoutTickArgs {
@@ -99,10 +108,29 @@ export async function runPayoutTick(args: RunPayoutTickArgs): Promise<PayoutTick
     skippedAlreadyLanded: 0,
     skippedRace: 0,
     retriedLater: 0,
+    skippedKilled: 0,
   };
+  // CF-15 (x-flows F9-1): read the kill switch ONCE per tick (live
+  // process.env, like the request-path middleware) so a mid-incident
+  // flip takes effect on the next tick without a redeploy. Withdrawal
+  // rows are skipped while engaged — they stay `pending`/`submitted`
+  // and re-drain once the switch is reset. Order-cashback rows are
+  // never gated by this switch (they're not user-initiated outbound
+  // transfers — they emit the cashback the user already earned).
+  const withdrawalsKilled = isKilled('withdrawals');
   for (const row of rows) {
+    if (withdrawalsKilled && row.kind === 'withdrawal') {
+      result.skippedKilled++;
+      continue;
+    }
     const outcome = await payOne(row, args);
     result[outcome]++;
+  }
+  if (withdrawalsKilled && result.skippedKilled > 0) {
+    log.warn(
+      { skippedKilled: result.skippedKilled },
+      'LOOP_KILL_WITHDRAWALS engaged — skipped withdrawal payouts this tick (order-cashback still draining)',
+    );
   }
   return result;
 }

@@ -339,6 +339,61 @@ export function notifyPegBreakOnFulfillment(args: {
   });
 }
 
+/**
+ * CF-20 (x-flows F1-1, v-orders P2-02): notify ops when an order
+ * fails AFTER Loop has already paid CTX (operator XLM/USDC spent)
+ * and the user has already paid Loop. The procurement worker auto-
+ * refunds the user's off-chain balance, but Loop's operator-side
+ * settlement to CTX is now an outstanding debt — ops must chase a
+ * refund/credit from CTX for the wholesale cost. Unlike the generic
+ * `markOrderFailed` (a silent `log.error`), this pages because there
+ * is money out the door and a recovery action only a human can do.
+ *
+ * `refunded` distinguishes "user made whole, debt is purely
+ * operator↔CTX" from "auto-refund itself failed too" (the worst
+ * case — both user AND treasury are out, needs immediate manual
+ * intervention).
+ */
+export function notifyOrderFailedAfterCtxPaid(args: {
+  orderId: string;
+  ctxOrderId: string | null;
+  userId: string;
+  chargeMinor: string;
+  chargeCurrency: string;
+  reason: string;
+  refunded: boolean;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: args.refunded
+      ? '🔴 Order failed after CTX paid — user refunded, CTX debt open'
+      : '🚨 Order failed after CTX paid — AUTO-REFUND FAILED (user + treasury out)',
+    color: RED,
+    description: truncate(
+      args.refunded
+        ? `Loop already paid CTX for this order but procurement then failed. The user's off-chain balance has been auto-refunded; chase the wholesale cost back from CTX (operator-side debt).`
+        : `Loop already paid CTX AND the automatic user refund FAILED. The user is debited with no gift card and the operator is out of pocket. Manual refund + CTX reconciliation needed NOW.`,
+      DESCRIPTION_MAX,
+    ),
+    fields: [
+      { name: 'Order', value: `\`${args.orderId.slice(-8)}\``, inline: true },
+      {
+        name: 'CTX order',
+        value: args.ctxOrderId === null ? '_none_' : `\`${args.ctxOrderId.slice(-8)}\``,
+        inline: true,
+      },
+      { name: 'User', value: `\`${args.userId.slice(-8)}\``, inline: true },
+      { name: 'Charge (minor)', value: escapeMarkdown(args.chargeMinor), inline: true },
+      { name: 'Currency', value: escapeMarkdown(args.chargeCurrency), inline: true },
+      { name: 'User refunded?', value: args.refunded ? 'yes' : 'NO', inline: true },
+      {
+        name: 'Reason',
+        value: truncate(escapeMarkdown(args.reason), FIELD_VALUE_MAX),
+        inline: false,
+      },
+    ],
+  });
+}
+
 export function notifyUsdcBelowFloor(args: {
   balanceStroops: string;
   floorStroops: string;
