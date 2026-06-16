@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Merchant } from '@loop/shared';
 import { Button } from '~/components/ui/Button';
 import { Input } from '~/components/ui/Input';
-import { currencySymbol } from '~/utils/money';
+import { currencySymbol, useLocaleTag } from '~/i18n/format';
 
 interface AmountSelectionProps {
   merchant: Merchant;
@@ -55,11 +55,12 @@ export function AmountSelection({
   userCashbackPct = null,
 }: AmountSelectionProps): React.JSX.Element {
   const denominations = merchant.denominations;
+  const locale = useLocaleTag();
   // Currency symbol — £ for GBP, € for EUR, $ for USD / CAD. Shared
-  // helper picks from Intl.NumberFormat so we don't maintain a
-  // table. Falls back to `$` when the merchant's currency is
-  // missing or unknown, matching the legacy behaviour.
-  const symbol = currencySymbol(denominations?.currency ?? 'USD');
+  // helper picks from Intl.NumberFormat (keyed on the route locale) so
+  // we don't maintain a table. Falls back to `$` when the merchant's
+  // currency is missing or unknown, matching the legacy behaviour.
+  const symbol = currencySymbol(denominations?.currency ?? 'USD', locale);
   const [customAmount, setCustomAmount] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);

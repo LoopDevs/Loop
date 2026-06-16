@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, waitFor, act, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router';
 
 import type * as OrdersLoopModule from '~/services/orders-loop';
 const getLoopOrderMock = vi.fn();
@@ -20,7 +21,11 @@ function wrap(ui: React.ReactElement): React.JSX.Element {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return <QueryClientProvider client={qc}>{ui}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={qc}>
+      <MemoryRouter>{ui}</MemoryRouter>
+    </QueryClientProvider>
+  );
 }
 
 function mkStellarCreate(

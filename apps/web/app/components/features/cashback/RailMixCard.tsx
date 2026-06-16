@@ -8,6 +8,7 @@ import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { fmtPct, fmtPctBigint } from '~/components/features/admin/PaymentMethodShareCard';
+import { formatNumber, useLocaleTag } from '~/i18n/format';
 
 /**
  * User-facing rail-mix card (#643) — self-view of the admin
@@ -49,6 +50,7 @@ const METHOD_CLASSES: Record<UserPaymentMethod, string> = {
 export function RailMixCard(): React.JSX.Element | null {
   // A2-1156: auth-gate so cold-start doesn't fire before session restore.
   const { isAuthenticated } = useAuth();
+  const locale = useLocaleTag();
   const query = useQuery({
     queryKey: ['me', 'payment-method-share', 'fulfilled'],
     queryFn: () => getUserPaymentMethodShare({ state: 'fulfilled' }),
@@ -112,7 +114,7 @@ export function RailMixCard(): React.JSX.Element | null {
                     </span>
                   </td>
                   <td className="px-3 py-2 tabular-nums text-gray-900 dark:text-white">
-                    {bucket.orderCount.toLocaleString('en-US')}
+                    {formatNumber(bucket.orderCount, locale)}
                   </td>
                   <td className="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-300">
                     {fmtPct(bucket.orderCount, snapshot.totalOrders)}

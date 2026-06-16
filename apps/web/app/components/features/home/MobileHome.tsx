@@ -7,7 +7,6 @@ import {
   brandSlug,
   currencyOf,
   foldForSearch,
-  formatMinorCurrency,
   groupMerchants,
   merchantInCountry,
   merchantSlug,
@@ -21,7 +20,7 @@ import { useLocale } from '~/i18n/locale';
 import { shouldRetry } from '~/hooks/query-retry';
 import { getCashbackSummary } from '~/services/user';
 import { getImageProxyUrl } from '~/utils/image';
-import { formatMoney } from '~/utils/money';
+import { formatMinorCurrency, formatMoney, useLocaleTag } from '~/i18n/format';
 import { MerchantCardSkeleton } from '~/components/ui/Skeleton';
 import { FavoritesStrip } from '~/components/features/FavoritesStrip';
 import { RecentlyPurchasedStrip } from '~/components/features/RecentlyPurchasedStrip';
@@ -68,6 +67,7 @@ export function MobileHome(): React.JSX.Element {
   const visibleMerchants = useMemo(() => (hydrated ? merchants : []), [hydrated, merchants]);
   const visibleMerchantsLoading = !hydrated || merchantsLoading;
   const { country } = useLocale();
+  const locale = useLocaleTag();
   // Country-filtered view (ADR 034) for the directory + quick-buy display.
   // `visibleMerchants` stays unfiltered for the lifetime-savings calc (orders span
   // every country the user has bought in).
@@ -221,6 +221,7 @@ export function MobileHome(): React.JSX.Element {
           isAuthenticated={isAuthenticated}
           phase1Only={phase1Only}
           currency={heroCurrency}
+          locale={locale}
         />
       </div>
 
@@ -270,6 +271,7 @@ export function MobileHome(): React.JSX.Element {
                   savingsPercentage={merchantById.get(order.merchantId)?.savingsPercentage}
                   amount={order.amount}
                   currency={order.currency}
+                  locale={locale}
                   createdAt={order.createdAt}
                   onClick={() => void navigate(`/orders/${order.id}`)}
                   isLast={i === recent.length - 1}
@@ -428,6 +430,7 @@ export function SavingsHero({
   isAuthenticated,
   phase1Only,
   currency = 'USD',
+  locale = 'en-US',
 }: {
   cashbackCents: number;
   ordersCount: number;
@@ -440,6 +443,13 @@ export function SavingsHero({
    * country's currency) so a GB/EU user sees £/€ on this headline.
    */
   currency?: string;
+  /**
+   * Active route locale for separators/grouping (CF-22). Defaults to
+   * `en-US` so tests / legacy callers keep stable output; the parent
+   * threads the `/:country/:lang` tag so a `/de/en` ledger groups as
+   * `1.234,56 €`.
+   */
+  locale?: string;
 }): React.JSX.Element {
   // Unauth or no-orders state — show a teaser instead of "$0.00"
   // which reads as a bug. Matches the design's ink face but with a
@@ -479,7 +489,9 @@ export function SavingsHero({
         className="text-[44px] font-extrabold leading-none mb-1"
         style={{ letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums' }}
       >
-        {empty ? formatCashback(0, currency) : formatCashback(cashbackCents, currency)}
+        {empty
+          ? formatCashback(0, currency, locale)
+          : formatCashback(cashbackCents, currency, locale)}
       </div>
       <div className="text-[13px] text-white/65 mb-4">
         {empty
@@ -495,7 +507,7 @@ export function SavingsHero({
         </div>
         <div className="text-right">
           <div className="text-[16px] font-bold" style={{ fontVariantNumeric: 'tabular-nums' }}>
-            {empty ? '—' : avgBackLabel(cashbackCents, ordersCount, currency)}
+            {empty ? '—' : avgBackLabel(cashbackCents, ordersCount, currency, locale)}
           </div>
           <div className="text-[11px] opacity-55 mt-0.5">{avgLabel}</div>
         </div>
@@ -504,19 +516,25 @@ export function SavingsHero({
   );
 }
 
-// WEB-M1: format the hero figures in the user's home/ledger currency
-// instead of a hardcoded `$`, so a GB/EU ledger reads £/€ on the most
+// WEB-M1 / CF-22: format the hero figures in the user's home/ledger
+// currency and the active route locale instead of a hardcoded `$`/en-US,
+// so a GB/EU ledger reads £/€ with the right separators on the most
 // prominent money figure on the home screen (ADR-034 locale model).
-function formatCashback(cents: number, currency: string): string {
-  return formatMinorCurrency(cents, currency);
+function formatCashback(cents: number, currency: string, locale: string): string {
+  return formatMinorCurrency(cents, currency, locale);
 }
 
-function avgBackLabel(cashbackCents: number, ordersCount: number, currency: string): string {
+function avgBackLabel(
+  cashbackCents: number,
+  ordersCount: number,
+  currency: string,
+  locale: string,
+): string {
   if (ordersCount === 0) return '—';
   // Round to the nearest minor unit before formatting so the average
   // renders as exact cents (formatMinorCurrency floors otherwise).
   const avgCents = Math.round(cashbackCents / ordersCount);
-  return formatMinorCurrency(avgCents, currency);
+  return formatMinorCurrency(avgCents, currency, locale);
 }
 
 function BrandTile({
@@ -659,6 +677,7 @@ function ActivityRow({
   savingsPercentage,
   amount,
   currency,
+  locale,
   createdAt,
   onClick,
   isLast,
@@ -668,6 +687,7 @@ function ActivityRow({
   savingsPercentage?: number | undefined;
   amount: number;
   currency: string;
+  locale: string;
   createdAt: string;
   onClick: () => void;
   isLast: boolean;
@@ -702,14 +722,14 @@ function ActivityRow({
           className="text-[14px] font-bold text-gray-900 dark:text-white"
           style={{ fontVariantNumeric: 'tabular-nums' }}
         >
-          −{formatMoney(amount, currency)}
+          −{formatMoney(amount, currency, locale)}
         </div>
         {back > 0 && (
           <div
             className="text-[11px] font-semibold text-green-700 dark:text-green-400"
             style={{ fontVariantNumeric: 'tabular-nums' }}
           >
-            +{formatMoney(back, currency)} back
+            +{formatMoney(back, currency, locale)} back
           </div>
         )}
       </div>

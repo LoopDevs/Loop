@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { assertNever, formatMinorCurrency } from '@loop/shared';
+import { assertNever } from '@loop/shared';
 import { listLoopOrders, loopOrderStateLabel, type LoopOrderView } from '~/services/orders-loop';
 import { useAllMerchants } from '~/hooks/use-merchants';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 
 /**
  * Loop-native orders section on the account/orders page.
@@ -64,9 +65,10 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
   // the row to recover their payment instructions.
   const [expanded, setExpanded] = useState(order.state === 'pending_payment');
   const { merchants } = useAllMerchants();
+  const locale = useLocaleTag();
   const merchantName = merchants.find((m) => m.id === order.merchantId)?.name ?? order.merchantId;
-  const amount = formatMinor(order.faceValueMinor);
-  const date = new Date(order.createdAt).toLocaleDateString(undefined, {
+  const amount = formatMinor(order.faceValueMinor, locale);
+  const date = new Date(order.createdAt).toLocaleDateString(locale, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -109,7 +111,7 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
               <div className="mt-0.5 text-[11px] font-medium text-green-700 dark:text-green-400 tabular-nums">
                 {/* WEB-M2: render the currency symbol/code so £1.25 isn't
                     ambiguous with $1.25 on the always-visible row. */}
-                +{formatMinorCurrency(order.userCashbackMinor, order.currency)} cashback
+                +{formatMinorCurrency(order.userCashbackMinor, order.currency, locale)} cashback
               </div>
             ) : null}
           </div>
@@ -142,7 +144,7 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
           ) : null}
           {order.userCashbackMinor !== '0' && isFulfilled ? (
             <div className="text-xs text-green-700 dark:text-green-300">
-              {formatMinor(order.userCashbackMinor)} {order.currency} cashback credited.
+              {formatMinor(order.userCashbackMinor, locale)} {order.currency} cashback credited.
             </div>
           ) : null}
         </div>
@@ -211,6 +213,7 @@ function PendingPaymentRecoveryPanel({
 }: {
   order: LoopOrderView;
 }): React.JSX.Element | null {
+  const locale = useLocaleTag();
   if (order.stellarAddress === null || order.paymentMemo === null) return null;
   const assetLabel =
     order.paymentMethod === 'usdc'
@@ -223,7 +226,7 @@ function PendingPaymentRecoveryPanel({
   return (
     <div className="rounded-lg border border-yellow-200 dark:border-yellow-900/40 bg-yellow-50 dark:bg-yellow-900/20 p-3 text-xs text-yellow-900 dark:text-yellow-100 space-y-2">
       <p className="font-medium">
-        Awaiting payment. Send {formatMinor(order.chargeMinor)} {order.chargeCurrency} of{' '}
+        Awaiting payment. Send {formatMinor(order.chargeMinor, locale)} {order.chargeCurrency} of{' '}
         {assetLabel} to the address below with the memo, then this row will move to Paid.
       </p>
       <RedemptionField label="Address" value={order.stellarAddress} />
@@ -281,11 +284,16 @@ function stateColour(state: LoopOrderView['state']): string {
   }
 }
 
-function formatMinor(minor: string): string {
+/**
+ * BigInt-safe minor-unit → major-unit with two decimals, grouped in the
+ * active route locale (CF-22). The currency code is appended by the caller,
+ * so this stays a bare number; only the thousands grouping is localised.
+ */
+function formatMinor(minor: string, locale: string): string {
   const negative = minor.startsWith('-');
   const digits = negative ? minor.slice(1) : minor;
   const padded = digits.padStart(3, '0');
   const whole = padded.slice(0, -2);
   const fraction = padded.slice(-2);
-  return `${negative ? '-' : ''}${Number(whole).toLocaleString('en-US')}.${fraction}`;
+  return `${negative ? '-' : ''}${Number(whole).toLocaleString(locale)}.${fraction}`;
 }

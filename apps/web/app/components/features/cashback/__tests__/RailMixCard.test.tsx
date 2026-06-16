@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router';
 import type * as UserModule from '~/services/user';
 import { RailMixCard } from '../RailMixCard';
 
@@ -33,7 +34,9 @@ function renderCard(): { container: HTMLElement } {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <RailMixCard />
+      <MemoryRouter>
+        <RailMixCard />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }

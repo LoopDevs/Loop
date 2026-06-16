@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router';
 import type * as UserModule from '~/services/user';
 import { CashbackBalanceCard, fmtBalance } from '../CashbackBalanceCard';
 
@@ -34,7 +35,9 @@ function renderCard(): void {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={qc}>
-      <CashbackBalanceCard />
+      <MemoryRouter>
+        <CashbackBalanceCard />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -82,7 +85,9 @@ describe('<CashbackBalanceCard />', () => {
       <QueryClientProvider
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
-        <CashbackBalanceCard />
+        <MemoryRouter>
+          <CashbackBalanceCard />
+        </MemoryRouter>
       </QueryClientProvider>,
     );
     await waitFor(() => {

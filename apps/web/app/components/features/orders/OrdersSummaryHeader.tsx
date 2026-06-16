@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getUserOrdersSummary, type UserOrdersSummary } from '~/services/user';
 import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
+import { formatMinorCurrency, formatNumber, useLocaleTag } from '~/i18n/format';
 
 /**
  * Compact 5-number header for `/orders`: total, fulfilled, pending,
@@ -23,6 +24,7 @@ import { shouldRetry } from '~/hooks/query-retry';
 export function OrdersSummaryHeader(): React.JSX.Element | null {
   // A2-1156: auth-gate so cold-start doesn't fire before session restore.
   const { isAuthenticated } = useAuth();
+  const locale = useLocaleTag();
   const query = useQuery({
     queryKey: ['me', 'orders', 'summary'],
     queryFn: getUserOrdersSummary,
@@ -43,14 +45,14 @@ export function OrdersSummaryHeader(): React.JSX.Element | null {
       aria-label="Orders summary"
       className="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900"
     >
-      <Stat label="Total" value={summary.totalOrders.toLocaleString('en-US')} />
-      <Stat label="Fulfilled" value={summary.fulfilledCount.toLocaleString('en-US')} />
+      <Stat label="Total" value={formatNumber(summary.totalOrders, locale)} />
+      <Stat label="Fulfilled" value={formatNumber(summary.fulfilledCount, locale)} />
       <Stat
         label="In flight"
-        value={summary.pendingCount.toLocaleString('en-US')}
+        value={formatNumber(summary.pendingCount, locale)}
         emphasis={summary.pendingCount > 0 ? 'yellow' : 'neutral'}
       />
-      <Stat label="Spent" value={formatMinor(summary.totalSpentMinor, summary.currency)} />
+      <Stat label="Spent" value={formatMinor(summary.totalSpentMinor, summary.currency, locale)} />
     </section>
   );
 }
@@ -83,22 +85,15 @@ function Stat({
 }
 
 /**
- * Renders a minor-unit bigint-string as a localised currency total
- * with no decimals. Falls back to `"—"` on non-numeric input so a
- * malformed response doesn't tear the header down.
+ * Renders a minor-unit bigint-string as a currency total with no
+ * decimals, in the active route locale (CF-22) via the shared
+ * bigint-exact formatter. Em-dash on non-numeric input so a malformed
+ * response doesn't tear the header down. `locale` defaults to `en-US`
+ * for direct (non-component) callers.
  */
-export function formatMinor(minor: string, currency: string): string {
-  const n = Number(minor);
-  if (!Number.isFinite(n)) return '—';
-  try {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 0,
-    }).format(n / 100);
-  } catch {
-    return `${(n / 100).toFixed(0)} ${currency}`;
-  }
+export function formatMinor(minor: string, currency: string, locale?: string): string {
+  if (!Number.isFinite(Number(minor))) return '—';
+  return formatMinorCurrency(minor, currency, locale, { fractionDigits: 0 });
 }
 
 /**

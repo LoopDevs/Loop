@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router';
 import type * as UserModule from '~/services/user';
 import { OrdersSummaryHeader, formatMinor } from '../OrdersSummaryHeader';
 
@@ -32,7 +33,9 @@ function renderHeader(): { container: HTMLElement } {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <OrdersSummaryHeader />
+      <MemoryRouter>
+        <OrdersSummaryHeader />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }

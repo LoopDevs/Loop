@@ -10,6 +10,7 @@ import {
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { isNativePlatform } from '~/native/platform';
+import { useLocaleTag } from '~/i18n/format';
 
 export interface LoopPaymentStepProps {
   /** Result of `createLoopOrder` — the memo + deposit address we display to the user. */
@@ -152,6 +153,7 @@ export function LoopPaymentStep({ create, onTerminal }: LoopPaymentStepProps): R
  * backfill later, and the user's order history retains the entry.
  */
 function RedemptionBody({ order }: { order: LoopOrderView }): React.JSX.Element {
+  const locale = useLocaleTag();
   const hasCode = order.redeemCode !== null && order.redeemCode.length > 0;
   const hasPin = order.redeemPin !== null && order.redeemPin.length > 0;
   const hasUrl = order.redeemUrl !== null && order.redeemUrl.length > 0;
@@ -188,7 +190,7 @@ function RedemptionBody({ order }: { order: LoopOrderView }): React.JSX.Element 
       ) : null}
       {order.userCashbackMinor !== '0' ? (
         <p className="text-xs text-green-700 dark:text-green-300 text-center pt-2 border-t border-green-200 dark:border-green-900/40">
-          {formatMinor(order.userCashbackMinor)} {order.currency} cashback credited.
+          {formatMinor(order.userCashbackMinor, locale)} {order.currency} cashback credited.
         </p>
       ) : null}
     </div>
@@ -240,11 +242,12 @@ function StellarPaymentBody({
   assetLabel,
   order,
 }: StellarPaymentBodyProps): React.JSX.Element {
+  const locale = useLocaleTag();
   const showSpinner = order === undefined || order.state === 'pending_payment';
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
-        <Row label="You pay" value={`${formatMinor(amountMinor)} ${currency}`} />
+        <Row label="You pay" value={`${formatMinor(amountMinor, locale)} ${currency}`} />
         <Row label="Send" value={`${assetAmount} ${assetLabel}`} mono />
         <Row label="To address" value={address} copyable mono />
         <Row label="Memo (required)" value={memo} copyable mono />
@@ -305,6 +308,7 @@ function NativePaymentBody({
   currency,
   order,
 }: NativePaymentBodyProps): React.JSX.Element {
+  const locale = useLocaleTag();
   const showSpinner = order === undefined || order.state === 'pending_payment';
   return (
     <div className="space-y-5">
@@ -313,7 +317,7 @@ function NativePaymentBody({
           You pay
         </div>
         <div className="text-3xl font-semibold tabular-nums text-gray-900 dark:text-white">
-          {formatMinor(amountMinor)} {currency}
+          {formatMinor(amountMinor, locale)} {currency}
         </div>
         <div className="text-sm text-gray-600 dark:text-gray-400 tabular-nums">
           ≈ {assetAmount} {assetLabel}
@@ -386,12 +390,16 @@ function Row({
   );
 }
 
-/** BigInt-safe minor-unit → major-unit with two decimal places. */
-function formatMinor(minor: string): string {
+/**
+ * BigInt-safe minor-unit → major-unit with two decimals, grouped in the
+ * active route locale (CF-22). The currency code is appended by the caller,
+ * so this stays a bare number; only the thousands grouping is localised.
+ */
+function formatMinor(minor: string, locale: string): string {
   const negative = minor.startsWith('-');
   const digits = negative ? minor.slice(1) : minor;
   const padded = digits.padStart(3, '0');
   const whole = padded.slice(0, -2);
   const fraction = padded.slice(-2);
-  return `${negative ? '-' : ''}${Number(whole).toLocaleString('en-US')}.${fraction}`;
+  return `${negative ? '-' : ''}${Number(whole).toLocaleString(locale)}.${fraction}`;
 }

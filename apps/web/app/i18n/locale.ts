@@ -98,12 +98,6 @@ export function localizedHref(path: string, locale: Locale): string {
   return `${prefix}${rest}`;
 }
 
-/** Hook form bound to the active locale — `const href = useLocalizedHref()`. */
-export function useLocalizedHref(): (path: string) => string {
-  const locale = useLocale();
-  return (path: string) => localizedHref(path, locale);
-}
-
 /**
  * `navigate()` that keeps the visitor in their locale: a localizable target is
  * prefixed with the current route's locale, anything else (and any navigation

@@ -10,7 +10,7 @@ import { PurchaseContainer } from '~/components/features/purchase/PurchaseContai
 import { Spinner } from '~/components/ui/Spinner';
 import { LazyImage } from '~/components/ui/LazyImage';
 import { getImageProxyUrl } from '~/utils/image';
-import { currencySymbol } from '~/utils/money';
+import { currencySymbol, useLocaleTag } from '~/i18n/format';
 
 export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
   // decodeURIComponent throws on malformed percent escapes (e.g. "%ZZ"). A
@@ -64,6 +64,7 @@ export default function GiftCardRoute(): React.JSX.Element {
   // when the merchant hasn't loaded yet — the hook's internal
   // `enabled` guard skips the fetch in that case.
   const { userCashbackPct } = useMerchantCashbackRate(merchant?.id ?? '');
+  const locale = useLocaleTag();
 
   const handleBack = (): void => {
     if (window.history.length > 1) {
@@ -391,9 +392,9 @@ export default function GiftCardRoute(): React.JSX.Element {
                         merchant.denominations.min !== undefined &&
                         merchant.denominations.max !== undefined && (
                           <span className="bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-3 py-1 rounded-full text-sm font-medium">
-                            {currencySymbol(merchant.denominations.currency)}
+                            {currencySymbol(merchant.denominations.currency, locale)}
                             {merchant.denominations.min} &ndash;{' '}
-                            {currencySymbol(merchant.denominations.currency)}
+                            {currencySymbol(merchant.denominations.currency, locale)}
                             {merchant.denominations.max}
                           </span>
                         )}
@@ -422,7 +423,7 @@ export default function GiftCardRoute(): React.JSX.Element {
                               key={d}
                               className="bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-1 rounded text-sm"
                             >
-                              {currencySymbol(merchant.denominations!.currency)}
+                              {currencySymbol(merchant.denominations!.currency, locale)}
                               {d}
                             </span>
                           ))}
@@ -433,9 +434,9 @@ export default function GiftCardRoute(): React.JSX.Element {
                       merchant.denominations.max !== undefined ? (
                       <p className="text-sm text-gray-600 dark:text-gray-300">
                         <span className="font-medium text-gray-900 dark:text-white">Range:</span>{' '}
-                        {currencySymbol(merchant.denominations.currency)}
+                        {currencySymbol(merchant.denominations.currency, locale)}
                         {merchant.denominations.min} &ndash;{' '}
-                        {currencySymbol(merchant.denominations.currency)}
+                        {currencySymbol(merchant.denominations.currency, locale)}
                         {merchant.denominations.max}
                       </p>
                     ) : null}

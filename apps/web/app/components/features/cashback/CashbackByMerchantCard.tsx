@@ -6,20 +6,17 @@ import { useAllMerchants } from '~/hooks/use-merchants';
 import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 
 /**
- * Formats a non-negative minor amount as localised currency, with
- * the same fallback pattern as the other cashback cards — users
- * never see a bare "NaN" for a malformed backend row.
+ * Formats a non-negative minor amount as currency in the active route
+ * locale (CF-22) via the shared bigint-exact formatter — same em-dash
+ * fallback as the other cashback cards so users never see a bare `NaN`.
+ * `locale` defaults to `en-US` for direct (non-component) callers.
  */
-export function fmtCashback(minor: string, currency: string): string {
-  const n = Number(minor);
-  if (!Number.isFinite(n)) return '—';
-  try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(n / 100);
-  } catch {
-    return `${(n / 100).toFixed(2)} ${currency}`;
-  }
+export function fmtCashback(minor: string, currency: string, locale?: string): string {
+  if (!Number.isFinite(Number(minor))) return '—';
+  return formatMinorCurrency(minor, currency, locale);
 }
 
 /**
@@ -41,6 +38,7 @@ export function fmtCashback(minor: string, currency: string): string {
 export function CashbackByMerchantCard(): React.JSX.Element | null {
   // A2-1156: auth-gate so cold-start doesn't fire before session restore.
   const { isAuthenticated } = useAuth();
+  const locale = useLocaleTag();
   const query = useQuery({
     queryKey: ['me', 'cashback-by-merchant'],
     queryFn: () => getCashbackByMerchant({ limit: 10 }),
@@ -102,7 +100,7 @@ export function CashbackByMerchantCard(): React.JSX.Element | null {
                 </p>
               </div>
               <p className="ml-3 shrink-0 text-sm font-semibold tabular-nums text-green-700 dark:text-green-400">
-                +{fmtCashback(row.cashbackMinor, currency)}
+                +{fmtCashback(row.cashbackMinor, currency, locale)}
               </p>
             </li>
           );
