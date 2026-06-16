@@ -19,7 +19,7 @@ import { OrdersSummaryHeader } from '~/components/features/orders/OrdersSummaryH
 import { CashbackEarningsHeadline } from '~/components/features/cashback/CashbackEarningsHeadline';
 import { FlywheelChip } from '~/components/features/cashback/FlywheelChip';
 import { friendlyError } from '~/utils/error-messages';
-import { formatMoney } from '~/utils/money';
+import { formatMoney, useLocaleTag } from '~/i18n/format';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Orders — Loop' }];
@@ -114,13 +114,14 @@ function OrderRow({
   order: Order;
   payoutState: UserPendingPayoutState | null;
 }): React.JSX.Element {
+  const locale = useLocaleTag();
   const status = STATUS_LABELS[order.status] ?? STATUS_LABELS['pending']!;
   // A malformed upstream createdAt would otherwise render "Invalid Date" in
   // the UI. Fall back to the raw string so the row is still informative.
   const parsed = new Date(order.createdAt);
   const date = Number.isNaN(parsed.getTime())
     ? order.createdAt
-    : parsed.toLocaleDateString(undefined, {
+    : parsed.toLocaleDateString(locale, {
         month: 'short',
         day: 'numeric',
         year: 'numeric',
@@ -140,7 +141,7 @@ function OrderRow({
       </div>
       <div className="flex items-center gap-3 ml-4">
         <span className="text-sm font-semibold text-gray-900 dark:text-white">
-          {formatMoney(order.amount, order.currency)}
+          {formatMoney(order.amount, order.currency, locale)}
         </span>
         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${status.color}`}>
           {status.label}

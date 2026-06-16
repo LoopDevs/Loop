@@ -4,7 +4,7 @@ import { merchantSlug } from '@loop/shared';
 import { getImageProxyUrl } from '~/utils/image';
 import { triggerHaptic } from '~/native/haptics';
 import { LazyImage } from '~/components/ui/LazyImage';
-import { currencySymbol } from '~/utils/money';
+import { currencySymbol } from '~/i18n/format';
 import { FavoriteToggleButton } from './FavoriteToggleButton';
 
 /**

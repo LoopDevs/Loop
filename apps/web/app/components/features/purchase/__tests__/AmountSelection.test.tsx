@@ -1,10 +1,17 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render as rtlRender, screen, fireEvent, cleanup } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import type { Merchant } from '@loop/shared';
 import { AmountSelection } from '../AmountSelection';
 
 afterEach(cleanup);
+
+// AmountSelection reads the active route locale (useLocaleTag → useParams),
+// so every render runs inside a router context (CF-22).
+function render(ui: React.ReactElement): ReturnType<typeof rtlRender> {
+  return rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
+}
 
 function merchant(overrides: Partial<Merchant> = {}): Merchant {
   return {

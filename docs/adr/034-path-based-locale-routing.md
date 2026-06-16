@@ -158,3 +158,34 @@ country-aware slug from the backend, so the sitemap / marketing tiles link corre
 re-deriving from `name`. This unblocks the CTX rename without changing any pre-rename URL
 (untagged merchants keep their bare slug via the fallback). See `architecture.md` →
 _Backend data model_ for the runtime detail.
+
+## i18n seam status — two seams, split fates (2026-06-16, cold-audit CF-22)
+
+The §7 "localization seam" is **two distinct seams** with deliberately different statuses.
+The cold audit found both shipped but imported by zero components; the proportionate
+remediation (CF-22) wires the one that has user-visible value today and documents the other
+as forward scaffolding.
+
+- **Locale formatting — LIVE and consolidated.** `i18n/format.ts` is now the single source
+  of truth for currency/number/date formatting. It exposes a `useLocaleTag()` hook that
+  reads the active `/:country/:lang` route and threads the BCP-47 tag into every user-facing
+  money/number/date render — the cashback cards, orders summary, order rows, rail-mix,
+  Loop-payment step, and gift-card range all format to the route's market instead of a
+  hardcoded `en-US`. The bigint-exact path delegates to `@loop/shared#formatMinorCurrency`
+  (CF-23), so this seam adds the _locale_ and shared adds the _exactness_. The former
+  duplicate formatter `utils/money.ts` and the unused browser-locale escape hatch
+  `utils/locale.ts#USER_LOCALE` / `i18n/locale.ts#useLocalizedHref` were removed — there is
+  no longer a second live currency formatter (closes P2-QUAL-02). Admin/ops surfaces keep
+  the deliberately stable `ADMIN_LOCALE = 'en-US'`.
+
+- **String translation — PHASE-2 SCAFFOLD, intentionally not wired.** `i18n/t.ts` +
+  `i18n/messages.ts` stay a documented scaffold. With `SUPPORTED_LANGS = ['en']` there is no
+  language to translate _to_, so routing ~137 components' copy through `t()` now would be pure
+  churn with zero user-visible effect. The exhaustive string extraction is deferred to the
+  **first non-`en` locale** (Phase 3, above). The seam is kept — not deleted — precisely so
+  that adding a language later remains the "JSON drop, not a refactor" §7 promised. Both files
+  carry a `PHASE-2 SCAFFOLD` header making this explicit; do **not** mass-extract copy through
+  `t()` while only English ships.
+
+So ADR 034's "market-correct page" is now true for rendered **amounts/numbers/dates** as well
+as `<title>`/meta; market-correct **copy** waits on the second locale.

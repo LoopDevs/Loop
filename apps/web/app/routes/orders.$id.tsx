@@ -16,7 +16,7 @@ import { PurchaseComplete } from '~/components/features/purchase/PurchaseComplet
 import { EarnedCashbackCard } from '~/components/features/purchase/EarnedCashbackCard';
 import { OrderPayoutCard } from '~/components/features/order/OrderPayoutCard';
 import { LinkWalletNudge } from '~/components/features/cashback/LinkWalletNudge';
-import { formatMoney } from '~/utils/money';
+import { formatMoney, useLocaleTag } from '~/i18n/format';
 import { friendlyError } from '~/utils/error-messages';
 import { openWebView } from '~/native/webview';
 import { buildChallengeBarScript } from '~/utils/redeem-challenge-bar';
@@ -144,10 +144,11 @@ export default function OrderDetailRoute(): React.JSX.Element {
 }
 
 function OrderDetailBody({ order, now }: { order: Order; now: number }): React.JSX.Element {
+  const locale = useLocaleTag();
   const created = new Date(order.createdAt);
   const createdLabel = Number.isNaN(created.getTime())
     ? order.createdAt
-    : created.toLocaleString(undefined, {
+    : created.toLocaleString(locale, {
         month: 'short',
         day: 'numeric',
         year: 'numeric',
@@ -171,7 +172,7 @@ function OrderDetailBody({ order, now }: { order: Order; now: number }): React.J
         </div>
         <div className="text-right flex-shrink-0">
           <div className="text-lg font-bold text-gray-900 dark:text-white tabular-nums">
-            {formatMoney(order.amount, order.currency)}
+            {formatMoney(order.amount, order.currency, locale)}
           </div>
           {order.status !== 'completed' && (
             <div className="mt-1">

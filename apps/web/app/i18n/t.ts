@@ -1,5 +1,17 @@
 /**
- * `t()` — the translation seam (ADR 034 Phase 1).
+ * `t()` — the string-translation seam (ADR 034 Phase 1).
+ *
+ * ⚠️ PHASE-2 SCAFFOLD — intentionally not wired (cold-audit CF-22). Loop ships a
+ * single language today (`SUPPORTED_LANGS = ['en']`), so there is nothing to
+ * translate *to*: routing every UI literal through `t()` now would be a ~137-
+ * component refactor with zero user-visible effect. This seam is kept as the
+ * forward-compatible landing spot so that *adding* a language later (ADR 034 §7's
+ * "`/de/de` is a catalogue drop, not a refactor") is a real, small change rather
+ * than a from-scratch extraction. The string-extraction itself is deliberately
+ * deferred to the first non-`en` locale (ADR 034 Phase 3 — see the ADR's "i18n
+ * seam status" note). Do NOT mass-extract copy through `t()` while only `en`
+ * exists. Locale-aware *number/date/currency* formatting is a separate, fully
+ * live seam (`i18n/format.ts`).
  *
  * A thin, dependency-free, SSR-safe message lookup with `{placeholder}`
  * interpolation. English-only today; the `lang` argument and per-language

@@ -2,21 +2,16 @@ import { useQuery } from '@tanstack/react-query';
 import { getCashbackSummary, type UserCashbackSummary } from '~/services/user';
 import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
+import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 
 /**
- * Formats a minor-unit amount as localised currency, falling back to
- * "<value> <code>" if Intl rejects the currency. Shared shape with
- * `fmtBalance` on the balance card but inlined here to keep the
- * two surfaces independently refactorable.
+ * Formats a minor-unit amount as currency in the active route locale
+ * (CF-22) via the shared bigint-exact formatter; em-dash on a malformed
+ * row. `locale` defaults to `en-US` for direct (non-component) callers.
  */
-export function fmtEarnings(minor: string, currency: string): string {
-  const n = Number(minor);
-  if (!Number.isFinite(n)) return '—';
-  try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(n / 100);
-  } catch {
-    return `${(n / 100).toFixed(2)} ${currency}`;
-  }
+export function fmtEarnings(minor: string, currency: string, locale?: string): string {
+  if (!Number.isFinite(Number(minor))) return '—';
+  return formatMinorCurrency(minor, currency, locale);
 }
 
 /**
@@ -35,6 +30,7 @@ export function fmtEarnings(minor: string, currency: string): string {
 export function CashbackEarningsHeadline(): React.JSX.Element | null {
   // A2-1156: auth-gate so cold-start doesn't fire before session restore.
   const { isAuthenticated } = useAuth();
+  const locale = useLocaleTag();
   const query = useQuery({
     queryKey: ['me', 'cashback-summary'],
     queryFn: getCashbackSummary,
@@ -50,8 +46,8 @@ export function CashbackEarningsHeadline(): React.JSX.Element | null {
   // "£0 earned" above a (probably empty) orders list.
   if (summary.lifetimeMinor === '0') return null;
 
-  const lifetime = fmtEarnings(summary.lifetimeMinor, summary.currency);
-  const thisMonth = fmtEarnings(summary.thisMonthMinor, summary.currency);
+  const lifetime = fmtEarnings(summary.lifetimeMinor, summary.currency, locale);
+  const thisMonth = fmtEarnings(summary.thisMonthMinor, summary.currency, locale);
   const hasMonthlyCashback = summary.thisMonthMinor !== '0';
 
   return (

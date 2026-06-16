@@ -3,22 +3,19 @@ import { getMyCredits, type UserCreditRow } from '~/services/user';
 import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
+import { formatMinorCurrency, useLocaleTag } from '~/i18n/format';
 
 /**
- * Formats a non-negative minor-unit amount as localised currency.
- * The balance card always shows a currency symbol so Intl is the
- * right tool; fall back to "<value> <code>" if Intl rejects the
- * currency (shouldn't happen — we only ever emit USD/GBP/EUR —
- * but the guard keeps the UI readable on a bad backend response).
+ * Formats a non-negative minor-unit balance as currency in the active
+ * route locale (CF-22). Delegates to the shared bigint-exact formatter
+ * so grouping/decimals/symbol all follow the `/:country/:lang` market;
+ * a non-numeric row renders an em-dash rather than `NaN`. `locale`
+ * defaults to `en-US` so direct (non-component) callers — e.g. unit
+ * tests — keep a stable output.
  */
-export function fmtBalance(balanceMinor: string, currency: string): string {
-  const n = Number(balanceMinor);
-  if (!Number.isFinite(n)) return '—';
-  try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(n / 100);
-  } catch {
-    return `${(n / 100).toFixed(2)} ${currency}`;
-  }
+export function fmtBalance(balanceMinor: string, currency: string, locale?: string): string {
+  if (!Number.isFinite(Number(balanceMinor))) return '—';
+  return formatMinorCurrency(balanceMinor, currency, locale);
 }
 
 /**
@@ -35,6 +32,7 @@ export function CashbackBalanceCard(): React.JSX.Element {
   // A2-1156: gate on isAuthenticated so cold-start doesn't fire a 401
   // before session restore completes.
   const { isAuthenticated } = useAuth();
+  const locale = useLocaleTag();
   const query = useQuery({
     queryKey: ['me', 'credits'],
     queryFn: getMyCredits,
@@ -82,7 +80,7 @@ export function CashbackBalanceCard(): React.JSX.Element {
                 {r.currency}
               </div>
               <div className="mt-0.5 text-xl font-semibold tabular-nums text-gray-900 dark:text-white">
-                {fmtBalance(r.balanceMinor, r.currency)}
+                {fmtBalance(r.balanceMinor, r.currency, locale)}
               </div>
             </div>
           ))}

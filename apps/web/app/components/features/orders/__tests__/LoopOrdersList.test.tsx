@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router';
 import type * as OrdersLoopModule from '~/services/orders-loop';
 import type { LoopOrderView } from '~/services/orders-loop';
 
@@ -26,7 +27,11 @@ function wrap(ui: React.ReactElement): React.JSX.Element {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return <QueryClientProvider client={qc}>{ui}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={qc}>
+      <MemoryRouter>{ui}</MemoryRouter>
+    </QueryClientProvider>
+  );
 }
 
 function mkOrder(overrides: Partial<LoopOrderView> = {}): LoopOrderView {

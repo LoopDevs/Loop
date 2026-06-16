@@ -1,6 +1,13 @@
 /** ADR 034 Phase 1 — Intl formatting seam + `t()` message lookup. */
 import { describe, it, expect } from 'vitest';
-import { localeTag, formatCurrency, currencySymbol, formatNumber } from '../format.js';
+import {
+  localeTag,
+  formatCurrency,
+  formatMoney,
+  formatMinorCurrency,
+  currencySymbol,
+  formatNumber,
+} from '../format.js';
 import { t } from '../t.js';
 import type { MessageKey } from '../messages.js';
 
@@ -43,6 +50,38 @@ describe('currencySymbol', () => {
 describe('formatNumber', () => {
   it('groups thousands per locale', () => {
     expect(formatNumber(1234.5, 'en-US')).toBe('1,234.5');
+  });
+});
+
+describe('formatMoney', () => {
+  it('formats with the ISO code, not a hardcoded dollar sign (A-029 regression)', () => {
+    const usd = formatMoney(25, 'USD');
+    expect(usd).toContain('USD');
+    expect(usd).toContain('25.00');
+    const eur = formatMoney(25, 'EUR');
+    expect(eur).toContain('EUR');
+    expect(eur).not.toMatch(/^\$/);
+  });
+  it('honours the passed locale for separators', () => {
+    // de-DE uses a comma decimal separator.
+    expect(formatMoney(1234.5, 'EUR', 'de-DE')).toContain('1.234,50');
+  });
+  it('falls back to a plain "amount code" rendering for unknown currencies', () => {
+    expect(formatMoney(1.5, 'NOTREAL')).toBe('1.50 NOTREAL');
+  });
+});
+
+describe('formatMinorCurrency (locale-threaded web wrapper)', () => {
+  it('formats minor units in the passed route locale', () => {
+    const gbp = formatMinorCurrency('12345', 'GBP', 'en-GB');
+    expect(gbp).toContain('£');
+    expect(gbp).toContain('123.45');
+  });
+  it('defaults to en-US when no locale is passed (stable for direct callers)', () => {
+    expect(formatMinorCurrency('12345', 'USD')).toBe('$123.45');
+  });
+  it('supports the 0-decimal summary variant', () => {
+    expect(formatMinorCurrency('35000', 'USD', 'en-US', { fractionDigits: 0 })).toBe('$350');
   });
 });
 

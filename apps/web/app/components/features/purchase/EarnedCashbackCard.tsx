@@ -24,7 +24,7 @@
  */
 import { Link } from 'react-router';
 import { useMerchantCashbackRate } from '~/hooks/use-merchants';
-import { currencySymbol } from '~/utils/money';
+import { currencySymbol, useLocaleTag } from '~/i18n/format';
 
 interface EarnedCashbackCardProps {
   merchantId: string;
@@ -40,6 +40,7 @@ export function EarnedCashbackCard({
   currency,
 }: EarnedCashbackCardProps): React.JSX.Element | null {
   const { userCashbackPct } = useMerchantCashbackRate(merchantId);
+  const locale = useLocaleTag();
   if (userCashbackPct === null) return null;
 
   const pct = Number(userCashbackPct);
@@ -50,7 +51,7 @@ export function EarnedCashbackCard({
   const rounded = Math.round(estimate * 100) / 100;
   if (rounded <= 0) return null;
 
-  const symbol = currencySymbol(currency);
+  const symbol = currencySymbol(currency, locale);
   // Drop trailing `.00` for cleaner reads on whole-unit amounts — matches
   // the AmountSelection checkout-preview formatter.
   const formatted = rounded.toFixed(2).replace(/\.00$/, '');
