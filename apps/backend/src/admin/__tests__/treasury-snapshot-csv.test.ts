@@ -110,9 +110,9 @@ describe('adminTreasurySnapshotCsvHandler', () => {
 
     // Ledger totals combine currency + type in the key.
     expect(body).toContain('\r\nledger_total,USD:cashback,20000\r\n');
-    // A2-1602: leading `-` is prefixed with `'` in the raw CSV so
-    // spreadsheet apps don't evaluate it as a negative formula.
-    expect(body).toContain("\r\nledger_total,USD:withdrawal,'-5000\r\n");
+    // A pure negative number is data, not a formula — the escaper exempts
+    // numeric literals so the financial value stays a real number.
+    expect(body).toContain('\r\nledger_total,USD:withdrawal,-5000\r\n');
 
     // Liabilities emit both value and issuer rows.
     expect(body).toContain('\r\nliability,USDLOOP,15000\r\n');

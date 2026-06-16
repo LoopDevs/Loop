@@ -34,14 +34,24 @@
 
 const FORMULA_PREFIXES = new Set(['=', '+', '-', '@', '\t', '\r']);
 
+// A pure numeric literal (optionally signed integer/decimal). These are NOT a
+// formula-injection vector — a spreadsheet treats `-50` / `+1` / `-0.5` as the
+// number, never as a formula — and these CSVs carry signed financial amounts
+// (negative spends, net flows). Prefixing them with `'` would corrupt the data
+// into text and break SUM/sort for the finance/accounting users who open them,
+// so a leading `+`/`-` is only guarded when the rest of the cell is non-numeric
+// (e.g. `-1+cmd|…`, `+HYPERLINK(…)`). `=`/`@`/tab/cr are never numeric and stay
+// guarded unconditionally.
+const NUMERIC_LITERAL = /^[+-]?(\d+(\.\d+)?|\.\d+)$/;
+
 export function csvEscape(value: string | null | undefined): string {
   if (value === null || value === undefined) return '';
   let v = value;
   // Formula-injection guard — prepend `'` if the first char looks
   // like a spreadsheet formula or control. The leading quote is a
   // spreadsheet convention for "treat as text"; it renders invisibly
-  // in Excel / Sheets / LibreOffice.
-  if (v.length > 0 && FORMULA_PREFIXES.has(v[0]!)) {
+  // in Excel / Sheets / LibreOffice. Pure numbers are exempt (see above).
+  if (v.length > 0 && FORMULA_PREFIXES.has(v[0]!) && !NUMERIC_LITERAL.test(v)) {
     v = `'${v}`;
   }
   // RFC 4180: wrap in double quotes + double-up embedded quotes if

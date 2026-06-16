@@ -28,10 +28,28 @@ describe('csvEscape', () => {
       expect(csvEscape('=1+1')).toBe("'=1+1");
     });
 
-    it('prefixes a leading + - @ with a single quote', () => {
-      expect(csvEscape('+1')).toBe("'+1");
-      expect(csvEscape('-1')).toBe("'-1");
+    it('prefixes a leading @ with a single quote', () => {
       expect(csvEscape('@SUM(A1)')).toBe("'@SUM(A1)");
+    });
+
+    it('exempts pure signed numbers — they are data, not formulas', () => {
+      // Negative/positive amounts are legitimate financial data; prefixing
+      // them with `'` would turn them into spreadsheet text and break
+      // SUM/sort. A spreadsheet never evaluates `-50` as a formula.
+      expect(csvEscape('-1')).toBe('-1');
+      expect(csvEscape('+1')).toBe('+1');
+      expect(csvEscape('-50')).toBe('-50');
+      expect(csvEscape('-300')).toBe('-300');
+      expect(csvEscape('-0.5')).toBe('-0.5');
+      expect(csvEscape('-12.34')).toBe('-12.34');
+    });
+
+    it('still guards a leading +/- when the cell is NOT a pure number', () => {
+      // Formula-like payloads that merely start with a sign must stay guarded.
+      expect(csvEscape('-1+2')).toBe("'-1+2");
+      expect(csvEscape('+1-1')).toBe("'+1-1");
+      expect(csvEscape('-2+3+cmd|x')).toBe("'-2+3+cmd|x");
+      expect(csvEscape('+HYPERLINK(A1)')).toBe("'+HYPERLINK(A1)");
     });
 
     it('prefixes a leading tab / carriage-return with a single quote', () => {
