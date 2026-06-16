@@ -204,11 +204,18 @@ so a provider JWKS outage doesn't pin request handling threads.
 - [ ] Backend: `/api/auth/social/google` + `/api/auth/social/apple`
       endpoints (unauthed, per-IP rate-limited)
 - [ ] Env: Google client IDs (web/ios/android), Apple service ID
-- [ ] Web: Google Sign-In button + redirect flow (on-device libraries
-      exist)
-- [ ] iOS: Sign in with Apple native button (required by App Store
-      review guidelines)
-- [ ] Android: Google Sign-In Credential Manager flow
+- [x] Web: Google Sign-In button (GSI web SDK) — `GoogleSignInButton`,
+      rendered on web only (CF-27 / M-02: the GSI SDK is blocked inside
+      the Capacitor WebView with `disallowed_useragent`, so the Google
+      button is gated to web in `routes/auth.tsx`).
+- [x] Sign in with Apple button — `AppleSignInButton` (Apple JS SDK,
+      `appleid.auth.js`, popup mode), rendered on **web and native**
+      (Apple's own SDK runs in WKWebView). Closes the App Store 4.8
+      gap (CF-27 / M-01). Native Google is intentionally hidden; native
+      users get Apple + email-OTP.
+- [ ] Native Google via a system-browser / Credential Manager flow
+      (ASWebAuthenticationSession / Custom Tabs) — deferred (M-02
+      Phase-2 fix); email-OTP + Apple cover native sign-in for Phase 1.
 - [ ] Observability: per-provider login volume + failure rate
 
 ## Open questions

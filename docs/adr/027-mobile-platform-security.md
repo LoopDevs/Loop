@@ -1,8 +1,8 @@
 # ADR-027 — Mobile platform security: SSL pinning, App Attest, Play Integrity, jailbreak / root, binary tamper
 
-**Status:** Accepted (Phase-1 deferral). Wallet-model premise amended 2026-05-05 — see Wallet model evolution below.
-**Date:** 2026-04-26 (amended 2026-05-05)
-**Audit ref:** A2-1204; A4-096 (resolved 2026-05-05); A4-096b (resolved 2026-05-05 by this amendment)
+**Status:** Accepted (Phase-1 deferral). Wallet-model premise amended 2026-05-05; binary-tamper Phase-2 trigger reviewed + deferral re-accepted 2026-06-16 — see Wallet model evolution and the **2026-06-16 trigger review** note below.
+**Date:** 2026-04-26 (amended 2026-05-05; trigger review 2026-06-16)
+**Audit ref:** A2-1204; A4-096 (resolved 2026-05-05); A4-096b (resolved 2026-05-05 by this amendment); CF-36 / cold-audit-2026-06-15 M-03 (trigger review 2026-06-16)
 **Supersedes:** none
 **Superseded by:** none on the platform-security controls themselves; ADR 030 supersedes the wallet-custody premise of §Context and §Jailbreak/root row of the decision table
 
@@ -35,6 +35,29 @@ Rationale per control:
 | **App Attest / Play Integrity** | Backend can't distinguish genuine client from scripted reuse of stolen tokens.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Bot-driven scraping or token replay from a non-mobile context. Phase-1 traffic shape (single brand, no high-value scraping target) doesn't warrant the per-request Apple / Google quota cost.          | Bot-traffic spike in `/api/orders` rate-limit telemetry, OR reaching ≥10K MAU.                   |
 | **Jailbreak / root detection**  | App-lock on cold start with biometric-or-device-credential fallback, a global task-switcher privacy overlay, Keychain-backed refresh tokens (ADR-006), and bearer tokens kept in memory only (Zustand). A4-096 / A4-096b: the app does NOT hold a Stellar private key — under ADR 030 (live wallet model), Privy custodies the user's Stellar key remotely, accessed via Loop's RS256 JWT through Privy's Custom Auth Provider. Backend signs LOOP-asset payouts from `LOOP_STELLAR_OPERATOR_SECRET`. So a rooted device can replay refresh tokens until rotation, but cannot exfiltrate a Stellar secret from this app. | Rooted-device user can extract refresh token + replay until refresh-token rotation. With Privy live, the access token also unlocks Privy session — same blast radius as access-token replay (≤15 min). | Phase-2 fraud-rate signals OR App Store rejection.                                               |
 | **Binary tamper detection**     | Capacitor binary distribution is the App Store / Play Store; sideloaded modified IPAs are out-of-scope for the threat model that Phase-1 protects.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | A user who deliberately sideloads a tampered Loop binary can intercept their own data — this is self-inflicted and not a control we owe them.                                                          | Distribution path moves outside the official stores (e.g. enterprise distribution, web install). |
+
+## 2026-06-16 trigger review (CF-36 / cold-audit-2026-06-15 M-03)
+
+The cold audit flagged that the **binary-tamper detection** trigger — _"distribution path moves outside the official stores"_ — is now **met**: the Phase-1 launch plan ships an APK via direct link / Google Drive / Diawi sideload (`docs/tranche-1-launch.md`, `docs/roadmap.md` orphaned-work register) while the App Store / TestFlight build goes through Apple review. The roadmap had recorded the trigger as "already met, decision pending"; the ADR table still read as a clean Phase-1 deferral. This note closes that inconsistency.
+
+**Decision — re-accept the deferral for Phase 1; do not implement binary-tamper detection now.**
+
+Rationale:
+
+- **The sideload audience is controlled and reviewer-only.** The pre-public APK goes to Loop maintainers, the App Store reviewer (TestFlight), and a handful of invited testers — not the open web. It is not a public install channel; it is a closed beta-distribution mechanic while Apple review is pending.
+- **The threat the control addresses is self-inflicted at this scale.** A tester who swaps the JS bundle in their own sideloaded APK only attacks their own session — consistent with the original "self-inflicted, not a control we owe them" rationale. There is no third party who can push a tampered bundle to another user's device through this channel.
+- **The Phase-1 blast radius is bounded by the other live controls.** No on-device Stellar secret (ADR-006 / ADR-030 Privy-MPC), bearer-in-memory, refresh token in Keychain / EncryptedSharedPreferences, app-lock on cold start, HTTPS-only network config (A4-079). A tampered bundle gains nothing those controls don't already fence.
+- **A meaningful tamper check needs native plugin work + signing-key custody that doesn't pay off at this audience size.** A robust check (bundle hash pinned to a server-held manifest, or native integrity attestation) is a Phase-2-sized spike; a trivial in-JS self-check is trivially patched out of the same modded bundle, so it would be security theatre.
+
+**Trigger re-armed for Phase 2.** This acceptance is scoped to the controlled pre-launch sideload. The trigger **re-fires** the moment distribution becomes a genuinely public out-of-store channel — e.g. a public APK download link on loopfinance.io, an Android web-install flow, or enterprise/MDM distribution to non-Loop users. At that point implement binary-tamper detection per the Phase-2 implementation order below (it is intentionally last in that order).
+
+**The other three controls were re-checked on the same review (roadmap line 34 asks for this); none of their triggers have fired:**
+
+- **SSL / cert pinning** — trigger is "first confirmed MITM event in production telemetry OR enterprise customer requirement." Neither has occurred (Phase-1 has no production order traffic yet). Deferral stands.
+- **App Attest / Play Integrity** — trigger is "bot-traffic spike in `/api/orders` rate-limit telemetry OR ≥10K MAU." Pre-launch, neither applies. Deferral stands.
+- **Jailbreak / root detection** — trigger is "Phase-2 fraud-rate signals OR App Store rejection." No fraud signal exists pre-launch; no rejection on this ground has occurred. Deferral stands.
+
+Re-confirm all four at the next ADR-027 review (first-launch metrics, per the headline decision) or sooner if any trigger fires.
 
 ## Consequences
 
