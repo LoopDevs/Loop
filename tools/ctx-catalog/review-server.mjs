@@ -7,18 +7,99 @@
  * Approved (✓) images get pushed to CTX (ctx-apply.mjs --images, fed the
  * approved subset). Rejected (✗) images get re-sourced.
  *
- *   node scripts/review-server.mjs          # → http://localhost:7654
+ *   node scripts/review-server.mjs          # prints http://127.0.0.1:7654/?token=…
+ *
+ * Binds loopback-only and requires a shared token (REVIEW_SERVER_TOKEN, else a
+ * per-boot random one printed at startup) on every request — it gates the
+ * production-apply decisions file, so it must not be network-reachable (T-01).
  *
  * Reads /tmp/ctx-images.json (scraped) + /tmp/ctx-all.json (names/country).
  */
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { isIP } from 'node:net';
+import { lookup } from 'node:dns/promises';
 
 const IMG_CACHE = '/tmp/review-img-cache';
 try {
   mkdirSync(IMG_CACHE, { recursive: true });
 } catch {}
+
+// T-01: this server gates the production-apply decision file, so it must not be
+// network-reachable. Bind loopback only and require a shared token on every
+// request. Token comes from REVIEW_SERVER_TOKEN, else a per-boot random one
+// that is printed (and folded into the browser URL) at startup.
+const HOST = '127.0.0.1';
+const TOKEN = process.env.REVIEW_SERVER_TOKEN || randomBytes(24).toString('hex');
+function tokenOk(url, req) {
+  const got = url.searchParams.get('token') || req.headers['x-review-token'] || '';
+  const a = Buffer.from(String(got));
+  const b = Buffer.from(TOKEN);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// T-02: the /img proxy fetched arbitrary attacker-supplied URLs server-side
+// (SSRF to cloud metadata / localhost / internal hosts). Restrict to http(s)
+// on the expected public image hosts, and reject any URL that resolves to a
+// loopback / private / link-local / unique-local address.
+const IMG_HOST_ALLOWLIST = [
+  'spend.ctx.com',
+  'ctx-spend.s3.us-west-2.amazonaws.com',
+  's3.us-west-2.amazonaws.com',
+  'amazonaws.com', // CTX S3 buckets / CloudFront-fronted assets
+  'logo.dev',
+  'img.logo.dev',
+  'cdn.brandfetch.io',
+  'logos-world.net',
+  'images.unsplash.com',
+  'icons.duckduckgo.com',
+  'gstatic.com', // Google favicon / static asset hosts
+];
+function hostAllowed(hostname) {
+  const h = hostname.toLowerCase();
+  return IMG_HOST_ALLOWLIST.some((allowed) => h === allowed || h.endsWith('.' + allowed));
+}
+function isBlockedIp(ip) {
+  const v = isIP(ip);
+  if (v === 4) {
+    const [a, b] = ip.split('.').map(Number);
+    if (a === 127 || a === 10 || a === 0) return true; // loopback / private / this-host
+    if (a === 169 && b === 254) return true; // link-local + 169.254.169.254 metadata
+    if (a === 172 && b >= 16 && b <= 31) return true; // private
+    if (a === 192 && b === 168) return true; // private
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+    return false;
+  }
+  if (v === 6) {
+    const l = ip.toLowerCase();
+    if (l === '::1' || l === '::') return true; // loopback / unspecified
+    if (l.startsWith('fe80')) return true; // link-local
+    if (l.startsWith('fc') || l.startsWith('fd')) return true; // unique-local (ULA)
+    if (l.startsWith('::ffff:')) return isBlockedIp(l.slice(7)); // IPv4-mapped
+    return false;
+  }
+  return true; // not a valid IP literal → block
+}
+async function safeImageFetch(rawUrl, init) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error('invalid url');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('bad scheme');
+  if (!hostAllowed(parsed.hostname)) throw new Error('host not allowed');
+  // Resolve and re-check every address so a DNS-rebinding host (an allowlisted
+  // name pointing at 169.254.169.254 / a private IP) is still rejected.
+  const addrs = isIP(parsed.hostname)
+    ? [{ address: parsed.hostname }]
+    : await lookup(parsed.hostname, { all: true });
+  for (const { address } of addrs) {
+    if (isBlockedIp(address)) throw new Error('blocked address');
+  }
+  return fetch(rawUrl, init);
+}
 
 const PORT = 7654;
 const IMAGES = '/tmp/ctx-media-final.json';
@@ -137,10 +218,15 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Merchant i
 <main id="grid"></main>
 <script>
 let rows=[], dec={}, filter='all', saveTimer=null;
+// T-01: shared token is injected into the page when it is served with a valid
+// ?token=…; every same-origin request carries it via the X-Review-Token header,
+// and the image proxy carries it as a query param.
+const TOKEN=new URLSearchParams(location.search).get('token')||'';
+const tfetch=(u,o={})=>fetch(u,{...o,headers:{...(o.headers||{}),'x-review-token':TOKEN}});
 const $=s=>document.querySelector(s);
 async function boot(){
-  rows=await (await fetch('/data')).json();
-  dec=await (await fetch('/decisions')).json();
+  rows=await (await tfetch('/data')).json();
+  dec=await (await tfetch('/decisions')).json();
   render();
 }
 function stateOf(id){ const d=dec[id]||{}; const v=[d.logo,d.cover].filter(Boolean);
@@ -194,12 +280,14 @@ function srcBadge(s){
   if(!s) return '';
   const real=(s==='scrape'); const fb=(s==='favicon'||s==='category');
   const color=real?'#16a34a':fb?'#d97706':'#94a3b8';
-  return '<div class="badge" style="color:'+color+'">'+s+'</div>';
+  // T-06: badge text is catalog-derived (logoSource/coverSource) — escape it so
+  // a crafted source string can't break out of the attribute / inject markup.
+  return '<div class="badge" style="color:'+color+'">'+esc(s)+'</div>';
 }
 function asset(k,lbl,url,cur,src){
   if(!url) return '<div class="asset '+k+'"><div class="lbl">'+lbl+'</div><div class="thumb"></div><div class="vote" style="visibility:hidden"></div></div>';
   return '<div class="asset '+k+'"><div class="lbl">'+lbl+'</div>'+
-    '<img class="thumb" loading="lazy" src="/img?u='+encodeURIComponent(url)+'">'+
+    '<img class="thumb" loading="lazy" src="/img?token='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(url)+'">'+
     srcBadge(src)+
     '<div class="vote"><button class="yes'+(cur==='yes'?' on':'')+'" data-k="'+k+'" data-v="yes">✓</button>'+
     '<button class="no'+(cur==='no'?' on':'')+'" data-k="'+k+'" data-v="no">✗</button></div></div>';
@@ -207,16 +295,21 @@ function asset(k,lbl,url,cur,src){
 function save(){
   $('#save').textContent='saving…';
   clearTimeout(saveTimer);
-  saveTimer=setTimeout(async()=>{ await fetch('/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(dec)}); $('#save').textContent='saved ✓'; },350);
+  saveTimer=setTimeout(async()=>{ await tfetch('/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(dec)}); $('#save').textContent='saved ✓'; },350);
 }
 $('#filters').onclick=e=>{ if(e.target.dataset.f){filter=e.target.dataset.f; document.querySelectorAll('#filters button').forEach(b=>b.classList.toggle('active',b===e.target)); render(); } };
 $('#approveAll').onclick=()=>{ for(const r of rows){ const st=stateOf(r.id); if(filter==='approved'&&!(st==='approved'||st==='mixed'))continue; if(filter==='rejected'&&st!=='rejected')continue; if(filter==='pending'&&st!=='pending')continue; dec[r.id]=dec[r.id]||{}; if(r.logoUrl)dec[r.id].logo='yes'; if(r.cardImageUrl)dec[r.id].cover='yes'; } save(); render(); };
-function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function esc(s){return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 boot();
 </script></body></html>`;
 
 createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
+  // T-01: every request (page + data + save + img) must present the token.
+  if (!tokenOk(url, req)) {
+    res.writeHead(403, { 'content-type': 'text/plain' });
+    return res.end('forbidden: missing or bad ?token / X-Review-Token');
+  }
   if (url.pathname === '/') {
     res.writeHead(200, { 'content-type': 'text/html' });
     return res.end(PAGE);
@@ -263,9 +356,12 @@ createServer(async (req, res) => {
     }
     try {
       const origin = new URL(u).origin;
-      const r = await fetch(u, {
+      // T-02: safeImageFetch enforces http(s) + host allowlist + private/
+      // loopback/link-local/metadata IP rejection before the request leaves.
+      const r = await safeImageFetch(u, {
         headers: { 'User-Agent': UA, Referer: origin, Accept: 'image/*,*/*' },
         signal: AbortSignal.timeout(12000),
+        redirect: 'error', // a redirect could escape the allowlist into a blocked host
       });
       const ct = r.headers.get('content-type') || '';
       if (!r.ok || !ct.startsWith('image/')) {
@@ -286,4 +382,4 @@ createServer(async (req, res) => {
   }
   res.writeHead(404);
   res.end('not found');
-}).listen(PORT, () => console.log(`Review UI → http://localhost:${PORT}`));
+}).listen(PORT, HOST, () => console.log(`Review UI → http://${HOST}:${PORT}/?token=${TOKEN}`));
