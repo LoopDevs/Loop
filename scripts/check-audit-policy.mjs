@@ -56,7 +56,15 @@ const ACCEPTED_HIGH_VULNS = new Map([
   ],
   [
     'form-data',
-    'GHSA-fjxv-7rqg-78g4 (form-data <4.0.4 unsafe boundary RNG). Installed version is 4.0.5 — at/above the patched 4.0.4 — so this is a registry/range false-positive; it is transitive via @stellar/stellar-sdk→axios and Loop issues no multipart form-data on any code path. Not separately resolvable without an SDK bump; accepted.',
+    'GHSA-fjxv-7rqg-78g4 (form-data <4.0.4 unsafe boundary RNG). Installed version is 4.0.5 — at/above the patched 4.0.4 — so this is a registry/range false-positive; it is transitive via @stellar/stellar-sdk→axios and Loop issues no multipart form-data on any code path. Not separately resolvable without an SDK bump; accepted. Note (2026-06-30 cold audit): a *different* form-data advisory (GHSA-hmw2-7cc7-3qxx, CRLF injection, range >=4.0.0 <4.0.6) also matches the installed 4.0.5 — the accept-by-package-name policy masks this; tracked as a follow-up to accept-by-advisory-ID instead of by-name.',
+  ],
+  [
+    'undici',
+    'Multiple 2026-06 advisories (TLS/SOCKS5 proxy bypass, Set-Cookie header injection/downgrade, WebSocket DoS, cache poisoning). Two independent dev/test-only chains pull it in: jsdom@29.1.1 (apps/web devDependency, test-environment only, never in the built web bundle or the SSR runtime) and @sentry/cli@3.4.1 (root devDependency, release-tooling CLI invoked at build time, not imported by any runtime code). Not reachable from any deployed surface; accepted pending a jsdom/@sentry/cli major bump.',
+  ],
+  [
+    '@cyclonedx/cyclonedx-npm',
+    'GHSA-v75r-vx73-82pj (shell injection via unsanitized --workspace argument, range 2.1.0-4.2.1). Root devDependency invoked once, in CI only, by .github/workflows/ci.yml to generate the SBOM — never runs with untrusted/user-controlled arguments (the workflow invokes it with a fixed, repo-authored argument list, not external input), so the injection vector is not reachable. Fix is semver-major (5.0.0); deferred as a tracked follow-up rather than risking breaking the SBOM step mid-audit-remediation.',
   ],
 ]);
 
@@ -69,11 +77,12 @@ const ACCEPTED_MODERATE_VULNS = new Map([
     '@esbuild-kit/esm-loader',
     'Transitive via drizzle-kit deprecated loader chain; fix requires a major drizzle-kit move.',
   ],
-  [
-    'hono',
-    'Three moderate advisories on hono <=4.12.17: (a) CSS Declaration Injection via Style Object Values in JSX SSR — Loop does not use Hono JSX SSR; web SSR runs via React Router v7. (b) Improper NumericDate-claim validation in Hono JWT verify() — Loop uses its own verifier at apps/backend/src/auth/tokens.ts with explicit iat/exp/iss/aud checks; Hono JWT is never imported. (c) Cache Middleware Vary-header gap — Loop does not mount Hono Cache Middleware. None of the three reach an exploitable code path. The openapi layer is @asteasolutions/zod-to-openapi (peer: zod ^4 only — no hono constraint), so hono is bumpable; the deferral is a deliberate choice not to take a minor hono bump mid-audit, revisit on the next dependency sweep.',
-  ],
 ]);
+// `hono` was here (moderate, <=4.12.17) until the 2026-06-30 cold audit's
+// CF-04 fix bumped it to 4.12.27, which resolves every advisory in this
+// package's chain (including the ones re-rated to `high` that redded the
+// gate) — see git history for the prior rationale if the entry needs to
+// come back after a future hono release regresses.
 
 function runAuditJson() {
   try {
