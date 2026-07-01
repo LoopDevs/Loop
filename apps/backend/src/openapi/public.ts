@@ -201,11 +201,15 @@ export function registerPublicOpenApi(
     path: '/api/public/top-cashback-merchants',
     summary: 'Top-N merchants by active cashback rate (ADR 011 / 020).',
     description:
-      'Unauthenticated, CDN-friendly. Landing-page "best cashback" band. `?limit=` clamped 1..50 (default 10). Merchants whose row has been evicted from the in-memory catalog (ADR 021 Rule B) are dropped from the response so the list never links to about-to-vanish merchants. The fallback snapshot is keyed by effective `limit`, so a degraded response preserves the caller-requested shape. `Cache-Control: public, max-age=300` on the happy path; `max-age=60` on the fallback path. Never 500.',
+      'Unauthenticated, CDN-friendly. Landing-page "best cashback" band. `?limit=` clamped 1..50 (default 10). `?country=` (CAT-02, 2026-06-30 cold audit) applies the same country↔merchant visibility rule as `home.tsx` (merchant.country match OR merchant currency matches the country\'s display currency) — an unrecognised code is treated as no filter, never a 400. Merchants whose row has been evicted from the in-memory catalog (ADR 021 Rule B) are dropped from the response so the list never links to about-to-vanish merchants. The fallback snapshot is keyed by effective `limit` + `country`, so a degraded response never crosses country boundaries. `Cache-Control: public, max-age=300` on the happy path; `max-age=60` on the fallback path. Never 500.',
     tags: ['Public'],
     request: {
       query: z.object({
         limit: z.coerce.number().int().min(1).max(50).optional(),
+        country: z.string().optional().openapi({
+          description:
+            'ISO 3166-1 alpha-2 country code to scope results to (CAT-02). Unrecognised codes are ignored (no filter applied), never a 400.',
+        }),
       }),
     },
     responses: {

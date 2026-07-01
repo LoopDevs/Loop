@@ -1,13 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Context } from 'hono';
 
+interface FakeMerchant {
+  id: string;
+  name: string;
+  logoUrl?: string | null;
+  enabled: boolean;
+  // CAT-02: country↔merchant visibility fields merchantInCountry reads.
+  country?: string;
+  denominations?: { currency?: string };
+}
+
 const state = vi.hoisted(() => ({
   configRows: [] as Array<{ merchantId: string; userCashbackPct: string }>,
   throwErr: null as Error | null,
-  merchants: new Map<
-    string,
-    { id: string; name: string; logoUrl?: string | null; enabled: boolean }
-  >(),
+  merchants: new Map<string, FakeMerchant>(),
 }));
 
 const orderByMock = vi.fn(async () => {
@@ -241,5 +248,99 @@ describe('publicTopCashbackMerchantsHandler', () => {
       merchants: Array<Record<string, unknown>>;
     };
     expect(body.merchants).toEqual([]);
+  });
+
+  // CAT-02 (2026-06-30 cold audit): ?country= applies the same
+  // country↔merchant visibility rule as home.tsx / brand.$slug.tsx —
+  // the "best cashback" marketing band shouldn't feed a visitor a
+  // merchant tagged to a different country/currency.
+  describe('CAT-02: ?country= scoping', () => {
+    it('drops a merchant tagged to a different country than ?country=', async () => {
+      state.configRows = [
+        { merchantId: 'us_merchant', userCashbackPct: '5.00' },
+        { merchantId: 'ae_merchant', userCashbackPct: '10.00' },
+      ];
+      state.merchants.set('us_merchant', {
+        id: 'us_merchant',
+        name: 'US Merchant',
+        enabled: true,
+        country: 'US',
+      });
+      state.merchants.set('ae_merchant', {
+        id: 'ae_merchant',
+        name: 'AE Merchant',
+        enabled: true,
+        country: 'AE',
+      });
+      const res = await publicTopCashbackMerchantsHandler(makeCtx({ country: 'US' }));
+      const body = (await res.json()) as { merchants: Array<{ name: string }> };
+      expect(body.merchants.map((m) => m.name)).toEqual(['US Merchant']);
+    });
+
+    it('includes a currency-matched merchant with no country tag (Eurozone rule)', async () => {
+      state.configRows = [{ merchantId: 'eur_merchant', userCashbackPct: '4.00' }];
+      state.merchants.set('eur_merchant', {
+        id: 'eur_merchant',
+        name: 'Eurozone Merchant',
+        enabled: true,
+        denominations: { currency: 'EUR' },
+      });
+      const res = await publicTopCashbackMerchantsHandler(makeCtx({ country: 'FR' }));
+      const body = (await res.json()) as { merchants: Array<{ name: string }> };
+      expect(body.merchants.map((m) => m.name)).toEqual(['Eurozone Merchant']);
+    });
+
+    it('an unrecognised ?country= is ignored (no filter, not a 400)', async () => {
+      state.configRows = [{ merchantId: 'argos', userCashbackPct: '15.00' }];
+      state.merchants.set('argos', { id: 'argos', name: 'Argos', enabled: true, country: 'GB' });
+      const res = await publicTopCashbackMerchantsHandler(makeCtx({ country: 'not-a-country' }));
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { merchants: Array<{ name: string }> };
+      expect(body.merchants.map((m) => m.name)).toEqual(['Argos']);
+    });
+
+    it('no ?country= at all returns every merchant regardless of tag (unchanged default)', async () => {
+      state.configRows = [
+        { merchantId: 'us_merchant', userCashbackPct: '5.00' },
+        { merchantId: 'ae_merchant', userCashbackPct: '10.00' },
+      ];
+      state.merchants.set('us_merchant', {
+        id: 'us_merchant',
+        name: 'US Merchant',
+        enabled: true,
+        country: 'US',
+      });
+      state.merchants.set('ae_merchant', {
+        id: 'ae_merchant',
+        name: 'AE Merchant',
+        enabled: true,
+        country: 'AE',
+      });
+      const res = await publicTopCashbackMerchantsHandler(makeCtx());
+      const body = (await res.json()) as { merchants: Array<{ name: string }> };
+      expect(body.merchants).toHaveLength(2);
+    });
+
+    it('fallback snapshots never cross country boundaries', async () => {
+      state.configRows = [{ merchantId: 'us_merchant', userCashbackPct: '5.00' }];
+      state.merchants.set('us_merchant', {
+        id: 'us_merchant',
+        name: 'US Merchant',
+        enabled: true,
+        country: 'US',
+      });
+      // Seed the US-scoped cache.
+      const seeded = await publicTopCashbackMerchantsHandler(makeCtx({ country: 'US' }));
+      expect(seeded.status).toBe(200);
+
+      // A first-ever AE-scoped request during a DB outage must NOT
+      // fall back to the US-scoped cached snapshot — it has no cache
+      // entry of its own yet, so it must serve the empty fallback.
+      state.throwErr = new Error('db exploded');
+      const aeDuringOutage = await publicTopCashbackMerchantsHandler(makeCtx({ country: 'AE' }));
+      expect(aeDuringOutage.status).toBe(200);
+      const body = (await aeDuringOutage.json()) as { merchants: Array<{ name: string }> };
+      expect(body.merchants).toEqual([]);
+    });
   });
 });
