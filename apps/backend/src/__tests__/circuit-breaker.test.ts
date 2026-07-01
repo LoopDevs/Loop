@@ -500,3 +500,57 @@ describe('CF-13 — forceOpen trips the circuit out-of-band', () => {
     expect(cb.getState()).toBe('closed');
   });
 });
+
+describe('CF2-01 (2026-06-30 cold audit) — isAvailable() self-heal without calling fetch', () => {
+  it('reports unavailable immediately after opening', () => {
+    const cb = createCircuitBreaker({ cooldownMs: 10_000 });
+    cb.forceOpen();
+    expect(cb.isAvailable()).toBe(false);
+  });
+
+  it('flips to available once the cooldown elapses — WITHOUT any .fetch() call in between', async () => {
+    // This is the exact bug: a caller (operator-pool's pickHealthyOperator)
+    // that filters on isAvailable() before ever calling .fetch() must see
+    // the breaker become eligible again once the cooldown passes. Before
+    // CF2-01, only .fetch() itself ran the cooldown-expiry check, so a
+    // breaker filtered out by a bare getState() read could never recover.
+    const cb = createCircuitBreaker({ cooldownMs: 30 });
+    cb.forceOpen();
+    expect(cb.isAvailable()).toBe(false);
+    await new Promise((r) => setTimeout(r, 60));
+    // No cb.fetch() call anywhere above this line.
+    expect(cb.isAvailable()).toBe(true);
+    expect(cb.getState()).toBe('half_open');
+  });
+
+  it('a single forceOpen (one bad response, e.g. CF-13 401) is enough to make isAvailable() false — proving the exact CF2-01 exposure', () => {
+    // CF-13's forceOpen() trips the breaker to OPEN on a single 401,
+    // unlike the old 5-consecutive-failure threshold. Confirms
+    // isAvailable() reflects that immediately, same as getState() did —
+    // the fix is about RECOVERY, not about making it harder to trip.
+    const cb = createCircuitBreaker({ failureThreshold: 5, cooldownMs: 10_000 });
+    expect(cb.isAvailable()).toBe(true);
+    cb.forceOpen();
+    expect(cb.isAvailable()).toBe(false);
+  });
+
+  it('only allows one probe attempt through isAvailable() while HALF_OPEN — a second caller sees unavailable until the probe resolves', async () => {
+    const cb = createCircuitBreaker({ cooldownMs: 30 });
+    cb.forceOpen();
+    await new Promise((r) => setTimeout(r, 60));
+    expect(cb.isAvailable()).toBe(true); // transitions to half_open here
+    expect(cb.getState()).toBe('half_open');
+    // A concurrent caller must not also see this operator as available —
+    // only one probe should be in flight at a time. isAvailable() alone
+    // doesn't mark a probe in-flight (only .fetch() does), so a second
+    // isAvailable() call still reports true until something actually
+    // calls .fetch() to claim the probe slot.
+    let fetchResolve!: (r: Response) => void;
+    mockFetch.mockReturnValueOnce(new Promise((r) => (fetchResolve = r)));
+    const probe = cb.fetch('http://x');
+    expect(cb.isAvailable()).toBe(false); // probe now in flight
+    fetchResolve(new Response('ok', { status: 200 }));
+    await probe;
+    expect(cb.getState()).toBe('closed');
+  });
+});

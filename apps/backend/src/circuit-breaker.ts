@@ -33,6 +33,20 @@ interface CircuitBreaker {
   fetch: (url: string | URL, init?: RequestInit) => Promise<Response>;
   /** Returns the current circuit state. */
   getState: () => CircuitState;
+  /**
+   * CF2-01 (2026-06-30 cold audit): true iff a call through `.fetch()`
+   * right now would be attempted rather than immediately rejected with
+   * `CircuitOpenError`. Callers that filter OUT unavailable targets
+   * BEFORE ever calling `.fetch()` on them (e.g. `pickHealthyOperator`
+   * picking among several breakers) must use this, not `getState() !==
+   * 'open'` — the OPEN→HALF_OPEN cooldown-expiry transition previously
+   * lived only inside `wrappedFetch`, so a target filtered out via a
+   * bare state check never got `.fetch()` called on it again and could
+   * never recover on its own. This method runs the same idempotent
+   * cooldown check `wrappedFetch` does, so probing eligibility is
+   * visible to a pre-filter without needing to attempt a real request.
+   */
+  isAvailable: () => boolean;
   /** Resets the circuit to CLOSED (useful for testing). */
   reset: () => void;
   /**
@@ -131,14 +145,31 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
     }
   }
 
+  /**
+   * CF2-01: if OPEN and the cooldown has elapsed, transitions to
+   * HALF_OPEN. Idempotent and side-effect-free otherwise — safe to
+   * call from a pre-filter (`isAvailable`) as well as from the top of
+   * `wrappedFetch` itself, so the two never disagree about whether the
+   * cooldown has expired.
+   */
+  function maybeExpireOpenState(): void {
+    if (state === 'open' && Date.now() - openedAt >= cooldownMs) {
+      transitionTo('half_open');
+    }
+  }
+
+  function isAvailable(): boolean {
+    maybeExpireOpenState();
+    if (state === 'open') return false;
+    if (state === 'half_open') return !halfOpenInFlight;
+    return true;
+  }
+
   async function wrappedFetch(url: string | URL, init?: RequestInit): Promise<Response> {
     // OPEN — check if cooldown has elapsed
+    maybeExpireOpenState();
     if (state === 'open') {
-      if (Date.now() - openedAt >= cooldownMs) {
-        transitionTo('half_open');
-      } else {
-        throw new CircuitOpenError();
-      }
+      throw new CircuitOpenError();
     }
 
     // HALF_OPEN — only one probe request at a time. Arm a failsafe timer
@@ -234,7 +265,7 @@ export function createCircuitBreaker(options?: CircuitBreakerOptions): CircuitBr
     notifyCircuitBreaker('open', consecutiveFailures, Math.round(cooldownMs / 1000), name);
   }
 
-  return { fetch: wrappedFetch, getState, reset, forceOpen };
+  return { fetch: wrappedFetch, getState, isAvailable, reset, forceOpen };
 }
 
 /**

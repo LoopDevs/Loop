@@ -47,6 +47,12 @@ vi.mock('../../circuit-breaker.js', async (importActual) => {
         // Returning 'open' short-circuits pickHealthyOperator — it skips
         // every operator and returns null, tripping the exhausted path.
         getState: () => (isOpen() ? 'open' : 'closed'),
+        // CF2-01: pickHealthyOperator now filters on isAvailable(), not a
+        // bare getState() check (see circuit-breaker.ts). This fixture
+        // doesn't model real cooldown-based recovery — matching getState's
+        // own open/closed semantics is sufficient for what these tests
+        // exercise (selection/retry/alerting, not breaker internals).
+        isAvailable: () => !isOpen(),
         getStats: () => ({
           state: isOpen() ? 'open' : 'closed',
           consecutiveFailures: 0,

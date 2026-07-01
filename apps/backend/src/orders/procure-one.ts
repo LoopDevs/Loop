@@ -88,6 +88,36 @@ function formatMinorToMajor(minor: bigint): string {
  * Attempts procurement on a single order. Returns the outcome label
  * so callers can increment their batch counters.
  */
+/**
+ * CTX-02 (2026-06-30 cold audit): CF-12 correctly parses CTX's
+ * `Retry-After` header but never enforced it — `runProcurementTick`
+ * re-queries `state='paid'` orders on the next fixed-interval tick
+ * (default ~5s) regardless, so a 429 never actually backed off; it
+ * just stopped counting as an order failure while still re-hammering
+ * CTX every tick. Rate-limiting is an upstream-wide signal (not
+ * per-order), so the gate is process-wide: once any operator 429s,
+ * skip picking up ANY order until the parsed `Retry-After` window
+ * elapses. `runProcurementTick` checks `ctxBackoffActive()` before
+ * even querying for paid orders.
+ *
+ * Known limitation (tracked in Wave 9 of the remediation plan): this
+ * is in-memory, so it's per-Fly-machine, not fleet-wide — on a
+ * multi-machine deploy each instance backs off independently. Still a
+ * real improvement over never backing off at all, and the per-machine
+ * gap is the same shape as every other in-memory limiter flagged
+ * elsewhere in this audit round, tracked for the same shared-store fix.
+ */
+let ctxBackoffUntilMs = 0;
+
+export function ctxBackoffActive(now: number = Date.now()): boolean {
+  return now < ctxBackoffUntilMs;
+}
+
+/** Test seam: clears the process-wide CTX back-off gate. */
+export function __resetCtxBackoffForTests(): void {
+  ctxBackoffUntilMs = 0;
+}
+
 export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' | 'skipped'> {
   // Pick an operator before we flip state — the WHERE-state guard
   // means the UPDATE is our "lock", and we want to pin the operator
@@ -353,9 +383,15 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
     // revert/defer shape as the pool-unavailable path below.
     if (err instanceof OperatorRateLimitedError) {
       await revertOrderProcuringToPaid(order.id);
+      // CTX-02: actually enforce the parsed Retry-After instead of just
+      // logging it — see ctxBackoffActive()'s docstring. No header →
+      // fall back to a conservative 5s (matches the default tick
+      // interval, so at minimum we skip the very next re-pick).
+      const backoffMs = err.retryAfterMs ?? 5_000;
+      ctxBackoffUntilMs = Date.now() + backoffMs;
       log.warn(
-        { orderId: order.id, retryAfterMs: err.retryAfterMs },
-        'CTX rate-limited (429) — reverted procuring → paid for retry on a later tick',
+        { orderId: order.id, retryAfterMs: err.retryAfterMs, backoffMs },
+        'CTX rate-limited (429) — reverted procuring → paid and gated further procurement ticks until backoff elapses',
       );
       return 'skipped';
     }

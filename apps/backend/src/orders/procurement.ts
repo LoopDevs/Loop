@@ -19,7 +19,12 @@
 import { asc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { orders } from '../db/schema.js';
-import { procureOne } from './procure-one.js';
+import { procureOne, ctxBackoffActive } from './procure-one.js';
+
+// CTX-02: re-exported so `__tests__/procurement.test.ts` can reset the
+// process-wide back-off gate between cases without importing
+// procure-one.ts directly — same pattern as `__resetBelowFloorAlertForTests`.
+export { __resetCtxBackoffForTests } from './procure-one.js';
 
 export interface ProcurementTickResult {
   picked: number;
@@ -50,6 +55,14 @@ export {
 export async function runProcurementTick(
   args: { limit?: number } = {},
 ): Promise<ProcurementTickResult> {
+  // CTX-02 (2026-06-30 cold audit): a CTX 429 must actually pause
+  // procurement, not just get logged. Skip the whole tick — no orders
+  // picked, no CTX calls — until the back-off window elapses. See
+  // `ctxBackoffActive()`'s docstring in procure-one.ts.
+  if (ctxBackoffActive()) {
+    return { picked: 0, fulfilled: 0, failed: 0, skipped: 0 };
+  }
+
   const limit = args.limit ?? 10;
   const paidOrders = await db
     .select()
