@@ -25,6 +25,7 @@ import { consumeIdToken } from './id-token-replay.js';
 import { resolveOrCreateUserForIdentity } from './identities.js';
 import { isLoopAuthConfigured } from './tokens.js';
 import { issueTokenPair } from './issue-token-pair.js';
+import { enqueueWalletProvisioning } from '../wallet/provisioning.js';
 import type { SocialProvider } from '../db/schema.js';
 
 const log = logger.child({ handler: 'auth-social' });
@@ -165,6 +166,9 @@ export function makeSocialLoginHandler(config: SocialProviderConfig) {
         email,
       });
       const pair = await issueTokenPair({ id: user.id, email: user.email });
+      // ADR 030 Phase C1 — fire-and-forget embedded-wallet
+      // provisioning (see native.ts verify-otp for rationale).
+      enqueueWalletProvisioning(user.id);
       // Include email so the client can persist the session without
       // having to decode the Loop access JWT — mirrors what OTP users
       // get back (they typed their email; social users never did).

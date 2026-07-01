@@ -158,6 +158,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       'Fires when the redemption-backfill sweeper has re-fetched the CTX gift-card detail 10 times for a fulfilled order and the redemption payload (code / PIN / URL) is still empty. Per-row — each exhaustion needs a CTX support ticket keyed on the embedded CTX order id (see docs/runbooks/redemption-backfill-exhausted.md).',
   },
   {
+    name: 'notifyWalletProvisioningStuck',
+    channel: 'monitoring',
+    description:
+      "Fires when the wallet-provisioning sweeper (ADR 030 Phase C) has failed to provision + activate a user's embedded wallet 10 times and stops retrying. Per-row — each exhaustion needs its own investigation against the wallet-provider dashboard, operator-account funding, and Horizon (see docs/runbooks/wallet-provisioning-stuck.md).",
+  },
+  {
     name: 'notifyStuckProcurementSwept',
     channel: 'monitoring',
     description:

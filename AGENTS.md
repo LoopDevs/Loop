@@ -309,10 +309,12 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS=1
 # LOOP_AUTH_ROW_RETENTION_DAYS=30
 
-# ADR 030 Phase B: provider-agnostic embedded-wallet layer. '' (default)
+# ADR 030: provider-agnostic embedded-wallet layer. '' (default)
 # → OFF: getWalletProvider() returns null. 'privy' → Privy REST adapter
 # (fetch + Zod, no SDK dep); PRIVY_APP_ID + PRIVY_APP_SECRET then
-# required (parseEnv cross-field check). Substrate only in Phase B.
+# required (parseEnv cross-field check). Phase C wires the flows:
+# signup provisioning + sweeper, payout targeting, pay-with-balance,
+# GET /api/me/wallet.
 # LOOP_WALLET_PROVIDER=
 # PRIVY_APP_ID=<app-id>
 # PRIVY_APP_SECRET=<app-secret>        — never logged (pino redaction)
@@ -325,7 +327,7 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # LOOP_KILL_ORDERS_LEGACY=false   — POST /api/orders only
 # LOOP_KILL_ORDERS_LOOP=false     — POST /api/orders/loop only
 # LOOP_KILL_AUTH=false
-# LOOP_KILL_WITHDRAWALS=false
+# LOOP_KILL_EMISSIONS=false
 
 # Observability
 # SENTRY_DSN=<dsn>

@@ -31,3 +31,4 @@ export * from './stellar.js';
 export * from './user-favorites.js';
 export * from './user-recently-purchased.js';
 export * from './users-me.js';
+export * from './users-wallet.js';

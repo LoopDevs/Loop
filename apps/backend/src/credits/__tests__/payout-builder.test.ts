@@ -105,6 +105,49 @@ describe('buildPayoutIntent', () => {
     expect(d).toEqual({ kind: 'skip', reason: 'no_cashback' });
   });
 
+  // ADR 030 Phase C2 — destination resolution order: activated
+  // embedded wallet → legacy linked address → skip.
+  it('targets the embedded wallet when both addresses are present', () => {
+    payoutAssetMock.GBP.issuer = 'G' + 'C'.repeat(55);
+    const EMBEDDED = 'G' + 'D'.repeat(55);
+    const d = buildPayoutIntent({
+      embeddedWalletAddress: EMBEDDED,
+      stellarAddress: VALID_ADDRESS,
+      homeCurrency: 'GBP',
+      userCashbackMinor: 250n,
+      memoText: 'order-abc',
+    });
+    expect(d.kind).toBe('pay');
+    if (d.kind !== 'pay') throw new Error('unreachable');
+    expect(d.intent.to).toBe(EMBEDDED);
+  });
+
+  it('falls back to the legacy linked address when no activated embedded wallet', () => {
+    payoutAssetMock.GBP.issuer = 'G' + 'C'.repeat(55);
+    const d = buildPayoutIntent({
+      embeddedWalletAddress: null,
+      stellarAddress: VALID_ADDRESS,
+      homeCurrency: 'GBP',
+      userCashbackMinor: 250n,
+      memoText: 'order-abc',
+    });
+    expect(d.kind).toBe('pay');
+    if (d.kind !== 'pay') throw new Error('unreachable');
+    expect(d.intent.to).toBe(VALID_ADDRESS);
+  });
+
+  it('skips with no_address when neither embedded wallet nor legacy address exists', () => {
+    payoutAssetMock.GBP.issuer = 'G' + 'C'.repeat(55);
+    const d = buildPayoutIntent({
+      embeddedWalletAddress: null,
+      stellarAddress: null,
+      homeCurrency: 'GBP',
+      userCashbackMinor: 250n,
+      memoText: 'order-abc',
+    });
+    expect(d).toEqual({ kind: 'skip', reason: 'no_address' });
+  });
+
   it('synthesises a memo when the caller omits memoText', () => {
     payoutAssetMock.USD.issuer = 'GISSUERUSD';
     const d = buildPayoutIntent({

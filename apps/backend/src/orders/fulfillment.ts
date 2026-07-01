@@ -141,6 +141,8 @@ export async function markOrderFulfilled(
         .select({
           stellarAddress: users.stellarAddress,
           homeCurrency: users.homeCurrency,
+          walletAddress: users.walletAddress,
+          walletProvisioning: users.walletProvisioning,
         })
         .from(users)
         .where(eq(users.id, order.userId));
@@ -174,6 +176,15 @@ export async function markOrderFulfilled(
           let durableRowWritten = false;
           if (isHomeCurrency(order.chargeCurrency)) {
             const decision = buildPayoutIntent({
+              // ADR 030 Phase C2 — same activated-embedded-wallet
+              // precedence as the happy path below; without this the
+              // peg-break durable row silently fell back to the legacy
+              // linked address (or `no_address` for embedded-wallet-
+              // only users), reopening the exact off-chain/on-chain
+              // divergence gap CF-16 closed, just scoped to users who
+              // never linked a legacy address.
+              embeddedWalletAddress:
+                userRow.walletProvisioning === 'activated' ? userRow.walletAddress : null,
               stellarAddress: userRow.stellarAddress,
               homeCurrency: order.chargeCurrency,
               userCashbackMinor: order.userCashbackMinor,
@@ -234,6 +245,12 @@ export async function markOrderFulfilled(
           pegBreakDurableRow = durableRowWritten;
         } else {
           const decision = buildPayoutIntent({
+            // ADR 030 Phase C2 — activated embedded wallet wins over
+            // the legacy linked address; a wallet that exists but is
+            // not yet activated has no trustlines and must not be
+            // targeted (the legacy address / skip path applies).
+            embeddedWalletAddress:
+              userRow.walletProvisioning === 'activated' ? userRow.walletAddress : null,
             stellarAddress: userRow.stellarAddress,
             homeCurrency: userRow.homeCurrency,
             userCashbackMinor: order.userCashbackMinor,

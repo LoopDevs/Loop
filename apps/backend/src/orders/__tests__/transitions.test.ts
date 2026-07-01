@@ -183,17 +183,23 @@ vi.mock('../../credits/payout-builder.js', () => ({
   generatePayoutMemo: () => 'mock-burn-memo-20char',
   buildPayoutIntent: (args: {
     userCashbackMinor: bigint;
+    embeddedWalletAddress?: string | null;
     stellarAddress: string | null;
     homeCurrency: string;
     memoText?: string;
   }) => {
     if (payoutBuilderMock.decision !== null) return payoutBuilderMock.decision;
     if (args.userCashbackMinor <= 0n) return { kind: 'skip', reason: 'no_cashback' };
-    if (args.stellarAddress === null) return { kind: 'skip', reason: 'no_address' };
+    // ADR 030 Phase C2 — same precedence as the real builder: an
+    // activated embedded wallet wins over the legacy linked address.
+    const destination = args.embeddedWalletAddress ?? args.stellarAddress;
+    if (destination === null || destination === undefined) {
+      return { kind: 'skip', reason: 'no_address' };
+    }
     return {
       kind: 'pay',
       intent: {
-        to: args.stellarAddress,
+        to: destination,
         assetCode: `${args.homeCurrency}LOOP`,
         assetIssuer: 'GISSUER',
         amountStroops: args.userCashbackMinor * 100_000n,
@@ -458,6 +464,38 @@ describe('markOrderFulfilled', () => {
     expect(state.insertPendingPayoutCalls).toHaveLength(0);
   });
 
+  // ADR 030 Phase C2 — activated embedded wallet wins over the legacy
+  // linked address on the happy path.
+  it('prefers the activated embedded wallet over the legacy linked address', async () => {
+    state.returningRows = [baseOrder];
+    state.userLookupRows = [
+      {
+        stellarAddress: 'GLEGACY',
+        homeCurrency: 'GBP',
+        walletAddress: 'GEMBEDDED',
+        walletProvisioning: 'activated',
+      },
+    ];
+    await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+    expect(state.insertPendingPayoutCalls).toHaveLength(1);
+    expect(state.insertPendingPayoutCalls[0]).toMatchObject({ toAddress: 'GEMBEDDED' });
+  });
+
+  it('falls back to the legacy address when the embedded wallet exists but is not yet activated', async () => {
+    state.returningRows = [baseOrder];
+    state.userLookupRows = [
+      {
+        stellarAddress: 'GLEGACY',
+        homeCurrency: 'GBP',
+        walletAddress: 'GEMBEDDED',
+        walletProvisioning: 'wallet_created',
+      },
+    ];
+    await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+    expect(state.insertPendingPayoutCalls).toHaveLength(1);
+    expect(state.insertPendingPayoutCalls[0]).toMatchObject({ toAddress: 'GLEGACY' });
+  });
+
   it('skips the payout when no user row is found', async () => {
     state.returningRows = [baseOrder];
     state.userLookupRows = [];
@@ -493,6 +531,30 @@ describe('markOrderFulfilled', () => {
     // builder skip (no_address) → no durable row, but ops still paged
     // so they can drive the on-chain side once the user links a wallet.
     expect(state.insertPendingPayoutCalls).toHaveLength(0);
+    expect(notifyPegBreakMock).toHaveBeenCalledTimes(1);
+  });
+
+  // Regression: the peg-break branch originally called buildPayoutIntent
+  // without embeddedWalletAddress, silently falling back to the legacy
+  // linked address (or no_address for embedded-wallet-only users) and
+  // reopening the exact off-chain/on-chain divergence gap CF-16 closed,
+  // scoped to users who never linked a legacy address.
+  it('CF-16 / ADR 030 Phase C2: peg break routes the durable row to the activated embedded wallet', async () => {
+    state.returningRows = [{ ...baseOrder, chargeCurrency: 'USD' }];
+    state.userLookupRows = [
+      {
+        stellarAddress: null,
+        homeCurrency: 'GBP',
+        walletAddress: 'GEMBEDDED',
+        walletProvisioning: 'activated',
+      },
+    ];
+    await markOrderFulfilled('o-1', { ctxOrderId: 'ctx-abc' });
+    expect(state.insertPendingPayoutCalls).toHaveLength(1);
+    expect(state.insertPendingPayoutCalls[0]).toMatchObject({
+      toAddress: 'GEMBEDDED',
+      assetCode: 'USDLOOP',
+    });
     expect(notifyPegBreakMock).toHaveBeenCalledTimes(1);
   });
 

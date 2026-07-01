@@ -66,8 +66,9 @@ export interface PayoutTickResult {
   /** Transient failures left in submitted for the next tick to retry. */
   retriedLater: number;
   /**
-   * CF-15 (x-flows F9-1): `kind='withdrawal'` rows left untouched
-   * because `LOOP_KILL_WITHDRAWALS` is engaged. Order-cashback rows
+   * CF-15 (x-flows F9-1): `kind='emission'` rows left untouched
+   * because `LOOP_KILL_EMISSIONS` is engaged (pre-ADR-036 this was
+   * `withdrawal` / `LOOP_KILL_WITHDRAWALS`). Order-cashback rows
    * keep draining — the kill switch is the operator's "stop outbound
    * user withdrawals NOW" lever (e.g. a leaked-operator-key incident),
    * not a full payout halt.

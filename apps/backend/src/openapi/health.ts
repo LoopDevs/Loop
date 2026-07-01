@@ -119,6 +119,7 @@ export function registerHealthOpenApi(
             'payout_worker',
             'procurement_worker',
             'redemption_backfill',
+            'wallet_provisioning',
           ]),
           required: z.boolean(),
           running: z.boolean(),
