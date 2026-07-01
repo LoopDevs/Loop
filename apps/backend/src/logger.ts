@@ -97,6 +97,14 @@ export const REDACT_PATHS: readonly string[] = [
   //   Transactional email provider API key (ADR 013):
   'RESEND_API_KEY',
   '*.RESEND_API_KEY',
+  //   Privy wallet-provider app secret (ADR 030 Phase B). The
+  //   adapter holds it as an `appSecret` config field; cover both
+  //   the field name and the fully-qualified env-key shape.
+  'PRIVY_APP_SECRET',
+  '*.PRIVY_APP_SECRET',
+  'appSecret',
+  '*.appSecret',
+  '*.*.appSecret',
   //   Postgres connection string (includes password):
   'DATABASE_URL',
   '*.DATABASE_URL',

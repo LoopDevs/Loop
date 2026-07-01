@@ -67,6 +67,15 @@ export const users = pgTable(
     // at the API boundary; column is just `text` so ops can null it
     // out with a simple UPDATE if needed.
     stellarAddress: text('stellar_address'),
+    // ADR 030 Phase B — embedded-wallet provider linkage. Both NULL
+    // until the Phase-C provisioning flow creates a provider wallet
+    // for the user. `wallet_provider` is CHECK-pinned to the known
+    // vendor set (just 'privy' today; the dfns fallback would be a
+    // migration widening the CHECK). `wallet_id` is the provider-side
+    // wallet identifier (Privy CUID2); the partial unique index below
+    // guarantees two users can never share one provider wallet.
+    walletProvider: text('wallet_provider').$type<'privy'>(),
+    walletId: text('wallet_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -94,6 +103,14 @@ export const users = pgTable(
     // (HOME_CURRENCIES) gates it in-app. Both agree — either layer
     // catching a bad write is a tripwire on the other layer drifting.
     check('users_home_currency_known', sql`${t.homeCurrency} IN ('USD', 'GBP', 'EUR')`),
+    // ADR 030 Phase B: same dual-layer pattern as home_currency —
+    // the CHECK pins the vendor enum at the DB boundary, the
+    // `$type<'privy'>()` narrowing pins it in TypeScript. NULL rows
+    // (no wallet provisioned) pass the CHECK by SQL semantics.
+    check('users_wallet_provider_known', sql`${t.walletProvider} IN ('privy')`),
+    uniqueIndex('users_wallet_id_unique')
+      .on(t.walletId)
+      .where(sql`${t.walletId} IS NOT NULL`),
   ],
 );
 
