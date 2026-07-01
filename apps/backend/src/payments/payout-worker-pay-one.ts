@@ -22,6 +22,7 @@ import {
   recordPayoutTxHash,
   type PendingPayout,
 } from '../credits/pending-payouts.js';
+import { getPayoutForAdmin } from '../credits/pending-payouts-admin.js';
 import { findOutboundPaymentByMemo, getOutboundPaymentByTxHash } from './horizon.js';
 import { getAccountTrustlines } from './horizon-trustlines.js';
 import { submitPayout, PayoutSubmitError } from './payout-submit.js';
@@ -303,6 +304,41 @@ async function handleSubmitError(
       );
       return 'retriedLater';
     }
+
+    // CF2-07 (2026-06-30 cold audit): `transient_horizon` specifically
+    // means "we don't know whether the tx landed" (as opposed to
+    // `transient_rebuild`, which means the submit never reached the
+    // network — no ambiguity). On every OTHER retry, that ambiguity
+    // resolves itself on the NEXT `payOne` call via the CF-18
+    // authoritative-hash idempotency pre-check at the top of this
+    // file. But retry-exhaustion is terminal — there is no next
+    // `payOne` call for this row — so without one more check here, an
+    // ambiguous failure that actually landed on-chain would get
+    // auto-compensated (autoCompensateFailedWithdrawal below),
+    // re-crediting a user who was already paid. Re-fetch the row (the
+    // `onSigned` hook may have persisted a fresh txHash during THIS
+    // attempt, after the in-memory `row` object was read) and ask
+    // Horizon directly before treating it as failed.
+    if (err.kind === 'transient_horizon') {
+      const fresh = await getPayoutForAdmin(row.id);
+      if (fresh?.txHash !== null && fresh?.txHash !== undefined) {
+        const landed = await getOutboundPaymentByTxHash(fresh.txHash).catch((checkErr: unknown) => {
+          log.warn(
+            { payoutId: row.id, err: checkErr },
+            'CF2-07: authoritative landed-check itself failed on ambiguous retry-exhaustion — falling through to terminal-fail path (fail-closed toward NOT compensating twice is not possible here, so we prefer the existing manual-review path)',
+          );
+          return null;
+        });
+        if (landed?.landed === true) {
+          log.warn(
+            { payoutId: row.id, txHash: fresh.txHash },
+            'CF2-07: ambiguous transient_horizon failure at retry-exhaustion actually landed — converging to confirmed instead of failing/compensating',
+          );
+          return await convergeConfirmed(row, fresh.txHash, 'authoritative-hash');
+        }
+      }
+    }
+
     // Terminal, or transient but out of retries.
     await markPayoutFailed({ id: row.id, reason: `[${err.kind}] ${reason}` });
     log.error({ payoutId: row.id, kind: err.kind, attempts: usedAttempts }, 'Payout marked failed');

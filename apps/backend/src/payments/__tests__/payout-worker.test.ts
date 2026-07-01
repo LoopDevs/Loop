@@ -33,6 +33,13 @@ const { repoMocks } = vi.hoisted(() => ({
     recordPayoutTxHash: vi.fn<(args: { id: string; txHash: string }) => Promise<unknown>>(
       async (args: { id: string; txHash: string }) => ({ id: args.id, txHash: args.txHash }),
     ),
+    // CF2-07: re-fetch of the row on an ambiguous (transient_horizon)
+    // retry-exhaustion failure. Default: no fresh hash persisted (the
+    // common case — most attempts fail before `onSigned` even runs),
+    // so the new check is a no-op and behaviour matches pre-CF2-07.
+    getPayoutForAdmin: vi.fn<(id: string) => Promise<{ id: string; txHash: string | null } | null>>(
+      async (id: string) => ({ id, txHash: null }),
+    ),
   },
 }));
 vi.mock('../../credits/pending-payouts.js', () => ({
@@ -45,6 +52,9 @@ vi.mock('../../credits/pending-payouts.js', () => ({
   reclaimSubmittedPayout: (args: { id: string; expectedAttempts: number }) =>
     repoMocks.reclaimSubmittedPayout(args),
   recordPayoutTxHash: (args: { id: string; txHash: string }) => repoMocks.recordPayoutTxHash(args),
+}));
+vi.mock('../../credits/pending-payouts-admin.js', () => ({
+  getPayoutForAdmin: (id: string) => repoMocks.getPayoutForAdmin(id),
 }));
 
 const { horizonMock } = vi.hoisted(() => ({
@@ -236,6 +246,8 @@ beforeEach(() => {
   repoMocks.markPayoutFailed.mockReset();
   repoMocks.reclaimSubmittedPayout.mockReset();
   repoMocks.recordPayoutTxHash.mockReset();
+  repoMocks.getPayoutForAdmin.mockReset();
+  repoMocks.getPayoutForAdmin.mockImplementation(async (id: string) => ({ id, txHash: null }));
   horizonMock.findOutboundPaymentByMemo.mockReset();
   horizonMock.getOutboundPaymentByTxHash.mockReset();
   sdkMock.submitPayout.mockReset();
@@ -553,6 +565,99 @@ describe('runPayoutTick', () => {
     const r = await runPayoutTick({ ...BASE_ARGS, maxAttempts: 5 });
     expect(r.failed).toBe(1);
     expect(repoMocks.markPayoutFailed).toHaveBeenCalledWith(expect.objectContaining({ id: 'p-1' }));
+  });
+
+  // CF2-07 (2026-06-30 cold audit): `transient_horizon` at retry-exhaustion
+  // is ambiguous — we don't know if the tx actually landed. Auto-
+  // compensating without re-checking would re-credit a user who was
+  // already paid. These pin the new authoritative re-check.
+  describe('CF2-07: transient_horizon at retry-exhaustion re-checks before compensating', () => {
+    it('landed=true → converges to confirmed instead of failing/compensating', async () => {
+      repoMocks.listClaimablePayouts.mockResolvedValue([
+        makeRow({ attempts: 4, kind: 'withdrawal', assetCode: 'GBPLOOP' }),
+      ]);
+      sdkMock.submitPayout.mockRejectedValue(
+        new PayoutSubmitErrorMock('transient_horizon', 'ambiguous timeout'),
+      );
+      // A fresh row-fetch reveals onSigned persisted a hash during THIS
+      // ambiguous attempt, and Horizon confirms it actually landed.
+      repoMocks.getPayoutForAdmin.mockResolvedValue({ id: 'p-1', txHash: 'tx-landed-after-all' });
+      horizonMock.getOutboundPaymentByTxHash.mockImplementation(async (hash: string) =>
+        hash === 'tx-landed-after-all' ? { landed: true } : null,
+      );
+      const r = await runPayoutTick({ ...BASE_ARGS, maxAttempts: 5 });
+      // convergeConfirmed's outcome label for "idempotency check proved a
+      // prior submit had already landed" is skippedAlreadyLanded, not
+      // confirmed (that label is reserved for a fresh submit succeeding
+      // in the same tick) — the important thing is it's NOT failed.
+      expect(r.skippedAlreadyLanded).toBe(1);
+      expect(r.failed).toBe(0);
+      expect(repoMocks.markPayoutFailed).not.toHaveBeenCalled();
+      expect(compensationMock.applyAdminPayoutCompensation).not.toHaveBeenCalled();
+      expect(repoMocks.markPayoutConfirmed).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'p-1', txHash: 'tx-landed-after-all' }),
+      );
+    });
+
+    it('landed=false → proceeds with the existing fail + auto-compensate path', async () => {
+      repoMocks.listClaimablePayouts.mockResolvedValue([
+        makeRow({ attempts: 4, kind: 'withdrawal', assetCode: 'GBPLOOP' }),
+      ]);
+      sdkMock.submitPayout.mockRejectedValue(
+        new PayoutSubmitErrorMock('transient_horizon', 'ambiguous timeout'),
+      );
+      repoMocks.getPayoutForAdmin.mockResolvedValue({ id: 'p-1', txHash: 'tx-never-landed' });
+      horizonMock.getOutboundPaymentByTxHash.mockResolvedValue(null);
+      const r = await runPayoutTick({ ...BASE_ARGS, maxAttempts: 5 });
+      expect(r.failed).toBe(1);
+      expect(repoMocks.markPayoutFailed).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'p-1' }),
+      );
+      expect(compensationMock.applyAdminPayoutCompensation).toHaveBeenCalled();
+    });
+
+    it('no fresh hash persisted → skips the check gracefully, proceeds to fail + compensate', async () => {
+      repoMocks.listClaimablePayouts.mockResolvedValue([
+        makeRow({ attempts: 4, kind: 'withdrawal', assetCode: 'GBPLOOP' }),
+      ]);
+      sdkMock.submitPayout.mockRejectedValue(
+        new PayoutSubmitErrorMock('transient_horizon', 'ambiguous timeout'),
+      );
+      repoMocks.getPayoutForAdmin.mockResolvedValue({ id: 'p-1', txHash: null });
+      const r = await runPayoutTick({ ...BASE_ARGS, maxAttempts: 5 });
+      expect(r.failed).toBe(1);
+      expect(horizonMock.getOutboundPaymentByTxHash).not.toHaveBeenCalled();
+      expect(compensationMock.applyAdminPayoutCompensation).toHaveBeenCalled();
+    });
+
+    it('the authoritative check itself failing → falls through to the existing fail path (no throw out of the tick)', async () => {
+      repoMocks.listClaimablePayouts.mockResolvedValue([
+        makeRow({ attempts: 4, kind: 'withdrawal', assetCode: 'GBPLOOP' }),
+      ]);
+      sdkMock.submitPayout.mockRejectedValue(
+        new PayoutSubmitErrorMock('transient_horizon', 'ambiguous timeout'),
+      );
+      repoMocks.getPayoutForAdmin.mockResolvedValue({ id: 'p-1', txHash: 'tx-check-degraded' });
+      horizonMock.getOutboundPaymentByTxHash.mockRejectedValue(new Error('Horizon 503'));
+      const r = await runPayoutTick({ ...BASE_ARGS, maxAttempts: 5 });
+      expect(r.failed).toBe(1);
+      expect(compensationMock.applyAdminPayoutCompensation).toHaveBeenCalled();
+    });
+
+    it('transient_rebuild (not ambiguous) at retry-exhaustion does NOT trigger the re-check at all', async () => {
+      repoMocks.listClaimablePayouts.mockResolvedValue([
+        makeRow({ attempts: 4, kind: 'withdrawal', assetCode: 'GBPLOOP' }),
+      ]);
+      sdkMock.submitPayout.mockRejectedValue(
+        new PayoutSubmitErrorMock('transient_rebuild', 'tx_bad_seq'),
+      );
+      const r = await runPayoutTick({ ...BASE_ARGS, maxAttempts: 5 });
+      expect(r.failed).toBe(1);
+      // getPayoutForAdmin is only called by the transient_horizon-specific
+      // re-check — transient_rebuild has no landing ambiguity, so it must
+      // never fire here.
+      expect(repoMocks.getPayoutForAdmin).not.toHaveBeenCalled();
+    });
   });
 
   it('terminal_no_trust immediately marks failed regardless of attempts', async () => {
