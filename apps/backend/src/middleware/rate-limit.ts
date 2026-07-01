@@ -120,12 +120,36 @@ export function sweepExpiredRateLimits(now: number = Date.now()): void {
  * Conventional naming (recommended): `${METHOD} ${routePattern}`
  * for routes that share a path across methods (e.g. `GET /api/orders/:id`
  * vs `POST /api/orders/:id/retry`).
+ *
+ * **CF2-10 (2026-06-30 cold audit) stopgap:** `maxRequests` is the
+ * caller's documented per-machine budget; this is `rateLimitMap`
+ * being in-memory and per-machine, so the effective FLEET-wide
+ * budget is `maxRequests × (live machine count)`. Until the real fix
+ * (a shared counter, tracked separately as Wave 9 PR AA) lands, the
+ * enforced budget is divided by `env.RATE_LIMIT_MACHINE_COUNT_ESTIMATE`
+ * so the fleet-wide effective limit stays close to what each call
+ * site's comment documents. Floors at 1 so a low `maxRequests` (e.g.
+ * request-otp's 5/min) can never divide down to a limit of 0.
+ *
+ * Defensive against a missing/invalid estimate (many existing tests
+ * mock `env.js` with a hand-picked field subset that predates this
+ * var, so `env.RATE_LIMIT_MACHINE_COUNT_ESTIMATE` can be `undefined`
+ * there): anything that isn't a positive finite number falls back to
+ * 1 (no division) rather than propagating `NaN`, which would make
+ * `effectiveMaxRequests` `NaN` and `count > NaN` permanently `false`
+ * — silently disabling the rate limiter entirely.
  */
 export function rateLimit(
   name: string,
   maxRequests: number,
   windowMs: number,
 ): (c: Context, next: () => Promise<void>) => Promise<void | Response> {
+  const rawEstimate = env.RATE_LIMIT_MACHINE_COUNT_ESTIMATE;
+  const machineCountEstimate =
+    typeof rawEstimate === 'number' && Number.isFinite(rawEstimate) && rawEstimate > 0
+      ? rawEstimate
+      : 1;
+  const effectiveMaxRequests = Math.max(1, Math.floor(maxRequests / machineCountEstimate));
   return async (c, next): Promise<void | Response> => {
     // Escape hatch for e2e test runs. The mocked-e2e suite drives
     // the purchase flow twice with Playwright retries, which
@@ -154,7 +178,7 @@ export function rateLimit(
       rateLimitMap.set(key, { count: 1, resetAt: now + windowMs });
     } else {
       entry.count++;
-      if (entry.count > maxRequests) {
+      if (entry.count > effectiveMaxRequests) {
         // Tell the client when the window resets so clients can
         // back off instead of hot-looping retries.
         const retryAfterSec = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));

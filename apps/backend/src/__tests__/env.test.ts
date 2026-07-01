@@ -348,4 +348,24 @@ describe('parseEnv', () => {
       ).not.toThrow();
     });
   });
+
+  // CF2-10 (2026-06-30 cold audit) / PLAT-30-04 precedent: new env vars
+  // need direct parseEnv-level coverage, not just indirect exercise via
+  // a sibling module.
+  describe('RATE_LIMIT_MACHINE_COUNT_ESTIMATE', () => {
+    it('defaults to 1 (no division — same posture as TRUST_PROXY)', () => {
+      const env = parseEnv({ ...base });
+      expect(env.RATE_LIMIT_MACHINE_COUNT_ESTIMATE).toBe(1);
+    });
+
+    it('coerces a numeric string', () => {
+      const env = parseEnv({ ...base, RATE_LIMIT_MACHINE_COUNT_ESTIMATE: '5' });
+      expect(env.RATE_LIMIT_MACHINE_COUNT_ESTIMATE).toBe(5);
+    });
+
+    it('rejects zero and negative values', () => {
+      expect(() => parseEnv({ ...base, RATE_LIMIT_MACHINE_COUNT_ESTIMATE: '0' })).toThrow();
+      expect(() => parseEnv({ ...base, RATE_LIMIT_MACHINE_COUNT_ESTIMATE: '-1' })).toThrow();
+    });
+  });
 });
