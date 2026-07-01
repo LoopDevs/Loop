@@ -197,6 +197,16 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # entirely.
 # DISABLE_RATE_LIMITING=1
 
+# CF2-10 (2026-06-30 cold audit) stopgap: rateLimitMap is in-memory and
+# per-machine, so every configured per-route budget is actually
+# max × (live Fly machine count). Divides every budget by this
+# estimate so the effective fleet-wide limit matches what's documented.
+# Default 1 (no division) — same posture as TRUST_PROXY; local dev/test
+# run single-process, so leave unset there. Production sets this
+# explicitly to the fleet's real machine count (confirmed 2 during the
+# audit); update when that count changes.
+# RATE_LIMIT_MACHINE_COUNT_ESTIMATE=2
+
 # ── Loop-native auth (ADR 013 / 014) ─────────────────────────────────
 # HS256 signing key; ≥32 chars. Absent → Loop-native auth endpoints
 # are inert and CTX-proxy auth is the only path. `_PREVIOUS` is only

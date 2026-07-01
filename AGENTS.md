@@ -222,6 +222,14 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # can spoof X-Forwarded-For and bypass per-IP limits.
 # TRUST_PROXY=true
 
+# CF2-10 (2026-06-30 cold audit) stopgap: rateLimitMap is in-memory and
+# per-machine, so every configured per-route budget is actually
+# max × (live Fly machine count). Divides every budget by this
+# estimate. Default 1 (no division, same posture as TRUST_PROXY) —
+# production sets this explicitly to the fleet's real machine count
+# (confirmed 2 during the audit); update when that count changes.
+# RATE_LIMIT_MACHINE_COUNT_ESTIMATE=2
+
 # Optional: API credentials for endpoints that require auth (/locations)
 # GIFT_CARD_API_KEY=<key>
 # GIFT_CARD_API_SECRET=<secret>

@@ -180,6 +180,28 @@ export const EnvSchema = z.object({
   // every per-IP limit on every route.
   DISABLE_RATE_LIMITING: envBoolean.default(false),
 
+  // CF2-10 (2026-06-30 cold audit) stopgap: `rateLimitMap` is an
+  // in-memory, per-machine Map — every configured per-route budget
+  // (`rateLimit(name, max, windowMs)`) is actually `max × N` where N
+  // is however many Fly machines are currently running, since a
+  // client's requests land on whichever machine picks them up. Fly's
+  // `auto_start_machines=true` autoscaling means N isn't fixed; a
+  // `flyctl machines list` check during the audit found 2 machines
+  // already provisioned. Until the real fix (a shared Postgres/Redis-
+  // backed counter, tracked separately) lands, divide every
+  // configured budget by this estimate so the EFFECTIVE fleet-wide
+  // budget matches what's documented.
+  //
+  // Defaults to 1 (no division) — same posture as TRUST_PROXY: local
+  // dev and every unit/integration test run single-process, where the
+  // per-machine multiplier problem doesn't exist, so the documented
+  // literal thresholds (5/min, 10/min, etc.) must hold unchanged.
+  // Production sets this explicitly (via fly.toml / `flyctl secrets`)
+  // to the fleet's real machine count — update it when that count
+  // changes; it's a blunt estimate, not a live `flyctl machines list`
+  // read.
+  RATE_LIMIT_MACHINE_COUNT_ESTIMATE: z.coerce.number().int().positive().default(1),
+
   // A2-1606 / A2-1607: shared-secret bearer tokens for `/metrics` and
   // `/openapi.json`. When set, the route requires `Authorization:
   // Bearer <token>` for every request. When unset the route is open in
