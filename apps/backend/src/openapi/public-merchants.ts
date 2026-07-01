@@ -58,11 +58,17 @@ export function registerPublicMerchantsOpenApi(
     path: '/api/public/merchants/{id}',
     summary: 'Per-merchant SEO detail (ADR 011 / 020).',
     description:
-      'Unauthenticated single-merchant view for the /cashback/:slug landing page. Accepts merchant id OR slug as the path parameter. Narrow PII-free shape (no wholesale / margin — only user-facing cashback pct). Never 500: DB trouble → per-merchant last-known-good cache; first-miss → catalog row with null pct. 404 only for unknown id/slug (evicted merchants / typo URLs). `Cache-Control: public, max-age=300` on the happy path; `max-age=60` on the fallback path.',
+      "Unauthenticated single-merchant view for the /cashback/:slug landing page. Accepts merchant id OR slug as the path parameter. Narrow PII-free shape (no wholesale / margin — only user-facing cashback pct). `?country=` (CAT-02, 2026-06-30 cold audit) applies the same country↔merchant visibility rule as `home.tsx`/`brand.$slug.tsx` — a merchant tagged to a different country/currency than the caller's resolves to 404 rather than revealing it. Unrecognised codes are ignored (no filter), never a 400. Never 500: DB trouble → per-merchant last-known-good cache; first-miss → catalog row with null pct. 404 for unknown id/slug (evicted merchants / typo URLs) or a country-filtered-out merchant. `Cache-Control: public, max-age=300` on the happy path; `max-age=60` on the fallback path.",
     tags: ['Public'],
     request: {
       params: z.object({
         id: z.string().openapi({ description: 'Merchant id or slug.' }),
+      }),
+      query: z.object({
+        country: z.string().optional().openapi({
+          description:
+            'ISO 3166-1 alpha-2 country code to scope the lookup to (CAT-02). A merchant tagged to a different country/currency resolves to 404. Unrecognised codes are ignored (no filter).',
+        }),
       }),
     },
     responses: {
@@ -75,7 +81,7 @@ export function registerPublicMerchantsOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       404: {
-        description: 'Unknown merchant id / slug',
+        description: 'Unknown merchant id / slug, or a merchant filtered out by ?country=',
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {

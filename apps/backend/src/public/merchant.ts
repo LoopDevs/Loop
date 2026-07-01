@@ -30,7 +30,7 @@
 import type { Context } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import type { PublicMerchantDetail } from '@loop/shared';
-import { merchantSlug } from '@loop/shared';
+import { isSupportedCountryCode, merchantInCountry, merchantSlug } from '@loop/shared';
 import { db } from '../db/client.js';
 import { merchantCashbackConfigs } from '../db/schema.js';
 import { getMerchants } from '../merchants/sync.js';
@@ -65,10 +65,20 @@ interface ResolvedMerchant {
   logoUrl: string | null;
 }
 
-function resolveMerchant(idOrSlug: string): ResolvedMerchant | null {
+/**
+ * CAT-02 (2026-06-30 cold audit): `country` applies the same
+ * country↔merchant visibility rule `home.tsx` / `brand.$slug.tsx`
+ * already use — resolving to `null` (404 at the handler) for a
+ * merchant tagged to a different country/currency than the caller's,
+ * so `/cashback/:slug` can't reveal a merchant that's out of scope
+ * for the visitor's locale, matching brand.$slug.tsx's existing
+ * filter-then-find pattern instead of resolving unconditionally.
+ */
+function resolveMerchant(idOrSlug: string, country: string | null): ResolvedMerchant | null {
   const { merchantsById, merchantsBySlug } = getMerchants();
   const m = merchantsById.get(idOrSlug) ?? merchantsBySlug.get(idOrSlug);
   if (m === undefined) return null;
+  if (country !== null && !merchantInCountry(m, country)) return null;
   return { id: m.id, name: m.name, slug: merchantSlug(m), logoUrl: m.logoUrl ?? null };
 }
 
@@ -104,7 +114,17 @@ export async function publicMerchantHandler(c: Context): Promise<Response> {
     return c.json({ code: 'VALIDATION_ERROR', message: 'id is malformed' }, 400);
   }
 
-  const resolved = resolveMerchant(idParam);
+  // CAT-02: optional `?country=` filter. Lenient parsing (unrecognised
+  // code → no filter) matching top-cashback-merchants.ts and the rest
+  // of the public surface's precedent (ADR 020) — never 400 a visitor
+  // over a malformed locale hint.
+  const countryRaw = c.req.query('country');
+  const country =
+    countryRaw !== undefined && isSupportedCountryCode(countryRaw)
+      ? countryRaw.toUpperCase()
+      : null;
+
+  const resolved = resolveMerchant(idParam, country);
   if (resolved === null) {
     return c.json({ code: 'NOT_FOUND', message: 'Merchant not found' }, 404);
   }

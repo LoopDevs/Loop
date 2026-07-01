@@ -25,7 +25,7 @@ import { desc, eq, sql } from 'drizzle-orm';
 // (ADR 019 single-source rule). Re-exported below for existing backend
 // callers that import the symbol relative to this module.
 import type { PublicTopCashbackMerchantsResponse, TopCashbackMerchant } from '@loop/shared';
-import { merchantSlug } from '@loop/shared';
+import { isSupportedCountryCode, merchantInCountry, merchantSlug } from '@loop/shared';
 import { db } from '../db/client.js';
 import { merchantCashbackConfigs } from '../db/schema.js';
 import { getMerchants } from '../merchants/sync.js';
@@ -43,14 +43,24 @@ interface ConfigRow {
   userCashbackPct: string;
 }
 
-const lastKnownGoodByLimit = new Map<number, PublicTopCashbackMerchantsResponse>();
+// CAT-02 (2026-06-30 cold audit): keyed by `${limit}:${country ?? ''}` so a
+// fallback snapshot never crosses country boundaries — a US visitor hitting
+// the fallback path must never see a cached AE-scoped result and vice versa.
+const lastKnownGoodByKey = new Map<string, PublicTopCashbackMerchantsResponse>();
+
+function cacheKey(limit: number, country: string | null): string {
+  return `${limit}:${country ?? ''}`;
+}
 
 /** Test-only reset. */
 export function __resetPublicTopCashbackMerchantsCache(): void {
-  lastKnownGoodByLimit.clear();
+  lastKnownGoodByKey.clear();
 }
 
-async function compute(limit: number): Promise<PublicTopCashbackMerchantsResponse> {
+async function compute(
+  limit: number,
+  country: string | null,
+): Promise<PublicTopCashbackMerchantsResponse> {
   const rows = (await db
     .select({
       merchantId: merchantCashbackConfigs.merchantId,
@@ -73,6 +83,11 @@ async function compute(limit: number): Promise<PublicTopCashbackMerchantsRespons
   for (const row of rows) {
     const m = merchantsById.get(row.merchantId);
     if (m === undefined) continue;
+    // CAT-02: same country↔merchant visibility rule home.tsx / the now-
+    // fixed brand.$slug.tsx already use — a merchant tagged to a
+    // different country/currency than the visitor's shouldn't feed the
+    // "best cashback" marketing band for them.
+    if (country !== null && !merchantInCountry(m, country)) continue;
     merchants.push({
       id: m.id,
       name: m.name,
@@ -94,15 +109,27 @@ export async function publicTopCashbackMerchantsHandler(c: Context): Promise<Res
     MAX_LIMIT,
   );
 
+  // CAT-02: optional `?country=` filter. Lenient parsing matching this
+  // handler's own `limit` precedent (and the rest of the public surface,
+  // ADR 020) — an unrecognised code is treated as "no filter" rather than
+  // a 400, since this is an unauthenticated, CDN-cached, never-500
+  // marketing endpoint that should degrade gracefully for any caller.
+  const countryRaw = c.req.query('country');
+  const country =
+    countryRaw !== undefined && isSupportedCountryCode(countryRaw)
+      ? countryRaw.toUpperCase()
+      : null;
+
+  const key = cacheKey(limit, country);
   try {
-    const snapshot = await compute(limit);
-    lastKnownGoodByLimit.set(limit, snapshot);
+    const snapshot = await compute(limit, country);
+    lastKnownGoodByKey.set(key, snapshot);
     c.header('cache-control', 'public, max-age=300');
     return c.json<PublicTopCashbackMerchantsResponse>(snapshot);
   } catch (err) {
     log.error({ err }, 'Public top-cashback-merchants computation failed — serving fallback');
     c.header('cache-control', 'public, max-age=60');
-    const fallback = lastKnownGoodByLimit.get(limit);
+    const fallback = lastKnownGoodByKey.get(key);
     if (fallback !== undefined) {
       return c.json<PublicTopCashbackMerchantsResponse>(fallback);
     }

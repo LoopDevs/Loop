@@ -1,17 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Context } from 'hono';
 
+interface FakeMerchant {
+  id: string;
+  name: string;
+  logoUrl?: string | null;
+  enabled: boolean;
+  // CAT-02: country↔merchant visibility fields merchantInCountry reads.
+  country?: string;
+  denominations?: { currency?: string };
+}
+
 const state = vi.hoisted(() => ({
   configRows: [] as Array<{ userCashbackPct: string }>,
   throwErr: null as Error | null,
-  merchantsById: new Map<
-    string,
-    { id: string; name: string; logoUrl?: string | null; enabled: boolean }
-  >(),
-  merchantsBySlug: new Map<
-    string,
-    { id: string; name: string; logoUrl?: string | null; enabled: boolean }
-  >(),
+  merchantsById: new Map<string, FakeMerchant>(),
+  merchantsBySlug: new Map<string, FakeMerchant>(),
 }));
 
 const limitMock = vi.fn(async () => {
@@ -58,10 +62,13 @@ vi.mock('../../logger.js', () => ({
 
 import { publicMerchantHandler, __resetPublicMerchantCache } from '../merchant.js';
 
-function makeCtx(params: Record<string, string | undefined> = {}): Context {
+function makeCtx(
+  params: Record<string, string | undefined> = {},
+  query: Record<string, string | undefined> = {},
+): Context {
   const headers = new Map<string, string>();
   return {
-    req: { param: (k: string) => params[k] },
+    req: { param: (k: string) => params[k], query: (k: string) => query[k] },
     header: (k: string, v: string) => {
       headers.set(k, v);
     },
@@ -192,5 +199,74 @@ describe('publicMerchantHandler', () => {
     const body = (await res.json()) as { id: string; userCashbackPct: string | null };
     expect(body.id).toBe('amazon_us');
     expect(body.userCashbackPct).toBeNull();
+  });
+
+  // CAT-02 (2026-06-30 cold audit): ?country= applies the same
+  // country↔merchant visibility rule as home.tsx / brand.$slug.tsx.
+  describe('CAT-02: ?country= scoping', () => {
+    it('404s a merchant tagged to a different country than ?country=', async () => {
+      state.merchantsById.set('ae_only', {
+        id: 'ae_only',
+        name: 'AE Only Merchant',
+        logoUrl: null,
+        enabled: true,
+        country: 'AE',
+      });
+      const res = await publicMerchantHandler(makeCtx({ id: 'ae_only' }, { country: 'US' }));
+      expect(res.status).toBe(404);
+    });
+
+    it('resolves a merchant whose country matches ?country=', async () => {
+      state.merchantsById.set('ae_only', {
+        id: 'ae_only',
+        name: 'AE Only Merchant',
+        logoUrl: null,
+        enabled: true,
+        country: 'AE',
+      });
+      state.configRows = [{ userCashbackPct: '3.00' }];
+      const res = await publicMerchantHandler(makeCtx({ id: 'ae_only' }, { country: 'AE' }));
+      expect(res.status).toBe(200);
+    });
+
+    it('resolves via currency match when the merchant has no country tag (Eurozone rule)', async () => {
+      state.merchantsById.set('eur_merchant', {
+        id: 'eur_merchant',
+        name: 'Eurozone Merchant',
+        logoUrl: null,
+        enabled: true,
+        denominations: { currency: 'EUR' },
+      });
+      state.configRows = [{ userCashbackPct: '4.00' }];
+      // FR is a Eurozone country per @loop/shared's country table.
+      const res = await publicMerchantHandler(makeCtx({ id: 'eur_merchant' }, { country: 'FR' }));
+      expect(res.status).toBe(200);
+    });
+
+    it('an unrecognised ?country= is ignored (no filter, not a 400)', async () => {
+      state.merchantsById.set('amazon_us', {
+        id: 'amazon_us',
+        name: 'Amazon',
+        logoUrl: null,
+        enabled: true,
+        country: 'US',
+      });
+      const res = await publicMerchantHandler(
+        makeCtx({ id: 'amazon_us' }, { country: 'not-a-country' }),
+      );
+      expect(res.status).toBe(200);
+    });
+
+    it('no ?country= at all resolves regardless of the merchant tag (unchanged default behavior)', async () => {
+      state.merchantsById.set('ae_only', {
+        id: 'ae_only',
+        name: 'AE Only Merchant',
+        logoUrl: null,
+        enabled: true,
+        country: 'AE',
+      });
+      const res = await publicMerchantHandler(makeCtx({ id: 'ae_only' }));
+      expect(res.status).toBe(200);
+    });
   });
 });
