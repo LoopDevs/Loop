@@ -51,10 +51,24 @@ export default function BrandRoute(): React.JSX.Element {
     () => merchants.filter((m) => merchantInCountry(m, country)),
     [merchants, country],
   );
-  const group = useMemo(
-    () => groupMerchants(countryMerchants).find((g) => brandSlug(g.name) === slug),
-    [countryMerchants, slug],
-  );
+  // CAT-03 (2026-06-30 cold audit): brandSlug() always lowercases its
+  // output, but the raw URL slug was compared verbatim — a hand-typed
+  // or old-backlink `/brand/Adidas` 404'd even though `/brand/adidas`
+  // resolves. Every other slug-resolution path in the codebase is
+  // explicitly case-insensitive; run the raw param through the same
+  // brandSlug() normalisation before comparing, matching that
+  // convention. decodeURIComponent throws on malformed percent escapes
+  // (e.g. "%ZZ") — same guarded pattern as this file's meta() above.
+  const group = useMemo(() => {
+    let decoded = slug;
+    try {
+      decoded = decodeURIComponent(slug);
+    } catch {
+      // keep the raw value
+    }
+    const normalizedSlug = brandSlug(decoded);
+    return groupMerchants(countryMerchants).find((g) => brandSlug(g.name) === normalizedSlug);
+  }, [countryMerchants, slug]);
 
   const handleBack = (): void => {
     if (window.history.length > 1) {

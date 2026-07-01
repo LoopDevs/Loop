@@ -25,7 +25,7 @@ vi.mock('~/services/public-stats', async (importActual) => {
   const actual = (await importActual()) as typeof PublicStats;
   return {
     ...actual,
-    getPublicTopCashbackMerchants: (opts?: { limit?: number }) =>
+    getPublicTopCashbackMerchants: (opts?: { limit?: number; country?: string }) =>
       mocks.getPublicTopCashbackMerchants(opts),
     getPublicCashbackPreview: (args: { merchantId: string; amountMinor: number }) =>
       mocks.getPublicCashbackPreview(args),
@@ -36,13 +36,14 @@ vi.mock('~/hooks/query-retry', () => ({ shouldRetry: () => false }));
 vi.mock('~/hooks/use-auth', () => ({ useAuth: () => ({ isAuthenticated: false }) }));
 vi.mock('~/hooks/use-native-platform', () => ({ useNativePlatform: () => ({ isNative: false }) }));
 
-function renderRoute(): HTMLElement {
+function renderRoute(path = '/calculator'): HTMLElement {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const { container } = render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={['/calculator']}>
+      <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/calculator" element={<CalculatorRoute />} />
+          <Route path="/:country/:lang/calculator" element={<CalculatorRoute />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -125,6 +126,35 @@ describe('<CalculatorRoute />', () => {
     renderRoute();
     await waitFor(() => {
       expect(screen.getByText(/No merchants available right now/)).toBeDefined();
+    });
+  });
+
+  // CAT-02 (2026-06-30 cold audit): this route was one of three
+  // country-blind catalog surfaces — the dropdown showed every
+  // merchant globally regardless of the visitor's locale.
+  it('passes the URL country segment through to the top-merchants request', async () => {
+    mocks.getPublicTopCashbackMerchants.mockResolvedValue({
+      merchants: [],
+      asOf: new Date().toISOString(),
+    });
+    renderRoute('/gb/en/calculator');
+    await waitFor(() => {
+      expect(mocks.getPublicTopCashbackMerchants).toHaveBeenCalledWith(
+        expect.objectContaining({ country: 'gb' }),
+      );
+    });
+  });
+
+  it('defaults to the fallback market on an unprefixed route', async () => {
+    mocks.getPublicTopCashbackMerchants.mockResolvedValue({
+      merchants: [],
+      asOf: new Date().toISOString(),
+    });
+    renderRoute('/calculator');
+    await waitFor(() => {
+      expect(mocks.getPublicTopCashbackMerchants).toHaveBeenCalledWith(
+        expect.objectContaining({ country: 'us' }),
+      );
     });
   });
 });
