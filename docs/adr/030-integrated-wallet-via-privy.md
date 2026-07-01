@@ -1,6 +1,6 @@
 # ADR 030: Integrated cross-platform wallet via Privy
 
-Status: Proposed
+Status: Proposed — technical DD answered 2026-06-11 (see Due-diligence outcome); awaiting business DD (ToS/pricing/counsel) for Accepted
 Date: 2026-05-05
 Supersedes: ADR 015 §"User wallet linking" + rollout checklist items #362 / #366; amends ADR 009 §"Earlier exploration looked at embedded wallets via Privy / dfns / Turnkey. All three were rejected"; amends ADR 027 §"the app does NOT generate or hold a Stellar private key" (still true on-device, but Privy now does provision a managed wallet keyed to the user)
 Related: ADR 013 (Loop-owned auth), ADR 014 (social login), ADR 016 (operator-signed payouts), ADR 031 (per-currency yield architecture)
@@ -130,3 +130,40 @@ As of 2026-06-11 none of these has a recorded answer — the DD call is unschedu
 | Privy custom auth bridge    | `apps/web/app/services/privy.ts` (new)                                                                |
 | Remove link-wallet UX       | delete `LinkWalletNudge.tsx`; rewrite `routes/settings.wallet.tsx`                                    |
 | Onboarding step 7 rewrite   | `screen-wallet-intro.tsx`                                                                             |
+
+## Due-diligence outcome (2026-06-11, public-docs research)
+
+The technical gate questions are answered from Privy's published documentation; the remaining
+items are business-side only.
+
+| Gate question                                              | Outcome                                                                                                                                                                                                                                                                                                |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Stellar custody                                            | ✅ **Tier 2 chain**: embedded EOA wallets on ed25519 (TEE + Shamir model), chain address derivation, server-side creation via `privy.wallets().create({ chain_type: 'stellar' })`. Production precedent: Kulipa runs user assets on Stellar via Privy.                                                 |
+| Programmatic signing                                       | ✅ `rawSign(walletId, { hash })` returns the ed25519 signature over a transaction hash — Loop attaches it as a decorated signature with `@stellar/stellar-sdk` and submits through the existing ADR 016 machinery. Tier 2's missing "transaction building/submission" is capability Loop already owns. |
+| Soroban (ADR 031 vault shares)                             | ✅ at the signing layer — `rawSign` signs any hash, Soroban invocations included. Operational complexity tracked in ADR 031, not a custody blocker.                                                                                                                                                    |
+| Key export                                                 | ✅ private-key export is included in Tier 2 support (the "users can leave" requirement).                                                                                                                                                                                                               |
+| Custom auth                                                | ✅ JWT-based auth with a JWKS endpoint (RS256/ES256, `sub` claim) — requires Loop's JWT migration from HS256 to RS256 + a public JWKS endpoint (Phase A below).                                                                                                                                        |
+| ToS jurisdictions (US/EU/UK/CA), pricing, counsel sign-off | ⏳ **business DD — operator** (the only remaining gate items).                                                                                                                                                                                                                                         |
+
+## Implementation plan (phases; each its own reviewed PR)
+
+- **Phase A — RS256 + JWKS** (provider-agnostic prerequisite): Loop-native JWTs signed RS256
+  with `kid`; `/.well-known/jwks.json`; dual-verify window (HS256 legacy tokens keep verifying
+  until expiry); rotation via `_PREVIOUS` key, mirroring the HS256 convention.
+- **Phase B — wallet provider layer**: `wallet/provider.ts` interface (create, rawSign,
+  export-support) with a Privy REST adapter (plain `fetch` + Zod — no SDK dependency);
+  `wallet/user-signer.ts` bridges rawSign into the existing build→sign→submit pipeline;
+  `users.wallet_provider` / `wallet_id` columns; `LOOP_WALLET_PROVIDER` flag + `PRIVY_APP_ID` /
+  `PRIVY_APP_SECRET`.
+- **Phase C — flows**: (C1) provisioning on signup + backfill — operator-sponsored account
+  creation + rawSign-signed trustline (the "sponsored wallet" from the roadmap); (C2) cashback
+  payouts default to the embedded address; (C3) one-tap "pay with Loop balance" — server builds
+  the redemption payment from the user wallet (memo-matched), rawSigns, submits; the deposit
+  watcher + skip-table + burn machinery handle the rest unchanged. Balance display reads
+  on-chain via the backend.
+- **Phase D — nightly interest mints** (ADR 031 slice / ADR 036 §3): midnight-UTC worker mints
+  APR/365 from the issuer to each holder, mirror-credited in the same operation,
+  period-cursor idempotent; replaces the disabled off-chain accrual.
+
+Fallback remains dfns if business DD fails; everything except the Phase B adapter is
+provider-agnostic by construction.
