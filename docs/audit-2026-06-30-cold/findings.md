@@ -19,7 +19,7 @@ Severity split — P0: 2 LIVE / 1 GATED / 1 BRANCH / 2 LAUNCH-GATE. The discount
 
 ## P0 — Critical
 
-**CF2-01 [LIVE] Operator circuit breaker can never self-heal.** `ctx/operator-pool.ts:226-237` filters `getState() !== 'open'` before `.fetch()`, but the OPEN→HALF_OPEN cooldown only runs _inside_ `.fetch()` (`circuit-breaker.ts:134-142`). One bad 401 strands an operator for the process lifetime; a second bad response bricks the 2-operator pool fleet-wide; `/health` bypasses breakers so Fly can't restart. Sources: v-ctx CTX-01, x-flows flow-1. Fix: `isAvailable()` filter + real-breaker integration test.
+**CF2-01 [LIVE] Operator circuit breaker can never self-heal.** `ctx/operator-pool.ts:226-237` filters `getState() !== 'open'` before `.fetch()`, but the OPEN→HALF*OPEN cooldown only runs \_inside* `.fetch()` (`circuit-breaker.ts:134-142`). One bad 401 strands an operator for the process lifetime; a second bad response bricks the 2-operator pool fleet-wide; `/health` bypasses breakers so Fly can't restart. Sources: v-ctx CTX-01, x-flows flow-1. Fix: `isAvailable()` filter + real-breaker integration test.
 
 **CF-04 [LIVE·operational] Security-audit merge gate RED again.** `scripts/check-audit-policy.mjs` allowlist not kept current; `npm audit --omit=dev` already silences 2 of 3 dev-only highs; only `hono` (production framework) actually reaches runtime. Source: x-infra X-INFRA-01. Fix: allowlist dev-only highs + merge hono bump; make `--omit=dev` the primary signal; add a cron audit→oncall.
 

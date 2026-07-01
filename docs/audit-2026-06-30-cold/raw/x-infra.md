@@ -118,42 +118,39 @@ statusCheckRollup` on the older backlog shows **#1352/#1353/#1354
       throttled from opening _further_ npm update PRs until this backlog
       clears.
   - Root-cause detail on the 3 new highs (severity context, since "high" by
-    itself doesn't mean runtime-reachable):
-    - **hono** (`4.12.16`, range `<=4.12.24`, fix `4.12.27` non-major) is a
-      **direct, genuine production dependency** — `apps/backend`'s actual
-      HTTP framework (`apps/backend/package.json:31`, plus
-      `@hono/node-server` + `@sentry/hono`). The triggering high
-      (GHSA-88fw-hqm2-52qc, "CORS Middleware reflects any Origin with
-      credentials when `origin` defaults to the wildcard") does not appear
-      practically exploitable in Loop's own config — `apps/backend/src/
+    itself doesn't mean runtime-reachable): - **hono** (`4.12.16`, range `<=4.12.24`, fix `4.12.27` non-major) is a
+    **direct, genuine production dependency** — `apps/backend`'s actual
+    HTTP framework (`apps/backend/package.json:31`, plus
+    `@hono/node-server` + `@sentry/hono`). The triggering high
+    (GHSA-88fw-hqm2-52qc, "CORS Middleware reflects any Origin with
+    credentials when `origin` defaults to the wildcard") does not appear
+    practically exploitable in Loop's own config — `apps/backend/src/
 middleware/cors.ts:56-58` never sets `credentials: true` and uses an
-      explicit allowlist array (not the literal `'*'` default) in
-      production — but hono also carries **9 unpatched moderate
-      advisories** beyond the 3 the existing `ACCEPTED_MODERATE_VULNS`
-      rationale documents (IP-restriction bypass, cookie-sanitization gap,
-      JWT-scheme bypass, `app.mount()` path-decode bug, `serve-static`
-      path traversal, Lambda Set-Cookie merge bug, body-limit bypass,
-      Lambda@Edge header drop) — none individually high-severity-reachable
-      by Loop's usage as far as this pass could verify, but the
-      accumulated drift is the literal production web framework running 11
-      versions behind with a trivial non-major upgrade path sitting
-      unapplied for the second audit running (the 06-15 audit's
-      `ACCEPTED_MODERATE_VULNS` rationale text already said "revisit on the
-      next dependency sweep" — this is that sweep).
-    - **`@cyclonedx/cyclonedx-npm`** (high: shell injection via unsanitized
-      `--workspace` argument, GHSA-v75r-vx73-82pj) is a root
-      `devDependency` used only by `ci.yml`'s `sbom` job, which invokes it
-      as `npx --no-install @cyclonedx/cyclonedx-npm --output-format JSON
+    explicit allowlist array (not the literal `'*'` default) in
+    production — but hono also carries **9 unpatched moderate
+    advisories** beyond the 3 the existing `ACCEPTED_MODERATE_VULNS`
+    rationale documents (IP-restriction bypass, cookie-sanitization gap,
+    JWT-scheme bypass, `app.mount()` path-decode bug, `serve-static`
+    path traversal, Lambda Set-Cookie merge bug, body-limit bypass,
+    Lambda@Edge header drop) — none individually high-severity-reachable
+    by Loop's usage as far as this pass could verify, but the
+    accumulated drift is the literal production web framework running 11
+    versions behind with a trivial non-major upgrade path sitting
+    unapplied for the second audit running (the 06-15 audit's
+    `ACCEPTED_MODERATE_VULNS` rationale text already said "revisit on the
+    next dependency sweep" — this is that sweep). - **`@cyclonedx/cyclonedx-npm`** (high: shell injection via unsanitized
+    `--workspace` argument, GHSA-v75r-vx73-82pj) is a root
+    `devDependency` used only by `ci.yml`'s `sbom` job, which invokes it
+    as `npx --no-install @cyclonedx/cyclonedx-npm --output-format JSON
 --output-file sbom.cdx.json --spec-version 1.6 --omit dev`
-      (`ci.yml:345-350`) — **no `--workspace` flag is passed**, so the
-      specific injection vector isn't reachable via Loop's own invocation.
-      Fix is major (5.0.0).
-    - **undici** (high: TLS-cert-validation bypass via SOCKS5 ProxyAgent,
-      GHSA-vmh5-mc38-953g, plus WebSocket DoS + header-injection
-      advisories) resolves transitively via **`jsdom`** (`apps/web`
-      devDependency, vitest-only DOM shim) and **`@sentry/cli`** (root
-      devDependency, sourcemap-upload tool) — both dev/CI-only, never in
-      the deployed runtime. Fix is non-major (6.27.0 / 7.28.0+).
+    (`ci.yml:345-350`) — **no `--workspace` flag is passed**, so the
+    specific injection vector isn't reachable via Loop's own invocation.
+    Fix is major (5.0.0). - **undici** (high: TLS-cert-validation bypass via SOCKS5 ProxyAgent,
+    GHSA-vmh5-mc38-953g, plus WebSocket DoS + header-injection
+    advisories) resolves transitively via **`jsdom`** (`apps/web`
+    devDependency, vitest-only DOM shim) and **`@sentry/cli`** (root
+    devDependency, sourcemap-upload tool) — both dev/CI-only, never in
+    the deployed runtime. Fix is non-major (6.27.0 / 7.28.0+).
   - **Structural diagnosis:** `npm audit` (no `--omit=dev`) audits the
     _entire_ graph including devDependencies, then leans on a hand-written,
     per-package prose rationale (`ACCEPTED_HIGH_VULNS`) to manually re-derive
