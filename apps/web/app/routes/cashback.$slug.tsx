@@ -7,6 +7,7 @@ import { canonicalHref } from '~/i18n/seo';
 import { getPublicMerchant } from '~/services/public-stats';
 import { CashbackCalculator } from '~/components/features/cashback/CashbackCalculator';
 import { shouldRetry } from '~/hooks/query-retry';
+import { useLocale } from '~/i18n/locale';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
 import { Phase2Gate } from '~/components/Phase2Gate';
@@ -87,9 +88,14 @@ export default function CashbackMerchantLanding(): React.JSX.Element {
 
 function CashbackMerchantLandingBody(): React.JSX.Element {
   const { slug = '' } = useParams<{ slug: string }>();
+  // CAT-02 (2026-06-30 cold audit): a merchant out of the visitor's
+  // country/currency scope now 404s server-side (same rule
+  // home.tsx / brand.$slug.tsx already use) instead of resolving any
+  // slug regardless of locale.
+  const { country } = useLocale();
   const query = useQuery({
-    queryKey: ['public-merchant', slug],
-    queryFn: () => getPublicMerchant(slug),
+    queryKey: ['public-merchant', slug, country],
+    queryFn: () => getPublicMerchant(slug, { country }),
     enabled: slug.length > 0,
     retry: shouldRetry,
     // Merchant detail is near-static; long cache ok.

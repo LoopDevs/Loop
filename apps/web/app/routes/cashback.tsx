@@ -4,6 +4,7 @@ import type { Route } from './+types/cashback';
 import { canonicalHref, countryLabel } from '~/i18n/seo';
 import { getPublicTopCashbackMerchants, type TopCashbackMerchant } from '~/services/public-stats';
 import { shouldRetry } from '~/hooks/query-retry';
+import { useLocale } from '~/i18n/locale';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
 import { Phase2Gate } from '~/components/Phase2Gate';
@@ -55,9 +56,13 @@ export default function CashbackIndexRoute(): React.JSX.Element {
 }
 
 function CashbackIndexBody(): React.JSX.Element {
+  // CAT-02 (2026-06-30 cold audit): scope the index to the visitor's
+  // country, same rule home.tsx / brand.$slug.tsx already use — this
+  // was one of three country-blind catalog surfaces.
+  const { country } = useLocale();
   const query = useQuery({
-    queryKey: ['public-top-cashback-merchants', LIMIT],
-    queryFn: () => getPublicTopCashbackMerchants({ limit: LIMIT }),
+    queryKey: ['public-top-cashback-merchants', LIMIT, country],
+    queryFn: () => getPublicTopCashbackMerchants({ limit: LIMIT, country }),
     retry: shouldRetry,
     staleTime: 5 * 60 * 1000,
   });

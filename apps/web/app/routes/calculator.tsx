@@ -5,6 +5,7 @@ import type { Route } from './+types/calculator';
 import { canonicalHref } from '~/i18n/seo';
 import { getPublicTopCashbackMerchants, type TopCashbackMerchant } from '~/services/public-stats';
 import { shouldRetry } from '~/hooks/query-retry';
+import { useLocale } from '~/i18n/locale';
 import { Navbar } from '~/components/features/Navbar';
 import { Footer } from '~/components/features/Footer';
 import { Spinner } from '~/components/ui/Spinner';
@@ -41,9 +42,14 @@ export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
 }
 
 export default function CalculatorRoute(): React.JSX.Element {
+  // CAT-02 (2026-06-30 cold audit): this route was the last of three
+  // country-blind catalog surfaces — the dropdown showed every
+  // merchant globally regardless of the visitor's locale, unlike
+  // home.tsx / brand.$slug.tsx.
+  const { country } = useLocale();
   const query = useQuery({
-    queryKey: ['public-top-cashback-merchants', 50],
-    queryFn: () => getPublicTopCashbackMerchants({ limit: 50 }),
+    queryKey: ['public-top-cashback-merchants', 50, country],
+    queryFn: () => getPublicTopCashbackMerchants({ limit: 50, country }),
     retry: shouldRetry,
     staleTime: 5 * 60 * 1000,
   });

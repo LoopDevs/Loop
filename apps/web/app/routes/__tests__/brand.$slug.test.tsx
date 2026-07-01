@@ -75,4 +75,19 @@ describe('BrandRoute (ADR 032)', () => {
     renderAt('no-such-brand');
     expect(screen.getByText(/Brand not found/)).toBeDefined();
   });
+
+  // CAT-03 (2026-06-30 cold audit): brandSlug() always lowercases its
+  // output, but the raw URL slug was compared verbatim — a hand-typed
+  // or old-backlink mixed-case URL 404'd even though the lowercase
+  // version resolves. Every other slug-resolution path in the codebase
+  // is explicitly case-insensitive.
+  it('resolves a mixed-case slug case-insensitively', () => {
+    renderAt('Dots.Eco');
+    expect(screen.getByRole('heading', { name: 'dots.eco' })).toBeDefined();
+  });
+
+  it('resolves a fully-uppercase slug case-insensitively', () => {
+    renderAt('DOTS.ECO');
+    expect(screen.getByRole('heading', { name: 'dots.eco' })).toBeDefined();
+  });
 });

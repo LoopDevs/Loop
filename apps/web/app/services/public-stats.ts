@@ -35,10 +35,13 @@ export async function getPublicCashbackStats(): Promise<PublicCashbackStats> {
  * snapshot on DB trouble, empty list on bootstrap.
  */
 export async function getPublicTopCashbackMerchants(
-  opts: { limit?: number } = {},
+  opts: { limit?: number; country?: string } = {},
 ): Promise<PublicTopCashbackMerchantsResponse> {
   const params = new URLSearchParams();
   if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  // CAT-02 (2026-06-30 cold audit): scope the "best cashback" list to
+  // the visitor's country, same rule home.tsx already uses.
+  if (opts.country !== undefined) params.set('country', opts.country);
   const qs = params.toString();
   return apiRequest<PublicTopCashbackMerchantsResponse>(
     `/api/public/top-cashback-merchants${qs.length > 0 ? `?${qs}` : ''}`,
@@ -52,8 +55,17 @@ export async function getPublicTopCashbackMerchants(
  * unknown id/slug — callers should handle that as the
  * "merchant-not-in-catalog" page.
  */
-export async function getPublicMerchant(idOrSlug: string): Promise<PublicMerchantDetail> {
-  return apiRequest<PublicMerchantDetail>(`/api/public/merchants/${encodeURIComponent(idOrSlug)}`);
+export async function getPublicMerchant(
+  idOrSlug: string,
+  opts: { country?: string } = {},
+): Promise<PublicMerchantDetail> {
+  // CAT-02 (2026-06-30 cold audit): a merchant tagged to a different
+  // country/currency than `opts.country` 404s server-side, same rule
+  // home.tsx / brand.$slug.tsx already use.
+  const qs = opts.country !== undefined ? `?country=${encodeURIComponent(opts.country)}` : '';
+  return apiRequest<PublicMerchantDetail>(
+    `/api/public/merchants/${encodeURIComponent(idOrSlug)}${qs}`,
+  );
 }
 
 // A2-676 + ADR 019: PublicCashbackPreview was previously duplicated
