@@ -115,4 +115,40 @@ describe('<SupplierSpendActivityChart />', () => {
       ).toBe(true);
     });
   });
+
+  // F-WEBADMIN-03 (2026-06-30 cold audit): a malformed wholesaleMinor
+  // string used to throw a SyntaxError from an unguarded BigInt() call
+  // (both in the max-reduce and per-row), blanking the entire admin
+  // page. A malformed day must be skipped, not crash the chart.
+  it('skips a day with a malformed wholesaleMinor instead of crashing', async () => {
+    adminMock.getSupplierSpendActivity.mockResolvedValue({
+      windowDays: 2,
+      currency: 'USD',
+      days: [
+        {
+          day: '2026-04-21',
+          currency: 'USD',
+          count: 10,
+          faceValueMinor: '100000',
+          wholesaleMinor: 'not-a-bigint',
+          userCashbackMinor: '3000',
+          loopMarginMinor: '2000',
+        },
+        {
+          day: '2026-04-22',
+          currency: 'USD',
+          count: 20,
+          faceValueMinor: '250000',
+          wholesaleMinor: '240000',
+          userCashbackMinor: '7500',
+          loopMarginMinor: '2500',
+        },
+      ],
+    });
+    renderChart();
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Apr 22: \$2,400\.00 wholesale/)).toBeDefined();
+    });
+    expect(screen.queryByLabelText(/Apr 21/)).toBeNull();
+  });
 });

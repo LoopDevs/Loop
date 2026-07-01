@@ -67,7 +67,10 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
   const { merchants } = useAllMerchants();
   const locale = useLocaleTag();
   const merchantName = merchants.find((m) => m.id === order.merchantId)?.name ?? order.merchantId;
-  const amount = formatMinor(order.faceValueMinor, locale);
+  // WUM-04 (2026-06-30 cold audit): canonical symbol-prefixed formatter,
+  // matching the cashback teaser two lines below instead of the old
+  // bare-number-plus-code-suffix local formatMinor.
+  const amount = formatMinorCurrency(order.faceValueMinor, order.currency, locale);
   const date = new Date(order.createdAt).toLocaleDateString(locale, {
     month: 'short',
     day: 'numeric',
@@ -105,7 +108,7 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
         <div className="flex items-center gap-3 ml-4">
           <div className="text-right">
             <div className="text-sm font-semibold text-gray-900 dark:text-white tabular-nums">
-              {amount} {order.currency}
+              {amount}
             </div>
             {hasEarnedCashback ? (
               <div className="mt-0.5 text-[11px] font-medium text-green-700 dark:text-green-400 tabular-nums">
@@ -144,7 +147,8 @@ function LoopOrderRow({ order }: { order: LoopOrderView }): React.JSX.Element {
           ) : null}
           {order.userCashbackMinor !== '0' && isFulfilled ? (
             <div className="text-xs text-green-700 dark:text-green-300">
-              {formatMinor(order.userCashbackMinor, locale)} {order.currency} cashback credited.
+              {formatMinorCurrency(order.userCashbackMinor, order.currency, locale)} cashback
+              credited.
             </div>
           ) : null}
         </div>
@@ -226,8 +230,9 @@ function PendingPaymentRecoveryPanel({
   return (
     <div className="rounded-lg border border-yellow-200 dark:border-yellow-900/40 bg-yellow-50 dark:bg-yellow-900/20 p-3 text-xs text-yellow-900 dark:text-yellow-100 space-y-2">
       <p className="font-medium">
-        Awaiting payment. Send {formatMinor(order.chargeMinor, locale)} {order.chargeCurrency} of{' '}
-        {assetLabel} to the address below with the memo, then this row will move to Paid.
+        Awaiting payment. Send{' '}
+        {formatMinorCurrency(order.chargeMinor, order.chargeCurrency, locale)} of {assetLabel} to
+        the address below with the memo, then this row will move to Paid.
       </p>
       <RedemptionField label="Address" value={order.stellarAddress} />
       <RedemptionField label="Memo" value={order.paymentMemo} />
@@ -282,18 +287,4 @@ function stateColour(state: LoopOrderView['state']): string {
     default:
       return assertNever(state, 'OrderState');
   }
-}
-
-/**
- * BigInt-safe minor-unit → major-unit with two decimals, grouped in the
- * active route locale (CF-22). The currency code is appended by the caller,
- * so this stays a bare number; only the thousands grouping is localised.
- */
-function formatMinor(minor: string, locale: string): string {
-  const negative = minor.startsWith('-');
-  const digits = negative ? minor.slice(1) : minor;
-  const padded = digits.padStart(3, '0');
-  const whole = padded.slice(0, -2);
-  const fraction = padded.slice(-2);
-  return `${negative ? '-' : ''}${Number(whole).toLocaleString(locale)}.${fraction}`;
 }

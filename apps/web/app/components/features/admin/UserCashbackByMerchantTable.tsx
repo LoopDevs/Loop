@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
+import { formatMinorCurrency } from '@loop/shared';
 import {
   getAdminUserCashbackByMerchant,
   type AdminUserCashbackByMerchantRow,
@@ -9,19 +10,12 @@ import { Spinner } from '~/components/ui/Spinner';
 import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
- * Minor-unit string → localised currency, with an em-dash fallback
- * for malformed backend input. Identical shape to the user-facing
- * variant; inlined here to keep the two surfaces independently
- * refactorable while the pattern stabilises.
+ * F-WEBADMIN-09 (2026-06-30 cold audit): delegates to the canonical
+ * bigint-exact shared formatter (CF-23) instead of `Number(minor) /
+ * 100`.
  */
 export function fmtCashback(minor: string, currency: string): string {
-  const n = Number(minor);
-  if (!Number.isFinite(n)) return '—';
-  try {
-    return new Intl.NumberFormat(ADMIN_LOCALE, { style: 'currency', currency }).format(n / 100);
-  } catch {
-    return `${(n / 100).toFixed(2)} ${currency}`;
-  }
+  return formatMinorCurrency(minor, currency, { locale: ADMIN_LOCALE });
 }
 
 function fmtRelative(iso: string): string {

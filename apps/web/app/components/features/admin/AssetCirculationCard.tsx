@@ -105,11 +105,21 @@ export function AssetCirculationCard({
     return null;
   }
 
-  const row: DriftRow = {
-    onChainStroops: BigInt(query.data.onChainStroops),
-    ledgerLiabilityMinor: BigInt(query.data.ledgerLiabilityMinor),
-    driftStroops: BigInt(query.data.driftStroops),
-  };
+  // F-WEBADMIN-03 (2026-06-30 cold audit): malformed bigint from
+  // server — degrade silently (render nothing) rather than crash the
+  // whole page, matching this component's own doc comment ("other
+  // failures degrade silently") which this unguarded parse didn't
+  // actually deliver on for a malformed-but-200 payload.
+  let row: DriftRow;
+  try {
+    row = {
+      onChainStroops: BigInt(query.data.onChainStroops),
+      ledgerLiabilityMinor: BigInt(query.data.ledgerLiabilityMinor),
+      driftStroops: BigInt(query.data.driftStroops),
+    };
+  } catch {
+    return null;
+  }
 
   const drift = row.driftStroops;
   const driftSign = drift === 0n ? 'zero' : drift > 0n ? 'positive' : 'negative';

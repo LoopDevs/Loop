@@ -23,6 +23,7 @@
  * Empty card > misleading "$0 cashback".
  */
 import { Link } from 'react-router';
+import { useAppConfig } from '~/hooks/use-app-config';
 import { useMerchantCashbackRate } from '~/hooks/use-merchants';
 import { currencySymbol, useLocaleTag } from '~/i18n/format';
 
@@ -39,8 +40,18 @@ export function EarnedCashbackCard({
   amount,
   currency,
 }: EarnedCashbackCardProps): React.JSX.Element | null {
+  // WUM-05 / CF2-08 (2026-06-30 cold audit): AGENTS.md documents
+  // LOOP_PHASE_1_ONLY as hiding every Phase 2+ surface including
+  // "you've earned X" copy — this card's "Credited to your Loop
+  // balance" claim is false under the actual Phase-1 model (instant
+  // discount at checkout, no balance accumulates, no wallet to
+  // withdraw to). Every sibling cashback/wallet surface already
+  // gates on this (LinkWalletNudge, settings.cashback.tsx); this one
+  // didn't.
+  const { config } = useAppConfig();
   const { userCashbackPct } = useMerchantCashbackRate(merchantId);
   const locale = useLocaleTag();
+  if (config.phase1Only) return null;
   if (userCashbackPct === null) return null;
 
   const pct = Number(userCashbackPct);

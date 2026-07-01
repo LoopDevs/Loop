@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { formatMinorCurrency } from '@loop/shared';
 import { getUserPendingPayoutsSummary } from '~/services/user';
 import { useAuth } from '~/hooks/use-auth';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -40,22 +41,11 @@ export function stroopsToMinor(stroopsStr: string): bigint {
   }
 }
 
+// WUM-04 (2026-06-30 cold audit): the canonical bigint-exact shared
+// formatter (CF-23) replaces `Number(minor) / 100`.
 function formatAmount(stroopsStr: string, fiat: string): string {
   const minor = stroopsToMinor(stroopsStr);
-  const major = Number(minor) / 100;
-  try {
-    // `narrowSymbol` picks `$` over `US$` regardless of the runtime
-    // locale — users in en-GB environments get `$`, not `US$`, for
-    // USDLOOP balances. Same behaviour on jsdom test runs.
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency: fiat,
-      currencyDisplay: 'narrowSymbol',
-      maximumFractionDigits: 2,
-    }).format(major);
-  } catch {
-    return `${major.toFixed(2)} ${fiat}`;
-  }
+  return formatMinorCurrency(minor, fiat);
 }
 
 export function formatOldestAgo(iso: string, now: number = Date.now()): string {

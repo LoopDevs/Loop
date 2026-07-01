@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { formatMinorCurrency } from '@loop/shared';
 import { getSupplierSpendActivity, type SupplierSpendActivityDay } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { shortDay } from './PaymentMethodActivityChart';
-import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
  * CSS-only per-day bar chart of supplier-spend over the last N days
@@ -23,21 +23,9 @@ import { ADMIN_LOCALE } from '~/utils/locale';
 const CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
 type Cur = (typeof CURRENCIES)[number];
 
-const CURRENCY_SYMBOL: Record<Cur, string> = {
-  USD: '$',
-  GBP: '£',
-  EUR: '€',
-};
-
-function fmtMinor(minor: string, currency: Cur): string {
-  const negative = minor.startsWith('-');
-  const digits = negative ? minor.slice(1) : minor;
-  const padded = digits.padStart(3, '0');
-  const whole = padded.slice(0, -2);
-  const fraction = padded.slice(-2);
-  const sign = negative ? '-' : '';
-  return `${sign}${CURRENCY_SYMBOL[currency]}${Number(whole).toLocaleString(ADMIN_LOCALE)}.${fraction}`;
-}
+// F-WEBADMIN-09 (2026-06-30 cold audit): local fmtMinor replaced with
+// the bigint-safe shared helper (CF-23).
+const fmtMinor = formatMinorCurrency;
 
 export function SupplierSpendActivityChart(): React.JSX.Element {
   const [currency, setCurrency] = useState<Cur>('USD');
@@ -114,8 +102,16 @@ function Chart({
   days: SupplierSpendActivityDay[];
   currency: Cur;
 }): React.JSX.Element {
+  // F-WEBADMIN-03 (2026-06-30 cold audit): malformed bigint from
+  // server — skip this day's contribution to max rather than crash
+  // the whole reduce.
   const max = days.reduce((m, d) => {
-    const v = BigInt(d.wholesaleMinor);
+    let v: bigint;
+    try {
+      v = BigInt(d.wholesaleMinor);
+    } catch {
+      return m;
+    }
     return v > m ? v : m;
   }, 0n);
 
@@ -130,7 +126,14 @@ function Chart({
   return (
     <ul role="list" className="space-y-1">
       {days.map((d) => {
-        const v = BigInt(d.wholesaleMinor);
+        // Malformed bigint from server — skip the row rather than
+        // crash the whole page.
+        let v: bigint;
+        try {
+          v = BigInt(d.wholesaleMinor);
+        } catch {
+          return null;
+        }
         // Scale to 1000 for float-safe percentage math on bigints.
         const widthPct = Number((v * 1000n) / max) / 10;
         return (

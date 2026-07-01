@@ -7,11 +7,16 @@ import { OrderPayoutCard } from '../OrderPayoutCard';
 
 afterEach(cleanup);
 
-const { userMock, authMock } = vi.hoisted(() => ({
+const { userMock, authMock, appConfigMock } = vi.hoisted(() => ({
   userMock: {
     getUserPayoutByOrder: vi.fn(),
   },
   authMock: { isAuthenticated: true },
+  // WUM-05 / CF2-08 (2026-06-30 cold audit): useAppConfig defaults
+  // phase1Only=true, which now gates this Phase 2+ card off entirely.
+  // Force it false so the existing tests keep exercising the card's
+  // own rendering logic; a dedicated test below pins the gate itself.
+  appConfigMock: { phase1Only: false },
 }));
 
 vi.mock('~/services/user', async (importActual) => {
@@ -26,15 +31,19 @@ vi.mock('~/hooks/query-retry', () => ({ shouldRetry: () => false }));
 vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: authMock.isAuthenticated }),
 }));
+vi.mock('~/hooks/use-app-config', () => ({
+  useAppConfig: () => ({ config: appConfigMock, isLoading: false }),
+}));
 
 afterEach(() => {
   authMock.isAuthenticated = true;
+  appConfigMock.phase1Only = false;
   userMock.getUserPayoutByOrder.mockReset();
 });
 
-function renderCard(orderId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'): void {
+function renderCard(orderId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'): ReturnType<typeof render> {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
+  return render(
     <QueryClientProvider client={qc}>
       <OrderPayoutCard orderId={orderId} />
     </QueryClientProvider>,
@@ -201,5 +210,30 @@ describe('<OrderPayoutCard />', () => {
     await waitFor(() => {
       expect(screen.getByText(/Our system hasn.t retried yet/i)).toBeDefined();
     });
+  });
+
+  // WUM-05 / CF2-08 (2026-06-30 cold audit): this card tells the user
+  // where their cashback went "on Stellar" — a Phase 2+ concept — and
+  // must hide (and not even fire the query) when phase1Only.
+  it('renders nothing and does not fire the payout query when phase1Only', async () => {
+    appConfigMock.phase1Only = true;
+    userMock.getUserPayoutByOrder.mockResolvedValue({
+      id: 'payout-1',
+      orderId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      assetCode: 'USDLOOP',
+      assetIssuer: 'GISSUER',
+      amountStroops: '10000000',
+      state: 'confirmed',
+      txHash: 'tx-abc',
+      attempts: 1,
+      createdAt: '2026-04-20T10:00:00.000Z',
+      submittedAt: '2026-04-20T10:01:00.000Z',
+      confirmedAt: '2026-04-20T10:02:00.000Z',
+      failedAt: null,
+    });
+    const { container } = renderCard();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(container.firstChild).toBeNull();
+    expect(userMock.getUserPayoutByOrder).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { LOOP_ASSET_CODES, PAYOUT_STATES } from '@loop/shared';
+// F-WEBADMIN-01 (2026-06-30 cold audit): local fmtMinor replaced with
+// bigint-safe shared helper — the one route file CF-23 (A2-1520) never
+// migrated. This page renders the company-wide solvency figure, the
+// single most monetarily sensitive aggregate in the admin panel.
+import { formatMinorCurrency as fmtMinor } from '@loop/shared';
 import type { Route } from './+types/admin.treasury';
 import { getTreasurySnapshot, type TreasurySnapshot } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
@@ -21,29 +26,10 @@ import { DiscordNotifiersCard } from '~/components/features/admin/DiscordNotifie
 import { PaymentMethodActivityChart } from '~/components/features/admin/PaymentMethodActivityChart';
 import { PaymentMethodShareCard } from '~/components/features/admin/PaymentMethodShareCard';
 import { Spinner } from '~/components/ui/Spinner';
-import { ADMIN_LOCALE } from '~/utils/locale';
 import { fmtStroops } from '~/utils/format-stellar';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Admin · Treasury — Loop' }];
-}
-
-/**
- * Minor-unit (pence / cent) int string → human currency string.
- * Accepts a BigInt-safe string so we don't silently lose precision
- * for large ledger totals.
- */
-function fmtMinor(minor: string, currency: string): string {
-  // Normalise sign + digits; values are decimal integers.
-  const negative = minor.startsWith('-');
-  const digits = negative ? minor.slice(1) : minor;
-  const padded = digits.padStart(3, '0');
-  const whole = padded.slice(0, -2);
-  const fraction = padded.slice(-2);
-  const sign = negative ? '-' : '';
-  const symbol =
-    currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : currency === 'USD' ? '$' : '';
-  return `${sign}${symbol}${Number(whole).toLocaleString(ADMIN_LOCALE)}.${fraction} ${currency}`;
 }
 
 // LOOP asset enumeration comes from `@loop/shared` so the treasury

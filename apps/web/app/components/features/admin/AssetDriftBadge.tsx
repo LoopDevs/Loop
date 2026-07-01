@@ -74,7 +74,16 @@ export function AssetDriftBadge({
     return null;
   }
 
-  const variant = VARIANTS[classifyDrift(BigInt(query.data.driftStroops))];
+  // F-WEBADMIN-03 (2026-06-30 cold audit): malformed bigint from
+  // server — degrade silently (render nothing) rather than crash the
+  // whole page.
+  let driftStroops: bigint;
+  try {
+    driftStroops = BigInt(query.data.driftStroops);
+  } catch {
+    return null;
+  }
+  const variant = VARIANTS[classifyDrift(driftStroops)];
   return (
     <span
       className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${variant.classes}`}

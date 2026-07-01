@@ -106,4 +106,25 @@ describe('<AssetDriftBadge />', () => {
     });
     expect(container.textContent).toBe('');
   });
+
+  // F-WEBADMIN-03 (2026-06-30 cold audit): a malformed driftStroops
+  // string used to throw a SyntaxError from an unguarded BigInt() call,
+  // blanking the entire admin page (no route-level ErrorBoundary
+  // exists). Must degrade to rendering nothing instead.
+  it('renders nothing (does not throw) when driftStroops is malformed', async () => {
+    adminMock.getAssetCirculation.mockResolvedValue({
+      ...base,
+      driftStroops: 'not-a-bigint',
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <AssetDriftBadge assetCode="USDLOOP" />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => {
+      expect(adminMock.getAssetCirculation).toHaveBeenCalled();
+    });
+    expect(container.textContent).toBe('');
+  });
 });
