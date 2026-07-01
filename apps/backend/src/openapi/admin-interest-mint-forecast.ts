@@ -110,6 +110,11 @@ export function registerAdminInterestMintForecastOpenApi(
         description: 'Rate limit exceeded (30/min per IP)',
         content: { 'application/json': { schema: errorResponse } },
       },
+      500: {
+        description:
+          'PLAT-30-17: the DB-side interest forecast computation failed (ledger read error).',
+        content: { 'application/json': { schema: errorResponse } },
+      },
       503: {
         description: 'Horizon unreachable for pool-balance read',
         content: { 'application/json': { schema: errorResponse } },

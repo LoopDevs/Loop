@@ -38,7 +38,10 @@ const log = logger.child({ handler: 'admin-user-search' });
 
 const MIN_QUERY_LENGTH = 2;
 const MAX_QUERY_LENGTH = 254;
-const RESULT_LIMIT = 20;
+// Exported so read-audit.test.ts can assert the ADMIN-02 per-path bulk
+// threshold stays below this endpoint's own row cap without a second
+// hardcoded literal that could silently drift out of sync.
+export const RESULT_LIMIT = 20;
 
 export interface AdminUserSearchResult {
   id: string;

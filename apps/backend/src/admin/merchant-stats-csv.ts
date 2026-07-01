@@ -8,7 +8,7 @@
  * preparing CTX wholesale-rate negotiation decks (the "here's the
  * 30 merchants that drive our revenue" slide).
  *
- * Shape: one row per (merchant, currency) — most merchants emit
+ * Shape: one row per (merchant, chargeCurrency) — most merchants emit
  * one row, the GROUP BY handles the rare multi-currency case.
  * bigint columns as strings. Orders ranked by Loop margin DESC
  * so the top earners surface first.
@@ -94,10 +94,15 @@ export async function adminMerchantStatsCsvHandler(c: Context): Promise<Response
   }
 
   try {
+    // ADMIN-01 (2026-06-30 cold audit): group by chargeCurrency, not
+    // the catalog `currency` column — wholesale/cashback/margin are
+    // denominated in the user's home (charge) currency. See
+    // merchant-stats.ts's MerchantStatsRow docs for the full rationale;
+    // this CSV is the same aggregate, flattened.
     const result = await db.execute(sql`
       SELECT
         ${orders.merchantId} AS merchant_id,
-        ${orders.currency}    AS currency,
+        ${orders.chargeCurrency} AS currency,
         COUNT(*)::bigint      AS order_count,
         COUNT(DISTINCT ${orders.userId})::bigint AS unique_user_count,
         COALESCE(SUM(${orders.faceValueMinor}), 0)::bigint    AS face_value_minor,
@@ -109,7 +114,7 @@ export async function adminMerchantStatsCsvHandler(c: Context): Promise<Response
       WHERE ${orders.state} = 'fulfilled'
         AND ${orders.fulfilledAt} IS NOT NULL
         AND ${orders.fulfilledAt} >= ${since.toISOString()}
-      GROUP BY ${orders.merchantId}, ${orders.currency}
+      GROUP BY ${orders.merchantId}, ${orders.chargeCurrency}
       ORDER BY loop_margin_minor DESC, order_count DESC
       LIMIT ${ROW_CAP + 1}
     `);

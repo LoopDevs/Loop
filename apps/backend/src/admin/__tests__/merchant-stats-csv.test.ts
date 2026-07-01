@@ -19,6 +19,7 @@ vi.mock('../../db/schema.js', () => ({
   orders: {
     merchantId: 'orders.merchant_id',
     currency: 'orders.currency',
+    chargeCurrency: 'orders.charge_currency',
     userId: 'orders.user_id',
     state: 'orders.state',
     fulfilledAt: 'orders.fulfilled_at',
@@ -46,6 +47,7 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
+import { db } from '../../db/client.js';
 import { adminMerchantStatsCsvHandler } from '../merchant-stats-csv.js';
 
 function makeCtx(query: Record<string, string> = {}): Context {
@@ -193,5 +195,50 @@ describe('adminMerchantStatsCsvHandler', () => {
     state.throwErr = new Error('db exploded');
     const res = await adminMerchantStatsCsvHandler(makeCtx());
     expect(res.status).toBe(500);
+  });
+
+  // ADMIN-01 (2026-06-30 cold audit): same fix as merchant-stats.ts —
+  // group by orders.chargeCurrency, not the catalog orders.currency.
+  describe('ADMIN-01: groups by chargeCurrency, not catalog currency', () => {
+    it('the aggregate query references orders.chargeCurrency, not orders.currency', async () => {
+      await adminMerchantStatsCsvHandler(makeCtx());
+      const call = vi.mocked(db.execute).mock.calls[0]?.[0] as { values: unknown[] } | undefined;
+      expect(call).toBeDefined();
+      expect(call!.values).toContain('orders.charge_currency');
+      expect(call!.values).not.toContain('orders.currency');
+    });
+
+    it('splits the same merchant into separate CSV rows per charge currency', async () => {
+      state.rows = [
+        {
+          merchant_id: 'amazon-uk',
+          currency: 'GBP',
+          order_count: 5n,
+          unique_user_count: 3n,
+          face_value_minor: 50_000n,
+          wholesale_minor: 40_000n,
+          user_cashback_minor: 2_500n,
+          loop_margin_minor: 7_500n,
+          last_fulfilled_at: '2026-04-20T10:00:00Z',
+        },
+        {
+          merchant_id: 'amazon-uk',
+          currency: 'EUR',
+          order_count: 2n,
+          unique_user_count: 2n,
+          face_value_minor: 20_000n,
+          wholesale_minor: 16_000n,
+          user_cashback_minor: 1_000n,
+          loop_margin_minor: 3_000n,
+          last_fulfilled_at: '2026-04-18T00:00:00Z',
+        },
+      ];
+      const res = await adminMerchantStatsCsvHandler(makeCtx());
+      const body = await res.text();
+      const lines = body.split('\r\n').filter((l) => l.length > 0);
+      expect(lines).toHaveLength(3);
+      expect(lines).toContain('amazon-uk,GBP,5,3,50000,40000,2500,7500,2026-04-20T10:00:00.000Z');
+      expect(lines).toContain('amazon-uk,EUR,2,2,20000,16000,1000,3000,2026-04-18T00:00:00.000Z');
+    });
   });
 });

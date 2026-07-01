@@ -26,6 +26,7 @@ const { mocks } = vi.hoisted(() => ({
     assetBalance: vi.fn<(account: string, code: string, issuer: string) => Promise<bigint | null>>(
       async () => null,
     ),
+    forecastThrows: null as Error | null,
   },
 }));
 
@@ -36,7 +37,10 @@ vi.mock('../../env.js', () => ({
 }));
 
 vi.mock('../../credits/interest-forecast.js', () => ({
-  computeInterestForecast: async () => mocks.forecast,
+  computeInterestForecast: async () => {
+    if (mocks.forecastThrows !== null) throw mocks.forecastThrows;
+    return mocks.forecast;
+  },
 }));
 
 vi.mock('../../credits/interest-pool.js', () => ({
@@ -87,6 +91,7 @@ beforeEach(() => {
   };
   mocks.assetBalance.mockReset();
   mocks.assetBalance.mockResolvedValue(null);
+  mocks.forecastThrows = null;
 });
 
 describe('adminInterestMintForecastHandler', () => {
@@ -172,5 +177,48 @@ describe('adminInterestMintForecastHandler', () => {
       rows: Array<{ recommendedMintStroops: string }>;
     };
     expect(body.rows[0]!.recommendedMintStroops).toBe('0');
+  });
+
+  // PLAT-30-17 (2026-06-30 cold audit): a Horizon pool-balance read
+  // failure used to fall through with poolStroops=0n — fabricating a
+  // near-empty pool and risking an operator over-mint decision — instead
+  // of the documented 503. Same for an uncaught DB-side forecast throw.
+  describe('PLAT-30-17: fails loudly instead of fabricating poolStroops=0', () => {
+    it('503s when the Horizon pool-balance read throws, instead of reporting poolStroops=0', async () => {
+      mocks.apyBasisPoints = 350;
+      mocks.poolAccount = 'GPOOL';
+      mocks.configuredAssets = [{ code: 'USDLOOP', issuer: 'GABC' }];
+      mocks.forecast = {
+        apyBasisPoints: 350,
+        forecastDays: 35,
+        asOfMs: 0,
+        perCurrency: [
+          {
+            currency: 'USD',
+            assetCode: 'USDLOOP',
+            cohortBalanceMinor: 1_000_000n,
+            dailyInterestMinor: 110n,
+            forecastDays: 35,
+            forecastInterestMinor: 3_850n,
+          },
+        ],
+      };
+      mocks.assetBalance.mockRejectedValue(new Error('Horizon 503'));
+
+      const res = await adminInterestMintForecastHandler(fakeContext());
+      expect(res.status).toBe(503);
+      const body = (await res.json()) as { code: string };
+      expect(body.code).toBe('UPSTREAM_UNAVAILABLE');
+    });
+
+    it('500s when the DB-side forecast computation throws', async () => {
+      mocks.apyBasisPoints = 350;
+      mocks.forecastThrows = new Error('db exploded');
+
+      const res = await adminInterestMintForecastHandler(fakeContext());
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as { code: string };
+      expect(body.code).toBe('INTERNAL_ERROR');
+    });
   });
 });

@@ -19,10 +19,19 @@
  * `fulfilled_at::date` so the row aligns with when CTX actually
  * shipped the good — matches the JSON sibling
  * `/api/admin/supplier-spend/activity`.
+ *
+ * `?currency=USD|GBP|EUR` (PLAT-30-16, 2026-06-30 cold audit): filters
+ * to one charge currency, zero-filling every day in the window —
+ * mirrors the JSON sibling exactly. Previously declared in the OpenAPI
+ * spec but silently ignored by this handler (always returned every
+ * currency mixed), a finance-miscount risk for a month-end
+ * reconciliation export.
  */
 import type { Context } from 'hono';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
+import { HOME_CURRENCIES, type HomeCurrency } from '../db/schema.js';
+import { isHomeCurrency } from '@loop/shared';
 import { logger } from '../logger.js';
 import { csvEscape } from './csv-escape.js';
 
@@ -75,37 +84,85 @@ export async function adminSupplierSpendActivityCsvHandler(c: Context): Promise<
     MAX_DAYS,
   );
 
+  const currencyRaw = c.req.query('currency');
+  let currencyFilter: HomeCurrency | null = null;
+  if (currencyRaw !== undefined && currencyRaw.length > 0) {
+    const upper = currencyRaw.toUpperCase();
+    if (!isHomeCurrency(upper)) {
+      return c.json(
+        {
+          code: 'VALIDATION_ERROR',
+          message: `currency must be one of ${HOME_CURRENCIES.join(', ')}`,
+        },
+        400,
+      );
+    }
+    currencyFilter = upper;
+  }
+
   try {
     // A2-904: GROUP BY charge_currency. Per orders/repo.ts, the
     // wholesale / cashback / margin minor-unit sums are denominated
     // in charge_currency (home currency). Grouping by catalog
     // currency mixed them. `currency` CSV column name preserved for
     // wire-compat but now reflects the charge_currency.
-    const result = await db.execute(sql`
-      WITH days AS (
-        SELECT generate_series(
-          (CURRENT_DATE - (${days - 1}::int))::date,
-          CURRENT_DATE,
-          '1 day'::interval
-        )::date AS d
-      )
-      SELECT
-        days.d::text                                       AS day,
-        o.charge_currency                                  AS currency,
-        COUNT(o.id)::bigint                                AS count,
-        COALESCE(SUM(o.face_value_minor), 0)::bigint       AS face_value_minor,
-        COALESCE(SUM(o.wholesale_minor), 0)::bigint        AS wholesale_minor,
-        COALESCE(SUM(o.user_cashback_minor), 0)::bigint    AS user_cashback_minor,
-        COALESCE(SUM(o.loop_margin_minor), 0)::bigint      AS loop_margin_minor
-      FROM days
-      LEFT JOIN orders o
-        ON o.state = 'fulfilled'
-        AND o.fulfilled_at IS NOT NULL
-        AND o.fulfilled_at::date = days.d
-      GROUP BY days.d, o.charge_currency
-      ORDER BY days.d ASC, o.charge_currency ASC NULLS LAST
-      LIMIT ${ROW_CAP + 1}
-    `);
+    //
+    // PLAT-30-16: when `currencyFilter` is set, pin the JOIN predicate
+    // to that currency and emit it as a constant column — same
+    // zero-filled-per-day shape as the unfiltered branch, but narrowed
+    // to one currency, mirroring the JSON sibling's filtered query.
+    const result = currencyFilter
+      ? await db.execute(sql`
+          WITH days AS (
+            SELECT generate_series(
+              (CURRENT_DATE - (${days - 1}::int))::date,
+              CURRENT_DATE,
+              '1 day'::interval
+            )::date AS d
+          )
+          SELECT
+            days.d::text                                       AS day,
+            ${currencyFilter}::text                            AS currency,
+            COUNT(o.id)::bigint                                AS count,
+            COALESCE(SUM(o.face_value_minor), 0)::bigint       AS face_value_minor,
+            COALESCE(SUM(o.wholesale_minor), 0)::bigint        AS wholesale_minor,
+            COALESCE(SUM(o.user_cashback_minor), 0)::bigint    AS user_cashback_minor,
+            COALESCE(SUM(o.loop_margin_minor), 0)::bigint      AS loop_margin_minor
+          FROM days
+          LEFT JOIN orders o
+            ON o.state = 'fulfilled'
+            AND o.fulfilled_at IS NOT NULL
+            AND o.fulfilled_at::date = days.d
+            AND o.charge_currency = ${currencyFilter}
+          GROUP BY days.d
+          ORDER BY days.d ASC
+          LIMIT ${ROW_CAP + 1}
+        `)
+      : await db.execute(sql`
+          WITH days AS (
+            SELECT generate_series(
+              (CURRENT_DATE - (${days - 1}::int))::date,
+              CURRENT_DATE,
+              '1 day'::interval
+            )::date AS d
+          )
+          SELECT
+            days.d::text                                       AS day,
+            o.charge_currency                                  AS currency,
+            COUNT(o.id)::bigint                                AS count,
+            COALESCE(SUM(o.face_value_minor), 0)::bigint       AS face_value_minor,
+            COALESCE(SUM(o.wholesale_minor), 0)::bigint        AS wholesale_minor,
+            COALESCE(SUM(o.user_cashback_minor), 0)::bigint    AS user_cashback_minor,
+            COALESCE(SUM(o.loop_margin_minor), 0)::bigint      AS loop_margin_minor
+          FROM days
+          LEFT JOIN orders o
+            ON o.state = 'fulfilled'
+            AND o.fulfilled_at IS NOT NULL
+            AND o.fulfilled_at::date = days.d
+          GROUP BY days.d, o.charge_currency
+          ORDER BY days.d ASC, o.charge_currency ASC NULLS LAST
+          LIMIT ${ROW_CAP + 1}
+        `);
 
     const rows = (
       Array.isArray(result)

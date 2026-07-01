@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Context } from 'hono';
+import { db } from '../../db/client.js';
 
 const state = vi.hoisted(() => ({
   rows: [] as Array<Record<string, unknown>>,
@@ -150,5 +151,72 @@ describe('adminSupplierSpendActivityCsvHandler', () => {
     state.throwErr = new Error('db exploded');
     const res = await adminSupplierSpendActivityCsvHandler(makeCtx());
     expect(res.status).toBe(500);
+  });
+
+  // PLAT-30-16 (2026-06-30 cold audit): the openapi spec declares a
+  // `?currency=` filter (mirroring the JSON sibling) but the handler
+  // never read it — always returned every currency mixed together.
+  describe('PLAT-30-16: ?currency= filter', () => {
+    it('400s on an unrecognised currency', async () => {
+      const res = await adminSupplierSpendActivityCsvHandler(makeCtx({ currency: 'XYZ' }));
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code: string };
+      expect(body.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('is case-insensitive and accepts a lowercase currency', async () => {
+      const res = await adminSupplierSpendActivityCsvHandler(makeCtx({ currency: 'usd' }));
+      expect(res.status).toBe(200);
+    });
+
+    it('pins the query to the requested currency instead of grouping by charge_currency', async () => {
+      await adminSupplierSpendActivityCsvHandler(makeCtx({ currency: 'GBP' }));
+      const call = vi.mocked(db.execute).mock.calls.at(-1)?.[0] as
+        | { values: unknown[] }
+        | undefined;
+      expect(call).toBeDefined();
+      expect(call!.values).toContain('GBP');
+    });
+
+    it('every emitted row uses the filtered currency, never a mixed row', async () => {
+      state.rows = [
+        {
+          day: '2026-04-20',
+          currency: 'GBP',
+          count: 5n,
+          face_value_minor: 50_000n,
+          wholesale_minor: 40_000n,
+          user_cashback_minor: 2_500n,
+          loop_margin_minor: 7_500n,
+        },
+        {
+          day: '2026-04-21',
+          currency: 'GBP',
+          count: 0n,
+          face_value_minor: 0n,
+          wholesale_minor: 0n,
+          user_cashback_minor: 0n,
+          loop_margin_minor: 0n,
+        },
+      ];
+      const res = await adminSupplierSpendActivityCsvHandler(makeCtx({ currency: 'GBP' }));
+      const body = await res.text();
+      const rows = body
+        .split('\r\n')
+        .filter((l) => l.length > 0)
+        .slice(1);
+      expect(rows.every((r) => r.split(',')[1] === 'GBP')).toBe(true);
+    });
+
+    it('without the filter, behaves exactly as before (mixed currencies, GROUP BY charge_currency)', async () => {
+      await adminSupplierSpendActivityCsvHandler(makeCtx());
+      const call = vi.mocked(db.execute).mock.calls.at(-1)?.[0] as
+        | { values: unknown[] }
+        | undefined;
+      expect(call).toBeDefined();
+      expect(call!.values).not.toContain('USD');
+      expect(call!.values).not.toContain('GBP');
+      expect(call!.values).not.toContain('EUR');
+    });
   });
 });

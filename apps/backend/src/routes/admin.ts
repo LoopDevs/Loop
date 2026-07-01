@@ -79,7 +79,7 @@ import type { Context, Hono } from 'hono';
 import { logger } from '../logger.js';
 import type { User } from '../db/users.js';
 import {
-  BULK_LIST_ROW_THRESHOLD,
+  bulkRowThresholdFor,
   countAdminListRows,
   sanitizeAdminReadQueryString,
 } from '../admin/read-audit.js';
@@ -137,11 +137,15 @@ export function mountAdminRoutes(app: Hono): void {
   // signal alongside the existing write stream. A read counts as "bulk"
   // when EITHER:
   //   - the path is a `.csv` export (any size), OR
-  //   - CF-10: a JSON list response returns ≥ BULK_LIST_ROW_THRESHOLD
-  //     rows. The original A2-2008 tripwire only wired the `.csv` path,
-  //     leaving cursor-walking JSON list pulls (`/users`, `/top-users`,
-  //     `/recycling-activity` — all email-bearing) unmonitored. A
-  //     near-max page is the fingerprint of a PII exfil walk.
+  //   - CF-10: a JSON list response returns ≥ its effective bulk-row
+  //     threshold (bulkRowThresholdFor — the global
+  //     BULK_LIST_ROW_THRESHOLD, or a lower per-path override for an
+  //     endpoint whose own row cap sits below the global default —
+  //     ADMIN-02). The original A2-2008 tripwire only wired the `.csv`
+  //     path, leaving cursor-walking JSON list pulls (`/users`,
+  //     `/top-users`, `/recycling-activity` — all email-bearing)
+  //     unmonitored. A near-max page is the fingerprint of a PII
+  //     exfil walk.
   // Single-row drills + small filtered lists stay log-only — sending
   // every drill to Discord would flood the channel and dilute the
   // signal on real bulk-exfil patterns.
@@ -170,7 +174,12 @@ export function mountAdminRoutes(app: Hono): void {
         rowCount = 0;
       }
     }
-    const isBulkList = rowCount >= BULK_LIST_ROW_THRESHOLD;
+    // ADMIN-02 (2026-06-30 cold audit): some endpoints (e.g.
+    // users/search) hard-cap their own response below the global
+    // threshold, making them structurally invisible to it. A per-path
+    // override lets those endpoints trip the tripwire at a lower row
+    // count instead of never at all — see bulkRowThresholdFor's docs.
+    const isBulkList = rowCount >= bulkRowThresholdFor(path);
     const isBulk = isCsv || isBulkList;
 
     logger.info(

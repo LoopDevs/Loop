@@ -93,10 +93,20 @@ export async function adminInterestMintForecastHandler(c: Context): Promise<Resp
     return c.json(body);
   }
 
-  const forecast = await computeInterestForecast({
-    apyBasisPoints: apy,
-    forecastDays,
-  });
+  // PLAT-30-17: the DB-side forecast computation had no try/catch at
+  // all, relying entirely on the global onError fallback — inconsistent
+  // with the request-scoped INTERNAL_ERROR shape every sibling admin
+  // read handler returns, and undeclared in the openapi spec.
+  let forecast: Awaited<ReturnType<typeof computeInterestForecast>>;
+  try {
+    forecast = await computeInterestForecast({
+      apyBasisPoints: apy,
+      forecastDays,
+    });
+  } catch (err) {
+    log.error({ err }, 'Interest forecast computation failed');
+    return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to compute interest forecast' }, 500);
+  }
 
   const assets = configuredLoopPayableAssets();
   const issuerByCode = new Map<LoopAssetCode, string>();
@@ -111,13 +121,27 @@ export async function adminInterestMintForecastHandler(c: Context): Promise<Resp
         const balance = await getAssetBalance(poolAccount, entry.assetCode, issuer);
         poolStroops = balance ?? 0n;
       } catch (err) {
-        log.warn(
+        // PLAT-30-17 (2026-06-30 cold audit): a swallowed Horizon
+        // failure here used to fall through with poolStroops=0n,
+        // fabricating a near-empty pool balance instead of the
+        // documented 503. That's the exact failure class this tool
+        // exists to prevent against — an operator reading this
+        // forecast during a transient Horizon outage would see a
+        // fake zero-cover row and could over-mint LOOP-asset into a
+        // pool that already has ample real balance. Bail the whole
+        // request loudly instead, matching admin-asset-circulation.ts's
+        // established pattern for the same failure class.
+        log.error(
           { err, assetCode: entry.assetCode, poolAccount },
-          'Pool-balance read failed for forecast row; reporting 0 cover',
+          'Pool-balance read failed — bailing the forecast request rather than fabricating poolStroops=0',
         );
-        // Fall through with poolStroops=0n — operator sees 0 cover
-        // and treats it as "fix the pool read or top up"; either
-        // way the row is actionable.
+        return c.json(
+          {
+            code: 'UPSTREAM_UNAVAILABLE',
+            message: `On-chain pool-balance read failed for ${entry.assetCode}`,
+          },
+          503,
+        );
       }
     }
 
