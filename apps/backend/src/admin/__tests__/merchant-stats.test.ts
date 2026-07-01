@@ -19,12 +19,14 @@ vi.mock('../../db/schema.js', () => ({
   orders: {
     merchantId: 'orders.merchant_id',
     currency: 'orders.currency',
+    chargeCurrency: 'orders.charge_currency',
     state: 'orders.state',
     fulfilledAt: 'orders.fulfilled_at',
     faceValueMinor: 'orders.face_value_minor',
     wholesaleMinor: 'orders.wholesale_minor',
     userCashbackMinor: 'orders.user_cashback_minor',
     loopMarginMinor: 'orders.loop_margin_minor',
+    userId: 'orders.user_id',
   },
 }));
 
@@ -45,6 +47,7 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
+import { db } from '../../db/client.js';
 import { adminMerchantStatsHandler } from '../merchant-stats.js';
 
 function makeCtx(query: Record<string, string> = {}): Context {
@@ -164,5 +167,58 @@ describe('adminMerchantStatsHandler', () => {
     state.throwErr = new Error('db exploded');
     const res = await adminMerchantStatsHandler(makeCtx());
     expect(res.status).toBe(500);
+  });
+
+  // ADMIN-01 (2026-06-30 cold audit): wholesaleMinor/userCashbackMinor/
+  // loopMarginMinor are denominated in orders.chargeCurrency, not the
+  // catalog orders.currency column. Both handlers used to GROUP BY the
+  // wrong column, silently collapsing a merchant's orders across
+  // different real-world currencies into one row.
+  describe('ADMIN-01: groups by chargeCurrency, not catalog currency', () => {
+    it('the aggregate query references orders.chargeCurrency, not orders.currency, as the GROUP BY/select currency column', async () => {
+      await adminMerchantStatsHandler(makeCtx());
+      const call = vi.mocked(db.execute).mock.calls[0]?.[0] as { values: unknown[] } | undefined;
+      expect(call).toBeDefined();
+      // The template's interpolated values include chargeCurrency
+      // (used for both the SELECT alias and the GROUP BY) and must
+      // NOT include the catalog currency column at all — this would
+      // have failed against the original ${orders.currency} version.
+      expect(call!.values).toContain('orders.charge_currency');
+      expect(call!.values).not.toContain('orders.currency');
+    });
+
+    it('splits the same merchant into separate rows per charge currency', async () => {
+      state.rows = [
+        {
+          merchant_id: 'amazon-uk',
+          currency: 'GBP',
+          order_count: '5',
+          unique_user_count: '3',
+          face_value_minor: '50000',
+          wholesale_minor: '40000',
+          user_cashback_minor: '2500',
+          loop_margin_minor: '7500',
+          last_fulfilled_at: new Date('2026-04-20T10:00:00Z'),
+        },
+        {
+          merchant_id: 'amazon-uk',
+          currency: 'EUR',
+          order_count: '2',
+          unique_user_count: '2',
+          face_value_minor: '20000',
+          wholesale_minor: '16000',
+          user_cashback_minor: '1000',
+          loop_margin_minor: '3000',
+          last_fulfilled_at: new Date('2026-04-18T00:00:00Z'),
+        },
+      ];
+      const res = await adminMerchantStatsHandler(makeCtx());
+      const body = (await res.json()) as {
+        rows: Array<{ merchantId: string; currency: string; userCashbackMinor: string }>;
+      };
+      expect(body.rows).toHaveLength(2);
+      expect(body.rows.map((r) => r.currency).sort()).toEqual(['EUR', 'GBP']);
+      expect(body.rows.every((r) => r.merchantId === 'amazon-uk')).toBe(true);
+    });
   });
 });

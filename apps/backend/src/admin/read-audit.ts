@@ -17,6 +17,40 @@ const PII_QUERY_KEYS = new Set(['email', 'q']);
 export const BULK_LIST_ROW_THRESHOLD = 50;
 
 /**
+ * ADMIN-02 (2026-06-30 cold audit): `admin/users/search` hard-caps its
+ * own response at 20 rows (`user-search.ts`'s `RESULT_LIMIT`), which
+ * keeps it permanently BELOW `BULK_LIST_ROW_THRESHOLD` regardless of
+ * how broad the query is or how many times it's called — the endpoint
+ * can never trip the generic tripwire by construction, defeating the
+ * one control (CF-10) meant to catch an admin enumerating the user
+ * table's emails via short substrings (`q=aa`, `q=ab`, ...).
+ *
+ * Stopgap fix: a per-path threshold override, checked below the global
+ * `BULK_LIST_ROW_THRESHOLD`. Pinned under this endpoint's own row cap
+ * so a full page (a broad query hitting the 20-row ceiling) — the
+ * actual enumeration fingerprint — always trips it, while a normal
+ * "find this one user" search (1-3 rows) stays log-only.
+ *
+ * The real fix (tracked separately, larger lift) is a shared,
+ * cross-machine per-actor rolling-window row-count accumulator so the
+ * tripwire catches cumulative exfiltration regardless of any single
+ * endpoint's page size — this map is a targeted patch for the one
+ * endpoint that's currently invisible by construction, not a general
+ * solution to sub-threshold pagination walks on other list endpoints.
+ */
+export const PER_PATH_BULK_ROW_THRESHOLD: Readonly<Record<string, number>> = {
+  '/api/admin/users/search': 15,
+};
+
+/**
+ * Returns the effective bulk-row threshold for `path` — the
+ * per-path override when one exists, else the global default.
+ */
+export function bulkRowThresholdFor(path: string): number {
+  return PER_PATH_BULK_ROW_THRESHOLD[path] ?? BULK_LIST_ROW_THRESHOLD;
+}
+
+/**
  * CF-10: counts the list rows in an admin JSON response body so the
  * read-audit middleware can flag bulk JSON pulls (not just `.csv`
  * exports) to #admin-audit.

@@ -47,8 +47,21 @@ export interface MerchantStatsRow {
    * Useful signal for "merchant with strong history but no recent volume".
    */
   lastFulfilledAt: string;
-  /** Dominant catalog currency. Most merchants only have one; the aggregate
-   * picks the most-fulfilled currency in the window when there are multiple. */
+  /**
+   * ADMIN-01 (2026-06-30 cold audit): `wholesaleMinor` /
+   * `userCashbackMinor` / `loopMarginMinor` are denominated in
+   * `orders.chargeCurrency` (the user's home currency), NOT
+   * `orders.currency` (the catalog currency CTX procures in) — see
+   * `orders/repo.ts` and `db/schema.ts`'s field docs. This row groups
+   * by `chargeCurrency` to match every sibling handler
+   * (`merchant-flows.ts`, `merchant-cashback-summary.ts`,
+   * `merchant-cashback-monthly.ts`, `merchant-top-earners.ts`) that
+   * sums the same three fields. A merchant whose orders span more
+   * than one chargeCurrency (any cross-region purchase, or an
+   * ADR-035 extended-market merchant) gets one row per chargeCurrency
+   * instead of incorrectly collapsing them into one under the
+   * catalog currency.
+   */
   currency: string;
 }
 
@@ -112,13 +125,14 @@ export async function adminMerchantStatsHandler(c: Context): Promise<Response> {
   }
 
   try {
-    // One row per (merchant, currency) in the window. Most merchants
-    // have a single catalog currency, but the GROUP-BY handles the
-    // multi-currency edge case safely.
+    // One row per (merchant, chargeCurrency) in the window. Most
+    // merchants only see one chargeCurrency, but the GROUP-BY handles
+    // the multi-currency edge case safely. ADMIN-01: chargeCurrency,
+    // not the catalog `currency` column — see MerchantStatsRow's docs.
     const result = await db.execute(sql`
       SELECT
         ${orders.merchantId} AS merchant_id,
-        ${orders.currency}    AS currency,
+        ${orders.chargeCurrency} AS currency,
         COUNT(*)::bigint      AS order_count,
         COUNT(DISTINCT ${orders.userId})::bigint AS unique_user_count,
         COALESCE(SUM(${orders.faceValueMinor}), 0)::bigint    AS face_value_minor,
@@ -130,7 +144,7 @@ export async function adminMerchantStatsHandler(c: Context): Promise<Response> {
       WHERE ${orders.state} = 'fulfilled'
         AND ${orders.fulfilledAt} IS NOT NULL
         AND ${orders.fulfilledAt} >= ${since.toISOString()}
-      GROUP BY ${orders.merchantId}, ${orders.currency}
+      GROUP BY ${orders.merchantId}, ${orders.chargeCurrency}
       ORDER BY user_cashback_minor DESC, order_count DESC
     `);
 

@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   BULK_LIST_ROW_THRESHOLD,
+  PER_PATH_BULK_ROW_THRESHOLD,
+  bulkRowThresholdFor,
   countAdminListRows,
   sanitizeAdminReadQueryString,
 } from '../read-audit.js';
+import { RESULT_LIMIT as USER_SEARCH_RESULT_LIMIT } from '../user-search.js';
 
 describe('sanitizeAdminReadQueryString', () => {
   it('returns undefined for an empty query string', () => {
@@ -66,5 +69,40 @@ describe('countAdminListRows (CF-10)', () => {
     expect(countAdminListRows(JSON.stringify({ users: rows }), JSON_CT)).toBeGreaterThanOrEqual(
       BULK_LIST_ROW_THRESHOLD,
     );
+  });
+});
+
+// ADMIN-02 (2026-06-30 cold audit): admin/users/search hard-caps its own
+// response at RESULT_LIMIT (20) rows, permanently below
+// BULK_LIST_ROW_THRESHOLD (50) — structurally invisible to the generic
+// tripwire regardless of query breadth or call volume. A per-path
+// threshold override closes this for the one endpoint that needs it.
+describe('bulkRowThresholdFor (ADMIN-02)', () => {
+  it('falls back to the global threshold for an endpoint with no override', () => {
+    expect(bulkRowThresholdFor('/api/admin/users')).toBe(BULK_LIST_ROW_THRESHOLD);
+    expect(bulkRowThresholdFor('/api/admin/payouts')).toBe(BULK_LIST_ROW_THRESHOLD);
+  });
+
+  it("uses the per-path override for admin/users/search, set below the endpoint's own row cap", () => {
+    const override = bulkRowThresholdFor('/api/admin/users/search');
+    expect(override).toBe(PER_PATH_BULK_ROW_THRESHOLD['/api/admin/users/search']);
+    // The whole point of the fix: user-search's RESULT_LIMIT (20) must
+    // exceed the override so a full page always trips the tripwire —
+    // if this ever regresses back to >= RESULT_LIMIT, the endpoint
+    // becomes invisible to the tripwire again exactly like before.
+    expect(override).toBeLessThan(USER_SEARCH_RESULT_LIMIT);
+    expect(override).toBeLessThan(BULK_LIST_ROW_THRESHOLD);
+  });
+
+  it('a full user-search page (RESULT_LIMIT rows) now counts as bulk', () => {
+    const rows = Array.from({ length: USER_SEARCH_RESULT_LIMIT }, (_, i) => ({ id: String(i) }));
+    const rowCount = countAdminListRows(
+      JSON.stringify({ users: rows, truncated: false }),
+      'application/json; charset=utf-8',
+    );
+    expect(rowCount).toBeGreaterThanOrEqual(bulkRowThresholdFor('/api/admin/users/search'));
+    // Before the fix this same page would NOT have tripped the global
+    // 50-row threshold.
+    expect(rowCount).toBeLessThan(BULK_LIST_ROW_THRESHOLD);
   });
 });
