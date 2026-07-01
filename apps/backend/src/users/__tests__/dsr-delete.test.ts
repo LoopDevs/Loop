@@ -21,6 +21,8 @@ const { state } = vi.hoisted(() => {
     failedUncompensatedRows: Array<{ id: string }>;
     payoutQueryCount: number;
     orderBlockingRows: Array<{ id: string }>;
+    /** PLAT-30-03: user_credits rows with a non-zero balance. */
+    nonZeroBalanceRows: Array<{ currency: string }>;
     /** Captures of writes for assertions. */
     deletedFromIdentitiesUserId: string | null;
     updatedUserSet: Record<string, unknown> | null;
@@ -40,6 +42,7 @@ const { state } = vi.hoisted(() => {
     failedUncompensatedRows: [],
     payoutQueryCount: 0,
     orderBlockingRows: [],
+    nonZeroBalanceRows: [],
     deletedFromIdentitiesUserId: null,
     updatedUserSet: null,
     updatedUserWhereId: null,
@@ -62,6 +65,12 @@ vi.mock('../../db/schema.js', () => ({
   orders: { __tag: 'orders', userId: 'userId', state: 'state' },
   userIdentities: { __tag: 'userIdentities', userId: 'userId' },
   users: { __tag: 'users', id: 'id' },
+  userCredits: {
+    __tag: 'userCredits',
+    userId: 'userId',
+    currency: 'currency',
+    balanceMinor: 'balance_minor',
+  },
   PAYOUT_STATES: ['pending', 'submitted', 'confirmed', 'failed'],
   ORDER_STATES: ['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired'],
 }));
@@ -69,6 +78,7 @@ vi.mock('../../db/schema.js', () => ({
 vi.mock('drizzle-orm', () => ({
   and: (...args: unknown[]) => ({ __and: args }),
   eq: (col: unknown, value: unknown) => ({ __eq: col, value }),
+  ne: (col: unknown, value: unknown) => ({ __ne: col, value }),
   inArray: (col: unknown, values: unknown[]) => ({ __inArray: col, values }),
   // A4-078: dsr-delete uses sql`... IS NULL` for the
   // failed-uncompensated check; mock returns a tagged sentinel.
@@ -84,7 +94,9 @@ vi.mock('../../auth/refresh-tokens.js', () => ({
 vi.mock('../../db/client.js', () => {
   function selectChain(): {
     from: (t: { __tag: string }) => {
-      where: (where: unknown) => { limit: (n: number) => Promise<Array<{ id: string }>> };
+      where: (where: unknown) => {
+        limit: (n: number) => Promise<Array<{ id: string } | { currency: string }>>;
+      };
     };
   } {
     return {
@@ -103,6 +115,7 @@ vi.mock('../../db/client.js', () => {
               return [];
             }
             if (t.__tag === 'orders') return state.orderBlockingRows;
+            if (t.__tag === 'userCredits') return state.nonZeroBalanceRows;
             return [];
           },
         }),
@@ -160,6 +173,7 @@ beforeEach(() => {
   state.failedUncompensatedRows = [];
   state.payoutQueryCount = 0;
   state.orderBlockingRows = [];
+  state.nonZeroBalanceRows = [];
   state.deletedFromIdentitiesUserId = null;
   state.updatedUserSet = null;
   state.updatedUserWhereId = null;
@@ -194,6 +208,18 @@ describe('deleteUserViaAnonymisation (A2-1905)', () => {
     state.failedUncompensatedRows = [{ id: 'p-failed-1' }];
     const out = await deleteUserViaAnonymisation('u-1');
     expect(out).toEqual({ ok: false, blockedBy: 'failed_uncompensated_withdrawals' });
+    expect(state.txnRan).toBe(false);
+    expect(state.revokedForUserId).toBeNull();
+  });
+
+  // PLAT-30-03 (2026-06-30 cold audit): a never-linked-wallet user can
+  // accumulate a bare user_credits balance with zero pending_payouts
+  // rows ever created — the other three preconditions are trivially
+  // satisfied regardless of balance size.
+  it('refuses with blockedBy=non_zero_credit_balance when any user_credits row has a non-zero balance', async () => {
+    state.nonZeroBalanceRows = [{ currency: 'GBP' }];
+    const out = await deleteUserViaAnonymisation('u-1');
+    expect(out).toEqual({ ok: false, blockedBy: 'non_zero_credit_balance' });
     expect(state.txnRan).toBe(false);
     expect(state.revokedForUserId).toBeNull();
   });

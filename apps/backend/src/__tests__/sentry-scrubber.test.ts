@@ -107,4 +107,19 @@ describe('scrubSentryEvent (A2-1308)', () => {
     const out = scrubSentryEvent(weird);
     expect(out).toEqual(weird);
   });
+
+  // CF2-09 (2026-06-30 cold audit): the implementation already walked
+  // breadcrumbs (unlike the web twin, which didn't) but this file had
+  // zero test coverage pinning that behavior.
+  it('scrubs free-text PII in breadcrumb.message and sensitive keys in breadcrumb.data', () => {
+    const out = scrubSentryEvent({
+      breadcrumbs: [
+        { message: 'user u@example.com did something', data: { accessToken: 'tok-1' } },
+        { message: 'no pii here' },
+      ],
+    });
+    expect(out.breadcrumbs?.[0]?.message).toBe('user [REDACTED_EMAIL] did something');
+    expect((out.breadcrumbs?.[0]?.data as Record<string, string>).accessToken).toBe('[REDACTED]');
+    expect(out.breadcrumbs?.[1]?.message).toBe('no pii here');
+  });
 });

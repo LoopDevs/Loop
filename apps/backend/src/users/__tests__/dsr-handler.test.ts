@@ -31,7 +31,11 @@ const state = vi.hoisted(() => ({
     | { ok: true }
     | {
         ok: false;
-        blockedBy: 'pending_payouts' | 'in_flight_orders' | 'failed_uncompensated_withdrawals';
+        blockedBy:
+          | 'pending_payouts'
+          | 'in_flight_orders'
+          | 'failed_uncompensated_withdrawals'
+          | 'non_zero_credit_balance';
       },
   /** When set, deleteUserViaAnonymisation throws → 500 path. */
   deleteError: null as Error | null,
@@ -220,6 +224,15 @@ describe('dsrDeleteHandler', () => {
     expect(body.code).toBe('FAILED_UNCOMPENSATED_WITHDRAWALS');
     expect(body.message).toContain('contact support');
     expect(body.message).toContain('failed withdrawal');
+  });
+
+  it('PLAT-30-03: returns 409 BALANCE_NOT_ZERO when a cashback balance is outstanding', async () => {
+    state.deleteResult = { ok: false, blockedBy: 'non_zero_credit_balance' };
+    const res = await dsrDeleteHandler(makeCtx());
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('BALANCE_NOT_ZERO');
+    expect(body.message).toContain('cashback balance');
   });
 
   it('500s when the anonymisation helper throws', async () => {

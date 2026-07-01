@@ -79,8 +79,16 @@ function runInit(Sentry: SentryModule): void {
     tracesSampleRate: import.meta.env.PROD ? 0.1 : 1.0,
     // A2-1308: scrub known-secret keys out of every captured event.
     // Mirror of the backend Sentry init; utility is duplicated across
-    // apps/web and apps/backend (they don't share a build).
-    beforeSend: (event) => scrubSentryEvent(event),
+    // apps/web and apps/backend (they don't share a build). The cast
+    // sidesteps `@sentry/react`'s ErrorEvent having many optional
+    // fields our minimal `SentryEventLike` doesn't declare —
+    // `exactOptionalPropertyTypes` treats that as a structural
+    // mismatch even though scrubSentryEvent only ever rewrites fields
+    // it explicitly reads. Same pattern as the backend's instrument.ts.
+    beforeSend: (event) =>
+      scrubSentryEvent(
+        event as unknown as Parameters<typeof scrubSentryEvent>[0],
+      ) as unknown as typeof event,
   });
 }
 
