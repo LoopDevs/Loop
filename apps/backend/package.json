@@ -28,7 +28,7 @@
     "@sentry/node": "10.51.0",
     "@stellar/stellar-sdk": "15.1.0",
     "drizzle-orm": "0.45.2",
-    "hono": "4.12.16",
+    "hono": "4.12.27",
     "maxmind": "5.0.6",
     "pino": "10.3.1",
     "postgres": "3.4.9",

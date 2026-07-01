@@ -1,0 +1,48 @@
+name: Weekly dependency audit
+
+# CF-04 (2026-06-15 cold audit) found the "Security audit" merge gate had
+# gone red for 7 weeks before anyone noticed, because it only ever runs on
+# push/PR — with no PR activity, a newly-rated advisory can sit silent
+# until the next push. This scheduled run surfaces that drift on its own
+# cadence instead of waiting for a human to push code.
+on:
+  schedule:
+    # Every Monday 09:00 UTC.
+    - cron: '0 9 * * 1'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Weekly npm audit policy check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+      - name: Run audit policy
+        id: audit
+        run: npm run audit
+      - name: Notify Discord on failure
+        if: failure()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_MONITORING }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          URL="$SERVER_URL/$REPO/actions/runs/$RUN_ID"
+          TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          PAYLOAD=$(jq -cn \
+            --arg title "⚠️ Weekly npm audit policy check failed" \
+            --arg desc  "A new unaccepted advisory (or a re-rated existing one) is redding the merge gate. See the run log for which package(s). See docs/standards.md §15." \
+            --argjson color 15105570 \
+            --arg url   "$URL" \
+            --arg ts    "$TIMESTAMP" \
+            '{embeds:[{title:$title,description:$desc,color:$color,url:$url,timestamp:$ts}]}')
+          curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK" || true

@@ -1034,6 +1034,14 @@ jobs:
   notify: # Discord status — always, depends on all of the above
 ```
 
+`.github/workflows/audit-cron.yml` runs the same `npm run audit` policy gate
+on a weekly schedule (Monday 09:00 UTC) plus `workflow_dispatch`, independent
+of any push/PR. The 2026-06-15 cold audit's CF-04, reopened by the
+2026-06-30 cold audit, found the gate had been red for 7 weeks with nobody
+noticing because it only ever ran on push/PR activity — a quiet repo can sit
+on a newly-rated advisory indefinitely. The cron job posts to
+`DISCORD_WEBHOOK_MONITORING` on failure so drift surfaces on its own cadence.
+
 ### Security audit policy
 
 - `npm run audit` is the only supported dependency-audit gate.
@@ -1055,30 +1063,32 @@ jobs:
   launch.**
 - Current accepted **highs** (authoritative set + per-entry rationale in
   `ACCEPTED_HIGH_VULNS`): `esbuild`, `vite`, `vite-node`, `tsx`, `tsup`,
-  `drizzle-kit`, `@react-router/dev`. These are the esbuild dev-server /
-  build-toolchain advisory chain (GHSA-67mh-4wv8-2f99 + GHSA-gv7w-rqvm-qjhr,
-  esbuild `<=0.28.0`, re-rated moderate→high on 2026-06). Accepted because the
-  chain is **dev/build-time only** — esbuild and its dependents are never in
-  the deployed runtime (the backend ships compiled `dist`; the web client is
-  built ahead of deploy), so the dev-server-SSRF / `NPM_CONFIG_REGISTRY`-RCE
-  vectors are unreachable by any deployed surface. Fixes are semver-major
-  (esbuild/vite/tsup/drizzle-kit/@react-router/dev) or a non-major `tsx` bump
-  tracked as a follow-up.
+  `drizzle-kit`, `@react-router/dev`, `form-data`, `undici`,
+  `@cyclonedx/cyclonedx-npm`. The esbuild/vite/vite-node/tsx/tsup/drizzle-kit/
+  @react-router/dev set is the esbuild dev-server / build-toolchain advisory
+  chain (GHSA-67mh-4wv8-2f99 + GHSA-gv7w-rqvm-qjhr, esbuild `<=0.28.0`,
+  re-rated moderate→high on 2026-06) — accepted because it's **dev/build-time
+  only**, never in the deployed runtime. `undici` (multiple 2026-06 advisories
+  — TLS/SOCKS5 bypass, Set-Cookie injection/downgrade, WebSocket DoS, cache
+  poisoning) comes in via two dev/test-only chains — `jsdom` (web test
+  environment) and `@sentry/cli` (release tooling) — neither reachable from a
+  deployed surface. `@cyclonedx/cyclonedx-npm` (GHSA-v75r-vx73-82pj, shell
+  injection via `--workspace`) is invoked once in CI with a fixed,
+  repo-authored argument list, never with external input. `form-data` is a
+  registry/range false-positive at the installed patched version. Fixes for
+  the semver-major entries are tracked follow-ups; `tsx` has a non-major fix
+  available.
+- **`hono` is bumped, not accepted** — the 2026-06-30 cold audit's CF-04 fix
+  moved `apps/backend`'s `hono` to `4.12.27`, which resolves every advisory in
+  its chain (including the ones re-rated `high` on 2026-06 that redded the
+  gate: JSX-SSR CSS injection, JWT `verify()` NumericDate gap, Cache
+  Middleware `Vary` gap, cookie/CORS/body-limit/path-traversal issues across
+  several point releases). No accept-list entry needed unless a future hono
+  release regresses.
 - Current accepted **moderates** (`ACCEPTED_MODERATE_VULNS`):
-  `@esbuild-kit/core-utils`, `@esbuild-kit/esm-loader`, `hono`. The
-  `@esbuild-kit/*` pair rides the deprecated drizzle-kit loader chain (major
-  fix). `hono` covers three moderate advisories on `hono <= 4.12.17`, none of
-  which reach an exploitable code path in Loop: (a) JSX-SSR CSS injection —
-  Loop's SSR is React Router v7, not Hono JSX; (b) Hono JWT `verify()`
-  NumericDate-claim gap — Loop uses its own verifier
-  (`apps/backend/src/auth/tokens.ts`) with explicit `iat`/`exp`/`iss`/`aud`
-  checks and never imports Hono JWT; (c) Cache-Middleware `Vary` gap — Loop
-  doesn't mount Hono Cache Middleware. The openapi layer is
-  `@asteasolutions/zod-to-openapi` (peer `zod ^4` only — **no** hono
-  constraint), so hono is bumpable; the deferral is a deliberate choice not to
-  take a minor hono bump mid-audit, revisited on the next dependency sweep.
-  (`esbuild` + `drizzle-kit` were previously here; the 2026-06 re-rating moved
-  them to the high set.) None of this is a blanket waiver for future findings.
+  `@esbuild-kit/core-utils`, `@esbuild-kit/esm-loader` — both ride the
+  deprecated drizzle-kit loader chain (major fix). None of this is a blanket
+  waiver for future findings.
 
 ### Branch protection on `main`
 
