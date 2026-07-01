@@ -4,7 +4,7 @@ import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-libra
 import { MemoryRouter } from 'react-router';
 import { ApiException } from '@loop/shared';
 
-const { userMock, authMock, navMock } = vi.hoisted(() => ({
+const { userMock, authMock, navMock, nativePlatformMock, shareMock } = vi.hoisted(() => ({
   userMock: {
     downloadMyData: vi.fn(),
     getMyDataExport: vi.fn(),
@@ -15,6 +15,10 @@ const { userMock, authMock, navMock } = vi.hoisted(() => ({
     logout: vi.fn(),
   },
   navMock: { navigate: vi.fn() },
+  // W30-02 (2026-06-30 cold audit): mutable so individual tests can flip
+  // to the native path without a second vi.mock factory per test file.
+  nativePlatformMock: { isNative: false },
+  shareMock: { shareJsonFile: vi.fn() },
 }));
 
 vi.mock('~/services/user', () => ({
@@ -27,9 +31,14 @@ vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: authMock.isAuthenticated, logout: authMock.logout }),
 }));
 
-// Web platform by default (anchor-download path).
+// Web platform by default (anchor-download path); native-path tests
+// flip `nativePlatformMock.isNative` in their own beforeEach/body.
 vi.mock('~/hooks/use-native-platform', () => ({
-  useNativePlatform: () => ({ platform: 'web', isNative: false }),
+  useNativePlatform: () => ({ platform: 'web', isNative: nativePlatformMock.isNative }),
+}));
+
+vi.mock('~/native/share', () => ({
+  shareJsonFile: (...args: unknown[]) => shareMock.shareJsonFile(...args),
 }));
 
 vi.mock('react-router', async (importActual) => {
@@ -57,6 +66,9 @@ beforeEach(() => {
   userMock.getMyDataExport.mockReset();
   userMock.requestAccountDeletion.mockReset();
   userMock.requestAccountDeletion.mockResolvedValue({ ok: true });
+  nativePlatformMock.isNative = false;
+  shareMock.shareJsonFile.mockReset();
+  shareMock.shareJsonFile.mockResolvedValue(true);
 });
 
 afterEach(cleanup);
@@ -120,5 +132,55 @@ describe('SettingsPrivacyRoute', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toMatch(/payout in flight/i);
     expect(authMock.logout).not.toHaveBeenCalled();
+  });
+
+  it('renders the BALANCE_NOT_ZERO block message (PLAT-30-03)', async () => {
+    userMock.requestAccountDeletion.mockRejectedValue(
+      new ApiException(409, { code: 'BALANCE_NOT_ZERO', message: 'balance not zero' }),
+    );
+    renderPage();
+    fireEvent.change(screen.getByLabelText(/Type/i), { target: { value: 'DELETE' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Delete my account/i }));
+    });
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/unredeemed cashback balance/i);
+    expect(authMock.logout).not.toHaveBeenCalled();
+  });
+
+  // W30-02 (2026-06-30 cold audit): native export used to only
+  // console.log the payload — invisible to a real user. These pin the
+  // fixed behavior: shareJsonFile is called instead, and the UI
+  // reflects success/failure correctly.
+  describe('native export (W30-02)', () => {
+    beforeEach(() => {
+      nativePlatformMock.isNative = true;
+      userMock.getMyDataExport.mockResolvedValue({ schemaVersion: 1 });
+    });
+
+    it('calls shareJsonFile with the export payload instead of console.log', async () => {
+      renderPage();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /Download my data/i }));
+      });
+      await waitFor(() => expect(shareMock.shareJsonFile).toHaveBeenCalledTimes(1));
+      expect(userMock.downloadMyData).not.toHaveBeenCalled();
+      const [filename, payload, shareText] = shareMock.shareJsonFile.mock.calls[0]!;
+      expect(filename).toMatch(/^loop-data-export-\d{4}-\d{2}-\d{2}\.json$/);
+      expect(payload).toEqual({ schemaVersion: 1 });
+      expect(shareText).toEqual(expect.objectContaining({ title: expect.any(String) }));
+      const status = await screen.findByRole('status');
+      expect(status.textContent).toMatch(/share sheet/i);
+    });
+
+    it('surfaces an error when shareJsonFile returns false (share sheet failed/cancelled)', async () => {
+      shareMock.shareJsonFile.mockResolvedValue(false);
+      renderPage();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /Download my data/i }));
+      });
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent).toMatch(/couldn't prepare your data/i);
+    });
   });
 });

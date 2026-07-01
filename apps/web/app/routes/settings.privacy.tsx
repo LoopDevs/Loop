@@ -26,6 +26,7 @@ import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { Button } from '~/components/ui/Button';
 import { downloadMyData, getMyDataExport, requestAccountDeletion } from '~/services/user';
+import { shareJsonFile } from '~/native/share';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Privacy & data — Loop' }];
@@ -44,6 +45,9 @@ function deletionBlockMessage(err: unknown): string {
     }
     if (err.code === 'FAILED_UNCOMPENSATED_WITHDRAWALS') {
       return 'A failed withdrawal is awaiting compensation. Contact support about it before deleting your account.';
+    }
+    if (err.code === 'BALANCE_NOT_ZERO') {
+      return 'You have an unredeemed cashback balance. Spend it, or contact support to withdraw it, before deleting your account.';
     }
     return err.message;
   }
@@ -91,12 +95,23 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
     void (async () => {
       try {
         if (isNative) {
-          // Native has no anchor-download; surface the JSON so the user
-          // can still capture it. (A first-class native file-save is a
-          // follow-up; the data is the right that matters here.)
+          // W30-02 (2026-06-30 cold audit): native has no anchor-
+          // download, so write the export JSON to Directory.Cache and
+          // open the OS share sheet — the user can save/AirDrop/email
+          // the file to actually retrieve it (GDPR Art. 15/20).
           const payload = await getMyDataExport();
-          // eslint-disable-next-line no-console
-          console.log('[loop] your data export', payload);
+          const shared = await shareJsonFile(
+            `loop-data-export-${new Date().toISOString().slice(0, 10)}.json`,
+            payload,
+            { title: 'Your Loop data export', text: 'Your Loop account data export' },
+          );
+          if (!shared) {
+            setExportError(
+              "Couldn't prepare your data for sharing. Please try again, or email privacy@loopfinance.io.",
+            );
+            setExportState('error');
+            return;
+          }
           setExportState('done');
           return;
         }
@@ -168,7 +183,7 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
             className="text-sm text-green-700 dark:text-green-400"
           >
             {isNative
-              ? 'Your data was prepared. To save a copy on mobile, contact privacy@loopfinance.io.'
+              ? 'Your data was prepared — save it via the share sheet.'
               : 'Your data download has started.'}
           </p>
         ) : null}

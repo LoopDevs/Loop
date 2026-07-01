@@ -99,6 +99,9 @@ export const ApiErrorCode = {
   IN_FLIGHT_ORDERS: 'IN_FLIGHT_ORDERS',
   PENDING_PAYOUTS: 'PENDING_PAYOUTS',
   FAILED_UNCOMPENSATED_WITHDRAWALS: 'FAILED_UNCOMPENSATED_WITHDRAWALS',
+  // PLAT-30-03 (2026-06-30 cold audit): DSR self-delete blocks on a
+  // non-zero user_credits balance in any currency.
+  BALANCE_NOT_ZERO: 'BALANCE_NOT_ZERO',
   REFUND_ALREADY_ISSUED: 'REFUND_ALREADY_ISSUED',
   // CF-06 admin-refund order validation. The bound order must exist
   // (ORDER_NOT_FOUND → 404), belong to the refund target

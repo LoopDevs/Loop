@@ -45,9 +45,9 @@
  * code path that does `select(u where email=?)` keeps working
  * without special-casing the deletion sentinel.
  */
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { orders, pendingPayouts, userIdentities, users } from '../db/schema.js';
+import { orders, pendingPayouts, userCredits, userIdentities, users } from '../db/schema.js';
 import type { PAYOUT_STATES, ORDER_STATES } from '../db/schema.js';
 import { revokeAllRefreshTokensForUser } from '../auth/refresh-tokens.js';
 import { logger } from '../logger.js';
@@ -73,11 +73,27 @@ import { logger } from '../logger.js';
  *     row whose email is now `deleted-{uuid}@…`, the user's new
  *     account (re-signup with the original email) gets a fresh
  *     user_id and never sees the recovered balance.
+ *   - `non_zero_credit_balance` (PLAT-30-03, 2026-06-30 cold audit): a
+ *     `user_credits` row with `balanceMinor !== 0n`. Cashback is
+ *     credited on every fulfilled order regardless of whether the
+ *     user ever linked a Stellar wallet (`orders/fulfillment.ts`) — a
+ *     `pending_payouts` row only exists when a wallet address was on
+ *     file at fulfillment time. A user who never links a wallet can
+ *     accumulate an arbitrary cashback balance with zero
+ *     `pending_payouts` rows ever created, trivially satisfying the
+ *     other three preconditions regardless of balance size. Without
+ *     this check, anonymisation permanently orphans that balance:
+ *     there's no self-serve withdrawal path (admin-only,
+ *     `credits/withdrawals.ts`), yet `liabilities.ts`'s
+ *     `sumOutstandingLiability` keeps counting it as outstanding
+ *     company liability forever. Mirrors
+ *     `home-currency-change.ts`'s identical live-balance guard.
  */
 export type DsrDeleteBlockReason =
   | 'pending_payouts'
   | 'in_flight_orders'
-  | 'failed_uncompensated_withdrawals';
+  | 'failed_uncompensated_withdrawals'
+  | 'non_zero_credit_balance';
 
 export interface DsrDeleteResult {
   /** True when the anonymisation succeeded; the caller's session is dead. */
@@ -180,6 +196,20 @@ export async function deleteUserViaAnonymisation(userId: string): Promise<DsrDel
     .limit(1);
   if (blockingOrders.length > 0) {
     return { ok: false, blockedBy: 'in_flight_orders' };
+  }
+
+  // PLAT-30-03: block on any non-zero user_credits balance, in any
+  // currency (a user can hold rows in more than one currency after a
+  // home-currency change) — see DsrDeleteBlockReason's docs for why
+  // the three preconditions above don't catch a never-linked-wallet
+  // user's cashback.
+  const nonZeroBalances = await db
+    .select({ currency: userCredits.currency })
+    .from(userCredits)
+    .where(and(eq(userCredits.userId, userId), ne(userCredits.balanceMinor, 0n)))
+    .limit(1);
+  if (nonZeroBalances.length > 0) {
+    return { ok: false, blockedBy: 'non_zero_credit_balance' };
   }
 
   await db.transaction(async (tx) => {

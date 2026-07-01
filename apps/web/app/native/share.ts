@@ -143,6 +143,50 @@ export async function nativeShare(options: ShareOptions): Promise<boolean> {
   }
 }
 
+/**
+ * W30-02 (2026-06-30 cold audit): the native DSR data-export path
+ * previously only `console.log`'d the payload — invisible to a real
+ * user with no devtools, so the GDPR Art. 15/20 data-portability right
+ * wasn't actually honoured on mobile. Writes the JSON payload to
+ * `Directory.Cache` (same `share/`-prefixed, FileProvider-scoped path
+ * `writeTempShareImage` uses) and opens the native share sheet so the
+ * user can save/AirDrop/email the file themselves. No-op / returns
+ * false on web — callers already have a correct web path
+ * (`downloadMyData()`'s Blob-anchor download) and should only call
+ * this on `Capacitor.isNativePlatform()`.
+ */
+export async function shareJsonFile(
+  filename: string,
+  payload: unknown,
+  shareText: { title: string; text: string },
+): Promise<boolean> {
+  if (!Capacitor.isNativePlatform()) return false;
+  const scopedPath = `share/${filename}`;
+  try {
+    const { Filesystem, Directory, Encoding } = await import('@capacitor/filesystem');
+    await Filesystem.writeFile({
+      path: scopedPath,
+      data: JSON.stringify(payload, null, 2),
+      directory: Directory.Cache,
+      encoding: Encoding.UTF8,
+      recursive: true,
+    });
+    const { uri } = await Filesystem.getUri({ path: scopedPath, directory: Directory.Cache });
+    const { Share } = await import('@capacitor/share');
+    try {
+      await Share.share({ title: shareText.title, text: shareText.text, files: [uri] });
+    } finally {
+      // Same opportunistic-purge rationale as A4-059 above — the share
+      // extension has already read its own copy by the time `share()`
+      // resolves.
+      void purgeShareImage(scopedPath);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function parseBase64DataUrl(dataUrl: string): { mimeType: string; base64: string } | null {
   const match = /^data:([^;,]+);base64,(.+)$/s.exec(dataUrl);
   if (match === null) return null;

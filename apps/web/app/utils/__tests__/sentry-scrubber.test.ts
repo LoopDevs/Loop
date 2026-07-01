@@ -99,4 +99,67 @@ describe('scrubSentryEvent (web)', () => {
     // Same reference is returned on the catch path.
     expect(out).toBe(event);
   });
+
+  // CF2-09 (2026-06-30 cold audit): this file had drifted from the
+  // backend twin — no breadcrumb handling at all, and no free-text
+  // (email/bearer/hex) pass on message/exception/breadcrumbs. Sentry's
+  // default integrations capture console.* calls as breadcrumbs
+  // automatically, so any PII logged anywhere in the app (e.g. the
+  // native DSR export screen's now-fixed console.log(payload),
+  // W30-02) reached Sentry completely unscrubbed before this fix.
+  describe('CF2-09: breadcrumbs + free-text PII scrubbing', () => {
+    it('redacts email addresses in breadcrumb messages', () => {
+      const out = scrubSentryEvent({
+        breadcrumbs: [{ message: 'user alice@example.com clicked export', category: 'console' }],
+      });
+      expect(out.breadcrumbs?.[0]?.message).toBe('user [REDACTED_EMAIL] clicked export');
+      expect(out.breadcrumbs?.[0]?.category).toBe('console');
+    });
+
+    it('redacts sensitive keys inside breadcrumb.data', () => {
+      const out = scrubSentryEvent({
+        breadcrumbs: [{ message: 'fetch', data: { accessToken: 'abc123', url: '/api/orders' } }],
+      });
+      expect((out.breadcrumbs?.[0]?.data as Record<string, string>).accessToken).toBe('[REDACTED]');
+      expect((out.breadcrumbs?.[0]?.data as Record<string, string>).url).toBe('/api/orders');
+    });
+
+    it('scrubs multiple breadcrumbs independently', () => {
+      const out = scrubSentryEvent({
+        breadcrumbs: [{ message: 'first bob@example.com' }, { message: 'second no-pii-here' }],
+      });
+      expect(out.breadcrumbs?.[0]?.message).toBe('first [REDACTED_EMAIL]');
+      expect(out.breadcrumbs?.[1]?.message).toBe('second no-pii-here');
+    });
+
+    it('redacts email/bearer/stellar-secret/long-hex patterns in event.message', () => {
+      const out = scrubSentryEvent({ message: 'failed for alice@example.com' });
+      expect(out.message).toBe('failed for [REDACTED_EMAIL]');
+    });
+
+    it('redacts free-text PII in exception.values[].value', () => {
+      const out = scrubSentryEvent({
+        exception: { values: [{ type: 'Error', value: 'token Bearer abc123def456ghi789jkl' }] },
+      });
+      expect(out.exception?.values?.[0]?.value).toBe('token [REDACTED_BEARER]');
+    });
+
+    it('redacts the idempotency-key sensitive-key variants (A4-039 parity with backend)', () => {
+      const camel = scrubSentryEvent({ extra: { idempotencyKey: 'key-value' } });
+      expect(camel.extra?.['idempotencyKey']).toBe('[REDACTED]');
+      const header = scrubSentryEvent({
+        request: { headers: { 'Idempotency-Key': 'header-value' } },
+      });
+      expect(header.request?.headers?.['Idempotency-Key']).toBe('[REDACTED]');
+    });
+
+    it('leaves an event with no breadcrumbs/message/exception unaffected', () => {
+      const out = scrubSentryEvent({
+        extra: { safe: 'value' },
+      } as { extra: Record<string, unknown>; breadcrumbs?: never; message?: never });
+      expect(out.breadcrumbs).toBeUndefined();
+      expect(out.message).toBeUndefined();
+      expect(out.extra?.['safe']).toBe('value');
+    });
+  });
 });
