@@ -157,6 +157,7 @@ import {
   runProcurementTick,
   pickProcurementAsset,
   __resetBelowFloorAlertForTests,
+  __resetCtxBackoffForTests,
 } from '../procurement.js';
 import { OperatorPoolUnavailableError, OperatorRateLimitedError } from '../../ctx/operator-pool.js';
 
@@ -240,6 +241,7 @@ beforeEach(() => {
   getBalancesMock.mockClear();
   discordMock.notifyUsdcBelowFloor.mockClear();
   __resetBelowFloorAlertForTests();
+  __resetCtxBackoffForTests();
   envState.LOOP_STELLAR_DEPOSIT_ADDRESS = undefined;
   envState.LOOP_STELLAR_USDC_ISSUER = undefined;
   envState.LOOP_STELLAR_USDC_FLOOR_STROOPS = undefined;
@@ -443,6 +445,55 @@ describe('runProcurementTick', () => {
     // CF-12: a transient rate-limit must defer, not fail real paid
     // orders into a self-sustaining hot loop.
     expect(revertProcuringMock).toHaveBeenCalledWith('o-1');
+  });
+
+  // CTX-02 (2026-06-30 cold audit): CF-12 parsed Retry-After but never
+  // enforced it — the NEXT tick immediately re-queried and re-hit CTX
+  // regardless. These prove the back-off is now real: a subsequent tick
+  // during the Retry-After window picks zero orders and never calls CTX
+  // again, and the gate releases once the window elapses.
+  describe('CTX-02: Retry-After is actually enforced across ticks', () => {
+    it('a 429 with Retry-After gates the NEXT tick — zero orders picked, no CTX call', async () => {
+      state.paid = [makeOrder({ id: 'o-1' })];
+      operatorFetchMock.mockRejectedValue(new OperatorRateLimitedError('429', 200));
+      const first = await runProcurementTick();
+      expect(first.skipped).toBe(1);
+
+      // A fresh paid order arrives before the back-off window elapses —
+      // the whole tick must be skipped, not just this order's CTX call.
+      state.paid = [makeOrder({ id: 'o-2' })];
+      operatorFetchMock.mockClear();
+      const second = await runProcurementTick();
+      expect(second.picked).toBe(0);
+      expect(operatorFetchMock).not.toHaveBeenCalled();
+    });
+
+    it('the gate releases once the Retry-After window elapses', async () => {
+      state.paid = [makeOrder({ id: 'o-1' })];
+      operatorFetchMock.mockRejectedValue(new OperatorRateLimitedError('429', 30));
+      await runProcurementTick();
+
+      await new Promise((r) => setTimeout(r, 60));
+
+      state.paid = [makeOrder({ id: 'o-2' })];
+      operatorFetchMock.mockReset();
+      mockProcureAndFetch('ctx-2');
+      const after = await runProcurementTick();
+      expect(after.picked).toBe(1);
+      expect(operatorFetchMock).toHaveBeenCalled();
+    });
+
+    it('no Retry-After header (null) still applies a conservative default back-off', async () => {
+      state.paid = [makeOrder({ id: 'o-1' })];
+      operatorFetchMock.mockRejectedValue(new OperatorRateLimitedError('429', null));
+      await runProcurementTick();
+
+      state.paid = [makeOrder({ id: 'o-2' })];
+      operatorFetchMock.mockClear();
+      const second = await runProcurementTick();
+      expect(second.picked).toBe(0);
+      expect(operatorFetchMock).not.toHaveBeenCalled();
+    });
   });
 
   it('unexpected throw → markOrderFailed with message', async () => {

@@ -228,7 +228,14 @@ function pickHealthyOperator(): Operator | null {
   for (let attempt = 0; attempt < operators.length; attempt++) {
     const idx = (nextIndex + attempt) % operators.length;
     const op = operators[idx];
-    if (op !== undefined && op.breaker.getState() !== 'open') {
+    // CF2-01 (2026-06-30 cold audit): `isAvailable()`, not a bare
+    // `getState() !== 'open'` check. The breaker's OPEN→HALF_OPEN
+    // cooldown-expiry transition previously lived only inside
+    // `.fetch()` — an operator filtered out here never got `.fetch()`
+    // called on it again, so it could never recover on its own. One
+    // bad response (CF-13's `forceOpen` trips on a single 401) could
+    // permanently strand an operator; two could brick the whole pool.
+    if (op !== undefined && op.breaker.isAvailable()) {
       nextIndex = (idx + 1) % operators.length;
       return op;
     }

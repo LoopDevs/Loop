@@ -45,6 +45,7 @@ import { getMerchants } from './merchants/sync.js';
 import { getRuntimeHealthSnapshot } from './runtime-health.js';
 import { upstreamUrl } from './upstream.js';
 import { notifyHealthChange } from './discord.js';
+import { getOperatorHealth } from './ctx/operator-pool.js';
 
 const healthLog = logger.child({ component: 'health' });
 
@@ -188,6 +189,19 @@ export async function healthHandler(c: Context): Promise<Response> {
   const [upstreamReachable, databaseReachable] = await Promise.all([probeUpstream(), probeDb()]);
   const runtime = getRuntimeHealthSnapshot();
 
+  // CF2-01 (2026-06-30 cold audit): the operator-pool circuit-breaker
+  // state was previously invisible to /health entirely, so a pool-wide
+  // outage (every operator's breaker OPEN) had no external signal
+  // besides procurement/orders silently failing. Surfaced as SOFT
+  // degraded (visible, doesn't cycle the Fly machine) rather than
+  // critical — the isAvailable() fix means the pool self-heals via the
+  // cooldown+half-open probe on its own schedule; cycling this backend
+  // instance wouldn't fix an upstream CTX outage and would just reset
+  // the recovery timers.
+  const operatorHealth = getOperatorHealth();
+  const operatorPoolExhausted =
+    operatorHealth.length > 0 && operatorHealth.every((op) => op.state === 'open');
+
   // Two-tier degradation. Critical = "the backend itself is in
   // trouble; orchestrator should cycle this machine". Soft = "an
   // external dependency we proxy is slow; we still want it visible
@@ -209,7 +223,8 @@ export async function healthHandler(c: Context): Promise<Response> {
   //     keeps the machine; monitoring dashboards still see truth;
   //     Discord stays quiet on upstream blips.
   const criticalDegraded = !databaseReachable || runtime.degraded;
-  const softDegraded = merchantsStale || locationsStale || !upstreamReachable;
+  const softDegraded =
+    merchantsStale || locationsStale || !upstreamReachable || operatorPoolExhausted;
   const degraded = criticalDegraded || softDegraded;
 
   // Raw reading → rolling window. Keep the last N readings, flip
@@ -301,6 +316,7 @@ export async function healthHandler(c: Context): Promise<Response> {
   if (merchantsStale) softDegradedReasons.push('merchants_stale');
   if (locationsStale) softDegradedReasons.push('locations_stale');
   if (!upstreamReachable) softDegradedReasons.push('upstream_unreachable');
+  if (operatorPoolExhausted) softDegradedReasons.push('operator_pool_exhausted');
   return c.json(
     {
       status: degraded ? 'degraded' : 'healthy',
@@ -315,6 +331,11 @@ export async function healthHandler(c: Context): Promise<Response> {
       // A4-034: DB readiness component. False = pool exhausted /
       // credentials rotated / network partition / DB hard-down.
       databaseReachable,
+      // CF2-01: per-operator circuit-breaker snapshot so an operator
+      // stuck OPEN is visible externally, not just inferred from
+      // procurement failures.
+      operatorPool: operatorHealth,
+      operatorPoolExhausted,
       criticalDegraded,
       softDegraded,
       softDegradedReasons,
