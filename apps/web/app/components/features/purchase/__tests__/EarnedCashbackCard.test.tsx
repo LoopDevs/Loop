@@ -14,6 +14,18 @@ vi.mock('~/hooks/use-merchants', () => ({
   useMerchantCashbackRate: () => ({ userCashbackPct: rateMock.userCashbackPct }),
 }));
 
+// WUM-05 / CF2-08 (2026-06-30 cold audit): useAppConfig defaults
+// phase1Only=true, which now gates this Phase 2+ card off entirely.
+// Force it false so the existing happy-path tests keep exercising the
+// card's own rendering logic; a dedicated describe block below pins
+// the phase1Only=true gate itself.
+const { appConfigMock } = vi.hoisted(() => ({
+  appConfigMock: { phase1Only: false },
+}));
+vi.mock('~/hooks/use-app-config', () => ({
+  useAppConfig: () => ({ config: appConfigMock, isLoading: false }),
+}));
+
 import { EarnedCashbackCard } from '../EarnedCashbackCard';
 
 function renderCard(
@@ -35,6 +47,7 @@ function renderCard(
 
 beforeEach(() => {
   rateMock.userCashbackPct = null;
+  appConfigMock.phase1Only = false;
 });
 
 afterEach(cleanup);
@@ -82,5 +95,16 @@ describe('EarnedCashbackCard', () => {
     renderCard({ amount: 25 });
     const link = screen.getByRole('link', { name: /View →/ });
     expect(link.getAttribute('href')).toBe('/settings/cashback');
+  });
+
+  // WUM-05 / CF2-08 (2026-06-30 cold audit): this card's "Credited to
+  // your Loop balance" copy is false under the actual Phase-1 model
+  // (instant discount at checkout, no balance, no wallet) — must hide
+  // entirely when phase1Only, like every sibling cashback/wallet surface.
+  it('renders nothing when phase1Only, regardless of an otherwise-valid rate', () => {
+    appConfigMock.phase1Only = true;
+    rateMock.userCashbackPct = '2.50';
+    const { container } = renderCard({ amount: 50, currency: 'USD' });
+    expect(container.firstChild).toBeNull();
   });
 });

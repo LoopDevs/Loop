@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { formatMinorCurrency } from '@loop/shared';
 import { getTreasuryCreditFlow, type TreasuryCreditFlowDay } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
 import { shortDay } from './PaymentMethodActivityChart';
-import { ADMIN_LOCALE } from '~/utils/locale';
 
 /**
  * CSS-only per-day ledger-delta chart over the last N days for one
@@ -25,21 +25,9 @@ import { ADMIN_LOCALE } from '~/utils/locale';
 const CURRENCIES = ['USD', 'GBP', 'EUR'] as const;
 type Cur = (typeof CURRENCIES)[number];
 
-const SYMBOL: Record<Cur, string> = { USD: '$', GBP: '£', EUR: '€' };
-
-function fmtMinor(minor: string, currency: Cur): string {
-  const negative = minor.startsWith('-');
-  const digits = negative ? minor.slice(1) : minor;
-  const padded = digits.padStart(3, '0');
-  const whole = padded.slice(0, -2);
-  const fraction = padded.slice(-2);
-  const sign = negative ? '-' : '';
-  return `${sign}${SYMBOL[currency]}${Number(whole).toLocaleString(ADMIN_LOCALE)}.${fraction}`;
-}
-
-function absBig(v: bigint): bigint {
-  return v < 0n ? -v : v;
-}
+// F-WEBADMIN-09 (2026-06-30 cold audit): local fmtMinor replaced with
+// the bigint-safe shared helper (CF-23).
+const fmtMinor = formatMinorCurrency;
 
 export function CreditFlowChart(): React.JSX.Element {
   const [currency, setCurrency] = useState<Cur>('USD');
@@ -147,8 +135,18 @@ function Chart({
   currency: Cur;
 }): React.JSX.Element {
   const max = days.reduce((m, d) => {
-    const c = BigInt(d.creditedMinor);
-    const deb = BigInt(d.debitedMinor);
+    // F-WEBADMIN-03 (2026-06-30 cold audit): malformed bigint from
+    // server — skip this day's contribution to max rather than crash
+    // the whole reduce. Matches the guarded pattern used 12+ times
+    // elsewhere in this directory.
+    let c: bigint;
+    let deb: bigint;
+    try {
+      c = BigInt(d.creditedMinor);
+      deb = BigInt(d.debitedMinor);
+    } catch {
+      return m;
+    }
     const hi = c > deb ? c : deb;
     return hi > m ? hi : m;
   }, 0n);
@@ -178,10 +176,21 @@ function DayRow({
   day: TreasuryCreditFlowDay;
   currency: Cur;
   max: bigint;
-}): React.JSX.Element {
-  const credited = BigInt(day.creditedMinor);
-  const debited = BigInt(day.debitedMinor);
-  const net = BigInt(day.netMinor);
+}): React.JSX.Element | null {
+  // F-WEBADMIN-03 (2026-06-30 cold audit): malformed bigint from server
+  // — skip the row rather than crash the whole page (no route-level
+  // ErrorBoundary exists on the admin surface, so an unguarded throw
+  // here blanks the entire /admin/treasury page, not just this widget).
+  let credited: bigint;
+  let debited: bigint;
+  let net: bigint;
+  try {
+    credited = BigInt(day.creditedMinor);
+    debited = BigInt(day.debitedMinor);
+    net = BigInt(day.netMinor);
+  } catch {
+    return null;
+  }
   // Scale to 1000 for float-safe percentage math on bigints.
   const creditedPct = max === 0n ? 0 : Number((credited * 1000n) / max) / 10;
   const debitedPct = max === 0n ? 0 : Number((debited * 1000n) / max) / 10;
@@ -193,7 +202,7 @@ function DayRow({
         ? 'text-blue-700 dark:text-blue-400'
         : 'text-gray-500 dark:text-gray-400';
   const netPrefix = net > 0n ? '+' : '';
-  const netDisplay = `${netPrefix}${fmtMinor(net < 0n ? `-${absBig(net).toString()}` : net.toString(), currency)}`;
+  const netDisplay = `${netPrefix}${fmtMinor(net, currency)}`;
 
   const label = `${shortDay(day.day)}: credited ${fmtMinor(day.creditedMinor, currency)}, debited ${fmtMinor(day.debitedMinor, currency)}, net ${netDisplay}`;
 

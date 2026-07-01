@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { formatMinorCurrency } from '@loop/shared';
 import { getPublicCashbackPreview, type PublicCashbackPreview } from '~/services/public-stats';
 import { shouldRetry } from '~/hooks/query-retry';
 
@@ -38,21 +39,14 @@ function useDebouncedValue<T>(value: T, ms: number): T {
 }
 
 /**
- * Stroops-free version of `formatMinor` — amounts are already in
- * fiat cents. `narrowSymbol` locks USDLOOP = \$ on en-GB / jsdom.
+ * WUM-04 (2026-06-30 cold audit): delegates to the canonical
+ * bigint-exact shared formatter (CF-23) instead of `Number(BigInt(minor))
+ * / 100` — kept as a thin named wrapper since this file's own test
+ * suite asserts on it directly and other call sites in this file use
+ * the short name.
  */
 export function formatCashbackMinor(minor: string, currency: string): string {
-  try {
-    const major = Number(BigInt(minor)) / 100;
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency,
-      currencyDisplay: 'narrowSymbol',
-      maximumFractionDigits: 2,
-    }).format(major);
-  } catch {
-    return '—';
-  }
+  return formatMinorCurrency(minor, currency);
 }
 
 export function CashbackCalculator({ merchantId }: Props): React.JSX.Element {

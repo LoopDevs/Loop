@@ -87,7 +87,7 @@ describe('LoopOrdersList', () => {
     render(wrap(<LoopOrdersList enabled={true} />));
     await waitFor(() => screen.getAllByText('Target'));
     expect(screen.getAllByText('Target').length).toBe(2);
-    expect(screen.getAllByText(/10\.00 USD/).length).toBe(2);
+    expect(screen.getAllByText(/\$10\.00/).length).toBe(2);
     expect(screen.getByText('Ready')).toBeDefined();
     expect(screen.getByText('Waiting for payment')).toBeDefined();
   });
@@ -208,7 +208,7 @@ describe('LoopOrdersList', () => {
     // Auto-expanded — no click required.
     await waitFor(() => screen.getByText('MEMO-RECOVERY'));
     expect(screen.getByText('GABCDEF')).toBeDefined();
-    expect(screen.getByText(/Send 25\.00 USD of USDC/i)).toBeDefined();
+    expect(screen.getByText(/Send \$25\.00 of USDC/i)).toBeDefined();
   });
 
   it('A4-026: pending_payment without stellarAddress / memo renders no panel (no NPE)', async () => {

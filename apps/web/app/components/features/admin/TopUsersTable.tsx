@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
+import { formatMinorCurrency } from '@loop/shared';
 import { getTopUsers, type TopUserRow } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { Spinner } from '~/components/ui/Spinner';
@@ -15,22 +16,15 @@ const DEFAULT_WINDOW_DAYS = 30;
 const LIMIT = 20;
 
 /**
- * Formats an unsigned minor amount in the row's currency. Rows here
- * are always positive cashback sums; we use `signDisplay: 'never'`
- * so "£5.00" shows without a leading "+".
+ * F-WEBADMIN-09 (2026-06-30 cold audit): delegates to the canonical
+ * bigint-exact shared formatter (CF-23) instead of `Number(minor) /
+ * 100`. Rows here are always positive cashback sums, and
+ * formatMinorCurrency already omits any sign for a positive amount
+ * (only negatives get a `-` prefix), matching the prior
+ * `signDisplay: 'never'` behaviour.
  */
 export function fmtPositiveMinor(minor: string, currency: string): string {
-  const n = Number(minor);
-  if (!Number.isFinite(n)) return '—';
-  try {
-    return new Intl.NumberFormat(ADMIN_LOCALE, {
-      style: 'currency',
-      currency,
-      signDisplay: 'never',
-    }).format(n / 100);
-  } catch {
-    return `${(n / 100).toFixed(2)} ${currency}`;
-  }
+  return formatMinorCurrency(minor, currency, { locale: ADMIN_LOCALE });
 }
 
 /**

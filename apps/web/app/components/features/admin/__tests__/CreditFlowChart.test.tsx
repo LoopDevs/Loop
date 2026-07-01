@@ -125,4 +125,38 @@ describe('<CreditFlowChart />', () => {
       ).toBe(true);
     });
   });
+
+  // F-WEBADMIN-03 (2026-06-30 cold audit): a malformed minor-unit string
+  // used to throw a SyntaxError from an unguarded BigInt() call (both in
+  // the max-reduce and per-row), blanking the entire admin page. A
+  // malformed day must be skipped, not crash the chart.
+  it('skips a day with a malformed minor-unit string instead of crashing', async () => {
+    adminMock.getTreasuryCreditFlow.mockResolvedValue({
+      windowDays: 2,
+      currency: 'USD',
+      days: [
+        {
+          day: '2026-04-19',
+          currency: 'USD',
+          creditedMinor: 'not-a-bigint',
+          debitedMinor: 'also-not-a-bigint',
+          netMinor: 'nope',
+        },
+        {
+          day: '2026-04-20',
+          currency: 'USD',
+          creditedMinor: '50000',
+          debitedMinor: '12000',
+          netMinor: '38000',
+        },
+      ],
+    });
+    renderChart();
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText(/Apr 20: credited \$500\.00, debited \$120\.00, net \+\$380\.00/i),
+      ).toBeDefined();
+    });
+    expect(screen.queryByLabelText(/Apr 19/)).toBeNull();
+  });
 });

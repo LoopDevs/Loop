@@ -100,7 +100,7 @@ describe('LoopPaymentStep — stellar (xlm/usdc)', () => {
     expect(screen.getByText('MEMO-ABCDEFGHIJKLMN')).toBeDefined();
     // Web variant shows fiat ("$10.00") + asset-native amount ("10.0000000 USDC")
     // on separate rows alongside the SEP-7 "Open in wallet" anchor.
-    expect(screen.getByText(/10\.00 USD/)).toBeDefined();
+    expect(screen.getByText(/\$10\.00/)).toBeDefined();
     expect(screen.getByText(/10\.0000000 USDC/)).toBeDefined();
     expect(screen.getByRole('link', { name: /Open in wallet/i })).toBeDefined();
   });
@@ -211,7 +211,7 @@ describe('LoopPaymentStep — fulfilled redemption', () => {
       }),
     );
     render(wrap(<LoopPaymentStep create={mkStellarCreate()} />));
-    await waitFor(() => screen.getByText(/5\.00 USD cashback/i));
+    await waitFor(() => screen.getByText(/\$5\.00 cashback/i));
   });
 
   it('omits the cashback line when userCashbackMinor is 0', async () => {

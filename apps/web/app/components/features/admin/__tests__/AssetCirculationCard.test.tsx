@@ -130,4 +130,31 @@ describe('<AssetCirculationCard />', () => {
     expect(container.textContent).not.toMatch(/Circulation drift/);
     expect(container.textContent).not.toMatch(/On-chain circulation read failed/);
   });
+
+  // F-WEBADMIN-03 (2026-06-30 cold audit): a malformed numeric string
+  // used to throw a SyntaxError from an unguarded BigInt() call,
+  // blanking the entire admin page (no route-level ErrorBoundary
+  // exists). Must degrade silently instead, matching this component's
+  // own doc comment ("other failures degrade silently").
+  it('renders nothing (does not throw) when a numeric field is malformed', async () => {
+    adminMock.getAssetCirculation.mockResolvedValue({
+      assetCode: 'USDLOOP',
+      fiatCurrency: 'USD',
+      issuer: 'GABC',
+      onChainStroops: 'not-a-bigint',
+      ledgerLiabilityMinor: '100',
+      driftStroops: '0',
+      onChainAsOfMs: Date.now(),
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <AssetCirculationCard assetCode="USDLOOP" />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => {
+      expect(adminMock.getAssetCirculation).toHaveBeenCalled();
+    });
+    expect(container.textContent).not.toMatch(/Circulation drift/);
+  });
 });

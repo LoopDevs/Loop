@@ -6,6 +6,7 @@ import {
 } from '~/services/user';
 import { shouldRetry } from '~/hooks/query-retry';
 import { useAuth } from '~/hooks/use-auth';
+import { useAppConfig } from '~/hooks/use-app-config';
 import { formatAssetAmount } from '~/components/features/cashback/PendingPayoutsCard';
 
 /**
@@ -59,10 +60,16 @@ function formatDate(iso: string): string {
 export function OrderPayoutCard({ orderId }: { orderId: string }): React.JSX.Element | null {
   // Audit CF-24: gate on auth (A2-1156 cold-start 401/refresh-storm guard).
   const { isAuthenticated } = useAuth();
+  // WUM-05 / CF2-08 (2026-06-30 cold audit): this card tells the user
+  // where their cashback went "on Stellar" — a Phase 2+ concept.
+  // AGENTS.md documents LOOP_PHASE_1_ONLY as hiding every Phase 2+
+  // surface; every sibling cashback/wallet surface already gates on
+  // this, this one didn't.
+  const { config } = useAppConfig();
   const query = useQuery({
     queryKey: ['order', orderId, 'payout'],
     queryFn: () => getUserPayoutByOrder(orderId),
-    enabled: isAuthenticated && orderId.length > 0,
+    enabled: isAuthenticated && orderId.length > 0 && !config.phase1Only,
     retry: shouldRetry,
     staleTime: 30_000,
     // Poll only while the payout can still change. `confirmed`/`failed` are
@@ -74,6 +81,7 @@ export function OrderPayoutCard({ orderId }: { orderId: string }): React.JSX.Ele
     },
   });
 
+  if (config.phase1Only) return null;
   if (query.isPending || query.isError) return null;
   const payout: UserPendingPayoutView | null = query.data;
   if (payout === null) return null;
