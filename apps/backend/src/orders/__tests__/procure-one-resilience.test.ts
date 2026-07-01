@@ -248,10 +248,9 @@ describe('procureOne — CF-28 pay-ctx failure NEVER fulfils (stranded-order gua
     ['PayCtxConfigError', () => new PayCtxConfigError('operator secret missing')],
     ['PayCtxReconcileError', () => new PayCtxReconcileError('amount/asset mismatch')],
     [
-      'PayoutSubmitError',
-      () => new PayoutSubmitError('transient_horizon', 'horizon 504', { transaction: 'tx_failed' }),
+      'a terminal PayoutSubmitError',
+      () => new PayoutSubmitError('terminal_no_trust', 'op_no_trust', { transaction: 'tx_failed' }),
     ],
-    ['a generic Error', () => new Error('unexpected pay-ctx blowup')],
   ])('payCtxOrder throwing %s → order failed, NEVER fulfilled', async (_label, makeErr) => {
     payCtxOrderMock.mockRejectedValue(makeErr());
     const outcome = await procureOne(fakeOrder());
@@ -261,11 +260,51 @@ describe('procureOne — CF-28 pay-ctx failure NEVER fulfils (stranded-order gua
     expect(markFulfilled).not.toHaveBeenCalled();
     // And it's a failure, not a transient defer.
     expect(revertToPaid).not.toHaveBeenCalled();
-    // CF-20 guard: pay-ctx FAILED, so CTX was never paid → no
-    // auto-refund and no operator-debt alert. The refund path is for
-    // failures AFTER pay-ctx succeeds, not the pay-ctx failure itself.
+    // These three kinds are ops-bug / reconciliation-needed / genuinely
+    // terminal — none of them auto-refund (an operator must investigate
+    // first, e.g. a reconcile mismatch could mean CTX WAS actually paid).
     expect(applyOrderAutoRefundMock).not.toHaveBeenCalled();
     expect(notifyOrderFailedAfterCtxPaidMock).not.toHaveBeenCalled();
+  });
+
+  // CF2-04 (2026-06-30 cold audit): transient_horizon/transient_rebuild
+  // are the retry-safe kinds `payout-submit.ts` documents — Horizon
+  // couldn't confirm the tx's fate, not "this payment is genuinely bad".
+  // procureOne now reverts procuring→paid for a retry instead of failing
+  // the order outright, leaning on payCtxOrder's own idempotency
+  // pre-check to make the retry safe against a double-pay. The
+  // stranded-order invariant still holds: never fulfilled from here.
+  it('payCtxOrder throwing a transient/ambiguous PayoutSubmitError → reverted for retry, NEVER fulfilled', async () => {
+    payCtxOrderMock.mockRejectedValue(
+      new PayoutSubmitError('transient_horizon', 'horizon 504', { transaction: 'tx_failed' }),
+    );
+    const outcome = await procureOne(fakeOrder());
+    expect(outcome).toBe('skipped');
+    expect(revertToPaid).toHaveBeenCalledWith('order-1');
+    expect(markFailed).not.toHaveBeenCalled();
+    expect(markFulfilled).not.toHaveBeenCalled();
+    expect(applyOrderAutoRefundMock).not.toHaveBeenCalled();
+  });
+
+  // CF2-05 (2026-06-30 cold audit): the user already paid Loop before
+  // procureOne ran, so an unexpected throw from payCtxOrder — even one
+  // that isn't a classified PayoutSubmitError — must still auto-refund
+  // them. `ctxPaid` is still false here (payCtxOrder never resolved),
+  // so the alert reflects "no operator-side CTX debt" rather than the
+  // CF-20 post-payment shape.
+  it('payCtxOrder throwing a generic Error → order failed, auto-refunded, NEVER fulfilled', async () => {
+    payCtxOrderMock.mockRejectedValue(new Error('unexpected pay-ctx blowup'));
+    const outcome = await procureOne(fakeOrder());
+    expect(outcome).toBe('failed');
+    expect(markFailed).toHaveBeenCalledWith('order-1', expect.any(String));
+    expect(markFulfilled).not.toHaveBeenCalled();
+    expect(revertToPaid).not.toHaveBeenCalled();
+    expect(applyOrderAutoRefundMock).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: 'order-1' }),
+    );
+    expect(notifyOrderFailedAfterCtxPaidMock).toHaveBeenCalledWith(
+      expect.objectContaining({ ctxPaid: false }),
+    );
   });
 
   it('missing paymentUrls in the CTX response → failed, never fulfilled (no pay-ctx call)', async () => {

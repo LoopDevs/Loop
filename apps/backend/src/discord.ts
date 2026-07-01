@@ -23,6 +23,7 @@ export {
   notifyPayoutFailed,
   notifyPayoutAwaitingTrustline,
   notifyOrderFailedAfterCtxPaid,
+  notifyPriceFeedAnomaly,
   notifyUsdcBelowFloor,
   notifyPegBreakOnFulfillment,
   notifyInterestPoolLow,

@@ -182,6 +182,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       "Fires when Loop's USDC operator balance drops below the alerting floor — time to fund the treasury account before payouts can't clear (ADR 015).",
   },
   {
+    name: 'notifyPriceFeedAnomaly',
+    channel: 'monitoring',
+    description:
+      'CF2-06 (2026-06-30 cold audit): fires when the XLM oracle or fiat FX feed returns a rate that jumps by more than the sanity-bound ratio (default 50%) from the last known-good value for that currency. The anomalous rate is rejected (the caller throws and the tick defers), but a feed glitch or compromise still needs operator eyes.',
+  },
+  {
     name: 'notifyWebhookPing',
     channel: 'monitoring',
     description:

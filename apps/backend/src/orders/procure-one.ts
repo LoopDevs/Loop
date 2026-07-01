@@ -244,7 +244,14 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
     if (!res.ok) {
       const body = scrubUpstreamBody(await res.text());
       log.error({ orderId: order.id, status: res.status, body }, 'CTX procurement returned non-ok');
-      await markOrderFailed(order.id, `CTX returned ${res.status}`);
+      const reason = `CTX returned ${res.status}`;
+      await markOrderFailed(order.id, reason);
+      // CF2-05 (2026-06-30 cold audit): the user already paid Loop before
+      // procureOne ran — this pre-payment failure class (this site plus
+      // the three below) is the LARGER share of real procurement
+      // failures, and previously left the user debited with no gift card
+      // and only a silent log.error. No CTX order id available here.
+      await autoRefundFailedOrder(order, null, reason, false);
       return 'failed';
     }
     const raw = await res.json();
@@ -254,7 +261,9 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
         { orderId: order.id, issues: parsed.error.issues },
         'CTX procurement response schema drift',
       );
-      await markOrderFailed(order.id, 'CTX response schema drift');
+      const reason = 'CTX response schema drift';
+      await markOrderFailed(order.id, reason);
+      await autoRefundFailedOrder(order, null, reason, false);
       return 'failed';
     }
 
@@ -270,7 +279,9 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
         { orderId: order.id, ctxOrderId: parsed.data.id, cryptoCurrency },
         'CTX procurement response missing paymentUrls entry — cannot pay CTX',
       );
-      await markOrderFailed(order.id, `CTX response missing paymentUrls.${cryptoCurrency}`);
+      const reason = `CTX response missing paymentUrls.${cryptoCurrency}`;
+      await markOrderFailed(order.id, reason);
+      await autoRefundFailedOrder(order, parsed.data.id, reason, false);
       return 'failed';
     }
     const sep7 = parseSep7PayUri(paymentUri);
@@ -279,7 +290,9 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
         { orderId: order.id, ctxOrderId: parsed.data.id, sep7Error: sep7.error },
         'CTX paymentUrls entry failed SEP-7 parse',
       );
-      await markOrderFailed(order.id, `CTX paymentUrls SEP-7 ${sep7.error}`);
+      const reason = `CTX paymentUrls SEP-7 ${sep7.error}`;
+      await markOrderFailed(order.id, reason);
+      await autoRefundFailedOrder(order, parsed.data.id, reason, false);
       return 'failed';
     }
     try {
@@ -318,13 +331,31 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
         await markOrderFailed(order.id, `CTX payment reconcile: ${err.message}`);
         return 'failed';
       }
-      // Submit-side error. Transient kinds (transient_horizon,
-      // transient_rebuild) could be retried by the stuck-procurement
-      // sweep — but the order is already in `procuring` and the
-      // sweep marks stuck orders `failed` after 15 min. For now
-      // fail the order and surface the result_codes; treasury can
-      // recover the operator-side debt manually if needed.
+      // CF2-04 (2026-06-30 cold audit): transient_horizon/transient_rebuild
+      // are explicitly the retry-safe kinds `payout-submit.ts` documents —
+      // Horizon couldn't confirm the tx's fate (network blip, ambiguous
+      // response), not "this payment is genuinely bad". Failing the order
+      // here loses a real paid order over a transient upstream hiccup.
+      // Safe to revert procuring→paid and let the next tick retry (same
+      // shape as the CF-12 rate-limit path above): payCtxOrder's own
+      // idempotency pre-check (memo+amount+asset-matched Horizon scan,
+      // this file's `try` block above) runs before any new submit, so a
+      // retry can't double-pay CTX even if the ambiguous attempt actually
+      // landed. The existing stuck-procurement sweep (marks `procuring`
+      // rows `failed` after 15 min) remains the backstop if retries never
+      // resolve — unchanged from before this fix.
       if (err instanceof PayoutSubmitError) {
+        const isTransient = err.kind === 'transient_horizon' || err.kind === 'transient_rebuild';
+        if (isTransient) {
+          await revertOrderProcuringToPaid(order.id);
+          log.warn(
+            { orderId: order.id, kind: err.kind, resultCodes: err.resultCodes },
+            'CTX payment submit hit a transient/ambiguous failure — reverted procuring → paid for retry',
+          );
+          return 'skipped';
+        }
+        // Terminal kinds (e.g. underfunded, no-trust, bad-auth): failing
+        // fast is correct — a retry would hit the exact same wall.
         log.error(
           { orderId: order.id, kind: err.kind, resultCodes: err.resultCodes },
           'CTX payment submit failed',
@@ -419,71 +450,80 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
     const reason = err instanceof Error ? err.message.slice(0, 500) : 'Unknown procurement error';
     log.error({ err, orderId: order.id }, 'Procurement threw unexpectedly');
     await markOrderFailed(order.id, reason);
-    // CF-20: if we'd already paid CTX (operator XLM/USDC spent) the
-    // user is now debited for a gift card they'll never get. Refund
-    // the user automatically + page ops about the operator-side CTX
-    // debt. Guarded on `ctxPaid` so a never-paid order (CTX returned
-    // before any settlement) is NOT refunded here.
-    if (ctxPaid) {
-      await autoRefundAfterCtxPaid(order, ctxOrderId, reason);
-    }
+    // CF-20 / CF2-05 (2026-06-30 cold audit): the user already paid Loop
+    // (every order reaches procureOne from `state='paid'`), so ANY
+    // unexpected throw here — before or after CTX payment — leaves them
+    // debited for a gift card they'll never get. Always refund; `ctxPaid`
+    // only changes the alert wording (operator-side CTX debt or not).
+    // Before this fix, an unexpected throw pre-payment (e.g. `res.json()`
+    // throwing on a non-JSON CTX response, uncaught by the inner
+    // try/catch's explicit early-returns) skipped the refund entirely.
+    await autoRefundFailedOrder(order, ctxOrderId, reason, ctxPaid);
     return 'failed';
   }
 }
 
 /**
- * CF-20 (x-flows F1-1, v-orders P2-02): compensate a user whose order
- * failed AFTER Loop already paid CTX. Best-effort + non-throwing — the
- * order is already terminally `failed`; a refund/alert blip must never
- * re-throw out of `procureOne` and abort the batch tick.
+ * CF-20 (x-flows F1-1, v-orders P2-02) / CF2-05 (2026-06-30 cold audit):
+ * compensate a user whose order failed after they'd already paid Loop.
+ * Best-effort + non-throwing — the order is already terminally `failed`;
+ * a refund/alert blip must never re-throw out of `procureOne` and abort
+ * the batch tick.
+ *
+ * `ctxPaid` distinguishes the two failure shapes for the Discord alert
+ * (CF2-05: the pre-payment case — bad CTX response, schema drift,
+ * missing paymentUrls, bad SEP-7 — has no operator-side CTX debt to
+ * reconcile, unlike the original CF-20 post-payment case).
  *
  * Refund is idempotent (the partial unique index on the refund row),
  * so a re-pick of the same order (it can't be re-picked once `failed`,
  * but the stuck-sweep / a manual reset are theoretical paths) converges
  * to "already refunded" rather than double-crediting the user.
  */
-async function autoRefundAfterCtxPaid(
+async function autoRefundFailedOrder(
   order: Order,
   ctxOrderId: string | null,
   reason: string,
+  ctxPaid: boolean,
 ): Promise<void> {
   let refunded = false;
+  const reasonPrefix = ctxPaid ? 'order failed after CTX paid' : 'order failed before CTX paid';
   try {
     await applyOrderAutoRefund({
       userId: order.userId,
       currency: order.chargeCurrency,
       amountMinor: order.chargeMinor,
       orderId: order.id,
-      reason: `order failed after CTX paid: ${reason}`,
+      reason: `${reasonPrefix}: ${reason}`,
     });
     refunded = true;
     log.warn(
-      { orderId: order.id, ctxOrderId, chargeMinor: order.chargeMinor.toString() },
-      'CF-20: order failed after CTX paid — auto-refunded the user; CTX-side debt open',
+      { orderId: order.id, ctxOrderId, ctxPaid, chargeMinor: order.chargeMinor.toString() },
+      `${ctxPaid ? 'CF-20' : 'CF2-05'}: ${reasonPrefix} — auto-refunded the user`,
     );
   } catch (refundErr) {
     if (refundErr instanceof RefundAlreadyIssuedError) {
       // A prior pass already refunded this order. Treat as success —
-      // the user is whole; still alert so ops knows about the CTX debt.
+      // the user is whole; still alert for visibility.
       refunded = true;
-      log.warn({ orderId: order.id, ctxOrderId }, 'CF-20: order already auto-refunded');
+      log.warn({ orderId: order.id, ctxOrderId, ctxPaid }, 'order already auto-refunded');
     } else if (refundErr instanceof RefundOrderInvalidError) {
       // Should not happen for a real failed order (it exists, the
       // currency was pinned at creation). Leave refunded=false so the
       // alert escalates and ops investigates.
       log.error(
-        { orderId: order.id, ctxOrderId, reason: refundErr.reason },
-        'CF-20: auto-refund rejected — order/currency invalid; manual refund needed',
+        { orderId: order.id, ctxOrderId, ctxPaid, reason: refundErr.reason },
+        'auto-refund rejected — order/currency invalid; manual refund needed',
       );
     } else {
       log.error(
-        { err: refundErr, orderId: order.id, ctxOrderId },
-        'CF-20: auto-refund threw — user NOT refunded; manual intervention needed',
+        { err: refundErr, orderId: order.id, ctxOrderId, ctxPaid },
+        'auto-refund threw — user NOT refunded; manual intervention needed',
       );
     }
   }
-  // Always page ops: even a successful auto-refund leaves an open
-  // operator↔CTX debt to reconcile.
+  // Always page ops — even a successful auto-refund is worth a record,
+  // and the ctxPaid branch additionally leaves an operator↔CTX debt open.
   notifyOrderFailedAfterCtxPaid({
     orderId: order.id,
     ctxOrderId,
@@ -492,5 +532,6 @@ async function autoRefundAfterCtxPaid(
     chargeCurrency: order.chargeCurrency,
     reason,
     refunded,
+    ctxPaid,
   });
 }
