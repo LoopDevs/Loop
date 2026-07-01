@@ -43,6 +43,48 @@ const envBoolean = z.union([z.boolean(), z.string()]).transform((v, ctx) => {
 });
 
 /**
+ * Shannon entropy in bits per character. A uniformly random alphanumeric
+ * secret (e.g. `openssl rand -base64 32`) lands well above 4 bits/char;
+ * a degenerate value (all one character, a short repeating pattern, or a
+ * low-cardinality string like `"aaaaaaaa...bbbbbbbb..."`) lands well below.
+ */
+function shannonEntropyBitsPerChar(s: string): number {
+  if (s.length === 0) return 0;
+  const counts = new Map<string, number>();
+  for (const ch of s) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+  let bits = 0;
+  for (const count of counts.values()) {
+    const p = count / s.length;
+    bits -= p * Math.log2(p);
+  }
+  return bits;
+}
+
+/** CF2-17 (2026-06-30 cold audit): minimum entropy every signing key must clear. */
+const SIGNING_KEY_MIN_ENTROPY_BITS_PER_CHAR = 3.0;
+
+/**
+ * CF2-17: length alone doesn't rule out a low-entropy secret — a 32-char
+ * string of one repeated character (or a short repeating cycle) passes a
+ * bare `.min(32)` check but is trivially guessable. Centralizes the
+ * length + entropy pair so every HS256 signing key (`LOOP_JWT_SIGNING_KEY`,
+ * its `_PREVIOUS`, `LOOP_ADMIN_STEP_UP_SIGNING_KEY`, its `_PREVIOUS`) is
+ * validated identically instead of four hand-copied `.min(32)` calls.
+ */
+function signingKeySchema(varName: string): z.ZodOptional<z.ZodString> {
+  return z
+    .string()
+    .min(32, { message: `${varName} must be at least 32 characters` })
+    .refine((key) => shannonEntropyBitsPerChar(key) >= SIGNING_KEY_MIN_ENTROPY_BITS_PER_CHAR, {
+      message:
+        `${varName} is too low-entropy to be a real signing key ` +
+        `(looks like a repeated/patterned value, not a random secret) — ` +
+        `generate one with \`openssl rand -base64 32\` or similar`,
+    })
+    .optional();
+}
+
+/**
  * Environment schema. Exported so tests can exercise it directly if they
  * ever need to (today they go through `parseEnv` instead); production
  * code should consume the validated `env` object at the bottom of this
@@ -156,6 +198,15 @@ export const EnvSchema = z.object({
   // regardless.
   ADMIN_DAILY_ADJUSTMENT_CAP_MINOR: z.coerce.bigint().nonnegative().default(100_000_000n),
 
+  // ADM-01 (2026-06-30 cold audit): withdrawals had NO daily aggregate
+  // cap at all, unlike every sibling admin money-write (adjustment,
+  // refund, payout-compensation) — the one path where real value
+  // actually leaves the system as a Stellar payment was bounded only
+  // by the per-call cap in `admin/withdrawals.ts` and the 20/min rate
+  // limit. Same semantics as ADMIN_DAILY_ADJUSTMENT_CAP_MINOR: per
+  // currency, per UTC day, across all admins; `0` disables the check.
+  ADMIN_DAILY_WITHDRAWAL_CAP_MINOR: z.coerce.bigint().nonnegative().default(100_000_000n),
+
   // Discord webhooks (optional — for notifications)
   DISCORD_WEBHOOK_ORDERS: z.string().url().optional(),
   DISCORD_WEBHOOK_MONITORING: z.string().url().optional(),
@@ -261,14 +312,8 @@ export const EnvSchema = z.object({
   // LOOP_JWT_SIGNING_KEY_PREVIOUS to the old one for the access-token
   // TTL window; the verifier accepts either, the signer always uses
   // the current. Drop PREVIOUS after the TTL elapses.
-  LOOP_JWT_SIGNING_KEY: z
-    .string()
-    .min(32, { message: 'LOOP_JWT_SIGNING_KEY must be at least 32 characters' })
-    .optional(),
-  LOOP_JWT_SIGNING_KEY_PREVIOUS: z
-    .string()
-    .min(32, { message: 'LOOP_JWT_SIGNING_KEY_PREVIOUS must be at least 32 characters' })
-    .optional(),
+  LOOP_JWT_SIGNING_KEY: signingKeySchema('LOOP_JWT_SIGNING_KEY'),
+  LOOP_JWT_SIGNING_KEY_PREVIOUS: signingKeySchema('LOOP_JWT_SIGNING_KEY_PREVIOUS'),
 
   // Admin step-up signing key (ADR 028, A4-063). Separate from
   // LOOP_JWT_SIGNING_KEY so a JWT-key compromise doesn't widen to
@@ -287,16 +332,10 @@ export const EnvSchema = z.object({
   // Set `_PREVIOUS` to the old key during the 5-minute step-up TTL
   // window; the verifier accepts either, the signer always uses
   // the current.
-  LOOP_ADMIN_STEP_UP_SIGNING_KEY: z
-    .string()
-    .min(32, { message: 'LOOP_ADMIN_STEP_UP_SIGNING_KEY must be at least 32 characters' })
-    .optional(),
-  LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS: z
-    .string()
-    .min(32, {
-      message: 'LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS must be at least 32 characters',
-    })
-    .optional(),
+  LOOP_ADMIN_STEP_UP_SIGNING_KEY: signingKeySchema('LOOP_ADMIN_STEP_UP_SIGNING_KEY'),
+  LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS: signingKeySchema(
+    'LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS',
+  ),
 
   // Gift-card redeem-secret envelope key (CF-25 / X-PRIV-03). When set,
   // `orders.redeem_code` / `redeem_pin` are AES-256-GCM-encrypted at

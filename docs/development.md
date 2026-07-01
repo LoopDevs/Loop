@@ -126,8 +126,14 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # A2-1610: per-admin per-currency daily cap on credit adjustments,
 # in minor units. Default 100000000 (1,000,000 units minor =
 # $10,000 / £10,000 / €10,000). A single admin exceeding the cap
-# inside a rolling 24h window gets a 403 with `code: 'DAILY_CAP_EXCEEDED'`.
+# inside a rolling UTC day gets a 429 with `code: 'DAILY_LIMIT_EXCEEDED'`.
 # ADMIN_DAILY_ADJUSTMENT_CAP_MINOR=100000000
+
+# ADM-01 (2026-06-30 cold audit): same shape, but for admin
+# withdrawals — previously uncapped in aggregate despite being the
+# one admin write that moves real on-chain value. Same 429
+# `DAILY_LIMIT_EXCEEDED` response shape.
+# ADMIN_DAILY_WITHDRAWAL_CAP_MINOR=100000000
 
 # ── Default cashback split (ADR 010 / 011) ───────────────────────────
 # Fallbacks used when a merchant has no row in merchant_cashback_configs.

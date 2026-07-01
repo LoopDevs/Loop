@@ -4,7 +4,7 @@ import { createHmac } from 'node:crypto';
 // Set the signing key BEFORE env.ts is loaded — signer.ts reads env
 // lazily inside getActiveSigner() but env.ts validates at import.
 vi.hoisted(() => {
-  process.env['LOOP_JWT_SIGNING_KEY'] = 's'.repeat(32);
+  process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-signing-key-32-chars-min!!';
 });
 
 import { getActiveSigner, getVerifiersForAlg, isAnySignerConfigured } from '../signer.js';
@@ -46,7 +46,9 @@ describe('signer (Tranche-2 prep — Track A.1)', () => {
       const s = getActiveSigner();
       if (s === null) throw new Error('expected signer');
       const ours = s.sign('foo.bar');
-      const native = createHmac('sha256', 's'.repeat(32)).update('foo.bar').digest();
+      const native = createHmac('sha256', 'jwt-test-signing-key-32-chars-min!!')
+        .update('foo.bar')
+        .digest();
       expect(Buffer.compare(ours, native)).toBe(0);
     });
   });
@@ -64,8 +66,8 @@ describe('signer (Tranche-2 prep — Track A.1)', () => {
       // the existing test pattern in tokens.test.ts: override at the
       // env mock level via vi.doMock.
       vi.resetModules();
-      process.env['LOOP_JWT_SIGNING_KEY'] = 'a'.repeat(32);
-      process.env['LOOP_JWT_SIGNING_KEY_PREVIOUS'] = 'b'.repeat(32);
+      process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-current-signing-key-32min!!';
+      process.env['LOOP_JWT_SIGNING_KEY_PREVIOUS'] = 'jwt-test-signing-key-previous-32chr!';
       // Re-import after env mutation — picks up both keys.
       return import('../signer.js').then(({ getVerifiersForAlg: re }) => {
         const verifiers = re('HS256');

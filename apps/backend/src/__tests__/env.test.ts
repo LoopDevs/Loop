@@ -216,6 +216,52 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ ...base, NODE_ENV: 'test' })).not.toThrow();
   });
 
+  // CF2-17 (2026-06-30 cold audit): length alone doesn't rule out a
+  // guessable signing key — a 32-char string of one repeated character
+  // passes `.min(32)` but has zero real entropy.
+  describe('signing-key entropy validation', () => {
+    const REAL_KEY = 'jwt-test-signing-key-32-chars-min!!';
+
+    it('accepts a realistic random-looking key', () => {
+      expect(() => parseEnv({ ...base, LOOP_JWT_SIGNING_KEY: REAL_KEY })).not.toThrow();
+    });
+
+    it('rejects a 32-char single-repeated-character key despite meeting the length bar', () => {
+      expect(() => parseEnv({ ...base, LOOP_JWT_SIGNING_KEY: 'a'.repeat(32) })).toThrow(
+        /LOOP_JWT_SIGNING_KEY.*low-entropy/,
+      );
+    });
+
+    it('rejects a short repeating-cycle key (e.g. "ab" repeated)', () => {
+      expect(() => parseEnv({ ...base, LOOP_JWT_SIGNING_KEY: 'ab'.repeat(17) })).toThrow(
+        /low-entropy/,
+      );
+    });
+
+    it('applies the same check to LOOP_JWT_SIGNING_KEY_PREVIOUS', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          LOOP_JWT_SIGNING_KEY: REAL_KEY,
+          LOOP_JWT_SIGNING_KEY_PREVIOUS: 'c'.repeat(32),
+        }),
+      ).toThrow(/LOOP_JWT_SIGNING_KEY_PREVIOUS.*low-entropy/);
+    });
+
+    it('applies the same check to the admin step-up signing keys', () => {
+      expect(() => parseEnv({ ...base, LOOP_ADMIN_STEP_UP_SIGNING_KEY: 'd'.repeat(32) })).toThrow(
+        /LOOP_ADMIN_STEP_UP_SIGNING_KEY.*low-entropy/,
+      );
+      expect(() => parseEnv({ ...base, LOOP_ADMIN_STEP_UP_SIGNING_KEY: REAL_KEY })).not.toThrow();
+    });
+
+    it('still enforces the minimum-length bar independently of entropy', () => {
+      expect(() => parseEnv({ ...base, LOOP_JWT_SIGNING_KEY: 'short' })).toThrow(
+        /LOOP_JWT_SIGNING_KEY must be at least 32 characters/,
+      );
+    });
+  });
+
   // Launch-runbook tripwire: a typo'd USDC issuer on mainnet makes
   // the payment watcher silently ignore every legitimate deposit.
   describe('LOOP_STELLAR_USDC_ISSUER mainnet tripwire', () => {

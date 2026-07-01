@@ -31,10 +31,15 @@
  * otherwise create a second active withdrawal with a fresh payout UUID
  * — surfaces as `WithdrawalAlreadyIssuedError`.
  */
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, gte, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { creditTransactions, pendingPayouts, userCredits } from '../db/schema.js';
-import { InsufficientBalanceError } from './adjustments.js';
+import { env } from '../env.js';
+import {
+  adjustmentCapLockKey,
+  DailyAdjustmentLimitError,
+  InsufficientBalanceError,
+} from './adjustments.js';
 
 export class WithdrawalAlreadyIssuedError extends Error {
   constructor(public readonly payoutId: string) {
@@ -42,6 +47,15 @@ export class WithdrawalAlreadyIssuedError extends Error {
     this.name = 'WithdrawalAlreadyIssuedError';
   }
 }
+
+/**
+ * ADM-01: distinct lock-scope string so the withdrawal cap's advisory
+ * lock never collides with the adjustment cap's (`adminUserId`) or the
+ * compensation cap's (`COMPENSATION_CAP_LOCK_SCOPE`) lock space —
+ * `adjustmentCapLockKey` hashes `${scope}:${currency}:${dayStartUtc}`,
+ * so any distinct scope string partitions cleanly.
+ */
+const WITHDRAWAL_CAP_LOCK_SCOPE = 'admin-withdrawal';
 
 export interface WithdrawalIntent {
   /** LOOP asset code being burned off-chain — `USDLOOP`, `GBPLOOP`, `EURLOOP`. */
@@ -98,6 +112,43 @@ export async function applyAdminWithdrawal(args: {
 
   try {
     return await db.transaction(async (tx) => {
+      // ADM-01: per-currency, per-UTC-day cap across all admins —
+      // the same shape `applyAdminCreditAdjustment` and
+      // `applyAdminPayoutCompensation` already enforce, previously
+      // missing here entirely. Advisory-locked under a distinct scope
+      // so concurrent withdrawals (different users, same currency)
+      // can't jointly race past the cap.
+      const capMinor = env.ADMIN_DAILY_WITHDRAWAL_CAP_MINOR;
+      if (capMinor > 0n) {
+        const dayStart = new Date();
+        dayStart.setUTCHours(0, 0, 0, 0);
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(${adjustmentCapLockKey(WITHDRAWAL_CAP_LOCK_SCOPE, args.currency, dayStart)})`,
+        );
+        const [dayRow] = await tx
+          .select({
+            usedMinor: sql<string>`COALESCE(SUM(ABS(${creditTransactions.amountMinor}))::text, '0')`,
+          })
+          .from(creditTransactions)
+          .where(
+            and(
+              eq(creditTransactions.type, 'withdrawal'),
+              eq(creditTransactions.currency, args.currency),
+              gte(creditTransactions.createdAt, dayStart),
+            ),
+          );
+        const used = BigInt(dayRow?.usedMinor ?? '0');
+        if (used + args.amountMinor > capMinor) {
+          throw new DailyAdjustmentLimitError(
+            args.currency,
+            dayStart,
+            used,
+            capMinor,
+            args.amountMinor,
+          );
+        }
+      }
+
       // Lock the (userId, currency) balance row before reading +
       // checking. A concurrent admin adjustment / accrual cannot
       // race past this point until the txn commits.

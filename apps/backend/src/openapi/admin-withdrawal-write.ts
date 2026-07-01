@@ -98,7 +98,7 @@ export function registerAdminWithdrawalWriteOpenApi(
     summary:
       'Issue a withdrawal — debit cashback balance + queue on-chain payout (A2-901 / ADR-024).',
     description:
-      "Writes a negative-amount `credit_transactions` row (`type='withdrawal'`, `reference_type='payout'`, `reference_id=<pending_payouts.id>`), atomically decrements `user_credits.balance_minor`, and queues a LOOP-asset payout row for the on-chain submit worker. Idempotent in two layers: the admin idempotency key replays the stored snapshot on repeat (ADR 017), and the DB active-withdrawal unique index rejects a second unresolved withdrawal for the same user/asset/destination/amount tuple with 409 `WITHDRAWAL_ALREADY_ISSUED`. Phase 2a is admin-mediated only; user-initiated cash-out is deferred to Phase 2b.",
+      "Writes a negative-amount `credit_transactions` row (`type='withdrawal'`, `reference_type='payout'`, `reference_id=<pending_payouts.id>`), atomically decrements `user_credits.balance_minor`, and queues a LOOP-asset payout row for the on-chain submit worker. Idempotent in two layers: the admin idempotency key replays the stored snapshot on repeat (ADR 017), and the DB active-withdrawal unique index rejects a second unresolved withdrawal for the same user/asset/destination/amount tuple with 409 `WITHDRAWAL_ALREADY_ISSUED`. Phase 2a is admin-mediated only; user-initiated cash-out is deferred to Phase 2b. ADR-028 step-up gate enforced at the route — a captured bearer alone cannot issue a withdrawal (CF2-16, 2026-06-30 cold audit: this doc previously omitted the step-up requirement despite it always being enforced in code). ADM-01: also counts against a fleet-wide daily cap (`ADMIN_DAILY_WITHDRAWAL_CAP_MINOR`), the same shape as the adjustment/refund caps.",
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     request: {
@@ -107,6 +107,9 @@ export function registerAdminWithdrawalWriteOpenApi(
         'idempotency-key': z.string().min(16).max(128).openapi({
           description:
             'Required. Scoped to (admin_user_id, key); repeats replay the stored snapshot.',
+        }),
+        'x-admin-step-up': z.string().openapi({
+          description: 'ADR-028 step-up JWT minted by `POST /api/admin/step-up`. 5-minute TTL.',
         }),
       }),
       body: {
@@ -124,7 +127,7 @@ export function registerAdminWithdrawalWriteOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       401: {
-        description: 'Missing or invalid bearer',
+        description: 'Missing or invalid bearer / missing or invalid step-up token',
         content: { 'application/json': { schema: errorResponse } },
       },
       404: {
@@ -137,7 +140,8 @@ export function registerAdminWithdrawalWriteOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {
-        description: 'Rate limit exceeded (20/min per IP)',
+        description:
+          'Rate limit exceeded (20/min per IP), or the per-currency daily withdrawal cap has been hit (`DAILY_LIMIT_EXCEEDED`, ADM-01)',
         content: { 'application/json': { schema: errorResponse } },
       },
       500: {
@@ -147,7 +151,7 @@ export function registerAdminWithdrawalWriteOpenApi(
       },
       503: {
         description:
-          'LOOP issuer for the requested currency not configured in env (`NOT_CONFIGURED`)',
+          'LOOP issuer for the requested currency not configured in env (`NOT_CONFIGURED`), or step-up auth unavailable on this deployment (`STEP_UP_UNAVAILABLE`)',
         content: { 'application/json': { schema: errorResponse } },
       },
     },

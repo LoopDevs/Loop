@@ -165,6 +165,22 @@ describe('incrementOtpAttempts', () => {
     expect(dbMock['update']!).toHaveBeenCalled();
     expect(dbMock['set']!).toHaveBeenCalled();
   });
+
+  // CF2 AUTH-01 regression guard: the WHERE clause must scope by email +
+  // live-row conditions only — no per-row LIMIT/subquery targeting the
+  // single newest row, which is exactly the shape that let an attacker
+  // dodge the attempts ceiling on an older code by requesting fresh OTPs.
+  it('scopes the update to every live row for the email, not just the newest', async () => {
+    await incrementOtpAttempts({ email: 'a@b.com' });
+    expect(dbMock['limit']!).not.toHaveBeenCalled();
+    expect(dbMock['orderBy']!).not.toHaveBeenCalled();
+    const whereArg = dbMock['where']!.mock.calls[0]?.[0];
+    const serialized = JSON.stringify(whereArg);
+    // A drizzle `and(eq(...), isNull(...), gt(...))` composite never
+    // contains a nested SELECT; the prior subquery-based implementation's
+    // raw `sql` template did.
+    expect(serialized).not.toMatch(/SELECT/i);
+  });
 });
 
 describe('purgeExpiredOtps', () => {

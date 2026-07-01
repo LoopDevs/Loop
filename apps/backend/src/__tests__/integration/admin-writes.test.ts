@@ -86,7 +86,13 @@ interface SeededState {
    * so the per-test setup doesn't have to round-trip through the
    * `POST /api/admin/step-up` handler — the integration value here is
    * proving the gated handler accepts a valid token, not the
-   * step-up minting flow itself (covered by unit tests).
+   * step-up minting flow itself. That flow (OTP lookup/attempts/
+   * consume + token mint, at the HTTP-handler layer) is covered by
+   * `admin/__tests__/step-up-handler.test.ts`; the crypto-level mint/
+   * verify primitives are covered separately by
+   * `auth/__tests__/admin-step-up.test.ts`. CF-11 (06-15 audit) found
+   * this comment previously claimed handler-level coverage that did
+   * not actually exist — `step-up-handler.test.ts` closes that gap.
    */
   stepUp: string;
   orderId: string;
