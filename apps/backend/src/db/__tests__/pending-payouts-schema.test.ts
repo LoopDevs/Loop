@@ -6,12 +6,14 @@ type PendingPayoutRow = typeof pendingPayouts.$inferSelect;
 type PendingPayoutInsert = typeof pendingPayouts.$inferInsert;
 
 /**
- * ADR-024 §2: `pending_payouts` now serves two payout flows:
+ * ADR-024 §2 + ADR 036: `pending_payouts` serves three payout flows:
  *
- *   - `kind='order_cashback'` → existing order-fulfilment cashback
- *     payouts; `order_id` is NOT NULL and references `orders`.
- *   - `kind='withdrawal'`     → admin-initiated cash-out of a user's
- *     cashback balance to Stellar; `order_id IS NULL`.
+ *   - `kind='order_cashback'` → order-fulfilment cashback payouts;
+ *     `order_id` is NOT NULL and references `orders`.
+ *   - `kind='emission'`       → admin on-chain backfill (ex-ADR-024
+ *     "withdrawal", relabelled by migration 0038); `order_id IS NULL`.
+ *   - `kind='burn'`           → redemption issuer-return enqueued by
+ *     markOrderPaid; `order_id` is NOT NULL.
  *
  * These tests guard the Drizzle mirror of the SQL migration: any
  * drift between the migration CHECKs and the TypeScript types means
@@ -25,19 +27,19 @@ describe('pending_payouts schema (A2-901 / ADR-024 §2)', () => {
     expectTypeOf<PendingPayoutRow['orderId']>().toEqualTypeOf<string | null>();
   });
 
-  it('orderId is nullable with no default (withdrawal rows leave it NULL)', () => {
+  it('orderId is nullable with no default (emission rows leave it NULL)', () => {
     // Compile-time: Drizzle's $inferInsert treats nullable columns as
-    // optional, so a withdrawal writer can omit orderId entirely.
-    const withdrawalInsert: PendingPayoutInsert = {
+    // optional, so the emission writer can omit orderId entirely.
+    const emissionInsert: PendingPayoutInsert = {
       userId: '00000000-0000-0000-0000-000000000000',
-      kind: 'withdrawal',
+      kind: 'emission',
       assetCode: 'USDC',
       assetIssuer: 'GAAA',
       toAddress: 'GBBB',
       amountStroops: 1n,
-      memoText: 'withdraw',
+      memoText: 'emit',
     };
-    expectTypeOf(withdrawalInsert).toMatchTypeOf<PendingPayoutInsert>();
+    expectTypeOf(emissionInsert).toMatchTypeOf<PendingPayoutInsert>();
     // Runtime: the actual column definition must be nullable and
     // default-free — an omitted orderId lands as NULL, not a value.
     expect(pendingPayouts.orderId.notNull).toBe(false);
@@ -64,15 +66,30 @@ describe('pending_payouts schema (A2-901 / ADR-024 §2)', () => {
     expect(pendingPayouts.kind.default).toBe('order_cashback');
   });
 
-  it('kind admits only the two known values', () => {
+  it('kind admits only the three known values', () => {
     // Compile-time: the $type<> narrowing on the column is exactly the
-    // two-member union — no third kind can be inserted or selected.
-    expectTypeOf<PendingPayoutRow['kind']>().toEqualTypeOf<'order_cashback' | 'withdrawal'>();
+    // three-member union — no fourth kind can be inserted or selected.
+    expectTypeOf<PendingPayoutRow['kind']>().toEqualTypeOf<
+      'order_cashback' | 'emission' | 'burn'
+    >();
     // Runtime: the schema object declares the CHECK constraint that
     // pins the same invariant in Postgres.
     const checkNames = getTableConfig(pendingPayouts).checks.map((c) => c.name);
     expect(checkNames).toContain('pending_payouts_kind_known');
     expect(checkNames).toContain('pending_payouts_kind_shape');
+  });
+
+  it('ADR 036: per-kind order uniqueness + active-emission fence are declared', () => {
+    // Runtime mirror of migration 0038: the cashback and burn rows
+    // each get their own partial unique index on order_id, and the
+    // A3-007 active-intent fence travels under its emission name.
+    const indexNames = getTableConfig(pendingPayouts)
+      .indexes.map((i) => i.config.name)
+      .filter((n): n is string => n !== undefined);
+    expect(indexNames).toContain('pending_payouts_order_unique');
+    expect(indexNames).toContain('pending_payouts_burn_order_unique');
+    expect(indexNames).toContain('pending_payouts_active_emission_unique');
+    expect(indexNames).not.toContain('pending_payouts_active_withdrawal_unique');
   });
 
   it('compensatedAt is nullable on the row type and has no default', () => {

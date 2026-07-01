@@ -57,7 +57,7 @@ export function registerUsersPendingPayoutsOpenApi(
       id: z.string().uuid(),
       orderId: z.string().uuid().nullable().openapi({
         description:
-          "Origin order id for order-fulfilment cashback payouts; null for kind='withdrawal' (A2-901 / ADR-024 §2).",
+          "Origin order id for order-fulfilment cashback payouts; null for kind='emission' (A2-901 / ADR-024 §2 / ADR 036).",
       }),
       assetCode: z
         .string()

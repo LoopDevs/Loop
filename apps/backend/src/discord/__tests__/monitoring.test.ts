@@ -2,7 +2,7 @@
  * `monitoring.ts` notifier-body tests. Covers the eight notifiers
  * defined in this file directly:
  *   - notifyHealthChange (status flip + color)
- *   - notifyPayoutFailed (last-8 redaction; withdrawal vs order)
+ *   - notifyPayoutFailed (last-8 redaction; emission vs order)
  *   - notifyInterestPoolLow / notifyInterestPoolRecovered (paired,
  *     dedup'd per asset)
  *   - notifyPegBreakOnFulfillment (cross-currency divergence)
@@ -133,7 +133,7 @@ describe('notifyPayoutFailed', () => {
     expect(e.fields!.find((f) => f.name === 'Attempts')!.value).toBe('3');
   });
 
-  it('renders _withdrawal_ when orderId is null (kind=withdrawal payouts)', () => {
+  it('renders _emission_ when orderId is null (kind=emission payouts)', () => {
     notifyPayoutFailed({
       payoutId: 'p-1',
       userId: 'u-1',
@@ -144,7 +144,7 @@ describe('notifyPayoutFailed', () => {
       reason: 'operator out of GBPLOOP',
       attempts: 1,
     });
-    expect(lastEmbed().fields!.find((f) => f.name === 'Order')!.value).toBe('_withdrawal_');
+    expect(lastEmbed().fields!.find((f) => f.name === 'Order')!.value).toBe('_emission_');
   });
 });
 

@@ -4,9 +4,11 @@
  * Background companion to the admin drift-detection surface
  * (`/admin/assets`, treasury, landing). Polls Horizon for each
  * configured LOOP-branded stablecoin and compares on-chain
- * circulation against the off-chain ledger liability:
+ * circulation against the off-chain ledger liability mirror
+ * (ADR 036):
  *
- *   driftStroops = onChainStroops - ledgerLiabilityMinor * 1e5
+ *   driftStroops = (onChain − pool − inFlightBurns)
+ *                  − ledgerLiabilityMinor × 1e5
  *
  * When |drift| exceeds a per-operator threshold, pages the
  * monitoring Discord channel so ops notices before an admin happens
@@ -28,6 +30,7 @@
  */
 import { configuredLoopPayableAssets, type LoopAssetCode } from '../credits/payout-asset.js';
 import { sumOutstandingLiability } from '../credits/liabilities.js';
+import { sumInFlightBurnStroops } from '../credits/pending-payouts.js';
 import { getLoopAssetCirculation } from './horizon-circulation.js';
 import { getAssetBalance } from './horizon-asset-balance.js';
 import { resolveInterestPoolAccount } from '../credits/interest-pool.js';
@@ -79,8 +82,9 @@ export interface AssetDriftSample {
   assetCode: LoopAssetCode;
   /**
    * Drift after subtracting the interest forward-mint pool balance
-   * from on-chain circulation. See `runAssetDriftTick` doc-comment
-   * for the reconciliation equation.
+   * and the in-flight redemption burns from on-chain circulation.
+   * See `runAssetDriftTick` doc-comment for the reconciliation
+   * equation.
    */
   driftStroops: bigint;
   /**
@@ -95,6 +99,14 @@ export interface AssetDriftSample {
    * the pool isn't configured or the trustline is missing.
    */
   poolStroops: bigint;
+  /**
+   * ADR 036: stroops debited from the mirror at redemption and
+   * parked at the deposit account awaiting the issuer-return burn
+   * (`pending_payouts` kind='burn', state pending/submitted/failed).
+   * Counted out of circulation so a redemption doesn't read as
+   * drift between the mirror debit and the burn confirming.
+   */
+  pendingBurnStroops: bigint;
   thresholdStroops: bigint;
   over: boolean;
   previousState: DriftState;
@@ -137,10 +149,11 @@ function abs(n: bigint): bigint {
  * ledger, compute drift, compare to threshold, emit a transition
  * notification when state flips.
  *
- * Reconciliation equation (ADR 009 + ADR 015 with on-chain as
- * source of truth):
+ * Reconciliation equation (ADR 009 + ADR 015 + ADR 036 with
+ * on-chain as source of truth):
  *
- *   driftStroops = (onChain − pool) − userCreditsLiability × 1e5
+ *   driftStroops = (onChain − pool − inFlightBurns)
+ *                  − userCreditsLiability × 1e5
  *
  *   - onChain: total LOOP-asset issued from the issuer (held by
  *     anyone other than the issuer itself; Horizon `/assets`).
@@ -148,6 +161,16 @@ function abs(n: bigint): bigint {
  *     account. Pre-minted ahead of daily distribution; not yet
  *     allocated to a user. Subtracted because off-chain
  *     `user_credits` doesn't yet reflect this LOOP.
+ *   - inFlightBurns: stroops on un-confirmed `kind='burn'` payout
+ *     rows (ADR 036 redemption). markOrderPaid debits the mirror
+ *     and enqueues the burn in one txn, but the received LOOP
+ *     stays at the deposit account (still "in circulation" from
+ *     Horizon's view) until the payout worker forwards it to the
+ *     issuer. Subtracting the in-flight amount keeps a redemption
+ *     drift-neutral end-to-end: before the deposit, user-held LOOP
+ *     matches the mirror; after the debit, the deposit-held LOOP is
+ *     cancelled by this term; after the burn confirms, circulation
+ *     itself drops and the term goes to zero.
  *   - userCreditsLiability: sum of `user_credits.balance_minor`
  *     for the matching fiat.
  *
@@ -156,6 +179,12 @@ function abs(n: bigint): bigint {
  * pass, daily accrual writes off-chain credits while the pool
  * holds steady (no on-chain action) → off-chain catches up to
  * the (onChain − pool) figure, drift stays flat.
+ *
+ * TODO(ADR-031, 2026-06-11): once nightly interest becomes an
+ * on-chain mint mirrored into `user_credits` in the same operation,
+ * both sides of the equation move together and the forward-mint
+ * pool term is expected to retire; re-derive this equation when
+ * that lands.
  *
  * Pure enough to be called from tests directly — the Horizon fetch +
  * ledger query + Discord send are all injected via module mocks.
@@ -197,6 +226,18 @@ export async function runAssetDriftTick(args: RunDriftTickArgs): Promise<DriftTi
       }
     }
 
+    // ADR 036: in-flight redemption burns — mirror already debited,
+    // tokens awaiting issuer-return. DB read, same failure posture
+    // as the ledger read below.
+    let pendingBurnStroops: bigint;
+    try {
+      pendingBurnStroops = await sumInFlightBurnStroops({ assetCode: code, assetIssuer: issuer });
+    } catch (err) {
+      log.error({ err, assetCode: code }, 'In-flight burn read failed');
+      result.skipped++;
+      continue;
+    }
+
     let ledgerMinor: bigint;
     try {
       ledgerMinor = await sumOutstandingLiability(fiat);
@@ -207,7 +248,8 @@ export async function runAssetDriftTick(args: RunDriftTickArgs): Promise<DriftTi
     }
     result.checked++;
 
-    const driftStroops = onChainStroops - poolStroops - ledgerMinor * STROOPS_PER_MINOR;
+    const driftStroops =
+      onChainStroops - poolStroops - pendingBurnStroops - ledgerMinor * STROOPS_PER_MINOR;
     const over = abs(driftStroops) >= args.thresholdStroops;
     const previous = currentState(code);
     const next: DriftState = over ? 'over' : 'ok';
@@ -216,6 +258,7 @@ export async function runAssetDriftTick(args: RunDriftTickArgs): Promise<DriftTi
       driftStroops,
       onChainStroops,
       poolStroops,
+      pendingBurnStroops,
       thresholdStroops: args.thresholdStroops,
       over,
       previousState: previous,

@@ -132,9 +132,9 @@ export function registerAdminPayoutsClusterWritesOpenApi(
   registry.registerPath({
     method: 'post',
     path: '/api/admin/payouts/{id}/compensate',
-    summary: 'Compensate a permanently-failed withdrawal payout (ADR-024 §5).',
+    summary: 'Compensate a permanently-failed legacy withdrawal payout (ADR-024 §5 / ADR 036).',
     description:
-      'Re-credits the user after their withdrawal payout permanently failed on-chain. Writes a positive `type=adjustment` row referencing the payout id; net result is the original withdrawal debit is offset and the user is back to where they started. Manual-only (Phase 2a) — finance reviews failures before triggering. 400 if the payout is not a withdrawal; 409 if the payout is already compensated or is in any state other than `failed`. ADR 017 compliant: `Idempotency-Key` header + `reason` body required. CF-07: ADR-028 step-up gate enforced at the route — a captured bearer alone cannot re-credit a balance via compensation.',
+      'Re-credits the user after a LEGACY pre-ADR-036 withdrawal payout permanently failed on-chain. Writes a positive `type=adjustment` row referencing the payout id; net result is the original at-send debit is offset and the user is back to where they started. Post-ADR-036 emissions never debit the mirror and are refused with 409 `PAYOUT_NOT_COMPENSABLE`. Manual-only (Phase 2a) — finance reviews failures before triggering. 400 if the payout is not an emission; 409 if the payout is already compensated, lacks the legacy debit, or is in any state other than `failed`. ADR 017 compliant: `Idempotency-Key` header + `reason` body required. CF-07: ADR-028 step-up gate enforced at the route — a captured bearer alone cannot re-credit a balance via compensation.',
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     request: {
@@ -159,7 +159,7 @@ export function registerAdminPayoutsClusterWritesOpenApi(
       },
       400: {
         description:
-          'Missing idempotency key, invalid reason, malformed id, or payout is not a withdrawal',
+          'Missing idempotency key, invalid reason, malformed id, or payout is not an emission',
         content: { 'application/json': { schema: errorResponse } },
       },
       401: {

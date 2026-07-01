@@ -9,6 +9,13 @@ const { dbMock, state } = vi.hoisted(() => {
     returnedCreditRow: unknown;
     /** pg_advisory_xact_lock bigint args, in call order. */
     advisoryLockCalls: bigint[];
+    /**
+     * ADR 036: rows returned by the legacy at-send-debit lookup
+     * (`select().from(creditTransactions).where(...).limit(1)`).
+     * Defaults to one row so the legacy-compensable happy paths
+     * pass; the post-ADR-036 refusal test empties it.
+     */
+    legacyDebitRows: unknown[];
   }
   const s: State = {
     forUpdateResults: [],
@@ -17,6 +24,7 @@ const { dbMock, state } = vi.hoisted(() => {
     updateCalls: [],
     returnedCreditRow: null,
     advisoryLockCalls: [],
+    legacyDebitRows: [{ id: 'ct-legacy-debit' }],
   };
 
   /** Recursively pull bigints out of drizzle's sql-template object. */
@@ -40,6 +48,8 @@ const { dbMock, state } = vi.hoisted(() => {
   chain['from'] = vi.fn(() => chain);
   chain['where'] = vi.fn(() => chain);
   chain['for'] = vi.fn(async () => s.forUpdateResults.shift() ?? []);
+  // ADR 036: the legacy-debit lookup terminates in `.limit(1)`.
+  chain['limit'] = vi.fn(async () => s.legacyDebitRows);
   // the cap check now opens with `tx.execute(SELECT
   // pg_advisory_xact_lock(...))`. Capture the bigint lock key so
   // tests can pin the key derivation.
@@ -89,7 +99,13 @@ const { dbMock, state } = vi.hoisted(() => {
 
 vi.mock('../../db/client.js', () => ({ db: dbMock }));
 vi.mock('../../db/schema.js', () => ({
-  creditTransactions: { __name: 'creditTransactions' },
+  creditTransactions: {
+    __name: 'creditTransactions',
+    id: 'id',
+    type: 'type',
+    referenceType: 'reference_type',
+    referenceId: 'reference_id',
+  },
   pendingPayouts: {
     __name: 'pendingPayouts',
     id: 'id',
@@ -117,6 +133,7 @@ beforeEach(() => {
   state.updateCalls = [];
   state.returnedCreditRow = { id: 'ct-1', createdAt: new Date('2026-04-29T00:00:00Z') };
   state.advisoryLockCalls = [];
+  state.legacyDebitRows = [{ id: 'ct-legacy-debit' }];
 });
 
 describe('applyAdminPayoutCompensation', () => {
@@ -129,7 +146,7 @@ describe('applyAdminPayoutCompensation', () => {
           // amountMinor equals payout.amountStroops / 100_000n.
           userId: 'u-1',
           amountStroops: 50_000_000n,
-          kind: 'withdrawal',
+          kind: 'emission',
           state: 'failed',
           compensatedAt: null,
         },
@@ -178,7 +195,7 @@ describe('applyAdminPayoutCompensation', () => {
       [
         {
           id: 'p-1',
-          kind: 'withdrawal',
+          kind: 'emission',
           state: 'failed',
           compensatedAt: new Date('2026-04-29T00:00:00Z'),
         },
@@ -197,7 +214,7 @@ describe('applyAdminPayoutCompensation', () => {
     expect(state.insertCreditCalls).toHaveLength(0);
   });
 
-  it('throws PayoutNotCompensableError when the payout is not a failed withdrawal', async () => {
+  it('throws PayoutNotCompensableError when the payout is not a failed emission', async () => {
     state.forUpdateResults = [
       [
         {
@@ -221,6 +238,33 @@ describe('applyAdminPayoutCompensation', () => {
     expect(state.insertCreditCalls).toHaveLength(0);
   });
 
+  it('ADR 036: throws PayoutNotCompensableError for a debit-less post-ADR-036 emission', async () => {
+    state.forUpdateResults = [
+      [
+        {
+          id: 'p-1',
+          userId: 'u-1',
+          amountStroops: 50_000_000n,
+          kind: 'emission',
+          state: 'failed',
+          compensatedAt: null,
+        },
+      ],
+    ];
+    // No legacy at-send debit row → nothing to compensate.
+    state.legacyDebitRows = [];
+    await expect(
+      applyAdminPayoutCompensation({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 500n,
+        payoutId: 'p-1',
+        reason: 'manual compensation',
+      }),
+    ).rejects.toBeInstanceOf(PayoutNotCompensableError);
+    expect(state.insertCreditCalls).toHaveLength(0);
+  });
+
   it('A4-022: throws when args.userId does not match the locked payout.userId', async () => {
     state.forUpdateResults = [
       [
@@ -228,7 +272,7 @@ describe('applyAdminPayoutCompensation', () => {
           id: 'p-1',
           userId: 'u-other',
           amountStroops: 50_000_000n,
-          kind: 'withdrawal',
+          kind: 'emission',
           state: 'failed',
           compensatedAt: null,
         },
@@ -254,7 +298,7 @@ describe('applyAdminPayoutCompensation', () => {
           userId: 'u-1',
           // 50_000_000 stroops = 500 minor; caller asks for 600 — mismatch.
           amountStroops: 50_000_000n,
-          kind: 'withdrawal',
+          kind: 'emission',
           state: 'failed',
           compensatedAt: null,
         },
@@ -279,7 +323,7 @@ describe('applyAdminPayoutCompensation', () => {
           id: 'p-1',
           userId: 'u-1',
           amountStroops: 50_000_000n,
-          kind: 'withdrawal',
+          kind: 'emission',
           state: 'failed',
           compensatedAt: null,
         },
@@ -321,7 +365,7 @@ describe('applyAdminPayoutCompensation', () => {
             id: 'p-2',
             userId: 'u-1',
             amountStroops: 50_000_000n,
-            kind: 'withdrawal',
+            kind: 'emission',
             state: 'failed',
             compensatedAt: null,
           },

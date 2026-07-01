@@ -31,8 +31,8 @@ export async function listPayoutsForAdmin(opts: {
   state?: string;
   userId?: string;
   assetCode?: string;
-  /** ADR-024 §2: filter by payout discriminator. Lets treasury split order-cashback from withdrawal flows visually. */
-  kind?: 'order_cashback' | 'withdrawal';
+  /** ADR-024 §2 + ADR 036: filter by payout discriminator. Lets treasury split order-cashback / emission / burn flows visually. */
+  kind?: 'order_cashback' | 'emission' | 'burn';
   before?: Date;
   limit?: number;
 }): Promise<PendingPayout[]> {
@@ -62,10 +62,15 @@ export async function getPayoutForAdmin(id: string): Promise<PendingPayout | nul
 }
 
 /**
- * Order-id lookup. `pending_payouts.order_id` is UNIQUE, so at most
- * one row matches. Returns null when the order has no payout row yet
- * (e.g. cashback hasn't been issued, the order is still pending, or
- * the payout builder deliberately skipped this order).
+ * Order-id lookup, scoped to the order's *cashback* payout.
+ * `pending_payouts.order_id` is unique per kind since migration 0038
+ * (ADR 036) — a loop_asset-redeemed order can also carry a
+ * `kind='burn'` row, so this lookup pins `kind='order_cashback'` to
+ * preserve its "the payout for this order" semantics. Returns null
+ * when the order has no cashback payout row yet (e.g. cashback
+ * hasn't been issued, the order is still pending, or the payout
+ * builder deliberately skipped this order). Burn rows are reachable
+ * via the kind-filtered list.
  *
  * Ops uses this to jump from an order-support ticket straight to the
  * payout state instead of fishing for the payout id in the list.
@@ -74,7 +79,7 @@ export async function getPayoutByOrderId(orderId: string): Promise<PendingPayout
   const [row] = await db
     .select()
     .from(pendingPayouts)
-    .where(eq(pendingPayouts.orderId, orderId))
+    .where(and(eq(pendingPayouts.orderId, orderId), eq(pendingPayouts.kind, 'order_cashback')))
     .limit(1);
   return row ?? null;
 }

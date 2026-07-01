@@ -1,5 +1,5 @@
 /**
- * `/api/admin/users/:userId/{credit-adjustments,refunds,withdrawals}`
+ * `/api/admin/users/:userId/{credit-adjustments,refunds,emissions}`
  * route mounts (ADR 017 / 024 + A2-901).
  *
  * Lifted out of `apps/backend/src/routes/admin.ts`. Three POST
@@ -19,7 +19,7 @@
  * factory MUST be called AFTER the 4-piece middleware stack
  * (cache-control / requireAuth / requireAdmin / audit middleware)
  * is in place; that\'s the parent factory\'s responsibility. The
- * withdrawal route also wears the `withdrawals` killSwitch — the
+ * emission route also wears the `emissions` killSwitch — the
  * switch state is checked per-request inside the kill-switch
  * middleware, NOT at registration time, so the route still mounts
  * even when the switch is engaged.
@@ -30,7 +30,7 @@ import { killSwitch } from '../middleware/kill-switch.js';
 import { requireAdminStepUp } from '../auth/admin-step-up-middleware.js';
 import { adminCreditAdjustmentHandler } from '../admin/credit-adjustments.js';
 import { adminRefundHandler } from '../admin/refunds.js';
-import { adminWithdrawalHandler } from '../admin/withdrawals.js';
+import { adminEmissionHandler } from '../admin/emissions.js';
 
 /**
  * Mounts the admin credit-write routes on the supplied Hono app.
@@ -66,17 +66,18 @@ export function mountAdminCreditWritesRoutes(app: Hono): void {
     requireAdminStepUp('refund'),
     adminRefundHandler,
   );
-  // ADR-024 / A2-901 — admin-mediated withdrawal: debit user's
-  // cashback balance + queue an on-chain LOOP-asset payout. Same
-  // rate limit + idempotency discipline as refund. ADR-028 / A4-063
-  // step-up gate also applies — a stolen bearer must NOT be able to
-  // issue an outbound on-chain payout to an attacker-chosen address.
-  // CF-08: bound to the `'withdrawal'` scope.
+  // ADR-024 / A2-901, re-scoped by ADR 036 — admin-mediated emission:
+  // queue an on-chain LOOP-asset payout backfilling the on-chain half
+  // of an existing user_credits liability. Never debits the mirror
+  // (ADR 036). Same rate limit + idempotency discipline as refund.
+  // ADR-028 / A4-063 step-up gate also applies — a stolen bearer must
+  // NOT be able to issue an outbound on-chain payout to an
+  // attacker-chosen address. CF-08: bound to the `'emission'` scope.
   app.post(
-    '/api/admin/users/:userId/withdrawals',
-    killSwitch('withdrawals'),
-    rateLimit('POST /api/admin/users/:userId/withdrawals', 20, 60_000),
-    requireAdminStepUp('withdrawal'),
-    adminWithdrawalHandler,
+    '/api/admin/users/:userId/emissions',
+    killSwitch('emissions'),
+    rateLimit('POST /api/admin/users/:userId/emissions', 20, 60_000),
+    requireAdminStepUp('emission'),
+    adminEmissionHandler,
   );
 }

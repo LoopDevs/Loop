@@ -1,7 +1,7 @@
 {
   "$comment": "Allowlist for scripts/check-shared-type-parity.mjs (ADR 019). 'distinct' = same name, legitimately different shapes (justify each). 'grandfathered' = known pre-detector duplicates pending consolidation into packages/shared — a ratchet: entries may only be REMOVED. The detector fails on stale entries.",
   "distinct": {
-    "WithdrawalResult": "Legitimately distinct shapes: apps/backend/src/credits/withdrawals.ts is the INTERNAL ledger-writer result (amountMinor/priorBalanceMinor/newBalanceMinor are bigint, createdAt is Date); apps/web/app/services/admin-user-credits.ts is the JSON wire serialization of it (bigint-string + ISO-string fields). Renaming one side would be clearer but the shapes must differ."
+    "EmissionResult": "Legitimately distinct shapes: apps/backend/src/credits/emissions.ts is the INTERNAL queue-writer result (amountMinor/balanceMinor are bigint, createdAt is Date); apps/web/app/services/admin-user-credits.ts is the JSON wire serialization of it (bigint-string + ISO-string fields). Renamed from WithdrawalResult by the ADR 036 emission re-scope; the shapes must differ."
   },
   "grandfathered": {
     "AdminAuditTailResponse": "Pre-existing duplicate: web admin-panel mirror of the backend handler wire shape (ADR 018/022/23 drill surface). Identical-on-the-wire; predates this detector. RATCHET — when touched, move to packages/shared instead of editing both copies. Never add new entries here.",

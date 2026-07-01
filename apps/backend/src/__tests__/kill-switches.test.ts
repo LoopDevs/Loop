@@ -7,14 +7,14 @@ describe('isKilled — A2-1907 runtime kill switches', () => {
     delete process.env.LOOP_KILL_ORDERS_LEGACY;
     delete process.env.LOOP_KILL_ORDERS_LOOP;
     delete process.env.LOOP_KILL_AUTH;
-    delete process.env.LOOP_KILL_WITHDRAWALS;
+    delete process.env.LOOP_KILL_EMISSIONS;
   });
 
   it('returns false when env var is unset (fail-open)', () => {
     expect(isKilled('orders-legacy')).toBe(false);
     expect(isKilled('orders-loop')).toBe(false);
     expect(isKilled('auth')).toBe(false);
-    expect(isKilled('withdrawals')).toBe(false);
+    expect(isKilled('emissions')).toBe(false);
   });
 
   it('returns true on each accepted truthy value, case-insensitive', () => {
@@ -58,7 +58,7 @@ describe('isKilled — A2-1907 runtime kill switches', () => {
     expect(isKilled('auth')).toBe(true);
     expect(isKilled('orders-legacy')).toBe(false);
     expect(isKilled('orders-loop')).toBe(false);
-    expect(isKilled('withdrawals')).toBe(false);
+    expect(isKilled('emissions')).toBe(false);
   });
 
   describe('per-path order switches (comprehensive-audit 2026-06-11, P10)', () => {

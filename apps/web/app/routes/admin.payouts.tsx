@@ -33,17 +33,19 @@ const STATES: readonly (PayoutState | 'all')[] = [
   'failed',
 ];
 
-// ADR-024 §2: discriminator filter for the two payout flows. `order_cashback`
-// is the legacy order-fulfilment payout; `withdrawal` is the admin cash-out
-// from a user's balance (ADR-024). Treasury wants to drill into one or the
-// other without scrolling.
-const KINDS = ['all', 'order_cashback', 'withdrawal'] as const;
+// ADR-024 §2 / ADR 036: discriminator filter for the three payout flows.
+// `order_cashback` is the order-fulfilment payout; `emission` is the admin
+// on-chain backfill (ex-withdrawal — no mirror debit, ADR 036); `burn` is
+// the redemption issuer-return. Treasury wants to drill into one without
+// scrolling.
+const KINDS = ['all', 'order_cashback', 'emission', 'burn'] as const;
 type KindFilter = (typeof KINDS)[number];
 
 function kindLabel(k: KindFilter): string {
   if (k === 'all') return 'All kinds';
   if (k === 'order_cashback') return 'Order cashback';
-  return 'Withdrawal';
+  if (k === 'emission') return 'Emission';
+  return 'Burn';
 }
 
 // LOOP_ASSET_CODES + isLoopAssetCode come from `@loop/shared` —
@@ -96,7 +98,7 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
   const assetCodeFilter =
     assetCodeParam !== null && isLoopAssetCode(assetCodeParam) ? assetCodeParam : undefined;
 
-  // ADR-024 §2 kind filter — `?kind=order_cashback` or `?kind=withdrawal`.
+  // ADR-024 §2 / ADR 036 kind filter — `?kind=order_cashback`, `?kind=emission`, or `?kind=burn`.
   const kindParam = searchParams.get('kind');
   const activeKind: KindFilter = (KINDS as readonly string[]).includes(kindParam ?? '')
     ? (kindParam as KindFilter)
@@ -325,7 +327,7 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
                     </Link>
                   </td>
                   <td className="px-3 py-2 text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">
-                    {p.kind === 'withdrawal' ? 'Withdrawal' : 'Cashback'}
+                    {p.kind === 'emission' ? 'Emission' : p.kind === 'burn' ? 'Burn' : 'Cashback'}
                   </td>
                   <td className="px-3 py-2">
                     <span

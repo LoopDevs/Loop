@@ -47,7 +47,14 @@
  */
 import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { orders, pendingPayouts, userCredits, userIdentities, users } from '../db/schema.js';
+import {
+  creditTransactions,
+  orders,
+  pendingPayouts,
+  userCredits,
+  userIdentities,
+  users,
+} from '../db/schema.js';
 import type { PAYOUT_STATES, ORDER_STATES } from '../db/schema.js';
 import { revokeAllRefreshTokensForUser } from '../auth/refresh-tokens.js';
 import { logger } from '../logger.js';
@@ -65,14 +72,20 @@ import { logger } from '../logger.js';
  *     flight on chain.
  *   - `in_flight_orders`: an order in pending_payment / paid /
  *     procuring — purchase being fulfilled.
- *   - `failed_uncompensated_withdrawals`: a withdrawal payout in
+ *   - `failed_uncompensated_withdrawals`: a LEGACY pre-ADR-036
+ *     withdrawal payout (now `kind='emission'` with the at-send
+ *     `type='withdrawal'` debit row, per migration 0038) in
  *     state='failed' with `compensated_at IS NULL`. The user owes
  *     themselves money; admin compensation needs to fire OR a
  *     manual recovery path. Anonymising in this window orphans
  *     the user_credits balance — admin compensation re-credits a
  *     row whose email is now `deleted-{uuid}@…`, the user's new
  *     account (re-signup with the original email) gets a fresh
- *     user_id and never sees the recovered balance.
+ *     user_id and never sees the recovered balance. Post-ADR-036
+ *     emissions never debit, so a failed one does NOT block —
+ *     there is no compensation to wait for (and blocking on it
+ *     would deadlock deletion, since compensation refuses
+ *     debit-less rows).
  *   - `non_zero_credit_balance` (PLAT-30-03, 2026-06-30 cold audit): a
  *     `user_credits` row with `balanceMinor !== 0n`. Cashback is
  *     credited on every fulfilled order regardless of whether the
@@ -150,16 +163,22 @@ export async function deleteUserViaAnonymisation(userId: string): Promise<DsrDel
     return { ok: false, blockedBy: 'pending_payouts' };
   }
 
-  // A4-078: a failed withdrawal payout with compensated_at IS
-  // NULL means the user_credits debit landed but the on-chain
-  // payout never did, and no admin compensation has re-credited
-  // the balance yet. The user owes themselves money. Anonymising
-  // in this window severs the recovery path: admin compensation
-  // re-credits the (now-anonymised) user_id; if the user
-  // re-signs up with the same email they get a fresh user_id and
-  // can't see the recovered balance. Block until either the
-  // compensation lands (compensated_at != NULL) or ops decides
-  // to write the balance off via a separate admin path.
+  // A4-078 (narrowed by ADR 036): a failed LEGACY withdrawal-era
+  // payout with compensated_at IS NULL means the at-send
+  // user_credits debit landed but the on-chain payout never did,
+  // and no admin compensation has re-credited the balance yet. The
+  // user owes themselves money. Anonymising in this window severs
+  // the recovery path: admin compensation re-credits the
+  // (now-anonymised) user_id; if the user re-signs up with the same
+  // email they get a fresh user_id and can't see the recovered
+  // balance. Block until either the compensation lands
+  // (compensated_at != NULL) or ops decides to write the balance
+  // off via a separate admin path.
+  //
+  // The legacy discriminator is the at-send debit ledger row
+  // (`type='withdrawal'` referencing the payout) — post-ADR-036
+  // emissions never debit, are not compensable, and must not block
+  // deletion.
   const failedUncompensated = await db
     .select({ id: pendingPayouts.id })
     .from(pendingPayouts)
@@ -167,8 +186,14 @@ export async function deleteUserViaAnonymisation(userId: string): Promise<DsrDel
       and(
         eq(pendingPayouts.userId, userId),
         eq(pendingPayouts.state, 'failed' as (typeof PAYOUT_STATES)[number]),
-        eq(pendingPayouts.kind, 'withdrawal'),
+        eq(pendingPayouts.kind, 'emission'),
         sql`${pendingPayouts.compensatedAt} IS NULL`,
+        sql`EXISTS (
+          SELECT 1 FROM ${creditTransactions}
+          WHERE ${creditTransactions.type} = 'withdrawal'
+            AND ${creditTransactions.referenceType} = 'payout'
+            AND ${creditTransactions.referenceId} = ${pendingPayouts.id}::text
+        )`,
       ),
     )
     .limit(1);

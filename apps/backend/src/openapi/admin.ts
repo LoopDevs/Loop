@@ -95,11 +95,11 @@ export function registerAdminOpenApi(
       userId: z.string().uuid(),
       orderId: z.string().uuid().nullable().openapi({
         description:
-          'Source order id for `kind=order_cashback` payouts. NULL for withdrawal-initiated payouts (ADR-024 §2).',
+          'Source order id for `kind=order_cashback` and `kind=burn` payouts. NULL for emission payouts (ADR-024 §2 / ADR 036).',
       }),
-      kind: z.enum(['order_cashback', 'withdrawal']).openapi({
+      kind: z.enum(['order_cashback', 'emission', 'burn']).openapi({
         description:
-          'Discriminator: `order_cashback` is the legacy order-fulfilment payout; `withdrawal` is the ADR-024 admin-cash-out flow.',
+          'Discriminator: `order_cashback` is the order-fulfilment payout; `emission` is the ADR-024 admin write re-scoped by ADR 036 (on-chain backfill, no mirror debit); `burn` is the ADR 036 redemption issuer-return.',
       }),
       assetCode: z
         .string()
@@ -149,7 +149,7 @@ export function registerAdminOpenApi(
   // ─── Admin credit-write surfaces (ADR 017/024 + A2-901) ─────────────────────
   //
   // The three admin-mediated writes — credit-adjustment, refund,
-  // withdrawal — share the ADR-017 contract (idempotency key,
+  // emission — share the ADR-017 contract (idempotency key,
   // reason, audit envelope). Lifted into ./admin-credit-writes.ts;
   // the nine locally-scoped Body/Result/Envelope schemas travel
   // with it. `AdminWriteAudit` stays here because it is shared
@@ -159,7 +159,7 @@ export function registerAdminOpenApi(
 
   // Admin user-property writes — currently just the home-currency
   // flip (ADR 015 deferred). Same audit-envelope contract; lives
-  // in its own slice because it isn't a credit/refund/withdrawal.
+  // in its own slice because it isn't a credit/refund/emission.
   registerAdminUserWritesOpenApi(registry, errorResponse, AdminWriteAudit);
 
   // ADR-028 / A4-063: admin step-up auth.
@@ -208,7 +208,7 @@ export function registerAdminOpenApi(
     path: '/api/admin/step-up',
     summary: 'Mint a 5-minute admin step-up token (ADR 028).',
     description:
-      'Re-verifies the admin (currently via OTP) and returns a short-lived `X-Admin-Step-Up` JWT the admin must present on credit-adjust / refund / withdrawal / payout-retry. Stateless — verified by HS256 signature against `LOOP_ADMIN_STEP_UP_SIGNING_KEY`. The bearer access token alone is insufficient by design — see ADR-028.',
+      'Re-verifies the admin (currently via OTP) and returns a short-lived `X-Admin-Step-Up` JWT the admin must present on credit-adjust / refund / emission / payout-retry. Stateless — verified by HS256 signature against `LOOP_ADMIN_STEP_UP_SIGNING_KEY`. The bearer access token alone is insufficient by design — see ADR-028.',
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     request: {

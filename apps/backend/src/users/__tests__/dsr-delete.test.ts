@@ -71,6 +71,14 @@ vi.mock('../../db/schema.js', () => ({
     currency: 'currency',
     balanceMinor: 'balance_minor',
   },
+  // ADR 036: the failed-uncompensated check joins to the legacy
+  // at-send debit row via an EXISTS subquery over creditTransactions.
+  creditTransactions: {
+    __tag: 'creditTransactions',
+    type: 'type',
+    referenceType: 'reference_type',
+    referenceId: 'reference_id',
+  },
   PAYOUT_STATES: ['pending', 'submitted', 'confirmed', 'failed'],
   ORDER_STATES: ['pending_payment', 'paid', 'procuring', 'fulfilled', 'failed', 'expired'],
 }));
@@ -201,10 +209,13 @@ describe('deleteUserViaAnonymisation (A2-1905)', () => {
   });
 
   it('refuses with blockedBy=failed_uncompensated_withdrawals when an admin withdrawal is failed but not yet compensated (A4-078)', async () => {
-    // A4-078: a failed kind=withdrawal payout with
+    // A4-078 (narrowed by ADR 036): a failed legacy kind=emission
+    // payout carrying the at-send type='withdrawal' debit row with
     // compensated_at IS NULL means user_credits was debited but
     // no on-chain transfer / fiat reached the user. Anonymising
-    // here orphans the recovery path.
+    // here orphans the recovery path. (The EXISTS legacy-debit
+    // predicate travels inside the mocked sql template; this test
+    // drives the query result directly.)
     state.failedUncompensatedRows = [{ id: 'p-failed-1' }];
     const out = await deleteUserViaAnonymisation('u-1');
     expect(out).toEqual({ ok: false, blockedBy: 'failed_uncompensated_withdrawals' });

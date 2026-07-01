@@ -101,7 +101,8 @@ vi.mock('../../discord.js', async (importActual) => {
 });
 
 import { db } from '../../db/client.js';
-import { users, pendingPayouts } from '../../db/schema.js';
+import { users, orders, pendingPayouts } from '../../db/schema.js';
+import { getAccountTrustlines } from '../../payments/horizon-trustlines.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
 import { runPayoutTick } from '../../payments/payout-worker.js';
 import { reclaimSubmittedPayout, listClaimablePayouts } from '../../credits/pending-payouts.js';
@@ -143,9 +144,9 @@ async function seedPayout(args: {
     .insert(pendingPayouts)
     .values({
       userId: user.id,
-      // No order — withdrawal-style payout with kind='withdrawal'
-      // skips the FK requirement on order_id.
-      kind: 'withdrawal',
+      // No order — emission payout (kind='emission', ADR 036) skips
+      // the FK requirement on order_id.
+      kind: 'emission',
       assetCode: 'USDLOOP',
       assetIssuer: 'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
       toAddress: 'GUSERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
@@ -536,5 +537,88 @@ describeIf('payout-worker integration — CF-14 FOR UPDATE SKIP LOCKED claim', (
 
     const rows = await listClaimablePayouts({ limit: 20, staleSeconds: 300, maxAttempts: 5 });
     expect(rows.map((r) => r.id).sort()).toEqual([a.payoutId, b.payoutId].sort());
+  });
+});
+
+describeIf('payout-worker integration — ADR 036 issuer-return burns', () => {
+  beforeAll(async () => {
+    await ensureMigrated();
+  });
+
+  beforeEach(async () => {
+    await truncateAllTables();
+    vi.mocked(submitPayout).mockReset();
+    vi.mocked(findOutboundPaymentByMemo).mockReset();
+    vi.mocked(getAccountTrustlines).mockClear();
+  });
+
+  /**
+   * Seeds a `kind='burn'` row the way markOrderPaid writes it: tied
+   * to a redeemed order, destination = the asset's issuer.
+   */
+  async function seedBurnPayout(): Promise<{ payoutId: string }> {
+    const user = await findOrCreateUserByEmail(`burn-${Date.now()}-${Math.random()}@test.local`);
+    await db.update(users).set({ homeCurrency: 'USD' }).where(eq(users.id, user.id));
+    const [order] = await db
+      .insert(orders)
+      .values({
+        userId: user.id,
+        merchantId: 'amazon',
+        faceValueMinor: 2500n,
+        currency: 'USD',
+        chargeMinor: 2500n,
+        chargeCurrency: 'USD',
+        paymentMethod: 'loop_asset',
+        paymentMemo: `burn-memo-${Date.now()}-${Math.random()}`,
+        wholesalePct: '70.00',
+        userCashbackPct: '5.00',
+        loopMarginPct: '25.00',
+        wholesaleMinor: 1750n,
+        userCashbackMinor: 125n,
+        loopMarginMinor: 625n,
+        state: 'paid',
+      })
+      .returning({ id: orders.id });
+    const issuer = process.env['LOOP_STELLAR_USDLOOP_ISSUER']!;
+    const [row] = await db
+      .insert(pendingPayouts)
+      .values({
+        userId: user.id,
+        orderId: order!.id,
+        kind: 'burn',
+        assetCode: 'USDLOOP',
+        assetIssuer: issuer,
+        toAddress: issuer,
+        amountStroops: 2500n * 100_000n,
+        memoText: `burn-${Date.now()}`,
+        state: 'pending',
+      })
+      .returning({ id: pendingPayouts.id });
+    if (row === undefined) throw new Error('seed: burn pending_payouts insert returned no row');
+    return { payoutId: row.id };
+  }
+
+  it('submits the burn to the issuer destination without a trustline probe', async () => {
+    const { payoutId } = await seedBurnPayout();
+    vi.mocked(findOutboundPaymentByMemo).mockResolvedValueOnce(null);
+    vi.mocked(submitPayout).mockResolvedValueOnce({ txHash: 'burn-tx-hash', ledger: 12345 });
+
+    const tick = await runPayoutTick(DEFAULT_TICK_ARGS);
+    expect(tick.confirmed).toBe(1);
+    expect(tick.failed).toBe(0);
+
+    // The submit targeted the issuer (the burn destination).
+    const call = vi.mocked(submitPayout).mock.calls[0]?.[0];
+    expect(call).toBeDefined();
+    expect(call!.intent.to).toBe(process.env['LOOP_STELLAR_USDLOOP_ISSUER']);
+    expect(call!.intent.assetIssuer).toBe(process.env['LOOP_STELLAR_USDLOOP_ISSUER']);
+
+    // ADR 036: no trustline probe for an issuer-return — the issuer
+    // never holds a trustline to its own asset.
+    expect(getAccountTrustlines).not.toHaveBeenCalled();
+
+    const [row] = await db.select().from(pendingPayouts).where(eq(pendingPayouts.id, payoutId));
+    expect(row!.state).toBe('confirmed');
+    expect(row!.txHash).toBe('burn-tx-hash');
   });
 });

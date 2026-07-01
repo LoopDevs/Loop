@@ -5,8 +5,8 @@
  * reads + one ADR-017 retry writer.
  *
  * - `AdminPayoutView` — admin-shaped payout row carrying the
- *   ADR-024 §2 `kind` discriminator (`order_cashback` vs
- *   `withdrawal`), the asset code + issuer, the destination
+ *   ADR-024 §2 / ADR 036 `kind` discriminator (`order_cashback` /
+ *   `emission` / `burn`), the asset code + issuer, the destination
  *   address + memo, the state-machine timestamps, and Stellar
  *   submission metadata (`txHash`, `lastError`, `attempts`).
  * - `GET /api/admin/payouts` — paginated drilldown for the
@@ -44,10 +44,10 @@ import { authenticatedRequest } from './api-client';
 export interface AdminPayoutView {
   id: string;
   userId: string;
-  /** NULL for `kind='withdrawal'` rows (ADR-024 §2). */
+  /** NULL for `kind='emission'` rows (ADR-024 §2 / ADR 036). */
   orderId: string | null;
   /** ADR-024 §2 discriminator. */
-  kind: 'order_cashback' | 'withdrawal';
+  kind: 'order_cashback' | 'emission' | 'burn';
   assetCode: string;
   assetIssuer: string;
   toAddress: string;
@@ -68,8 +68,8 @@ export async function listPayouts(opts: {
   state?: PayoutState;
   userId?: string;
   assetCode?: LoopAssetCode;
-  /** ADR-024 §2 — filter by payout discriminator (order-cashback vs withdrawal). */
-  kind?: 'order_cashback' | 'withdrawal';
+  /** ADR-024 §2 / ADR 036 — filter by payout discriminator. */
+  kind?: 'order_cashback' | 'emission' | 'burn';
   limit?: number;
   before?: string;
 }): Promise<{ payouts: AdminPayoutView[] }> {

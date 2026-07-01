@@ -10,7 +10,7 @@
  *
  * Inline shape (`HomeCurrencySetResult`) travels with the function —
  * no other consumers. The barrel in `services/admin.ts` re-exports it
- * alongside the credit-adjust / withdrawal types.
+ * alongside the credit-adjust / emission types.
  */
 import { generateIdempotencyKey, type AdminWriteEnvelope } from './admin-write-envelope';
 import { authenticatedRequest } from './api-client';

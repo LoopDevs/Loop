@@ -462,28 +462,28 @@ export {
 } from './admin-user-cashback-by-merchant';
 
 // A2-1165 (slice 22): user-credits management surface (credit-
-// adjust write + withdrawal write + ledger read) moved to
-// `./admin-user-credits.ts` (ADR 009 / 017 / 024). Both writes
-// re-use the `AdminWriteEnvelope` primitives from slice 16. The
-// idempotency-key generator that was duplicated inline in both
+// adjust write + emission write + ledger read) moved to
+// `./admin-user-credits.ts` (ADR 009 / 017 / 024 / 036). Both
+// writes re-use the `AdminWriteEnvelope` primitives from slice 16.
+// The idempotency-key generator that was duplicated inline in both
 // writers is now a private helper in the slice file. Inline
 // shapes moved with the functions — no other consumers.
 // Re-export keeps `CreditAdjustmentForm.tsx`,
-// `AdminWithdrawalForm.tsx`, `UserCreditTransactionsTable.tsx`,
+// `AdminEmissionForm.tsx`, `UserCreditTransactionsTable.tsx`,
 // and paired tests untouched.
 export {
   type CreditAdjustmentResult,
-  type WithdrawalResult,
+  type EmissionResult,
   type AdminCreditTransactionView,
   applyCreditAdjustment,
-  applyAdminWithdrawal,
+  applyAdminEmission,
   listAdminUserCreditTransactions,
 } from './admin-user-credits';
 
 // Admin home-currency change (ADR 015 deferred § support-mediated
 // change). Same `AdminWriteEnvelope` + step-up + idempotency-key
 // discipline as the credit writes; lives in its own slice because
-// it isn't a credit/refund/withdrawal.
+// it isn't a credit/refund/emission.
 export { type HomeCurrencySetResult, setUserHomeCurrency } from './admin-user-home-currency';
 
 // A2-1165 (slice 24): admin orders surface lives in

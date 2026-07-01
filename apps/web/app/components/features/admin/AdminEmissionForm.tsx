@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiException, formatMinorCurrency, STELLAR_PUBKEY_REGEX } from '@loop/shared';
 import {
-  applyAdminWithdrawal,
+  applyAdminEmission,
   generateIdempotencyKey,
   type AdminWriteEnvelope,
-  type WithdrawalResult,
+  type EmissionResult,
 } from '~/services/admin';
 import { useAdminStepUp } from '~/hooks/use-admin-step-up';
 import { ReplayedBadge } from './ReplayedBadge';
@@ -40,7 +40,7 @@ export function parseUnsignedAmountMajor(raw: string): ParsedAmount | null {
   return { minorString: unsigned.toString(), minorBigInt: unsigned };
 }
 
-export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.JSX.Element {
+export function AdminEmissionForm({ userId, defaultCurrency }: Props): React.JSX.Element {
   const queryClient = useQueryClient();
   const [amountMajor, setAmountMajor] = useState('');
   const [currency, setCurrency] = useState<Currency>(defaultCurrency);
@@ -48,7 +48,7 @@ export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.J
   const [reason, setReason] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [lastApplied, setLastApplied] = useState<{
-    result: WithdrawalResult;
+    result: EmissionResult;
     replayed: boolean;
   } | null>(null);
   // A4-053: gate the on-chain payout queue behind a second-step
@@ -69,9 +69,9 @@ export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.J
   const stepUp = useAdminStepUp();
 
   const mutation = useMutation({
-    mutationFn: (args: Parameters<typeof applyAdminWithdrawal>[0]) =>
-      stepUp.runWithStepUp(() => applyAdminWithdrawal(args)),
-    onSuccess: (envelope: AdminWriteEnvelope<WithdrawalResult>) => {
+    mutationFn: (args: Parameters<typeof applyAdminEmission>[0]) =>
+      stepUp.runWithStepUp(() => applyAdminEmission(args)),
+    onSuccess: (envelope: AdminWriteEnvelope<EmissionResult>) => {
       setLastApplied({ result: envelope.result, replayed: envelope.audit.replayed });
       setAmountMajor('');
       setReason('');
@@ -86,7 +86,7 @@ export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.J
       } else if (err instanceof Error) {
         setFormError(err.message);
       } else {
-        setFormError('Withdrawal failed');
+        setFormError('Emission failed');
       }
     },
   });
@@ -145,7 +145,7 @@ export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.J
     pendingPayload !== null ? (
       <div className="space-y-2">
         <p>
-          Queue a withdrawal of{' '}
+          Queue an emission of{' '}
           <strong className="tabular-nums">
             {formatMinorCurrency(pendingPayload.amountMinor, pendingPayload.currency)}
           </strong>{' '}
@@ -162,15 +162,15 @@ export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.J
     ) : null;
 
   return (
-    <form className="space-y-4" onSubmit={handleSubmit} aria-labelledby="admin-withdrawal-heading">
-      <p id="admin-withdrawal-heading" className="sr-only">
-        Apply admin withdrawal
+    <form className="space-y-4" onSubmit={handleSubmit} aria-labelledby="admin-emission-heading">
+      <p id="admin-emission-heading" className="sr-only">
+        Apply admin emission
       </p>
       <ConfirmDialog
         open={pendingPayload !== null}
-        title="Confirm withdrawal"
+        title="Confirm emission"
         body={dialogBody}
-        confirmLabel="Queue withdrawal"
+        confirmLabel="Queue emission"
         onResolve={handleConfirm}
       />
       {stepUp.modalOpen && (
@@ -187,7 +187,7 @@ export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.J
             value={amountMajor}
             onChange={(e) => setAmountMajor(e.target.value)}
             placeholder="e.g. 12.34"
-            aria-label="Withdrawal amount in major units"
+            aria-label="Emission amount in major units"
             className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
           />
         </label>
@@ -212,7 +212,7 @@ export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.J
             disabled={mutation.isPending}
             className="w-full rounded-lg border border-gray-900 bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200"
           >
-            {mutation.isPending ? 'Queueing…' : 'Queue withdrawal'}
+            {mutation.isPending ? 'Queueing…' : 'Queue emission'}
           </button>
         </div>
       </div>
@@ -237,7 +237,7 @@ export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.J
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           rows={3}
-          placeholder="e.g. user requested cash-out via support ticket #abc"
+          placeholder="e.g. backfill of failed cashback payout — ticket #abc"
           className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
         />
       </label>
@@ -256,13 +256,11 @@ export function AdminWithdrawalForm({ userId, defaultCurrency }: Props): React.J
           role="status"
           className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-800 dark:bg-green-900/20 dark:text-green-300"
         >
-          Withdrawal queued. New balance:{' '}
+          Emission queued. Mirror balance unchanged (ADR 036):{' '}
           <strong className="tabular-nums">
-            {formatMinorCurrency(lastApplied.result.newBalanceMinor, lastApplied.result.currency)}
-          </strong>{' '}
-          (was{' '}
-          {formatMinorCurrency(lastApplied.result.priorBalanceMinor, lastApplied.result.currency)}
-          ). Payout id <code className="font-mono text-xs">{lastApplied.result.payoutId}</code>.
+            {formatMinorCurrency(lastApplied.result.balanceMinor, lastApplied.result.currency)}
+          </strong>
+          . Payout id <code className="font-mono text-xs">{lastApplied.result.payoutId}</code>.
           <ReplayedBadge replayed={lastApplied.replayed} />
         </div>
       ) : null}

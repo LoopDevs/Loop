@@ -28,7 +28,7 @@
  *     Merchants).
  *   - `adminWriteAudit` (the ADR-017 audit envelope shape —
  *     defined upstream in admin.ts and reused by the credit-
- *     adjustment / withdrawal / refund envelopes).
+ *     adjustment / emission / refund envelopes).
  *
  * Threading those three through the slice's signature keeps the
  * spec output byte-identical: the call site still passes the same

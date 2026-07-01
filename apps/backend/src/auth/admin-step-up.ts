@@ -3,7 +3,7 @@
  *
  * Mints + verifies the short-lived (5-minute) `X-Admin-Step-Up`
  * JWT that gates destructive admin endpoints — credit-adjust,
- * withdrawals, payout retry. Sits beside `auth/tokens.ts` (which
+ * emissions, payout retry. Sits beside `auth/tokens.ts` (which
  * mints the bearer access + refresh tokens) but uses a SEPARATE
  * signing key so a `LOOP_JWT_SIGNING_KEY` compromise doesn't widen
  * to step-up.
@@ -50,7 +50,8 @@ const STEP_UP_ISSUER = 'loop-api';
  * gate — that's the backward-safe behaviour the web client relies on
  * today (it mints one generic token and replays it across writes). A
  * narrower scope (`'credit-adjustment'` / `'refund'` / `'withdrawal'`
- * / `'payout-retry'` / `'payout-compensation'` / `'home-currency'`)
+ * / `'emission'` / `'payout-retry'` / `'payout-compensation'` /
+ * `'home-currency'`)
  * is opt-in and binds the token to that single class — the gate
  * middleware rejects it on any other class with `STEP_UP_PURPOSE_MISMATCH`.
  */
@@ -60,6 +61,7 @@ export const STEP_UP_SCOPES = [
   'credit-adjustment',
   'refund',
   'withdrawal',
+  'emission',
   'payout-retry',
   'payout-compensation',
   'home-currency',

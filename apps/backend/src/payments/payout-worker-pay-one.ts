@@ -66,25 +66,17 @@ export interface PayOneArgs {
   maxAttempts: number;
 }
 
-export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayOutcome> {
-  // Pre-flight: does the destination account have a trustline to
-  // this asset? Without it, `submitPayout` will get `op_no_trust`
-  // back and the row will be marked `failed`, which is the wrong
-  // outcome for the most common case (user linked a wallet but
-  // forgot to add the LOOP-asset trustline). Instead: probe the
-  // trustline first; if it's missing, leave the row in `pending`,
-  // notify the user via Discord (throttled), and let the next
-  // tick re-probe. The user can add the trustline at any moment
-  // and the payout submits without admin intervention.
-  //
-  // Probe is cached at 30s TTL inside getAccountTrustlines, so
-  // many pending payouts to the same address share one Horizon
-  // round-trip per 30s. ADR-015 / ADR-016 §"trustline-probe before
-  // payout submit" was the open Phase-1 question; this closes it.
+/**
+ * Trustline pre-flight for user-addressed payouts. Returns a
+ * `PayOutcome` when the row should NOT proceed to submit this tick
+ * (missing trustline, Horizon degraded), or `null` when the
+ * destination is ready. Extracted so `payOne` can skip it entirely
+ * for ADR 036 issuer-return burns.
+ */
+async function probeTrustline(row: PendingPayout): Promise<PayOutcome | null> {
   const trustlineSnapshot = await getAccountTrustlines(row.toAddress).catch((err: unknown) => {
     // Horizon read-degraded path: don't burn the row, retry next
-    // tick. Same posture as the idempotency pre-check below — fail
-    // closed.
+    // tick. Same posture as the idempotency pre-check — fail closed.
     log.warn(
       { err, payoutId: row.id, account: row.toAddress },
       'Trustline pre-check Horizon read failed — leaving payout in pending for retry',
@@ -117,7 +109,35 @@ export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayO
     });
     return 'retriedLater';
   }
+  return null;
+}
 
+export async function payOne(row: PendingPayout, args: PayOneArgs): Promise<PayOutcome> {
+  // Pre-flight: does the destination account have a trustline to
+  // this asset? Without it, `submitPayout` will get `op_no_trust`
+  // back and the row will be marked `failed`, which is the wrong
+  // outcome for the most common case (user linked a wallet but
+  // forgot to add the LOOP-asset trustline). Instead: probe the
+  // trustline first; if it's missing, leave the row in `pending`,
+  // notify the user via Discord (throttled), and let the next
+  // tick re-probe. The user can add the trustline at any moment
+  // and the payout submits without admin intervention.
+  //
+  // Probe is cached at 30s TTL inside getAccountTrustlines, so
+  // many pending payouts to the same address share one Horizon
+  // round-trip per 30s. ADR-015 / ADR-016 §"trustline-probe before
+  // payout submit" was the open Phase-1 question; this closes it.
+  //
+  // ADR 036 burn rows are exempt: their destination IS the asset's
+  // issuer account, and an issuer never holds (or needs) a trustline
+  // to its own asset — Stellar always accepts an asset back at its
+  // issuer, where it is burned. Probing would report "no trustline"
+  // and park the burn in pending forever.
+  const isIssuerReturn = row.toAddress === row.assetIssuer;
+  if (!isIssuerReturn) {
+    const outcome = await probeTrustline(row);
+    if (outcome !== null) return outcome;
+  }
   // Idempotency pre-check (ADR 016). If the prior submit landed
   // async between the last tick and this one, we converge without
   // issuing a second tx.
@@ -381,12 +401,14 @@ async function handleSubmitError(
  * the Discord page and ran the manual compensation. Re-credit
  * automatically via the established ADR-024 §5 primitive.
  *
- * Scope: `kind='withdrawal'` only. Order-cashback failures are NOT
- * compensated — an unpaid cashback payout means the off-chain ledger
- * credit simply has no on-chain mirror yet (the user keeps the credit;
- * the divergence is a settlement-backlog handled by drift recovery),
- * not a net-negative balance. The primitive itself also refuses any
- * non-withdrawal row.
+ * Scope: `kind='emission'` only (pre-ADR-036 `withdrawal`, relabelled
+ * by migration 0038). Order-cashback failures are NOT compensated —
+ * an unpaid cashback payout means the off-chain ledger credit simply
+ * has no on-chain mirror yet (the user keeps the credit; the
+ * divergence is a settlement-backlog handled by drift recovery), not
+ * a net-negative balance. The primitive itself also refuses any
+ * post-ADR-036 emission lacking the legacy at-send debit row — see
+ * `credits/payout-compensation.ts`.
  *
  * Idempotent + non-throwing:
  *   - The primitive's `SELECT ... FOR UPDATE` re-checks `state='failed'
@@ -399,7 +421,7 @@ async function handleSubmitError(
  *     never re-throw out of the worker tick and abort the batch.
  */
 async function autoCompensateFailedWithdrawal(row: PendingPayout, reason: string): Promise<void> {
-  if (row.kind !== 'withdrawal') return;
+  if (row.kind !== 'emission') return;
   if (!isLoopAssetCode(row.assetCode)) {
     log.error(
       { payoutId: row.id, assetCode: row.assetCode },

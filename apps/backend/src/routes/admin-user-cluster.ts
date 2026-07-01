@@ -172,7 +172,7 @@ export function mountAdminUserClusterRoutes(app: Hono): void {
   );
   // Credit-transaction log for a user (ADR 009). Drill-down from the
   // balance endpoint — shows how the balance got there (cashback,
-  // withdrawals, refunds, adjustments).
+  // emissions, refunds, adjustments).
   app.get(
     '/api/admin/users/:userId/credit-transactions',
     rateLimit('GET /api/admin/users/:userId/credit-transactions', 120, 60_000),

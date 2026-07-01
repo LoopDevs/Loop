@@ -10,13 +10,14 @@
  *   currencies, and a 2..500 char reason. The service
  *   generates the `Idempotency-Key` so a double-submit can't
  *   double-credit.
- * - `POST /api/admin/users/:userId/withdrawals` — ADR 024
- *   admin write. Debits the user's off-chain cashback balance
- *   and queues a matching on-chain LOOP-asset payout. Caller
+ * - `POST /api/admin/users/:userId/emissions` — ADR 024 admin
+ *   write, re-scoped by ADR 036. Queues an on-chain LOOP-asset
+ *   payout backfilling the on-chain half of an existing
+ *   liability; the off-chain mirror is NOT debited. Caller
  *   supplies a positive minor amount, one of the home
  *   currencies, the user's Stellar destination address, and a
  *   reason. The service generates the `Idempotency-Key` so a
- *   double-submit can't double-debit.
+ *   double-submit can't double-emit.
  * - `GET /api/admin/users/:userId/credit-transactions` —
  *   newest-first paginated ledger drill. Cursor via
  *   `before=<iso>`; `limit` clamped [1, 100] server-side
@@ -24,11 +25,11 @@
  *   re-used from `@loop/shared`).
  *
  * The 3 inline shapes (`CreditAdjustmentResult`,
- * `WithdrawalResult`, `AdminCreditTransactionView`) move with
+ * `EmissionResult`, `AdminCreditTransactionView`) move with
  * the functions — no other consumers, so promoting them to
  * `@loop/shared` would just add indirection. `services/admin.ts`
  * keeps a barrel re-export so existing consumers
- * (`CreditAdjustmentForm.tsx`, `AdminWithdrawalForm.tsx`,
+ * (`CreditAdjustmentForm.tsx`, `AdminEmissionForm.tsx`,
  * `UserCreditTransactionsTable.tsx`, paired tests) don't have
  * to re-target imports.
  */
@@ -47,16 +48,15 @@ export interface CreditAdjustmentResult {
   createdAt: string;
 }
 
-/** Result shape from a successful admin withdrawal (ADR 024). */
-export interface WithdrawalResult {
-  id: string;
+/** Result shape from a successful admin emission (ADR 024 / ADR 036). */
+export interface EmissionResult {
   payoutId: string;
   userId: string;
   currency: string;
   amountMinor: string;
   destinationAddress: string;
-  priorBalanceMinor: string;
-  newBalanceMinor: string;
+  /** Mirror balance at queue time — unchanged by the emission (ADR 036). */
+  balanceMinor: string;
   createdAt: string;
 }
 
@@ -103,23 +103,24 @@ export async function applyCreditAdjustment(args: {
 }
 
 /**
- * `POST /api/admin/users/:userId/withdrawals` — ADR 024 admin write.
- * Debits the off-chain balance and queues a LOOP-asset payout.
+ * `POST /api/admin/users/:userId/emissions` — ADR 024 admin write,
+ * re-scoped by ADR 036. Queues a LOOP-asset payout; never debits
+ * the off-chain mirror.
  *
  * CF-09: pass `idempotencyKey` to reuse one key across the step-up
  * retry + a post-completion re-click (the form mints it once when the
  * operator confirms). Defaults to a fresh per-call key.
  */
-export async function applyAdminWithdrawal(args: {
+export async function applyAdminEmission(args: {
   userId: string;
   amountMinor: string;
   currency: 'USD' | 'GBP' | 'EUR';
   destinationAddress: string;
   reason: string;
   idempotencyKey?: string;
-}): Promise<AdminWriteEnvelope<WithdrawalResult>> {
-  return authenticatedRequest<AdminWriteEnvelope<WithdrawalResult>>(
-    `/api/admin/users/${encodeURIComponent(args.userId)}/withdrawals`,
+}): Promise<AdminWriteEnvelope<EmissionResult>> {
+  return authenticatedRequest<AdminWriteEnvelope<EmissionResult>>(
+    `/api/admin/users/${encodeURIComponent(args.userId)}/emissions`,
     {
       method: 'POST',
       headers: { 'Idempotency-Key': args.idempotencyKey ?? generateIdempotencyKey() },

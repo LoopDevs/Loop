@@ -121,24 +121,27 @@ export async function runPayoutTick(args: RunPayoutTickArgs): Promise<PayoutTick
   };
   // CF-15 (x-flows F9-1): read the kill switch ONCE per tick (live
   // process.env, like the request-path middleware) so a mid-incident
-  // flip takes effect on the next tick without a redeploy. Withdrawal
+  // flip takes effect on the next tick without a redeploy. Emission
   // rows are skipped while engaged — they stay `pending`/`submitted`
   // and re-drain once the switch is reset. Order-cashback rows are
   // never gated by this switch (they're not user-initiated outbound
   // transfers — they emit the cashback the user already earned).
-  const withdrawalsKilled = isKilled('withdrawals');
+  // (Pre-ADR-036 this was the `withdrawals` switch / `kind='withdrawal'`
+  // — renamed with the emission re-scope; `kind='burn'` issuer-return
+  // rows are likewise never gated, same rationale as order-cashback.)
+  const emissionsKilled = isKilled('emissions');
   for (const row of rows) {
-    if (withdrawalsKilled && row.kind === 'withdrawal') {
+    if (emissionsKilled && row.kind === 'emission') {
       result.skippedKilled++;
       continue;
     }
     const outcome = await payOne(row, args);
     result[outcome]++;
   }
-  if (withdrawalsKilled && result.skippedKilled > 0) {
+  if (emissionsKilled && result.skippedKilled > 0) {
     log.warn(
       { skippedKilled: result.skippedKilled },
-      'LOOP_KILL_WITHDRAWALS engaged — skipped withdrawal payouts this tick (order-cashback still draining)',
+      'LOOP_KILL_EMISSIONS engaged — skipped emission payouts this tick (order-cashback still draining)',
     );
   }
   return result;

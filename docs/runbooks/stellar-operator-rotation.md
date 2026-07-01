@@ -8,7 +8,7 @@ Planned operational hygiene, not alert-driven. Rotate
 
 The operator secret signs every outbound LOOP-asset payout (cashback
 
-- withdrawals). A leaked operator secret lets an attacker drain
+- emissions / burns). A leaked operator secret lets an attacker drain
   operator-funded LOOP balances on Stellar — high-impact, so rotation
   hygiene matters even without an active incident.
 
