@@ -340,19 +340,28 @@ export function notifyPegBreakOnFulfillment(args: {
 }
 
 /**
- * CF-20 (x-flows F1-1, v-orders P2-02): notify ops when an order
- * fails AFTER Loop has already paid CTX (operator XLM/USDC spent)
- * and the user has already paid Loop. The procurement worker auto-
- * refunds the user's off-chain balance, but Loop's operator-side
- * settlement to CTX is now an outstanding debt — ops must chase a
- * refund/credit from CTX for the wholesale cost. Unlike the generic
- * `markOrderFailed` (a silent `log.error`), this pages because there
- * is money out the door and a recovery action only a human can do.
+ * CF-20 (x-flows F1-1, v-orders P2-02): notify ops when an order fails
+ * after the user has already paid Loop (every order reaches this path
+ * from `state='paid'`). Two shapes:
  *
- * `refunded` distinguishes "user made whole, debt is purely
- * operator↔CTX" from "auto-refund itself failed too" (the worst
- * case — both user AND treasury are out, needs immediate manual
- * intervention).
+ *   - `ctxPaid=true` — Loop has ALSO already paid CTX (operator XLM/USDC
+ *     spent) before the failure. The procurement worker auto-refunds the
+ *     user's off-chain balance, but Loop's operator-side settlement to
+ *     CTX is now an outstanding debt — ops must chase a refund/credit
+ *     from CTX for the wholesale cost.
+ *   - `ctxPaid=false` (CF2-05, 2026-06-30 cold audit) — the failure
+ *     happened BEFORE Loop ever paid CTX (a bad CTX response, schema
+ *     drift, a malformed payment URL/SEP-7 URI) — this is actually the
+ *     larger share of real procurement failures. No operator-side CTX
+ *     debt exists; only the user needs to be made whole. Lower severity
+ *     (no treasury exposure) but still needs paging when the auto-refund
+ *     itself fails.
+ *
+ * Unlike the generic `markOrderFailed` (a silent `log.error`), this pages
+ * because there is a recovery action only a human can verify happened
+ * correctly. `refunded` distinguishes "user made whole" from "auto-refund
+ * itself failed too" (the worst case for the ctxPaid branch — both user
+ * AND treasury are out, needs immediate manual intervention).
  */
 export function notifyOrderFailedAfterCtxPaid(args: {
   orderId: string;
@@ -362,18 +371,26 @@ export function notifyOrderFailedAfterCtxPaid(args: {
   chargeCurrency: string;
   reason: string;
   refunded: boolean;
+  ctxPaid: boolean;
 }): void {
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
-    title: args.refunded
+  const title = args.ctxPaid
+    ? args.refunded
       ? '🔴 Order failed after CTX paid — user refunded, CTX debt open'
-      : '🚨 Order failed after CTX paid — AUTO-REFUND FAILED (user + treasury out)',
-    color: RED,
-    description: truncate(
-      args.refunded
-        ? `Loop already paid CTX for this order but procurement then failed. The user's off-chain balance has been auto-refunded; chase the wholesale cost back from CTX (operator-side debt).`
-        : `Loop already paid CTX AND the automatic user refund FAILED. The user is debited with no gift card and the operator is out of pocket. Manual refund + CTX reconciliation needed NOW.`,
-      DESCRIPTION_MAX,
-    ),
+      : '🚨 Order failed after CTX paid — AUTO-REFUND FAILED (user + treasury out)'
+    : args.refunded
+      ? '🟡 Order failed before CTX paid — user refunded, no CTX debt'
+      : '🚨 Order failed before CTX paid — AUTO-REFUND FAILED (user out, no CTX debt)';
+  const description = args.ctxPaid
+    ? args.refunded
+      ? `Loop already paid CTX for this order but procurement then failed. The user's off-chain balance has been auto-refunded; chase the wholesale cost back from CTX (operator-side debt).`
+      : `Loop already paid CTX AND the automatic user refund FAILED. The user is debited with no gift card and the operator is out of pocket. Manual refund + CTX reconciliation needed NOW.`
+    : args.refunded
+      ? `Procurement failed before Loop paid CTX (bad response / schema drift / malformed payment URL) — no operator-side debt. The user's off-chain balance has been auto-refunded.`
+      : `Procurement failed before Loop paid CTX AND the automatic user refund FAILED. The user is debited with no gift card. No CTX-side debt, but the user needs a manual refund NOW.`;
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title,
+    color: args.ctxPaid || !args.refunded ? RED : ORANGE,
+    description: truncate(description, DESCRIPTION_MAX),
     fields: [
       { name: 'Order', value: `\`${args.orderId.slice(-8)}\``, inline: true },
       {
@@ -385,11 +402,48 @@ export function notifyOrderFailedAfterCtxPaid(args: {
       { name: 'Charge (minor)', value: escapeMarkdown(args.chargeMinor), inline: true },
       { name: 'Currency', value: escapeMarkdown(args.chargeCurrency), inline: true },
       { name: 'User refunded?', value: args.refunded ? 'yes' : 'NO', inline: true },
+      { name: 'CTX paid?', value: args.ctxPaid ? 'yes (operator debt open)' : 'no', inline: true },
       {
         name: 'Reason',
         value: truncate(escapeMarkdown(args.reason), FIELD_VALUE_MAX),
         inline: false,
       },
+    ],
+  });
+}
+
+/**
+ * CF2-06 (2026-06-30 cold audit): fires when a price-feed rate (XLM
+ * oracle or fiat FX feed) jumps by more than the configured sanity
+ * bound between two refreshes — the feed's own request is rejected
+ * (the caller throws and defers) rather than accepted, but this is
+ * still page-worthy: either a real, unusual market move (rare for a
+ * 60s window) or a compromised/glitching feed that needs operator
+ * attention before it's trusted again.
+ */
+export function notifyPriceFeedAnomaly(args: {
+  currency: string;
+  feed: 'xlm' | 'fx';
+  previousValue: number | null;
+  newValue: number;
+  maxRatio: number;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: `🚨 Price feed anomaly — ${args.currency} rate jump rejected`,
+    color: RED,
+    description: truncate(
+      `The ${args.feed === 'xlm' ? 'XLM oracle' : 'fiat FX'} feed returned a ${args.currency} rate that deviates by more than ${Math.round(args.maxRatio * 100)}% from the last known-good value. Rejected as implausible rather than accepted — the affected order-creation/procurement path defers to the next tick. Investigate the upstream feed before this recurs.`,
+      DESCRIPTION_MAX,
+    ),
+    fields: [
+      { name: 'Currency', value: escapeMarkdown(args.currency), inline: true },
+      { name: 'Feed', value: args.feed, inline: true },
+      {
+        name: 'Previous value',
+        value: args.previousValue === null ? '_none_' : String(args.previousValue),
+        inline: true,
+      },
+      { name: 'New value', value: String(args.newValue), inline: true },
     ],
   });
 }

@@ -40,8 +40,18 @@ import {
   type OrderableCurrency,
 } from '@loop/shared';
 import { logger } from '../logger.js';
+import { validateRateJump } from './rate-sanity.js';
 
 const log = logger.child({ area: 'price-feed-fx' });
+
+/**
+ * CF2-06 (2026-06-30 cold audit): see `rate-sanity.ts` for the shared
+ * mechanism. Fiat FX pairs are far less volatile than a crypto asset —
+ * major/emerging-market currency pairs essentially never move more
+ * than a few percent in a single day, let alone a 60s refresh window —
+ * so this feed's bound is much tighter than the XLM oracle's.
+ */
+const MAX_FX_RATE_JUMP_RATIO = 0.1;
 
 /**
  * Frankfurter response shape — `{ base: 'USD', rates: { GBP, EUR, … } }`.
@@ -125,10 +135,21 @@ async function refreshFx(): Promise<CachedFx> {
     throw new Error(`FX feed base is ${parsed.data.base}, expected USD`);
   }
   const rates = parsed.data.rates;
+  // CF2-06: validate each currency's new rate against its own last
+  // known-good value before accepting it into the cache.
+  const previous = cachedFx;
   const minorPerUsdDollar: CachedFx['minorPerUsdDollar'] = {};
   for (const code of FX_RATE_CURRENCIES) {
     const rate = rates[code];
-    if (typeof rate === 'number') minorPerUsdDollar[code] = rate;
+    if (typeof rate !== 'number') continue;
+    validateRateJump({
+      currency: code,
+      feed: 'fx',
+      previousValue: previous?.minorPerUsdDollar[code],
+      newValue: rate,
+      maxRatio: MAX_FX_RATE_JUMP_RATIO,
+    });
+    minorPerUsdDollar[code] = rate;
   }
   cachedFx = {
     minorPerUsdDollar,

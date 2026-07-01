@@ -147,10 +147,48 @@ vi.mock('../../payments/horizon-balances.js', () => ({
 const { discordMock } = vi.hoisted(() => ({
   discordMock: {
     notifyUsdcBelowFloor: vi.fn<(args: unknown) => void>(() => undefined),
+    // CF2-05 (2026-06-30 cold audit): pre-payment procurement failures
+    // now also auto-refund + alert, same as the CF-20 post-payment path.
+    notifyOrderFailedAfterCtxPaid: vi.fn<(args: unknown) => void>(() => undefined),
   },
 }));
 vi.mock('../../discord.js', () => ({
   notifyUsdcBelowFloor: (args: unknown) => discordMock.notifyUsdcBelowFloor(args),
+  notifyOrderFailedAfterCtxPaid: (args: unknown) => discordMock.notifyOrderFailedAfterCtxPaid(args),
+}));
+
+const { refundsMock, RefundAlreadyIssuedErrorMock, RefundOrderInvalidErrorMock } = vi.hoisted(
+  () => {
+    class RefundAlreadyIssuedErrorMock extends Error {
+      constructor(public readonly orderId: string) {
+        super(`A refund has already been issued for order ${orderId}`);
+        this.name = 'RefundAlreadyIssuedError';
+      }
+    }
+    class RefundOrderInvalidErrorMock extends Error {
+      constructor(
+        public readonly reason: string,
+        message: string,
+      ) {
+        super(message);
+        this.name = 'RefundOrderInvalidError';
+      }
+    }
+    return {
+      RefundAlreadyIssuedErrorMock,
+      RefundOrderInvalidErrorMock,
+      refundsMock: {
+        applyOrderAutoRefund: vi.fn<(args: unknown) => Promise<unknown>>(async () => ({
+          id: 'refund-1',
+        })),
+      },
+    };
+  },
+);
+vi.mock('../../credits/refunds.js', () => ({
+  applyOrderAutoRefund: (args: unknown) => refundsMock.applyOrderAutoRefund(args),
+  RefundAlreadyIssuedError: RefundAlreadyIssuedErrorMock,
+  RefundOrderInvalidError: RefundOrderInvalidErrorMock,
 }));
 
 import {
@@ -166,6 +204,13 @@ type AnyOrder = {
   merchantId: string;
   currency: string;
   faceValueMinor: bigint;
+  // CF2-05 (2026-06-30 cold audit): the auto-refund path now reads
+  // these on every failure branch (not just the post-CTX-paid one), so
+  // the fixture needs them even though most existing tests never
+  // asserted on the refund call itself.
+  userId: string;
+  chargeMinor: bigint;
+  chargeCurrency: string;
 };
 
 function makeOrder(overrides: Partial<AnyOrder> = {}): AnyOrder {
@@ -174,6 +219,9 @@ function makeOrder(overrides: Partial<AnyOrder> = {}): AnyOrder {
     merchantId: 'm1',
     currency: 'GBP',
     faceValueMinor: 10_000n,
+    userId: 'user-1',
+    chargeMinor: 10_000n,
+    chargeCurrency: 'GBP',
     ...overrides,
   };
 }

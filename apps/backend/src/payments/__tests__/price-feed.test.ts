@@ -213,6 +213,48 @@ describe('stroopsPerCent — CTX rates adapter', () => {
     expect(await stroopsPerCent('USD')).toBe(621_119n);
     await expect(stroopsPerCent('GBP')).rejects.toThrow(/no rate for GBP/);
   });
+
+  // CF2-06 (2026-06-30 cold audit): the sanity-bound wiring end-to-end —
+  // pure-logic coverage for isPlausibleRateJump/validateRateJump lives in
+  // rate-sanity.test.ts; these prove refreshCtx actually calls it with a
+  // real prior cached value once the 60s TTL has expired.
+  describe('CF2-06: rate sanity bound', () => {
+    it('accepts a plausible rate change across two refreshes', async () => {
+      vi.useFakeTimers();
+      try {
+        fetchSpy = stubCtxFeed({ USD: '0.1610' });
+        expect(await stroopsPerCent('USD')).toBe(621_119n);
+        // A 20% move is within the 50% XLM bound.
+        fetchSpy.mockRestore();
+        fetchSpy = stubCtxFeed({ USD: '0.1932' });
+        vi.advanceTimersByTime(60_001);
+        await expect(stroopsPerCent('USD')).resolves.not.toThrow();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('rejects an implausible rate jump and leaves the prior value unusable (throws instead)', async () => {
+      vi.useFakeTimers();
+      try {
+        fetchSpy = stubCtxFeed({ USD: '0.1610' });
+        await stroopsPerCent('USD');
+        // A >3x jump in one 60s refresh — implausible for a liquid asset.
+        fetchSpy.mockRestore();
+        fetchSpy = stubCtxFeed({ USD: '0.6000' });
+        vi.advanceTimersByTime(60_001);
+        await expect(stroopsPerCent('USD')).rejects.toThrow(/exceeds sanity bound/);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('cold start (first-ever refresh) accepts any rate regardless of magnitude', async () => {
+      // No previous cache exists yet — nothing to compare against.
+      fetchSpy = stubCtxFeed({ USD: '50.0000' });
+      await expect(stroopsPerCent('USD')).resolves.not.toThrow();
+    });
+  });
 });
 
 describe('requiredStroopsForCharge (A4-106)', () => {
@@ -302,6 +344,41 @@ describe('usdcStroopsPerCent', () => {
   it('throws on a non-positive rate', async () => {
     fetchSpy = stubFeed({ base: 'USD', rates: { GBP: 0 } });
     await expect(usdcStroopsPerCent('GBP')).rejects.toThrow(/non-positive rate/);
+  });
+
+  // CF2-06 (2026-06-30 cold audit): the FX feed's bound is tighter than
+  // XLM's (10% vs 50%) — fiat pairs essentially never move that much in
+  // a 60s window.
+  describe('CF2-06: rate sanity bound', () => {
+    it('accepts a plausible FX rate change across two refreshes', async () => {
+      vi.useFakeTimers();
+      try {
+        fetchSpy = stubFeed({ base: 'USD', rates: { GBP: 0.78 } });
+        await usdcStroopsPerCent('GBP');
+        // A 5% move is within the 10% FX bound.
+        fetchSpy.mockRestore();
+        fetchSpy = stubFeed({ base: 'USD', rates: { GBP: 0.819 } });
+        vi.advanceTimersByTime(60_001);
+        await expect(usdcStroopsPerCent('GBP')).resolves.not.toThrow();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('rejects an implausible FX rate jump', async () => {
+      vi.useFakeTimers();
+      try {
+        fetchSpy = stubFeed({ base: 'USD', rates: { GBP: 0.78 } });
+        await usdcStroopsPerCent('GBP');
+        // A 50% move — way beyond the 10% FX bound.
+        fetchSpy.mockRestore();
+        fetchSpy = stubFeed({ base: 'USD', rates: { GBP: 1.17 } });
+        vi.advanceTimersByTime(60_001);
+        await expect(usdcStroopsPerCent('GBP')).rejects.toThrow(/exceeds sanity bound/);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });
 

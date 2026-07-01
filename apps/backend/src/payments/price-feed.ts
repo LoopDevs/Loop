@@ -32,8 +32,18 @@
  */
 import { z } from 'zod';
 import { logger } from '../logger.js';
+import { validateRateJump } from './rate-sanity.js';
 
 const log = logger.child({ area: 'price-feed' });
+
+/**
+ * CF2-06 (2026-06-30 cold audit): see `rate-sanity.ts` for the shared
+ * mechanism. XLM is a genuinely volatile asset, so this feed's bound is
+ * wide enough to tolerate real market moves — a >50% move between two
+ * 60s-TTL refreshes is still implausible for a liquid asset and far
+ * more likely to be a bad feed response than a real one.
+ */
+const MAX_RATE_JUMP_RATIO = 0.5;
 
 const CoinGeckoResponse = z.object({
   stellar: z.object({
@@ -186,14 +196,43 @@ async function refreshCtx(): Promise<CachedPrice> {
     // the caller sees a 503 at order create time.
     throw new Error('CTX rates: USD pair unavailable');
   }
+  // CF2-06: capture the pre-refresh cache to validate each currency's
+  // new rate against its own last known-good value before accepting it.
+  const previous = cached;
   // Scale to micro-cents (cents × 10^6) per A4-106 precision rationale.
   // `price` is major-unit per XLM (e.g. 0.1610 USD per XLM), so
   // microCents per XLM = price × 100 cents/major × 10^6 = price × 1e8.
-  const microCentsPerXlm: CachedPrice['microCentsPerXlm'] = {
-    USD: Math.round(usd * 100_000_000),
-  };
-  if (gbp !== null) microCentsPerXlm.GBP = Math.round(gbp * 100_000_000);
-  if (eur !== null) microCentsPerXlm.EUR = Math.round(eur * 100_000_000);
+  const usdMicroCents = Math.round(usd * 100_000_000);
+  validateRateJump({
+    currency: 'USD',
+    feed: 'xlm',
+    previousValue: previous?.microCentsPerXlm.USD,
+    newValue: usdMicroCents,
+    maxRatio: MAX_RATE_JUMP_RATIO,
+  });
+  const microCentsPerXlm: CachedPrice['microCentsPerXlm'] = { USD: usdMicroCents };
+  if (gbp !== null) {
+    const gbpMicroCents = Math.round(gbp * 100_000_000);
+    validateRateJump({
+      currency: 'GBP',
+      feed: 'xlm',
+      previousValue: previous?.microCentsPerXlm.GBP,
+      newValue: gbpMicroCents,
+      maxRatio: MAX_RATE_JUMP_RATIO,
+    });
+    microCentsPerXlm.GBP = gbpMicroCents;
+  }
+  if (eur !== null) {
+    const eurMicroCents = Math.round(eur * 100_000_000);
+    validateRateJump({
+      currency: 'EUR',
+      feed: 'xlm',
+      previousValue: previous?.microCentsPerXlm.EUR,
+      newValue: eurMicroCents,
+      maxRatio: MAX_RATE_JUMP_RATIO,
+    });
+    microCentsPerXlm.EUR = eurMicroCents;
+  }
   cached = { microCentsPerXlm, expiresAt: Date.now() + CACHE_TTL_MS };
   return cached;
 }
@@ -206,11 +245,39 @@ async function refreshCoinGecko(url: string): Promise<CachedPrice> {
     throw new Error('Price feed schema drift');
   }
   const { usd, gbp, eur } = parsed.data.stellar;
-  const microCentsPerXlm: CachedPrice['microCentsPerXlm'] = {
-    USD: Math.round(usd * 100_000_000),
-  };
-  if (typeof gbp === 'number') microCentsPerXlm.GBP = Math.round(gbp * 100_000_000);
-  if (typeof eur === 'number') microCentsPerXlm.EUR = Math.round(eur * 100_000_000);
+  // CF2-06: same sanity-bound validation as the CTX adapter above.
+  const previous = cached;
+  const usdMicroCents = Math.round(usd * 100_000_000);
+  validateRateJump({
+    currency: 'USD',
+    feed: 'xlm',
+    previousValue: previous?.microCentsPerXlm.USD,
+    newValue: usdMicroCents,
+    maxRatio: MAX_RATE_JUMP_RATIO,
+  });
+  const microCentsPerXlm: CachedPrice['microCentsPerXlm'] = { USD: usdMicroCents };
+  if (typeof gbp === 'number') {
+    const gbpMicroCents = Math.round(gbp * 100_000_000);
+    validateRateJump({
+      currency: 'GBP',
+      feed: 'xlm',
+      previousValue: previous?.microCentsPerXlm.GBP,
+      newValue: gbpMicroCents,
+      maxRatio: MAX_RATE_JUMP_RATIO,
+    });
+    microCentsPerXlm.GBP = gbpMicroCents;
+  }
+  if (typeof eur === 'number') {
+    const eurMicroCents = Math.round(eur * 100_000_000);
+    validateRateJump({
+      currency: 'EUR',
+      feed: 'xlm',
+      previousValue: previous?.microCentsPerXlm.EUR,
+      newValue: eurMicroCents,
+      maxRatio: MAX_RATE_JUMP_RATIO,
+    });
+    microCentsPerXlm.EUR = eurMicroCents;
+  }
   cached = { microCentsPerXlm, expiresAt: Date.now() + CACHE_TTL_MS };
   return cached;
 }
