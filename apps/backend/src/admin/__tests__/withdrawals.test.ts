@@ -20,6 +20,7 @@ const {
   generateMemoMock,
   WithdrawalAlreadyIssuedError,
   InsufficientBalanceError,
+  DailyAdjustmentLimitError,
 } = vi.hoisted(() => {
   class WithdrawalAlreadyIssuedError extends Error {
     constructor(public readonly payoutId: string) {
@@ -37,6 +38,21 @@ const {
       this.name = 'InsufficientBalanceError';
     }
   }
+  // ADM-01 (2026-06-30 cold audit): withdrawals now share the same
+  // per-currency/per-day cap error class the adjustment/compensation
+  // writers already throw.
+  class DailyAdjustmentLimitError extends Error {
+    constructor(
+      public readonly currency: string,
+      public readonly dayStartUtc: Date,
+      public readonly usedMinor: bigint,
+      public readonly capMinor: bigint,
+      public readonly attemptedDelta: bigint,
+    ) {
+      super('Daily admin adjustment cap would be exceeded');
+      this.name = 'DailyAdjustmentLimitError';
+    }
+  }
   return {
     applyMock: vi.fn(),
     guardMock: vi.fn(),
@@ -46,6 +62,7 @@ const {
     generateMemoMock: vi.fn(() => 'memo-fixed-for-tests'),
     WithdrawalAlreadyIssuedError,
     InsufficientBalanceError,
+    DailyAdjustmentLimitError,
   };
 });
 
@@ -70,6 +87,7 @@ vi.mock('../../credits/withdrawals.js', () => ({
 
 vi.mock('../../credits/adjustments.js', () => ({
   InsufficientBalanceError,
+  DailyAdjustmentLimitError,
 }));
 
 vi.mock('../../db/users.js', () => ({
@@ -372,6 +390,28 @@ describe('adminWithdrawalHandler — ADR-017 + ADR-024 invariants', () => {
     expect(res.status).toBe(409);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('WITHDRAWAL_ALREADY_ISSUED');
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  // ADM-01 (2026-06-30 cold audit): withdrawals had no daily aggregate
+  // cap at all — this pins the new 429 mapping, mirroring the sibling
+  // adjustment/compensation handlers' response shape.
+  it('429 DAILY_LIMIT_EXCEEDED when the ledger layer reports the daily withdrawal cap hit', async () => {
+    applyMock.mockRejectedValueOnce(
+      new DailyAdjustmentLimitError(
+        'USD',
+        new Date('2026-06-30T00:00:00Z'),
+        99_999_900n,
+        100_000_000n,
+        200n,
+      ),
+    );
+    const res = await adminWithdrawalHandler(
+      makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
+    );
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('DAILY_LIMIT_EXCEEDED');
     expect(notifyMock).not.toHaveBeenCalled();
   });
 

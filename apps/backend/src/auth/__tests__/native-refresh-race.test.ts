@@ -29,7 +29,7 @@ interface StoreRow {
 }
 
 const fake = vi.hoisted(() => {
-  process.env['LOOP_JWT_SIGNING_KEY'] = 'k'.repeat(32);
+  process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-signing-key-32-chars-min!!';
 
   const rows = new Map<string, StoreRow>();
   // Cheap stand-in for SHA-256 — the store only needs hash equality.

@@ -22,6 +22,25 @@ const UA =
 const outPath = '/tmp/ctx-media-proxied.json';
 const concurrency = Number(process.argv[process.argv.indexOf('--concurrency') + 1] ?? 4);
 
+/**
+ * TOOL-04 (2026-06-30 cold audit): `PROXY_SERVER` may embed credentials
+ * directly (`scheme://user:pass@host:port`, per `proxyForSession`'s own
+ * `u.username`/`u.password` fallback below) rather than relying solely on
+ * the separate `PROXY_USERNAME`/`PROXY_PASSWORD` vars. Logging it verbatim
+ * leaked the proxy password into stdout/CI logs. Redact any embedded
+ * userinfo before logging; host:port is fine to show for diagnosis.
+ */
+function redactProxyServerForLog(server) {
+  if (!server) return '(unset)';
+  try {
+    const hasScheme = /^[a-z][a-z0-9+\-.]*:\/\//i.test(server);
+    const u = new URL(hasScheme ? server : `http://${server}`);
+    return `${u.protocol}//${u.hostname}:${u.port || 80}`;
+  } catch {
+    return '(unparseable)';
+  }
+}
+
 function proxyForSession(sessionId) {
   const server = process.env.PROXY_SERVER;
   if (!server) return null;
@@ -203,7 +222,7 @@ async function main() {
   } catch {}
   const todo = items.filter((m) => !(m.id in out));
   console.log(
-    `Proxied re-scrape: ${items.length} targets, ${Object.keys(out).length} done, ${todo.length} to do @ ${concurrency}\nproxy: ${process.env.PROXY_SERVER}\n`,
+    `Proxied re-scrape: ${items.length} targets, ${Object.keys(out).length} done, ${todo.length} to do @ ${concurrency}\nproxy: ${redactProxyServerForLog(process.env.PROXY_SERVER)}\n`,
   );
   const browser = await chromium.launch();
   let idx = 0,

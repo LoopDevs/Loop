@@ -124,8 +124,17 @@ is not on a bot — refills are deliberately manual.
    laptop.**
 2. Construct the refund-from-cold transaction (Stellar lab; sign
    offline; QR-transfer to an online machine for submit).
-3. Submit via Horizon. Watch the operator balance via
-   `https://horizon.stellar.org/accounts/$LOOP_STELLAR_OPERATOR_ID`.
+3. Submit via Horizon. There is **no** `LOOP_STELLAR_OPERATOR_ID` env var —
+   derive the operator's public key from the secret signer
+   (`LOOP_STELLAR_OPERATOR_SECRET`) on a trusted machine, then watch its
+   balance:
+
+   ```bash
+   OPERATOR_PUBKEY=$(fly ssh console -a loopfinance-api -C \
+     "node -e \"const{Keypair}=require('@stellar/stellar-sdk');console.log(Keypair.fromSecret(process.env.LOOP_STELLAR_OPERATOR_SECRET).publicKey())\"")
+   echo "https://horizon.stellar.org/accounts/$OPERATOR_PUBKEY"
+   ```
+
 4. Re-enable the payout worker if it was killed via
    `LOOP_KILL_WITHDRAWALS=true`.
 

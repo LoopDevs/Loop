@@ -30,6 +30,15 @@
  * Production guard (T-03): runs unattended only against a local DATABASE_URL
  * host (localhost / 127.0.0.1). Any other host requires --yes-non-prod AND
  * NODE_ENV !== 'production'; it always refuses when NODE_ENV=production.
+ *
+ * TOOL-03 (2026-06-30 cold audit): the hostname check alone has a blind
+ * spot — `flyctl proxy 5433:5432 -a <prod-db-app>` tunnels a REMOTE
+ * production database to a local port, so `DATABASE_URL` legitimately
+ * reads `localhost` while pointing at production. A hostname string can't
+ * tell the difference. Closed by an additional, hostname-independent
+ * sanity check: refuse (same as the non-local-host branch) if the target
+ * database's `users` table holds more than a handful of rows — a real
+ * dev/demo database is small by construction; production is not.
  */
 import postgres from 'postgres';
 
@@ -109,6 +118,40 @@ const WHOLESALE_PCT = 70;
 const MARGIN_PCT = 25;
 
 const sql = postgres(DATABASE_URL, { max: 1, types: { bigint: postgres.BigInt } });
+
+// TOOL-03: hostname-independent backstop. A `flyctl proxy` tunnel to
+// production presents as `localhost` and would otherwise sail past the
+// hostname check above. A real local/demo Postgres never has more than a
+// handful of seeded users; refuse unattended runs against anything larger,
+// same escape hatch as the non-local-host branch.
+const SAFE_USER_COUNT_THRESHOLD = 25;
+{
+  const [{ n: userCount }] = await sql`SELECT count(*)::int AS n FROM users`;
+  if (userCount > SAFE_USER_COUNT_THRESHOLD) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error(
+        `✗ Refusing to run: NODE_ENV=production. demo-seed.mjs performs destructive ledger\n` +
+          `  DELETEs and is never safe against a production database.`,
+      );
+      await sql.end();
+      process.exit(1);
+    }
+    if (!yesNonProd) {
+      console.error(
+        `✗ Refusing to run: target database has ${userCount} users (> ${SAFE_USER_COUNT_THRESHOLD}),\n` +
+          `  which looks like production regardless of hostname "${host ?? '(unparseable)'}" —\n` +
+          `  a \`flyctl proxy\` tunnel to production presents as localhost too. If this is\n` +
+          `  genuinely a disposable non-prod target with real seeded data, re-run with\n` +
+          `  --yes-non-prod (NODE_ENV must not be 'production').`,
+      );
+      await sql.end();
+      process.exit(1);
+    }
+    console.warn(
+      `⚠ Target database has ${userCount} users (--yes-non-prod acknowledged despite the count).`,
+    );
+  }
+}
 
 try {
   // Upsert the demo user (loop-native: ctx_user_id NULL).

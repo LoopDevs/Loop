@@ -4,7 +4,7 @@ import { createHmac } from 'node:crypto';
 // Env vars must be set before env.ts is loaded — tokens.ts consumes env
 // at module init.
 vi.hoisted(() => {
-  process.env['LOOP_JWT_SIGNING_KEY'] = 'k'.repeat(32);
+  process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-signing-key-32-chars-min!!';
 });
 
 import {
@@ -268,7 +268,8 @@ describe('verifyLoopToken', () => {
     // Manually-crafted payload representing the pre-fix shape.
     // Signed with the test key so the signature is valid — the
     // rejection must come from the claim-shape check, not signature.
-    process.env['LOOP_JWT_SIGNING_KEY'] = process.env['LOOP_JWT_SIGNING_KEY'] ?? 'x'.repeat(32);
+    process.env['LOOP_JWT_SIGNING_KEY'] =
+      process.env['LOOP_JWT_SIGNING_KEY'] ?? 'jwt-test-key-x-variant-32-chars-min!';
     const key = process.env['LOOP_JWT_SIGNING_KEY']!;
     const legacyPayload = {
       sub: 'u1',
@@ -298,13 +299,17 @@ describe('verifyLoopToken', () => {
       ttlSeconds: 300,
     });
     vi.resetModules();
-    process.env['LOOP_JWT_SIGNING_KEY_PREVIOUS'] = 'k'.repeat(32);
-    process.env['LOOP_JWT_SIGNING_KEY'] = 'n'.repeat(32);
+    // PREVIOUS must equal the key that actually signed `token` above
+    // (the top-of-file key) — the fallback path only succeeds if the
+    // previous key matches what the token was really signed with.
+    process.env['LOOP_JWT_SIGNING_KEY_PREVIOUS'] = 'jwt-test-signing-key-32-chars-min!!';
+    process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-key-n-variant-32-chars-min!';
     const fresh = await import('../tokens.js');
     const result = fresh.verifyLoopToken(token, 'access');
     expect(result.ok).toBe(true);
-    // Reset env module state for the rest of the suite.
-    process.env['LOOP_JWT_SIGNING_KEY'] = 'k'.repeat(32);
+    // Reset env module state for the rest of the suite — MUST match the
+    // key the wire-format-back-compat fixture below was signed under.
+    process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-signing-key-32-chars-min!!';
     delete process.env['LOOP_JWT_SIGNING_KEY_PREVIOUS'];
     vi.resetModules();
   });
@@ -318,10 +323,10 @@ describe('wire-format back-compat (Track A.1 regression gate)', () => {
   //   sig = b64url(createHmac('sha256', key).update(header + '.' + payload).digest())
   //   token = header + '.' + payload + '.' + sig
   //
-  // with key = 'k'.repeat(32) (the test signing key set at the top of
-  // this file) and claims pinned to a far-future exp so the fixture
-  // doesn't drift on time. If a future change to signer.ts / tokens.ts
-  // produces a different verify behaviour for this exact byte
+  // with key = 'jwt-test-signing-key-32-chars-min!!' (the test signing key
+  // set at the top of this file) and claims pinned to a far-future exp so
+  // the fixture doesn't drift on time. If a future change to signer.ts /
+  // tokens.ts produces a different verify behaviour for this exact byte
   // sequence, this assertion fails — proving wire-format
   // back-compatibility with the pre-A.1 binary.
   //
@@ -329,8 +334,16 @@ describe('wire-format back-compat (Track A.1 regression gate)', () => {
   // binary may have minted access tokens still alive (15-min TTL); the
   // post-A.1 binary that takes over MUST verify them. This fixture
   // pins that property as a regression test.
+  //
+  // CF2-17 (2026-06-30 cold audit): the header/payload (and thus the
+  // wire-format property this fixture pins) are unchanged from the
+  // original fixture — only the signature was recomputed, because the
+  // original was signed under a low-entropy repeated-char key that the
+  // new signing-key entropy check (env.ts) now rejects. Regenerated via:
+  //   createHmac('sha256', 'jwt-test-signing-key-32-chars-min!!')
+  //     .update(header + '.' + payload).digest().toString('base64url')
   const FIXTURE_TOKEN =
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmaXh0dXJlLXVzZXIiLCJlbWFpbCI6ImZpeHR1cmVAbG9vcGZpbmFuY2UudGVzdCIsInR5cCI6ImFjY2VzcyIsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwLCJpc3MiOiJsb29wLWFwaSIsImF1ZCI6Imxvb3AtY2xpZW50cyJ9.cwtnCoHVUQG2aKK4bjexNa3ihWqPAS2Xdor9Ckh5Ydw';
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmaXh0dXJlLXVzZXIiLCJlbWFpbCI6ImZpeHR1cmVAbG9vcGZpbmFuY2UudGVzdCIsInR5cCI6ImFjY2VzcyIsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwLCJpc3MiOiJsb29wLWFwaSIsImF1ZCI6Imxvb3AtY2xpZW50cyJ9.iI6PPy0lVt72yrig7AO0JB_IQjAU1jgvutGvO6Fdohs';
 
   it('verifies a pre-refactor-format HS256 token byte-for-byte', () => {
     const result = verifyLoopToken(FIXTURE_TOKEN, 'access');
@@ -371,7 +384,8 @@ describe('isLoopAuthConfigured', () => {
 
 afterEach(() => {
   // Keep env stable between tests — the rotation test fiddles with it.
-  process.env['LOOP_JWT_SIGNING_KEY'] = 'k'.repeat(32);
+  // MUST match the key the wire-format-back-compat fixture was signed under.
+  process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-signing-key-32-chars-min!!';
   delete process.env['LOOP_JWT_SIGNING_KEY_PREVIOUS'];
 });
 

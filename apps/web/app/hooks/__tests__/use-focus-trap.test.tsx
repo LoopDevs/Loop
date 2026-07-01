@@ -85,4 +85,59 @@ describe('useFocusTrap', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(document.activeElement).toBe(trigger);
   });
+
+  // CF2 WUI-01 regression guard: a roving-tabindex radiogroup (most
+  // options tabindex="-1", one tabindex="0") must not have its inactive
+  // options counted as tab stops — they used to match `button:not([disabled])`
+  // regardless of tabindex, computing the wrong last/first element and
+  // letting Tab escape the trap.
+  function RovingTabindexDialog({ onClose }: { onClose: () => void }): React.JSX.Element {
+    const ref = useRef<HTMLDivElement>(null);
+    const firstRef = useRef<HTMLButtonElement>(null);
+    useFocusTrap({ active: true, containerRef: ref, onClose, initialFocusRef: firstRef });
+    return (
+      <div ref={ref} role="dialog">
+        <button ref={firstRef}>first</button>
+        <div role="radiogroup">
+          <button role="radio" tabIndex={0} aria-checked="true">
+            option-active
+          </button>
+          <button role="radio" tabIndex={-1} aria-checked="false">
+            option-inactive-1
+          </button>
+          <button role="radio" tabIndex={-1} aria-checked="false">
+            option-inactive-2
+          </button>
+        </div>
+        <button>last</button>
+      </div>
+    );
+  }
+
+  it('excludes tabindex=-1 roving-tabindex options from the tab cycle', () => {
+    function Harness2(): React.JSX.Element {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button data-testid="trigger" onClick={() => setOpen(true)}>
+            open
+          </button>
+          {open ? <RovingTabindexDialog onClose={() => setOpen(false)} /> : null}
+        </>
+      );
+    }
+    render(<Harness2 />);
+    fireEvent.click(screen.getByTestId('trigger'));
+    // Tab from "last" must wrap to "first" — not to one of the
+    // tabindex=-1 radio options, which would prove they were (wrongly)
+    // still counted as tab stops.
+    const last = screen.getByText('last');
+    last.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(screen.getByText('first'));
+    // Shift+Tab from "first" must wrap to "last" directly, skipping the
+    // radiogroup's inactive options.
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
 });

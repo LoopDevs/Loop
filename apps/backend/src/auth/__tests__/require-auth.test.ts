@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Context } from 'hono';
 
 vi.hoisted(() => {
-  process.env['LOOP_JWT_SIGNING_KEY'] = 'k'.repeat(32);
+  process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-signing-key-32-chars-min!!';
 });
 
 vi.mock('../../logger.js', () => ({

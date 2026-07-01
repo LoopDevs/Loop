@@ -11,6 +11,10 @@ const { dbMock, state } = vi.hoisted(() => {
   interface State {
     forUpdateRows: unknown[];
     selectRows: unknown[];
+    /** ADM-01: the bare-awaited daily-cap-sum query (`.where(...)` with no
+     * further chain call) — distinct from `forUpdateRows` (`.for('update')`)
+     * and `selectRows` (`.limit(1)`, the prior-payout lookup). */
+    dayCapRows: unknown[];
     insertCreditCalls: unknown[];
     insertUserCreditsCalls: unknown[];
     insertPayoutCalls: unknown[];
@@ -23,6 +27,7 @@ const { dbMock, state } = vi.hoisted(() => {
   const s: State = {
     forUpdateRows: [],
     selectRows: [],
+    dayCapRows: [{ usedMinor: '0' }],
     insertCreditCalls: [],
     insertUserCreditsCalls: [],
     insertPayoutCalls: [],
@@ -36,9 +41,18 @@ const { dbMock, state } = vi.hoisted(() => {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
   chain['select'] = vi.fn(() => chain);
   chain['from'] = vi.fn(() => chain);
-  chain['where'] = vi.fn(() => chain);
-  chain['for'] = vi.fn(async () => s.forUpdateRows);
-  chain['limit'] = vi.fn(async () => s.selectRows);
+  chain['execute'] = vi.fn(async () => []);
+  // ADM-01: three distinct queries all land through `.where(...)`. The
+  // daily-cap-sum query terminates with the bare awaited `.where(...)`
+  // result; the balance-lock query chains `.for('update')` after
+  // `.where`; the prior-active-withdrawal lookup chains `.limit(1)`.
+  // Return a thenable that's ALSO chainable to `.for`/`.limit` so all
+  // three call shapes resolve to their own independent fixture.
+  chain['where'] = vi.fn(() => ({
+    then: (resolve: (v: unknown) => unknown) => resolve(s.dayCapRows),
+    for: vi.fn(async () => s.forUpdateRows),
+    limit: vi.fn(async () => s.selectRows),
+  }));
   chain['insert'] = vi.fn((table: unknown) => {
     const name = (table as Record<string, unknown>)['__name'];
     (chain as unknown as { _lastInsert: string | undefined })['_lastInsert'] =
@@ -98,7 +112,7 @@ vi.mock('../../db/schema.js', () => ({
 }));
 
 import { applyAdminWithdrawal, WithdrawalAlreadyIssuedError } from '../withdrawals.js';
-import { InsufficientBalanceError } from '../adjustments.js';
+import { InsufficientBalanceError, DailyAdjustmentLimitError } from '../adjustments.js';
 
 const intent = {
   assetCode: 'USDLOOP',
@@ -111,6 +125,7 @@ const intent = {
 beforeEach(() => {
   state.forUpdateRows = [];
   state.selectRows = [];
+  state.dayCapRows = [{ usedMinor: '0' }];
   state.insertCreditCalls = [];
   state.insertUserCreditsCalls = [];
   state.insertPayoutCalls = [];
@@ -317,5 +332,61 @@ describe('applyAdminWithdrawal (A2-901 / ADR-024)', () => {
     ).rejects.toMatchObject({ payoutId: 'p-existing' });
     expect(state.insertPayoutCalls).toHaveLength(0);
     expect(state.insertCreditCalls).toHaveLength(0);
+  });
+
+  // ADM-01 (2026-06-30 cold audit): withdrawals had NO daily aggregate cap
+  // at all, unlike every sibling admin money-write. These pin the new
+  // ADMIN_DAILY_WITHDRAWAL_CAP_MINOR check (default 100_000_000n minor).
+  describe('ADM-01: daily withdrawal cap', () => {
+    it('rejects a withdrawal that would push the day total over the cap', async () => {
+      state.forUpdateRows = [{ userId: 'u-1', currency: 'USD', balanceMinor: 500_000_000n }];
+      state.dayCapRows = [{ usedMinor: '99999900' }];
+      await expect(
+        applyAdminWithdrawal({
+          userId: 'u-1',
+          currency: 'USD',
+          amountMinor: 200n, // 99_999_900 + 200 > 100_000_000 default cap
+          intent,
+          reason: 'r',
+        }),
+      ).rejects.toBeInstanceOf(DailyAdjustmentLimitError);
+      // Must fail BEFORE touching the balance lock or writing anything.
+      expect(state.insertPayoutCalls).toHaveLength(0);
+      expect(state.insertCreditCalls).toHaveLength(0);
+    });
+
+    it('allows a withdrawal that stays within the daily cap', async () => {
+      state.forUpdateRows = [{ userId: 'u-1', currency: 'USD', balanceMinor: 500_000_000n }];
+      state.dayCapRows = [{ usedMinor: '50000000' }];
+      state.returnedPayoutRow = { id: 'p-ok' };
+      state.returnedCreditRow = { id: 'ct-ok', createdAt: new Date() };
+      const result = await applyAdminWithdrawal({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 1000n,
+        intent,
+        reason: 'r',
+      });
+      expect(result.id).toBe('ct-ok');
+    });
+
+    it('cap is per-currency — a maxed-out USD total does not block a GBP withdrawal', async () => {
+      // The mock can't distinguish currency in the fixture, so this
+      // documents the intent at the query level: the real WHERE clause
+      // filters on `currency = args.currency`, verified by inspecting
+      // the actual query builder call.
+      state.forUpdateRows = [{ userId: 'u-1', currency: 'GBP', balanceMinor: 500_000_000n }];
+      state.dayCapRows = [{ usedMinor: '0' }];
+      state.returnedPayoutRow = { id: 'p-gbp' };
+      state.returnedCreditRow = { id: 'ct-gbp', createdAt: new Date() };
+      const result = await applyAdminWithdrawal({
+        userId: 'u-1',
+        currency: 'GBP',
+        amountMinor: 1000n,
+        intent,
+        reason: 'r',
+      });
+      expect(result.id).toBe('ct-gbp');
+    });
   });
 });

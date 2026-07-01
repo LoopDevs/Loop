@@ -49,10 +49,20 @@ export function useFocusTrap<T extends HTMLElement>({
     };
 
     const tabbables = (): HTMLElement[] => {
+      // CF2 WUI-01 (2026-06-30 cold audit): the exclusion of tabindex="-1"
+      // MUST apply after matching any branch, not just the bare `[tabindex]`
+      // one. As a single comma-separated selector, `button:not([disabled])`
+      // (and the input/select/textarea/a/area branches) matched a
+      // `tabindex="-1"` element independent of its tabindex value — so a
+      // roving-tabindex radiogroup (most options intentionally -1, one 0)
+      // had its inactive options counted as tab stops, computing the wrong
+      // first/last tabbable and letting Tab escape the trap.
       const nodes = container.querySelectorAll<HTMLElement>(
-        'a[href], area[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        'a[href], area[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]',
       );
-      return Array.from(nodes).filter(isVisible);
+      return Array.from(nodes).filter(
+        (el) => el.getAttribute('tabindex') !== '-1' && isVisible(el),
+      );
     };
 
     // Move focus in on open. Prefer an explicit initial target (e.g. the

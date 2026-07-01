@@ -122,18 +122,31 @@ export async function markOtpConsumed(id: string, now?: Date): Promise<void> {
 }
 
 /**
- * Bumps the per-row `attempts` counter. Called on a bad code guess so
- * the row locks itself out after `OTP_MAX_ATTEMPTS`.
+ * Bumps the `attempts` counter on every live (unconsumed, unexpired) OTP
+ * row for the email. Called on a bad code guess so each outstanding row
+ * locks itself out after `OTP_MAX_ATTEMPTS`.
  *
- * A2-561: target the SINGLE newest live row, not every live row for
- * the email. The prior UPDATE bumped `attempts` across the whole
- * window — if a user requested two codes back-to-back and typed a
- * wrong guess, BOTH rows got burned. A separate code (like the
- * second one they actually want to use) can't be the target of an
- * `attempts`-range check if the row is already at MAX.
+ * CF2 AUTH-01 (2026-06-30 cold audit) / reverts A2-561: A2-561 scoped this
+ * to the SINGLE newest live row so a user holding two live codes (e.g. they
+ * requested a second one before the first email arrived) wouldn't have
+ * their *other* still-wanted code burned by an unrelated typo. That fix
+ * introduced a real bypass: an attacker can keep calling `request-otp`
+ * (issuing fresh rows) between guesses, so every wrong guess bumps only
+ * the newest row while an older still-live code's `attempts` counter never
+ * moves — the 5-attempt ceiling on that row is never reached, defeating
+ * the "online brute force is not viable" guarantee `OTP_MAX_ATTEMPTS`
+ * documents. Bumping every live row closes that hole: no matter how many
+ * fresh codes exist, a wrong guess costs an attempt against ALL of them,
+ * so an attacker can't dodge the ceiling by rotating which row is newest.
  *
- * We scope the UPDATE to the single newest live row via a subselect
- * so the attempts counter is per-row again.
+ * Trade-off (deliberately accepted): a user who mistypes a code 5 times
+ * while holding two live codes loses both and must request a new one —
+ * a minor UX cost, and strictly better than an unbounded guess window.
+ * Better fix (not implemented here — a small schema change, flagged as a
+ * follow-up in the 2026-06-30 audit's remediation plan): track failed
+ * attempts per-email in a dedicated counter decoupled from the OTP row
+ * lifecycle entirely, so a sibling code's guess-budget is never touched
+ * by a wrong guess against a different one.
  */
 export async function incrementOtpAttempts(args: { email: string; now?: Date }): Promise<void> {
   // `args.now` is accepted for test-time overrides (the call sites
@@ -144,17 +157,7 @@ export async function incrementOtpAttempts(args: { email: string; now?: Date }):
   await db
     .update(otps)
     .set({ attempts: sql`${otps.attempts} + 1` })
-    .where(
-      sql`${otps.id} = (
-        SELECT ${otps.id}
-        FROM ${otps}
-        WHERE ${otps.email} = ${args.email}
-          AND ${otps.consumedAt} IS NULL
-          AND ${otps.expiresAt} > ${nowExpr}
-        ORDER BY ${otps.createdAt} DESC
-        LIMIT 1
-      )`,
-    );
+    .where(and(eq(otps.email, args.email), isNull(otps.consumedAt), gt(otps.expiresAt, nowExpr)));
 }
 
 /**

@@ -29,7 +29,7 @@ import { getUserById, type User } from '../db/users.js';
 import { payoutAssetFor } from '../credits/payout-asset.js';
 import { generatePayoutMemo } from '../credits/payout-builder.js';
 import { applyAdminWithdrawal, WithdrawalAlreadyIssuedError } from '../credits/withdrawals.js';
-import { InsufficientBalanceError } from '../credits/adjustments.js';
+import { InsufficientBalanceError, DailyAdjustmentLimitError } from '../credits/adjustments.js';
 import { notifyAdminAudit } from '../discord.js';
 import { logger } from '../logger.js';
 import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
@@ -227,6 +227,18 @@ export async function adminWithdrawalHandler(c: Context): Promise<Response> {
           message: err.message,
         },
         409,
+      );
+    }
+    if (err instanceof DailyAdjustmentLimitError) {
+      // ADM-01: per-currency, per-UTC-day withdrawal cap hit — mirrors
+      // the adjustment/compensation handlers' response shape so an
+      // operator sees "you've already withdrawn X today, cap is Y".
+      return c.json(
+        {
+          code: 'DAILY_LIMIT_EXCEEDED',
+          message: `Daily ${err.currency} withdrawal cap (${err.capMinor} minor) hit — ${err.usedMinor} used today, attempted ${err.attemptedDelta}`,
+        },
+        429,
       );
     }
     log.error({ err, userId, adminUserId: actor.id }, 'Withdrawal failed');

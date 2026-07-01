@@ -4,7 +4,7 @@ import type { Context } from 'hono';
 // env.ts snapshots at module load — set everything up-front.
 vi.hoisted(() => {
   process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
-  process.env['LOOP_JWT_SIGNING_KEY'] = 'k'.repeat(32);
+  process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-signing-key-32-chars-min!!';
   process.env['GOOGLE_OAUTH_CLIENT_ID_WEB'] = 'google-web-client';
   process.env['GOOGLE_OAUTH_CLIENT_ID_IOS'] = 'google-ios-client';
   process.env['APPLE_SIGN_IN_SERVICE_ID'] = 'io.loopfinance.app';

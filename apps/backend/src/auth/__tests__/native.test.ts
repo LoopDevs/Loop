@@ -5,7 +5,7 @@ import type * as OtpsModule from '../otps.js';
 // Loop JWTs are minted by the verify-otp + refresh handlers; set the
 // signing key so tokens.ts is configured when the test loads.
 vi.hoisted(() => {
-  process.env['LOOP_JWT_SIGNING_KEY'] = 'k'.repeat(32);
+  process.env['LOOP_JWT_SIGNING_KEY'] = 'jwt-test-signing-key-32-chars-min!!';
 });
 
 const createOtpMock = vi.fn();
