@@ -45,7 +45,7 @@
  * `docker compose up -d db` locally; CI uses a postgres service
  * container).
  */
-import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { sql, eq } from 'drizzle-orm';
 
 const RUN_INTEGRATION = process.env['LOOP_E2E_DB'] === '1';
@@ -173,6 +173,7 @@ import { markOrderPaid } from '../../orders/transitions.js';
 import { runProcurementTick } from '../../orders/procurement.js';
 import { app } from '../../app.js';
 import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
+import { computeLedgerDriftSql } from '../../credits/ledger-invariant.js';
 import { operatorFetch } from '../../ctx/operator-pool.js';
 
 const describeIf = RUN_INTEGRATION ? describe : describe.skip;
@@ -185,6 +186,15 @@ describeIf('flywheel integration — XLM order → fulfilment → cashback credi
   beforeEach(async () => {
     await truncateAllTables();
     vi.mocked(operatorFetch).mockReset();
+  });
+
+  // Hardening C7 (2026-07 plan): every flow this suite drives must end
+  // with the mirror consistent — `user_credits.balance_minor` equal to
+  // the `credit_transactions` sum for every (user, currency). A new
+  // writer path that desyncs the two ships a red CI run instead of a
+  // silent production drift the ledger-invariant watcher finds later.
+  afterEach(async () => {
+    expect(await computeLedgerDriftSql(db)).toEqual([]);
   });
 
   afterAll(async () => {

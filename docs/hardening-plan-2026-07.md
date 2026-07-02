@@ -168,12 +168,18 @@
 - [ ] **C5. Dead-flag detector.** Script asserting every `LOOP_*` flag in
       `env.ts` still gates ≥1 live branch; flags stale flags and (B7) stale
       rotation keys. Wire into verify + CI quality job.
-- [ ] **C6. Rate-limit presence inventory.** Route-walk test: every mounted
+- [x] **C6. Rate-limit presence inventory.** Route-walk test: every mounted
       route declares a limiter or sits on an explicit allowlist (ratcheting,
-      like the parity gates).
-- [ ] **C7. Integration-suite ledger assertion.** After every flywheel walk,
+      like the parity gates). _Done: `rateLimit` middleware named,
+      `rate-limit-route-inventory.test.ts` default-deny walk + reasoned
+      allowlist (health probe, bearer-gated ops probes, test-only
+      endpoints) + stale-entry guard._
+- [x] **C7. Integration-suite ledger assertion.** After every flywheel walk,
       assert `sum(credit_transactions) == user_credits.balance_minor` per
       (user,currency) — makes any new mirror-desyncing writer fail CI.
+      _Done: `afterEach` ledger-consistency assertion (via
+      `computeLedgerDriftSql`) on every test in `flywheel.test.ts` and
+      `admin-writes.test.ts`._
 - [ ] **C8. Property-test seed rotation.** Per-run random seed, logged on
       failure for reproduction (or adopt fast-check) — the current fixed
       `0x5eed_1710` never explores new input space.
