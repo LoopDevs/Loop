@@ -145,12 +145,15 @@
       own bump-all-live-rows fix as a stopgap; the correct design is a
       per-email failed-attempt counter decoupled from OTP rows. Matters
       double because step-up minting reuses the same primitives.
-- [ ] **B6. Rate-limit ordering + fallback.** On `/api/admin/*` the blanket
+- [x] **B6. Rate-limit ordering + fallback.** On `/api/admin/*` the blanket
       `requireAuth` + `requireStaff` (two DB reads) run before any per-route
       limiter, so a valid-token non-staff user drives unthrottled DB work; and
       routes without an explicit `rateLimit()` have none. Add a cheap global
       fallback limiter early in the chain; keep per-route budgets as the tight
-      bound.
+      bound. _Done: `globalRateLimit` (600/min/IP, `/health`-exempt) mounted
+      before all route/namespace middleware — backstops unlimited routes +
+      the admin auth-DB-reads path; per-route limiters unchanged as the tight
+      bound; distinct `__global__` key namespace._
 - [x] **B7. HS256 retirement tripwire.** Nothing ever prompts removing
       `LOOP_JWT_SIGNING_KEY` after RS256 cutover — a standing
       forgery-if-leaked surface. Boot warn (then scheduled alert) when both
