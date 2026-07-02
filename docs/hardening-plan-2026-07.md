@@ -278,35 +278,40 @@ gate in Track C; skills are the residue that genuinely needs judgment.
       CTX, Horizon, Privy, admin bearers, step-up), and the accepted-risk
       register — so future contributors can tell "deliberate tradeoff" from
       "gap."
-- [ ] **E3. Skill: `/review-money-diff`.** The adversarial review procedure
+- [x] **E3. Skill: `/review-money-diff`.** The adversarial review procedure
       for ledger/Stellar/auth-touching diffs: check against E1's invariants,
       concurrency probes (what if two of these run?), merge-regression checks
       (did a conflict resolution drop a gate?), fail-open hunts. Encodes what
       CI structurally cannot catch — merge-introduced semantic regressions.
-- [ ] **E4. Skill: `/add-endpoint`.** The golden path for the 5-file endpoint
+- [x] **E4. Skill: `/add-endpoint`.** The golden path for the 5-file endpoint
       fan-out as an executable recipe (drives D3's scaffold; interim value
       even before D3 lands).
-- [ ] **E5. Skill: `/merge-stale-stack`.** Discipline for rebasing stale PR
+- [x] **E5. Skill: `/merge-stale-stack`.** Discipline for rebasing stale PR
       stacks: real-postgres integration run per merge, adversarial review on
       money diffs, migration renumbering procedure, conflict-resolution
       gate-preservation checklist.
-- [ ] **E6. Subagent definitions (`.claude/agents/`).** `money-reviewer`
+- [x] **E6. Subagent definitions (`.claude/agents/`).** `money-reviewer`
       (adversarial, invariants-anchored), `auth-reviewer`, and
       `release-preflight` — so E3/E7 are one keyword away for any session.
-- [ ] **E7. Skill: `/release-preflight`.** Launch-readiness sweep: secrets
+- [x] **E7. Skill: `/release-preflight`.** Launch-readiness sweep: secrets
       preflight, kill-switch drill, reconciliation clean, branch-protection
       check, e2e-real smoke — one command before any production push.
-- [ ] **E8. Sensitive-path hook.** Harness hook (settings.json) that flags any
+- [x] **E8. Sensitive-path hook.** Harness hook (settings.json) that flags any
       edit under `credits/`, `payments/`, `orders/`, `auth/`, `wallet/`,
       `db/schema*` and injects a reminder to run E3 before opening the PR —
       the mechanical trigger that makes the skill get used.
-- [ ] **E9. AGENTS.md "how this repo defends itself" section.** One page:
+- [x] **E9. AGENTS.md "how this repo defends itself" section.** One page:
       the gate inventory (what catches what), the invariants doc, the skills,
       and when each is mandatory. The first thing a future mid-tier agent
       reads.
-- [ ] **E10. ADR backfill.** Any design decision made while executing A–D
+- [x] **E10. ADR backfill.** Any design decision made while executing A–D
       that isn't mechanical gets an ADR in the same PR (existing repo rule —
-      restated here so plan execution honors it).
+      restated here so plan execution honors it). _Done: ADR 038
+      consolidates the money-path hardening decisions (A1-A5) with
+      their rationale — why DB + app for conservation, why at-least-once
+      paging, why the settlement-record signal over a live CTX query,
+      why the hash not confirmed_at. Individual mechanical fixes are
+      documented at their call sites + this plan._
 
 ## Suggested execution order
 
