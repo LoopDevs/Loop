@@ -78,6 +78,18 @@ export const REDACT_PATHS: readonly string[] = [
   'LOOP_STELLAR_OPERATOR_SECRET_PREVIOUS',
   '*.LOOP_STELLAR_OPERATOR_SECRET',
   '*.LOOP_STELLAR_OPERATOR_SECRET_PREVIOUS',
+  // ADR 031 / ADR 036 Phase D — per-asset issuer secrets used to
+  // sign nightly interest mints (`kind='interest_mint'`). Same
+  // treatment as the operator secret: cover the env-key shape and
+  // the typed field name on the resolved signer config.
+  'LOOP_STELLAR_USDLOOP_ISSUER_SECRET',
+  'LOOP_STELLAR_GBPLOOP_ISSUER_SECRET',
+  'LOOP_STELLAR_EURLOOP_ISSUER_SECRET',
+  '*.LOOP_STELLAR_USDLOOP_ISSUER_SECRET',
+  '*.LOOP_STELLAR_GBPLOOP_ISSUER_SECRET',
+  '*.LOOP_STELLAR_EURLOOP_ISSUER_SECRET',
+  'issuerSecret',
+  '*.issuerSecret',
   // A2-655 + A2-1601 — env-var names for every secret-bearing
   // field loaded into process.env / env.ts. A boot-time
   // `log.debug({ env })` would otherwise leak these verbatim. The

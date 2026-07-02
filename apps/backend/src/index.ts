@@ -24,6 +24,8 @@ import {
 import { configuredLoopPayableAssets } from './credits/payout-asset.js';
 import { startInterestScheduler, stopInterestScheduler } from './credits/interest-scheduler.js';
 import { startAuthRowPurge, stopAuthRowPurge } from './auth/auth-row-purge.js';
+import { startInterestMintWorker, stopInterestMintWorker } from './credits/interest-mint.js';
+import { resolveIssuerSigners } from './payments/issuer-signers.js';
 import { startWalletProvisioning, stopWalletProvisioning } from './wallet/provisioning.js';
 import { markWorkerBlocked, markWorkerDisabled } from './runtime-health.js';
 
@@ -161,11 +163,40 @@ if (env.LOOP_WORKERS_ENABLED) {
     markWorkerDisabled('asset_drift_watcher', 'no LOOP issuers configured');
   }
 
-  // A2-905 / ADR 009: interest accrual scheduler. Zero bps →
-  // feature-off; skip silently so a deployment that hasn't
-  // received legal sign-off stays quiet instead of warning on
-  // every boot. Non-zero bps turns on the tick.
-  if (env.INTEREST_APY_BASIS_POINTS > 0) {
+  // Interest — exactly ONE writer may ever run (ADR 031 / ADR 036):
+  //
+  //   - LOOP_INTEREST_ONCHAIN_ENABLED=true → the interest-mint worker
+  //     (nightly on-chain mint mirrored into user_credits in one txn,
+  //     Phase D). The legacy scheduler is structurally never started
+  //     on this branch, and `startInterestScheduler` additionally
+  //     hard-throws on the flag as a tripwire against re-wiring.
+  //   - flag false → the legacy off-chain accrual scheduler exactly
+  //     as before (A2-905 / ADR 009), which per ADR 036 §3 must stay
+  //     disabled (INTEREST_APY_BASIS_POINTS=0) in cashback-mode
+  //     deployments until retired.
+  if (env.LOOP_INTEREST_ONCHAIN_ENABLED) {
+    markWorkerDisabled(
+      'interest_scheduler',
+      'superseded by on-chain interest mints (LOOP_INTEREST_ONCHAIN_ENABLED=true)',
+    );
+    if (env.INTEREST_APY_BASIS_POINTS <= 0) {
+      markWorkerDisabled('interest_mint', 'interest APY is zero');
+    } else if (resolveIssuerSigners().size === 0) {
+      markWorkerBlocked('interest_mint', {
+        reason: 'no LOOP_STELLAR_*_ISSUER_SECRET configured',
+        staleAfterMs: 60 * 60 * 1000,
+      });
+      logger.error(
+        'LOOP_INTEREST_ONCHAIN_ENABLED=true but no LOOP_STELLAR_*_ISSUER_SECRET is configured — interest-mint worker will not start',
+      );
+    } else {
+      startInterestMintWorker({ apyBps: env.INTEREST_APY_BASIS_POINTS });
+    }
+    // The interest-pool watcher is deliberately NOT started here:
+    // the forward-mint pool is a legacy-path construct (pre-minted
+    // batch sub-allocated off-chain) — on-chain mints don't use it.
+  } else if (env.INTEREST_APY_BASIS_POINTS > 0) {
+    markWorkerDisabled('interest_mint', 'LOOP_INTEREST_ONCHAIN_ENABLED is false');
     startInterestScheduler({
       period: {
         apyBasisPoints: env.INTEREST_APY_BASIS_POINTS,
@@ -174,9 +205,9 @@ if (env.LOOP_WORKERS_ENABLED) {
       intervalMs: env.INTEREST_TICK_INTERVAL_HOURS * 60 * 60 * 1000,
     });
     // Pool depletion watcher (ADR 009 / 015 forward-mint pool).
-    // Only meaningful when interest is on AND at least one LOOP-
-    // asset issuer is configured — otherwise there's nothing to
-    // forward-mint against.
+    // Only meaningful when legacy interest is on AND at least one
+    // LOOP-asset issuer is configured — otherwise there's nothing
+    // to forward-mint against.
     if (configuredLoopPayableAssets().length > 0) {
       startInterestPoolWatcher({
         apyBasisPoints: env.INTEREST_APY_BASIS_POINTS,
@@ -186,6 +217,7 @@ if (env.LOOP_WORKERS_ENABLED) {
     }
   } else {
     markWorkerDisabled('interest_scheduler', 'interest APY is zero');
+    markWorkerDisabled('interest_mint', 'interest APY is zero');
   }
 
   // CF-26 / X-PRIV-07/08: auth-row retention purge. Deletes expired/
@@ -214,6 +246,7 @@ if (env.LOOP_WORKERS_ENABLED) {
   markWorkerDisabled('asset_drift_watcher', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('interest_scheduler', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('auth_row_purge', 'LOOP_WORKERS_ENABLED is false');
+  markWorkerDisabled('interest_mint', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('wallet_provisioning', 'LOOP_WORKERS_ENABLED is false');
 }
 
@@ -248,6 +281,7 @@ function shutdown(signal: string): void {
   stopPayoutWorker();
   stopAssetDriftWatcher();
   stopInterestScheduler();
+  stopInterestMintWorker();
   stopInterestPoolWatcher();
   stopAuthRowPurge();
   stopWalletProvisioning();

@@ -32,7 +32,7 @@ export async function listPayoutsForAdmin(opts: {
   userId?: string;
   assetCode?: string;
   /** ADR-024 §2 + ADR 036: filter by payout discriminator. Lets treasury split order-cashback / emission / burn flows visually. */
-  kind?: 'order_cashback' | 'emission' | 'burn';
+  kind?: 'order_cashback' | 'emission' | 'burn' | 'interest_mint';
   before?: Date;
   limit?: number;
 }): Promise<PendingPayout[]> {
