@@ -16,7 +16,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "npm run test -w @loop/backend -w @loop/web",
+    "test": "npm run test -w @loop/shared -w @loop/backend -w @loop/web",
     "test:coverage": "npm run test:coverage --workspaces --if-present",
     "test:e2e": "playwright test --config=playwright.mocked.config.ts",
     "test:e2e:mocked": "playwright test --config=playwright.mocked.config.ts",
