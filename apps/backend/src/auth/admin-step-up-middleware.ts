@@ -64,7 +64,7 @@ interface AuthLike {
  *   exactly this class (a wildcard token still satisfies it).
  */
 export function requireAdminStepUp(action?: AdminStepUpScope): MiddlewareHandler {
-  return async (c: Context, next) => {
+  const mw: MiddlewareHandler = async (c: Context, next) => {
     if (!isAdminStepUpConfigured()) {
       log.error('admin step-up gate hit but LOOP_ADMIN_STEP_UP_SIGNING_KEY is unset');
       return c.json(
@@ -83,6 +83,27 @@ export function requireAdminStepUp(action?: AdminStepUpScope): MiddlewareHandler
     // gates on). Loop-native admins MUST present a step-up token.
     if (auth !== undefined && auth.kind === 'ctx') {
       return next();
+    }
+
+    // Hardening B2: fail closed when there is no authenticated
+    // context to pin the step-up token's subject against. The gate
+    // is designed to mount AFTER requireAuth + requireStaff; if a
+    // future mount drops those, the subject-pinning check below
+    // would silently no-op and ANY admin's valid step-up token would
+    // satisfy the gate. A missing auth context is a mount-order bug,
+    // not a client error — reject rather than trust.
+    if (auth === undefined || auth.userId === undefined) {
+      log.error(
+        { path: c.req.path },
+        'step-up gate reached without an authenticated context — mount-order bug; failing closed',
+      );
+      return c.json(
+        {
+          code: 'STEP_UP_INVALID',
+          message: 'Step-up authentication could not be verified for this session.',
+        },
+        401,
+      );
     }
 
     const tokenHeader = c.req.header('X-Admin-Step-Up') ?? c.req.header('x-admin-step-up');
@@ -115,8 +136,10 @@ export function requireAdminStepUp(action?: AdminStepUpScope): MiddlewareHandler
     // Subject pinning: the step-up token's `sub` MUST match the
     // bearer access token's `sub`. Otherwise admin A could mint a
     // step-up, hand the token to admin B, and B replays it on their
-    // session — sidestepping the per-admin freshness check.
-    if (auth?.userId !== undefined && verified.claims.sub !== auth.userId) {
+    // session — sidestepping the per-admin freshness check. The
+    // auth context is guaranteed non-undefined by the fail-closed
+    // check above (B2), so this comparison is unconditional.
+    if (verified.claims.sub !== auth.userId) {
       log.warn(
         { stepUpSub: verified.claims.sub, bearerSub: auth.userId },
         'admin step-up subject mismatch',
@@ -161,4 +184,12 @@ export function requireAdminStepUp(action?: AdminStepUpScope): MiddlewareHandler
     c.set('stepUp', verified.claims);
     return next();
   };
+  // Named so the route-inventory test (staff-route-gating.test.ts)
+  // can statically assert every destructive admin mount declares its
+  // step-up gate + scope — same pattern as `requireStaff`. Hardening
+  // B1: before this, the gate was an anonymous closure the inventory
+  // walk couldn't see, so a new money-write route missing step-up
+  // passed every structural test.
+  Object.defineProperty(mw, 'name', { value: `requireAdminStepUp(${action ?? 'any'})` });
+  return mw;
 }

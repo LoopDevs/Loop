@@ -295,7 +295,9 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       const g = groups.get(key) ?? { method: r.method, path: r.path, gates: [], handlerCount: 0 };
       g.handlerCount++;
       const name = (r.handler as { name?: string }).name ?? '';
-      if (name.startsWith('requireStaff(')) g.gates.push(name);
+      if (name.startsWith('requireStaff(') || name.startsWith('requireAdminStepUp(')) {
+        g.gates.push(name);
+      }
       groups.set(key, g);
     }
     return [...groups.values()];
@@ -357,5 +359,68 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       expect(g, `${key} is mounted`).toBeDefined();
       expect(g?.gates, `${key} carries requireStaff(admin)`).toContain('requireStaff(admin)');
     }
+  });
+
+  it('every destructive write carries its correctly-SCOPED step-up gate (ADR 028 / CF-08)', () => {
+    // Hardening B1: this is the structural half the tier inventory
+    // couldn't see — `requireAdminStepUp` used to return an anonymous
+    // closure, so a new money write mounted with `requireStaff(admin)`
+    // but WITHOUT step-up passed every test. The scope is pinned per
+    // route: merge history has already produced both failure modes
+    // this guards (a route losing its step-up gate entirely, and a
+    // route keeping the gate but losing its CF-08 scope binding).
+    const mustCarryStepUp: Record<string, string> = {
+      'POST /api/admin/users/:userId/credit-adjustments': 'requireAdminStepUp(credit-adjustment)',
+      'POST /api/admin/users/:userId/refunds': 'requireAdminStepUp(refund)',
+      'POST /api/admin/users/:userId/emissions': 'requireAdminStepUp(emission)',
+      'POST /api/admin/users/:userId/home-currency': 'requireAdminStepUp(home-currency)',
+      'POST /api/admin/payouts/:id/retry': 'requireAdminStepUp(payout-retry)',
+      'POST /api/admin/payouts/:id/compensate': 'requireAdminStepUp(payout-compensation)',
+      'PUT /api/admin/staff/:userId/role': 'requireAdminStepUp(staff-role-grant)',
+      'DELETE /api/admin/staff/:userId/role': 'requireAdminStepUp(staff-role-revoke)',
+      // Sets future emission rates — see the route mount's comment.
+      'PUT /api/admin/merchant-cashback-configs/:merchantId': 'requireAdminStepUp(cashback-config)',
+    };
+    const groups = new Map(adminRouteGroups().map((g) => [`${g.method} ${g.path}`, g]));
+    for (const [key, gate] of Object.entries(mustCarryStepUp)) {
+      const g = groups.get(key);
+      expect(g, `${key} is mounted`).toBeDefined();
+      expect(g?.gates, `${key} carries ${gate}`).toContain(gate);
+    }
+  });
+
+  it('default-deny: a NEW admin-tier write must declare step-up or join the explicit exempt list', () => {
+    // The strongest form of the B1 guarantee: any non-GET mount gated
+    // `requireStaff(admin)` either carries a named step-up gate or is
+    // listed here WITH its reason. Adding a destructive admin write
+    // without step-up now requires editing this list — which is
+    // exactly the review conversation ADR 028 wants to force.
+    const STEP_UP_EXEMPT = new Set<string>([
+      // Mints the step-up token itself — gating it on step-up would
+      // be circular; it re-authenticates via a fresh OTP instead.
+      'POST /api/admin/step-up',
+      // Catalog refresh: no money path, reversible, rate-limited.
+      'POST /api/admin/merchants/resync',
+      // Sends a test embed to the configured Discord webhook — no
+      // state change beyond the outbound message.
+      'POST /api/admin/discord/test',
+      // ADR 037 support-tier delivery-unsticking actions: reversible
+      // re-drives of existing intents (no new value creation), scoped
+      // to the support remit on purpose — adding step-up would move
+      // them back to admin-only.
+      'POST /api/admin/watcher-skips/:paymentId/reopen',
+      'POST /api/admin/users/:userId/wallet/reprovision',
+      'POST /api/admin/orders/:orderId/refetch-redemption',
+    ]);
+    const offenders: string[] = [];
+    for (const g of adminRouteGroups()) {
+      if (g.method === 'GET') continue;
+      const key = `${g.method} ${g.path}`;
+      if (STEP_UP_EXEMPT.has(key)) continue;
+      if (!g.gates.some((name) => name.startsWith('requireAdminStepUp('))) {
+        offenders.push(key);
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });

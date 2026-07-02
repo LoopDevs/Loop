@@ -109,6 +109,9 @@ export async function upsertCashbackConfig(
       method: 'PUT',
       headers: { 'Idempotency-Key': options.idempotencyKey ?? generateIdempotencyKey() },
       body,
+      // ADR 028: this write sets future cashback emission rates —
+      // step-up gated on the backend; plumb the held token through.
+      withStepUp: true,
     },
   );
 }

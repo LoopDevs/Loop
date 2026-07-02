@@ -258,10 +258,14 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # LOOP_JWT_RSA_PRIVATE_KEY=<PKCS8 PEM>
 # LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS=<prior PKCS8 PEM during rotation>
 
-# Admin step-up auth (ADR 028). Absent → boot succeeds but destructive
-# admin endpoints (credit-adjust / emissions / payout-retry) return
-# 503 STEP_UP_UNAVAILABLE.
+# Admin step-up auth (ADR 028). Hardening B3: production boot FAILS
+# without it (destructive admin endpoints would all 503
+# STEP_UP_UNAVAILABLE — a silently-degraded admin surface); set
+# DISABLE_ADMIN_STEP_UP_ENFORCEMENT=1 to deliberately ship the
+# surface disabled (staging only). Outside production: absent → boot
+# succeeds, destructive endpoints 503.
 # LOOP_ADMIN_STEP_UP_SIGNING_KEY=<at-least-32-char-random-secret>
+# DISABLE_ADMIN_STEP_UP_ENFORCEMENT=1
 
 # Gift-card redeem-secret envelope key (CF-25 / X-PRIV-03). Set → AES-256-GCM
 # encrypts orders.redeem_code + redeem_pin at rest (redeem_url stays plaintext).

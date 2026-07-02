@@ -24,6 +24,7 @@
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
 import { requireStaff } from '../auth/require-staff.js';
+import { requireAdminStepUp } from '../auth/admin-step-up-middleware.js';
 import { listConfigsHandler, upsertConfigHandler, configHistoryHandler } from '../admin/handler.js';
 import { adminConfigsHistoryHandler } from '../admin/configs-history.js';
 import { adminCashbackConfigsCsvHandler } from '../admin/cashback-configs-csv.js';
@@ -74,6 +75,12 @@ export function mountAdminCashbackConfigRoutes(app: Hono): void {
     '/api/admin/merchant-cashback-configs/:merchantId',
     rateLimit('PUT /api/admin/merchant-cashback-configs/:merchantId', 60, 60_000),
     requireStaff('admin'),
+    // ADR 028 / hardening B1: this upsert sets future cashback
+    // emission rates (orders stamp the split from this table at
+    // creation) — a stolen admin bearer must not be able to inflate
+    // user_cashback_pct and harvest emissions without a fresh
+    // step-up confirmation.
+    requireAdminStepUp('cashback-config'),
     upsertConfigHandler,
   );
   app.get(

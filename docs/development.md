@@ -245,9 +245,12 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 
 # Admin step-up auth (ADR 028 / A4-063). ≥32 chars, deliberately
 # separate from LOOP_JWT_SIGNING_KEY so a JWT-key compromise doesn't
-# widen to step-up. Absent → boot succeeds but the destructive admin
-# endpoints (credit-adjust / emissions / payout-retry) fail closed
-# with 503 STEP_UP_UNAVAILABLE. `_PREVIOUS` only during rotation.
+# widen to step-up. `_PREVIOUS` only during rotation. Hardening B3:
+# production boot FAILS without the key unless
+# DISABLE_ADMIN_STEP_UP_ENFORCEMENT=1 explicitly ships the surface
+# disabled (staging only — destructive admin writes then all 503
+# STEP_UP_UNAVAILABLE). Outside production: absent → boot succeeds,
+# destructive endpoints fail closed with 503.
 # LOOP_ADMIN_STEP_UP_SIGNING_KEY=...(≥32 chars)
 # LOOP_ADMIN_STEP_UP_SIGNING_KEY_PREVIOUS=...(≥32 chars)
 

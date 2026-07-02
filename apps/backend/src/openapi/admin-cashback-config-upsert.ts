@@ -108,7 +108,8 @@ export function registerAdminCashbackConfigUpsertOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       401: {
-        description: 'Missing or invalid bearer',
+        description:
+          'Missing or invalid bearer, or step-up required/invalid (`STEP_UP_REQUIRED` / `STEP_UP_INVALID` / `STEP_UP_SUBJECT_MISMATCH` / `STEP_UP_PURPOSE_MISMATCH` — ADR 028; this write sets future cashback emission rates)',
         content: { 'application/json': { schema: errorResponse } },
       },
       404: {
@@ -123,6 +124,10 @@ export function registerAdminCashbackConfigUpsertOpenApi(
       500: {
         description:
           'DB write failed (`INTERNAL_ERROR`), or the stored replay snapshot for this Idempotency-Key is unreadable (`IDEMPOTENCY_SNAPSHOT_CORRUPT` — the write is never re-executed)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      503: {
+        description: 'Step-up auth unavailable on this deployment (`STEP_UP_UNAVAILABLE`)',
         content: { 'application/json': { schema: errorResponse } },
       },
     },

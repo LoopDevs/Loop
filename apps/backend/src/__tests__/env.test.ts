@@ -22,6 +22,10 @@ const base = {
   DATABASE_URL: 'postgres://user:pass@localhost:5433/loop',
 };
 
+// Hardening B3: production boots require LOOP_ADMIN_STEP_UP_SIGNING_KEY
+// (or the explicit opt-out), so production-success fixtures carry it.
+const STEP_UP_KEY = 'admin-step-up-test-key-32-chars-min!!';
+
 describe('parseEnv', () => {
   it('parses a minimal valid env with defaults', () => {
     const env = parseEnv(base);
@@ -176,6 +180,7 @@ describe('parseEnv', () => {
       NODE_ENV: 'production',
       INCLUDE_DISABLED_MERCHANTS: 'true',
       IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+      LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
     });
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('INCLUDE_DISABLED_MERCHANTS'));
     warn.mockRestore();
@@ -199,6 +204,7 @@ describe('parseEnv', () => {
       ...base,
       NODE_ENV: 'production',
       IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com,images.example.com',
+      LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
     });
     expect(env.NODE_ENV).toBe('production');
     expect(env.IMAGE_PROXY_ALLOWED_HOSTS).toBe('cdn.example.com,images.example.com');
@@ -209,6 +215,7 @@ describe('parseEnv', () => {
       ...base,
       NODE_ENV: 'production',
       DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT: '1',
+      LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
     });
     expect(env.NODE_ENV).toBe('production');
   });
@@ -338,6 +345,7 @@ describe('parseEnv', () => {
           ...base,
           NODE_ENV: 'production',
           IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
         }),
       ).not.toThrow();
       expect(() =>
@@ -346,8 +354,92 @@ describe('parseEnv', () => {
           NODE_ENV: 'production',
           IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
           DISABLE_RATE_LIMITING: 'false',
+          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
         }),
       ).not.toThrow();
+    });
+  });
+
+  // Hardening B3 (2026-07 plan): the two auth misconfigurations that
+  // previously only surfaced at request time now fail at boot.
+  describe('B3: native-auth signing-key boot guard', () => {
+    it('refuses LOOP_AUTH_NATIVE_ENABLED=true with no signing capability (any env)', () => {
+      for (const nodeEnv of ['development', 'test', 'production'] as const) {
+        expect(() =>
+          parseEnv({
+            ...base,
+            NODE_ENV: nodeEnv,
+            LOOP_AUTH_NATIVE_ENABLED: 'true',
+            IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+            LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+          }),
+        ).toThrow(/LOOP_AUTH_NATIVE_ENABLED=true requires a JWT signing key/);
+      }
+    });
+
+    it('accepts native auth with the HS256 key', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          LOOP_AUTH_NATIVE_ENABLED: 'true',
+          LOOP_JWT_SIGNING_KEY: 'jwt-test-signing-key-32-chars-min!!',
+        }),
+      ).not.toThrow();
+    });
+
+    it('accepts native auth with only the RS256 key', () => {
+      const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const pem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+      expect(() =>
+        parseEnv({
+          ...base,
+          LOOP_AUTH_NATIVE_ENABLED: 'true',
+          LOOP_JWT_RSA_PRIVATE_KEY: pem,
+        }),
+      ).not.toThrow();
+    });
+
+    it('leaves native-auth-disabled configs unconstrained', () => {
+      expect(() => parseEnv({ ...base })).not.toThrow();
+    });
+  });
+
+  describe('B3: production step-up-key boot guard (ADR 028)', () => {
+    it('refuses production without LOOP_ADMIN_STEP_UP_SIGNING_KEY', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          NODE_ENV: 'production',
+          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+        }),
+      ).toThrow(/LOOP_ADMIN_STEP_UP_SIGNING_KEY must be set in production/);
+    });
+
+    it('allows DISABLE_ADMIN_STEP_UP_ENFORCEMENT=1 as the explicit opt-out', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          NODE_ENV: 'production',
+          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+          DISABLE_ADMIN_STEP_UP_ENFORCEMENT: '1',
+        }),
+      ).not.toThrow();
+    });
+
+    it('rejects any opt-out value other than "1" at parse time', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          NODE_ENV: 'production',
+          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+          DISABLE_ADMIN_STEP_UP_ENFORCEMENT: 'true',
+        }),
+      ).toThrow(/DISABLE_ADMIN_STEP_UP_ENFORCEMENT/);
+    });
+
+    it('does not enforce the step-up key outside production', () => {
+      expect(() => parseEnv({ ...base, NODE_ENV: 'development' })).not.toThrow();
+      expect(() => parseEnv({ ...base, NODE_ENV: 'test' })).not.toThrow();
     });
   });
 

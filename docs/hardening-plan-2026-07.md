@@ -87,21 +87,35 @@
 
 ## Track B — Auth hardening
 
-- [ ] **B1. Step-up structural enforcement.** `requireAdminStepUp` returns an
+- [x] **B1. Step-up structural enforcement.** `requireAdminStepUp` returns an
       anonymous closure the route-inventory test can't see — a new money-write
       route without step-up passes every structural test. Name the middleware
       (same `Object.defineProperty` trick as `requireStaff`) and extend
       `staff-route-gating.test.ts` to pin the destructive route set to a
-      required step-up scope.
-- [ ] **B2. Step-up subject-pinning fail-closed.** The `sub === auth.userId`
+      required step-up scope. _Done: middleware named
+      `requireAdminStepUp(<scope>)`; inventory test pins the 8 scoped
+      destructive routes AND adds a default-deny rule — any new
+      admin-tier write must declare step-up or join an explicit,
+      reasoned exempt list._
+- [x] **B2. Step-up subject-pinning fail-closed.** The `sub === auth.userId`
       check silently no-ops when `auth` is undefined
       (`admin-step-up-middleware.ts:119`) — safe only by mount order today.
-      Reject outright when there's no auth context.
-- [ ] **B3. Boot cross-field checks.** `env.ts` has many production tripwires
+      Reject outright when there's no auth context. _Done: missing auth
+      context (or missing userId) → 401 + error log; subject check now
+      unconditional._
+- [x] **B3. Boot cross-field checks.** `env.ts` has many production tripwires
       but none for: `LOOP_AUTH_NATIVE_ENABLED` without a signing key (500s at
       request time), or production admin surface without
       `LOOP_ADMIN_STEP_UP_SIGNING_KEY` (silent 503 on all destructive writes).
-      Fail at boot instead.
+      Fail at boot instead. _Done: native-auth-without-key fails parse in
+      every env; production-without-step-up-key fails boot unless
+      `DISABLE_ADMIN_STEP_UP_ENFORCEMENT=1`; preflight-tranche-1
+      promotes the key to REQUIRED. ⚠️ Operator: production Fly
+      (`loopfinance-api`) does NOT currently have
+      `LOOP_ADMIN_STEP_UP_SIGNING_KEY` — set it before the next deploy
+      (`flyctl secrets set LOOP_ADMIN_STEP_UP_SIGNING_KEY=$(openssl rand -base64 48) -a loopfinance-api`;
+      note this restarts the app and enables the step-up-gated admin
+      writes)._
 - [ ] **B4. Session revocation surface.** `revokeAllRefreshTokensForUser`
       exists but no route mounts it — no user "sign out all devices," no admin
       "revoke user's sessions," so a stolen 30-day refresh token can only die

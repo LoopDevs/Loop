@@ -5,6 +5,7 @@ import type * as SchemaModule from '../../db/schema.js';
 
 vi.hoisted(() => {
   process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
+  process.env['LOOP_JWT_SIGNING_KEY'] ??= 'unit-test-loop-jwt-signing-key-32ch!';
   process.env['LOOP_STELLAR_DEPOSIT_ADDRESS'] =
     'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
   // CF-25 / X-PRIV-03: set the redeem envelope key (a fixed, valid
