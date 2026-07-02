@@ -65,7 +65,8 @@ import { app, __resetRateLimitsForTests } from '../../app.js';
 import { notifyAdminBulkRead } from '../../discord.js';
 import { signLoopToken } from '../../auth/tokens.js';
 import { signAdminStepUpToken } from '../../auth/admin-step-up.js';
-import { adjustmentCapLockKey } from '../../credits/adjustments.js';
+import { adjustmentCapLockKey, DailyAdjustmentLimitError } from '../../credits/adjustments.js';
+import { applyAdminEmission } from '../../credits/emissions.js';
 import { env } from '../../env.js';
 import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
 
@@ -877,6 +878,273 @@ describeIf('admin emission write — real postgres ladder, mirror untouched (ADR
       expect(compensationRows).toHaveLength(1);
       expect(credit?.balanceMinor).toBe(2000n);
     }
+  });
+});
+
+describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB fence)', () => {
+  beforeAll(async () => {
+    await ensureMigrated();
+  });
+
+  beforeEach(async () => {
+    await truncateAllTables();
+  });
+
+  const DEST = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
+  async function emit(args: {
+    userId: string;
+    bearer: string;
+    stepUp: string;
+    amountMinor: string;
+  }): Promise<Response> {
+    return app.request(`http://localhost/api/admin/users/${args.userId}/emissions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${args.bearer}`,
+        'idempotency-key': idemKey(),
+        'X-Admin-Step-Up': args.stepUp,
+      },
+      body: JSON.stringify({
+        amountMinor: args.amountMinor,
+        currency: 'USD',
+        destinationAddress: DEST,
+        reason: 'conservation integration test',
+      }),
+    });
+  }
+
+  it('rejects cumulative emissions past the liability — the audited unbacked-mint hole', async () => {
+    // THE finding: each call passes `balance >= amount` because
+    // emission never debits, so before A1 an admin could emit 1500,
+    // then 800, then 800… against a 2000 balance forever.
+    const { targetUser, bearer, stepUp } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
+
+    const first = await emit({ userId: targetUser.id, bearer, stepUp, amountMinor: '1500' });
+    expect(first.status).toBe(200);
+
+    const second = await emit({ userId: targetUser.id, bearer, stepUp, amountMinor: '800' });
+    expect(second.status).toBe(409);
+    const body = (await second.json()) as { code: string; message: string };
+    expect(body.code).toBe('EMISSION_EXCEEDS_UNEMITTED_BALANCE');
+    expect(body.message).toContain('500'); // remaining headroom named for the operator
+
+    // Exactly the remaining headroom still emits fine.
+    const third = await emit({ userId: targetUser.id, bearer, stepUp, amountMinor: '500' });
+    expect(third.status).toBe(200);
+  });
+
+  it('a CONFIRMED prior mint consumes headroom — its liability is already on-chain', async () => {
+    // Seeded as a confirmed emission row: the conservation accounting
+    // treats the three mint kinds (order_cashback / emission /
+    // interest_mint) through one uniform IN-clause, and the kind-shape
+    // CHECK requires order_cashback rows to carry a real order — the
+    // state coverage (confirmed counts, failed doesn't) is what these
+    // two tests pin.
+    const { targetUser, bearer, stepUp } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
+    await db.insert(pendingPayouts).values({
+      userId: targetUser.id,
+      kind: 'emission',
+      assetCode: 'USDLOOP',
+      assetIssuer: 'GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      toAddress: DEST,
+      amountStroops: 2000n * 100_000n,
+      memoText: 'seeded confirmed prior emission',
+      state: 'confirmed',
+    });
+
+    const res = await emit({ userId: targetUser.id, bearer, stepUp, amountMinor: '1' });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe(
+      'EMISSION_EXCEEDS_UNEMITTED_BALANCE',
+    );
+  });
+
+  it('a FAILED prior mint does NOT consume headroom — the backfill use case emission exists for', async () => {
+    const { targetUser, bearer, stepUp } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
+    await db.insert(pendingPayouts).values({
+      userId: targetUser.id,
+      kind: 'emission',
+      assetCode: 'USDLOOP',
+      assetIssuer: 'GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      toAddress: DEST,
+      amountStroops: 2000n * 100_000n,
+      memoText: 'seeded failed prior emission',
+      state: 'failed',
+      lastError: 'seeded terminal failure',
+      attempts: 5,
+    });
+
+    const res = await emit({ userId: targetUser.id, bearer, stepUp, amountMinor: '2000' });
+    expect(res.status).toBe(200);
+  });
+
+  it('DB fence: a raw INSERT bypassing the app layer is rejected by the conservation trigger', async () => {
+    // The GBPLOOP-mint lesson: app-layer allowlists get bypassed by
+    // future writers. The trigger holds at the database boundary.
+    const { targetUser } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 100n });
+
+    let thrown: unknown = null;
+    await db
+      .insert(pendingPayouts)
+      .values({
+        userId: targetUser.id,
+        kind: 'emission',
+        assetCode: 'USDLOOP',
+        assetIssuer: 'GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        toAddress: DEST,
+        amountStroops: 5000n * 100_000n, // 50× the liability
+        memoText: 'rogue writer bypassing credits/emissions.ts',
+      })
+      .catch((err: unknown) => {
+        thrown = err;
+      });
+    expect(thrown).not.toBeNull();
+    const chain: string[] = [];
+    let cursor: unknown = thrown;
+    while (cursor instanceof Error) {
+      chain.push(cursor.message);
+      cursor = cursor.cause;
+    }
+    expect(chain.join(' | ')).toMatch(/emission_conservation/);
+  });
+
+  it('retry-after-backfill double mint is rejected by the re-entry trigger (adversarial-review P0)', async () => {
+    // The documented ops flow that would double-mint without the
+    // UPDATE-side trigger: an emission fails terminally, ops re-emits
+    // the backfill (legitimate — failed rows free headroom), and then
+    // someone retries the ORIGINAL failed row from the payouts list.
+    const { targetUser, bearer, stepUp } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
+
+    // The original emission, terminally failed.
+    const [failedRow] = await db
+      .insert(pendingPayouts)
+      .values({
+        userId: targetUser.id,
+        kind: 'emission',
+        assetCode: 'USDLOOP',
+        assetIssuer: 'GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        toAddress: DEST,
+        amountStroops: 2000n * 100_000n,
+        memoText: 'original emission, terminally failed',
+        state: 'failed',
+        lastError: 'op_no_trust',
+        attempts: 5,
+      })
+      .returning({ id: pendingPayouts.id });
+
+    // The backfill emission — legitimate, consumes the full headroom.
+    const backfill = await emit({ userId: targetUser.id, bearer, stepUp, amountMinor: '2000' });
+    expect(backfill.status).toBe(200);
+
+    // Retrying the original failed row would mint BOTH → 409.
+    const retry = await app.request(`http://localhost/api/admin/payouts/${failedRow!.id}/retry`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${bearer}`,
+        'idempotency-key': idemKey(),
+        'X-Admin-Step-Up': stepUp,
+      },
+      body: JSON.stringify({ reason: 'attempting the double-mint retry' }),
+    });
+    expect(retry.status).toBe(409);
+    const body = (await retry.json()) as { code: string };
+    expect(body.code).toBe('EMISSION_EXCEEDS_UNEMITTED_BALANCE');
+
+    // The failed row stays failed — nothing re-entered the queue.
+    const [row] = await db
+      .select()
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.id, failedRow!.id));
+    expect(row?.state).toBe('failed');
+  });
+
+  it('a legitimate retry (headroom intact) still passes the re-entry trigger', async () => {
+    const { targetUser, bearer, stepUp } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 2000n });
+    const [failedRow] = await db
+      .insert(pendingPayouts)
+      .values({
+        userId: targetUser.id,
+        kind: 'emission',
+        assetCode: 'USDLOOP',
+        assetIssuer: 'GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        toAddress: DEST,
+        amountStroops: 2000n * 100_000n,
+        memoText: 'failed emission, headroom untouched',
+        state: 'failed',
+        lastError: 'transient_horizon exhausted',
+        attempts: 5,
+      })
+      .returning({ id: pendingPayouts.id });
+
+    const retry = await app.request(`http://localhost/api/admin/payouts/${failedRow!.id}/retry`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${bearer}`,
+        'idempotency-key': idemKey(),
+        'X-Admin-Step-Up': stepUp,
+      },
+      body: JSON.stringify({ reason: 'legitimate retry, nothing re-materialised' }),
+    });
+    expect(retry.status).toBe(200);
+    const [row] = await db
+      .select()
+      .from(pendingPayouts)
+      .where(eq(pendingPayouts.id, failedRow!.id));
+    expect(row?.state).toBe('pending');
+  });
+
+  it('fleet-wide daily emission cap: the primitive refuses past ADMIN_DAILY_ADJUSTMENT_CAP_MINOR', async () => {
+    // Cap default is 100M minor. Drive the primitive directly (the
+    // HTTP surface adds a 10M per-request cap that would need 10+
+    // calls). Different amounts so the semantic-duplicate fence
+    // doesn't fire first.
+    const { targetUser } = await seed();
+    await seedCashbackBalance({ userId: targetUser.id, amountMinor: 200_000_000n });
+
+    const intent = (
+      amountStroops: bigint,
+    ): {
+      assetCode: string;
+      assetIssuer: string;
+      toAddress: string;
+      amountStroops: bigint;
+      memoText: string;
+    } => ({
+      assetCode: 'USDLOOP',
+      assetIssuer: 'GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      toAddress: DEST,
+      amountStroops,
+      memoText: `cap test ${amountStroops}`,
+    });
+
+    const first = await applyAdminEmission({
+      userId: targetUser.id,
+      currency: 'USD',
+      amountMinor: 60_000_000n,
+      intent: intent(60_000_000n * 100_000n),
+    });
+    expect(first.payoutId).toBeTruthy();
+
+    let thrown: unknown = null;
+    await applyAdminEmission({
+      userId: targetUser.id,
+      currency: 'USD',
+      amountMinor: 50_000_000n,
+      intent: intent(50_000_000n * 100_000n),
+    }).catch((err: unknown) => {
+      thrown = err;
+    });
+    expect(thrown).toBeInstanceOf(DailyAdjustmentLimitError);
   });
 });
 

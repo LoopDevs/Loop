@@ -19,6 +19,7 @@ const {
   payoutAssetForMock,
   generateMemoMock,
   EmissionAlreadyIssuedError,
+  EmissionExceedsUnemittedBalanceError,
   InsufficientBalanceError,
   DailyAdjustmentLimitError,
 } = vi.hoisted(() => {
@@ -26,6 +27,22 @@ const {
     constructor(public readonly payoutId: string) {
       super(`A matching active emission already exists for payout ${payoutId}`);
       this.name = 'EmissionAlreadyIssuedError';
+    }
+  }
+  // Hardening A1: cumulative conservation error — mirrors the real
+  // class shape in credits/emissions.ts.
+  class EmissionExceedsUnemittedBalanceError extends Error {
+    constructor(
+      public readonly currency: string,
+      public readonly balanceMinor: bigint,
+      public readonly alreadyEmittedMinor: bigint,
+      public readonly requestedMinor: bigint,
+    ) {
+      super(
+        `Emission of ${requestedMinor} minor would exceed the un-emitted liability: ` +
+          `mirror balance ${balanceMinor} minus ${alreadyEmittedMinor} already materialised on-chain`,
+      );
+      this.name = 'EmissionExceedsUnemittedBalanceError';
     }
   }
   class InsufficientBalanceError extends Error {
@@ -61,6 +78,7 @@ const {
     payoutAssetForMock: vi.fn(),
     generateMemoMock: vi.fn(() => 'memo-fixed-for-tests'),
     EmissionAlreadyIssuedError,
+    EmissionExceedsUnemittedBalanceError,
     InsufficientBalanceError,
     DailyAdjustmentLimitError,
   };
@@ -83,6 +101,7 @@ vi.mock('../idempotency.js', () => ({
 vi.mock('../../credits/emissions.js', () => ({
   applyAdminEmission: applyMock,
   EmissionAlreadyIssuedError,
+  EmissionExceedsUnemittedBalanceError,
 }));
 
 vi.mock('../../credits/adjustments.js', () => ({
@@ -384,6 +403,33 @@ describe('adminEmissionHandler — ADR-017 + ADR-024/036 invariants', () => {
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('EMISSION_ALREADY_ISSUED');
     expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('409 EMISSION_EXCEEDS_UNEMITTED_BALANCE when cumulative conservation rejects (hardening A1)', async () => {
+    applyMock.mockRejectedValueOnce(
+      new EmissionExceedsUnemittedBalanceError('USD', 2000n, 1500n, 800n),
+    );
+    const res = await adminEmissionHandler(
+      makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
+    );
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string; message: string };
+    expect(body.code).toBe('EMISSION_EXCEEDS_UNEMITTED_BALANCE');
+    // The operator sees the remaining headroom in the message.
+    expect(body.message).toContain('1500');
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('429 DAILY_LIMIT_EXCEEDED when the fleet-wide emission cap trips (hardening A1)', async () => {
+    applyMock.mockRejectedValueOnce(
+      new DailyAdjustmentLimitError('USD', new Date(), 90_000_000n, 100_000_000n, 20_000_000n),
+    );
+    const res = await adminEmissionHandler(
+      makeCtx({ userId: VALID_USER_ID, body: GOOD_BODY, idempotencyKey: VALID_KEY }),
+    );
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('DAILY_LIMIT_EXCEEDED');
   });
 
   it('500 INTERNAL_ERROR on unexpected queue-layer failure', async () => {

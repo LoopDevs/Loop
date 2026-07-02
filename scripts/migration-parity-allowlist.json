@@ -2,26 +2,36 @@
   {
     "side": "migrations-only",
     "line": "trigger merchant_cashback_configs.merchant_cashback_configs_audit: CREATE TRIGGER merchant_cashback_configs_audit BEFORE UPDATE ON public.merchant_cashback_configs FOR EACH ROW EXECUTE FUNCTION record_merchant_cashback_config_history()",
-    "reason": "ADR-011 audit trigger — drizzle's schema DSL cannot represent triggers (A2-412/A2-703); the hand-written migration is the source of truth."
+    "reason": "ADR-011 audit trigger \u2014 drizzle's schema DSL cannot represent triggers (A2-412/A2-703); the hand-written migration is the source of truth."
   },
   {
     "side": "migrations-only",
     "line": "trigger merchant_cashback_configs.merchant_cashback_configs_audit_delete: CREATE TRIGGER merchant_cashback_configs_audit_delete AFTER DELETE ON public.merchant_cashback_configs FOR EACH ROW EXECUTE FUNCTION record_merchant_cashback_config_history()",
-    "reason": "ADR-011 audit trigger (delete leg) — not representable in drizzle's schema DSL."
+    "reason": "ADR-011 audit trigger (delete leg) \u2014 not representable in drizzle's schema DSL."
   },
   {
     "side": "migrations-only",
     "line": "trigger merchant_cashback_configs.merchant_cashback_configs_audit_insert: CREATE TRIGGER merchant_cashback_configs_audit_insert AFTER INSERT ON public.merchant_cashback_configs FOR EACH ROW EXECUTE FUNCTION record_merchant_cashback_config_history()",
-    "reason": "ADR-011 audit trigger (insert leg) — not representable in drizzle's schema DSL."
+    "reason": "ADR-011 audit trigger (insert leg) \u2014 not representable in drizzle's schema DSL."
   },
   {
     "side": "migrations-only",
     "line": "constraint user_favorite_merchants.user_favorite_merchants_user_id_fkey: FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
-    "reason": "Identical FK definition; the hand-written migration used Postgres's default constraint name (…_fkey) while drizzle names it …_users_id_fk. Renaming a production constraint carries deploy risk for zero behavioural benefit."
+    "reason": "Identical FK definition; the hand-written migration used Postgres's default constraint name (\u2026_fkey) while drizzle names it \u2026_users_id_fk. Renaming a production constraint carries deploy risk for zero behavioural benefit."
   },
   {
     "side": "schema-only",
     "line": "constraint user_favorite_merchants.user_favorite_merchants_user_id_users_id_fk: FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
-    "reason": "Pair of the …_fkey entry above — same FK, drizzle-generated name."
+    "reason": "Pair of the \u2026_fkey entry above \u2014 same FK, drizzle-generated name."
+  },
+  {
+    "side": "migrations-only",
+    "line": "trigger pending_payouts.pending_payouts_emission_conservation: CREATE TRIGGER pending_payouts_emission_conservation BEFORE INSERT ON public.pending_payouts FOR EACH ROW WHEN (((new.kind = 'emission'::text) AND (new.state <> 'failed'::text))) EXECUTE FUNCTION assert_emission_conservation()",
+    "reason": "Hardening A1/C10 emission-conservation fence (migration 0044) \u2014 drizzle's schema DSL cannot represent triggers; the hand-written migration is the source of truth. Enforces minted-net <= mirror balance at the DB boundary so no future writer path can re-open the unbacked-mint hole two cold audits flagged."
+  },
+  {
+    "side": "migrations-only",
+    "line": "trigger pending_payouts.pending_payouts_mint_reentry_conservation: CREATE TRIGGER pending_payouts_mint_reentry_conservation BEFORE UPDATE OF state ON public.pending_payouts FOR EACH ROW WHEN (((old.state = 'failed'::text) AND (new.state <> 'failed'::text) AND (new.kind = ANY (ARRAY['emission'::text, 'order_cashback'::text, 'interest_mint'::text])))) EXECUTE FUNCTION assert_emission_conservation()",
+    "reason": "Hardening A1/C10 re-entry conservation fence (migration 0044) \u2014 the second way a row enters the counted mint set is an admin payout-retry flipping failed \u2192 pending; without this trigger the freed headroom could be double-materialised (adversarial-review P0). Drizzle cannot represent triggers."
   }
 ]

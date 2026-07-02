@@ -97,7 +97,7 @@ export function registerAdminEmissionWriteOpenApi(
     path: '/api/admin/users/{userId}/emissions',
     summary: 'Queue an emission — on-chain LOOP backfill, no mirror debit (ADR-024 / ADR 036).',
     description:
-      "Queues a LOOP-asset payout row for the on-chain submit worker WITHOUT touching the off-chain `user_credits` mirror — per ADR 036 emission materialises the on-chain half of a liability that already exists (e.g. backfilling a missed/failed cashback payout). Refuses with 400 `INSUFFICIENT_BALANCE` when the requested amount exceeds the user's mirror balance (an emission beyond the mirrored liability would mint unbacked LOOP). Idempotent in two layers: the admin idempotency key replays the stored snapshot on repeat (ADR 017), and the DB active-emission unique index rejects a second unresolved emission for the same user/asset/destination/amount tuple with 409 `EMISSION_ALREADY_ISSUED`. Admin-mediated only — user-facing value exit is redemption (ADR 036).",
+      "Queues a LOOP-asset payout row for the on-chain submit worker WITHOUT touching the off-chain `user_credits` mirror — per ADR 036 emission materialises the on-chain half of a liability that already exists (e.g. backfilling a missed/failed cashback payout). Refuses with 400 `INSUFFICIENT_BALANCE` when the requested amount exceeds the user's mirror balance, and — hardening A1 — with 409 `EMISSION_EXCEEDS_UNEMITTED_BALANCE` when it exceeds the UN-EMITTED portion of the liability (mirror balance minus what prior payouts/emissions already materialised on-chain, net of burns): emission never debits, so without the cumulative check repeated emissions could mint unbacked LOOP. A fleet-wide per-currency daily cap (`ADMIN_DAILY_ADJUSTMENT_CAP_MINOR`) returns 429 `DAILY_LIMIT_EXCEEDED`, and a DB trigger enforces the same conservation rule against any writer that bypasses the app layer. Idempotent in two layers: the admin idempotency key replays the stored snapshot on repeat (ADR 017), and the DB active-emission unique index rejects a second unresolved emission for the same user/asset/destination/amount tuple with 409 `EMISSION_ALREADY_ISSUED`. Admin-mediated only — user-facing value exit is redemption (ADR 036).",
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     request: {
@@ -133,11 +133,12 @@ export function registerAdminEmissionWriteOpenApi(
       },
       409: {
         description:
-          'A matching active emission already exists for this user/asset/destination/amount (`EMISSION_ALREADY_ISSUED`)',
+          'A matching active emission already exists for this user/asset/destination/amount (`EMISSION_ALREADY_ISSUED`), or the amount exceeds the un-emitted portion of the mirror liability (`EMISSION_EXCEEDS_UNEMITTED_BALANCE` — hardening A1 cumulative conservation; the message names the remaining headroom)',
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {
-        description: 'Rate limit exceeded (20/min per IP)',
+        description:
+          'Rate limit exceeded (20/min per IP), or the fleet-wide per-currency UTC-day emission cap was hit (`DAILY_LIMIT_EXCEEDED` — parity with the adjustment/compensation caps, hardening A1)',
         content: { 'application/json': { schema: errorResponse } },
       },
       500: {

@@ -101,7 +101,7 @@ vi.mock('../../discord.js', async (importActual) => {
 });
 
 import { db } from '../../db/client.js';
-import { users, orders, pendingPayouts } from '../../db/schema.js';
+import { users, orders, pendingPayouts, userCredits } from '../../db/schema.js';
 import { getAccountTrustlines } from '../../payments/horizon-trustlines.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
 import { runPayoutTick } from '../../payments/payout-worker.js';
@@ -139,6 +139,15 @@ async function seedPayout(args: {
 }): Promise<{ payoutId: string; userId: string }> {
   const user = await findOrCreateUserByEmail(`payout-${Date.now()}-${Math.random()}@test.local`);
   await db.update(users).set({ homeCurrency: 'USD' }).where(eq(users.id, user.id));
+
+  // Hardening A1/C10: the emission-conservation trigger requires the
+  // mirror liability to cover the emitted amount — seed the matching
+  // balance (500 minor × 100_000 stroops/minor = the row below).
+  await db.insert(userCredits).values({
+    userId: user.id,
+    currency: 'USD',
+    balanceMinor: 500n,
+  });
 
   const [row] = await db
     .insert(pendingPayouts)

@@ -275,9 +275,13 @@ function AdminUserDetailRouteInner(): React.JSX.Element {
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               Queues an on-chain LOOP-asset payout backfilling the on-chain half of an existing
               liability — the off-chain mirror is <em>not</em> debited (ADR 036). An amount above
-              the mirror balance returns <code className="font-mono">400</code>; a duplicate active
-              intent surfaces as <code className="font-mono">409</code> EMISSION_ALREADY_ISSUED.
-              Idempotent on the browser-generated key + Discord-audited after commit.
+              the mirror balance returns <code className="font-mono">400</code>; one above the
+              <em> un-emitted</em> portion (prior payouts/emissions already materialised it) is
+              <code className="font-mono">409</code> EMISSION_EXCEEDS_UNEMITTED_BALANCE with the
+              remaining headroom in the message; a duplicate active intent surfaces as
+              <code className="font-mono">409</code> EMISSION_ALREADY_ISSUED; the fleet-wide daily
+              cap returns <code className="font-mono">429</code>. Idempotent on the
+              browser-generated key + Discord-audited after commit.
             </p>
           </header>
           <div className="px-6 py-5">

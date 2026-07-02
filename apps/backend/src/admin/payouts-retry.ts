@@ -18,6 +18,20 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import { UUID_RE } from '../uuid.js';
 import { resetPayoutToPending } from '../credits/pending-payouts.js';
+
+/**
+ * Walks the drizzle → postgres-js cause chain for the
+ * `assert_emission_conservation()` trigger's check_violation (raised
+ * with an `emission_conservation:` message prefix).
+ */
+function isEmissionConservationViolation(err: unknown): boolean {
+  let cur: unknown = err;
+  for (let depth = 0; depth < 4 && cur instanceof Error; depth++) {
+    if (cur.message.includes('emission_conservation')) return true;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return false;
+}
 import type { User } from '../db/users.js';
 import { notifyAdminAudit } from '../discord.js';
 import { logger } from '../logger.js';
@@ -195,6 +209,21 @@ export async function adminRetryPayoutHandler(c: Context): Promise<Response> {
   } catch (err) {
     if (err instanceof PayoutNotRetryableError) {
       return c.json({ code: 'NOT_FOUND', message: 'Payout not found or not in failed state' }, 404);
+    }
+    if (isEmissionConservationViolation(err)) {
+      // Hardening A1/C10: the re-entry conservation trigger rejected
+      // the failed → pending flip. The row's headroom was legitimately
+      // re-consumed while it sat failed (typically a backfill emission
+      // was issued instead) — retrying it now would mint BOTH.
+      log.warn({ payoutId: id, adminUserId: actor.id }, 'Payout retry rejected by conservation');
+      return c.json(
+        {
+          code: 'EMISSION_EXCEEDS_UNEMITTED_BALANCE',
+          message:
+            'Retrying this payout would exceed the un-emitted liability — its value was already re-materialised (e.g. via a backfill emission) while it sat failed. Compensate or investigate instead of retrying.',
+        },
+        409,
+      );
     }
     log.error({ err, payoutId: id }, 'Admin retry failed');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Failed to retry payout' }, 500);

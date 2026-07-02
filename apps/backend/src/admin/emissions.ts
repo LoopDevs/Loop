@@ -35,8 +35,12 @@ import { HOME_CURRENCIES, type HomeCurrency } from '../db/schema.js';
 import { getUserById, type User } from '../db/users.js';
 import { payoutAssetFor } from '../credits/payout-asset.js';
 import { generatePayoutMemo } from '../credits/payout-builder.js';
-import { applyAdminEmission, EmissionAlreadyIssuedError } from '../credits/emissions.js';
-import { InsufficientBalanceError } from '../credits/adjustments.js';
+import {
+  applyAdminEmission,
+  EmissionAlreadyIssuedError,
+  EmissionExceedsUnemittedBalanceError,
+} from '../credits/emissions.js';
+import { InsufficientBalanceError, DailyAdjustmentLimitError } from '../credits/adjustments.js';
 import { notifyAdminAudit } from '../discord.js';
 import { logger } from '../logger.js';
 import { buildAuditEnvelope, type AdminAuditEnvelope } from './audit-envelope.js';
@@ -231,6 +235,32 @@ export async function adminEmissionHandler(c: Context): Promise<Response> {
           message: err.message,
         },
         409,
+      );
+    }
+    if (err instanceof EmissionExceedsUnemittedBalanceError) {
+      // Hardening A1: cumulative conservation — the balance guard
+      // passed but prior emissions/payouts already materialised the
+      // liability on-chain. Numbers in the body so the operator sees
+      // exactly how much headroom remains.
+      return c.json(
+        {
+          code: 'EMISSION_EXCEEDS_UNEMITTED_BALANCE',
+          message: err.message,
+        },
+        409,
+      );
+    }
+    if (err instanceof DailyAdjustmentLimitError) {
+      // Hardening A1: fleet-wide per-currency daily emission cap —
+      // same shape as the adjustment/compensation caps so a
+      // compromised admin session cannot drain the treasury through
+      // emissions inside one UTC day.
+      return c.json(
+        {
+          code: 'DAILY_LIMIT_EXCEEDED',
+          message: `Daily ${err.currency} emission cap (${err.capMinor} minor) hit — ${err.usedMinor} used today, attempted ${err.attemptedDelta}`,
+        },
+        429,
       );
     }
     log.error({ err, userId, adminUserId: actor.id }, 'Emission failed');
