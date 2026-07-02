@@ -58,6 +58,7 @@
 | `docs/adr/035-extended-supplier-currency-markets.md`        | Display countries for strong extended-currency markets (≥15 merchants): AE/IN/SA/AU/MX. Loop-side order path wired (CF-19): `ORDERABLE_CURRENCIES`, FX feed, migration 0037 `orders_currency_known`; gated on the external rates service serving the currency (else `CURRENCY_NOT_AVAILABLE` "coming soon")                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `docs/adr/036-cashback-token-lifecycle.md`                  | Cashback-mode token lifecycle — on-chain LOOP is the authoritative balance; user_credits is the mirror; emission never debits, redemption extinguishes both halves (issuer-return burn)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `docs/adr/037-staff-roles-support-dashboard.md`             | Staff roles + support dashboard — `staff_roles` table, `requireStaff('support'\|'admin')`, support gets read views + delivery-unsticking actions; money writes / CSV exports / role grants stay admin + step-up                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `docs/adr/038-money-path-hardening.md`                      | The 2026-07 money-path hardening decisions (why): DB-enforced emission conservation, persisted + at-least-once drift paging, durable CTX-settlement idempotency, sweep refund disambiguation, structural auth gates. Hardens ADR 009/015/016/036 without changing their models. Pairs with `docs/invariants.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ---
 
@@ -189,6 +190,52 @@ E2E_REFRESH_TOKEN=… STELLAR_TEST_SECRET_KEY=… node scripts/e2e-real.mjs
 - **NEVER** store or transmit Stellar private keys from backend. Generated on-device, stays on-device.
 - **ALL** auth, payment, and Stellar code requires human review before merge.
 - **NEVER** use `--no-verify` to skip hooks — fix the root cause.
+
+---
+
+## How this repo defends itself
+
+The repo is built to catch a bad change mechanically rather than by trust —
+this is what lets mid-tier contributors and models work on it safely. When you
+touch money or auth, these are the layers you're working within (and must not
+weaken):
+
+**The money invariants** (`docs/invariants.md`) are the properties that must
+always be true about value, each tagged with what enforces it — DB constraint,
+CI test, scheduled watcher, or (weakest) convention. **The failure mode this
+repo keeps hitting is a diff that silently demotes an invariant from a DB/test
+tier down to convention** while tests still pass. Reviewing against this list is
+the single highest-leverage check on a money diff.
+
+**The threat model** (`docs/threat-model.md`) separates deliberate tradeoffs
+(non-revocable 15-min tokens, per-machine rate limiting, deferred leader
+election) from gaps — so you don't re-fix an accepted risk or assume a gap was
+intentional.
+
+**Mechanical gates** (fail CI, not just docs):
+
+- `staff-route-gating.test.ts` — every admin route carries its tier + scoped
+  step-up gate (default-deny).
+- `rate-limit-route-inventory.test.ts` — every route declares a rate limit.
+- `route-auth-inventory.test.ts` (web) — every admin route renders its staff gate.
+- `check-openapi-parity` / `check-shared-type-parity` / `check-migration-parity`
+  — the three drift contracts.
+- `check-dead-flags.mjs` — every env var is actually read.
+- The integration `afterEach` ledger assertion — no flow desyncs the mirror.
+- `env.ts` boot guards — misconfiguration fails at deploy, not at request time.
+
+**Watchers** (catch post-hoc drift): `ledger-invariant-watcher` (daily mirror =
+ledger sum), `asset-drift-watcher` (on-chain vs off-chain, + failed-row alert).
+
+**Skills + subagents** (`.claude/`): `/review-money-diff` runs the adversarial
+pass anchored on the invariants; `/add-endpoint` walks the 5-file fan-out;
+`/merge-stale-stack` for reviving old branches; `/release-preflight` before a
+deploy; `money-reviewer` / `auth-reviewer` subagents for parallel refute-first
+review. A PostToolUse hook reminds you to run `/review-money-diff` when you edit
+a sensitive path.
+
+**When in doubt on a money/auth change: run `/review-money-diff` and state in
+the PR which invariants it preserves.**
 
 ---
 
