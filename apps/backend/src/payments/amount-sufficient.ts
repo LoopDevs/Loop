@@ -157,3 +157,38 @@ function loopAssetCurrency(code: LoopAssetCode): 'USD' | 'GBP' | 'EUR' {
       return 'EUR';
   }
 }
+
+/**
+ * Dust tolerance (stroops) below which a LOOP-asset overpayment is
+ * ignored (0.001 minor unit). The app's own redeem path sends exact
+ * amounts; a sub-dust excess is rounding noise, not a real overpay.
+ */
+export const LOOP_ASSET_OVERPAYMENT_DUST_STROOPS = 100n;
+
+/**
+ * Hardening A7: excess stroops a LOOP-asset payment overpaid the order
+ * charge by, `0n` when it's an exact/underpayment or not a
+ * currency-matched loop_asset payment. `markOrderPaid` debits + burns
+ * only the CHARGED amount, so any excess sits stranded at the deposit
+ * account and reads as positive drift; the watcher uses this to fire
+ * an attributed overpayment alert so ops can return the excess (rather
+ * than it surfacing only as aggregate drift). Fulfilment is NOT
+ * blocked — the user paid enough; the excess is theirs to get back.
+ */
+export function loopAssetOverpaymentStroops(
+  payment: HorizonPayment,
+  order: Order,
+  loopAssetCode: LoopAssetCode | null,
+): bigint {
+  if (loopAssetCode === null || payment.amount === undefined) return 0n;
+  if (order.chargeCurrency !== loopAssetCurrency(loopAssetCode)) return 0n;
+  let receivedStroops: bigint;
+  try {
+    receivedStroops = parseStroops(payment.amount);
+  } catch {
+    return 0n;
+  }
+  const requiredStroops = order.chargeMinor * 100_000n;
+  const excess = receivedStroops - requiredStroops;
+  return excess > LOOP_ASSET_OVERPAYMENT_DUST_STROOPS ? excess : 0n;
+}

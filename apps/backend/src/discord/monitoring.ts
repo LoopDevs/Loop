@@ -478,6 +478,45 @@ export function notifyUsdcBelowFloor(args: {
 }
 
 /**
+ * Notify: a LOOP-asset payment overpaid its order charge (hardening
+ * A7). The order still fulfils — the user paid enough — but
+ * `markOrderPaid` debits + burns only the charged amount, so the
+ * excess sits at the deposit account (stranded, reads as positive
+ * drift). Ops should return the excess LOOP to the user. Attributed
+ * (order / user / excess) so a return can be issued directly, unlike
+ * the drift watcher's aggregate signal.
+ */
+export function notifyLoopAssetOverpayment(args: {
+  orderId: string;
+  userId: string;
+  assetCode: string;
+  chargeMinor: string;
+  chargeCurrency: string;
+  /** Excess in stroops (bigint-as-string). */
+  excessStroops: string;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🟡 LOOP-asset Overpayment — return excess to user',
+    color: ORANGE,
+    description: truncate(
+      `A \`${escapeMarkdown(args.assetCode)}\` payment overpaid its order. The order fulfilled (the user paid enough), but the excess LOOP is parked at the deposit account and was NOT burned/debited — return it to the user. It reads as positive asset drift until then.`,
+      DESCRIPTION_MAX,
+    ),
+    fields: [
+      { name: 'Order', value: `\`${escapeMarkdown(args.orderId.slice(-8))}\``, inline: true },
+      { name: 'User', value: `\`${escapeMarkdown(args.userId.slice(-8))}\``, inline: true },
+      { name: 'Asset', value: escapeMarkdown(args.assetCode), inline: true },
+      {
+        name: 'Charged',
+        value: `${escapeMarkdown(args.chargeMinor)} ${escapeMarkdown(args.chargeCurrency)}`,
+        inline: true,
+      },
+      { name: 'Excess (stroops)', value: escapeMarkdown(args.excessStroops), inline: true },
+    ],
+  });
+}
+
+/**
  * Notify: the off-chain ledger invariant is violated (hardening C1;
  * ADR 009). `user_credits.balance_minor` no longer equals
  * `SUM(credit_transactions.amount_minor)` for at least one

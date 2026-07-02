@@ -110,6 +110,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       'Fires when every operator in the CTX pool is unhealthy — procurement is blocked. Throttled to once per 15 min per deployment so a sustained outage stays loud without flooding the channel (ADR 013).',
   },
   {
+    name: 'notifyLoopAssetOverpayment',
+    channel: 'monitoring',
+    description:
+      'Hardening A7: fires when a LOOP-asset payment overpaid its order charge. The order still fulfils (the user paid enough), but markOrderPaid burns/debits only the charged amount, so the excess is parked at the deposit account (reads as positive drift). Attributed (order/user/excess) so ops can return the excess LOOP directly.',
+  },
+  {
     name: 'notifyLedgerDrift',
     channel: 'monitoring',
     description:
