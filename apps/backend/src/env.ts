@@ -865,6 +865,28 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     );
   }
 
+  // Hardening B7 (2026-07 plan): HS256 retirement tripwire. After the
+  // RS256 cutover (ADR 030 Phase A) the HS256 key must stay set only
+  // for the 30-day refresh window so outstanding HS256 tokens keep
+  // verifying — then it MUST be removed: every extra day it stays set
+  // is a standing forgery-if-leaked surface running alongside the RSA
+  // key for no benefit. Nothing else ever prompts the removal, so
+  // this warn fires on every boot while both are set (deploys are the
+  // natural cadence for the reminder). Runbook:
+  // docs/runbooks/jwt-key-rotation.md.
+  if (
+    parsed.data.LOOP_JWT_RSA_PRIVATE_KEY !== undefined &&
+    parsed.data.LOOP_JWT_SIGNING_KEY !== undefined
+  ) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[env] Both LOOP_JWT_RSA_PRIVATE_KEY and LOOP_JWT_SIGNING_KEY are set. If the RS256 cutover ' +
+        'is more than 30 days old (the refresh-token TTL), remove LOOP_JWT_SIGNING_KEY — outstanding ' +
+        'HS256 tokens have all expired and the key is now a pure forgery-if-leaked surface ' +
+        '(docs/runbooks/jwt-key-rotation.md, hardening B7).',
+    );
+  }
+
   // Audit A-018: operators can override client IDs per environment, but
   // the web bundle hardcodes `DEFAULT_CLIENT_IDS` (via @loop/shared) at
   // build time. Warn when the effective server value diverges from that

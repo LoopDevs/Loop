@@ -26,6 +26,7 @@
     "lint:docs": "./scripts/lint-docs.sh",
     "check:bundle-budget": "./scripts/check-bundle-budget.sh",
     "check:openapi-parity": "node ./scripts/check-openapi-parity.mjs",
+    "check:dead-flags": "node ./scripts/check-dead-flags.mjs",
     "check:migration-parity": "npm run check:migration-parity -w @loop/backend",
     "audit": "node ./scripts/check-audit-policy.mjs",
     "build": "npm run build -w @loop/backend -w @loop/web",

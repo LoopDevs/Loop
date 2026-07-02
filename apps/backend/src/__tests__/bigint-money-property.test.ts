@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { formatMinorCurrency, pctBigint } from '@loop/shared';
 import { computeAccrualMinor } from '../credits/accrue-interest.js';
 import {
@@ -17,11 +17,23 @@ import {
  * then drives it with randomised inputs in the per-property ranges.
  *
  * If a property ever fails, the seed is printed so the failing case
- * is reproducible. Seed is fixed per run for stable CI output — if
- * you're chasing a flake, swap it.
+ * is reproducible.
+ *
+ * Hardening C8 (2026-07 plan): the seed ROTATES per run so the suite
+ * explores new input space over time — a fixed seed only ever tests
+ * one sample forever. On failure the seed prints in the error output;
+ * replay a failing run exactly with:
+ *
+ *   PROPERTY_TEST_SEED=<seed> npx vitest run src/__tests__/bigint-money-property.test.ts
  */
 
-const SEED = 0x5eed_1710;
+const SEED =
+  process.env['PROPERTY_TEST_SEED'] !== undefined
+    ? Number.parseInt(process.env['PROPERTY_TEST_SEED'], 10) >>> 0
+    : // Time-derived per run. Deliberately NOT logged on success (it
+      // would spam every run) — vitest prints it via the seed-stamped
+      // assertion messages below on failure.
+      Date.now() >>> 0;
 
 /** xorshift32 — tiny, deterministic. Good enough for test-case shuffling. */
 function mkRng(seed: number): () => number {
@@ -35,6 +47,13 @@ function mkRng(seed: number): () => number {
 }
 
 const rng = mkRng(SEED);
+
+/**
+ * Wraps expect-failures with the run's seed so any red property test
+ * is immediately replayable (see header). Usage: pass as the message
+ * argument on property assertions.
+ */
+const seedNote = `property seed ${SEED} — replay with PROPERTY_TEST_SEED=${SEED}`;
 
 /** Random signed bigint in `[-max, max]`. */
 function randBigint(max: bigint): bigint {
@@ -54,6 +73,15 @@ function randNonNegBigint(max: bigint): bigint {
 }
 
 const CURRENCIES = ['USD', 'GBP', 'EUR'];
+
+// Print the replay instruction exactly once if anything in this file
+// fails — vitest surfaces console output next to the failing test.
+afterEach((ctx) => {
+  if (ctx.task.result?.state === 'fail') {
+    // eslint-disable-next-line no-console
+    console.error(seedNote);
+  }
+});
 
 describe('formatMinorCurrency — properties (A2-1710)', () => {
   it('never throws across the bigint range we care about (±1e18 minor)', () => {
