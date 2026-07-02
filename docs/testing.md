@@ -21,6 +21,17 @@ section used to get stale within a week. Instead, treat the vitest / Playwright
 output as the source of truth — re-run with `npm test` / `npm run test:e2e`
 any time you need an up-to-date number.
 
+### Shared (`packages/shared`)
+
+Vitest unit tests colocated as `src/*.test.ts`. The package's tuples are
+pinned to Postgres CHECK constraints and its helpers are the
+single-source-of-truth for money math and locale routing, so the tests
+lean on exact-pin assertions (state machines, currency↔asset bijection,
+Eurozone lockstep between `regions.ts` and `countries.ts`) rather than
+example-only coverage. Runs in `npm test` and in CI's unit-test job via
+`test:coverage --workspaces` (coverage-thresholded in
+`packages/shared/vitest.config.ts`).
+
 ### Backend (`apps/backend`)
 
 Vitest unit + integration tests covering:
@@ -70,6 +81,7 @@ Playwright suites:
 npm test
 
 # Single package
+npm run test -w @loop/shared
 npm run test -w @loop/backend
 npm run test -w @loop/web
 
