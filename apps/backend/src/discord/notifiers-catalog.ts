@@ -167,7 +167,7 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     name: 'notifyInterestPoolLow',
     channel: 'monitoring',
     description:
-      "Fires when a LOOP-asset's interest forward-mint pool can cover fewer than LOOP_INTEREST_POOL_MIN_DAYS_COVER days of forecast daily interest. One-shot per asset until recovered — operator's action is to mint the next batch into the pool account before users would be under-allocated.",
+      "Fires when a LOOP-asset's interest forward-mint pool can cover fewer than LOOP_INTEREST_POOL_MIN_DAYS_COVER days of forecast daily interest. Deduped once per asset until recovered via the persisted interest_pool_alert_state table (hardening C10a — fleet-consistent, restart-durable, at-least-once); operator's action is to mint the next batch into the pool account before users would be under-allocated.",
   },
   {
     name: 'notifyInterestPoolRecovered',

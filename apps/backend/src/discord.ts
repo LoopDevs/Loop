@@ -46,7 +46,6 @@ export {
   __resetCircuitNotifyDedupForTests,
   __resetCtxSchemaDriftDedupForTests,
   __resetOperatorCredentialDedupForTests,
-  __resetPoolDepletionDedupForTests,
   __resetAwaitingTrustlineDedupForTests,
 } from './discord/monitoring.js';
 
