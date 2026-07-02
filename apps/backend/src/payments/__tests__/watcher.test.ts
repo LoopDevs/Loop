@@ -14,6 +14,13 @@ const listPaymentsMock = vi.fn();
 const findOrderMock = vi.fn();
 const markPaidMock = vi.fn();
 
+const { notifyOverpaymentMock } = vi.hoisted(() => ({
+  notifyOverpaymentMock: vi.fn(),
+}));
+vi.mock('../../discord.js', () => ({
+  notifyLoopAssetOverpayment: (args: unknown) => notifyOverpaymentMock(args),
+}));
+
 vi.mock('../horizon.js', async () => {
   const actual = await vi.importActual<typeof HorizonModule>('../horizon.js');
   return {
@@ -133,6 +140,7 @@ vi.mock('../../db/schema.js', async () => {
 });
 
 import { isAmountSufficient, parseStroops, runPaymentWatcherTick } from '../watcher.js';
+import { loopAssetOverpaymentStroops } from '../amount-sufficient.js';
 
 const ACCOUNT = 'GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGV';
 
@@ -176,6 +184,7 @@ function makeOrder(overrides: Partial<FakeOrder> = {}): FakeOrder {
 
 beforeEach(() => {
   listPaymentsMock.mockReset();
+  notifyOverpaymentMock.mockReset();
   findOrderMock.mockReset();
   markPaidMock.mockReset();
   recordSkipMock.mockReset();
@@ -190,6 +199,44 @@ beforeEach(() => {
       (fn as unknown as { mockClear: () => void }).mockClear();
     }
   }
+});
+
+describe('loopAssetOverpaymentStroops (A7)', () => {
+  const lp = (amount: string): never => ({ amount }) as never;
+  const gbpOrder = (): never =>
+    makeOrder({
+      paymentMethod: 'loop_asset',
+      currency: 'GBP',
+      chargeCurrency: 'GBP',
+      chargeMinor: 1_000n,
+    }) as never;
+
+  it('returns the excess stroops on a material overpayment', () => {
+    // charge 1000 minor → 100_000_000 stroops required; 12.5 GBPLOOP →
+    // 125_000_000 received; excess 25_000_000.
+    expect(loopAssetOverpaymentStroops(lp('12.5000000'), gbpOrder(), 'GBPLOOP')).toBe(25_000_000n);
+  });
+
+  it('returns 0n for an exact payment', () => {
+    expect(loopAssetOverpaymentStroops(lp('10.0000000'), gbpOrder(), 'GBPLOOP')).toBe(0n);
+  });
+
+  it('returns 0n for an underpayment', () => {
+    expect(loopAssetOverpaymentStroops(lp('9.0000000'), gbpOrder(), 'GBPLOOP')).toBe(0n);
+  });
+
+  it('ignores sub-dust excess (rounding noise)', () => {
+    // 10.0000050 GBPLOOP = 100_000_050 stroops; excess 50 < 100 dust.
+    expect(loopAssetOverpaymentStroops(lp('10.0000050'), gbpOrder(), 'GBPLOOP')).toBe(0n);
+  });
+
+  it('returns 0n when it is not a loop_asset payment', () => {
+    expect(loopAssetOverpaymentStroops(lp('999.0000000'), gbpOrder(), null)).toBe(0n);
+  });
+
+  it('returns 0n on a currency mismatch (never over-credits cross-currency)', () => {
+    expect(loopAssetOverpaymentStroops(lp('999.0000000'), gbpOrder(), 'USDLOOP')).toBe(0n);
+  });
 });
 
 describe('parseStroops', () => {
@@ -505,6 +552,60 @@ describe('runPaymentWatcherTick', () => {
     const r = await runPaymentWatcherTick({ account: ACCOUNT });
     expect(r.paid).toBe(1);
     expect(r.skippedAmount).toBe(0);
+  });
+
+  it('A7: fulfils an overpaid GBPLOOP payment AND fires the attributed overpayment alert', async () => {
+    loopAssetsState.assets = [{ code: 'GBPLOOP', issuer: GBPLOOP_ISSUER }];
+    listPaymentsMock.mockResolvedValue({
+      // £10.00 charge, but 12.5 GBPLOOP sent → 2.5 excess =
+      // 250_000 minor-stroops overpaid.
+      records: [loopAssetPayment('MEMO', '12.5000000', 'GBPLOOP', GBPLOOP_ISSUER)],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(
+      makeOrder({
+        paymentMethod: 'loop_asset',
+        currency: 'GBP',
+        chargeCurrency: 'GBP',
+        chargeMinor: 1_000n,
+      }),
+    );
+    markPaidMock.mockResolvedValue({ id: 'order-1' });
+    const r = await runPaymentWatcherTick({ account: ACCOUNT });
+    // The order still fulfils — the user paid enough.
+    expect(r.paid).toBe(1);
+    expect(r.skippedAmount).toBe(0);
+    // ...and the excess is surfaced attributed for a manual return.
+    expect(notifyOverpaymentMock).toHaveBeenCalledOnce();
+    const arg = notifyOverpaymentMock.mock.calls[0]![0] as {
+      excessStroops: string;
+      orderId: string;
+    };
+    // 12.5 GBPLOOP = 1_250_000_000 stroops; charge 1000 minor =
+    // 100_000_000 stroops; excess 1_150_000_000... wait:
+    // 1000 minor × 100_000 = 100_000_000 stroops required.
+    // 12.5 GBPLOOP × 10^7 = 125_000_000 stroops received.
+    // excess = 25_000_000 stroops.
+    expect(arg.excessStroops).toBe('25000000');
+  });
+
+  it('A7: an EXACT GBPLOOP payment fires no overpayment alert', async () => {
+    loopAssetsState.assets = [{ code: 'GBPLOOP', issuer: GBPLOOP_ISSUER }];
+    listPaymentsMock.mockResolvedValue({
+      records: [loopAssetPayment('MEMO', '10.0000000', 'GBPLOOP', GBPLOOP_ISSUER)],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(
+      makeOrder({
+        paymentMethod: 'loop_asset',
+        currency: 'GBP',
+        chargeCurrency: 'GBP',
+        chargeMinor: 1_000n,
+      }),
+    );
+    markPaidMock.mockResolvedValue({ id: 'order-1' });
+    await runPaymentWatcherTick({ account: ACCOUNT });
+    expect(notifyOverpaymentMock).not.toHaveBeenCalled();
   });
 
   it('rejects a LOOP-asset payment whose currency does not match the order charge currency', async () => {

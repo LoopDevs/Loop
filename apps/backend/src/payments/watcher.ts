@@ -28,7 +28,8 @@ import { markOrderPaid, LoopAssetMissingCreditRowError } from '../orders/transit
 import { listAccountPayments, isMatchingIncomingPayment, type HorizonPayment } from './horizon.js';
 import { configuredLoopPayableAssets, type LoopAssetCode } from '../credits/payout-asset.js';
 import { parseStroops } from './stroops.js';
-import { isAmountSufficient } from './amount-sufficient.js';
+import { isAmountSufficient, loopAssetOverpaymentStroops } from './amount-sufficient.js';
+import { notifyLoopAssetOverpayment } from '../discord.js';
 import { recordSkip, retrySkippedPayments, type RetryOutcome } from './skipped-payments.js';
 
 const log = logger.child({ area: 'payment-watcher' });
@@ -269,6 +270,32 @@ async function processPayment(
       { orderId: order.id, paymentId: p.id, memo },
       'Order transitioned pending_payment → paid',
     );
+    // Hardening A7: a LOOP-asset overpayment fulfils the order (the
+    // user paid enough) but markOrderPaid burns/debits only the
+    // charged amount, so the excess is parked at the deposit account
+    // and reads as positive drift. Surface it attributed so ops can
+    // return the excess — do this only on the fresh `paid` transition
+    // (not `already_paid`) so a re-processed cursor doesn't re-alert.
+    const overpaymentStroops = loopAssetOverpaymentStroops(p, order, loopAssetCode);
+    if (overpaymentStroops > 0n) {
+      log.warn(
+        {
+          orderId: order.id,
+          userId: order.userId,
+          excessStroops: overpaymentStroops.toString(),
+          loopAssetCode,
+        },
+        'A7: LOOP-asset overpayment — order fulfilled, excess parked at deposit for manual return',
+      );
+      notifyLoopAssetOverpayment({
+        orderId: order.id,
+        userId: order.userId,
+        assetCode: loopAssetCode ?? 'unknown',
+        chargeMinor: order.chargeMinor.toString(),
+        chargeCurrency: order.chargeCurrency,
+        excessStroops: overpaymentStroops.toString(),
+      });
+    }
     return { kind: 'paid', orderId: order.id, memo };
   }
   return { kind: 'already_paid', orderId: order.id, memo };

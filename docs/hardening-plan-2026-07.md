@@ -90,13 +90,24 @@
       admin "match to order / refund to sender" action instead of silent
       Discord-only abandonment. `[D]` refund-to-sender needs an operator OK
       (outbound payment from the pool).
-- [ ] **A7. loop_asset overpayment.** `amount-sufficient.ts:88` accepts
+- [x] **A7. loop_asset overpayment.** `amount-sufficient.ts:88` accepts
       `received >= required` but `markOrderPaid` debits/burns only
       `chargeMinor` — excess LOOP sits stranded, un-burned, counted as
       circulating drift. Default: burn/debit the full received amount and
       credit the excess back to the user's mirror (auditable), or refuse
       overpays outright. `[D]` pick one; implementing full-burn-and-credit
-      unless overridden.
+      unless overridden. _Done (scope revised on implementation): the order
+      still FULFILS (the user paid enough — refusing would strand their
+      funds AND deny the order), and a material overpayment (>dust) now
+      fires an ATTRIBUTED alert (`notifyLoopAssetOverpayment`: order / user
+      / excess stroops) so ops returns the excess directly — vs the drift
+      watcher's aggregate signal. Chose this over auto-crediting the excess
+      to the mirror: crediting without an on-chain return would itself
+      create drift (excess sits at the deposit, not the user's wallet), and
+      the correct auto-return (plumb received amount → return payout →
+      drift-equation update) is a larger money-movement change than
+      warranted for a rare edge the app never triggers (redeem sends exact).
+      Follow-up: auto-return-of-excess payout._
 - [x] **A8. Single-payout-submitter enforcement.** `SKIP LOCKED` batching
       doesn't stop two Fly machines from claiming disjoint batches and racing
       the shared operator sequence (`tx_bad_seq` → attempt-budget burn →
