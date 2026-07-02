@@ -26,6 +26,7 @@
  */
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
+import { requireStaff } from '../auth/require-staff.js';
 import { killSwitch } from '../middleware/kill-switch.js';
 import { requireAdminStepUp } from '../auth/admin-step-up-middleware.js';
 import { adminCreditAdjustmentHandler } from '../admin/credit-adjustments.js';
@@ -48,6 +49,7 @@ export function mountAdminCreditWritesRoutes(app: Hono): void {
   app.post(
     '/api/admin/users/:userId/credit-adjustments',
     rateLimit('POST /api/admin/users/:userId/credit-adjustments', 20, 60_000),
+    requireStaff('admin'),
     requireAdminStepUp('credit-adjustment'),
     adminCreditAdjustmentHandler,
   );
@@ -63,6 +65,7 @@ export function mountAdminCreditWritesRoutes(app: Hono): void {
   app.post(
     '/api/admin/users/:userId/refunds',
     rateLimit('POST /api/admin/users/:userId/refunds', 20, 60_000),
+    requireStaff('admin'),
     requireAdminStepUp('refund'),
     adminRefundHandler,
   );
@@ -75,6 +78,9 @@ export function mountAdminCreditWritesRoutes(app: Hono): void {
   // attacker-chosen address. CF-08: bound to the `'emission'` scope.
   app.post(
     '/api/admin/users/:userId/emissions',
+    // ADR 037: tier gate ahead of the kill switch so an engaged
+    // switch can't leak a 503 (endpoint existence) to support.
+    requireStaff('admin'),
     killSwitch('emissions'),
     rateLimit('POST /api/admin/users/:userId/emissions', 20, 60_000),
     requireAdminStepUp('emission'),

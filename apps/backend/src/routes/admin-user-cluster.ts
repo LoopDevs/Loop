@@ -39,6 +39,7 @@
  */
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
+import { requireStaff } from '../auth/require-staff.js';
 import { adminListUsersHandler } from '../admin/users-list.js';
 import { adminUserByEmailHandler } from '../admin/user-by-email.js';
 import { adminGetUserHandler } from '../admin/user-detail.js';
@@ -102,6 +103,7 @@ export function mountAdminUserClusterRoutes(app: Hono): void {
   app.get(
     '/api/admin/users/recycling-activity.csv',
     rateLimit('GET /api/admin/users/recycling-activity.csv', 10, 60_000),
+    requireStaff('admin'),
     adminUsersRecyclingActivityCsvHandler,
   );
   // Admin user-detail drill. Entry point for the admin panel's user
@@ -195,6 +197,7 @@ export function mountAdminUserClusterRoutes(app: Hono): void {
   app.get(
     '/api/admin/users/:userId/credit-transactions.csv',
     rateLimit('GET /api/admin/users/:userId/credit-transactions.csv', 10, 60_000),
+    requireStaff('admin'),
     adminUserCreditTransactionsCsvHandler,
   );
 }

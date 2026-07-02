@@ -51,7 +51,7 @@ const STEP_UP_ISSUER = 'loop-api';
  * today (it mints one generic token and replays it across writes). A
  * narrower scope (`'credit-adjustment'` / `'refund'` / `'withdrawal'`
  * / `'emission'` / `'payout-retry'` / `'payout-compensation'` /
- * `'home-currency'`)
+ * `'home-currency'` / `'staff-role-grant'` / `'staff-role-revoke'`)
  * is opt-in and binds the token to that single class — the gate
  * middleware rejects it on any other class with `STEP_UP_PURPOSE_MISMATCH`.
  */
@@ -65,6 +65,8 @@ export const STEP_UP_SCOPES = [
   'payout-retry',
   'payout-compensation',
   'home-currency',
+  'staff-role-grant',
+  'staff-role-revoke',
 ] as const;
 export type AdminStepUpScope = (typeof STEP_UP_SCOPES)[number];
 

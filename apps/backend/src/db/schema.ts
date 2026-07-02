@@ -24,7 +24,7 @@ import {
   jsonb,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import type { WalletProvisioningState } from '@loop/shared';
+import type { StaffRole, WalletProvisioningState } from '@loop/shared';
 
 /**
  * Loop users. For the current CTX-anchored identity, populated lazily
@@ -142,6 +142,11 @@ export const users = pgTable(
     index('users_wallet_provisioning_pending')
       .on(t.createdAt)
       .where(sql`${t.walletProvisioning} <> 'activated'`),
+    // ADR 037 reverse lookup (GET /api/admin/lookup): legacy linked
+    // Stellar address → user. Partial — most rows have no address.
+    index('users_stellar_address')
+      .on(t.stellarAddress)
+      .where(sql`${t.stellarAddress} IS NOT NULL`),
   ],
 );
 
@@ -162,6 +167,54 @@ export type { WalletProvisioningState } from '@loop/shared';
 // `db/schema.ts` callers that import both from one module (drizzle
 // tables + the currency union).
 export { HOME_CURRENCIES, type HomeCurrency } from '@loop/shared';
+
+/**
+ * ADR 037 — staff role table (migration 0042). One row per staff
+ * member; absence of a row means "not staff" (the public). `role`
+ * replaces the binary `users.is_admin` trust model:
+ *
+ *   admin   → everything (money writes still step-up-gated, ADR 028)
+ *   support → read views + the three delivery-unsticking actions
+ *
+ * `users.is_admin` survives as a deprecated read-compat shim —
+ * `requireStaff` falls back to it ('admin') when no row exists, so
+ * CTX-allowlist admins (`ADMIN_CTX_USER_IDS` upsert path) keep
+ * working until the CTX path retires (ADR 013 Phase C). Role writes
+ * mirror the flag (grant admin → true, grant support / revoke →
+ * false) so the shim can't resurrect a revoked Loop-native admin.
+ *
+ * `granted_by_user_id` / `reason` / `granted_at` are the ADR 017
+ * actor-attribution trail; the migration-0039 seed rows carry a
+ * NULL grantor.
+ */
+export const staffRoles = pgTable(
+  'staff_roles',
+  {
+    userId: uuid('user_id')
+      .primaryKey()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    role: text('role').$type<StaffRole>().notNull(),
+    grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow(),
+    grantedByUserId: uuid('granted_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    reason: text('reason'),
+  },
+  (t) => [
+    // Same dual-layer pattern as home_currency / wallet_provider:
+    // CHECK pins the enum at the DB boundary, `$type<StaffRole>()`
+    // pins it in TypeScript. Widening to 'finance' / 'operator'
+    // later is a CHECK migration, not an ALTER TYPE dance.
+    check('staff_roles_role_known', sql`${t.role} IN ('admin', 'support')`),
+  ],
+);
+
+// Staff-role enum + type live in `@loop/shared/admin-staff` — the
+// role is on the wire (`GET /api/admin/staff`, `requireStaff`
+// context) so web + backend + openapi compile against one
+// definition. Re-exported here for schema-side callers, mirroring
+// the HOME_CURRENCIES pattern above.
+export { STAFF_ROLES, type StaffRole } from '@loop/shared';
 
 /**
  * Per-user credit balance in a specific regional currency. One row per
@@ -669,6 +722,12 @@ export const orders = pgTable(
     // Ops lookup — "did operator X place this order?" — from the
     // admin pool-health surface (ADR 013).
     index('orders_ctx_operator').on(t.ctxOperatorId),
+    // ADR 037 reverse lookup (GET /api/admin/lookup): payment memo →
+    // order. Partial — legacy CTX-proxy orders have no memo. Also
+    // serves the watcher's findPendingOrderByMemo hot path.
+    index('orders_payment_memo')
+      .on(t.paymentMemo)
+      .where(sql`${t.paymentMemo} IS NOT NULL`),
     // Redemption-backfill sweeper poll (migration 0034): fulfilled rows
     // that captured a ctx_order_id but no redemption payload. Partial
     // index keeps the scan tiny — the qualifying set is empty in the

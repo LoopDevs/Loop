@@ -21,6 +21,7 @@
  */
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
+import { requireStaff } from '../auth/require-staff.js';
 import { killSwitch } from '../middleware/kill-switch.js';
 import { requireAdminStepUp } from '../auth/admin-step-up-middleware.js';
 import {
@@ -90,6 +91,7 @@ export function mountAdminPayoutsRoutes(app: Hono): void {
   app.post(
     '/api/admin/payouts/:id/retry',
     rateLimit('POST /api/admin/payouts/:id/retry', 20, 60_000),
+    requireStaff('admin'),
     requireAdminStepUp('payout-retry'),
     adminRetryPayoutHandler,
   );
@@ -103,6 +105,9 @@ export function mountAdminPayoutsRoutes(app: Hono): void {
   // CF-08: bound to the `'payout-compensation'` scope.
   app.post(
     '/api/admin/payouts/:id/compensate',
+    // ADR 037: tier gate ahead of the kill switch so an engaged
+    // switch can't leak a 503 (endpoint existence) to support.
+    requireStaff('admin'),
     killSwitch('emissions'),
     rateLimit('POST /api/admin/payouts/:id/compensate', 20, 60_000),
     requireAdminStepUp('payout-compensation'),
@@ -114,6 +119,7 @@ export function mountAdminPayoutsRoutes(app: Hono): void {
   app.get(
     '/api/admin/payouts.csv',
     rateLimit('GET /api/admin/payouts.csv', 10, 60_000),
+    requireStaff('admin'),
     adminPayoutsCsvHandler,
   );
 }

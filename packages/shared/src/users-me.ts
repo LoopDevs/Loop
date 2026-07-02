@@ -19,6 +19,7 @@ import type { HomeCurrency, LoopAssetCode } from './loop-asset.js';
 import type { OrderPaymentMethod, OrderState } from './order-state.js';
 import type { CreditTransactionType } from './credit-transaction-type.js';
 import type { PayoutState } from './payout-state.js';
+import type { StaffRole } from './admin-staff.js';
 
 /**
  * `GET /api/users/me` / `POST /api/users/me/home-currency` /
@@ -32,6 +33,12 @@ export interface UserMeView {
   id: string;
   email: string;
   isAdmin: boolean;
+  /**
+   * ADR 037 staff role — 'admin' | 'support' | null (not staff).
+   * Role-aware admin UI keys off this field (falling back to
+   * `isAdmin` while the backend rollout completes).
+   */
+  staffRole: StaffRole | null;
   homeCurrency: HomeCurrency;
   stellarAddress: string | null;
   homeCurrencyBalanceMinor: string;
