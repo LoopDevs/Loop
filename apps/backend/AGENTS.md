@@ -68,7 +68,8 @@ src/
 │   ├── procurement-redemption.ts ← CTX gift-card detail fetch + waitForRedemption (SSE-first, polling fallback)
 │   ├── redeem.ts        ← POST /api/orders/loop/:id/redeem — embedded-wallet LOOP redemption (ADR 036 term): user-signed inner payment + operator fee-bump; watcher settles downstream (ADR 030 C3 / ADR 036)
 │   ├── redemption-backfill.ts ← Sweeper re-fetching redemption payloads for fulfilled orders that persisted nulls (migration 0034; pages ops after 10 attempts → runbooks/redemption-backfill-exhausted.md) + refetchOrderRedemption one-shot for the ADR 037 admin action
-│   └── redeem-crypto.ts ← AES-256-GCM envelope for redeem_code/redeem_pin at rest (CF-25; LOOP_REDEEM_ENCRYPTION_KEY; encrypt-on-write, decrypt-on-read, legacy-plaintext passthrough)
+│   ├── redeem-crypto.ts ← AES-256-GCM envelope for redeem_code/redeem_pin at rest (CF-25; LOOP_REDEEM_ENCRYPTION_KEY; encrypt-on-write, decrypt-on-read, legacy-plaintext passthrough)
+│   └── ctx-settlements.ts ← Durable operator→CTX settlement record (hardening A4): one row per order, tx hash persisted before submit (CF-18 pattern) so pay-ctx idempotency uses the authoritative Horizon point lookup, not a bounded memo scan
 ├── payments/
 │   ├── watcher.ts      ← Horizon payment watcher (matches inbound deposits, accepts USDC/XLM/LOOP assets)
 │   ├── skipped-payments.ts ← Skipped-deposit retry ledger — persists skips before cursor advance, sweeps each tick (audit CRIT #1/#2)
