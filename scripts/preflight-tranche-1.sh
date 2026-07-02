@@ -46,6 +46,14 @@ REQUIRED=(
   # Probe gating — production policy is 404 unless these are set
   METRICS_BEARER_TOKEN
   OPENAPI_BEARER_TOKEN
+  # ADR 028 / hardening B3 (2026-07 plan): production boot now FAILS
+  # without the step-up key (env.ts cross-field guard) — a keyless
+  # deploy would pass preflight and then crash-loop at boot. Promoted
+  # from RECOMMENDED when the boot guard landed. Generate with
+  # `openssl rand -base64 48`. The deliberate opt-out is setting
+  # DISABLE_ADMIN_STEP_UP_ENFORCEMENT=1 in fly.toml [env] (staging
+  # only), in which case remove this from REQUIRED for that app.
+  LOOP_ADMIN_STEP_UP_SIGNING_KEY
 )
 
 # Optional but strongly recommended — boot doesn't fail without these,
@@ -53,14 +61,6 @@ REQUIRED=(
 # surfaces that fail closed). Reported separately so the operator sees
 # the gap without it being a hard blocker.
 RECOMMENDED=(
-  # ADR 028 / A4-063: env.ts treats this as optional so boot succeeds
-  # without it, but the step-up gate fails CLOSED — every destructive
-  # admin endpoint (credit-adjust, withdrawals, payout-retry) returns
-  # 503 STEP_UP_UNAVAILABLE until the key is set. Advisory rather
-  # than REQUIRED because Tranche 1 can launch with those admin
-  # surfaces dark; generate the key (openssl rand -base64 48) before
-  # the first admin credit adjustment is needed.
-  LOOP_ADMIN_STEP_UP_SIGNING_KEY
   SENTRY_DSN
   DISCORD_WEBHOOK_ORDERS
   DISCORD_WEBHOOK_MONITORING

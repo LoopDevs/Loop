@@ -67,6 +67,11 @@ export const STEP_UP_SCOPES = [
   'home-currency',
   'staff-role-grant',
   'staff-role-revoke',
+  // Hardening B1 review finding (2026-07 plan): the cashback-config
+  // upsert sets FUTURE emission rates (orders stamp the split at
+  // creation from this table), so it is squarely the stolen-bearer
+  // threat ADR 028 exists for — gate it like the other money writes.
+  'cashback-config',
 ] as const;
 export type AdminStepUpScope = (typeof STEP_UP_SCOPES)[number];
 

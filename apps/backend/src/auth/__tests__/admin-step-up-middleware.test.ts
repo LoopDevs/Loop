@@ -105,6 +105,44 @@ describe('requireAdminStepUp', () => {
     expect(next).toHaveBeenCalled();
   });
 
+  describe('hardening B2 — fail-closed subject pinning', () => {
+    it('401 when the gate is reached with NO auth context (mount-order bug)', async () => {
+      // Even a completely valid step-up token must not pass: with no
+      // bearer subject to pin against, ANY admin's token would
+      // satisfy the gate.
+      const { token } = signAdminStepUpToken({ sub: 'admin-1', email: 'admin@example.com' });
+      const middleware = requireAdminStepUp();
+      const { ctx } = makeCtx({ headers: { 'X-Admin-Step-Up': token } });
+      const next = vi.fn(noopNext);
+      const res = (await middleware(ctx, next)) as Response;
+      expect(next).not.toHaveBeenCalled();
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { code: string };
+      expect(body.code).toBe('STEP_UP_INVALID');
+    });
+
+    it('401 when the loop auth context carries no userId', async () => {
+      const { token } = signAdminStepUpToken({ sub: 'admin-1', email: 'admin@example.com' });
+      const middleware = requireAdminStepUp();
+      const { ctx } = makeCtx({
+        auth: { kind: 'loop' },
+        headers: { 'X-Admin-Step-Up': token },
+      });
+      const next = vi.fn(noopNext);
+      const res = (await middleware(ctx, next)) as Response;
+      expect(next).not.toHaveBeenCalled();
+      expect(res.status).toBe(401);
+    });
+  });
+
+  it('is named for the route-inventory walk (hardening B1)', () => {
+    // staff-route-gating.test.ts statically asserts every destructive
+    // admin mount carries its scoped step-up gate — that only works
+    // while the middleware's function name encodes the scope.
+    expect(requireAdminStepUp('refund').name).toBe('requireAdminStepUp(refund)');
+    expect(requireAdminStepUp().name).toBe('requireAdminStepUp(any)');
+  });
+
   describe('CF-08 scope binding', () => {
     it('a wildcard-scoped token (mint default) satisfies a scoped gate', async () => {
       // No `scope` passed → defaults to the `'admin-write'` wildcard.

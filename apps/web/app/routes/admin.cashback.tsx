@@ -18,6 +18,8 @@ import { AdminNav } from '~/components/features/admin/AdminNav';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { MerchantResyncButton } from '~/components/features/admin/MerchantResyncButton';
 import { ReasonDialog } from '~/components/features/admin/ReasonDialog';
+import { StepUpModal } from '~/components/features/admin/StepUpModal';
+import { useAdminStepUp } from '~/hooks/use-admin-step-up';
 import { MerchantStatsTable } from '~/components/features/admin/MerchantStatsTable';
 import { MerchantsFlywheelShareCard } from '~/components/features/admin/MerchantsFlywheelShareCard';
 import { Button } from '~/components/ui/Button';
@@ -115,17 +117,22 @@ function AdminCashbackRouteInner(): React.JSX.Element {
     return map;
   }, [configsQuery.data]);
 
+  const stepUp = useAdminStepUp();
   const saveMutation = useMutation({
     mutationFn: async (args: { merchantId: string; draft: RowDraft; reason: string }) => {
       const wholesalePct = Number(args.draft.wholesalePct);
       const userCashbackPct = Number(args.draft.userCashbackPct);
       const loopMarginPct = Number(args.draft.loopMarginPct);
-      return upsertCashbackConfig(args.merchantId, {
-        wholesalePct,
-        userCashbackPct,
-        loopMarginPct,
-        reason: args.reason,
-      });
+      // ADR 028: step-up gated (sets future emission rates). The hook
+      // opens <StepUpModal /> on STEP_UP_REQUIRED and retries once.
+      return stepUp.runWithStepUp(() =>
+        upsertCashbackConfig(args.merchantId, {
+          wholesalePct,
+          userCashbackPct,
+          loopMarginPct,
+          reason: args.reason,
+        }),
+      );
     },
     onSuccess: async () => {
       setSaveError(null);
@@ -194,6 +201,9 @@ function AdminCashbackRouteInner(): React.JSX.Element {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
+      {stepUp.modalOpen ? (
+        <StepUpModal onConfirm={stepUp.handleStepUpConfirm} onCancel={stepUp.handleStepUpCancel} />
+      ) : null}
       <ReasonDialog
         open={reasonTarget !== null}
         title={

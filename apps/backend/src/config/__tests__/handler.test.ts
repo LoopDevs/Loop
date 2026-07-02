@@ -31,6 +31,7 @@ const LOOP_ISSUER_VARS = [
 
 function clearEnv(): void {
   delete process.env['LOOP_AUTH_NATIVE_ENABLED'];
+  delete process.env['LOOP_JWT_SIGNING_KEY'];
   delete process.env['LOOP_WORKERS_ENABLED'];
   delete process.env['LOOP_STELLAR_DEPOSIT_ADDRESS'];
   for (const k of LOOP_ISSUER_VARS) delete process.env[k];
@@ -95,6 +96,8 @@ describe('configHandler', () => {
 
   it('reflects LOOP_AUTH_NATIVE_ENABLED independently', async () => {
     process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
+    // Hardening B3: enabling native auth requires a signing key at parse.
+    process.env['LOOP_JWT_SIGNING_KEY'] = 'unit-test-loop-jwt-signing-key-32ch!';
     const { configHandler } = await import('../handler.js');
     const { ctx } = makeCtx();
     const body = (await configHandler(ctx).json()) as {
@@ -108,6 +111,8 @@ describe('configHandler', () => {
 
   it('only sets loopOrdersEnabled when auth + workers + deposit-address are all configured', async () => {
     process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
+    // Hardening B3: enabling native auth requires a signing key at parse.
+    process.env['LOOP_JWT_SIGNING_KEY'] = 'unit-test-loop-jwt-signing-key-32ch!';
     process.env['LOOP_WORKERS_ENABLED'] = 'true';
     process.env['LOOP_STELLAR_DEPOSIT_ADDRESS'] =
       'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
@@ -119,6 +124,8 @@ describe('configHandler', () => {
 
   it('keeps loopOrdersEnabled=false when the deposit address is missing', async () => {
     process.env['LOOP_AUTH_NATIVE_ENABLED'] = 'true';
+    // Hardening B3: enabling native auth requires a signing key at parse.
+    process.env['LOOP_JWT_SIGNING_KEY'] = 'unit-test-loop-jwt-signing-key-32ch!';
     process.env['LOOP_WORKERS_ENABLED'] = 'true';
     // No LOOP_STELLAR_DEPOSIT_ADDRESS.
     const { configHandler } = await import('../handler.js');

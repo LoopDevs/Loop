@@ -202,6 +202,14 @@ export const EnvSchema = z.object({
   // or `"yes"` and wonder why production still refuses to boot.
   DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT: z.enum(['1']).optional(),
 
+  // Hardening B3: emergency opt-out for the production step-up-key
+  // boot guard below. Same `"1"`-only shape as the image-proxy
+  // override so a deploy typo fails at parse time. Setting it ships
+  // an admin surface whose destructive writes all 503
+  // STEP_UP_UNAVAILABLE — deliberate for a staging deploy that
+  // hasn't provisioned the key, never for real production.
+  DISABLE_ADMIN_STEP_UP_ENFORCEMENT: z.enum(['1']).optional(),
+
   // Rate-limiter trust boundary (audit A-023). When `true` the rate limiter
   // reads the client IP from the first value in X-Forwarded-For (required
   // when running behind Fly.io / a load balancer). When `false` it falls
@@ -1013,6 +1021,46 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
           `fix the key material before booting.`,
       );
     }
+  }
+
+  // Hardening B3 (2026-07 plan): cross-field boot guards for the two
+  // auth misconfigurations that previously only surfaced at request
+  // time.
+  //
+  // 1. Native auth enabled with NO signing capability. verify-otp /
+  //    refresh would 500 on every call (`getActiveSigner` throws) —
+  //    an outage discovered by the first user, not the deploy. Both
+  //    key families count: HS256 (`LOOP_JWT_SIGNING_KEY`) or RS256
+  //    (`LOOP_JWT_RSA_PRIVATE_KEY`).
+  if (
+    parsed.data.LOOP_AUTH_NATIVE_ENABLED &&
+    parsed.data.LOOP_JWT_SIGNING_KEY === undefined &&
+    parsed.data.LOOP_JWT_RSA_PRIVATE_KEY === undefined
+  ) {
+    throw new Error(
+      'Invalid environment variables — LOOP_AUTH_NATIVE_ENABLED=true requires a JWT signing key ' +
+        '(LOOP_JWT_SIGNING_KEY or LOOP_JWT_RSA_PRIVATE_KEY, ADR 013 / ADR 030). Without one, every ' +
+        'verify-otp/refresh call 500s. Set a key or disable native auth.',
+    );
+  }
+
+  // 2. Production without the admin step-up key. Every destructive
+  //    admin endpoint (credit-adjust / refunds / emissions /
+  //    payout-retry / staff-role writes) would return 503
+  //    STEP_UP_UNAVAILABLE — a silently-degraded admin surface that
+  //    looks healthy until the first incident needs an intervention.
+  //    Fail at boot; staging deploys that genuinely want the surface
+  //    disabled opt out explicitly.
+  if (
+    parsed.data.NODE_ENV === 'production' &&
+    parsed.data.LOOP_ADMIN_STEP_UP_SIGNING_KEY === undefined &&
+    parsed.data.DISABLE_ADMIN_STEP_UP_ENFORCEMENT !== '1'
+  ) {
+    throw new Error(
+      'Invalid environment variables — LOOP_ADMIN_STEP_UP_SIGNING_KEY must be set in production ' +
+        '(ADR 028; hardening B3). Without it every destructive admin write 503s. Generate a 32+ char ' +
+        'random secret, or set DISABLE_ADMIN_STEP_UP_ENFORCEMENT=1 to deliberately ship the surface disabled.',
+    );
   }
 
   // A2-203: the fallback cashback split must respect the

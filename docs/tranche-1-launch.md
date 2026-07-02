@@ -85,6 +85,12 @@ DISCORD_WEBHOOK_DEPLOYMENTS=…
 # Probe gating (production policy: 404 when unset)
 METRICS_BEARER_TOKEN=…                        # 32+ random chars
 OPENAPI_BEARER_TOKEN=…
+
+# Admin step-up auth (ADR 028; hardening B3 2026-07). Production boot
+# FAILS without this key — the destructive admin surface must not ship
+# silently dark. openssl rand -base64 48. The deliberate opt-out
+# (staging only) is DISABLE_ADMIN_STEP_UP_ENFORCEMENT=1.
+LOOP_ADMIN_STEP_UP_SIGNING_KEY=
 ```
 
 **Explicitly NOT set in Tranche 1** — these belong to Tranche 2's cashback emission / yield surface and stay off:
