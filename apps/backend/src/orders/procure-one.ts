@@ -296,7 +296,7 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
       return 'failed';
     }
     try {
-      const payRes = await payCtxOrder(sep7.value);
+      const payRes = await payCtxOrder({ orderId: order.id, ...sep7.value });
       // CF-20: from here on a failure leaves Loop having paid CTX.
       // Pin the boundary + ctx order id for the auto-refund path.
       ctxPaid = true;

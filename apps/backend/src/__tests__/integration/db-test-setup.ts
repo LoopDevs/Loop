@@ -33,6 +33,7 @@ import { db } from '../../db/client.js';
  */
 const TABLES_TO_TRUNCATE = [
   'asset_drift_state',
+  'ctx_settlements',
   'pending_payouts',
   'credit_transactions',
   'user_credits',

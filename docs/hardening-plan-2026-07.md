@@ -60,12 +60,18 @@
       table (migration 0043) + `asset-drift-state-repo.ts`; transitions
       claim under `SELECT ... FOR UPDATE` so exactly one machine pages
       per flip; restarts no longer re-page ongoing incidents._
-- [ ] **A4. pay-ctx settlement idempotency + durable record.** The operator→CTX
+- [x] **A4. pay-ctx settlement idempotency + durable record.** The operator→CTX
       payment (`pay-ctx.ts`) has no persisted tx-hash (never wires `onSigned`)
       and no DB record that Loop paid CTX — idempotency rests entirely on a
       bounded Horizon memo scan of a busy shared account. Persist the
       deterministic hash before submit (same CF-18 pattern as
       `payout-submit.ts:316`) and record the settlement spend in a table.
+      _Done: `ctx_settlements` table (migration 0045, one row per order) +
+      `orders/ctx-settlements.ts`; payCtxOrder now converges via the
+      authoritative hash point-lookup first (window-immune), keeps the
+      memo scan as a fallback that backfills the record, pins the intent
+      (destination/memo/amount) against URI rotation, and persists the
+      signed hash via onSigned before every network submit._
 - [ ] **A5. Procurement crash-sweep refund policy.** `sweepStuckProcurement`
       (`transitions-sweeps.ts:57`) flips `procuring → failed` with no refund —
       the one failure path that strands a paid user. Disambiguate via CTX using

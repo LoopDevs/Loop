@@ -8,15 +8,19 @@
  *
  * Three responsibilities:
  *
- *   1. Idempotency. The procurement worker can be re-run for the
- *      same order (stuck-procurement sweep, mid-flight crash). The
- *      `POST /gift-cards` request carries `Idempotency-Key:
- *      <order.id>` so CTX returns the same gift-card + payment URI
- *      on retry. We use that URI's memo to ask Horizon "have we
- *      already sent this memo from the operator account to this
- *      destination?" — if yes, return the existing tx hash without
- *      re-submitting. Same primitive the LOOP-asset payout worker
- *      uses for its retries (`findOutboundPaymentByMemo`).
+ *   1. Idempotency (hardening A4 — two layers). The procurement
+ *      worker can be re-run for the same order (stuck-procurement
+ *      sweep, mid-flight crash).
+ *        a. Durable settlement record: one `ctx_settlements` row per
+ *           order pins the intent and persists the deterministic tx
+ *           hash BEFORE the network submit (CF-18 pattern). A re-run
+ *           asks Horizon for that exact hash — a point lookup with no
+ *           history window, immune to deposit traffic on the shared
+ *           deposit+operator account. This is also the only durable
+ *           evidence outside the chain that Loop paid CTX.
+ *        b. Memo-scan fallback (`findOutboundPaymentByMemo`) for
+ *           pre-A4 orders and the crash-between-sign-and-persist
+ *           sliver; hits are backfilled into the settlement record.
  *
  *   2. Submit. If no prior payment matches, build + sign + submit
  *      a NATIVE XLM payment with the SEP-7 URI's amount + memo.
@@ -28,8 +32,16 @@
  */
 import { logger } from '../logger.js';
 import { findOutboundPaymentByMemo } from '../payments/horizon-find-outbound.js';
+import { getOutboundPaymentByTxHash } from '../payments/horizon.js';
 import { submitNativePayment, PayoutSubmitError } from '../payments/payout-submit.js';
 import { resolvePayoutConfig } from '../payments/payout-worker.js';
+import {
+  backfillCtxSettlementFromChain,
+  getCtxSettlementByOrderId,
+  getOrCreateCtxSettlement,
+  markCtxSettlementConfirmed,
+  recordCtxSettlementTxHash,
+} from './ctx-settlements.js';
 
 const log = logger.child({ area: 'pay-ctx' });
 
@@ -59,6 +71,8 @@ export class PayCtxReconcileError extends Error {
 }
 
 export interface PayCtxArgs {
+  /** Loop order id — keys the durable settlement record (hardening A4). */
+  orderId: string;
   /** CTX destination address from the SEP-7 URI. */
   destination: string;
   /** Decimal-string amount from the SEP-7 URI (e.g. `"0.1198323"`). */
@@ -120,7 +134,68 @@ export async function payCtxOrder(args: PayCtxArgs): Promise<PayCtxResult> {
     throw new PayCtxConfigError('LOOP_STELLAR_OPERATOR_SECRET unset or invalid — cannot pay CTX');
   }
 
-  // Idempotency check first. The lookup walks Horizon's outbound
+  const amountStroops = decimalToStroops(args.amount);
+  if (amountStroops === null || amountStroops <= 0n) {
+    // Fail-closed: an unparseable SEP-7 amount must never reach the
+    // signer or the settlement record.
+    throw new PayCtxReconcileError(`unparseable CTX payment amount '${args.amount}'`);
+  }
+
+  // Hardening A4, layer 1: durable settlement record + AUTHORITATIVE
+  // hash lookup. If a prior attempt persisted its tx hash (persisted
+  // BEFORE the network submit, CF-18 pattern), ask Horizon directly
+  // whether that exact tx landed — a point lookup has no history
+  // window, so a re-run converges correctly no matter how many
+  // deposits have interleaved on the shared deposit+operator account.
+  // This closes the double-pay path the memo scan's bounded window
+  // left open.
+  const settlement = await getCtxSettlementByOrderId(args.orderId);
+  if (settlement !== null) {
+    // The pinned intent must match this attempt's URI — CTX's
+    // Idempotency-Key contract returns the same payment URI per
+    // order, so drift means a tampered/rotated URI. Fail closed.
+    if (
+      settlement.destination !== args.destination ||
+      settlement.memoText !== args.memo ||
+      settlement.amountStroops !== amountStroops
+    ) {
+      log.error(
+        {
+          orderId: args.orderId,
+          pinned: {
+            destination: settlement.destination,
+            memo: settlement.memoText,
+            amountStroops: settlement.amountStroops.toString(),
+          },
+          got: { destination: args.destination, memo: args.memo, amount: args.amount },
+        },
+        'CTX settlement record mismatches this attempt — refusing to pay',
+      );
+      throw new PayCtxReconcileError(
+        `settlement record for order ${args.orderId} mismatches this attempt's payment URI`,
+      );
+    }
+    if (settlement.txHash !== null) {
+      const landed = await getOutboundPaymentByTxHash(settlement.txHash);
+      if (landed?.landed === true) {
+        if (settlement.confirmedAt === null) {
+          await markCtxSettlementConfirmed(settlement.id);
+        }
+        log.info(
+          { orderId: args.orderId, memo: args.memo, txHash: settlement.txHash },
+          'CTX payment already on chain (authoritative hash) — skipping submit',
+        );
+        return { txHash: settlement.txHash, submitted: false };
+      }
+      // landed=false (tx on chain but failed) or null (never landed):
+      // fall through to a fresh submit with a new sequence; onSigned
+      // overwrites the stale hash.
+    }
+  }
+
+  // Layer 2 fallback — the memo scan. Covers orders settled before
+  // the durable record existed and the crash-between-sign-and-persist
+  // sliver. The lookup walks Horizon's outbound
   // payments from the operator account; a prior submit lands on
   // page 1 within seconds, so the typical cost is one Horizon hit.
   //
@@ -168,10 +243,32 @@ export async function payCtxOrder(args: PayCtxArgs): Promise<PayCtxResult> {
     }
     log.info(
       { memo: args.memo, destination: args.destination, txHash: prior.txHash },
-      'CTX payment already on chain — skipping submit',
+      'CTX payment already on chain (memo scan) — skipping submit',
     );
+    // Backfill the durable record so the NEXT re-run converges via
+    // the authoritative hash without a scan.
+    await backfillCtxSettlementFromChain({
+      orderId: args.orderId,
+      destination: args.destination,
+      memoText: args.memo,
+      amountStroops,
+      txHash: prior.txHash,
+    });
     return { txHash: prior.txHash, submitted: false };
   }
+
+  // Fresh submit. Create (or reuse) the settlement intent row, then
+  // persist the deterministic tx hash via onSigned BEFORE the network
+  // submit — a persist failure aborts the submit (better to retry
+  // than to send a tx we cannot later prove we sent).
+  const intentRow =
+    settlement ??
+    (await getOrCreateCtxSettlement({
+      orderId: args.orderId,
+      destination: args.destination,
+      memoText: args.memo,
+      amountStroops,
+    }));
 
   try {
     const res = await submitNativePayment({
@@ -183,7 +280,11 @@ export async function payCtxOrder(args: PayCtxArgs): Promise<PayCtxResult> {
         amount: args.amount,
         memoText: args.memo,
       },
+      onSigned: async (signedHash) => {
+        await recordCtxSettlementTxHash({ id: intentRow.id, txHash: signedHash });
+      },
     });
+    await markCtxSettlementConfirmed(intentRow.id);
     log.info(
       { memo: args.memo, destination: args.destination, amount: args.amount, txHash: res.txHash },
       'CTX payment submitted',

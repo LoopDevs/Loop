@@ -1376,6 +1376,48 @@ export const assetDriftState = pgTable(
   ],
 );
 
+/**
+ * Durable record of operator→CTX settlement payments (hardening A4,
+ * 2026-07 plan; ADR 010 principal switch).
+ *
+ * `payCtxOrder` forwards user-paid value to CTX from the operator
+ * wallet — real money leaving Loop's custody — yet no table recorded
+ * that it happened: idempotency rested entirely on a bounded Horizon
+ * memo scan over the shared deposit+operator account, and the only
+ * durable evidence Loop ever paid CTX was the chain itself. A prior
+ * payment scrolling past the scan window on a busy account meant a
+ * retry would double-pay.
+ *
+ * One row per order (unique). `tx_hash` is persisted BEFORE the
+ * network submit (the CF-18 pattern via `onSigned`) so a crash or
+ * lost response after the tx lands is recoverable via the
+ * authoritative hash lookup — no history-window dependence.
+ */
+export const ctxSettlements = pgTable(
+  'ctx_settlements',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'restrict' }),
+    /** CTX destination address from the SEP-7 URI, pinned at first attempt. */
+    destination: text('destination').notNull(),
+    /** Per-order memo CTX matches inbound payments by. */
+    memoText: text('memo_text').notNull(),
+    /** Native XLM amount in stroops, pinned at first attempt. */
+    amountStroops: bigint('amount_stroops', { mode: 'bigint' }).notNull(),
+    /** Deterministic hash of the signed tx — set before the network submit. */
+    txHash: text('tx_hash'),
+    /** Set once an authoritative Horizon lookup confirms the tx landed. */
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('ctx_settlements_order_unique').on(t.orderId),
+    check('ctx_settlements_amount_positive', sql`${t.amountStroops} > 0`),
+  ],
+);
+
 export const userFavoriteMerchants = pgTable(
   'user_favorite_merchants',
   {
