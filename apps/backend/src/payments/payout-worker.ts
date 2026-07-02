@@ -36,10 +36,12 @@
  * masks the residual today; the single-flight worker is deferred. See
  * `listClaimablePayouts` for the full reasoning.
  */
+import { createHash } from 'node:crypto';
 import { Keypair } from '@stellar/stellar-sdk';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { isKilled } from '../kill-switches.js';
+import { withAdvisoryLock } from '../db/client.js';
 import { listClaimablePayouts } from '../credits/pending-payouts.js';
 import { resolveIssuerSigners } from './issuer-signers.js';
 import {
@@ -113,7 +115,92 @@ export interface RunPayoutTickArgs {
  * idempotency lives in (a) the state-guarded markSubmitted + (b)
  * the Horizon memo pre-check inside `payOne`.
  */
+/**
+ * Advisory-lock key for the payout-worker leader gate (hardening A8).
+ * Fixed sha256→int64 derivation, same shape as the ledger-invariant /
+ * adjustment-cap keys. One key fleet-wide → one payout tick runs at a
+ * time across all Fly machines.
+ */
+function payoutLeaderLockKey(): bigint {
+  const digest = createHash('sha256').update('loop:payout-worker-leader').digest();
+  const raw =
+    (BigInt(digest[0]!) << 56n) |
+    (BigInt(digest[1]!) << 48n) |
+    (BigInt(digest[2]!) << 40n) |
+    (BigInt(digest[3]!) << 32n) |
+    (BigInt(digest[4]!) << 24n) |
+    (BigInt(digest[5]!) << 16n) |
+    (BigInt(digest[6]!) << 8n) |
+    BigInt(digest[7]!);
+  return BigInt.asIntN(64, raw);
+}
+
+const EMPTY_TICK: PayoutTickResult = {
+  picked: 0,
+  confirmed: 0,
+  failed: 0,
+  skippedAlreadyLanded: 0,
+  skippedRace: 0,
+  retriedLater: 0,
+  skippedKilled: 0,
+};
+
+/**
+ * Hard ceiling on how long the leader may hold the A8 lock. A batch of
+ * 5 submits at ~5s each is ~25s; 90s leaves generous headroom while
+ * bounding the worst case. See the deadline rationale in
+ * `runPayoutTick`.
+ */
+const PAYOUT_TICK_LEASE_MS = 90_000;
+
+/** Distinct sentinel so the lease-timeout path is testable + loggable. */
+const TICK_LEASE_TIMED_OUT = Symbol('payout-tick-lease-timeout');
+
 export async function runPayoutTick(args: RunPayoutTickArgs): Promise<PayoutTickResult> {
+  // Hardening A8: single-flight the whole claim→submit tick across
+  // machines. `SKIP LOCKED` (listClaimablePayouts) already gives
+  // disjoint row batches, but two machines submitting concurrently
+  // still race the operator account's sequence number (`tx_bad_seq`
+  // churn that can burn the attempt budget and drive legit payouts to
+  // terminal `failed`). Holding a fleet-wide advisory lock for the
+  // whole tick makes the operator-sequence usage serial again.
+  //
+  // The lock is held across the (network) Stellar submits, so a
+  // hung-but-alive leader (a blackholed Horizon that accepts TCP and
+  // never responds) would otherwise hold the lock forever and stall
+  // the WHOLE fleet's payout queue — a worse failure mode than the
+  // per-machine `tx_bad_seq` churn A8 fixes (adversarial-review P1).
+  // So the tick body races a hard lease deadline: on timeout we
+  // release the lock and return, and the orphaned submit degrades to
+  // exactly the pre-A8 per-machine race (the accepted residual), never
+  // a fleet stall. Net: strictly better than status quo in the normal
+  // case, no worse in the pathological one.
+  let leaseTimer: ReturnType<typeof setTimeout> | undefined;
+  const outcome = await withAdvisoryLock(payoutLeaderLockKey(), () =>
+    Promise.race([
+      runPayoutTickLocked(args),
+      new Promise<typeof TICK_LEASE_TIMED_OUT>((resolve) => {
+        leaseTimer = setTimeout(() => resolve(TICK_LEASE_TIMED_OUT), PAYOUT_TICK_LEASE_MS);
+      }),
+    ]),
+  );
+  if (leaseTimer !== undefined) clearTimeout(leaseTimer);
+  if (!outcome.ran) {
+    // Another machine holds the lock this tick.
+    return { ...EMPTY_TICK };
+  }
+  if (outcome.value === TICK_LEASE_TIMED_OUT) {
+    log.error(
+      { leaseMs: PAYOUT_TICK_LEASE_MS },
+      'Payout tick exceeded the lease deadline — releasing the leader lock so the fleet is not stalled; the in-flight submit degrades to the pre-A8 per-machine posture',
+    );
+    return { ...EMPTY_TICK };
+  }
+  return outcome.value;
+}
+
+/** The tick body, run under the A8 leader lock. */
+async function runPayoutTickLocked(args: RunPayoutTickArgs): Promise<PayoutTickResult> {
   const rows = await listClaimablePayouts({
     limit: args.limit ?? 5,
     staleSeconds: args.watchdogStaleSeconds ?? 300,

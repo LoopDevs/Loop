@@ -97,12 +97,19 @@
       credit the excess back to the user's mirror (auditable), or refuse
       overpays outright. `[D]` pick one; implementing full-burn-and-credit
       unless overridden.
-- [ ] **A8. Single-payout-submitter enforcement.** `SKIP LOCKED` batching
+- [x] **A8. Single-payout-submitter enforcement.** `SKIP LOCKED` batching
       doesn't stop two Fly machines from claiming disjoint batches and racing
       the shared operator sequence (`tx_bad_seq` → attempt-budget burn →
       legitimate payouts terminally fail). Add a Postgres advisory-lock leader
       gate around the payout tick (cheap, no infra), and same treatment for the
-      per-machine CTX rate-limit backoff if trivial.
+      per-machine CTX rate-limit backoff if trivial. _Done: `withAdvisoryLock`
+      (reserved-connection session lock, pooler-guarded) wraps the whole
+      payout tick — one machine drains at a time; losers skip. Adversarial
+      review caught that a lock held across unbounded Stellar I/O by a hung
+      leader would stall the whole fleet (worse than the per-machine race
+      it fixes) → added a 90s lease deadline that releases the lock and
+      degrades to the accepted pre-A8 posture rather than stalling. CTX
+      backoff left per-machine (not trivial; lower value)._
 
 ## Track B — Auth hardening
 

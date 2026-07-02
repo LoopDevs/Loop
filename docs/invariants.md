@@ -150,10 +150,13 @@ A `pending_payouts` row is submitted to Stellar at most once.
   hash re-check on re-pick.
 - **DB**: partial unique idempotency indexes per kind
   (`pending_payouts_active_emission_unique`, order-cashback unique, …).
-- **residual (convention)**: single-submitter-per-operator-account is
-  assumed but NOT enforced — two Fly machines can claim disjoint batches
-  and race the operator sequence (`SKIP LOCKED` is row-level, not leader
-  election). Bounded today by `min_machines_running=1`. See hardening A8.
+- **runtime (A8)**: the payout tick is single-flighted fleet-wide via a
+  reserved-connection advisory lock (`withAdvisoryLock` +
+  `payoutLeaderLockKey`) — one machine drains at a time, closing the
+  normal-case operator-sequence race. A 90s lease deadline releases the
+  lock if the leader hangs on Stellar I/O, degrading to the pre-A8
+  per-machine race (accepted) rather than stalling the fleet. Not a full
+  heartbeat leader-election; the residual is a >90s hung tick.
 
 ### INV-10 — Interest mints only for backed assets
 
@@ -202,6 +205,6 @@ how, in the PR description. If it introduces a new invariant, add it here
 with its enforcement tier in the same PR.
 
 **Weakest links** (as of 2026-07, ranked): INV-2 (lock is convention for
-new writers), INV-4's equation correctness (one-head knowledge), INV-9's
-single-submitter residual (A8). These are where a mid-tier contributor is
-most likely to introduce a silent regression.
+new writers), INV-4's equation correctness (one-head knowledge). These are
+where a mid-tier contributor is most likely to introduce a silent
+regression.
