@@ -134,7 +134,13 @@ vi.mock('../../discord.js', async (importActual) => {
 });
 
 import { db } from '../../db/client.js';
-import { users, merchantCashbackConfigs, orders } from '../../db/schema.js';
+import {
+  users,
+  merchantCashbackConfigs,
+  orders,
+  ctxSettlements,
+  creditTransactions,
+} from '../../db/schema.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
 import { runProcurementTick } from '../../orders/procurement.js';
 import { sweepStuckProcurement } from '../../orders/transitions.js';
@@ -411,6 +417,65 @@ describeIf('procurement-worker integration — stuck-procurement sweep', () => {
 
     const [fulfilled] = await db.select().from(orders).where(eq(orders.id, fulfilledId));
     expect(fulfilled!.state).toBe('fulfilled');
+  });
+
+  it('A5: auto-refunds a stuck row with NO CTX settlement (Loop never paid)', async () => {
+    const user = await findOrCreateUserByEmail('sweep-refund@test.local');
+    const cutoff = new Date('2026-01-01T01:00:00Z');
+    const orderId = await seedOrderInState({
+      userId: user.id,
+      state: 'procuring',
+      procuredAt: new Date(cutoff.getTime() - 30 * 60 * 1000),
+    });
+    // No ctx_settlements row → Loop never forwarded value to CTX.
+
+    const swept = await sweepStuckProcurement(cutoff);
+    expect(swept).toBe(1);
+
+    const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
+    expect(order!.state).toBe('failed');
+
+    // The user was auto-refunded — a positive refund ledger row exists.
+    const refunds = await db
+      .select()
+      .from(creditTransactions)
+      .where(eq(creditTransactions.referenceId, orderId));
+    expect(refunds).toHaveLength(1);
+    expect(refunds[0]!.type).toBe('refund');
+    expect(refunds[0]!.amountMinor).toBe(2500n);
+  });
+
+  it('A5: HOLDS a stuck row with a CONFIRMED CTX settlement — no refund, no Horizon call', async () => {
+    const user = await findOrCreateUserByEmail('sweep-hold@test.local');
+    const cutoff = new Date('2026-01-01T01:00:00Z');
+    const orderId = await seedOrderInState({
+      userId: user.id,
+      state: 'procuring',
+      procuredAt: new Date(cutoff.getTime() - 30 * 60 * 1000),
+    });
+    // Loop DID pay CTX — a confirmed settlement exists.
+    await db.insert(ctxSettlements).values({
+      orderId,
+      destination: 'GCTXAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      memoText: 'settled',
+      amountStroops: 1_000_000n,
+      txHash: 'confirmed-tx',
+      confirmedAt: new Date(),
+    });
+
+    const swept = await sweepStuckProcurement(cutoff);
+    expect(swept).toBe(1);
+
+    const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
+    expect(order!.state).toBe('failed');
+
+    // NO refund — the confirmed settlement means a usable card may
+    // exist; refunding would leave Loop out-of-pocket.
+    const refunds = await db
+      .select()
+      .from(creditTransactions)
+      .where(eq(creditTransactions.referenceId, orderId));
+    expect(refunds).toHaveLength(0);
   });
 
   it('idempotent — second sweep over the same cutoff is a no-op', async () => {

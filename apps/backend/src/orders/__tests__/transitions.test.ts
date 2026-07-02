@@ -153,12 +153,45 @@ vi.mock('../../logger.js', () => ({
     child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
   },
 }));
-const { notifyStuckProcurementSweptMock, notifyPegBreakMock } = vi.hoisted(() => ({
+const {
+  notifyStuckProcurementSweptMock,
+  notifyOrderFailedAfterCtxPaidMock,
+  notifyPegBreakMock,
+  getCtxSettlementMock,
+  markCtxSettlementConfirmedMock,
+  hashLookupMock,
+  autoRefundMock,
+} = vi.hoisted(() => ({
   notifyStuckProcurementSweptMock: vi.fn(),
+  notifyOrderFailedAfterCtxPaidMock: vi.fn(),
   notifyPegBreakMock: vi.fn(),
+  // Hardening A5: the stuck-procurement sweep reads the durable
+  // CTX-settlement record + the authoritative Horizon hash lookup and
+  // auto-refunds the CTX-unpaid rows.
+  getCtxSettlementMock: vi.fn(),
+  markCtxSettlementConfirmedMock: vi.fn(),
+  hashLookupMock: vi.fn(),
+  autoRefundMock: vi.fn(),
+}));
+vi.mock('../ctx-settlements.js', () => ({
+  getCtxSettlementByOrderId: (orderId: string) => getCtxSettlementMock(orderId),
+  markCtxSettlementConfirmed: (id: string) => markCtxSettlementConfirmedMock(id),
+}));
+vi.mock('../../payments/horizon.js', () => ({
+  getOutboundPaymentByTxHash: (h: string) => hashLookupMock(h),
+}));
+vi.mock('../../credits/refunds.js', () => ({
+  applyOrderAutoRefund: (args: unknown) => autoRefundMock(args),
+  RefundAlreadyIssuedError: class RefundAlreadyIssuedError extends Error {},
+  RefundOrderInvalidError: class RefundOrderInvalidError extends Error {
+    constructor(public readonly reason: string) {
+      super(reason);
+    }
+  },
 }));
 vi.mock('../../discord.js', () => ({
   notifyStuckProcurementSwept: (args: unknown) => notifyStuckProcurementSweptMock(args),
+  notifyOrderFailedAfterCtxPaid: (args: unknown) => notifyOrderFailedAfterCtxPaidMock(args),
   // other notify* functions are not called from transitions.ts —
   // stub to no-op so the module's import surface stays satisfied.
   notifyCashbackCredited: vi.fn(),
@@ -651,44 +684,149 @@ describe('markOrderProcuring — procured_at pin', () => {
   });
 });
 
-describe('sweepStuckProcurement', () => {
-  it('returns the number of rows swept', async () => {
-    state.returningRows = [
-      {
-        id: 'a',
-        userId: 'u-a',
-        merchantId: 'm-1',
-        chargeMinor: 1000n,
-        chargeCurrency: 'GBP',
-        ctxOperatorId: 'pool',
-        procuredAt: new Date(Date.now() - 20 * 60 * 1000),
-      },
-      {
-        id: 'b',
-        userId: 'u-b',
-        merchantId: 'm-2',
-        chargeMinor: 2500n,
-        chargeCurrency: 'USD',
-        ctxOperatorId: null,
-        procuredAt: new Date(Date.now() - 20 * 60 * 1000),
-      },
-    ];
+describe('sweepStuckProcurement (hardening A5 — refund disambiguation)', () => {
+  const rowA = {
+    id: 'a',
+    userId: 'u-a',
+    merchantId: 'm-1',
+    chargeMinor: 1000n,
+    chargeCurrency: 'GBP',
+    ctxOperatorId: 'pool',
+    procuredAt: new Date(Date.now() - 20 * 60 * 1000),
+  };
+  const rowB = {
+    id: 'b',
+    userId: 'u-b',
+    merchantId: 'm-2',
+    chargeMinor: 2500n,
+    chargeCurrency: 'USD',
+    ctxOperatorId: null,
+    procuredAt: new Date(Date.now() - 20 * 60 * 1000),
+  };
+
+  beforeEach(() => {
     notifyStuckProcurementSweptMock.mockClear();
+    notifyOrderFailedAfterCtxPaidMock.mockClear();
+    getCtxSettlementMock.mockReset();
+    markCtxSettlementConfirmedMock.mockReset();
+    hashLookupMock.mockReset();
+    autoRefundMock.mockReset();
+    autoRefundMock.mockResolvedValue({ id: 'refund-tx' });
+  });
+
+  it('auto-refunds a row with NO settlement (Loop never paid)', async () => {
+    state.returningRows = [rowA];
+    getCtxSettlementMock.mockResolvedValue(null);
     const { sweepStuckProcurement } = await import('../transitions.js');
-    const cutoff = new Date(Date.now() - 15 * 60 * 1000);
-    const n = await sweepStuckProcurement(cutoff);
-    expect(n).toBe(2);
+    const n = await sweepStuckProcurement(new Date(Date.now() - 15 * 60 * 1000));
+    expect(n).toBe(1);
     expect(state.updateSet).toMatchObject({
       state: 'failed',
       failureReason: 'procurement_timeout',
     });
-    // A2-621: per-row Discord alert fires for each swept row.
-    expect(notifyStuckProcurementSweptMock).toHaveBeenCalledTimes(2);
-    expect(notifyStuckProcurementSweptMock).toHaveBeenCalledWith(
-      expect.objectContaining({ orderId: 'a', merchantId: 'm-1', chargeCurrency: 'GBP' }),
+    expect(hashLookupMock).not.toHaveBeenCalled();
+    expect(autoRefundMock).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: 'a', userId: 'u-a', amountMinor: 1000n, currency: 'GBP' }),
     );
-    expect(notifyStuckProcurementSweptMock).toHaveBeenCalledWith(
-      expect.objectContaining({ orderId: 'b', ctxOperatorId: null }),
+    // Every swept row pages; here refunded + not-ctx-paid.
+    expect(notifyOrderFailedAfterCtxPaidMock).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: 'a', ctxPaid: false, refunded: true }),
+    );
+  });
+
+  it('auto-refunds a settlement row with NO tx_hash (nothing was ever dispatched)', async () => {
+    state.returningRows = [rowA];
+    getCtxSettlementMock.mockResolvedValue({ id: 's0', txHash: null, confirmedAt: null });
+    const { sweepStuckProcurement } = await import('../transitions.js');
+    await sweepStuckProcurement(new Date());
+    expect(hashLookupMock).not.toHaveBeenCalled();
+    expect(autoRefundMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('P0 fix: a persisted tx_hash that LANDED is treated as PAID → HOLD, no refund', async () => {
+    // The crashed-after-submit population: tx_hash set, confirmed_at
+    // null, but the payment actually landed. Keying on confirmed_at
+    // would have double-refunded this user.
+    state.returningRows = [rowB];
+    getCtxSettlementMock.mockResolvedValue({ id: 's2', txHash: 'landed-tx', confirmedAt: null });
+    hashLookupMock.mockResolvedValue({ landed: true });
+    const { sweepStuckProcurement } = await import('../transitions.js');
+    await sweepStuckProcurement(new Date());
+    expect(hashLookupMock).toHaveBeenCalledWith('landed-tx');
+    expect(markCtxSettlementConfirmedMock).toHaveBeenCalledWith('s2'); // backfilled
+    expect(autoRefundMock).not.toHaveBeenCalled();
+    expect(notifyOrderFailedAfterCtxPaidMock).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: 'b', ctxPaid: true, refunded: false }),
+    );
+  });
+
+  it('auto-refunds a persisted tx_hash that NEVER landed (signed but did not settle)', async () => {
+    state.returningRows = [rowA];
+    getCtxSettlementMock.mockResolvedValue({ id: 's3', txHash: 'never-landed', confirmedAt: null });
+    hashLookupMock.mockResolvedValue(null);
+    const { sweepStuckProcurement } = await import('../transitions.js');
+    await sweepStuckProcurement(new Date());
+    expect(autoRefundMock).toHaveBeenCalledTimes(1);
+    expect(markCtxSettlementConfirmedMock).not.toHaveBeenCalled();
+  });
+
+  it('confirmed_at already set → PAID fast path, no Horizon call, HOLD', async () => {
+    state.returningRows = [rowB];
+    getCtxSettlementMock.mockResolvedValue({ id: 's4', txHash: 't', confirmedAt: new Date() });
+    const { sweepStuckProcurement } = await import('../transitions.js');
+    await sweepStuckProcurement(new Date());
+    expect(hashLookupMock).not.toHaveBeenCalled();
+    expect(autoRefundMock).not.toHaveBeenCalled();
+    expect(notifyOrderFailedAfterCtxPaidMock).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: 'b', ctxPaid: true, refunded: false }),
+    );
+  });
+
+  it('fails closed (hold, no refund) when the settlement lookup throws', async () => {
+    state.returningRows = [rowA];
+    getCtxSettlementMock.mockRejectedValue(new Error('db down'));
+    const { sweepStuckProcurement } = await import('../transitions.js');
+    await sweepStuckProcurement(new Date());
+    expect(autoRefundMock).not.toHaveBeenCalled();
+    expect(notifyOrderFailedAfterCtxPaidMock).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: 'a', ctxPaid: true }),
+    );
+  });
+
+  it('fails closed (hold, no refund) when the Horizon hash lookup throws', async () => {
+    state.returningRows = [rowA];
+    getCtxSettlementMock.mockResolvedValue({ id: 's5', txHash: 'x', confirmedAt: null });
+    hashLookupMock.mockRejectedValue(new Error('horizon 503'));
+    const { sweepStuckProcurement } = await import('../transitions.js');
+    await sweepStuckProcurement(new Date());
+    expect(autoRefundMock).not.toHaveBeenCalled();
+  });
+
+  it('mixed batch: refunds the unpaid, holds the landed-paid, both flipped to failed', async () => {
+    state.returningRows = [rowA, rowB];
+    getCtxSettlementMock.mockImplementation(async (orderId: string) =>
+      orderId === 'b' ? { id: 's2', txHash: 'landed', confirmedAt: new Date() } : null,
+    );
+    const { sweepStuckProcurement } = await import('../transitions.js');
+    const n = await sweepStuckProcurement(new Date());
+    expect(n).toBe(2);
+    expect(autoRefundMock).toHaveBeenCalledTimes(1);
+    expect(autoRefundMock).toHaveBeenCalledWith(expect.objectContaining({ orderId: 'a' }));
+    expect(notifyOrderFailedAfterCtxPaidMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('a refund blip does not abort the batch (next row still processed)', async () => {
+    state.returningRows = [rowA, rowB];
+    getCtxSettlementMock.mockResolvedValue(null);
+    autoRefundMock.mockRejectedValueOnce(new Error('refund write failed'));
+    autoRefundMock.mockResolvedValueOnce({ id: 'refund-tx' });
+    const { sweepStuckProcurement } = await import('../transitions.js');
+    const n = await sweepStuckProcurement(new Date());
+    expect(n).toBe(2);
+    expect(autoRefundMock).toHaveBeenCalledTimes(2);
+    // The failed-refund row still pages with refunded:false.
+    expect(notifyOrderFailedAfterCtxPaidMock).toHaveBeenCalledWith(
+      expect.objectContaining({ refunded: false }),
     );
   });
 
@@ -697,6 +835,7 @@ describe('sweepStuckProcurement', () => {
     const { sweepStuckProcurement } = await import('../transitions.js');
     const n = await sweepStuckProcurement(new Date());
     expect(n).toBe(0);
+    expect(autoRefundMock).not.toHaveBeenCalled();
   });
 });
 

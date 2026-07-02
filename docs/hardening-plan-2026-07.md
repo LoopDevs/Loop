@@ -72,12 +72,18 @@
       memo scan as a fallback that backfills the record, pins the intent
       (destination/memo/amount) against URI rotation, and persists the
       signed hash via onSigned before every network submit._
-- [ ] **A5. Procurement crash-sweep refund policy.** `sweepStuckProcurement`
+- [x] **A5. Procurement crash-sweep refund policy.** `sweepStuckProcurement`
       (`transitions-sweeps.ts:57`) flips `procuring → failed` with no refund —
       the one failure path that strands a paid user. Disambiguate via CTX using
       the order-id idempotency key (did CTX mint?): if no CTX order exists,
       auto-refund like every other failure path; if ambiguous, alert loudly and
-      hold. `[D]` default as stated.
+      hold. `[D]` default as stated. _Done — disambiguation uses the A4
+      `ctx_settlements` record (did LOOP PAY CTX?) instead of a live CTX
+      query: cleaner signal, no external call, no new failure mode. No
+      confirmed settlement → Loop never forwarded value → auto-refund (the
+      common crashed-worker case). Confirmed settlement → hold + page for
+      manual reconcile (a usable card may exist). Settlement-read failure
+      fails closed to hold (never auto-refund on uncertainty)._
 - [ ] **A6. Late-deposit-after-expiry handling.** Deposits landing just after
       `pending_payment → expired` are classified `order_gone` and abandoned
       (`skipped-payments.ts:233`). Default: durable queue row + alert with an
