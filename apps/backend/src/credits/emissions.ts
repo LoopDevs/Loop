@@ -30,8 +30,10 @@
  *      DB trigger (migration 0044) enforces the same rule against any
  *      future writer that bypasses this module.
  *   4. Hardening A1 — fleet-wide daily value cap per currency
- *      (ADMIN_DAILY_ADJUSTMENT_CAP_MINOR), advisory-lock-serialised
- *      like the compensation cap.
+ *      (ADMIN_DAILY_WITHDRAWAL_CAP_MINOR — ADM-01's cap for the
+ *      pre-ADR-036 withdrawal writer, orphaned by the emission
+ *      re-scope and revived here), advisory-lock-serialised like the
+ *      compensation cap.
  *   5. Reject with EmissionAlreadyIssuedError if a matching active
  *      emission intent already exists (semantic uniqueness fence
  *      `pending_payouts_active_emission_unique` + pre-check).
@@ -276,7 +278,10 @@ export async function applyAdminEmission(args: {
       // it two concurrent emissions in the same (currency, day)
       // bucket both read the same `used` total and jointly exceed the
       // cap. Lock held to commit.
-      const capMinor = env.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR;
+      // ADM-01's dedicated cap for the value-leaves-the-system writer
+      // (declared for the pre-ADR-036 withdrawal writer, orphaned by
+      // the emission re-scope, revived here — hardening A1/C5).
+      const capMinor = env.ADMIN_DAILY_WITHDRAWAL_CAP_MINOR;
       if (capMinor > 0n) {
         const dayStart = new Date();
         dayStart.setUTCHours(0, 0, 0, 0);

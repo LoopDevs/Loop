@@ -1103,7 +1103,7 @@ describeIf('hardening A1 — emission conservation (cumulative, cross-writer, DB
     expect(row?.state).toBe('pending');
   });
 
-  it('fleet-wide daily emission cap: the primitive refuses past ADMIN_DAILY_ADJUSTMENT_CAP_MINOR', async () => {
+  it('fleet-wide daily emission cap: the primitive refuses past ADMIN_DAILY_WITHDRAWAL_CAP_MINOR', async () => {
     // Cap default is 100M minor. Drive the primitive directly (the
     // HTTP surface adds a 10M per-request cap that would need 10+
     // calls). Different amounts so the semantic-duplicate fence
