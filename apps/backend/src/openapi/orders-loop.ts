@@ -33,7 +33,7 @@
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerOrdersLoopReadsOpenApi } from './orders-loop-reads.js';
-import { registerOrdersPayWithBalanceOpenApi } from './orders-pay-with-balance.js';
+import { registerOrdersRedeemOpenApi } from './orders-redeem.js';
 
 /**
  * Registers the Loop-native `/api/orders/loop/*` schemas + paths
@@ -150,7 +150,7 @@ export function registerOrdersLoopOpenApi(
       },
       400: {
         description:
-          'Validation error or unknown/disabled merchant (also: malformed Idempotency-Key length)',
+          'Validation error or unknown/disabled merchant (also: malformed Idempotency-Key length); `CREDIT_METHOD_RETIRED` when `paymentMethod=credit` is requested by a wallet-activated user (ADR 036 OQ3 — spend via token redemption instead); `INSUFFICIENT_CREDIT` when a migration-window credit order exceeds the mirror balance',
         content: { 'application/json': { schema: errorResponse } },
       },
       401: {
@@ -191,7 +191,7 @@ export function registerOrdersLoopOpenApi(
   // position as the original block.
   registerOrdersLoopReadsOpenApi(registry, errorResponse);
 
-  // ADR 030 Phase C3 — one-tap "pay with Loop balance" on an
-  // existing loop_asset order. Lives in its own module.
-  registerOrdersPayWithBalanceOpenApi(registry, errorResponse);
+  // ADR 030 Phase C3 / ADR 036 — one-tap redemption of an existing
+  // loop_asset order from the embedded-wallet LOOP balance.
+  registerOrdersRedeemOpenApi(registry, errorResponse);
 }

@@ -25,7 +25,10 @@ import {
   type UserMeView,
 } from '~/services/user';
 import { PendingCashbackChip } from '~/components/features/cashback/PendingCashbackChip';
-import { WalletCard } from '~/components/features/wallet/WalletCard';
+import { WalletCard, fmtLoopBalance } from '~/components/features/wallet/WalletCard';
+import { useLocaleTag } from '~/i18n/format';
+import { useWallet } from '~/hooks/use-wallet';
+import { CURRENCY_TO_ASSET_CODE } from '@loop/shared';
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Sign in — Loop' }];
@@ -196,6 +199,16 @@ function CashbackBalanceCard({
   isLoading: boolean;
   phase1Only: boolean;
 }): React.JSX.Element {
+  // balance = tokens once activated; mirror is reconciliation-only
+  // (ADR 036). Once the embedded wallet is `activated`, every accrued
+  // unit has been emitted on-chain — the user's balance IS the LOOP
+  // tokens they hold, so this card sources the headline from the
+  // wallet's matching home-currency LOOP asset. Pre-activation users
+  // keep the `homeCurrencyBalanceMinor` mirror display (their tokens
+  // haven't been emitted yet).
+  const { wallet, isActivated, balanceFor } = useWallet();
+  const tokenSourced = isActivated && wallet !== undefined;
+  const locale = useLocaleTag();
   const showWithdrawNudge = !phase1Only && me?.stellarAddress === null;
   return (
     <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4">
@@ -205,7 +218,13 @@ function CashbackBalanceCard({
       <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">
         {isLoading || me === undefined
           ? '—'
-          : formatCashbackBalance(me.homeCurrencyBalanceMinor, me.homeCurrency)}
+          : tokenSourced
+            ? fmtLoopBalance(
+                balanceFor(CURRENCY_TO_ASSET_CODE[me.homeCurrency]),
+                CURRENCY_TO_ASSET_CODE[me.homeCurrency],
+                locale,
+              )
+            : formatCashbackBalance(me.homeCurrencyBalanceMinor, me.homeCurrency)}
       </p>
       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
         {phase1Only ? 'Realised on every Loop order as a discount.' : 'Earned on every Loop order.'}

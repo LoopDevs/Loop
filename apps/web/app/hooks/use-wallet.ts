@@ -7,7 +7,7 @@ import { shouldRetry } from './query-retry';
  * Shared cache key for the embedded-wallet surface (ADR 030 Phase C).
  * Me-surface convention: 2-element array where the first element is
  * the scope selector (matches `['me', 'credits']` etc.). Exported so
- * the pay-with-balance flow can invalidate it after a spend.
+ * the redeem flow can invalidate it after a spend.
  */
 export const WALLET_QUERY_KEY = ['me', 'wallet'] as const;
 
@@ -32,7 +32,7 @@ export interface UseWalletResult {
  * renders never fire a guaranteed-401 request.
  *
  * 30s staleTime: balances move on order payment and nightly interest;
- * the pay-with-balance mutation invalidates explicitly, so a 30s
+ * the redeem mutation invalidates explicitly, so a 30s
  * window only ever shows a slightly stale read between unrelated
  * navigations.
  */

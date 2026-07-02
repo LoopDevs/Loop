@@ -1,13 +1,14 @@
 /**
- * `GET /api/me/wallet` + `POST /api/orders/loop/:id/pay-with-balance`
- * wire shapes (ADR 030 Phase C).
+ * `GET /api/me/wallet` wire shapes (ADR 030 Phase C).
  *
  * The embedded-wallet balance surface: on-chain LOOP balances are
  * the user's authoritative balance under ADR 036, so the wallet
  * card reads this endpoint (never the off-chain mirror). Lives in
  * `@loop/shared` per ADR 019 — backend emits it, web consumes it,
  * and the shared-type-parity gate holds both sides to one
- * definition.
+ * definition. `POST /api/orders/loop/:id/redeem`'s response lives in
+ * `loop-orders.ts` (`RedeemLoopOrderResponse`) — it's an order
+ * action, not a wallet-surface read.
  */
 import type { LoopAssetCode } from './loop-asset.js';
 
@@ -52,20 +53,4 @@ export interface UserWalletResponse {
    * never-500 fallback per ADR 020 discipline.
    */
   stale: boolean;
-}
-
-/**
- * `POST /api/orders/loop/:id/pay-with-balance` 200 response.
- * `state` is the order's state after the balance payment was
- * submitted; clients keep polling `GET /api/orders/loop/:id` exactly
- * as they do for the crypto deposit path — the deposit watcher remains
- * the authoritative state machine.
- *
- * Error contract: 400 `{ code: 'INSUFFICIENT_BALANCE' }` when the
- * up-front Horizon read says the matching LOOP-asset balance doesn't
- * cover the charge; 503 when the wallet provider / Horizon is
- * unavailable.
- */
-export interface PayWithBalanceResponse {
-  state: string;
 }
