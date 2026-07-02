@@ -259,14 +259,16 @@
 Principle: enforcement over documentation — anything mechanizable became a
 gate in Track C; skills are the residue that genuinely needs judgment.
 
-- [ ] **E1. `docs/invariants.md`.** The money-invariants document: every
+- [x] **E1. `docs/invariants.md`.** The money-invariants document: every
       "must always be true" (mirror = Σ ledger; emission conservation; the
       drift equation on-chain − pool − burns + mints = mirror; paid orders
       always reach a user-whole terminal state; single submitter per operator
       account; …), each with a pointer to WHAT enforces it (CHECK / test /
       cron / nothing-yet). The single doc this repo most lacks; also the
-      review anchor for every future money diff.
-- [ ] **E2. Threat model doc.** Assets, actors, trust boundaries (upstream
+      review anchor for every future money diff. _Done: 12 invariants,
+      each with its enforcement tier + "weakest links" ranking; linked
+      from AGENTS.md docs index._
+- [x] **E2. Threat model doc.** Assets, actors, trust boundaries (upstream
       CTX, Horizon, Privy, admin bearers, step-up), and the accepted-risk
       register — so future contributors can tell "deliberate tradeoff" from
       "gap."
