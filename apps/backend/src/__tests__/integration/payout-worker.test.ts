@@ -631,3 +631,80 @@ describeIf('payout-worker integration — ADR 036 issuer-return burns', () => {
     expect(row!.txHash).toBe('burn-tx-hash');
   });
 });
+
+describeIf('withAdvisoryLock — real postgres single-flight (hardening A8)', () => {
+  it('a second concurrent acquire of the same key does NOT run its fn', async () => {
+    const { withAdvisoryLock } = await import('../../db/client.js');
+    const KEY = 918273645123456789n % 2n ** 63n;
+
+    let firstRunning = false;
+    let secondRan = false;
+
+    // Hold the lock in the first call until the second has attempted.
+    let releaseFirst: () => void = () => {};
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    const first = withAdvisoryLock(KEY, async () => {
+      firstRunning = true;
+      await firstGate; // stay in the critical section
+      return 'first';
+    });
+
+    // Spin until the first is inside its fn (holds the lock).
+    for (let i = 0; i < 100 && !firstRunning; i++) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(firstRunning).toBe(true);
+
+    const second = await withAdvisoryLock(KEY, async () => {
+      secondRan = true;
+      return 'second';
+    });
+    expect(second.ran).toBe(false); // lock held → skipped
+    expect(secondRan).toBe(false); // fn never ran
+
+    releaseFirst();
+    const firstResult = await first;
+    expect(firstResult).toEqual({ ran: true, value: 'first' });
+
+    // After release, the key is free again.
+    const third = await withAdvisoryLock(KEY, async () => 'third');
+    expect(third).toEqual({ ran: true, value: 'third' });
+  });
+
+  it('a throwing fn still releases the lock (next acquire succeeds)', async () => {
+    const { withAdvisoryLock } = await import('../../db/client.js');
+    const KEY = 424242424242424242n % 2n ** 63n;
+    await expect(
+      withAdvisoryLock(KEY, async () => {
+        throw new Error('tick blew up mid-submit');
+      }),
+    ).rejects.toThrow('tick blew up');
+    // The lock must be free again — if the finally didn't unlock, this
+    // would return { ran: false }.
+    const after = await withAdvisoryLock(KEY, async () => 'recovered');
+    expect(after).toEqual({ ran: true, value: 'recovered' });
+  });
+
+  it('a DIFFERENT key is not blocked by a held lock', async () => {
+    const { withAdvisoryLock } = await import('../../db/client.js');
+    const KEY_A = 111222333444555666n % 2n ** 63n;
+    const KEY_B = 666555444333222111n % 2n ** 63n;
+    let releaseA: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+    const a = withAdvisoryLock(KEY_A, async () => {
+      await gate;
+      return 'a';
+    });
+    // Give A a moment to acquire.
+    await new Promise((r) => setTimeout(r, 20));
+    const b = await withAdvisoryLock(KEY_B, async () => 'b');
+    expect(b).toEqual({ ran: true, value: 'b' }); // independent key runs
+    releaseA();
+    await a;
+  });
+});

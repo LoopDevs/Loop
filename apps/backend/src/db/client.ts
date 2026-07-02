@@ -76,6 +76,73 @@ export const db = drizzle(client, { schema });
 export type DB = typeof db;
 
 /**
+ * Run `fn` while holding a session-scoped Postgres advisory lock,
+ * fleet-wide, on a DEDICATED reserved connection (hardening A8).
+ *
+ * Session advisory locks are a pool footgun — the unlock must land on
+ * the SAME physical connection that took the lock, but a pooled query
+ * can run on any member. `client.reserve()` pins one connection for
+ * the lock's whole lifetime, so lock + `fn` + unlock are guaranteed
+ * co-located, and the `finally` always releases (or the connection
+ * close releases it if the process dies).
+ *
+ * Non-blocking (`pg_try_advisory_lock`): if another machine holds the
+ * lock, `fn` is NOT run and the result is `{ ran: false }`. Callers
+ * that single-flight a periodic tick treat that as "another instance
+ * is the leader this tick" and skip.
+ *
+ * **Transaction-pooler guard.** Under a transaction-mode pooler
+ * (PgBouncer/Supavisor), each statement can land on a different server
+ * backend, so `pg_advisory_unlock` may miss the backend that took the
+ * lock → the SESSION lock leaks and never releases. `reserve()` only
+ * pins the client↔pooler socket, not the pooler↔server backend. So
+ * when the URL is a pooler we do NOT take the lock — we run `fn`
+ * un-serialised (degrading to the caller's pre-lock behaviour, which
+ * for the payout worker is the accepted `SKIP LOCKED` per-machine
+ * posture) rather than risk a leaked lock that stalls the queue.
+ * Production uses the direct Postgres port (see deployment.md), so
+ * this only trips on a misconfigured `DATABASE_URL`.
+ *
+ * **No lease is enforced here** — the CALLER is responsible for
+ * bounding how long `fn` runs (e.g. the payout worker races its tick
+ * body against a deadline), because a lock held across unbounded
+ * network I/O by a hung-but-alive leader would otherwise stall the
+ * whole fleet. This wrapper only guarantees the lock is released when
+ * `fn` settles (resolve or throw) or the connection closes.
+ */
+export async function withAdvisoryLock<T>(
+  lockKey: bigint,
+  fn: () => Promise<T>,
+): Promise<{ ran: true; value: T } | { ran: false }> {
+  if (isPooledPostgresUrl(env.DATABASE_URL)) {
+    // Cannot hold a reliable session lock through a transaction
+    // pooler — run un-serialised rather than leak a lock. Logged so a
+    // misconfiguration is visible.
+    log.warn(
+      'withAdvisoryLock called with a transaction-pooler DATABASE_URL — running fn WITHOUT the advisory lock (session locks are unsafe through a pooler). Use the direct Postgres port for fleet-wide single-flight.',
+    );
+    return { ran: true, value: await fn() };
+  }
+  const reserved = await client.reserve();
+  try {
+    const [row] = await reserved<{ locked: boolean }[]>`
+      SELECT pg_try_advisory_lock(${lockKey}) AS locked
+    `;
+    if (row?.locked !== true) {
+      return { ran: false };
+    }
+    try {
+      const value = await fn();
+      return { ran: true, value };
+    } finally {
+      await reserved`SELECT pg_advisory_unlock(${lockKey})`;
+    }
+  } finally {
+    reserved.release();
+  }
+}
+
+/**
  * Run pending migrations and resolve. Called at backend startup so a
  * fresh deploy applies any schema changes before it starts serving.
  * Safe to call repeatedly — the migrator no-ops on an up-to-date DB.

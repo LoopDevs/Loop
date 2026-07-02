@@ -42,6 +42,17 @@ const { repoMocks } = vi.hoisted(() => ({
     ),
   },
 }));
+// Hardening A8: the tick runs under a fleet-wide advisory leader lock.
+// Default mock runs fn inline (single-machine happy path); a per-test
+// override simulates losing the lock to another machine.
+const { advisoryLockState } = vi.hoisted(() => ({
+  advisoryLockState: { acquired: true },
+}));
+vi.mock('../../db/client.js', () => ({
+  withAdvisoryLock: async <T>(_key: bigint, fn: () => Promise<T>) =>
+    advisoryLockState.acquired ? { ran: true, value: await fn() } : { ran: false },
+}));
+
 vi.mock('../../credits/pending-payouts.js', () => ({
   listClaimablePayouts: (opts: { limit?: number; staleSeconds: number; maxAttempts: number }) =>
     repoMocks.listClaimablePayouts(opts),
@@ -242,6 +253,7 @@ function makeRow(overrides: Record<string, unknown> = {}): Record<string, unknow
 }
 
 beforeEach(() => {
+  advisoryLockState.acquired = true;
   repoMocks.listClaimablePayouts.mockReset();
   repoMocks.markPayoutSubmitted.mockReset();
   repoMocks.markPayoutConfirmed.mockReset();
@@ -296,6 +308,42 @@ beforeEach(() => {
   });
   killMock.isKilled.mockReset();
   killMock.isKilled.mockReturnValue(false);
+});
+
+describe('runPayoutTick (A8 leader lock)', () => {
+  it('runs an empty tick without claiming rows when another machine holds the leader lock', async () => {
+    advisoryLockState.acquired = false;
+    const r = await runPayoutTick(BASE_ARGS);
+    expect(r.picked).toBe(0);
+    expect(r.confirmed).toBe(0);
+    // The claim query is never even issued — the loser doesn't touch
+    // the queue.
+    expect(repoMocks.listClaimablePayouts).not.toHaveBeenCalled();
+  });
+
+  it('releases the lock + returns empty when the tick body exceeds the lease deadline (P1 fix)', async () => {
+    // A hung Horizon: the claim (or a submit) never resolves. The lease
+    // must fire so the leader lock is released and the fleet is not
+    // stalled. Emulate the hang at the claim query.
+    vi.useFakeTimers();
+    try {
+      let releaseHang: () => void = () => {};
+      repoMocks.listClaimablePayouts.mockReturnValue(
+        new Promise((resolve) => {
+          // never resolves until we release, simulating a hung tick
+          releaseHang = () => resolve([]);
+        }),
+      );
+      const tickPromise = runPayoutTick(BASE_ARGS);
+      // Advance past the 90s lease — the Promise.race timeout wins.
+      await vi.advanceTimersByTimeAsync(90_001);
+      const r = await tickPromise;
+      expect(r.picked).toBe(0); // empty tick returned, not a hang
+      releaseHang();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('runPayoutTick', () => {
