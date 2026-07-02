@@ -150,7 +150,7 @@ export function rateLimit(
       ? rawEstimate
       : 1;
   const effectiveMaxRequests = Math.max(1, Math.floor(maxRequests / machineCountEstimate));
-  return async (c, next): Promise<void | Response> => {
+  const mw = async (c: Context, next: () => Promise<void>): Promise<void | Response> => {
     // Escape hatch for e2e test runs. The mocked-e2e suite drives
     // the purchase flow twice with Playwright retries, which
     // collides with the 5/min request-otp limit on a cold start.
@@ -190,4 +190,9 @@ export function rateLimit(
 
     await next();
   };
+  // Named so the route-inventory test (rate-limit-route-inventory.
+  // test.ts, hardening C6) can statically assert every mount declares
+  // a limiter — same pattern as `requireStaff` / `requireAdminStepUp`.
+  Object.defineProperty(mw, 'name', { value: `rateLimit(${name})` });
+  return mw;
 }

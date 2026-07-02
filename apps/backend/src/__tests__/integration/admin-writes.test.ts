@@ -31,7 +31,7 @@
  * the advisory-lock txn semantics + Hono routing + the Loop-signed
  * admin auth path (`requireAuth` + `requireAdmin`).
  */
-import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
 
 const RUN_INTEGRATION = process.env['LOOP_E2E_DB'] === '1';
@@ -68,6 +68,7 @@ import { signAdminStepUpToken } from '../../auth/admin-step-up.js';
 import { adjustmentCapLockKey } from '../../credits/adjustments.js';
 import { env } from '../../env.js';
 import { ensureMigrated, truncateAllTables } from './db-test-setup.js';
+import { computeLedgerDriftSql } from '../../credits/ledger-invariant.js';
 
 const describeIf = RUN_INTEGRATION ? describe : describe.skip;
 
@@ -235,6 +236,13 @@ describeIf('admin credit-adjustment write — real postgres ladder', () => {
 
   beforeEach(async () => {
     await truncateAllTables();
+  });
+
+  // Hardening C7: every admin money write in this suite must leave the
+  // mirror consistent with the credit_transactions sum. See
+  // flywheel.test.ts for the rationale.
+  afterEach(async () => {
+    expect(await computeLedgerDriftSql(db)).toEqual([]);
   });
 
   it('credit happy path: writes ledger row + bumps balance + returns envelope', async () => {
