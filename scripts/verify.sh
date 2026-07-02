@@ -15,6 +15,7 @@ echo "=== Format ==="    && npm run format:check
 echo "=== Docs ==="      && ./scripts/lint-docs.sh
 echo "=== Type parity ===" && node scripts/check-shared-type-parity.mjs
 echo "=== OpenAPI parity ===" && node ./scripts/check-openapi-parity.mjs
+echo "=== Dead flags ===" && node ./scripts/check-dead-flags.mjs
 echo "=== Env perms ===" && ./scripts/check-env-perms.sh
 echo "=== Test ==="      && npm test
 echo "=== Audit ==="     && npm run audit

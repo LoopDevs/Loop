@@ -139,11 +139,13 @@
       routes without an explicit `rateLimit()` have none. Add a cheap global
       fallback limiter early in the chain; keep per-route budgets as the tight
       bound.
-- [ ] **B7. HS256 retirement tripwire.** Nothing ever prompts removing
+- [x] **B7. HS256 retirement tripwire.** Nothing ever prompts removing
       `LOOP_JWT_SIGNING_KEY` after RS256 cutover — a standing
       forgery-if-leaked surface. Boot warn (then scheduled alert) when both
       keys are set longer than the 30-day refresh window; wire into the
-      dead-flag detector (C5).
+      dead-flag detector (C5). _Done: boot warn on every deploy while
+      both key families are set (deploys are the natural reminder
+      cadence; no persisted cutover timestamp needed)._
 
 ## Track C — Mechanical enforcement (self-defending repo)
 
@@ -172,9 +174,15 @@
       (scripts + config + root `test`), and full-package coverage
       measurement exposed 13 untested executable modules — all now tested
       (50 → 118 tests), thresholds ratcheted to 95/88/92/95._
-- [ ] **C5. Dead-flag detector.** Script asserting every `LOOP_*` flag in
+- [x] **C5. Dead-flag detector.** Script asserting every `LOOP_*` flag in
       `env.ts` still gates ≥1 live branch; flags stale flags and (B7) stale
-      rotation keys. Wire into verify + CI quality job.
+      rotation keys. Wire into verify + CI quality job. _Done:
+      `scripts/check-dead-flags.mjs` (all declared env vars, not just
+      LOOP_\*) in verify + CI quality. First run immediately found
+      ADM-01's `ADMIN_DAILY_WITHDRAWAL_CAP_MINOR` orphaned by the ADR 036
+      withdrawal→emission re-scope — revived as the emission cap in
+      #1494 — plus the deliberately code-unread operator-secret rotation
+      slot (allowlisted with reason).\_
 - [x] **C6. Rate-limit presence inventory.** Route-walk test: every mounted
       route declares a limiter or sits on an explicit allowlist (ratcheting,
       like the parity gates). _Done: `rateLimit` middleware named,
@@ -187,9 +195,12 @@
       _Done: `afterEach` ledger-consistency assertion (via
       `computeLedgerDriftSql`) on every test in `flywheel.test.ts` and
       `admin-writes.test.ts`._
-- [ ] **C8. Property-test seed rotation.** Per-run random seed, logged on
+- [x] **C8. Property-test seed rotation.** Per-run random seed, logged on
       failure for reproduction (or adopt fast-check) — the current fixed
-      `0x5eed_1710` never explores new input space.
+      `0x5eed_1710` never explores new input space. _Done: time-derived
+      seed per run, `PROPERTY_TEST_SEED=<n>` pins an exact replay, and an
+      afterEach hook prints the replay instruction whenever a property
+      test fails._
 - [ ] **C9. Branch-protection verification.** Confirm via
       `gh api .../branches/main/protection` that flywheel-integration,
       migration-parity, and e2e-mocked are actually required checks, not

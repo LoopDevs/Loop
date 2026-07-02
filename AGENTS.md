@@ -104,7 +104,7 @@ npm run mobile:sync && cd apps/mobile && npx cap open ios
 # survive the native-project regeneration (ADR-007).
 
 # Code quality
-npm run verify               # typecheck + lint + format:check + lint:docs + shared-type-parity + openapi-parity + env-perms + test + audit (one command — runs ./scripts/verify.sh)
+npm run verify               # typecheck + lint + format:check + lint:docs + shared-type-parity + openapi-parity + dead-flags + env-perms + test + audit (one command — runs ./scripts/verify.sh)
 npm run typecheck            # tsc across all packages
 npm run lint                 # ESLint across all packages
 npm run format               # Prettier across all packages
@@ -127,6 +127,11 @@ npm run check:bundle-budget  # Size-regression gate for the web SSR bundle
 # Runs in `npm run verify` + the CI quality job. Deferred violations
 # go in scripts/openapi-parity-allowlist.json (currently empty).
 npm run check:openapi-parity # Route ↔ OpenAPI registration parity (static)
+# Hardening C5: every env var declared in env.ts must be read
+# somewhere in backend source (env.X / live process.env / boot
+# guards). Dead config that LOOKS wired fails CI; deliberate
+# exceptions live in the script's reasoned allowlist.
+npm run check:dead-flags     # Declared-but-never-read env var detector
 # Replays migrations 0000→latest into a scratch DB and diffs the
 # resulting catalog against schema.ts materialised by drizzle-kit.
 # Needs a disposable postgres (DATABASE_URL is only the maintenance

@@ -360,6 +360,29 @@ describe('parseEnv', () => {
     });
   });
 
+  // Hardening B7 (2026-07 plan): HS256 retirement tripwire.
+  describe('B7: HS256 retirement tripwire', () => {
+    it('warns on every boot while both the RSA and HS256 keys are set', () => {
+      const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const pem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      parseEnv({
+        ...base,
+        LOOP_JWT_SIGNING_KEY: 'jwt-test-signing-key-32-chars-min!!',
+        LOOP_JWT_RSA_PRIVATE_KEY: pem,
+      });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('remove LOOP_JWT_SIGNING_KEY'));
+      warn.mockRestore();
+    });
+
+    it('stays quiet when only one signing family is configured', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      parseEnv({ ...base, LOOP_JWT_SIGNING_KEY: 'jwt-test-signing-key-32-chars-min!!' });
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+  });
+
   // Hardening B3 (2026-07 plan): the two auth misconfigurations that
   // previously only surfaced at request time now fail at boot.
   describe('B3: native-auth signing-key boot guard', () => {
