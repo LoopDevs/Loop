@@ -12,8 +12,9 @@ import {
 } from '~/services/admin';
 import { shouldRetry } from '~/hooks/query-retry';
 import { useAdminStepUp } from '~/hooks/use-admin-step-up';
+import { useStaffRole } from '~/hooks/use-staff-role';
 import { AdminNav } from '~/components/features/admin/AdminNav';
-import { RequireAdmin } from '~/components/features/admin/RequireAdmin';
+import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { CsvDownloadButton } from '~/components/features/admin/CsvDownloadButton';
 import { ReasonDialog } from '~/components/features/admin/ReasonDialog';
 import { StepUpModal } from '~/components/features/admin/StepUpModal';
@@ -81,13 +82,15 @@ function statePillClass(s: PayoutState): string {
 // A2-1101: see RequireAdmin.tsx for the shell-gate rationale.
 export default function AdminPayoutsRoute(): React.JSX.Element {
   return (
-    <RequireAdmin>
+    <RequireStaff minimum="support">
       <AdminPayoutsRouteInner />
-    </RequireAdmin>
+    </RequireStaff>
   );
 }
 
 function AdminPayoutsRouteInner(): React.JSX.Element {
+  // ADR 037: admin-only controls (CSV / money writes) key off this.
+  const { isAdminRole } = useStaffRole();
   const [searchParams, setSearchParams] = useSearchParams();
   const stateParam = searchParams.get('state');
   const activeState = STATES.includes(stateParam as PayoutState | 'all')
@@ -204,10 +207,13 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
             button at the row level.
           </p>
         </div>
-        <CsvDownloadButton
-          path="/api/admin/payouts.csv"
-          filename={`loop-payouts-${new Date().toISOString().slice(0, 10)}.csv`}
-        />
+        {/* ADR 037 §3: bulk CSV exports are admin-only. */}
+        {isAdminRole ? (
+          <CsvDownloadButton
+            path="/api/admin/payouts.csv"
+            filename={`loop-payouts-${new Date().toISOString().slice(0, 10)}.csv`}
+          />
+        ) : null}
       </header>
 
       <nav className="flex flex-wrap gap-2" aria-label="Payout state filter">
@@ -373,7 +379,9 @@ function AdminPayoutsRouteInner(): React.JSX.Element {
                     {p.attempts}
                   </td>
                   <td className="px-3 py-2">
-                    {p.state === 'failed' ? (
+                    {/* ADR 037 §3: payout retry is a money write —
+                        admin-only, hidden for support. */}
+                    {isAdminRole && p.state === 'failed' ? (
                       <button
                         type="button"
                         onClick={() => handleRetry(p.id)}

@@ -32,11 +32,18 @@ import type { StaffRole } from './admin-staff.js';
 export interface UserMeView {
   id: string;
   email: string;
+  /**
+   * Deprecated read-compat shim (ADR 037): true iff `staffRole` is
+   * `'admin'`. Kept until the CTX-seeded `users.isAdmin` column
+   * retires (ADR 013 Phase C); new gating should key off `staffRole`.
+   */
   isAdmin: boolean;
   /**
-   * ADR 037 staff role — 'admin' | 'support' | null (not staff).
-   * Role-aware admin UI keys off this field (falling back to
-   * `isAdmin` while the backend rollout completes).
+   * ADR 037 staff role resolved from the `staff_roles` table —
+   * `'admin'`, `'support'`, or `null` for regular users. The web
+   * admin shell keys its role-aware nav + write-button visibility
+   * off this field (falling back to `isAdmin` while the backend
+   * rollout completes — see `useStaffRole`).
    */
   staffRole: StaffRole | null;
   homeCurrency: HomeCurrency;

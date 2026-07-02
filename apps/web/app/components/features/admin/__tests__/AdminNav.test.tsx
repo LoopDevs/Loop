@@ -6,16 +6,22 @@ import { MemoryRouter } from 'react-router';
 import { ApiException } from '@loop/shared';
 import type { TreasurySnapshot } from '~/services/admin';
 import type * as AdminModule from '~/services/admin';
-import { AdminNav, failedPayoutsCount, operatorPoolStatus } from '../AdminNav';
+import { AdminNav, failedPayoutsCount, operatorPoolStatus, visibleTabs } from '../AdminNav';
 
 afterEach(cleanup);
 
-const { adminMock, authMock } = vi.hoisted(() => ({
+const { adminMock, authMock, userMock } = vi.hoisted(() => ({
   adminMock: {
     getTreasurySnapshot: vi.fn(),
   },
   authMock: {
     isAuthenticated: true,
+  },
+  // ADR 037: AdminNav resolves the staff role from /api/users/me via
+  // useStaffRole — the mock state drives the role-aware tab tests.
+  userMock: {
+    staffRole: 'admin' as 'admin' | 'support' | null,
+    isAdmin: true,
   },
 }));
 
@@ -30,6 +36,23 @@ vi.mock('~/services/admin', async (importActual) => {
 vi.mock('~/hooks/use-auth', () => ({
   useAuth: () => ({ isAuthenticated: authMock.isAuthenticated }),
 }));
+
+import type * as UserModule from '~/services/user';
+vi.mock('~/services/user', async (importActual) => {
+  const actual = (await importActual()) as typeof UserModule;
+  return {
+    ...actual,
+    getMe: vi.fn(async () => ({
+      id: 'u1',
+      email: 'staff@loop.test',
+      isAdmin: userMock.isAdmin,
+      staffRole: userMock.staffRole,
+      homeCurrency: 'USD' as const,
+      stellarAddress: null,
+      homeCurrencyBalanceMinor: '0',
+    })),
+  };
+});
 
 vi.mock('~/hooks/query-retry', () => ({
   shouldRetry: () => false,
@@ -80,6 +103,8 @@ function renderAt(path: string): ReturnType<typeof render> {
 
 beforeEach(() => {
   authMock.isAuthenticated = true;
+  userMock.staffRole = 'admin';
+  userMock.isAdmin = true;
   adminMock.getTreasurySnapshot.mockReset();
 });
 
@@ -88,34 +113,112 @@ describe('AdminNav — tabs', () => {
     adminMock.getTreasurySnapshot.mockResolvedValue(baseSnapshot());
   });
 
-  it('renders one link per admin section with the correct hrefs', () => {
+  it('renders one link per admin section with the correct hrefs', async () => {
     renderAt('/admin/cashback');
-    // Ignore the "CTX healthy" pill link; only the three tab links
+    // Tabs render once the staff role resolves from /api/users/me
+    // (ADR 037). Ignore the "CTX healthy" pill link; only tab links
     // have href targeting admin sections.
+    await screen.findByRole('link', { name: 'Cashback' });
     const tabHrefs = ['/admin/cashback', '/admin/treasury', '/admin/payouts'];
     for (const href of tabHrefs) {
       expect(screen.getAllByRole('link').some((l) => l.getAttribute('href') === href)).toBe(true);
     }
   });
 
-  it('marks the Cashback tab as aria-current=page on /admin/cashback', () => {
+  it('marks the Cashback tab as aria-current=page on /admin/cashback', async () => {
     renderAt('/admin/cashback');
-    expect(screen.getByRole('link', { name: 'Cashback' }).getAttribute('aria-current')).toBe(
-      'page',
-    );
+    expect(
+      (await screen.findByRole('link', { name: 'Cashback' })).getAttribute('aria-current'),
+    ).toBe('page');
     expect(screen.getByRole('link', { name: 'Treasury' }).getAttribute('aria-current')).toBeNull();
   });
 
-  it('marks the Payouts tab as active on nested paths like /admin/payouts/abc', () => {
+  it('marks the Payouts tab as active on nested paths like /admin/payouts/abc', async () => {
     renderAt('/admin/payouts/abc-123');
-    expect(screen.getByRole('link', { name: 'Payouts' }).getAttribute('aria-current')).toBe('page');
+    expect(
+      (await screen.findByRole('link', { name: 'Payouts' })).getAttribute('aria-current'),
+    ).toBe('page');
   });
 
-  it('does not highlight any tab on /admin (no subpath)', () => {
+  it('does not highlight any tab on /admin (no subpath)', async () => {
     renderAt('/admin');
+    await screen.findByRole('link', { name: 'Cashback' });
     for (const label of ['Cashback', 'Treasury', 'Payouts']) {
       expect(screen.getByRole('link', { name: label }).getAttribute('aria-current')).toBeNull();
     }
+  });
+});
+
+describe('AdminNav — role-aware tabs (ADR 037 §6)', () => {
+  beforeEach(() => {
+    adminMock.getTreasurySnapshot.mockResolvedValue(baseSnapshot());
+  });
+
+  it('admin sees every tab, including Skips and Staff', async () => {
+    userMock.staffRole = 'admin';
+    renderAt('/admin');
+    for (const label of [
+      'Cashback',
+      'Treasury',
+      'Payouts',
+      'Orders',
+      'Merchants',
+      'Users',
+      'Skips',
+      'Operators',
+      'Assets',
+      'Audit',
+      'Staff',
+    ]) {
+      expect(await screen.findByRole('link', { name: label })).toBeDefined();
+    }
+  });
+
+  it('support sees the read/unstick tabs only — money/CSV/staff surfaces hidden', async () => {
+    userMock.staffRole = 'support';
+    userMock.isAdmin = false;
+    renderAt('/admin');
+    for (const label of ['Treasury', 'Payouts', 'Orders', 'Merchants', 'Users', 'Skips']) {
+      expect(await screen.findByRole('link', { name: label })).toBeDefined();
+    }
+    for (const label of ['Cashback', 'Operators', 'Assets', 'Audit', 'Staff']) {
+      expect(screen.queryByRole('link', { name: label })).toBeNull();
+    }
+  });
+
+  it('renders no tabs at all for a null (non-staff) role', async () => {
+    userMock.staffRole = null;
+    userMock.isAdmin = false;
+    renderAt('/admin');
+    // Wait for the snapshot pill so the async settle has happened,
+    // then assert the tab strip stayed empty.
+    await waitFor(() => {
+      expect(screen.getByText(/CTX /)).toBeDefined();
+    });
+    expect(screen.queryByRole('link', { name: 'Users' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Treasury' })).toBeNull();
+  });
+
+  it('falls back to isAdmin when the backend does not emit staffRole yet', async () => {
+    userMock.staffRole = null;
+    userMock.isAdmin = true;
+    renderAt('/admin');
+    expect(await screen.findByRole('link', { name: 'Staff' })).toBeDefined();
+  });
+});
+
+describe('visibleTabs', () => {
+  it('returns every tab for admin', () => {
+    expect(visibleTabs('admin').length).toBe(11);
+  });
+
+  it('filters to support-visible tabs for support', () => {
+    const labels = visibleTabs('support').map((t) => t.label);
+    expect(labels).toEqual(['Treasury', 'Payouts', 'Orders', 'Merchants', 'Users', 'Skips']);
+  });
+
+  it('returns nothing for null', () => {
+    expect(visibleTabs(null)).toEqual([]);
   });
 });
 
