@@ -814,6 +814,14 @@ export const EnvSchema = z.object({
   // long enough that the token-theft reuse signal (A2-1608) and the
   // just-expired-OTP 401 edge stay intact.
   LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS: z.coerce.number().int().positive().default(1),
+
+  // Hardening C1 (2026-07 plan): cadence of the ledger-invariant
+  // watcher — the scheduled check that user_credits.balance_minor
+  // still equals SUM(credit_transactions) per (user, currency), paging
+  // Discord while any drift persists. Full-table aggregate, so daily
+  // by default; the check single-flights across machines via an
+  // advisory lock. Runs under LOOP_WORKERS_ENABLED.
+  LOOP_LEDGER_INVARIANT_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
   LOOP_AUTH_ROW_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
 });
 

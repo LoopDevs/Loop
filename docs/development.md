@@ -395,6 +395,14 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS=1         # sweep cadence (hours)
 # LOOP_AUTH_ROW_RETENTION_DAYS=30              # grace before a dead row is reaped
 
+# Hardening C1 (2026-07 plan): cadence of the scheduled ledger-invariant
+# check — user_credits.balance_minor must equal SUM(credit_transactions)
+# per (user, currency); pages the Discord monitoring channel every tick
+# while any drift persists (deliberately no dedup — unresolved ledger
+# drift must not go quiet). Single-flighted across machines via an
+# advisory lock; runs under LOOP_WORKERS_ENABLED.
+# LOOP_LEDGER_INVARIANT_INTERVAL_HOURS=24
+
 # ── Embedded wallet (ADR 030) ────────────────────────────────────────
 # Provider-agnostic embedded-wallet layer. '' (default) → OFF:
 # getWalletProvider() returns null and no vendor code path is

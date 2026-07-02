@@ -310,6 +310,12 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS=1
 # LOOP_AUTH_ROW_RETENTION_DAYS=30
 
+# Hardening C1: scheduled off-chain ledger-invariant check — pages
+# Discord while user_credits disagrees with the credit_transactions
+# sum anywhere. Daily default; single-flighted across machines; runs
+# under LOOP_WORKERS_ENABLED.
+# LOOP_LEDGER_INVARIANT_INTERVAL_HOURS=24
+
 # ADR 030: provider-agnostic embedded-wallet layer. '' (default)
 # → OFF: getWalletProvider() returns null. 'privy' → Privy REST adapter
 # (fetch + Zod, no SDK dep); PRIVY_APP_ID + PRIVY_APP_SECRET then

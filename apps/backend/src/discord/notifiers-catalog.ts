@@ -110,6 +110,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       'Fires when every operator in the CTX pool is unhealthy — procurement is blocked. Throttled to once per 15 min per deployment so a sustained outage stays loud without flooding the channel (ADR 013).',
   },
   {
+    name: 'notifyLedgerDrift',
+    channel: 'monitoring',
+    description:
+      'Hardening C1: fires when the off-chain ledger invariant is violated — user_credits.balance_minor disagrees with SUM(credit_transactions) for at least one (user, currency) pair. Run by the ledger-invariant watcher (default daily, single-flighted across machines via advisory lock); deliberately re-pages every tick while the drift persists because an unresolved ledger-integrity incident must not go quiet. Triage via /api/admin/reconciliation.',
+  },
+  {
     name: 'notifyOperatorCredentialExpired',
     channel: 'monitoring',
     description:
