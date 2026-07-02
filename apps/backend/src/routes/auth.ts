@@ -43,6 +43,8 @@ import {
   refreshHandler,
   logoutHandler,
 } from '../auth/handler.js';
+import { requireAuth } from '../auth/handler.js';
+import { revokeAllOwnSessionsHandler } from '../auth/revoke-sessions-handler.js';
 import { googleSocialLoginHandler, appleSocialLoginHandler } from '../auth/social.js';
 
 /** Mounts all `/api/auth/*` routes on the supplied Hono app. */
@@ -92,4 +94,14 @@ export function mountAuthRoutes(app: Hono): void {
   // revoke, so without a limit an attacker could cheaply spam
   // arbitrary refresh tokens at CTX through us.
   app.delete('/api/auth/session', rateLimit('DELETE /api/auth/session', 20, 60_000), logoutHandler);
+
+  // B4: "sign out of all devices" — revokes every live refresh token
+  // for the authenticated caller. Requires auth (the self-target is
+  // the token's own subject). 10/min: a deliberate, rare action.
+  app.delete(
+    '/api/auth/session/all',
+    rateLimit('DELETE /api/auth/session/all', 10, 60_000),
+    requireAuth,
+    revokeAllOwnSessionsHandler,
+  );
 }

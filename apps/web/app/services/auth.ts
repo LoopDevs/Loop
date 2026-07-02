@@ -83,3 +83,15 @@ export async function logout(): Promise<void> {
     // Swallow — local clear in the caller (useAuth.logout) runs in finally.
   }
 }
+
+/**
+ * B4: "Sign out of all devices" — revokes every live refresh token for
+ * the caller server-side, so a stolen refresh token on another device
+ * is killed. Authenticated call; the caller clears local state after.
+ */
+export async function signOutAllDevices(): Promise<void> {
+  const { authenticatedRequest } = await import('./api-client');
+  await authenticatedRequest<{ message: string }>('/api/auth/session/all', {
+    method: 'DELETE',
+  });
+}

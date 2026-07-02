@@ -233,6 +233,36 @@ export function registerAuthOpenApi(
     },
   });
 
+  // B4: "sign out of all devices" — revokes every live refresh token
+  // for the authenticated caller.
+  registry.registerPath({
+    method: 'delete',
+    path: '/api/auth/session/all',
+    summary: 'Sign out of all devices (hardening B4).',
+    description:
+      'Revokes every live refresh token for the authenticated caller, so a stolen refresh token on any device is killed. Loop-native only — CTX-proxy sessions have no local row to revoke and succeed as a no-op. Access tokens are non-revocable by design (15-min TTL), so other devices lose access within at most that window.',
+    tags: ['Auth'],
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: {
+        description: 'Signed out of all devices',
+        content: { 'application/json': { schema: z.object({ message: z.string() }) } },
+      },
+      401: {
+        description: 'Missing or invalid bearer',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (10/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      500: {
+        description: 'Internal error revoking sessions (`INTERNAL_ERROR`)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+    },
+  });
+
   // The two social-login paths (`/auth/social/google`,
   // `/auth/social/apple`) and their two shared schemas live in
   // `./auth-social.ts`. Same path-registration position as the

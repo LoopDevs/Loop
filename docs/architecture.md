@@ -325,6 +325,7 @@ POST /api/auth/refresh
 POST /api/auth/social/google                — ADR 014
 POST /api/auth/social/apple                 — ADR 014
 DELETE /api/auth/session
+DELETE /api/auth/session/all                             [authed — B4: sign out of all devices; revokes every live refresh token]
 POST /api/orders             [authenticated]
 POST /api/orders/loop        [authenticated — Loop-native flow, ADR 010 + Idempotency-Key, A2-2003; `credit` method is migration-window only — wallet-activated users get 400 CREDIT_METHOD_RETIRED and spend via token redemption, ADR 036 OQ3]
 GET  /api/orders/loop        [authenticated — Loop-native list, ADR 010]
@@ -386,6 +387,7 @@ POST /api/admin/users/:userId/credit-adjustments        [admin — signed credit
 POST /api/admin/users/:userId/refunds                   [admin — order-bound refund, ADR 017 + A2-901]
 POST /api/admin/users/:userId/emissions                 [admin — queue on-chain LOOP backfill, mirror NOT debited, ADR-024 / ADR 036]
 POST /api/admin/users/:userId/home-currency              [admin — change home_currency with safety preflight, ADR 015 deferred]
+POST /api/admin/users/:userId/revoke-sessions            [admin — B4: revoke a user's live sessions (incident response); step-up-exempt]
 GET  /api/users/me/favorites                            [user — favourite merchants, newest first; joined to in-memory catalog]
 POST /api/users/me/favorites                            [user — add a merchant to favourites; idempotent on (user_id, merchant_id)]
 DELETE /api/users/me/favorites/:merchantId              [user — remove a merchant from favourites; idempotent]

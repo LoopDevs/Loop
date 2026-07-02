@@ -190,6 +190,7 @@ E2E_REFRESH_TOKEN=… STELLAR_TEST_SECRET_KEY=… node scripts/e2e-real.mjs
 - **NEVER** store or transmit Stellar private keys from backend. Generated on-device, stays on-device.
 - **ALL** auth, payment, and Stellar code requires human review before merge.
 - **NEVER** use `--no-verify` to skip hooks — fix the root cause.
+- **Session revocation** (hardening B4): `DELETE /api/auth/session/all` (self "sign out everywhere") + `POST /api/admin/users/:userId/revoke-sessions` (admin incident response) revoke refresh tokens; access tokens stay non-revocable by design (15-min TTL — see `docs/threat-model.md`).
 
 ---
 
