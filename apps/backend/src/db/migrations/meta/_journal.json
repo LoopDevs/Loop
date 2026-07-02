@@ -309,6 +309,13 @@
       "when": 1780101100000,
       "tag": "0043_asset_drift_state",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1780101200000,
+      "tag": "0044_emission_conservation_trigger",
+      "breakpoints": true
     }
   ]
 }

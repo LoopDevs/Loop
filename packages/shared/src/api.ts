@@ -121,6 +121,12 @@ export const ApiErrorCode = {
   // route + `credits/withdrawals.ts` are gone, superseded entirely by
   // the emission primitive.
   EMISSION_ALREADY_ISSUED: 'EMISSION_ALREADY_ISSUED',
+  // Hardening A1 (2026-07 plan): cumulative emission conservation —
+  // the requested emission exceeds the un-emitted portion of the
+  // user's mirror liability (prior payouts/emissions already
+  // materialised it on-chain). 409; the admin UI shows the remaining
+  // headroom from the message.
+  EMISSION_EXCEEDS_UNEMITTED_BALANCE: 'EMISSION_EXCEEDS_UNEMITTED_BALANCE',
   ALREADY_COMPENSATED: 'ALREADY_COMPENSATED',
   PAYOUT_NOT_COMPENSABLE: 'PAYOUT_NOT_COMPENSABLE',
   NOT_CONFIGURED: 'NOT_CONFIGURED',

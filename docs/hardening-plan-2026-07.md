@@ -17,7 +17,7 @@
 
 ## Track A — Money-invariant fixes (the judgment-dense residuals)
 
-- [ ] **A1. Emission conservation accounting.** `applyAdminEmission`
+- [x] **A1. Emission conservation accounting.** `applyAdminEmission`
       (`credits/emissions.ts:111`) only checks `balance >= amount` per call and
       never decrements anything — repeated emissions can materialize on-chain
       LOOP far beyond the user's mirror liability (cashback fulfillment also
@@ -25,7 +25,14 @@
       emitted-on-chain-per-(user,asset) accounting checked under the same lock,
       plus a daily value cap consistent with the adjustment/refund/compensation
       caps (emissions currently have none). Defense in depth: a DB-level fence
-      (accounting table or constraint), not just app logic.
+      (accounting table or constraint), not just app logic. _Done:
+      `emittedNetMinorFor` conservation check under the existing row lock
+      (invariant: mintedNet ≤ mirror balance, where mintedNet = non-failed
+      cashback/emission/interest payouts − burns, excluding compensated +
+      legacy at-send-debited rows); new 409
+      `EMISSION_EXCEEDS_UNEMITTED_BALANCE`; fleet-wide per-currency daily
+      cap (advisory-lock serialised, parity with adjustment/compensation
+      caps); DB trigger fence in migration 0044 (see C10)._
 - [x] **A2. Failed-mint/emission blind spots.** A terminal `failed`
       `interest_mint` leaves the mirror permanently ahead of chain and nothing
       fires: auto-compensation skips non-emission kinds
@@ -197,10 +204,14 @@
       its transition state in process memory — restart re-pages, each
       machine pages independently. Port it to the same persisted
       `asset_drift_state`-style claim (or generalise the repo).
-- [ ] **C10. Emission/mint DB fences.** The DB-level half of A1 — cumulative
+- [x] **C10. Emission/mint DB fences.** The DB-level half of A1 — cumulative
       emission accounting constraint/table so no future app-layer writer can
       reopen the unbacked path (same defense-in-depth pattern as the
-      interest-mint GBPLOOP pin).
+      interest-mint GBPLOOP pin). _Done: `assert_emission_conservation()`
+      BEFORE INSERT trigger (migration 0044, parity-allowlisted like the
+      ADR-011 audit triggers) — enforces the same mintedNet ≤ balance rule
+      against ANY writer, incl. raw SQL; integration test proves the
+      bypass path is rejected._
 
 ## Track D — Structural simplification (delete the drift-tax)
 

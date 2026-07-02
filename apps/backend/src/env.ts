@@ -270,9 +270,13 @@ export const EnvSchema = z.object({
   // cap at all, unlike every sibling admin money-write (adjustment,
   // refund, payout-compensation) — the one path where real value
   // actually leaves the system as a Stellar payment was bounded only
-  // by the per-call cap in `admin/withdrawals.ts` and the 20/min rate
-  // limit. Same semantics as ADMIN_DAILY_ADJUSTMENT_CAP_MINOR: per
-  // currency, per UTC day, across all admins; `0` disables the check.
+  // by the per-call cap and the 20/min rate limit. ADR 036 re-scoped
+  // the withdrawal writer to EMISSION and the cap var was silently
+  // orphaned in that merge (found by check-dead-flags, hardening C5);
+  // hardening A1 revives it as the cap on the emission writer — the
+  // same "value leaves the system" surface under its new name. Same
+  // semantics as ADMIN_DAILY_ADJUSTMENT_CAP_MINOR: per currency, per
+  // UTC day, across all admins; `0` disables the check.
   ADMIN_DAILY_WITHDRAWAL_CAP_MINOR: z.coerce.bigint().nonnegative().default(100_000_000n),
 
   // Discord webhooks (optional — for notifications)

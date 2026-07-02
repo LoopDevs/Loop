@@ -49,7 +49,7 @@ export function registerAdminPayoutsClusterWritesOpenApi(
     path: '/api/admin/payouts/{id}/retry',
     summary: 'Flip a failed payout back to pending (ADR 015 / 016 / 017).',
     description:
-      'Admin-only manual retry: resets a `failed` pending_payouts row to `pending` so the submit worker picks it up on the next tick. 404 when the id matches nothing or the row is in a non-failed state. ADR 017 compliant: `Idempotency-Key` header + `reason` body required; a repeat call returns the stored snapshot with `audit.replayed: true`. Worker enforces memo-idempotency on re-submit (ADR 016) so double-retry never double-pays. ADR-028 step-up gate enforced at the route.',
+      "Admin-only manual retry: resets a `failed` pending_payouts row to `pending` so the submit worker picks it up on the next tick. 404 when the id matches nothing or the row is in a non-failed state. Hardening A1/C10: for mint-kind rows (emission / order_cashback / interest_mint) the DB re-entry conservation trigger rejects the flip with 409 `EMISSION_EXCEEDS_UNEMITTED_BALANCE` when the row's value was already re-materialised while it sat failed (e.g. via a backfill emission) — retrying would mint both. ADR 017 compliant: `Idempotency-Key` header + `reason` body required; a repeat call returns the stored snapshot with `audit.replayed: true`. Worker enforces memo-idempotency on re-submit (ADR 016) so double-retry never double-pays. ADR-028 step-up gate enforced at the route.",
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     request: {
@@ -82,6 +82,11 @@ export function registerAdminPayoutsClusterWritesOpenApi(
       },
       404: {
         description: 'Payout not found or not in failed state',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      409: {
+        description:
+          "Retrying would exceed the un-emitted liability (`EMISSION_EXCEEDS_UNEMITTED_BALANCE`) — the failed row's value was already re-materialised while it sat failed; compensate or investigate instead of retrying (hardening A1/C10 re-entry conservation trigger)",
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {
