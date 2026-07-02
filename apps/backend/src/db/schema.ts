@@ -1290,6 +1290,92 @@ export const interestMintSnapshots = pgTable(
   ],
 );
 
+/**
+ * Persisted per-asset state of the asset-drift watcher (hardening
+ * A2/A3, 2026-07 plan; ADR 015 / 036).
+ *
+ * The watcher previously kept its ok/over transition state in
+ * process memory — lost on every restart and duplicated per Fly
+ * machine, so the primary unbacked-mint backstop re-paged after
+ * every deploy and each machine paged independently. One row per
+ * configured LOOP asset persists:
+ *
+ *   - `state` — the drift dimension (|drift| vs threshold).
+ *   - `failed_rows_state` — the failed money-movement dimension:
+ *     `kind IN ('burn','interest_mint')` rows in `state='failed'`
+ *     are counted into the drift equation (the tokens / mirror
+ *     credits genuinely exist), which makes the equation itself
+ *     blind to them; this column keeps that masked term visible
+ *     and transition-paged until an operator retries the rows.
+ *
+ * Transition claims are serialised through `SELECT ... FOR UPDATE`
+ * on this row (`payments/asset-drift-state-repo.ts`), so exactly
+ * one machine in the fleet wins each ok↔over / none↔present flip
+ * and sends the Discord page.
+ *
+ * Page delivery is AT-LEAST-ONCE, not fire-and-forget: the
+ * `last_paged_*` columns record what ops has actually been paged
+ * about (written only after a successful Discord send), and
+ * `page_attempt_at` is a short lease claimed by whichever machine
+ * is attempting the send. A page lost to a Discord outage or a
+ * SIGTERM between the state commit and the send is re-attempted on
+ * later ticks — the state columns say what IS, the paged columns
+ * say what ops KNOWS, and the watcher pages whenever they diverge.
+ *
+ * `state` deliberately has no 'unknown' member — absence of the row
+ * IS the unknown state (pre-first-successful-read).
+ */
+export const assetDriftState = pgTable(
+  'asset_drift_state',
+  {
+    /** LOOP asset code — one watcher row per configured asset. */
+    assetCode: text('asset_code').primaryKey(),
+    state: text('state').$type<'ok' | 'over'>().notNull(),
+    failedRowsState: text('failed_rows_state').$type<'none' | 'present'>().notNull(),
+    lastDriftStroops: bigint('last_drift_stroops', { mode: 'bigint' }).notNull(),
+    lastThresholdStroops: bigint('last_threshold_stroops', { mode: 'bigint' }).notNull(),
+    failedBurnStroops: bigint('failed_burn_stroops', { mode: 'bigint' }).notNull(),
+    failedInterestMintStroops: bigint('failed_interest_mint_stroops', {
+      mode: 'bigint',
+    }).notNull(),
+    /**
+     * Drift state ops has successfully been paged about. NULL =
+     * never paged (an asset that has only ever been 'ok' needs no
+     * page). Written only after `sendWebhook` reports delivery.
+     */
+    lastPagedState: text('last_paged_state').$type<'ok' | 'over'>(),
+    /** Failed-rows state ops has successfully been paged about. */
+    lastPagedFailedRowsState: text('last_paged_failed_rows_state').$type<'none' | 'present'>(),
+    /**
+     * Send-attempt lease: set when a machine claims the due pages
+     * for this asset, cleared on delivery/explicit release. A fresh
+     * lease stops a concurrently-ticking machine from double-paging;
+     * an expired lease (crashed sender) lets any machine re-attempt.
+     */
+    pageAttemptAt: timestamp('page_attempt_at', { withTimezone: true }),
+    lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check('asset_drift_state_state_known', sql`${t.state} IN ('ok', 'over')`),
+    check('asset_drift_state_failed_rows_known', sql`${t.failedRowsState} IN ('none', 'present')`),
+    check(
+      'asset_drift_state_paged_state_known',
+      sql`${t.lastPagedState} IS NULL OR ${t.lastPagedState} IN ('ok', 'over')`,
+    ),
+    check(
+      'asset_drift_state_paged_failed_rows_known',
+      sql`${t.lastPagedFailedRowsState} IS NULL OR ${t.lastPagedFailedRowsState} IN ('none', 'present')`,
+    ),
+    // The failed sums are magnitudes, never negative — a negative
+    // write is an aggregation bug, fail at the DB layer.
+    check(
+      'asset_drift_state_failed_sums_non_negative',
+      sql`${t.failedBurnStroops} >= 0 AND ${t.failedInterestMintStroops} >= 0`,
+    ),
+  ],
+);
+
 export const userFavoriteMerchants = pgTable(
   'user_favorite_merchants',
   {

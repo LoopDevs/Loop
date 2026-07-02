@@ -4,15 +4,17 @@ import { shouldRetry } from '~/hooks/query-retry';
 
 /**
  * `/admin` landing card — at-a-glance summary of the background
- * asset-drift watcher (ADR 015). Reads the in-memory snapshot
+ * asset-drift watcher (ADR 015). Reads the persisted snapshot
  * endpoint (`/api/admin/asset-drift/state`), so the read is cheap
  * and no browser-load forces a Horizon call.
  *
- * Three surfaces the operator cares about:
+ * Four surfaces the operator cares about:
  *   - is the watcher alive? (`running` + `lastTickMs`)
  *   - how many of the configured assets are currently drifted past
  *     threshold? (the "is anything on fire" signal)
  *   - which ones? (named so triage can start from here)
+ *   - any failed burn / interest-mint rows needing a retry?
+ *     (hardening A2 — invisible to the drift number by design)
  *
  * Self-hides when the watcher hasn't been started (no configured
  * issuers) so the landing layout doesn't show a dead card on a
@@ -40,11 +42,16 @@ export function AssetDriftWatcherCard(): React.JSX.Element | null {
   const ok = data.perAsset.length - overAssets.length - unknownAssets.length;
 
   const anyOver = overAssets.length > 0;
+  // Hardening A2: failed burn / interest-mint rows are invisible to
+  // the drift number itself (they're counted as in-flight by design),
+  // so the card must alert on them independently.
+  const failedRowAssets = data.perAsset.filter((a) => a.failedRowsState === 'present');
+  const anyAlert = anyOver || failedRowAssets.length > 0;
 
   return (
     <section
       className={`rounded-xl border p-4 ${
-        anyOver
+        anyAlert
           ? 'border-amber-200 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-900/20'
           : 'border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900'
       }`}
@@ -72,6 +79,12 @@ export function AssetDriftWatcherCard(): React.JSX.Element | null {
           </span>
         )}
       </div>
+      {failedRowAssets.length > 0 ? (
+        <div className="mt-1 text-xs text-amber-800 dark:text-amber-300">
+          Failed burn/mint rows need retry —{' '}
+          <span className="font-mono">{failedRowAssets.map((a) => a.assetCode).join(', ')}</span>
+        </div>
+      ) : null}
       <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
         {data.lastTickMs !== null ? (
           <>Last tick {formatAgo(data.lastTickMs)}</>

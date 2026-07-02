@@ -26,7 +26,7 @@
       plus a daily value cap consistent with the adjustment/refund/compensation
       caps (emissions currently have none). Defense in depth: a DB-level fence
       (accounting table or constraint), not just app logic.
-- [ ] **A2. Failed-mint/emission blind spots.** A terminal `failed`
+- [x] **A2. Failed-mint/emission blind spots.** A terminal `failed`
       `interest_mint` leaves the mirror permanently ahead of chain and nothing
       fires: auto-compensation skips non-emission kinds
       (`payout-worker-pay-one.ts:476`), the stuck-payout watchdog excludes
@@ -35,10 +35,24 @@
       failed mints alert + surface in the watchdog, drift equation stops
       counting them as circulating, and define compensation policy (default:
       auto-reverse the mirror credit with an auditable `adjustment`, alert).
-- [ ] **A3. Persist drift-watcher state.** `asset-drift-watcher.ts:77` keeps
+      _Done (design refined during implementation): failed burn/mint rows
+      STAY inside the drift equation (removing them would page a false
+      drift incident — the tokens/credits genuinely exist) but become a
+      second persisted, transition-paged state dimension
+      (`notifyDriftFailedRows` / `...Cleared`), surfaced on the admin
+      drift card + state endpoint. Compensation policy decided:
+      retry-first via the existing admin payout-retry, NO auto-reversal
+      of user-visible interest — the persistent alert is the guarantee
+      ops acts. Stuck-payouts watchdog semantics left unchanged (its
+      failed-row exclusion is coherent; the drift dimension is the
+      persistent surface)._
+- [x] **A3. Persist drift-watcher state.** `asset-drift-watcher.ts:77` keeps
       per-asset state in memory — lost on restart, wrong per-machine. Move to a
       DB table (cursor + last-alert dedup) so the primary unbacked-mint backstop
-      survives restarts and is fleet-consistent.
+      survives restarts and is fleet-consistent. _Done: `asset_drift_state`
+      table (migration 0043) + `asset-drift-state-repo.ts`; transitions
+      claim under `SELECT ... FOR UPDATE` so exactly one machine pages
+      per flip; restarts no longer re-page ongoing incidents._
 - [ ] **A4. pay-ctx settlement idempotency + durable record.** The operator→CTX
       payment (`pay-ctx.ts`) has no persisted tx-hash (never wires `onSigned`)
       and no DB record that Loop paid CTX — idempotency rests entirely on a
@@ -151,6 +165,11 @@
       set; e2e-mocked is. Adding it is a governance change the permission
       layer reserves for the operator. Run:_
       `gh api -X POST repos/LoopDevs/Loop/branches/main/protection/required_status_checks/contexts --input - <<< '["Flywheel integration (real postgres)"]'`
+- [ ] **C10a. Apply the A3 pattern to `interest-pool-watcher.ts`.** Found
+      during A2/A3 review: the interest-pool low-cover watcher still keeps
+      its transition state in process memory — restart re-pages, each
+      machine pages independently. Port it to the same persisted
+      `asset_drift_state`-style claim (or generalise the repo).
 - [ ] **C10. Emission/mint DB fences.** The DB-level half of A1 — cumulative
       emission accounting constraint/table so no future app-layer writer can
       reopen the unbacked path (same defense-in-depth pattern as the

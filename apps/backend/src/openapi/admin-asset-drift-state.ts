@@ -54,6 +54,18 @@ export function registerAdminAssetDriftStateOpenApi(
       }),
       lastThresholdStroops: z.string().nullable(),
       lastCheckedMs: z.number().int().nullable(),
+      failedRowsState: z.enum(['unknown', 'none', 'present']).openapi({
+        description:
+          "Failed money-movement dimension (hardening A2): `present` = terminally-failed burn / interest-mint payout rows exist for this asset and need an operator retry (they are counted into the drift equation, so drift alone can't surface them); `none` = no failed rows; `unknown` = no successful watcher read yet.",
+      }),
+      failedBurnStroops: z.string().nullable().openapi({
+        description:
+          "Stroops on `kind='burn'` rows in state `failed` (bigint-as-string). Null pre-first-read.",
+      }),
+      failedInterestMintStroops: z.string().nullable().openapi({
+        description:
+          "Stroops on `kind='interest_mint'` rows in state `failed` (bigint-as-string). Null pre-first-read.",
+      }),
     }),
   );
 
@@ -71,9 +83,9 @@ export function registerAdminAssetDriftStateOpenApi(
   registry.registerPath({
     method: 'get',
     path: '/api/admin/asset-drift/state',
-    summary: 'In-memory snapshot of the asset-drift watcher (ADR 015).',
+    summary: 'Persisted snapshot of the asset-drift watcher (ADR 015).',
     description:
-      "Surfaces the background drift watcher's last-pass per-asset state without forcing a fresh Horizon read. `running: false` means the watcher is not active in this process (no LOOP issuers configured or `LOOP_WORKERS_ENABLED=false`). `perAsset[].state` is `unknown` until the first successful per-asset tick. Cheap enough to poll from the admin landing (120/min rate limit).",
+      "Surfaces the background drift watcher's last-pass per-asset state (persisted in `asset_drift_state`, fleet-consistent) without forcing a fresh Horizon read. `running: false` means the watcher is not active in this process (no LOOP issuers configured or `LOOP_WORKERS_ENABLED=false`). `perAsset[].state` is `unknown` until the first successful per-asset tick. `perAsset[].failedRowsState = 'present'` flags terminally-failed burn / interest-mint rows needing an operator retry. Cheap enough to poll from the admin landing (120/min rate limit).",
     tags: ['Admin'],
     security: [{ bearerAuth: [] }],
     responses: {
@@ -92,6 +104,11 @@ export function registerAdminAssetDriftStateOpenApi(
       },
       429: {
         description: 'Rate limit exceeded (120/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      500: {
+        description:
+          'Internal error — the snapshot is a Postgres read (asset_drift_state, hardening A3); a DB outage degrades this poll endpoint to 500 rather than a stack trace.',
         content: { 'application/json': { schema: errorResponse } },
       },
     },

@@ -59,12 +59,21 @@ export function escapeMarkdown(value: string): string {
   return value.replace(BIDI_AND_ZERO_WIDTH, '').replace(/([\\`*_~|>[\]()])/g, '\\$1');
 }
 
-/** Sends a message to a Discord webhook. Fails silently — never blocks app logic. */
+/**
+ * Sends a message to a Discord webhook. Fails silently — never
+ * blocks app logic. Returns whether the send is considered
+ * DELIVERED: `true` on a 2xx (or when no webhook is configured —
+ * there is nowhere to deliver, so callers tracking delivery must
+ * not retry forever), `false` on a non-2xx or network error.
+ * Fire-and-forget callers can keep ignoring the result; delivery-
+ * tracked callers (the asset-drift watcher's transition pages)
+ * await it and re-attempt undelivered pages on later ticks.
+ */
 export async function sendWebhook(
   webhookUrl: string | undefined,
   embed: DiscordEmbed,
-): Promise<void> {
-  if (!webhookUrl) return;
+): Promise<boolean> {
+  if (!webhookUrl) return true;
 
   try {
     const response = await fetch(webhookUrl, {
@@ -100,9 +109,12 @@ export async function sendWebhook(
         /* body unreadable */
       }
       log.warn({ status: response.status, body }, 'Discord webhook returned non-success status');
+      return false;
     }
+    return true;
   } catch (err) {
     log.warn({ err }, 'Failed to send Discord notification');
+    return false;
   }
 }
 

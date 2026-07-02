@@ -32,6 +32,7 @@ import { db } from '../../db/client.js';
  * keeps the truncation deterministic.
  */
 const TABLES_TO_TRUNCATE = [
+  'asset_drift_state',
   'pending_payouts',
   'credit_transactions',
   'user_credits',

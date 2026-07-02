@@ -64,10 +64,11 @@ export function mountAdminTreasuryRoutes(app: Hono): void {
     rateLimit('GET /api/admin/assets/:assetCode/circulation', 30, 60_000),
     adminAssetCirculationHandler,
   );
-  // In-memory snapshot of the asset-drift watcher's per-asset state
-  // (ADR 015). Process-local, no Horizon call; cheap to poll from the
-  // admin UI landing so the "which assets are drifted?" signal reads
-  // without forcing each tab to re-read Horizon.
+  // Persisted snapshot of the asset-drift watcher's per-asset state
+  // (ADR 015; asset_drift_state table — fleet-consistent, hardening
+  // A3). No Horizon call; cheap to poll from the admin UI landing so
+  // the "which assets are drifted / carrying failed money-movement
+  // rows?" signal reads without forcing each tab to re-read Horizon.
   app.get(
     '/api/admin/asset-drift/state',
     rateLimit('GET /api/admin/asset-drift/state', 120, 60_000),
