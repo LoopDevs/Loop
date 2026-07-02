@@ -477,6 +477,47 @@ export function notifyUsdcBelowFloor(args: {
   });
 }
 
+/**
+ * Notify: the off-chain ledger invariant is violated (hardening C1;
+ * ADR 009). `user_credits.balance_minor` no longer equals
+ * `SUM(credit_transactions.amount_minor)` for at least one
+ * (user, currency) pair — a writer desynced the mirror or the DB was
+ * hand-edited; either way the money ledger cannot be trusted until
+ * explained. Fired by the ledger-invariant watcher every tick
+ * (default daily) WHILE the drift persists — deliberately no
+ * transition dedup: an unresolved ledger-integrity incident should
+ * re-page daily, not go quiet after one message.
+ */
+export function notifyLedgerDrift(args: {
+  driftCount: number;
+  /** True when the query limit was hit — the real count may be higher. */
+  limitHit: boolean;
+  sample: Array<{
+    userId: string;
+    currency: string;
+    balanceMinor: string;
+    ledgerSumMinor: string;
+    deltaMinor: string;
+  }>;
+}): void {
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: '🚨 Ledger Invariant Violated',
+    color: RED,
+    description: truncate(
+      `${args.driftCount}${args.limitHit ? '+' : ''} (user, currency) pair(s) where user_credits.balance_minor ≠ SUM(credit_transactions). The mirror can no longer be trusted until this is explained — triage via /api/admin/reconciliation. This page repeats daily while the drift persists.`,
+      DESCRIPTION_MAX,
+    ),
+    fields: args.sample.slice(0, 5).map((d) => ({
+      name: `${escapeMarkdown(d.userId.slice(0, 8))}… ${escapeMarkdown(d.currency)}`,
+      value: truncate(
+        `balance=${escapeMarkdown(d.balanceMinor)} ledger=${escapeMarkdown(d.ledgerSumMinor)} Δ=${escapeMarkdown(d.deltaMinor)}`,
+        FIELD_VALUE_MAX,
+      ),
+      inline: false,
+    })),
+  });
+}
+
 // `notifyAssetDrift` and `notifyAssetDriftRecovered` (the paired
 // open-and-close drift-watcher notifiers, ADR 015) live in
 // `./monitoring-asset-drift.ts`. Re-exported below so existing

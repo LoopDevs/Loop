@@ -140,11 +140,18 @@
 
 ## Track C — Mechanical enforcement (self-defending repo)
 
-- [ ] **C1. Scheduled ledger reconciliation.** `check-ledger-invariant.ts` is
+- [x] **C1. Scheduled ledger reconciliation.** `check-ledger-invariant.ts` is
       written but runs nowhere. Nightly workflow (pattern already exists in
       `audit-cron.yml`) against prod/replica: ledger invariant + the on-chain
       drift equation, Discord alert on any drift. The single highest-value
-      money-integrity gate per effort.
+      money-integrity gate per effort. _Done — implemented as an IN-APP
+      worker instead of a CI cron (runs where the DB is: no tunnels, no
+      new secrets, Discord plumbing shared): `ledger-invariant-watcher.ts`,
+      daily default (`LOOP_LEDGER_INVARIANT_INTERVAL_HOURS`),
+      advisory-lock single-flight across machines, re-pages every tick
+      while drift persists (deliberately no dedup). The on-chain half of
+      reconciliation was already continuous via the asset-drift watcher
+      (every 300s, hardened in A2/A3)._
 - [ ] **C2. Web-route auth inventory test.** Web analogue of
       `staff-route-gating.test.ts`: every route module rendering authed data
       must carry the auth/redirect guard. Closes the softest spot in the stack

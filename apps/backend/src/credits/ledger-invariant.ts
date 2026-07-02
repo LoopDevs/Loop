@@ -132,7 +132,10 @@ interface DriftSqlRow extends Record<string, unknown> {
  * a matching `user_credits` row.
  */
 export async function computeLedgerDriftSql(
-  db: typeof dbType,
+  // `execute` is the only method used — accepting the narrow shape
+  // lets callers pass either the pooled client or a transaction
+  // handle (the C1 watcher runs inside its single-flight txn).
+  db: Pick<typeof dbType, 'execute'>,
   limit = 1000,
 ): Promise<DriftEntry[]> {
   const result = await db.execute<DriftSqlRow>(sql`

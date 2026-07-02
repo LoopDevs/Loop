@@ -32,6 +32,7 @@ export {
   notifyAssetDriftRecovered,
   notifyDriftFailedRows,
   notifyDriftFailedRowsCleared,
+  notifyLedgerDrift,
   notifyStuckProcurementSwept,
   notifyPaymentWatcherStuck,
   notifyStuckPayouts,

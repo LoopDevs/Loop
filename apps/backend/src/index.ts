@@ -24,6 +24,10 @@ import {
 import { configuredLoopPayableAssets } from './credits/payout-asset.js';
 import { startInterestScheduler, stopInterestScheduler } from './credits/interest-scheduler.js';
 import { startAuthRowPurge, stopAuthRowPurge } from './auth/auth-row-purge.js';
+import {
+  startLedgerInvariantWatcher,
+  stopLedgerInvariantWatcher,
+} from './credits/ledger-invariant-watcher.js';
 import { startInterestMintWorker, stopInterestMintWorker } from './credits/interest-mint.js';
 import { resolveIssuerSigners } from './payments/issuer-signers.js';
 import { startWalletProvisioning, stopWalletProvisioning } from './wallet/provisioning.js';
@@ -229,6 +233,16 @@ if (env.LOOP_WORKERS_ENABLED) {
     intervalMs: env.LOOP_AUTH_ROW_PURGE_INTERVAL_HOURS * 60 * 60 * 1000,
   });
 
+  // Hardening C1 (2026-07 plan): scheduled ledger-invariant check —
+  // pages Discord while user_credits disagrees with the
+  // credit_transactions sum anywhere. The check itself single-flights
+  // across machines via a transaction-scoped advisory lock; DB-only,
+  // no Stellar / CTX dependency — gated here to share the workers'
+  // lifecycle.
+  startLedgerInvariantWatcher({
+    intervalMs: env.LOOP_LEDGER_INVARIANT_INTERVAL_HOURS * 60 * 60 * 1000,
+  });
+
   // ADR 030 Phase C1 — wallet-provisioning sweeper. Re-drives stuck
   // signup-time provisioning with backoff and backfills existing
   // users that hold user_credits. Only meaningful when the embedded
@@ -284,6 +298,7 @@ function shutdown(signal: string): void {
   stopInterestMintWorker();
   stopInterestPoolWatcher();
   stopAuthRowPurge();
+  stopLedgerInvariantWatcher();
   stopWalletProvisioning();
 
   server.close(() => {
