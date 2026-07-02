@@ -196,3 +196,45 @@ export function rateLimit(
   Object.defineProperty(mw, 'name', { value: `rateLimit(${name})` });
   return mw;
 }
+
+/**
+ * Global per-IP fallback limiter (hardening B6, 2026-07 plan).
+ *
+ * The per-route `rateLimit()` factory only protects routes that
+ * remember to mount it, and it runs AFTER the `/api/admin/*` blanket
+ * `requireAuth` + `requireStaff` (two DB reads) — so a valid-token
+ * non-staff caller could drive unthrottled DB work while getting
+ * 404s. This middleware sits early in the global chain (before any
+ * route or namespace middleware) and applies a single generous
+ * per-IP ceiling across ALL requests, so:
+ *
+ *   - a route that forgot its per-route limiter still has a backstop;
+ *   - the admin auth-DB-reads-before-limiter path is bounded;
+ *   - a URL fuzz across unmatched paths is capped.
+ *
+ * The ceiling is deliberately high (default 600/min/IP) so it never
+ * interferes with the tighter per-route budgets — it's a volumetric
+ * backstop, not the primary control. Shares the same `rateLimitMap`
+ * + machine-count division as the per-route limiter, under a distinct
+ * `__global__` key namespace.
+ */
+export function globalRateLimit(opts?: {
+  maxRequests?: number;
+  windowMs?: number;
+}): (c: Context, next: () => Promise<void>) => Promise<void | Response> {
+  const inner = rateLimit('__global__', opts?.maxRequests ?? 600, opts?.windowMs ?? 60_000);
+  const mw = async (c: Context, next: () => Promise<void>): Promise<void | Response> => {
+    // `/health` is the Fly platform's liveness probe, hit every few
+    // seconds from the platform's own addresses — exempt it for the
+    // same reason it's exempt from the per-route inventory: a per-IP
+    // budget would 429 the prober and page ops. It's a cheap
+    // SELECT 1 + in-memory reads, not an abuse surface.
+    if (c.req.path === '/health') {
+      await next();
+      return;
+    }
+    return inner(c, next);
+  };
+  Object.defineProperty(mw, 'name', { value: 'globalRateLimit' });
+  return mw;
+}

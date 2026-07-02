@@ -45,12 +45,12 @@ vi.mock('../metrics.js', () => ({
   incrementRateLimitHit: () => metricsMock.incrementRateLimitHit(),
 }));
 
-import { rateLimit, __resetRateLimitsForTests } from '../middleware/rate-limit.js';
+import { rateLimit, globalRateLimit, __resetRateLimitsForTests } from '../middleware/rate-limit.js';
 
-function makeCtx(): { ctx: Context; headers: Map<string, string> } {
+function makeCtx(path = '/api/anything'): { ctx: Context; headers: Map<string, string> } {
   const headers = new Map<string, string>();
   const ctx = {
-    req: { header: () => undefined },
+    req: { header: () => undefined, path },
     header: (k: string, v: string) => headers.set(k, v),
     json: (body: unknown, status?: number) =>
       new Response(JSON.stringify(body), { status: status ?? 200 }),
@@ -167,5 +167,50 @@ describe('rateLimit middleware', () => {
       expect(res).toBeUndefined();
     }
     expect(next).toHaveBeenCalledTimes(5);
+  });
+
+  describe('globalRateLimit (hardening B6)', () => {
+    it('enforces the generous per-IP ceiling as a volumetric backstop', async () => {
+      // maxRequests=4, estimate=2 → effective 2 (kept tiny for the test).
+      const mw = globalRateLimit({ maxRequests: 4, windowMs: 60_000 });
+      const next = vi.fn(async () => {});
+      const a = await mw(makeCtx().ctx, next);
+      const b = await mw(makeCtx().ctx, next);
+      expect(a).toBeUndefined();
+      expect(b).toBeUndefined();
+      const c = await mw(makeCtx().ctx, next);
+      expect(c).toBeInstanceOf(Response);
+      expect((c as Response).status).toBe(429);
+    });
+
+    it('exempts /health so the Fly liveness probe is never throttled', async () => {
+      const mw = globalRateLimit({ maxRequests: 2, windowMs: 60_000 });
+      const next = vi.fn(async () => {});
+      // Well past the ceiling — every /health call must still pass.
+      for (let i = 0; i < 10; i++) {
+        const res = await mw(makeCtx('/health').ctx, next);
+        expect(res).toBeUndefined();
+      }
+      expect(next).toHaveBeenCalledTimes(10);
+    });
+
+    it('keys under a distinct namespace — does not consume a per-route budget', async () => {
+      const global = globalRateLimit({ maxRequests: 4, windowMs: 60_000 });
+      const route = rateLimit('some-route', 4, 60_000); // effective 2 (÷2)
+      const next = vi.fn(async () => {});
+      // Exhaust the global backstop on one path...
+      await global(makeCtx('/api/x').ctx, next);
+      await global(makeCtx('/api/x').ctx, next);
+      await global(makeCtx('/api/x').ctx, next); // 429 on global
+      // ...the per-route limiter for a different route is untouched.
+      const r1 = await route(makeCtx('/api/y').ctx, next);
+      const r2 = await route(makeCtx('/api/y').ctx, next);
+      expect(r1).toBeUndefined();
+      expect(r2).toBeUndefined();
+    });
+
+    it('is named for the middleware inventory', () => {
+      expect(globalRateLimit().name).toBe('globalRateLimit');
+    });
   });
 });

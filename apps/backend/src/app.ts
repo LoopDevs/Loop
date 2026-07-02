@@ -5,6 +5,7 @@ import { logger } from './logger.js';
 import { accessLogMiddleware } from './middleware/access-log.js';
 import { requestContextMiddleware } from './middleware/request-context.js';
 import { requestCounterMiddleware } from './middleware/request-counter.js';
+import { globalRateLimit } from './middleware/rate-limit.js';
 import { requestIdMiddleware } from './middleware/request-id.js';
 import { corsMiddleware } from './middleware/cors.js';
 import { secureHeadersMiddleware } from './middleware/secure-headers.js';
@@ -102,6 +103,15 @@ app.use('*', accessLogMiddleware);
 // it observes the final status; collapses unmatched routes to
 // `NOT_FOUND` so a URL fuzz can't balloon Prometheus series.
 app.use('*', requestCounterMiddleware);
+
+// Global per-IP volumetric backstop (hardening B6). Sits before every
+// route + namespace middleware so routes that lack a per-route limiter
+// — and the `/api/admin/*` blanket auth DB-reads that run before the
+// per-route limiter — still have a ceiling. Deliberately generous
+// (600/min/IP) so it never shadows the tighter per-route budgets; it's
+// the backstop, not the primary control. Mounted after the request
+// counter so a 429'd request is still observed in metrics.
+app.use('*', globalRateLimit());
 
 // `/metrics` (Prometheus exposition) + `/openapi.json` (static
 // spec) handlers live in `./observability-handlers.ts`. Both are
