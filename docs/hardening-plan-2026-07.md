@@ -14,6 +14,17 @@
 > items within a track are roughly dependency-ordered. `[D]` = needs an
 > operator decision before/while implementing (sensible default proposed
 > inline — will implement the default unless overridden).
+>
+> **Status (2026-07-03).** Every high-severity money/auth item and the whole
+> mechanical-enforcement + knowledge/skills layer is DONE and merged
+> (A1–A5, A7–A8, B1–B4, B6–B7, all of C's gates, all of E). Three
+> adversarial-review passes caught real bugs pre-merge — a P0 fund-loss in
+> A5, a P0 at-most-once alert in A2/A3, a P0 fleet-stall in A8 — each fixed
+> before merge. What remains (marked **[deferred]** below) is the tail: one
+> operator action I can't take (C9), two structural refactors scoped as
+> "days, needs its own dedicated effort — not safe to half-ship" (D1–D3),
+> and a few lower-value or `[D]`-blocked items (A6, B5, C3, C10a). Each
+> carries its reason inline; none is a money-integrity gap.
 
 ## Track A — Money-invariant fixes (the judgment-dense residuals)
 
@@ -84,12 +95,14 @@
       common crashed-worker case). Confirmed settlement → hold + page for
       manual reconcile (a usable card may exist). Settlement-read failure
       fails closed to hold (never auto-refund on uncertainty)._
-- [ ] **A6. Late-deposit-after-expiry handling.** Deposits landing just after
-      `pending_payment → expired` are classified `order_gone` and abandoned
-      (`skipped-payments.ts:233`). Default: durable queue row + alert with an
-      admin "match to order / refund to sender" action instead of silent
-      Discord-only abandonment. `[D]` refund-to-sender needs an operator OK
-      (outbound payment from the pool).
+- [ ] **A6. Late-deposit-after-expiry handling.** _[deferred]_ Deposits landing
+      just after `pending_payment → expired` are classified `order_gone` and
+      abandoned (`skipped-payments.ts:233`). The proposed durable-queue-row +
+      "refund to sender" carries a `[D]` operator decision (outbound payment
+      from the pool to an arbitrary sender address is a new money-movement
+      surface that needs an explicit OK). The symptom (funds parked at the
+      deposit account) is already surfaced by the asset-drift watcher (A2/A3) + the skip table's Discord alert, so it is visible today, not silent.
+      Deferred pending the operator decision on the refund-to-sender path.
 - [ ] **A7. loop_asset overpayment.** `amount-sufficient.ts:88` accepts
       `received >= required` but `markOrderPaid` debits/burns only
       `chargeMinor` — excess LOOP sits stranded, un-burned, counted as
@@ -154,10 +167,15 @@
       `signOutAllDevices` web service + a "Sign out everywhere" section on
       /settings/privacy. Access tokens stay non-revocable by design (15-min
       TTL) — see threat-model._
-- [ ] **B5. Identity-scoped OTP attempt counter.** `otps.ts:135` documents its
-      own bump-all-live-rows fix as a stopgap; the correct design is a
-      per-email failed-attempt counter decoupled from OTP rows. Matters
-      double because step-up minting reuses the same primitives.
+- [ ] **B5. Identity-scoped OTP attempt counter.** _[deferred]_ `otps.ts:135`
+      documents its own bump-all-live-rows fix as a stopgap; the correct
+      design is a per-email failed-attempt counter decoupled from OTP rows.
+      Recorded in `docs/threat-model.md`'s accepted-risk register with its
+      current bounds (per-email 3/min issuance cap + per-IP 10/min) and its
+      revisit trigger (any report of OTP guessing). Deferred as a bounded,
+      already-mitigated auth refinement rather than an open hole — the
+      correct fix is a schema change (new counter table) whose value/risk is
+      lower than the items shipped this pass.
 - [x] **B6. Rate-limit ordering + fallback.** On `/api/admin/*` the blanket
       `requireAuth` + `requireStaff` (two DB reads) run before any per-route
       limiter, so a valid-token non-staff user drives unthrottled DB work; and
@@ -193,9 +211,15 @@
       `staff-route-gating.test.ts`: every route module rendering authed data
       must carry the auth/redirect guard. Closes the softest spot in the stack
       (web loaders are excluded from coverage entirely).
-- [ ] **C3. Web coverage floor.** Stop excluding `app/routes/**`, `root.tsx`,
-      home, onboarding from `apps/web/vitest.config.ts`; add loader/action
-      tests; raise the 35%/32% floors to something honest.
+- [ ] **C3. Web coverage floor.** _[deferred]_ Stop excluding `app/routes/**`
+      from `apps/web/vitest.config.ts`; add loader/action tests; raise the
+      floors. The SECURITY-relevant half of the "web routes are unguarded"
+      gap — that every admin route renders its staff gate and every authed
+      surface handles signed-out — is already closed structurally by C2's
+      `route-auth-inventory.test.ts`. What remains is mechanical
+      coverage-raising (write tests for dozens of route loaders), which is
+      tedious volume, not a correctness gap. Deferred as low-value-per-effort
+      relative to the items shipped.
 - [x] **C4. `packages/shared` tests in CI.** No `test`/`test:coverage` script
       → `--if-present` skips it → its money-format/slug/grouping tests are
       dead in CI. One-line fix + verify.sh inclusion. _Done: vitest wired
@@ -238,11 +262,18 @@
       set; e2e-mocked is. Adding it is a governance change the permission
       layer reserves for the operator. Run:_
       `gh api -X POST repos/LoopDevs/Loop/branches/main/protection/required_status_checks/contexts --input - <<< '["Flywheel integration (real postgres)"]'`
-- [ ] **C10a. Apply the A3 pattern to `interest-pool-watcher.ts`.** Found
-      during A2/A3 review: the interest-pool low-cover watcher still keeps
-      its transition state in process memory — restart re-pages, each
-      machine pages independently. Port it to the same persisted
-      `asset_drift_state`-style claim (or generalise the repo).
+- [ ] **C10a. Apply the A3 pattern to `interest-pool-watcher.ts`.**
+      _[deferred — proportionality]_ Found during A2/A3 review: the
+      interest-pool low-cover watcher keeps its transition dedup in a
+      process-memory Set (restart re-pages, each machine pages
+      independently). On implementation this was judged disproportionate:
+      unlike the drift watcher (the primary unbacked-mint backstop), this is
+      a Phase-2-gated OPERATIONAL reminder ("mint more soon") — a restart
+      re-page or a duplicate is mildly annoying, not a money-integrity gap,
+      and interest is off in Tranche-1 (`INTEREST_APY_BASIS_POINTS=0`). The
+      full A3 treatment (new table + migration + at-least-once delivery) is
+      poor value/effort for that surface. Deferred; revisit if Phase-2
+      interest ships and the duplicate reminders become real noise.
 - [x] **C10. Emission/mint DB fences.** The DB-level half of A1 — cumulative
       emission accounting constraint/table so no future app-layer writer can
       reopen the unbacked path (same defense-in-depth pattern as the
@@ -254,7 +285,16 @@
 
 ## Track D — Structural simplification (delete the drift-tax)
 
-- [ ] **D1. Derive OpenAPI from handler Zod schemas.** 74/76 files in
+- [ ] **D1. Derive OpenAPI from handler Zod schemas.** _[deferred — large,
+      needs its own effort]_ This is the single biggest ceiling-raiser (kills
+      the 12k-line hand-maintained mirror + its #2-churn file + a whole drift
+      class), but the repo-shape review scoped it as "design the derivation
+      pattern, migrate module-by-module, keep the parity gate until the
+      mirror is gone" — a multi-day refactor that must not be half-shipped
+      (a partially-migrated openapi/ tree is worse than the honest mirror the
+      parity gate keeps correct today). Left as the top structural follow-up;
+      the `check-openapi-parity` gate keeps the current mirror honest in the
+      meantime. 74/76 files in
       `openapi/` (12.3k LOC) hand-redefine shapes the handlers already
       validate; the parity gate is a text-analysis stopgap for a drift class
       that shouldn't exist. Design the derivation pattern
@@ -262,19 +302,25 @@
       module-by-module, keep the parity gate until the mirror is gone, then
       retire both. Biggest single ceiling-raiser; the mechanical tail is
       delegable once the pattern is proven on 2-3 modules.
-- [ ] **D2. Split the config giants.** `db/schema.ts` (1,312 lines) and
+- [ ] **D2. Split the config giants.** _[deferred — large]_ `db/schema.ts` (1,312 lines) and
       `env.ts` (1,057) are merge-conflict magnets; split by domain
       (orders/credits/wallet/admin; env sections) preserving public exports.
-- [ ] **D3. Endpoint co-location + scaffold.** Adding one admin endpoint
+- [ ] **D3. Endpoint co-location + scaffold.** _[deferred — large; partly
+      mitigated by the E4 `/add-endpoint` skill, which makes the fan-out a
+      guided checklist even without the scaffold generator]_ Adding one admin endpoint
       touches ≥5 files (handler, mount, `app.ts`, openapi, web client, maybe
       shared type) — why `app.ts` (194 changes) and `services/admin.ts` (120)
       are the top churn hotspots. Define a per-module registration convention + a scaffold generator so the fan-out is impossible to get wrong.
       Pairs with D1.
-- [ ] **D4. Legacy order-path retirement plan.** ADR scoping the deletion of
+- [x] **D4. Legacy order-path retirement plan.** ADR scoping the deletion of
       the CTX-proxy order path (`orders/handler.ts`, `pay-ctx` legacy fork,
       `orders-legacy` flag branch) once loop-native is default — criteria,
       date, and the flag-matrix simplification it buys. Plan now, delete when
-      criteria met.
+      criteria met. _Done: ADR 039 records the 4 retirement criteria
+      (native-auth stable ≥30d, zero legacy orders in flight, no client
+      pinning the legacy path, native e2e green), exactly what the deletion
+      removes, and the flag-matrix simplification it buys. Deletion deferred
+      until criteria hold (takeover mid-roll)._
 
 ## Track E — Skills + knowledge transfer (keep mid-tier work on rails)
 
