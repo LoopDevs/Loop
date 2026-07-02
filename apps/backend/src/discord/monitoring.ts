@@ -481,7 +481,12 @@ export function notifyUsdcBelowFloor(args: {
 // open-and-close drift-watcher notifiers, ADR 015) live in
 // `./monitoring-asset-drift.ts`. Re-exported below so existing
 // import sites resolve unchanged.
-export { notifyAssetDrift, notifyAssetDriftRecovered } from './monitoring-asset-drift.js';
+export {
+  notifyAssetDrift,
+  notifyAssetDriftRecovered,
+  notifyDriftFailedRows,
+  notifyDriftFailedRowsCleared,
+} from './monitoring-asset-drift.js';
 
 // `notifyStuckProcurementSwept` (A2-621) and
 // `notifyPaymentWatcherStuck` (A2-626) — the two stuck-row sweeper

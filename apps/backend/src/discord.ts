@@ -30,6 +30,8 @@ export {
   notifyInterestPoolRecovered,
   notifyAssetDrift,
   notifyAssetDriftRecovered,
+  notifyDriftFailedRows,
+  notifyDriftFailedRowsCleared,
   notifyStuckProcurementSwept,
   notifyPaymentWatcherStuck,
   notifyStuckPayouts,

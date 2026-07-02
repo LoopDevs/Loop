@@ -77,13 +77,25 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
     name: 'notifyAssetDrift',
     channel: 'monitoring',
     description:
-      'Fires when a LOOP asset drifts past the operator threshold — on-chain circulation vs off-chain ledger liability (ADR 015). In-memory dedupe: fires once on ok→over, once on over→ok via notifyAssetDriftRecovered.',
+      'Fires when a LOOP asset drifts past the operator threshold — on-chain circulation vs off-chain ledger liability (ADR 015). Persisted dedupe (asset_drift_state): exactly one machine fires once on ok→over, once on over→ok via notifyAssetDriftRecovered.',
   },
   {
     name: 'notifyAssetDriftRecovered',
     channel: 'monitoring',
     description:
       'Fires once per asset on the over→ok transition paired with notifyAssetDrift. Closes the drift incident in the channel so ops reads a beginning AND end for every alert.',
+  },
+  {
+    name: 'notifyDriftFailedRows',
+    channel: 'monitoring',
+    description:
+      'Hardening A2: fires once per asset when terminally-failed burn / interest-mint payout rows appear. These rows keep the drift equation neutral by design (the deposit-held tokens / mirror credits genuinely exist), so drift alone can never surface them — the alert stays open until an operator retries the rows via /admin/payouts?state=failed.',
+  },
+  {
+    name: 'notifyDriftFailedRowsCleared',
+    channel: 'monitoring',
+    description:
+      'Closes the notifyDriftFailedRows incident once the failed burn / interest-mint rows for the asset converge (retried to confirmation). Paired open + close, same pattern as notifyAssetDrift / notifyAssetDriftRecovered.',
   },
   {
     name: 'notifyCircuitBreaker',

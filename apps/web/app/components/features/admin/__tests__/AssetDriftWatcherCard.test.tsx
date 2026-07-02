@@ -57,6 +57,9 @@ describe('<AssetDriftWatcherCard />', () => {
           lastDriftStroops: '0',
           lastThresholdStroops: '100000000',
           lastCheckedMs: Date.now() - 60_000,
+          failedRowsState: 'none',
+          failedBurnStroops: '0',
+          failedInterestMintStroops: '0',
         },
         {
           assetCode: 'GBPLOOP',
@@ -64,6 +67,9 @@ describe('<AssetDriftWatcherCard />', () => {
           lastDriftStroops: '0',
           lastThresholdStroops: '100000000',
           lastCheckedMs: Date.now() - 60_000,
+          failedRowsState: 'none',
+          failedBurnStroops: '0',
+          failedInterestMintStroops: '0',
         },
       ],
     });
@@ -85,6 +91,9 @@ describe('<AssetDriftWatcherCard />', () => {
           lastDriftStroops: '500000000',
           lastThresholdStroops: '100000000',
           lastCheckedMs: Date.now(),
+          failedRowsState: 'none',
+          failedBurnStroops: '0',
+          failedInterestMintStroops: '0',
         },
         {
           assetCode: 'GBPLOOP',
@@ -92,6 +101,9 @@ describe('<AssetDriftWatcherCard />', () => {
           lastDriftStroops: '0',
           lastThresholdStroops: '100000000',
           lastCheckedMs: Date.now(),
+          failedRowsState: 'none',
+          failedBurnStroops: '0',
+          failedInterestMintStroops: '0',
         },
       ],
     });
@@ -113,6 +125,9 @@ describe('<AssetDriftWatcherCard />', () => {
           lastDriftStroops: null,
           lastThresholdStroops: null,
           lastCheckedMs: null,
+          failedRowsState: 'unknown',
+          failedBurnStroops: null,
+          failedInterestMintStroops: null,
         },
       ],
     });
@@ -121,6 +136,35 @@ describe('<AssetDriftWatcherCard />', () => {
       expect(screen.getByText('inactive')).toBeDefined();
     });
     expect(screen.getByText(/has not run yet/i)).toBeDefined();
+  });
+
+  it('alerts on failed burn/mint rows even when drift reads ok (hardening A2)', async () => {
+    // Failed rows are counted as in-flight by the drift equation, so
+    // the drift number stays 'ok' — the card must alert on the
+    // failed-rows dimension independently.
+    adminMock.getAssetDriftState.mockResolvedValue({
+      lastTickMs: Date.now(),
+      running: true,
+      perAsset: [
+        {
+          assetCode: 'GBPLOOP',
+          state: 'ok',
+          lastDriftStroops: '0',
+          lastThresholdStroops: '100000000',
+          lastCheckedMs: Date.now(),
+          failedRowsState: 'present',
+          failedBurnStroops: '0',
+          failedInterestMintStroops: '100000',
+        },
+      ],
+    });
+    const container = renderCard();
+    await waitFor(() => {
+      expect(screen.getByText(/Failed burn\/mint rows need retry/)).toBeDefined();
+    });
+    expect(screen.getByText('GBPLOOP')).toBeDefined();
+    // The amber alert styling fires from failed rows alone.
+    expect(container.querySelector('section')?.className).toContain('border-amber');
   });
 
   it('self-hides when the watcher is inactive and no assets are configured', async () => {

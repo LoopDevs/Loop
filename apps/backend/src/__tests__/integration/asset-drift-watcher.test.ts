@@ -19,8 +19,9 @@
  *     a sustained-incident tick stream doesn't flood the channel.
  *
  * Mocked: `getLoopAssetCirculation` (Horizon GET) + Discord. Real:
- * postgres + drizzle + the in-memory state Map + the per-currency
- * `sumOutstandingLiability` SQL.
+ * postgres + drizzle + the persisted `asset_drift_state` transition
+ * rows (hardening A3) + the per-currency `sumOutstandingLiability`
+ * SQL.
  *
  * Gated on `LOOP_E2E_DB=1` like the sibling integration suites.
  */
@@ -40,8 +41,13 @@ vi.mock('../../discord.js', async (importActual) => {
   const actual = (await importActual()) as Record<string, unknown>;
   return {
     ...actual,
-    notifyAssetDrift: vi.fn(),
-    notifyAssetDriftRecovered: vi.fn(),
+    // Delivery-tracked notifiers (hardening A2): the watcher marks a
+    // page delivered only when the notifier resolves true, so the
+    // mocks must report success or every page reads as undelivered.
+    notifyAssetDrift: vi.fn(async () => true),
+    notifyAssetDriftRecovered: vi.fn(async () => true),
+    notifyDriftFailedRows: vi.fn(async () => true),
+    notifyDriftFailedRowsCleared: vi.fn(async () => true),
   };
 });
 

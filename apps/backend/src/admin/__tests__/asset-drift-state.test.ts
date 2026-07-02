@@ -12,13 +12,16 @@ const { mock } = vi.hoisted(() => ({
         lastDriftStroops: bigint | null;
         lastThresholdStroops: bigint | null;
         lastCheckedMs: number | null;
+        failedRowsState: 'unknown' | 'none' | 'present';
+        failedBurnStroops: bigint | null;
+        failedInterestMintStroops: bigint | null;
       }>,
     },
   },
 }));
 
 vi.mock('../../payments/asset-drift-watcher.js', () => ({
-  getAssetDriftState: () => mock.state,
+  getAssetDriftState: async () => mock.state,
 }));
 
 import { adminAssetDriftStateHandler } from '../asset-drift-state.js';
@@ -49,7 +52,7 @@ describe('adminAssetDriftStateHandler', () => {
   it('returns `running: false` and an empty per-asset list when the watcher never ran', async () => {
     mock.state.running = false;
     const c = fakeContext();
-    const res = adminAssetDriftStateHandler(c);
+    const res = await adminAssetDriftStateHandler(c);
     const body = (await res.json()) as {
       lastTickMs: number | null;
       running: boolean;
@@ -61,7 +64,7 @@ describe('adminAssetDriftStateHandler', () => {
     expect(body.perAsset).toEqual([]);
   });
 
-  it('serialises bigint drift / threshold as strings', async () => {
+  it('serialises bigint drift / threshold / failed sums as strings', async () => {
     mock.state.lastTickMs = 1_700_000_000_000;
     mock.state.running = true;
     mock.state.perAsset = [
@@ -71,10 +74,13 @@ describe('adminAssetDriftStateHandler', () => {
         lastDriftStroops: 12_345_678_900n,
         lastThresholdStroops: 100_000_000n,
         lastCheckedMs: 1_700_000_000_000,
+        failedRowsState: 'present',
+        failedBurnStroops: 200_000n,
+        failedInterestMintStroops: 300_000n,
       },
     ];
     const c = fakeContext();
-    const res = adminAssetDriftStateHandler(c);
+    const res = await adminAssetDriftStateHandler(c);
     const body = (await res.json()) as {
       running: boolean;
       perAsset: Array<{
@@ -82,6 +88,9 @@ describe('adminAssetDriftStateHandler', () => {
         state: string;
         lastDriftStroops: string | null;
         lastThresholdStroops: string | null;
+        failedRowsState: string;
+        failedBurnStroops: string | null;
+        failedInterestMintStroops: string | null;
       }>;
     };
     expect(body.running).toBe(true);
@@ -91,6 +100,9 @@ describe('adminAssetDriftStateHandler', () => {
       lastDriftStroops: '12345678900',
       lastThresholdStroops: '100000000',
       lastCheckedMs: 1_700_000_000_000,
+      failedRowsState: 'present',
+      failedBurnStroops: '200000',
+      failedInterestMintStroops: '300000',
     });
   });
 
@@ -103,14 +115,26 @@ describe('adminAssetDriftStateHandler', () => {
         lastDriftStroops: null,
         lastThresholdStroops: null,
         lastCheckedMs: null,
+        failedRowsState: 'unknown',
+        failedBurnStroops: null,
+        failedInterestMintStroops: null,
       },
     ];
     const c = fakeContext();
-    const res = adminAssetDriftStateHandler(c);
+    const res = await adminAssetDriftStateHandler(c);
     const body = (await res.json()) as {
-      perAsset: Array<{ lastDriftStroops: string | null; lastCheckedMs: number | null }>;
+      perAsset: Array<{
+        lastDriftStroops: string | null;
+        lastCheckedMs: number | null;
+        failedRowsState: string;
+        failedBurnStroops: string | null;
+        failedInterestMintStroops: string | null;
+      }>;
     };
     expect(body.perAsset[0]!.lastDriftStroops).toBeNull();
     expect(body.perAsset[0]!.lastCheckedMs).toBeNull();
+    expect(body.perAsset[0]!.failedRowsState).toBe('unknown');
+    expect(body.perAsset[0]!.failedBurnStroops).toBeNull();
+    expect(body.perAsset[0]!.failedInterestMintStroops).toBeNull();
   });
 });

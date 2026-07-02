@@ -53,8 +53,27 @@ export interface AssetCirculationResponse {
 export type AssetDriftState = 'unknown' | 'ok' | 'over';
 
 /**
+ * Failed money-movement dimension of the watcher (hardening A2).
+ * `pending_payouts` rows of kind `burn` / `interest_mint` in state
+ * `failed` are counted into the drift equation (the tokens / mirror
+ * credits genuinely exist), which makes the equation blind to them —
+ * a terminally-failed nightly mint would otherwise read as
+ * drift-neutral forever while the mirror silently overstates the
+ * user's on-chain holdings. This second state dimension keeps that
+ * masked term loud: `present` = at least one failed burn/mint row
+ * needs an operator retry (`/admin/payouts?state=failed`).
+ *
+ *   - `unknown` — no successful watcher read for this asset yet.
+ *   - `none` — no failed burn / interest-mint rows.
+ *   - `present` — failed rows exist; ops paged on the transition.
+ */
+export type AssetFailedRowsState = 'unknown' | 'none' | 'present';
+
+/**
  * One asset's watcher-side snapshot. `null` fields pre-first-tick
- * (before the watcher has run against this asset in this process).
+ * (before the watcher has ever successfully read this asset).
+ * Snapshots are persisted in Postgres (hardening A3), so they are
+ * fleet-consistent and survive process restarts.
  */
 export interface AssetDriftStateRow {
   assetCode: LoopAssetCode;
@@ -65,6 +84,12 @@ export interface AssetDriftStateRow {
   lastThresholdStroops: string | null;
   /** Unix ms of the last successful per-asset read. `null` pre-first-tick. */
   lastCheckedMs: number | null;
+  /** Failed burn/interest-mint dimension — see {@link AssetFailedRowsState}. */
+  failedRowsState: AssetFailedRowsState;
+  /** Stroops on `kind='burn'` rows in state `failed` (bigint-as-string). `null` pre-first-tick. */
+  failedBurnStroops: string | null;
+  /** Stroops on `kind='interest_mint'` rows in state `failed` (bigint-as-string). `null` pre-first-tick. */
+  failedInterestMintStroops: string | null;
 }
 
 /**

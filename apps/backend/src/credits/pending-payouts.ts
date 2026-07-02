@@ -61,64 +61,89 @@ export async function insertPayout(args: {
 }
 
 /**
- * ADR 036: sum of `amount_stroops` across in-flight `kind='burn'`
- * rows for one asset. "In-flight" = pending / submitted / failed —
- * the corresponding LOOP has already been debited from the
- * `user_credits` mirror (markOrderPaid) and is parked at the
- * deposit/operator account awaiting the issuer-return burn, so it is
- * no longer user-circulating but still counts toward on-chain
- * issuance until the burn confirms. The asset-drift watcher subtracts
- * this from circulation so redemptions don't read as drift. Confirmed
- * burns are excluded — the issuer-return already removed them from
- * circulation on-chain.
+ * State-bucketed stroop sums for one money-movement kind of one
+ * asset (hardening A2).
+ *
+ *   - `pendingSubmittedStroops` — rows the payout worker will still
+ *     converge on its own (`pending` / `submitted`).
+ *   - `failedStroops` — terminally-failed rows that converge ONLY via
+ *     an operator retry (`/admin/payouts?state=failed` →
+ *     reset-to-pending).
+ *
+ * The asset-drift watcher uses the SUM of both buckets in its
+ * reconciliation equation (the deposit-held tokens / mirror credits
+ * genuinely exist regardless of row state), and the failed bucket
+ * separately as its second alert dimension — without the split, a
+ * terminally-failed burn or nightly mint reads as drift-neutral
+ * forever and nothing keeps pointing at it after the one-shot
+ * `notifyPayoutFailed` page.
  */
-export async function sumInFlightBurnStroops(args: {
+export interface MoneyMovementStroopsByState {
+  pendingSubmittedStroops: bigint;
+  failedStroops: bigint;
+}
+
+async function sumKindStroopsByState(args: {
+  kind: 'burn' | 'interest_mint';
   assetCode: string;
   assetIssuer: string;
-}): Promise<bigint> {
+}): Promise<MoneyMovementStroopsByState> {
   const [row] = await db
     .select({
-      total: sql<string>`COALESCE(SUM(${pendingPayouts.amountStroops}), 0)::text`,
+      pendingSubmitted: sql<string>`COALESCE(SUM(${pendingPayouts.amountStroops}) FILTER (WHERE ${pendingPayouts.state} IN ('pending', 'submitted')), 0)::text`,
+      failed: sql<string>`COALESCE(SUM(${pendingPayouts.amountStroops}) FILTER (WHERE ${pendingPayouts.state} = 'failed'), 0)::text`,
     })
     .from(pendingPayouts)
     .where(
-      sql`${pendingPayouts.kind} = 'burn'
+      sql`${pendingPayouts.kind} = ${args.kind}
         AND ${pendingPayouts.assetCode} = ${args.assetCode}
         AND ${pendingPayouts.assetIssuer} = ${args.assetIssuer}
         AND ${pendingPayouts.state} IN ('pending', 'submitted', 'failed')`,
     );
-  return BigInt(row?.total ?? '0');
+  return {
+    pendingSubmittedStroops: BigInt(row?.pendingSubmitted ?? '0'),
+    failedStroops: BigInt(row?.failed ?? '0'),
+  };
 }
 
 /**
- * ADR 031 / ADR 036 Phase D: sum of `amount_stroops` across in-flight
- * `kind='interest_mint'` rows for one asset. Mirror image of the burn
- * sum above: the nightly interest txn credits the `user_credits`
- * mirror AND enqueues the issuer-signed mint in one transaction, so
- * until the mint confirms the mirror is AHEAD of on-chain circulation
- * by the queued amount. The asset-drift watcher ADDS this to the
- * circulation side of its equation so an in-flight mint reads as
- * drift-neutral. Confirmed mints are excluded — the issuer payment
- * raised on-chain circulation itself. `failed` rows stay included
- * (mirror credited, chain pending ops intervention) — same posture
- * as in-flight burns.
+ * ADR 036: `amount_stroops` across un-confirmed `kind='burn'` rows
+ * for one asset, bucketed by state. The corresponding LOOP has
+ * already been debited from the `user_credits` mirror (markOrderPaid)
+ * and is parked at the deposit/operator account awaiting the
+ * issuer-return burn, so it is no longer user-circulating but still
+ * counts toward on-chain issuance until the burn confirms. The
+ * asset-drift watcher subtracts the total from circulation so
+ * redemptions don't read as drift. Confirmed burns are excluded —
+ * the issuer-return already removed them from circulation on-chain.
  */
-export async function sumInFlightInterestMintStroops(args: {
+export async function sumBurnStroopsByState(args: {
   assetCode: string;
   assetIssuer: string;
-}): Promise<bigint> {
-  const [row] = await db
-    .select({
-      total: sql<string>`COALESCE(SUM(${pendingPayouts.amountStroops}), 0)::text`,
-    })
-    .from(pendingPayouts)
-    .where(
-      sql`${pendingPayouts.kind} = 'interest_mint'
-        AND ${pendingPayouts.assetCode} = ${args.assetCode}
-        AND ${pendingPayouts.assetIssuer} = ${args.assetIssuer}
-        AND ${pendingPayouts.state} IN ('pending', 'submitted', 'failed')`,
-    );
-  return BigInt(row?.total ?? '0');
+}): Promise<MoneyMovementStroopsByState> {
+  return sumKindStroopsByState({ kind: 'burn', ...args });
+}
+
+/**
+ * ADR 031 / ADR 036 Phase D: `amount_stroops` across un-confirmed
+ * `kind='interest_mint'` rows for one asset, bucketed by state.
+ * Mirror image of the burn sum above: the nightly interest txn
+ * credits the `user_credits` mirror AND enqueues the issuer-signed
+ * mint in one transaction, so until the mint confirms the mirror is
+ * AHEAD of on-chain circulation by the queued amount. The
+ * asset-drift watcher ADDS the total to the circulation side of its
+ * equation so an un-confirmed mint reads as drift-neutral. Confirmed
+ * mints are excluded — the issuer payment raised on-chain circulation
+ * itself. `failed` rows are included in the equation term (mirror
+ * credited, chain pending ops intervention) but surfaced separately
+ * so the intervention actually happens — see
+ * {@link MoneyMovementStroopsByState}.
+ */
+export async function sumInterestMintStroopsByState(args: {
+  assetCode: string;
+  assetIssuer: string;
+}): Promise<MoneyMovementStroopsByState> {
+  return sumKindStroopsByState({ kind: 'interest_mint', ...args });
 }
 
 /**
