@@ -114,4 +114,54 @@ export function registerAdminUserWritesOpenApi(
       },
     },
   });
+
+  // B4: admin session revocation (incident response). Admin-tier, NOT
+  // step-up-gated (reversible, no value movement).
+  const AdminRevokeSessionsResult = registry.register(
+    'AdminRevokeSessionsResult',
+    z.object({
+      userId: z.string().uuid(),
+      message: z.string(),
+    }),
+  );
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/admin/users/{userId}/revoke-sessions',
+    summary: "Revoke all of a user's live sessions (hardening B4 — incident response).",
+    description:
+      'Revokes every live refresh token for the target user — the incident-response lever for a compromised account. Access tokens are non-revocable by design (15-min TTL), so the session dies within at most that window. Admin-tier; NOT step-up-gated (reversible — the user just signs back in — and moves no value, so step-up friction during a fast security response is counterproductive).',
+    tags: ['Admin'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: z.object({ userId: z.string().uuid() }),
+    },
+    responses: {
+      200: {
+        description: 'All sessions revoked',
+        content: { 'application/json': { schema: AdminRevokeSessionsResult } },
+      },
+      400: {
+        description: 'Non-uuid userId (`VALIDATION_ERROR`)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      401: {
+        description: 'Missing or invalid bearer',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      404: {
+        description:
+          'Target user not found (`NOT_FOUND`). Also returned to non-admin callers: requireStaff masks the admin surface as 404.',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (20/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      500: {
+        description: 'Internal error revoking sessions (`INTERNAL_ERROR`)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+    },
+  });
 }

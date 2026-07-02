@@ -142,12 +142,18 @@
       (`flyctl secrets set LOOP_ADMIN_STEP_UP_SIGNING_KEY=$(openssl rand -base64 48) -a loopfinance-api`;
       note this restarts the app and enables the step-up-gated admin
       writes)._
-- [ ] **B4. Session revocation surface.** `revokeAllRefreshTokensForUser`
+- [x] **B4. Session revocation surface.** `revokeAllRefreshTokensForUser`
       exists but no route mounts it — no user "sign out all devices," no admin
       "revoke user's sessions," so a stolen 30-day refresh token can only die
       via the reuse heuristic. Mount `DELETE /api/auth/session/all` (self) and
       an admin revoke endpoint (support-tier: fits ADR 037's
       delivery-unsticking remit? — no: it's security-relevant; admin-tier).
+      _Done: `DELETE /api/auth/session/all` (self; loop-native revokes all
+      refresh tokens, ctx no-ops) + `POST /api/admin/users/:userId/revoke-sessions`
+      (admin-tier, step-up-exempt — reversible, no value movement) +
+      `signOutAllDevices` web service + a "Sign out everywhere" section on
+      /settings/privacy. Access tokens stay non-revocable by design (15-min
+      TTL) — see threat-model._
 - [ ] **B5. Identity-scoped OTP attempt counter.** `otps.ts:135` documents its
       own bump-all-live-rows fix as a stopgap; the correct design is a
       per-email failed-attempt counter decoupled from OTP rows. Matters

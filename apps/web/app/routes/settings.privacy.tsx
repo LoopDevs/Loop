@@ -26,6 +26,7 @@ import { useAuth } from '~/hooks/use-auth';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { Button } from '~/components/ui/Button';
 import { downloadMyData, getMyDataExport, requestAccountDeletion } from '~/services/user';
+import { signOutAllDevices } from '~/services/auth';
 import { shareJsonFile } from '~/native/share';
 
 export function meta(): Route.MetaDescriptors {
@@ -65,6 +66,27 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
   const [confirmText, setConfirmText] = useState('');
   const [deleteState, setDeleteState] = useState<'idle' | 'working'>('idle');
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // B4: "sign out of all devices" — revoke every session, then clear
+  // local state (this device signs out too, which is the expected UX).
+  const [signOutAllState, setSignOutAllState] = useState<'idle' | 'working'>('idle');
+  const [signOutAllError, setSignOutAllError] = useState<string | null>(null);
+  const handleSignOutAll = (): void => {
+    setSignOutAllError(null);
+    setSignOutAllState('working');
+    void (async () => {
+      try {
+        await signOutAllDevices();
+        await logout();
+        void navigate('/');
+      } catch (err) {
+        setSignOutAllError(
+          err instanceof ApiException ? err.message : 'Could not sign out of all devices.',
+        );
+        setSignOutAllState('idle');
+      }
+    })();
+  };
 
   if (!isAuthenticated) {
     return (
@@ -190,6 +212,32 @@ export default function SettingsPrivacyRoute(): React.JSX.Element {
         {exportError !== null ? (
           <p role="alert" className="text-sm text-red-600 dark:text-red-400">
             {exportError}
+          </p>
+        ) : null}
+      </section>
+
+      {/* Session security (B4) */}
+      <section
+        aria-labelledby="sessions-heading"
+        className="rounded-xl border border-gray-200 dark:border-gray-800 p-5 bg-white dark:bg-gray-900 space-y-4"
+      >
+        <h2 id="sessions-heading" className="text-base font-semibold text-gray-900 dark:text-white">
+          Sign out everywhere
+        </h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          Revoke every active session, on this and all other devices. Use this if you think someone
+          else has access to your account — you&apos;ll need to sign in again.
+        </p>
+        <Button
+          variant="secondary"
+          onClick={handleSignOutAll}
+          disabled={signOutAllState === 'working'}
+        >
+          {signOutAllState === 'working' ? 'Signing out…' : 'Sign out of all devices'}
+        </Button>
+        {signOutAllError !== null ? (
+          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            {signOutAllError}
           </p>
         ) : null}
       </section>

@@ -202,6 +202,7 @@ const ADMIN_ONLY_PROBES: Array<[string, string]> = [
   ['POST', `/api/admin/users/${NOBODY_ID}/refunds`],
   ['POST', `/api/admin/users/${NOBODY_ID}/emissions`],
   ['POST', `/api/admin/users/${NOBODY_ID}/home-currency`],
+  ['POST', `/api/admin/users/${NOBODY_ID}/revoke-sessions`],
   ['POST', '/api/admin/payouts/00000000-0000-4000-8000-00000000aaaa/retry'],
   ['POST', '/api/admin/payouts/00000000-0000-4000-8000-00000000aaaa/compensate'],
   ['PUT', '/api/admin/merchant-cashback-configs/some-merchant'],
@@ -328,13 +329,13 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       (g) => !g.gates.includes('requireStaff(admin)') && g.gates.includes('requireStaff(support)'),
     );
     const riders = groups.length - adminTier.length - supportExplicit.length;
-    // 33 = 23 CSV exports + 6 non-CSV admin writes (3 credit writes,
-    //      home-currency, cashback-config PUT, merchants/resync)
-    //      + payout retry/compensate + 3 Discord surfaces + step-up
-    //      mint... see the mount-by-mount table in the PR; the exact
-    //      membership is pinned by the matrix test above and the
-    //      money-write list below.
-    expect(adminTier).toHaveLength(33);
+    // 34 = 23 CSV exports + 7 non-CSV admin writes (3 credit writes,
+    //      home-currency, cashback-config PUT, merchants/resync,
+    //      B4 revoke-sessions) + payout retry/compensate + 3 Discord
+    //      surfaces + step-up mint... see the mount-by-mount table in
+    //      the PR; the exact membership is pinned by the matrix test
+    //      above and the money-write list below.
+    expect(adminTier).toHaveLength(34);
     // 7 = lookup, watcher-skips ×3, wallet ×2, refetch-redemption.
     expect(supportExplicit).toHaveLength(7);
     expect(riders).toBeGreaterThanOrEqual(50);
@@ -404,6 +405,11 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       // Sends a test embed to the configured Discord webhook — no
       // state change beyond the outbound message.
       'POST /api/admin/discord/test',
+      // B4: admin session revocation — a reversible incident-response
+      // action (the user just signs back in), moves no value, and
+      // step-up friction during a fast security response is
+      // counterproductive.
+      'POST /api/admin/users/:userId/revoke-sessions',
       // ADR 037 support-tier delivery-unsticking actions: reversible
       // re-drives of existing intents (no new value creation), scoped
       // to the support remit on purpose — adding step-up would move
