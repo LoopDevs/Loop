@@ -4,8 +4,12 @@ import { loader } from '../home-geo-redirect';
 
 type Args = Parameters<typeof loader>[0];
 
-const run = async (ua: string, cookie?: string): Promise<Response | null> => {
-  const headers: Record<string, string> = { 'user-agent': ua };
+const run = async (
+  ua: string,
+  cookie?: string,
+  extra?: Record<string, string>,
+): Promise<Response | null> => {
+  const headers: Record<string, string> = { 'user-agent': ua, ...extra };
   if (cookie) headers.cookie = cookie;
   const request = new Request('https://loopfinance.io/', { headers });
   try {
@@ -57,6 +61,28 @@ describe('home-geo-redirect loader', () => {
     const res = await run(CHROME);
     expect(res!.status).toBe(302);
     expect(res!.headers.get('location')).toBe('/us/en');
+  });
+
+  it('falls back to Accept-Language when geo-IP is empty (the UK-user-gets-US fix)', async () => {
+    // MaxMind has no entry for the visitor's ISP → empty country. Without the
+    // Accept-Language backstop this defaults to US; a real en-GB browser is GB.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ countryCode: '', region: 'US' }), { status: 200 }),
+      ),
+    );
+    const res = await run(CHROME, undefined, { 'accept-language': 'en-GB,en;q=0.9' });
+    expect(res!.headers.get('location')).toBe('/gb/en');
+  });
+
+  it('prefers an edge geo header (Cloudflare CF-IPCountry) and skips the backend geo call', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const res = await run(CHROME, undefined, { 'cf-ipcountry': 'GB' });
+    expect(res!.headers.get('location')).toBe('/gb/en');
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('falls back to the default market for an unrouted geo country', async () => {

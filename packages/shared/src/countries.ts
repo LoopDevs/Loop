@@ -150,6 +150,28 @@ export function resolveCountryPath(code: string | null | undefined): string {
 }
 
 /**
+ * Best-guess supported country from an `Accept-Language` header — the
+ * geo-redirect fallback when geo-IP can't place the visitor (the free
+ * GeoLite2 DB misses smaller ISPs, so a real UK visitor can resolve to
+ * empty and wrongly default to the US). Reads only the REGION subtag
+ * (`en-GB` → GB), never the language alone — a language doesn't pin a
+ * country (`en` could be GB/US/AU/…). Returns a supported ISO code
+ * (uppercase) in browser-preference order, or '' when none maps to a
+ * supported market. Pair with {@link resolveCountryPath}, which turns
+ * '' into {@link DEFAULT_COUNTRY}.
+ */
+export function countryFromAcceptLanguage(header: string | null | undefined): string {
+  if (!header) return '';
+  for (const part of header.split(',')) {
+    const tag = part.split(';')[0]?.trim(); // "en-GB;q=0.9" → "en-GB"
+    if (tag === undefined || tag.length === 0) continue;
+    const region = tag.split('-')[1]?.trim(); // "en-GB" → "GB"
+    if (region !== undefined && isSupportedCountryCode(region)) return region.toUpperCase();
+  }
+  return '';
+}
+
+/**
  * Country↔merchant visibility rule (ADR 034 §Decision-2). A merchant shows in
  * country `C` when `merchant.country === C` **OR** its display currency equals
  * `currencyOf(C)` — so a EUR merchant appears in every Eurozone country and a

@@ -4,6 +4,7 @@ import {
   COUNTRIES,
   DEFAULT_COUNTRY,
   SUPPORTED_CURRENCIES,
+  countryFromAcceptLanguage,
   countriesForCurrency,
   countryByCode,
   currencyOf,
@@ -68,6 +69,38 @@ describe('resolveCountryPath', () => {
     expect(resolveCountryPath('JP')).toBe(DEFAULT_COUNTRY.toLowerCase());
     expect(resolveCountryPath(null)).toBe(DEFAULT_COUNTRY.toLowerCase());
     expect(resolveCountryPath(undefined)).toBe(DEFAULT_COUNTRY.toLowerCase());
+  });
+});
+
+describe('countryFromAcceptLanguage', () => {
+  it('reads the region subtag of the first supported entry', () => {
+    expect(countryFromAcceptLanguage('en-GB,en;q=0.9')).toBe('GB');
+    expect(countryFromAcceptLanguage('it-IT,it;q=0.9,en;q=0.8')).toBe('IT');
+    expect(countryFromAcceptLanguage('fr-CA,fr;q=0.8')).toBe('CA');
+    expect(countryFromAcceptLanguage('de-DE')).toBe('DE');
+  });
+
+  it('skips language-only tags (a language does not pin a country)', () => {
+    // `en` alone → no region → no guess (en could be GB/US/AU/…).
+    expect(countryFromAcceptLanguage('en')).toBe('');
+    expect(countryFromAcceptLanguage('it')).toBe('');
+  });
+
+  it('skips unsupported regions and takes the first supported one', () => {
+    expect(countryFromAcceptLanguage('ja-JP,en-GB;q=0.9')).toBe('GB');
+    expect(countryFromAcceptLanguage('zz-ZZ')).toBe('');
+  });
+
+  it('returns "" for empty / missing headers', () => {
+    expect(countryFromAcceptLanguage('')).toBe('');
+    expect(countryFromAcceptLanguage(null)).toBe('');
+    expect(countryFromAcceptLanguage(undefined)).toBe('');
+  });
+
+  it('feeds resolveCountryPath as the geo-IP fallback', () => {
+    // The real bug: empty geo-IP → without this, DEFAULT_COUNTRY (US).
+    expect(resolveCountryPath(countryFromAcceptLanguage('en-GB,en;q=0.9'))).toBe('gb');
+    expect(resolveCountryPath(countryFromAcceptLanguage('en'))).toBe(DEFAULT_COUNTRY.toLowerCase());
   });
 });
 
