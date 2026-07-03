@@ -225,13 +225,21 @@
       must carry the auth/redirect guard. Closes the softest spot in the stack
       (web loaders are excluded from coverage entirely). _Done: shipped in
       #1495 as `route-auth-inventory.test.ts` (checkbox was stale)._
-- [ ] **C3. Web coverage floor.** _[deferred]_ Stop excluding `app/routes/**`
-      from `apps/web/vitest.config.ts`; add loader/action tests; raise the
-      floors. The SECURITY-relevant half — every admin route renders its
-      staff gate, every authed surface handles signed-out — is already closed
-      structurally by C2's `route-auth-inventory.test.ts`. What remains is
-      mechanical coverage-raising (tests for dozens of route loaders):
-      tedious volume, not a correctness gap. Deferred as low value/effort.
+- [x] **C3. Web coverage floor.** Stop excluding `app/routes/**` from
+      `apps/web/vitest.config.ts`; add loader/action tests; raise the floors.
+      _Done: the coverage config previously excluded `app/routes/**`,
+      `root.tsx`, and the home/onboarding presentation — narrowing the
+      denominator so the number OVERSTATED how much of the shipping app was
+      tested (floors sat at stmt 35 / branch 32 / func 40 / line 37 against
+      that narrowed set). Now only the genuinely un-unit-testable surface is
+      excluded (test files, the route-table config, the SSR entry
+      bootstrap); every route loader/meta/action + component is measured.
+      Honest whole-app coverage came out at 58.3 / 53.6 / 56.3 / 59.7, so the
+      floors were re-baselined to 55 / 50 / 53 / 56 — a large jump AND honest.
+      Added loader/meta tests for `gift-card.$name` (the malformed-percent
+      SSR-500 guard) and `not-found-ssr` (the hard-404 loader) as the
+      route-logic-test pattern. The security half was already closed by C2's
+      `route-auth-inventory.test.ts`._
 - [x] **C4. `packages/shared` tests in CI.** No `test`/`test:coverage` script
       → `--if-present` skips it → its money-format/slug/grouping tests are
       dead in CI. One-line fix + verify.sh inclusion. _Done: vitest wired
