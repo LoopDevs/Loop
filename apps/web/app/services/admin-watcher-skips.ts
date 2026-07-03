@@ -75,3 +75,25 @@ export async function reopenWatcherSkip(args: {
     },
   );
 }
+
+export interface DepositRefundResult {
+  paymentId: string;
+  status: 'refunded' | 'already_refunded';
+  txHash: string;
+}
+
+/**
+ * A6: refund an abandoned late deposit back to its on-chain sender.
+ * `POST /api/admin/deposits/:paymentId/refund` — admin-tier + step-up
+ * (`withStepUp` runs the ADR-028 dance). Idempotent server-side, so a
+ * step-up retry / re-click never double-pays.
+ */
+export async function refundDeposit(paymentId: string): Promise<DepositRefundResult> {
+  return authenticatedRequest<DepositRefundResult>(
+    `/api/admin/deposits/${encodeURIComponent(paymentId)}/refund`,
+    {
+      method: 'POST',
+      withStepUp: true,
+    },
+  );
+}

@@ -10,6 +10,10 @@ import {
 import type { Route } from './+types/admin.skips';
 import { shouldRetry } from '~/hooks/query-retry';
 import { getWatcherSkip, listWatcherSkips, reopenWatcherSkip } from '~/services/admin';
+import { refundDeposit } from '~/services/admin-watcher-skips';
+import { useStaffRole } from '~/hooks/use-staff-role';
+import { useAdminStepUp } from '~/hooks/use-admin-step-up';
+import { StepUpModal } from '~/components/features/admin/StepUpModal';
 import { AdminNav } from '~/components/features/admin/AdminNav';
 import { RequireStaff } from '~/components/features/admin/RequireAdmin';
 import { ReasonDialog } from '~/components/features/admin/ReasonDialog';
@@ -94,6 +98,10 @@ function AdminSkipsRouteInner(): React.JSX.Element {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reopenTarget, setReopenTarget] = useState<AdminWatcherSkipRow | null>(null);
+  // A6: refund is an admin-tier + step-up action; support sees the tab
+  // but not the Refund button.
+  const { isAdminRole } = useStaffRole();
+  const stepUp = useAdminStepUp();
 
   const query = useQuery({
     queryKey: ['admin-watcher-skips', status ?? null, reason ?? null, before ?? null],
@@ -126,6 +134,27 @@ function AdminSkipsRouteInner(): React.JSX.Element {
         err instanceof ApiException ? err.message : 'Failed to re-open the skip row.',
         'error',
       );
+    },
+  });
+
+  // A6: refund an abandoned late deposit to its sender. Idempotent
+  // server-side (the step-up retry / re-click never double-pays), so a
+  // simple mutation through the step-up dance is safe.
+  const refund = useMutation({
+    mutationFn: (paymentId: string) => stepUp.runWithStepUp(() => refundDeposit(paymentId)),
+    onSuccess: (res) => {
+      addToast(
+        res.status === 'already_refunded'
+          ? `Deposit ${res.paymentId} was already refunded (tx ${res.txHash.slice(0, 8)}…).`
+          : `Deposit ${res.paymentId} refunded to sender (tx ${res.txHash.slice(0, 8)}…).`,
+        'success',
+      );
+      void queryClient.invalidateQueries({
+        predicate: (q) => String(q.queryKey[0]).startsWith('admin-watcher-skip'),
+      });
+    },
+    onError: (err) => {
+      addToast(err instanceof ApiException ? err.message : 'Refund failed.', 'error');
     },
   });
 
@@ -275,14 +304,27 @@ function AdminSkipsRouteInner(): React.JSX.Element {
                   </td>
                   <td className="px-3 py-2 text-right">
                     {row.status === 'abandoned' ? (
-                      <button
-                        type="button"
-                        onClick={() => setReopenTarget(row)}
-                        disabled={reopen.isPending}
-                        className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
-                      >
-                        Reopen
-                      </button>
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setReopenTarget(row)}
+                          disabled={reopen.isPending}
+                          className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+                        >
+                          Reopen
+                        </button>
+                        {isAdminRole ? (
+                          <button
+                            type="button"
+                            onClick={() => refund.mutate(row.paymentId)}
+                            disabled={refund.isPending}
+                            title="Refund this deposit to its on-chain sender"
+                            className="rounded-lg border border-teal-300 bg-teal-50 px-3 py-1.5 text-xs font-medium text-teal-800 hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-teal-800 dark:bg-teal-900/30 dark:text-teal-300 dark:hover:bg-teal-900/50"
+                          >
+                            {refund.isPending ? 'Refunding…' : 'Refund'}
+                          </button>
+                        ) : null}
+                      </div>
                     ) : null}
                   </td>
                 </tr>
@@ -327,6 +369,11 @@ function AdminSkipsRouteInner(): React.JSX.Element {
         confirmLabel="Reopen"
         onResolve={handleReopenReason}
       />
+
+      {/* A6: step-up dance for the admin refund action. */}
+      {stepUp.modalOpen && (
+        <StepUpModal onConfirm={stepUp.handleStepUpConfirm} onCancel={stepUp.handleStepUpCancel} />
+      )}
     </main>
   );
 }
