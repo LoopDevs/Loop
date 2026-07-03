@@ -15,16 +15,39 @@
 > operator decision before/while implementing (sensible default proposed
 > inline — will implement the default unless overridden).
 >
-> **Status (2026-07-03).** Every high-severity money/auth item and the whole
-> mechanical-enforcement + knowledge/skills layer is DONE and merged
-> (A1–A5, A7–A8, B1–B4, B6–B7, all of C's gates, all of E). Three
-> adversarial-review passes caught real bugs pre-merge — a P0 fund-loss in
-> A5, a P0 at-most-once alert in A2/A3, a P0 fleet-stall in A8 — each fixed
-> before merge. What remains (marked **[deferred]** / **[blocked]** below) is
-> the tail: one operator action I can't take (C9), two structural refactors
-> scoped as "days, needs its own dedicated effort — not safe to half-ship"
-> (D1–D3), and a few lower-value or `[D]`-blocked items (A6, B5, C3, C10a).
-> Each carries its reason inline; none is a money-integrity gap.
+> **Status (2026-07-03).** 36 of 40 items DONE and merged — every money/auth
+> fix (A1–A5, A7–A8, B1–B7), every mechanical enforcement gate (C1–C8, C10,
+> C10a), the whole skills/knowledge layer (E1–E10), and the tractable
+> structural items (D3 scaffold generator, D4 retirement ADR). Four
+> adversarial-review passes caught real bugs pre-merge — a P0 fund-loss (A5),
+> a P0 at-most-once alert (A2/A3), a P0 fleet-stall (A8), three P2s in C10a —
+> each fixed before merge.
+>
+> **The 4 remaining are genuinely blocked or scoped, NOT skipped:**
+>
+> - **C9** — **[blocked: operator action]**. Adding the flywheel check to
+>   branch protection is a governance change the permission layer reserves
+>   for the operator; I attempted the exact API call twice and was denied
+>   both times. The command is below for the operator to run.
+> - **A6** — **[blocked: operator `[D]` decision]**. The remaining piece is
+>   automating refund-to-sender for late deposits — a NEW outbound-payment-to-
+>   arbitrary-address money surface that needs an explicit operator OK. The
+>   non-`[D]` half (durable skip row + attributed `notifyDepositSkipAbandoned`
+>   alert) is already live, so nothing is silently lost today.
+> - **D1** — **[scoped: multi-day, must not half-ship]**. Deriving the whole
+>   OpenAPI spec from Zod is the biggest ceiling-raiser but the plan itself
+>   requires a module-by-module migration keeping the parity gate until the
+>   mirror is fully gone; a partial `openapi/` tree is worse than the honest
+>   mirror `check-openapi-parity` keeps correct today.
+> - **D2** — **[scoped: large maintainability refactor, dedicated follow-up]**.
+>   Verifiable-safe (migration-parity + typecheck prove equivalence) but a
+>   delicate ~2,600-line reorganization of the two most load-bearing config
+>   files for zero correctness value; a concrete split plan is recorded in the
+>   D2 entry so it's a bounded, hand-offable task rather than an open question.
+>   Not rushed at the tail of a long autonomous session when 100% is already
+>   unreachable via C9/A6/D1.
+>
+> None of the four is a money-integrity gap.
 
 ## Track A — Money-invariant fixes (the judgment-dense residuals)
 
@@ -179,16 +202,19 @@
       `signOutAllDevices` web service + a "Sign out everywhere" section on
       /settings/privacy. Access tokens stay non-revocable by design (15-min
       TTL) — see threat-model._
-- [ ] **B5. Identity-scoped OTP attempt counter.** _[deferred]_ `otps.ts:135`
-      documents its own bump-all-live-rows fix as a stopgap; the correct
-      design is a per-email failed-attempt counter decoupled from OTP rows.
-      Recorded in `docs/threat-model.md`'s accepted-risk register with its
-      current bounds (per-email 3/min issuance + per-IP 10/min) and its
-      revisit trigger (any report of OTP guessing). Deferred as a bounded,
-      already-mitigated auth refinement (a new counter table) rather than an
-      open hole — lower value/risk than the items shipped this pass, and a
-      rushed change to the OTP path is exactly the kind of security-critical
-      edit that shouldn't be hurried at the tail of a long session.
+- [x] **B5. Identity-scoped OTP attempt counter.** `otps.ts:135` documented
+      its bump-all-live-rows fix as a stopgap; the correct design is a
+      per-email failed-attempt counter decoupled from OTP rows. _Done (#1507):
+      `otp_attempt_counters` table (migration 0047) + `otp-attempt-counter.ts`
+      — a fixed-window (10 fails / 15 min) per-EMAIL counter that locks verify
+      for 15 min once crossed, checked BEFORE the code compare so the
+      row-rotation bypass is closed at the identity level. Clears on
+      successful verify; swept by the auth-row purge worker; load-time
+      invariant enforces lockout ≥ window. Adversarial (auth) review confirmed
+      the upsert SQL, expired-lockout→reset, race- and enumeration-safety; the
+      inherent targeted-verify-lockout DoS is in the threat-model register
+      with a CAPTCHA/backoff revisit trigger. Unit + real-pg integration
+      tests._
 - [x] **B6. Rate-limit ordering + fallback.** On `/api/admin/*` the blanket
       `requireAuth` + `requireStaff` (two DB reads) run before any per-route
       limiter, so a valid-token non-staff user drives unthrottled DB work; and
@@ -322,9 +348,33 @@
       module-by-module, keep the parity gate until the mirror is gone, then
       retire both. Biggest single ceiling-raiser; the mechanical tail is
       delegable once the pattern is proven on 2-3 modules.
-- [ ] **D2. Split the config giants.** _[deferred — large]_ `db/schema.ts` (1,312 lines) and
-      `env.ts` (1,057) are merge-conflict magnets; split by domain
-      (orders/credits/wallet/admin; env sections) preserving public exports.
+- [ ] **D2. Split the config giants.** _[scoped follow-up — see status header]_
+      `db/schema.ts` (1,515) and `env.ts` (1,139) are merge-conflict magnets;
+      split by domain preserving public exports. Verifiable-safe: the schema
+      has NO `relations()` and drizzle FK references are lazy thunks (cross-file
+      imports can't cycle-break), so migration-parity + typecheck prove the
+      split is equivalent; env.ts is pure Zod composition where typecheck alone
+      proves the `Env` type is byte-identical. **Concrete split plan (ready to
+      execute):** - `db/schema.ts` → barrel re-exporting `db/schema/*.ts` domain modules:
+      `users.ts` (users, staffRoles, userIdentities, userFavoriteMerchants +
+      WALLET*PROVISIONING_STATES/STAFF_ROLES re-exports), `auth.ts` (otps,
+      otpAttemptCounters, refreshTokens, socialIdTokenUses, SOCIAL_PROVIDERS),
+      `credits.ts` (userCredits, creditTransactions, interestMintSnapshots),
+      `orders.ts` (orders, ctxSettlements + ORDER*_ re-exports), `payments.ts`
+      (pendingPayouts, paymentWatcherSkips, watcherCursors, assetDriftState,
+      interestPoolAlertState, PAYOUT_STATES), `merchants.ts`
+      (merchantCashbackConfigs + history), `admin.ts` (adminIdempotencyKeys).
+      Keep the shared column-import header in each; `import _ as schema`and
+  drizzle-kit's`schema: './src/db/schema.ts'`both still collect via the
+ `export _`barrel.
+-`env.ts`→`env/schema-helpers.ts`(envBoolean, signingKeySchema,
+  rsaPrivateKeyPem, entropy fn, STELLAR_ADDRESS_MESSAGE consts) +
+ `env/sections/_.ts`(field-map objects spread into one`z.object`:
+  runtime, upstream+rate-limit, observability+db+admin-identity, auth,
+  stellar+payments, workers+interest) + `env/parse-env.ts`(the
+  cross-field`parseEnv`); `env.ts`composes`EnvSchema`and exports
+ `env`. Every field is comma-terminated so a plain-object spread
+      preserves the exact schema.
 - [x] **D3. Endpoint co-location + scaffold.** Adding one admin endpoint
       touches ≥5 files (handler, mount, `app.ts`, openapi, web client, maybe
       shared type) — why `app.ts` and `services/admin.ts` are the top churn
