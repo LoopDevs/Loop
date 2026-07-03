@@ -1,5 +1,17 @@
 # Tranche 1 (MVP) launch runbook
 
+> **STATUS 2026-07-03 — the backend + web are already LIVE on the Tranche-1
+> binary.** `api.loopfinance.io` returns `{ loopAuthNativeEnabled:true,
+loopOrdersEnabled:true, phase1Only:true }`, `/health` is `healthy` with all
+> four workers running (payment-watcher / procurement / payout /
+> redemption-backfill) and ~3,400 merchants synced; the web SSR app serves at
+> `beta.loopfinance.io`. So the "backend redeploy" and "email OTP is
+> CTX-proxied" framing in the older sections below is **superseded** — auth is
+> now Loop-native (ADR 013). What genuinely remains before a public Phase-1
+> launch is operator/mobile/legal work (Apple TestFlight, Android keystore,
+> ToS + age-gate + sanctions screening, apex DNS cut-over), not backend code.
+> See `docs/roadmap.md` for the current gap list.
+
 The product Tranche 1 ships is a **discounted gift card store** with crypto checkout (**XLM + USDC**, Loop is merchant of record, Loop holds treasury and pays CTX in XLM). Cashback as a post-purchase Stellar wallet emission, the Stellar passkey wallet, and DeFindex yield are all **Tranche 2** and stay disabled behind feature flags.
 
 The cashback split configured in `merchant_cashback_configs` is delivered as an **instant discount at order creation** — the user pays `chargeMinor − userCashbackMinor` instead of full face value, and no on-chain payout is queued. Same money flow as Tranche 2's cashback, just delivered up-front instead of post-purchase. Flipping `LOOP_PHASE_1_ONLY=false` later swaps the delivery channel back to Stellar emission with no schema change.

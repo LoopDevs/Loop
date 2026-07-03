@@ -28,12 +28,47 @@ customer-impacting state that always needs a human decision.
 
 ## Resolution paths
 
+The purpose-built lever for returning a stranded deposit is the **A6 admin
+refund** (hardening 2026-07): the deposit account IS the operator account
+(CF-18), so this submits an ordinary operator→sender Stellar payment returning
+the deposit to its on-chain sender.
+
+> **Refund a deposit → its sender:** `POST /api/admin/deposits/:paymentId/refund`
+> from the admin UI (the **Refund** button on the abandoned row in
+> `/admin/skips`, admin-tier + step-up) or via curl with a step-up token.
+> It reads the sender/amount/asset from the stored Horizon snapshot — you don't
+> supply them. **Idempotent + one-time-use**: a re-click / retry never
+> double-pays (it pre-checks Horizon for an already-landed refund and converges
+> to `already_refunded`). Do NOT use the emission writer for this — that was the
+> pre-A6 mechanism and requires a matching mirror balance an unmatched deposit
+> never has.
+
 | Situation                                                                       | Action                                                                                                                                                                                                                                                                                                                                                                    |
 | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Order expired before the deposit validated (late payment, oracle outage window) | Refund the deposit to the sender address via the admin emission writer (ADR 024 / ADR 036 — note an emission requires matching mirror balance), or — with the user's confirmation — re-create the order and apply the deposit manually.                                                                                                                                   |
+| Order expired before the deposit validated (late payment, oracle outage window) | **Refund to sender** via `POST /api/admin/deposits/:paymentId/refund` (the Refund button on the abandoned row). Or — with the user's confirmation — re-create the order and apply the deposit manually.                                                                                                                                                                   |
 | `reason = missing_credit_row` (A4-110 state corruption)                         | Follow the credit-row recovery in `ledger-drift.md` first; once the `user_credits` row exists, re-open the skip row — `POST /api/admin/watcher-skips/:paymentId/reopen` from the admin UI (ADR 037; audited, resets the attempt budget), or via SQL (`UPDATE payment_watcher_skips SET status='pending', attempts=0 WHERE payment_id='…'`) — and let the next tick retry. |
-| `reason = asset_mismatch` (user sent the wrong asset)                           | Contact the user; refund to sender per the support policy.                                                                                                                                                                                                                                                                                                                |
+| `reason = asset_mismatch` (user sent the wrong asset)                           | Contact the user; **refund to sender** via the refund endpoint above (it returns exactly what they sent, in the asset they sent).                                                                                                                                                                                                                                         |
 | `reason = processing_error` with a persistent `last_error`                      | This is a code defect — file it, fix it, then re-open the skip row as above (admin UI reopen or SQL) so the sweep replays the deposit.                                                                                                                                                                                                                                    |
+| Deposit below the dust floor (`DEPOSIT_NOT_REFUNDABLE` on refund)               | Deposits under 10,000 stroops (0.001 unit) are not one-click refundable (the Stellar fee would dwarf the value). Handle out-of-band / write off per the support policy.                                                                                                                                                                                                   |
+
+### Recovering a stuck `refunding` row
+
+A refund whose submit hit an **ambiguous** Horizon error (lost response) is held
+in `status='refunding'` **fail-closed** — the system will NOT auto-re-drive it
+(deliberate: never risk a double-pay). To recover:
+
+1. Check whether the refund actually landed. The row's `refund_tx_hash` (if set)
+   is the last attempted tx — look it up on Horizon:
+   `GET https://horizon.stellar.org/transactions/<refund_tx_hash>`. If it
+   `successful`, the sender WAS paid — mark it done:
+   `UPDATE payment_watcher_skips SET status='refunded' WHERE payment_id='…'`.
+2. If it did NOT land (404), just **re-POST the refund endpoint**. It runs the
+   Horizon idempotency pre-check first (windowless hash lookup + memo scan), and
+   a `refunding` row older than 5 min with no landed refund is safely
+   re-claimed and re-submitted — so a second click after the row has sat a few
+   minutes converges to a clean refund without any double-pay risk.
+3. If it's been <5 min, the endpoint returns `PAYMENT_IN_FLIGHT` (409) — wait
+   and retry; the tx may still be settling.
 
 ## Afterwards
 
