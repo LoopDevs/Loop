@@ -22,6 +22,8 @@ Known limitations we are **consciously not fixing** in the current phase are tra
 
 The 2026-06-11 comprehensive audit ([`docs/comprehensive-audit-2026-06-11.md`](./comprehensive-audit-2026-06-11.md)) is the live findings register; its **Part IV** is the sequenced remediation plan currently in execution. Roadmap items below defer to Part IV's sequencing where they overlap (notably the ADR 035 order-path work and the redemption-null backfill).
 
+The **[`readiness-backlog-2026-07-03.md`](./readiness-backlog-2026-07-03.md)** tracker is the consolidated, agent-followable superset of this roadmap + the cold-audit `needs-operator` list + the 2026-07-03 nine-lens readiness investigation (incl. the verified **T0-1 stranded-deposit P0**). Work concrete items from there; this roadmap stays the phase-level map.
+
 ## Orphaned-work register (2026-06-11)
 
 Items flagged in past sessions or audits that previously had **no home in any forward-looking document**. Each stays here until it is either scheduled (move into a phase/tranche checklist with an owner) or explicitly declined (record the decision, dated).
