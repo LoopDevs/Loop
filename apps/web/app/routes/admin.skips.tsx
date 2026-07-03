@@ -38,6 +38,7 @@ const REASONS: ReadonlyArray<WatcherSkipReason> = [
   'amount_insufficient',
   'missing_credit_row',
   'processing_error',
+  'order_gone',
 ];
 
 const STATUS_CLASSES: Record<WatcherSkipStatus, string> = {

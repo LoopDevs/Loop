@@ -2,9 +2,11 @@
  * Admin-mediated late-deposit refund-to-sender (hardening A6; ADR 010).
  *
  * A deposit that lands just after its order expires is recorded in
- * `payment_watcher_skips` and abandoned with an attributed Discord
- * alert — visible, but the funds sit at the deposit account until an
- * operator acts. This module returns them to their on-chain sender.
+ * `payment_watcher_skips` (with the `order_gone` reason — T0-1, which
+ * closed the gap where such late/duplicate deposits were only counted
+ * and never recorded) and abandoned with an attributed Discord alert —
+ * visible, but the funds sit at the deposit account until an operator
+ * acts. This module returns them to their on-chain sender.
  *
  * It is deliberately ADMIN-MEDIATED (not automatic): the plan flagged
  * the outbound payment `[D]`, and the operator's explicit, step-up-

@@ -42,7 +42,10 @@ Priority tiers are ordered by when it bites; within a tier, top = higher leverag
 
 ### T0-1 · Stranded late/duplicate deposits (VERIFIED P0 money bug) `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Fixed — scoped to `expired` orders (money-reviewed SOUND: the
+      `expired`-only guard is safe by construction — `expired` ⊥ `paid` with no reverse
+      state edge, so the cursor-replay double-spend can't arise). Migration 0049 +
+      `order_gone` reason + 3 real-pg tests. Two follow-ups spun out (T0-1b, T0-1c).
 
 **Why (impact):** Real user funds can be permanently stranded with no record, no alert, and no possible refund. A user who pays after their order's 24h expiry, or whose duplicate payment lands after the order is already `paid`, has their XLM/USDC/LOOP sit at the operator deposit account forever. This **falsifies the "funds are never silently lost" guarantee** written in `payments/deposit-refund.ts:5-9` and `orders/redeem.ts:40-43`, and it's exactly the class the A6 refund feature was meant to cover — but A6 can't, because these deposits never enter its input table.
 
@@ -71,6 +74,26 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 - Deduplicate: a genuine duplicate payment and a late payment both land here — make sure the same physical deposit can't be recorded twice (key on the Horizon payment id).
 
 **Done when:** the new integration test passes on real Postgres; a late/duplicate deposit appears on `/admin/skips` with the new reason and the Refund button works on it; `npm run verify` green; money-review posted on the PR.
+
+### T0-1b · Duplicate deposit against an already-PAID order `[code]`
+
+- [ ] **Status:** ☐ Not started (spun out of T0-1)
+
+**Why:** T0-1 fixed the `expired`-order strand but deliberately does NOT record a deposit whose order is `paid`/`fulfilled` — because `markOrderPaid` doesn't persist which payment paid the order, so a genuine _second_ deposit can't be told apart from the _original paying_ deposit re-read after a cursor regression (recording the latter as refundable = double-spend). So a user who accidentally double-pays a real order is still stranded.
+
+**Do:** persist the paying deposit's Horizon payment id (+ tx hash) on the order in `markOrderPaid` (schema + migration). Then in the watcher's `unmatched` arm, also record a deposit against a paid order **iff** its payment id ≠ the order's stored paying-payment id (a genuine duplicate) → `order_gone` → refundable. ⚠️ Money-review; the whole point is the paying-payment id, so get that linkage right first.
+
+**Done when:** a duplicate deposit against a paid order is recorded + refundable, and the _original_ paying deposit re-read never is (integration test both ways).
+
+### T0-1c · Don't record sub-dust `order_gone` deposits `[code]` (small)
+
+- [ ] **Status:** ☐ Not started (money-review P2 follow-up)
+
+**Why:** T0-1's money-review flagged a self-funded nuisance vector: a user can expire their own order then send dust deposits to its memo, each recorded as `order_gone` and paging Discord on abandonment. Value-safe (the `REFUND_MIN_STROOPS` floor blocks the refund; attacker burns real XLM), but it bloats the skip table + alerts.
+
+**Do:** in the watcher's `unmatched`/`order_gone` record path, skip recording deposits below `REFUND_MIN_STROOPS` (they can never be refunded via A6 anyway). Keep it value-safe.
+
+**Done when:** a sub-dust late deposit is not recorded; a refundable one still is.
 
 ---
 

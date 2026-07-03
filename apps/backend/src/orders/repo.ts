@@ -227,3 +227,23 @@ export async function findPendingOrderByMemo(memo: string): Promise<Order | null
   });
   return row ?? null;
 }
+
+/**
+ * Looks up the order for a memo in ANY state (T0-1). Used by the
+ * watcher only after {@link findPendingOrderByMemo} returns null, to
+ * read the order's state: a deposit whose order has `expired` unpaid is
+ * a genuine stranded late deposit (recorded so the A6 refund path can
+ * reach it); a memo matching no order — or an order that was PAID —
+ * stays a counted no-op (see the watcher's `unmatched` arm for why
+ * paid-order deposits are deliberately NOT auto-recorded).
+ *
+ * State + `id` are what matter here — the A6 refund pays the deposit's
+ * on-chain *sender*, not the order, so a (near-impossible) memo
+ * collision returning a different order can't misdirect funds.
+ */
+export async function findAnyOrderByMemo(memo: string): Promise<Order | null> {
+  const row = await db.query.orders.findFirst({
+    where: eq(orders.paymentMemo, memo),
+  });
+  return row ?? null;
+}

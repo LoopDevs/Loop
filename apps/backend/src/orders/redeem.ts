@@ -38,9 +38,13 @@
  *     state. (Single-process deployment today — Fly runs one
  *     machine; a multi-instance future needs a DB-level fence.)
  *   - Even if a duplicate payment slips through (e.g. across a
- *     restart), the second deposit finds no `pending_payment` order
- *     for the memo and parks in the watcher's skip table for ops —
- *     funds are never silently lost.
+ *     restart), the fence above is the primary guard. A deposit that
+ *     lands after its order has EXPIRED unpaid is recorded by the
+ *     watcher (`order_gone` reason, T0-1), abandoned, and refundable to
+ *     its on-chain sender via A6. A true duplicate against an
+ *     already-PAID order is a known residual (T0-1b): safe
+ *     auto-recording needs the paying-payment id persisted first, so a
+ *     re-read of the original deposit can't be mistaken for a duplicate.
  */
 import type { Context } from 'hono';
 import { and, eq } from 'drizzle-orm';
