@@ -1,5 +1,12 @@
 # tools/ctx-catalog — CTX merchant-catalog operator tooling
 
+> **v2 direction:** [`IMPROVEMENT-PLAN-2026-07.md`](./IMPROVEMENT-PLAN-2026-07.md)
+> — the principal-engineer plan to turn this from an ad-hoc, `/tmp`-based,
+> repair-after-the-fact pipeline into a durable, confidence-scored,
+> coverage-driven system (brand brief · `merchant-state.json` lifecycle ledger ·
+> tiered auto-QC incl. text-in-cover + upscale detection · safe dry-run apply).
+> The recovered working set now lives in [`data/`](./data/README.md).
+
 Operator scripts from the 2026-06 CTX merchant media / description / supplier-coverage overhaul
 (see memory: `project_ctx_media_pipeline`). Previously untracked in `scripts/`; committed here by
 the comprehensive-audit remediation (Part IV phase 9) so they survive machine loss and carry
