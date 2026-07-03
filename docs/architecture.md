@@ -388,6 +388,7 @@ POST /api/admin/users/:userId/refunds                   [admin — order-bound r
 POST /api/admin/users/:userId/emissions                 [admin — queue on-chain LOOP backfill, mirror NOT debited, ADR-024 / ADR 036]
 POST /api/admin/users/:userId/home-currency              [admin — change home_currency with safety preflight, ADR 015 deferred]
 POST /api/admin/users/:userId/revoke-sessions            [admin — B4: revoke a user's live sessions (incident response); step-up-exempt]
+POST /api/admin/deposits/:paymentId/refund               [admin + step-up — A6: refund an abandoned late deposit to its on-chain sender]
 GET  /api/users/me/favorites                            [user — favourite merchants, newest first; joined to in-memory catalog]
 POST /api/users/me/favorites                            [user — add a merchant to favourites; idempotent on (user_id, merchant_id)]
 DELETE /api/users/me/favorites/:merchantId              [user — remove a merchant from favourites; idempotent]

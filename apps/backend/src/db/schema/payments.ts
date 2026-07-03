@@ -58,7 +58,14 @@ export const paymentWatcherSkips = pgTable(
     payment: jsonb('payment').notNull(),
     attempts: integer('attempts').notNull().default(1),
     lastError: text('last_error'),
-    status: text('status').notNull().default('pending'),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<'pending' | 'resolved' | 'abandoned' | 'refunding' | 'refunded'>(),
+    // Hardening A6: Stellar tx hash of the admin-mediated refund-to-
+    // sender, set (via the CF-18 onSigned hook, before submit) when an
+    // operator refunds an abandoned late deposit back to its sender.
+    refundTxHash: text('refund_tx_hash'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -69,7 +76,7 @@ export const paymentWatcherSkips = pgTable(
     ),
     check(
       'payment_watcher_skips_status_known',
-      sql`${t.status} IN ('pending', 'resolved', 'abandoned')`,
+      sql`${t.status} IN ('pending', 'resolved', 'abandoned', 'refunding', 'refunded')`,
     ),
     index('payment_watcher_skips_status_created').on(t.status, t.createdAt),
   ],

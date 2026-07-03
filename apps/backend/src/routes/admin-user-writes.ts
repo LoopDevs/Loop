@@ -22,6 +22,7 @@ import { requireStaff } from '../auth/require-staff.js';
 import { requireAdminStepUp } from '../auth/admin-step-up-middleware.js';
 import { adminHomeCurrencySetHandler } from '../admin/home-currency-set.js';
 import { adminRevokeUserSessionsHandler } from '../auth/revoke-sessions-handler.js';
+import { adminDepositRefundHandler } from '../admin/deposit-refund-handler.js';
 
 export function mountAdminUserWritesRoutes(app: Hono): void {
   app.post(
@@ -43,5 +44,16 @@ export function mountAdminUserWritesRoutes(app: Hono): void {
     rateLimit('POST /api/admin/users/:userId/revoke-sessions', 20, 60_000),
     requireStaff('admin'),
     adminRevokeUserSessionsHandler,
+  );
+
+  // A6: refund an abandoned late deposit to its on-chain sender.
+  // Admin-tier + step-up (`'deposit-refund'`) — it submits an outbound
+  // Stellar payment from the operator account.
+  app.post(
+    '/api/admin/deposits/:paymentId/refund',
+    rateLimit('POST /api/admin/deposits/:paymentId/refund', 10, 60_000),
+    requireStaff('admin'),
+    requireAdminStepUp('deposit-refund'),
+    adminDepositRefundHandler,
   );
 }

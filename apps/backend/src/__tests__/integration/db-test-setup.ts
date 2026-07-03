@@ -37,6 +37,7 @@ const TABLES_TO_TRUNCATE = [
   'otp_attempt_counters',
   'ctx_settlements',
   'pending_payouts',
+  'payment_watcher_skips',
   'credit_transactions',
   'user_credits',
   'orders',

@@ -125,6 +125,71 @@ export function registerAdminUserWritesOpenApi(
     }),
   );
 
+  // A6: late-deposit refund-to-sender.
+  const DepositRefundResult = registry.register(
+    'DepositRefundResult',
+    z.object({
+      paymentId: z.string(),
+      status: z.enum(['refunded', 'already_refunded']),
+      txHash: z.string(),
+    }),
+  );
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/admin/deposits/{paymentId}/refund',
+    summary: 'Refund an abandoned late deposit to its sender (hardening A6).',
+    description:
+      "Submits an outbound Stellar payment from the operator account returning an abandoned late deposit (one that landed just after its order expired) to its on-chain sender. Idempotent + crash-safe (CF-18 hash persisted before submit); a replay returns `already_refunded`. Admin-tier + step-up (`'deposit-refund'` scope). The same `refundDeposit()` path runs automatically when `LOOP_DEPOSIT_REFUND_AUTO=true`.",
+    tags: ['Admin'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: z.object({ paymentId: z.string() }),
+      headers: z.object({
+        'x-admin-step-up': z.string().openapi({
+          description: 'ADR-028 step-up JWT scoped to `deposit-refund`. 5-minute TTL.',
+        }),
+      }),
+    },
+    responses: {
+      200: {
+        description: 'Refunded (or replayed `already_refunded`)',
+        content: { 'application/json': { schema: DepositRefundResult } },
+      },
+      400: {
+        description: 'Missing/invalid paymentId (`VALIDATION_ERROR`)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      401: {
+        description: 'Missing or invalid bearer / step-up token',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      404: {
+        description:
+          'No skipped deposit with that id (`NOT_FOUND`). Also returned to non-admin callers (requireStaff masks the admin surface).',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      409: {
+        description:
+          'A refund is already in progress (`PAYMENT_IN_FLIGHT`) or the deposit is not refundable — not abandoned, unparseable, or missing sender/amount (`DEPOSIT_NOT_REFUNDABLE`)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      429: {
+        description: 'Rate limit exceeded (10/min per IP)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      502: {
+        description:
+          'Stellar submit failed (`REFUND_SUBMIT_FAILED`) — the claim is released for retry',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+      503: {
+        description: 'Step-up auth unavailable on this deployment (`STEP_UP_UNAVAILABLE`)',
+        content: { 'application/json': { schema: errorResponse } },
+      },
+    },
+  });
+
   registry.registerPath({
     method: 'post',
     path: '/api/admin/users/{userId}/revoke-sessions',

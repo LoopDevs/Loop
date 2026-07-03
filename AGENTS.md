@@ -372,6 +372,13 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # production + Fly staging after LOOP_STELLAR_OPERATOR_SECRET is wired.
 # LOOP_WORKERS_ENABLED=true
 
+# Hardening A6: auto-refund late deposits (deposits landing after their
+# order expired). Default false → refunds are admin-triggered via
+# POST /api/admin/deposits/:paymentId/refund (admin + step-up). true →
+# the skip-sweep also auto-refunds them to the sender (same
+# refundDeposit() path). Read live (no redeploy to flip).
+# LOOP_DEPOSIT_REFUND_AUTO=false
+
 # CF-26 / X-PRIV-07/08: auth-row retention purge sweep. Runs under
 # LOOP_WORKERS_ENABLED; DELETE-only sweep of expired/consumed OTP rows
 # + dead refresh-token rows past the retention grace. Runbook:

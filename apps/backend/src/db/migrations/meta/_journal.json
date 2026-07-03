@@ -337,6 +337,13 @@
       "when": 1780101500000,
       "tag": "0047_otp_attempt_counters",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1780101600000,
+      "tag": "0048_deposit_refunds",
+      "breakpoints": true
     }
   ]
 }

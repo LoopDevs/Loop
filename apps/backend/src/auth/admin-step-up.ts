@@ -72,6 +72,11 @@ export const STEP_UP_SCOPES = [
   // creation from this table), so it is squarely the stolen-bearer
   // threat ADR 028 exists for — gate it like the other money writes.
   'cashback-config',
+  // Hardening A6: the late-deposit refund submits an outbound Stellar
+  // payment from the operator account to the deposit's sender — a
+  // captured bearer alone must not be able to drain the operator to
+  // attacker-chosen deposits.
+  'deposit-refund',
 ] as const;
 export type AdminStepUpScope = (typeof STEP_UP_SCOPES)[number];
 

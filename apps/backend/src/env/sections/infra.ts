@@ -132,6 +132,18 @@ export const infraEnvFields = {
   // CTX pre-configuration.
   LOOP_WORKERS_ENABLED: envBoolean.default(false),
 
+  // Hardening A6: auto-refund late deposits. A deposit that lands just
+  // after its order expires is recorded + abandoned; an operator can
+  // always refund it to the sender via
+  // `POST /api/admin/deposits/:paymentId/refund` (step-up gated). When
+  // this is `true` (and the operator Stellar signer is configured), the
+  // skip-sweep ALSO refunds such `order_gone` late deposits
+  // automatically the moment they're abandoned — same
+  // `refundDeposit()` path, same idempotency, no button press. Default
+  // false (admin-triggered only). Read live (like the kill switches) so
+  // flipping it takes effect on the next sweep without a redeploy.
+  LOOP_DEPOSIT_REFUND_AUTO: envBoolean.default(false),
+
   // A2-1907: runtime kill switches. Setting any of these to `true` on
   // a running deployment makes the matching surface return 503
   // SUBSYSTEM_DISABLED without redeploying. Toggle via:
