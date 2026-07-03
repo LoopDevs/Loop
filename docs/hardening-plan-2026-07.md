@@ -179,16 +179,19 @@
       `signOutAllDevices` web service + a "Sign out everywhere" section on
       /settings/privacy. Access tokens stay non-revocable by design (15-min
       TTL) — see threat-model._
-- [ ] **B5. Identity-scoped OTP attempt counter.** _[deferred]_ `otps.ts:135`
-      documents its own bump-all-live-rows fix as a stopgap; the correct
-      design is a per-email failed-attempt counter decoupled from OTP rows.
-      Recorded in `docs/threat-model.md`'s accepted-risk register with its
-      current bounds (per-email 3/min issuance + per-IP 10/min) and its
-      revisit trigger (any report of OTP guessing). Deferred as a bounded,
-      already-mitigated auth refinement (a new counter table) rather than an
-      open hole — lower value/risk than the items shipped this pass, and a
-      rushed change to the OTP path is exactly the kind of security-critical
-      edit that shouldn't be hurried at the tail of a long session.
+- [x] **B5. Identity-scoped OTP attempt counter.** `otps.ts:135` documented
+      its bump-all-live-rows fix as a stopgap; the correct design is a
+      per-email failed-attempt counter decoupled from OTP rows. _Done (#1507):
+      `otp_attempt_counters` table (migration 0047) + `otp-attempt-counter.ts`
+      — a fixed-window (10 fails / 15 min) per-EMAIL counter that locks verify
+      for 15 min once crossed, checked BEFORE the code compare so the
+      row-rotation bypass is closed at the identity level. Clears on
+      successful verify; swept by the auth-row purge worker; load-time
+      invariant enforces lockout ≥ window. Adversarial (auth) review confirmed
+      the upsert SQL, expired-lockout→reset, race- and enumeration-safety; the
+      inherent targeted-verify-lockout DoS is in the threat-model register
+      with a CAPTCHA/backoff revisit trigger. Unit + real-pg integration
+      tests._
 - [x] **B6. Rate-limit ordering + fallback.** On `/api/admin/*` the blanket
       `requireAuth` + `requireStaff` (two DB reads) run before any per-route
       limiter, so a valid-token non-staff user drives unthrottled DB work; and
