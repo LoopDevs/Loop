@@ -1,0 +1,396 @@
+{
+  "FAM": {
+    "Pizza Pizza": [
+      "AnyCard - Thank You",
+      "CA"
+    ],
+    "Second Cup": [
+      "AnyCard - Thank You",
+      "CA"
+    ],
+    "Skip the Dishes": [
+      "AnyCard - Thank You",
+      "CA"
+    ],
+    "Freshii": [
+      "AnyCard - Thank You",
+      "CA"
+    ],
+    "Pizza 73": [
+      "AnyCard - Thank You",
+      "CA"
+    ],
+    "Thai Express": [
+      "AnyCard - Dine",
+      "CA"
+    ],
+    "Baton Rouge": [
+      "AnyCard - Dine",
+      "CA"
+    ],
+    "Canadian Brewhouse": [
+      "AnyCard - Dine",
+      "CA"
+    ],
+    "MR MIKES": [
+      "AnyCard - Dine",
+      "CA"
+    ],
+    "Sunset Grill": [
+      "AnyCard - Dine",
+      "CA"
+    ],
+    "Shoeless Joe’s": [
+      "AnyCard - Dine",
+      "CA"
+    ],
+    "La Belle et la Boeuf": [
+      "AnyCard - Dine",
+      "CA"
+    ],
+    "D'Arcy McGee's": [
+      "Jack Astor's",
+      "CA"
+    ],
+    "Fionn MacCool's": [
+      "Jack Astor's",
+      "CA"
+    ],
+    "Paddy Flaherty's": [
+      "Jack Astor's",
+      "CA"
+    ],
+    "Tir nan Og": [
+      "Jack Astor's",
+      "CA"
+    ],
+    "Scaddabush Italian Kitchen + Bar": [
+      "Jack Astor's",
+      "CA"
+    ],
+    "Birch Lane": [
+      "Wayfair",
+      "US"
+    ],
+    "Joss & Main": [
+      "Wayfair",
+      "US"
+    ],
+    "Williams Sonoma": [
+      "Pottery Barn",
+      "US"
+    ],
+    "PBteen": [
+      "Pottery Barn",
+      "US"
+    ],
+    "Galaxy Cinemas": [
+      "Cineplex",
+      "CA"
+    ],
+    "SilverCity": [
+      "Cineplex",
+      "CA"
+    ],
+    "Bubba's 33": [
+      "Texas Roadhouse",
+      "US"
+    ],
+    "Jaggers": [
+      "Texas Roadhouse",
+      "US"
+    ],
+    "LOFT Outlet": [
+      "Ann Taylor",
+      "US"
+    ],
+    "Lou & Grey": [
+      "Ann Taylor",
+      "US"
+    ],
+    "Mountain Hardwear": [
+      "Columbia Sportswear Canada",
+      "CA"
+    ],
+    "SOREL": [
+      "Columbia Sportswear Canada",
+      "CA"
+    ],
+    "Thrifty Foods": [
+      "FreshCo",
+      "CA"
+    ],
+    "IGA": [
+      "FreshCo",
+      "CA"
+    ],
+    "Foodland": [
+      "FreshCo",
+      "CA"
+    ],
+    "Needs": [
+      "FreshCo",
+      "CA"
+    ],
+    "Fast Fuel": [
+      "FreshCo",
+      "CA"
+    ],
+    "Gymboree": [
+      "The Children's Place",
+      "US"
+    ],
+    "Duane Reade": [
+      "Walgreens",
+      "US"
+    ],
+    "Gap Factory": [
+      "Gap Options US",
+      "US"
+    ],
+    "The Land of Nod": [
+      "CB2",
+      "US"
+    ],
+    "Personalization Universe": [
+      "Fruit Bouquets",
+      "US"
+    ],
+    "Braven Restaurant": [
+      "Kindred Food and Drink",
+      "CA"
+    ]
+  },
+  "cardCfg": {
+    "AnyCard - Thank You": {
+      "discounts": [
+        {
+          "provider": "ezpin",
+          "providerId": "6594"
+        }
+      ],
+      "dt": "min-max",
+      "dv": [
+        "10.00",
+        "500.00"
+      ],
+      "ud": 424
+    },
+    "AnyCard - Dine": {
+      "discounts": [
+        {
+          "provider": "ezpin",
+          "providerId": "6593"
+        }
+      ],
+      "dt": "min-max",
+      "dv": [
+        "10.00",
+        "500.00"
+      ],
+      "ud": 424
+    },
+    "Jack Astor's": {
+      "discounts": [
+        {
+          "provider": "ezpin",
+          "providerId": "3042"
+        },
+        {
+          "provider": "ezpin",
+          "providerId": "5541"
+        }
+      ],
+      "dt": "min-max",
+      "dv": [
+        "10.00",
+        "300.00"
+      ],
+      "ud": 444
+    },
+    "Wayfair": {
+      "missing": true
+    },
+    "Pottery Barn": {
+      "discounts": [
+        {
+          "provider": "svs",
+          "providerId": "SVI1021846"
+        },
+        {
+          "provider": "ezpin",
+          "providerId": "4388"
+        }
+      ],
+      "dt": "min-max",
+      "dv": [
+        "25",
+        "500"
+      ],
+      "ud": 200
+    },
+    "Cineplex": {
+      "discounts": [
+        {
+          "provider": "ezpin",
+          "providerId": "6526"
+        }
+      ],
+      "dt": "min-max",
+      "dv": [
+        "5.00",
+        "200.00"
+      ],
+      "ud": 258
+    },
+    "Texas Roadhouse": {
+      "discounts": [
+        {
+          "provider": "svs",
+          "providerId": "SVI1021815"
+        },
+        {
+          "provider": "ezpin",
+          "providerId": "1048"
+        }
+      ],
+      "dt": "min-max",
+      "dv": [
+        "5",
+        "100"
+      ],
+      "ud": 200
+    },
+    "Ann Taylor": {
+      "discounts": [
+        {
+          "provider": "svs",
+          "providerId": "SVI1024468"
+        },
+        {
+          "provider": "ezpin",
+          "providerId": "5095"
+        }
+      ],
+      "dt": "min-max",
+      "dv": [
+        "1",
+        "500"
+      ],
+      "ud": 250
+    },
+    "Columbia Sportswear Canada": {
+      "discounts": [
+        {
+          "provider": "ezpin",
+          "providerId": "6528"
+        }
+      ],
+      "dt": "min-max",
+      "dv": [
+        "1.00",
+        "500.00"
+      ],
+      "ud": 536
+    },
+    "FreshCo": {
+      "discounts": [
+        {
+          "provider": "ezpin",
+          "providerId": "6565"
+        }
+      ],
+      "dt": "min-max",
+      "dv": [
+        "5.00",
+        "500.00"
+      ],
+      "ud": 168
+    },
+    "The Children's Place": {
+      "missing": true
+    },
+    "Walgreens": {
+      "discounts": [
+        {
+          "provider": "ezpin",
+          "providerId": "4549"
+        }
+      ],
+      "dt": "min-max",
+      "dv": [
+        "5.00",
+        "500.00"
+      ],
+      "ud": 196
+    },
+    "Gap Options US": {
+      "discounts": [
+        {
+          "provider": "ezpin",
+          "providerId": "7031"
+        },
+        {
+          "provider": "svs",
+          "providerId": "SVR1021132"
+        }
+      ],
+      "dt": "min-max",
+      "dv": [
+        "10.00",
+        "500.00"
+      ],
+      "ud": 520
+    },
+    "CB2": {
+      "discounts": [
+        {
+          "provider": "tillo",
+          "providerId": "cb2-usa"
+        },
+        {
+          "provider": "ezpin",
+          "providerId": "5131"
+        }
+      ],
+      "dt": "min-max",
+      "dv": [
+        "25.00",
+        "500.00"
+      ],
+      "ud": 500
+    },
+    "Fruit Bouquets": {
+      "discounts": [
+        {
+          "provider": "ezpin",
+          "providerId": "1023"
+        },
+        {
+          "provider": "ezpin",
+          "providerId": "7480"
+        }
+      ],
+      "dt": "min-max",
+      "dv": [
+        "10.00",
+        "100.00"
+      ],
+      "ud": 491
+    },
+    "Kindred Food and Drink": {
+      "discounts": [
+        {
+          "provider": "ezpin",
+          "providerId": "6627"
+        }
+      ],
+      "dt": "min-max",
+      "dv": [
+        "25.00",
+        "5000.00"
+      ],
+      "ud": 180
+    }
+  }
+}
