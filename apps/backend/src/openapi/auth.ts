@@ -21,6 +21,18 @@
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { registerAuthSocialOpenApi } from './auth-social.js';
+// D1 (derive OpenAPI from handler Zod schemas): the request bodies are
+// registered from the SAME schemas the auth handlers parse
+// (`auth/request-schemas.ts`), not re-declared here. The spec's request
+// shape is therefore the handler's validated shape by construction — no
+// drift possible, so no `check-openapi-parity`-style gate is needed for
+// these bodies. This is the proof-of-pattern for retiring the
+// hand-maintained mirror module-by-module.
+import {
+  RequestOtpBody as RequestOtpBodySchema,
+  VerifyOtpBody as VerifyOtpBodySchema,
+  RefreshBody as RefreshBodySchema,
+} from '../auth/request-schemas.js';
 
 /**
  * Registers all `/api/auth/*` schemas + paths on the supplied
@@ -35,22 +47,9 @@ export function registerAuthOpenApi(
   errorResponse: ReturnType<OpenAPIRegistry['register']>,
   platformEnum: z.ZodEnum<{ web: 'web'; ios: 'ios'; android: 'android' }>,
 ): void {
-  const RequestOtpBody = registry.register(
-    'RequestOtpBody',
-    z.object({
-      email: z.string().email(),
-      platform: platformEnum.default('web'),
-    }),
-  );
-
-  const VerifyOtpBody = registry.register(
-    'VerifyOtpBody',
-    z.object({
-      email: z.string().email(),
-      otp: z.string().min(1),
-      platform: platformEnum.default('web'),
-    }),
-  );
+  // D1: registered directly from the handler's canonical schemas.
+  const RequestOtpBody = registry.register('RequestOtpBody', RequestOtpBodySchema);
+  const VerifyOtpBody = registry.register('VerifyOtpBody', VerifyOtpBodySchema);
 
   const VerifyOtpResponse = registry.register(
     'VerifyOtpResponse',
@@ -60,13 +59,7 @@ export function registerAuthOpenApi(
     }),
   );
 
-  const RefreshBody = registry.register(
-    'RefreshBody',
-    z.object({
-      refreshToken: z.string().min(1),
-      platform: platformEnum.default('web'),
-    }),
-  );
+  const RefreshBody = registry.register('RefreshBody', RefreshBodySchema);
 
   const RefreshResponse = registry.register(
     'RefreshResponse',
@@ -268,5 +261,5 @@ export function registerAuthOpenApi(
   // `/auth/social/apple`) and their two shared schemas live in
   // `./auth-social.ts`. Same path-registration position as the
   // original block.
-  registerAuthSocialOpenApi(registry, errorResponse, platformEnum);
+  registerAuthSocialOpenApi(registry, errorResponse);
 }

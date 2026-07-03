@@ -22,6 +22,8 @@
  */
 import { z } from 'zod';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
+// D1: register the SAME body schema the handler parses (no re-declare).
+import { SocialLoginBody as SocialLoginBodySchema } from '../auth/social-schemas.js';
 
 /**
  * Registers `/api/auth/social/google` and `/api/auth/social/apple`
@@ -30,18 +32,12 @@ import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 export function registerAuthSocialOpenApi(
   registry: OpenAPIRegistry,
   errorResponse: ReturnType<OpenAPIRegistry['register']>,
-  platformEnum: z.ZodEnum<{ web: 'web'; ios: 'ios'; android: 'android' }>,
 ): void {
   // A2-568: social login (ADR 014). Body + response are shared
-  // across Google and Apple — the handler factory in
-  // `auth/social.ts` wires both to the same shape.
-  const SocialLoginBody = registry.register(
-    'SocialLoginBody',
-    z.object({
-      idToken: z.string().min(1),
-      platform: platformEnum.default('web'),
-    }),
-  );
+  // across Google and Apple. D1: registered directly from the handler's
+  // canonical `social-schemas.ts` — the spec can't drift from what
+  // `social.ts` parses.
+  const SocialLoginBody = registry.register('SocialLoginBody', SocialLoginBodySchema);
 
   const SocialLoginResponse = registry.register(
     'SocialLoginResponse',

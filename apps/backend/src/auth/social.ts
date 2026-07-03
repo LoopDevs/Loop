@@ -17,7 +17,6 @@
  * 401 the client.
  */
 import type { Context } from 'hono';
-import { z } from 'zod';
 import { logger } from '../logger.js';
 import { env } from '../env.js';
 import { verifyIdToken, type VerifyIdTokenResult } from './id-token.js';
@@ -27,13 +26,12 @@ import { isLoopAuthConfigured } from './tokens.js';
 import { issueTokenPair } from './issue-token-pair.js';
 import { enqueueWalletProvisioning } from '../wallet/provisioning.js';
 import type { SocialProvider } from '../db/schema.js';
+// D1: the request body is the schema-only `./social-schemas.ts`, the
+// same schema the OpenAPI spec registers — so the spec derives from
+// what this handler parses.
+import { SocialLoginBody as Body } from './social-schemas.js';
 
 const log = logger.child({ handler: 'auth-social' });
-
-const Body = z.object({
-  idToken: z.string().min(1),
-  platform: z.enum(['web', 'ios', 'android']).default('web'),
-});
 
 export interface SocialProviderConfig {
   provider: SocialProvider;

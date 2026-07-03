@@ -13,8 +13,14 @@
  * `PlatformEnum` defaults to `'web'` so older clients that omit the
  * field continue to verify; both paths read this value to pick the
  * right CTX client ID for downstream provisioning.
+ *
+ * D1: `z` is imported from `../openapi-zod.js` (the OpenAPI-extended
+ * Zod) rather than `'zod'`, so these schemas — which the OpenAPI spec
+ * now derives from directly (`openapi/auth.ts`) instead of re-declaring
+ * — carry `.openapi()` and are registrable. Functionally identical z
+ * for the handlers' `.parse()`.
  */
-import { z } from 'zod';
+import { z } from '../openapi-zod.js';
 
 export const PlatformEnum = z.enum(['web', 'ios', 'android']).default('web');
 
