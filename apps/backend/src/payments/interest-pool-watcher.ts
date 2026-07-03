@@ -16,13 +16,17 @@
  *     compute "days of cover."
  *
  * Design choices:
- *   - **One-shot dedup per asset.** First page when an asset goes
- *     low; recovery page when it comes back. Same pattern as
- *     `notifyAssetDrift` / `notifyAssetDriftRecovered` so the
- *     channel has paired open + close events.
+ *   - **Persisted transition dedup (C10a).** The low↔ok transition
+ *     state lives in `interest_pool_alert_state` — durable across
+ *     restarts and fleet-consistent — with AT-LEAST-ONCE page
+ *     delivery (last_paged_state advances only after the webhook
+ *     confirms). Previously the dedup was a process-memory Set inside
+ *     the notifiers: re-paged on every deploy, and (worse) the machine
+ *     computing "recovered" usually wasn't the one that paged "low",
+ *     so its empty Set silently dropped the close. Same pattern as
+ *     `asset-drift-state-repo.ts`.
  *   - **Stateless math.** Daily interest forecast is computed on
- *     the fly from the current cohort balance + APY; no need to
- *     persist anything between ticks.
+ *     the fly from the current cohort balance + APY.
  *   - **Skip silently when pool isn't configured.** A deployment
  *     without the operator secret has nothing to forecast against;
  *     no value pinging the channel about it.
@@ -33,6 +37,11 @@ import { configuredLoopPayableAssets, type LoopAssetCode } from '../credits/payo
 import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { notifyInterestPoolLow, notifyInterestPoolRecovered } from '../discord.js';
+import {
+  applyPoolAlertState,
+  markPoolPageDelivered,
+  releasePoolPageLease,
+} from './interest-pool-alert-state-repo.js';
 import { getAssetBalance } from './horizon-asset-balance.js';
 
 const log = logger.child({ area: 'interest-pool-watcher' });
@@ -67,6 +76,11 @@ export async function runInterestPoolWatcherTick(args: {
 }): Promise<PoolWatcherTickResult> {
   const result: PoolWatcherTickResult = { checked: 0, skipped: 0, samples: [] };
   if (args.apyBasisPoints <= 0) return result;
+
+  // One timestamp per tick — the staleness fence in the state repo
+  // compares samples by when their reads STARTED, so all assets in a
+  // tick share the tick's start time.
+  const checkedAt = new Date();
 
   const poolAccount = resolveInterestPoolAccount();
   if (poolAccount === null) {
@@ -114,25 +128,63 @@ export async function runInterestPoolWatcherTick(args: {
       notified: false,
     };
 
-    if (belowThreshold) {
-      notifyInterestPoolLow({
+    // C10a: persist the sample + claim any due page under the row
+    // lock, then send + confirm (at-least-once). A claimed page whose
+    // send fails releases its lease so the next tick (any machine)
+    // retries; last_paged_state only advances after delivery.
+    let applied;
+    try {
+      applied = await applyPoolAlertState({
         assetCode: code,
-        poolStroops: poolStroops.toString(),
-        dailyInterestStroops: dailyInterestStroops.toString(),
+        state: belowThreshold ? 'low' : 'ok',
         daysOfCover,
-        minDaysOfCover: args.minDaysOfCover,
+        poolStroops,
+        checkedAt,
       });
-      sample.notified = true;
-    } else if (dailyInterestStroops > 0n) {
-      // Recovery: only fires if the asset was previously low —
-      // notifyInterestPoolRecovered's dedup set short-circuits when
-      // the asset hadn't paged. So this is safe to call unconditionally
-      // on every above-threshold sample.
-      notifyInterestPoolRecovered({
-        assetCode: code,
-        poolStroops: poolStroops.toString(),
-        daysOfCover,
-      });
+    } catch (err) {
+      log.warn({ err, assetCode: code }, 'Pool alert-state persist failed; skipping page decision');
+      result.samples.push(sample);
+      continue;
+    }
+
+    // Send + confirm. The bookkeeping (mark/release) is wrapped so a
+    // transient monitoring-DB blip on ONE asset doesn't abort the rest
+    // of the tick — worst case is a duplicate page next tick, never a
+    // lost one (the lease + last_paged_state carry at-least-once). Same
+    // guard as `asset-drift-watcher.ts`.
+    try {
+      if (applied.duePage === 'low') {
+        const delivered = await notifyInterestPoolLow({
+          assetCode: code,
+          poolStroops: poolStroops.toString(),
+          dailyInterestStroops: dailyInterestStroops.toString(),
+          daysOfCover,
+          minDaysOfCover: args.minDaysOfCover,
+        });
+        if (delivered) {
+          await markPoolPageDelivered({ assetCode: code, page: 'low' });
+          sample.notified = true;
+        } else {
+          await releasePoolPageLease(code);
+        }
+      } else if (applied.duePage === 'recovered') {
+        const delivered = await notifyInterestPoolRecovered({
+          assetCode: code,
+          poolStroops: poolStroops.toString(),
+          daysOfCover,
+        });
+        if (delivered) {
+          await markPoolPageDelivered({ assetCode: code, page: 'recovered' });
+          sample.notified = true;
+        } else {
+          await releasePoolPageLease(code);
+        }
+      }
+    } catch (err) {
+      log.warn(
+        { err, assetCode: code, duePage: applied.duePage },
+        'Pool alert page bookkeeping failed; next tick re-attempts (at-least-once)',
+      );
     }
     result.samples.push(sample);
   }

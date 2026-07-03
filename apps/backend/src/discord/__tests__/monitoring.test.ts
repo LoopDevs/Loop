@@ -69,13 +69,12 @@ import {
   notifyUsdcBelowFloor,
   notifyOperatorPoolExhausted,
   notifyOperatorCredentialExpired,
-  __resetPoolDepletionDedupForTests,
   __resetOperatorCredentialDedupForTests,
 } from '../monitoring.js';
 
 beforeEach(() => {
   sendWebhookMock.mockReset();
-  __resetPoolDepletionDedupForTests();
+  sendWebhookMock.mockResolvedValue(true);
   __resetOperatorCredentialDedupForTests();
 });
 
@@ -149,21 +148,22 @@ describe('notifyPayoutFailed', () => {
 });
 
 describe('notifyInterestPoolLow / notifyInterestPoolRecovered', () => {
-  it('fires on first call per asset; deduped on the second', () => {
-    notifyInterestPoolLow({
+  // C10a: dedup moved to `interest_pool_alert_state` (durable +
+  // fleet-consistent + at-least-once). These notifiers are now PURE
+  // SENDERS — every call sends and returns the delivery promise; the
+  // watcher, not the notifier, decides WHEN to call based on persisted
+  // transition state. (The old per-process Set silently dropped a
+  // recovery close handled by a different machine than paged the low.)
+  it('low: sends the low embed and returns the delivery promise', async () => {
+    const p = notifyInterestPoolLow({
       assetCode: 'USDLOOP',
       poolStroops: '1000',
       dailyInterestStroops: '500',
       daysOfCover: 2,
       minDaysOfCover: 7,
     });
-    notifyInterestPoolLow({
-      assetCode: 'USDLOOP',
-      poolStroops: '1000',
-      dailyInterestStroops: '500',
-      daysOfCover: 2,
-      minDaysOfCover: 7,
-    });
+    expect(p).toBeInstanceOf(Promise);
+    await p;
     expect(sendWebhookMock).toHaveBeenCalledTimes(1);
     const e = lastEmbed();
     expect(e.title).toBe('🟠 Interest pool running low');
@@ -171,52 +171,14 @@ describe('notifyInterestPoolLow / notifyInterestPoolRecovered', () => {
     expect(e.fields!.find((f) => f.name === 'Days of cover')!.value).toBe('2.00');
   });
 
-  it('different assets dedup independently', () => {
-    notifyInterestPoolLow({
-      assetCode: 'USDLOOP',
-      poolStroops: '0',
-      dailyInterestStroops: '1',
-      daysOfCover: 0,
-      minDaysOfCover: 7,
-    });
-    notifyInterestPoolLow({
-      assetCode: 'GBPLOOP',
-      poolStroops: '0',
-      dailyInterestStroops: '1',
-      daysOfCover: 0,
-      minDaysOfCover: 7,
-    });
-    expect(sendWebhookMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('recovered no-ops when no prior low fired (paired-event invariant)', () => {
-    notifyInterestPoolRecovered({
+  it('recovered: sends unconditionally (no per-process dedup gate)', async () => {
+    // Under the old Set this no-op'd with no prior low on this process.
+    await notifyInterestPoolRecovered({
       assetCode: 'USDLOOP',
       poolStroops: '999999999',
       daysOfCover: 100,
     });
-    expect(sendWebhookMock).not.toHaveBeenCalled();
-  });
-
-  it('recovered fires after a low; subsequent recovered no-ops', () => {
-    notifyInterestPoolLow({
-      assetCode: 'USDLOOP',
-      poolStroops: '1',
-      dailyInterestStroops: '1',
-      daysOfCover: 1,
-      minDaysOfCover: 7,
-    });
-    notifyInterestPoolRecovered({
-      assetCode: 'USDLOOP',
-      poolStroops: '999',
-      daysOfCover: 999,
-    });
-    notifyInterestPoolRecovered({
-      assetCode: 'USDLOOP',
-      poolStroops: '999',
-      daysOfCover: 999,
-    });
-    expect(sendWebhookMock).toHaveBeenCalledTimes(2); // low + first recovered only
+    expect(sendWebhookMock).toHaveBeenCalledTimes(1);
     const last = lastEmbed();
     expect(last.title).toBe('✅ Interest pool replenished');
     expect(last.color).toBe(0x2ecc71);

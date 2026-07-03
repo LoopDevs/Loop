@@ -220,10 +220,11 @@
       while drift persists (deliberately no dedup). The on-chain half of
       reconciliation was already continuous via the asset-drift watcher
       (every 300s, hardened in A2/A3)._
-- [ ] **C2. Web-route auth inventory test.** Web analogue of
+- [x] **C2. Web-route auth inventory test.** Web analogue of
       `staff-route-gating.test.ts`: every route module rendering authed data
       must carry the auth/redirect guard. Closes the softest spot in the stack
-      (web loaders are excluded from coverage entirely).
+      (web loaders are excluded from coverage entirely). _Done: shipped in
+      #1495 as `route-auth-inventory.test.ts` (checkbox was stale)._
 - [ ] **C3. Web coverage floor.** _[deferred]_ Stop excluding `app/routes/**`
       from `apps/web/vitest.config.ts`; add loader/action tests; raise the
       floors. The SECURITY-relevant half — every admin route renders its
@@ -273,18 +274,20 @@
       set; e2e-mocked is. Adding it is a governance change the permission
       layer reserves for the operator. Run:_
       `gh api -X POST repos/LoopDevs/Loop/branches/main/protection/required_status_checks/contexts --input - <<< '["Flywheel integration (real postgres)"]'`
-- [ ] **C10a. Apply the A3 pattern to `interest-pool-watcher.ts`.**
-      _[deferred — proportionality]_ Found during A2/A3 review: the
-      interest-pool low-cover watcher keeps its transition dedup in a
-      process-memory Set (restart re-pages, each machine pages
-      independently). On implementation this was judged disproportionate:
-      unlike the drift watcher (the primary unbacked-mint backstop), this is
-      a Phase-2-gated OPERATIONAL reminder ("mint more soon") — a restart
-      re-page or duplicate is mildly annoying, not a money-integrity gap, and
-      interest is off in Tranche-1 (`INTEREST_APY_BASIS_POINTS=0`). The full
-      A3 treatment (table + migration + at-least-once delivery) is poor
-      value/effort for that surface. Revisit if Phase-2 interest ships and
-      the duplicate reminders become real noise.
+- [x] **C10a. Apply the A3 pattern to `interest-pool-watcher.ts`.** Found
+      during A2/A3 review: the interest-pool low-cover watcher kept its
+      transition dedup in a process-memory Set (restart re-pages, each
+      machine pages independently — and, the real bug, the machine computing
+      "recovered" usually wasn't the one that paged "low", so its empty Set
+      silently DROPPED the close). _Done: `interest_pool_alert_state` table
+      (migration 0046) + `interest-pool-alert-state-repo.ts` — the full A3
+      pattern (durable + fleet-consistent, `SELECT ... FOR UPDATE` transition
+      claim, `page_attempt_at` lease, at-least-once delivery via
+      `last_paged_state` advancing only after the webhook confirms). The two
+      notifiers became pure senders returning the delivery promise (their
+      per-process Set was the source of the dropped-recovery bug). Real-pg
+      integration + unit tests cover re-page suppression, cross-machine
+      recovery, failed-delivery retry, lease, and staleness fence._
 - [x] **C10. Emission/mint DB fences.** The DB-level half of A1 — cumulative
       emission accounting constraint/table so no future app-layer writer can
       reopen the unbacked path (same defense-in-depth pattern as the

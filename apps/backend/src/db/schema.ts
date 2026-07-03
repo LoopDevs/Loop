@@ -22,6 +22,7 @@ import {
   primaryKey,
   uniqueIndex,
   jsonb,
+  doublePrecision,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { StaffRole, WalletProvisioningState } from '@loop/shared';
@@ -1372,6 +1373,47 @@ export const assetDriftState = pgTable(
     check(
       'asset_drift_state_failed_sums_non_negative',
       sql`${t.failedBurnStroops} >= 0 AND ${t.failedInterestMintStroops} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Persistence for the interest-pool low-cover watcher's per-asset
+ * alert state (hardening C10a; ADR 031). Same shape/rationale as
+ * `asset_drift_state` (A3): the low↔ok transition dedup lived in a
+ * process-memory Set inside the notifiers — lost on restart, and
+ * (worse) per-machine, so the machine that computed "recovered" was
+ * usually NOT the one that had paged "low", and its empty Set silently
+ * dropped the recovery close. This makes the state durable + fleet-
+ * consistent, and page delivery at-least-once (last_paged_state moves
+ * only after the webhook confirms).
+ */
+export const interestPoolAlertState = pgTable(
+  'interest_pool_alert_state',
+  {
+    /** LOOP asset code — one row per configured asset. */
+    assetCode: text('asset_code').primaryKey(),
+    /** Cover state as of the last tick. */
+    state: text('state').$type<'ok' | 'low'>().notNull(),
+    /**
+     * Cover state ops has successfully been paged about. NULL = never
+     * paged. Written only after `sendWebhook` reports delivery, so a
+     * send lost to a Discord outage / SIGTERM stays due.
+     */
+    lastPagedState: text('last_paged_state').$type<'ok' | 'low'>(),
+    /** Last computed days-of-cover, for the admin surface / debugging. */
+    lastDaysOfCover: doublePrecision('last_days_of_cover').notNull(),
+    lastPoolStroops: bigint('last_pool_stroops', { mode: 'bigint' }).notNull(),
+    /** Send-attempt lease — see `asset_drift_state.page_attempt_at`. */
+    pageAttemptAt: timestamp('page_attempt_at', { withTimezone: true }),
+    lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check('interest_pool_alert_state_state_known', sql`${t.state} IN ('ok', 'low')`),
+    check(
+      'interest_pool_alert_state_paged_state_known',
+      sql`${t.lastPagedState} IS NULL OR ${t.lastPagedState} IN ('ok', 'low')`,
     ),
   ],
 );

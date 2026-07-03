@@ -253,25 +253,23 @@ export function notifyPayoutAwaitingTrustline(args: {
  * Fires when the on-chain pool balance can cover fewer than the
  * configured minimum days of forecast daily interest. Operator's
  * action: mint the next batch into the pool before users would be
- * under-allocated. One-shot per process per cohort — we don't want
- * to re-page every tick during the same low-cover window.
+ * under-allocated.
+ *
+ * C10a: these are now PURE SENDERS — the low↔ok transition dedup moved
+ * to `interest_pool_alert_state` (durable + fleet-consistent +
+ * at-least-once). They return the `sendWebhook` promise so the watcher
+ * only advances `last_paged_state` after delivery confirms. No
+ * internal Set: a per-process Set made the recovery close drop
+ * whenever a different machine handled it than had paged the low.
  */
-const poolDepletionFired = new Set<string>();
-
-export function __resetPoolDepletionDedupForTests(): void {
-  poolDepletionFired.clear();
-}
-
 export function notifyInterestPoolLow(args: {
   assetCode: string;
   poolStroops: string;
   dailyInterestStroops: string;
   daysOfCover: number;
   minDaysOfCover: number;
-}): void {
-  if (poolDepletionFired.has(args.assetCode)) return;
-  poolDepletionFired.add(args.assetCode);
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+}): Promise<boolean> {
+  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
     title: '🟠 Interest pool running low',
     description: truncate(
       `${escapeMarkdown(args.assetCode)} forward-mint pool has ${args.daysOfCover.toFixed(1)} days of cover left (minimum ${args.minDaysOfCover}). Mint the next batch into the pool account before users are under-allocated.`,
@@ -296,20 +294,24 @@ export function notifyInterestPoolRecovered(args: {
   assetCode: string;
   poolStroops: string;
   daysOfCover: number;
-}): void {
-  if (!poolDepletionFired.has(args.assetCode)) return;
-  poolDepletionFired.delete(args.assetCode);
-  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+}): Promise<boolean> {
+  // C10a: recovery is now driven by persisted state, so it can fire on
+  // a low→ok flip where daily interest has since dropped to 0 (cohort
+  // drained) → daysOfCover = +Infinity. Render that as "ample" rather
+  // than the literal "Infinity".
+  const coverText = Number.isFinite(args.daysOfCover) ? args.daysOfCover.toFixed(1) : 'ample';
+  const coverField = Number.isFinite(args.daysOfCover) ? args.daysOfCover.toFixed(2) : 'ample';
+  return sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
     title: '✅ Interest pool replenished',
     description: truncate(
-      `${escapeMarkdown(args.assetCode)} forward-mint pool now has ${args.daysOfCover.toFixed(1)} days of cover. Closing the prior depletion alert.`,
+      `${escapeMarkdown(args.assetCode)} forward-mint pool now has ${coverText} days of cover. Closing the prior depletion alert.`,
       DESCRIPTION_MAX,
     ),
     color: GREEN,
     fields: [
       { name: 'Asset', value: escapeMarkdown(args.assetCode), inline: true },
       { name: 'Pool (stroops)', value: escapeMarkdown(args.poolStroops), inline: true },
-      { name: 'Days of cover', value: args.daysOfCover.toFixed(2), inline: true },
+      { name: 'Days of cover', value: coverField, inline: true },
     ],
   });
 }
