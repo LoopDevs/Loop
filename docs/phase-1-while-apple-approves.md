@@ -1,5 +1,14 @@
 # Phase 1 — what to do while Apple Developer approval lands
 
+> **STATUS 2026-07-03 — Track A (backend redeploy) is DONE.** The backend is
+> already live on the Tranche-1 binary (`api.loopfinance.io` → full Tranche-1
+> config, all workers running) and the web app is deployed at
+> `beta.loopfinance.io`. Skip Track A below. The still-open Phase-1 work is
+> Track B/C operator items — Apple TestFlight, the Android keystore (define the
+> offline-escrow procedure first), legal review of privacy/terms, sanctions +
+> ToS/age-gate compliance, the demo video, and the launch-day apex DNS
+> cut-over. See `docs/roadmap.md`.
+
 Apple Developer enrollment can take 3–7 days for a personal account
 (longer if D-U-N-S verification is needed for an Organization
 account). Most of the Phase-1 acceptance pipeline parallelises
