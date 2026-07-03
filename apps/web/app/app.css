@@ -12,9 +12,11 @@
       per-file edits. This is the DRY / updateable core: retune a
       token here, the entire surface follows.
 
-   2. We add NAMED semantic tokens (`brand`, `ink`, `surface`, `line`)
-      so new components read intentionally — `text-ink`, `bg-surface`,
-      `border-line`, `bg-brand-600` — instead of guessing greys.
+   2. We add NAMED semantic tokens (`ink`, `surface`, `line`) so new
+      components read intentionally — `text-ink`, `bg-surface`,
+      `border-line` — instead of guessing greys. (No `brand-*` alias:
+      the accent is `blue-*` directly, which layer 1 already makes the
+      single retune point.)
 
    Inspiration: Coinbase / Revolut / Quidco / Framer / Google — a
    confident blue accent, generous whitespace, hairline borders,
@@ -59,19 +61,12 @@
   --color-gray-950: #0a1322;
 
   /* ── Named semantic aliases ─────────────────────────────────
-     For new components. `bg-surface`, `text-ink`, `border-line`,
-     `bg-brand-600`, … */
-  --color-brand-50: #eef4ff;
-  --color-brand-100: #d9e6ff;
-  --color-brand-200: #bcd2ff;
-  --color-brand-300: #8eb4ff;
-  --color-brand-400: #5a8bff;
-  --color-brand-500: #2f6bff;
-  --color-brand-600: #1a56db;
-  --color-brand-700: #1846b3;
-  --color-brand-800: #183a8f;
-  --color-brand-900: #173474;
-
+     For new components: `bg-surface`, `text-ink`, `border-line`.
+     There is deliberately NO `brand-*` ramp — the brand colour IS
+     `blue-*` (we override Tailwind's default blue above, so it's
+     already the one place to retune the accent), and a duplicate
+     `brand-*` alias only the styleguide ever referenced was dead
+     config. Use `blue-600` for the primary action. */
   --color-canvas: #ffffff;
   --color-surface: #ffffff;
   --color-surface-subtle: #f8fafc;
