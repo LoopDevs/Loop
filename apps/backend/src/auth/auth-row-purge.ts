@@ -32,6 +32,7 @@ import { env } from '../env.js';
 import { logger } from '../logger.js';
 import { purgeExpiredOtps } from './otps.js';
 import { purgeDeadRefreshTokens } from './refresh-tokens.js';
+import { purgeStaleOtpAttemptCounters } from './otp-attempt-counter.js';
 import {
   markWorkerStarted,
   markWorkerStopped,
@@ -46,6 +47,8 @@ export interface AuthRowPurgeTickResult {
   otpsDeleted: number;
   /** Refresh-token rows deleted this tick. */
   refreshTokensDeleted: number;
+  /** B5: stale per-email OTP attempt counters deleted this tick. */
+  otpAttemptCountersDeleted: number;
 }
 
 /**
@@ -77,7 +80,11 @@ export async function runAuthRowPurgeTick(args?: {
     retentionMs,
     ...(now ? { now } : {}),
   });
-  return { otpsDeleted, refreshTokensDeleted };
+  const otpAttemptCountersDeleted = await purgeStaleOtpAttemptCounters({
+    retentionMs,
+    ...(now ? { now } : {}),
+  });
+  return { otpsDeleted, refreshTokensDeleted, otpAttemptCountersDeleted };
 }
 
 // ─── Interval loop ────────────────────────────────────────────────────────
@@ -100,7 +107,7 @@ export function startAuthRowPurge(args?: { intervalMs?: number }): void {
   const tick = async (): Promise<void> => {
     try {
       const r = await runAuthRowPurgeTick();
-      if (r.otpsDeleted > 0 || r.refreshTokensDeleted > 0) {
+      if (r.otpsDeleted > 0 || r.refreshTokensDeleted > 0 || r.otpAttemptCountersDeleted > 0) {
         log.info(r, 'Auth-row purge tick reclaimed rows');
       }
       markWorkerTickSuccess('auth_row_purge');

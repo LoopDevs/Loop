@@ -9,6 +9,12 @@
 import type { Context } from 'hono';
 import { logger } from '../logger.js';
 import { findLiveOtp, incrementOtpAttempts, markOtpConsumed } from './otps.js';
+import {
+  isEmailOtpLocked,
+  registerFailedOtpAttempt,
+  clearOtpAttempts,
+  OTP_EMAIL_LOCKOUT_MS,
+} from './otp-attempt-counter.js';
 import { enqueueWalletProvisioning } from '../wallet/provisioning.js';
 import { normalizeEmail, NonAsciiEmailError } from './normalize-email.js';
 import { verifyLoopToken, isLoopAuthConfigured } from './tokens.js';
@@ -54,6 +60,13 @@ import { issueTokenPair, mintTokenPair, persistMintedRefreshToken } from './issu
  * Wrong-code guesses bump the per-row `attempts` counter; after
  * `OTP_MAX_ATTEMPTS` the row is excluded from `findLiveOtp` and
  * further tries 401. Expired / missing rows also 401.
+ *
+ * B5: the authoritative brute-force ceiling is the per-EMAIL failed-
+ * attempt counter (`otp-attempt-counter.ts`), checked before the code
+ * comparison and incremented on every wrong guess. Once an email
+ * crosses the threshold it's locked (429) regardless of how many fresh
+ * codes an attacker rotates in — closing the row-rotation bypass at
+ * the identity level. A successful verify clears the counter.
  */
 export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
   if (!isLoopAuthConfigured()) {
@@ -79,14 +92,35 @@ export async function nativeVerifyOtpHandler(c: Context): Promise<Response> {
   }
 
   try {
+    // B5: identity-level lockout — refuse before touching any code so a
+    // locked email can't keep guessing by rotating fresh OTP rows.
+    if (await isEmailOtpLocked({ email })) {
+      c.header('Retry-After', String(Math.ceil(OTP_EMAIL_LOCKOUT_MS / 1000)));
+      return c.json(
+        { code: 'TOO_MANY_ATTEMPTS', message: 'Too many attempts. Try again later.' },
+        429,
+      );
+    }
     const hit = await findLiveOtp({ email, code: parsed.data.otp });
     if (hit === null) {
       // Bump the per-row attempts counter on any guess so brute force
       // against a specific row gets squeezed. No-ops if no live row.
       await incrementOtpAttempts({ email });
+      // B5: the authoritative per-email ceiling. If this guess tips the
+      // email over the threshold, surface the lockout immediately.
+      const { locked } = await registerFailedOtpAttempt({ email });
+      if (locked) {
+        c.header('Retry-After', String(Math.ceil(OTP_EMAIL_LOCKOUT_MS / 1000)));
+        return c.json(
+          { code: 'TOO_MANY_ATTEMPTS', message: 'Too many attempts. Try again later.' },
+          429,
+        );
+      }
       return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired verification code' }, 401);
     }
     await markOtpConsumed(hit.id);
+    // B5: legitimate verify clears the email's failed-attempt counter.
+    await clearOtpAttempts(email);
     const user = await findOrCreateUserByEmail(email);
     const pair = await issueTokenPair({ id: user.id, email: user.email });
     // ADR 030 Phase C1 — fire-and-forget embedded-wallet

@@ -491,6 +491,39 @@ export const otps = pgTable(
 );
 
 /**
+ * Per-email OTP verification attempt counter (hardening B5; ADR 013).
+ *
+ * The brute-force ceiling used to live only on the OTP ROW
+ * (`otps.attempts` capped at OTP_MAX_ATTEMPTS). That coupled the guess
+ * budget to a code's lifecycle, which forced an ugly choice
+ * (`otps.incrementOtpAttempts` docstring): bump only the newest row
+ * (clean UX, but an attacker rotates `request-otp` so the OLD row's
+ * cap is never reached — a real bypass) OR bump every live row (closes
+ * the bypass, but a mistype burns a user's sibling code too).
+ *
+ * This counter decouples the ceiling from OTP rows entirely: a
+ * fixed-window count of FAILED verify attempts PER EMAIL. Once
+ * `failed_attempts` crosses the threshold inside the window, verify is
+ * locked for the email regardless of how many fresh codes exist — so
+ * the rotation bypass is closed at the IDENTITY level, independent of
+ * which rows get bumped. The per-row `otps.attempts` bump stays as
+ * defense-in-depth (still bump-all-live-rows), but this counter is now
+ * the authoritative brute-force limit, so the row bump could safely be
+ * relaxed to newest-row-only in a future UX pass. A successful verify
+ * clears the row; the auth-row purge sweep reaps stale ones.
+ */
+export const otpAttemptCounters = pgTable('otp_attempt_counters', {
+  email: text('email').primaryKey(),
+  /** Failed verify attempts inside the current fixed window. */
+  failedAttempts: integer('failed_attempts').notNull().default(0),
+  /** Start of the current counting window; reset when it lapses. */
+  windowStartedAt: timestamp('window_started_at', { withTimezone: true }).notNull(),
+  /** When set and in the future, verify is locked for this email. */
+  lockedUntil: timestamp('locked_until', { withTimezone: true }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
  * Active refresh tokens (ADR 013). One row per live refresh; revoked
  * on use (rotation) or on sign-out / security-revoke.
  *
