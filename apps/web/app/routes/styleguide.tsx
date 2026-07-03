@@ -25,11 +25,8 @@ export function meta(): Array<Record<string, string>> {
 }
 
 // Full literal class names (NOT `bg-blue-${n}`) so Tailwind v4's source
-// scanner sees each one and emits the utility + its theme var. A
-// constructed class name wouldn't be generated, and inline
-// `var(--color-…)` fails for any token no utility references (Tailwind
-// tree-shakes those) — which is exactly how we learned the brand-*
-// aliases are unused in the app.
+// scanner sees each one and emits the utility + its theme var — a
+// constructed class name wouldn't be generated.
 const BLUE = [
   'bg-blue-50',
   'bg-blue-100',
@@ -55,18 +52,6 @@ const GRAY = [
   'bg-gray-800',
   'bg-gray-900',
   'bg-gray-950',
-];
-const BRAND = [
-  'bg-brand-50',
-  'bg-brand-100',
-  'bg-brand-200',
-  'bg-brand-300',
-  'bg-brand-400',
-  'bg-brand-500',
-  'bg-brand-600',
-  'bg-brand-700',
-  'bg-brand-800',
-  'bg-brand-900',
 ];
 const SEMANTIC = [
   'bg-canvas',
@@ -175,13 +160,8 @@ export default function StyleguideRoute(): React.JSX.Element {
 
         <Section
           title="Colour — semantic tokens"
-          subtitle="Named aliases for new components (surface / ink / line are in use; the brand-* ramp mirrors blue-* and is currently unused — the app reaches for blue-* directly)."
+          subtitle="Named aliases so components read intentionally instead of guessing greys. (There's no brand-* ramp — the accent is blue-* directly.)"
         >
-          <div className="flex flex-wrap gap-3">
-            {BRAND.map((c) => (
-              <Swatch key={c} cls={c} />
-            ))}
-          </div>
           <div className="flex flex-wrap gap-3">
             {SEMANTIC.map((c) => (
               <Swatch key={c} cls={c} />
