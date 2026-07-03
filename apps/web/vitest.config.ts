@@ -20,36 +20,34 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'lcov'],
       include: ['app/**/*.ts', 'app/**/*.tsx'],
-      // Routes and `root.tsx` are excluded from UNIT coverage so this
-      // metric stays focused on shared modules. Some route journeys are
-      // exercised via Playwright and a few routes have direct tests, but
-      // that coverage is partial — this exclusion is not a blanket claim
-      // that every route is covered elsewhere. When a route owns risky
-      // logic, add a route test or Playwright coverage explicitly.
+      // C3 (hardening 2026-07): routes, `root.tsx`, and the home/
+      // onboarding presentation are now MEASURED. They were previously
+      // excluded, which narrowed the denominator and let the coverage
+      // number overstate how much of the shipping app is actually
+      // tested. The exclusions below are the genuinely un-unit-testable
+      // surface only: the test files themselves, the route-table config,
+      // and the SSR/client entry bootstraps (framework-invoked, no
+      // branching of ours). Everything else — every route loader, meta,
+      // action, and component — counts. When a route owns risky logic,
+      // add a route test (see gift-card.$name / not-found-ssr for the
+      // loader/meta pattern) or Playwright coverage.
       exclude: [
         'app/**/__tests__/**',
-        'app/routes/**',
-        'app/root.tsx',
-        // Route-level presentation: MobileHome is the mobile variant of
-        // the home route, and the onboarding flow is a 5-component
-        // assembly rendered by a single route. They follow the same
-        // route-level exclusion boundary as `app/routes/**`; that is a
-        // unit-coverage choice, not a blanket browser-coverage claim.
-        // Keep reusable UI (components/ui/**, atoms) IN.
-        'app/components/features/home/**',
-        'app/components/features/onboarding/**',
+        'app/routes.ts', // generated route table, not app logic
+        'app/entry.server.tsx', // SSR bootstrap, framework-invoked
       ],
       // Thresholds are a regression gate, not an aspiration (audit A-014).
-      // Actual at time of baseline: stmt 40.2 / branch 37.9 / func 45.4 /
-      // line 41.1. These floors sit ~3-5pts below to tolerate minor
-      // fluctuation but still fail CI if a change drags coverage down.
-      // The explicit goal is to ratchet these up as new unit tests land,
-      // never to widen the gap between measured and claimed coverage.
+      // C3 re-baselined them against the HONEST whole-app denominator
+      // (routes included): measured stmt 58.2 / branch 53.6 / func 56.2 /
+      // line 59.6 (2026-07). Floors sit ~3-4pts below to tolerate minor
+      // fluctuation but still fail CI if a change drags coverage down —
+      // and they're now honest (whole-app), not a narrowed subset. Ratchet
+      // up as new tests land; never widen the measured↔claimed gap again.
       thresholds: {
-        lines: 37,
-        functions: 40,
-        branches: 32,
-        statements: 35,
+        lines: 56,
+        functions: 53,
+        branches: 50,
+        statements: 55,
       },
     },
   },
