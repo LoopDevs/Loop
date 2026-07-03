@@ -6,6 +6,24 @@ if [ "$BRANCH" != "main" ] && ! echo "$BRANCH" | grep -qE "^(feat|fix|chore|docs
   exit 1
 fi
 
+# PR pacing (AGENTS.md §Git workflow / standards.md §7): the clean-burndown
+# rule is ONE PR in flight at a time — open -> green -> merge -> next — to
+# avoid the branch/PR pile-up that's messy to reconcile. WARN (don't block)
+# so the disjoint audit-batch carve-out still works. Excludes this branch's
+# own PR (re-pushes) and Dependabot (authored by the bot, not you). Set
+# ALLOW_STACKED_PRS=1 to silence for a deliberate disjoint batch. Skips
+# silently where `gh` is unavailable (CI, etc.).
+if [ "$BRANCH" != "main" ] && [ -z "$ALLOW_STACKED_PRS" ] && command -v gh >/dev/null 2>&1; then
+  OPEN=$(gh pr list --state open --author '@me' --json headRefName \
+    --jq "[.[] | select(.headRefName != \"$BRANCH\")] | length" 2>/dev/null || echo 0)
+  if [ "${OPEN:-0}" -gt 0 ] 2>/dev/null; then
+    echo "⚠️  PR pacing: you already have $OPEN open PR(s) of your own in flight."
+    echo "    Protocol is ONE at a time — merge/close it before opening another"
+    echo "    (or export ALLOW_STACKED_PRS=1 for a deliberate disjoint batch)."
+    echo "    This is a warning, not a block — continuing."
+  fi
+fi
+
 # A2-411: run the full local verification suite — typecheck, lint,
 # format:check, lint-docs, tests — so a push that would fail CI's
 # Quality job fails locally instead. Previously pre-push only ran

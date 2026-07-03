@@ -28,5 +28,14 @@ updates:
     directory: '/'
     schedule:
       interval: 'weekly'
+    open-pull-requests-limit: 5
     labels:
       - 'ci'
+    groups:
+      # Collapse ALL action bumps into a single weekly PR (they were
+      # opening one PR per action — labeler/cosign/codeql/checkout/flyctl
+      # each separately — a needless slice of the PR pile). Majors ride
+      # the same group; review the combined diff.
+      github-actions:
+        patterns:
+          - '*'

@@ -549,6 +549,18 @@ Once the third push-capable member is on the rotation, flip the org rule on via 
 
 ## 7. Branching strategy
 
+### PR pacing — one in flight at a time (the anti-mess rule)
+
+Work serially: **`open → CI green → squash-merge → --delete-branch → git checkout main && git pull → start the next`**. Do **not** open a second feature branch before the first merges. This is the single rule that prevents the failure mode we keep hitting — a pile of half-finished branches and stale unmerged PRs, each cut from a different point of `main`, that becomes a conflict mess to reconcile.
+
+Concretely:
+
+- **Branch every PR from fresh `main`** (`git checkout main && git pull` first) — eliminates divergence conflicts before they exist.
+- **One task = one small PR**; tick its tracker checkbox (e.g. in `docs/readiness-backlog-2026-07-03.md`) in the **same** PR, so the tracker is the live status, not the branch list.
+- **A blocked item stays an unstarted checkbox** — not a lingering branch or draft PR. If it needs an owner decision or a vendor, leave it untouched and move to the next actionable item.
+- **Prune as you go**: `--delete-branch` on merge handles the remote; run `git fetch --prune` + delete merged local branches periodically. (Squash-merge makes local branches _look_ unmerged — `git branch --merged` won't see them — so verify content landed in `main` before deleting a local-only branch, especially one holding unmerged work.)
+- **Parallelism only on strictly-disjoint files.** The lone exception (`feedback_audit_batch_mode`) is disjoint audit batches — never let two in-flight branches touch the same file, and cap the number open. The `pre-push` hook warns when you already have an open PR; set `ALLOW_STACKED_PRS=1` to opt into a deliberate disjoint batch.
+
 ### Trunk-based development with short-lived feature branches
 
 ```
