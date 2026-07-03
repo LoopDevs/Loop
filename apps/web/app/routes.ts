@@ -71,6 +71,8 @@ export default [
   route('terms', 'routes/terms.tsx'),
   ...sitemapRoutes,
   route('auth', 'routes/auth.tsx'),
+  // Internal design-system kitchen-sink (noindex; gate/remove before public launch).
+  route('styleguide', 'routes/styleguide.tsx'),
   route('onboarding', 'routes/onboarding.tsx'),
   route('orders', 'routes/orders.tsx'),
   route('orders/:id', 'routes/orders.$id.tsx'),
