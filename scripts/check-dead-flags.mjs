@@ -51,12 +51,16 @@ function walk(dir, files = []) {
 }
 
 // 1. Collect declared schema keys: lines shaped `  NAME: z.` or
-//    `  NAME: envBoolean` etc. inside the EnvSchema object.
-const envSource = readFileSync(ENV_TS, 'utf8');
-const schemaStart = envSource.indexOf('export const EnvSchema = z.object({');
-const schemaEnd = envSource.indexOf('\n});', schemaStart);
-const schemaBody = envSource.slice(schemaStart, schemaEnd);
-const declared = [...schemaBody.matchAll(/^ {2}([A-Z][A-Z0-9_]+):/gm)].map((m) => m[1]);
+//    `  NAME: envBoolean` etc. D2 split — the EnvSchema fields moved
+//    out of env.ts into per-domain section modules
+//    (env/sections/*.ts); each exports a `{ NAME: ..., }` field map
+//    that env.ts spreads. Scan those section files for the declarations.
+const SECTIONS_DIR = join(SRC_DIR, 'env', 'sections');
+const sectionSource = readdirSync(SECTIONS_DIR)
+  .filter((f) => f.endsWith('.ts'))
+  .map((f) => readFileSync(join(SECTIONS_DIR, f), 'utf8'))
+  .join('\n');
+const declared = [...sectionSource.matchAll(/^ {2}([A-Z][A-Z0-9_]+):/gm)].map((m) => m[1]);
 
 if (declared.length < 30) {
   console.error(
@@ -65,9 +69,12 @@ if (declared.length < 30) {
   process.exit(2);
 }
 
-// 2. Scan all backend source EXCEPT env.ts for reads.
+// 2. Scan all backend source for reads, EXCEPT env.ts (the composer +
+//    parseEnv) and the env/sections/*.ts declaration files — those
+//    DECLARE the vars, they don't count as consuming reads.
+const envSource = readFileSync(ENV_TS, 'utf8');
 const haystacks = walk(SRC_DIR)
-  .filter((p) => p !== ENV_TS)
+  .filter((p) => p !== ENV_TS && !p.includes(join('env', 'sections')))
   .map((p) => readFileSync(p, 'utf8'))
   .join('\n');
 
@@ -78,9 +85,9 @@ for (const name of declared) {
     haystacks.includes(`process.env['${name}']`) ||
     haystacks.includes(`process.env.${name}`) ||
     haystacks.includes(`process.env[\`${name}\`]`);
-  // env.ts itself consuming a var in a cross-field boot guard counts
-  // as a real read — those vars exist purely to gate the boot.
-  const readInBootGuards = envSource.slice(schemaEnd).includes(`parsed.data.${name}`);
+  // env.ts itself consuming a var in a cross-field boot guard (parseEnv)
+  // counts as a real read — those vars exist purely to gate the boot.
+  const readInBootGuards = envSource.includes(`parsed.data.${name}`);
   if (!readViaEnv && !readViaProcess && !readInBootGuards && !ALLOWLIST.has(name)) {
     dead.push(name);
   }

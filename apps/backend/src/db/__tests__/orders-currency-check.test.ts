@@ -70,8 +70,10 @@ describe('orders_currency_known CHECK mirror', () => {
     expect(new Set(adds.at(-1)!)).toEqual(new Set(ORDERABLE_CURRENCIES));
   });
 
-  it('schema.ts drizzle mirror lists exactly ORDERABLE_CURRENCIES', () => {
-    const sql = read('src/db/schema.ts');
+  it('schema orders module drizzle mirror lists exactly ORDERABLE_CURRENCIES', () => {
+    // D2 split: the orders table + its `orders_currency_known` CHECK
+    // moved from db/schema.ts (now a barrel) into db/schema/orders.ts.
+    const sql = read('src/db/schema/orders.ts');
     expect(new Set(currenciesInOrdersCheck(sql))).toEqual(new Set(ORDERABLE_CURRENCIES));
   });
 });
