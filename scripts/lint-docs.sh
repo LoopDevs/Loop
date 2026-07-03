@@ -21,9 +21,12 @@ err() {
 # could be dropped from .env.example without failing CI (D-04 / CF-33).
 
 echo "Checking env vars..."
-grep -E '^\s+[A-Z][A-Z0-9_]*:' apps/backend/src/env.ts | sed 's/[[:space:]]*//' | cut -d: -f1 | while read -r var; do
+# D2 split: the EnvSchema fields moved out of env.ts into the per-domain
+# section modules (env/sections/*.ts); scan those for the var
+# declarations (the `env.ts` composer now only spreads them).
+grep -hE '^\s+[A-Z][A-Z0-9_]*:' apps/backend/src/env/sections/*.ts | sed 's/[[:space:]]*//' | cut -d: -f1 | while read -r var; do
   if ! grep -q "^${var}=\|^# *${var}" apps/backend/.env.example 2>/dev/null; then
-    err "Env var '$var' is in env.ts but missing from .env.example"
+    err "Env var '$var' is in env/sections/*.ts but missing from .env.example"
   fi
 done
 

@@ -39,15 +39,19 @@
 >   requires a module-by-module migration keeping the parity gate until the
 >   mirror is fully gone; a partial `openapi/` tree is worse than the honest
 >   mirror `check-openapi-parity` keeps correct today.
-> - **D2** — **[scoped: large maintainability refactor, dedicated follow-up]**.
->   Verifiable-safe (migration-parity + typecheck prove equivalence) but a
->   delicate ~2,600-line reorganization of the two most load-bearing config
->   files for zero correctness value; a concrete split plan is recorded in the
->   D2 entry so it's a bounded, hand-offable task rather than an open question.
->   Not rushed at the tail of a long autonomous session when 100% is already
->   unreachable via C9/A6/D1.
+> - **D2** — **DONE** (this session). `env.ts` split into `env/schema-helpers.ts`
+>   - 3 domain section modules + a composer (1,139 → 328 lines); `db/schema.ts`
+>     split into 8 per-domain modules under `db/schema/` + a barrel (1,515 → 21
+>     lines). Equivalence proven mechanically: migration-parity re-introspects the
+>     composed schema (345 catalog entries match), typecheck proves the `Env` type
+>     is byte-identical, all tests green. The C5 dead-flag + lint-docs env scans
+>     were repointed at the section modules.
 >
-> None of the four is a money-integrity gap.
+> **The 3 remaining are genuine hard blocks — none a money-integrity gap:**
+> C9 (operator branch-protection, permission-denied), A6 (operator `[D]`
+> refund-to-sender money decision; durable+alert half already live), D1
+> (multi-day OpenAPI-from-Zod that the plan itself says must not be
+> half-shipped).
 
 ## Track A — Money-invariant fixes (the judgment-dense residuals)
 
@@ -348,7 +352,7 @@
       module-by-module, keep the parity gate until the mirror is gone, then
       retire both. Biggest single ceiling-raiser; the mechanical tail is
       delegable once the pattern is proven on 2-3 modules.
-- [ ] **D2. Split the config giants.** _[scoped follow-up — see status header]_
+- [x] **D2. Split the config giants.** _Done (this session):_
       `db/schema.ts` (1,515) and `env.ts` (1,139) are merge-conflict magnets;
       split by domain preserving public exports. Verifiable-safe: the schema
       has NO `relations()` and drizzle FK references are lazy thunks (cross-file

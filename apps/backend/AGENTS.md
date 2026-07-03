@@ -8,7 +8,7 @@
 src/
 ├── app.ts              ← Hono app, middleware, all routes (import this in tests)
 ├── index.ts            ← Server startup + background tasks only (never import in tests)
-├── env.ts              ← Zod-validated env config
+├── env.ts              ← Zod env composer + parseEnv (fields live in env/sections/*, D2 split)
 ├── logger.ts           ← Pino logger
 ├── upstream.ts         ← upstreamUrl() helper
 ├── circuit-breaker.ts  ← Shared circuit breaker for upstream calls
@@ -106,6 +106,10 @@ src/
 ├── users/handler.ts    ← GET /me + POST /me/home-currency + PUT /me/stellar-address (ADR 015)
 ├── users/wallet-handler.ts ← GET /api/me/wallet — embedded-wallet balances, never-500 last-known-good (ADR 030 C4)
 ├── db/                 ← Drizzle schema + migrations + pool client (ADR 012);
+│   │                     schema.ts is a barrel over schema/*.ts per-domain
+│   │                     modules (users/credits/merchants/auth/orders/payments/
+│   │                     admin/reconciliation — D2 split); add tables to the
+│   │                     domain module, not one giant file.
 │   │                     staff-roles.ts — ADR 037 role repo (resolution, list,
 │   │                     grant/revoke under a fixed advisory lock with
 │   │                     last-admin protection + is_admin mirror)
@@ -152,7 +156,12 @@ Status codes: 400 (validation), 401 (auth), 404 (not found), 429 (rate limit), 5
 
 ## Recipe: Add a new env var
 
-1. Add to Zod schema in `src/env.ts` (use `.optional()` or `.default()`)
+1. Add to the Zod field-map for the var's domain in `src/env/sections/` —
+   `core.ts` (runtime/upstream/rate-limit/db/admin-identity), `auth.ts`
+   (JWT/step-up/social/email/stellar-keys), or `infra.ts`
+   (workers/interest/kill-switches/drift). `src/env.ts` spreads these into
+   `EnvSchema`, so it stays a thin composer + `parseEnv`. Use `.optional()`
+   or `.default()`. (D2 split: env vars no longer live in one giant file.)
 2. Add to `.env.example` with comment
 3. Add to `.env` for local dev
 4. Update `AGENTS.md` (root) env vars section
@@ -177,8 +186,11 @@ To add a migration:
 1. Write a new `apps/backend/src/db/migrations/NNNN_short_slug.sql`
    with the forward-SQL. Match the naming of the prior files and
    include a header comment citing the audit/ADR that motivated it.
-2. Update `db/schema.ts` so Drizzle's TypeScript types keep pace
-   with the real schema. Add tests under
+2. Update the Drizzle types in the table's domain module under
+   `db/schema/` (users / credits / merchants / auth / orders / payments /
+   admin / reconciliation) — `db/schema.ts` is now a barrel re-exporting
+   those (D2 split), so `import { ... } from '../db/schema.js'` call sites
+   and drizzle-kit are unchanged. Add tests under
    `db/__tests__/<table>-schema.test.ts` that pin the mirror of any
    new CHECK or index.
 3. Append an entry to `apps/backend/src/db/migrations/meta/_journal.json`
