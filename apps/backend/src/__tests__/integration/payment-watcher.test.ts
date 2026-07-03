@@ -73,6 +73,7 @@ import {
   userCredits,
   creditTransactions,
   pendingPayouts,
+  paymentWatcherSkips,
 } from '../../db/schema.js';
 import { findOrCreateUserByEmail } from '../../db/users.js';
 import { runPaymentWatcherTick } from '../../payments/watcher.js';
@@ -259,6 +260,74 @@ describeIf('payment-watcher integration — memo match + state transition', () =
     await runPaymentWatcherTick({ account: ACCOUNT });
     const cursors = await db.select().from(watcherCursors);
     expect(cursors).toHaveLength(0);
+  });
+
+  // ─── T0-1: stop stranding late deposits after order expiry ──────────
+
+  async function seedOrderInState(memo: string, state: 'expired' | 'paid'): Promise<SeededOrder> {
+    const seeded = await seedPendingOrder(memo);
+    await db.update(orders).set({ state }).where(eq(orders.id, seeded.orderId));
+    return seeded;
+  }
+  async function skipFor(
+    memo: string,
+  ): Promise<typeof paymentWatcherSkips.$inferSelect | undefined> {
+    const rows = await db
+      .select()
+      .from(paymentWatcherSkips)
+      .where(eq(paymentWatcherSkips.memo, memo));
+    return rows[0];
+  }
+
+  it('T0-1: deposit whose order EXPIRED unpaid → recorded as order_gone, then abandoned (A6-refundable)', async () => {
+    const seeded = await seedOrderInState('t01-expired', 'expired');
+    vi.mocked(listAccountPayments).mockResolvedValueOnce({
+      records: [xlmPayment({ id: 'late-1', pagingToken: 'tok-late-1', memo: seeded.memo })],
+      nextCursor: null,
+    });
+    const t1 = await runPaymentWatcherTick({ account: ACCOUNT });
+    // The pre-T0-1 bug counted this but NEVER recorded it → funds stranded,
+    // unreachable by any refund. Now it's a durable, refundable skip row.
+    expect(t1.unmatchedMemo).toBe(1);
+    const recorded = await skipFor(seeded.memo);
+    expect(recorded).toBeDefined();
+    expect(recorded!.reason).toBe('order_gone');
+    expect(recorded!.orderId).toBe(seeded.orderId);
+    expect(recorded!.paymentId).toBe('late-1');
+    expect(recorded!.status).toBe('pending');
+
+    // Next tick's sweep re-evaluates the row → order_gone → abandoned:
+    // the exact state the A6 refund flow claims from (auto-refund off).
+    vi.mocked(listAccountPayments).mockResolvedValueOnce({ records: [], nextCursor: null });
+    await runPaymentWatcherTick({ account: ACCOUNT });
+    const abandoned = await skipFor(seeded.memo);
+    expect(abandoned!.status).toBe('abandoned');
+    expect(abandoned!.reason).toBe('order_gone');
+  });
+
+  it('T0-1 safety: a memo matching NO order is counted only, never recorded (no unattributable refunds)', async () => {
+    vi.mocked(listAccountPayments).mockResolvedValueOnce({
+      records: [xlmPayment({ id: 'unk-1', pagingToken: 'tok-unk-1', memo: 'no-such-order-memo' })],
+      nextCursor: null,
+    });
+    const result = await runPaymentWatcherTick({ account: ACCOUNT });
+    expect(result.unmatchedMemo).toBe(1);
+    expect(await db.select().from(paymentWatcherSkips)).toHaveLength(0);
+  });
+
+  it('T0-1 safety: deposit whose order was PAID is counted only, NOT recorded (double-spend guard)', async () => {
+    // A paid order does not persist which payment paid it, so recording a
+    // deposit against it as refundable risks refunding the ORIGINAL paying
+    // deposit re-read after a cursor regression → double-spend. Deliberately
+    // not recorded here; the duplicate-against-paid case is T0-1b.
+    const seeded = await seedOrderInState('t01-paid', 'paid');
+    vi.mocked(listAccountPayments).mockResolvedValueOnce({
+      records: [xlmPayment({ id: 'dup-1', pagingToken: 'tok-dup-1', memo: seeded.memo })],
+      nextCursor: null,
+    });
+    const result = await runPaymentWatcherTick({ account: ACCOUNT });
+    expect(result.unmatchedMemo).toBe(1);
+    expect(await db.select().from(paymentWatcherSkips)).toHaveLength(0);
   });
 });
 

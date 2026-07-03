@@ -26,6 +26,10 @@ export const WATCHER_SKIP_REASONS = [
   'amount_insufficient',
   'missing_credit_row',
   'processing_error',
+  // T0-1: a deposit whose memo maps to a real order that's no longer
+  // pending_payment (expired / already paid) — a genuine late or
+  // duplicate deposit. Recorded so the A6 refund path can reach it.
+  'order_gone',
 ] as const;
 export type WatcherSkipReason = (typeof WATCHER_SKIP_REASONS)[number];
 

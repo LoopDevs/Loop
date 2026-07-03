@@ -12,6 +12,10 @@ vi.mock('../../logger.js', () => ({
 
 const listPaymentsMock = vi.fn();
 const findOrderMock = vi.fn();
+// T0-1: the `unmatched` arm consults findAnyOrderByMemo to decide whether
+// to record an expired-order deposit. Default null → no record (preserves
+// pre-T0-1 unmatched behaviour for the existing cases).
+const findAnyOrderMock = vi.fn();
 const markPaidMock = vi.fn();
 
 const { notifyOverpaymentMock } = vi.hoisted(() => ({
@@ -50,6 +54,7 @@ vi.mock('../price-feed.js', () => ({
 }));
 vi.mock('../../orders/repo.js', () => ({
   findPendingOrderByMemo: (memo: string) => findOrderMock(memo),
+  findAnyOrderByMemo: (memo: string) => findAnyOrderMock(memo),
 }));
 vi.mock('../../orders/transitions.js', async () => {
   // Keep the real LoopAssetMissingCreditRowError class — the
@@ -186,6 +191,8 @@ beforeEach(() => {
   listPaymentsMock.mockReset();
   notifyOverpaymentMock.mockReset();
   findOrderMock.mockReset();
+  findAnyOrderMock.mockReset();
+  findAnyOrderMock.mockResolvedValue(null);
   markPaidMock.mockReset();
   recordSkipMock.mockReset();
   recordSkipMock.mockResolvedValue(undefined);

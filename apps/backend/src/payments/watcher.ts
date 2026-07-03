@@ -23,7 +23,7 @@ import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { watcherCursors } from '../db/schema.js';
 import { logger } from '../logger.js';
-import { findPendingOrderByMemo } from '../orders/repo.js';
+import { findAnyOrderByMemo, findPendingOrderByMemo } from '../orders/repo.js';
 import { markOrderPaid, LoopAssetMissingCreditRowError } from '../orders/transitions.js';
 import { listAccountPayments, isMatchingIncomingPayment, type HorizonPayment } from './horizon.js';
 import { configuredLoopPayableAssets, type LoopAssetCode } from '../credits/payout-asset.js';
@@ -404,9 +404,44 @@ export async function runPaymentWatcherTick(args: {
       case 'no_match':
       case 'no_memo':
         break;
-      case 'unmatched':
+      case 'unmatched': {
         result.unmatchedMemo++;
+        // T0-1: `unmatched` means a real deposit (valid asset + memo) with
+        // no PENDING order for that memo. If the memo maps to an order that
+        // EXPIRED unpaid, this is a genuine late deposit that must be
+        // recorded so the A6 refund path can reach it — otherwise the cursor
+        // advances and the funds strand at the operator account forever.
+        //
+        // SAFETY — why `expired` ONLY (not paid/fulfilled/any-state): the
+        // order does not persist which payment paid it, so for a *paid*
+        // order we cannot tell a genuine second/duplicate deposit apart from
+        // the ORIGINAL paying deposit re-read after a cursor regression.
+        // Recording the latter as refundable would double-spend a delivered
+        // gift card. An `expired` order was provably never paid (the expiry
+        // sweep only flips `pending_payment → expired`), so a deposit for its
+        // memo is unambiguously stranded and refunding it cannot double-pay.
+        // A memo matching NO order likewise stays a counted no-op (refunding
+        // an unattributable payment is a separate decision). The
+        // duplicate-against-a-PAID-order case is a documented follow-up (T0-1b)
+        // gated on first persisting the paying-payment id.
+        //
+        // Recorded BEFORE the cursor advances (CRIT #1, same as the `skip`
+        // arm): if the insert throws, the tick aborts with the cursor parked
+        // before this payment, so it's re-read next tick — never orphaned.
+        // The sweep then maps this row's retry (`unmatched`) → `order_gone`
+        // → abandon → it lands on /admin/skips, refundable to the sender.
+        const strandedOrder = await findAnyOrderByMemo(outcome.memo);
+        if (strandedOrder !== null && strandedOrder.state === 'expired') {
+          await recordSkip({
+            payment: p,
+            memo: outcome.memo,
+            orderId: strandedOrder.id,
+            reason: 'order_gone',
+            detail: 'deposit arrived after order expired unpaid',
+          });
+        }
         break;
+      }
       case 'paid':
         result.matched++;
         result.paid++;

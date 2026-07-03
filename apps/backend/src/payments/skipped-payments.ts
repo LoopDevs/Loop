@@ -77,7 +77,11 @@ export type SkipReason =
   | 'asset_mismatch'
   | 'amount_insufficient'
   | 'missing_credit_row'
-  | 'processing_error';
+  | 'processing_error'
+  // T0-1: memo maps to a real order that's no longer pending (a late or
+  // duplicate deposit). Its retry resolves to `order_gone` → abandon →
+  // refundable via A6.
+  | 'order_gone';
 
 /**
  * Attempt budget for rows that keep failing with the same reason.
