@@ -15,7 +15,7 @@
 > operator decision before/while implementing (sensible default proposed
 > inline — will implement the default unless overridden).
 >
-> **Status (2026-07-03).** 38 of 40 items DONE and merged — every money/auth
+> **Status (2026-07-03).** 39 of 40 items DONE and merged — every money/auth
 > fix (A1–A8, B1–B7), every mechanical enforcement gate (C1–C8, C10, C10a),
 > the whole skills/knowledge layer (E1–E10), and the structural track (D2
 > config-giant split, D3 scaffold generator, D4 retirement ADR). Six
@@ -23,7 +23,7 @@
 > a P0 at-most-once alert (A2/A3), a P0 fleet-stall (A8), three P2s (C10a), and
 > a P0 double-pay + P1 memo-window on the A6 refund — each fixed before merge.
 >
-> **The 2 remaining are owner-adjudicated / in-progress, NOT money gaps:**
+> **1 remains — owner-adjudicated, NOT a money gap:**
 >
 > - **C9** — **OWNER DECISION: defer branch-protection hardening to
 >   production.** At dev stage the existing protection is near-frictionless
@@ -31,9 +31,10 @@
 >   making the flywheel check _required_ is cosmetic while admins bypass it;
 >   the checks still run advisory. Revisit at production/team onboarding (see
 >   the C9 entry + release-preflight).
-> - **D1** — **in progress**: owner asked to prove the OpenAPI-from-Zod
->   derivation on 2–3 modules (keeping the parity gate) rather than the full
->   multi-day mirror retirement.
+> - **D1** — proof-of-pattern **DONE** on the auth + auth-social modules
+>   (shared extended-z foundation + a derivation test + the skill); the full
+>   mirror retirement is the delegable mechanical tail the plan always
+>   scoped it as.
 
 ## Track A — Money-invariant fixes (the judgment-dense residuals)
 
@@ -330,21 +331,22 @@
 
 ## Track D — Structural simplification (delete the drift-tax)
 
-- [ ] **D1. Derive OpenAPI from handler Zod schemas.** _[deferred — large,
-      needs its own effort]_ The single biggest ceiling-raiser, but the
-      repo-shape review scoped it as "design the derivation pattern, migrate
-      module-by-module, keep the parity gate until the mirror is gone" — a
-      multi-day refactor that must NOT be half-shipped (a partially-migrated
-      `openapi/` tree is worse than the honest mirror the parity gate keeps
-      correct today). Left as the top structural follow-up; `check-openapi-parity`
-      keeps the current mirror honest meanwhile. Original note: 74/76 files in
-      `openapi/` (12.3k LOC) hand-redefine shapes the handlers already
-      validate; the parity gate is a text-analysis stopgap for a drift class
-      that shouldn't exist. Design the derivation pattern
-      (`@asteasolutions/zod-to-openapi` is already a dependency), migrate
-      module-by-module, keep the parity gate until the mirror is gone, then
-      retire both. Biggest single ceiling-raiser; the mechanical tail is
-      delegable once the pattern is proven on 2-3 modules.
+- [x] **D1. Derive OpenAPI from handler Zod schemas.** Proof-of-pattern done
+      per the owner's scope ("prove the pattern on 2-3 modules"); the full
+      12k-line-mirror retirement stays the delegable mechanical tail. _Done:
+      `openapi-zod.ts` (the shared OpenAPI-extended `z` — the ordering fix so a
+      handler schema module carries `.openapi()` before its schemas are
+      created); the auth module (RequestOtpBody / VerifyOtpBody / RefreshBody,
+      already canonical in `auth/request-schemas.ts`) and the auth-social
+      module (extracted `social.ts`'s inline body to `auth/social-schemas.ts`)
+      now REGISTER the exact schema the handler `.parse()`s — the spec can't
+      drift from what's validated, so no `check-openapi-parity`-style gate is
+      needed for those bodies. `openapi-derivation.test.ts` pins spec-component
+      keys == canonical schema keys; the `/add-endpoint` skill leads new
+      endpoints to the pattern. Remaining `openapi/*` modules migrate the same
+      way (extract → import → register); the parity gate keeps the un-migrated
+      remainder honest until then._
+
 - [x] **D2. Split the config giants.** _Done (this session):_
       `db/schema.ts` (1,515) and `env.ts` (1,139) are merge-conflict magnets;
       split by domain preserving public exports. Verifiable-safe: the schema
