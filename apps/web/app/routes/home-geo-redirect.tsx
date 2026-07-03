@@ -1,6 +1,12 @@
 import { isbot } from 'isbot';
 import { redirect } from 'react-router';
-import { DEFAULT_LANG, resolveCountryPath, type GeoResponse } from '@loop/shared';
+import {
+  DEFAULT_LANG,
+  resolveCountryPath,
+  isSupportedCountryCode,
+  countryFromAcceptLanguage,
+  type GeoResponse,
+} from '@loop/shared';
 import type { Route } from './+types/home-geo-redirect';
 import { parseCountryCookie } from '~/i18n/locale';
 
@@ -54,9 +60,24 @@ async function geoCountry(request: Request): Promise<string> {
  */
 export async function loader({ request }: Route.LoaderArgs): Promise<null> {
   if (isbot(request.headers.get('user-agent') ?? '')) return null;
-  // Detection precedence (ADR 034 §7): saved cookie > geo-IP > default. A
-  // visitor who chose a country keeps it even when their IP says otherwise.
+  // Detection precedence (ADR 034 §7): saved cookie > edge/geo-IP country >
+  // Accept-Language > default. A visitor who chose a country keeps it even when
+  // their IP says otherwise — and the cookie short-circuits ALL geo work.
   const chosen = parseCountryCookie(request.headers.get('cookie'));
-  const country = chosen ?? resolveCountryPath(await geoCountry(request));
-  throw redirect(`/${country}/${DEFAULT_LANG}`);
+  if (chosen !== null) throw redirect(`/${chosen}/${DEFAULT_LANG}`);
+
+  // No saved choice — detect. An edge that geolocates for us (Cloudflare's
+  // `CF-IPCountry`) is accurate + maintenance-free, so prefer it and skip the
+  // backend geo round-trip; absent on Fly-direct, we fall back to the backend
+  // MaxMind lookup. This upgrades automatically the day the app sits behind
+  // such an edge.
+  const edge = request.headers.get('cf-ipcountry');
+  const geoCode = isSupportedCountryCode(edge) ? edge : await geoCountry(request);
+  // Accept-Language backstops the free GeoLite2 DB's ISP coverage gaps: a real
+  // UK visitor on an uncovered ISP resolves to an empty country and would
+  // otherwise wrongly default to the US. Their browser's `en-GB` pins them to GB.
+  const guess = isSupportedCountryCode(geoCode)
+    ? geoCode
+    : countryFromAcceptLanguage(request.headers.get('accept-language'));
+  throw redirect(`/${resolveCountryPath(guess)}/${DEFAULT_LANG}`);
 }
