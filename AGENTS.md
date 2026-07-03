@@ -146,6 +146,14 @@ npm run check:migration-parity # Migration chain ↔ schema.ts parity (needs pos
 
 # Proto
 npm run proto:generate       # buf generate → packages/shared/src/proto/ (A2-404: auto-prettier'd)
+
+# Scaffold a new backend endpoint (hardening D3). Writes the handler +
+# test in the right tier shape and prints the exact route-mount +
+# OpenAPI paste-snippets (with the correct status codes: 429 if
+# rate-limited, 404-not-403 on /api/admin) + a fan-out checklist. Pairs
+# with the /add-endpoint skill. --dry-run previews without writing.
+node scripts/scaffold-endpoint.mjs --method GET --path /api/x/:id \
+  --name getX --tier admin --domain x --rate 60
 ```
 
 ### Operator scripts (Phase-1 release path)
