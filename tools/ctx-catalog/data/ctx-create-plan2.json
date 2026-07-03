@@ -1,0 +1,586 @@
+[
+  {
+    "name": "Pizza Pizza",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6594"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,500.00",
+    "userDiscount": "424"
+  },
+  {
+    "name": "Second Cup",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6594"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,500.00",
+    "userDiscount": "424"
+  },
+  {
+    "name": "Skip the Dishes",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6594"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,500.00",
+    "userDiscount": "424"
+  },
+  {
+    "name": "Freshii",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6594"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,500.00",
+    "userDiscount": "424"
+  },
+  {
+    "name": "Pizza 73",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6594"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,500.00",
+    "userDiscount": "424"
+  },
+  {
+    "name": "Thai Express",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6593"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,500.00",
+    "userDiscount": "424"
+  },
+  {
+    "name": "Baton Rouge",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6593"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,500.00",
+    "userDiscount": "424"
+  },
+  {
+    "name": "Canadian Brewhouse",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6593"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,500.00",
+    "userDiscount": "424"
+  },
+  {
+    "name": "MR MIKES",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6593"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,500.00",
+    "userDiscount": "424"
+  },
+  {
+    "name": "Sunset Grill",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6593"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,500.00",
+    "userDiscount": "424"
+  },
+  {
+    "name": "Shoeless Joe’s",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6593"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,500.00",
+    "userDiscount": "424"
+  },
+  {
+    "name": "La Belle et la Boeuf",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6593"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,500.00",
+    "userDiscount": "424"
+  },
+  {
+    "name": "D'Arcy McGee's",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "3042"
+      },
+      {
+        "provider": "ezpin",
+        "providerId": "5541"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,300.00",
+    "userDiscount": "444"
+  },
+  {
+    "name": "Fionn MacCool's",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "3042"
+      },
+      {
+        "provider": "ezpin",
+        "providerId": "5541"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,300.00",
+    "userDiscount": "444"
+  },
+  {
+    "name": "Paddy Flaherty's",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "3042"
+      },
+      {
+        "provider": "ezpin",
+        "providerId": "5541"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,300.00",
+    "userDiscount": "444"
+  },
+  {
+    "name": "Tir nan Og",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "3042"
+      },
+      {
+        "provider": "ezpin",
+        "providerId": "5541"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,300.00",
+    "userDiscount": "444"
+  },
+  {
+    "name": "Scaddabush Italian Kitchen + Bar",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "3042"
+      },
+      {
+        "provider": "ezpin",
+        "providerId": "5541"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,300.00",
+    "userDiscount": "444"
+  },
+  {
+    "name": "Birch Lane",
+    "country": "US",
+    "link": [
+      {
+        "provider": "svs",
+        "providerId": "SVI1021809"
+      },
+      {
+        "provider": "ezpin",
+        "providerId": "2325"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "5,500",
+    "userDiscount": "150"
+  },
+  {
+    "name": "Joss & Main",
+    "country": "US",
+    "link": [
+      {
+        "provider": "svs",
+        "providerId": "SVI1021809"
+      },
+      {
+        "provider": "ezpin",
+        "providerId": "2325"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "5,500",
+    "userDiscount": "150"
+  },
+  {
+    "name": "Williams Sonoma",
+    "country": "US",
+    "link": [
+      {
+        "provider": "svs",
+        "providerId": "SVI1021846"
+      },
+      {
+        "provider": "ezpin",
+        "providerId": "4388"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "25,500",
+    "userDiscount": "200"
+  },
+  {
+    "name": "PBteen",
+    "country": "US",
+    "link": [
+      {
+        "provider": "svs",
+        "providerId": "SVI1021846"
+      },
+      {
+        "provider": "ezpin",
+        "providerId": "4388"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "25,500",
+    "userDiscount": "200"
+  },
+  {
+    "name": "Galaxy Cinemas",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6526"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "5.00,200.00",
+    "userDiscount": "258"
+  },
+  {
+    "name": "SilverCity",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6526"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "5.00,200.00",
+    "userDiscount": "258"
+  },
+  {
+    "name": "Bubba's 33",
+    "country": "US",
+    "link": [
+      {
+        "provider": "svs",
+        "providerId": "SVI1021815"
+      },
+      {
+        "provider": "ezpin",
+        "providerId": "1048"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "5,100",
+    "userDiscount": "200"
+  },
+  {
+    "name": "Jaggers",
+    "country": "US",
+    "link": [
+      {
+        "provider": "svs",
+        "providerId": "SVI1021815"
+      },
+      {
+        "provider": "ezpin",
+        "providerId": "1048"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "5,100",
+    "userDiscount": "200"
+  },
+  {
+    "name": "LOFT Outlet",
+    "country": "US",
+    "link": [
+      {
+        "provider": "svs",
+        "providerId": "SVI1024468"
+      },
+      {
+        "provider": "ezpin",
+        "providerId": "5095"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "1,500",
+    "userDiscount": "250"
+  },
+  {
+    "name": "Lou & Grey",
+    "country": "US",
+    "link": [
+      {
+        "provider": "svs",
+        "providerId": "SVI1024468"
+      },
+      {
+        "provider": "ezpin",
+        "providerId": "5095"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "1,500",
+    "userDiscount": "250"
+  },
+  {
+    "name": "Mountain Hardwear",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6528"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "1.00,500.00",
+    "userDiscount": "536"
+  },
+  {
+    "name": "SOREL",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6528"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "1.00,500.00",
+    "userDiscount": "536"
+  },
+  {
+    "name": "Thrifty Foods",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6565"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "5.00,500.00",
+    "userDiscount": "168"
+  },
+  {
+    "name": "IGA",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6565"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "5.00,500.00",
+    "userDiscount": "168"
+  },
+  {
+    "name": "Foodland",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6565"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "5.00,500.00",
+    "userDiscount": "168"
+  },
+  {
+    "name": "Needs",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6565"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "5.00,500.00",
+    "userDiscount": "168"
+  },
+  {
+    "name": "Fast Fuel",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6565"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "5.00,500.00",
+    "userDiscount": "168"
+  },
+  {
+    "name": "Gymboree",
+    "country": "US",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "5166"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "5.00,500.00",
+    "userDiscount": "453"
+  },
+  {
+    "name": "Duane Reade",
+    "country": "US",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "4549"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "5.00,500.00",
+    "userDiscount": "196"
+  },
+  {
+    "name": "Gap Factory",
+    "country": "US",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "7031"
+      },
+      {
+        "provider": "svs",
+        "providerId": "SVR1021132"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,500.00",
+    "userDiscount": "520"
+  },
+  {
+    "name": "The Land of Nod",
+    "country": "US",
+    "link": [
+      {
+        "provider": "tillo",
+        "providerId": "cb2-usa"
+      },
+      {
+        "provider": "ezpin",
+        "providerId": "5131"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "25.00,500.00",
+    "userDiscount": "500"
+  },
+  {
+    "name": "Personalization Universe",
+    "country": "US",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "1023"
+      },
+      {
+        "provider": "ezpin",
+        "providerId": "7480"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "10.00,100.00",
+    "userDiscount": "491"
+  },
+  {
+    "name": "Braven Restaurant",
+    "country": "CA",
+    "link": [
+      {
+        "provider": "ezpin",
+        "providerId": "6627"
+      }
+    ],
+    "denominationType": "min-max",
+    "denominationValues": "25.00,5000.00",
+    "userDiscount": "180"
+  }
+]
