@@ -341,6 +341,12 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # are configured above.
 # LOOP_WORKERS_ENABLED=true
 
+# Hardening A6: auto-refund late deposits (those landing after the
+# order expired). Default false → admin-triggered refunds only
+# (POST /api/admin/deposits/:paymentId/refund, admin + step-up). true →
+# the skip-sweep auto-refunds them to the sender. Read live.
+# LOOP_DEPOSIT_REFUND_AUTO=false
+
 # Per-worker cadences. Watcher runs every 10s (deposit latency),
 # procurement every 5s (user-blocking once an order is paid). Payout
 # interval matches Stellar ledger-close cadence.

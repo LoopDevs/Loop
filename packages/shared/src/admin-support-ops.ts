@@ -10,7 +10,15 @@ import type { WalletProvisioningState } from './users-wallet.js';
 
 // ─── Watcher skip rows (payment_watcher_skips, migration 0033) ─────────────
 
-export const WATCHER_SKIP_STATUSES = ['pending', 'resolved', 'abandoned'] as const;
+// `refunding` / `refunded` added by hardening A6 — an abandoned late
+// deposit an operator refunded to its sender (or is mid-refund).
+export const WATCHER_SKIP_STATUSES = [
+  'pending',
+  'resolved',
+  'abandoned',
+  'refunding',
+  'refunded',
+] as const;
 export type WatcherSkipStatus = (typeof WATCHER_SKIP_STATUSES)[number];
 
 export const WATCHER_SKIP_REASONS = [

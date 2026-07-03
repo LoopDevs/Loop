@@ -107,6 +107,9 @@ export const ApiErrorCode = {
   // non-zero user_credits balance in any currency.
   BALANCE_NOT_ZERO: 'BALANCE_NOT_ZERO',
   REFUND_ALREADY_ISSUED: 'REFUND_ALREADY_ISSUED',
+  // Hardening A6 — late-deposit refund-to-sender (admin).
+  DEPOSIT_NOT_REFUNDABLE: 'DEPOSIT_NOT_REFUNDABLE',
+  REFUND_SUBMIT_FAILED: 'REFUND_SUBMIT_FAILED',
   // CF-06 admin-refund order validation. The bound order must exist
   // (ORDER_NOT_FOUND → 404), belong to the refund target
   // (ORDER_USER_MISMATCH → 409, defends against IDOR / fabricated

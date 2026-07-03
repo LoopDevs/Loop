@@ -26,6 +26,50 @@ import { paymentWatcherSkips } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { HorizonPaymentSchema, type HorizonPayment } from './horizon.js';
 import { notifyDepositSkipRecorded, notifyDepositSkipAbandoned } from '../discord/monitoring.js';
+import { refundDeposit } from './deposit-refund.js';
+
+/**
+ * A6: is auto-refund of late deposits enabled? Read LIVE from
+ * process.env (like the kill switches) so an operator flip takes
+ * effect on the next sweep without a redeploy. Declared in env.ts for
+ * validation + .env.example parity.
+ */
+function isDepositRefundAutoEnabled(): boolean {
+  const v = (process.env['LOOP_DEPOSIT_REFUND_AUTO'] ?? '').trim().toLowerCase();
+  return v === 'true' || v === '1' || v === 'yes' || v === 'on';
+}
+
+/**
+ * A6 auto path: refund a just-abandoned late deposit. Never throws — an
+ * auto-refund failure must not abort the sweep; the caller alerts so
+ * ops can refund manually. Returns true iff the deposit was refunded
+ * (or was already refunded).
+ *
+ * Recovery note (money-review P2-a): a deposit whose refund hits an
+ * AMBIGUOUS submit error is held in `refunding` (fail-closed, never
+ * double-paid). The retry-sweep only re-drives `pending` skips, so in a
+ * fully-auto deployment a held `refunding` row is NOT auto-re-driven —
+ * recovery is operator-driven: the `notifyDepositSkipAbandoned` alert
+ * fired below prompts an operator to re-POST the refund endpoint (which
+ * re-checks Horizon + stale-reclaims). Funds are never lost (they sit
+ * at the operator==deposit account); this is a liveness note, not a
+ * safety one. A scheduled re-driver of stale `refunding` rows is a
+ * future enhancement for high-volume auto mode.
+ */
+async function tryAutoRefund(paymentId: string): Promise<boolean> {
+  try {
+    const res = await refundDeposit(paymentId);
+    if (res.kind === 'refunded' || res.kind === 'already_refunded') {
+      log.info({ paymentId, txHash: res.txHash }, 'A6: late deposit auto-refunded to sender');
+      return true;
+    }
+    log.warn({ paymentId, result: res.kind }, 'A6: auto-refund did not complete');
+    return false;
+  } catch (err) {
+    log.error({ err, paymentId }, 'A6: auto-refund threw — leaving abandoned for manual refund');
+    return false;
+  }
+}
 
 const log = logger.child({ area: 'payment-watcher-skips' });
 
@@ -231,6 +275,26 @@ export async function retrySkippedPayments(
         continue;
       }
       if (outcome.kind === 'order_gone') {
+        // A6: a late deposit (order expired before it landed). In
+        // auto-refund mode, return it to the sender instead of leaving
+        // it abandoned for a manual operator button-press.
+        if (isDepositRefundAutoEnabled()) {
+          await setStatus(row.paymentId, 'abandoned'); // durable state the refund claims
+          const refunded = await tryAutoRefund(row.paymentId);
+          result.abandoned++;
+          if (!refunded) {
+            // Auto-refund didn't complete — surface it so ops refunds
+            // manually rather than the deposit silently sitting.
+            notifyDepositSkipAbandoned({
+              paymentId: row.paymentId,
+              orderId: row.orderId,
+              reason: row.reason,
+              attempts: row.attempts,
+              note: 'late deposit — auto-refund did not complete; refund manually',
+            });
+          }
+          continue;
+        }
         await abandon(row, 'order no longer pending_payment');
         result.abandoned++;
         continue;

@@ -15,7 +15,13 @@ describe('STAFF_ROLES (ADR 037)', () => {
 
 describe('watcher-skip enums (migration 0033)', () => {
   it('pins the status tuple', () => {
-    expect(WATCHER_SKIP_STATUSES).toEqual(['pending', 'resolved', 'abandoned']);
+    expect(WATCHER_SKIP_STATUSES).toEqual([
+      'pending',
+      'resolved',
+      'abandoned',
+      'refunding',
+      'refunded',
+    ]);
   });
 
   it('reasons are unique and non-empty', () => {

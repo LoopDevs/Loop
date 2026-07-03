@@ -139,7 +139,8 @@ export async function adminListWatcherSkipsHandler(c: Context): Promise<Response
 
   try {
     const conditions: SQL[] = [];
-    if (statusRaw !== undefined) conditions.push(eq(paymentWatcherSkips.status, statusRaw));
+    if (statusRaw !== undefined)
+      conditions.push(eq(paymentWatcherSkips.status, statusRaw as WatcherSkipStatus));
     if (reasonRaw !== undefined) conditions.push(eq(paymentWatcherSkips.reason, reasonRaw));
     if (before !== undefined) conditions.push(lt(paymentWatcherSkips.createdAt, before));
     const where = conditions.length === 0 ? undefined : and(...conditions);

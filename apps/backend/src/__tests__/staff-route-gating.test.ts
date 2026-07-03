@@ -203,6 +203,7 @@ const ADMIN_ONLY_PROBES: Array<[string, string]> = [
   ['POST', `/api/admin/users/${NOBODY_ID}/emissions`],
   ['POST', `/api/admin/users/${NOBODY_ID}/home-currency`],
   ['POST', `/api/admin/users/${NOBODY_ID}/revoke-sessions`],
+  ['POST', '/api/admin/deposits/op-123/refund'],
   ['POST', '/api/admin/payouts/00000000-0000-4000-8000-00000000aaaa/retry'],
   ['POST', '/api/admin/payouts/00000000-0000-4000-8000-00000000aaaa/compensate'],
   ['PUT', '/api/admin/merchant-cashback-configs/some-merchant'],
@@ -329,13 +330,13 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       (g) => !g.gates.includes('requireStaff(admin)') && g.gates.includes('requireStaff(support)'),
     );
     const riders = groups.length - adminTier.length - supportExplicit.length;
-    // 34 = 23 CSV exports + 7 non-CSV admin writes (3 credit writes,
+    // 35 = 23 CSV exports + 8 non-CSV admin writes (3 credit writes,
     //      home-currency, cashback-config PUT, merchants/resync,
-    //      B4 revoke-sessions) + payout retry/compensate + 3 Discord
-    //      surfaces + step-up mint... see the mount-by-mount table in
-    //      the PR; the exact membership is pinned by the matrix test
-    //      above and the money-write list below.
-    expect(adminTier).toHaveLength(34);
+    //      B4 revoke-sessions, A6 deposit-refund) + payout
+    //      retry/compensate + 3 Discord surfaces + step-up mint... see
+    //      the mount-by-mount table in the PR; the exact membership is
+    //      pinned by the matrix test above and the money-write list below.
+    expect(adminTier).toHaveLength(35);
     // 7 = lookup, watcher-skips ×3, wallet ×2, refetch-redemption.
     expect(supportExplicit).toHaveLength(7);
     expect(riders).toBeGreaterThanOrEqual(50);
@@ -381,6 +382,8 @@ describe('ADR 037 mount inventory (default-deny)', () => {
       'DELETE /api/admin/staff/:userId/role': 'requireAdminStepUp(staff-role-revoke)',
       // Sets future emission rates — see the route mount's comment.
       'PUT /api/admin/merchant-cashback-configs/:merchantId': 'requireAdminStepUp(cashback-config)',
+      // A6: submits an outbound Stellar refund from the operator account.
+      'POST /api/admin/deposits/:paymentId/refund': 'requireAdminStepUp(deposit-refund)',
     };
     const groups = new Map(adminRouteGroups().map((g) => [`${g.method} ${g.path}`, g]));
     for (const [key, gate] of Object.entries(mustCarryStepUp)) {
