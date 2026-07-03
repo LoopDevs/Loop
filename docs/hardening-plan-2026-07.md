@@ -15,43 +15,25 @@
 > operator decision before/while implementing (sensible default proposed
 > inline — will implement the default unless overridden).
 >
-> **Status (2026-07-03).** 36 of 40 items DONE and merged — every money/auth
-> fix (A1–A5, A7–A8, B1–B7), every mechanical enforcement gate (C1–C8, C10,
-> C10a), the whole skills/knowledge layer (E1–E10), and the tractable
-> structural items (D3 scaffold generator, D4 retirement ADR). Four
+> **Status (2026-07-03).** 38 of 40 items DONE and merged — every money/auth
+> fix (A1–A8, B1–B7), every mechanical enforcement gate (C1–C8, C10, C10a),
+> the whole skills/knowledge layer (E1–E10), and the structural track (D2
+> config-giant split, D3 scaffold generator, D4 retirement ADR). Six
 > adversarial-review passes caught real bugs pre-merge — a P0 fund-loss (A5),
-> a P0 at-most-once alert (A2/A3), a P0 fleet-stall (A8), three P2s in C10a —
-> each fixed before merge.
+> a P0 at-most-once alert (A2/A3), a P0 fleet-stall (A8), three P2s (C10a), and
+> a P0 double-pay + P1 memo-window on the A6 refund — each fixed before merge.
 >
-> **The 4 remaining are genuinely blocked or scoped, NOT skipped:**
+> **The 2 remaining are owner-adjudicated / in-progress, NOT money gaps:**
 >
-> - **C9** — **[blocked: operator action]**. Adding the flywheel check to
->   branch protection is a governance change the permission layer reserves
->   for the operator; I attempted the exact API call twice and was denied
->   both times. The command is below for the operator to run.
-> - **A6** — **[blocked: operator `[D]` decision]**. The remaining piece is
->   automating refund-to-sender for late deposits — a NEW outbound-payment-to-
->   arbitrary-address money surface that needs an explicit operator OK. The
->   non-`[D]` half (durable skip row + attributed `notifyDepositSkipAbandoned`
->   alert) is already live, so nothing is silently lost today.
-> - **D1** — **[scoped: multi-day, must not half-ship]**. Deriving the whole
->   OpenAPI spec from Zod is the biggest ceiling-raiser but the plan itself
->   requires a module-by-module migration keeping the parity gate until the
->   mirror is fully gone; a partial `openapi/` tree is worse than the honest
->   mirror `check-openapi-parity` keeps correct today.
-> - **D2** — **DONE** (this session). `env.ts` split into `env/schema-helpers.ts`
->   - 3 domain section modules + a composer (1,139 → 328 lines); `db/schema.ts`
->     split into 8 per-domain modules under `db/schema/` + a barrel (1,515 → 21
->     lines). Equivalence proven mechanically: migration-parity re-introspects the
->     composed schema (345 catalog entries match), typecheck proves the `Env` type
->     is byte-identical, all tests green. The C5 dead-flag + lint-docs env scans
->     were repointed at the section modules.
->
-> **The 3 remaining are genuine hard blocks — none a money-integrity gap:**
-> C9 (operator branch-protection, permission-denied), A6 (operator `[D]`
-> refund-to-sender money decision; durable+alert half already live), D1
-> (multi-day OpenAPI-from-Zod that the plan itself says must not be
-> half-shipped).
+> - **C9** — **OWNER DECISION: defer branch-protection hardening to
+>   production.** At dev stage the existing protection is near-frictionless
+>   for a solo admin (`enforce_admins:false`, no required approvals), so
+>   making the flywheel check _required_ is cosmetic while admins bypass it;
+>   the checks still run advisory. Revisit at production/team onboarding (see
+>   the C9 entry + release-preflight).
+> - **D1** — **in progress**: owner asked to prove the OpenAPI-from-Zod
+>   derivation on 2–3 modules (keeping the parity gate) rather than the full
+>   multi-day mirror retirement.
 
 ## Track A — Money-invariant fixes (the judgment-dense residuals)
 
@@ -122,15 +104,18 @@
       common crashed-worker case). Confirmed settlement → hold + page for
       manual reconcile (a usable card may exist). Settlement-read failure
       fails closed to hold (never auto-refund on uncertainty)._
-- [ ] **A6. Late-deposit-after-expiry handling.** _[deferred]_ Deposits landing
-      just after `pending_payment → expired` are classified `order_gone` and
-      abandoned (`skipped-payments.ts:233`). Already surfaced today — the
-      abandon path fires `notifyDepositSkipAbandoned` (attributed RED Discord
-      alert: payment / order / reason), so the deposit is NOT silently lost.
-      What remains is the `[D]` "refund to sender" automation — an outbound
-      payment from the pool to an arbitrary sender address is a new
-      money-movement surface that needs an explicit operator OK. Deferred
-      pending that decision; the manual-reconcile path works today.
+- [x] **A6. Late-deposit-after-expiry handling.** Deposits landing just after
+      `pending_payment → expired` are `order_gone`-abandoned + alerted, but the
+      funds sat at the deposit account. _Done (#1512, operator green-lit "build
+      it, admin + step-up"): `POST /api/admin/deposits/:paymentId/refund`
+      returns an abandoned late deposit to its on-chain sender (deposit==
+      operator, so it reuses submitPayout/submitNativePayment), step-up-gated
+      (`deposit-refund` scope). `LOOP_DEPOSIT_REFUND_AUTO` (default off, per
+      "no auto refunds for now") lets the sweep auto-refund via the same path.
+      Web admin.skips shows the refunding/refunded lifecycle. TWO adversarial
+      money reviews: P0 (abandoned re-entry double-pay on a lost-response tx) + P1 (bounded memo scan window) fixed — windowless hash pre-check first,
+      fail-closed, CAS + >5min stale-reclaim, ambiguous-holds-in-refunding.
+      Unit + real-pg CAS integration tests._
 - [x] **A7. loop_asset overpayment.** `amount-sufficient.ts:88` accepts
       `received >= required` but `markOrderPaid` debits/burns only
       `chargeMinor` — excess LOOP sits stranded, un-burned, counted as
@@ -309,8 +294,16 @@
       advisory; fix the required-check set if not. Zero code, highest leverage.
       _Verified 2026-07-02: the gap is real — "Flywheel integration (real
       postgres)" (which includes migration-parity) is NOT in the required
-      set; e2e-mocked is. Adding it is a governance change the permission
-      layer reserves for the operator. Run:_
+      set; e2e-mocked is._ **OWNER DECISION (2026-07-03): do NOT harden
+      branch protection until production.** Rationale: at dev stage the
+      existing protection is already near-frictionless for a solo admin
+      (`enforce_admins:false`, no required approvals — an admin merges via
+      override anytime), so adding the slow flywheel check as _required_ is
+      cosmetic while admins bypass it; the checks still run + report as
+      advisory, so 100% of the safety signal is retained. Revisit the
+      required-set AND flip `enforce_admins` on at production/team onboarding
+      (release-preflight + oncall docs already slot it there). Command left
+      for that day:
       `gh api -X POST repos/LoopDevs/Loop/branches/main/protection/required_status_checks/contexts --input - <<< '["Flywheel integration (real postgres)"]'`
 - [x] **C10a. Apply the A3 pattern to `interest-pool-watcher.ts`.** Found
       during A2/A3 review: the interest-pool low-cover watcher kept its
