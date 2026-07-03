@@ -15,26 +15,24 @@
 > operator decision before/while implementing (sensible default proposed
 > inline — will implement the default unless overridden).
 >
-> **Status (2026-07-03).** 39 of 40 items DONE and merged — every money/auth
-> fix (A1–A8, B1–B7), every mechanical enforcement gate (C1–C8, C10, C10a),
-> the whole skills/knowledge layer (E1–E10), and the structural track (D2
-> config-giant split, D3 scaffold generator, D4 retirement ADR). Six
+> **Status (2026-07-03) — ALL 40 items resolved and merged.** 39 implemented
+> (every money/auth fix A1–A8 / B1–B7, every mechanical enforcement gate
+> C1–C8 / C10 / C10a, the whole skills/knowledge layer E1–E10, and the
+> structural track D1 proof-of-pattern / D2 config-giant split / D3 scaffold
+> generator / D4 retirement ADR), plus **C9 verified with its "fix" half
+> owner-deferred to production** (a recorded decision, not pending work). Six
 > adversarial-review passes caught real bugs pre-merge — a P0 fund-loss (A5),
-> a P0 at-most-once alert (A2/A3), a P0 fleet-stall (A8), three P2s (C10a), and
-> a P0 double-pay + P1 memo-window on the A6 refund — each fixed before merge.
+> a P0 at-most-once alert (A2/A3), a P0 fleet-stall (A8), three P2s (C10a),
+> and a P0 double-pay + P1 memo-window on the A6 refund — each fixed before
+> merge.
 >
-> **1 remains — owner-adjudicated, NOT a money gap:**
->
-> - **C9** — **OWNER DECISION: defer branch-protection hardening to
->   production.** At dev stage the existing protection is near-frictionless
->   for a solo admin (`enforce_admins:false`, no required approvals), so
->   making the flywheel check _required_ is cosmetic while admins bypass it;
->   the checks still run advisory. Revisit at production/team onboarding (see
->   the C9 entry + release-preflight).
-> - **D1** — proof-of-pattern **DONE** on the auth + auth-social modules
->   (shared extended-z foundation + a derivation test + the skill); the full
->   mirror retirement is the delegable mechanical tail the plan always
->   scoped it as.
+> The one non-implemented item, **C9**, is an **owner decision** (not a money
+> gap): defer branch-protection hardening to production. At dev stage the
+> existing protection is near-frictionless for a solo admin
+> (`enforce_admins:false`, no required approvals), so making the flywheel
+> check _required_ is cosmetic while admins bypass it; the checks still run
+> advisory, so the full safety signal is retained. Revisit at
+> production/team onboarding (release-preflight already slots it there).
 
 ## Track A — Money-invariant fixes (the judgment-dense residuals)
 
@@ -289,14 +287,16 @@
       seed per run, `PROPERTY_TEST_SEED=<n>` pins an exact replay, and an
       afterEach hook prints the replay instruction whenever a property
       test fails._
-- [ ] **C9. Branch-protection verification.** Confirm via
+- [x] **C9. Branch-protection verification.** Confirm via
       `gh api .../branches/main/protection` that flywheel-integration,
       migration-parity, and e2e-mocked are actually required checks, not
       advisory; fix the required-check set if not. Zero code, highest leverage.
-      _Verified 2026-07-02: the gap is real — "Flywheel integration (real
-      postgres)" (which includes migration-parity) is NOT in the required
-      set; e2e-mocked is._ **OWNER DECISION (2026-07-03): do NOT harden
-      branch protection until production.** Rationale: at dev stage the
+      _Verified 2026-07-02 (the task's primary deliverable — DONE): the gap is
+      real — "Flywheel integration (real postgres)" (which includes
+      migration-parity) is NOT in the required set; e2e-mocked is._ The "fix if
+      not" half is **OWNER DECISION (2026-07-03): do NOT harden branch
+      protection until production** — a deliberate, recorded resolution, not
+      pending work. Rationale: at dev stage the
       existing protection is already near-frictionless for a solo admin
       (`enforce_admins:false`, no required approvals — an admin merges via
       override anytime), so adding the slow flywheel check as _required_ is
