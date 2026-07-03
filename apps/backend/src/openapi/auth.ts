@@ -151,7 +151,8 @@ export function registerAuthOpenApi(
         content: { 'application/json': { schema: errorResponse } },
       },
       429: {
-        description: 'Rate limit exceeded (10/min per IP)',
+        description:
+          'Rate limit exceeded (10/min per IP), or the email is locked after too many failed attempts (`TOO_MANY_ATTEMPTS`, hardening B5 — includes `Retry-After`)',
         content: { 'application/json': { schema: errorResponse } },
       },
       500: {

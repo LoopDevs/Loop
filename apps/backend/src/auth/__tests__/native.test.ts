@@ -21,6 +21,17 @@ const revokeRefreshMock = vi.fn();
 const tryRevokeIfLiveMock = vi.fn();
 const findRefreshRecordMock = vi.fn();
 const revokeAllRefreshForUserMock = vi.fn();
+// B5: per-email OTP attempt counter.
+const isEmailOtpLockedMock = vi.fn();
+const registerFailedOtpAttemptMock = vi.fn();
+const clearOtpAttemptsMock = vi.fn();
+
+vi.mock('../otp-attempt-counter.js', () => ({
+  isEmailOtpLocked: (args: unknown) => isEmailOtpLockedMock(args),
+  registerFailedOtpAttempt: (args: unknown) => registerFailedOtpAttemptMock(args),
+  clearOtpAttempts: (email: string) => clearOtpAttemptsMock(email),
+  OTP_EMAIL_LOCKOUT_MS: 900_000,
+}));
 
 vi.mock('../otps.js', async () => {
   const actual = await vi.importActual<typeof OtpsModule>('../otps.js');
@@ -80,6 +91,9 @@ interface FakeCtx {
 }
 
 function makeCtx(body: unknown): FakeCtx {
+  // Accumulate `c.header(k, v)` calls so response assertions can read
+  // them (B5 sets Retry-After on the 429 lockout paths).
+  const extraHeaders: Record<string, string> = {};
   return {
     body,
     ctx: {
@@ -89,10 +103,13 @@ function makeCtx(body: unknown): FakeCtx {
           return body;
         },
       },
+      header: (k: string, v: string) => {
+        extraHeaders[k] = v;
+      },
       json: (b: unknown, status?: number) =>
         new Response(JSON.stringify(b), {
           status: status ?? 200,
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', ...extraHeaders },
         }),
     } as unknown as Context,
   };
@@ -114,6 +131,13 @@ beforeEach(() => {
   revokeAllRefreshForUserMock.mockReset();
   findRefreshRecordMock.mockResolvedValue(null);
   revokeAllRefreshForUserMock.mockResolvedValue(undefined);
+  // B5 defaults: email not locked, wrong-guess doesn't tip over, clear ok.
+  isEmailOtpLockedMock.mockReset();
+  isEmailOtpLockedMock.mockResolvedValue(false);
+  registerFailedOtpAttemptMock.mockReset();
+  registerFailedOtpAttemptMock.mockResolvedValue({ failedAttempts: 1, locked: false });
+  clearOtpAttemptsMock.mockReset();
+  clearOtpAttemptsMock.mockResolvedValue(undefined);
 
   countRecentMock.mockResolvedValue(0);
   createOtpMock.mockResolvedValue({ id: 'row-1', expiresAt: new Date(Date.now() + 60_000) });
@@ -243,7 +267,39 @@ describe('nativeVerifyOtpHandler', () => {
     );
   });
 
-  it('consumes the OTP, upserts the user, and mints a token pair on success', async () => {
+  it('B5: 429 when the email is already locked — never touches the code', async () => {
+    isEmailOtpLockedMock.mockResolvedValue(true);
+    const { ctx } = makeCtx({ email: 'a@b.com', otp: '123456' });
+    const res = await nativeVerifyOtpHandler(ctx);
+    expect(res.status).toBe(429);
+    expect(((await res.json()) as { code: string }).code).toBe('TOO_MANY_ATTEMPTS');
+    expect(res.headers.get('Retry-After')).toBe('900');
+    // Locked out BEFORE the hash comparison — no live-OTP lookup.
+    expect(findLiveOtpMock).not.toHaveBeenCalled();
+  });
+
+  it('B5: registers a failed attempt on a wrong code (401 when under threshold)', async () => {
+    findLiveOtpMock.mockResolvedValue(null);
+    registerFailedOtpAttemptMock.mockResolvedValue({ failedAttempts: 3, locked: false });
+    const { ctx } = makeCtx({ email: 'a@b.com', otp: '000000' });
+    const res = await nativeVerifyOtpHandler(ctx);
+    expect(res.status).toBe(401);
+    expect(registerFailedOtpAttemptMock).toHaveBeenCalledWith(
+      expect.objectContaining({ email: 'a@b.com' }),
+    );
+  });
+
+  it('B5: 429 when the wrong guess tips the email over the threshold', async () => {
+    findLiveOtpMock.mockResolvedValue(null);
+    registerFailedOtpAttemptMock.mockResolvedValue({ failedAttempts: 10, locked: true });
+    const { ctx } = makeCtx({ email: 'a@b.com', otp: '000000' });
+    const res = await nativeVerifyOtpHandler(ctx);
+    expect(res.status).toBe(429);
+    expect(((await res.json()) as { code: string }).code).toBe('TOO_MANY_ATTEMPTS');
+    expect(res.headers.get('Retry-After')).toBe('900');
+  });
+
+  it('consumes the OTP, upserts the user, mints a pair, and clears the counter on success', async () => {
     findLiveOtpMock.mockResolvedValue({ id: 'otp-1', attempts: 0 });
     findOrCreateUserMock.mockResolvedValue({ id: 'user-1', email: 'a@b.com' });
     const { ctx } = makeCtx({ email: 'a@b.com', otp: '123456' });
@@ -252,6 +308,8 @@ describe('nativeVerifyOtpHandler', () => {
     expect(markConsumedMock).toHaveBeenCalledWith('otp-1');
     expect(findOrCreateUserMock).toHaveBeenCalledWith('a@b.com');
     expect(recordRefreshMock).toHaveBeenCalled();
+    // B5: the email's failed-attempt counter is cleared on success.
+    expect(clearOtpAttemptsMock).toHaveBeenCalledWith('a@b.com');
     const body = (await res.json()) as { accessToken: string; refreshToken: string };
     expect(body.accessToken.split('.')).toHaveLength(3);
     expect(body.refreshToken.split('.')).toHaveLength(3);

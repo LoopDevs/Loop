@@ -70,6 +70,8 @@ export const ApiErrorCode = {
   UNAUTHORIZED: 'UNAUTHORIZED',
   RATE_LIMITED: 'RATE_LIMITED',
   DAILY_LIMIT_EXCEEDED: 'DAILY_LIMIT_EXCEEDED',
+  // Hardening B5 — per-email OTP verify lockout (verify-otp).
+  TOO_MANY_ATTEMPTS: 'TOO_MANY_ATTEMPTS',
   // Server / upstream
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   UPSTREAM_ERROR: 'UPSTREAM_ERROR',
