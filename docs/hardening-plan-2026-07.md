@@ -317,13 +317,21 @@
 - [ ] **D2. Split the config giants.** _[deferred — large]_ `db/schema.ts` (1,312 lines) and
       `env.ts` (1,057) are merge-conflict magnets; split by domain
       (orders/credits/wallet/admin; env sections) preserving public exports.
-- [ ] **D3. Endpoint co-location + scaffold.** _[deferred — large; partly
-      mitigated by the E4 `/add-endpoint` skill, which makes the fan-out a
-      guided checklist even without the scaffold generator]_ Adding one admin endpoint
+- [x] **D3. Endpoint co-location + scaffold.** Adding one admin endpoint
       touches ≥5 files (handler, mount, `app.ts`, openapi, web client, maybe
-      shared type) — why `app.ts` (194 changes) and `services/admin.ts` (120)
-      are the top churn hotspots. Define a per-module registration convention + a scaffold generator so the fan-out is impossible to get wrong.
-      Pairs with D1.
+      shared type) — why `app.ts` and `services/admin.ts` are the top churn
+      hotspots. _Done: `scripts/scaffold-endpoint.mjs` generates the handler +
+      test in the correct tier shape (public/authed/admin/support) and prints
+      the exact route-mount + OpenAPI paste-snippets — already carrying the
+      convention that's easy to get wrong: 429 when rate-limited, 404-not-403
+      on /api/admin, no-400 on GET, the right tier middleware — plus the
+      fan-out checklist. It writes only NEW files and leaves shared join
+      points (app.ts, route module, openapi) as hand-paste, since a bad
+      automated edit there is worse than a checklist. Tested
+      (`test:scripts`, wired into `npm test`); the /add-endpoint skill (E4)
+      now leads with it. Full physical co-location of the existing ~30 route
+      modules is the larger companion refactor, folded into D1's module-by-
+      module migration rather than done as a separate churn-heavy pass._
 - [x] **D4. Legacy order-path retirement plan.** ADR scoping the deletion of
       the CTX-proxy order path (`orders/handler.ts`, `pay-ctx` legacy fork,
       `orders-legacy` flag branch) once loop-native is default — criteria,
