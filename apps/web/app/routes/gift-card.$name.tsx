@@ -230,6 +230,11 @@ export default function GiftCardRoute(): React.JSX.Element {
                             height={80}
                             eager
                             className="w-full h-full"
+                            fallback={
+                              <span className="text-gray-500 text-sm font-bold">
+                                {merchant.name.charAt(0)}
+                              </span>
+                            }
                           />
                         ) : (
                           <span className="text-gray-500 text-sm font-bold">
@@ -254,6 +259,11 @@ export default function GiftCardRoute(): React.JSX.Element {
                           height={80}
                           eager
                           className="w-full h-full"
+                          fallback={
+                            <span className="text-gray-400 text-xl font-bold">
+                              {merchant.name.charAt(0)}
+                            </span>
+                          }
                         />
                       ) : (
                         <span className="text-gray-400 text-xl font-bold">

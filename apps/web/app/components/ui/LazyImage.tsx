@@ -8,12 +8,20 @@ interface LazyImageProps {
   className?: string;
   /** Eagerly load (above the fold). Default: lazy. */
   eager?: boolean;
+  /**
+   * Rendered on load ERROR instead of the neutral grey placeholder. Pass the
+   * same fallback the caller shows when `src` is absent (e.g. a letter
+   * monogram) so a present-but-broken URL — a logo.dev 404, a dead CDN link —
+   * degrades to the intended fallback rather than a permanent grey box, which
+   * looked worse than having no image at all.
+   */
+  fallback?: React.ReactNode;
 }
 
 /**
  * Image with shimmer placeholder and fade-in on load.
  * Shows a pulse animation while loading, fades in when ready.
- * On error, stays on the placeholder (no broken image icon).
+ * On error, renders `fallback` if given, else the neutral grey placeholder.
  */
 export function LazyImage({
   src,
@@ -22,6 +30,7 @@ export function LazyImage({
   height,
   className = '',
   eager = false,
+  fallback,
 }: LazyImageProps): React.JSX.Element {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
@@ -33,10 +42,14 @@ export function LazyImage({
         <div className="absolute inset-0 bg-gradient-to-r from-gray-200 via-gray-100 to-gray-200 dark:from-gray-700 dark:via-gray-600 dark:to-gray-700 animate-pulse" />
       )}
 
-      {/* Error fallback */}
-      {error && (
-        <div className="absolute inset-0 bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800" />
-      )}
+      {/* Error fallback — the caller's fallback (e.g. a monogram) if provided,
+          else a neutral grey box. */}
+      {error &&
+        (fallback !== undefined ? (
+          <div className="absolute inset-0 flex items-center justify-center">{fallback}</div>
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800" />
+        ))}
 
       {/* Actual image */}
       {!error && (
