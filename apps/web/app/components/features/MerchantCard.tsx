@@ -193,6 +193,11 @@ export function MerchantCard({
                 height={80}
                 eager={eager}
                 className="w-full h-full"
+                fallback={
+                  <span className="text-ink-subtle text-sm font-bold">
+                    {merchant.name.substring(0, 2).toUpperCase()}
+                  </span>
+                }
               />
             ) : (
               <span className="text-ink-subtle text-sm font-bold">
