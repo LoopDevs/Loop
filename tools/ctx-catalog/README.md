@@ -38,7 +38,9 @@ dry-run/confirm gate is tracked follow-up (comprehensive-audit Part IV phase 9 r
 - `./` — re-runnable tooling: supplier pulls (`pull-*`, `supplier-*`), allocators
   (`*-allocate`, `ezpin-availability-sweep`), media pipeline (`fetch-logos`, `scrape-*`,
   `source-images-*`, `build-logo-*`, `warm-img-cache`), QC + review UIs (`review-server`,
-  `domain-review-server`, `logo-dims`, `logo-opacity-scan`, `recount`, `ctx-anomalies`,
+  `domain-review-server`, `image-qc` (deterministic sharp-only gate: blur +
+  upscale/low-quality round-trip + near-dup dHash; `--self-test`), `logo-dims`,
+  `logo-opacity-scan`, `recount`, `ctx-anomalies`,
   `ctx-dup-scan`, `ctx-provider-gaps`, domain resolvers), and `demo-seed`.
 - `./archive/` — **consumed one-shot passes** kept for provenance only (the `ctx-*-apply` /
   retag / casing / dedup-apply family, cover fix rounds, `qc-residue-fix`, `note-*`,
