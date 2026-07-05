@@ -46,7 +46,11 @@ EzPin resyncs → 3,468) after this pass, so the newer brands still need sourcin
 
 ## Going forward
 
-The pipeline scripts still read/write `/tmp` — a `CTX_DATA_DIR` convention
-pointing here (so new work persists automatically) is tracked as part of the
-media-system improvement pass. Until then, `cp` fresh `/tmp` outputs here after
-a run.
+**M1 landed** (`../paths.mjs`): the `CTX_DATA_DIR` convention (default this dir)
+
+- `cachePath`/`withLogodevKey` helpers. The core review loop — `review-server`
+  (reads the manifests + persists decisions here; re-injects `LOGODEV_KEY` into the
+  scrubbed URLs) and `recount` — now reads/writes here, so approvals + sourcing
+  persist automatically. The remaining ad-hoc scripts still hardcode `/tmp`;
+  migrating them is a mechanical follow-up. Override with `CTX_DATA_DIR=/tmp` for a
+  throwaway run.
