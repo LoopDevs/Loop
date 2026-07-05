@@ -20,8 +20,9 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
+import { dataPath, cachePath, withLogodevKey } from './paths.mjs';
 
-const IMG_CACHE = '/tmp/review-img-cache';
+const IMG_CACHE = cachePath('review-img-cache');
 try {
   mkdirSync(IMG_CACHE, { recursive: true });
 } catch {}
@@ -82,6 +83,7 @@ function isBlockedIp(ip) {
   return true; // not a valid IP literal → block
 }
 async function safeImageFetch(rawUrl, init) {
+  rawUrl = withLogodevKey(rawUrl); // recovered manifests carry a scrubbed token
   let parsed;
   try {
     parsed = new URL(rawUrl);
@@ -102,10 +104,10 @@ async function safeImageFetch(rawUrl, init) {
 }
 
 const PORT = 7654;
-const IMAGES = '/tmp/ctx-media-final.json';
-const INFO = '/tmp/ctx-info.json';
-const CTXALL = '/tmp/ctx-all.json';
-const DECISIONS = '/tmp/review-decisions.json';
+const IMAGES = dataPath('ctx-media-final.json');
+const INFO = dataPath('ctx-info.json');
+const CTXALL = dataPath('ctx-all.json');
+const DECISIONS = dataPath('review-decisions.json');
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
 
@@ -114,7 +116,7 @@ function loadData() {
   const info = existsSync(INFO) ? JSON.parse(readFileSync(INFO, 'utf8')) : {};
   // Current CTX state is the authoritative source for names/country — the
   // media snapshot pre-dates the renames, so always prefer the live name.
-  const FRESH = '/tmp/ctx-fresh.json';
+  const FRESH = dataPath('ctx-fresh.json');
   const ctx = existsSync(FRESH)
     ? JSON.parse(readFileSync(FRESH, 'utf8'))
     : existsSync(CTXALL)
