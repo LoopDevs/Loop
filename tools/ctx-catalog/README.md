@@ -1,5 +1,10 @@
 # tools/ctx-catalog — CTX merchant-catalog operator tooling
 
+> **End-to-end runbook:** [`PIPELINE.md`](./PIPELINE.md) — how the v2 scripts fit
+> together (aggregate → resolve → source → extract → QC → review → dry-run
+> apply), the keys each stage needs, and a one-liner that runs every
+> `--self-test` (13/13 green).
+>
 > **v2 direction:** [`IMPROVEMENT-PLAN-2026-07.md`](./IMPROVEMENT-PLAN-2026-07.md)
 > — the principal-engineer plan to turn this from an ad-hoc, `/tmp`-based,
 > repair-after-the-fact pipeline into a durable, confidence-scored,
