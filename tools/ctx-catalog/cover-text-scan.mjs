@@ -101,7 +101,8 @@ export async function scanCover(buf, worker) {
   return { ...classifyCoverText(metrics), metrics };
 }
 
-// ── CLI ───────────────────────────────────────────────────────────────────
+// ── CLI (only when run directly, never on import) ───────────────────────────
+const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 const argv = process.argv.slice(2);
 const arg = (k) => {
   const i = argv.indexOf(k);
@@ -124,7 +125,7 @@ const svgText = (words) =>
       `</svg>`,
   );
 
-if (argv.includes('--self-test')) {
+if (isMain && argv.includes('--self-test')) {
   // 1) pure classify logic (deterministic, no OCR)
   const cases = [
     [{ wordCount: 20, coverage: 0.2, watermark: false }, 'reject'],
@@ -164,7 +165,7 @@ if (argv.includes('--self-test')) {
     c.metrics.wordCount <= 1;
   console.log(ok ? '\nSELF-TEST PASS ✓' : '\nSELF-TEST FAIL ✗');
   process.exit(ok ? 0 : 1);
-} else if (arg('--url') || arg('--manifest')) {
+} else if (isMain && (arg('--url') || arg('--manifest'))) {
   const worker = await createWorker('eng');
   try {
     if (arg('--url')) {
@@ -191,7 +192,7 @@ if (argv.includes('--self-test')) {
   } finally {
     await worker.terminate();
   }
-} else {
+} else if (isMain) {
   console.log(
     'usage: cover-text-scan.mjs --self-test | --url <img> | --manifest <file> [--field headerUrl] [--limit N]',
   );

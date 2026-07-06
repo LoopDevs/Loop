@@ -14,6 +14,7 @@
  *   node scripts/source-images-tavily.mjs [--limit N] [--test]   (needs TAVILY_API_KEY)
  */
 import { readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { imageDimensions } from './logo-dims.mjs';
 import { registrable } from './domain-tools.mjs';
 
@@ -54,12 +55,49 @@ async function tavily(query) {
     .filter((im) => im.url);
 }
 
+const CC_NAME = {
+  US: 'USA',
+  GB: 'UK',
+  CA: 'Canada',
+  AU: 'Australia',
+  MX: 'Mexico',
+  IN: 'India',
+  AE: 'UAE',
+  SA: 'Saudi Arabia',
+  DE: 'Germany',
+  FR: 'France',
+  ES: 'Spain',
+  IT: 'Italy',
+  NL: 'Netherlands',
+  IE: 'Ireland',
+  NZ: 'New Zealand',
+};
+const STRIP_COUNTRY =
+  /\s+(US|USA|UK|GB|Canada|CA|Europe|EU|AU|Australia|MX|Mexico|IN|India|AE|UAE|SA|IE|NZ)$/i;
+
+// Category + country disambiguated first-pass cover queries (media v2 plan S2).
+// The old brand-name-only queries ("Wickes storefront") sent ambiguous brands
+// to the wrong images and then to the archived repair round; folding in the
+// category (already on the record as `vertical`) + the country name
+// disambiguates up front ("Wickes DIY UK store interior"). Empty parts are
+// dropped, so it degrades to the old behaviour when category/country are absent.
+export function coverQueries(m, brand) {
+  const cat = (m.vertical || m.category || '').trim();
+  const cc = CC_NAME[m.country] || '';
+  const q = (...parts) => parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  return [
+    q(brand, cat, cc, 'store interior'),
+    q(brand, cat, cc, 'hero banner lifestyle'),
+    q(brand, cc, 'official site'),
+  ];
+}
+
 async function bestFor(m) {
-  const brand = m.name.replace(/\s+(US|USA|UK|GB|Canada|CA|Europe)$/i, '');
+  const brand = m.name.replace(STRIP_COUNTRY, '');
   const root = rootOf(m.domain);
   const seen = new Set();
   let pool = [];
-  for (const q of [`${brand} storefront`, `${brand} store interior`, `${brand} brand lifestyle`]) {
+  for (const q of coverQueries(m, brand)) {
     let imgs = [];
     try {
       imgs = await tavily(q);
@@ -155,7 +193,22 @@ async function main() {
     `\nDone. covers:${Object.values(out).filter((r) => r.headerUrl).length}/${Object.keys(out).length} (brand-owned:${Object.values(out).filter((r) => r.headerSource === 'tavily-brand').length}). Wrote ${outPath}`,
   );
 }
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+const isMain = process.argv[1] === fileURLToPath(import.meta.url);
+if (isMain && process.argv.includes('--self-test')) {
+  // Prove the disambiguated queries fold in category + country and degrade
+  // cleanly — no Tavily call, runs before main().
+  const wickes = coverQueries({ vertical: 'DIY', country: 'GB' }, 'Wickes');
+  const bare = coverQueries({}, 'PlainBrand');
+  const checks = {
+    'category + country folded into scene query': wickes[0] === 'Wickes DIY UK store interior',
+    'official-site query carries the country': wickes[2] === 'Wickes UK official site',
+    'degrades to brand-only when cat/country absent': bare[0] === 'PlainBrand store interior',
+  };
+  for (const [k, v] of Object.entries(checks)) console.log(`  ${v ? '✓' : '✗'} ${k}`);
+  process.exit(Object.values(checks).every(Boolean) ? 0 : 1);
+} else if (isMain) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
