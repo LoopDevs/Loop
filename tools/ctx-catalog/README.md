@@ -41,7 +41,10 @@ dry-run/confirm gate is tracked follow-up (comprehensive-audit Part IV phase 9 r
   `domain-review-server`, `image-qc` (deterministic sharp-only gate: blur +
   upscale/low-quality round-trip + near-dup dHash; `--self-test`),
   `cover-text-scan` (Tesseract OCR text-in-cover reject/flag; covers only, never
-  logos; ADR 041; `--self-test`), `logo-dims`,
+  logos; ADR 041; `--self-test`), `vision-qc` (Claude vision wrong-brand /
+  low-quality / has-text / placeholder verdict — the semantic check sharp+OCR
+  can't make; plain fetch, `ANTHROPIC_API_KEY`, no SDK dep; `--self-test`),
+  `logo-dims`,
   `logo-opacity-scan`, `recount`, `ctx-anomalies`,
   `ctx-dup-scan`, `ctx-provider-gaps`, domain resolvers (`ctx-domain-resolve`,
   `resolve-missing-domains`, `domain-tools` — PSL registrable root + reseller
