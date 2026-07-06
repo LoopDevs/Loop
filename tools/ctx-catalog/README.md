@@ -58,7 +58,10 @@ dry-run/confirm gate is tracked follow-up (comprehensive-audit Part IV phase 9 r
   `ANTHROPIC_API_KEY`, no SDK dep; `--self-test`), `ai-info` (codified
   info-generation prompt + style-contract validator for
   intro/description/instructions/terms — no price/discount/expiry claims;
-  `--self-test`), and `demo-seed`.
+  `--self-test`), `brand-family` (family fan-out: group regional variants by a
+  country-stripped key + propagate the region-agnostic logo across them so
+  sourcing/QC happens once per family, not per variant; `--self-test`), and
+  `demo-seed`.
 - `./archive/` — **consumed one-shot passes** kept for provenance only (the `ctx-*-apply` /
   retag / casing / dedup-apply family, cover fix rounds, `qc-residue-fix`, `note-*`,
   `merge-pairs`, …). Their `/tmp` inputs are gone; do not re-run them — they encode decisions
