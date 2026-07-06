@@ -55,3 +55,10 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - 'dependencies'
+    # Only keep node:22-alpine PATCHED (digest bumps) — that's what keeps the
+    # trivy CVE scan green. A major node bump (22→26) is a deliberate runtime
+    # migration, not something to auto-PR every release; it just piles up red
+    # PRs (dependabot opened #1540/#1541 for exactly this). Do majors by hand.
+    ignore:
+      - dependency-name: 'node'
+        update-types: ['version-update:semver-major']
