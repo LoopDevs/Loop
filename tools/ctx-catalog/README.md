@@ -39,7 +39,9 @@ dry-run/confirm gate is tracked follow-up (comprehensive-audit Part IV phase 9 r
   (`*-allocate`, `ezpin-availability-sweep`), media pipeline (`fetch-logos`, `scrape-*`,
   `source-images-*`, `build-logo-*`, `warm-img-cache`), QC + review UIs (`review-server`,
   `domain-review-server`, `image-qc` (deterministic sharp-only gate: blur +
-  upscale/low-quality round-trip + near-dup dHash; `--self-test`), `logo-dims`,
+  upscale/low-quality round-trip + near-dup dHash; `--self-test`),
+  `cover-text-scan` (Tesseract OCR text-in-cover reject/flag; covers only, never
+  logos; ADR 041; `--self-test`), `logo-dims`,
   `logo-opacity-scan`, `recount`, `ctx-anomalies`,
   `ctx-dup-scan`, `ctx-provider-gaps`, domain resolvers), and `demo-seed`.
 - `./archive/` — **consumed one-shot passes** kept for provenance only (the `ctx-*-apply` /
