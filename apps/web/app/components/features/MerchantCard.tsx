@@ -2,6 +2,7 @@ import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { Merchant } from '@loop/shared';
 import { merchantSlug } from '@loop/shared';
 import { getImageProxyUrl } from '~/utils/image';
+import { brandTileStyle } from '~/utils/brand-color';
 import { triggerHaptic } from '~/native/haptics';
 import { LazyImage } from '~/components/ui/LazyImage';
 import { currencySymbol } from '~/i18n/format';
@@ -146,9 +147,20 @@ export function MerchantCard({
               height={360}
               eager={eager}
               className="w-full h-full"
+              fallback={
+                <div
+                  className="w-full h-full flex items-center justify-center"
+                  style={brandTileStyle(merchant.name)}
+                >
+                  <span className="text-white text-3xl font-bold">{merchant.name.charAt(0)}</span>
+                </div>
+              }
             />
           ) : (
-            <div className="w-full h-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center">
+            <div
+              className="w-full h-full flex items-center justify-center"
+              style={brandTileStyle(merchant.name)}
+            >
               <span className="text-white text-3xl font-bold">{merchant.name.charAt(0)}</span>
             </div>
           )}

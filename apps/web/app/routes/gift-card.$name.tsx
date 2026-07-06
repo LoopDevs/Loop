@@ -10,6 +10,7 @@ import { PurchaseContainer } from '~/components/features/purchase/PurchaseContai
 import { Spinner } from '~/components/ui/Spinner';
 import { LazyImage } from '~/components/ui/LazyImage';
 import { getImageProxyUrl } from '~/utils/image';
+import { brandTileStyle } from '~/utils/brand-color';
 import { currencySymbol, useLocaleTag } from '~/i18n/format';
 
 export function meta({ params }: Route.MetaArgs): Route.MetaDescriptors {
@@ -208,7 +209,7 @@ export default function GiftCardRoute(): React.JSX.Element {
                   {/* Card cover image — always rendered. Mobile overlays
                     logo + name on the image; desktop keeps the image
                     clean and places the logo below via -mt. */}
-                  <div className="relative aspect-video bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-600 dark:to-gray-700">
+                  <div className="relative aspect-video" style={brandTileStyle(merchant.name)}>
                     {cardUrl && (
                       <LazyImage
                         src={cardUrl}
@@ -217,6 +218,9 @@ export default function GiftCardRoute(): React.JSX.Element {
                         height={360}
                         eager
                         className="w-full h-full"
+                        fallback={
+                          <div className="w-full h-full" style={brandTileStyle(merchant.name)} />
+                        }
                       />
                     )}
                     {/* Mobile-only overlay: logo + name on the cover. */}
