@@ -131,8 +131,15 @@ const normBrand = (name) =>
  * Score one candidate against the brand brief. Denied hosts hard-zero; otherwise
  * the score rises with how closely the registrable SLD matches the brand name,
  * plus a small bonus for the country's ccTLD storefront.
+ *
+ * `supplierAnchored`: the URL came from the supplier's OWN record for this
+ * merchant (a website field, or extracted from the redemption/terms copy). That
+ * is authoritative identity — trust it over name-matching, which is exactly what
+ * fixes the wrong-brand error (e.g. "Aerie" → `ae.com`, where the SLD doesn't
+ * match the name at all). Still subject to the deny-list above, so a reseller
+ * URL in the text can't sneak through.
  */
-export function scoreCandidate(candidate, { name, country } = {}) {
+export function scoreCandidate(candidate, { name, country, supplierAnchored } = {}) {
   const domain = registrable(candidate);
   if (!domain) return { domain: null, confidence: 0, reasons: ['unresolvable'] };
   if (isDeniedDomain(candidate))
@@ -159,6 +166,10 @@ export function scoreCandidate(candidate, { name, country } = {}) {
   if (cc && domain.endsWith(cc)) {
     conf = Math.min(0.99, conf + 0.05);
     reasons.push(`cc:${country}`);
+  }
+  if (supplierAnchored) {
+    conf = Math.max(conf, 0.9);
+    reasons.push('supplier-anchored');
   }
   return { domain, confidence: Number(conf.toFixed(2)), reasons };
 }
@@ -189,6 +200,10 @@ if (isMain && argv.includes('--self-test')) {
     'score: exact name → ≥0.9':
       scoreCandidate('tesco.co.uk', { name: 'Tesco', country: 'GB' }).confidence >= 0.9,
     'score: denied → 0': scoreCandidate('eneba.com', { name: 'Tesco' }).confidence === 0,
+    'supplier-anchored: ae.com for Aerie → ≥0.9 (SLD ≠ name)':
+      scoreCandidate('ae.com', { name: 'Aerie', supplierAnchored: true }).confidence >= 0.9,
+    'supplier-anchored cannot override the deny-list':
+      scoreCandidate('eneba.com', { name: 'X', supplierAnchored: true }).confidence === 0,
     'resolve: picks brand over reseller/noise': (() => {
       const r = resolveDomain({ name: 'Tesco', country: 'GB' }, [
         'eneba.com',
