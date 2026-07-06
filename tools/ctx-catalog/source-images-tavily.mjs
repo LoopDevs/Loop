@@ -14,6 +14,7 @@
  *   node scripts/source-images-tavily.mjs [--limit N] [--test]   (needs TAVILY_API_KEY)
  */
 import { readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { imageDimensions } from './logo-dims.mjs';
 import { registrable } from './domain-tools.mjs';
 
@@ -192,7 +193,8 @@ async function main() {
     `\nDone. covers:${Object.values(out).filter((r) => r.headerUrl).length}/${Object.keys(out).length} (brand-owned:${Object.values(out).filter((r) => r.headerSource === 'tavily-brand').length}). Wrote ${outPath}`,
   );
 }
-if (process.argv.includes('--self-test')) {
+const isMain = process.argv[1] === fileURLToPath(import.meta.url);
+if (isMain && process.argv.includes('--self-test')) {
   // Prove the disambiguated queries fold in category + country and degrade
   // cleanly — no Tavily call, runs before main().
   const wickes = coverQueries({ vertical: 'DIY', country: 'GB' }, 'Wickes');
@@ -204,9 +206,9 @@ if (process.argv.includes('--self-test')) {
   };
   for (const [k, v] of Object.entries(checks)) console.log(`  ${v ? '✓' : '✗'} ${k}`);
   process.exit(Object.values(checks).every(Boolean) ? 0 : 1);
+} else if (isMain) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
 }
-
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
