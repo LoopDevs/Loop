@@ -121,6 +121,7 @@ export function mapUpstreamMerchant(item: UpstreamMerchant): Merchant | null {
   const savingsPercentage =
     item.savingsPercentage !== undefined ? item.savingsPercentage / 100 : undefined;
 
+  const intro = item.info?.intro;
   const description = item.info?.description;
   const instructions = item.info?.instructions;
   const terms = item.info?.terms;
@@ -139,6 +140,7 @@ export function mapUpstreamMerchant(item: UpstreamMerchant): Merchant | null {
     ...(item.cardImageUrl ? { cardImageUrl: item.cardImageUrl } : {}),
     ...(savingsPercentage !== undefined ? { savingsPercentage } : {}),
     ...(denominations !== undefined ? { denominations } : {}),
+    ...(intro ? { intro } : {}),
     ...(description ? { description } : {}),
     ...(instructions ? { instructions } : {}),
     ...(terms ? { terms } : {}),

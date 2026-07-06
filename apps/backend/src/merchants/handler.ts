@@ -164,12 +164,13 @@ export async function merchantDetailHandler(c: Context): Promise<Response> {
       const raw = (await response.json().catch(() => null)) as unknown;
       const parsed = UpstreamMerchantDetailResponse.safeParse(raw);
       if (parsed.success && parsed.data.info) {
-        const { description, longDescription, terms, instructions } = parsed.data.info;
+        const { intro, description, longDescription, terms, instructions } = parsed.data.info;
         // longDescription wins when both are present — it's the
         // full-length body copy, while `description` is often just a
         // headline repeat. Fall back to `description` otherwise.
         if (longDescription) merchant.description = longDescription;
         else if (description) merchant.description = description;
+        if (intro) merchant.intro = intro;
         if (terms) merchant.terms = terms;
         if (instructions) merchant.instructions = instructions;
       }

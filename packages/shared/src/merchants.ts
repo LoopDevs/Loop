@@ -25,6 +25,9 @@ export interface Merchant {
   /** Savings as a percentage for display (e.g. 4.0 means 4% off). */
   savingsPercentage?: number | undefined;
   denominations?: MerchantDenominations | undefined;
+  /** Short tagline (≤8 words) shown under the name. Sourced for 100% of
+   *  enriched merchants but was dropped by both sync mappers before this. */
+  intro?: string | undefined;
   description?: string | undefined;
   instructions?: string | undefined;
   terms?: string | undefined;
