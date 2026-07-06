@@ -481,7 +481,7 @@
     "domain": "cancer.org",
     "logoUrl": "https://img.logo.dev/cancer.org?token=LOGODEV_KEY_REDACTED&size=256&format=png&fallback=404",
     "logoSource": "logo.dev",
-    "headerUrl": "https://www.lehighvalleylive.com/resizer/v2/7TYSY7DJ3ZE3JHQDJ7PFVRT7DA.JPG?auth=e9f0c6323a583e90f7ac968ef92ab468946160589288ea6e7c5233eefb0b5171&width=1280&smart=true&quality=90",
+    "headerUrl": "https://www.lehighvalleylive.com/resizer/v2/7TYSY7DJ3ZE3JHQDJ7PFVRT7DA.JPG?auth=SIGNED_URL_TOKEN_REDACTED&width=1280&smart=true&quality=90",
     "headerSource": "qc-fixed"
   },
   "ee015395-d140-4a4d-ad6e-59983e49bfa6": {
@@ -2426,7 +2426,7 @@
     "domain": "fredmeyer.com",
     "logoUrl": "https://img.logo.dev/fredmeyer.com?token=LOGODEV_KEY_REDACTED&size=256&format=png&fallback=404",
     "logoSource": "logo.dev",
-    "headerUrl": "https://opb-opb-prod.cdn.arcpublishing.com/resizer/v2/QGTRFTZXWVEPFLLMW3MSHH7254.jpg?auth=53860b1123914476d0a5658544c9506b5fb26b51a02415d1e9dda9e23daecacb&width=1440&height=810&smart=true",
+    "headerUrl": "https://opb-opb-prod.cdn.arcpublishing.com/resizer/v2/QGTRFTZXWVEPFLLMW3MSHH7254.jpg?auth=SIGNED_URL_TOKEN_REDACTED&width=1440&height=810&smart=true",
     "headerSource": "tavily",
     "vertical": "grocery"
   },
@@ -4977,7 +4977,7 @@
     "domain": "newlook.com",
     "logoUrl": "https://img.logo.dev/newlook.com?token=LOGODEV_KEY_REDACTED&size=256&format=png&fallback=404",
     "logoSource": "logo.dev",
-    "headerUrl": "https://img.businessoffashion.com/resizer/v2/TTS3DA7NYBGFPELX4ZOHF6CF2Y.jpg?auth=0444481a27275bc6ce30f99715a7d00727efde44ca3581e092c52fdeef89ff93&width=1440",
+    "headerUrl": "https://img.businessoffashion.com/resizer/v2/TTS3DA7NYBGFPELX4ZOHF6CF2Y.jpg?auth=SIGNED_URL_TOKEN_REDACTED&width=1440",
     "headerSource": "tavily",
     "vertical": "fashion"
   },
@@ -5865,7 +5865,7 @@
     "domain": "regmovies.com",
     "logoUrl": "https://img.logo.dev/regmovies.com?token=LOGODEV_KEY_REDACTED&size=256&format=png&fallback=404",
     "logoSource": "logo.dev",
-    "headerUrl": "https://www.syracuse.com/resizer/v2/S54VNJY4XBC7RJFTUQ2LGR6Z54.JPG?auth=8fcfb7bc4ea3956756b288a8077e9f164e9197db8daa4b8ba131a94737c432b5&width=1280&smart=true&quality=90",
+    "headerUrl": "https://www.syracuse.com/resizer/v2/S54VNJY4XBC7RJFTUQ2LGR6Z54.JPG?auth=SIGNED_URL_TOKEN_REDACTED&width=1280&smart=true&quality=90",
     "headerSource": "qc-fixed"
   },
   "b2140d8d-7ef0-48f2-887c-a373448122cd": {
@@ -8115,7 +8115,7 @@
     "domain": "waitrose.com",
     "logoUrl": "https://img.logo.dev/waitrose.com?token=LOGODEV_KEY_REDACTED&size=256&format=png&fallback=404",
     "logoSource": "logo.dev",
-    "headerUrl": "https://www.foodmanufacture.co.uk/resizer/v2/UVKOUQGI5FECPGMRIKMGYWUL7A.jpg?auth=cbf2db05c4ba9d4bf2d4874dfd11fef83652d551dfa7e6ab897899196b18efdc",
+    "headerUrl": "https://www.foodmanufacture.co.uk/resizer/v2/UVKOUQGI5FECPGMRIKMGYWUL7A.jpg?auth=SIGNED_URL_TOKEN_REDACTED",
     "headerSource": "tavily",
     "vertical": "retail"
   },

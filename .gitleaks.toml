@@ -37,3 +37,23 @@ paths = [
   # of the backend under `NODE_ENV=test` against `loop_test`.
   '''(^|/)playwright\..*\.config\.ts$''',
 ]
+
+# Matched against the full MATCH text (not the file path), so these stay
+# narrow — a real Loop key (sk_live / AKIA / a PEM / a real JWT) in the same
+# files would still trip its own rule.
+regexTarget = "match"
+
+# Machine-sourced third-party image URLs in `tools/ctx-catalog/data/` (the
+# recovered media working set) sometimes carry CDN signed-URL tokens, e.g.
+# `?auth=<hex>` on a foodmanufacture.co.uk resizer link. Third-party,
+# short-lived, and NOT Loop secrets. HEAD scrubs new ones to a placeholder
+# (see data/README.md); this allowlists the `auth=<hex>` class so the advisory
+# scan is green on the already-public historical blob too (removing it from
+# history would need a force-push to `main`, which branch protection blocks).
+regexes = ['''\bauth=[A-Fa-f0-9]{24,}''']
+
+# Documented placeholder signing keys spell out their own fakeness with a
+# `-<N>-chars-min` suffix (the flywheel test key quoted in the 2026-06-11
+# audit doc + the playwright configs). Real keys are random and never carry
+# this marker. Matched as a stopword substring of the detected secret.
+stopwords = ['''-chars-min''']
