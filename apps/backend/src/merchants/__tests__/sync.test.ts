@@ -55,6 +55,7 @@ interface FakeUpstreamMerchant {
   denominations?: string[];
   currency?: string;
   info?: {
+    intro?: string;
     description?: string;
     instructions?: string;
     terms?: string;
@@ -136,6 +137,38 @@ describe('refreshMerchants', () => {
     expect(store.merchantsById.get('merchant-1')?.name).toBe('Home Depot');
     expect(store.merchantsBySlug.get('home-depot')?.id).toBe('merchant-1');
     expect(store.merchantsBySlug.get('target')?.id).toBe('merchant-2');
+  });
+
+  it('maps upstream info fields (intro/description/instructions/terms) onto the merchant', async () => {
+    // `intro` was parsed by the schema but dropped by the mapper before A4 —
+    // guard the whole info-field-mapping class so no field silently vanishes.
+    mockFetch.mockResolvedValueOnce(
+      upstreamResponse(
+        [
+          {
+            id: 'm-info',
+            name: 'Aerie',
+            enabled: true,
+            info: {
+              intro: 'Soft, comfy essentials',
+              description: 'Aerie sells intimates and apparel.',
+              instructions: 'Redeem online at ae.com or in store.',
+              terms: 'No expiry. Not redeemable for cash.',
+            },
+          },
+        ],
+        1,
+        1,
+      ),
+    );
+
+    await refreshMerchants();
+
+    const m = getMerchants().merchantsById.get('m-info')!;
+    expect(m.intro).toBe('Soft, comfy essentials');
+    expect(m.description).toBe('Aerie sells intimates and apparel.');
+    expect(m.instructions).toBe('Redeem online at ae.com or in store.');
+    expect(m.terms).toBe('No expiry. Not redeemable for cash.');
   });
 
   it('retains previous data when upstream returns an error', async () => {

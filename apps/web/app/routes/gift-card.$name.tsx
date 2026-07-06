@@ -396,6 +396,9 @@ export default function GiftCardRoute(): React.JSX.Element {
                     <h1 className="text-3xl font-bold text-white mb-2 drop-shadow">
                       {merchant.name} Gift Card
                     </h1>
+                    {merchant.intro ? (
+                      <p className="text-white/90 text-base mb-2 drop-shadow">{merchant.intro}</p>
+                    ) : null}
                     <div className="flex flex-wrap gap-2">
                       {savings !== undefined && savings > 0 && (
                         <span className="bg-green-500 text-white px-3 py-1 rounded-full text-sm font-medium">
