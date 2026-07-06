@@ -39,3 +39,19 @@ updates:
       github-actions:
         patterns:
           - '*'
+
+  # Watch the backend + web Dockerfile base images (node:22-alpine, pinned by
+  # digest). Without this the pinned SHA ages and the advisory trivy CVE scan
+  # re-fails on every run once a new fixed Alpine CVE lands — the source of the
+  # recurring CI-failure email noise. Dependabot now opens a bump PR when a
+  # fresh digest is published, keeping the scan green without manual chasing.
+  - package-ecosystem: 'docker'
+    directories:
+      - '/apps/backend'
+      - '/apps/web'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    open-pull-requests-limit: 5
+    labels:
+      - 'dependencies'
