@@ -48,7 +48,9 @@ dry-run/confirm gate is tracked follow-up (comprehensive-audit Part IV phase 9 r
   deny-list + confidence scoring, ADR 041; `--self-test`)), `brand-brief`
   (supplier-evidence aggregator: unions multi-supplier raw data + provenance,
   mines embedded URLs, anchors the domain to supplier-provided URLs over web
-  guesses; `--self-test`), and `demo-seed`.
+  guesses; `--self-test`), `ai-extract` (Claude semantic pass over the aggregated
+  brief → redeemableAt cross-brands / category / evidence; plain fetch,
+  `ANTHROPIC_API_KEY`, no SDK dep; `--self-test`), and `demo-seed`.
 - `./archive/` — **consumed one-shot passes** kept for provenance only (the `ctx-*-apply` /
   retag / casing / dedup-apply family, cover fix rounds, `qc-residue-fix`, `note-*`,
   `merge-pairs`, …). Their `/tmp` inputs are gone; do not re-run them — they encode decisions
