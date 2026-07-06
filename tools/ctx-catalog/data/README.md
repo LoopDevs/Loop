@@ -11,8 +11,12 @@ irreplaceable, expensive-to-regenerate state.
 > `ctx-media-final.json` + `brandqc-input.json` (in `token=pk_…` query params);
 > it's been redacted to `token=LOGODEV_KEY_REDACTED`. Every entry keeps its
 > `domain`, so a logo.dev URL is deterministically reconstructable:
-> `https://img.logo.dev/<domain>?token=$LOGODEV_KEY&size=512&format=png`. Never
-> re-commit a real token here.
+> `https://img.logo.dev/<domain>?token=$LOGODEV_KEY&size=512&format=png`. A
+> later pass also scrubbed third-party CDN signed-URL tokens (`?auth=<hex>` on
+> scraped cover URLs) to `auth=SIGNED_URL_TOKEN_REDACTED` — these are
+> third-party, short-lived, not Loop secrets, but tokens don't belong in git.
+> Never re-commit a real token here; `.gitleaks.toml` narrowly allowlists the
+> `auth=<hex>` class (by match) while still catching a real Loop key.
 
 ## State at recovery (2026-07-04)
 
