@@ -37,7 +37,9 @@ dry-run/confirm gate is tracked follow-up (comprehensive-audit Part IV phase 9 r
 
 - `./` — re-runnable tooling: supplier pulls (`pull-*`, `supplier-*`), allocators
   (`*-allocate`, `ezpin-availability-sweep`), media pipeline (`fetch-logos`, `scrape-*`,
-  `source-images-*`, `build-logo-*`, `warm-img-cache`), QC + review UIs (`review-server`,
+  `source-images-*`, `build-logo-*`, `warm-img-cache`, `logo-sources` — logo.dev
+  URL builder that always sets `fallback=404` so a miss is a clean 404 not a junk
+  monogram + faceplate-cover reject; `--self-test`), QC + review UIs (`review-server`,
   `domain-review-server`, `image-qc` (deterministic sharp-only gate: blur +
   upscale/low-quality round-trip + near-dup dHash; `--self-test`),
   `cover-text-scan` (Tesseract OCR text-in-cover reject/flag; covers only, never
