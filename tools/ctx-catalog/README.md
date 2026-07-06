@@ -47,7 +47,10 @@ dry-run/confirm gate is tracked follow-up (comprehensive-audit Part IV phase 9 r
   low-quality / has-text / placeholder verdict — the semantic check sharp+OCR
   can't make; plain fetch, `ANTHROPIC_API_KEY`, no SDK dep; `--self-test`),
   `logo-dims`,
-  `logo-opacity-scan`, `recount`, `ctx-anomalies`,
+  `logo-opacity-scan`, `merchant-state` (per-merchant lifecycle ledger in
+  git-tracked `data/` — sourced/qc/reviewed/applied; `applied.<field>` is a
+  timestamp so resume is a local filter, no catalog re-scan; `--self-test`,
+  `--coverage`), `recount`, `ctx-anomalies`,
   `ctx-dup-scan`, `ctx-provider-gaps`, domain resolvers (`ctx-domain-resolve`,
   `resolve-missing-domains`, `domain-tools` — PSL registrable root + reseller
   deny-list + confidence scoring, ADR 041; `--self-test`)), `brand-brief`
