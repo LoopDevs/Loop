@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import type { Merchant } from '@loop/shared';
 import { LazyImage } from '~/components/ui/LazyImage';
 import { getImageProxyUrl } from '~/utils/image';
+import { brandTileStyle } from '~/utils/brand-color';
 import { PurchaseContainer } from '~/components/features/purchase/PurchaseContainer';
 import { useFocusTrap } from '~/hooks/use-focus-trap';
 
@@ -177,9 +178,13 @@ export function MapBottomSheet({ merchant, onClose }: MapBottomSheetProps): Reac
                 alt={`${merchant.name} card`}
                 className="absolute inset-0 w-full h-full pointer-events-none"
                 eager
+                fallback={<div className="w-full h-full" style={brandTileStyle(merchant.name)} />}
               />
             ) : (
-              <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-blue-700 pointer-events-none" />
+              <div
+                className="absolute inset-0 pointer-events-none"
+                style={brandTileStyle(merchant.name)}
+              />
             )}
             <div className="absolute top-2 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/75 shadow-sm pointer-events-none" />
             {/* A11Y-005: a real, focusable close button — the only previous
@@ -212,6 +217,11 @@ export function MapBottomSheet({ merchant, onClose }: MapBottomSheetProps): Reac
                     alt={`${merchant.name} logo`}
                     className="w-full h-full"
                     eager
+                    fallback={
+                      <span className="text-gray-500 text-sm font-bold">
+                        {merchant.name.charAt(0)}
+                      </span>
+                    }
                   />
                 ) : (
                   <span className="text-gray-500 text-sm font-bold">{merchant.name.charAt(0)}</span>

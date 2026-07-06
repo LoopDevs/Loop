@@ -389,6 +389,11 @@ export default function GiftCardRoute(): React.JSX.Element {
                         height={96}
                         eager
                         className="w-full h-full"
+                        fallback={
+                          <span className="text-gray-400 text-2xl font-bold">
+                            {merchant.name.charAt(0)}
+                          </span>
+                        }
                       />
                     </div>
                   )}
@@ -482,16 +487,20 @@ export default function GiftCardRoute(): React.JSX.Element {
                 )}
               </div>
 
-              {merchant.instructions && (
-                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 lg:p-8 mb-8">
-                  <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
-                    How to redeem
-                  </h2>
-                  <div className="text-gray-600 dark:text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
-                    {merchant.instructions}
-                  </div>
+              {/* Always render "How to redeem" — the section silently
+                  vanishing when instructions are unset was a trust hit at
+                  the conversion moment. Fall back to a generic, always-true
+                  default (the code + redemption details arrive on
+                  fulfilment) that claims no specific method. */}
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 lg:p-8 mb-8">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
+                  How to redeem
+                </h2>
+                <div className="text-gray-600 dark:text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
+                  {merchant.instructions ??
+                    "After purchase, you'll receive your gift card code and everything you need to redeem it."}
                 </div>
-              )}
+              </div>
 
               {merchant.terms && (
                 <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 lg:p-8 mb-8">

@@ -2,6 +2,7 @@ import { LocaleLink as Link } from '~/components/ui/LocaleLink';
 import type { MerchantGroup } from '@loop/shared';
 import { brandSlug } from '@loop/shared';
 import { getImageProxyUrl } from '~/utils/image';
+import { brandTileStyle } from '~/utils/brand-color';
 import { triggerHaptic } from '~/native/haptics';
 import { LazyImage } from '~/components/ui/LazyImage';
 
@@ -79,9 +80,20 @@ export function MerchantGroupCard({
               height={360}
               eager={eager}
               className="w-full h-full"
+              fallback={
+                <div
+                  className="w-full h-full flex items-center justify-center"
+                  style={brandTileStyle(group.name)}
+                >
+                  <span className="text-white text-3xl font-bold">{group.name.charAt(0)}</span>
+                </div>
+              }
             />
           ) : (
-            <div className="w-full h-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center">
+            <div
+              className="w-full h-full flex items-center justify-center"
+              style={brandTileStyle(group.name)}
+            >
               <span className="text-white text-3xl font-bold">{group.name.charAt(0)}</span>
             </div>
           )}
@@ -116,6 +128,11 @@ export function MerchantGroupCard({
                 height={80}
                 eager={eager}
                 className="w-full h-full"
+                fallback={
+                  <span className="text-ink-subtle text-sm font-bold">
+                    {group.name.substring(0, 2).toUpperCase()}
+                  </span>
+                }
               />
             ) : (
               <span className="text-ink-subtle text-sm font-bold">
