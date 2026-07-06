@@ -119,6 +119,34 @@ export default [
               message:
                 'Capacitor plugins must only be imported in app/native/. Import from ~/native/ instead.',
             },
+            {
+              // ADR 041: tesseract.js / tldts are tools/ctx-catalog operator-only
+              // deps. Importing them here would pull an OCR/WASM blob into the
+              // shipped web bundle.
+              group: ['tesseract.js', 'tldts', 'tldts/*'],
+              message:
+                'tesseract.js / tldts are tools/ctx-catalog operator-only deps (ADR 041) — never import them into shipped app code.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  // ─── Media-tooling deps must never enter backend/shared bundles (ADR 041) ────
+  // Separate block (non-overlapping file scope) so it doesn't override the
+  // web-app @capacitor rule above — flat config's last-match-wins per rule id.
+  {
+    files: ['apps/backend/**/*.ts', 'packages/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['tesseract.js', 'tldts', 'tldts/*'],
+              message:
+                'tesseract.js / tldts are tools/ctx-catalog operator-only deps (ADR 041) — never import them into shipped backend/package code.',
+            },
           ],
         },
       ],

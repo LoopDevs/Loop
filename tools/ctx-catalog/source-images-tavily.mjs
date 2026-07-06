@@ -15,6 +15,7 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { imageDimensions } from './logo-dims.mjs';
+import { registrable } from './domain-tools.mjs';
 
 const KEY = process.env.TAVILY_API_KEY;
 const args = process.argv.slice(2);
@@ -27,12 +28,11 @@ const BAD =
 const LOGO_ONLY =
   /^(the )?(image (shows|features|depicts) )?(a |the )?(prominent |large |white |red |blue |illuminated )*(logo|sign|signage|wordmark|brand name)\b/i;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const rootOf = (d) =>
-  (d || '')
-    .replace(/^www\./, '')
-    .split('.')
-    .slice(-2)
-    .join('.');
+// Registrable root via the Public Suffix List (domain-tools/tldts) — the old
+// `.split('.').slice(-2)` turned `tesco.co.uk` into `co.uk`, breaking
+// brand-owned detection + dedup for every GB/AU/MX ccTLD SLD. Falls back to the
+// www-stripped host for non-domain input.
+const rootOf = (d) => registrable(d) || (d || '').replace(/^www\./, '');
 
 async function tavily(query) {
   const r = await fetch('https://api.tavily.com/search', {
