@@ -27,6 +27,7 @@
  *   node domain-tools.mjs --resolve "Aerie" US ae.com aerie.com freefirepro.com
  */
 import { getDomain, getDomainWithoutSuffix } from 'tldts';
+import { fileURLToPath } from 'node:url';
 
 /** eTLD+1 via the Public Suffix List. Accepts a URL or a bare host. */
 export function registrable(input) {
@@ -172,9 +173,10 @@ export function resolveDomain(brief, candidates = []) {
   return { ...best, autoAccept: best.confidence >= 0.8, alternatives: scored.slice(1, 3) };
 }
 
-// ── CLI ───────────────────────────────────────────────────────────────────
+// ── CLI (only when run directly, never on import) ───────────────────────────
+const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 const argv = process.argv.slice(2);
-if (argv.includes('--self-test')) {
+if (isMain && argv.includes('--self-test')) {
   const checks = {
     'PSL root: tesco.co.uk (not co.uk)': registrable('https://www.tesco.co.uk/x') === 'tesco.co.uk',
     'PSL root: harveynorman.com.au': registrable('harveynorman.com.au') === 'harveynorman.com.au',
@@ -200,9 +202,9 @@ if (argv.includes('--self-test')) {
   const ok = Object.values(checks).every(Boolean);
   console.log(ok ? '\nSELF-TEST PASS ✓' : '\nSELF-TEST FAIL ✗');
   process.exit(ok ? 0 : 1);
-} else if (argv[0] === '--resolve') {
+} else if (isMain && argv[0] === '--resolve') {
   const [name, country, ...candidates] = argv.slice(1);
   console.log(JSON.stringify(resolveDomain({ name, country }, candidates), null, 2));
-} else {
+} else if (isMain) {
   console.log('usage: domain-tools.mjs --self-test | --resolve "<name>" <country> <candidate...>');
 }

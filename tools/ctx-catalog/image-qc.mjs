@@ -231,7 +231,8 @@ export async function scoreCover(buf) {
 
 export { dhash, hamming };
 
-// ── CLI ───────────────────────────────────────────────────────────────────
+// ── CLI (only when run directly, never on import) ───────────────────────────
+const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 const argv = process.argv.slice(2);
 const arg = (k) => {
   const i = argv.indexOf(k);
@@ -243,7 +244,7 @@ async function fetchBuf(url) {
   return Buffer.from(await r.arrayBuffer());
 }
 
-if (argv.includes('--self-test')) {
+if (isMain && argv.includes('--self-test')) {
   // Synthesise three cover-sized images and prove the detectors discriminate
   // them, no network. "detailed" = a fine grid + text (real high-frequency
   // detail, non-uniform at every scale); "upscaled" = that base downscaled to a
@@ -286,14 +287,14 @@ if (argv.includes('--self-test')) {
   const ok = Object.values(checks).every(Boolean);
   console.log(ok ? '\nSELF-TEST PASS ✓' : '\nSELF-TEST FAIL ✗');
   process.exit(ok ? 0 : 1);
-} else if (arg('--url')) {
+} else if (isMain && arg('--url')) {
   const kind = arg('--kind') || 'cover';
   const buf = await fetchBuf(arg('--url'));
   const res = kind === 'logo' ? await scoreLogo(buf) : await scoreCover(buf);
   console.log(
     JSON.stringify({ url: arg('--url'), kind, ...res, dhash: await dhash(buf) }, null, 2),
   );
-} else if (arg('--manifest')) {
+} else if (isMain && arg('--manifest')) {
   const field = arg('--field') || 'logoUrl';
   const kind = arg('--kind') || (field === 'logoUrl' ? 'logo' : 'cover');
   const limit = Number(arg('--limit') || '0');
@@ -326,7 +327,7 @@ if (argv.includes('--self-test')) {
   for (let i = 0; i < arr.length; i++)
     for (let j = i + 1; j < arr.length; j++) if (hamming(arr[i][1], arr[j][1]) <= 6) dups++;
   console.log(`\nscanned ${rows.length} | ${JSON.stringify(counts)} | near-dup pairs: ${dups}`);
-} else {
+} else if (isMain) {
   console.log(
     'usage: image-qc.mjs --self-test | --url <img> [--kind logo|cover] | --manifest <file> [--field logoUrl|headerUrl] [--kind …] [--limit N]',
   );
