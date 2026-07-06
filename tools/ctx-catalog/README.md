@@ -47,7 +47,9 @@ dry-run/confirm gate is tracked follow-up (comprehensive-audit Part IV phase 9 r
   low-quality / has-text / placeholder verdict — the semantic check sharp+OCR
   can't make; plain fetch, `ANTHROPIC_API_KEY`, no SDK dep; `--self-test`),
   `logo-dims`,
-  `logo-opacity-scan`, `merchant-state` (per-merchant lifecycle ledger in
+  `logo-opacity-scan`, `build-state` (populate the `merchant-state` ledger from
+  the recovered `data/` manifests — sourced/reviewed/category per merchant, never
+  `applied`; `--self-test`, `--build`), `merchant-state` (per-merchant lifecycle ledger in
   git-tracked `data/` — sourced/qc/reviewed/applied; `applied.<field>` is a
   timestamp so resume is a local filter, no catalog re-scan; `--self-test`,
   `--coverage`), `ctx-write` (safe-apply primitives: dry-run by default /
