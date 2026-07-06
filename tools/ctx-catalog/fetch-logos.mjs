@@ -9,6 +9,7 @@
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import sharp from 'sharp';
+import { logoDevUrl } from './logo-sources.mjs';
 
 const PK = readFileSync('/tmp/logodev-pk.txt', 'utf8').trim();
 const M = JSON.parse(readFileSync('/tmp/ctx-fresh.json', 'utf8')).filter(
@@ -35,7 +36,7 @@ async function worker() {
     const domain = V[m.id].domain;
     const path = `/tmp/logos/${m.id}.png`;
     try {
-      const url = `https://img.logo.dev/${encodeURIComponent(domain)}?token=${PK}&size=400&format=png&retina=true`;
+      const url = logoDevUrl(domain, { token: PK, size: 400 });
       const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
       if (!r.ok) {
         fail++;

@@ -17,6 +17,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { imageDimensions } from './logo-dims.mjs';
 import { registrable } from './domain-tools.mjs';
+import { looksLikeFaceplate } from './logo-sources.mjs';
 
 const KEY = process.env.TAVILY_API_KEY;
 const args = process.argv.slice(2);
@@ -105,7 +106,13 @@ async function bestFor(m) {
       imgs = [];
     }
     for (const im of imgs) {
-      if (seen.has(im.url) || BAD.test(im.url) || LOGO_ONLY.test(im.description || '')) continue;
+      if (
+        seen.has(im.url) ||
+        BAD.test(im.url) ||
+        LOGO_ONLY.test(im.description || '') ||
+        looksLikeFaceplate(im.description || '')
+      )
+        continue;
       seen.add(im.url);
       pool.push(im);
     }
