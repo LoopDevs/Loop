@@ -50,7 +50,9 @@ dry-run/confirm gate is tracked follow-up (comprehensive-audit Part IV phase 9 r
   `logo-opacity-scan`, `merchant-state` (per-merchant lifecycle ledger in
   git-tracked `data/` — sourced/qc/reviewed/applied; `applied.<field>` is a
   timestamp so resume is a local filter, no catalog re-scan; `--self-test`,
-  `--coverage`), `recount`, `ctx-anomalies`,
+  `--coverage`), `ctx-write` (safe-apply primitives: dry-run by default /
+  `--apply` to write, plan preview to `data/plans/`, idempotent from the
+  `merchant-state` ledger, throttled; `--self-test`), `recount`, `ctx-anomalies`,
   `ctx-dup-scan`, `ctx-provider-gaps`, domain resolvers (`ctx-domain-resolve`,
   `resolve-missing-domains`, `domain-tools` — PSL registrable root + reseller
   deny-list + confidence scoring, ADR 041; `--self-test`)), `brand-brief`
