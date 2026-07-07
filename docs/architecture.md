@@ -311,7 +311,7 @@ GET  /metrics                               — Prometheus format
 GET  /openapi.json                          — full OpenAPI 3.1 spec, bearer-gated, `private, no-store`
 GET  /.well-known/jwks.json                 — public RSA JWKS for Loop-minted RS256 JWTs (ADR 030 Phase A), `public, max-age=3600`
 GET  /api/merchants              ?page=&limit=&q=      — paginated, max 100 per page
-GET  /api/merchants/all                                 — full catalog in one response (audit A-002)
+GET  /api/merchants/all                                 — full catalog in one response (audit A-002); `?fields=lite` strips description/instructions/terms for browse (S4-7)
 GET  /api/merchants/by-slug/:slug
 GET  /api/merchants/:id
 GET  /api/merchants/cashback-rates              — public bulk map of active cashback pcts (ADR 011/015)
