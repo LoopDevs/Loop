@@ -67,6 +67,19 @@ const DENY_SLDS = new Set([
   'eldorado',
   'giftcards',
   'cardpool',
+  // gift-card / loyalty INFRASTRUCTURE — the suppliers + processors whose
+  // redemption-portal URLs show up in supplier `redeemUrl`/terms fields but are
+  // NEVER a brand's own storefront (anchoring a merchant to these was the risk).
+  'tillo',
+  'blackhawk',
+  'bhnetwork',
+  'cashstar',
+  'wgiftcard',
+  'ezpin',
+  'incomm',
+  'qwikcilver',
+  'woohoo',
+  'storedvalue',
   // socials / UGC
   'facebook',
   'instagram',
@@ -196,6 +209,11 @@ if (isMain && argv.includes('--self-test')) {
     'deny: amazon marketplace': isDeniedDomain('https://amazon.com/dp/123') === true,
     'deny: eneba reseller': isDeniedDomain('eneba.com') === true,
     'deny: instagram social': isDeniedDomain('https://www.instagram.com/tesco') === true,
+    'deny: gift-card infra portal (redeem.tillo.io)':
+      isDeniedDomain('https://redeem.tillo.io/abc') === true,
+    'deny: infra beats a supplier-anchored redeemUrl':
+      scoreCandidate('https://wgiftcard.com/redeem', { name: 'Aerie', supplierAnchored: true })
+        .confidence === 0,
     'allow: a real brand domain': isDeniedDomain('aerie.com') === false,
     'score: exact name → ≥0.9':
       scoreCandidate('tesco.co.uk', { name: 'Tesco', country: 'GB' }).confidence >= 0.9,
