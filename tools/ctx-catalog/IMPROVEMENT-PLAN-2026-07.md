@@ -8,6 +8,17 @@ like. Today it's at **3.2% live coverage** (109/3,468 CTX merchants) despite
 **~1,150 merchants' worth of logos + full LLM-written info already sourced and
 sitting un-applied** in `data/` (recovered 2026-07-04).
 
+## Status (2026-07-07): built
+
+All waves are **built + self-tested** — see the end-to-end runbook
+[`PIPELINE.md`](./PIPELINE.md) (13/13 self-tests green). Wave 1 (M1–M3), Wave 2
+(Q1–Q2), Wave 3 (S1–S5), Wave 4 (V1 vision), and the app-side (A2–A5) all landed,
+plus the supplier-evidence aggregator + Claude extraction/info passes + the
+`merchant-state` ledger populated from the recovered manifests (1,156 merchants).
+The only outstanding items need operator input: the **supplier-pull adapters**
+(Tillo/SVS/EzPin read-only fetchers, stage 0) and **A1 apply** to CTX (staging
+first, `CTX_TOKEN`). The roadmap below is kept for provenance + the rationale.
+
 ## The one-line diagnosis
 
 **Everything is done as repair, not prevention.** Ambiguous brands are

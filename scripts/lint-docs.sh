@@ -48,26 +48,30 @@ done
 # Stale entries on either side fail CI.
 
 echo "Checking API routes vs architecture.md..."
-app_route_literals=$(grep -ohE "'/api/[a-zA-Z0-9/:._-]+'" \
+# Extract to temp files (not command substitution) + diff with `comm`. The prior
+# `while read <<< "$var"` + per-iteration `echo "$var" | grep` was flaky: under
+# the full script it intermittently reported spurious route mismatches even
+# though the two lists are byte-identical. `comm` on two sorted files is
+# deterministic and has no per-iteration subshell to misbehave.
+app_routes_file=$(mktemp)
+arch_routes_file=$(mktemp)
+trap 'rm -f "$app_routes_file" "$arch_routes_file"' EXIT
+grep -ohE "'/api/[a-zA-Z0-9/:._-]+'" \
   apps/backend/src/app.ts apps/backend/src/routes/*.ts 2>/dev/null \
-  | tr -d "'" | sort -u)
-arch_route_listings=$(grep -E "^(GET|POST|PUT|DELETE|PATCH) +/api/" docs/architecture.md \
+  | tr -d "'" | sort -u > "$app_routes_file"
+grep -E "^(GET|POST|PUT|DELETE|PATCH) +/api/" docs/architecture.md \
   | sed -E "s/^(GET|POST|PUT|DELETE|PATCH) +(\/api\/[^ ?[:space:]]+).*/\2/" \
-  | sort -u)
+  | sort -u > "$arch_routes_file"
 
 while read -r route; do
   [ -z "$route" ] && continue
-  if ! echo "$arch_route_listings" | grep -qxF "$route"; then
-    err "Route '$route' is in app.ts but not in docs/architecture.md"
-  fi
-done <<< "$app_route_literals"
+  err "Route '$route' is in app.ts but not in docs/architecture.md"
+done < <(comm -23 "$app_routes_file" "$arch_routes_file")
 
 while read -r route; do
   [ -z "$route" ] && continue
-  if ! echo "$app_route_literals" | grep -qxF "$route"; then
-    err "Route '$route' is listed in docs/architecture.md but no matching literal exists in apps/backend/src/app.ts or apps/backend/src/routes/*.ts"
-  fi
-done <<< "$arch_route_listings"
+  err "Route '$route' is listed in docs/architecture.md but no matching literal exists in apps/backend/src/app.ts or apps/backend/src/routes/*.ts"
+done < <(comm -13 "$app_routes_file" "$arch_routes_file")
 
 # ─── 3. No references to deleted files ──────────────────────────────────────
 
