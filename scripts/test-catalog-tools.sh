@@ -8,7 +8,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 tools=(domain-tools brand-brief brand-family source-images-tavily logo-sources
-  image-qc vision-qc ai-extract ai-info merchant-state build-state ctx-write)
+  image-qc vision-qc ai-extract ai-info merchant-state build-state ctx-write audit-resolver)
 fail=0
 for t in "${tools[@]}"; do
   if node "tools/ctx-catalog/$t.mjs" --self-test >/dev/null 2>&1; then
