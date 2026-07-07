@@ -17,6 +17,8 @@ web (Tavily) ──┘   brand-brief      domain-tools  images    ai-extract   i
 
 ## Keys (per stage, in a gitignored env — never in the repo)
 
+Copy [`.env.example`](./.env.example) → a gitignored `.env` and fill it in.
+
 | Var                      | Used by                              | Scope                                                 |
 | ------------------------ | ------------------------------------ | ----------------------------------------------------- |
 | `CTX_TOKEN`              | `recount`, `ctx-write`               | CTX admin, read for coverage; write only on `--apply` |
