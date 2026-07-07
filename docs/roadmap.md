@@ -1,5 +1,10 @@
 # Roadmap
 
+> **The single comprehensive forward-looking task list — every tranche, phase,
+> feature, and task — now lives in [`go-live-plan.md`](./go-live-plan.md)** (ownership-tagged,
+> checkbox-tracked). This roadmap remains the phase-level map and the **record of
+> shipped work** (ticked items live here); use `go-live-plan.md` for "what's left".
+
 What remains to ship Loop and what comes after.
 
 The original migration plan (now at `docs/archive/migration.md`, historical only) covered getting the monorepo to a working state. This document tracks what's left to reach production and beyond.
