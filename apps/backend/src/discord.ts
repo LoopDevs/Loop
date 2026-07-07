@@ -25,6 +25,7 @@ export {
   notifyOrderFailedAfterCtxPaid,
   notifyPriceFeedAnomaly,
   notifyUsdcBelowFloor,
+  notifyOperatorFloatDrift,
   notifyPegBreakOnFulfillment,
   notifyInterestPoolLow,
   notifyInterestPoolRecovered,

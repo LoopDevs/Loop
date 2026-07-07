@@ -49,8 +49,9 @@ import {
   type Account,
   type Transaction,
 } from '@stellar/stellar-sdk';
+import { createHash } from 'node:crypto';
 import { and, eq, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
-import { db } from '../db/client.js';
+import { db, withAdvisoryLock } from '../db/client.js';
 import { users, type WalletProvisioningState } from '../db/schema.js';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
@@ -96,6 +97,20 @@ const ACTIVATION_TIMEOUT_SECONDS = 60;
 export function walletProvisioningDelayMs(attempts: number): number {
   const exp = Math.min(attempts, 30); // 2^30 guard against overflow noise
   return Math.min(WALLET_PROVISIONING_BASE_DELAY_MS * 2 ** exp, WALLET_PROVISIONING_MAX_DELAY_MS);
+}
+
+function walletProvisioningLockKey(): bigint {
+  const digest = createHash('sha256').update('loop:wallet-provisioning-sweeper').digest();
+  const raw =
+    (BigInt(digest[0]!) << 56n) |
+    (BigInt(digest[1]!) << 48n) |
+    (BigInt(digest[2]!) << 40n) |
+    (BigInt(digest[3]!) << 32n) |
+    (BigInt(digest[4]!) << 24n) |
+    (BigInt(digest[5]!) << 16n) |
+    (BigInt(digest[6]!) << 8n) |
+    BigInt(digest[7]!);
+  return BigInt.asIntN(64, raw);
 }
 
 // ─── Activation transaction builder (pure) ──────────────────────────────────
@@ -382,6 +397,8 @@ async function recordFailedAttempt(userId: string): Promise<void> {
 // ─── Sweeper ────────────────────────────────────────────────────────────────
 
 export interface WalletProvisioningTickResult {
+  /** True when another machine held the fleet-wide sweeper lock. */
+  skippedLocked: boolean;
   /** Candidate rows matched by the SQL filter (pre-backoff). */
   picked: number;
   /** Rows skipped because their backoff window hasn't elapsed yet. */
@@ -406,8 +423,29 @@ export async function runWalletProvisioningTick(args?: {
   limit?: number;
   now?: number;
 }): Promise<WalletProvisioningTickResult> {
+  const locked = await withAdvisoryLock(walletProvisioningLockKey(), () =>
+    runWalletProvisioningTickLocked(args),
+  );
+  if (!locked.ran) {
+    return {
+      skippedLocked: true,
+      picked: 0,
+      notDueYet: 0,
+      activated: 0,
+      errors: 0,
+      abortedUnconfigured: false,
+    };
+  }
+  return locked.value;
+}
+
+async function runWalletProvisioningTickLocked(args?: {
+  limit?: number;
+  now?: number;
+}): Promise<WalletProvisioningTickResult> {
   const now = args?.now ?? Date.now();
   const result: WalletProvisioningTickResult = {
+    skippedLocked: false,
     picked: 0,
     notDueYet: 0,
     activated: 0,

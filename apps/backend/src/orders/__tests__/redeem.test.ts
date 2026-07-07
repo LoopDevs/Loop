@@ -67,8 +67,9 @@ vi.mock('../../env.js', () => ({
   ),
 }));
 
-const { orderState } = vi.hoisted(() => ({
+const { orderState, advisoryLockState } = vi.hoisted(() => ({
   orderState: { row: undefined as unknown, freshRow: undefined as unknown },
+  advisoryLockState: { held: new Set<string>() },
 }));
 vi.mock('../../db/client.js', () => ({
   db: {
@@ -86,6 +87,16 @@ vi.mock('../../db/client.js', () => ({
         }),
       },
     },
+  },
+  withAdvisoryLock: async <T>(key: bigint, fn: () => Promise<T>) => {
+    const lock = key.toString();
+    if (advisoryLockState.held.has(lock)) return { ran: false as const };
+    advisoryLockState.held.add(lock);
+    try {
+      return { ran: true as const, value: await fn() };
+    } finally {
+      advisoryLockState.held.delete(lock);
+    }
   },
 }));
 
@@ -203,6 +214,7 @@ function fundedTrustlines(balanceStroops: bigint): unknown {
 
 beforeEach(() => {
   __resetRedeemFenceForTests();
+  advisoryLockState.held.clear();
   envState.LOOP_AUTH_NATIVE_ENABLED = true;
   envState.LOOP_STELLAR_DEPOSIT_ADDRESS = DEPOSIT_ADDRESS;
   envState.LOOP_STELLAR_OPERATOR_SECRET = OPERATOR_SECRET;

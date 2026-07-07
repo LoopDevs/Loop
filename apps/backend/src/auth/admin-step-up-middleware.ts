@@ -28,11 +28,10 @@
  *     unset) → 503 `STEP_UP_UNAVAILABLE`. Fail closed: surface
  *     ships disabled if the operator hasn't generated the key.
  *
- * The middleware does NOT check that the bearer kind is `loop` —
- * admins authenticated via the legacy CTX-proxy path are exempt
- * from step-up by design (ADR-028 §Excluded). When ADR-013 Phase
- * C lands and the CTX-proxy path is removed, this exemption goes
- * with it.
+ * The middleware requires a Loop-native auth subject to pin the
+ * step-up token against. Legacy CTX-proxy bearer context has no
+ * Loop user id, so it fails closed here rather than acting as a
+ * standalone admin-write gate.
  */
 import type { Context, MiddlewareHandler } from 'hono';
 import {
@@ -78,12 +77,6 @@ export function requireAdminStepUp(action?: AdminStepUpScope): MiddlewareHandler
     }
 
     const auth = c.get('auth') as AuthLike | undefined;
-    // ADR-028 exempts the legacy CTX-proxy path — `kind === 'ctx'`
-    // admins fall through (their step-up is whatever CTX itself
-    // gates on). Loop-native admins MUST present a step-up token.
-    if (auth !== undefined && auth.kind === 'ctx') {
-      return next();
-    }
 
     // Hardening B2: fail closed when there is no authenticated
     // context to pin the step-up token's subject against. The gate

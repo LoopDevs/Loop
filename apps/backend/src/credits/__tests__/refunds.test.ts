@@ -25,6 +25,7 @@ const { dbMock, state } = vi.hoisted(() => {
     forUpdateResponses: unknown[];
     insertCreditCalls: unknown[];
     insertUserCreditsCalls: unknown[];
+    insertSkipCalls: unknown[];
     updateSets: unknown[];
     returnedCreditRow: unknown;
     // Error to throw from the credit_transactions insert .returning() —
@@ -35,6 +36,7 @@ const { dbMock, state } = vi.hoisted(() => {
     forUpdateResponses: [],
     insertCreditCalls: [],
     insertUserCreditsCalls: [],
+    insertSkipCalls: [],
     updateSets: [],
     returnedCreditRow: null,
     creditInsertError: null,
@@ -64,8 +66,10 @@ const { dbMock, state } = vi.hoisted(() => {
     const last = (chain as unknown as { _lastInsert: string | undefined })['_lastInsert'];
     if (last === 'creditTransactions') s.insertCreditCalls.push(v);
     else if (last === 'userCredits') s.insertUserCreditsCalls.push(v);
+    else if (last === 'paymentWatcherSkips') s.insertSkipCalls.push(v);
     return chain;
   });
+  chain['onConflictDoUpdate'] = vi.fn(() => chain);
   chain['returning'] = vi.fn(async () => {
     if (s.creditInsertError !== null) throw s.creditInsertError;
     return [s.returnedCreditRow];
@@ -90,6 +94,11 @@ vi.mock('../../db/schema.js', () => ({
     amountMinor: 'amount_minor',
   },
   orders: { __name: 'orders', id: 'id' },
+  paymentWatcherSkips: {
+    __name: 'paymentWatcherSkips',
+    paymentId: 'payment_id',
+    status: 'status',
+  },
   userCredits: {
     userId: 'user_id',
     currency: 'currency',
@@ -103,6 +112,21 @@ const { envMock } = vi.hoisted(() => ({
   },
 }));
 vi.mock('../../env.js', () => ({ env: envMock }));
+
+const { refundDepositMock } = vi.hoisted(() => ({
+  refundDepositMock: vi.fn(),
+}));
+vi.mock('../../payments/deposit-refund.js', () => ({
+  refundDeposit: (paymentId: string) => refundDepositMock(paymentId),
+}));
+vi.mock('../../payments/horizon.js', () => ({
+  HorizonPaymentSchema: {
+    safeParse: (value: unknown) =>
+      typeof (value as { id?: unknown } | null)?.id === 'string'
+        ? { success: true, data: value }
+        : { success: false, error: { issues: [] } },
+  },
+}));
 
 import {
   applyAdminRefund,
@@ -127,9 +151,12 @@ beforeEach(() => {
   state.forUpdateResponses = [];
   state.insertCreditCalls = [];
   state.insertUserCreditsCalls = [];
+  state.insertSkipCalls = [];
   state.updateSets = [];
   state.returnedCreditRow = null;
   state.creditInsertError = null;
+  refundDepositMock.mockReset();
+  refundDepositMock.mockResolvedValue({ kind: 'refunded', txHash: 'refund-tx' });
   envMock.ADMIN_DAILY_ADJUSTMENT_CAP_MINOR = 0n;
 });
 
@@ -434,6 +461,8 @@ describe('applyOrderAutoRefund (CF-20)', () => {
       orderId: 'o-1',
       reason: 'order failed after CTX paid: timeout',
     });
+    expect('kind' in result).toBe(false);
+    if ('kind' in result) throw new Error('expected ledger refund result');
     expect(result.amountMinor).toBe(500n);
     // Same validated refund row shape as the admin path — positive,
     // type='refund', order-scoped.
@@ -468,5 +497,97 @@ describe('applyOrderAutoRefund (CF-20)', () => {
         reason: 'x',
       }),
     ).rejects.toBeInstanceOf(RefundOrderInvalidError);
+  });
+
+  it('R3-2: xlm/usdc payments are refunded to the original on-chain sender, not internal credit', async () => {
+    const payment = {
+      id: 'pay-1',
+      paging_token: 'pt-1',
+      type: 'payment',
+      from: 'GSENDER',
+      to: 'GDEPOSIT',
+      asset_type: 'credit_alphanum4',
+      asset_code: 'USDC',
+      asset_issuer: 'GISSUER',
+      amount: '10.0000000',
+      transaction_hash: 'tx-in',
+      transaction: { memo: 'MEMO-1', memo_type: 'text', successful: true },
+    };
+
+    const result = await applyOrderAutoRefund({
+      userId: 'u-1',
+      currency: 'USD',
+      amountMinor: 1000n,
+      orderId: 'o-usdc',
+      paymentMethod: 'usdc',
+      paymentMemo: 'MEMO-1',
+      paymentReceivedHorizonId: 'pay-1',
+      paymentReceivedPayment: payment,
+      reason: 'order failed after CTX paid: timeout',
+    });
+
+    expect(result).toEqual({
+      kind: 'onchain_refund',
+      orderId: 'o-usdc',
+      paymentId: 'pay-1',
+      refund: { kind: 'refunded', txHash: 'refund-tx' },
+    });
+    expect(state.insertCreditCalls).toHaveLength(0);
+    expect(state.insertUserCreditsCalls).toHaveLength(0);
+    expect(state.insertSkipCalls[0]).toMatchObject({
+      paymentId: 'pay-1',
+      memo: 'MEMO-1',
+      orderId: 'o-usdc',
+      reason: 'order_gone',
+      payment,
+      status: 'abandoned',
+    });
+    expect(refundDepositMock).toHaveBeenCalledWith('pay-1');
+  });
+
+  it('R3-2: xlm/usdc auto-refund fails closed when the outbound refund does not complete', async () => {
+    refundDepositMock.mockResolvedValue({ kind: 'in_progress' });
+    const payment = {
+      id: 'pay-2',
+      paging_token: 'pt-2',
+      type: 'payment',
+      from: 'GSENDER',
+      to: 'GDEPOSIT',
+      asset_type: 'native',
+      amount: '2.0000000',
+      transaction_hash: 'tx-in-2',
+      transaction: { memo: 'MEMO-2', memo_type: 'text', successful: true },
+    };
+
+    await expect(
+      applyOrderAutoRefund({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 200n,
+        orderId: 'o-xlm',
+        paymentMethod: 'xlm',
+        paymentMemo: 'MEMO-2',
+        paymentReceivedHorizonId: 'pay-2',
+        paymentReceivedPayment: payment,
+        reason: 'order failed before CTX paid: schema drift',
+      }),
+    ).rejects.toThrow(/did not complete: in_progress/);
+    expect(state.insertCreditCalls).toHaveLength(0);
+    expect(state.insertSkipCalls[0]).toMatchObject({ paymentId: 'pay-2', status: 'abandoned' });
+  });
+
+  it('R3-2: loop_asset auto-refund is guarded until re-mint + mirror semantics are implemented', async () => {
+    await expect(
+      applyOrderAutoRefund({
+        userId: 'u-1',
+        currency: 'GBP',
+        amountMinor: 500n,
+        orderId: 'o-loop',
+        paymentMethod: 'loop_asset',
+        reason: 'x',
+      }),
+    ).rejects.toThrow(/loop_asset order auto-refund requires coordinated mirror re-credit/);
+    expect(state.insertCreditCalls).toHaveLength(0);
+    expect(refundDepositMock).not.toHaveBeenCalled();
   });
 });

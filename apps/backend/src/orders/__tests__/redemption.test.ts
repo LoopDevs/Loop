@@ -26,7 +26,14 @@ vi.mock('../../ctx/stream.js', () => ({
   streamGiftCardStatus: (...args: unknown[]) => streamMock(...args),
 }));
 
-import { waitForRedemption } from '../procurement-redemption.js';
+const { notifyCtxSchemaDriftMock } = vi.hoisted(() => ({
+  notifyCtxSchemaDriftMock: vi.fn<(args: unknown) => void>(() => undefined),
+}));
+vi.mock('../../discord.js', () => ({
+  notifyCtxSchemaDrift: (args: unknown) => notifyCtxSchemaDriftMock(args),
+}));
+
+import { fetchRedemption, waitForRedemption } from '../procurement-redemption.js';
 
 function detailResponse(body: Record<string, unknown>): Response {
   return new Response(JSON.stringify(body), {
@@ -38,6 +45,7 @@ function detailResponse(body: Record<string, unknown>): Response {
 beforeEach(() => {
   operatorFetchMock.mockReset();
   streamMock.mockReset();
+  notifyCtxSchemaDriftMock.mockReset();
   credsState.current = { id: 'op-1', bearer: 'tok', clientId: 'loopweb' };
 });
 
@@ -77,6 +85,25 @@ describe('waitForRedemption', () => {
     const result = await waitForRedemption('o-1', { pollIntervalMs: 1, totalTimeoutMs: 200 });
     expect(result).toEqual({ code: 'X', pin: 'Y', url: 'https://x.example' });
     expect(streamMock).not.toHaveBeenCalled();
+  });
+
+  it('schema drift on detail fetch pages the drift channel and returns null payload', async () => {
+    operatorFetchMock.mockResolvedValueOnce(detailResponse({ redeemUrl: 123 }));
+    const result = await fetchRedemption('o-1');
+    expect(result).toEqual({ code: null, pin: null, url: null });
+    expect(notifyCtxSchemaDriftMock).toHaveBeenCalledWith({
+      surface: 'GET /gift-cards/:id',
+      issuesSummary: expect.stringContaining('redeemUrl'),
+    });
+  });
+
+  it('keeps usable code/PIN even when CTX returns a non-absolute redeemUrl string', async () => {
+    operatorFetchMock.mockResolvedValueOnce(
+      detailResponse({ redeemCode: 'C', redeemPin: 'P', redeemUrl: '/relative/redeem' }),
+    );
+    const result = await fetchRedemption('o-1');
+    expect(result).toEqual({ code: 'C', pin: 'P', url: '/relative/redeem' });
+    expect(notifyCtxSchemaDriftMock).not.toHaveBeenCalled();
   });
 
   it('polling tolerates intermittent failures and returns once codes appear', async () => {

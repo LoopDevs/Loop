@@ -97,6 +97,20 @@ export const infraEnvFields = {
   // account is unsafe (sequence numbers serialise).
   LOOP_PAYOUT_WORKER_INTERVAL_SECONDS: z.coerce.number().int().positive().default(30),
 
+  // R3-5: upper-band sanity check for CTX's SEP-7 settlement amount.
+  // Before paying CTX, procurement compares the URI amount against
+  // the order's expected wholesale XLM quote. Default 12_500 bps =
+  // 125%, leaving room for ordinary FX/oracle movement while refusing
+  // obvious CTX mispricing / tampered payment URLs. Exact lower-bound
+  // checking is intentionally omitted: an under-quoted CTX URI is not
+  // a treasury-loss vector and CTX owns its own requested amount.
+  LOOP_CTX_PAYMENT_MAX_BPS_OF_EXPECTED: z.coerce
+    .number()
+    .int()
+    .min(10_000)
+    .max(100_000)
+    .default(12_500),
+
   // Max auto-retry attempts before a row promotes from transient
   // failure to terminal `failed`. ADR 016 default 5.
   LOOP_PAYOUT_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
@@ -185,6 +199,15 @@ export const infraEnvFields = {
   // queue of say 20 × $5 cashbacks still fits) while catching
   // real accounting divergence.
   LOOP_ASSET_DRIFT_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(100_000_000n),
+
+  // R3-1: operator XLM/USDC float reconciliation. This is a historical
+  // conservation check over the deposit/operator wallet from an
+  // operator-created baseline. XLM gets a wider default tolerance for
+  // Stellar fees; USDC should be exact unless an approved manual
+  // movement explains the difference.
+  LOOP_OPERATOR_FLOAT_RECONCILIATION_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
+  LOOP_OPERATOR_FLOAT_XLM_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(10_000_000n),
+  LOOP_OPERATOR_FLOAT_USDC_THRESHOLD_STROOPS: z.coerce.bigint().nonnegative().default(1n),
 
   // ADR 030 Phase B: provider-agnostic embedded-wallet substrate.
   // '' (default) → the wallet layer is OFF: `getWalletProvider()`

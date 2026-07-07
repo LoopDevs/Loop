@@ -48,6 +48,7 @@ import {
   sendWebhook,
   truncate,
 } from './shared.js';
+import type { OperatorFloatRunSummary } from '../payments/operator-float-reconciliation.js';
 
 /** Notify: health status changed */
 export function notifyHealthChange(status: 'healthy' | 'degraded', details: string): void {
@@ -55,6 +56,55 @@ export function notifyHealthChange(status: 'healthy' | 'degraded', details: stri
     title: status === 'healthy' ? '💚 Service Healthy' : '🟠 Service Degraded',
     description: truncate(details, DESCRIPTION_MAX),
     color: status === 'healthy' ? GREEN : ORANGE,
+  });
+}
+
+/** Notify: operator XLM/USDC float conservation drifted or cannot classify wallet flow. */
+export function notifyOperatorFloatDrift(args: OperatorFloatRunSummary): void {
+  const suffix = args.state === 'error' ? 'check failed' : args.state;
+  void sendWebhook(env.DISCORD_WEBHOOK_MONITORING, {
+    title: `🔴 Operator Float Reconciliation — ${suffix}`,
+    description: truncate(
+      args.error ??
+        `Operator ${args.asset.toUpperCase()} wallet does not reconcile from its active baseline. Triage /api/admin/treasury and unclassified operator wallet movements before treating the float as healthy.`,
+      DESCRIPTION_MAX,
+    ),
+    color: RED,
+    fields: [
+      { name: 'Asset', value: `\`${args.asset.toUpperCase()}\``, inline: true },
+      { name: 'State', value: `\`${args.state}\``, inline: true },
+      {
+        name: 'Account',
+        value: `\`${escapeMarkdown(args.account.slice(0, 8))}…${escapeMarkdown(args.account.slice(-8))}\``,
+        inline: true,
+      },
+      {
+        name: 'Expected',
+        value:
+          args.expectedBalanceStroops === null ? '_n/a_' : `\`${args.expectedBalanceStroops}\``,
+        inline: true,
+      },
+      {
+        name: 'Actual',
+        value: args.actualBalanceStroops === null ? '_n/a_' : `\`${args.actualBalanceStroops}\``,
+        inline: true,
+      },
+      {
+        name: 'Delta',
+        value: args.deltaStroops === null ? '_n/a_' : `\`${args.deltaStroops}\``,
+        inline: true,
+      },
+      {
+        name: 'Threshold',
+        value: `\`${args.thresholdStroops}\``,
+        inline: true,
+      },
+      {
+        name: 'Unclassified',
+        value: `\`${args.unclassifiedCount}\``,
+        inline: true,
+      },
+    ],
   });
 }
 

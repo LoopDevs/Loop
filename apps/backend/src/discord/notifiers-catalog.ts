@@ -128,6 +128,12 @@ export const DISCORD_NOTIFIERS: ReadonlyArray<DiscordNotifier> = Object.freeze([
       'CF-13: fires when a CTX operator returns 401 ("token invalid") — its bearer expired or was revoked. operatorFetch pulls the operator from rotation (forces its breaker open) and fails over to a healthy sibling. Per-operator 10-min dedup so a sustained 401 produces one alert per operator per ten minutes (ADR 013).',
   },
   {
+    name: 'notifyOperatorFloatDrift',
+    channel: 'monitoring',
+    description:
+      'R3-1: fires when the operator XLM/USDC wallet no longer conserves from its active baseline, or when a Horizon wallet movement is unclassified. Triage via Treasury and the operator-float movement drilldown before treating float as healthy.',
+  },
+  {
     name: 'notifyCtxSchemaDrift',
     channel: 'monitoring',
     description:

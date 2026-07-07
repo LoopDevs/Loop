@@ -50,10 +50,14 @@ const { sdkState, mocks } = vi.hoisted(() => {
 
 vi.mock('@stellar/stellar-sdk', () => {
   class Asset {
+    static native(): { _kind: 'native' } {
+      return { _kind: 'native' };
+    }
     constructor(
       public readonly code: string,
       public readonly issuer: string,
     ) {
+      if (code === 'BADASSET') throw new Error('bad asset');
       mocks.assetCtorMock(code, issuer);
     }
   }
@@ -108,7 +112,12 @@ vi.mock('@stellar/stellar-sdk', () => {
       TESTNET: 'TESTNET_NETWORK',
     },
     Operation: {
-      payment: (arg: unknown) => ({ _kind: 'payment', arg }),
+      payment: (arg: unknown) => {
+        if ((arg as { destination?: string }).destination === 'GBUILDERFAIL') {
+          throw new Error('bad payment op');
+        }
+        return { _kind: 'payment', arg };
+      },
     },
     Horizon: {
       Server: class {
@@ -120,7 +129,13 @@ vi.mock('@stellar/stellar-sdk', () => {
   };
 });
 
-import { submitPayout, PayoutSubmitError } from '../payout-submit.js';
+import {
+  submitPayout,
+  submitNativePayment,
+  submitPreSignedTransaction,
+  PayoutSubmitError,
+  type PreSignedSubmitArgs,
+} from '../payout-submit.js';
 
 const BASE_ARGS = {
   secret: 'SABCDEF',
@@ -132,6 +147,17 @@ const BASE_ARGS = {
     assetIssuer: 'GISSUER',
     amountStroops: 50_000_000n,
     memoText: 'order-abc',
+  },
+};
+
+const BASE_NATIVE_ARGS = {
+  secret: 'SABCDEF',
+  horizonUrl: 'https://horizon.example',
+  networkPassphrase: 'PUBLIC_NETWORK',
+  intent: {
+    to: 'GCTX',
+    amount: '0.1198323',
+    memoText: 'order-native',
   },
 };
 
@@ -228,6 +254,33 @@ describe('submitPayout — keypair + asset errors', () => {
     await expect(submitPayout({ ...BASE_ARGS, secret: 'invalid' })).rejects.toMatchObject({
       kind: 'terminal_bad_auth',
     });
+  });
+
+  it('throws terminal_other when the asset code/issuer pair is invalid', async () => {
+    await expect(
+      submitPayout({
+        ...BASE_ARGS,
+        intent: { ...BASE_ARGS.intent, assetCode: 'BADASSET' },
+      }),
+    ).rejects.toMatchObject({
+      kind: 'terminal_other',
+      message: 'bad asset',
+    });
+  });
+});
+
+describe('submitPayout — transaction build failures', () => {
+  it('wraps SDK payment/build failures as terminal_other', async () => {
+    await expect(
+      submitPayout({
+        ...BASE_ARGS,
+        intent: { ...BASE_ARGS.intent, to: 'GBUILDERFAIL' },
+      }),
+    ).rejects.toMatchObject({
+      kind: 'terminal_other',
+      message: 'bad payment op',
+    });
+    expect(mocks.submitTransactionMock).not.toHaveBeenCalled();
   });
 });
 
@@ -334,5 +387,112 @@ describe('submitPayout — Horizon submit classifications', () => {
       const e = err as PayoutSubmitError;
       expect(e.resultCodes?.operations).toEqual(['op_no_trust']);
     }
+  });
+});
+
+describe('submitNativePayment', () => {
+  it('builds and submits a native XLM payment without re-encoding the decimal amount', async () => {
+    const res = await submitNativePayment(BASE_NATIVE_ARGS);
+
+    expect(res).toEqual({ txHash: 'tx-hash-from-horizon', ledger: 4242 });
+    const tx = sdkState.submittedTxs[0] as {
+      _fingerprint?: { ops: Array<{ arg?: { amount?: string; asset?: unknown } }> };
+    };
+    expect(tx._fingerprint?.ops[0]?.arg?.amount).toBe('0.1198323');
+    expect(tx._fingerprint?.ops[0]?.arg?.asset).toEqual({ _kind: 'native' });
+  });
+
+  it('uses the signed hash fallback when Horizon omits hash and ledger', async () => {
+    sdkState.submitResult = {};
+    await expect(submitNativePayment(BASE_NATIVE_ARGS)).resolves.toEqual({
+      txHash: 'client-computed-hash',
+      ledger: null,
+    });
+  });
+
+  it('aborts before submit if onSigned cannot persist the signed hash', async () => {
+    await expect(
+      submitNativePayment({
+        ...BASE_NATIVE_ARGS,
+        onSigned: async () => {
+          throw new Error('persist failed');
+        },
+      }),
+    ).rejects.toMatchObject({
+      kind: 'terminal_other',
+      message: 'onSigned persist failed: persist failed',
+    });
+    expect(mocks.submitTransactionMock).not.toHaveBeenCalled();
+  });
+
+  it('wraps invalid native submit secrets as terminal_bad_auth', async () => {
+    await expect(
+      submitNativePayment({ ...BASE_NATIVE_ARGS, secret: 'invalid' }),
+    ).rejects.toMatchObject({
+      kind: 'terminal_bad_auth',
+    });
+  });
+
+  it('wraps native loadAccount failures as transient_horizon', async () => {
+    sdkState.loadAccountThrow = new Error('horizon down');
+    await expect(submitNativePayment(BASE_NATIVE_ARGS)).rejects.toMatchObject({
+      kind: 'transient_horizon',
+    });
+  });
+
+  it('wraps native transaction build failures as terminal_other', async () => {
+    await expect(
+      submitNativePayment({
+        ...BASE_NATIVE_ARGS,
+        intent: { ...BASE_NATIVE_ARGS.intent, to: 'GBUILDERFAIL' },
+      }),
+    ).rejects.toMatchObject({
+      kind: 'terminal_other',
+      message: 'bad payment op',
+    });
+  });
+});
+
+describe('submitPreSignedTransaction', () => {
+  function signedTx(hash = 'pre-signed-hash'): PreSignedSubmitArgs['tx'] {
+    return { hash: () => ({ toString: () => hash }) } as unknown as PreSignedSubmitArgs['tx'];
+  }
+
+  it('submits a pre-signed transaction and returns Horizon hash + ledger', async () => {
+    await expect(
+      submitPreSignedTransaction({
+        horizonUrl: 'https://horizon.example',
+        tx: signedTx(),
+      }),
+    ).resolves.toEqual({ txHash: 'tx-hash-from-horizon', ledger: 4242 });
+  });
+
+  it('uses the transaction hash fallback when Horizon omits hash', async () => {
+    sdkState.submitResult = { ledger: 8 };
+    await expect(
+      submitPreSignedTransaction({
+        horizonUrl: 'https://horizon.example',
+        tx: signedTx('fallback-pre-signed-hash'),
+      }),
+    ).resolves.toEqual({ txHash: 'fallback-pre-signed-hash', ledger: 8 });
+  });
+
+  it('shares submit-error classification with operator-signed payouts', async () => {
+    sdkState.submitThrow = {
+      response: {
+        status: 400,
+        data: {
+          extras: { result_codes: { transaction: 'tx_failed', operations: ['op_no_trust'] } },
+        },
+      },
+    };
+    await expect(
+      submitPreSignedTransaction({
+        horizonUrl: 'https://horizon.example',
+        tx: signedTx(),
+      }),
+    ).rejects.toMatchObject({
+      kind: 'terminal_no_trust',
+    });
   });
 });

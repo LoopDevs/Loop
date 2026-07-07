@@ -72,7 +72,12 @@ import type { Order } from './repo.js';
  */
 export async function markOrderPaid(
   orderId: string,
-  opts: { paymentReceivedAt?: Date } = {},
+  opts: {
+    paymentReceivedAt?: Date;
+    paymentReceivedHorizonId?: string | null;
+    paymentReceivedTxHash?: string | null;
+    paymentReceivedPayment?: unknown | null;
+  } = {},
 ): Promise<Order | null> {
   const now = new Date();
   const paymentReceivedAt = opts.paymentReceivedAt ?? now;
@@ -83,6 +88,15 @@ export async function markOrderPaid(
         state: 'paid',
         paidAt: now,
         paymentReceivedAt,
+        ...(opts.paymentReceivedHorizonId !== undefined
+          ? { paymentReceivedHorizonId: opts.paymentReceivedHorizonId }
+          : {}),
+        ...(opts.paymentReceivedTxHash !== undefined
+          ? { paymentReceivedTxHash: opts.paymentReceivedTxHash }
+          : {}),
+        ...(opts.paymentReceivedPayment !== undefined
+          ? { paymentReceivedPayment: opts.paymentReceivedPayment }
+          : {}),
       })
       .where(and(eq(orders.id, orderId), eq(orders.state, 'pending_payment')))
       .returning();

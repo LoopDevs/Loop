@@ -63,7 +63,7 @@ vi.mock('../../orders/transitions.js', async () => {
   const actual = await vi.importActual<typeof TransitionsModule>('../../orders/transitions.js');
   return {
     ...actual,
-    markOrderPaid: (id: string) => markPaidMock(id),
+    markOrderPaid: (id: string, opts?: unknown) => markPaidMock(id, opts),
   };
 });
 
@@ -449,7 +449,11 @@ describe('runPaymentWatcherTick', () => {
     });
     expect(r.matched).toBe(1);
     expect(r.paid).toBe(1);
-    expect(markPaidMock).toHaveBeenCalledWith('order-1');
+    expect(markPaidMock).toHaveBeenCalledWith('order-1', {
+      paymentReceivedHorizonId: 'id-pt-1',
+      paymentReceivedTxHash: 'tx-pt-1',
+      paymentReceivedPayment: expect.objectContaining({ id: 'id-pt-1' }),
+    });
     expect(state.writtenCursors).toEqual(['pt-1']);
   });
 
@@ -463,6 +467,103 @@ describe('runPaymentWatcherTick', () => {
     expect(r.unmatchedMemo).toBe(1);
     expect(r.paid).toBe(0);
     expect(state.writtenCursors).toEqual(['pt-7']);
+  });
+
+  it('T0-1c: expired-order sub-dust late deposit is counted but not recorded', async () => {
+    listPaymentsMock.mockResolvedValue({
+      records: [usdcPayment('DUST-MEMO', '0.0009999', 'pt-dust')],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(null);
+    findAnyOrderMock.mockResolvedValue({ ...makeOrder({ id: 'expired-order' }), state: 'expired' });
+    const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+    expect(r.unmatchedMemo).toBe(1);
+    expect(recordSkipMock).not.toHaveBeenCalled();
+    expect(state.writtenCursors).toEqual(['pt-dust']);
+  });
+
+  it('T0-1c: refundable late deposit at the dust floor is still recorded', async () => {
+    listPaymentsMock.mockResolvedValue({
+      records: [usdcPayment('REFUNDABLE-MEMO', '0.0010000', 'pt-refundable')],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(null);
+    findAnyOrderMock.mockResolvedValue({ ...makeOrder({ id: 'expired-order' }), state: 'expired' });
+    const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+    expect(r.unmatchedMemo).toBe(1);
+    expect(recordSkipMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memo: 'REFUNDABLE-MEMO',
+        orderId: 'expired-order',
+        reason: 'order_gone',
+      }),
+    );
+  });
+
+  it('T0-1b: duplicate deposit against a paid order is recorded for refund', async () => {
+    listPaymentsMock.mockResolvedValue({
+      records: [usdcPayment('PAID-MEMO', '10.0000000', 'pt-duplicate')],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(null);
+    findAnyOrderMock.mockResolvedValue({
+      ...makeOrder({ id: 'paid-order' }),
+      state: 'paid',
+      paymentReceivedHorizonId: 'id-original',
+      paymentReceivedTxHash: 'tx-original',
+    });
+
+    const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+
+    expect(r.unmatchedMemo).toBe(1);
+    expect(recordSkipMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment: expect.objectContaining({ id: 'id-pt-duplicate' }),
+        memo: 'PAID-MEMO',
+        orderId: 'paid-order',
+        reason: 'order_gone',
+        detail: 'duplicate deposit arrived after order was already paid',
+      }),
+    );
+  });
+
+  it('T0-1b: re-reading the original paying deposit for a paid order is not recorded', async () => {
+    listPaymentsMock.mockResolvedValue({
+      records: [usdcPayment('PAID-MEMO', '10.0000000', 'pt-original')],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(null);
+    findAnyOrderMock.mockResolvedValue({
+      ...makeOrder({ id: 'paid-order' }),
+      state: 'paid',
+      paymentReceivedHorizonId: 'id-pt-original',
+      paymentReceivedTxHash: 'tx-pt-original',
+    });
+
+    const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+
+    expect(r.unmatchedMemo).toBe(1);
+    expect(recordSkipMock).not.toHaveBeenCalled();
+    expect(state.writtenCursors).toEqual(['pt-original']);
+  });
+
+  it('T0-1b: paid-order deposits without a stored paying id stay unrecorded', async () => {
+    listPaymentsMock.mockResolvedValue({
+      records: [usdcPayment('LEGACY-PAID-MEMO', '10.0000000', 'pt-legacy')],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(null);
+    findAnyOrderMock.mockResolvedValue({
+      ...makeOrder({ id: 'legacy-paid-order' }),
+      state: 'paid',
+      paymentReceivedHorizonId: null,
+      paymentReceivedTxHash: null,
+    });
+
+    const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+
+    expect(r.unmatchedMemo).toBe(1);
+    expect(recordSkipMock).not.toHaveBeenCalled();
   });
 
   it('underpayment → skippedAmount++, no transition', async () => {
@@ -750,7 +851,11 @@ describe('skip persistence + poison isolation (comprehensive-audit CRIT #1/#2)',
     // forever and 'memo-good' never got paid.
     expect(result.errors).toBe(1);
     expect(result.paid).toBe(1);
-    expect(markPaidMock).toHaveBeenCalledWith('order-good');
+    expect(markPaidMock).toHaveBeenCalledWith('order-good', {
+      paymentReceivedHorizonId: 'id-pt-21',
+      paymentReceivedTxHash: 'tx-pt-21',
+      paymentReceivedPayment: expect.objectContaining({ id: 'id-pt-21' }),
+    });
     expect(recordSkipMock).toHaveBeenCalledTimes(1);
     const call = recordSkipMock.mock.calls[0]?.[0] as { reason: string; detail?: string };
     expect(call.reason).toBe('processing_error');

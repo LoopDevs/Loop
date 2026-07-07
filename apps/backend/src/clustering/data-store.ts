@@ -6,6 +6,7 @@ import { getUpstreamCircuit } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import { getMerchants } from '../merchants/sync.js';
+import { loadCatalogSnapshot, saveCatalogSnapshot } from '../ctx/catalog-snapshots.js';
 
 /**
  * Zod schema for a single upstream location entry. Required fields are strict;
@@ -63,6 +64,27 @@ let isLocationRefreshing = false;
 /** Returns true while a location refresh is in progress. */
 export function isLocationLoading(): boolean {
   return isLocationRefreshing;
+}
+
+export function __resetLocationStoreForTests(): void {
+  store = { locations: [], loadedAt: 0 };
+  isLocationRefreshing = false;
+  hasWarnedStale = false;
+}
+
+export async function warmStartLocationsFromSnapshot(): Promise<boolean> {
+  if (store.locations.length > 0) return false;
+  const log = logger.child({ module: 'data-store' });
+  try {
+    const snapshot = await loadCatalogSnapshot<Location>('locations');
+    if (snapshot === null) return false;
+    store = { locations: snapshot.items, loadedAt: snapshot.loadedAt };
+    log.info({ count: snapshot.items.length }, 'Location data warm-started from Postgres snapshot');
+    return true;
+  } catch (err) {
+    log.error({ err }, 'Failed to warm-start location data from Postgres snapshot');
+    return false;
+  }
 }
 
 /**
@@ -167,7 +189,17 @@ export async function refreshLocations(): Promise<void> {
       log.warn({ page, totalPages }, 'Hit MAX_PAGES cap while paginating locations — truncating');
     }
 
-    store = { locations, loadedAt: Date.now() };
+    const loadedAt = Date.now();
+    store = { locations, loadedAt };
+    try {
+      await saveCatalogSnapshot({
+        name: 'locations',
+        items: locations,
+        loadedAt: new Date(loadedAt),
+      });
+    } catch (err) {
+      log.error({ err }, 'Failed to persist location catalog snapshot');
+    }
     // Successful refresh clears the stale-warning dedup so a *future* staleness
     // event can warn again.
     hasWarnedStale = false;
@@ -187,8 +219,9 @@ let refreshInterval: NodeJS.Timeout | null = null;
 let hasWarnedStale = false;
 
 /** Starts the background refresh timer. Call once at startup. */
-export function startLocationRefresh(): void {
+export async function startLocationRefresh(): Promise<void> {
   const log = logger.child({ module: 'data-store' });
+  await warmStartLocationsFromSnapshot();
   void refreshLocations();
 
   const intervalMs = env.LOCATION_REFRESH_INTERVAL_HOURS * 60 * 60 * 1000;

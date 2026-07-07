@@ -26,6 +26,10 @@ const { mocks } = vi.hoisted(() => ({
     >(async () => []),
     notifyLedgerDrift: vi.fn<(args: unknown) => void>(() => undefined),
     txExecute: vi.fn(),
+    markWorkerStarted: vi.fn(),
+    markWorkerStopped: vi.fn(),
+    markWorkerTickFailure: vi.fn(),
+    markWorkerTickSuccess: vi.fn(),
   },
 }));
 
@@ -52,7 +56,18 @@ vi.mock('../../discord.js', () => ({
   notifyLedgerDrift: (args: unknown) => mocks.notifyLedgerDrift(args),
 }));
 
-import { runLedgerInvariantTick } from '../ledger-invariant-watcher.js';
+vi.mock('../../runtime-health.js', () => ({
+  markWorkerStarted: (...args: unknown[]) => mocks.markWorkerStarted(...args),
+  markWorkerStopped: (...args: unknown[]) => mocks.markWorkerStopped(...args),
+  markWorkerTickFailure: (...args: unknown[]) => mocks.markWorkerTickFailure(...args),
+  markWorkerTickSuccess: (...args: unknown[]) => mocks.markWorkerTickSuccess(...args),
+}));
+
+import {
+  runLedgerInvariantTick,
+  startLedgerInvariantWatcher,
+  stopLedgerInvariantWatcher,
+} from '../ledger-invariant-watcher.js';
 
 function driftRow(n: number): {
   userId: string;
@@ -71,11 +86,16 @@ function driftRow(n: number): {
 }
 
 beforeEach(() => {
+  stopLedgerInvariantWatcher();
   mocks.lockAcquired.value = true;
   mocks.computeLedgerDriftSql.mockReset();
   mocks.computeLedgerDriftSql.mockResolvedValue([]);
   mocks.notifyLedgerDrift.mockReset();
   mocks.txExecute.mockClear();
+  mocks.markWorkerStarted.mockReset();
+  mocks.markWorkerStopped.mockReset();
+  mocks.markWorkerTickFailure.mockReset();
+  mocks.markWorkerTickSuccess.mockReset();
 });
 
 describe('runLedgerInvariantTick', () => {
@@ -133,5 +153,41 @@ describe('runLedgerInvariantTick', () => {
     mocks.computeLedgerDriftSql.mockRejectedValue(new Error('db down'));
     await expect(runLedgerInvariantTick()).rejects.toThrow('db down');
     expect(mocks.notifyLedgerDrift).not.toHaveBeenCalled();
+  });
+});
+
+describe('ledger-invariant watcher lifecycle', () => {
+  async function flushTick(): Promise<void> {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  it('starts once, runs an immediate tick, records health, and stops', async () => {
+    startLedgerInvariantWatcher({ intervalMs: 60_000 });
+    startLedgerInvariantWatcher({ intervalMs: 60_000 });
+
+    await flushTick();
+
+    expect(mocks.markWorkerStarted).toHaveBeenCalledOnce();
+    expect(mocks.computeLedgerDriftSql).toHaveBeenCalledOnce();
+    expect(mocks.markWorkerTickSuccess).toHaveBeenCalledOnce();
+
+    stopLedgerInvariantWatcher();
+    stopLedgerInvariantWatcher();
+
+    expect(mocks.markWorkerStopped).toHaveBeenCalledOnce();
+  });
+
+  it('marks tick failures without throwing out of the interval loop', async () => {
+    const err = new Error('db unavailable');
+    mocks.computeLedgerDriftSql.mockRejectedValue(err);
+
+    startLedgerInvariantWatcher({ intervalMs: 60_000 });
+    await flushTick();
+
+    expect(mocks.markWorkerTickFailure).toHaveBeenCalledWith('ledger_invariant_watcher', err);
+    expect(mocks.markWorkerTickSuccess).not.toHaveBeenCalled();
+
+    stopLedgerInvariantWatcher();
   });
 });

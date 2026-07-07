@@ -11,14 +11,25 @@ import type { Context } from 'hono';
  * primitives are separately covered in `auth/__tests__/admin-step-up.test.ts`).
  */
 
-const { findLiveOtpMock, incrementOtpAttemptsMock, markOtpConsumedMock, signMock, configuredMock } =
-  vi.hoisted(() => ({
-    findLiveOtpMock: vi.fn(),
-    incrementOtpAttemptsMock: vi.fn(async () => undefined),
-    markOtpConsumedMock: vi.fn(async () => undefined),
-    signMock: vi.fn(),
-    configuredMock: vi.fn(() => true),
-  }));
+const {
+  findLiveOtpMock,
+  incrementOtpAttemptsMock,
+  markOtpConsumedMock,
+  signMock,
+  configuredMock,
+  isEmailOtpLockedMock,
+  registerFailedOtpAttemptMock,
+  clearOtpAttemptsMock,
+} = vi.hoisted(() => ({
+  findLiveOtpMock: vi.fn(),
+  incrementOtpAttemptsMock: vi.fn(async () => undefined),
+  markOtpConsumedMock: vi.fn(async () => undefined),
+  signMock: vi.fn(),
+  configuredMock: vi.fn(() => true),
+  isEmailOtpLockedMock: vi.fn(async () => false),
+  registerFailedOtpAttemptMock: vi.fn(async () => ({ failedAttempts: 1, locked: false })),
+  clearOtpAttemptsMock: vi.fn(async () => undefined),
+}));
 
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -32,6 +43,13 @@ vi.mock('../../auth/otps.js', () => ({
   markOtpConsumed: markOtpConsumedMock,
 }));
 
+vi.mock('../../auth/otp-attempt-counter.js', () => ({
+  clearOtpAttempts: clearOtpAttemptsMock,
+  isEmailOtpLocked: isEmailOtpLockedMock,
+  OTP_EMAIL_LOCKOUT_MS: 15 * 60 * 1000,
+  registerFailedOtpAttempt: registerFailedOtpAttemptMock,
+}));
+
 vi.mock('../../auth/admin-step-up.js', () => ({
   isAdminStepUpConfigured: configuredMock,
   signAdminStepUpToken: signMock,
@@ -43,6 +61,7 @@ vi.mock('../../auth/admin-step-up.js', () => ({
     'payout-retry',
     'payout-compensation',
     'home-currency',
+    'operator-float',
   ] as const,
 }));
 
@@ -53,6 +72,7 @@ function makeCtx(opts: {
   body?: unknown;
 }): Context {
   const store = new Map<string, unknown>();
+  const headers: Record<string, string> = {};
   if (opts.auth !== undefined) store.set('auth', opts.auth);
   return {
     req: {
@@ -62,10 +82,13 @@ function makeCtx(opts: {
       },
     },
     get: (k: string) => store.get(k),
+    header: (k: string, v: string) => {
+      headers[k] = v;
+    },
     json: (body: unknown, status?: number) =>
       new Response(JSON.stringify(body), {
         status: status ?? 200,
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...headers },
       }),
   } as unknown as Context;
 }
@@ -81,6 +104,9 @@ beforeEach(() => {
     claims: { exp: Math.floor(Date.now() / 1000) + 300, scope: 'admin-write' },
   });
   configuredMock.mockReset().mockReturnValue(true);
+  isEmailOtpLockedMock.mockReset().mockResolvedValue(false);
+  registerFailedOtpAttemptMock.mockReset().mockResolvedValue({ failedAttempts: 1, locked: false });
+  clearOtpAttemptsMock.mockReset().mockResolvedValue(undefined);
 });
 
 describe('adminStepUpHandler', () => {
@@ -133,10 +159,37 @@ describe('adminStepUpHandler', () => {
     expect(res.status).toBe(401);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('UNAUTHORIZED');
+    expect(isEmailOtpLockedMock).toHaveBeenCalledWith({ email: 'admin@loop.test' });
     expect(incrementOtpAttemptsMock).toHaveBeenCalledWith({ email: 'admin@loop.test' });
+    expect(registerFailedOtpAttemptMock).toHaveBeenCalledWith({ email: 'admin@loop.test' });
     // A wrong guess must never mint a token or consume anything.
     expect(signMock).not.toHaveBeenCalled();
     expect(markOtpConsumedMock).not.toHaveBeenCalled();
+  });
+
+  it('429 TOO_MANY_ATTEMPTS when the admin email is already locked, before checking any OTP', async () => {
+    isEmailOtpLockedMock.mockResolvedValue(true);
+    const res = await adminStepUpHandler(makeCtx({ auth: LOOP_ADMIN, body: { otp: '000000' } }));
+    expect(res.status).toBe(429);
+    expect(res.headers.get('Retry-After')).toBe('900');
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('TOO_MANY_ATTEMPTS');
+    expect(findLiveOtpMock).not.toHaveBeenCalled();
+    expect(incrementOtpAttemptsMock).not.toHaveBeenCalled();
+    expect(registerFailedOtpAttemptMock).not.toHaveBeenCalled();
+    expect(signMock).not.toHaveBeenCalled();
+  });
+
+  it('429 TOO_MANY_ATTEMPTS when a wrong OTP crosses the per-email threshold', async () => {
+    findLiveOtpMock.mockResolvedValue(null);
+    registerFailedOtpAttemptMock.mockResolvedValue({ failedAttempts: 10, locked: true });
+    const res = await adminStepUpHandler(makeCtx({ auth: LOOP_ADMIN, body: { otp: '000000' } }));
+    expect(res.status).toBe(429);
+    expect(res.headers.get('Retry-After')).toBe('900');
+    expect(incrementOtpAttemptsMock).toHaveBeenCalledWith({ email: 'admin@loop.test' });
+    expect(registerFailedOtpAttemptMock).toHaveBeenCalledWith({ email: 'admin@loop.test' });
+    expect(markOtpConsumedMock).not.toHaveBeenCalled();
+    expect(signMock).not.toHaveBeenCalled();
   });
 
   it('401 UNAUTHORIZED (same shape as a wrong OTP) for a non-ASCII stored email, without leaking the reason', async () => {
@@ -164,6 +217,7 @@ describe('adminStepUpHandler', () => {
 
     expect(markOtpConsumedMock).toHaveBeenCalledTimes(1);
     expect(markOtpConsumedMock).toHaveBeenCalledWith('otp-row-1');
+    expect(clearOtpAttemptsMock).toHaveBeenCalledWith('admin@loop.test');
 
     expect(signMock).toHaveBeenCalledTimes(1);
     const signArgs = signMock.mock.calls[0]?.[0] as { sub: string; email: string; scope?: string };

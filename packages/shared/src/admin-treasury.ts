@@ -47,6 +47,17 @@ export interface TreasuryHolding {
   stroops: string | null;
 }
 
+export interface OperatorFloatTreasuryState {
+  state: 'ok' | 'drift' | 'unclassified' | 'needs_baseline' | 'error' | 'unknown';
+  expectedBalanceStroops: string | null;
+  actualBalanceStroops: string | null;
+  deltaStroops: string | null;
+  thresholdStroops: string | null;
+  unclassifiedCount: number;
+  checkedAt: string | null;
+  error: string | null;
+}
+
 /**
  * Per charge-currency economics of fulfilled orders (ADR 015 — ADR 010
  * gift-card procurement flow). Sums — in the key's currency — how much
@@ -77,6 +88,11 @@ export interface TreasurySnapshot {
   assets: {
     USDC: TreasuryHolding;
     XLM: TreasuryHolding;
+  };
+  /** R3-1 — operator/deposit wallet conservation from active baselines. */
+  operatorFloat: {
+    xlm: OperatorFloatTreasuryState;
+    usdc: OperatorFloatTreasuryState;
   };
   /**
    * ADR 015 — outbound Stellar cashback payouts at each state.

@@ -47,6 +47,7 @@ const { state, dbMock } = vi.hoisted(() => {
     snapshotKeys: new Set<string>(),
     /** set by the test file after imports resolve. */
     tableNameOf: (_t: unknown): string => '',
+    advisoryAcquired: true,
     reset(): void {
       state.cursorRow = null;
       state.eligibleUsers = [];
@@ -56,6 +57,7 @@ const { state, dbMock } = vi.hoisted(() => {
       state.creditUpserts = [];
       state.payoutInserts = [];
       state.snapshotKeys = new Set<string>();
+      state.advisoryAcquired = true;
     },
   };
 
@@ -167,7 +169,11 @@ const { state, dbMock } = vi.hoisted(() => {
   return { state, dbMock };
 });
 
-vi.mock('../../db/client.js', () => ({ db: dbMock }));
+vi.mock('../../db/client.js', () => ({
+  db: dbMock,
+  withAdvisoryLock: async <T>(_key: bigint, fn: () => Promise<T>) =>
+    state.advisoryAcquired ? { ran: true as const, value: await fn() } : { ran: false as const },
+}));
 
 // Horizon trustline reads — per-address balances.
 const { horizonState } = vi.hoisted(() => ({
@@ -305,6 +311,25 @@ describe('splitPayable — sub-minor carry', () => {
 });
 
 describe('runInterestMintTick', () => {
+  it('S4-3: skips the sweep when another machine holds the interest-mint lock', async () => {
+    state.advisoryAcquired = false;
+    configureGbp();
+    state.eligibleUsers = [{ id: 'u-1', walletAddress: WALLET }];
+    horizonState.balances.set(WALLET, 5_000_000_000n);
+
+    const r = await runInterestMintTick({ now: NOW, apyBps: 300 });
+
+    expect(r).toMatchObject({
+      period: '2026-06-12',
+      skippedLocked: true,
+      eligibleUsers: 0,
+      minted: 0,
+      errors: 0,
+    });
+    expect(state.snapshotInserts).toHaveLength(0);
+    expect(state.payoutInserts).toHaveLength(0);
+  });
+
   it('mints to an activated holder: snapshot + interest credit + mirror bump + interest_mint payout in one pass', async () => {
     configureGbp();
     state.eligibleUsers = [{ id: 'u-1', walletAddress: WALLET }];

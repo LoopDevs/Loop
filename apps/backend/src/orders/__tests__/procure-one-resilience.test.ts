@@ -28,6 +28,7 @@ vi.mock('../../env.js', () => ({
     LOOP_PHASE_1_ONLY: true,
     LOOP_STELLAR_USDC_FLOOR_STROOPS: null,
     LOOP_STELLAR_DEPOSIT_ADDRESS: undefined,
+    LOOP_CTX_PAYMENT_MAX_BPS_OF_EXPECTED: 12_500,
   },
 }));
 
@@ -70,8 +71,13 @@ const { notifyOrderFailedAfterCtxPaidMock, notifyCashbackCreditedMock } = vi.hoi
 }));
 vi.mock('../../discord.js', () => ({
   notifyCashbackCredited: notifyCashbackCreditedMock,
+  notifyCtxSchemaDrift: vi.fn(),
   notifyUsdcBelowFloor: vi.fn(),
   notifyOrderFailedAfterCtxPaid: notifyOrderFailedAfterCtxPaidMock,
+}));
+
+vi.mock('../../payments/price-feed.js', () => ({
+  requiredStroopsForCharge: vi.fn(async (chargeMinor: bigint) => chargeMinor * 1_000_000n),
 }));
 
 // CF-20: the auto-refund seam. Keep the REAL error classes so
@@ -114,6 +120,7 @@ function fakeOrder(): Order {
     userId: 'user-1',
     chargeMinor: 1000n,
     chargeCurrency: 'USD',
+    wholesaleMinor: 1000n,
   } as unknown as Order;
 }
 

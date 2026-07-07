@@ -32,11 +32,10 @@
  *     Already-paid states (`paid`/`procuring`/`fulfilled`) replay
  *     `{ state }` with 200 — a double-tap after the watcher caught
  *     the payment is success, not an error.
- *   - In-flight fence: an in-process per-order set rejects a
- *     concurrent second call (`400 PAYMENT_IN_FLIGHT`) so two taps
- *     can't double-submit two payments before the watcher flips the
- *     state. (Single-process deployment today — Fly runs one
- *     machine; a multi-instance future needs a DB-level fence.)
+ *   - In-flight fence: a fleet-wide advisory lock keyed by order id
+ *     rejects a concurrent second call (`400 PAYMENT_IN_FLIGHT`) so
+ *     two taps on different machines can't double-submit two payments
+ *     before the watcher flips the state.
  *   - Even if a duplicate payment slips through (e.g. across a
  *     restart), the fence above is the primary guard. A deposit that
  *     lands after its order has EXPIRED unpaid is recorded by the
@@ -46,6 +45,7 @@
  *     auto-recording needs the paying-payment id persisted first, so a
  *     re-read of the original deposit can't be mistaken for a duplicate.
  */
+import { createHash } from 'node:crypto';
 import type { Context } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import {
@@ -60,7 +60,7 @@ import {
   type FeeBumpTransaction,
   type Transaction,
 } from '@stellar/stellar-sdk';
-import { db } from '../db/client.js';
+import { db, withAdvisoryLock } from '../db/client.js';
 import { orders } from '../db/schema.js';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
@@ -90,16 +90,23 @@ const PAY_TIMEOUT_SECONDS = 60;
  */
 const ALREADY_PAID_STATES = new Set(['paid', 'procuring', 'fulfilled']);
 
-/**
- * In-process per-order fence. Entries live only for the duration of
- * one handler invocation (try/finally) — this is a concurrency
- * fence, not a cache, so process restarts clearing it is correct.
- */
-const inFlightOrders = new Set<string>();
-
 /** Test seam. */
 export function __resetRedeemFenceForTests(): void {
-  inFlightOrders.clear();
+  // No in-memory fence state remains; kept for existing tests.
+}
+
+function redeemFenceLockKey(orderId: string): bigint {
+  const digest = createHash('sha256').update(`loop:redeem:${orderId}`).digest();
+  const raw =
+    (BigInt(digest[0]!) << 56n) |
+    (BigInt(digest[1]!) << 48n) |
+    (BigInt(digest[2]!) << 40n) |
+    (BigInt(digest[3]!) << 32n) |
+    (BigInt(digest[4]!) << 24n) |
+    (BigInt(digest[5]!) << 16n) |
+    (BigInt(digest[6]!) << 8n) |
+    BigInt(digest[7]!);
+  return BigInt.asIntN(64, raw);
 }
 
 /** `12_3400000n` stroops → `"12.3400000"` (SDK amount string). */
@@ -208,6 +215,7 @@ export async function redeemLoopOrderHandler(c: Context): Promise<Response> {
     log.error({ orderId }, 'loop_asset order has no payment memo');
     return c.json({ code: 'INTERNAL_ERROR', message: 'Order is missing its payment memo' }, 500);
   }
+  const paymentMemo = order.paymentMemo;
 
   const provider = getWalletProvider();
   if (provider === null) {
@@ -223,6 +231,7 @@ export async function redeemLoopOrderHandler(c: Context): Promise<Response> {
       503,
     );
   }
+  const depositAddress = env.LOOP_STELLAR_DEPOSIT_ADDRESS;
   const operatorSecret = env.LOOP_STELLAR_OPERATOR_SECRET;
   if (operatorSecret === undefined) {
     return c.json(
@@ -244,6 +253,7 @@ export async function redeemLoopOrderHandler(c: Context): Promise<Response> {
       503,
     );
   }
+  const assetIssuer = asset.issuer;
 
   const user = await getUserById(auth.userId);
   if (user === null) {
@@ -264,15 +274,8 @@ export async function redeemLoopOrderHandler(c: Context): Promise<Response> {
   }
   const { walletId, walletAddress } = user;
 
-  // In-flight fence — one build/sign/submit per order at a time.
-  if (inFlightOrders.has(orderId)) {
-    return c.json(
-      { code: 'PAYMENT_IN_FLIGHT', message: 'A payment for this order is already in flight' },
-      400,
-    );
-  }
-  inFlightOrders.add(orderId);
-  try {
+  // Fleet-wide in-flight fence — one build/sign/submit per order at a time.
+  const fenced = await withAdvisoryLock(redeemFenceLockKey(orderId), async () => {
     const requiredStroops = order.chargeMinor * LOOP_ASSET_STROOPS_PER_MINOR;
 
     // Early balance check for honest UX. The authoritative check is
@@ -313,10 +316,10 @@ export async function redeemLoopOrderHandler(c: Context): Promise<Response> {
     }
     const innerTx = buildRedeemTransaction({
       userAccount,
-      depositAddress: env.LOOP_STELLAR_DEPOSIT_ADDRESS,
-      asset: { code: asset.code, issuer: asset.issuer },
+      depositAddress,
+      asset: { code: asset.code, issuer: assetIssuer },
       amountStroops: requiredStroops,
-      memoText: order.paymentMemo,
+      memoText: paymentMemo,
       networkPassphrase: env.LOOP_STELLAR_NETWORK_PASSPHRASE,
     });
 
@@ -391,7 +394,12 @@ export async function redeemLoopOrderHandler(c: Context): Promise<Response> {
     // a fast watcher is reflected immediately.
     const fresh = await db.query.orders.findFirst({ where: eq(orders.id, orderId) });
     return c.json({ state: fresh?.state ?? order.state });
-  } finally {
-    inFlightOrders.delete(orderId);
+  });
+  if (!fenced.ran) {
+    return c.json(
+      { code: 'PAYMENT_IN_FLIGHT', message: 'A payment for this order is already in flight' },
+      400,
+    );
   }
+  return fenced.value;
 }

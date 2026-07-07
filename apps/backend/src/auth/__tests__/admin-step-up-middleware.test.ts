@@ -97,12 +97,15 @@ describe('requireAdminStepUp', () => {
     expect(body.code).toBe('STEP_UP_SUBJECT_MISMATCH');
   });
 
-  it('legacy CTX-proxy admins fall through (ADR-028 exemption)', async () => {
+  it('legacy CTX-proxy auth fails closed because there is no Loop subject to pin', async () => {
     const middleware = requireAdminStepUp();
     const { ctx } = makeCtx({ auth: { kind: 'ctx' } });
     const next = vi.fn(noopNext);
-    await middleware(ctx, next);
-    expect(next).toHaveBeenCalled();
+    const res = (await middleware(ctx, next)) as Response;
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('STEP_UP_INVALID');
   });
 
   describe('hardening B2 — fail-closed subject pinning', () => {

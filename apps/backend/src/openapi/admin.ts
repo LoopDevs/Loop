@@ -195,6 +195,7 @@ export function registerAdminOpenApi(
           'payout-retry',
           'payout-compensation',
           'home-currency',
+          'operator-float',
         ])
         .optional()
         .openapi({

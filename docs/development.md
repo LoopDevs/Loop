@@ -229,8 +229,12 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 
 # Feature flag. When true + the signing key is set, /request-otp /
 # /verify-otp / /refresh take the Loop-native path (Loop sends the
-# email, mints its own JWTs).
+# email, mints its own JWTs). R3-7: production boot fails unless
+# this is true, so an unset flag cannot silently fall back to the
+# legacy CTX-proxy path. Emergency rollback / staging only:
+# DISABLE_NATIVE_AUTH_ENFORCEMENT=1.
 # LOOP_AUTH_NATIVE_ENABLED=true
+# DISABLE_NATIVE_AUTH_ENFORCEMENT=1
 
 # Phase 1 launch gate. When true, the web client hides every Phase 2+
 # surface (cashback navbar links, /settings/wallet, /settings/cashback,
@@ -354,6 +358,11 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # LOOP_PROCUREMENT_INTERVAL_SECONDS=5
 # LOOP_PAYOUT_WORKER_INTERVAL_SECONDS=30
 # LOOP_PAYOUT_MAX_ATTEMPTS=5                   # bounded retry
+
+# R3-5 CTX settlement sanity band. Before paying CTX, procurement
+# refuses a SEP-7 payment amount above this many basis points of the
+# expected wholesale XLM quote. Default 12500 = 125%.
+# LOOP_CTX_PAYMENT_MAX_BPS_OF_EXPECTED=12500
 
 # A2-1921 fee-bump strategy. Attempt N pays BASE * MULTIPLIER^(N-1),
 # capped at CAP, so congested-network submits drain instead of going

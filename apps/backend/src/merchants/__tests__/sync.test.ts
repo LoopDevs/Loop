@@ -24,6 +24,23 @@ vi.mock('../../logger.js', () => ({
   logger: { child: () => ({ info: vi.fn(), error: vi.fn(), warn: warnSpy }) },
 }));
 
+const { snapshotState } = vi.hoisted(() => ({
+  snapshotState: {
+    saved: [] as Array<{ name: string; items: unknown[]; loadedAt: Date }>,
+    next: null as null | { items: unknown[]; loadedAt: number },
+  },
+}));
+
+vi.mock('../../ctx/catalog-snapshots.js', () => ({
+  saveCatalogSnapshot: vi.fn(async (args: { name: string; items: unknown[]; loadedAt: Date }) => {
+    snapshotState.saved.push(args);
+  }),
+  loadCatalogSnapshot: vi.fn(async (name: string) => {
+    if (name !== 'merchants') return null;
+    return snapshotState.next;
+  }),
+}));
+
 // Mock circuit breaker to pass through to global fetch (avoids cross-test state leaks)
 vi.mock('../../circuit-breaker.js', () => ({
   getAllCircuitStates: () => ({}),
@@ -34,7 +51,12 @@ vi.mock('../../circuit-breaker.js', () => ({
   }),
 }));
 
-import { refreshMerchants, getMerchants } from '../sync.js';
+import {
+  __resetMerchantStoreForTests,
+  refreshMerchants,
+  getMerchants,
+  warmStartMerchantsFromSnapshot,
+} from '../sync.js';
 
 // --- Mock fetch globally ---
 const mockFetch = vi.fn();
@@ -81,6 +103,9 @@ describe('refreshMerchants', () => {
   beforeEach(() => {
     mockFetch.mockReset();
     warnSpy.mockClear();
+    snapshotState.saved = [];
+    snapshotState.next = null;
+    __resetMerchantStoreForTests();
   });
 
   it('fetches all pages and populates the merchant store', async () => {
@@ -137,6 +162,34 @@ describe('refreshMerchants', () => {
     expect(store.merchantsById.get('merchant-1')?.name).toBe('Home Depot');
     expect(store.merchantsBySlug.get('home-depot')?.id).toBe('merchant-1');
     expect(store.merchantsBySlug.get('target')?.id).toBe('merchant-2');
+    expect(snapshotState.saved).toHaveLength(1);
+    expect(snapshotState.saved[0]).toMatchObject({
+      name: 'merchants',
+      items: expect.arrayContaining([expect.objectContaining({ id: 'merchant-1' })]),
+    });
+  });
+
+  it('warm-starts from the last-good Postgres snapshot before upstream is reachable', async () => {
+    snapshotState.next = {
+      loadedAt: 1_780_188_400_000,
+      items: [
+        {
+          id: 'snapshot-merchant',
+          name: 'Snapshot Store',
+          enabled: true,
+          country: 'GB',
+        },
+      ],
+    };
+
+    await expect(warmStartMerchantsFromSnapshot()).resolves.toBe(true);
+    mockFetch.mockResolvedValueOnce(new Response('CTX down', { status: 503 }));
+    await refreshMerchants();
+
+    const store = getMerchants();
+    expect(store.loadedAt).toBe(1_780_188_400_000);
+    expect(store.merchants).toHaveLength(1);
+    expect(store.merchantsBySlug.get('snapshot-store-gb')?.id).toBe('snapshot-merchant');
   });
 
   it('maps upstream info fields (intro/description/instructions/terms) onto the merchant', async () => {

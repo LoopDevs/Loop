@@ -13,14 +13,15 @@
  */
 import { env } from '../env.js';
 import { logger } from '../logger.js';
-import { getMerchants, refreshMerchants } from './sync.js';
+import { getMerchants, refreshMerchants, warmStartMerchantsFromSnapshot } from './sync.js';
 
 const log = logger.child({ module: 'merchants-sync' });
 
 let refreshInterval: NodeJS.Timeout | null = null;
 
 /** Starts the background refresh timer. Call once at startup. */
-export function startMerchantRefresh(): void {
+export async function startMerchantRefresh(): Promise<void> {
+  await warmStartMerchantsFromSnapshot();
   void refreshMerchants();
 
   const intervalMs = env.REFRESH_INTERVAL_HOURS * 60 * 60 * 1000;

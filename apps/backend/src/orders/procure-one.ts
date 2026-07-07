@@ -10,6 +10,7 @@
  * counter without inspecting the order row.
  */
 import { z } from 'zod';
+import { isHomeCurrency } from '@loop/shared';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
 import {
@@ -28,6 +29,7 @@ import { upstreamUrl } from '../upstream.js';
 import { scrubUpstreamBody } from '../upstream-body-scrub.js';
 import {
   notifyCashbackCredited,
+  notifyCtxSchemaDrift,
   notifyUsdcBelowFloor,
   notifyOrderFailedAfterCtxPaid,
 } from '../discord.js';
@@ -39,7 +41,14 @@ import {
 import { getMerchants } from '../merchants/sync.js';
 import { waitForRedemption } from './procurement-redemption.js';
 import { parseSep7PayUri } from './sep7.js';
-import { payCtxOrder, PayCtxConfigError, PayCtxReconcileError } from './pay-ctx.js';
+import { summariseZodIssues } from './handler-shared.js';
+import {
+  decimalToStroops,
+  payCtxOrder,
+  PayCtxConfigError,
+  PayCtxReconcileError,
+} from './pay-ctx.js';
+import { requiredStroopsForCharge } from '../payments/price-feed.js';
 import { PayoutSubmitError } from '../payments/payout-submit.js';
 import {
   pickProcurementAsset,
@@ -82,6 +91,47 @@ function formatMinorToMajor(minor: bigint): string {
   const dollars = abs / 100n;
   const fractional = cents.toString().padStart(2, '0');
   return `${negative ? '-' : ''}${dollars.toString()}.${fractional}`;
+}
+
+const BPS_DENOMINATOR = 10_000n;
+
+function maxStroopsForBps(expectedStroops: bigint, maxBps: number): bigint {
+  return (expectedStroops * BigInt(maxBps) + BPS_DENOMINATOR - 1n) / BPS_DENOMINATOR;
+}
+
+async function checkCtxPaymentAmountBand(
+  order: Order,
+  amount: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const ctxAmountStroops = decimalToStroops(amount);
+  if (ctxAmountStroops === null || ctxAmountStroops <= 0n) {
+    return { ok: false, reason: `CTX payment amount '${amount}' is not a positive stroop amount` };
+  }
+  if (!isHomeCurrency(order.chargeCurrency)) {
+    return {
+      ok: false,
+      reason: `CTX payment amount guard cannot price unsupported charge currency ${order.chargeCurrency}`,
+    };
+  }
+
+  const expectedWholesaleStroops = await requiredStroopsForCharge(
+    order.wholesaleMinor,
+    order.chargeCurrency,
+  );
+  const maxAllowedStroops = maxStroopsForBps(
+    expectedWholesaleStroops,
+    env.LOOP_CTX_PAYMENT_MAX_BPS_OF_EXPECTED,
+  );
+  if (ctxAmountStroops > maxAllowedStroops) {
+    return {
+      ok: false,
+      reason:
+        `CTX payment amount ${ctxAmountStroops.toString()} stroops exceeds ` +
+        `${env.LOOP_CTX_PAYMENT_MAX_BPS_OF_EXPECTED} bps ceiling ` +
+        `(${maxAllowedStroops.toString()} stroops) for expected wholesale`,
+    };
+  }
+  return { ok: true };
 }
 
 /**
@@ -261,6 +311,10 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
         { orderId: order.id, issues: parsed.error.issues },
         'CTX procurement response schema drift',
       );
+      notifyCtxSchemaDrift({
+        surface: 'POST /gift-cards',
+        issuesSummary: summariseZodIssues(parsed.error.issues),
+      });
       const reason = 'CTX response schema drift';
       await markOrderFailed(order.id, reason);
       await autoRefundFailedOrder(order, null, reason, false);
@@ -293,6 +347,31 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
       const reason = `CTX paymentUrls SEP-7 ${sep7.error}`;
       await markOrderFailed(order.id, reason);
       await autoRefundFailedOrder(order, parsed.data.id, reason, false);
+      return 'failed';
+    }
+    let paymentBand;
+    try {
+      paymentBand = await checkCtxPaymentAmountBand(order, sep7.value.amount);
+    } catch (err) {
+      await revertOrderProcuringToPaid(order.id);
+      log.warn(
+        { err, orderId: order.id, ctxOrderId: parsed.data.id },
+        'CTX payment amount guard could not compute expected wholesale quote — reverted procuring → paid for retry',
+      );
+      return 'skipped';
+    }
+    if (!paymentBand.ok) {
+      log.error(
+        {
+          orderId: order.id,
+          ctxOrderId: parsed.data.id,
+          amount: sep7.value.amount,
+          reason: paymentBand.reason,
+        },
+        'CTX payment amount outside configured sanity band — refusing to pay CTX',
+      );
+      await markOrderFailed(order.id, paymentBand.reason);
+      await autoRefundFailedOrder(order, parsed.data.id, paymentBand.reason, false);
       return 'failed';
     }
     try {
@@ -494,6 +573,10 @@ async function autoRefundFailedOrder(
       currency: order.chargeCurrency,
       amountMinor: order.chargeMinor,
       orderId: order.id,
+      paymentMethod: order.paymentMethod,
+      paymentMemo: order.paymentMemo,
+      paymentReceivedHorizonId: order.paymentReceivedHorizonId,
+      paymentReceivedPayment: order.paymentReceivedPayment,
       reason: `${reasonPrefix}: ${reason}`,
     });
     refunded = true;

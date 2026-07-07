@@ -6,6 +6,7 @@ export type RuntimeWorkerName =
   | 'ledger_invariant_watcher'
   | 'interest_mint'
   | 'interest_scheduler'
+  | 'operator_float_reconciliation'
   | 'payment_watcher'
   | 'payout_worker'
   | 'procurement_worker'

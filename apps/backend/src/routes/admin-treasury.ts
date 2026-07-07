@@ -21,12 +21,18 @@
 import type { Hono } from 'hono';
 import { rateLimit } from '../middleware/rate-limit.js';
 import { requireStaff } from '../auth/require-staff.js';
+import { requireAdminStepUp } from '../auth/admin-step-up-middleware.js';
 import { treasuryHandler } from '../admin/treasury.js';
 import { adminTreasurySnapshotCsvHandler } from '../admin/treasury-snapshot-csv.js';
 import { adminTreasuryCreditFlowHandler } from '../admin/treasury-credit-flow.js';
 import { adminAssetCirculationHandler } from '../admin/asset-circulation.js';
 import { adminAssetDriftStateHandler } from '../admin/asset-drift-state.js';
 import { adminInterestMintForecastHandler } from '../admin/interest-mint-forecast.js';
+import {
+  adminOperatorFloatBaselineCreateHandler,
+  adminOperatorFloatManualMovementCreateHandler,
+  adminOperatorFloatMovementsHandler,
+} from '../admin/operator-float.js';
 
 /**
  * Mounts the treasury / asset-drift routes on the supplied Hono
@@ -73,6 +79,25 @@ export function mountAdminTreasuryRoutes(app: Hono): void {
     '/api/admin/asset-drift/state',
     rateLimit('GET /api/admin/asset-drift/state', 120, 60_000),
     adminAssetDriftStateHandler,
+  );
+  app.get(
+    '/api/admin/operator-float/movements',
+    rateLimit('GET /api/admin/operator-float/movements', 60, 60_000),
+    adminOperatorFloatMovementsHandler,
+  );
+  app.post(
+    '/api/admin/operator-float/baselines',
+    rateLimit('POST /api/admin/operator-float/baselines', 10, 60_000),
+    requireStaff('admin'),
+    requireAdminStepUp('operator-float'),
+    adminOperatorFloatBaselineCreateHandler,
+  );
+  app.post(
+    '/api/admin/operator-float/manual-movements',
+    rateLimit('POST /api/admin/operator-float/manual-movements', 20, 60_000),
+    requireStaff('admin'),
+    requireAdminStepUp('operator-float'),
+    adminOperatorFloatManualMovementCreateHandler,
   );
 
   // Forward-mint forecast for the interest pool (ADR 009 / 015).

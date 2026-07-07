@@ -217,7 +217,32 @@ vi.mock('../../kill-switches.js', () => ({
   isKilled: (subsystem: string) => killMock.isKilled(subsystem),
 }));
 
-import { runPayoutTick } from '../payout-worker.js';
+const { lifecycleMocks } = vi.hoisted(() => ({
+  lifecycleMocks: {
+    markWorkerStarted: vi.fn(),
+    markWorkerStopped: vi.fn(),
+    markWorkerTickFailure: vi.fn(),
+    markWorkerTickSuccess: vi.fn(),
+    runStuckPayoutWatchdog: vi.fn(async () => undefined),
+  },
+}));
+vi.mock('../../runtime-health.js', () => ({
+  markWorkerStarted: (...args: unknown[]) => lifecycleMocks.markWorkerStarted(...args),
+  markWorkerStopped: (...args: unknown[]) => lifecycleMocks.markWorkerStopped(...args),
+  markWorkerTickFailure: (...args: unknown[]) => lifecycleMocks.markWorkerTickFailure(...args),
+  markWorkerTickSuccess: (...args: unknown[]) => lifecycleMocks.markWorkerTickSuccess(...args),
+}));
+vi.mock('../stuck-payout-watchdog.js', () => ({
+  STUCK_PAYOUT_WATCHDOG_INTERVAL_MS: 60_000,
+  runStuckPayoutWatchdog: () => lifecycleMocks.runStuckPayoutWatchdog(),
+}));
+
+import {
+  runPayoutTick,
+  startPayoutWorker,
+  stopPayoutWorker,
+  __resetPayoutWorkerForTests,
+} from '../payout-worker.js';
 
 const BASE_ARGS = {
   operatorSecret: 'SXXX',
@@ -253,6 +278,7 @@ function makeRow(overrides: Record<string, unknown> = {}): Record<string, unknow
 }
 
 beforeEach(() => {
+  __resetPayoutWorkerForTests();
   advisoryLockState.acquired = true;
   repoMocks.listClaimablePayouts.mockReset();
   repoMocks.markPayoutSubmitted.mockReset();
@@ -308,6 +334,12 @@ beforeEach(() => {
   });
   killMock.isKilled.mockReset();
   killMock.isKilled.mockReturnValue(false);
+  lifecycleMocks.markWorkerStarted.mockReset();
+  lifecycleMocks.markWorkerStopped.mockReset();
+  lifecycleMocks.markWorkerTickFailure.mockReset();
+  lifecycleMocks.markWorkerTickSuccess.mockReset();
+  lifecycleMocks.runStuckPayoutWatchdog.mockReset();
+  lifecycleMocks.runStuckPayoutWatchdog.mockResolvedValue(undefined);
 });
 
 describe('runPayoutTick (A8 leader lock)', () => {
@@ -343,6 +375,83 @@ describe('runPayoutTick (A8 leader lock)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('payout worker lifecycle', () => {
+  async function flushWorkerTick(): Promise<void> {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  const START_ARGS = {
+    ...BASE_ARGS,
+    intervalMs: 60_000,
+    limit: 2,
+    watchdogStaleSeconds: 120,
+  };
+
+  it('starts once, runs immediate payout/watchdog ticks, records health, and stops', async () => {
+    startPayoutWorker(START_ARGS);
+    startPayoutWorker(START_ARGS);
+
+    await flushWorkerTick();
+
+    expect(lifecycleMocks.markWorkerStarted).toHaveBeenCalledOnce();
+    expect(repoMocks.listClaimablePayouts).toHaveBeenCalledWith({
+      limit: 2,
+      staleSeconds: 120,
+      maxAttempts: START_ARGS.maxAttempts,
+    });
+    expect(lifecycleMocks.runStuckPayoutWatchdog).toHaveBeenCalledOnce();
+    expect(lifecycleMocks.markWorkerTickSuccess).toHaveBeenCalledOnce();
+
+    stopPayoutWorker();
+    stopPayoutWorker();
+
+    expect(lifecycleMocks.markWorkerStopped).toHaveBeenCalledOnce();
+  });
+
+  it('marks payout tick failures without killing the interval loop', async () => {
+    const err = new Error('claim failed');
+    repoMocks.listClaimablePayouts.mockRejectedValue(err);
+
+    startPayoutWorker(START_ARGS);
+    await flushWorkerTick();
+
+    expect(lifecycleMocks.markWorkerTickFailure).toHaveBeenCalledWith('payout_worker', err);
+    expect(lifecycleMocks.markWorkerTickSuccess).not.toHaveBeenCalled();
+
+    stopPayoutWorker();
+  });
+
+  it('swallows stuck-payout watchdog failures separately from payout tick success', async () => {
+    lifecycleMocks.runStuckPayoutWatchdog.mockRejectedValue(new Error('watchdog failed'));
+
+    startPayoutWorker(START_ARGS);
+    await flushWorkerTick();
+
+    expect(lifecycleMocks.runStuckPayoutWatchdog).toHaveBeenCalledOnce();
+    expect(lifecycleMocks.markWorkerTickSuccess).toHaveBeenCalledOnce();
+    expect(lifecycleMocks.markWorkerTickFailure).not.toHaveBeenCalled();
+
+    stopPayoutWorker();
+  });
+
+  it('test reset clears active payout and watchdog timers without emitting stop health', async () => {
+    startPayoutWorker(START_ARGS);
+    await flushWorkerTick();
+    lifecycleMocks.markWorkerStopped.mockClear();
+
+    __resetPayoutWorkerForTests();
+
+    expect(lifecycleMocks.markWorkerStopped).not.toHaveBeenCalled();
+
+    startPayoutWorker(START_ARGS);
+    await flushWorkerTick();
+    expect(lifecycleMocks.markWorkerStarted).toHaveBeenCalledTimes(2);
+
+    stopPayoutWorker();
   });
 });
 

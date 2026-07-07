@@ -10,8 +10,10 @@ import {
   boolean,
   timestamp,
   numeric,
+  integer,
   index,
   check,
+  jsonb,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -85,4 +87,30 @@ export const merchantCashbackConfigHistory = pgTable(
     changedAt: timestamp('changed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('merchant_cashback_config_history_merchant').on(t.merchantId, t.changedAt)],
+);
+
+/**
+ * Last-good CTX catalog snapshots (R3-3).
+ *
+ * Public catalog surfaces are served from in-memory stores for speed,
+ * but booting during a CTX outage must not start those stores empty.
+ * Each successful full upstream sweep replaces the matching snapshot;
+ * startup hydrates from it before trying CTX. `name` is deliberately
+ * a tiny discriminator instead of separate tables so merchants and
+ * locations share one recovery path.
+ */
+export const ctxCatalogSnapshots = pgTable(
+  'ctx_catalog_snapshots',
+  {
+    name: text('name').primaryKey().$type<'merchants' | 'locations'>(),
+    payload: jsonb('payload').notNull(),
+    itemCount: integer('item_count').notNull(),
+    loadedAt: timestamp('loaded_at', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check('ctx_catalog_snapshots_name_known', sql`${t.name} IN ('merchants', 'locations')`),
+    check('ctx_catalog_snapshots_payload_array', sql`jsonb_typeof(${t.payload}) = 'array'`),
+    check('ctx_catalog_snapshots_item_count_non_negative', sql`${t.itemCount} >= 0`),
+  ],
 );

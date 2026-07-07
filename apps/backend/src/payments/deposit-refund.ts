@@ -67,7 +67,7 @@ const REFUND_RECLAIM_STALE_MS = 5 * 60 * 1000;
  * smallest e2e order is $0.02 = 200_000 stroops) while dropping true
  * dust.
  */
-const REFUND_MIN_STROOPS = 10_000n;
+export const REFUND_MIN_STROOPS = 10_000n;
 
 export type RefundResult =
   | { kind: 'refunded'; txHash: string }

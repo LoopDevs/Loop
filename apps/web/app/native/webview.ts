@@ -20,7 +20,7 @@ export interface WebViewOptions {
  * `http:` — audit A-009. Dev / test still accept http so the mocked
  * suites and local backends work.
  */
-function assertSafeUrl(url: string): void {
+function assertSafeUrl(url: string): URL {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -43,6 +43,15 @@ function assertSafeUrl(url: string): void {
       `openWebView: http:// URLs are rejected in production (got ${url}). Redeem URLs must be https.`,
     );
   }
+  return parsed;
+}
+
+function originOf(rawUrl: string): string | null {
+  try {
+    return new URL(rawUrl).origin;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -54,16 +63,26 @@ export async function openWebView(
   options: WebViewOptions,
 ): Promise<{ close: () => Promise<void> }> {
   const { url, scripts = [], onMessage, onClose } = options;
-  assertSafeUrl(url);
+  const parsedUrl = assertSafeUrl(url);
+  const allowedMessageOrigin = parsedUrl.origin;
 
   // Native: try @capgo/inappbrowser WebView
   if (Capacitor.isNativePlatform()) {
     try {
       const { InAppBrowser, ToolBarType } = await import('@capgo/inappbrowser');
+      let currentOrigin: string | null = allowedMessageOrigin;
 
       // Listen for messages from injected scripts
       if (onMessage) {
+        // R3-13: `messageFromWebview` does not include a browser-native
+        // MessageEvent.origin, so keep our own current-page origin from the
+        // plugin's URL-change event and only accept messages while the WebView
+        // is still on the original redeem origin.
+        await InAppBrowser.addListener('urlChangeEvent', (event) => {
+          currentOrigin = typeof event.url === 'string' ? originOf(event.url) : null;
+        });
         await InAppBrowser.addListener('messageFromWebview', (event) => {
+          if (currentOrigin !== allowedMessageOrigin) return;
           // The plugin sends { detail, rawMessage } — try parsing detail or rawMessage
           const raw = event.detail ?? event.rawMessage;
           if (raw === undefined) return;

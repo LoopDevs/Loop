@@ -693,6 +693,16 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Prepare apt sources for Playwright deps
+        run: |
+          # GitHub's Ubuntu image carries optional Microsoft apt sources
+          # (Azure CLI / Microsoft packages). They are not needed for
+          # Chromium deps, but a bad InRelease from those repos makes
+          # Playwright's apt update fail before tests run.
+          sudo rm -f \
+            /etc/apt/sources.list.d/azure-cli.list \
+            /etc/apt/sources.list.d/microsoft-prod.list \
+            /etc/apt/sources.list.d/microsoft-prod.sources
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
@@ -800,6 +810,16 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Prepare apt sources for Playwright deps
+        run: |
+          # GitHub's Ubuntu image carries optional Microsoft apt sources
+          # (Azure CLI / Microsoft packages). They are not needed for
+          # Chromium deps, but a bad InRelease from those repos makes
+          # Playwright's apt update fail before tests run.
+          sudo rm -f \
+            /etc/apt/sources.list.d/azure-cli.list \
+            /etc/apt/sources.list.d/microsoft-prod.list \
+            /etc/apt/sources.list.d/microsoft-prod.sources
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
@@ -870,6 +890,16 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Prepare apt sources for Playwright deps
+        run: |
+          # GitHub's Ubuntu image carries optional Microsoft apt sources
+          # (Azure CLI / Microsoft packages). They are not needed for
+          # Chromium deps, but a bad InRelease from those repos makes
+          # Playwright's apt update fail before tests run.
+          sudo rm -f \
+            /etc/apt/sources.list.d/azure-cli.list \
+            /etc/apt/sources.list.d/microsoft-prod.list \
+            /etc/apt/sources.list.d/microsoft-prod.sources
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium

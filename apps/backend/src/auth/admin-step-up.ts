@@ -51,7 +51,8 @@ const STEP_UP_ISSUER = 'loop-api';
  * today (it mints one generic token and replays it across writes). A
  * narrower scope (`'credit-adjustment'` / `'refund'` / `'withdrawal'`
  * / `'emission'` / `'payout-retry'` / `'payout-compensation'` /
- * `'home-currency'` / `'staff-role-grant'` / `'staff-role-revoke'`)
+ * `'home-currency'` / `'operator-float'` / `'staff-role-grant'` /
+ * `'staff-role-revoke'`)
  * is opt-in and binds the token to that single class — the gate
  * middleware rejects it on any other class with `STEP_UP_PURPOSE_MISMATCH`.
  */
@@ -65,6 +66,7 @@ export const STEP_UP_SCOPES = [
   'payout-retry',
   'payout-compensation',
   'home-currency',
+  'operator-float',
   'staff-role-grant',
   'staff-role-revoke',
   // Hardening B1 review finding (2026-07 plan): the cashback-config

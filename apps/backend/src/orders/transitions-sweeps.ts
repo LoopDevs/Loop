@@ -128,6 +128,10 @@ export async function sweepStuckProcurement(cutoff: Date): Promise<number> {
       merchantId: orders.merchantId,
       chargeMinor: orders.chargeMinor,
       chargeCurrency: orders.chargeCurrency,
+      paymentMethod: orders.paymentMethod,
+      paymentMemo: orders.paymentMemo,
+      paymentReceivedHorizonId: orders.paymentReceivedHorizonId,
+      paymentReceivedPayment: orders.paymentReceivedPayment,
       ctxOperatorId: orders.ctxOperatorId,
       procuredAt: orders.procuredAt,
     });
@@ -159,6 +163,10 @@ export async function sweepStuckProcurement(cutoff: Date): Promise<number> {
           currency: row.chargeCurrency,
           amountMinor: row.chargeMinor,
           orderId: row.id,
+          paymentMethod: row.paymentMethod,
+          paymentMemo: row.paymentMemo,
+          paymentReceivedHorizonId: row.paymentReceivedHorizonId,
+          paymentReceivedPayment: row.paymentReceivedPayment,
           reason: `procurement stuck-sweep, CTX unpaid: order timed out in procuring`,
         });
         refunded = true;

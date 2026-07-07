@@ -31,6 +31,8 @@ import { logger } from '../logger.js';
 import { operatorFetch, pickOperatorCredentials } from '../ctx/operator-pool.js';
 import { streamGiftCardStatus } from '../ctx/stream.js';
 import { upstreamUrl } from '../upstream.js';
+import { notifyCtxSchemaDrift } from '../discord.js';
+import { summariseZodIssues } from './handler-shared.js';
 
 const log = logger.child({ area: 'procurement-redemption' });
 
@@ -43,10 +45,10 @@ const log = logger.child({ area: 'procurement-redemption' });
 const CtxGiftCardDetailResponse = z.object({
   redeemCode: z.string().optional(),
   redeemPin: z.string().optional(),
-  redeemUrl: z.string().url().optional(),
+  redeemUrl: z.string().optional(),
   code: z.string().optional(),
   pin: z.string().optional(),
-  url: z.string().url().optional(),
+  url: z.string().optional(),
 });
 
 /**
@@ -79,6 +81,10 @@ export async function fetchRedemption(ctxOrderId: string): Promise<{
       { ctxOrderId, issues: parsed.error.issues },
       'CTX gift-card detail schema mismatch; persisting order without redemption payload',
     );
+    notifyCtxSchemaDrift({
+      surface: 'GET /gift-cards/:id',
+      issuesSummary: summariseZodIssues(parsed.error.issues),
+    });
     return { code: null, pin: null, url: null };
   }
   const out = {

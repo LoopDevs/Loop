@@ -25,6 +25,7 @@ const base = {
 // Hardening B3: production boots require LOOP_ADMIN_STEP_UP_SIGNING_KEY
 // (or the explicit opt-out), so production-success fixtures carry it.
 const STEP_UP_KEY = 'admin-step-up-test-key-32-chars-min!!';
+const JWT_KEY = 'jwt-test-signing-key-32-chars-min!!';
 
 describe('parseEnv', () => {
   it('parses a minimal valid env with defaults', () => {
@@ -181,6 +182,7 @@ describe('parseEnv', () => {
       INCLUDE_DISABLED_MERCHANTS: 'true',
       IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
       LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+      DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
     });
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('INCLUDE_DISABLED_MERCHANTS'));
     warn.mockRestore();
@@ -205,6 +207,8 @@ describe('parseEnv', () => {
       NODE_ENV: 'production',
       IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com,images.example.com',
       LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+      LOOP_AUTH_NATIVE_ENABLED: 'true',
+      LOOP_JWT_SIGNING_KEY: JWT_KEY,
     });
     expect(env.NODE_ENV).toBe('production');
     expect(env.IMAGE_PROXY_ALLOWED_HOSTS).toBe('cdn.example.com,images.example.com');
@@ -216,6 +220,7 @@ describe('parseEnv', () => {
       NODE_ENV: 'production',
       DISABLE_IMAGE_PROXY_ALLOWLIST_ENFORCEMENT: '1',
       LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+      DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
     });
     expect(env.NODE_ENV).toBe('production');
   });
@@ -315,6 +320,7 @@ describe('parseEnv', () => {
           NODE_ENV: 'production',
           IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
           DISABLE_RATE_LIMITING: 'true',
+          DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
         }),
       ).toThrow(/DISABLE_RATE_LIMITING/);
     });
@@ -327,6 +333,7 @@ describe('parseEnv', () => {
             NODE_ENV: 'production',
             IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
             DISABLE_RATE_LIMITING: v,
+            DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
           }),
         ).toThrow(/DISABLE_RATE_LIMITING/);
       }
@@ -346,6 +353,7 @@ describe('parseEnv', () => {
           NODE_ENV: 'production',
           IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
           LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+          DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
         }),
       ).not.toThrow();
       expect(() =>
@@ -355,6 +363,7 @@ describe('parseEnv', () => {
           IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
           DISABLE_RATE_LIMITING: 'false',
           LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+          DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
         }),
       ).not.toThrow();
     });
@@ -427,6 +436,64 @@ describe('parseEnv', () => {
     });
   });
 
+  describe('R3-7: production native-auth boot guard', () => {
+    it('refuses production when LOOP_AUTH_NATIVE_ENABLED is unset or false', () => {
+      for (const value of [undefined, 'false'] as const) {
+        expect(() =>
+          parseEnv({
+            ...base,
+            NODE_ENV: 'production',
+            IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+            LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+            ...(value === undefined ? {} : { LOOP_AUTH_NATIVE_ENABLED: value }),
+          }),
+        ).toThrow(/LOOP_AUTH_NATIVE_ENABLED must be true in production/);
+      }
+    });
+
+    it('accepts production with native auth enabled and a signing key', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          NODE_ENV: 'production',
+          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+          LOOP_AUTH_NATIVE_ENABLED: 'true',
+          LOOP_JWT_SIGNING_KEY: JWT_KEY,
+        }),
+      ).not.toThrow();
+    });
+
+    it('allows DISABLE_NATIVE_AUTH_ENFORCEMENT=1 as the explicit rollback opt-out', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          NODE_ENV: 'production',
+          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+          DISABLE_NATIVE_AUTH_ENFORCEMENT: '1',
+        }),
+      ).not.toThrow();
+    });
+
+    it('rejects any rollback opt-out value other than "1" at parse time', () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          NODE_ENV: 'production',
+          IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+          LOOP_ADMIN_STEP_UP_SIGNING_KEY: STEP_UP_KEY,
+          DISABLE_NATIVE_AUTH_ENFORCEMENT: 'true',
+        }),
+      ).toThrow(/DISABLE_NATIVE_AUTH_ENFORCEMENT/);
+    });
+
+    it('does not enforce native auth outside production', () => {
+      expect(() => parseEnv({ ...base, NODE_ENV: 'development' })).not.toThrow();
+      expect(() => parseEnv({ ...base, NODE_ENV: 'test' })).not.toThrow();
+    });
+  });
+
   describe('B3: production step-up-key boot guard (ADR 028)', () => {
     it('refuses production without LOOP_ADMIN_STEP_UP_SIGNING_KEY', () => {
       expect(() =>
@@ -434,6 +501,8 @@ describe('parseEnv', () => {
           ...base,
           NODE_ENV: 'production',
           IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
+          LOOP_AUTH_NATIVE_ENABLED: 'true',
+          LOOP_JWT_SIGNING_KEY: JWT_KEY,
         }),
       ).toThrow(/LOOP_ADMIN_STEP_UP_SIGNING_KEY must be set in production/);
     });
@@ -445,6 +514,8 @@ describe('parseEnv', () => {
           NODE_ENV: 'production',
           IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
           DISABLE_ADMIN_STEP_UP_ENFORCEMENT: '1',
+          LOOP_AUTH_NATIVE_ENABLED: 'true',
+          LOOP_JWT_SIGNING_KEY: JWT_KEY,
         }),
       ).not.toThrow();
     });
@@ -456,6 +527,8 @@ describe('parseEnv', () => {
           NODE_ENV: 'production',
           IMAGE_PROXY_ALLOWED_HOSTS: 'cdn.example.com',
           DISABLE_ADMIN_STEP_UP_ENFORCEMENT: 'true',
+          LOOP_AUTH_NATIVE_ENABLED: 'true',
+          LOOP_JWT_SIGNING_KEY: JWT_KEY,
         }),
       ).toThrow(/DISABLE_ADMIN_STEP_UP_ENFORCEMENT/);
     });

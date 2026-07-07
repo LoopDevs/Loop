@@ -23,9 +23,14 @@
  */
 import { and, eq, gte, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { creditTransactions, orders, userCredits } from '../db/schema.js';
+import { creditTransactions, orders, paymentWatcherSkips, userCredits } from '../db/schema.js';
 import { env } from '../env.js';
 import { adjustmentCapLockKey, DailyAdjustmentLimitError } from './adjustments.js';
+import {
+  refundDeposit,
+  type RefundResult as DepositRefundResult,
+} from '../payments/deposit-refund.js';
+import { HorizonPaymentSchema, type HorizonPayment } from '../payments/horizon.js';
 
 /**
  * CF-06: advisory-lock scope for the refund daily-cap bucket. Refund
@@ -82,6 +87,15 @@ export interface RefundResult {
   createdAt: Date;
 }
 
+export interface OnChainOrderAutoRefundResult {
+  kind: 'onchain_refund';
+  orderId: string;
+  paymentId: string;
+  refund: Extract<DepositRefundResult, { kind: 'refunded' | 'already_refunded' }>;
+}
+
+export type OrderAutoRefundResult = RefundResult | OnChainOrderAutoRefundResult;
+
 /**
  * CF-20: synthetic actor id stamped on the `reason` of an automatic
  * (non-admin) order refund. The `credit_transactions` row does not
@@ -120,9 +134,23 @@ export async function applyOrderAutoRefund(args: {
   currency: string;
   amountMinor: bigint;
   orderId: string;
+  paymentMethod?: 'xlm' | 'usdc' | 'credit' | 'loop_asset' | string;
+  paymentMemo?: string | null;
+  paymentReceivedHorizonId?: string | null;
+  paymentReceivedPayment?: unknown | null;
   /** Free-text suffix appended after the system-actor prefix. */
   reason: string;
-}): Promise<RefundResult> {
+}): Promise<OrderAutoRefundResult> {
+  if (args.paymentMethod === 'xlm' || args.paymentMethod === 'usdc') {
+    return applyOnChainOrderAutoRefund(args);
+  }
+
+  if (args.paymentMethod === 'loop_asset') {
+    throw new Error(
+      'loop_asset order auto-refund requires coordinated mirror re-credit + on-chain re-mint; manual money-review refund required',
+    );
+  }
+
   return applyAdminRefund({
     userId: args.userId,
     currency: args.currency,
@@ -134,6 +162,80 @@ export async function applyOrderAutoRefund(args: {
     adminUserId: AUTO_REFUND_SYSTEM_ACTOR,
     reason: `${AUTO_REFUND_SYSTEM_ACTOR}: ${args.reason}`,
   });
+}
+
+async function applyOnChainOrderAutoRefund(args: {
+  orderId: string;
+  paymentMemo?: string | null;
+  paymentReceivedHorizonId?: string | null;
+  paymentReceivedPayment?: unknown | null;
+  reason: string;
+}): Promise<OnChainOrderAutoRefundResult> {
+  if (args.paymentReceivedHorizonId === null || args.paymentReceivedHorizonId === undefined) {
+    throw new Error('on-chain auto-refund cannot run without payment_received_horizon_id');
+  }
+  if (args.paymentReceivedPayment === null || args.paymentReceivedPayment === undefined) {
+    throw new Error('on-chain auto-refund cannot run without payment_received_payment');
+  }
+
+  const parsed = HorizonPaymentSchema.safeParse(args.paymentReceivedPayment);
+  if (!parsed.success) {
+    throw new Error('on-chain auto-refund payment snapshot failed schema validation');
+  }
+  const payment = parsed.data;
+  if (payment.id !== args.paymentReceivedHorizonId) {
+    throw new Error('on-chain auto-refund payment snapshot id does not match order identity');
+  }
+
+  await recordFailedOrderRefundableDeposit({
+    orderId: args.orderId,
+    memo: args.paymentMemo ?? payment.transaction?.memo ?? '',
+    payment,
+    detail: `${AUTO_REFUND_SYSTEM_ACTOR}: ${args.reason}`,
+  });
+
+  const refund = await refundDeposit(payment.id);
+  if (refund.kind !== 'refunded' && refund.kind !== 'already_refunded') {
+    throw new Error(`on-chain auto-refund did not complete: ${refund.kind}`);
+  }
+  return {
+    kind: 'onchain_refund',
+    orderId: args.orderId,
+    paymentId: payment.id,
+    refund,
+  };
+}
+
+async function recordFailedOrderRefundableDeposit(args: {
+  orderId: string;
+  memo: string;
+  payment: HorizonPayment;
+  detail: string;
+}): Promise<void> {
+  await db
+    .insert(paymentWatcherSkips)
+    .values({
+      paymentId: args.payment.id,
+      memo: args.memo,
+      orderId: args.orderId,
+      reason: 'order_gone',
+      payment: args.payment,
+      status: 'abandoned',
+      lastError: args.detail.slice(0, 500),
+    })
+    .onConflictDoUpdate({
+      target: paymentWatcherSkips.paymentId,
+      set: {
+        memo: args.memo,
+        orderId: args.orderId,
+        reason: 'order_gone',
+        payment: args.payment,
+        status: 'abandoned',
+        lastError: args.detail.slice(0, 500),
+        updatedAt: sql`NOW()`,
+      },
+      setWhere: sql`${paymentWatcherSkips.status} IN ('pending', 'resolved', 'abandoned')`,
+    });
 }
 
 export async function applyAdminRefund(args: {

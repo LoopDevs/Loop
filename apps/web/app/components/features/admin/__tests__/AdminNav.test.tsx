@@ -62,6 +62,16 @@ function baseSnapshot(
   overrides?: Partial<TreasurySnapshot['operatorPool']>,
   payoutOverrides?: Partial<TreasurySnapshot['payouts']>,
 ): TreasurySnapshot {
+  const unknownFloat = {
+    state: 'unknown' as const,
+    expectedBalanceStroops: null,
+    actualBalanceStroops: null,
+    deltaStroops: null,
+    thresholdStroops: null,
+    unclassifiedCount: 0,
+    checkedAt: null,
+    error: null,
+  };
   return {
     outstanding: {},
     totals: {},
@@ -71,6 +81,7 @@ function baseSnapshot(
       EURLOOP: { outstandingMinor: '0', issuer: null },
     },
     assets: { USDC: { stroops: null }, XLM: { stroops: null } },
+    operatorFloat: { xlm: unknownFloat, usdc: unknownFloat },
     orderFlows: {},
     payouts: {
       pending: '0',
