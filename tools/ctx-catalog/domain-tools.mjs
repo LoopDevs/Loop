@@ -99,6 +99,13 @@ const DENY_SLDS = new Set([
   'uiavatars',
   'gravatar',
   'duckduckgo',
+  // URL rewrappers / email-link security proxies (Proofpoint urldefense,
+  // Mimecast). They wrap the REAL brand URL and leak into scraped supplier text
+  // — resolving one as the domain is always wrong (found CVS + Foot Locker +
+  // Hulu all resolved to urldefense.com in the recovered data).
+  'urldefense',
+  'proofpoint',
+  'mimecast',
   // socials / UGC
   'facebook',
   'instagram',
@@ -244,6 +251,8 @@ if (isMain && argv.includes('--self-test')) {
     'deny: CDN + placeholder infra (cloudfront / ui-avatars)':
       isDeniedDomain('https://d1.cloudfront.net/x.png') === true &&
       isDeniedDomain('https://ui-avatars.com/api/?name=X') === true,
+    'deny: URL rewrapper (Proofpoint urldefense)':
+      isDeniedDomain('https://urldefense.com/v3/__https://cvs.com__;!!x') === true,
     'deny: infra beats a supplier-anchored redeemUrl':
       scoreCandidate('https://wgiftcard.com/redeem', { name: 'Aerie', supplierAnchored: true })
         .confidence === 0,
