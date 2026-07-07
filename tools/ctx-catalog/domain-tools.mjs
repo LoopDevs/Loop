@@ -155,12 +155,23 @@ const normBrand = (name) =>
 export function scoreCandidate(candidate, { name, country, supplierAnchored } = {}) {
   const domain = registrable(candidate);
   if (!domain) return { domain: null, confidence: 0, reasons: ['unresolvable'] };
-  if (isDeniedDomain(candidate))
-    return { domain, confidence: 0, reasons: ['denied:marketplace/reseller/social'] };
 
   const reasons = [];
   const sld = (getDomainWithoutSuffix(candidate) || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const brand = normBrand(name);
+  const nameMatchesSld = !!(
+    brand &&
+    sld &&
+    (sld === brand || sld.includes(brand) || brand.includes(sld))
+  );
+  // Deny marketplaces/resellers/infra/socials — EXCEPT when the brand IS that
+  // entity (its own storefront). Amazon/Target/eBay/Best Buy are themselves
+  // gift-card merchants, so amazon.com is correct FOR Amazon but must still be
+  // denied as a candidate for a DIFFERENT brand. Portals (cashstar, tillo) have
+  // no matching merchant name, so they stay denied.
+  if (isDeniedDomain(candidate) && !nameMatchesSld)
+    return { domain, confidence: 0, reasons: ['denied:marketplace/reseller/infra/social'] };
+
   let conf = 0.3;
   if (brand && sld) {
     if (sld === brand) {
@@ -215,6 +226,10 @@ if (isMain && argv.includes('--self-test')) {
       scoreCandidate('https://wgiftcard.com/redeem', { name: 'Aerie', supplierAnchored: true })
         .confidence === 0,
     'allow: a real brand domain': isDeniedDomain('aerie.com') === false,
+    'marketplace brand keeps its OWN domain (Amazon → amazon.com)':
+      scoreCandidate('amazon.com', { name: 'Amazon US' }).confidence >= 0.9,
+    'a marketplace domain is still denied for a DIFFERENT brand':
+      scoreCandidate('https://amazon.com/stores/widget', { name: 'Widget Co' }).confidence === 0,
     'score: exact name → ≥0.9':
       scoreCandidate('tesco.co.uk', { name: 'Tesco', country: 'GB' }).confidence >= 0.9,
     'score: denied → 0': scoreCandidate('eneba.com', { name: 'Tesco' }).confidence === 0,
