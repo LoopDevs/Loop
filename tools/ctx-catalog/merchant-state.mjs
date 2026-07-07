@@ -28,9 +28,10 @@
  *   node merchant-state.mjs --self-test
  *   node merchant-state.mjs --coverage        # print the coverage board from data/
  */
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dataPath } from './paths.mjs';
+import { cachePath, dataPath } from './paths.mjs';
 
 const FIELDS = ['logo', 'cover', 'info'];
 const STATE_FILE = () => dataPath('merchant-state.json');
@@ -99,7 +100,8 @@ if (isMain && process.argv.includes('--self-test')) {
     'coverage counts applied': cov.applied.logo === 1,
     'needsApply = sourced + approved + not-applied': apply.length === 1 && apply[0] === 'm2',
     'load/save round-trips': (() => {
-      const tmp = `${process.env.CLAUDE_JOB_DIR || '/tmp'}/tmp/ms-selftest.json`;
+      const tmp = cachePath('merchant-state-selftest/ms-selftest.json');
+      mkdirSync(dirname(tmp), { recursive: true });
       saveState(s, tmp);
       return JSON.stringify(loadState(tmp)) === JSON.stringify(s);
     })(),
