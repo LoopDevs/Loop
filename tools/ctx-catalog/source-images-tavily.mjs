@@ -25,8 +25,13 @@ const LIMIT = args.includes('--limit') ? Number(args[args.indexOf('--limit') + 1
 const TEST = args.includes('--test');
 const outPath = '/tmp/ctx-images-tavily.json';
 
+// Watermarked stock, logo aggregators, socials, clip-art — and image PROXIES
+// (weserv/wsrv/images.weserv): a proxy URL hides the real source and is fragile
+// (weserv rate-limits at 2500/10min), so never store one as a cover. Free stock
+// (unsplash/pexels) is deliberately NOT here — those are clean, license-free
+// scenes and an acceptable fallback when no brand-owned hero exists.
 const BAD =
-  /alamy|dreamstime|shutterstock|istockphoto|gettyimages|getty_images|media\.gettyimages|123rf|depositphotos|stock\.adobe|stockphoto|logos-world|1000logos|brandirectory|seeklogo|logo-marque|logodownload|logowik|logo\.wine|freebiesupply|wikimedia|wikipedia|pinterest|fbcdn|twimg|aliexpress|ytimg|tiktok|vecteezy|freepik|pngwing|pngegg|cleanpng|kindpng|flaticon|seekingalpha/i;
+  /alamy|dreamstime|shutterstock|istockphoto|gettyimages|getty_images|media\.gettyimages|123rf|depositphotos|stock\.adobe|stockphoto|logos-world|1000logos|brandirectory|seeklogo|logo-marque|logodownload|logowik|logo\.wine|freebiesupply|wikimedia|wikipedia|pinterest|fbcdn|twimg|aliexpress|ytimg|tiktok|vecteezy|freepik|pngwing|pngegg|cleanpng|kindpng|flaticon|seekingalpha|weserv|wsrv/i;
 const LOGO_ONLY =
   /^(the )?(image (shows|features|depicts) )?(a |the )?(prominent |large |white |red |blue |illuminated )*(logo|sign|signage|wordmark|brand name)\b/i;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -210,6 +215,11 @@ if (isMain && process.argv.includes('--self-test')) {
     'category + country folded into scene query': wickes[0] === 'Wickes DIY UK store interior',
     'official-site query carries the country': wickes[2] === 'Wickes UK official site',
     'degrades to brand-only when cat/country absent': bare[0] === 'PlainBrand store interior',
+    'BAD rejects an image-proxy (weserv) URL':
+      BAD.test('https://images.weserv.nl/?url=example.com/x.jpg') === true,
+    'BAD rejects watermarked stock but allows free stock (unsplash)':
+      BAD.test('https://media.gettyimages.com/x.jpg') === true &&
+      BAD.test('https://images.unsplash.com/photo-123') === false,
   };
   for (const [k, v] of Object.entries(checks)) console.log(`  ${v ? '✓' : '✗'} ${k}`);
   process.exit(Object.values(checks).every(Boolean) ? 0 : 1);
