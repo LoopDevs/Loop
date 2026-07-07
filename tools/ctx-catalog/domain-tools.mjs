@@ -80,6 +80,25 @@ const DENY_SLDS = new Set([
   'qwikcilver',
   'woohoo',
   'storedvalue',
+  // CDN / hosting / placeholder infrastructure — image CDNs, avatar generators,
+  // favicon/search sources. These flood the scraped supplier text (cloudfront
+  // 763×, ui-avatars 311×, duckduckgo 163× in the real data) but are NEVER a
+  // brand's storefront. The name-match exception in scoreCandidate still lets a
+  // real merchant literally named one of these keep its own domain.
+  'cloudfront',
+  'cloudinary',
+  'imgix',
+  'fastly',
+  'akamai',
+  'akamaized',
+  'amazonaws',
+  'googleusercontent',
+  'gstatic',
+  'ggpht',
+  'contentstack',
+  'uiavatars',
+  'gravatar',
+  'duckduckgo',
   // socials / UGC
   'facebook',
   'instagram',
@@ -222,6 +241,9 @@ if (isMain && argv.includes('--self-test')) {
     'deny: instagram social': isDeniedDomain('https://www.instagram.com/tesco') === true,
     'deny: gift-card infra portal (redeem.tillo.io)':
       isDeniedDomain('https://redeem.tillo.io/abc') === true,
+    'deny: CDN + placeholder infra (cloudfront / ui-avatars)':
+      isDeniedDomain('https://d1.cloudfront.net/x.png') === true &&
+      isDeniedDomain('https://ui-avatars.com/api/?name=X') === true,
     'deny: infra beats a supplier-anchored redeemUrl':
       scoreCandidate('https://wgiftcard.com/redeem', { name: 'Aerie', supplierAnchored: true })
         .confidence === 0,
