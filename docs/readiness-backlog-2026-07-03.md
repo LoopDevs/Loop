@@ -365,7 +365,7 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### S4-7 · Trim the client-side catalog fetch `[code]`
 
-- [ ] **Status:** ◑ In progress — **(1) `fields=lite` server projection done** (`/api/merchants/all?fields=lite` strips description/instructions/terms; browse hook opts in; verified no browse surface renders them — detail page uses `/by-slug` + `/:id`). Remaining: (2) debounce mobile search; (3) virtualize the directory (later).
+- [x] **Status:** ✅ Done — both "done when" criteria met: **(1) `fields=lite` projection** (`/api/merchants/all?fields=lite` strips description/instructions/terms; browse hook opts in; verified no browse surface renders them — detail uses `/by-slug` + `/:id`) + **(2) mobile search debounced** (150ms in `MobileHome`, mirrors Navbar; input stays responsive, filtering keys off the debounced value). (3) directory virtualization + server-side search deferred (explicitly "later"; not in the acceptance criteria).
       **Why:** `use-merchants.ts:65` → `/api/merchants/all` ships `description/instructions/terms` (each capped 50k chars) that no browse surface renders — ~0.5-1MB now, ~10-20MB at 34k merchants — JSON-parsed on the main thread + localStorage-seeded; the directory renders un-virtualized DOM cards; mobile search is undebounced. Scale-#6 (catalog size is operator-controlled).
       **Do (cheap→structural):** (1) a `fields=lite` server projection stripping the long text — biggest single win, few lines in `merchants/handler.ts`; (2) debounce mobile search; (3) virtualize the directory + add server-side search (later).
       **Done when:** the browse payload excludes unrendered long text; mobile search is debounced.

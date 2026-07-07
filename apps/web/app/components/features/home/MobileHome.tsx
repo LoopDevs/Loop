@@ -157,7 +157,16 @@ export function MobileHome(): React.JSX.Element {
   // util the backend + Navbar search use, so "cafe" matches "Café"
   // here identically to everywhere else.
   const [query, setQuery] = useState('');
-  const foldedQuery = foldForSearch(query.trim());
+  // S4-7: debounce before folding/filtering so the (large, un-virtualized)
+  // directory isn't re-filtered on every keystroke. The input stays bound to
+  // `query` for responsive typing; filtering keys off `debouncedQuery`. Mirrors
+  // Navbar's 150ms search debounce.
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 150);
+    return () => clearTimeout(timer);
+  }, [query]);
+  const foldedQuery = foldForSearch(debouncedQuery.trim());
   const grid = useMemo(() => {
     const bySavings = (a: Merchant, b: Merchant): number =>
       (b.savingsPercentage ?? 0) - (a.savingsPercentage ?? 0);
