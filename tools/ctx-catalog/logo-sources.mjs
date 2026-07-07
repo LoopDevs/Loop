@@ -23,10 +23,12 @@
  * API:
  *   logoDevUrl(domain, { token, size?, format?, retina? }) → string
  *   looksLikeFaceplate(text) → boolean
+ *   logoSourceQuality(url) → 'ok' | 'aggregator' | 'icon-library' | 'reseller-portal' | 'placeholder'
  *
  * CLI: node logo-sources.mjs --self-test
  */
 import { fileURLToPath } from 'node:url';
+import { getDomainWithoutSuffix } from 'tldts';
 
 export function logoDevUrl(domain, { token = '', size = 400, format = 'png', retina = true } = {}) {
   const params = new URLSearchParams({ token, size: String(size), format });
@@ -42,6 +44,40 @@ export function looksLikeFaceplate(text) {
   return FACEPLATE.test(text || '');
 }
 
+// A logo URL hosted on one of these is NOT the brand's real logo: aggregators
+// scrape mixed-quality marks, icon libraries hand back monochrome simplified
+// glyphs, reseller/portal sites host card art, and avatar generators emit
+// monograms. Auditing the recovered data, ~100+ sourced logos came from these.
+// logoSourceQuality classifies by registrable SLD so the sourcing/QC step can
+// flag them for RE-SOURCING cheaply (no fetch) — prevention over a fetch+vision
+// round. Matched on the SLD so any TLD/subdomain variant is covered.
+const LOGO_SOURCE_CLASSES = {
+  aggregator: [
+    'seeklogo',
+    '1000logos',
+    'logowik',
+    'logodownload',
+    'brandsoftheworld',
+    'freebiesupply',
+    'wikimedia',
+    'wikipedia',
+    'logolynx',
+    'logospng',
+  ],
+  'icon-library': ['iconify', 'simpleicons', 'icons8', 'flaticon'],
+  'reseller-portal': ['gyft', 'egifter', 'townandcitygiftcards', 'giftcards', 'gcodes'],
+  placeholder: ['uiavatars', 'gravatar', 'placeholder'],
+};
+
+export function logoSourceQuality(url) {
+  const sld = (getDomainWithoutSuffix(url) || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!sld) return 'ok';
+  for (const [cls, slds] of Object.entries(LOGO_SOURCE_CLASSES)) {
+    if (slds.includes(sld)) return cls;
+  }
+  return 'ok';
+}
+
 // ── CLI (only when run directly, never on import) ───────────────────────────
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain && process.argv.includes('--self-test')) {
@@ -55,6 +91,17 @@ if (isMain && process.argv.includes('--self-test')) {
     'faceplate: "Tesco voucher" → rejected': looksLikeFaceplate('a Tesco voucher') === true,
     'faceplate: a real scene → kept':
       looksLikeFaceplate('Wickes DIY store interior, aisles of paint') === false,
+    'logoSourceQuality: seeklogo → aggregator':
+      logoSourceQuality('https://seeklogo.com/images/x.png') === 'aggregator',
+    'logoSourceQuality: iconify → icon-library':
+      logoSourceQuality('https://api.iconify.design/mdi/x.svg') === 'icon-library',
+    'logoSourceQuality: gyft → reseller-portal':
+      logoSourceQuality('https://www.gyft.com/x') === 'reseller-portal',
+    'logoSourceQuality: ui-avatars → placeholder':
+      logoSourceQuality('https://ui-avatars.com/api/?name=X') === 'placeholder',
+    'logoSourceQuality: logo.dev + brand domain → ok':
+      logoSourceQuality('https://img.logo.dev/tesco.com') === 'ok' &&
+      logoSourceQuality('https://www.tesco.com/logo.png') === 'ok',
   };
   for (const [k, v] of Object.entries(checks)) console.log(`  ${v ? '✓' : '✗'} ${k}`);
   const ok = Object.values(checks).every(Boolean);
