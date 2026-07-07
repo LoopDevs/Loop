@@ -76,18 +76,22 @@ export function aggregateSuppliers(bundle) {
  */
 export function buildBrief(merchant, bundle = {}, searchCandidates = []) {
   const agg = aggregateSuppliers(bundle);
-  const supplierUrls = [...new Set([...agg.websiteUrls, ...agg.embeddedUrls].map((x) => x.url))];
+  const brief = { name: merchant.name, country: merchant.country };
+  // Explicit supplier website/URL FIELDS are authoritative → anchor them (trust
+  // over name-matching, the wrong-brand fix: Aerie → ae.com).
+  const websiteUrls = [...new Set(agg.websiteUrls.map((x) => x.url))];
+  // URLs merely EMBEDDED in free text (redemption/T&Cs) are a weaker signal —
+  // the text can name a payment processor, CDN, or a legal/social link that
+  // isn't the merchant's own site. Score these by name-match instead of
+  // anchoring, so the merchant's own URL still wins but "powered by stripe.com"
+  // in an Aerie card's terms does NOT anchor the domain to stripe.
+  const embeddedUrls = [...new Set(agg.embeddedUrls.map((x) => x.url))].filter(
+    (u) => !websiteUrls.includes(u),
+  );
   const scored = [
-    ...supplierUrls.map((u) =>
-      scoreCandidate(u, {
-        name: merchant.name,
-        country: merchant.country,
-        supplierAnchored: true,
-      }),
-    ),
-    ...searchCandidates.map((c) =>
-      scoreCandidate(c, { name: merchant.name, country: merchant.country }),
-    ),
+    ...websiteUrls.map((u) => scoreCandidate(u, { ...brief, supplierAnchored: true })),
+    ...embeddedUrls.map((u) => scoreCandidate(u, brief)),
+    ...searchCandidates.map((c) => scoreCandidate(c, brief)),
   ]
     // Drop confidence-0 candidates (denied resellers/marketplaces, unresolvable)
     // so a merchant whose only URL is a reseller resolves to NO domain (→ review)
@@ -105,7 +109,7 @@ export function buildBrief(merchant, bundle = {}, searchCandidates = []) {
     domainReasons: best.reasons,
     domainAnchored: best.reasons?.includes('supplier-anchored') || false,
     suppliers: agg.suppliers,
-    supplierUrlCount: supplierUrls.length,
+    supplierUrlCount: websiteUrls.length + embeddedUrls.length,
     redeemableAt: null, // semantic Claude pass fills this
     raw: bundle, // verbatim, with provenance — never normalised away
   };
@@ -133,6 +137,16 @@ if (isMain && process.argv.includes('--self-test')) {
     { id: 'm2', name: 'SomeBrand', country: 'US' },
     { tillo: { redeemUrl: 'https://www.eneba.com/somebrand' } }, // reseller in a supplier field
   );
+  // A third-party URL merely MENTIONED in the terms text (a payment processor)
+  // must NOT anchor the domain — only a name-matching URL should win.
+  const thirdParty = buildBrief(
+    { id: 'm3', name: 'Aerie', country: 'US' },
+    {
+      svs: {
+        terms: 'Checkout powered by https://www.shopify.com. Redeem at https://www.ae.com/aerie.',
+      },
+    },
+  );
 
   const checks = {
     'extractUrls trims trailing punctuation':
@@ -144,6 +158,9 @@ if (isMain && process.argv.includes('--self-test')) {
     'raw bundle kept verbatim with provenance':
       aerie.raw.tillo.websiteUrl === 'https://www.ae.com' && aerie.suppliers.length === 2,
     'deny-list beats a reseller URL even in a supplier field': reseller.domain !== 'eneba.com',
+    'free-text-embedded URL is name-scored, not blindly anchored':
+      thirdParty.domain === 'ae.com' && thirdParty.domainAnchored === false,
+    'a third-party URL mentioned in the text does not win': thirdParty.domain !== 'shopify.com',
   };
   for (const [k, v] of Object.entries(checks)) console.log(`  ${v ? '✓' : '✗'} ${k}`);
   const ok = Object.values(checks).every(Boolean);
