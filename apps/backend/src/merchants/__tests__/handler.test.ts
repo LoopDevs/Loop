@@ -269,6 +269,41 @@ describe('GET /api/merchants/all', () => {
     const res = await app.request('/api/merchants/all');
     expect(res.status).toBe(200);
   });
+
+  it('strips description/instructions/terms with ?fields=lite but keeps browse fields (S4-7)', async () => {
+    seed([
+      merchant('m-1', 'Acme', {
+        intro: 'Great everyday value',
+        description: 'A long-form description the browse surfaces never render.',
+        instructions: 'Redeem online at checkout.',
+        terms: 'Standard terms apply.',
+        logoUrl: 'https://cdn.test/logo.png',
+      }),
+    ]);
+    const res = await app.request('/api/merchants/all?fields=lite');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { merchants: Merchant[]; total: number };
+    const m = body.merchants[0]!;
+    // long-form fields dropped from the whole-catalog payload…
+    expect(m.description).toBeUndefined();
+    expect(m.instructions).toBeUndefined();
+    expect(m.terms).toBeUndefined();
+    // …everything a browse card renders is preserved
+    expect(m.id).toBe('m-1');
+    expect(m.name).toBe('Acme');
+    expect(m.intro).toBe('Great everyday value');
+    expect(m.logoUrl).toBe('https://cdn.test/logo.png');
+    expect(body.total).toBe(1);
+  });
+
+  it('keeps the long-form fields when ?fields=lite is absent (default unchanged)', async () => {
+    seed([merchant('m-1', 'Acme', { description: 'D', instructions: 'I', terms: 'T' })]);
+    const res = await app.request('/api/merchants/all');
+    const body = (await res.json()) as { merchants: Merchant[]; total: number };
+    expect(body.merchants[0]?.description).toBe('D');
+    expect(body.merchants[0]?.instructions).toBe('I');
+    expect(body.merchants[0]?.terms).toBe('T');
+  });
 });
 
 describe('GET /api/merchants/by-slug/:slug', () => {

@@ -91,6 +91,22 @@ export function merchantListHandler(c: Context): Response {
 export function merchantAllHandler(c: Context): Response {
   const { merchants } = getMerchants();
   c.header('Cache-Control', 'public, max-age=300');
+  // S4-7: browse surfaces (home, map, navbar/mobile search) need the whole
+  // catalog but never RENDER the long-form description/instructions/terms —
+  // only the detail page does, and it pulls those from /by-slug + /:id, not
+  // here. `?fields=lite` strips them from this whole-catalog payload, the
+  // single biggest browse-payload win as the catalog scales (they're capped at
+  // 50k chars each). Default (no param) is unchanged for any other consumer.
+  if (c.req.query('fields') === 'lite') {
+    const lite = merchants.map((m) => {
+      const copy = { ...m };
+      delete copy.description;
+      delete copy.instructions;
+      delete copy.terms;
+      return copy;
+    });
+    return c.json({ merchants: lite, total: merchants.length });
+  }
   return c.json({ merchants, total: merchants.length });
 }
 

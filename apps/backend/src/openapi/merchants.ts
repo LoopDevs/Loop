@@ -121,6 +121,14 @@ export function registerMerchantsOpenApi(
     summary:
       'Full merchant catalog in a single response. Serves UI surfaces that need every merchant (audit A-002).',
     tags: ['Merchants'],
+    request: {
+      query: z.object({
+        fields: z.literal('lite').optional().openapi({
+          description:
+            "'lite' strips the long-form description/instructions/terms — not rendered by browse surfaces — to shrink this whole-catalog payload (S4-7). Omit for the full objects.",
+        }),
+      }),
+    },
     responses: {
       200: {
         description: 'Complete merchant catalog',

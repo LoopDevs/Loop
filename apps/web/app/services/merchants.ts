@@ -28,7 +28,10 @@ export async function fetchMerchants(
  * truncate the catalog.
  */
 export async function fetchAllMerchants(): Promise<MerchantAllResponse> {
-  return apiRequest<MerchantAllResponse>('/api/merchants/all');
+  // S4-7: browse never renders description/instructions/terms (the detail page
+  // pulls those from /by-slug + /:id), so request the lite projection to keep
+  // this whole-catalog payload small as the catalog grows.
+  return apiRequest<MerchantAllResponse>('/api/merchants/all?fields=lite');
 }
 
 /**
