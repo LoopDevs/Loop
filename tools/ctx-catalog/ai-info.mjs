@@ -8,11 +8,14 @@
  * merchants. This commits the prompt + a style contract + a validator, so every
  * merchant's copy is uniform, grounded, and re-generatable.
  *
- * Style contract (enforced by validateInfo):
- *   - intro:        ≤ 8-word tagline, no trailing period
- *   - description:  40–70 words, present tense, what they sell + who it's for
+ * Style contract (enforced by validateInfo). The word bounds are calibrated to
+ * the real ctx-info.json distribution (p5–p95 of 1,150 human-reviewed entries),
+ * NOT arbitrary — an earlier tight guess (desc 40–70, terms ≤60) failed 89% of
+ * the good corpus, making the gate useless. Bounds now flag only true outliers:
+ *   - intro:        short tagline, ≤ 12 words (real p95=8, max=13)
+ *   - description:  25–80 words, present tense (real p5=27, p95=50, max=61)
  *   - instructions: how to redeem (online at <domain> / in store / enter code+PIN)
- *   - terms:        ≤ 60 words, factual T&Cs only
+ *   - terms:        factual T&Cs only, ≤ 130 words (real p50=70, p95=98, max=112)
  *   - NO prices, discount %, expiry promises, or marketing hyperbole; ground
  *     everything in the supplier text — invent nothing.
  *
@@ -56,10 +59,10 @@ export function buildInfoPrompt(brief, textBlob) {
     '',
     'Return exactly this JSON:',
     '{',
-    '  "intro": "≤8-word tagline, no trailing period",',
-    '  "description": "40-70 words, present tense — what they sell and who it\'s for",',
+    '  "intro": "short tagline, ≤10 words",',
+    '  "description": "30-70 words, present tense — what they sell and who it\'s for",',
     '  "instructions": "how to redeem: online at the domain / in store / enter code+PIN at checkout; note balance/expiry only if stated",',
-    '  "terms": "≤60 words, factual T&Cs only"',
+    '  "terms": "factual T&Cs only, ≤120 words"',
     '}',
   ]
     .filter((l) => l !== '')
@@ -75,16 +78,17 @@ export function validateInfo(info, brief = {}) {
   for (const f of ['intro', 'description', 'instructions', 'terms']) {
     if (!s(i[f])) issues.push(`${f}: missing`);
   }
-  if (s(i.intro)) {
-    if (wordCount(i.intro) > 8) issues.push(`intro: >8 words (${wordCount(i.intro)})`);
-    if (/[.]\s*$/.test(s(i.intro))) issues.push('intro: has a trailing period');
-  }
+  // Bounds calibrated to the real ctx-info distribution (see the style-contract
+  // note above) — flag only genuine outliers, not the normal spread. A trailing
+  // period on the intro is NOT flagged: 116/1150 good intros use one.
+  if (s(i.intro) && wordCount(i.intro) > 12)
+    issues.push(`intro: >12 words (${wordCount(i.intro)})`);
   if (s(i.description)) {
     const w = wordCount(i.description);
-    if (w < 40 || w > 70) issues.push(`description: ${w} words (want 40-70)`);
+    if (w < 25 || w > 80) issues.push(`description: ${w} words (want 25-80)`);
   }
-  if (s(i.terms) && wordCount(i.terms) > 60)
-    issues.push(`terms: >60 words (${wordCount(i.terms)})`);
+  if (s(i.terms) && wordCount(i.terms) > 130)
+    issues.push(`terms: >130 words (${wordCount(i.terms)})`);
   for (const f of ['intro', 'description', 'instructions', 'terms']) {
     if (FORBIDDEN.test(s(i[f]))) issues.push(`${f}: contains a price/discount/expiry claim`);
   }
@@ -164,10 +168,12 @@ if (isMain && process.argv.includes('--self-test')) {
       /instructions/.test(user) &&
       /terms/.test(user),
     'validate: clean copy passes': validateInfo(good, brief).valid === true,
-    'validate: >8-word intro flagged': validateInfo(
-      { ...good, intro: 'one two three four five six seven eight nine' },
+    'validate: an over-long intro (>12 words) flagged': validateInfo(
+      { ...good, intro: 'one two three four five six seven eight nine ten eleven twelve thirteen' },
       brief,
     ).issues.some((x) => x.startsWith('intro')),
+    'validate: a normal intro with a trailing period passes':
+      validateInfo({ ...good, intro: 'Soft, comfy essentials.' }, brief).valid === true,
     'validate: short description flagged': validateInfo(
       { ...good, description: 'Too short.' },
       brief,
