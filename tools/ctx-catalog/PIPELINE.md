@@ -70,12 +70,14 @@ node tools/ctx-catalog/recount.mjs                       # live CTX coverage (ne
 ## Run every self-test
 
 ```bash
-for s in domain-tools brand-brief brand-family source-images-tavily logo-sources \
-         image-qc cover-text-scan vision-qc ai-extract ai-info \
-         merchant-state build-state ctx-write; do
-  node tools/ctx-catalog/$s.mjs --self-test || echo "FAIL: $s"
-done
+npm run test:tools          # network-free subset, also run in CI's Quality job
+node tools/ctx-catalog/cover-text-scan.mjs --self-test   # the one that boots Tesseract
 ```
+
+`npm run test:tools` (→ `scripts/test-catalog-tools.sh`) runs the 12 network-free
+self-tests and is wired into CI so a regression in any tool script fails the
+build. `cover-text-scan` is run separately because its self-test downloads
+Tesseract traineddata.
 
 ## Status
 
