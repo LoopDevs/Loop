@@ -88,3 +88,33 @@ Every stage above is built + self-tested. The one missing piece is the
 **supplier-pull adapters** (Tillo/SVS/EzPin read-only fetchers) that fill stage 0
 with raw supplier data — everything downstream is ready to consume it. See the
 improvement plan for the outstanding-work detail.
+
+## Known data issues + re-source work-lists (2026-07-07 audit)
+
+A data-driven audit (running the scripts against the real recovered `data/`)
+hardened the resolver/validator and surfaced concrete work-lists to clear when
+the pipeline next runs with keys. Re-run these to regenerate each list:
+
+| Work-list                    | Count | Detector (re-run)                                                   |
+| ---------------------------- | ----- | ------------------------------------------------------------------- |
+| Bad-source logos (re-source) | ~120  | `logoSourceQuality()` — reseller-portal / aggregator / icon-library |
+| Missing `terms`              | ~155  | `validateInfo()` over `ctx-info.json`                               |
+| Missing `instructions`       | ~76   | `validateInfo()` over `ctx-info.json`                               |
+| Legacy weserv-proxied covers | 61    | `BAD.test(headerUrl)` in `source-images-tavily.mjs`                 |
+| Wrong resolved domains       | ~11   | `node audit-resolver.mjs --audit`                                   |
+
+**Wrong-domain re-resolves** (the resolver now DENIES the bad values, so a fresh
+run re-resolves them; listed here so they can also be hand-checked):
+
+- **CVS Pharmacy, Foot Locker, Hulu** → were `urldefense.com` (Proofpoint link
+  rewrapper). Real: cvs.com, footlocker.com, hulu.com.
+- **Sam's Club** → `walmart.com` (should be samsclub.com).
+- **Albertsons** → `thegiftcardshop.com` (a portal, should be albertsons.com).
+- **7 portal domains** (Golf Town / Starbucks UK / Levy / Bass Pro CA / Red Robin
+  CA / Service Inspired ×2) → `*.cashstar.com` / `giftcards.ca`; re-resolve to
+  the real brand sites.
+
+Most of these are **prevented going forward** by the deny-list + anchoring fixes
+(brand-brief, domain-tools); the counts above are the residue already sitting in
+the recovered manifests. `~725` merchants also lack a `vertical`/category — the
+Claude extraction (`ai-extract`) fills that on the run.
