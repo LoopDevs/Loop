@@ -18,8 +18,16 @@ for t in "${tools[@]}"; do
     fail=$((fail + 1))
   fi
 done
+# cover-text-scan's full --self-test boots Tesseract (network); its pure classify
+# logic is covered network-free via --self-test-logic.
+if node tools/ctx-catalog/cover-text-scan.mjs --self-test-logic >/dev/null 2>&1; then
+  echo "  ✓ cover-text-scan (logic)"
+else
+  echo "  ✗ cover-text-scan (logic)"
+  fail=$((fail + 1))
+fi
 if [ "$fail" -gt 0 ]; then
   echo "FAILED: $fail catalog tool self-test(s)"
   exit 1
 fi
-echo "OK: all ${#tools[@]} catalog tool self-tests passed"
+echo "OK: all $((${#tools[@]} + 1)) catalog tool self-tests passed"

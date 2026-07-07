@@ -75,9 +75,10 @@ node tools/ctx-catalog/cover-text-scan.mjs --self-test   # the one that boots Te
 ```
 
 `npm run test:tools` (→ `scripts/test-catalog-tools.sh`) runs the 12 network-free
-self-tests and is wired into CI so a regression in any tool script fails the
-build. `cover-text-scan` is run separately because its self-test downloads
-Tesseract traineddata.
+self-tests plus `cover-text-scan`'s network-free classify logic
+(`--self-test-logic`), and is wired into CI so a regression in any tool script
+fails the build. `cover-text-scan`'s **full** self-test (the end-to-end OCR pass)
+is run separately because it downloads Tesseract traineddata.
 
 ## Status
 

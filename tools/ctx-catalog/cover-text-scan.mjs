@@ -125,18 +125,29 @@ const svgText = (words) =>
       `</svg>`,
   );
 
-if (isMain && argv.includes('--self-test')) {
-  // 1) pure classify logic (deterministic, no OCR)
-  const cases = [
-    [{ wordCount: 20, coverage: 0.2, watermark: false }, 'reject'],
-    [{ wordCount: 0, coverage: 0.01, watermark: false }, 'pass'],
-    [{ wordCount: 3, coverage: 0.05, watermark: false }, 'flag'],
-    [{ wordCount: 0, coverage: 0.0, watermark: true }, 'reject'],
-  ];
-  const logicOk = cases.every(([m, want]) => classifyCoverText(m).verdict === want);
-  cases.forEach(([m, want]) =>
+// Pure classify-logic checks (deterministic, no OCR) — shared by --self-test and
+// the network-free --self-test-logic (the latter runs in CI, where Tesseract's
+// traineddata download would add a network dependency to the check).
+const classifyCases = [
+  [{ wordCount: 20, coverage: 0.2, watermark: false }, 'reject'],
+  [{ wordCount: 0, coverage: 0.01, watermark: false }, 'pass'],
+  [{ wordCount: 3, coverage: 0.05, watermark: false }, 'flag'],
+  [{ wordCount: 0, coverage: 0.0, watermark: true }, 'reject'],
+];
+const runClassifyChecks = () => {
+  classifyCases.forEach(([m, want]) =>
     console.log(`  classify ${JSON.stringify(m)} → ${classifyCoverText(m).verdict} (want ${want})`),
   );
+  return classifyCases.every(([m, want]) => classifyCoverText(m).verdict === want);
+};
+
+if (isMain && argv.includes('--self-test-logic')) {
+  const ok = runClassifyChecks();
+  console.log(ok ? '\nSELF-TEST(logic) PASS ✓' : '\nSELF-TEST(logic) FAIL ✗');
+  process.exit(ok ? 0 : 1);
+} else if (isMain && argv.includes('--self-test')) {
+  // 1) pure classify logic (deterministic, no OCR)
+  const logicOk = runClassifyChecks();
 
   // 2) real OCR end-to-end: a text-heavy card vs a clean scene
   console.log('\n  booting Tesseract…');
