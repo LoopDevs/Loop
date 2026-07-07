@@ -52,6 +52,9 @@ export function looksLikeFaceplate(text) {
 // flag them for RE-SOURCING cheaply (no fetch) — prevention over a fetch+vision
 // round. Matched on the SLD so any TLD/subdomain variant is covered.
 const LOGO_SOURCE_CLASSES = {
+  // Kept in sync with the cover-source BAD list in source-images-tavily.mjs —
+  // both encode "logo/image aggregator" knowledge. brandlogos was confirmed
+  // serving a real merchant's logo (Athleta) in the recovered data.
   aggregator: [
     'seeklogo',
     '1000logos',
@@ -63,6 +66,11 @@ const LOGO_SOURCE_CLASSES = {
     'wikipedia',
     'logolynx',
     'logospng',
+    'brandlogos',
+    'logosworld',
+    'brandirectory',
+    'logomarque',
+    'logowine',
   ],
   'icon-library': ['iconify', 'simpleicons', 'icons8', 'flaticon'],
   'reseller-portal': ['gyft', 'egifter', 'townandcitygiftcards', 'giftcards', 'gcodes'],
@@ -93,6 +101,8 @@ if (isMain && process.argv.includes('--self-test')) {
       looksLikeFaceplate('Wickes DIY store interior, aisles of paint') === false,
     'logoSourceQuality: seeklogo → aggregator':
       logoSourceQuality('https://seeklogo.com/images/x.png') === 'aggregator',
+    'logoSourceQuality: brandlogos.net → aggregator (was missed)':
+      logoSourceQuality('https://brandlogos.net/wp-content/uploads/x.png') === 'aggregator',
     'logoSourceQuality: iconify → icon-library':
       logoSourceQuality('https://api.iconify.design/mdi/x.svg') === 'icon-library',
     'logoSourceQuality: gyft → reseller-portal':
