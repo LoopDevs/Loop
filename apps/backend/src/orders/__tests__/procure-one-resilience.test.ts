@@ -63,6 +63,15 @@ vi.mock('../pay-ctx.js', async (importActual) => {
   const actual = (await importActual()) as Record<string, unknown>;
   return { ...actual, payCtxOrder: payCtxOrderMock };
 });
+// procure-one's R3-5 retry guard reads the settlement repo directly;
+// stub it (null → first attempt, band applies) so no real DB loads.
+vi.mock('../ctx-settlements.js', () => ({
+  getCtxSettlementByOrderId: vi.fn(async () => null),
+  getOrCreateCtxSettlement: vi.fn(),
+  recordCtxSettlementTxHash: vi.fn(),
+  markCtxSettlementConfirmed: vi.fn(),
+  backfillCtxSettlementFromChain: vi.fn(),
+}));
 
 // Everything else procureOne references — stubbed so the module loads.
 const { notifyOrderFailedAfterCtxPaidMock, notifyCashbackCreditedMock } = vi.hoisted(() => ({

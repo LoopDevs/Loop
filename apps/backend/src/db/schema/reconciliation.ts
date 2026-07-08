@@ -240,6 +240,12 @@ export const operatorWalletBaselines = pgTable(
   },
   (t) => [
     index('operator_wallet_baselines_account_asset_active').on(t.account, t.asset, t.active),
+    // Migration 0054: at most one ACTIVE baseline per (account, asset)
+    // — a concurrent double-create fails loudly instead of leaving two
+    // actives for loadActiveBaseline to tiebreak by created_at.
+    uniqueIndex('operator_wallet_baselines_one_active')
+      .on(t.account, t.asset)
+      .where(sql`${t.active} = 1`),
     check('operator_wallet_baselines_asset_known', sql`${t.asset} IN ('xlm', 'usdc')`),
     check('operator_wallet_baselines_opening_non_negative', sql`${t.openingBalanceStroops} >= 0`),
     check('operator_wallet_baselines_active_bool', sql`${t.active} IN (0, 1)`),
@@ -305,6 +311,12 @@ export const operatorWalletMovements = pgTable(
       .default('unclassified')
       .$type<OperatorFloatClassification>(),
     orderId: uuid('order_id').references(() => orders.id, { onDelete: 'set null' }),
+    // Related payment_watcher_skips row — DUAL meaning by direction:
+    // for an OUTBOUND deposit_refund movement it is the skip row whose
+    // deposit this refund returns; for an INBOUND user_deposit matched
+    // only via a skip row (orphan/late deposit) it is that skip row
+    // itself. Read it as "the watcher-skip row that explains this
+    // movement", not "the refund's payment id".
     refundPaymentId: text('refund_payment_id').references(() => paymentWatcherSkips.paymentId, {
       onDelete: 'set null',
     }),

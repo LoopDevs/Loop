@@ -1,16 +1,17 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
+import { getTableConfig } from 'drizzle-orm/pg-core';
 import {
   OPERATOR_FLOAT_ASSETS,
   OPERATOR_FLOAT_CLASSIFICATIONS,
   OPERATOR_FLOAT_DIRECTIONS,
   OPERATOR_FLOAT_RUN_STATES,
+  operatorWalletBaselines,
   type OperatorFloatAsset,
   type OperatorFloatClassification,
   type OperatorFloatDirection,
   type OperatorFloatRunState,
   type operatorFloatReconciliationRuns,
   type operatorManualMovements,
-  type operatorWalletBaselines,
   type operatorWalletMovements,
 } from '../schema.js';
 
@@ -41,6 +42,15 @@ describe('operator float schema mirrors', () => {
     expect(OPERATOR_FLOAT_DIRECTIONS).toContain(direction);
     expect(OPERATOR_FLOAT_CLASSIFICATIONS).toContain(classification);
     expect(OPERATOR_FLOAT_RUN_STATES).toContain(state);
+  });
+
+  it('pins one ACTIVE baseline per (account, asset) at the schema layer (migration 0054)', () => {
+    const idx = getTableConfig(operatorWalletBaselines).indexes.find(
+      (i) => i.config.name === 'operator_wallet_baselines_one_active',
+    );
+    expect(idx).toBeDefined();
+    expect(idx?.config.unique).toBe(true);
+    expect(idx?.config.where).toBeDefined();
   });
 
   it('exposes bigint balances and nullable baseline/run fields with the expected row types', () => {

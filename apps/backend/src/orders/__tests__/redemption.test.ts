@@ -97,13 +97,29 @@ describe('waitForRedemption', () => {
     });
   });
 
-  it('keeps usable code/PIN even when CTX returns a non-absolute redeemUrl string', async () => {
+  it('keeps usable code/PIN when CTX returns a non-absolute redeemUrl, nulling the unusable url', async () => {
     operatorFetchMock.mockResolvedValueOnce(
       detailResponse({ redeemCode: 'C', redeemPin: 'P', redeemUrl: '/relative/redeem' }),
     );
     const result = await fetchRedemption('o-1');
-    expect(result).toEqual({ code: 'C', pin: 'P', url: '/relative/redeem' });
+    expect(result).toEqual({ code: 'C', pin: 'P', url: null });
     expect(notifyCtxSchemaDriftMock).not.toHaveBeenCalled();
+  });
+
+  it('F10: never persists a non-http(s) redeem URL — javascript: is nulled, code/PIN survive', async () => {
+    operatorFetchMock.mockResolvedValueOnce(
+      detailResponse({ redeemCode: 'C', redeemUrl: 'javascript:alert(document.cookie)' }),
+    );
+    const result = await fetchRedemption('o-1');
+    expect(result).toEqual({ code: 'C', pin: null, url: null });
+  });
+
+  it('F10: a genuine https redeem URL passes through untouched', async () => {
+    operatorFetchMock.mockResolvedValueOnce(
+      detailResponse({ redeemUrl: 'https://redeem.example.com/card/123' }),
+    );
+    const result = await fetchRedemption('o-1');
+    expect(result).toEqual({ code: null, pin: null, url: 'https://redeem.example.com/card/123' });
   });
 
   it('polling tolerates intermittent failures and returns once codes appear', async () => {

@@ -42,6 +42,7 @@ import { getMerchants } from '../merchants/sync.js';
 import { waitForRedemption } from './procurement-redemption.js';
 import { parseSep7PayUri } from './sep7.js';
 import { summariseZodIssues } from './handler-shared.js';
+import { getCtxSettlementByOrderId } from './ctx-settlements.js';
 import {
   decimalToStroops,
   payCtxOrder,
@@ -351,7 +352,20 @@ export async function procureOne(order: Order): Promise<'fulfilled' | 'failed' |
     }
     let paymentBand;
     try {
-      paymentBand = await checkCtxPaymentAmountBand(order, sep7.value.amount);
+      // R3-5 band — FIRST ATTEMPT ONLY (money review 2026-07-08). Once
+      // a settlement intent row exists, a prior attempt already reached
+      // payCtxOrder: the amount is pinned in ctx_settlements (any
+      // mismatch fails closed inside payCtxOrder) and — after an
+      // ambiguous prior submit — the windowless landed-check there may
+      // prove Loop ALREADY paid CTX. Failing the band on a retry would
+      // refund the user while CTX keeps the payment (INV-6/INV-7
+      // double-pay window). The band's job is to refuse a mispriced
+      // FIRST payment, and only that attempt has no row yet.
+      const priorSettlement = await getCtxSettlementByOrderId(order.id);
+      paymentBand =
+        priorSettlement !== null
+          ? { ok: true as const }
+          : await checkCtxPaymentAmountBand(order, sep7.value.amount);
     } catch (err) {
       await revertOrderProcuringToPaid(order.id);
       log.warn(

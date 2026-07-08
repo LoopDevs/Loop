@@ -21,7 +21,7 @@
  * back to a different state (cancelled, refunded) is a separate
  * support-mediated action.
  */
-import { and, eq, gte, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, or, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { creditTransactions, orders, paymentWatcherSkips, userCredits } from '../db/schema.js';
 import { env } from '../env.js';
@@ -171,11 +171,23 @@ async function applyOnChainOrderAutoRefund(args: {
   paymentReceivedPayment?: unknown | null;
   reason: string;
 }): Promise<OnChainOrderAutoRefundResult> {
+  // DELIBERATE fail-closed for the migration-transition cohort (money
+  // review 2026-07-08): orders paid BEFORE migrations 0050/0051 carry
+  // no payment snapshot, so their failed-order refund cannot go
+  // on-chain. They land in the caller's generic catch → refunded=false
+  // → ops page → manual `applyAdminRefund` (which INV-8-excludes a
+  // later on-chain double). The alternative — silently falling back to
+  // a mirror credit — is the exact wrong-asset drift R3-2 exists to
+  // stop. Bounded population: only orders in flight at deploy time.
   if (args.paymentReceivedHorizonId === null || args.paymentReceivedHorizonId === undefined) {
-    throw new Error('on-chain auto-refund cannot run without payment_received_horizon_id');
+    throw new Error(
+      'on-chain auto-refund cannot run without payment_received_horizon_id (pre-0050 order — refund manually via applyAdminRefund)',
+    );
   }
   if (args.paymentReceivedPayment === null || args.paymentReceivedPayment === undefined) {
-    throw new Error('on-chain auto-refund cannot run without payment_received_payment');
+    throw new Error(
+      'on-chain auto-refund cannot run without payment_received_payment (pre-0051 order — refund manually via applyAdminRefund)',
+    );
   }
 
   const parsed = HorizonPaymentSchema.safeParse(args.paymentReceivedPayment);
@@ -187,11 +199,45 @@ async function applyOnChainOrderAutoRefund(args: {
     throw new Error('on-chain auto-refund payment snapshot id does not match order identity');
   }
 
-  await recordFailedOrderRefundableDeposit({
-    orderId: args.orderId,
-    memo: args.paymentMemo ?? payment.transaction?.memo ?? '',
-    payment,
-    detail: `${AUTO_REFUND_SYSTEM_ACTOR}: ${args.reason}`,
+  // INV-8 cross-check (money review 2026-07-08): the on-chain branch
+  // does not write a `credit_transactions` refund row, so migration
+  // 0013's one-refund-per-order partial unique index cannot see it.
+  // Re-establish the exclusion here: under the SAME order-row lock
+  // `applyAdminRefund` takes, refuse to send funds on-chain when a
+  // mirror-credit refund already exists for this order, and record the
+  // refundable-deposit skip row inside the same transaction so the two
+  // refund exits serialise on the order row — whichever commits first
+  // wins and the loser converges to a no-op / typed error. The third
+  // writer (`refundDeposit`, reachable directly via the A6 admin
+  // endpoint) carries the same guard inside its claim transaction.
+  await db.transaction(async (tx) => {
+    const [orderRow] = await tx
+      .select({ id: orders.id })
+      .from(orders)
+      .where(eq(orders.id, args.orderId))
+      .for('update');
+    if (orderRow === undefined) {
+      throw new RefundOrderInvalidError('order_not_found', `Order ${args.orderId} does not exist`);
+    }
+    const [creditRefund] = await tx
+      .select({ id: creditTransactions.id })
+      .from(creditTransactions)
+      .where(
+        and(
+          eq(creditTransactions.type, 'refund'),
+          eq(creditTransactions.referenceType, 'order'),
+          eq(creditTransactions.referenceId, args.orderId),
+        ),
+      );
+    if (creditRefund !== undefined) {
+      throw new RefundAlreadyIssuedError(args.orderId);
+    }
+    await recordFailedOrderRefundableDeposit(tx, {
+      orderId: args.orderId,
+      memo: args.paymentMemo ?? payment.transaction?.memo ?? '',
+      payment,
+      detail: `${AUTO_REFUND_SYSTEM_ACTOR}: ${args.reason}`,
+    });
   });
 
   const refund = await refundDeposit(payment.id);
@@ -206,13 +252,16 @@ async function applyOnChainOrderAutoRefund(args: {
   };
 }
 
-async function recordFailedOrderRefundableDeposit(args: {
-  orderId: string;
-  memo: string;
-  payment: HorizonPayment;
-  detail: string;
-}): Promise<void> {
-  await db
+async function recordFailedOrderRefundableDeposit(
+  tx: Pick<typeof db, 'insert'>,
+  args: {
+    orderId: string;
+    memo: string;
+    payment: HorizonPayment;
+    detail: string;
+  },
+): Promise<void> {
+  await tx
     .insert(paymentWatcherSkips)
     .values({
       paymentId: args.payment.id,
@@ -271,6 +320,7 @@ export async function applyAdminRefund(args: {
           orderUserId: orders.userId,
           chargeMinor: orders.chargeMinor,
           chargeCurrency: orders.chargeCurrency,
+          paymentReceivedHorizonId: orders.paymentReceivedHorizonId,
         })
         .from(orders)
         .where(eq(orders.id, args.orderId))
@@ -358,6 +408,42 @@ export async function applyAdminRefund(args: {
 
       const priorBalance = existing?.balanceMinor ?? 0n;
       const newBalance = priorBalance + args.amountMinor;
+
+      // INV-8 cross-check (money review 2026-07-08): refuse a
+      // mirror-credit refund when the order's own paying deposit has
+      // already been returned (or is being returned) on-chain through
+      // `refundDeposit()` — that path writes no credit_transactions
+      // row, so the partial unique index alone cannot exclude it. Runs
+      // under the order-row lock, which every on-chain refund writer
+      // also takes, so the two exits serialise. Duplicate-deposit skip
+      // rows (T0-1b — a *second* deposit against a genuinely paid
+      // order, paymentId ≠ the persisted paying id) do not block:
+      // returning an extraneous deposit to its sender is not a refund
+      // of the order. A null paying id (legacy/expired order) blocks on
+      // any refunded deposit for the order — fail closed when we
+      // cannot distinguish.
+      const payingId = order.paymentReceivedHorizonId ?? null;
+      // Match by order binding OR by the paying deposit's own payment
+      // id — the latter catches skip rows recorded with orderId=null
+      // (e.g. processing_error rows) that still ARE this order's
+      // deposit.
+      const onChainRefunds = await tx
+        .select({ paymentId: paymentWatcherSkips.paymentId })
+        .from(paymentWatcherSkips)
+        .where(
+          and(
+            payingId === null
+              ? eq(paymentWatcherSkips.orderId, args.orderId)
+              : or(
+                  eq(paymentWatcherSkips.orderId, args.orderId),
+                  eq(paymentWatcherSkips.paymentId, payingId),
+                ),
+            inArray(paymentWatcherSkips.status, ['refunding', 'refunded']),
+          ),
+        );
+      if (onChainRefunds.some((r) => payingId === null || r.paymentId === payingId)) {
+        throw new RefundAlreadyIssuedError(args.orderId);
+      }
 
       const [row] = await tx
         .insert(creditTransactions)

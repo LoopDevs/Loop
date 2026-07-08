@@ -6,6 +6,30 @@
  * baseline: a current Horizon balance alone is not evidence that user
  * deposits, CTX settlements, refunds, fees, top-ups and sweeps
  * conserved correctly.
+ *
+ * KNOWN UNMODELED TERMS (money review 2026-07-08) — the expected-
+ * balance model counts only Horizon `payment` operations, so these
+ * real balance movers are invisible to it and accrue as slow negative
+ * XLM delta until a re-baseline:
+ *   - transaction FEES on every tx the operator account submits (CTX
+ *     settlements, deposit refunds, payouts) — ~100-200 stroops each.
+ *     The 1-XLM default `LOOP_OPERATOR_FLOAT_XLM_THRESHOLD_STROOPS`
+ *     absorbs ~50k such fees; USDC pays no fee so its threshold stays
+ *     exact.
+ *   - `create_account` funding (Phase-2 wallet provisioning — gated
+ *     off in Phase 1), `account_merge`, path payments, claimable
+ *     balances. None are used on this account in Phase 1.
+ * OPERATOR POLICY: when the XLM delta approaches the threshold from
+ * accumulated fees, create a fresh baseline (balance + cursor snapshot
+ * via the audited admin write) rather than raising the threshold —
+ * threshold inflation is exactly how a real leak hides.
+ *
+ * ALERT SEMANTICS: like the ledger-invariant watcher, this pages the
+ * monitoring channel on EVERY bad-state run (daily cadence) — that is
+ * the at-least-once reminder, not an oversight. A drift result is
+ * recomputed once (re-index + re-read) before it is persisted or
+ * paged, so a deposit landing between the movement indexing and the
+ * balance read does not produce a one-run false page.
  */
 import { createHash } from 'node:crypto';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
@@ -178,8 +202,18 @@ export function classifyRun(args: {
   return abs(args.deltaStroops) > args.thresholdStroops ? 'drift' : 'ok';
 }
 
+/**
+ * The classifier only needs the movement's identity + direction, so it
+ * accepts the narrow shape — lets the reclassify sweep feed persisted
+ * rows straight back through without fabricating a full extraction.
+ */
+export type ClassifiableMovement = Pick<
+  ExtractedOperatorMovement,
+  'paymentId' | 'txHash' | 'direction'
+>;
+
 export async function classifyMovement(
-  movement: ExtractedOperatorMovement,
+  movement: ClassifiableMovement,
 ): Promise<MovementClassification> {
   const [manual] = await db
     .select({ id: operatorManualMovements.id })
@@ -303,7 +337,74 @@ export async function upsertOperatorMovement(
         manualMovementId: classification.manualMovementId,
         updatedAt: sql`NOW()`,
       },
+      // A cursor replay must only ever UPGRADE an unclassified row —
+      // an existing attribution (manual link, user_deposit, …) is
+      // final and a stale re-classify computed before that attribution
+      // committed must not transiently clobber it.
+      setWhere: sql`${operatorWalletMovements.classification} = 'unclassified'`,
     });
+}
+
+/**
+ * Re-run classification over rows stuck `unclassified` (money review
+ * 2026-07-08, F3/F4). Classification used to be compute-once at index
+ * time, so a deposit indexed BEFORE the payment watcher stamped
+ * `orders.payment_received_horizon_id` (watcher lag), or a manual
+ * explanation that raced the indexer, froze `unclassified` forever —
+ * masking the ok/drift signal and paging every run until an operator
+ * misrecorded a genuine deposit as `manual`. Each tick this heals any
+ * row whose linkage has since appeared. The UPDATE is guarded on
+ * `classification = 'unclassified'` so it can never clobber a
+ * concurrent manual-movement link.
+ */
+export async function reclassifyUnclassifiedMovements(args: {
+  account: string;
+  asset: OperatorFloatAsset;
+  limit?: number;
+}): Promise<number> {
+  const rows = await db
+    .select({
+      paymentId: operatorWalletMovements.paymentId,
+      txHash: operatorWalletMovements.txHash,
+      direction: operatorWalletMovements.direction,
+    })
+    .from(operatorWalletMovements)
+    .where(
+      and(
+        eq(operatorWalletMovements.account, args.account),
+        eq(operatorWalletMovements.asset, args.asset),
+        eq(operatorWalletMovements.classification, 'unclassified'),
+      ),
+    )
+    .orderBy(operatorWalletMovements.observedAt)
+    .limit(args.limit ?? 500);
+
+  let healed = 0;
+  for (const row of rows) {
+    const classification = await classifyMovement(row);
+    if (classification.classification === 'unclassified') continue;
+    await db
+      .update(operatorWalletMovements)
+      .set({
+        classification: classification.classification,
+        orderId: classification.orderId,
+        refundPaymentId: classification.refundPaymentId,
+        settlementId: classification.settlementId,
+        manualMovementId: classification.manualMovementId,
+        updatedAt: sql`NOW()`,
+      })
+      .where(
+        and(
+          eq(operatorWalletMovements.paymentId, row.paymentId),
+          eq(operatorWalletMovements.classification, 'unclassified'),
+        ),
+      );
+    healed++;
+  }
+  if (healed > 0) {
+    log.info({ account: args.account, asset: args.asset, healed }, 'Reclassified stuck movements');
+  }
+  return healed;
 }
 
 async function loadActiveBaseline(args: {
@@ -491,13 +592,24 @@ async function currentBalance(args: {
   return value ?? 0n;
 }
 
-export async function runOperatorFloatReconciliationForAsset(args: {
-  account: string;
-  asset: OperatorFloatAsset;
-  usdcIssuer: string | null;
-  thresholdStroops: bigint;
-  maxPages?: number;
-}): Promise<OperatorFloatRunSummary> {
+/** The active baseline was replaced by an operator write mid-run. */
+class BaselineChangedMidRunError extends Error {
+  constructor() {
+    super('active operator-float baseline changed mid-run');
+    this.name = 'BaselineChangedMidRunError';
+  }
+}
+
+export async function runOperatorFloatReconciliationForAsset(
+  args: {
+    account: string;
+    asset: OperatorFloatAsset;
+    usdcIssuer: string | null;
+    thresholdStroops: bigint;
+    maxPages?: number;
+  },
+  attempt = 0,
+): Promise<OperatorFloatRunSummary> {
   const baseline = await loadActiveBaseline({ account: args.account, asset: args.asset });
   if (baseline === null) {
     return await recordNeedsBaseline({
@@ -508,58 +620,88 @@ export async function runOperatorFloatReconciliationForAsset(args: {
   }
 
   try {
-    const cursor = baseline.currentHorizonCursor ?? baseline.startingHorizonCursor;
-    await indexNewMovements({
-      account: args.account,
-      asset: args.asset,
-      usdcIssuer: args.usdcIssuer,
-      baselineId: baseline.id,
-      cursor,
-      maxPages: args.maxPages ?? 5,
-    });
-    const movementTotals = await computeMovementTotals({
-      account: args.account,
-      asset: args.asset,
-      baselineCreatedAt: baseline.createdAt,
-    });
-    const manualDelta = await computeUnlinkedManualDelta({
-      account: args.account,
-      asset: args.asset,
-      baselineCreatedAt: baseline.createdAt,
-    });
-    const expected = computeExpectedBalance({
-      openingBalanceStroops: baseline.openingBalanceStroops,
-      classifiedMovementDeltaStroops: movementTotals.classifiedMovementDeltaStroops,
-      unlinkedManualDeltaStroops: manualDelta,
-    });
-    const actual = await currentBalance({
-      account: args.account,
-      asset: args.asset,
-      usdcIssuer: args.usdcIssuer,
-    });
-    const delta = actual - expected;
-    const state = classifyRun({
-      deltaStroops: delta,
-      thresholdStroops: args.thresholdStroops,
-      unclassifiedCount: movementTotals.unclassifiedCount,
-    });
-    const summary: OperatorFloatRunSummary = {
-      asset: args.asset,
-      account: args.account,
-      baselineId: baseline.id,
-      expectedBalanceStroops: expected,
-      actualBalanceStroops: actual,
-      deltaStroops: delta,
-      thresholdStroops: args.thresholdStroops,
-      unclassifiedCount: movementTotals.unclassifiedCount,
-      indexedMovementCount: movementTotals.indexedMovementCount,
-      state,
-      error: null,
+    const computePass = async (): Promise<OperatorFloatRunSummary> => {
+      // Re-load the cursor each pass — the first pass advances it on
+      // the baseline row. Pin the baseline IDENTITY: if an operator
+      // re-baselined mid-run, mixing the old opening balance with the
+      // new row's cursor would produce a garbage run record, so start
+      // the whole per-asset run over against the new baseline instead.
+      const fresh = await loadActiveBaseline({ account: args.account, asset: args.asset });
+      if (fresh === null || fresh.id !== baseline.id) {
+        throw new BaselineChangedMidRunError();
+      }
+      const cursor = fresh.currentHorizonCursor ?? fresh.startingHorizonCursor;
+      await indexNewMovements({
+        account: args.account,
+        asset: args.asset,
+        usdcIssuer: args.usdcIssuer,
+        baselineId: baseline.id,
+        cursor,
+        maxPages: args.maxPages ?? 5,
+      });
+      // F3/F4: heal rows that indexed before their linkage existed
+      // (watcher lag, manual-explanation race) before summing.
+      await reclassifyUnclassifiedMovements({ account: args.account, asset: args.asset });
+      const movementTotals = await computeMovementTotals({
+        account: args.account,
+        asset: args.asset,
+        baselineCreatedAt: baseline.createdAt,
+      });
+      const manualDelta = await computeUnlinkedManualDelta({
+        account: args.account,
+        asset: args.asset,
+        baselineCreatedAt: baseline.createdAt,
+      });
+      const expected = computeExpectedBalance({
+        openingBalanceStroops: baseline.openingBalanceStroops,
+        classifiedMovementDeltaStroops: movementTotals.classifiedMovementDeltaStroops,
+        unlinkedManualDeltaStroops: manualDelta,
+      });
+      const actual = await currentBalance({
+        account: args.account,
+        asset: args.asset,
+        usdcIssuer: args.usdcIssuer,
+      });
+      const delta = actual - expected;
+      const state = classifyRun({
+        deltaStroops: delta,
+        thresholdStroops: args.thresholdStroops,
+        unclassifiedCount: movementTotals.unclassifiedCount,
+      });
+      return {
+        asset: args.asset,
+        account: args.account,
+        baselineId: baseline.id,
+        expectedBalanceStroops: expected,
+        actualBalanceStroops: actual,
+        deltaStroops: delta,
+        thresholdStroops: args.thresholdStroops,
+        unclassifiedCount: movementTotals.unclassifiedCount,
+        indexedMovementCount: movementTotals.indexedMovementCount,
+        state,
+        error: null,
+      };
     };
+
+    let summary = await computePass();
+    if (summary.state === 'drift') {
+      // A deposit landing between the movement indexing and the balance
+      // read shows up in `actual` but not yet in `expected`. Re-index +
+      // recompute once before persisting or paging so that window can't
+      // produce a one-run false drift page (money review 2026-07-08).
+      summary = await computePass();
+    }
     await persistRun(summary);
-    if (state === 'drift' || state === 'unclassified') notifyOperatorFloatDrift(summary);
+    if (summary.state === 'drift' || summary.state === 'unclassified') {
+      notifyOperatorFloatDrift(summary);
+    }
     return summary;
   } catch (err) {
+    if (err instanceof BaselineChangedMidRunError && attempt === 0) {
+      // One clean restart against the new active baseline; a second
+      // change inside a single tick falls through to the error record.
+      return await runOperatorFloatReconciliationForAsset(args, 1);
+    }
     const message = err instanceof Error ? err.message : String(err);
     const summary: OperatorFloatRunSummary = {
       asset: args.asset,
@@ -619,8 +761,11 @@ export function startOperatorFloatReconciliationWatcher(args?: { intervalMs?: nu
   });
   const tick = async (): Promise<void> => {
     try {
-      const r = await runOperatorFloatReconciliationTick();
-      if (!r.skippedLocked) markWorkerTickSuccess('operator_float_reconciliation');
+      // A lost advisory lock is a HEALTHY tick — another machine owns
+      // the sweep this round. Marking it success keeps the losing
+      // machine's worker-staleness monitor quiet on a 2-machine fleet.
+      await runOperatorFloatReconciliationTick();
+      markWorkerTickSuccess('operator_float_reconciliation');
     } catch (err) {
       markWorkerTickFailure('operator_float_reconciliation', err);
       log.error({ err }, 'Operator-float reconciliation tick failed');

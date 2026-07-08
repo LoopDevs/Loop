@@ -271,6 +271,23 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
       It still remains open until the operator supplies production
       baselines/cursors/thresholds and money review signs off the
       workflow.
+      **Money-review fixes 2026-07-08** (adversarial pass on PR #1581):
+      classification is no longer compute-once — each tick re-runs the
+      classifier over `unclassified` rows, healing watcher-lag deposits
+      and the indexer-vs-manual-explanation race; manual-movement
+      writes validate the linked movement (must exist, be
+      `unclassified`, and match asset/account/direction/amount — no
+      more blessing arbitrary drift or typo'd silent no-ops); baselines
+      require `startingHorizonCursor` (an unanchored baseline walked
+      the whole account history and double-counted pre-baseline flow)
+      and a partial unique index (migration 0054) pins one ACTIVE
+      baseline per (account, asset); a drift result is recomputed once
+      before paging (kills the index-vs-balance-read false positive);
+      the module docstring documents the unmodeled terms (tx fees,
+      create_account, path payments) and the re-baseline-not-threshold-
+      inflation policy. Remaining: production baselines/cursors/
+      thresholds (operator) — the code side of the money review is
+      addressed.
 
 ### R3-2 · Auto-refund delivers the wrong asset in Phase-1 `[code]`
 
@@ -286,6 +303,18 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
       rather than issuing the previous mirror-only refund that could create drift.
       R3-2 remains open until the loop-asset re-mint/re-credit branch and method
       integration coverage land.
+      **Money-review fixes 2026-07-08** (adversarial pass on PR #1581): the
+      on-chain branch no longer vacates INV-8 — a credit-ledger cross-check
+      runs under the order-row lock in `applyOnChainOrderAutoRefund`,
+      `refundDeposit`'s claim, and `applyAdminRefund`, so a mirror-credit
+      refund and an on-chain refund for the same order are mutually exclusive
+      in both orders of arrival (duplicate T0-1b deposits stay independently
+      refundable). Pre-0050/0051 orders without a payment snapshot fail closed
+      to a page + manual `applyAdminRefund` (documented deliberate posture for
+      the deploy-transition cohort). The R3-5 band is now first-attempt-only:
+      once a `ctx_settlements` intent row exists, a retry defers to
+      `payCtxOrder`'s pinned-intent + landed-check instead of failing-and-
+      refunding an order CTX may already have been paid for.
 
 ### R3-3 · CTX: warm-start the merchant/location catalog from Postgres `[code]`
 

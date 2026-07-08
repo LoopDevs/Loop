@@ -1,6 +1,6 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
   OPERATOR_FLOAT_ASSETS,
@@ -37,7 +37,12 @@ const BaselineBody = z.object({
   asset: z.enum(OPERATOR_FLOAT_ASSETS),
   account: z.string().min(10).max(128),
   openingBalanceStroops: StroopsString,
-  startingHorizonCursor: z.string().min(1).max(200).optional(),
+  // REQUIRED (money review 2026-07-08): a baseline without a cursor
+  // anchor made the indexer walk the account's ENTIRE Horizon history
+  // with observed_at = NOW(), double-counting all pre-baseline flow
+  // against the opening balance. The operator must snapshot balance +
+  // cursor from the same Horizon moment.
+  startingHorizonCursor: z.string().min(1).max(200),
   reason: z.string().min(2).max(500),
 });
 
@@ -87,6 +92,19 @@ export interface AdminOperatorFloatManualMovementResult {
   movementPaymentId: string | null;
   effectiveAt: string;
   createdAt: string;
+}
+
+/**
+ * Linkage-validation failure for a manual-movement write. Thrown from
+ * inside the idempotency guard's `doWrite` so the transaction rolls
+ * back WITHOUT storing a replay snapshot — a corrected retry with the
+ * same Idempotency-Key must not replay the stale 400.
+ */
+class ManualMovementLinkError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ManualMovementLinkError';
+  }
 }
 
 function idempotencyError(c: Context, idempotencyKey: string | undefined): Response | null {
@@ -201,8 +219,8 @@ export async function adminOperatorFloatBaselineCreateHandler(c: Context): Promi
             asset: parsed.data.asset,
             account: parsed.data.account,
             openingBalanceStroops: parsed.data.openingBalanceStroops,
-            startingHorizonCursor: parsed.data.startingHorizonCursor ?? null,
-            currentHorizonCursor: parsed.data.startingHorizonCursor ?? null,
+            startingHorizonCursor: parsed.data.startingHorizonCursor,
+            currentHorizonCursor: parsed.data.startingHorizonCursor,
             reason: parsed.data.reason,
             createdBy: actor.id,
           })
@@ -262,67 +280,122 @@ export async function adminOperatorFloatManualMovementCreateHandler(c: Context):
   }
 
   const path = '/api/admin/operator-float/manual-movements';
-  const guardResult = await withIdempotencyGuard(
-    {
-      adminUserId: actor.id,
-      key,
-      method: 'POST',
-      path,
-    },
-    async () => {
-      const inserted = await db.transaction(async (tx) => {
-        const effectiveAt =
-          parsed.data.effectiveAt !== undefined ? new Date(parsed.data.effectiveAt) : new Date();
-        const [row] = await tx
-          .insert(operatorManualMovements)
-          .values({
-            asset: parsed.data.asset,
-            account: parsed.data.account,
-            direction: parsed.data.direction,
-            amountStroops: parsed.data.amountStroops,
-            movementPaymentId: parsed.data.movementPaymentId ?? null,
-            effectiveAt,
-            reason: parsed.data.reason,
-            createdBy: actor.id,
-          })
-          .returning();
-        if (row === undefined) {
-          throw new Error('operator float manual movement insert returned no row');
-        }
-        if (row.movementPaymentId !== null) {
-          await tx
-            .update(operatorWalletMovements)
-            .set({
-              classification: 'manual',
-              manualMovementId: row.id,
-              updatedAt: sql`NOW()`,
+  let guardResult;
+  try {
+    guardResult = await withIdempotencyGuard(
+      {
+        adminUserId: actor.id,
+        key,
+        method: 'POST',
+        path,
+      },
+      async () => {
+        const inserted = await db.transaction(async (tx) => {
+          // R3-1 linkage validation (money review 2026-07-08): a linked
+          // movement must exist, still be `unclassified`, and structurally
+          // match the declared explanation. Without this, one step-up'd
+          // admin could bless arbitrary drift by binding a tiny declared
+          // amount to a huge unexplained movement (the reconciler counts
+          // the MOVEMENT's amount once linked), overwrite an existing
+          // user_deposit/ctx_settlement attribution, or typo an id into a
+          // silent 200 that explained nothing. FOR UPDATE pins the row so
+          // the guarded update below cannot miss.
+          if (parsed.data.movementPaymentId !== undefined) {
+            const [movement] = await tx
+              .select({
+                asset: operatorWalletMovements.asset,
+                account: operatorWalletMovements.account,
+                direction: operatorWalletMovements.direction,
+                amountStroops: operatorWalletMovements.amountStroops,
+                classification: operatorWalletMovements.classification,
+              })
+              .from(operatorWalletMovements)
+              .where(eq(operatorWalletMovements.paymentId, parsed.data.movementPaymentId))
+              .for('update');
+            if (movement === undefined) {
+              throw new ManualMovementLinkError(
+                'movementPaymentId does not match an indexed operator wallet movement — wait for the next reconciliation pass to index it, then link it',
+              );
+            }
+            if (movement.classification !== 'unclassified') {
+              throw new ManualMovementLinkError(
+                `linked movement is already classified '${movement.classification}' — refusing to reclassify an attributed movement`,
+              );
+            }
+            if (
+              movement.asset !== parsed.data.asset ||
+              movement.account !== parsed.data.account ||
+              movement.direction !== parsed.data.direction ||
+              movement.amountStroops !== parsed.data.amountStroops
+            ) {
+              throw new ManualMovementLinkError(
+                'declared asset/account/direction/amountStroops do not match the indexed movement',
+              );
+            }
+          }
+          const effectiveAt =
+            parsed.data.effectiveAt !== undefined ? new Date(parsed.data.effectiveAt) : new Date();
+          const [row] = await tx
+            .insert(operatorManualMovements)
+            .values({
+              asset: parsed.data.asset,
+              account: parsed.data.account,
+              direction: parsed.data.direction,
+              amountStroops: parsed.data.amountStroops,
+              movementPaymentId: parsed.data.movementPaymentId ?? null,
+              effectiveAt,
+              reason: parsed.data.reason,
+              createdBy: actor.id,
             })
-            .where(eq(operatorWalletMovements.paymentId, row.movementPaymentId));
-        }
-        return row;
-      });
-
-      const result: AdminOperatorFloatManualMovementResult = {
-        id: inserted.id,
-        asset: inserted.asset,
-        account: inserted.account,
-        direction: inserted.direction,
-        amountStroops: inserted.amountStroops.toString(),
-        movementPaymentId: inserted.movementPaymentId,
-        effectiveAt: inserted.effectiveAt.toISOString(),
-        createdAt: inserted.createdAt.toISOString(),
-      };
-      const envelope: AdminAuditEnvelope<AdminOperatorFloatManualMovementResult> =
-        buildAuditEnvelope({
-          result,
-          actor,
-          idempotencyKey: key,
-          appliedAt: inserted.createdAt,
-          replayed: false,
+            .returning();
+          if (row === undefined) {
+            throw new Error('operator float manual movement insert returned no row');
+          }
+          if (row.movementPaymentId !== null) {
+            await tx
+              .update(operatorWalletMovements)
+              .set({
+                classification: 'manual',
+                manualMovementId: row.id,
+                updatedAt: sql`NOW()`,
+              })
+              .where(
+                and(
+                  eq(operatorWalletMovements.paymentId, row.movementPaymentId),
+                  eq(operatorWalletMovements.classification, 'unclassified'),
+                ),
+              );
+          }
+          return row;
         });
-      return { status: 200, body: envelope as unknown as Record<string, unknown> };
-    },
-  );
+
+        const result: AdminOperatorFloatManualMovementResult = {
+          id: inserted.id,
+          asset: inserted.asset,
+          account: inserted.account,
+          direction: inserted.direction,
+          amountStroops: inserted.amountStroops.toString(),
+          movementPaymentId: inserted.movementPaymentId,
+          effectiveAt: inserted.effectiveAt.toISOString(),
+          createdAt: inserted.createdAt.toISOString(),
+        };
+        const envelope: AdminAuditEnvelope<AdminOperatorFloatManualMovementResult> =
+          buildAuditEnvelope({
+            result,
+            actor,
+            idempotencyKey: key,
+            appliedAt: inserted.createdAt,
+            replayed: false,
+          });
+        return { status: 200, body: envelope as unknown as Record<string, unknown> };
+      },
+    );
+  } catch (err) {
+    if (err instanceof ManualMovementLinkError) {
+      return c.json({ code: 'VALIDATION_ERROR', message: err.message }, 400);
+    }
+    throw err;
+  }
 
   notifyAdminAudit({
     actorUserId: actor.id,

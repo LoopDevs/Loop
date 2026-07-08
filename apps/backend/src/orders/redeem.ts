@@ -32,18 +32,19 @@
  *     Already-paid states (`paid`/`procuring`/`fulfilled`) replay
  *     `{ state }` with 200 — a double-tap after the watcher caught
  *     the payment is success, not an error.
- *   - In-flight fence: a fleet-wide advisory lock keyed by order id
- *     rejects a concurrent second call (`400 PAYMENT_IN_FLIGHT`) so
- *     two taps on different machines can't double-submit two payments
- *     before the watcher flips the state.
+ *   - In-flight fence, two belts: an in-process per-order Set (same-
+ *     machine double-tap; still holds when a pooled DATABASE_URL
+ *     degrades the advisory lock to a no-op) and a fleet-wide advisory
+ *     lock keyed by order id (cross-machine). Either rejects a
+ *     concurrent second call with `400 PAYMENT_IN_FLIGHT`.
  *   - Even if a duplicate payment slips through (e.g. across a
- *     restart), the fence above is the primary guard. A deposit that
+ *     restart), the fences above are the primary guard. A deposit that
  *     lands after its order has EXPIRED unpaid is recorded by the
  *     watcher (`order_gone` reason, T0-1), abandoned, and refundable to
- *     its on-chain sender via A6. A true duplicate against an
- *     already-PAID order is a known residual (T0-1b): safe
- *     auto-recording needs the paying-payment id persisted first, so a
- *     re-read of the original deposit can't be mistaken for a duplicate.
+ *     its on-chain sender via A6 — and since T0-1b persisted the
+ *     paying-payment id on the order, a true duplicate against an
+ *     already-PAID order is recorded the same way while a cursor
+ *     re-read of the original paying deposit never is.
  */
 import { createHash } from 'node:crypto';
 import type { Context } from 'hono';
@@ -90,9 +91,21 @@ const PAY_TIMEOUT_SECONDS = 60;
  */
 const ALREADY_PAID_STATES = new Set(['paid', 'procuring', 'fulfilled']);
 
+/**
+ * In-process per-order fence — the INNER belt (money review
+ * 2026-07-08). The advisory lock below is the fleet-wide fence, but
+ * `withAdvisoryLock` deliberately runs UNLOCKED (with a warn) when
+ * `DATABASE_URL` points at a transaction pooler — session locks are
+ * unsafe through PgBouncer. If the fleet ever moves to a pooled URL
+ * (S4-5), this Set is what keeps two same-machine taps from
+ * double-submitting; without it the fence would silently vanish with
+ * only a boot-time log line standing between one tap and two payments.
+ */
+const inFlightOrders = new Set<string>();
+
 /** Test seam. */
 export function __resetRedeemFenceForTests(): void {
-  // No in-memory fence state remains; kept for existing tests.
+  inFlightOrders.clear();
 }
 
 function redeemFenceLockKey(orderId: string): bigint {
@@ -274,127 +287,146 @@ export async function redeemLoopOrderHandler(c: Context): Promise<Response> {
   }
   const { walletId, walletAddress } = user;
 
-  // Fleet-wide in-flight fence — one build/sign/submit per order at a time.
-  const fenced = await withAdvisoryLock(redeemFenceLockKey(orderId), async () => {
-    const requiredStroops = order.chargeMinor * LOOP_ASSET_STROOPS_PER_MINOR;
+  // In-process fence first (same-machine double-tap; survives a pooled
+  // DATABASE_URL where the advisory lock degrades to a no-op), then the
+  // fleet-wide advisory lock — one build/sign/submit per order at a time.
+  if (inFlightOrders.has(orderId)) {
+    return c.json(
+      { code: 'PAYMENT_IN_FLIGHT', message: 'A payment for this order is already in flight' },
+      400,
+    );
+  }
+  inFlightOrders.add(orderId);
+  let fenced;
+  try {
+    fenced = await withAdvisoryLock(redeemFenceLockKey(orderId), async () => {
+      const requiredStroops = order.chargeMinor * LOOP_ASSET_STROOPS_PER_MINOR;
 
-    // Early balance check for honest UX. The authoritative check is
-    // still the watcher's (and ultimately Horizon's op_underfunded).
-    let snapshot;
-    try {
-      snapshot = await getAccountTrustlines(walletAddress);
-    } catch (err) {
-      log.warn({ err, orderId }, 'Horizon balance read failed during redeem');
-      return c.json(
-        { code: 'SERVICE_UNAVAILABLE', message: 'Balance check temporarily unavailable' },
-        503,
-      );
-    }
-    const line = snapshot.trustlines.get(`${asset.code}::${asset.issuer}`);
-    if (!snapshot.accountExists || line === undefined || line.balanceStroops < requiredStroops) {
-      return c.json(
-        {
-          code: 'INSUFFICIENT_BALANCE',
-          message: `Your on-chain ${asset.code} balance does not cover this order`,
-        },
-        400,
-      );
-    }
-
-    // Build inner tx with a fresh user-account sequence.
-    const server = new Horizon.Server(env.LOOP_STELLAR_HORIZON_URL);
-    let userAccount: Account;
-    try {
-      const loaded = await server.loadAccount(walletAddress);
-      userAccount = new Account(walletAddress, loaded.sequenceNumber());
-    } catch (err) {
-      log.warn({ err, orderId }, 'Horizon loadAccount failed during redeem');
-      return c.json(
-        { code: 'SERVICE_UNAVAILABLE', message: 'Stellar temporarily unavailable' },
-        503,
-      );
-    }
-    const innerTx = buildRedeemTransaction({
-      userAccount,
-      depositAddress,
-      asset: { code: asset.code, issuer: assetIssuer },
-      amountStroops: requiredStroops,
-      memoText: paymentMemo,
-      networkPassphrase: env.LOOP_STELLAR_NETWORK_PASSPHRASE,
-    });
-
-    // User signs the inner tx (provider rawSign, locally verified)...
-    try {
-      await attachUserWalletSignature({ provider, walletId, address: walletAddress, tx: innerTx });
-    } catch (err) {
-      if (err instanceof WalletProviderError && err.kind === 'transient_provider') {
-        log.warn({ err: err.message, orderId }, 'Wallet provider transient failure on rawSign');
+      // Early balance check for honest UX. The authoritative check is
+      // still the watcher's (and ultimately Horizon's op_underfunded).
+      let snapshot;
+      try {
+        snapshot = await getAccountTrustlines(walletAddress);
+      } catch (err) {
+        log.warn({ err, orderId }, 'Horizon balance read failed during redeem');
         return c.json(
-          { code: 'SERVICE_UNAVAILABLE', message: 'Wallet signing temporarily unavailable' },
+          { code: 'SERVICE_UNAVAILABLE', message: 'Balance check temporarily unavailable' },
           503,
         );
       }
-      log.error(
-        { err: err instanceof Error ? err.message : String(err), orderId },
-        'Wallet provider terminal failure on rawSign',
-      );
-      return c.json({ code: 'INTERNAL_ERROR', message: 'Wallet signing failed' }, 500);
-    }
+      const line = snapshot.trustlines.get(`${asset.code}::${asset.issuer}`);
+      if (!snapshot.accountExists || line === undefined || line.balanceStroops < requiredStroops) {
+        return c.json(
+          {
+            code: 'INSUFFICIENT_BALANCE',
+            message: `Your on-chain ${asset.code} balance does not cover this order`,
+          },
+          400,
+        );
+      }
 
-    // ...the operator fee-bumps + signs the outer envelope (the user
-    // holds zero XLM — sponsored reserves, operator-paid fees).
-    const operatorKeypair = Keypair.fromSecret(operatorSecret);
-    const feeBump: FeeBumpTransaction = TransactionBuilder.buildFeeBumpTransaction(
-      operatorKeypair,
-      feeBumpBaseFee(),
-      innerTx,
-      env.LOOP_STELLAR_NETWORK_PASSPHRASE,
-    );
-    feeBump.sign(operatorKeypair);
-
-    try {
-      const result = await submitPreSignedTransaction({
-        horizonUrl: env.LOOP_STELLAR_HORIZON_URL,
-        tx: feeBump,
+      // Build inner tx with a fresh user-account sequence.
+      const server = new Horizon.Server(env.LOOP_STELLAR_HORIZON_URL);
+      let userAccount: Account;
+      try {
+        const loaded = await server.loadAccount(walletAddress);
+        userAccount = new Account(walletAddress, loaded.sequenceNumber());
+      } catch (err) {
+        log.warn({ err, orderId }, 'Horizon loadAccount failed during redeem');
+        return c.json(
+          { code: 'SERVICE_UNAVAILABLE', message: 'Stellar temporarily unavailable' },
+          503,
+        );
+      }
+      const innerTx = buildRedeemTransaction({
+        userAccount,
+        depositAddress,
+        asset: { code: asset.code, issuer: assetIssuer },
+        amountStroops: requiredStroops,
+        memoText: paymentMemo,
+        networkPassphrase: env.LOOP_STELLAR_NETWORK_PASSPHRASE,
       });
-      log.info(
-        { orderId, txHash: result.txHash, asset: asset.code },
-        'Redeem payment submitted — watcher will match the memo',
-      );
-    } catch (err) {
-      if (err instanceof PayoutSubmitError) {
-        if (err.kind === 'terminal_underfunded') {
-          // Balance raced away between the pre-check and the submit.
+
+      // User signs the inner tx (provider rawSign, locally verified)...
+      try {
+        await attachUserWalletSignature({
+          provider,
+          walletId,
+          address: walletAddress,
+          tx: innerTx,
+        });
+      } catch (err) {
+        if (err instanceof WalletProviderError && err.kind === 'transient_provider') {
+          log.warn({ err: err.message, orderId }, 'Wallet provider transient failure on rawSign');
           return c.json(
-            {
-              code: 'INSUFFICIENT_BALANCE',
-              message: `Your on-chain ${asset.code} balance does not cover this order`,
-            },
-            400,
-          );
-        }
-        if (err.kind === 'transient_horizon' || err.kind === 'transient_rebuild') {
-          log.warn({ err: err.message, orderId }, 'Transient Horizon failure on redeem');
-          return c.json(
-            { code: 'SERVICE_UNAVAILABLE', message: 'Stellar temporarily unavailable' },
+            { code: 'SERVICE_UNAVAILABLE', message: 'Wallet signing temporarily unavailable' },
             503,
           );
         }
         log.error(
-          { err: err.message, kind: err.kind, resultCodes: err.resultCodes, orderId },
-          'Terminal submit failure on redeem',
+          { err: err instanceof Error ? err.message : String(err), orderId },
+          'Wallet provider terminal failure on rawSign',
         );
-        return c.json({ code: 'INTERNAL_ERROR', message: 'Payment submission failed' }, 500);
+        return c.json({ code: 'INTERNAL_ERROR', message: 'Wallet signing failed' }, 500);
       }
-      throw err;
-    }
 
-    // Submitted. The order flips pending_payment → paid when the
-    // watcher matches the memo (typically the next tick); re-read so
-    // a fast watcher is reflected immediately.
-    const fresh = await db.query.orders.findFirst({ where: eq(orders.id, orderId) });
-    return c.json({ state: fresh?.state ?? order.state });
-  });
+      // ...the operator fee-bumps + signs the outer envelope (the user
+      // holds zero XLM — sponsored reserves, operator-paid fees).
+      const operatorKeypair = Keypair.fromSecret(operatorSecret);
+      const feeBump: FeeBumpTransaction = TransactionBuilder.buildFeeBumpTransaction(
+        operatorKeypair,
+        feeBumpBaseFee(),
+        innerTx,
+        env.LOOP_STELLAR_NETWORK_PASSPHRASE,
+      );
+      feeBump.sign(operatorKeypair);
+
+      try {
+        const result = await submitPreSignedTransaction({
+          horizonUrl: env.LOOP_STELLAR_HORIZON_URL,
+          tx: feeBump,
+        });
+        log.info(
+          { orderId, txHash: result.txHash, asset: asset.code },
+          'Redeem payment submitted — watcher will match the memo',
+        );
+      } catch (err) {
+        if (err instanceof PayoutSubmitError) {
+          if (err.kind === 'terminal_underfunded') {
+            // Balance raced away between the pre-check and the submit.
+            return c.json(
+              {
+                code: 'INSUFFICIENT_BALANCE',
+                message: `Your on-chain ${asset.code} balance does not cover this order`,
+              },
+              400,
+            );
+          }
+          if (err.kind === 'transient_horizon' || err.kind === 'transient_rebuild') {
+            log.warn({ err: err.message, orderId }, 'Transient Horizon failure on redeem');
+            return c.json(
+              { code: 'SERVICE_UNAVAILABLE', message: 'Stellar temporarily unavailable' },
+              503,
+            );
+          }
+          log.error(
+            { err: err.message, kind: err.kind, resultCodes: err.resultCodes, orderId },
+            'Terminal submit failure on redeem',
+          );
+          return c.json({ code: 'INTERNAL_ERROR', message: 'Payment submission failed' }, 500);
+        }
+        throw err;
+      }
+
+      // Submitted. The order flips pending_payment → paid when the
+      // watcher matches the memo (typically the next tick); re-read so
+      // a fast watcher is reflected immediately.
+      const fresh = await db.query.orders.findFirst({ where: eq(orders.id, orderId) });
+      return c.json({ state: fresh?.state ?? order.state });
+    });
+  } finally {
+    inFlightOrders.delete(orderId);
+  }
   if (!fenced.ran) {
     return c.json(
       { code: 'PAYMENT_IN_FLIGHT', message: 'A payment for this order is already in flight' },

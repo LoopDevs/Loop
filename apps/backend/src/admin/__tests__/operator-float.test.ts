@@ -31,12 +31,19 @@ const { dbMock, state } = vi.hoisted(() => {
     priorSnapshot: null as null | { status: number; body: Record<string, unknown> },
     storedSnapshot: null as null | Record<string, unknown>,
     discordCalls: [] as Array<Record<string, unknown>>,
+    // Rows served to the linkage-validation `SELECT … FOR UPDATE` on
+    // operator_wallet_movements (F7). Default: matches the canonical
+    // 'pay-1' manual-movement request.
+    linkedMovementRows: [] as unknown[],
   };
   m['select'] = vi.fn(() => m);
   m['from'] = vi.fn(() => m);
   m['where'] = vi.fn(() => m);
   m['orderBy'] = vi.fn(() => m);
   m['limit'] = vi.fn(async () => rows);
+  tx['select'] = vi.fn(() => tx);
+  tx['from'] = vi.fn(() => tx);
+  tx['for'] = vi.fn(async () => txState.linkedMovementRows);
   tx['update'] = vi.fn(() => tx);
   tx['set'] = vi.fn((values: Record<string, unknown>) => {
     txState.updateCalls.push(values);
@@ -188,6 +195,15 @@ beforeEach(() => {
   state.txState.priorSnapshot = null;
   state.txState.storedSnapshot = null;
   state.txState.discordCalls = [];
+  state.txState.linkedMovementRows = [
+    {
+      asset: 'usdc',
+      account: 'GOPERATORACCOUNT',
+      direction: 'out',
+      amountStroops: 50n,
+      classification: 'unclassified',
+    },
+  ];
 });
 
 describe('adminOperatorFloatMovementsHandler', () => {
@@ -236,6 +252,23 @@ describe('adminOperatorFloatBaselineCreateHandler', () => {
 
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toMatchObject({ code: 'IDEMPOTENCY_KEY_REQUIRED' });
+  });
+
+  it('F8: 400 when startingHorizonCursor is missing — a baseline must anchor balance + cursor together', async () => {
+    const res = await adminOperatorFloatBaselineCreateHandler(
+      writeCtx({
+        headers: { 'idempotency-key': validKey },
+        body: {
+          asset: 'xlm',
+          account: 'GOPERATORACCOUNT',
+          openingBalanceStroops: '123',
+          reason: 'initial reconciliation baseline',
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect(state.txState.insertValues).toHaveLength(0);
   });
 
   it('creates an audited baseline envelope and stores an idempotency snapshot', async () => {
@@ -345,5 +378,68 @@ describe('adminOperatorFloatManualMovementCreateHandler', () => {
         replayed: false,
       }),
     ]);
+  });
+
+  function manualMovementCtx(body?: Record<string, unknown>): Context {
+    return writeCtx({
+      headers: { 'idempotency-key': validKey },
+      body: {
+        asset: 'usdc',
+        account: 'GOPERATORACCOUNT',
+        direction: 'out',
+        amountStroops: '50',
+        movementPaymentId: 'pay-1',
+        reason: 'operator sweep to rebalance float',
+        ...body,
+      },
+    });
+  }
+
+  it('F7: 400 when the linked movement is not indexed — no manual row, no snapshot, no audit', async () => {
+    state.txState.linkedMovementRows = [];
+    const res = await adminOperatorFloatManualMovementCreateHandler(manualMovementCtx());
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect(state.txState.insertValues).toHaveLength(0);
+    // A rolled-back write must not leave a replay snapshot, so a
+    // corrected retry with the same key runs fresh.
+    expect(state.txState.storedSnapshot).toBeNull();
+    expect(state.txState.discordCalls).toHaveLength(0);
+  });
+
+  it('F7: 400 when the linked movement is already classified — refuses to reclassify', async () => {
+    state.txState.linkedMovementRows = [
+      {
+        asset: 'usdc',
+        account: 'GOPERATORACCOUNT',
+        direction: 'out',
+        amountStroops: 50n,
+        classification: 'ctx_settlement',
+      },
+    ];
+    const res = await adminOperatorFloatManualMovementCreateHandler(manualMovementCtx());
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { message: string };
+    expect(body.message).toContain('already classified');
+    expect(state.txState.insertValues).toHaveLength(0);
+  });
+
+  it('F7: 400 when the declared shape does not match the indexed movement', async () => {
+    // Declared 50 stroops out; the real movement is 5_000_000 stroops.
+    state.txState.linkedMovementRows = [
+      {
+        asset: 'usdc',
+        account: 'GOPERATORACCOUNT',
+        direction: 'out',
+        amountStroops: 5_000_000n,
+        classification: 'unclassified',
+      },
+    ];
+    const res = await adminOperatorFloatManualMovementCreateHandler(manualMovementCtx());
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { message: string };
+    expect(body.message).toContain('do not match');
+    expect(state.txState.insertValues).toHaveLength(0);
+    expect(state.txState.updateCalls).toHaveLength(0);
   });
 });

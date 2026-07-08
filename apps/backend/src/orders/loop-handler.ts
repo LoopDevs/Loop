@@ -48,6 +48,17 @@ const log = logger.child({ handler: 'loop-orders' });
  */
 const ORDER_IDEMPOTENCY_KEY_MIN = 16;
 const ORDER_IDEMPOTENCY_KEY_MAX = 128;
+/**
+ * R3-10 fallback-key window. KNOWN residuals (money review 2026-07-08,
+ * accepted): (a) two clicks STRADDLING a bucket boundary derive
+ * different keys and both create — the window shrinks the double-click
+ * exposure, it doesn't zero it (a true fix is requiring the header,
+ * which the loop-native client already sends); (b) a deliberate second
+ * identical credit purchase inside the window replays order #1 rather
+ * than charging twice — the safe direction for money, mildly
+ * surprising for the user. Both strictly better than the pre-R3-10
+ * no-guard behaviour.
+ */
 const CREDIT_FALLBACK_IDEMPOTENCY_BUCKET_MS = 60_000;
 
 /**

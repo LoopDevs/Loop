@@ -187,9 +187,9 @@ export function registerAdminTreasuryAssetsOpenApi(
           description:
             'Non-negative operator-wallet opening balance at the reconciliation start cursor, in stroops.',
         }),
-      startingHorizonCursor: z.string().min(1).max(200).optional().openapi({
+      startingHorizonCursor: z.string().min(1).max(200).openapi({
         description:
-          'Optional Horizon cursor where reconciliation should begin. When omitted the baseline starts without a cursor anchor.',
+          'Required Horizon paging cursor where reconciliation begins. Snapshot it from the SAME Horizon moment as the opening balance — without a cursor anchor the indexer would walk the entire account history and double-count pre-baseline flow against the opening balance.',
       }),
       reason: z.string().min(2).max(500),
     }),

@@ -52,6 +52,26 @@ const CtxGiftCardDetailResponse = z.object({
 });
 
 /**
+ * The Zod field accepts any string (CTX has returned relative paths,
+ * and rejecting them used to drop the still-usable code/PIN with
+ * them), but what we PERSIST and hand to the web `<a href>` / native
+ * WebView must be a real http(s) URL — a hostile or drifted CTX
+ * response must not be able to plant `javascript:` (or garbage) into
+ * a clickable link (money review 2026-07-08, upstream-validation
+ * boundary). Anything else → null; code/PIN survive independently.
+ */
+export function sanitizeRedeemUrl(raw: string | null): string | null {
+  if (raw === null) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? raw : null;
+}
+
+/**
  * Fetches the gift-card detail from CTX and collapses its various
  * field aliases into our internal `redeemCode / redeemPin / redeemUrl`
  * shape. CTX has been seen to use both `redeemCode` / `code` in the
@@ -90,7 +110,7 @@ export async function fetchRedemption(ctxOrderId: string): Promise<{
   const out = {
     code: parsed.data.redeemCode ?? parsed.data.code ?? null,
     pin: parsed.data.redeemPin ?? parsed.data.pin ?? null,
-    url: parsed.data.redeemUrl ?? parsed.data.url ?? null,
+    url: sanitizeRedeemUrl(parsed.data.redeemUrl ?? parsed.data.url ?? null),
   };
   // Diagnostic: CTX has been returning 200 with all redemption fields
   // missing across long polling windows for operator-account orders.

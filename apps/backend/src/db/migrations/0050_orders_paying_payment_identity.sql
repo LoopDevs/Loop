@@ -5,7 +5,7 @@
 -- original paying deposit.
 
 ALTER TABLE "orders"
-  ADD COLUMN "payment_received_horizon_id" text;
+  ADD COLUMN IF NOT EXISTS "payment_received_horizon_id" text;
 
 ALTER TABLE "orders"
-  ADD COLUMN "payment_received_tx_hash" text;
+  ADD COLUMN IF NOT EXISTS "payment_received_tx_hash" text;

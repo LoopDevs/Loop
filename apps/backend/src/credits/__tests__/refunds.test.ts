@@ -88,16 +88,20 @@ vi.mock('../../db/client.js', () => ({ db: dbMock }));
 vi.mock('../../db/schema.js', () => ({
   creditTransactions: {
     __name: 'creditTransactions',
+    id: 'id',
     type: 'type',
     currency: 'currency',
     createdAt: 'created_at',
     amountMinor: 'amount_minor',
+    referenceType: 'reference_type',
+    referenceId: 'reference_id',
   },
-  orders: { __name: 'orders', id: 'id' },
+  orders: { __name: 'orders', id: 'id', paymentReceivedHorizonId: 'payment_received_horizon_id' },
   paymentWatcherSkips: {
     __name: 'paymentWatcherSkips',
     paymentId: 'payment_id',
     status: 'status',
+    orderId: 'order_id',
   },
   userCredits: {
     userId: 'user_id',
@@ -514,6 +518,9 @@ describe('applyOrderAutoRefund (CF-20)', () => {
       transaction: { memo: 'MEMO-1', memo_type: 'text', successful: true },
     };
 
+    // INV-8 guard txn: order row FOR UPDATE, then the credit-refund
+    // existence check (empty queue → no prior refund).
+    state.forUpdateResponses = [[{ id: 'o-usdc' }]];
     const result = await applyOrderAutoRefund({
       userId: 'u-1',
       currency: 'USD',
@@ -559,6 +566,7 @@ describe('applyOrderAutoRefund (CF-20)', () => {
       transaction: { memo: 'MEMO-2', memo_type: 'text', successful: true },
     };
 
+    state.forUpdateResponses = [[{ id: 'o-xlm' }]];
     await expect(
       applyOrderAutoRefund({
         userId: 'u-1',
@@ -589,5 +597,98 @@ describe('applyOrderAutoRefund (CF-20)', () => {
     ).rejects.toThrow(/loop_asset order auto-refund requires coordinated mirror re-credit/);
     expect(state.insertCreditCalls).toHaveLength(0);
     expect(refundDepositMock).not.toHaveBeenCalled();
+  });
+
+  it('INV-8: on-chain auto-refund refuses when a mirror-credit refund already exists for the order', async () => {
+    const payment = {
+      id: 'pay-3',
+      paging_token: 'pt-3',
+      type: 'payment',
+      from: 'GSENDER',
+      to: 'GDEPOSIT',
+      asset_type: 'native',
+      amount: '2.0000000',
+      transaction_hash: 'tx-in-3',
+      transaction: { memo: 'MEMO-3', memo_type: 'text', successful: true },
+    };
+
+    // Guard txn: order row, then an EXISTING credit refund row.
+    state.forUpdateResponses = [[{ id: 'o-dup' }], [{ id: 'ct-prior-refund' }]];
+    await expect(
+      applyOrderAutoRefund({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 200n,
+        orderId: 'o-dup',
+        paymentMethod: 'xlm',
+        paymentMemo: 'MEMO-3',
+        paymentReceivedHorizonId: 'pay-3',
+        paymentReceivedPayment: payment,
+        reason: 'order failed after CTX paid: timeout',
+      }),
+    ).rejects.toBeInstanceOf(RefundAlreadyIssuedError);
+    // The exclusion must fire BEFORE any money-adjacent write: no skip
+    // row recorded, no on-chain refund submitted.
+    expect(state.insertSkipCalls).toHaveLength(0);
+    expect(refundDepositMock).not.toHaveBeenCalled();
+  });
+
+  it('INV-8: admin credit refund refuses when the paying deposit was refunded on-chain', async () => {
+    // FIFO: order row (with the persisted paying id), user_credits
+    // balance row, then the skips-with-refund-status rows.
+    state.forUpdateResponses = [
+      [okOrder({ paymentReceivedHorizonId: 'pay-paying' })],
+      [],
+      [{ paymentId: 'pay-paying' }],
+    ];
+    await expect(
+      applyAdminRefund({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 500n,
+        orderId: 'o-1',
+        adminUserId: 'admin-1',
+      }),
+    ).rejects.toBeInstanceOf(RefundAlreadyIssuedError);
+    expect(state.insertCreditCalls).toHaveLength(0);
+    expect(state.insertUserCreditsCalls).toHaveLength(0);
+  });
+
+  it('INV-8: a refunded DUPLICATE deposit (T0-1b) does not block the admin credit refund', async () => {
+    // The refunded skip row is a second deposit, not the paying one —
+    // returning it to its sender is not a refund of the order.
+    state.forUpdateResponses = [
+      [okOrder({ paymentReceivedHorizonId: 'pay-paying' })],
+      [],
+      [{ paymentId: 'pay-duplicate' }],
+    ];
+    state.returnedCreditRow = { id: 'ct-2', createdAt: new Date('2026-07-08') };
+    const result = await applyAdminRefund({
+      userId: 'u-1',
+      currency: 'USD',
+      amountMinor: 500n,
+      orderId: 'o-1',
+      adminUserId: 'admin-1',
+    });
+    expect(result.amountMinor).toBe(500n);
+    expect(state.insertCreditCalls).toHaveLength(1);
+  });
+
+  it('INV-8: a null paying id fails closed — any refunded deposit for the order blocks the credit refund', async () => {
+    state.forUpdateResponses = [
+      [okOrder({ paymentReceivedHorizonId: null })],
+      [],
+      [{ paymentId: 'pay-late' }],
+    ];
+    await expect(
+      applyAdminRefund({
+        userId: 'u-1',
+        currency: 'USD',
+        amountMinor: 500n,
+        orderId: 'o-1',
+        adminUserId: 'admin-1',
+      }),
+    ).rejects.toBeInstanceOf(RefundAlreadyIssuedError);
+    expect(state.insertCreditCalls).toHaveLength(0);
   });
 });

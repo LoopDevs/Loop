@@ -136,6 +136,24 @@ No order is refunded twice; no order's cashback is credited twice.
 - **DB**: partial unique index on `(type, reference_type, reference_id)`
   for `type IN ('refund','cashback','spend','withdrawal')` (migration
   0013). A duplicate insert gets `23505` → typed `…AlreadyIssuedError`.
+- **runtime (R3-2 cross-check, 2026-07-08)**: an XLM/USDC failed-order
+  refund goes ON-CHAIN via `refundDeposit()` and writes no
+  `credit_transactions` row, so the index alone cannot exclude a
+  credit-refund/on-chain-refund pair. The two exits serialise on the
+  order row lock: `applyOnChainOrderAutoRefund` and `refundDeposit`'s
+  claim both refuse when a credit refund row exists for the order, and
+  `applyAdminRefund` refuses when the order's own paying deposit has a
+  skip row in `refunding`/`refunded`. Duplicate-deposit skip rows
+  (T0-1b, paymentId ≠ the persisted paying id) stay independently
+  refundable — returning an extraneous deposit is not an order refund.
+  Skip rows recorded with `orderId=null` (processing_error class) are
+  matched by the paying-payment id instead (both directions). Two
+  fail-closed residuals, both deliberate: a skip row stuck fresh
+  `refunding` (crashed claim) blocks the credit refund until the A6
+  re-POST converges it past `REFUND_RECLAIM_STALE_MS`; and an expired
+  never-paid order whose unlinked deposit was A6-refunded relies on the
+  admin not also crediting an order that never debited anything (both
+  actions are step-up-gated and audited).
 
 ---
 
