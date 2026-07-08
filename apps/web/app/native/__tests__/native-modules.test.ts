@@ -117,7 +117,6 @@ import {
   storeEmail,
   getEmail,
 } from '../secure-storage';
-import { setupNotificationChannels } from '../notifications';
 import { setStatusBarStyle, setStatusBarOverlay } from '../status-bar';
 import { registerBackButton } from '../back-button';
 import { watchNetwork } from '../network';
@@ -772,14 +771,5 @@ describe('purchase-storage', () => {
     mockSessionStorage.setItem('loop_pending_order', '{}');
     await clearPendingOrder();
     expect(mockSessionStorage.getItem('loop_pending_order')).toBeNull();
-  });
-});
-
-// ────────────────────────────────────────────────────────────
-// 14. Notifications
-// ────────────────────────────────────────────────────────────
-describe('notifications', () => {
-  it('setupNotificationChannels is a no-op on web (resolves without throwing)', async () => {
-    await expect(setupNotificationChannels()).resolves.toBeUndefined();
   });
 });
