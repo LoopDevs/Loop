@@ -379,7 +379,11 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### R3-11 · Note/accelerate the legacy-order-path ownership gap `[code]`/doc
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Done 2026-07-08 — trust boundary documented explicitly at
+      the top of both `orders/get-handler.ts` and `orders/list-handler.ts`
+      (referencing ADR-039), plus a new "Accepted risks" row in
+      `docs/threat-model.md`. No code/behavior change; ADR-039's retirement
+      criteria remain the tracked path to removing this boundary entirely.
       **Why:** `orders/get-handler.ts` + `list-handler.ts` do **no local ownership check** — IDOR defense is fully delegated to CTX bearer-scoping + UUID unguessability (contrast the loop-native path which pins `and(eq(id), eq(userId))`). Not exploitable from Loop's code; it's an upstream trust assumption. Authz-F1.
       **Do:** document the trust boundary explicitly in the handler, and prioritise ADR-039 legacy-path retirement (which removes this path entirely). No urgent code change while the path is being retired.
       **Done when:** the assumption is documented and the retirement criteria (ADR-039) are being tracked.
