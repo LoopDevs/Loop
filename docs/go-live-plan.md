@@ -82,7 +82,7 @@ Phase-2 surfaces ship dark behind `LOOP_PHASE_1_ONLY=true`, so T1 launches witho
 
 # §T1-H · BEFORE REAL-MONEY VOLUME (T1 hardening, concurrent with / just after launch)
 
-- [ ] **Reliability (R3 tail):** ✅ R3-3 warm-start catalog from Postgres (done 2026-07-07) · R3-11 legacy-order-path ownership gap 🟢/doc.
+- [ ] **Reliability (R3 tail):** ✅ R3-3 warm-start catalog from Postgres (done 2026-07-07) · ✅ R3-11 legacy-order-path ownership gap documented (done 2026-07-08) 🟢/doc.
 - [ ] **Scale/fleet (S4):** ✅ S4-7 catalog fetch trim (done) · ✅ S4-6 bound admin ledger-drift scan (done) · ✅ S4-2 wallet-provisioning fleet-lock (done) · ✅ S4-3 single-flight interest-mint reads (done). S4-1 payout throughput ceiling (L, architectural) 💰 · S4-4 rate-limiter shared store 🟢 · S4-5 raise DB pool / plan PgBouncer 👤+🟢 · S4-8 dedupe per-machine watchers/alerts 🟢.
 - [ ] **Admin/support tooling (A5):** A5-1 order re-drive (biggest hole) · A5-4 order-bound refund UI+policy · A5-6 stuck-orders/payouts visibility · A5-7 per-subject audit view · A5-8 fleet-wide ledger browser · A5-9 bulk + drift-correction · A5-2 session-revocation UI 🔐 · A5-3 login/OTP support tooling 🔐 · A5-5 operator-mediated DSR. (all 💰 unless tagged)
 - [ ] **Test & E2E coverage (Q6):** ✅ Q6-2 money/auth workers (done 2026-07-07) · Q6-3 web money-write · Q6-4 loop-native purchase E2E · Q6-5 admin/support UI E2E · Q6-6 wallet-spend + interest-mint · Q6-7 promote real-chain run off manual · Q6-8 ratchet web floors. 💰

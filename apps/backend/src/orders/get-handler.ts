@@ -15,6 +15,19 @@
  * (`summariseZodIssues`, `upstreamHeaders`, `mapStatus`) are
  * imported from `./handler.ts` so all three handlers stay in
  * lockstep on schema/header/status conventions.
+ *
+ * TRUST BOUNDARY (R3-11): this handler does no local ownership check —
+ * it fetches whatever order the upstream bearer token is authorized to
+ * see. IDOR defense is delegated entirely to CTX's bearer-scoping (the
+ * upstream only returns orders belonging to the token's account) plus
+ * `orderId` being an unguessable UUID; there is no Loop-side
+ * `eq(orders.userId, ...)` filter to bypass. Contrast the loop-native
+ * path (`orders/loop-read-handlers.ts`), which pins
+ * `and(eq(orders.id, id), eq(orders.userId, auth.userId))` locally.
+ * This is a deliberate accepted-risk trust boundary, not an oversight —
+ * see docs/threat-model.md ("Accepted risks") and ADR-039
+ * (docs/adr/039-legacy-order-path-retirement.md), which retires this
+ * whole path once its criteria are met.
  */
 import type { Context } from 'hono';
 import { z } from 'zod';
