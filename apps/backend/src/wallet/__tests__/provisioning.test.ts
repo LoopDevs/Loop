@@ -147,6 +147,7 @@ const { dbMock, dbState } = vi.hoisted(() => {
     sweepRows: [] as unknown[],
     updates: [] as Array<Record<string, unknown>>,
     updateMatches: true,
+    advisoryAcquired: true,
   };
   function nextSelectRows(): unknown[] {
     if (s.selectQueue !== null && s.selectQueue.length > 0) {
@@ -191,7 +192,11 @@ const { dbMock, dbState } = vi.hoisted(() => {
   };
   return { dbMock: m, dbState: s };
 });
-vi.mock('../../db/client.js', () => ({ db: dbMock }));
+vi.mock('../../db/client.js', () => ({
+  db: dbMock,
+  withAdvisoryLock: async <T>(_key: bigint, fn: () => Promise<T>) =>
+    dbState.advisoryAcquired ? { ran: true as const, value: await fn() } : { ran: false as const },
+}));
 
 import {
   buildActivationTransaction,
@@ -237,6 +242,7 @@ beforeEach(() => {
   dbState.sweepRows = [];
   dbState.updates = [];
   dbState.updateMatches = true;
+  dbState.advisoryAcquired = true;
 });
 
 // ─── Activation envelope shape ──────────────────────────────────────────────
@@ -442,6 +448,16 @@ describe('runWalletProvisioningTick', () => {
     ];
     const r = await runWalletProvisioningTick({ now });
     expect(r).toMatchObject({ picked: 1, notDueYet: 1, activated: 0, errors: 0 });
+  });
+
+  it('S4-2: skips the sweep when another machine holds the provisioning lock', async () => {
+    dbState.advisoryAcquired = false;
+    dbState.sweepRows = [{ id: USER_ID, attempts: 0, lastAttemptAt: null }];
+
+    const r = await runWalletProvisioningTick();
+
+    expect(r).toMatchObject({ skippedLocked: true, picked: 0, activated: 0, errors: 0 });
+    expect(submitMock).not.toHaveBeenCalled();
   });
 
   it('records the attempt and pages ops when the cap is crossed', async () => {

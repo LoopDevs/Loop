@@ -127,7 +127,7 @@ export function registerOrdersLoopOpenApi(
     path: '/api/orders/loop',
     summary: 'Create a Loop-native order (ADR 015).',
     description:
-      "Creates an order under the Loop-native auth path. Returns per-method payment instructions: on-chain methods (`xlm`, `usdc`, `loop_asset`) include the destination address + memo the client uses to build the outbound payment; `credit` returns only the amount we'll debit from the user's cashback balance on the paid-state transition. Optional `Idempotency-Key` header (16-128 chars) — when present, a repeat post replays the prior order's response instead of creating a duplicate (A2-2003).",
+      "Creates an order under the Loop-native auth path. Returns per-method payment instructions: on-chain methods (`xlm`, `usdc`, `loop_asset`) include the destination address + memo the client uses to build the outbound payment; `credit` returns only the amount we'll debit from the user's cashback balance on the paid-state transition. Optional `Idempotency-Key` header (16-128 chars) — when present, a repeat post replays the prior order's response instead of creating a duplicate (A2-2003). R3-10 also derives a short-window server fallback key for no-header `credit` orders so older clients cannot double-debit a mirror balance by double-submitting.",
     tags: ['Orders'],
     security: [{ bearerAuth: [] }],
     request: {
@@ -138,7 +138,7 @@ export function registerOrdersLoopOpenApi(
           .max(128)
           .optional()
           .describe(
-            'A2-2003: client-supplied de-dup key. When present, scoped per-user and unique per order. A repeat POST with the same key returns the original order rather than creating a duplicate.',
+            'A2-2003: client-supplied de-dup key. When present, scoped per-user and unique per order. A repeat POST with the same key returns the original order rather than creating a duplicate. For no-header credit orders, the server derives a short-window fallback key.',
           ),
       }),
       body: { content: { 'application/json': { schema: LoopCreateOrderBody } } },

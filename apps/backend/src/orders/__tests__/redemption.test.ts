@@ -26,7 +26,14 @@ vi.mock('../../ctx/stream.js', () => ({
   streamGiftCardStatus: (...args: unknown[]) => streamMock(...args),
 }));
 
-import { waitForRedemption } from '../procurement-redemption.js';
+const { notifyCtxSchemaDriftMock } = vi.hoisted(() => ({
+  notifyCtxSchemaDriftMock: vi.fn<(args: unknown) => void>(() => undefined),
+}));
+vi.mock('../../discord.js', () => ({
+  notifyCtxSchemaDrift: (args: unknown) => notifyCtxSchemaDriftMock(args),
+}));
+
+import { fetchRedemption, waitForRedemption } from '../procurement-redemption.js';
 
 function detailResponse(body: Record<string, unknown>): Response {
   return new Response(JSON.stringify(body), {
@@ -38,6 +45,7 @@ function detailResponse(body: Record<string, unknown>): Response {
 beforeEach(() => {
   operatorFetchMock.mockReset();
   streamMock.mockReset();
+  notifyCtxSchemaDriftMock.mockReset();
   credsState.current = { id: 'op-1', bearer: 'tok', clientId: 'loopweb' };
 });
 
@@ -77,6 +85,41 @@ describe('waitForRedemption', () => {
     const result = await waitForRedemption('o-1', { pollIntervalMs: 1, totalTimeoutMs: 200 });
     expect(result).toEqual({ code: 'X', pin: 'Y', url: 'https://x.example' });
     expect(streamMock).not.toHaveBeenCalled();
+  });
+
+  it('schema drift on detail fetch pages the drift channel and returns null payload', async () => {
+    operatorFetchMock.mockResolvedValueOnce(detailResponse({ redeemUrl: 123 }));
+    const result = await fetchRedemption('o-1');
+    expect(result).toEqual({ code: null, pin: null, url: null });
+    expect(notifyCtxSchemaDriftMock).toHaveBeenCalledWith({
+      surface: 'GET /gift-cards/:id',
+      issuesSummary: expect.stringContaining('redeemUrl'),
+    });
+  });
+
+  it('keeps usable code/PIN when CTX returns a non-absolute redeemUrl, nulling the unusable url', async () => {
+    operatorFetchMock.mockResolvedValueOnce(
+      detailResponse({ redeemCode: 'C', redeemPin: 'P', redeemUrl: '/relative/redeem' }),
+    );
+    const result = await fetchRedemption('o-1');
+    expect(result).toEqual({ code: 'C', pin: 'P', url: null });
+    expect(notifyCtxSchemaDriftMock).not.toHaveBeenCalled();
+  });
+
+  it('F10: never persists a non-http(s) redeem URL — javascript: is nulled, code/PIN survive', async () => {
+    operatorFetchMock.mockResolvedValueOnce(
+      detailResponse({ redeemCode: 'C', redeemUrl: 'javascript:alert(document.cookie)' }),
+    );
+    const result = await fetchRedemption('o-1');
+    expect(result).toEqual({ code: 'C', pin: null, url: null });
+  });
+
+  it('F10: a genuine https redeem URL passes through untouched', async () => {
+    operatorFetchMock.mockResolvedValueOnce(
+      detailResponse({ redeemUrl: 'https://redeem.example.com/card/123' }),
+    );
+    const result = await fetchRedemption('o-1');
+    expect(result).toEqual({ code: null, pin: null, url: 'https://redeem.example.com/card/123' });
   });
 
   it('polling tolerates intermittent failures and returns once codes appear', async () => {

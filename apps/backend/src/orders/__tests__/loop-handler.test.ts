@@ -826,6 +826,93 @@ describe('loopCreateOrderHandler', () => {
         expect.not.objectContaining({ idempotencyKey: expect.anything() }),
       );
     });
+
+    it('R3-10: credit request without header gets a server fallback idempotency key', async () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_800_000);
+      createOrderMock.mockResolvedValueOnce({
+        id: 'credit-order-id',
+        userId: 'user-uuid',
+        merchantId: 'm1',
+        faceValueMinor: 10_000n,
+        currency: 'GBP',
+        chargeMinor: 10_000n,
+        chargeCurrency: 'GBP',
+        paymentMethod: 'credit',
+        paymentMemo: null,
+      });
+      try {
+        const { ctx } = makeCtx({
+          auth: LOOP_AUTH,
+          body: {
+            merchantId: 'm1',
+            amountMinor: 10_000,
+            currency: 'GBP',
+            paymentMethod: 'credit',
+          },
+        });
+        const res = await loopCreateOrderHandler(ctx);
+        expect(res.status).toBe(200);
+        expect(findOrderByIdempotencyKeyMock).toHaveBeenCalledTimes(2);
+        expect(createOrderMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            paymentMethod: 'credit',
+            idempotencyKey: expect.stringMatching(/^server-credit-v1-[0-9a-f]{48}$/),
+          }),
+        );
+      } finally {
+        nowSpy.mockRestore();
+      }
+    });
+
+    it('R3-10: duplicate no-header credit request replays without a second debit', async () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_800_000);
+      let created: {
+        id: string;
+        userId: string;
+        merchantId: string;
+        faceValueMinor: bigint;
+        currency: string;
+        chargeMinor: bigint;
+        chargeCurrency: string;
+        paymentMethod: 'credit';
+        paymentMemo: null;
+      } | null = null;
+      let createdKey: string | null = null;
+      findOrderByIdempotencyKeyMock.mockImplementation(async (_userId: string, key: string) =>
+        key === createdKey ? created : null,
+      );
+      createOrderMock.mockImplementation(async (args: { idempotencyKey?: string }) => {
+        createdKey = args.idempotencyKey ?? null;
+        created = {
+          id: 'credit-order-id',
+          userId: 'user-uuid',
+          merchantId: 'm1',
+          faceValueMinor: 10_000n,
+          currency: 'GBP',
+          chargeMinor: 10_000n,
+          chargeCurrency: 'GBP',
+          paymentMethod: 'credit',
+          paymentMemo: null,
+        };
+        return created;
+      });
+      const body = {
+        merchantId: 'm1',
+        amountMinor: 10_000,
+        currency: 'GBP',
+        paymentMethod: 'credit',
+      };
+      try {
+        const first = await loopCreateOrderHandler(makeCtx({ auth: LOOP_AUTH, body }).ctx);
+        const second = await loopCreateOrderHandler(makeCtx({ auth: LOOP_AUTH, body }).ctx);
+        expect(first.status).toBe(200);
+        expect(second.status).toBe(200);
+        expect(createOrderMock).toHaveBeenCalledTimes(1);
+        expect((await second.json()) as unknown).toMatchObject({ orderId: 'credit-order-id' });
+      } finally {
+        nowSpy.mockRestore();
+      }
+    });
   });
 });
 

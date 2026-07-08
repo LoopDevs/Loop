@@ -25,10 +25,32 @@ vi.mock('../../circuit-breaker.js', () => ({
   }),
 }));
 
+const { snapshotState } = vi.hoisted(() => ({
+  snapshotState: {
+    saved: [] as Array<{ name: string; items: unknown[]; loadedAt: Date }>,
+    next: null as null | { items: unknown[]; loadedAt: number },
+  },
+}));
+
+vi.mock('../../ctx/catalog-snapshots.js', () => ({
+  saveCatalogSnapshot: vi.fn(async (args: { name: string; items: unknown[]; loadedAt: Date }) => {
+    snapshotState.saved.push(args);
+  }),
+  loadCatalogSnapshot: vi.fn(async (name: string) => {
+    if (name !== 'locations') return null;
+    return snapshotState.next;
+  }),
+}));
+
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
-import { refreshLocations, getLocations } from '../data-store.js';
+import {
+  __resetLocationStoreForTests,
+  refreshLocations,
+  getLocations,
+  warmStartLocationsFromSnapshot,
+} from '../data-store.js';
 
 interface MockLocation {
   id: string;
@@ -51,6 +73,9 @@ function makePage(page: number, pages: number, result: MockLocation[]): Response
 
 beforeEach(() => {
   mockFetch.mockReset();
+  snapshotState.saved = [];
+  snapshotState.next = null;
+  __resetLocationStoreForTests();
 });
 
 afterEach(async () => {
@@ -103,6 +128,40 @@ describe('refreshLocations', () => {
     const firstUrl = mockFetch.mock.calls[0]![0] as string;
     expect(firstUrl).toContain('/locations');
     expect(firstUrl).toContain('page=1');
+    expect(snapshotState.saved).toHaveLength(1);
+    expect(snapshotState.saved[0]).toMatchObject({
+      name: 'locations',
+      items: expect.arrayContaining([expect.objectContaining({ merchantId: 'm-1' })]),
+    });
+  });
+
+  it('warm-starts from the last-good Postgres snapshot before upstream is reachable', async () => {
+    snapshotState.next = {
+      loadedAt: 1_780_188_400_000,
+      items: [
+        {
+          merchantId: 'm-snapshot',
+          mapPinUrl: 'https://img.test/pin.png',
+          latitude: 51.5,
+          longitude: -0.1,
+        },
+      ],
+    };
+
+    await expect(warmStartLocationsFromSnapshot()).resolves.toBe(true);
+    mockFetch.mockResolvedValueOnce(new Response('CTX down', { status: 503 }));
+    await refreshLocations();
+
+    const store = getLocations();
+    expect(store.loadedAt).toBe(1_780_188_400_000);
+    expect(store.locations).toEqual([
+      {
+        merchantId: 'm-snapshot',
+        mapPinUrl: 'https://img.test/pin.png',
+        latitude: 51.5,
+        longitude: -0.1,
+      },
+    ]);
   });
 
   it('retains previous data when upstream returns an error', async () => {

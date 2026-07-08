@@ -305,6 +305,21 @@ describe('markOrderPaid', () => {
     await markOrderPaid('o-1', { paymentReceivedAt: at });
     expect(state.updateSet).toMatchObject({ paymentReceivedAt: at });
   });
+
+  it('persists the Horizon payment identity that funded the order', async () => {
+    state.returningRows = [{ id: 'o-1' }];
+    const payment = { id: 'horizon-op-1', amount: '10.0000000' };
+    await markOrderPaid('o-1', {
+      paymentReceivedHorizonId: 'horizon-op-1',
+      paymentReceivedTxHash: 'tx-1',
+      paymentReceivedPayment: payment,
+    });
+    expect(state.updateSet).toMatchObject({
+      paymentReceivedHorizonId: 'horizon-op-1',
+      paymentReceivedTxHash: 'tx-1',
+      paymentReceivedPayment: payment,
+    });
+  });
 });
 
 describe('markOrderPaid — loop_asset redemption (A4-110 + ADR 036)', () => {

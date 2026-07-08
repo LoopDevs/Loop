@@ -15,6 +15,7 @@ import {
   index,
   check,
   uniqueIndex,
+  jsonb,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { users } from './users.js';
@@ -92,6 +93,17 @@ export const orders = pgTable(
     paymentMethod: text('payment_method').notNull(),
     paymentMemo: text('payment_memo'),
     paymentReceivedAt: timestamp('payment_received_at', { withTimezone: true }),
+    // T0-1b: identity of the Horizon payment operation that actually
+    // funded the order. This lets the watcher distinguish a cursor
+    // re-read of the original paying deposit from a genuine duplicate
+    // deposit against an already-paid order.
+    paymentReceivedHorizonId: text('payment_received_horizon_id'),
+    paymentReceivedTxHash: text('payment_received_tx_hash'),
+    // R3-2: snapshot of the paying Horizon operation. If a paid order
+    // later fails procurement, the auto-refund path can return the
+    // exact on-chain asset/amount to the sender through the same
+    // crash-safe deposit-refund state machine as late deposits.
+    paymentReceivedPayment: jsonb('payment_received_payment'),
 
     // Pinned cashback split (ADR 011 snapshot at creation).
     wholesalePct: numeric('wholesale_pct', { precision: 5, scale: 2 }).notNull(),

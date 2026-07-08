@@ -77,7 +77,7 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### T0-1b · Duplicate deposit against an already-PAID order `[code]`
 
-- [ ] **Status:** ☐ Not started (spun out of T0-1)
+- [x] **Status:** ✅ Fixed 2026-07-07 — migration 0050 adds nullable `orders.payment_received_horizon_id` / `payment_received_tx_hash`; the watcher stamps these when `markOrderPaid` transitions an order. Fresh unmatched deposits for paid/procuring/fulfilled orders are recorded as `order_gone` only when the Horizon operation id differs from the stored paying id, so genuine duplicates become refundable while a cursor re-read of the original paying deposit is ignored. Focused tests cover duplicate recording, original reread suppression, and legacy paid rows without stored paying id.
 
 **Why:** T0-1 fixed the `expired`-order strand but deliberately does NOT record a deposit whose order is `paid`/`fulfilled` — because `markOrderPaid` doesn't persist which payment paid the order, so a genuine _second_ deposit can't be told apart from the _original paying_ deposit re-read after a cursor regression (recording the latter as refundable = double-spend). So a user who accidentally double-pays a real order is still stranded.
 
@@ -87,7 +87,7 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### T0-1c · Don't record sub-dust `order_gone` deposits `[code]` (small)
 
-- [ ] **Status:** ☐ Not started (money-review P2 follow-up)
+- [x] **Status:** ✅ Fixed 2026-07-07 — the fresh unmatched/expired-order watcher path now reuses `REFUND_MIN_STROOPS` before writing an `order_gone` skip row. Sub-dust late deposits are still counted and cursor-advanced, but not recorded for admin/refund handling; deposits at or above the refund floor still record normally.
 
 **Why:** T0-1's money-review flagged a self-funded nuisance vector: a user can expire their own order then send dust deposits to its memo, each recorded as `order_gone` and paging Discord on abandonment. Value-safe (the `REFUND_MIN_STROOPS` floor blocks the refund; attacker burns real XLM), but it bloats the skip table + alerts.
 
@@ -120,7 +120,7 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### T0-3 · Make the money-invariant DB layer a required merge check `[operator]`+`[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Fixed 2026-07-07 — `orders/redeem.ts` now uses the existing fleet-wide advisory lock primitive keyed by order id instead of a process-local `Set`. Contention returns `PAYMENT_IN_FLIGHT`; completion releases the lock so legitimate sequential retries still work. The redeem race test now exercises advisory-lock contention and proves two concurrent calls produce exactly one submit.
 
 **Why:** The real-Postgres suite that enforces the money invariants (CHECK constraints, conservation trigger, CAS races) runs in the `flywheel-integration` job — which is **not** in the required-checks set. So the layer that guarantees money safety can go red and still merge. `ctx-settlements.ts` also sits at 0% counted coverage because its only real coverage is in this ungated suite.
 
@@ -198,7 +198,7 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### C2-1 · Redemption-null re-validation `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [ ] **Status:** ◐ Code-side hardening landed 2026-07-07; live fulfilled-order validation still required. The redemption parser now preserves code/PIN when CTX returns a non-absolute `redeemUrl` string, and the polling fallback has regression coverage for fresh `Response` bodies / consumed-body recovery.
       **Why:** The `redemption-backfill` worker shipped and runs in prod, but the original symptom (fulfilled order with `redeem_code/pin/url` all null) has not been re-smoke-tested since the fix. Must be green before public order traffic. `docs/roadmap.md` orphaned-work + CTX-R2.
       **Do:** run one real fulfilled order (`scripts/e2e-real.mjs` or the `e2e-real.yml` workflow — Aerie $0.02) and confirm the redemption fields populate directly or via the backfill sweep. Also fix the related `Body has already been read` polling-fallback bug (grep for the double-`.json()`/`.text()` read in the redemption polling path). Add this assertion to the Tranche-1 acceptance checklist.
       **Done when:** a real order fulfils with non-null redemption fields; the polling-fallback bug is fixed + tested.
@@ -218,11 +218,76 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### R3-1 · Operator XLM/USDC float reconciliation `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [ ] **Status:** ◐ Partial 2026-07-07 — detection/indexing/read surface and audited baseline/manual write workflow landed; production baselines/cursors/thresholds and money review remain.
       **Why:** The only automated reconciliations are mirror=ledger (INV-1) and on-chain-LOOP-vs-mirror (INV-4). **Neither covers the operator/deposit wallet** through which every real deposit dollar flows (deposits in, CTX settlements out, refunds out, fees). No aggregate "deposits-for-paid-orders ≈ CTX-paid + refunds + fees + float" check. Money-P2-1.
       **Do:** add a scheduled reconciliation (model on `asset-drift-watcher.ts` / `ledger-invariant-watcher.ts`, `withAdvisoryLock` single-flight, persist state, page on breach) that sums the operator wallet's inbound/outbound (Horizon) against the recorded deposits/settlements/refunds and alerts on drift beyond a threshold. Surface it on the Treasury admin page.
       **⚠️** Money-review; it's a _detection_ addition (no writes) but its threshold logic must not false-page on normal float.
       **Done when:** a watcher computes operator-float conservation daily and alerts on drift; visible on Treasury.
+      **Scoped 2026-07-07:** This is a historical conservation check, not
+      a point-in-time balance card. For each asset (`xlm`, `usdc`) the
+      watcher must compare:
+      `actual operator balance ~= baseline balance + classified inbound - classified outbound +/- approved manual movement`.
+      Persist:
+      `operator_wallet_baselines` (asset, account, opening balance,
+      Horizon cursor, chosen by, reason), `operator_wallet_movements`
+      (Horizon op id, tx hash, paging token, from/to, asset, amount,
+      direction, classification, order/refund/settlement/manual refs,
+      raw payment json), `operator_manual_movements` (approved
+      top-up/sweep/fee adjustment rows), and
+      `operator_float_reconciliation_runs` (expected, actual, delta,
+      thresholds, unclassified count, state, error).
+      Classification rules:
+      `user_deposit` = inbound memo matched to paid/procuring/fulfilled
+      orders or recorded watcher skips; `ctx_settlement` = outbound CTX
+      supplier payment; `deposit_refund` = outbound A6/R3-2 refund;
+      `loop_asset_burn`/`interest_mint` = known non-XLM/USDC movement
+      classes when the operator account is involved; `manual` = row
+      approved by ops; `unclassified` = everything else and must keep
+      the run degraded until explained.
+      Worker: single-flight with advisory lock, page on `delta` beyond
+      per-asset thresholds or any unclassified movement, persist every
+      run, and preserve cursor idempotency by upserting Horizon
+      movements by operation id before advancing.
+      Admin: surface latest actual/expected/delta/state/unclassified
+      count on Treasury; add movement drilldown for unclassified rows.
+      Operator handoff still required before closing: initial baselines
+      and cursors, asset thresholds, manual movement memo policy, and
+      money-review sign-off on the write workflow. Until those are
+      configured, code must fail closed as `needs_baseline` rather
+      than claiming the float is healthy.
+      **Partial 2026-07-07:** R3-1 now has durable schema + migration
+      (`operator_wallet_baselines`, `operator_wallet_movements`,
+      `operator_manual_movements`, `operator_float_reconciliation_runs`),
+      a single-flighted worker that indexes Horizon XLM/USDC movements
+      from the active baseline cursor, classifies movements against
+      paid orders / abandoned deposits / deposit refunds / CTX
+      settlements / approved manual rows, persists each run, pages
+      Discord on drift or unclassified movement, and surfaces latest
+      state in `/api/admin/treasury` plus
+      `/api/admin/operator-float/movements`. Audited, idempotent,
+      step-up-gated admin writes now exist for creating baselines
+      (`POST /api/admin/operator-float/baselines`) and manual movement
+      explanations (`POST /api/admin/operator-float/manual-movements`).
+      It still remains open until the operator supplies production
+      baselines/cursors/thresholds and money review signs off the
+      workflow.
+      **Money-review fixes 2026-07-08** (adversarial pass on PR #1581):
+      classification is no longer compute-once — each tick re-runs the
+      classifier over `unclassified` rows, healing watcher-lag deposits
+      and the indexer-vs-manual-explanation race; manual-movement
+      writes validate the linked movement (must exist, be
+      `unclassified`, and match asset/account/direction/amount — no
+      more blessing arbitrary drift or typo'd silent no-ops); baselines
+      require `startingHorizonCursor` (an unanchored baseline walked
+      the whole account history and double-counted pre-baseline flow)
+      and a partial unique index (migration 0054) pins one ACTIVE
+      baseline per (account, asset); a drift result is recomputed once
+      before paging (kills the index-vs-balance-read false positive);
+      the module docstring documents the unmodeled terms (tx fees,
+      create_account, path payments) and the re-baseline-not-threshold-
+      inflation policy. Remaining: production baselines/cursors/
+      thresholds (operator) — the code side of the money review is
+      addressed.
 
 ### R3-2 · Auto-refund delivers the wrong asset in Phase-1 `[code]`
 
@@ -231,10 +296,29 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
       **Do:** branch the refund by `orders.payment_method`: xlm/usdc → on-chain refund to sender (reuse the A6 `refundDeposit`/`submitPayout` machinery); loop_asset → re-mint/re-credit consistently with the burn; credit-method → mirror credit (current behaviour, correct). Coordinate with T0-1 (same "return what they paid, in what they paid" principle).
       **⚠️** Money-review. Must remain idempotent (auto-refund already has a partial-unique-index guard — don't break it). Don't create a double-refund with the A5 procurement-crash path.
       **Done when:** each payment method's failed order refunds in the same asset it was paid; integration test per method; money-review posted.
+      **Partial 2026-07-07:** XLM/USDC failed-order auto-refunds now snapshot the
+      paying Horizon payment on `orders` and reuse A6 `refundDeposit` to return
+      the exact on-chain deposit to the original sender. `credit` remains mirror
+      refund. `loop_asset` now fails closed for manual money-review handling
+      rather than issuing the previous mirror-only refund that could create drift.
+      R3-2 remains open until the loop-asset re-mint/re-credit branch and method
+      integration coverage land.
+      **Money-review fixes 2026-07-08** (adversarial pass on PR #1581): the
+      on-chain branch no longer vacates INV-8 — a credit-ledger cross-check
+      runs under the order-row lock in `applyOnChainOrderAutoRefund`,
+      `refundDeposit`'s claim, and `applyAdminRefund`, so a mirror-credit
+      refund and an on-chain refund for the same order are mutually exclusive
+      in both orders of arrival (duplicate T0-1b deposits stay independently
+      refundable). Pre-0050/0051 orders without a payment snapshot fail closed
+      to a page + manual `applyAdminRefund` (documented deliberate posture for
+      the deploy-transition cohort). The R3-5 band is now first-attempt-only:
+      once a `ctx_settlements` intent row exists, a retry defers to
+      `payCtxOrder`'s pinned-intent + landed-check instead of failing-and-
+      refunding an order CTX may already have been paid for.
 
 ### R3-3 · CTX: warm-start the merchant/location catalog from Postgres `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Fixed 2026-07-07 — successful CTX merchant and location sweeps now persist compact last-good snapshots to Postgres (`ctx_catalog_snapshots`). Startup warm-starts both in-memory stores from those snapshots before attempting the next upstream refresh, so a restart during CTX outage retains the last-good storefront/map catalog instead of serving empty successful responses. Focused tests cover snapshot save and CTX-down warm-start for both stores.
       **Why:** The catalog caches are module-level in-memory with no persistent seed (`merchants/sync.ts:64-69`, `clustering/data-store.ts:54`), written only on a _successful_ sync. A Fly restart/redeploy **during a CTX outage** cold-starts empty, the boot refresh fails, and `/api/merchants` returns **HTTP 200 with an empty list** — a silently empty storefront with no error signal. CTX-R1.
       **Do:** persist the last-good merchant + location snapshot to Postgres on each successful sync; on boot, warm-start from it before the first upstream refresh; only serve empty if there's genuinely no snapshot. Consider returning `503`/a stale-flag rather than an empty `200` when the catalog is unpopulated.
       **Done when:** killing the process with CTX unreachable still serves the last-good catalog after restart; integration/e2e proof.
@@ -249,7 +333,7 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### R3-5 · CTX: add an upper-band sanity check on pay-CTX amount `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Fixed 2026-07-07 — procurement now parses the CTX SEP-7 amount before `payCtxOrder`, converts it to stroops, and compares it against the expected wholesale quote with the boot-configured `LOOP_CTX_PAYMENT_MAX_BPS_OF_EXPECTED` ceiling (default 125%). Out-of-band or invalid amounts mark the order failed, auto-refund, page the existing procurement-failure path, and do not pay CTX; quote-computation failures revert to `paid` for retry.
       **Why:** Procurement pays CTX the amount from CTX's own SEP-7 URI (`procure-one.ts:287-299` → `pay-ctx.ts`) with **no upper-band check** against expected wholesale cost. A CTX mispricing or a spike between browse and settle makes Loop overpay from the operator wallet (user is protected — they paid the pinned face value; Loop's treasury eats it). CTX-R4.
       **Do:** before submitting the CTX payment, assert the amount is within a sane band of the expected wholesale (e.g. ≤ face value × a configurable ceiling, and ≥ a floor). On breach: fail the order + auto-refund + page, don't pay.
       **⚠️** Money-review. Don't reject legitimate FX movement — set the band from real spread data + a margin; make it a boot-configured constant.
@@ -257,21 +341,21 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### R3-6 · CTX: page the drift channel on money-path contract drift `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Fixed 2026-07-07 — `procureOne` now calls `notifyCtxSchemaDrift` on `POST /gift-cards` schema failure before the existing mark-failed + auto-refund path, and `fetchRedemption` calls the same notifier on `GET /gift-cards/:id` schema failure before returning the existing null redemption payload.
       **Why:** `notifyCtxSchemaDrift` fires for browse/auth surfaces, but the two money-critical operator-pool responses — `POST /gift-cards` (`procure-one.ts:259-267`) and `GET /gift-cards/:id` (`procurement-redemption.ts:77-83`) — **only log** on Zod failure. So "CTX changed their schema on the money path" has no dedicated signal. CTX-R5.
       **Do:** wire both Zod-failure branches to `notifyCtxSchemaDrift` (behaviour is already fail-safe; this just adds the alert). Confirm `ctx-contract.test.ts` still covers the fixtures.
       **Done when:** a simulated schema change on either money-path response fires a drift page.
 
 ### R3-7 · Pin production to native auth at boot `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Fixed 2026-07-07 — `parseEnv` now refuses production boots with `LOOP_AUTH_NATIVE_ENABLED=false`/unset unless `DISABLE_NATIVE_AUTH_ENFORCEMENT=1` is explicitly set. The override is typed as exact `"1"` in the env schema and documented in `.env.example`, `docs/development.md`, `docs/deployment.md`, and `AGENTS.md`.
       **Why:** `LOOP_AUTH_NATIVE_ENABLED` schema default is `false` (`env/sections/auth.ts:90`). An unset flag on a new prod deploy silently reverts auth to the **CTX-coupled** legacy path → a CTX outage becomes a total login outage. CTX-R3.
       **Do:** add a boot assertion in `env.ts` (or a `parseEnv` cross-check) that in `NODE_ENV=production`, `LOOP_AUTH_NATIVE_ENABLED` must be `true` unless an explicit `DISABLE_...` escape is set (mirror the existing prod boot-fail guards, e.g. the step-up-key one). Update `.env.example` + docs.
       **Done when:** a production boot with native auth off fails fast with a clear error (unless deliberately overridden).
 
 ### R3-8 · Align admin step-up OTP with the B5 per-email lockout `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Fixed 2026-07-07 — `adminStepUpHandler` now checks `isEmailOtpLocked` before OTP lookup, calls `registerFailedOtpAttempt` after a wrong OTP, returns `429 TOO_MANY_ATTEMPTS` with `Retry-After` when locked, and clears the counter after a successful step-up OTP.
       **Why:** `admin/step-up-handler.ts:95-101` verifies the admin's OTP with `findLiveOtp` + `incrementOtpAttempts` but does **not** call the B5 `isEmailOtpLocked`/`registerFailedOtpAttempt` counter that the main `verify-otp` path runs (`auth/native.ts:97-118`). Not exploitable today (tiny space, tight rate limits), but the two OTP-consuming surfaces should share one identity-level brute-force ceiling. Authz-F2.
       **Do:** wrap the step-up OTP verify with the same `otp-attempt-counter.ts` lockout as `native.ts`.
       **⚠️** Auth-review. Keep the lockout check _before_ the code compare (checking after is a bypass).
@@ -287,7 +371,7 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### R3-10 · Make order-create idempotency default-on `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Fixed 2026-07-07 — client-supplied `Idempotency-Key` remains authoritative, and no-header `credit` orders now derive a short-window server fallback key from `userId + merchant + amount + currency`. The handler checks the current and previous fallback bucket before creation and passes the current derived key into the existing `(user_id, idempotency_key)` unique-index path, so duplicate no-header credit submits replay the first order instead of debiting twice.
       **Why:** Order create only dedups when the client sends `Idempotency-Key` (`orders/loop-handler.ts:179-201`). Without it, a double-submitted **credit**-method order writes two orders + two `user_credits` debits — a double-charge of the user's own balance. Money-P2-3.
       **Do:** derive a server-side idempotency key (e.g. `userId+merchant+denomination+minute` bucket, or require the header) so a double-click can't double-debit. Prefer requiring the header from the web client + a short server-side dedup window.
       **⚠️** Money-review.
@@ -302,7 +386,9 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### R3-12 · Guard the step-up middleware CTX fail-open `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Fixed 2026-07-07 — `requireAdminStepUp(...)` now requires a
+      Loop-native auth subject and fails closed for legacy `ctx` auth; focused
+      middleware + route-gating tests cover the regression.
       **Why:** `auth/admin-step-up-middleware.ts:84-86` allows `auth.kind === 'ctx'` through. Safe only because every step-up route currently sits behind a loop-anchored `requireStaff` that 401s a `ctx` bearer first. If a future `requireAdminStepUp(...)` is mounted without a preceding staff gate, an unverified CTX bearer sails through with no staff check. Authz-F3.
       **Do:** make the CTX branch fail-closed (reject) rather than allow, or add an assertion that a staff gate ran. Verify no legitimate flow relies on the exemption.
       **⚠️** Auth-review.
@@ -310,7 +396,9 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### R3-13 · Origin-check the redemption WebView postMessage `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Fixed 2026-07-07 — native WebView messages are accepted only
+      while the current WebView URL origin matches the original redeem URL
+      origin; cross-origin navigation drops `messageFromWebview` events.
       **Why:** `RedeemFlow.tsx:88-100` `onMessage` has no origin check; `parseGiftCardMessage` validates payload _shape_ not _sender_. Any frame loaded in the in-app browser can post a `loop:giftcard`-shaped message. Low impact (drives display/clipboard of a code, not a money write). CF-02 reopen.
       **Do:** pin the injected scripts to the expected merchant host and verify `event.origin` against it before accepting a message.
       **Done when:** a message from an unexpected origin is ignored; the happy path still captures.
@@ -329,18 +417,26 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### S4-2 · Wallet-provisioning fleet-lock (reads as a bug) `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Fixed 2026-07-07
       **Why:** `wallet/provisioning.ts:405-511` has **no** advisory lock / `SKIP LOCKED` / in-flight guard (unlike every other worker). At 2 machines both pick the same oldest users and both submit a sponsored activation tx from the shared operator account → `tx_bad_seq`/`op_already_exists`, burned fees, sequence thrash, false "stuck" pages. Correctness holds (CAS-fenced) but throughput halves. **Not in the risk register.** Scale-#3.
       **Do:** wrap the provisioning tick in `withAdvisoryLock` (the primitive from A8 already exists; copy the payout-worker pattern). A few lines.
       **⚠️** Bites the moment Phase-2 turns on. Money/Stellar-review the lock placement.
       **Done when:** two machines running the tick submit each activation once; test the race.
+      **Done 2026-07-07:** `runWalletProvisioningTick` now takes a fixed
+      fleet-wide `withAdvisoryLock` before selecting candidates and returns
+      `skippedLocked=true` when another machine owns the sweep. Focused coverage
+      proves the skipped path does not submit an activation transaction.
 
 ### S4-3 · Single-flight the interest-mint Horizon reads `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Fixed 2026-07-07
       **Why:** `credits/interest-mint.ts` isn't single-flighted → every machine does a Horizon trustline read per activated wallet each run (safe — DB-fenced against double-mint — but N× wasteful). Scale-#7.
       **Do:** wrap the tick in `withAdvisoryLock` (same pattern as S4-2).
       **Done when:** only one machine performs the mint sweep per run.
+      **Done 2026-07-07:** `runInterestMintTick` now takes a fixed fleet-wide
+      `withAdvisoryLock`; losing machines return `skippedLocked=true` before
+      cursor/user/Horizon reads. Focused coverage proves the skipped path writes
+      no snapshot or payout rows.
 
 ### S4-4 · Rate-limiter shared store (accuracy under auto-scale) `[code]`
 
@@ -358,10 +454,14 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### S4-6 · Bound the admin ledger-drift scan `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Fixed 2026-07-07
       **Why:** `admin/reconciliation.ts:74` → `credits/ledger-invariant.ts:141` runs an unbounded `GROUP BY` over **all** `credit_transactions` synchronously on the admin request path, holding a pool connection for a multi-second scan (`credit_transactions` grows ~1 row/user/night). Scale-#5.
       **Do:** quick — add a statement timeout + short cache to the admin call. Durable — incremental/materialised reconciliation. Bites ~10M+ rows.
       **Done when:** the admin call can't monopolise a connection with a full scan.
+      **Done 2026-07-07:** `adminReconciliationHandler` now runs the drift/count
+      queries inside a transaction-local `statement_timeout=2000ms` and caches the
+      successful response for 30s, preserving the existing response shape. Focused
+      unit coverage asserts the timeout path and immediate cache hit.
 
 ### S4-7 · Trim the client-side catalog fetch `[code]`
 
@@ -449,11 +549,11 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### Q6-1 · Direct test for `orders/ctx-settlements.ts` (0% counted) `[code]`
 
-- [ ] **Status:** ☐ Not started — it's mocked in every unit test; add real assertions for the settlement-idempotency logic (the ADR-038 durable double-pay guard). Move a slice into the counted unit suite so it's gated (see T0-3).
+- [x] **Status:** ✅ Fixed 2026-07-07 — added a direct counted unit suite for `orders/ctx-settlements.ts` covering lookup, first intent insert, insert-conflict re-read, impossible conflict failure, signed tx-hash persistence, confirmation marking, and confirmed chain backfill/upsert. This gates the ADR-038 durable double-pay guard outside the real-Postgres integration job.
 
 ### Q6-2 · Raise counted coverage on money/auth workers `[code]`
 
-- [ ] **Status:** ☐ Not started — `payout-worker.ts` (42%), `ledger-invariant-watcher.ts` (50%), `payout-submit.ts` (61%), `otp-attempt-counter.ts` (22%). Either add unit tests or promote a slice of their integration coverage into the counted suite.
+- [x] **Status:** ✅ Fixed 2026-07-07 — raised counted coverage for every named Q6-2 file. Added unit coverage for `auth/otp-attempt-counter.ts` (lockout read, failed-attempt upsert shape, clear, stale purge; targeted 94.44% lines / 80% branches), expanded `payments/payout-submit.ts` (native XLM, pre-signed submits, hash fallbacks, build/persist failures; targeted 98.8% lines / 79.16% branches), added `credits/ledger-invariant-watcher.ts` lifecycle coverage (start idempotence, immediate tick success/failure, stop; targeted 97.5% lines / 75% branches), and added `payments/payout-worker.ts` lifecycle/reset coverage (targeted 89.04% lines / 76.19% branches).
 
 ### Q6-3 · Web money-write client tests `[code]`
 

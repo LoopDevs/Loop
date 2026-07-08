@@ -13,6 +13,7 @@ const { dbMock, state } = vi.hoisted(() => {
   m['from'] = vi.fn(() => m);
   m['where'] = vi.fn(() => m);
   m['groupBy'] = vi.fn(async () => results.shift() ?? []);
+  m['execute'] = vi.fn(async () => []);
   return { dbMock: m, state: { results } };
 });
 
@@ -134,11 +135,34 @@ describe('treasuryHandler', () => {
       totals: Record<string, Record<string, string>>;
       orderFlows: Record<string, unknown>;
       operatorPool: { size: number; operators: unknown[] };
+      operatorFloat: unknown;
     };
     expect(body.outstanding).toEqual({});
     expect(body.totals).toEqual({});
     expect(body.orderFlows).toEqual({});
     expect(body.operatorPool).toEqual({ size: 0, operators: [] });
+    expect(body.operatorFloat).toEqual({
+      xlm: {
+        state: 'unknown',
+        expectedBalanceStroops: null,
+        actualBalanceStroops: null,
+        deltaStroops: null,
+        thresholdStroops: null,
+        unclassifiedCount: 0,
+        checkedAt: null,
+        error: null,
+      },
+      usdc: {
+        state: 'unknown',
+        expectedBalanceStroops: null,
+        actualBalanceStroops: null,
+        deltaStroops: null,
+        thresholdStroops: null,
+        unclassifiedCount: 0,
+        checkedAt: null,
+        error: null,
+      },
+    });
   });
 
   it('shapes outstanding balances per currency', async () => {

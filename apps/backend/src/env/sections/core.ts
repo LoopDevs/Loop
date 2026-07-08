@@ -89,6 +89,13 @@ export const coreEnvFields = {
   // hasn't provisioned the key, never for real production.
   DISABLE_ADMIN_STEP_UP_ENFORCEMENT: z.enum(['1']).optional(),
 
+  // R3-7: emergency opt-out for the production native-auth boot
+  // guard below. Only `"1"` counts. Setting it deliberately permits
+  // a production deploy to use the legacy CTX-proxy auth path, so it
+  // is for rollback / staging only; normal production must run
+  // LOOP_AUTH_NATIVE_ENABLED=true.
+  DISABLE_NATIVE_AUTH_ENFORCEMENT: z.enum(['1']).optional(),
+
   // Rate-limiter trust boundary (audit A-023). When `true` the rate limiter
   // reads the client IP from the first value in X-Forwarded-For (required
   // when running behind Fly.io / a load balancer). When `false` it falls

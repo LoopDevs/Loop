@@ -40,9 +40,13 @@ Phase-2 surfaces ship dark behind `LOOP_PHASE_1_ONLY=true`, so T1 launches witho
 
 ## T1-B · Money correctness 💰 / 🔐 — _sequenced in [`money-auth-worklist.md`](./money-auth-worklist.md)_
 
-- [ ] **AUDIT-1 · Regression-verify the GBPLOOP unbacked-mint P0** (it was **fixed** 2026-07-01/02 via `ONCHAIN_MINT_ELIGIBLE_ASSETS` allowlist + DB CHECK — confirm no regression, read-only). 💰
-- [ ] **T0-1b** dup deposit vs paid order · **R3-2** wrong-asset refund · **R3-9** process-local redeem fence · **R3-10** idempotency default-on · **R3-5** pay-CTX upper-band · **T0-1c** sub-dust deposits · **R3-1** float reconciliation · **R3-4** redemption-null-exhaustion refund (+policy) · **R3-6** drift-channel paging. 💰
-- [ ] **R3-12** step-up CTX fail-open · **R3-7** pin native auth · **R3-8** step-up OTP lockout · **R3-13** WebView postMessage origin-check. 🔐
+- [x] **AUDIT-1 · Regression-verify the GBPLOOP unbacked-mint P0** (it was **fixed** 2026-07-01/02 via `ONCHAIN_MINT_ELIGIBLE_ASSETS` allowlist + DB CHECK — confirm no regression, read-only). 💰 **Done 2026-07-07:** read-only verification passed; see [`audit-2026-07-07-gbploop-regression.md`](./audit-2026-07-07-gbploop-regression.md).
+- [ ] **R3-2** wrong-asset refund _(partial: XLM/USDC refund-to-sender done; loop_asset re-mint/re-credit still open)_ · **R3-1** float reconciliation _(partial: schema/indexer/classifier/worker/Treasury read surface + audited baseline/manual writes done; production baselines/cursors/thresholds + money review still open)_ · **R3-4** redemption-null-exhaustion refund (+policy). 💰
+- [x] **T0-1b** dup deposit vs paid order. 💰
+- [x] **R3-9** durable redeem in-flight fence. 💰
+- [x] **R3-10** idempotency default-on · **T0-1c** sub-dust deposits. 💰
+- [x] **R3-5** pay-CTX upper-band · **R3-6** drift-channel paging. 💰
+- [x] **R3-12** step-up CTX fail-open · **R3-7** pin native auth · **R3-8** step-up OTP lockout · **R3-13** WebView postMessage origin-check. 🔐
 - [ ] **T0-3 · Money-invariant DB layer as a required merge check.** 💰 + 👤
 
 ## T1-C · Operator / legal / vendor 👤 — _longest lead; start in parallel now_
@@ -78,10 +82,11 @@ Phase-2 surfaces ship dark behind `LOOP_PHASE_1_ONLY=true`, so T1 launches witho
 
 # §T1-H · BEFORE REAL-MONEY VOLUME (T1 hardening, concurrent with / just after launch)
 
-- [ ] **Reliability (R3 tail):** R3-3 warm-start catalog from Postgres 🟢 · R3-11 legacy-order-path ownership gap 🟢/doc.
-- [ ] **Scale/fleet (S4):** ✅ S4-7 catalog fetch trim (done). S4-1 payout throughput ceiling (L, architectural) 💰 · S4-2 wallet-provisioning fleet-lock 💰 · S4-3 single-flight interest-mint reads 💰 · S4-4 rate-limiter shared store 🟢 · S4-5 raise DB pool / plan PgBouncer 👤+🟢 · S4-6 bound admin ledger-drift scan 💰 · S4-8 dedupe per-machine watchers/alerts 🟢.
+- [ ] **Reliability (R3 tail):** ✅ R3-3 warm-start catalog from Postgres (done 2026-07-07) · R3-11 legacy-order-path ownership gap 🟢/doc.
+- [ ] **Scale/fleet (S4):** ✅ S4-7 catalog fetch trim (done) · ✅ S4-6 bound admin ledger-drift scan (done) · ✅ S4-2 wallet-provisioning fleet-lock (done) · ✅ S4-3 single-flight interest-mint reads (done). S4-1 payout throughput ceiling (L, architectural) 💰 · S4-4 rate-limiter shared store 🟢 · S4-5 raise DB pool / plan PgBouncer 👤+🟢 · S4-8 dedupe per-machine watchers/alerts 🟢.
 - [ ] **Admin/support tooling (A5):** A5-1 order re-drive (biggest hole) · A5-4 order-bound refund UI+policy · A5-6 stuck-orders/payouts visibility · A5-7 per-subject audit view · A5-8 fleet-wide ledger browser · A5-9 bulk + drift-correction · A5-2 session-revocation UI 🔐 · A5-3 login/OTP support tooling 🔐 · A5-5 operator-mediated DSR. (all 💰 unless tagged)
-- [ ] **Test & E2E coverage (Q6):** Q6-1 ctx-settlements · Q6-2 money/auth workers · Q6-3 web money-write · Q6-4 loop-native purchase E2E · Q6-5 admin/support UI E2E · Q6-6 wallet-spend + interest-mint · Q6-7 promote real-chain run off manual · Q6-8 ratchet web floors. 💰
+- [ ] **Test & E2E coverage (Q6):** ✅ Q6-2 money/auth workers (done 2026-07-07) · Q6-3 web money-write · Q6-4 loop-native purchase E2E · Q6-5 admin/support UI E2E · Q6-6 wallet-spend + interest-mint · Q6-7 promote real-chain run off manual · Q6-8 ratchet web floors. 💰
+- [x] **Q6-1** ctx-settlements direct counted coverage. 💰
 - [ ] **Fraud/abuse (B-3):** velocity limits, dup-account detection, chargeback handling (absent today). 💰 + design/ADR.
 
 ## §T1-BS · Hardening / blind-spots (before real growth)

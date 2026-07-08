@@ -39,7 +39,7 @@
  */
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { paymentWatcherSkips } from '../db/schema.js';
+import { creditTransactions, orders, paymentWatcherSkips } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { HorizonPaymentSchema } from './horizon.js';
 import { parseStroops } from './stroops.js';
@@ -67,7 +67,7 @@ const REFUND_RECLAIM_STALE_MS = 5 * 60 * 1000;
  * smallest e2e order is $0.02 = 200_000 stroops) while dropping true
  * dust.
  */
-const REFUND_MIN_STROOPS = 10_000n;
+export const REFUND_MIN_STROOPS = 10_000n;
 
 export type RefundResult =
   | { kind: 'refunded'; txHash: string }
@@ -148,29 +148,83 @@ export async function loadSkip(paymentId: string): Promise<RefundableSkip | null
   return row ?? null;
 }
 
+export type ClaimForRefundResult = 'claimed' | 'lost' | 'credit_refunded';
+
 /**
  * CAS-claim the row for a submit, under the row lock. Wins iff the row
  * is `abandoned`, OR it is a STALE `refunding` row (a prior attempt
  * older than {@link REFUND_RECLAIM_STALE_MS} whose refund the caller
  * has already confirmed did NOT land — the caller MUST run the memo
- * pre-check first). Returns true on the winning update. Two concurrent
- * callers: exactly one wins (the second re-evaluates the WHERE after
- * the first commits and matches 0 rows).
+ * pre-check first). Two concurrent callers: exactly one wins (the
+ * second re-evaluates the WHERE after the first commits and matches 0
+ * rows → `'lost'`).
+ *
+ * INV-8 cross-check (money review 2026-07-08): when the skip row is
+ * bound to an order whose OWN paying deposit this is (paymentId equals
+ * the order's persisted paying id, or the order has no paying id and
+ * cannot be disambiguated — fail closed), the claim refuses with
+ * `'credit_refunded'` if a mirror-credit refund row already exists for
+ * that order. The check locks the order row FOR UPDATE — the same lock
+ * `applyAdminRefund` holds while inserting its credit row — so the two
+ * refund exits serialise: whichever commits first is visible to the
+ * other. Without this, an admin credit refund plus an A6 one-click
+ * deposit refund would pay the user twice for one order.
  */
-export async function claimForRefund(paymentId: string): Promise<boolean> {
+export async function claimForRefund(paymentId: string): Promise<ClaimForRefundResult> {
   const staleCutoff = sql`NOW() - ${`${REFUND_RECLAIM_STALE_MS} milliseconds`}::interval`;
-  const updated = await db
-    .update(paymentWatcherSkips)
-    .set({ status: 'refunding', updatedAt: sql`NOW()` })
-    .where(
-      and(
-        eq(paymentWatcherSkips.paymentId, paymentId),
-        sql`(${paymentWatcherSkips.status} = 'abandoned'
-          OR (${paymentWatcherSkips.status} = 'refunding' AND ${paymentWatcherSkips.updatedAt} < ${staleCutoff}))`,
-      ),
-    )
-    .returning({ paymentId: paymentWatcherSkips.paymentId });
-  return updated.length > 0;
+  return await db.transaction(async (tx) => {
+    const [skipRow] = await tx
+      .select({ orderId: paymentWatcherSkips.orderId })
+      .from(paymentWatcherSkips)
+      .where(eq(paymentWatcherSkips.paymentId, paymentId));
+    const orderId = skipRow?.orderId ?? null;
+    // Lock order first, skip row second — the same order every other
+    // refund writer uses, so the lock graph stays acyclic. When the
+    // skip row carries no order binding (e.g. a processing_error row
+    // recorded before the watcher matched anything), reverse-look-up
+    // the order this deposit PAID via its persisted paying id — that
+    // is how a null-orderId row still gets the INV-8 exclusion.
+    const [order] =
+      orderId !== null
+        ? await tx
+            .select({ id: orders.id, paymentReceivedHorizonId: orders.paymentReceivedHorizonId })
+            .from(orders)
+            .where(eq(orders.id, orderId))
+            .for('update')
+        : await tx
+            .select({ id: orders.id, paymentReceivedHorizonId: orders.paymentReceivedHorizonId })
+            .from(orders)
+            .where(eq(orders.paymentReceivedHorizonId, paymentId))
+            .for('update');
+    if (order !== undefined) {
+      const payingId = order.paymentReceivedHorizonId ?? null;
+      if (payingId === null || payingId === paymentId) {
+        const [creditRefund] = await tx
+          .select({ id: creditTransactions.id })
+          .from(creditTransactions)
+          .where(
+            and(
+              eq(creditTransactions.type, 'refund'),
+              eq(creditTransactions.referenceType, 'order'),
+              eq(creditTransactions.referenceId, order.id),
+            ),
+          );
+        if (creditRefund !== undefined) return 'credit_refunded';
+      }
+    }
+    const updated = await tx
+      .update(paymentWatcherSkips)
+      .set({ status: 'refunding', updatedAt: sql`NOW()` })
+      .where(
+        and(
+          eq(paymentWatcherSkips.paymentId, paymentId),
+          sql`(${paymentWatcherSkips.status} = 'abandoned'
+            OR (${paymentWatcherSkips.status} = 'refunding' AND ${paymentWatcherSkips.updatedAt} < ${staleCutoff}))`,
+        ),
+      )
+      .returning({ paymentId: paymentWatcherSkips.paymentId });
+    return updated.length > 0 ? 'claimed' : 'lost';
+  });
 }
 
 async function markRefunded(paymentId: string, txHash: string): Promise<void> {
@@ -284,8 +338,17 @@ export async function refundDeposit(paymentId: string): Promise<RefundResult> {
   // `abandoned`, or a `refunding` row stale past REFUND_RECLAIM_STALE_MS
   // (a prior attempt that — per the pre-check just above — never landed,
   // so re-submitting is safe). A fresh `refunding` row (concurrent or
-  // recent attempt) loses the claim → in_progress.
-  if (!(await claimForRefund(paymentId))) {
+  // recent attempt) loses the claim → in_progress. A skip row whose
+  // order was already refunded as a mirror credit refuses the claim
+  // outright (INV-8 cross-check — see claimForRefund).
+  const claim = await claimForRefund(paymentId);
+  if (claim === 'credit_refunded') {
+    return {
+      kind: 'not_refundable',
+      detail: 'order was already refunded as a mirror credit (INV-8 cross-check)',
+    };
+  }
+  if (claim === 'lost') {
     return { kind: 'in_progress' };
   }
 

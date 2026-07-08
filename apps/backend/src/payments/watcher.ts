@@ -31,6 +31,7 @@ import { parseStroops } from './stroops.js';
 import { isAmountSufficient, loopAssetOverpaymentStroops } from './amount-sufficient.js';
 import { notifyLoopAssetOverpayment } from '../discord.js';
 import { recordSkip, retrySkippedPayments, type RetryOutcome } from './skipped-payments.js';
+import { REFUND_MIN_STROOPS } from './deposit-refund.js';
 
 const log = logger.child({ area: 'payment-watcher' });
 
@@ -236,7 +237,11 @@ async function processPayment(
 
   let transitioned;
   try {
-    transitioned = await markOrderPaid(order.id);
+    transitioned = await markOrderPaid(order.id, {
+      paymentReceivedHorizonId: p.id,
+      paymentReceivedTxHash: p.transaction_hash,
+      paymentReceivedPayment: p,
+    });
   } catch (err) {
     if (err instanceof LoopAssetMissingCreditRowError) {
       // A4-110 defence: state corruption (user holds on-chain
@@ -412,18 +417,17 @@ export async function runPaymentWatcherTick(args: {
         // recorded so the A6 refund path can reach it — otherwise the cursor
         // advances and the funds strand at the operator account forever.
         //
-        // SAFETY — why `expired` ONLY (not paid/fulfilled/any-state): the
-        // order does not persist which payment paid it, so for a *paid*
-        // order we cannot tell a genuine second/duplicate deposit apart from
-        // the ORIGINAL paying deposit re-read after a cursor regression.
-        // Recording the latter as refundable would double-spend a delivered
-        // gift card. An `expired` order was provably never paid (the expiry
-        // sweep only flips `pending_payment → expired`), so a deposit for its
-        // memo is unambiguously stranded and refunding it cannot double-pay.
-        // A memo matching NO order likewise stays a counted no-op (refunding
-        // an unattributable payment is a separate decision). The
-        // duplicate-against-a-PAID-order case is a documented follow-up (T0-1b)
-        // gated on first persisting the paying-payment id.
+        // SAFETY:
+        //   - expired: provably never paid, so any later deposit for
+        //     its memo is unambiguously stranded.
+        //   - paid/procuring/fulfilled: record only when the deposit's
+        //     Horizon operation id differs from the order's persisted
+        //     paying operation id. That distinguishes a true duplicate
+        //     deposit from a cursor re-read of the original paying
+        //     deposit, avoiding a double-spend refund of a delivered
+        //     gift card.
+        // A memo matching NO order stays a counted no-op (refunding an
+        // unattributable payment is a separate decision).
         //
         // Recorded BEFORE the cursor advances (CRIT #1, same as the `skip`
         // arm): if the insert throws, the tick aborts with the cursor parked
@@ -431,13 +435,37 @@ export async function runPaymentWatcherTick(args: {
         // The sweep then maps this row's retry (`unmatched`) → `order_gone`
         // → abandon → it lands on /admin/skips, refundable to the sender.
         const strandedOrder = await findAnyOrderByMemo(outcome.memo);
-        if (strandedOrder !== null && strandedOrder.state === 'expired') {
+        if (
+          strandedOrder !== null &&
+          (strandedOrder.state === 'expired' ||
+            (['paid', 'procuring', 'fulfilled'].includes(strandedOrder.state) &&
+              strandedOrder.paymentReceivedHorizonId !== null &&
+              strandedOrder.paymentReceivedHorizonId !== p.id))
+        ) {
+          if (p.amount !== undefined) {
+            const amountStroops = parseStroops(p.amount);
+            if (amountStroops < REFUND_MIN_STROOPS) {
+              log.info(
+                {
+                  paymentId: p.id,
+                  memo: outcome.memo,
+                  amount: p.amount,
+                  refundMinStroops: REFUND_MIN_STROOPS.toString(),
+                },
+                'Late deposit below refund dust floor — counted but not recorded for manual refund',
+              );
+              break;
+            }
+          }
           await recordSkip({
             payment: p,
             memo: outcome.memo,
             orderId: strandedOrder.id,
             reason: 'order_gone',
-            detail: 'deposit arrived after order expired unpaid',
+            detail:
+              strandedOrder.state === 'expired'
+                ? 'deposit arrived after order expired unpaid'
+                : 'duplicate deposit arrived after order was already paid',
           });
         }
         break;

@@ -1,11 +1,37 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+const inAppBrowserState = vi.hoisted(() => ({
+  listeners: new Map<string, (...args: unknown[]) => void>(),
+  addListener: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+    inAppBrowserState.listeners.set(event, handler);
+    return Promise.resolve({ remove: vi.fn() });
+  }),
+  openWebView: vi.fn(() => Promise.resolve({ id: 'webview-1' })),
+  executeScript: vi.fn(() => Promise.resolve()),
+  close: vi.fn(() => Promise.resolve()),
+  removeAllListeners: vi.fn(() => {
+    inAppBrowserState.listeners.clear();
+    return Promise.resolve();
+  }),
+}));
+
 // Mock Capacitor core
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
     isNativePlatform: vi.fn(() => false),
     getPlatform: vi.fn(() => 'web'),
   },
+}));
+
+vi.mock('@capgo/inappbrowser', () => ({
+  InAppBrowser: {
+    addListener: inAppBrowserState.addListener,
+    openWebView: inAppBrowserState.openWebView,
+    executeScript: inAppBrowserState.executeScript,
+    close: inAppBrowserState.close,
+    removeAllListeners: inAppBrowserState.removeAllListeners,
+  },
+  ToolBarType: { NAVIGATION: 'navigation' },
 }));
 
 // Mock sessionStorage for secure-storage tests
@@ -101,6 +127,7 @@ import { checkBiometrics, authenticateWithBiometrics } from '../biometrics';
 import { isAppLockEnabled, setAppLockEnabled, registerAppLockGuard } from '../app-lock';
 import { openWebView } from '../webview';
 import { savePendingOrder, loadPendingOrder, clearPendingOrder } from '../purchase-storage';
+import { Capacitor } from '@capacitor/core';
 
 // ────────────────────────────────────────────────────────────
 // 1. Platform
@@ -526,6 +553,13 @@ describe('app-lock', () => {
 describe('webview', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.mocked(Capacitor.isNativePlatform).mockReturnValue(false);
+    inAppBrowserState.listeners.clear();
+    inAppBrowserState.addListener.mockClear();
+    inAppBrowserState.openWebView.mockClear();
+    inAppBrowserState.executeScript.mockClear();
+    inAppBrowserState.close.mockClear();
+    inAppBrowserState.removeAllListeners.mockClear();
     // Clean up window.open mock
     delete (window as unknown as Record<string, unknown>).open;
   });
@@ -657,6 +691,29 @@ describe('webview', () => {
     });
 
     expect(controller).toHaveProperty('close');
+  });
+
+  it('native WebView ignores postMessage after cross-origin navigation', async () => {
+    vi.mocked(Capacitor.isNativePlatform).mockReturnValue(true);
+    const onMessage = vi.fn();
+
+    await openWebView({ url: 'https://redeem.example.com/start', onMessage });
+
+    const messageListener = inAppBrowserState.listeners.get('messageFromWebview');
+    const urlListener = inAppBrowserState.listeners.get('urlChangeEvent');
+    expect(messageListener).toBeDefined();
+    expect(urlListener).toBeDefined();
+
+    messageListener?.({ detail: { type: 'loop:giftcard', code: 'SAME-ORIGIN' } });
+    expect(onMessage).toHaveBeenCalledTimes(1);
+
+    urlListener?.({ url: 'https://evil.example.net/relay' });
+    messageListener?.({ detail: { type: 'loop:giftcard', code: 'FORGED' } });
+    expect(onMessage).toHaveBeenCalledTimes(1);
+
+    urlListener?.({ url: 'https://redeem.example.com/complete' });
+    messageListener?.({ detail: { type: 'loop:giftcard', code: 'BACK' } });
+    expect(onMessage).toHaveBeenCalledTimes(2);
   });
 });
 

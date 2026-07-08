@@ -19,6 +19,7 @@
  * flow.
  */
 import type { Context } from 'hono';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { env } from '../env.js';
 import { logger } from '../logger.js';
@@ -47,6 +48,18 @@ const log = logger.child({ handler: 'loop-orders' });
  */
 const ORDER_IDEMPOTENCY_KEY_MIN = 16;
 const ORDER_IDEMPOTENCY_KEY_MAX = 128;
+/**
+ * R3-10 fallback-key window. KNOWN residuals (money review 2026-07-08,
+ * accepted): (a) two clicks STRADDLING a bucket boundary derive
+ * different keys and both create — the window shrinks the double-click
+ * exposure, it doesn't zero it (a true fix is requiring the header,
+ * which the loop-native client already sends); (b) a deliberate second
+ * identical credit purchase inside the window replays order #1 rather
+ * than charging twice — the safe direction for money, mildly
+ * surprising for the user. Both strictly better than the pre-R3-10
+ * no-guard behaviour.
+ */
+const CREDIT_FALLBACK_IDEMPOTENCY_BUCKET_MS = 60_000;
 
 /**
  * A4-017: hard ceiling on order face value, in minor units. Defence
@@ -73,6 +86,43 @@ const CreateBody = z.object({
     .transform((s) => s.toUpperCase()),
   paymentMethod: z.enum(ORDER_PAYMENT_METHODS),
 });
+
+function deriveCreditFallbackIdempotencyKey(args: {
+  userId: string;
+  merchantId: string;
+  amountMinor: bigint;
+  currency: string;
+  bucket: number;
+}): string {
+  const digest = createHash('sha256')
+    .update('loop:r3-10:credit-order-idempotency:v1')
+    .update('\0')
+    .update(args.userId)
+    .update('\0')
+    .update(args.merchantId)
+    .update('\0')
+    .update(args.amountMinor.toString())
+    .update('\0')
+    .update(args.currency)
+    .update('\0')
+    .update(args.bucket.toString())
+    .digest('hex');
+  return `server-credit-v1-${digest.slice(0, 48)}`;
+}
+
+function creditFallbackIdempotencyKeys(args: {
+  userId: string;
+  merchantId: string;
+  amountMinor: bigint;
+  currency: string;
+  nowMs?: number;
+}): [string, string] {
+  const bucket = Math.floor((args.nowMs ?? Date.now()) / CREDIT_FALLBACK_IDEMPOTENCY_BUCKET_MS);
+  return [
+    deriveCreditFallbackIdempotencyKey({ ...args, bucket }),
+    deriveCreditFallbackIdempotencyKey({ ...args, bucket: bucket - 1 }),
+  ];
+}
 
 /**
  * A2-1504: wire response type is now canonical in `@loop/shared`
@@ -170,17 +220,20 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
     );
   }
 
-  // A2-2003: optional `Idempotency-Key` header. When present and well-
-  // formed, a repeat post within the row's lifetime returns the
-  // already-created order's response instead of writing a second row
-  // (and, for credit-funded orders, a second `user_credits` debit).
-  // When absent, the legacy double-click risk is preserved — the
-  // header is opt-in for now while the loop-native client rolls out.
-  const idempotencyKey = c.req.header('Idempotency-Key') ?? c.req.header('idempotency-key');
-  if (idempotencyKey !== undefined) {
+  // A2-2003 / R3-10: client-supplied `Idempotency-Key` remains the
+  // strongest contract. When absent on `credit` orders, derive a
+  // short-window server key from the authenticated user + order body
+  // so older clients cannot double-click into two mirror-balance
+  // debits. On-chain methods keep the header optional: their duplicate
+  // safety is the memo/deposit watcher path, and intentionally buying
+  // two identical cards in quick succession must remain possible.
+  const suppliedIdempotencyKey = c.req.header('Idempotency-Key') ?? c.req.header('idempotency-key');
+  let idempotencyKey = suppliedIdempotencyKey;
+  let idempotencyLookupKeys: string[] = [];
+  if (suppliedIdempotencyKey !== undefined) {
     if (
-      idempotencyKey.length < ORDER_IDEMPOTENCY_KEY_MIN ||
-      idempotencyKey.length > ORDER_IDEMPOTENCY_KEY_MAX
+      suppliedIdempotencyKey.length < ORDER_IDEMPOTENCY_KEY_MIN ||
+      suppliedIdempotencyKey.length > ORDER_IDEMPOTENCY_KEY_MAX
     ) {
       return c.json(
         {
@@ -190,13 +243,27 @@ export async function loopCreateOrderHandler(c: Context): Promise<Response> {
         400,
       );
     }
+    idempotencyLookupKeys = [suppliedIdempotencyKey];
+  } else if (parsed.data.paymentMethod === 'credit') {
+    idempotencyLookupKeys = creditFallbackIdempotencyKeys({
+      userId: auth.userId,
+      merchantId: parsed.data.merchantId,
+      amountMinor: parsed.data.amountMinor,
+      currency: parsed.data.currency,
+    });
+    idempotencyKey = idempotencyLookupKeys[0];
+  }
+
+  if (idempotencyLookupKeys.length > 0) {
     // Lookup-first: a repeat post short-circuits without holding any
     // locks. The unique index is scoped to (user_id, key), so a key
     // re-used by a different user simply doesn't match here and falls
     // through to the create path.
-    const prior = await findOrderByIdempotencyKey(auth.userId, idempotencyKey);
-    if (prior !== null) {
-      return await replayOrderResponse(c, prior);
+    for (const lookupKey of idempotencyLookupKeys) {
+      const prior = await findOrderByIdempotencyKey(auth.userId, lookupKey);
+      if (prior !== null) {
+        return await replayOrderResponse(c, prior);
+      }
     }
   }
 

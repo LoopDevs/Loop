@@ -24,7 +24,12 @@
  * them directly from this module.
  */
 import { eq, sql } from 'drizzle-orm';
-import type { LoopLiability, TreasuryOrderFlow, TreasurySnapshot } from '@loop/shared';
+import type {
+  LoopLiability,
+  OperatorFloatTreasuryState,
+  TreasuryOrderFlow,
+  TreasurySnapshot,
+} from '@loop/shared';
 import { db } from '../db/client.js';
 import {
   pendingPayouts,
@@ -132,6 +137,90 @@ export async function buildAssets(): Promise<TreasurySnapshot['assets']> {
     log.warn({ err, account }, 'Horizon balance read failed — treasury assets unavailable');
     return { USDC: { stroops: null }, XLM: { stroops: null } };
   }
+}
+
+function emptyOperatorFloatState(): OperatorFloatTreasuryState {
+  return {
+    state: 'unknown',
+    expectedBalanceStroops: null,
+    actualBalanceStroops: null,
+    deltaStroops: null,
+    thresholdStroops: null,
+    unclassifiedCount: 0,
+    checkedAt: null,
+    error: null,
+  };
+}
+
+export async function buildOperatorFloat(): Promise<TreasurySnapshot['operatorFloat']> {
+  const out: TreasurySnapshot['operatorFloat'] = {
+    xlm: emptyOperatorFloatState(),
+    usdc: emptyOperatorFloatState(),
+  };
+  const result = await db.execute<{
+    asset: 'xlm' | 'usdc';
+    state: OperatorFloatTreasuryState['state'];
+    expected_balance_stroops: string | null;
+    actual_balance_stroops: string | null;
+    delta_stroops: string | null;
+    threshold_stroops: string | null;
+    unclassified_count: number;
+    checked_at: string;
+    error: string | null;
+  }>(sql`
+    SELECT DISTINCT ON (asset)
+      asset,
+      state,
+      expected_balance_stroops::text,
+      actual_balance_stroops::text,
+      delta_stroops::text,
+      threshold_stroops::text,
+      unclassified_count,
+      checked_at::text,
+      error
+    FROM operator_float_reconciliation_runs
+    ORDER BY asset, checked_at DESC
+  `);
+  const normalized = result as
+    | Array<{
+        asset: 'xlm' | 'usdc';
+        state: OperatorFloatTreasuryState['state'];
+        expected_balance_stroops: string | null;
+        actual_balance_stroops: string | null;
+        delta_stroops: string | null;
+        threshold_stroops: string | null;
+        unclassified_count: number;
+        checked_at: string;
+        error: string | null;
+      }>
+    | {
+        rows: Array<{
+          asset: 'xlm' | 'usdc';
+          state: OperatorFloatTreasuryState['state'];
+          expected_balance_stroops: string | null;
+          actual_balance_stroops: string | null;
+          delta_stroops: string | null;
+          threshold_stroops: string | null;
+          unclassified_count: number;
+          checked_at: string;
+          error: string | null;
+        }>;
+      };
+  const rows = Array.isArray(normalized) ? normalized : normalized.rows;
+
+  for (const row of rows) {
+    out[row.asset] = {
+      state: row.state,
+      expectedBalanceStroops: row.expected_balance_stroops,
+      actualBalanceStroops: row.actual_balance_stroops,
+      deltaStroops: row.delta_stroops,
+      thresholdStroops: row.threshold_stroops,
+      unclassifiedCount: row.unclassified_count,
+      checkedAt: row.checked_at,
+      error: row.error,
+    };
+  }
+  return out;
 }
 
 /**

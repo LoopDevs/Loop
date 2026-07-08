@@ -38,6 +38,14 @@ const log = logger.child({ handler: 'admin-reconciliation' });
 
 /** Maximum number of drifted rows the endpoint returns. */
 const DRIFT_PAGE_LIMIT = 100;
+const RECONCILIATION_STATEMENT_TIMEOUT_MS = 2_000;
+const RECONCILIATION_CACHE_TTL_MS = 30_000;
+
+let cachedResponse: { response: ReconciliationResponse; expiresAtMs: number } | null = null;
+
+export function __resetReconciliationCacheForTests(): void {
+  cachedResponse = null;
+}
 
 export interface ReconciliationEntry {
   userId: string;
@@ -66,32 +74,49 @@ export interface ReconciliationResponse {
 /** GET /api/admin/reconciliation */
 export async function adminReconciliationHandler(c: Context): Promise<Response> {
   try {
-    // A2-1519: the drift SQL lives in `credits/ledger-invariant.ts`
-    // so the `check-ledger-invariant` CLI and this handler share one
-    // definition. The historical SQL (dual balance-side + orphan-side
-    // UNION ALL) is preserved verbatim in that module — see the
-    // `computeLedgerDriftSql` source for the per-branch rationale.
-    const driftRows = await computeLedgerDriftSql(db, DRIFT_PAGE_LIMIT);
+    const now = Date.now();
+    if (cachedResponse !== null && cachedResponse.expiresAtMs > now) {
+      return c.json(cachedResponse.response);
+    }
 
-    // Total user_credits count — just an aggregate, no filter. Used by
-    // the UI for the "0 drift across N rows" copy.
-    const [countRow] = await db.select({ count: sql<string>`COUNT(*)::text` }).from(userCredits);
+    const response = await db.transaction(async (tx) => {
+      // S4-6: this is a full-ledger aggregate on the admin request
+      // path. Keep the blast radius bounded: the timeout is scoped to
+      // this transaction only, so a slow scan releases the pool
+      // connection instead of monopolising it under load.
+      await tx.execute(
+        sql`SELECT set_config('statement_timeout', ${`${RECONCILIATION_STATEMENT_TIMEOUT_MS}ms`}, true)`,
+      );
 
-    const response: ReconciliationResponse = {
-      rowCount: countRow?.count ?? '0',
-      driftedCount: String(driftRows.length),
-      drift: driftRows.map((r) => ({
-        userId: r.userId,
-        currency: r.currency,
-        balanceMinor: r.balanceMinor,
-        ledgerSumMinor: r.ledgerSumMinor,
-        deltaMinor: r.deltaMinor,
-      })),
-    };
+      // A2-1519: the drift SQL lives in `credits/ledger-invariant.ts`
+      // so the `check-ledger-invariant` CLI and this handler share one
+      // definition. The historical SQL (dual balance-side + orphan-side
+      // UNION ALL) is preserved verbatim in that module — see the
+      // `computeLedgerDriftSql` source for the per-branch rationale.
+      const driftRows = await computeLedgerDriftSql(tx, DRIFT_PAGE_LIMIT);
 
-    if (driftRows.length > 0) {
+      // Total user_credits count — just an aggregate, no filter. Used by
+      // the UI for the "0 drift across N rows" copy.
+      const [countRow] = await tx.select({ count: sql<string>`COUNT(*)::text` }).from(userCredits);
+
+      return {
+        rowCount: countRow?.count ?? '0',
+        driftedCount: String(driftRows.length),
+        drift: driftRows.map((r) => ({
+          userId: r.userId,
+          currency: r.currency,
+          balanceMinor: r.balanceMinor,
+          ledgerSumMinor: r.ledgerSumMinor,
+          deltaMinor: r.deltaMinor,
+        })),
+      };
+    });
+
+    cachedResponse = { response, expiresAtMs: now + RECONCILIATION_CACHE_TTL_MS };
+
+    if (response.drift.length > 0) {
       log.warn(
-        { driftedCount: driftRows.length },
+        { driftedCount: response.drift.length },
         'Ledger drift detected — some user_credits rows disagree with their credit_transactions sum',
       );
     }

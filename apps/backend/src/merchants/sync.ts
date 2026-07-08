@@ -6,6 +6,7 @@ import { env } from '../env.js';
 import { getUpstreamCircuit } from '../circuit-breaker.js';
 import { upstreamUrl } from '../upstream.js';
 import { notifyCtxSchemaDrift } from '../discord.js';
+import { loadCatalogSnapshot, saveCatalogSnapshot } from '../ctx/catalog-snapshots.js';
 import {
   UpstreamMerchantSchema,
   UpstreamListResponseSchema,
@@ -68,9 +69,72 @@ let store: MerchantStore = {
   loadedAt: 0,
 };
 
+function buildMerchantStore(merchants: Merchant[], loadedAt: number): MerchantStore {
+  const log = logger.child({ module: 'merchants-sync' });
+  const merchantsById = new Map(merchants.map((m) => [m.id, m]));
+  // Build merchantsBySlug explicitly so a slug collision is visible in logs
+  // rather than silently clobbering the first entry. Frontend links only see
+  // the last-inserted merchant for a given slug, so the operator needs a
+  // signal to rename one of the conflicting merchants upstream.
+  //
+  // Slugs are now country-aware (`merchantSlug(m)` keys off CTX's slug, else
+  // brand+country) — so regional variants of one brand (`adidas` in CA / US /
+  // GB) get distinct slugs and no longer collide. A warn here therefore fires
+  // only on a TRUE duplicate: two merchants with the same brand AND country
+  // (the ~8 pre-existing dupe clusters like `lastminute`), which is the real
+  // signal an operator should act on.
+  const merchantsBySlug = new Map<string, Merchant>();
+  for (const m of merchants) {
+    const slug = merchantSlug(m);
+    const existing = merchantsBySlug.get(slug);
+    if (existing !== undefined) {
+      log.warn(
+        {
+          slug,
+          keptId: m.id,
+          keptName: m.name,
+          droppedId: existing.id,
+          droppedName: existing.name,
+        },
+        'Merchant slug collision — later merchant wins, earlier entry unreachable by slug',
+      );
+    }
+    merchantsBySlug.set(slug, m);
+  }
+  return { merchants, merchantsById, merchantsBySlug, loadedAt };
+}
+
 /** Returns the current merchant snapshot. */
 export function getMerchants(): MerchantStore {
   return store;
+}
+
+export function __resetMerchantStoreForTests(): void {
+  store = {
+    merchants: [],
+    merchantsById: new Map(),
+    merchantsBySlug: new Map(),
+    loadedAt: 0,
+  };
+  isMerchantRefreshing = false;
+}
+
+export async function warmStartMerchantsFromSnapshot(): Promise<boolean> {
+  if (store.merchants.length > 0) return false;
+  try {
+    const snapshot = await loadCatalogSnapshot<Merchant>('merchants');
+    if (snapshot === null) return false;
+    store = buildMerchantStore(snapshot.items, snapshot.loadedAt);
+    logger
+      .child({ module: 'merchants-sync' })
+      .info({ count: snapshot.items.length }, 'Merchant data warm-started from Postgres snapshot');
+    return true;
+  } catch (err) {
+    logger
+      .child({ module: 'merchants-sync' })
+      .error({ err }, 'Failed to warm-start merchant data from Postgres snapshot');
+    return false;
+  }
 }
 
 let isMerchantRefreshing = false;
@@ -184,37 +248,17 @@ async function refreshMerchantsInternal(opts: { rethrow?: boolean } = {}): Promi
       log.warn({ page, totalPages }, 'Hit MAX_PAGES cap while paginating merchants — truncating');
     }
 
-    const merchantsById = new Map(merchants.map((m) => [m.id, m]));
-    // Build merchantsBySlug explicitly so a slug collision is visible in logs
-    // rather than silently clobbering the first entry. Frontend links only see
-    // the last-inserted merchant for a given slug, so the operator needs a
-    // signal to rename one of the conflicting merchants upstream.
-    //
-    // Slugs are now country-aware (`merchantSlug(m)` keys off CTX's slug, else
-    // brand+country) — so regional variants of one brand (`adidas` in CA / US /
-    // GB) get distinct slugs and no longer collide. A warn here therefore fires
-    // only on a TRUE duplicate: two merchants with the same brand AND country
-    // (the ~8 pre-existing dupe clusters like `lastminute`), which is the real
-    // signal an operator should act on.
-    const merchantsBySlug = new Map<string, Merchant>();
-    for (const m of merchants) {
-      const slug = merchantSlug(m);
-      const existing = merchantsBySlug.get(slug);
-      if (existing !== undefined) {
-        log.warn(
-          {
-            slug,
-            keptId: m.id,
-            keptName: m.name,
-            droppedId: existing.id,
-            droppedName: existing.name,
-          },
-          'Merchant slug collision — later merchant wins, earlier entry unreachable by slug',
-        );
-      }
-      merchantsBySlug.set(slug, m);
+    const loadedAt = Date.now();
+    store = buildMerchantStore(merchants, loadedAt);
+    try {
+      await saveCatalogSnapshot({
+        name: 'merchants',
+        items: merchants,
+        loadedAt: new Date(loadedAt),
+      });
+    } catch (err) {
+      log.error({ err }, 'Failed to persist merchant catalog snapshot');
     }
-    store = { merchants, merchantsById, merchantsBySlug, loadedAt: Date.now() };
     log.info({ count: merchants.length }, 'Merchant data refreshed');
   } catch (err) {
     log.error({ err }, 'Failed to refresh merchant data — retaining previous data');

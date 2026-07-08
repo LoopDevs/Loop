@@ -7,6 +7,12 @@ vi.mock('../../logger.js', () => ({
 const { mocks } = vi.hoisted(() => ({
   mocks: {
     loadRow: vi.fn(),
+    // INV-8 claim-guard selects (routed by projection key): the skip
+    // row's orderId, the order's paying-payment id, and the existing
+    // credit-refund rows. Defaults ([] / null orderId) skip the guard.
+    skipOrderRows: (): unknown[] => [] as unknown[],
+    orderRows: (): unknown[] => [] as unknown[],
+    creditRefundRows: (): unknown[] => [] as unknown[],
     // Result of an `update().set().where().returning()` — drives the
     // CAS claim (non-empty array = claim won).
     claimReturn: (): unknown[] => [] as unknown[],
@@ -22,9 +28,29 @@ const { mocks } = vi.hoisted(() => ({
 }));
 
 // Mock the DB layer via a tiny query-builder stub keyed on which
-// operation runs. We drive loadSkip/claim/mark/release through the
-// mock functions by intercepting `db.select`/`db.update`.
+// operation runs. Selects are routed by their PROJECTION keys (each
+// query in the module selects a distinct column set), so loadSkip and
+// the three claim-guard reads resolve independently.
 vi.mock('../../db/client.js', () => {
+  const routeSelect = (proj: unknown): unknown => {
+    const keys = proj !== undefined ? Object.keys(proj as Record<string, unknown>) : [];
+    if (keys.includes('refundTxHash')) return mocks.loadRow();
+    if (keys.includes('orderId')) return mocks.skipOrderRows();
+    if (keys.includes('paymentReceivedHorizonId')) return mocks.orderRows();
+    if (keys.includes('id')) return mocks.creditRefundRows();
+    return mocks.loadRow();
+  };
+  const select = (proj?: unknown): unknown => ({
+    from: (): unknown => ({
+      where: (): unknown => {
+        const resolved = routeSelect(proj);
+        return {
+          then: (resolve: (v: unknown) => unknown) => resolve(resolved),
+          for: async () => resolved,
+        };
+      },
+    }),
+  });
   const update = (): unknown => ({
     set: (): unknown => ({
       where: (..._a: unknown[]): unknown => ({
@@ -32,14 +58,30 @@ vi.mock('../../db/client.js', () => {
       }),
     }),
   });
-  return {
-    db: {
-      select: (): unknown => ({ from: (): unknown => ({ where: (): unknown => mocks.loadRow() }) }),
-      update,
-    },
+  const dbLike = {
+    select,
+    update,
+    transaction: async (cb: (tx: unknown) => unknown) => cb(dbLike),
   };
+  return { db: dbLike };
 });
-vi.mock('../../db/schema.js', () => ({ paymentWatcherSkips: {} }));
+vi.mock('../../db/schema.js', () => ({
+  paymentWatcherSkips: {
+    paymentId: 'payment_id',
+    status: 'status',
+    orderId: 'order_id',
+    refundTxHash: 'refund_tx_hash',
+    payment: 'payment',
+    updatedAt: 'updated_at',
+  },
+  orders: { id: 'id', paymentReceivedHorizonId: 'payment_received_horizon_id' },
+  creditTransactions: {
+    id: 'id',
+    type: 'type',
+    referenceType: 'reference_type',
+    referenceId: 'reference_id',
+  },
+}));
 vi.mock('../payout-submit.js', () => ({
   submitPayout: (a: unknown) => mocks.submitPayout(a),
   submitNativePayment: (a: unknown) => mocks.submitNative(a),
@@ -98,6 +140,9 @@ const CFG = {
 beforeEach(() => {
   Object.values(mocks).forEach((m) => (m as ReturnType<typeof vi.fn>).mockReset?.());
   mocks.claimReturn = () => [{ paymentId: 'op-1' }]; // claim wins by default
+  mocks.skipOrderRows = () => []; // no bound order → INV-8 guard skipped
+  mocks.orderRows = () => [];
+  mocks.creditRefundRows = () => [];
   mocks.resolveConfig.mockReturnValue(CFG);
   mocks.submitPayout.mockResolvedValue({ txHash: 'txout', ledger: 1 });
   mocks.submitNative.mockResolvedValue({ txHash: 'txout', ledger: 1 });
@@ -244,6 +289,54 @@ describe('refundDeposit', () => {
     mocks.claimReturn = () => []; // another caller already claimed
     const r = await refundDeposit('op-1');
     expect(r.kind).toBe('in_progress');
+    expect(mocks.submitNative).not.toHaveBeenCalled();
+  });
+
+  it('INV-8: refuses the claim when the bound order was already refunded as a mirror credit', async () => {
+    mocks.loadRow.mockResolvedValue([row()]);
+    mocks.skipOrderRows = () => [{ orderId: 'o-1' }];
+    // The deposit IS the order's paying deposit…
+    mocks.orderRows = () => [{ paymentReceivedHorizonId: 'op-1' }];
+    // …and a mirror-credit refund row already exists for the order.
+    mocks.creditRefundRows = () => [{ id: 'ct-refund' }];
+    const r = await refundDeposit('op-1');
+    expect(r).toMatchObject({ kind: 'not_refundable' });
+    expect((r as { detail: string }).detail).toContain('INV-8');
+    expect(mocks.submitNative).not.toHaveBeenCalled();
+    expect(mocks.submitPayout).not.toHaveBeenCalled();
+  });
+
+  it('INV-8: a DUPLICATE deposit (paying id differs) stays refundable despite a credit refund', async () => {
+    mocks.loadRow.mockResolvedValue([row()]);
+    mocks.skipOrderRows = () => [{ orderId: 'o-1' }];
+    mocks.orderRows = () => [{ paymentReceivedHorizonId: 'op-OTHER' }];
+    mocks.creditRefundRows = () => [{ id: 'ct-refund' }];
+    const r = await refundDeposit('op-1');
+    expect(r).toMatchObject({ kind: 'refunded', txHash: 'txout' });
+    expect(mocks.submitNative).toHaveBeenCalledTimes(1);
+  });
+
+  it('INV-8: a null paying id fails closed — credit-refunded order blocks the deposit refund', async () => {
+    mocks.loadRow.mockResolvedValue([row()]);
+    mocks.skipOrderRows = () => [{ orderId: 'o-1' }];
+    mocks.orderRows = () => [{ id: 'o-1', paymentReceivedHorizonId: null }];
+    mocks.creditRefundRows = () => [{ id: 'ct-refund' }];
+    const r = await refundDeposit('op-1');
+    expect(r).toMatchObject({ kind: 'not_refundable' });
+    expect(mocks.submitNative).not.toHaveBeenCalled();
+  });
+
+  it('INV-8: an orderId=NULL skip row (processing_error class) is still guarded via the reverse paying-id lookup', async () => {
+    mocks.loadRow.mockResolvedValue([row()]);
+    // The skip row never got bound to an order…
+    mocks.skipOrderRows = () => [{ orderId: null }];
+    // …but SOME order records this deposit as its paying payment, and
+    // that order was already refunded as credit.
+    mocks.orderRows = () => [{ id: 'o-reverse', paymentReceivedHorizonId: 'op-1' }];
+    mocks.creditRefundRows = () => [{ id: 'ct-refund' }];
+    const r = await refundDeposit('op-1');
+    expect(r).toMatchObject({ kind: 'not_refundable' });
+    expect((r as { detail: string }).detail).toContain('INV-8');
     expect(mocks.submitNative).not.toHaveBeenCalled();
   });
 

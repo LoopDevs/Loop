@@ -263,6 +263,24 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     );
   }
 
+  // R3-7: production must not silently fall back to the legacy
+  // CTX-proxy auth path. If this flag is unset on a new prod deploy,
+  // a CTX outage becomes a full login outage and the Loop-owned auth
+  // controls are bypassed. Fail fast unless the operator deliberately
+  // ships the rollback/staging override.
+  if (
+    parsed.data.NODE_ENV === 'production' &&
+    !parsed.data.LOOP_AUTH_NATIVE_ENABLED &&
+    parsed.data.DISABLE_NATIVE_AUTH_ENFORCEMENT !== '1'
+  ) {
+    throw new Error(
+      'Invalid environment variables — LOOP_AUTH_NATIVE_ENABLED must be true in production ' +
+        '(R3-7 / ADR 013). Leaving it false reverts auth to the legacy CTX-proxy path. ' +
+        'Set LOOP_AUTH_NATIVE_ENABLED=true with a JWT signing key, or set ' +
+        'DISABLE_NATIVE_AUTH_ENFORCEMENT=1 only for an explicit rollback/staging deploy.',
+    );
+  }
+
   // 2. Production without the admin step-up key. Every destructive
   //    admin endpoint (credit-adjust / refunds / emissions /
   //    payout-retry / staff-role writes) would return 503

@@ -9,10 +9,12 @@ vi.mock('../../logger.js', () => ({
 
 /**
  * Reconciliation handler shape:
- *   1. db.execute(sql`...drift query...`) → returns a row array
- *   2. db.select({count}).from(userCredits) → returns [{ count }]
+ *   1. db.transaction(...) scopes the request-local statement timeout.
+ *   2. tx.execute(sql`set_config(...)`) → returns an ignored row array.
+ *   3. tx.execute(sql`...drift query...`) → returns a row array.
+ *   4. tx.select({count}).from(userCredits) → returns [{ count }]
  *
- * The mock keys each path by call order — execute first, then select.
+ * The mock keys each execute path by call order.
  */
 const { executeQueue, selectRows } = vi.hoisted(() => ({
   executeQueue: [] as unknown[][],
@@ -20,19 +22,43 @@ const { executeQueue, selectRows } = vi.hoisted(() => ({
 }));
 
 vi.mock('../../db/client.js', () => ({
-  db: {
-    execute: vi.fn(async () => executeQueue.shift() ?? []),
-    select: vi.fn(() => ({
-      from: vi.fn(async () => selectRows),
-    })),
-  },
+  db: (() => {
+    const mockedDb = {
+      execute: vi.fn(async () => executeQueue.shift() ?? []),
+      transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(mockedDb)),
+      select: vi.fn(() => ({
+        from: vi.fn(async () => selectRows),
+      })),
+    };
+    return mockedDb;
+  })(),
 }));
 
 vi.mock('../../db/schema.js', () => ({
   userCredits: {},
 }));
 
-import { adminReconciliationHandler } from '../reconciliation.js';
+import { db } from '../../db/client.js';
+import {
+  __resetReconciliationCacheForTests,
+  adminReconciliationHandler,
+} from '../reconciliation.js';
+
+const dbMock = db as unknown as {
+  execute: ReturnType<typeof vi.fn>;
+  transaction: ReturnType<typeof vi.fn>;
+  select: ReturnType<typeof vi.fn>;
+};
+
+function queueReconciliation(driftRows: unknown[]): void {
+  executeQueue.push([], driftRows);
+}
+
+function resetDbMocks(): void {
+  dbMock.execute.mockClear();
+  dbMock.transaction.mockClear();
+  dbMock.select.mockClear();
+}
 
 function makeCtx(): Context {
   return {
@@ -47,11 +73,13 @@ function makeCtx(): Context {
 beforeEach(() => {
   executeQueue.length = 0;
   selectRows.length = 0;
+  __resetReconciliationCacheForTests();
+  resetDbMocks();
 });
 
 describe('adminReconciliationHandler', () => {
   it('returns empty drift + zero counts when the ledger has no rows', async () => {
-    executeQueue.push([]);
+    queueReconciliation([]);
     selectRows.push({ count: '0' });
     const res = await adminReconciliationHandler(makeCtx());
     const body = (await res.json()) as {
@@ -65,7 +93,7 @@ describe('adminReconciliationHandler', () => {
   it('returns empty drift + non-zero rowCount when every row is consistent', async () => {
     // Drift query returns nothing (no HAVING matches); count query
     // reports the total user_credits population.
-    executeQueue.push([]);
+    queueReconciliation([]);
     selectRows.push({ count: '42' });
     const res = await adminReconciliationHandler(makeCtx());
     const body = (await res.json()) as {
@@ -79,7 +107,7 @@ describe('adminReconciliationHandler', () => {
   });
 
   it('surfaces each drifted row as-is, preserving bigint-string precision', async () => {
-    executeQueue.push([
+    queueReconciliation([
       {
         userId: 'user-a',
         currency: 'GBP',
@@ -127,7 +155,7 @@ describe('adminReconciliationHandler', () => {
     // ledgerSum = net sum of the orphan transactions, and a negative
     // delta (balance - ledgerSum). Prior LEFT-JOIN-anchored query
     // missed them entirely.
-    executeQueue.push([
+    queueReconciliation([
       {
         userId: 'orphan-user',
         currency: 'USD',
@@ -158,6 +186,7 @@ describe('adminReconciliationHandler', () => {
 
   it('handles the { rows: [...] } wrapper shape from a future drizzle driver', async () => {
     executeQueue.push(
+      [],
       // Simulate an execute result that carries rows inside a wrapper
       // instead of being the array itself. The handler normalises both.
       Object.assign(Object.create(null), {
@@ -180,5 +209,24 @@ describe('adminReconciliationHandler', () => {
     };
     expect(body.driftedCount).toBe('1');
     expect(body.drift[0]?.userId).toBe('user-c');
+  });
+
+  it('S4-6: sets a transaction-local statement timeout before the full drift scan', async () => {
+    queueReconciliation([]);
+    selectRows.push({ count: '0' });
+    await adminReconciliationHandler(makeCtx());
+    expect(dbMock.transaction).toHaveBeenCalledOnce();
+    expect(dbMock.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('S4-6: serves the response from a short cache on immediate repeat requests', async () => {
+    queueReconciliation([]);
+    selectRows.push({ count: '7' });
+    const first = await adminReconciliationHandler(makeCtx());
+    const second = await adminReconciliationHandler(makeCtx());
+    await first.json();
+    const body = (await second.json()) as { rowCount: string };
+    expect(body.rowCount).toBe('7');
+    expect(dbMock.transaction).toHaveBeenCalledOnce();
   });
 });

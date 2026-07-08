@@ -16,6 +16,10 @@ import {
 } from './payments/payout-worker.js';
 import { startAssetDriftWatcher, stopAssetDriftWatcher } from './payments/asset-drift-watcher.js';
 import {
+  startOperatorFloatReconciliationWatcher,
+  stopOperatorFloatReconciliationWatcher,
+} from './payments/operator-float-reconciliation.js';
+import {
   startInterestPoolWatcher,
   stopInterestPoolWatcher,
   INTEREST_POOL_WATCHER_DEFAULT_INTERVAL_MS,
@@ -82,9 +86,9 @@ if (env.NODE_ENV !== 'test') {
 // Merchants load first (startMerchantRefresh triggers initial refresh).
 // Locations start after a short delay to ensure merchant data is available
 // for cross-referencing pin logos.
-startMerchantRefresh();
+await startMerchantRefresh();
 const locationStartTimer = setTimeout(() => {
-  startLocationRefresh();
+  void startLocationRefresh();
 }, 3000);
 
 // Loop-native order workers (ADR 010). Gated behind LOOP_WORKERS_ENABLED
@@ -98,8 +102,12 @@ if (env.LOOP_WORKERS_ENABLED) {
       reason: 'LOOP_STELLAR_DEPOSIT_ADDRESS is unset',
       staleAfterMs: env.LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS * 3000,
     });
+    markWorkerBlocked('operator_float_reconciliation', {
+      reason: 'LOOP_STELLAR_DEPOSIT_ADDRESS is unset',
+      staleAfterMs: env.LOOP_OPERATOR_FLOAT_RECONCILIATION_INTERVAL_HOURS * 3 * 60 * 60 * 1000,
+    });
     logger.error(
-      'LOOP_WORKERS_ENABLED=true but LOOP_STELLAR_DEPOSIT_ADDRESS is unset — payment watcher will not start',
+      'LOOP_WORKERS_ENABLED=true but LOOP_STELLAR_DEPOSIT_ADDRESS is unset — payment watcher and operator-float reconciliation will not start',
     );
   } else {
     startPaymentWatcher({
@@ -108,6 +116,9 @@ if (env.LOOP_WORKERS_ENABLED) {
         ? { usdcIssuer: env.LOOP_STELLAR_USDC_ISSUER }
         : {}),
       intervalMs: env.LOOP_PAYMENT_WATCHER_INTERVAL_SECONDS * 1000,
+    });
+    startOperatorFloatReconciliationWatcher({
+      intervalMs: env.LOOP_OPERATOR_FLOAT_RECONCILIATION_INTERVAL_HOURS * 60 * 60 * 1000,
     });
   }
   startProcurementWorker({
@@ -254,6 +265,7 @@ if (env.LOOP_WORKERS_ENABLED) {
   }
 } else {
   markWorkerDisabled('payment_watcher', 'LOOP_WORKERS_ENABLED is false');
+  markWorkerDisabled('operator_float_reconciliation', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('procurement_worker', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('redemption_backfill', 'LOOP_WORKERS_ENABLED is false');
   markWorkerDisabled('payout_worker', 'LOOP_WORKERS_ENABLED is false');
@@ -290,6 +302,7 @@ function shutdown(signal: string): void {
   stopMerchantRefresh();
   stopLocationRefresh();
   stopPaymentWatcher();
+  stopOperatorFloatReconciliationWatcher();
   stopProcurementWorker();
   stopRedemptionBackfill();
   stopPayoutWorker();

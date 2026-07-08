@@ -67,8 +67,11 @@ vi.mock('../../env.js', () => ({
   ),
 }));
 
-const { orderState } = vi.hoisted(() => ({
+const { orderState, advisoryLockState } = vi.hoisted(() => ({
   orderState: { row: undefined as unknown, freshRow: undefined as unknown },
+  // `degraded: true` models a transaction-pooler DATABASE_URL, where
+  // withAdvisoryLock runs the fn WITHOUT any lock (see db/client.ts).
+  advisoryLockState: { held: new Set<string>(), degraded: false },
 }));
 vi.mock('../../db/client.js', () => ({
   db: {
@@ -86,6 +89,19 @@ vi.mock('../../db/client.js', () => ({
         }),
       },
     },
+  },
+  withAdvisoryLock: async <T>(key: bigint, fn: () => Promise<T>) => {
+    if (advisoryLockState.degraded) {
+      return { ran: true as const, value: await fn() };
+    }
+    const lock = key.toString();
+    if (advisoryLockState.held.has(lock)) return { ran: false as const };
+    advisoryLockState.held.add(lock);
+    try {
+      return { ran: true as const, value: await fn() };
+    } finally {
+      advisoryLockState.held.delete(lock);
+    }
   },
 }));
 
@@ -203,6 +219,7 @@ function fundedTrustlines(balanceStroops: bigint): unknown {
 
 beforeEach(() => {
   __resetRedeemFenceForTests();
+  advisoryLockState.held.clear();
   envState.LOOP_AUTH_NATIVE_ENABLED = true;
   envState.LOOP_STELLAR_DEPOSIT_ADDRESS = DEPOSIT_ADDRESS;
   envState.LOOP_STELLAR_OPERATOR_SECRET = OPERATOR_SECRET;
@@ -347,6 +364,35 @@ describe('redeemLoopOrderHandler — balance + fence', () => {
     const firstRes = await first;
     expect(firstRes.status).toBe(200);
     expect(submitMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('inner-belt fence holds when the advisory lock is degraded to a no-op (pooled DATABASE_URL)', async () => {
+    advisoryLockState.degraded = true;
+    try {
+      let release!: () => void;
+      const gate = new Promise<void>((r) => {
+        release = r;
+      });
+      trustlinesMock.mockImplementationOnce(async () => {
+        await gate;
+        return fundedTrustlines(100_000_000n);
+      });
+
+      const first = redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+      await new Promise((r) => setImmediate(r));
+      // No advisory lock exists — only the in-process Set stands
+      // between this second tap and a second Stellar submit.
+      const second = await redeemLoopOrderHandler(makeCtx({ auth: LOOP_AUTH, param: ORDER_ID }));
+      expect(second.status).toBe(400);
+      expect((await bodyOf(second))['code']).toBe('PAYMENT_IN_FLIGHT');
+
+      release();
+      const firstRes = await first;
+      expect(firstRes.status).toBe(200);
+      expect(submitMock).toHaveBeenCalledTimes(1);
+    } finally {
+      advisoryLockState.degraded = false;
+    }
   });
 
   it('releases the fence after completion (sequential retry is allowed)', async () => {

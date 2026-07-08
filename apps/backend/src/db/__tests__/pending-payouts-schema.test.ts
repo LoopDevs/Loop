@@ -1,6 +1,6 @@
 import { describe, it, expect, expectTypeOf } from 'vitest';
 import { getTableConfig } from 'drizzle-orm/pg-core';
-import { pendingPayouts } from '../schema.js';
+import { interestMintSnapshots, pendingPayouts } from '../schema.js';
 
 type PendingPayoutRow = typeof pendingPayouts.$inferSelect;
 type PendingPayoutInsert = typeof pendingPayouts.$inferInsert;
@@ -80,6 +80,16 @@ describe('pending_payouts schema (A2-901 / ADR-024 §2)', () => {
     const checkNames = getTableConfig(pendingPayouts).checks.map((c) => c.name);
     expect(checkNames).toContain('pending_payouts_kind_known');
     expect(checkNames).toContain('pending_payouts_kind_shape');
+  });
+
+  it('pins interest_mint payout rows to GBPLOOP at the schema layer', () => {
+    const checkNames = getTableConfig(pendingPayouts).checks.map((c) => c.name);
+    expect(checkNames).toContain('pending_payouts_interest_mint_asset_pinned');
+  });
+
+  it('pins interest-mint snapshots to GBPLOOP at the schema layer', () => {
+    const checkNames = getTableConfig(interestMintSnapshots).checks.map((c) => c.name);
+    expect(checkNames).toContain('interest_mint_snapshots_asset_code_known');
   });
 
   it('ADR 036: per-kind order uniqueness + active-emission fence are declared', () => {

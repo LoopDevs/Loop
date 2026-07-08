@@ -9,15 +9,18 @@ import {
   text,
   bigint,
   timestamp,
+  integer,
   index,
   check,
   primaryKey,
   uniqueIndex,
   doublePrecision,
+  jsonb,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { orders } from './orders.js';
 import { users } from './users.js';
+import { paymentWatcherSkips } from './payments.js';
 
 /**
  * Persisted per-asset state of the asset-drift watcher (hardening
@@ -185,6 +188,191 @@ export const ctxSettlements = pgTable(
   (t) => [
     uniqueIndex('ctx_settlements_order_unique').on(t.orderId),
     check('ctx_settlements_amount_positive', sql`${t.amountStroops} > 0`),
+  ],
+);
+
+export const OPERATOR_FLOAT_ASSETS = ['xlm', 'usdc'] as const;
+export type OperatorFloatAsset = (typeof OPERATOR_FLOAT_ASSETS)[number];
+
+export const OPERATOR_FLOAT_DIRECTIONS = ['in', 'out'] as const;
+export type OperatorFloatDirection = (typeof OPERATOR_FLOAT_DIRECTIONS)[number];
+
+export const OPERATOR_FLOAT_CLASSIFICATIONS = [
+  'user_deposit',
+  'ctx_settlement',
+  'deposit_refund',
+  'manual',
+  'unclassified',
+] as const;
+export type OperatorFloatClassification = (typeof OPERATOR_FLOAT_CLASSIFICATIONS)[number];
+
+export const OPERATOR_FLOAT_RUN_STATES = [
+  'ok',
+  'drift',
+  'unclassified',
+  'needs_baseline',
+  'error',
+] as const;
+export type OperatorFloatRunState = (typeof OPERATOR_FLOAT_RUN_STATES)[number];
+
+/**
+ * Opening point for the operator/deposit wallet conservation check
+ * (R3-1). Ops chooses one active baseline per (account, asset):
+ * balance at that point plus indexed, classified Horizon movements
+ * should equal the current Horizon balance within the configured
+ * threshold. Absence of an active baseline is a fail-closed
+ * `needs_baseline` state, not healthy.
+ */
+export const operatorWalletBaselines = pgTable(
+  'operator_wallet_baselines',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    asset: text('asset').notNull().$type<OperatorFloatAsset>(),
+    account: text('account').notNull(),
+    openingBalanceStroops: bigint('opening_balance_stroops', { mode: 'bigint' }).notNull(),
+    startingHorizonCursor: text('starting_horizon_cursor'),
+    currentHorizonCursor: text('current_horizon_cursor'),
+    active: integer('active').notNull().default(1),
+    reason: text('reason').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('operator_wallet_baselines_account_asset_active').on(t.account, t.asset, t.active),
+    // Migration 0054: at most one ACTIVE baseline per (account, asset)
+    // — a concurrent double-create fails loudly instead of leaving two
+    // actives for loadActiveBaseline to tiebreak by created_at.
+    uniqueIndex('operator_wallet_baselines_one_active')
+      .on(t.account, t.asset)
+      .where(sql`${t.active} = 1`),
+    check('operator_wallet_baselines_asset_known', sql`${t.asset} IN ('xlm', 'usdc')`),
+    check('operator_wallet_baselines_opening_non_negative', sql`${t.openingBalanceStroops} >= 0`),
+    check('operator_wallet_baselines_active_bool', sql`${t.active} IN (0, 1)`),
+    check('operator_wallet_baselines_reason_len', sql`length(${t.reason}) BETWEEN 2 AND 500`),
+    check(
+      'operator_wallet_baselines_created_by_len',
+      sql`length(${t.createdBy}) BETWEEN 1 AND 200`,
+    ),
+  ],
+);
+
+export const operatorManualMovements = pgTable(
+  'operator_manual_movements',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    asset: text('asset').notNull().$type<OperatorFloatAsset>(),
+    account: text('account').notNull(),
+    direction: text('direction').notNull().$type<OperatorFloatDirection>(),
+    amountStroops: bigint('amount_stroops', { mode: 'bigint' }).notNull(),
+    /** Optional Horizon operation id this manual explanation classifies. */
+    movementPaymentId: text('movement_payment_id'),
+    effectiveAt: timestamp('effective_at', { withTimezone: true }).notNull().defaultNow(),
+    reason: text('reason').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('operator_manual_movements_account_asset_effective').on(
+      t.account,
+      t.asset,
+      t.effectiveAt,
+    ),
+    index('operator_manual_movements_payment').on(t.movementPaymentId),
+    check('operator_manual_movements_asset_known', sql`${t.asset} IN ('xlm', 'usdc')`),
+    check('operator_manual_movements_direction_known', sql`${t.direction} IN ('in', 'out')`),
+    check('operator_manual_movements_amount_positive', sql`${t.amountStroops} > 0`),
+    check('operator_manual_movements_reason_len', sql`length(${t.reason}) BETWEEN 2 AND 500`),
+    check(
+      'operator_manual_movements_created_by_len',
+      sql`length(${t.createdBy}) BETWEEN 1 AND 200`,
+    ),
+  ],
+);
+
+export const operatorWalletMovements = pgTable(
+  'operator_wallet_movements',
+  {
+    /** Horizon payment operation id. */
+    paymentId: text('payment_id').primaryKey(),
+    txHash: text('tx_hash').notNull(),
+    pagingToken: text('paging_token').notNull(),
+    account: text('account').notNull(),
+    asset: text('asset').notNull().$type<OperatorFloatAsset>(),
+    assetCode: text('asset_code').notNull(),
+    assetIssuer: text('asset_issuer'),
+    direction: text('direction').notNull().$type<OperatorFloatDirection>(),
+    fromAddress: text('from_address'),
+    toAddress: text('to_address'),
+    memoText: text('memo_text'),
+    amountStroops: bigint('amount_stroops', { mode: 'bigint' }).notNull(),
+    classification: text('classification')
+      .notNull()
+      .default('unclassified')
+      .$type<OperatorFloatClassification>(),
+    orderId: uuid('order_id').references(() => orders.id, { onDelete: 'set null' }),
+    // Related payment_watcher_skips row — DUAL meaning by direction:
+    // for an OUTBOUND deposit_refund movement it is the skip row whose
+    // deposit this refund returns; for an INBOUND user_deposit matched
+    // only via a skip row (orphan/late deposit) it is that skip row
+    // itself. Read it as "the watcher-skip row that explains this
+    // movement", not "the refund's payment id".
+    refundPaymentId: text('refund_payment_id').references(() => paymentWatcherSkips.paymentId, {
+      onDelete: 'set null',
+    }),
+    settlementId: uuid('settlement_id').references(() => ctxSettlements.id, {
+      onDelete: 'set null',
+    }),
+    manualMovementId: uuid('manual_movement_id').references(() => operatorManualMovements.id, {
+      onDelete: 'set null',
+    }),
+    rawPayment: jsonb('raw_payment').notNull(),
+    observedAt: timestamp('observed_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('operator_wallet_movements_paging_unique').on(t.pagingToken),
+    index('operator_wallet_movements_account_asset_observed').on(t.account, t.asset, t.observedAt),
+    index('operator_wallet_movements_classification').on(t.classification, t.observedAt),
+    index('operator_wallet_movements_tx_hash').on(t.txHash),
+    check('operator_wallet_movements_asset_known', sql`${t.asset} IN ('xlm', 'usdc')`),
+    check('operator_wallet_movements_direction_known', sql`${t.direction} IN ('in', 'out')`),
+    check('operator_wallet_movements_amount_positive', sql`${t.amountStroops} > 0`),
+    check(
+      'operator_wallet_movements_classification_known',
+      sql`${t.classification} IN ('user_deposit', 'ctx_settlement', 'deposit_refund', 'manual', 'unclassified')`,
+    ),
+  ],
+);
+
+export const operatorFloatReconciliationRuns = pgTable(
+  'operator_float_reconciliation_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    asset: text('asset').notNull().$type<OperatorFloatAsset>(),
+    account: text('account').notNull(),
+    baselineId: uuid('baseline_id').references(() => operatorWalletBaselines.id, {
+      onDelete: 'set null',
+    }),
+    expectedBalanceStroops: bigint('expected_balance_stroops', { mode: 'bigint' }),
+    actualBalanceStroops: bigint('actual_balance_stroops', { mode: 'bigint' }),
+    deltaStroops: bigint('delta_stroops', { mode: 'bigint' }),
+    thresholdStroops: bigint('threshold_stroops', { mode: 'bigint' }).notNull(),
+    unclassifiedCount: integer('unclassified_count').notNull().default(0),
+    indexedMovementCount: integer('indexed_movement_count').notNull().default(0),
+    state: text('state').notNull().$type<OperatorFloatRunState>(),
+    error: text('error'),
+    checkedAt: timestamp('checked_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('operator_float_runs_account_asset_checked').on(t.account, t.asset, t.checkedAt),
+    check('operator_float_runs_asset_known', sql`${t.asset} IN ('xlm', 'usdc')`),
+    check(
+      'operator_float_runs_state_known',
+      sql`${t.state} IN ('ok', 'drift', 'unclassified', 'needs_baseline', 'error')`,
+    ),
+    check('operator_float_runs_threshold_non_negative', sql`${t.thresholdStroops} >= 0`),
+    check('operator_float_runs_unclassified_non_negative', sql`${t.unclassifiedCount} >= 0`),
   ],
 );
 

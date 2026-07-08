@@ -75,3 +75,22 @@ describe('orders redemption-backfill columns (migration 0034)', () => {
     >();
   });
 });
+
+describe('orders paying-payment identity columns (migration 0050)', () => {
+  it('payment_received_horizon_id is nullable on row and insert', () => {
+    expectTypeOf<OrderRow['paymentReceivedHorizonId']>().toEqualTypeOf<string | null>();
+    expectTypeOf<OrderInsert['paymentReceivedHorizonId']>().toEqualTypeOf<
+      string | null | undefined
+    >();
+  });
+
+  it('payment_received_tx_hash is nullable on row and insert', () => {
+    expectTypeOf<OrderRow['paymentReceivedTxHash']>().toEqualTypeOf<string | null>();
+    expectTypeOf<OrderInsert['paymentReceivedTxHash']>().toEqualTypeOf<string | null | undefined>();
+  });
+
+  it('payment_received_payment is nullable on row and insert', () => {
+    expectTypeOf<OrderRow['paymentReceivedPayment']>().toEqualTypeOf<unknown>();
+    expectTypeOf<OrderInsert['paymentReceivedPayment']>().toEqualTypeOf<unknown>();
+  });
+});

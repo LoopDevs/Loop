@@ -65,7 +65,21 @@ vi.mock('../../ctx/stream.js', () => ({
 const { payCtxOrderMock } = vi.hoisted(() => ({
   payCtxOrderMock: vi.fn(async () => ({ txHash: 'ctx-pay-tx', submitted: true })),
 }));
+// R3-5 retry guard seam: a non-null settlement row means a prior
+// attempt already reached payCtxOrder, so the band check is skipped.
+const { ctxSettlementState } = vi.hoisted(() => ({
+  ctxSettlementState: { row: null as null | Record<string, unknown> },
+}));
+vi.mock('../ctx-settlements.js', () => ({
+  getCtxSettlementByOrderId: vi.fn(async () => ctxSettlementState.row),
+}));
 vi.mock('../pay-ctx.js', () => ({
+  decimalToStroops: (s: string): bigint | null => {
+    const trimmed = s.trim();
+    if (!/^\d+(?:\.\d{0,7})?$/.test(trimmed)) return null;
+    const [whole = '', frac = ''] = trimmed.split('.');
+    return BigInt(whole) * 10_000_000n + BigInt(frac.padEnd(7, '0'));
+  },
   payCtxOrder: payCtxOrderMock,
   PayCtxConfigError: class PayCtxConfigError extends Error {
     constructor(m: string) {
@@ -120,6 +134,7 @@ const { envState, balancesState, getBalancesMock } = vi.hoisted(() => {
     LOOP_STELLAR_DEPOSIT_ADDRESS: undefined as string | undefined,
     LOOP_STELLAR_USDC_ISSUER: undefined as string | undefined,
     LOOP_STELLAR_USDC_FLOOR_STROOPS: undefined as bigint | undefined,
+    LOOP_CTX_PAYMENT_MAX_BPS_OF_EXPECTED: 12_500,
     LOOP_PHASE_1_ONLY: false as boolean,
   };
   const balances = {
@@ -143,10 +158,14 @@ vi.mock('../../env.js', () => ({
 vi.mock('../../payments/horizon-balances.js', () => ({
   getAccountBalances: getBalancesMock,
 }));
+vi.mock('../../payments/price-feed.js', () => ({
+  requiredStroopsForCharge: vi.fn(async (chargeMinor: bigint) => chargeMinor * 1_000_000n),
+}));
 
 const { discordMock } = vi.hoisted(() => ({
   discordMock: {
     notifyUsdcBelowFloor: vi.fn<(args: unknown) => void>(() => undefined),
+    notifyCtxSchemaDrift: vi.fn<(args: unknown) => void>(() => undefined),
     // CF2-05 (2026-06-30 cold audit): pre-payment procurement failures
     // now also auto-refund + alert, same as the CF-20 post-payment path.
     notifyOrderFailedAfterCtxPaid: vi.fn<(args: unknown) => void>(() => undefined),
@@ -154,6 +173,7 @@ const { discordMock } = vi.hoisted(() => ({
 }));
 vi.mock('../../discord.js', () => ({
   notifyUsdcBelowFloor: (args: unknown) => discordMock.notifyUsdcBelowFloor(args),
+  notifyCtxSchemaDrift: (args: unknown) => discordMock.notifyCtxSchemaDrift(args),
   notifyOrderFailedAfterCtxPaid: (args: unknown) => discordMock.notifyOrderFailedAfterCtxPaid(args),
 }));
 
@@ -211,6 +231,7 @@ type AnyOrder = {
   userId: string;
   chargeMinor: bigint;
   chargeCurrency: string;
+  wholesaleMinor: bigint;
 };
 
 function makeOrder(overrides: Partial<AnyOrder> = {}): AnyOrder {
@@ -222,6 +243,7 @@ function makeOrder(overrides: Partial<AnyOrder> = {}): AnyOrder {
     userId: 'user-1',
     chargeMinor: 10_000n,
     chargeCurrency: 'GBP',
+    wholesaleMinor: 10_000n,
     ...overrides,
   };
 }
@@ -288,11 +310,16 @@ beforeEach(() => {
   payCtxOrderMock.mockResolvedValue({ txHash: 'ctx-pay-tx', submitted: true });
   getBalancesMock.mockClear();
   discordMock.notifyUsdcBelowFloor.mockClear();
+  discordMock.notifyCtxSchemaDrift.mockClear();
+  discordMock.notifyOrderFailedAfterCtxPaid.mockClear();
+  refundsMock.applyOrderAutoRefund.mockClear();
   __resetBelowFloorAlertForTests();
   __resetCtxBackoffForTests();
   envState.LOOP_STELLAR_DEPOSIT_ADDRESS = undefined;
   envState.LOOP_STELLAR_USDC_ISSUER = undefined;
   envState.LOOP_STELLAR_USDC_FLOOR_STROOPS = undefined;
+  envState.LOOP_CTX_PAYMENT_MAX_BPS_OF_EXPECTED = 12_500;
+  ctxSettlementState.row = null;
   envState.LOOP_PHASE_1_ONLY = false;
   balancesState.usdc = null;
   balancesState.throwErr = null;
@@ -468,6 +495,65 @@ describe('runProcurementTick', () => {
     const r = await runProcurementTick();
     expect(r.failed).toBe(1);
     expect(markFailedMock).toHaveBeenCalledWith('o-1', expect.stringMatching(/schema drift/));
+    expect(discordMock.notifyCtxSchemaDrift).toHaveBeenCalledWith({
+      surface: 'POST /gift-cards',
+      issuesSummary: expect.stringContaining('id'),
+    });
+  });
+
+  it('R3-5: inflated CTX payment URI fails safe before paying CTX', async () => {
+    state.paid = [makeOrder({ id: 'o-1', wholesaleMinor: 10_000n, chargeCurrency: 'GBP' })];
+    const inflatedUri = 'web+stellar:pay?destination=GTESTCTXDEST&amount=2000.0000000&memo=ctx-1';
+    operatorFetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'ctx-1',
+          paymentUrls: { USDC: inflatedUri },
+          paymentCryptoAmount: '2000.0000000',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const r = await runProcurementTick();
+    expect(r.failed).toBe(1);
+    expect(payCtxOrderMock).not.toHaveBeenCalled();
+    expect(markFailedMock).toHaveBeenCalledWith(
+      'o-1',
+      expect.stringContaining('exceeds 12500 bps ceiling'),
+    );
+    expect(refundsMock.applyOrderAutoRefund).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: 'o-1' }),
+    );
+    expect(discordMock.notifyOrderFailedAfterCtxPaid).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: 'o-1', ctxOrderId: 'ctx-1', ctxPaid: false }),
+    );
+  });
+
+  it('R3-5 retry guard: an existing settlement intent SKIPS the band — a prior ambiguous submit may already have paid CTX', async () => {
+    // Money review 2026-07-08: attempt 1 passed the band and reached
+    // payCtxOrder (settlement row persisted), the submit returned
+    // ambiguously, and the order reverted to paid. On the retry the
+    // pinned CTX amount now breaches the ceiling (oracle moved). The
+    // band must NOT fail-and-refund — payCtxOrder's pinned-intent +
+    // windowless landed-check own this attempt.
+    state.paid = [makeOrder({ id: 'o-1', wholesaleMinor: 10_000n, chargeCurrency: 'GBP' })];
+    ctxSettlementState.row = { id: 'settlement-1', orderId: 'o-1', txHash: 'maybe-landed' };
+    const inflatedUri = 'web+stellar:pay?destination=GTESTCTXDEST&amount=2000.0000000&memo=ctx-1';
+    operatorFetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'ctx-1',
+          paymentUrls: { USDC: inflatedUri },
+          paymentCryptoAmount: '2000.0000000',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const r = await runProcurementTick();
+    expect(payCtxOrderMock).toHaveBeenCalledTimes(1);
+    expect(r.failed).toBe(0);
+    expect(markFailedMock).not.toHaveBeenCalled();
+    expect(refundsMock.applyOrderAutoRefund).not.toHaveBeenCalled();
   });
 
   it('operator pool unavailable → reverts to paid for retry, skipped (no mark-failed) [A4-101]', async () => {

@@ -351,6 +351,41 @@
       "when": 1780188000000,
       "tag": "0049_watcher_skip_order_gone",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1780188100000,
+      "tag": "0050_orders_paying_payment_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1780188200000,
+      "tag": "0051_orders_paying_payment_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1780188300000,
+      "tag": "0052_operator_float_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1780188400000,
+      "tag": "0053_ctx_catalog_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1780188500000,
+      "tag": "0054_operator_wallet_baselines_one_active",
+      "breakpoints": true
     }
   ]
 }

@@ -32,6 +32,12 @@ import {
 import type { LoopAuthContext } from '../auth/handler.js';
 import { findLiveOtp, incrementOtpAttempts, markOtpConsumed } from '../auth/otps.js';
 import { normalizeEmail, NonAsciiEmailError } from '../auth/normalize-email.js';
+import {
+  clearOtpAttempts,
+  isEmailOtpLocked,
+  OTP_EMAIL_LOCKOUT_MS,
+  registerFailedOtpAttempt,
+} from '../auth/otp-attempt-counter.js';
 
 const log = logger.child({ handler: 'admin-step-up' });
 
@@ -66,8 +72,8 @@ export async function adminStepUpHandler(c: Context): Promise<Response> {
   const auth = c.get('auth') as LoopAuthContext | undefined;
   if (auth === undefined || auth.kind !== 'loop') {
     // ADR-028 step-up is a Loop-native-only surface. CTX-proxy
-    // admins fall back to whatever CTX itself gates on, and the
-    // middleware exempts them from step-up checks.
+    // sessions have no Loop-native subject to pin the step-up token
+    // to, so fail closed.
     return c.json(
       { code: 'UNAUTHORIZED', message: 'Loop-native authentication required for admin step-up' },
       401,
@@ -93,12 +99,28 @@ export async function adminStepUpHandler(c: Context): Promise<Response> {
   }
 
   try {
+    if (await isEmailOtpLocked({ email })) {
+      c.header('Retry-After', String(Math.ceil(OTP_EMAIL_LOCKOUT_MS / 1000)));
+      return c.json(
+        { code: 'TOO_MANY_ATTEMPTS', message: 'Too many attempts. Try again later.' },
+        429,
+      );
+    }
     const hit = await findLiveOtp({ email, code: parsed.data.otp });
     if (hit === null) {
       await incrementOtpAttempts({ email });
+      const { locked } = await registerFailedOtpAttempt({ email });
+      if (locked) {
+        c.header('Retry-After', String(Math.ceil(OTP_EMAIL_LOCKOUT_MS / 1000)));
+        return c.json(
+          { code: 'TOO_MANY_ATTEMPTS', message: 'Too many attempts. Try again later.' },
+          429,
+        );
+      }
       return c.json({ code: 'UNAUTHORIZED', message: 'Invalid or expired verification code' }, 401);
     }
     await markOtpConsumed(hit.id);
+    await clearOtpAttempts(email);
     const { token, claims } = signAdminStepUpToken({
       sub: auth.userId,
       email,

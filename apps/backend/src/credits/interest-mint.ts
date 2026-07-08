@@ -65,8 +65,9 @@
  * between the ledger txn and the Stellar submit re-drives from the
  * queue without double-crediting.
  */
+import { createHash } from 'node:crypto';
 import { and, desc, eq, isNotNull, sql } from 'drizzle-orm';
-import { db } from '../db/client.js';
+import { db, withAdvisoryLock } from '../db/client.js';
 import {
   creditTransactions,
   interestMintSnapshots,
@@ -96,6 +97,20 @@ const STROOPS_PER_MINOR = 100_000n;
 
 /** `watcher_cursors` row name holding the last fully-processed period. */
 export const INTEREST_MINT_CURSOR_NAME = 'interest_mint';
+
+function interestMintLockKey(): bigint {
+  const digest = createHash('sha256').update('loop:interest-mint-worker').digest();
+  const raw =
+    (BigInt(digest[0]!) << 56n) |
+    (BigInt(digest[1]!) << 48n) |
+    (BigInt(digest[2]!) << 40n) |
+    (BigInt(digest[3]!) << 32n) |
+    (BigInt(digest[4]!) << 24n) |
+    (BigInt(digest[5]!) << 16n) |
+    (BigInt(digest[6]!) << 8n) |
+    BigInt(digest[7]!);
+  return BigInt.asIntN(64, raw);
+}
 
 /**
  * On-chain-mint-eligible LOOP codes (2026-06-15 cold audit v-wallet
@@ -325,6 +340,8 @@ async function mintOneUser(args: MintOneArgs): Promise<{
 export interface InterestMintTickResult {
   /** The UTC-day period this tick targeted. */
   period: string;
+  /** True when another machine held the fleet-wide mint lock. */
+  skippedLocked: boolean;
   /** True when the cursor already covered the period (cheap no-op tick). */
   alreadyProcessed: boolean;
   /** Activated-wallet users considered. */
@@ -353,10 +370,37 @@ export async function runInterestMintTick(args?: {
   now?: Date;
   apyBps?: number;
 }): Promise<InterestMintTickResult> {
-  const apyBps = args?.apyBps ?? env.INTEREST_APY_BASIS_POINTS;
   const period = utcPeriodCursor(args?.now ?? new Date());
+  const locked = await withAdvisoryLock(interestMintLockKey(), () =>
+    runInterestMintTickLocked({ ...args, period }),
+  );
+  if (!locked.ran) {
+    return {
+      period,
+      skippedLocked: true,
+      alreadyProcessed: false,
+      eligibleUsers: 0,
+      minted: 0,
+      accruedOnly: 0,
+      skippedZeroBalance: 0,
+      skippedAlready: 0,
+      errors: 0,
+      totalsMinor: {},
+    };
+  }
+  return locked.value;
+}
+
+async function runInterestMintTickLocked(args: {
+  now?: Date;
+  apyBps?: number;
+  period: string;
+}): Promise<InterestMintTickResult> {
+  const apyBps = args?.apyBps ?? env.INTEREST_APY_BASIS_POINTS;
+  const period = args.period;
   const result: InterestMintTickResult = {
     period,
+    skippedLocked: false,
     alreadyProcessed: false,
     eligibleUsers: 0,
     minted: 0,

@@ -48,6 +48,13 @@
     `POST /api/admin/step-up`. This is defence-in-depth; it does not by itself
     make the OTP a truly independent second factor (the passwordless-OTP
     limitation below still stands — WebAuthn is the Phase-2 fix).
+- **2026-07-07** R3-12 hardening: `requireAdminStepUp(...)` no longer lets
+  legacy CTX-proxy auth fall through. The gate requires a Loop-native auth
+  subject so the step-up token can be subject-pinned; a CTX bearer has no Loop
+  user id and fails closed with `STEP_UP_INVALID`. This is mostly a tripwire in
+  the current admin route stack because `requireAdmin` already rejects CTX
+  auth before route-specific step-up middleware, but it prevents a future
+  mis-mounted step-up gate from becoming a standalone CTX pass-through.
 
 ### Activation gate / deploy ordering
 
@@ -74,20 +81,29 @@ Step-up auth means: for a defined set of destructive primitives, the admin re-pr
 
 ## Decision
 
-**Phase 1: pin the design; ship a minimal slice for credit-adjust + withdrawal only. Phase 2: expand.**
+**Phase 1: require fresh step-up on destructive admin writes. Phase 2: expand the factor quality and thresholds.**
 
-The Phase-1 step-up surface is:
+The current step-up surface is:
 
-- `POST /api/admin/credits/adjust` (ADR-017 credit primitives)
-- `POST /api/admin/withdrawals` (ADR-024 withdrawal writer)
-- `POST /api/admin/payouts/:id/retry` (manual payout retry)
+- credit adjustment
+- refund
+- withdrawal
+- payout retry
+- payout compensation
+- home-currency change
+- merchant cashback-config write
+- staff role grant / revoke
+- abandoned-deposit refund
 
-**Excluded** from the Phase-1 minimum surface:
+**Excluded** from the current surface:
 
-- Cashback-config edits (audited via ADR-011 trail; reversible)
 - Merchant resyncs, force-refresh (read-only effects)
 - Admin CSV exports (read-only)
 - Admin-panel navigation (handled by `<RequireAdmin>` shell)
+
+Legacy CTX-proxy auth is not an alternate admin-write path. The admin surface
+requires Loop-native auth, and the step-up middleware itself also fails closed
+without a Loop-native subject to pin against.
 
 ### Mechanism
 

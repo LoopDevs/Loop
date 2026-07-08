@@ -328,6 +328,13 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # LOOP_JWT_RSA_PRIVATE_KEY=<PKCS8 PEM>
 # LOOP_JWT_RSA_PRIVATE_KEY_PREVIOUS=<prior PKCS8 PEM during rotation>
 
+# Loop-native auth (ADR 013). Production boot fails unless enabled
+# (R3-7) so deploys cannot silently fall back to legacy CTX-proxy
+# auth. Emergency rollback / staging only:
+# DISABLE_NATIVE_AUTH_ENFORCEMENT=1.
+# LOOP_AUTH_NATIVE_ENABLED=true
+# DISABLE_NATIVE_AUTH_ENFORCEMENT=1
+
 # Admin step-up auth (ADR 028). Hardening B3: production boot FAILS
 # without it (destructive admin endpoints would all 503
 # STEP_UP_UNAVAILABLE — a silently-degraded admin surface); set
@@ -376,6 +383,11 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # so a dev-mode backend doesn't submit Stellar transactions; set true in
 # production + Fly staging after LOOP_STELLAR_OPERATOR_SECRET is wired.
 # LOOP_WORKERS_ENABLED=true
+
+# R3-5 CTX settlement sanity band. Before paying CTX, procurement
+# refuses a SEP-7 payment amount above this many basis points of the
+# expected wholesale XLM quote. Default 12500 = 125%.
+# LOOP_CTX_PAYMENT_MAX_BPS_OF_EXPECTED=12500
 
 # Hardening A6: auto-refund late deposits (deposits landing after their
 # order expired). Default false → refunds are admin-triggered via
