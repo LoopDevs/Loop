@@ -30,8 +30,9 @@
  * `index.ts` on `LOOP_WORKERS_ENABLED`, with per-tick errors
  * swallowed so a transient CTX / DB blip doesn't kill the interval.
  */
+import { createHash } from 'node:crypto';
 import { and, eq, isNull, isNotNull, lt } from 'drizzle-orm';
-import { db } from '../db/client.js';
+import { db, withAdvisoryLock } from '../db/client.js';
 import { orders } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { notifyRedemptionBackfillExhausted } from '../discord.js';
@@ -91,6 +92,31 @@ export interface RedemptionBackfillTickResult {
   errors: number;
   /** True when the tick aborted early on a pool-wide operator outage. */
   abortedPoolUnavailable: boolean;
+  /** S4-8: true when another machine held the fleet-wide sweep lock. */
+  skippedLocked: boolean;
+}
+
+/**
+ * S4-8 (docs/readiness-backlog-2026-07-03.md): fixed advisory-lock key
+ * for the redemption-backfill single-flight, same sha256→int64
+ * derivation as `interestMintLockKey` / `ledgerInvariantLockKey`,
+ * fixed scope string. Per the doc-comment above, duplicate concurrent
+ * runs of this sweep were already money-safe (CAS-guarded writes) —
+ * this lock is a pure efficiency win (fewer redundant CTX reads), not
+ * a correctness fix.
+ */
+function redemptionBackfillLockKey(): bigint {
+  const digest = createHash('sha256').update('loop:redemption-backfill').digest();
+  const raw =
+    (BigInt(digest[0]!) << 56n) |
+    (BigInt(digest[1]!) << 48n) |
+    (BigInt(digest[2]!) << 40n) |
+    (BigInt(digest[3]!) << 32n) |
+    (BigInt(digest[4]!) << 24n) |
+    (BigInt(digest[5]!) << 16n) |
+    (BigInt(digest[6]!) << 8n) |
+    BigInt(digest[7]!);
+  return BigInt.asIntN(64, raw);
 }
 
 /**
@@ -108,8 +134,14 @@ export interface RedemptionBackfillTickResult {
  * read-only supplier call — wasted cost, no money/correctness bug) but
  * exactly one wins the attempt bump and the at-cap page. No shared
  * sequenced resource, no double-process.
+ *
+ * S4-8: still true today, but two machines re-fetching the same CTX
+ * order on every tick is a real wasted-cost tax at fleet scale. Single-
+ * flighted fleet-wide via `withAdvisoryLock` (see the exported
+ * `runRedemptionBackfillTick` wrapper below) — pure efficiency, the
+ * money-safety reasoning above is unchanged and preserved verbatim.
  */
-export async function runRedemptionBackfillTick(args?: {
+async function runRedemptionBackfillTickLocked(args?: {
   limit?: number;
   now?: number;
 }): Promise<RedemptionBackfillTickResult> {
@@ -122,6 +154,7 @@ export async function runRedemptionBackfillTick(args?: {
     exhausted: 0,
     errors: 0,
     abortedPoolUnavailable: false,
+    skippedLocked: false,
   };
 
   // Matches the partial index `orders_redemption_backfill_pending`
@@ -206,6 +239,42 @@ export async function runRedemptionBackfillTick(args?: {
   }
 
   return result;
+}
+
+/**
+ * S4-8: fleet-wide single-flight wrapper around
+ * `runRedemptionBackfillTickLocked`, copying the `withAdvisoryLock` +
+ * zeroed-result pattern from `runInterestMintTick`
+ * (`../credits/interest-mint.ts`). With N Fly machines running the
+ * same 60s-cadence interval, only the lock holder sweeps this tick;
+ * the rest return immediately with `skippedLocked: true` and no I/O.
+ *
+ * Public API unchanged for existing callers (`startRedemptionBackfill`,
+ * the ADR-037 admin one-shot uses `refetchOrderRedemption` directly
+ * and is NOT gated by this lock — a human click is its own rate
+ * limiter) — this is still `runRedemptionBackfillTick`, just now
+ * single-flighted.
+ */
+export async function runRedemptionBackfillTick(args?: {
+  limit?: number;
+  now?: number;
+}): Promise<RedemptionBackfillTickResult> {
+  const locked = await withAdvisoryLock(redemptionBackfillLockKey(), () =>
+    runRedemptionBackfillTickLocked(args),
+  );
+  if (!locked.ran) {
+    return {
+      picked: 0,
+      notDueYet: 0,
+      recovered: 0,
+      stillEmpty: 0,
+      exhausted: 0,
+      errors: 0,
+      abortedPoolUnavailable: false,
+      skippedLocked: true,
+    };
+  }
+  return locked.value;
 }
 
 /**

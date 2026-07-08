@@ -60,7 +60,16 @@ const { dbMock, dbState } = vi.hoisted(() => {
     dbState: s,
   };
 });
-vi.mock('../../db/client.js', () => ({ db: dbMock }));
+vi.mock('../../db/client.js', () => ({
+  db: dbMock,
+  // S4-8: withAdvisoryLock always acquires in this suite — it only
+  // exercises the encrypt-at-rest persistence, not lock contention
+  // (that's covered by redemption-backfill.test.ts's S4-8 case).
+  withAdvisoryLock: async <T>(
+    _lockKey: bigint,
+    fn: () => Promise<T>,
+  ): Promise<{ ran: true; value: T } | { ran: false }> => ({ ran: true, value: await fn() }),
+}));
 
 import { resetRedeemKeyCache, isEncryptedRedeemField } from '../redeem-crypto.js';
 import { runRedemptionBackfillTick } from '../redemption-backfill.js';

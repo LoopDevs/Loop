@@ -24,10 +24,12 @@ interface DuePages {
   failedRows?: 'present' | 'cleared';
 }
 
-const { mocks, driftStore } = vi.hoisted(() => {
+const { mocks, driftStore, advisoryState } = vi.hoisted(() => {
   const driftStore = new Map<string, StoredDriftState>();
+  const advisoryState = { acquired: true };
   return {
     driftStore,
+    advisoryState,
     mocks: {
       configuredLoopPayableAssets: vi.fn<
         () => ReadonlyArray<{ code: 'USDLOOP' | 'GBPLOOP' | 'EURLOOP'; issuer: string }>
@@ -216,6 +218,19 @@ vi.mock('../../discord.js', () => ({
   notifyDriftFailedRowsCleared: (args: unknown) => mocks.notifyDriftFailedRowsCleared(args),
 }));
 
+// S4-8: withAdvisoryLock mock — same shape as interest-mint.test.ts.
+// Default acquires the lock and runs `fn`; `advisoryState.acquired =
+// false` simulates another machine holding it fleet-wide.
+vi.mock('../../db/client.js', () => ({
+  withAdvisoryLock: async <T>(
+    _lockKey: bigint,
+    fn: () => Promise<T>,
+  ): Promise<{ ran: true; value: T } | { ran: false }> => {
+    if (!advisoryState.acquired) return { ran: false };
+    return { ran: true, value: await fn() };
+  },
+}));
+
 import {
   runAssetDriftTick,
   getAssetDriftState,
@@ -225,6 +240,7 @@ import {
 beforeEach(() => {
   __resetAssetDriftWatcherForTests();
   driftStore.clear();
+  advisoryState.acquired = true;
   mocks.configuredLoopPayableAssets.mockReset();
   mocks.sumOutstandingLiability.mockReset();
   mocks.getLoopAssetCirculation.mockReset();
@@ -423,6 +439,19 @@ describe('runAssetDriftTick', () => {
     expect(sample.onChainStroops).toBe(1_500_000n);
     expect(sample.poolStroops).toBe(1_000_000n);
     expect(sample.over).toBe(false);
+    expect(mocks.notifyAssetDrift).not.toHaveBeenCalled();
+  });
+
+  it('S4-8: skips the tick when another machine holds the asset-drift-watcher lock', async () => {
+    advisoryState.acquired = false;
+    mocks.configuredLoopPayableAssets.mockReturnValue([{ code: 'USDLOOP', issuer: 'GABC' }]);
+
+    const r = await runAssetDriftTick({ thresholdStroops: 1_000n });
+    expect(r).toEqual({ checked: 0, skipped: 0, samples: [], skippedLocked: true });
+    // Zero Horizon/ledger reads and zero Discord pages — the whole
+    // per-asset pass never ran.
+    expect(mocks.getLoopAssetCirculation).not.toHaveBeenCalled();
+    expect(mocks.sumOutstandingLiability).not.toHaveBeenCalled();
     expect(mocks.notifyAssetDrift).not.toHaveBeenCalled();
   });
 });

@@ -41,6 +41,13 @@ vi.mock('../../db/client.js', () => ({
       },
     },
   },
+  // S4-8: withAdvisoryLock always acquires in this scheduling suite —
+  // it only exercises the timer wiring, not lock contention (that's
+  // covered by watcher.test.ts / watcher-bootstrap's own S4-8 cases).
+  withAdvisoryLock: async <T>(
+    _lockKey: bigint,
+    fn: () => Promise<T>,
+  ): Promise<{ ran: true; value: T }> => ({ ran: true, value: await fn() }),
 }));
 vi.mock('../../db/schema.js', async () => {
   const actual = await vi.importActual<typeof SchemaModule>('../../db/schema.js');

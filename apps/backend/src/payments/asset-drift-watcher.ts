@@ -43,6 +43,8 @@
  * spurious recovery. The admin UI keeps the same invariant
  * (ledger-side stays authoritative when Horizon is down).
  */
+import { createHash } from 'node:crypto';
+import { withAdvisoryLock } from '../db/client.js';
 import { configuredLoopPayableAssets, type LoopAssetCode } from '../credits/payout-asset.js';
 import { sumOutstandingLiability } from '../credits/liabilities.js';
 import {
@@ -181,10 +183,37 @@ export interface DriftTickResult {
   /** Assets skipped because Horizon returned an error this tick. */
   skipped: number;
   samples: AssetDriftSample[];
+  /** S4-8: true when another machine held the fleet-wide watcher lock. */
+  skippedLocked: boolean;
 }
 
 export interface RunDriftTickArgs {
   thresholdStroops: bigint;
+}
+
+/**
+ * S4-8 (docs/readiness-backlog-2026-07-03.md): fixed advisory-lock key
+ * for the asset-drift-watcher single-flight, same sha256→int64
+ * derivation as `interestMintLockKey` / `ledgerInvariantLockKey`,
+ * fixed scope string. Note this is orthogonal to the PAGING dedup
+ * `asset-drift-state-repo.ts` already does (a per-asset DB row +
+ * lease claims exactly one page per transition, fleet-wide) — that
+ * mechanism only dedupes the ALERT. Without this lock every machine
+ * still independently re-reads Horizon + the ledger every tick; this
+ * lock dedupes the READS.
+ */
+function assetDriftLockKey(): bigint {
+  const digest = createHash('sha256').update('loop:asset-drift-watcher').digest();
+  const raw =
+    (BigInt(digest[0]!) << 56n) |
+    (BigInt(digest[1]!) << 48n) |
+    (BigInt(digest[2]!) << 40n) |
+    (BigInt(digest[3]!) << 32n) |
+    (BigInt(digest[4]!) << 24n) |
+    (BigInt(digest[5]!) << 16n) |
+    (BigInt(digest[6]!) << 8n) |
+    BigInt(digest[7]!);
+  return BigInt.asIntN(64, raw);
 }
 
 /** Fiat backing each LOOP code — 1:1 by design. */
@@ -256,11 +285,18 @@ function abs(n: bigint): bigint {
  * Pure enough to be called from tests directly — the Horizon fetch,
  * ledger query, state persistence and Discord send are all injected
  * via module mocks.
+ *
+ * S4-8: single-flighted fleet-wide via `withAdvisoryLock` (see the
+ * exported `runAssetDriftTick` wrapper below) — with N Fly machines
+ * only one runs the per-asset Horizon + ledger reads this tick,
+ * instead of N redundant read passes. The per-asset PAGING dedup
+ * (`asset-drift-state-repo.ts`) still applies underneath and is
+ * unchanged — this lock is a pure read-efficiency layer on top.
  */
-export async function runAssetDriftTick(args: RunDriftTickArgs): Promise<DriftTickResult> {
+async function runAssetDriftTickLocked(args: RunDriftTickArgs): Promise<DriftTickResult> {
   const assets = configuredLoopPayableAssets();
   const poolAccount = resolveInterestPoolAccount();
-  const result: DriftTickResult = { checked: 0, skipped: 0, samples: [] };
+  const result: DriftTickResult = { checked: 0, skipped: 0, samples: [], skippedLocked: false };
   for (const { code, issuer } of assets) {
     const fiat = fiatOf(code);
     // Captured BEFORE the reads: the staleness fence in
@@ -458,6 +494,30 @@ export async function runAssetDriftTick(args: RunDriftTickArgs): Promise<DriftTi
   }
   lastTickMs = Date.now();
   return result;
+}
+
+/**
+ * S4-8: fleet-wide single-flight wrapper around
+ * `runAssetDriftTickLocked`, copying the `withAdvisoryLock` +
+ * zeroed-result pattern from `runInterestMintTick`
+ * (`../credits/interest-mint.ts`). With N Fly machines running the
+ * same interval, only the lock holder reads Horizon + the ledger this
+ * tick; the rest return immediately with `skippedLocked: true` and no
+ * I/O. `lastTickMs` (surfaced by `getAssetDriftState`) only advances
+ * on a machine that actually won the lock and ran the full pass — the
+ * per-asset `lastCheckedMs` from the persisted `asset_drift_state`
+ * table (A3) remains the fleet-wide-authoritative freshness signal.
+ *
+ * Public API unchanged for existing callers (`startAssetDriftWatcher`,
+ * the test suite) — this is still `runAssetDriftTick`, just now
+ * single-flighted.
+ */
+export async function runAssetDriftTick(args: RunDriftTickArgs): Promise<DriftTickResult> {
+  const locked = await withAdvisoryLock(assetDriftLockKey(), () => runAssetDriftTickLocked(args));
+  if (!locked.ran) {
+    return { checked: 0, skipped: 0, samples: [], skippedLocked: true };
+  }
+  return locked.value;
 }
 
 /**

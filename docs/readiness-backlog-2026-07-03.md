@@ -476,10 +476,25 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### S4-8 · Dedupe per-machine watchers/alerts `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Done 2026-07-09
       **Why:** Non-single-flighted watchers (payment-watcher, asset-drift, redemption-backfill) run on every machine → N× Horizon/CTX reads; the cursor + stuck-payout Discord watchdogs gate on a per-process boolean → **N duplicate pages** at N machines. Scale-#7.
       **Do:** apply `withAdvisoryLock` (or a DB dedup) to the duplicated watchers/alerts. Location sync's doubled ~500-page CTX sweep is architectural (leave for later; cheap today).
       **Done when:** watchers run once per fleet per tick; no duplicate pages.
+      **Done 2026-07-09:** `runPaymentWatcherTick` / `runAssetDriftTick` /
+      `runRedemptionBackfillTick` (plus the expiry sweep in
+      `watcher-bootstrap.ts`) now wrap in a fixed fleet-wide
+      `withAdvisoryLock`, copying the `interest-mint.ts` pattern —
+      losing machines return `skippedLocked: true` with zero
+      Horizon/CTX/DB-write calls. The cursor + stuck-payout watchdogs
+      switch from a per-process boolean to `pg_try_advisory_xact_lock`
+      inside `db.transaction` (the `ledger-invariant-watcher.ts`
+      pattern) so only the lock holder evaluates staleness and manages
+      the one-shot re-arm state; documented caveat: because the xact
+      lock isn't sticky across ticks, a holder rotation mid-incident can
+      still re-page once (bounded, not per-tick). Location sync's
+      doubled sweep stays explicitly out of scope, per this item's
+      original "Do." Focused per-watcher tests assert the skipped path
+      makes zero external calls.
 
 ---
 

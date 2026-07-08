@@ -24,7 +24,9 @@
  * (`'../payments/watcher.js'`) used by `index.ts` and the test
  * suite keeps working unchanged.
  */
+import { createHash } from 'node:crypto';
 import { logger } from '../logger.js';
+import { withAdvisoryLock } from '../db/client.js';
 import {
   markWorkerStarted,
   markWorkerStopped,
@@ -59,6 +61,30 @@ const PAYMENT_EXPIRY_MS = 24 * 60 * 60 * 1000;
 /** How often the expiry sweep runs. 5 min is generous given 24h horizon. */
 const EXPIRY_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
+/**
+ * S4-8 (docs/readiness-backlog-2026-07-03.md): fixed advisory-lock key
+ * for the expiry-sweep single-flight, same sha256→int64 derivation as
+ * `interestMintLockKey` / `ledgerInvariantLockKey`, fixed scope
+ * string. `sweepExpiredOrders` is a single state-guarded UPDATE
+ * (`WHERE state = 'pending_payment'`) — already CAS-safe against N
+ * machines racing the same rows, so this lock is a pure efficiency
+ * win (avoids N redundant full-table-ish scans every 5 min), not a
+ * correctness fix.
+ */
+function orderExpirySweepLockKey(): bigint {
+  const digest = createHash('sha256').update('loop:order-expiry-sweep').digest();
+  const raw =
+    (BigInt(digest[0]!) << 56n) |
+    (BigInt(digest[1]!) << 48n) |
+    (BigInt(digest[2]!) << 40n) |
+    (BigInt(digest[3]!) << 32n) |
+    (BigInt(digest[4]!) << 24n) |
+    (BigInt(digest[5]!) << 16n) |
+    (BigInt(digest[6]!) << 8n) |
+    BigInt(digest[7]!);
+  return BigInt.asIntN(64, raw);
+}
+
 export function startPaymentWatcher(args: {
   account: string;
   usdcIssuer?: string | undefined;
@@ -86,10 +112,15 @@ export function startPaymentWatcher(args: {
   };
   const expirySweep = async (): Promise<void> => {
     try {
-      const cutoff = new Date(Date.now() - PAYMENT_EXPIRY_MS);
-      const n = await sweepExpiredOrders(cutoff);
-      if (n > 0) {
-        log.info({ swept: n }, 'Marked abandoned pending_payment orders as expired');
+      // S4-8: single-flighted fleet-wide — see orderExpirySweepLockKey
+      // doc-comment. A machine that doesn't win the lock this tick
+      // just skips (another machine already covers the same window).
+      const locked = await withAdvisoryLock(orderExpirySweepLockKey(), async () => {
+        const cutoff = new Date(Date.now() - PAYMENT_EXPIRY_MS);
+        return await sweepExpiredOrders(cutoff);
+      });
+      if (locked.ran && locked.value > 0) {
+        log.info({ swept: locked.value }, 'Marked abandoned pending_payment orders as expired');
       }
     } catch (err) {
       log.error({ err }, 'Expiry sweep failed');

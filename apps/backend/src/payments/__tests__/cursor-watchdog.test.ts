@@ -7,18 +7,34 @@ vi.mock('../../logger.js', () => ({
 const { state, mocks } = vi.hoisted(() => ({
   state: {
     row: undefined as { cursor: string | null; updatedAt: Date } | undefined,
+    /** S4-8: whether the pg_try_advisory_xact_lock probe "acquires". */
+    advisoryAcquired: true,
   },
   mocks: {
     notifyPaymentWatcherStuck: vi.fn<(args: unknown) => void>(() => undefined),
+    txExecute: vi.fn(),
   },
 }));
 
+// S4-8: db.transaction + pg_try_advisory_xact_lock mock — same shape
+// as ledger-invariant-watcher.test.ts. The transaction callback gets
+// a `tx` exposing both `.execute` (the lock probe) and `.query` (the
+// cursor lookup, same shape as the un-transacted `db.query` used
+// pre-S4-8).
 vi.mock('../../db/client.js', () => ({
   db: {
-    query: {
-      watcherCursors: {
-        findFirst: vi.fn(async () => state.row),
-      },
+    transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+      const tx = {
+        execute: mocks.txExecute.mockImplementation(async () => [
+          { locked: state.advisoryAcquired },
+        ]),
+        query: {
+          watcherCursors: {
+            findFirst: vi.fn(async () => state.row),
+          },
+        },
+      };
+      return fn(tx);
     },
   },
 }));
@@ -35,7 +51,9 @@ import { runCursorWatchdog, __resetCursorWatchdogForTests } from '../cursor-watc
 
 beforeEach(() => {
   state.row = undefined;
+  state.advisoryAcquired = true;
   mocks.notifyPaymentWatcherStuck.mockReset();
+  mocks.txExecute.mockClear();
   __resetCursorWatchdogForTests();
 });
 
@@ -103,5 +121,19 @@ describe('runCursorWatchdog', () => {
     await runCursorWatchdog();
     const args = mocks.notifyPaymentWatcherStuck.mock.calls[0]![0] as { lastCursor: string };
     expect(args.lastCursor).toBe('');
+  });
+
+  it('S4-8: skips the check when another machine holds the cursor-watchdog lock', async () => {
+    state.advisoryAcquired = false;
+    state.row = { cursor: 'pt-1', updatedAt: new Date(Date.now() - 11 * 60 * 1000) };
+    const r = await runCursorWatchdog();
+    expect(r).toEqual({ skippedLocked: true });
+    expect(mocks.notifyPaymentWatcherStuck).not.toHaveBeenCalled();
+  });
+
+  it('returns skippedLocked: false when it acquires the lock and runs', async () => {
+    state.row = undefined;
+    const r = await runCursorWatchdog();
+    expect(r).toEqual({ skippedLocked: false });
   });
 });

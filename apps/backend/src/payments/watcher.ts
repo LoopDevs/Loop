@@ -19,8 +19,9 @@
  * wiring lands in a follow-up once an operator has verified the
  * watcher against testnet.
  */
+import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
-import { db } from '../db/client.js';
+import { db, withAdvisoryLock } from '../db/client.js';
 import { watcherCursors } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { findAnyOrderByMemo, findPendingOrderByMemo } from '../orders/repo.js';
@@ -104,6 +105,28 @@ export interface TickResult {
   errors: number;
   /** Previously-skipped deposits recovered by this tick's sweep. */
   skipsRecovered: number;
+  /** S4-8: true when another machine held the fleet-wide watcher lock. */
+  skippedLocked: boolean;
+}
+
+/**
+ * S4-8 (docs/readiness-backlog-2026-07-03.md): fixed advisory-lock key
+ * for the payment-watcher single-flight, same sha256→int64 derivation
+ * as `interestMintLockKey` / `ledgerInvariantLockKey`, fixed scope
+ * string.
+ */
+function paymentWatcherLockKey(): bigint {
+  const digest = createHash('sha256').update('loop:payment-watcher').digest();
+  const raw =
+    (BigInt(digest[0]!) << 56n) |
+    (BigInt(digest[1]!) << 48n) |
+    (BigInt(digest[2]!) << 40n) |
+    (BigInt(digest[3]!) << 32n) |
+    (BigInt(digest[4]!) << 24n) |
+    (BigInt(digest[5]!) << 16n) |
+    (BigInt(digest[6]!) << 8n) |
+    BigInt(digest[7]!);
+  return BigInt.asIntN(64, raw);
 }
 
 /** A4-107 asset tag carried from match to validation. */
@@ -314,8 +337,14 @@ async function processPayment(
  * Requires `LOOP_STELLAR_DEPOSIT_ADDRESS` to be set — the caller
  * is expected to pass it explicitly so this function stays pure
  * w.r.t. env and testable.
+ *
+ * S4-8: single-flighted fleet-wide via `withAdvisoryLock` (see the
+ * exported `runPaymentWatcherTick` wrapper below) — with N Fly
+ * machines only one runs the Horizon poll + match/transition pass per
+ * tick, instead of N redundant Horizon reads (and N redundant DB
+ * writes racing the same cursor row).
  */
-export async function runPaymentWatcherTick(args: {
+async function runPaymentWatcherTickLocked(args: {
   account: string;
   usdcIssuer?: string | undefined;
   limit?: number;
@@ -335,6 +364,7 @@ export async function runPaymentWatcherTick(args: {
     unmatchedMemo: 0,
     errors: 0,
     skipsRecovered: 0,
+    skippedLocked: false,
   };
 
   // ADR 015 — extend the asset-match allowlist to cover every LOOP
@@ -516,6 +546,42 @@ export async function runPaymentWatcherTick(args: {
   }
 
   return result;
+}
+
+/**
+ * S4-8: fleet-wide single-flight wrapper around
+ * `runPaymentWatcherTickLocked`, copying the `withAdvisoryLock` +
+ * zeroed-result pattern from `runInterestMintTick`
+ * (`../credits/interest-mint.ts`). With N Fly machines running the
+ * same 10s-cadence interval, only the lock holder polls Horizon and
+ * writes the cursor this tick; the rest return immediately with
+ * `skippedLocked: true` and no I/O.
+ *
+ * Public API unchanged for existing callers (`watcher-bootstrap.ts`,
+ * the integration suite, the admin recovery tool) — this is still
+ * `runPaymentWatcherTick`, just now single-flighted.
+ */
+export async function runPaymentWatcherTick(args: {
+  account: string;
+  usdcIssuer?: string | undefined;
+  limit?: number;
+}): Promise<TickResult> {
+  const locked = await withAdvisoryLock(paymentWatcherLockKey(), () =>
+    runPaymentWatcherTickLocked(args),
+  );
+  if (!locked.ran) {
+    return {
+      scanned: 0,
+      matched: 0,
+      paid: 0,
+      skippedAmount: 0,
+      unmatchedMemo: 0,
+      errors: 0,
+      skipsRecovered: 0,
+      skippedLocked: true,
+    };
+  }
+  return locked.value;
 }
 
 // Cursor-age watchdog (A2-626) lives in `./cursor-watchdog.ts`.

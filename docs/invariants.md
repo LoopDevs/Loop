@@ -84,7 +84,11 @@ ledgerLiability×1e5 ≈ 0` per asset, within the operator threshold.
 - **watcher**: `asset-drift-watcher.ts` computes this every ~300s against
   Horizon + the ledger and pages on the `ok→over` transition. State is
   persisted in `asset_drift_state` (fleet-consistent, restart-durable —
-  hardening A3), page delivery is at-least-once (hardening A2).
+  hardening A3), page delivery is at-least-once (hardening A2). The
+  read pass itself is fleet-wide single-flighted via a Postgres
+  advisory lock (S4-8) — with N Fly machines only one runs the
+  Horizon/ledger reads per tick; this is a pure read-efficiency layer
+  on top of the A3 paging dedup, not a change to the paging contract.
 - **watcher (second dimension)**: terminally-`failed` burn / interest-mint
   rows are counted INTO the equation (the tokens/credits genuinely exist),
   which makes the equation itself blind to them — so a separate

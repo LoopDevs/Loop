@@ -52,6 +52,8 @@ const { dbMock, dbState } = vi.hoisted(() => {
     updates: [] as Array<Record<string, unknown>>,
     updateMatches: true,
     lastSet: null as Record<string, unknown> | null,
+    /** S4-8: whether withAdvisoryLock's probe "acquires" the lock. */
+    advisoryAcquired: true,
   };
   const selectChain: Record<string, unknown> = {};
   selectChain['from'] = vi.fn(() => selectChain);
@@ -75,7 +77,19 @@ const { dbMock, dbState } = vi.hoisted(() => {
   };
   return { dbMock: m, dbState: s };
 });
-vi.mock('../../db/client.js', () => ({ db: dbMock }));
+// S4-8: withAdvisoryLock mock — same shape as interest-mint.test.ts.
+// Default acquires the lock and runs `fn`; `dbState.advisoryAcquired
+// = false` simulates another machine holding it fleet-wide.
+vi.mock('../../db/client.js', () => ({
+  db: dbMock,
+  withAdvisoryLock: async <T>(
+    _lockKey: bigint,
+    fn: () => Promise<T>,
+  ): Promise<{ ran: true; value: T } | { ran: false }> => {
+    if (!dbState.advisoryAcquired) return { ran: false };
+    return { ran: true, value: await fn() };
+  },
+}));
 
 import { OperatorPoolUnavailableError, OperatorRateLimitedError } from '../../ctx/operator-pool.js';
 import {
@@ -116,6 +130,7 @@ beforeEach(() => {
   dbState.updates = [];
   dbState.updateMatches = true;
   dbState.lastSet = null;
+  dbState.advisoryAcquired = true;
 });
 
 describe('redemptionBackfillDelayMs', () => {
@@ -263,7 +278,26 @@ describe('runRedemptionBackfillTick', () => {
       exhausted: 0,
       errors: 0,
       abortedPoolUnavailable: false,
+      skippedLocked: false,
     });
     expect(fetchRedemptionMock).not.toHaveBeenCalled();
+  });
+
+  it('S4-8: skips the sweep when another machine holds the redemption-backfill lock', async () => {
+    dbState.advisoryAcquired = false;
+    dbState.rows = [makeRow()];
+    const r = await runRedemptionBackfillTick({ now: NOW });
+    expect(r).toEqual({
+      picked: 0,
+      notDueYet: 0,
+      recovered: 0,
+      stillEmpty: 0,
+      exhausted: 0,
+      errors: 0,
+      abortedPoolUnavailable: false,
+      skippedLocked: true,
+    });
+    expect(fetchRedemptionMock).not.toHaveBeenCalled();
+    expect(dbState.updates).toHaveLength(0);
   });
 });
