@@ -50,7 +50,7 @@ app/
 ├── stores/           ← Zustand (auth.store, purchase.store, ui.store)
 ├── native/           ← Capacitor plugin wrappers (platform, haptics, secure-storage,
 │                       biometrics, app-lock, back-button, clipboard, keyboard, network,
-│                       notifications, purchase-storage, share, task-switcher-overlay,
+│                       purchase-storage, share, task-switcher-overlay,
 │                       status-bar, webview)
 ├── utils/            ← admin-cache, error-messages, format-stellar (fmtStroops),
 │                       image, locale, money, security-headers,

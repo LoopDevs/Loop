@@ -19,8 +19,6 @@ import { setStatusBarOverlay, setStatusBarStyle } from '~/native/status-bar';
 import { registerBackButton } from '~/native/back-button';
 import { registerAppLockGuard } from '~/native/app-lock';
 import { enableTaskSwitcherPrivacyOverlay } from '~/native/task-switcher-overlay';
-import { getPlatform } from '~/native/platform';
-import { setupNotificationChannels } from '~/native/notifications';
 import { setKeyboardAccessoryBarVisible } from '~/native/keyboard';
 import { OfflineBanner } from '~/components/ui/OfflineBanner';
 import { NativeBackButton } from '~/components/features/NativeBackButton';
@@ -402,11 +400,6 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
     // lives in app/native/ so the @capacitor/keyboard import does not
     // sit in root.tsx (audit A-005 — Capacitor boundary compliance).
     void setKeyboardAccessoryBarVisible(true);
-
-    // Android: set up notification channels
-    if (getPlatform() === 'android') {
-      void setupNotificationChannels();
-    }
 
     return () => {
       cleanupBackButton();

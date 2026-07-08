@@ -596,10 +596,10 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### M-2 · Push notifications: wire or remove `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Done 2026-07-09 — removed the scaffolding (push is Phase 2)
       **Why:** Dead scaffolding — `notifications.ts` creates channels but **nothing** calls `PushNotifications.register()`, requests permission, or listens; no device-token upload, no APNs/FCM backend send. "Your gift card is ready" can't fire.
       **Do:** decide in-or-out. In → wire register/permission/listeners + a backend send path + token storage. Out → remove the channel scaffolding so the code is honest. ⚠️ APNs needs the push entitlement (currently unhandled by the overlay script — see M-4).
-      **Done when:** push either works end-to-end or is removed; no dead channels.
+      **Done when:** push either works end-to-end or is removed; no dead channels. Resolved out: `apps/web/app/native/notifications.ts` deleted, `@capacitor/push-notifications` removed from both `package.json`s and `capacitor.config.ts`. Re-add in Phase 2 if needed (see go-live-plan §T2 mobile enhancements).
 
 ### M-3 · Deep linking (entirely absent) `[code]`
 
