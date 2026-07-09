@@ -33,6 +33,15 @@ vi.mock('../../discord.js', () => ({
   notifyCtxSchemaDrift: (args: unknown) => notifyCtxSchemaDriftMock(args),
 }));
 
+// C2-1: spy on the logger so the log-safety regression tests below can
+// assert on exactly what got logged (and, critically, what didn't).
+const { logMock } = vi.hoisted(() => ({
+  logMock: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+vi.mock('../../logger.js', () => ({
+  logger: { child: () => logMock },
+}));
+
 import { fetchRedemption, waitForRedemption } from '../procurement-redemption.js';
 
 function detailResponse(body: Record<string, unknown>): Response {
@@ -46,6 +55,10 @@ beforeEach(() => {
   operatorFetchMock.mockReset();
   streamMock.mockReset();
   notifyCtxSchemaDriftMock.mockReset();
+  logMock.info.mockReset();
+  logMock.warn.mockReset();
+  logMock.error.mockReset();
+  logMock.debug.mockReset();
   credsState.current = { id: 'op-1', bearer: 'tok', clientId: 'loopweb' };
 });
 
@@ -120,6 +133,39 @@ describe('waitForRedemption', () => {
     );
     const result = await fetchRedemption('o-1');
     expect(result).toEqual({ code: null, pin: null, url: 'https://redeem.example.com/card/123' });
+  });
+
+  it('C2-1: never logs the raw response body once a redemption field is present (codes are PII)', async () => {
+    // procurement-redemption.ts's diagnostic "capturing shape for
+    // diagnosis" log is gated on ALL THREE fields being null — its own
+    // doc-comment says this is deliberate ("once any code/pin/url is
+    // populated the codes are PII and must not land in logs"). Pin
+    // that contract directly: a response carrying a real code/PIN must
+    // never surface in any log call, at any level.
+    operatorFetchMock.mockResolvedValueOnce(
+      detailResponse({ redeemCode: 'SECRET-CODE-1234', redeemPin: '9999' }),
+    );
+    const result = await fetchRedemption('o-1');
+    expect(result).toEqual({ code: 'SECRET-CODE-1234', pin: '9999', url: null });
+    expect(logMock.info).not.toHaveBeenCalled();
+    const allCalls = [
+      ...logMock.info.mock.calls,
+      ...logMock.warn.mock.calls,
+      ...logMock.error.mock.calls,
+      ...logMock.debug.mock.calls,
+    ];
+    expect(JSON.stringify(allCalls)).not.toContain('SECRET-CODE-1234');
+    expect(JSON.stringify(allCalls)).not.toContain('9999');
+  });
+
+  it('logs a diagnostic (keys + truncated body preview) only when every redemption field comes back null', async () => {
+    operatorFetchMock.mockResolvedValueOnce(detailResponse({ someUnrelatedField: 'x' }));
+    const result = await fetchRedemption('o-1');
+    expect(result).toEqual({ code: null, pin: null, url: null });
+    expect(logMock.info).toHaveBeenCalledTimes(1);
+    const [meta, message] = logMock.info.mock.calls[0] as [Record<string, unknown>, string];
+    expect(message).toContain('no redemption fields');
+    expect(meta['keys']).toEqual(['someUnrelatedField']);
   });
 
   it('polling tolerates intermittent failures and returns once codes appear', async () => {

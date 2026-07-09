@@ -65,6 +65,16 @@
  *                              currency, not just USD.
  *   POLL_TIMEOUT_MS          — total poll budget; default 600000 (10m)
  *   POLL_INTERVAL_MS         — poll cadence; default 5000 (5s)
+ *   REDEMPTION_GRACE_MS      — C2-1 acceptance check (the 2026-05-14
+ *                              fulfilled-but-redeemUrl/Code/Pin-all-null
+ *                              bug): once the order reaches `fulfilled`,
+ *                              how long to keep polling for a non-empty
+ *                              redemption payload before failing the
+ *                              run. Covers the case where
+ *                              `waitForRedemption`'s budget exhausted
+ *                              and the backend's redemption-backfill
+ *                              sweeper (60s cadence) needs a tick or
+ *                              two to recover it. Default 180000 (3m).
  *   NEW_REFRESH_TOKEN_OUT    — path to write the rotated refresh token
  *                              to. The workflow rotates the repo secret
  *                              from this file regardless of whether the
@@ -102,6 +112,7 @@ const AMOUNT =
     : 0.02;
 const POLL_TIMEOUT_MS = Number(process.env.POLL_TIMEOUT_MS ?? 600_000);
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 5_000);
+const REDEMPTION_GRACE_MS = Number(process.env.REDEMPTION_GRACE_MS ?? 180_000);
 const NEW_REFRESH_TOKEN_OUT = process.env.NEW_REFRESH_TOKEN_OUT;
 
 // Aerie — $0.01 min, USD, 2% savings. Cheapest documented merchant on
@@ -290,6 +301,10 @@ async function payOrder({ paymentAddress, asset, assetCode, assetIssuer, assetAm
   }
 }
 
+function hasRedemptionPayload(data) {
+  return Boolean(data?.redeemUrl) || Boolean(data?.redeemCode) || Boolean(data?.redeemPin);
+}
+
 async function pollForFulfilment(accessToken, orderId) {
   // State machine: pending_payment → paid → procuring → fulfilled.
   // Terminal: expired (24h sweep). No `failed` state on this surface
@@ -299,31 +314,81 @@ async function pollForFulfilment(accessToken, orderId) {
   // procurement worker (~30–60s), CTX-side issuance (≤60s).
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   let lastState = '';
+  let data;
   while (Date.now() < deadline) {
     // `GET /api/orders/loop/:id` returns the flat `orderToView`
     // shape — no `{ order: ... }` wrapper. Earlier versions of this
     // script read `data.order.state` and looped on `undefined`.
-    const data = await api(`/api/orders/loop/${orderId}`, { accessToken });
+    data = await api(`/api/orders/loop/${orderId}`, { accessToken });
     const state = data?.state;
     if (state !== lastState) {
       log(`Order state: ${state}`);
       lastState = state;
     }
-    if (state === 'fulfilled') {
-      log('Order fulfilled', {
-        hasRedeemUrl: Boolean(data.redeemUrl),
-        hasRedeemCode: Boolean(data.redeemCode),
-        hasRedeemPin: Boolean(data.redeemPin),
-        ctxOrderId: data.ctxOrderId,
-      });
-      return data;
-    }
+    if (state === 'fulfilled') break;
     if (state === 'failed' || state === 'expired') {
       throw new Error(`Order reached terminal state: ${state}`);
     }
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
-  throw new Error(`Order not fulfilled within ${POLL_TIMEOUT_MS}ms (last state: ${lastState})`);
+  if (data?.state !== 'fulfilled') {
+    throw new Error(`Order not fulfilled within ${POLL_TIMEOUT_MS}ms (last state: ${lastState})`);
+  }
+  return await waitForRedemptionPayload(accessToken, orderId, data);
+}
+
+/**
+ * C2-1 acceptance check (the 2026-05-14 fulfilled-but-redeemUrl/Code/
+ * Pin-all-null bug — see docs/readiness-backlog-2026-07-03.md §C2-1).
+ * `waitForRedemption` (backend orders/procurement-redemption.ts) can
+ * legitimately exhaust its 5-minute budget and let the order fulfil
+ * with every redeem field null — by design, so a slow CTX issuance
+ * never strands a paid order in limbo (procure-one.ts fulfils on
+ * `ctxOrderId`, not on redemption data). The documented recovery path
+ * is the redemption-backfill sweeper (orders/redemption-backfill.ts,
+ * 60s cadence, gated on LOOP_WORKERS_ENABLED). Give that sweeper a
+ * `REDEMPTION_GRACE_MS` window of re-polling before treating an empty
+ * payload as a real regression — this is exactly the check that was
+ * missing when the 2026-05-14 order fulfilled with nulls and nothing
+ * caught it.
+ */
+async function waitForRedemptionPayload(accessToken, orderId, initialData) {
+  let data = initialData;
+  if (hasRedemptionPayload(data)) {
+    log('Order fulfilled', {
+      hasRedeemUrl: Boolean(data.redeemUrl),
+      hasRedeemCode: Boolean(data.redeemCode),
+      hasRedeemPin: Boolean(data.redeemPin),
+      ctxOrderId: data.ctxOrderId,
+    });
+    return data;
+  }
+  log(
+    'Order fulfilled but redemption payload is empty — waiting for the redemption-backfill sweep',
+    {
+      orderId,
+      ctxOrderId: data.ctxOrderId,
+      graceMs: REDEMPTION_GRACE_MS,
+    },
+  );
+  const redemptionDeadline = Date.now() + REDEMPTION_GRACE_MS;
+  while (Date.now() < redemptionDeadline) {
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    data = await api(`/api/orders/loop/${orderId}`, { accessToken });
+    if (hasRedemptionPayload(data)) {
+      log('Redemption payload recovered by the backfill sweep', {
+        hasRedeemUrl: Boolean(data.redeemUrl),
+        hasRedeemCode: Boolean(data.redeemCode),
+        hasRedeemPin: Boolean(data.redeemPin),
+      });
+      return data;
+    }
+  }
+  throw new Error(
+    `C2-1 regression: order ${orderId} (ctxOrderId=${data.ctxOrderId}) fulfilled but ` +
+      `redeemUrl/redeemCode/redeemPin are still all empty after a ${REDEMPTION_GRACE_MS}ms ` +
+      'redemption-backfill grace window — see docs/runbooks/redemption-backfill-exhausted.md',
+  );
 }
 
 async function main() {
