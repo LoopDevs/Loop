@@ -9,6 +9,10 @@ vi.mock('../../logger.js', () => ({
 }));
 
 const listPaymentsMock = vi.fn();
+const { sweepExpiredOrdersMock, advisoryState } = vi.hoisted(() => ({
+  sweepExpiredOrdersMock: vi.fn<(cutoff: Date) => Promise<number>>(async () => 0),
+  advisoryState: { acquired: true },
+}));
 
 vi.mock('../horizon.js', async () => {
   const actual = await vi.importActual<typeof HorizonModule>('../horizon.js');
@@ -22,6 +26,7 @@ vi.mock('../../orders/repo.js', () => ({
 }));
 vi.mock('../../orders/transitions.js', () => ({
   markOrderPaid: async () => null,
+  sweepExpiredOrders: (cutoff: Date) => sweepExpiredOrdersMock(cutoff),
 }));
 
 const { dbMock } = vi.hoisted(() => {
@@ -41,6 +46,16 @@ vi.mock('../../db/client.js', () => ({
       },
     },
   },
+  // S4-8: withAdvisoryLock mock — same shape as interest-mint.test.ts.
+  // Default acquires the lock and runs `fn`; `advisoryState.acquired
+  // = false` simulates another machine holding it fleet-wide.
+  withAdvisoryLock: async <T>(
+    _lockKey: bigint,
+    fn: () => Promise<T>,
+  ): Promise<{ ran: true; value: T } | { ran: false }> => {
+    if (!advisoryState.acquired) return { ran: false };
+    return { ran: true, value: await fn() };
+  },
 }));
 vi.mock('../../db/schema.js', async () => {
   const actual = await vi.importActual<typeof SchemaModule>('../../db/schema.js');
@@ -51,12 +66,16 @@ vi.mock('../../db/schema.js', async () => {
 });
 
 import { startPaymentWatcher, stopPaymentWatcher } from '../watcher.js';
+import { runOrderExpirySweepTick } from '../watcher-bootstrap.js';
 
 const ACCOUNT = 'GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGV';
 
 beforeEach(() => {
   listPaymentsMock.mockReset();
   listPaymentsMock.mockResolvedValue({ records: [], nextCursor: null });
+  sweepExpiredOrdersMock.mockReset();
+  sweepExpiredOrdersMock.mockResolvedValue(0);
+  advisoryState.acquired = true;
   vi.useFakeTimers();
 });
 
@@ -110,5 +129,38 @@ describe('startPaymentWatcher / stopPaymentWatcher', () => {
     expect(listPaymentsMock).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(5_000);
     expect(listPaymentsMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('runOrderExpirySweepTick (S4-8)', () => {
+  it('runs the sweep and reports the swept count when it wins the lock', async () => {
+    sweepExpiredOrdersMock.mockResolvedValue(3);
+    const r = await runOrderExpirySweepTick();
+    expect(r).toEqual({ swept: 3, skippedLocked: false });
+    expect(sweepExpiredOrdersMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips the sweep when another machine holds the expiry-sweep lock', async () => {
+    advisoryState.acquired = false;
+    const r = await runOrderExpirySweepTick();
+    expect(r).toEqual({ swept: 0, skippedLocked: true });
+    expect(sweepExpiredOrdersMock).not.toHaveBeenCalled();
+  });
+
+  it('releases the lock + returns empty when the sweep exceeds the lease deadline', async () => {
+    // A hung DB UPDATE: sweepExpiredOrders never resolves. The lease
+    // must fire so the fleet-wide lock is released.
+    let releaseHang: () => void = () => {};
+    sweepExpiredOrdersMock.mockReturnValue(
+      new Promise((resolve) => {
+        releaseHang = () => resolve(0);
+      }),
+    );
+    const tickPromise = runOrderExpirySweepTick();
+    // Advance past the 60s lease — the Promise.race timeout wins.
+    await vi.advanceTimersByTimeAsync(60_001);
+    const r = await tickPromise;
+    expect(r).toEqual({ swept: 0, skippedLocked: false });
+    releaseHang();
   });
 });

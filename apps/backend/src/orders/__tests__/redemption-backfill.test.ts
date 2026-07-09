@@ -52,12 +52,19 @@ const { dbMock, dbState } = vi.hoisted(() => {
     updates: [] as Array<Record<string, unknown>>,
     updateMatches: true,
     lastSet: null as Record<string, unknown> | null,
+    /** S4-8: whether withAdvisoryLock's probe "acquires" the lock. */
+    advisoryAcquired: true,
+    /** S4-8 lease test: candidate select never resolves while true. */
+    hangSelect: false,
   };
   const selectChain: Record<string, unknown> = {};
   selectChain['from'] = vi.fn(() => selectChain);
   selectChain['where'] = vi.fn(() => selectChain);
   selectChain['orderBy'] = vi.fn(() => selectChain);
-  selectChain['limit'] = vi.fn(async () => s.rows);
+  selectChain['limit'] = vi.fn(() => {
+    if (s.hangSelect) return new Promise(() => undefined); // simulated hung DB read
+    return Promise.resolve(s.rows);
+  });
   const updateChain: Record<string, unknown> = {};
   updateChain['set'] = vi.fn((vals: Record<string, unknown>) => {
     s.lastSet = vals;
@@ -75,7 +82,19 @@ const { dbMock, dbState } = vi.hoisted(() => {
   };
   return { dbMock: m, dbState: s };
 });
-vi.mock('../../db/client.js', () => ({ db: dbMock }));
+// S4-8: withAdvisoryLock mock — same shape as interest-mint.test.ts.
+// Default acquires the lock and runs `fn`; `dbState.advisoryAcquired
+// = false` simulates another machine holding it fleet-wide.
+vi.mock('../../db/client.js', () => ({
+  db: dbMock,
+  withAdvisoryLock: async <T>(
+    _lockKey: bigint,
+    fn: () => Promise<T>,
+  ): Promise<{ ran: true; value: T } | { ran: false }> => {
+    if (!dbState.advisoryAcquired) return { ran: false };
+    return { ran: true, value: await fn() };
+  },
+}));
 
 import { OperatorPoolUnavailableError, OperatorRateLimitedError } from '../../ctx/operator-pool.js';
 import {
@@ -116,6 +135,8 @@ beforeEach(() => {
   dbState.updates = [];
   dbState.updateMatches = true;
   dbState.lastSet = null;
+  dbState.advisoryAcquired = true;
+  dbState.hangSelect = false;
 });
 
 describe('redemptionBackfillDelayMs', () => {
@@ -263,7 +284,53 @@ describe('runRedemptionBackfillTick', () => {
       exhausted: 0,
       errors: 0,
       abortedPoolUnavailable: false,
+      skippedLocked: false,
     });
     expect(fetchRedemptionMock).not.toHaveBeenCalled();
+  });
+
+  it('releases the lock + returns empty when the sweep body exceeds the lease deadline', async () => {
+    // A hung DB read: the candidate select never resolves. The lease
+    // must fire so the fleet-wide lock is released and the sweep is
+    // not stalled on every machine.
+    vi.useFakeTimers();
+    try {
+      dbState.hangSelect = true;
+      const tickPromise = runRedemptionBackfillTick({ now: NOW });
+      // Advance past the 240s lease — the Promise.race timeout wins.
+      await vi.advanceTimersByTimeAsync(240_001);
+      const r = await tickPromise;
+      expect(r).toEqual({
+        picked: 0,
+        notDueYet: 0,
+        recovered: 0,
+        stillEmpty: 0,
+        exhausted: 0,
+        errors: 0,
+        abortedPoolUnavailable: false,
+        skippedLocked: false,
+      });
+      expect(fetchRedemptionMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('S4-8: skips the sweep when another machine holds the redemption-backfill lock', async () => {
+    dbState.advisoryAcquired = false;
+    dbState.rows = [makeRow()];
+    const r = await runRedemptionBackfillTick({ now: NOW });
+    expect(r).toEqual({
+      picked: 0,
+      notDueYet: 0,
+      recovered: 0,
+      stillEmpty: 0,
+      exhausted: 0,
+      errors: 0,
+      abortedPoolUnavailable: false,
+      skippedLocked: true,
+    });
+    expect(fetchRedemptionMock).not.toHaveBeenCalled();
+    expect(dbState.updates).toHaveLength(0);
   });
 });

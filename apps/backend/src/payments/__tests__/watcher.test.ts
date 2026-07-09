@@ -99,7 +99,9 @@ const { dbMock, state } = vi.hoisted(() => {
   const s: {
     cursor: string | null;
     writtenCursors: string[];
-  } = { cursor: null, writtenCursors: [] };
+    /** S4-8: whether withAdvisoryLock's probe "acquires" the lock. */
+    advisoryAcquired: boolean;
+  } = { cursor: null, writtenCursors: [], advisoryAcquired: true };
   const m: Record<string, ReturnType<typeof vi.fn>> = {};
   m['insert'] = vi.fn(() => m);
   m['values'] = vi.fn((v: { cursor?: string }) => {
@@ -130,6 +132,16 @@ vi.mock('../../db/client.js', () => ({
         ),
       },
     },
+  },
+  // S4-8: withAdvisoryLock mock — same shape as interest-mint.test.ts.
+  // Default acquires the lock and runs `fn`; `state.advisoryAcquired
+  // = false` simulates another machine holding it fleet-wide.
+  withAdvisoryLock: async <T>(
+    _lockKey: bigint,
+    fn: () => Promise<T>,
+  ): Promise<{ ran: true; value: T } | { ran: false }> => {
+    if (!state.advisoryAcquired) return { ran: false };
+    return { ran: true, value: await fn() };
   },
 }));
 vi.mock('../../db/schema.js', async () => {
@@ -200,6 +212,7 @@ beforeEach(() => {
   retrySkipsMock.mockResolvedValue({ retried: 0, resolved: 0, abandoned: 0, stillPending: 0 });
   state.cursor = null;
   state.writtenCursors = [];
+  state.advisoryAcquired = true;
   loopAssetsState.assets = [];
   for (const fn of Object.values(dbMock)) {
     if (typeof fn === 'function' && 'mockClear' in fn) {
@@ -788,6 +801,62 @@ describe('runPaymentWatcherTick', () => {
     markPaidMock.mockResolvedValue({ id: 'order-1' });
     const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
     expect(r.paid).toBe(1);
+  });
+
+  it('S4-8: skips the tick when another machine holds the payment-watcher lock', async () => {
+    state.advisoryAcquired = false;
+    listPaymentsMock.mockResolvedValue({
+      records: [usdcPayment('MEMO', '10.0000000')],
+      nextCursor: null,
+    });
+    const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+    expect(r).toEqual({
+      scanned: 0,
+      matched: 0,
+      paid: 0,
+      skippedAmount: 0,
+      unmatchedMemo: 0,
+      errors: 0,
+      skipsRecovered: 0,
+      skippedLocked: true,
+    });
+    // Zero Horizon reads and zero cursor writes — the whole tick body
+    // never ran.
+    expect(listPaymentsMock).not.toHaveBeenCalled();
+    expect(state.writtenCursors).toEqual([]);
+  });
+
+  it('releases the lock + returns empty when the tick body exceeds the lease deadline', async () => {
+    // A hung Horizon: listAccountPayments never resolves. The lease
+    // must fire so the fleet-wide lock is released and deposit
+    // processing is not stalled on every machine.
+    vi.useFakeTimers();
+    try {
+      let releaseHang: () => void = () => {};
+      listPaymentsMock.mockReturnValue(
+        new Promise((resolve) => {
+          releaseHang = () => resolve({ records: [], nextCursor: null });
+        }),
+      );
+      const tickPromise = runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+      // Advance past the 60s lease — the Promise.race timeout wins.
+      await vi.advanceTimersByTimeAsync(60_001);
+      const r = await tickPromise;
+      expect(r).toEqual({
+        scanned: 0,
+        matched: 0,
+        paid: 0,
+        skippedAmount: 0,
+        unmatchedMemo: 0,
+        errors: 0,
+        skipsRecovered: 0,
+        skippedLocked: false,
+      });
+      expect(state.writtenCursors).toEqual([]);
+      releaseHang();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

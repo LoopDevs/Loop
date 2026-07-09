@@ -132,6 +132,14 @@ export function registerHealthOpenApi(
           lastErrorAtMs: z.number().int().nullable(),
           lastError: z.string().nullable(),
           staleAfterMs: z.number().int().nullable(),
+          // S4-8: single-flighted workers distinguish "alive but lost
+          // the fleet-wide lock" (lastSkippedLockedAtMs) from "actually
+          // did the work" (lastLeadTickAtMs). lastSuccessAtMs stays the
+          // liveness stamp (advanced by both), so degraded semantics
+          // are unchanged; these two let an operator see a machine
+          // that is alive but hasn't led in N minutes.
+          lastSkippedLockedAtMs: z.number().int().nullable(),
+          lastLeadTickAtMs: z.number().int().nullable(),
         }),
       ),
     }),

@@ -43,6 +43,8 @@
  * spurious recovery. The admin UI keeps the same invariant
  * (ledger-side stays authoritative when Horizon is down).
  */
+import { createHash } from 'node:crypto';
+import { withAdvisoryLock } from '../db/client.js';
 import { configuredLoopPayableAssets, type LoopAssetCode } from '../credits/payout-asset.js';
 import { sumOutstandingLiability } from '../credits/liabilities.js';
 import {
@@ -70,6 +72,7 @@ import {
   markWorkerStarted,
   markWorkerStopped,
   markWorkerTickFailure,
+  markWorkerTickSkippedLocked,
   markWorkerTickSuccess,
 } from '../runtime-health.js';
 import type { HomeCurrency } from '@loop/shared';
@@ -181,10 +184,37 @@ export interface DriftTickResult {
   /** Assets skipped because Horizon returned an error this tick. */
   skipped: number;
   samples: AssetDriftSample[];
+  /** S4-8: true when another machine held the fleet-wide watcher lock. */
+  skippedLocked: boolean;
 }
 
 export interface RunDriftTickArgs {
   thresholdStroops: bigint;
+}
+
+/**
+ * S4-8 (docs/readiness-backlog-2026-07-03.md): fixed advisory-lock key
+ * for the asset-drift-watcher single-flight, same sha256→int64
+ * derivation as `interestMintLockKey` / `ledgerInvariantLockKey`,
+ * fixed scope string. Note this is orthogonal to the PAGING dedup
+ * `asset-drift-state-repo.ts` already does (a per-asset DB row +
+ * lease claims exactly one page per transition, fleet-wide) — that
+ * mechanism only dedupes the ALERT. Without this lock every machine
+ * still independently re-reads Horizon + the ledger every tick; this
+ * lock dedupes the READS.
+ */
+function assetDriftLockKey(): bigint {
+  const digest = createHash('sha256').update('loop:asset-drift-watcher').digest();
+  const raw =
+    (BigInt(digest[0]!) << 56n) |
+    (BigInt(digest[1]!) << 48n) |
+    (BigInt(digest[2]!) << 40n) |
+    (BigInt(digest[3]!) << 32n) |
+    (BigInt(digest[4]!) << 24n) |
+    (BigInt(digest[5]!) << 16n) |
+    (BigInt(digest[6]!) << 8n) |
+    BigInt(digest[7]!);
+  return BigInt.asIntN(64, raw);
 }
 
 /** Fiat backing each LOOP code — 1:1 by design. */
@@ -256,11 +286,18 @@ function abs(n: bigint): bigint {
  * Pure enough to be called from tests directly — the Horizon fetch,
  * ledger query, state persistence and Discord send are all injected
  * via module mocks.
+ *
+ * S4-8: single-flighted fleet-wide via `withAdvisoryLock` (see the
+ * exported `runAssetDriftTick` wrapper below) — with N Fly machines
+ * only one runs the per-asset Horizon + ledger reads this tick,
+ * instead of N redundant read passes. The per-asset PAGING dedup
+ * (`asset-drift-state-repo.ts`) still applies underneath and is
+ * unchanged — this lock is a pure read-efficiency layer on top.
  */
-export async function runAssetDriftTick(args: RunDriftTickArgs): Promise<DriftTickResult> {
+async function runAssetDriftTickLocked(args: RunDriftTickArgs): Promise<DriftTickResult> {
   const assets = configuredLoopPayableAssets();
   const poolAccount = resolveInterestPoolAccount();
-  const result: DriftTickResult = { checked: 0, skipped: 0, samples: [] };
+  const result: DriftTickResult = { checked: 0, skipped: 0, samples: [], skippedLocked: false };
   for (const { code, issuer } of assets) {
     const fiat = fiatOf(code);
     // Captured BEFORE the reads: the staleness fence in
@@ -461,6 +498,64 @@ export async function runAssetDriftTick(args: RunDriftTickArgs): Promise<DriftTi
 }
 
 /**
+ * Hard ceiling on how long the lock holder may run one tick
+ * (`db/client.ts` puts lease responsibility on the CALLER — the
+ * payout worker's `PAYOUT_TICK_LEASE_MS` is the established pattern,
+ * INV-9). The tick does 2-4 Horizon reads + 3 DB reads per configured
+ * asset (3 assets max) plus up to 4 awaited Discord sends (5s cap
+ * each) — 240s is generous headroom under the 300s default cadence.
+ * On expiry the lock releases and the orphaned tick body degrades to
+ * the pre-S4-8 per-machine concurrency (safe: the A3 persisted-state
+ * repo already serialises transition claims via row locks + the
+ * staleness fence), never a fleet stall.
+ */
+const ASSET_DRIFT_TICK_LEASE_MS = 240_000;
+
+/** Distinct sentinel so the lease-timeout path is testable + loggable. */
+const TICK_LEASE_TIMED_OUT = Symbol('asset-drift-tick-lease-timeout');
+
+/**
+ * S4-8: fleet-wide single-flight wrapper around
+ * `runAssetDriftTickLocked`, copying the `withAdvisoryLock` +
+ * zeroed-result pattern from `runInterestMintTick`
+ * (`../credits/interest-mint.ts`) plus the payout worker's lease
+ * deadline. With N Fly machines running the same interval, only the
+ * lock holder reads Horizon + the ledger this tick; the rest return
+ * immediately with `skippedLocked: true` and no I/O. `lastTickMs`
+ * (surfaced by `getAssetDriftState`) only advances on a machine that
+ * actually won the lock and ran the full pass — the per-asset
+ * `lastCheckedMs` from the persisted `asset_drift_state` table (A3)
+ * remains the fleet-wide-authoritative freshness signal.
+ *
+ * Public API unchanged for existing callers (`startAssetDriftWatcher`,
+ * the test suite) — this is still `runAssetDriftTick`, just now
+ * single-flighted.
+ */
+export async function runAssetDriftTick(args: RunDriftTickArgs): Promise<DriftTickResult> {
+  let leaseTimer: ReturnType<typeof setTimeout> | undefined;
+  const locked = await withAdvisoryLock(assetDriftLockKey(), () =>
+    Promise.race([
+      runAssetDriftTickLocked(args),
+      new Promise<typeof TICK_LEASE_TIMED_OUT>((resolve) => {
+        leaseTimer = setTimeout(() => resolve(TICK_LEASE_TIMED_OUT), ASSET_DRIFT_TICK_LEASE_MS);
+      }),
+    ]),
+  );
+  if (leaseTimer !== undefined) clearTimeout(leaseTimer);
+  if (!locked.ran) {
+    return { checked: 0, skipped: 0, samples: [], skippedLocked: true };
+  }
+  if (locked.value === TICK_LEASE_TIMED_OUT) {
+    log.error(
+      { leaseMs: ASSET_DRIFT_TICK_LEASE_MS },
+      'Asset-drift tick exceeded the lease deadline — releasing the lock so the fleet is not stalled; the in-flight tick degrades to the pre-S4-8 per-machine posture',
+    );
+    return { checked: 0, skipped: 0, samples: [], skippedLocked: false };
+  }
+  return locked.value;
+}
+
+/**
  * Read-only snapshot of the watcher's persisted state. Used by the
  * admin handler so the UI can render "which assets are currently
  * drifted / carrying failed money-movement rows?" without hitting
@@ -542,7 +637,14 @@ export function startAssetDriftWatcher(args: {
           'Asset drift tick complete',
         );
       }
-      markWorkerTickSuccess('asset_drift_watcher');
+      // S4-8 /health honesty: a lock-skipped tick proves liveness but
+      // is recorded separately from a led tick — see
+      // markWorkerTickSkippedLocked's doc-comment.
+      if (r.skippedLocked) {
+        markWorkerTickSkippedLocked('asset_drift_watcher');
+      } else {
+        markWorkerTickSuccess('asset_drift_watcher');
+      }
     } catch (err) {
       markWorkerTickFailure('asset_drift_watcher', err);
       log.error({ err }, 'Asset drift tick failed');

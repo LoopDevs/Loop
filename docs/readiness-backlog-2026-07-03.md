@@ -476,10 +476,37 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### S4-8 · Dedupe per-machine watchers/alerts `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Done 2026-07-09
       **Why:** Non-single-flighted watchers (payment-watcher, asset-drift, redemption-backfill) run on every machine → N× Horizon/CTX reads; the cursor + stuck-payout Discord watchdogs gate on a per-process boolean → **N duplicate pages** at N machines. Scale-#7.
       **Do:** apply `withAdvisoryLock` (or a DB dedup) to the duplicated watchers/alerts. Location sync's doubled ~500-page CTX sweep is architectural (leave for later; cheap today).
       **Done when:** watchers run once per fleet per tick; no duplicate pages.
+      **Done 2026-07-09** (revised same day after two adversarial
+      money-reviews): `runPaymentWatcherTick` / `runAssetDriftTick` /
+      `runRedemptionBackfillTick` (plus the expiry sweep, now the
+      exported `runOrderExpirySweepTick`) wrap in a fixed fleet-wide
+      `withAdvisoryLock`, copying the `interest-mint.ts` pattern —
+      losing machines return `skippedLocked: true` with zero
+      Horizon/CTX/DB-write calls — and each tick races a hard lease
+      deadline (the payout-worker INV-9 pattern; 60-240s per cadence)
+      so a hung-but-alive lock holder degrades to the pre-S4-8
+      per-machine posture instead of stalling the fleet. The cursor +
+      stuck-payout watchdogs single-flight on
+      `pg_try_advisory_xact_lock` inside `db.transaction` (the
+      `ledger-invariant-watcher.ts` pattern) with the fire-once state
+      PERSISTED in the new `watchdog_alert_state` table (migration
+      0055; the ADR-038 D2 `interest_pool_alert_state` shape) —
+      contract: **at-least-once per incident, fleet-wide,
+      confirmed-delivery** (`alert_active` flips only after the
+      webhook confirms; a failed send is retried next tick; a healthy
+      tick re-arms). /health honesty: lock-skipped ticks stamp
+      liveness but are surfaced separately
+      (`lastSkippedLockedAtMs`/`lastLeadTickAtMs`) so an always-losing
+      machine can't masquerade as doing the work, and a healthy
+      lock-loser never flips degraded (no false Fly restarts).
+      Location sync's doubled sweep stays explicitly out of scope, per
+      this item's original "Do." Per-watcher tests cover
+      lock-skip-zero-calls, lease expiry, stale-fired-state re-arm,
+      and failed-send retry.
 
 ---
 

@@ -4,6 +4,7 @@ import {
   getRuntimeHealthSnapshot,
   markWorkerBlocked,
   markWorkerStarted,
+  markWorkerTickSkippedLocked,
   markWorkerTickSuccess,
   recordOtpSendFailure,
   recordOtpSendSuccess,
@@ -83,6 +84,33 @@ describe('runtime health snapshot', () => {
         degraded: true,
       }),
     );
+  });
+
+  it('S4-8: a lock-skipped tick counts as liveness (not stale/degraded) but is distinguishable from a led tick', () => {
+    markWorkerStarted('payment_watcher', { staleAfterMs: 1_000 });
+    // This machine keeps losing the fleet-wide single-flight lock —
+    // its loop is alive (must NOT go stale → Fly must not restart a
+    // healthy machine) but it has never actually led a tick.
+    markWorkerTickSkippedLocked('payment_watcher');
+
+    const snap = getRuntimeHealthSnapshot();
+    const worker = snap.workers[0]!;
+    expect(worker.stale).toBe(false);
+    expect(worker.degraded).toBe(false);
+    expect(worker.lastSuccessAtMs).not.toBeNull(); // liveness stamp advanced
+    expect(worker.lastSkippedLockedAtMs).toBe(worker.lastSuccessAtMs);
+    expect(worker.lastLeadTickAtMs).toBeNull(); // never did the real work
+
+    // Still fresh (not stale) right before the window; the liveness
+    // stamp from the skip is what keeps it healthy.
+    const fresh = getRuntimeHealthSnapshot((worker.lastSuccessAtMs ?? 0) + 500);
+    expect(fresh.workers[0]).toEqual(expect.objectContaining({ stale: false, degraded: false }));
+
+    // A real led tick advances lastLeadTickAtMs.
+    markWorkerTickSuccess('payment_watcher');
+    const led = getRuntimeHealthSnapshot().workers[0]!;
+    expect(led.lastLeadTickAtMs).not.toBeNull();
+    expect(led.lastLeadTickAtMs).toBe(led.lastSuccessAtMs);
   });
 
   it('A4-111: marks a worker whose first tick never resolves as stale once startedAtMs ages out', () => {

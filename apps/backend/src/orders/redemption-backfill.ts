@@ -30,8 +30,9 @@
  * `index.ts` on `LOOP_WORKERS_ENABLED`, with per-tick errors
  * swallowed so a transient CTX / DB blip doesn't kill the interval.
  */
+import { createHash } from 'node:crypto';
 import { and, eq, isNull, isNotNull, lt } from 'drizzle-orm';
-import { db } from '../db/client.js';
+import { db, withAdvisoryLock } from '../db/client.js';
 import { orders } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { notifyRedemptionBackfillExhausted } from '../discord.js';
@@ -42,6 +43,7 @@ import {
   markWorkerStarted,
   markWorkerStopped,
   markWorkerTickFailure,
+  markWorkerTickSkippedLocked,
   markWorkerTickSuccess,
 } from '../runtime-health.js';
 
@@ -91,6 +93,31 @@ export interface RedemptionBackfillTickResult {
   errors: number;
   /** True when the tick aborted early on a pool-wide operator outage. */
   abortedPoolUnavailable: boolean;
+  /** S4-8: true when another machine held the fleet-wide sweep lock. */
+  skippedLocked: boolean;
+}
+
+/**
+ * S4-8 (docs/readiness-backlog-2026-07-03.md): fixed advisory-lock key
+ * for the redemption-backfill single-flight, same sha256→int64
+ * derivation as `interestMintLockKey` / `ledgerInvariantLockKey`,
+ * fixed scope string. Per the doc-comment above, duplicate concurrent
+ * runs of this sweep were already money-safe (CAS-guarded writes) —
+ * this lock is a pure efficiency win (fewer redundant CTX reads), not
+ * a correctness fix.
+ */
+function redemptionBackfillLockKey(): bigint {
+  const digest = createHash('sha256').update('loop:redemption-backfill').digest();
+  const raw =
+    (BigInt(digest[0]!) << 56n) |
+    (BigInt(digest[1]!) << 48n) |
+    (BigInt(digest[2]!) << 40n) |
+    (BigInt(digest[3]!) << 32n) |
+    (BigInt(digest[4]!) << 24n) |
+    (BigInt(digest[5]!) << 16n) |
+    (BigInt(digest[6]!) << 8n) |
+    BigInt(digest[7]!);
+  return BigInt.asIntN(64, raw);
 }
 
 /**
@@ -108,8 +135,14 @@ export interface RedemptionBackfillTickResult {
  * read-only supplier call — wasted cost, no money/correctness bug) but
  * exactly one wins the attempt bump and the at-cap page. No shared
  * sequenced resource, no double-process.
+ *
+ * S4-8: still true today, but two machines re-fetching the same CTX
+ * order on every tick is a real wasted-cost tax at fleet scale. Single-
+ * flighted fleet-wide via `withAdvisoryLock` (see the exported
+ * `runRedemptionBackfillTick` wrapper below) — pure efficiency, the
+ * money-safety reasoning above is unchanged and preserved verbatim.
  */
-export async function runRedemptionBackfillTick(args?: {
+async function runRedemptionBackfillTickLocked(args?: {
   limit?: number;
   now?: number;
 }): Promise<RedemptionBackfillTickResult> {
@@ -122,6 +155,7 @@ export async function runRedemptionBackfillTick(args?: {
     exhausted: 0,
     errors: 0,
     abortedPoolUnavailable: false,
+    skippedLocked: false,
   };
 
   // Matches the partial index `orders_redemption_backfill_pending`
@@ -206,6 +240,80 @@ export async function runRedemptionBackfillTick(args?: {
   }
 
   return result;
+}
+
+/** Zeroed tick result for the not-run paths (lock lost / lease expired). */
+function emptyBackfillTickResult(skippedLocked: boolean): RedemptionBackfillTickResult {
+  return {
+    picked: 0,
+    notDueYet: 0,
+    recovered: 0,
+    stillEmpty: 0,
+    exhausted: 0,
+    errors: 0,
+    abortedPoolUnavailable: false,
+    skippedLocked,
+  };
+}
+
+/**
+ * Hard ceiling on how long the lock holder may run one sweep
+ * (`db/client.ts` puts lease responsibility on the CALLER — the
+ * payout worker's `PAYOUT_TICK_LEASE_MS` is the established pattern,
+ * INV-9). A batch of 20 CTX re-fetches at a few seconds each fits
+ * comfortably in 240s. On expiry the lock releases and the orphaned
+ * sweep body degrades to the pre-S4-8 per-machine concurrency (safe:
+ * every mutation is a guarded compare-and-set — see the tick
+ * doc-comment), never a fleet stall.
+ */
+const REDEMPTION_BACKFILL_TICK_LEASE_MS = 240_000;
+
+/** Distinct sentinel so the lease-timeout path is testable + loggable. */
+const TICK_LEASE_TIMED_OUT = Symbol('redemption-backfill-tick-lease-timeout');
+
+/**
+ * S4-8: fleet-wide single-flight wrapper around
+ * `runRedemptionBackfillTickLocked`, copying the `withAdvisoryLock` +
+ * zeroed-result pattern from `runInterestMintTick`
+ * (`../credits/interest-mint.ts`) plus the payout worker's lease
+ * deadline. With N Fly machines running the same 60s-cadence
+ * interval, only the lock holder sweeps this tick; the rest return
+ * immediately with `skippedLocked: true` and no I/O.
+ *
+ * Public API unchanged for existing callers (`startRedemptionBackfill`,
+ * the ADR-037 admin one-shot uses `refetchOrderRedemption` directly
+ * and is NOT gated by this lock — a human click is its own rate
+ * limiter) — this is still `runRedemptionBackfillTick`, just now
+ * single-flighted.
+ */
+export async function runRedemptionBackfillTick(args?: {
+  limit?: number;
+  now?: number;
+}): Promise<RedemptionBackfillTickResult> {
+  let leaseTimer: ReturnType<typeof setTimeout> | undefined;
+  const locked = await withAdvisoryLock(redemptionBackfillLockKey(), () =>
+    Promise.race([
+      runRedemptionBackfillTickLocked(args),
+      new Promise<typeof TICK_LEASE_TIMED_OUT>((resolve) => {
+        leaseTimer = setTimeout(
+          () => resolve(TICK_LEASE_TIMED_OUT),
+          REDEMPTION_BACKFILL_TICK_LEASE_MS,
+        );
+      }),
+    ]),
+  );
+  if (leaseTimer !== undefined) clearTimeout(leaseTimer);
+  if (!locked.ran) {
+    return emptyBackfillTickResult(true);
+  }
+  if (locked.value === TICK_LEASE_TIMED_OUT) {
+    log.error(
+      { leaseMs: REDEMPTION_BACKFILL_TICK_LEASE_MS },
+      'Redemption-backfill tick exceeded the lease deadline — releasing the lock so the fleet is not stalled; the in-flight sweep degrades to the pre-S4-8 per-machine posture',
+    );
+    return emptyBackfillTickResult(false);
+  }
+  return locked.value;
 }
 
 /**
@@ -410,7 +518,14 @@ export function startRedemptionBackfill(args?: { intervalMs?: number }): void {
       if (r.picked > 0) {
         log.info(r, 'Redemption-backfill tick complete');
       }
-      markWorkerTickSuccess('redemption_backfill');
+      // S4-8 /health honesty: a lock-skipped tick proves liveness but
+      // is recorded separately from a led tick — see
+      // markWorkerTickSkippedLocked's doc-comment.
+      if (r.skippedLocked) {
+        markWorkerTickSkippedLocked('redemption_backfill');
+      } else {
+        markWorkerTickSuccess('redemption_backfill');
+      }
     } catch (err) {
       markWorkerTickFailure('redemption_backfill', err);
       log.error({ err }, 'Redemption-backfill tick failed');

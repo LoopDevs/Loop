@@ -386,6 +386,13 @@
       "when": 1780188500000,
       "tag": "0054_operator_wallet_baselines_one_active",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1780188600000,
+      "tag": "0055_watchdog_alert_state",
+      "breakpoints": true
     }
   ]
 }

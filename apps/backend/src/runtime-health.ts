@@ -22,6 +22,22 @@ interface MutableWorkerState {
   lastErrorAtMs: number | null;
   lastError: string | null;
   staleAfterMs: number | null;
+  /**
+   * S4-8: last tick this machine skipped because another machine held
+   * the fleet-wide single-flight lock. A skip proves the loop is
+   * alive, so it also stamps `lastSuccessAtMs` (liveness) — this
+   * field exists so /health can distinguish "alive and leading" from
+   * "alive but always losing the lock".
+   */
+  lastSkippedLockedAtMs: number | null;
+  /**
+   * S4-8: last tick this machine actually did the work (won the
+   * fleet-wide lock, or the worker has no single-flight lock at all).
+   * With N machines a healthy fleet has exactly one machine advancing
+   * this per tick window; a fleet where NO machine advances it is
+   * wedged even though every machine's liveness stamp looks fresh.
+   */
+  lastLeadTickAtMs: number | null;
 }
 
 export interface RuntimeWorkerSnapshot extends MutableWorkerState {
@@ -62,6 +78,8 @@ function defaultWorkerState(): MutableWorkerState {
     lastErrorAtMs: null,
     lastError: null,
     staleAfterMs: null,
+    lastSkippedLockedAtMs: null,
+    lastLeadTickAtMs: null,
   };
 }
 
@@ -153,6 +171,32 @@ export function markWorkerTickSuccess(name: RuntimeWorkerName): void {
   state.running = true;
   if (state.startedAtMs === null) state.startedAtMs = Date.now();
   state.lastSuccessAtMs = Date.now();
+  // A tick that reached markWorkerTickSuccess did the real work (for
+  // single-flighted workers: it won the fleet-wide lock this tick).
+  state.lastLeadTickAtMs = state.lastSuccessAtMs;
+}
+
+/**
+ * S4-8: a tick that returned early because another machine held the
+ * fleet-wide single-flight advisory lock.
+ *
+ * Deliberately still stamps `lastSuccessAtMs`: the skip proves this
+ * machine's interval loop is alive and reaching the lock probe, and
+ * the degraded/stale computation keys off that liveness stamp. If a
+ * skip did NOT count as liveness, a healthy fleet's consistent
+ * lock-loser would flip stale → degraded → Fly restarts a perfectly
+ * healthy machine (false positive). The separate
+ * `lastSkippedLockedAtMs` / `lastLeadTickAtMs` fields exist so the
+ * /health payload still exposes the difference — an operator (or a
+ * dashboard) can see "alive but hasn't led in N minutes" fleet-wide,
+ * which is the real wedged-fleet signal.
+ */
+export function markWorkerTickSkippedLocked(name: RuntimeWorkerName): void {
+  const state = ensureWorker(name);
+  state.running = true;
+  if (state.startedAtMs === null) state.startedAtMs = Date.now();
+  state.lastSuccessAtMs = Date.now();
+  state.lastSkippedLockedAtMs = state.lastSuccessAtMs;
 }
 
 export function markWorkerTickFailure(name: RuntimeWorkerName, err: unknown): void {
@@ -208,6 +252,8 @@ export function getRuntimeHealthSnapshot(now: number = Date.now()): RuntimeHealt
         lastErrorAtMs: state.lastErrorAtMs,
         lastError: state.lastError,
         staleAfterMs: state.staleAfterMs,
+        lastSkippedLockedAtMs: state.lastSkippedLockedAtMs,
+        lastLeadTickAtMs: state.lastLeadTickAtMs,
         degraded,
         stale,
       };
