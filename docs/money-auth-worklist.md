@@ -116,7 +116,7 @@
       **Done when:** any payment-op with `to === depositAddress` that fails
       every rail match routes into `recordSkip` with a new reason, visible
       on `/admin/skips`.
-      ✅ Done 2026-07-09 (#1607, review-first — not yet merged at doc-write
+      ✅ Done 2026-07-09 (#1604, review-first — not yet merged at doc-write
       time). `horizon.ts` now accepts `path_payment_strict_send`/
       `path_payment_strict_receive` (same destination-side field names as
       `payment`) and adds `isInboundDeliveryToAccount` — the exact
