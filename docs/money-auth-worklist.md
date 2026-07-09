@@ -129,13 +129,18 @@
       `REFUND_MIN_STROOPS` dust floor T0-1c uses. Outbound operator
       payments/payouts (`to !== account`, same shared deposit/operator
       account) are never recorded — verified by dedicated tests. Migration
-      0056 widens the reason CHECK; `/admin/watcher-skips` picks the new
-      reason up automatically (already generic over `WATCHER_SKIP_REASONS`)
-      — no admin UI change needed. **Known residual** (not blocking, noted
-      in-code at `deposit-refund.ts`): the A6 automated refund path still
-      only handles `type === 'payment'`, so a path-payment skip row is
-      visible/recoverable but not yet one-click-refundable — separate
-      follow-up.
+      0056 widens the reason CHECK; the backend `/api/admin/watcher-skips`
+      handlers pick the new reason up automatically (already generic over
+      `WATCHER_SKIP_REASONS`) — but `money-reviewer` caught that the web
+      admin route (`admin.skips.tsx`) hardcoded its own reason
+      filter/dropdown list independent of the shared constant, so the new
+      reason (and, pre-existing, `order_gone`) couldn't actually be
+      filtered on; fixed in the same PR by deriving from
+      `WATCHER_SKIP_REASONS` instead (closes the drift class). **Known
+      residual** (not blocking, noted in-code at `deposit-refund.ts`): the
+      A6 automated refund path still only handles `type === 'payment'`, so
+      a path-payment skip row is visible/recoverable but not yet
+      one-click-refundable — separate follow-up.
 - [ ] **AUDIT-2-D · `interest-mint.ts` idempotency-skip catch never matches the real error shape.** _S · 💰._
       `credits/interest-mint.ts:324-337` (same pattern in
       `credits/accrue-interest.ts:183-201`, P2/legacy-gated-off) string-matches
