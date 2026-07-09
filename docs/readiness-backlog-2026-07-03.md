@@ -653,10 +653,11 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### B-1 · Load / stress / soak testing (absent) `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [ ] **Status:** ☐ Not started (harness half done 2026-07-09 — see below; real breaking-point run stays open)
       **Why:** Zero capacity evidence for a payment system on a single 512MB/1-cpu VM (`fly.toml`). You don't know the breaking point or autoscale behaviour. Compounds S4-4 (per-machine rate limits).
       **Do:** add a k6 (or artillery) suite hitting the hot paths (browse, order-create, auth) at increasing concurrency; run it against staging (see below) or a scratch deploy; record the breaking point + autoscale behaviour. New tool → note it in docs (k6 is a binary, not an npm dep, so no ADR needed, but document how to run).
       **Done when:** there's a documented capacity number + autoscale behaviour for the hot paths.
+      **Progress note (2026-07-09) — harness landed, 🟢 half done:** `tools/load-test/` now has a k6 suite (`browse.js` — clusters/merchants/by-slug, staged 5→50→100 VUs, SLO-derived `p95<200ms` thresholds; `auth-order.js` — request-otp→verify-otp→order-create→poll, staged 2→10→25 VUs, `p95<1500ms` order-create threshold; both `<1%` error budget) + `config.js` (`BASE_URL`, `scaleStages()` for a `VUS_SCALE` knob) + `run-local.sh` (boots the same mocked stack as `test-e2e-mocked`: mock-ctx, backend NODE_ENV=test, docker-compose postgres; pinned-by-digest `grafana/k6` image, `K6_BIN=k6` PATH fallback; macOS/Docker-Desktop networking handled via `host.docker.internal`) + `.github/workflows/load-test.yml` (`workflow_dispatch`-only, scenario + `vu_scale_factor` inputs, NOT a required check). Measured dev-machine + mock-CTX baselines (NOT production numbers — see `docs/load-testing.md` for the full caveat list): `browse.js` `merchants_all` p95 7.06ms, `merchants_by_slug` p95 5.36ms, 0% errors at 100 VUs peak; `auth-order.js` `order_create` p95 6.28ms, 0% errors at 25 VUs peak — both from the same `./tools/load-test/run-local.sh both` run; full numbers in `docs/load-testing.md`. **Still open (👤 operator):** the real breaking-point measurement needs this harness (or a rate-limiter-on variant) pointed at a staging deploy or a scratch Fly app sized like production — that's infra provisioning, not more engineering. B-1 stays unchecked until that half lands.
 
 ### B-2 · Accessibility (absent, + EU legal exposure) `[code]`
 
