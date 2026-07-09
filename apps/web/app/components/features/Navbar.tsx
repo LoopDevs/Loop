@@ -122,6 +122,10 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
     return () => clearTimeout(timer);
   }, [query]);
 
+  // UX-06: trimmed once so both the results filter and the "no results"
+  // copy agree on what actually counts as a searched query.
+  const trimmedQuery = debouncedQuery.trim();
+
   // Shared foldForSearch keeps navbar filtering in step with the
   // backend /api/merchants?q= behaviour (accent-insensitive).
   const foldedQuery = foldForSearch(debouncedQuery);
@@ -164,6 +168,13 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
           })
       : [];
 
+  // UX-06: an explicit empty state once a real search has run and found
+  // nothing — without this, a no-match query looks identical to "hasn't
+  // searched yet" (dropdown just doesn't render).
+  const showNoResults =
+    open && debouncedQuery.length > 1 && trimmedQuery.length > 0 && results.length === 0;
+  const showPanel = open && (results.length > 0 || showNoResults);
+
   return (
     <>
       {/* Dim backdrop behind the dropdown, portalled to body so the
@@ -171,7 +182,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
       {mounted &&
         createPortal(
           <div
-            className={`fixed inset-0 bg-ink/20 z-[1050] pointer-events-none transition-opacity duration-200 ${open && results.length > 0 ? 'opacity-100' : 'opacity-0'}`}
+            className={`fixed inset-0 bg-ink/20 z-[1050] pointer-events-none transition-opacity duration-200 ${showPanel ? 'opacity-100' : 'opacity-0'}`}
             aria-hidden="true"
           />,
           document.body,
@@ -179,7 +190,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
       <div
         className="relative"
         role="combobox"
-        aria-expanded={open && results.length > 0}
+        aria-expanded={showPanel}
         aria-haspopup="listbox"
         aria-owns="search-listbox"
         aria-controls="search-listbox"
@@ -190,6 +201,10 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
             type="text"
             value={query}
             placeholder="Search brands"
+            // UX-05: placeholder-only naming is unreliable for screen
+            // readers and disappears once the user starts typing —
+            // give the field a real accessible name.
+            aria-label="Search brands"
             aria-autocomplete="list"
             aria-controls="search-listbox"
             aria-activedescendant={
@@ -235,7 +250,7 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
             <path d="m21 21-4.35-4.35" />
           </svg>
         </div>
-        {open && results.length > 0 && (
+        {open && results.length > 0 ? (
           <SearchDropdown
             results={results}
             selectedIndex={selectedIndex}
@@ -245,7 +260,16 @@ const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(({ onSelect }, re
               setOpen(false);
             }}
           />
-        )}
+        ) : showNoResults ? (
+          // UX-06: `role="status"` so screen readers announce the
+          // "searched, found nothing" state without moving focus.
+          <div
+            role="status"
+            className="absolute top-full left-0 right-0 mt-2 rounded-lg shadow-lg z-[999999] bg-surface border border-line px-4 py-6 text-center text-sm text-ink-muted"
+          >
+            No brands match &ldquo;{trimmedQuery}&rdquo;
+          </div>
+        ) : null}
       </div>
     </>
   );

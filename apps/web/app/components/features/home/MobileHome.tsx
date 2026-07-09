@@ -77,15 +77,17 @@ export function MobileHome(): React.JSX.Element {
     [visibleMerchants, country],
   );
 
-  // Greeting name — email local-part, title-cased first char. Falls
-  // back to "there" for unauth / no-email visitors.
+  // Greeting name — email local-part, title-cased first char. `null` for
+  // unauth / no-email visitors (UX-09) — the header below swaps to a
+  // non-personalized "Welcome" for that case instead of a fake name like
+  // "there", which read as a real (if odd) identity under scrutiny.
   const greetingName = useMemo(() => {
-    if (email === null || email === undefined || email.length === 0) return 'there';
+    if (email === null || email === undefined || email.length === 0) return null;
     const local = email.split('@')[0] ?? '';
-    if (local.length === 0) return 'there';
+    if (local.length === 0) return null;
     return local.charAt(0).toUpperCase() + local.slice(1);
   }, [email]);
-  const avatarInitial = greetingName.charAt(0).toUpperCase();
+  const avatarInitial = greetingName?.charAt(0).toUpperCase() ?? null;
 
   // Authoritative cashback total — `credit_transactions.amount_minor`
   // where type='cashback' in the user's home currency. Prefer this
@@ -208,10 +210,10 @@ export function MobileHome(): React.JSX.Element {
       <div className="flex items-center justify-between px-5 pt-3 pb-2">
         <div className="flex flex-col">
           <span className="text-xs font-semibold uppercase tracking-[0.06em] text-gray-500 dark:text-gray-400">
-            Welcome back
+            {greetingName !== null ? 'Welcome back' : 'Welcome'}
           </span>
           <h1 className="mt-0.5 text-[24px] font-bold tracking-tight text-gray-950 dark:text-white">
-            {greetingName}
+            {greetingName ?? 'to Loop'}
           </h1>
         </div>
         <Link
@@ -219,7 +221,27 @@ export function MobileHome(): React.JSX.Element {
           aria-label="Account"
           className="w-9 h-9 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 flex items-center justify-center text-sm font-bold"
         >
-          {avatarInitial}
+          {avatarInitial !== null ? (
+            avatarInitial
+          ) : (
+            // UX-09: no real identity to initial for an anonymous
+            // visitor — a generic person glyph instead of a letter
+            // avatar derived from the "there" placeholder name.
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="8" r="4" />
+              <path d="M4 20c0-4 3.5-6 8-6s8 2 8 6" />
+            </svg>
+          )}
         </Link>
       </div>
 

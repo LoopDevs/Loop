@@ -1,7 +1,9 @@
 import { lazy, Suspense, useState, useCallback } from 'react';
+import { mapViewOf } from '@loop/shared';
 import type { Route } from './+types/map';
 import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useAllMerchants } from '~/hooks/use-merchants';
+import { useLocale } from '~/i18n/locale';
 import { Navbar } from '~/components/features/Navbar';
 import { MapBottomSheet } from '~/components/features/MapBottomSheet';
 import { Spinner } from '~/components/ui/Spinner';
@@ -34,6 +36,10 @@ export default function MapRoute(): React.JSX.Element {
   // caps at 100 items per page, which truncated popup name lookup once the
   // catalog grew past 100 merchants.
   const { merchants } = useAllMerchants();
+  // UX-08: the map's *initial* viewport follows the active ADR-034 locale
+  // country instead of always opening on the fixed US-wide default.
+  const { country } = useLocale();
+  const initialView = mapViewOf(country);
 
   const selectedMerchant = selectedMerchantId
     ? (merchants.find((m) => m.id === selectedMerchantId) ?? null)
@@ -59,7 +65,7 @@ export default function MapRoute(): React.JSX.Element {
             </div>
           }
         >
-          <ClusterMap onMerchantSelect={handleMerchantSelect} />
+          <ClusterMap onMerchantSelect={handleMerchantSelect} initialView={initialView} />
         </Suspense>
 
         {/* Bottom sheet for mobile — hidden on md+ where the popup is sufficient */}

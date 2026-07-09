@@ -8,7 +8,7 @@
  * Reuses `useOnboardingAuth` so the OTP send/verify behaviour is
  * identical to the mobile flow.
  */
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { LoopLogo } from '~/components/ui/LoopLogo';
 import { BackToSite } from '~/components/ui/BackToSite';
@@ -110,16 +110,52 @@ interface OnboardingDesktopProps {
   onComplete?: () => void;
 }
 
+// UX-07: cooldown after tapping "Resend code," mirroring the backend's
+// `POST /api/auth/request-otp` limit (5/min — AGENTS.md middleware stack).
+// 30s keeps every resend comfortably under that budget while still giving
+// clear, immediate feedback that the tap did something.
+const RESEND_COOLDOWN_SECONDS = 30;
+
 export function OnboardingDesktop({ onComplete }: OnboardingDesktopProps = {}): React.JSX.Element {
   const navigate = useNavigate();
   const [step, setStep] = useState<'email' | 'otp'>('email');
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
+  // A single interval, armed once per resend tap (not re-created every
+  // tick) and cleared on unmount / when the user backs out to re-enter
+  // an email — see `stopCooldown` below.
+  const cooldownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { sendingOtp, verifyingOtp, emailError, otpError, sendOtp, verify, clearErrors } =
     useOnboardingAuth();
 
+  const stopCooldown = useCallback((): void => {
+    if (cooldownIntervalRef.current !== null) {
+      clearInterval(cooldownIntervalRef.current);
+      cooldownIntervalRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => stopCooldown, [stopCooldown]);
+
+  const startCooldown = useCallback((): void => {
+    stopCooldown();
+    setResendCooldown(RESEND_COOLDOWN_SECONDS);
+    cooldownIntervalRef.current = setInterval(() => {
+      setResendCooldown((s) => {
+        if (s <= 1) {
+          stopCooldown();
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+  }, [stopCooldown]);
+
   const handleEmail = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
+    // No cooldown on the initial send — the code hasn't been resent yet,
+    // so the OTP step opens with "Resend code" immediately available.
     if (await sendOtp(email)) setStep('otp');
   };
 
@@ -129,6 +165,11 @@ export function OnboardingDesktop({ onComplete }: OnboardingDesktopProps = {}): 
       if (onComplete) onComplete();
       else void navigate('/');
     }
+  };
+
+  const handleResend = async (): Promise<void> => {
+    if (resendCooldown > 0 || sendingOtp) return;
+    if (await sendOtp(email)) startCooldown();
   };
 
   return (
@@ -215,9 +256,23 @@ export function OnboardingDesktop({ onComplete }: OnboardingDesktopProps = {}): 
                 <Button type="submit" size="lg" className="w-full" loading={verifyingOtp}>
                   Verify &amp; continue
                 </Button>
+                {/* UX-07: explicit resend, mirroring the native flow's
+                    "Resend code" (signup-tail.tsx's OtpEntry). Disabled
+                    during the post-send cooldown so it can't be used to
+                    hammer the 5/min request-otp rate limit. */}
+                <button
+                  type="button"
+                  onClick={() => void handleResend()}
+                  disabled={resendCooldown > 0 || sendingOtp}
+                  className="w-full text-sm text-ink-muted hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : 'Resend code'}
+                </button>
                 <button
                   type="button"
                   onClick={() => {
+                    stopCooldown();
+                    setResendCooldown(0);
                     setStep('email');
                     setOtp('');
                     clearErrors();
