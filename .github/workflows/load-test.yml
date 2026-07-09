@@ -1,0 +1,162 @@
+name: Load test (k6)
+
+# Manually triggered only — this is a capacity-measurement harness, not a
+# correctness gate (see docs/go-live-plan.md §T1-BS B-1 /
+# docs/readiness-backlog-2026-07-03.md B-1). It boots the same
+# self-contained mocked stack as `test-e2e-mocked` (mock-ctx + backend +
+# real postgres — see playwright.mocked.config.ts) and drives it with k6
+# instead of Playwright. NOT one of the required status checks on `main`
+# (branch protection lists: Quality, Unit tests, Security audit, Build
+# verification, E2E tests (mocked CTX)) — a load-test run failing its
+# thresholds shouldn't block an unrelated PR from merging, and this
+# workflow only ever runs via manual dispatch anyway.
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: 'Which scenario(s) to run'
+        required: false
+        type: choice
+        default: 'both'
+        options:
+          - browse
+          - auth-order
+          - both
+      vu_scale_factor:
+        description: "Multiplies every scenario's staged VU targets (e.g. 0.25 for a lighter CI-shared-runner pass, 1 for the numbers in docs/load-testing.md)"
+        required: false
+        default: '1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: load-test
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: k6 load test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      # Same shape as ci.yml's test-e2e-mocked / test-e2e-flywheel postgres
+      # service — port 5433 -> 5432 so DATABASE_URL matches
+      # playwright.mocked.config.ts / tools/load-test/run-local.sh exactly.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: loop
+          POSTGRES_PASSWORD: loop
+          POSTGRES_DB: loop_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U loop -d loop_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://loop:loop@localhost:5433/loop_test
+      MOCK_CTX_URL: http://localhost:9091
+      BACKEND_URL: http://localhost:8081
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install deps
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+      - name: Run migrations (tests/e2e-mocked/global-setup.ts)
+        run: npx tsx tools/load-test/migrate.mjs
+      - name: Start mock-ctx
+        run: |
+          PORT=9091 node tests/e2e-mocked/fixtures/mock-ctx.mjs > mock-ctx.log 2>&1 &
+          echo $! > mock-ctx.pid
+          for i in $(seq 1 20); do
+            curl -fsS "$MOCK_CTX_URL/status" >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          echo "::error::mock-ctx did not become healthy" && cat mock-ctx.log && exit 1
+      - name: Start backend (NODE_ENV=test, DISABLE_RATE_LIMITING=1)
+        # Mirrors playwright.mocked.config.ts's webServer entry — no
+        # --env-file, LOOP_AUTH_NATIVE_ENABLED left unset (legacy CTX-proxy
+        # auth path), DISABLE_RATE_LIMITING=1 so ramping VUs don't
+        # immediately trip the per-IP auth/order rate limits.
+        run: |
+          PORT=8081 \
+          NODE_ENV=test \
+          LOG_LEVEL=warn \
+          GIFT_CARD_API_BASE_URL="$MOCK_CTX_URL" \
+          REFRESH_INTERVAL_HOURS=6 \
+          LOCATION_REFRESH_INTERVAL_HOURS=24 \
+          DATABASE_URL="$DATABASE_URL" \
+          DISABLE_RATE_LIMITING=1 \
+          npm exec -w @loop/backend -- tsx src/index.ts > backend.log 2>&1 &
+          echo $! > backend.pid
+          for i in $(seq 1 60); do
+            curl -fsS "$BACKEND_URL/health" >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          echo "::error::backend did not become healthy" && cat backend.log && exit 1
+      - name: Run k6 (pinned by digest — see tools/load-test/run-local.sh)
+        # ubuntu-latest is a real Linux host (not Docker Desktop's VM), so
+        # --network host puts the k6 container directly on the runner's
+        # network namespace and BASE_URL=localhost resolves to the backend
+        # started above — no host.docker.internal indirection needed here
+        # (contrast tools/load-test/run-local.sh's macOS handling).
+        run: |
+          set +e   # collect both scenarios' results before failing the step
+          mkdir -p tools/load-test/results
+          overall=0
+          run_scenario() {
+            docker run --rm --network host \
+              -v "$PWD/tools/load-test":/scripts \
+              -e BASE_URL="$BACKEND_URL" \
+              -e VUS_SCALE="${{ inputs.vu_scale_factor }}" \
+              grafana/k6:2.1.0@sha256:65c920dc067d5e2e00befbf982af6ad6ad0117034e8b1c65817c7975c52d4669 \
+              run --summary-export="/scripts/results/$1-summary.json" "/scripts/$1.js"
+            local rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::k6 scenario '$1' failed (exit $rc) — see tools/load-test/results/$1-summary.json"
+              overall=1
+            fi
+          }
+          scenario="${{ inputs.scenario }}"
+          case "$scenario" in
+            browse) run_scenario browse ;;
+            auth-order) run_scenario auth-order ;;
+            both)
+              run_scenario browse
+              run_scenario auth-order
+              ;;
+            *)
+              echo "::error::unknown scenario '$scenario'"
+              overall=1
+              ;;
+          esac
+          exit "$overall"
+      - name: Upload k6 summaries
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: k6-summaries
+          path: tools/load-test/results/*.json
+          retention-days: 30
+      - name: Upload service logs (debugging)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: load-test-service-logs
+          path: |
+            mock-ctx.log
+            backend.log
+          retention-days: 7
+      - name: Stop backend + mock-ctx
+        if: always()
+        run: |
+          [ -f backend.pid ] && kill "$(cat backend.pid)" 2>/dev/null || true
+          [ -f mock-ctx.pid ] && kill "$(cat mock-ctx.pid)" 2>/dev/null || true

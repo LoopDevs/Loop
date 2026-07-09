@@ -52,6 +52,10 @@ coverage/
 playwright-report/
 test-results/
 
+# k6 load-test run output (tools/load-test/run-local.sh) — regenerated per
+# run; the measured baselines that matter get copied into docs/load-testing.md
+tools/load-test/results/
+
 # Postman / API collections
 *.postman_collection.json
 *.postman_environment.json
