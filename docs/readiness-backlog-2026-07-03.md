@@ -444,10 +444,32 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### S4-4 · Rate-limiter shared store (accuracy under auto-scale) `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Fixed 2026-07-09 (dynamic estimator, PR pending auth-review merge)
       **Why:** In-memory per-machine limiter divided by a _static_ `RATE_LIMIT_MACHINE_COUNT_ESTIMATE` (prod=2); `fly.toml` `auto_start_machines=true` makes limits wrong the moment real machine count diverges — too loose under exactly the spike you'd want them tight; the 10k-entry `rateLimitMap` also thrashes under high IP diversity. Wave 9 / Scale-#2 / ADR-005 #4.
       **Do:** interim (cheap) — pin `min`/`max` machines so the estimate stays accurate. Durable — a shared counter (Postgres or Redis; Redis needs an ADR as a new dep). Keep per-route keys (A4-001).
       **Done when:** per-IP limits are accurate regardless of machine count; documented.
+      **Done 2026-07-09:** implemented a **dynamic fleet-size estimator**
+      (`apps/backend/src/middleware/fleet-size.ts`) instead of either interim
+      option above. It queries Fly's private `<FLY_APP_NAME>.internal` DNS zone
+      (one AAAA record per currently-started machine, fleet-wide) on a 30s
+      background interval — never on the request path — and `rate-limit.ts`
+      reads the cached estimate fresh on every request as the divisor. On
+      DNS failure the last-known-good value is kept for a 5-minute grace
+      period, then falls back to the static `RATE_LIMIT_MACHINE_COUNT_ESTIMATE`
+      (which stays as the no-signal floor for local dev/CI/non-Fly hosts).
+      `/health` exposes the live value (`rateLimitFleetEstimate` /
+      `rateLimitFleetEstimateSource`). Per-route keys (A4-001) unchanged.
+      **The durable shared-store (Redis/Postgres) option was deliberately
+      rejected**, not deferred: it adds a hot-path round-trip to every
+      rate-limited request and turns a volumetric flood into a database
+      write storm — worse than the inaccuracy it would fix. ADR-040's
+      planned Cloudflare edge (a single edge-side limiter ahead of the whole
+      fleet) is the eventual durable answer once it lands. The interim
+      min/max-machine-pinning option is now unnecessary — the dynamic
+      estimator supersedes it (it's strictly more accurate and needs no
+      manual pinning). The 10k-entry `rateLimitMap` thrash-under-IP-diversity
+      half of the original "Why" is **not** addressed by this fix and remains
+      open if it becomes a real problem.
 
 ### S4-5 · Raise the DB pool; plan PgBouncer `[code]`
 

@@ -207,15 +207,25 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # entirely.
 # DISABLE_RATE_LIMITING=1
 
-# CF2-10 (2026-06-30 cold audit) stopgap: rateLimitMap is in-memory and
-# per-machine, so every configured per-route budget is actually
-# max × (live Fly machine count). Divides every budget by this
-# estimate so the effective fleet-wide limit matches what's documented.
-# Default 1 (no division) — same posture as TRUST_PROXY; local dev/test
-# run single-process, so leave unset there. Production sets this
-# explicitly to the fleet's real machine count (confirmed 2 during the
-# audit); update when that count changes.
+# CF2-10 (2026-06-30 cold audit) → S4-4 (2026-07-09 dynamic fix):
+# rateLimitMap is in-memory and per-machine, so every configured
+# per-route budget is actually max × (live Fly machine count).
+# apps/backend/src/middleware/fleet-size.ts now derives that count LIVE
+# from Fly's `.internal` private DNS zone (one AAAA record per started
+# machine, refreshed every 30s) and prefers it as the divisor whenever
+# it's fresh — this var is now only the fallback for when FLY_APP_NAME
+# is unset (local dev/CI/non-Fly hosts) or DNS has failed past a
+# 5-minute grace period. Default 1 (no division) — same posture as
+# TRUST_PROXY; local dev/test run single-process, so leave unset there.
+# Production sets this explicitly as the fallback floor.
 # RATE_LIMIT_MACHINE_COUNT_ESTIMATE=2
+
+# S4-4: Fly injects FLY_APP_NAME automatically into every Machine's
+# runtime — never set this by hand. Names the app's private `.internal`
+# DNS zone that the fleet-size estimator above queries. Absent outside
+# Fly, which is the expected local dev/CI posture (the estimator then
+# always uses the static fallback above).
+# FLY_APP_NAME=loopfinance-api
 
 # ── Loop-native auth (ADR 013 / 014) ─────────────────────────────────
 # HS256 signing key; ≥32 chars. Absent → Loop-native auth endpoints

@@ -15,6 +15,7 @@ const {
   operatorHealthMock,
   geoDbState,
   notifyGeoDbStaleMock,
+  fleetSizeState,
 } = vi.hoisted(() => ({
   locationsState: { locations: [] as unknown[], loadedAt: Date.now(), loading: false },
   merchantsState: { merchants: [] as unknown[], loadedAt: Date.now() },
@@ -41,6 +42,10 @@ const {
     stale: false,
   },
   notifyGeoDbStaleMock: vi.fn(),
+  // S4-4: default mirrors the "static fallback" posture — most tests
+  // don't care about the fleet-size source, so the baseline must not
+  // spuriously imply a live DNS read is in effect.
+  fleetSizeState: { estimate: 1, source: 'static' as 'dynamic' | 'static' },
 }));
 
 vi.mock('../clustering/data-store.js', () => ({
@@ -64,6 +69,11 @@ vi.mock('../discord.js', () => ({
 vi.mock('../public/geo.js', () => ({
   getGeoDbStatus: () => Promise.resolve(geoDbState),
   GEO_DB_STALE_AFTER_DAYS: 45,
+}));
+
+vi.mock('../middleware/fleet-size.js', () => ({
+  currentFleetSizeEstimate: () => fleetSizeState.estimate,
+  currentFleetSizeSource: () => fleetSizeState.source,
 }));
 
 vi.mock('../upstream.js', () => ({
@@ -122,6 +132,8 @@ beforeEach(() => {
   geoDbState.ageDays = null;
   geoDbState.stale = false;
   notifyGeoDbStaleMock.mockReset();
+  fleetSizeState.estimate = 1;
+  fleetSizeState.source = 'static';
   __resetHealthProbeCacheForTests();
   __resetDbProbeCacheForTests();
 });
@@ -228,6 +240,61 @@ describe('healthHandler', () => {
     const { ctx, headers } = makeCtx();
     await healthHandler(ctx);
     expect(headers.get('Cache-Control')).toBe('no-store');
+  });
+
+  // S4-4: purely informational exposure of the rate limiter's current
+  // fleet-size divisor (middleware/fleet-size.ts) — mirrors the
+  // geoDbStale/geoDbBuildEpoch shape added in PR #1588. Neither field
+  // affects softDegraded/criticalDegraded/status; these tests pin that
+  // as well as the plumbing from the (mocked) estimator through to the
+  // response body.
+  describe('rate limit fleet estimate', () => {
+    it('reports the dynamic estimate + source when a live DNS read is in effect', async () => {
+      fleetSizeState.estimate = 4;
+      fleetSizeState.source = 'dynamic';
+      const { ctx } = makeCtx();
+      const res = await healthHandler(ctx);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        status: string;
+        rateLimitFleetEstimate: number;
+        rateLimitFleetEstimateSource: string;
+      };
+      expect(body.status).toBe('healthy');
+      expect(body.rateLimitFleetEstimate).toBe(4);
+      expect(body.rateLimitFleetEstimateSource).toBe('dynamic');
+    });
+
+    it('reports the static fallback + source when no live DNS read is in effect', async () => {
+      fleetSizeState.estimate = 2;
+      fleetSizeState.source = 'static';
+      const { ctx } = makeCtx();
+      const res = await healthHandler(ctx);
+      const body = (await res.json()) as {
+        rateLimitFleetEstimate: number;
+        rateLimitFleetEstimateSource: string;
+      };
+      expect(body.rateLimitFleetEstimate).toBe(2);
+      expect(body.rateLimitFleetEstimateSource).toBe('static');
+    });
+
+    it('does not affect softDegraded/criticalDegraded/status — purely informational', async () => {
+      fleetSizeState.estimate = 1;
+      fleetSizeState.source = 'static';
+      const { ctx } = makeCtx();
+      const res = await healthHandler(ctx);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        status: string;
+        softDegraded: boolean;
+        criticalDegraded: boolean;
+        softDegradedReasons: string[];
+      };
+      expect(body.status).toBe('healthy');
+      expect(body.softDegraded).toBe(false);
+      expect(body.criticalDegraded).toBe(false);
+      expect(body.softDegradedReasons).toEqual([]);
+    });
   });
 
   // go-live-plan §T1-F: GeoLite2 staleness/absence signal. Pins the

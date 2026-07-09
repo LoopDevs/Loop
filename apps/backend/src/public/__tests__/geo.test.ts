@@ -30,6 +30,22 @@ vi.mock('maxmind', () => ({
   open: openMock,
 }));
 
+// S4-4: `clientIpFor` (imported below from `../../middleware/rate-limit.js`)
+// now pulls in `../../middleware/fleet-size.js`, which imports the real
+// logger at module scope. This file's `env.js` mock only carries the one
+// field `getGeoDbStatus` needs, so the real `logger.ts` would throw at
+// import time (`pino()` requires `LOG_LEVEL`/`NODE_ENV`, neither mocked
+// here). Mock it out, same as `rate-limit.test.ts` / `health.test.ts` do.
+vi.mock('../../logger.js', () => ({
+  logger: {
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn(),
+    child: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }),
+  },
+}));
+
 beforeEach(() => {
   vi.resetModules();
   envState.MAXMIND_GEOLITE2_PATH = undefined;

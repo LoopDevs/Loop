@@ -559,6 +559,22 @@ describe('parseEnv', () => {
     });
   });
 
+  // S4-4 (2026-07-09): FLY_APP_NAME feeds the dynamic fleet-size
+  // estimator (middleware/fleet-size.ts) that now takes priority over
+  // the static RATE_LIMIT_MACHINE_COUNT_ESTIMATE above. Platform-
+  // injected (never admin-set), so it's optional with no default.
+  describe('FLY_APP_NAME', () => {
+    it('is undefined by default (local dev / CI / non-Fly hosts)', () => {
+      const env = parseEnv({ ...base });
+      expect(env.FLY_APP_NAME).toBeUndefined();
+    });
+
+    it('passes through whatever the Fly runtime injects', () => {
+      const env = parseEnv({ ...base, FLY_APP_NAME: 'loopfinance-api' });
+      expect(env.FLY_APP_NAME).toBe('loopfinance-api');
+    });
+  });
+
   describe('ADR 030 Phase B: LOOP_WALLET_PROVIDER cross-field requirement', () => {
     it('defaults to the empty string (wallet layer OFF)', () => {
       expect(parseEnv(base).LOOP_WALLET_PROVIDER).toBe('');

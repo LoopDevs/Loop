@@ -127,27 +127,44 @@ export const coreEnvFields = {
   // every per-IP limit on every route.
   DISABLE_RATE_LIMITING: envBoolean.default(false),
 
-  // CF2-10 (2026-06-30 cold audit) stopgap: `rateLimitMap` is an
-  // in-memory, per-machine Map — every configured per-route budget
-  // (`rateLimit(name, max, windowMs)`) is actually `max × N` where N
-  // is however many Fly machines are currently running, since a
-  // client's requests land on whichever machine picks them up. Fly's
-  // `auto_start_machines=true` autoscaling means N isn't fixed; a
-  // `flyctl machines list` check during the audit found 2 machines
-  // already provisioned. Until the real fix (a shared Postgres/Redis-
-  // backed counter, tracked separately) lands, divide every
-  // configured budget by this estimate so the EFFECTIVE fleet-wide
-  // budget matches what's documented.
+  // CF2-10 (2026-06-30 cold audit) → S4-4 (2026-07-09 dynamic fix):
+  // `rateLimitMap` is an in-memory, per-machine Map — every configured
+  // per-route budget (`rateLimit(name, max, windowMs)`) is actually
+  // `max × N` where N is however many Fly machines are currently
+  // running, since a client's requests land on whichever machine picks
+  // them up. Fly's `auto_start_machines=true` autoscaling means N isn't
+  // fixed, so a *static* estimate goes wrong the moment the fleet
+  // scales — exactly under the load spike you'd want limits tight.
+  //
+  // The real fix (`middleware/fleet-size.ts`) queries Fly's private
+  // `.internal` DNS zone (one AAAA record per started machine,
+  // fleet-wide) on a background interval and uses that LIVE count as
+  // the divisor whenever it's fresh. This var is now only the
+  // **no-signal fallback**: used when `FLY_APP_NAME` is unset (local
+  // dev, CI, non-Fly hosts), the DNS refresh has never succeeded, or a
+  // run of failures has exceeded the estimator's grace period. See
+  // `fleet-size.ts` for why the dynamic value is preferred in both
+  // directions (a shrunk fleet dividing too much is safe; a grown
+  // fleet dividing too little is not) rather than e.g. `max(dynamic,
+  // static)`.
   //
   // Defaults to 1 (no division) — same posture as TRUST_PROXY: local
   // dev and every unit/integration test run single-process, where the
   // per-machine multiplier problem doesn't exist, so the documented
   // literal thresholds (5/min, 10/min, etc.) must hold unchanged.
-  // Production sets this explicitly (via fly.toml / `flyctl secrets`)
-  // to the fleet's real machine count — update it when that count
-  // changes; it's a blunt estimate, not a live `flyctl machines list`
-  // read.
+  // Production still sets this explicitly (via fly.toml / `flyctl
+  // secrets`) as the fallback floor for whenever DNS is unavailable.
   RATE_LIMIT_MACHINE_COUNT_ESTIMATE: z.coerce.number().int().positive().default(1),
+
+  // S4-4: Fly injects this into every Machine's runtime automatically
+  // (not admin-configured — declared here anyway, same as PORT/
+  // NODE_ENV, so it flows through the validated `env` object and the
+  // dead-flags detector can see it's read). Names the app's private
+  // `.internal` DNS zone (`<FLY_APP_NAME>.internal`), which
+  // `fleet-size.ts` queries to count live machines. Absent outside Fly
+  // (local dev, CI) — the estimator then falls back to
+  // `RATE_LIMIT_MACHINE_COUNT_ESTIMATE` above, unchanged behaviour.
+  FLY_APP_NAME: z.string().optional(),
 
   // A2-1606 / A2-1607: shared-secret bearer tokens for `/metrics` and
   // `/openapi.json`. When set, the route requires `Authorization:

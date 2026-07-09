@@ -11,6 +11,7 @@ import { corsMiddleware } from './middleware/cors.js';
 import { secureHeadersMiddleware } from './middleware/secure-headers.js';
 import { bodyLimitMiddleware } from './middleware/body-limit.js';
 import { startCleanupInterval } from './cleanup.js';
+import { startFleetSizeEstimator } from './middleware/fleet-size.js';
 import { metricsHandler, openApiHandler } from './observability-handlers.js';
 import { mountTestEndpoints } from './test-endpoints.js';
 import { mountMerchantRoutes } from './routes/merchants.js';
@@ -230,3 +231,15 @@ app.onError((err, c) => {
 // graceful-shutdown handler.
 startCleanupInterval();
 export { stopCleanupInterval } from './cleanup.js';
+
+// ─── Fleet-size estimator (S4-4) ────────────────────────────────────────────
+//
+// Background `.internal` DNS refresh feeding the rate limiter's
+// dynamic machine-count divisor lives in `./middleware/fleet-size.ts`.
+// Always-on (not gated behind LOOP_WORKERS_ENABLED — every machine
+// rate-limits, not just the ones running Loop-native order workers).
+// Started here at module-init time for the same reason as the cleanup
+// interval above; `stopFleetSizeEstimator` re-exported for
+// `index.ts`'s graceful-shutdown handler.
+startFleetSizeEstimator();
+export { stopFleetSizeEstimator } from './middleware/fleet-size.js';

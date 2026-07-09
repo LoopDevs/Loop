@@ -2,7 +2,7 @@ import { serve } from '@hono/node-server';
 import { flush as sentryFlush } from '@sentry/hono/node';
 import { env } from './env.js';
 import { logger } from './logger.js';
-import { app, stopCleanupInterval } from './app.js';
+import { app, stopCleanupInterval, stopFleetSizeEstimator } from './app.js';
 import { startLocationRefresh, stopLocationRefresh } from './clustering/data-store.js';
 import { startMerchantRefresh, stopMerchantRefresh } from './merchants/sync.js';
 import { runMigrations, closeDb } from './db/client.js';
@@ -320,6 +320,7 @@ function shutdown(signal: string): void {
   // Stop background intervals so they don't pin the event loop open past
   // server drain.
   stopCleanupInterval();
+  stopFleetSizeEstimator();
   stopMerchantRefresh();
   stopLocationRefresh();
   stopPaymentWatcher();

@@ -109,6 +109,21 @@ and where the fix work would happen.
   factory plus the `rateLimitMap` it reads from. Replace with a shared
   store (Upstash Redis is the Fly-friendly option) and keep the
   existing interface so call sites don't move.
+- **Update (2026-07-09, S4-4)**: the backend has been running more than
+  one Fly machine for a while now (`RATE_LIMIT_MACHINE_COUNT_ESTIMATE`,
+  CF2-10), and the "effective limit multiplies by instance count"
+  problem is now addressed **dynamically** rather than by a hand-set
+  constant: `apps/backend/src/middleware/fleet-size.ts` derives the
+  live started-machine count from Fly's `.internal` DNS zone and
+  `rate-limit.ts` divides by that count on every request, falling back
+  to the static estimate only when no live signal is available (see
+  `docs/deployment.md` §Rate-limiter fleet-size estimate). The
+  fundamental limitation this entry describes — the bucket store
+  itself is still an in-memory per-machine `Map`, not shared — is
+  otherwise unchanged, and the shared-store option was deliberately
+  rejected as the general fix (hot-path DB round-trip; turns a flood
+  into a write storm) rather than merely deferred. ADR-040's
+  Cloudflare edge remains the eventual durable answer.
 
 ### 5. Image proxy DNS-rebinding TOCTOU
 
