@@ -145,3 +145,48 @@ describe('PurchaseComplete', () => {
     expect(image.getAttribute('src')).toContain('mode=private');
   });
 });
+
+// WUM-10 (2026-06-30 cold audit): CF-35's aria-live copy-confirmation
+// pattern rolled out from PaymentStep to PurchaseComplete's CodeField —
+// the redemption-value surface (gift-card code/PIN).
+describe('PurchaseComplete — aria-live copy confirmation (WUM-10)', () => {
+  it('announces the code copy to assistive tech', async () => {
+    render(<PurchaseComplete merchantName="Target" code="GC-CODE" pin="9876" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Copy code' }));
+    });
+    expect(screen.getByText('Code copied to clipboard.')).toBeDefined();
+  });
+
+  it('announces the PIN copy distinctly from the code', async () => {
+    render(<PurchaseComplete merchantName="Target" code="GC-CODE" pin="9876" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Copy pin' }));
+    });
+    expect(screen.getByText('PIN copied to clipboard.')).toBeDefined();
+    expect(screen.queryByText('Code copied to clipboard.')).toBeNull();
+  });
+
+  it('resets the announcement after the flash window', async () => {
+    vi.useFakeTimers();
+    render(<PurchaseComplete merchantName="Target" code="GC-CODE" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy code' }));
+    await vi.waitFor(() => {
+      expect(screen.getByText('Code copied to clipboard.')).toBeDefined();
+    });
+    vi.advanceTimersByTime(2_000);
+    await vi.waitFor(() => {
+      expect(screen.queryByText('Code copied to clipboard.')).toBeNull();
+    });
+    vi.useRealTimers();
+  });
+
+  it('does not announce when the copy fails', async () => {
+    mockCopy.mockResolvedValueOnce(false);
+    render(<PurchaseComplete merchantName="Target" code="GC-CODE" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Copy code' }));
+    });
+    expect(screen.queryByText('Code copied to clipboard.')).toBeNull();
+  });
+});

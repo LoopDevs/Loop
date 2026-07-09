@@ -208,6 +208,11 @@ export function RedeemFlow({
         >
           {copied ? 'Copied!' : 'Copy code'}
         </button>
+        {/* WUM-10 (2026-06-30 cold audit) / CF-35 rollout: confirm copy to
+            assistive tech, matching PaymentStep / LoopPaymentStep. */}
+        <span aria-live="polite" className="sr-only">
+          {copied ? 'Challenge code copied to clipboard.' : ''}
+        </span>
       </div>
 
       {openError !== null && (

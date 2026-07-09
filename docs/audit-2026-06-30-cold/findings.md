@@ -59,7 +59,7 @@ Severity split — P0: 2 LIVE / 1 GATED / 1 BRANCH / 2 LAUNCH-GATE. The discount
 
 ## P2 — Medium (46)
 
-Multi-machine tail (breaker/operator-pool/cashback-cache/watcher-dedup/image-cache per-machine: CF2-11..15) · auth retention (AUTH-04/05) · orders robustness (ORD-004/05, V3-03/04, V4-04) · admin idempotency/caps (ADM-03/05/06/07/10/11, ADMIN-03/04/05/06, F-WEBADMIN-03/04/05/10-15) · OpenAPI contract drift incl. withdrawal step-up omission (CF2-16/PLAT-30-20..28) · catalog (CAT-04/05/07) · CF-22 locale tail · web UI (WUI-03/04/05/08, WUM-06/08/09/10, WEB-S3) · privacy/perimeter (PRIV-03/04/08/09, PLAT-30-08/09/15) · platform/DB/test-coverage (PLAT-30-04/05/06, DB-02, F-3/4/5, SEC-01/03, DT-01/02/03/04/05/06/08/10/14/17/18, EXT-01/02).
+Multi-machine tail (breaker/operator-pool/cashback-cache/watcher-dedup/image-cache per-machine: CF2-11..15) · auth retention (AUTH-04/05) · orders robustness (ORD-004/05, V3-03/04, V4-04) · admin idempotency/caps (ADM-03/05/06/07/10/11, ADMIN-03/04/05/06, F-WEBADMIN-03/04/05/10-15) · OpenAPI contract drift incl. withdrawal step-up omission (CF2-16/PLAT-30-20..28) · catalog (CAT-04/05/07) · CF-22 locale tail · web UI (WUI-03/04/05/08, WUM-06/08/09, WEB-S3) · WUM-10 (CLOSED 2026-07-09 — aria-live copy-confirmation rollout completed on the 3 remaining sites + the shared admin `CopyButton`; see `raw/v-web-ui-money.md`) · privacy/perimeter (PRIV-03/04/08/09, PLAT-30-08/09/15) · platform/DB/test-coverage (PLAT-30-04/05/06, DB-02, F-3/4/5, SEC-01/03, DT-01/02/03/04/05/06/08/10/14/17/18, EXT-01/02).
 
 ## P3 — Low (32, table form)
 

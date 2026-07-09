@@ -106,6 +106,18 @@ export function PurchaseComplete({
 
   return (
     <div className="flex flex-col gap-3">
+      {/* WUM-10 (2026-06-30 cold audit) / CF-35 rollout: confirm copy
+          actions to assistive tech, mirroring PaymentStep's copiedField
+          region — this is the redemption-value surface (gift-card
+          code/PIN), so a screen-reader user gets no other confirmation
+          the copy succeeded. */}
+      <div aria-live="polite" className="sr-only">
+        {copied === 'code'
+          ? 'Code copied to clipboard.'
+          : copied === 'pin'
+            ? 'PIN copied to clipboard.'
+            : ''}
+      </div>
       {/* Gift-card-shaped face: white body, ink header band with the
           merchant name + "Gift card" label, rounded corners + soft
           shadow. Mimics a physical card sitting on the page. */}

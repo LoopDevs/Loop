@@ -248,21 +248,30 @@ function RedemptionField({ label, value }: { label: string; value: string }): Re
     window.setTimeout(() => setCopied(false), 1500);
   };
   return (
-    <div className="flex items-center justify-between gap-2">
-      <div className="flex-1 min-w-0">
-        <div className="text-[10px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-          {label}
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+            {label}
+          </div>
+          <div className="text-sm font-mono text-gray-900 dark:text-white break-all">{value}</div>
         </div>
-        <div className="text-sm font-mono text-gray-900 dark:text-white break-all">{value}</div>
+        <button
+          type="button"
+          onClick={onCopy}
+          className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline shrink-0"
+          aria-label={`Copy ${label.toLowerCase()}`}
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
       </div>
-      <button
-        type="button"
-        onClick={onCopy}
-        className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline shrink-0"
-        aria-label={`Copy ${label.toLowerCase()}`}
-      >
-        {copied ? 'Copied' : 'Copy'}
-      </button>
+      {/* WUM-10 (2026-06-30 cold audit) / CF-35 rollout: confirm copy to
+          assistive tech, mirroring LoopPaymentStep's Row exactly — this
+          function is that component's structural sibling for the orders
+          list (address/memo recovery panel + redeem code/PIN). */}
+      <span aria-live="polite" className="sr-only">
+        {copied ? `${label} copied to clipboard.` : ''}
+      </span>
     </div>
   );
 }
