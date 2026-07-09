@@ -904,3 +904,4 @@ Each is documented + accepted in `docs/adr/005-known-limitations.md` with a revi
 
 - **2026-07-03** — created; consolidates the outstanding-work inventory + the nine-lens readiness investigation + the verified P0 stranded-deposit bug + the running-app pass.
 - **2026-07-09** — U-1 (full customer-journey UX/visual pass) closed; findings doc `docs/ux-pass-2026-07-09.md`; U-2 and U-3 added for the two P1 findings.
+- **2026-07-09** (PR #1596) — the findings doc's remaining mechanical P2s (UX-05 search a11y, UX-06 search no-results state, UX-07 onboarding OTP resend, UX-08 locale-aware map center, UX-09 anonymous-visitor greeting) fixed; none were filed as their own Tier 10 items (documented-only per the findings doc's severity rubric), so there's no checkbox here to flip — see `docs/ux-pass-2026-07-09.md`'s per-finding "Fixed" notes. UX-04 (unpaginated home merchant grid) stays open, deliberately out of scope (pagination/virtualization project).
