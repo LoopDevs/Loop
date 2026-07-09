@@ -789,6 +789,50 @@ describe('runPaymentWatcherTick', () => {
     expect(r.paid).toBe(0);
   });
 
+  // AUDIT-2 finding A (two independent reviewers): the USDC path used
+  // to spread `assetIssuer` into the matcher only when
+  // `args.usdcIssuer` was defined, and `isMatchingIncomingPayment`
+  // treated an omitted issuer as "any issuer matches" — an attacker
+  // could self-issue their own "USDC" asset and get it treated as
+  // real, triggering markOrderPaid and a real gift-card procurement
+  // against real operator funds. horizon.ts now requires a pinned
+  // issuer for any credit-asset match. These two tests pin the fixed
+  // tick-level behaviour: rejected regardless of whether an issuer is
+  // configured.
+  it('AUDIT-2 finding A: rejects a fake "USDC" from an attacker issuer when the REAL issuer IS configured', async () => {
+    const attackerIssuer = 'GATTACKER' + '9'.repeat(46);
+    listPaymentsMock.mockResolvedValue({
+      records: [{ ...usdcPayment('MEMO', '10.0000000'), asset_issuer: attackerIssuer }],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(makeOrder());
+    const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+    expect(r.matched).toBe(0);
+    expect(r.paid).toBe(0);
+    expect(markPaidMock).not.toHaveBeenCalled();
+    // Didn't match on any asset, so the memo lookup never happened —
+    // same "we never even looked up the memo" shape as the LOOP-asset
+    // spoof-guard test above.
+    expect(findOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('AUDIT-2 finding A: rejects USDC of ANY issuer — matches nothing, not "any issuer" — when LOOP_STELLAR_USDC_ISSUER is unset', async () => {
+    listPaymentsMock.mockResolvedValue({
+      // A real Circle-issuer-shaped USDC payment against a pending
+      // order's memo. Before the fix this matched (vacuous "any
+      // issuer" truth) and paid the order; now it must not.
+      records: [usdcPayment('MEMO', '10.0000000')],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(makeOrder());
+    // No `usdcIssuer` passed — the unconfigured-LOOP_STELLAR_USDC_ISSUER shape.
+    const r = await runPaymentWatcherTick({ account: ACCOUNT });
+    expect(r.matched).toBe(0);
+    expect(r.paid).toBe(0);
+    expect(markPaidMock).not.toHaveBeenCalled();
+    expect(findOrderMock).not.toHaveBeenCalled();
+  });
+
   it('still accepts USDC alongside LOOP assets — allowlist is additive', async () => {
     loopAssetsState.assets = [{ code: 'GBPLOOP', issuer: GBPLOOP_ISSUER }];
     listPaymentsMock.mockResolvedValue({

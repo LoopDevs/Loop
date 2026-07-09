@@ -364,6 +364,22 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # LOOP_ADMIN_STEP_UP_SIGNING_KEY=<at-least-32-char-random-secret>
 # DISABLE_ADMIN_STEP_UP_ENFORCEMENT=1
 
+# USDC deposit-matching issuer pin (AUDIT-2 finding A). Stellar asset
+# codes aren't unique — without this pinned, the payment watcher's
+# issuer-match guard (payments/horizon.ts: isMatchingIncomingPayment)
+# fails CLOSED: it matches NO USDC deposit at all, never "any issuer"
+# (an attacker's self-issued fake "USDC" would otherwise mark a real
+# order paid and trigger a real gift-card procurement against real
+# operator funds). Production boot FAILS without it, mirroring the
+# LOOP_ADMIN_STEP_UP_SIGNING_KEY pattern above; set
+# DISABLE_USDC_ISSUER_ENFORCEMENT=1 to deliberately ship the USDC rail
+# disabled (staging only). Outside production: absent → boot succeeds,
+# USDC deposits just never match (the same safe posture, no boot
+# guard). Circle's canonical mainnet issuer:
+# GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN.
+# LOOP_STELLAR_USDC_ISSUER=GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
+# DISABLE_USDC_ISSUER_ENFORCEMENT=1
+
 # Gift-card redeem-secret envelope key (CF-25 / X-PRIV-03). Set → AES-256-GCM
 # encrypts orders.redeem_code + redeem_pin at rest (redeem_url stays plaintext).
 # 32 bytes as base64/hex. Absent → plaintext storage + a single boot warn;

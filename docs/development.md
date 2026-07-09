@@ -319,8 +319,17 @@ DATABASE_URL=postgres://loop:loop@localhost:5433/loop
 # XLM / USDC for Loop-native orders. The three LOOP-asset issuers back
 # the cashback payouts (USDLOOP / GBPLOOP / EURLOOP — one per home
 # currency). Omit an issuer → cashback for that currency stays off-chain.
+#
+# LOOP_STELLAR_USDC_ISSUER (AUDIT-2 finding A): Stellar asset codes
+# aren't unique — anyone can self-issue an asset called "USDC". Absent
+# → the payment watcher's issuer-match guard fails CLOSED (matches NO
+# USDC deposit, never "any issuer"). Production boot FAILS without it
+# (same pattern as LOOP_ADMIN_STEP_UP_SIGNING_KEY); set
+# DISABLE_USDC_ISSUER_ENFORCEMENT=1 to deliberately ship the USDC rail
+# disabled in a non-production deploy.
 # LOOP_STELLAR_DEPOSIT_ADDRESS=G...(55 chars)
 # LOOP_STELLAR_USDC_ISSUER=GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
+# DISABLE_USDC_ISSUER_ENFORCEMENT=1
 # LOOP_STELLAR_USDLOOP_ISSUER=G...
 # LOOP_STELLAR_GBPLOOP_ISSUER=G...
 # LOOP_STELLAR_EURLOOP_ISSUER=G...

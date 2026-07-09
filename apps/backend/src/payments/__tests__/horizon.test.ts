@@ -275,6 +275,37 @@ describe('isMatchingIncomingPayment', () => {
   it('rejects a native payment when the caller expected USDC', () => {
     expect(isMatchingIncomingPayment(base, { account: ACCOUNT, assetCode: 'USDC' })).toBe(false);
   });
+
+  // AUDIT-2 finding A: the prior clause was
+  // `opts.assetIssuer === undefined || p.asset_issuer === opts.assetIssuer`,
+  // which is vacuously true when no issuer is passed — so an
+  // unconfigured LOOP_STELLAR_USDC_ISSUER matched a real Circle USDC
+  // payment AND an attacker's self-issued fake "USDC" from any
+  // account. A credit-asset match must now require a pinned issuer:
+  // no issuer configured → no match, ever, for any issuer.
+  it('AUDIT-2 finding A: rejects a credit-asset payment of any issuer when no issuer is pinned', () => {
+    const realUsdc: HorizonPayment = {
+      ...base,
+      asset_type: 'credit_alphanum4',
+      asset_code: 'USDC',
+      asset_issuer: 'GCENTRE',
+    };
+    const fakeUsdc: HorizonPayment = {
+      ...base,
+      asset_type: 'credit_alphanum4',
+      asset_code: 'USDC',
+      asset_issuer: 'GATTACKERSELFISSUED',
+    };
+    // No `assetIssuer` in opts at all — the shape watcher.ts produces
+    // when `LOOP_STELLAR_USDC_ISSUER` is unset (the key is omitted,
+    // not passed as `undefined`).
+    expect(isMatchingIncomingPayment(realUsdc, { account: ACCOUNT, assetCode: 'USDC' })).toBe(
+      false,
+    );
+    expect(isMatchingIncomingPayment(fakeUsdc, { account: ACCOUNT, assetCode: 'USDC' })).toBe(
+      false,
+    );
+  });
 });
 
 describe('findOutboundPaymentByMemo', () => {

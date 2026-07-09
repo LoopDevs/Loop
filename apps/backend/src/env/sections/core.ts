@@ -111,6 +111,15 @@ export const coreEnvFields = {
   // LOOP_AUTH_NATIVE_ENABLED=true.
   DISABLE_NATIVE_AUTH_ENFORCEMENT: z.enum(['1']).optional(),
 
+  // AUDIT-2 finding A: emergency opt-out for the production
+  // USDC-issuer boot guard below. Same `"1"`-only shape as its
+  // siblings so a deploy typo fails at parse time. Setting it ships
+  // production with the USDC deposit rail deliberately disabled (the
+  // watcher's issuer-match guard already fails closed with no issuer
+  // configured — matches nothing rather than "any issuer" — so this
+  // is a launch-readiness override, not a security override).
+  DISABLE_USDC_ISSUER_ENFORCEMENT: z.enum(['1']).optional(),
+
   // Rate-limiter trust boundary (audit A-023). When `true` the rate limiter
   // reads the client IP from the first value in X-Forwarded-For (required
   // when running behind Fly.io / a load balancer). When `false` it falls

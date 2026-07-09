@@ -300,6 +300,34 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
     );
   }
 
+  // 3. Production without a pinned USDC issuer (AUDIT-2 finding A).
+  //    Stellar asset codes are not unique — anyone can self-issue an
+  //    asset called "USDC". The payment watcher's issuer-match guard
+  //    (horizon.ts: isMatchingIncomingPayment) now fails CLOSED when
+  //    LOOP_STELLAR_USDC_ISSUER is unset — it matches no USDC
+  //    deposit at all, rather than "any issuer" — so this can no
+  //    longer be exploited into a fraudulent markOrderPaid. But a
+  //    silently USDC-disabled production deploy is still a
+  //    launch-readiness gap worth failing loud on (every user paying
+  //    by USDC would see their order stall unpaid forever), matching
+  //    the LOOP_ADMIN_STEP_UP_SIGNING_KEY precedent above. Emergency
+  //    opt-out for a deliberate USDC-disabled staging/rollback
+  //    deploy.
+  if (
+    parsed.data.NODE_ENV === 'production' &&
+    parsed.data.LOOP_STELLAR_USDC_ISSUER === undefined &&
+    parsed.data.DISABLE_USDC_ISSUER_ENFORCEMENT !== '1'
+  ) {
+    throw new Error(
+      'Invalid environment variables — LOOP_STELLAR_USDC_ISSUER must be set in production ' +
+        '(AUDIT-2 finding A). Without it the payment watcher matches NO USDC deposits (a safe ' +
+        'fail-closed default, not a fallback to "any issuer") and every USDC order stalls unpaid. ' +
+        `Set LOOP_STELLAR_USDC_ISSUER to the canonical mainnet USDC issuer ` +
+        `(${CANONICAL_MAINNET_USDC_ISSUER}) or your network's real USDC issuer, or set ` +
+        'DISABLE_USDC_ISSUER_ENFORCEMENT=1 to deliberately ship the USDC rail disabled.',
+    );
+  }
+
   // A2-203: the fallback cashback split must respect the
   // `userCashback + margin + wholesale = 100` invariant. Reject a
   // misconfigured env at boot rather than silently over-granting

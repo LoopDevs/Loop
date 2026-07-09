@@ -186,7 +186,8 @@ export {
  * memo?". The watcher uses this before consulting the orders table.
  *
  * `assetCode = null` asks for native XLM. Otherwise matches the
- * pair on a credit asset (typically USDC).
+ * pair on a credit asset (typically USDC) — and a credit-asset match
+ * REQUIRES `assetIssuer` to be pinned (see the AUDIT-2 note below).
  */
 export function isMatchingIncomingPayment(
   p: HorizonPayment,
@@ -205,9 +206,25 @@ export function isMatchingIncomingPayment(
   if (opts.assetCode === null) {
     return p.asset_type === 'native';
   }
+  // AUDIT-2 finding A: a credit-asset match REQUIRES a pinned
+  // issuer. Stellar asset codes are not unique — anyone can
+  // self-issue an asset called "USDC" (or any LOOP-asset code) from
+  // their own account. The previous clause here was
+  // `opts.assetIssuer === undefined || p.asset_issuer ===
+  // opts.assetIssuer`, which is vacuously true when no issuer is
+  // passed — an unconfigured LOOP_STELLAR_USDC_ISSUER matched an
+  // attacker's worthless self-issued "USDC" exactly as readily as
+  // Circle's real asset, and the watcher would markOrderPaid +
+  // procure a real gift card against it. Mirror the LOOP-asset
+  // allowlist's posture instead (credits/payout-asset.ts:
+  // configuredLoopPayableAssets omits any code whose issuer isn't
+  // configured, so the watcher's LOOP-asset loop never even offers
+  // an issuer-less candidate) — no issuer configured means NO
+  // MATCH, never "any issuer".
+  if (opts.assetIssuer === undefined) return false;
   return (
     (p.asset_type === 'credit_alphanum4' || p.asset_type === 'credit_alphanum12') &&
     p.asset_code === opts.assetCode &&
-    (opts.assetIssuer === undefined || p.asset_issuer === opts.assetIssuer)
+    p.asset_issuer === opts.assetIssuer
   );
 }
