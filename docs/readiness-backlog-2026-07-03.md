@@ -565,7 +565,7 @@ max_connections`, including the release-command migration machine
 
 ### A5-1 · Order re-drive lever (biggest hole) `[code]`
 
-- [x] **Status:** ✅ Shipped 2026-07-09 (PR TBD — review-first, not yet merged).
+- [x] **Status:** ✅ Shipped 2026-07-09 (PR #1609 — review-first, not yet merged).
       **Why:** A stuck `paid`/`procuring` order has **no** operator action — no requeue/reprocure/manual-fulfill/cancel. Resolution relies on the worker eventually retrying, else raw SQL/kill-switch.
       **Do:** add admin endpoint(s) + UI to re-drive a stuck order: re-enqueue procurement, or (with step-up + reason + audit) mark for retry/cancel-and-refund. Reuse the procurement worker path; don't duplicate its money logic.
       **⚠️** Money-review — a re-drive must be idempotent (can't double-procure/double-pay CTX; the `ctx_settlements` guard must hold).

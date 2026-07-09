@@ -304,7 +304,7 @@
 ## Phase 4 — Admin / support money tooling (ops can't intervene today)
 
 - [x] **A5-1 · Order re-drive lever** (biggest hole). _M · 💰._
-      **Done 2026-07-09 (review-first PR open, not yet merged):** `POST /api/admin/orders/:orderId/redrive`
+      **Done 2026-07-09 (review-first PR #1609 open, not yet merged):** `POST /api/admin/orders/:orderId/redrive`
       — admin-tier + step-up (`order-redrive` scope), ADR-017 envelope. `paid` orders redrive
       directly via `procureOne` (safe under `markOrderProcuring`'s CAS). `procuring` orders only
       redrive past the same 15-min staleness bar `sweepStuckProcurement` uses, and only when the
