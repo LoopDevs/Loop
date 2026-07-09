@@ -163,6 +163,13 @@ configure. Drift surfaces if a migration starts failing on the
 `loop_readonly` role's analytics workload — that's the smoke signal
 that the role-grant wasn't extended for a new table.
 
+**Backup / DR posture.** Loop runs unmanaged Fly Postgres (daily
+volume snapshots, 5-day default retention, no PITR or offsite copy
+by default). Current facts, target posture, and the restore-drill
+procedure live in `docs/runbooks/disaster-recovery.md` §"Backup
+posture (B-4)" — read that before assuming Fly's backups cover a
+vendor-compromise scenario; they don't yet.
+
 #### Admin + audit (ADR 017 / ADR 018)
 
 | Variable                            | Required           | Default        | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |

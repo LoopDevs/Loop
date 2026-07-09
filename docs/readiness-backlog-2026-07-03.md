@@ -727,9 +727,29 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### B-4 · DR: PITR + offsite backup `[operator]`+`[code]`
 
-- [ ] **Status:** ☐ Not started
+- [ ] **Status:** ☐ Not started (docs/procedure half done 2026-07-09 — see below; operator execution stays open)
       **Why:** 24h RPO (Fly daily snapshot) on the money ledger; **all** backups inside Fly → a vendor/account compromise is total data loss (the DR runbook's own "whole-environment compromise" case can't restore what only lived in the compromised vendor). `docs/runbooks/disaster-recovery.md` is otherwise strong.
       **Do:** enable Postgres PITR; add a scheduled cross-cloud `pg_dump` (e.g. to S3/GCS/B2) with a tested restore. `[operator]` for the vendor/bucket, `[code]` for the job + runbook update.
+      **Progress note (2026-07-09) — docs/procedure landed, 🟢 half done:**
+      `docs/runbooks/disaster-recovery.md` rewritten with an operator checklist, a
+      precise "what's actually at risk" table (ledger mirror / loop-native orders are
+      the crown jewel — reasoned from ADR 036 / `invariants.md` INV-3's
+      chain-is-a-floor-not-the-liability model), corrected + Fly-docs-cited
+      current-posture facts (confirmed via Fly's own docs: unmanaged Fly Postgres — not
+      Managed Postgres/MPG — does daily volume snapshots, 5-day default retention, **no
+      offsite copy**, and an **opt-in but not-yet-enabled** WAL-based PITR path via
+      `fly postgres backup enable`), a 3-layer target posture (snapshot retention → PITR
+      → genuinely offsite cross-vendor `pg_dump`, credentials as GitHub secrets not Fly
+      secrets), a restore-drill procedure (quarterly quick drill + the existing 180-day
+      full rehearsal), PROPOSED RPO/RTO tables pending operator sign-off, and an incident
+      decision tree wired to `docs/oncall.md` + the kill-switch-first step. Also fixed a
+      pre-existing app-name/cadence drift between this runbook and
+      `docs/runbooks/migration-rollback.md`. **Still open (👤 operator):** actually run
+      `fly postgres backup enable`, set explicit snapshot retention, provision the
+      offsite bucket + credentials, build the scheduled `pg_dump` GitHub Actions
+      workflow (`[code]`), and run one real timed restore drill — see the operator
+      checklist at the top of `disaster-recovery.md` for the exact steps. B-4 stays
+      unchecked until that half lands.
       **Done when:** PITR is on + an offsite backup exists with a rehearsed restore.
 
 ### B-5 · Observability depth `[code]`+`[operator]`
