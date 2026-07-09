@@ -49,8 +49,11 @@ app/
 │                       user, public-stats, parse-error-response)
 ├── stores/           ← Zustand (auth.store, purchase.store, ui.store)
 ├── native/           ← Capacitor plugin wrappers (platform, haptics, secure-storage,
-│                       biometrics, app-lock, back-button, clipboard, keyboard, network,
-│                       purchase-storage, share, task-switcher-overlay,
+│                       biometrics, app-lock, back-button, deep-link (M-3 —
+│                       resolveDeepLinkTarget pure mapper + registerDeepLinks),
+│                       app-state (M-5 — registerAppStateSync pipes appStateChange
+│                       into TanStack Query's focusManager), clipboard, keyboard,
+│                       network, purchase-storage, share, task-switcher-overlay,
 │                       status-bar, webview)
 ├── utils/            ← admin-cache, error-messages, format-stellar (fmtStroops),
 │                       image, locale, money, security-headers,

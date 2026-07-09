@@ -224,7 +224,7 @@ That work is code-complete on the original ADR 015 surface; the new ADR 030 + 03
 
 - [ ] Push notifications for order status and cashback
 - [ ] Capacitor Live Update for OTA web asset updates
-- [ ] Deep linking (`loopfinance.io/gift-card/:name` → app)
+- [x] Deep linking (`loopfinance.io/gift-card/:name` → app) — M-3, done 2026-07-09
 
 ---
 

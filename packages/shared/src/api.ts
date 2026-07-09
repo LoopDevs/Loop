@@ -136,6 +136,14 @@ export const ApiErrorCode = {
   PAYOUT_NOT_COMPENSABLE: 'PAYOUT_NOT_COMPENSABLE',
   NOT_CONFIGURED: 'NOT_CONFIGURED',
   WEBHOOK_NOT_CONFIGURED: 'WEBHOOK_NOT_CONFIGURED',
+  // M-3 (deep linking): `GET /.well-known/apple-app-site-association`
+  // and `GET /.well-known/assetlinks.json` 404 with this code when
+  // their gating env var (APPLE_TEAM_ID / ANDROID_CERT_SHA256) is
+  // unset. Distinct from NOT_CONFIGURED (503) rather than reusing it —
+  // "the verification file for this domain doesn't exist yet" is the
+  // correct 404 semantics for both Apple's and Google's link-
+  // verification crawlers, not a retryable server outage.
+  WELL_KNOWN_NOT_CONFIGURED: 'WELL_KNOWN_NOT_CONFIGURED',
   // ADR 036 OQ3 (resolved 2026-06-12): the `credit` payment method
   // is retired once the caller's embedded wallet is `activated` and
   // the wallet layer is on — their balance IS their tokens, so

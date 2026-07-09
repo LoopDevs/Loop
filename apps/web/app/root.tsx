@@ -7,6 +7,7 @@ import {
   Scripts,
   ScrollRestoration,
   useLocation,
+  useNavigate,
 } from 'react-router';
 import { QueryClient, QueryCache, MutationCache, QueryClientProvider } from '@tanstack/react-query';
 import { initSentryLazily, captureExceptionLazily } from '~/utils/sentry-lazy';
@@ -17,6 +18,8 @@ import { useNativePlatform } from '~/hooks/use-native-platform';
 import { useSessionRestore } from '~/hooks/use-session-restore';
 import { setStatusBarOverlay, setStatusBarStyle } from '~/native/status-bar';
 import { registerBackButton } from '~/native/back-button';
+import { registerDeepLinks } from '~/native/deep-link';
+import { registerAppStateSync } from '~/native/app-state';
 import { registerAppLockGuard } from '~/native/app-lock';
 import { enableTaskSwitcherPrivacyOverlay } from '~/native/task-switcher-overlay';
 import { setKeyboardAccessoryBarVisible } from '~/native/keyboard';
@@ -326,6 +329,7 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
 function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Element {
   const { isNative } = useNativePlatform();
   const location = useLocation();
+  const navigate = useNavigate();
 
   // Drive `--status-bar-intensity` from scroll position. Consumed by
   // the `html.native body::before` gradient in app.css to darken the
@@ -396,6 +400,23 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
     // instead of /gift-card → /).
     const cleanupBackButton = registerBackButton();
 
+    // Deep links (M-3) — universal links / App Links tap an
+    // https://loopfinance.io/... URL and the OS hands it to the app via
+    // `appUrlOpen`. `registerDeepLinks` validates protocol + host and
+    // resolves it to an in-app path before we ever call `navigate()` —
+    // see `~/native/deep-link.ts` for the full security rationale.
+    // Same stacked-listener hazard as the back button, same disposer
+    // requirement.
+    const cleanupDeepLinks = registerDeepLinks((path) => {
+      void navigate(path);
+    });
+
+    // App lifecycle (M-5) — feeds foreground/background transitions
+    // into TanStack Query's focusManager so queries refetch on resume
+    // (window focus/blur never fires for a backgrounded Capacitor app).
+    // Does NOT touch app-lock semantics — see `~/native/app-lock.ts`.
+    const cleanupAppState = registerAppStateSync();
+
     // iOS: enable keyboard accessory bar (Done/Previous/Next). Wrapper
     // lives in app/native/ so the @capacitor/keyboard import does not
     // sit in root.tsx (audit A-005 — Capacitor boundary compliance).
@@ -403,8 +424,10 @@ function NativeShell({ children }: { children: React.ReactNode }): React.JSX.Ele
 
     return () => {
       cleanupBackButton();
+      cleanupDeepLinks();
+      cleanupAppState();
     };
-  }, [isNative]);
+  }, [isNative, navigate]);
 
   // Register biometric app lock guard on native
   useEffect(() => {

@@ -313,6 +313,15 @@ GIFT_CARD_API_BASE_URL=https://spend.ctx.com
 # CTX_CLIENT_ID_IOS=loopios
 # CTX_CLIENT_ID_ANDROID=loopandroid
 
+# Mobile deep-linking domain verification (M-3). Each gates its
+# GET /.well-known/* file 404 WELL_KNOWN_NOT_CONFIGURED until set —
+# fill in only once the corresponding credential exists: after Apple
+# Developer Program enrollment (go-live-plan L1-4) / after the release
+# keystore is created (go-live-plan L1-5). ANDROID_CERT_SHA256 is
+# comma-separated to list a debug + release fingerprint during rollout.
+# APPLE_TEAM_ID=ABCDE12345
+# ANDROID_CERT_SHA256=AA:BB:CC:...,DD:EE:FF:...
+
 # Loop-native auth (ADR 013). Absent → legacy CTX-proxy path only.
 # Min 32 chars; PREVIOUS is set during rotation windows.
 # LOOP_JWT_SIGNING_KEY=<at-least-32-char-random-secret>
@@ -462,7 +471,7 @@ Applied in order on every request:
 3. **Body limit** — 1MB max request body; overflow returns 413 `PAYLOAD_TOO_LARGE` (A2-1005)
 4. **Request ID** — unique `X-Request-Id` on every request
 5. **Logger** — Pino-backed access log for every request (audit A-021); shares service/env/redaction with application logs and correlates via `X-Request-Id`
-6. **Rate limiting** — a global per-IP volumetric backstop (`globalRateLimit`, 600/min/IP, `/health`-exempt — hardening B6) runs early in the chain so routes lacking a per-route limiter and the admin auth-DB-reads-before-limiter path still have a ceiling; then per-IP, per-route limiters. The full enumeration is the source code: every `app.get/post/put/delete` mount in `apps/backend/src/routes/**` declares its own `rateLimit('METHOD /path', max, windowMs)`. Quick-reference for the highest-traffic surfaces: `/api/clusters` (60/min), `/api/image` (300/min), `/api/merchants` (180/min), `/api/merchants/all` (60/min), `/api/merchants/by-slug/:slug` (120/min), `/api/merchants/cashback-rates` (120/min), `/api/merchants/:id` (120/min — authed), `/api/merchants/:id/cashback-rate` (120/min), `/.well-known/jwks.json` (120/min), `/api/auth/request-otp` (5/min), `/api/auth/verify-otp` (10/min), `/api/auth/refresh` (30/min), `DELETE /api/auth/session` (20/min), `POST /api/orders` (10/min), `GET /api/orders` (60/min), `GET /api/orders/:id` (120/min). Admin/payouts/credits/users/cashback-config endpoints have their own per-route limits (10–120/min, often 10/min for CSV exports). 429 responses include `Retry-After`. Don't treat this list as exhaustive — A4-001's per-route key fix is enforced in code, not docs. Hardening C6: `rate-limit-route-inventory.test.ts` walks the real route table and fails CI on any mount without a named `rateLimit(…)` gate (explicit allowlist: /health + the bearer-gated ops probes + NODE_ENV=test-only endpoints).
+6. **Rate limiting** — a global per-IP volumetric backstop (`globalRateLimit`, 600/min/IP, `/health`-exempt — hardening B6) runs early in the chain so routes lacking a per-route limiter and the admin auth-DB-reads-before-limiter path still have a ceiling; then per-IP, per-route limiters. The full enumeration is the source code: every `app.get/post/put/delete` mount in `apps/backend/src/routes/**` declares its own `rateLimit('METHOD /path', max, windowMs)`. Quick-reference for the highest-traffic surfaces: `/api/clusters` (60/min), `/api/image` (300/min), `/api/merchants` (180/min), `/api/merchants/all` (60/min), `/api/merchants/by-slug/:slug` (120/min), `/api/merchants/cashback-rates` (120/min), `/api/merchants/:id` (120/min — authed), `/api/merchants/:id/cashback-rate` (120/min), `/.well-known/jwks.json` (120/min), `/.well-known/apple-app-site-association` (120/min), `/.well-known/assetlinks.json` (120/min), `/api/auth/request-otp` (5/min), `/api/auth/verify-otp` (10/min), `/api/auth/refresh` (30/min), `DELETE /api/auth/session` (20/min), `POST /api/orders` (10/min), `GET /api/orders` (60/min), `GET /api/orders/:id` (120/min). Admin/payouts/credits/users/cashback-config endpoints have their own per-route limits (10–120/min, often 10/min for CSV exports). 429 responses include `Retry-After`. Don't treat this list as exhaustive — A4-001's per-route key fix is enforced in code, not docs. Hardening C6: `rate-limit-route-inventory.test.ts` walks the real route table and fails CI on any mount without a named `rateLimit(…)` gate (explicit allowlist: /health + the bearer-gated ops probes + NODE_ENV=test-only endpoints).
 7. **Circuit breaker** — per-upstream-endpoint breakers (login, verify-email, refresh-token, logout, merchants, locations, gift-cards), each 5 failures → 30s open → HALF_OPEN probe. Independent so a failing `/locations` doesn't trip auth.
 
 ---

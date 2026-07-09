@@ -18,6 +18,7 @@ Making the Capacitor WebView app feel native on iOS and Android.
 ## Phase 1 — Polish (before launch)
 
 - [x] **Pull-to-refresh** — TanStack Query `refetchOnWindowFocus: true` on merchant hooks. Data refreshes when user returns to the app.
+- [x] **App lifecycle handling** (M-5) — `@capacitor/app` `appStateChange` (`apps/web/app/native/app-state.ts`) pipes foreground/background transitions into TanStack Query's `focusManager`, so `refetchOnWindowFocus` above actually fires on native (window focus/blur never fires for a backgrounded Capacitor app on its own). Deliberately does not change app-lock semantics — still cold-start-only, see `app-lock.ts`.
 - [x] **System font on mobile** — `html.native` class activates `system-ui` font stack. Inter kept on web.
 - [x] **Loading skeletons** — `MerchantCardSkeleton` (8-card grid on home) and `OrderRowSkeleton` (5-row list on orders) replace Spinner components.
 - [x] **Network status indicator** — `OfflineBanner` component + `watchNetwork()` native module. Shows red banner when offline, auto-hides on reconnect.
@@ -26,7 +27,7 @@ Making the Capacitor WebView app feel native on iOS and Android.
 
 - [x] **Page transitions** — CSS `slide-in` animation on route change (native only). Triggered via `key={location.pathname}` on content wrapper.
 - [x] **Biometric app lock** — Face ID / Touch ID via `@aparajita/capacitor-biometric-auth`. Toggle on Account page. Lock screen on cold start only (deliberately not on resume — see the design-choice comment on `registerAppLockGuard` in `apps/web/app/native/app-lock.ts`). Preference persisted in Capacitor Preferences.
-- [ ] **Deep linking** — `loopfinance.io/gift-card/:slug` opens the app directly to that merchant. iOS Universal Links + Android App Links. Configure in Capacitor `@capacitor/app` + server-side `apple-app-site-association` / `assetlinks.json`.
+- [x] **Deep linking** (M-3) — `loopfinance.io/gift-card/:slug` (and any other in-app route, including ADR-034 locale-prefixed URLs) opens the app directly via `appUrlOpen` (`apps/web/app/native/deep-link.ts`). iOS Universal Links (associated-domains entitlement) + Android App Links (autoVerify intent-filter), both wired by `apps/mobile/scripts/apply-native-overlays.sh`; server-side `apple-app-site-association` / `assetlinks.json` served by `apps/backend/src/well-known/deep-link-verification.ts`, gated on operator-filled `APPLE_TEAM_ID` / `ANDROID_CERT_SHA256`. Code-complete; on-device applink verification remains blocked on those two operator credentials (go-live-plan L1-4 / L1-5).
 - [ ] ~~**Push notifications**~~ — removed 2026-07-09 (M-2); re-add in Phase 2 if needed (see go-live-plan §T2 mobile enhancements). Was dead scaffolding: nothing called register()/requestPermissions()/listeners, no token upload, no backend send path.
 - [ ] **App badge** — show pending order count on app icon via push notification badge. Blocked on push notifications above being re-added.
 - [x] **Prevent screenshots on sensitive screens** — blur overlay on app background (iOS task switcher). Applied on PurchaseComplete screen via `enableScreenshotGuard()`.

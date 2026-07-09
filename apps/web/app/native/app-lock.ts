@@ -52,6 +52,12 @@ export function markAppLockJustVerified(): void {
  * seconds) makes the app feel hostile for no real security benefit. The
  * cold-start prompt catches the "someone found/stole a locked phone and
  * managed to get it unlocked" case; anything more is theatre.
+ *
+ * M-5 (`docs/readiness-backlog-2026-07-03.md`) added `appStateChange`
+ * lifecycle handling (`./app-state.ts`) and re-examined resume-relock
+ * as part of that work — still deliberately deferred, for the same
+ * reasoning above. Revisit only if the product calls for it, not as a
+ * side effect of unrelated lifecycle wiring.
  */
 export function registerAppLockGuard(): () => void {
   if (!Capacitor.isNativePlatform()) return () => {};

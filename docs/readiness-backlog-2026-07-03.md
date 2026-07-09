@@ -207,7 +207,7 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 - [ ] **Status:** ☐ Blocked on owner decision
       **Why:** Dead on iOS/Android — `AppleSignInButton.tsx:113` sets `redirectURI: window.location.origin` → `capacitor://localhost`, which Apple can't register, so the flow fails server-side; the button is a silent no-op. Native users are effectively email-OTP-only. `needs-operator.md` §1.
-      **Do:** owner picks **(a)** a backend-hosted HTTPS callback (`https://api.loopfinance.io/auth/apple/callback`) that bridges back via a universal link/custom scheme (no new dep; uses `@capgo/inappbrowser`), or **(b)** a native plugin (new dep → ADR). **(a) requires deep-linking (M-3) to exist first.** Not strictly launch-blocking (OTP works).
+      **Do:** owner picks **(a)** a backend-hosted HTTPS callback (`https://api.loopfinance.io/auth/apple/callback`) that bridges back via a universal link/custom scheme (no new dep; uses `@capgo/inappbrowser`), or **(b)** a native plugin (new dep → ADR). **(a) requires deep-linking (M-3) to exist first** — M-3's code-side prerequisite is now met (2026-07-09: `appUrlOpen` handling + universal-links/App-Links wiring landed), though on-device verification is still blocked on the same `APPLE_TEAM_ID` / `ANDROID_CERT_SHA256` operator creds M-3 itself needs. Not strictly launch-blocking (OTP works).
       **Done when:** native Apple Sign-In completes on a real device, or the owner explicitly accepts OTP-only on native for launch (record it).
 
 ---
@@ -630,10 +630,11 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### M-3 · Deep linking (entirely absent) `[code]`
 
-- [ ] **Status:** ☐ Not started
+- [x] **Status:** ✅ Done 2026-07-09 — `App.addListener('appUrlOpen')` wired (`apps/web/app/native/deep-link.ts`, mirroring `back-button.ts`'s dynamic-import + disposer shape), validated with an exact-hostname allowlist (`loopfinance.io` / `www` / `beta`, `https:` only) before ever calling `navigate()` — never the raw string, path+search+hash only. iOS associated-domains entitlement (`native-overlays/ios/App/App/App.entitlements`, wired via `CODE_SIGN_ENTITLEMENTS` on both build configs) + Android `autoVerify` intent-filter, both patched by `apps/mobile/scripts/apply-native-overlays.sh` and grep-asserted by the `mobile-overlay-guard` CI job. Backend serves `apple-app-site-association` / `assetlinks.json` (`apps/backend/src/well-known/deep-link-verification.ts`), 404 until the operator sets `APPLE_TEAM_ID` / `ANDROID_CERT_SHA256`.
       **Why:** No `App.addListener('appUrlOpen')`, no applinks/`associated-domains` entitlement, no Android intent-filters. Blocks the CF-27 Apple fix (C2-2), app-open from email/order links, and the SEP-7 wallet return path.
       **Do:** add `@capacitor/app` `appUrlOpen` handling + universal-links (iOS `associated-domains`) + Android `intent-filter`s in the native overlays; route incoming URLs to the right screen.
       **Done when:** an `https://loopfinance.io/...` link opens the app to the right screen on both platforms.
+      **⚠️ Operator follow-up:** code side is complete but on-device verification (Apple actually opening the app instead of Safari, Android actually opening the app instead of Chrome) is blocked on `APPLE_TEAM_ID` (Apple Developer Program enrollment, L1-4) and `ANDROID_CERT_SHA256` (release keystore, L1-5) — both currently unset, so both `.well-known/*` files 404 and neither OS will treat the domain as verified yet. Re-test after M-1 device testing once those creds land.
 
 ### M-4 · CI/checklist guard for operator-once overlay steps `[code]`
 
@@ -644,7 +645,7 @@ Note the **sweep** arm already maps a skip-row that goes `unmatched` → `order_
 
 ### M-5 · Add `@capacitor/app` lifecycle handling `[code]`
 
-- [ ] **Status:** ☐ Not started — no foreground/background `appStateChange` handling beyond the Android back button (e.g. for refreshing on resume, re-locking). Add as part of M-3's `@capacitor/app` wiring.
+- [x] **Status:** ✅ Done 2026-07-09 — `App.addListener('appStateChange')` wired (`apps/web/app/native/app-state.ts`, same dynamic-import + disposer shape as M-3/back-button), forwards `isActive` to TanStack Query's `focusManager.setFocused()` so `refetchOnWindowFocus` (already relied on for pull-to-refresh) actually fires on resume — window focus/blur never fires for a backgrounded Capacitor app on its own. Registered in the same NativeShell native-mount effect as M-3's deep-link listener. Re-locking on resume was considered and deliberately deferred — `registerAppLockGuard` (`apps/web/app/native/app-lock.ts`) stays cold-start-only per its existing design-choice comment, now noting M-5 revisited and confirmed the same reasoning.
 
 ---
 

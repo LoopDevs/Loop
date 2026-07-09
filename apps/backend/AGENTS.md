@@ -105,6 +105,11 @@ src/
 │   └── handler.ts      ← GET /api/clusters (protobuf + JSON)
 ├── users/handler.ts    ← GET /me + POST /me/home-currency + PUT /me/stellar-address (ADR 015)
 ├── users/wallet-handler.ts ← GET /api/me/wallet — embedded-wallet balances, never-500 last-known-good (ADR 030 C4)
+├── well-known/deep-link-verification.ts ← GET /.well-known/apple-app-site-association
+│                          + assetlinks.json (M-3 deep linking) — 404
+│                          WELL_KNOWN_NOT_CONFIGURED until APPLE_TEAM_ID /
+│                          ANDROID_CERT_SHA256 is set (route mount:
+│                          routes/well-known.ts, alongside jwks-publish.ts)
 ├── db/                 ← Drizzle schema + migrations + pool client (ADR 012);
 │   │                     schema.ts is a barrel over schema/*.ts per-domain
 │   │                     modules (users/credits/merchants/auth/orders/payments/
