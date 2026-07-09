@@ -631,6 +631,100 @@ jobs:
           path: apps/backend/dist/
           retention-days: 1
 
+  mobile-overlay-guard:
+    name: Mobile native-overlay regeneration guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # M-4 (docs/readiness-backlog-2026-07-03.md). Advisory, not one of
+    # the 5 required checks branch protection lists (`gh api
+    # repos/LoopDevs/Loop/branches/main/protection`) — same posture as
+    # `audit` / `sbom` / `container-cve-scan` / `secret-scan`.
+    # Standalone (no `needs`) so it starts immediately in parallel
+    # with `quality` / `test-unit` — it doesn't touch anything those
+    # jobs build.
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Cache node_modules
+        id: npm-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node_modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+      - name: Install deps
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+      # M-4: regenerate both native platforms from a scratch `cap add`
+      # — the same operation a fresh clone or a Capacitor-version bump
+      # runs — and prove `apply-native-overlays.sh` still restores
+      # every overlay, including the two store-critical iOS pbxproj
+      # wirings that used to be manual-only. This is a bare `cap add`,
+      # deliberately WITHOUT a preceding web build: `cap add` on both
+      # platforms is a pure template-extraction + plist/pbxproj text
+      # edit (verified against the pinned @capacitor/cli — ios/add.js
+      # and android/add.js both call `extractTemplate` and nothing
+      # else; the only step that shells out to a real toolchain —
+      # `cap sync`'s pod-install / gradle-sync — is gated on
+      # `apps/web/build/client` existing, and is skipped with a
+      # warning when it's absent, which is what happens here). That
+      # keeps this job independent of the `build` job's expensive web
+      # build and needs no Xcode / Android SDK on ubuntu-latest.
+      - name: cap add ios + android (scratch regeneration)
+        run: |
+          set -euo pipefail
+          cd apps/mobile
+          npx cap add ios --packagemanager SPM
+          npx cap add android
+      - name: Run apply-native-overlays.sh
+        run: |
+          set -euo pipefail
+          cd apps/mobile
+          ./scripts/apply-native-overlays.sh
+      # Grep-assert every overlay a bare `cap sync` (skipping this
+      # script) or a Capacitor-template change could silently drop.
+      # Fails loudly and specifically here rather than the gap being
+      # found at App Store review / archive time.
+      - name: Verify iOS release.xcconfig is wired on Release
+        run: |
+          set -euo pipefail
+          pbxproj=apps/mobile/ios/App/App.xcodeproj/project.pbxproj
+          count=$(grep -c 'baseConfigurationReference.*release\.xcconfig' "$pbxproj" || true)
+          if [ "${count:-0}" -lt 1 ]; then
+            echo "release.xcconfig is not wired as baseConfigurationReference on any XCBuildConfiguration" >&2
+            exit 1
+          fi
+      - name: Verify iOS PrivacyInfo.xcprivacy ships in Resources
+        run: |
+          set -euo pipefail
+          pbxproj=apps/mobile/ios/App/App.xcodeproj/project.pbxproj
+          in_resources=$(awk '/Begin PBXResourcesBuildPhase section/,/End PBXResourcesBuildPhase section/' "$pbxproj" | grep -c 'PrivacyInfo\.xcprivacy in Resources' || true)
+          if [ "${in_resources:-0}" -lt 1 ]; then
+            echo "PrivacyInfo.xcprivacy is not a member of any PBXResourcesBuildPhase" >&2
+            exit 1
+          fi
+      - name: Verify Android location permissions + backup-content overlays
+        run: |
+          set -euo pipefail
+          manifest=apps/mobile/android/app/src/main/AndroidManifest.xml
+          for perm in ACCESS_COARSE_LOCATION ACCESS_FINE_LOCATION; do
+            if ! grep -q "android.permission.$perm" "$manifest"; then
+              echo "AndroidManifest.xml is missing android.permission.$perm" >&2
+              exit 1
+            fi
+          done
+          if ! grep -q 'android:fullBackupContent' "$manifest"; then
+            echo "AndroidManifest.xml is missing android:fullBackupContent (A-033)" >&2
+            exit 1
+          fi
+
   test-e2e:
     name: E2E tests
     runs-on: ubuntu-latest
@@ -934,6 +1028,7 @@ jobs:
         container-cve-scan,
         sbom,
         build,
+        mobile-overlay-guard,
         test-e2e,
         test-e2e-mocked,
         test-e2e-flywheel,
