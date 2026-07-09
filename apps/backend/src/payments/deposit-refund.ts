@@ -96,6 +96,17 @@ export function refundIntentFromPayment(payment: unknown): RefundIntent | string
   const parsed = HorizonPaymentSchema.safeParse(payment);
   if (!parsed.success) return 'stored payment failed schema validation';
   const p = parsed.data;
+  // KNOWN RESIDUAL (AUDIT-2 finding C, 2026-07): the watcher now records
+  // `path_payment_strict_send`/`path_payment_strict_receive` deposits
+  // (as `order_gone` or the new `unrecognized_deposit`) since they
+  // deliver value identically to a plain `payment` op — but this A6
+  // refund path still only handles `type === 'payment'`. A path-payment
+  // skip row is therefore VISIBLE (the goal of this PR) but not yet
+  // refundable through this automated flow — refunding it needs the
+  // same "reverse a path payment" handling `submitPayout` doesn't have
+  // today. Left as a follow-up; not blocking, since the money sits safe
+  // at the deposit/operator account either way (INV-6 holds via
+  // visibility, not yet via one-click refund for this op type).
   if (p.type !== 'payment') return `not a payment op (type=${p.type})`;
   if (p.from === undefined || p.from === '') return 'no sender address on the deposit';
   if (p.amount === undefined) return 'no amount on the deposit';

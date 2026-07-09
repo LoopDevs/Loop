@@ -26,7 +26,12 @@ import { watcherCursors } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { findAnyOrderByMemo, findPendingOrderByMemo } from '../orders/repo.js';
 import { markOrderPaid, LoopAssetMissingCreditRowError } from '../orders/transitions.js';
-import { listAccountPayments, isMatchingIncomingPayment, type HorizonPayment } from './horizon.js';
+import {
+  listAccountPayments,
+  isMatchingIncomingPayment,
+  isInboundDeliveryToAccount,
+  type HorizonPayment,
+} from './horizon.js';
 import { configuredLoopPayableAssets, type LoopAssetCode } from '../credits/payout-asset.js';
 import { parseStroops } from './stroops.js';
 import { isAmountSufficient, loopAssetOverpaymentStroops } from './amount-sufficient.js';
@@ -127,6 +132,27 @@ function paymentWatcherLockKey(): bigint {
     (BigInt(digest[6]!) << 8n) |
     BigInt(digest[7]!);
   return BigInt.asIntN(64, raw);
+}
+
+/**
+ * AUDIT-2 finding C: human-readable manual-reconciliation detail for
+ * an `unrecognized_deposit` skip row — a payment that delivered value
+ * to the deposit address but matched no configured rail. Deliberately
+ * pulls only fields already on the parsed+snapshotted Horizon record
+ * (the jsonb `payment` column carries the rest for a deeper dig).
+ */
+function describeUnrecognizedDeposit(p: HorizonPayment): string {
+  const asset =
+    p.asset_type === 'native'
+      ? 'XLM'
+      : `${p.asset_code ?? 'unknown-code'}:${p.asset_issuer ?? 'unknown-issuer'}`;
+  const tx = p.transaction;
+  const memo =
+    tx !== undefined && tx.memo_type === 'text' && typeof tx.memo === 'string' ? tx.memo : null;
+  return (
+    `op ${p.id} (${p.type}) tx ${p.transaction_hash} from ${p.from ?? 'unknown'} ` +
+    `asset ${asset} amount ${p.amount ?? 'unknown'} memo ${memo ?? '(none)'}`
+  );
 }
 
 /** A4-107 asset tag carried from match to validation. */
@@ -403,10 +429,26 @@ async function runPaymentWatcherTickLocked(args: {
         return { kind: 'skip', reason: o.reason, orderId: o.orderId, detail: o.detail };
       case 'no_match':
       case 'no_memo':
-        // A recorded row matched when it was written; if it no
-        // longer does (e.g. a LOOP issuer env var was removed),
-        // keep retrying under the attempt budget rather than
-        // abandoning funds on a config blip.
+        // AUDIT-2 finding C: a row already IN the skip table got here
+        // via one of the recording arms below, so re-derive the same
+        // inbound-vs-outbound split on retry rather than collapsing
+        // every re-evaluation into `processing_error` — that would
+        // silently overwrite (via the recordSkip upsert) a genuine
+        // `unrecognized_deposit` row's reason on its very next retry
+        // tick, mislabeling it in the admin view.
+        if (isInboundDeliveryToAccount(payment, args.account)) {
+          return {
+            kind: 'skip',
+            reason: 'unrecognized_deposit',
+            orderId: null,
+            detail: describeUnrecognizedDeposit(payment),
+          };
+        }
+        // Not inbound (e.g. a `processing_error` row recorded for an
+        // outbound op that threw, now processing cleanly): a recorded
+        // row matched when it was written; if it no longer does (e.g.
+        // a LOOP issuer env var was removed), keep retrying under the
+        // attempt budget rather than abandoning funds on a config blip.
         return {
           kind: 'skip',
           reason: 'processing_error',
@@ -447,8 +489,53 @@ async function runPaymentWatcherTickLocked(args: {
     }
     switch (outcome.kind) {
       case 'no_match':
-      case 'no_memo':
+      case 'no_memo': {
+        // AUDIT-2 finding C: this used to be a bare `break;` — a
+        // payment that DELIVERED value to the deposit address (a
+        // successful payment/path-payment op, `to === account`) but
+        // matched no configured rail (wrong/no memo, or an asset no
+        // order or allowlist recognizes) got no DB row of any kind;
+        // the cursor still advances past it, so it can never be
+        // re-scanned. Real value silently stranded — the exact
+        // INV-6 violation this fix closes.
+        //
+        // PRECISION: the deposit account IS the operator account
+        // (ADR 010), so this same Horizon feed also carries the
+        // operator's own routine OUTBOUND payments/payouts — those
+        // hit `no_match` too (`to !== account`) but must NEVER be
+        // recorded here, or every ordinary payout would flood
+        // `payment_watcher_skips` with noise.
+        // `isInboundDeliveryToAccount` is the exact discriminator:
+        // true only for a successful payment/path-payment op
+        // addressed `to === account`, independent of asset/memo.
+        if (isInboundDeliveryToAccount(p, args.account)) {
+          // T0-1c parity: don't record un-refundable dust — same
+          // floor the `unmatched`/`order_gone` arm below applies.
+          const amountStroops = p.amount !== undefined ? parseStroops(p.amount) : null;
+          if (amountStroops !== null && amountStroops < REFUND_MIN_STROOPS) {
+            log.info(
+              {
+                paymentId: p.id,
+                amount: p.amount,
+                refundMinStroops: REFUND_MIN_STROOPS.toString(),
+              },
+              'Unrecognized inbound deposit below refund dust floor — counted but not recorded',
+            );
+            break;
+          }
+          const memo = p.transaction?.memo;
+          // Persisted BEFORE the cursor advances (CRIT #1, same
+          // rationale as every other recordSkip call in this loop).
+          await recordSkip({
+            payment: p,
+            memo: typeof memo === 'string' ? memo : '',
+            orderId: null,
+            reason: 'unrecognized_deposit',
+            detail: describeUnrecognizedDeposit(p),
+          });
+        }
         break;
+      }
       case 'unmatched': {
         result.unmatchedMemo++;
         // T0-1: `unmatched` means a real deposit (valid asset + memo) with

@@ -30,6 +30,13 @@ export const WATCHER_SKIP_REASONS = [
   // pending_payment (expired / already paid) — a genuine late or
   // duplicate deposit. Recorded so the A6 refund path can reach it.
   'order_gone',
+  // AUDIT-2 finding C: value delivered TO the deposit address that
+  // matched NO configured rail at all (wrong/no memo, or an asset/
+  // issuer/amount no order or allowlist recognizes) — previously
+  // silently dropped with no DB row. Distinct from `order_gone`
+  // (there the memo DID resolve to a real order); here nothing
+  // resolved, so there's no `orderId` to attach.
+  'unrecognized_deposit',
 ] as const;
 export type WatcherSkipReason = (typeof WATCHER_SKIP_REASONS)[number];
 

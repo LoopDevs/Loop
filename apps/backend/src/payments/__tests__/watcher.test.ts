@@ -3,6 +3,7 @@ import type { HorizonPayment } from '../horizon.js';
 import type * as HorizonModule from '../horizon.js';
 import type * as SchemaModule from '../../db/schema.js';
 import type * as TransitionsModule from '../../orders/transitions.js';
+import type { RetryOutcome } from '../skipped-payments.js';
 
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -612,6 +613,11 @@ describe('runPaymentWatcherTick', () => {
     // Cursor still advances to last record's paging token — we've
     // scanned them, they just didn't match.
     expect(state.writtenCursors).toEqual(['pt-b']);
+    // AUDIT-2 finding C: neither record delivers value to the account
+    // (create_account isn't payment-shaped; the second has a failed
+    // tx) — `isInboundDeliveryToAccount` must reject both, so nothing
+    // gets recorded here either.
+    expect(recordSkipMock).not.toHaveBeenCalled();
   });
 
   it('uses nextCursor when the page is empty but Horizon says there is more', async () => {
@@ -901,6 +907,229 @@ describe('runPaymentWatcherTick', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('AUDIT-2 finding C — unrecognized inbound deposit recording', () => {
+  function pathPaymentUsdc(memo: string, amount: string, pagingToken: string): HorizonPayment {
+    return {
+      id: `id-${pagingToken}`,
+      paging_token: pagingToken,
+      type: 'path_payment_strict_receive',
+      from: 'GOTHER',
+      to: ACCOUNT,
+      asset_type: 'credit_alphanum4',
+      asset_code: 'USDC',
+      asset_issuer: 'GCENTRE',
+      amount,
+      transaction_hash: `tx-${pagingToken}`,
+      transaction_successful: true,
+      transaction: { memo, memo_type: 'text', successful: true },
+    };
+  }
+
+  it('a path payment delivering the configured USDC asset + memo still pays the order (regression: widening the type gate does not break the happy path)', async () => {
+    listPaymentsMock.mockResolvedValue({
+      records: [pathPaymentUsdc('MEMO', '10.0000000', 'pt-path-pay')],
+      nextCursor: null,
+    });
+    findOrderMock.mockResolvedValue(makeOrder());
+    markPaidMock.mockResolvedValue({ id: 'order-1' });
+    const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+    expect(r.paid).toBe(1);
+    expect(markPaidMock).toHaveBeenCalledWith(
+      'order-1',
+      expect.objectContaining({ paymentReceivedHorizonId: 'id-pt-path-pay' }),
+    );
+    expect(recordSkipMock).not.toHaveBeenCalled();
+  });
+
+  it('a path payment delivering an asset no rail recognizes records an unrecognized_deposit skip (not silently dropped, not double-counted)', async () => {
+    const p: HorizonPayment = {
+      id: 'id-pt-unrec',
+      paging_token: 'pt-unrec',
+      type: 'path_payment_strict_send',
+      from: 'GOTHER',
+      to: ACCOUNT,
+      asset_type: 'credit_alphanum4',
+      asset_code: 'EURC',
+      asset_issuer: 'GEURCISSUERXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+      amount: '10.0000000',
+      transaction_hash: 'tx-unrec',
+      transaction_successful: true,
+      transaction: { memo: 'SOME-MEMO', memo_type: 'text', successful: true },
+    };
+    listPaymentsMock.mockResolvedValue({ records: [p], nextCursor: null });
+    findOrderMock.mockResolvedValue(makeOrder());
+    const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+    expect(r.paid).toBe(0);
+    expect(markPaidMock).not.toHaveBeenCalled();
+    // Never even looked up the memo — the asset itself matched nothing.
+    expect(findOrderMock).not.toHaveBeenCalled();
+    expect(recordSkipMock).toHaveBeenCalledTimes(1);
+    expect(recordSkipMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment: expect.objectContaining({ id: 'id-pt-unrec' }),
+        orderId: null,
+        reason: 'unrecognized_deposit',
+      }),
+    );
+    expect(state.writtenCursors).toEqual(['pt-unrec']);
+  });
+
+  it('a memo-less direct payment to the deposit address records an unrecognized_deposit skip', async () => {
+    const p: HorizonPayment = {
+      id: 'id-pt-nomemo',
+      paging_token: 'pt-nomemo',
+      type: 'payment',
+      from: 'GOTHER',
+      to: ACCOUNT,
+      asset_type: 'credit_alphanum4',
+      asset_code: 'USDC',
+      asset_issuer: 'GCENTRE',
+      amount: '10.0000000',
+      transaction_hash: 'tx-nomemo',
+      transaction_successful: true,
+      // No text memo — a real wallet payment that didn't set one.
+      transaction: { memo_type: 'none', successful: true },
+    };
+    listPaymentsMock.mockResolvedValue({ records: [p], nextCursor: null });
+    findOrderMock.mockResolvedValue(makeOrder());
+    const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+    expect(r.paid).toBe(0);
+    expect(recordSkipMock).toHaveBeenCalledTimes(1);
+    expect(recordSkipMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment: expect.objectContaining({ id: 'id-pt-nomemo' }),
+        memo: '',
+        orderId: null,
+        reason: 'unrecognized_deposit',
+      }),
+    );
+  });
+
+  it('an OUTBOUND operator payment (to !== account) is NEVER recorded — the critical noise guard (shared deposit/operator account)', async () => {
+    const p: HorizonPayment = {
+      id: 'id-pt-outbound',
+      paging_token: 'pt-outbound',
+      type: 'payment',
+      from: ACCOUNT,
+      to: 'GRECIPIENT',
+      asset_type: 'native',
+      amount: '5.0000000',
+      transaction_hash: 'tx-outbound',
+      transaction_successful: true,
+      transaction: { memo: 'payout-memo', memo_type: 'text', successful: true },
+    };
+    listPaymentsMock.mockResolvedValue({ records: [p], nextCursor: null });
+    const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+    expect(r.paid).toBe(0);
+    expect(recordSkipMock).not.toHaveBeenCalled();
+    expect(state.writtenCursors).toEqual(['pt-outbound']);
+  });
+
+  it('a sub-dust unrecognized inbound deposit is counted but not recorded (T0-1c dust-floor parity)', async () => {
+    const p: HorizonPayment = {
+      id: 'id-pt-dust',
+      paging_token: 'pt-dust',
+      type: 'payment',
+      from: 'GOTHER',
+      to: ACCOUNT,
+      asset_type: 'credit_alphanum4',
+      asset_code: 'EURC',
+      asset_issuer: 'GEURCISSUERXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+      amount: '0.0009999', // below REFUND_MIN_STROOPS (10_000 stroops = 0.0010000)
+      transaction_hash: 'tx-dust',
+      transaction_successful: true,
+      transaction: { memo: 'MEMO', memo_type: 'text', successful: true },
+    };
+    listPaymentsMock.mockResolvedValue({ records: [p], nextCursor: null });
+    findOrderMock.mockResolvedValue(makeOrder());
+    const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+    expect(r.paid).toBe(0);
+    expect(recordSkipMock).not.toHaveBeenCalled();
+    expect(state.writtenCursors).toEqual(['pt-dust']);
+  });
+
+  it('a deposit at the refund dust floor IS recorded', async () => {
+    const p: HorizonPayment = {
+      id: 'id-pt-floor',
+      paging_token: 'pt-floor',
+      type: 'payment',
+      from: 'GOTHER',
+      to: ACCOUNT,
+      asset_type: 'credit_alphanum4',
+      asset_code: 'EURC',
+      asset_issuer: 'GEURCISSUERXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+      amount: '0.0010000', // exactly REFUND_MIN_STROOPS
+      transaction_hash: 'tx-floor',
+      transaction_successful: true,
+      transaction: { memo: 'MEMO', memo_type: 'text', successful: true },
+    };
+    listPaymentsMock.mockResolvedValue({ records: [p], nextCursor: null });
+    findOrderMock.mockResolvedValue(makeOrder());
+    const r = await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+    expect(r.paid).toBe(0);
+    expect(recordSkipMock).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'unrecognized_deposit' }),
+    );
+  });
+
+  it('sweep re-evaluation preserves unrecognized_deposit on retry (not clobbered to processing_error)', async () => {
+    listPaymentsMock.mockResolvedValue({ records: [], nextCursor: null });
+    let capturedProcess: ((payment: HorizonPayment) => Promise<RetryOutcome>) | undefined;
+    retrySkipsMock.mockImplementation(async (process: unknown) => {
+      capturedProcess = process as (payment: HorizonPayment) => Promise<RetryOutcome>;
+      return { retried: 0, resolved: 0, abandoned: 0, stillPending: 0 };
+    });
+    await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+    expect(capturedProcess).toBeDefined();
+
+    const stillUnrecognized: HorizonPayment = {
+      id: 'id-retry-unrec',
+      paging_token: 'pt-retry-unrec',
+      type: 'payment',
+      from: 'GOTHER',
+      to: ACCOUNT,
+      asset_type: 'credit_alphanum4',
+      asset_code: 'EURC',
+      asset_issuer: 'GEURCISSUERXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+      amount: '10.0000000',
+      transaction_hash: 'tx-retry-unrec',
+      transaction_successful: true,
+      transaction: { memo: 'MEMO', memo_type: 'text', successful: true },
+    };
+    const outcome = await capturedProcess!(stillUnrecognized);
+    expect(outcome).toEqual(
+      expect.objectContaining({ kind: 'skip', reason: 'unrecognized_deposit', orderId: null }),
+    );
+  });
+
+  it('sweep re-evaluation keeps an outbound no-match row on processing_error — never reclassified as a deposit', async () => {
+    listPaymentsMock.mockResolvedValue({ records: [], nextCursor: null });
+    let capturedProcess: ((payment: HorizonPayment) => Promise<RetryOutcome>) | undefined;
+    retrySkipsMock.mockImplementation(async (process: unknown) => {
+      capturedProcess = process as (payment: HorizonPayment) => Promise<RetryOutcome>;
+      return { retried: 0, resolved: 0, abandoned: 0, stillPending: 0 };
+    });
+    await runPaymentWatcherTick({ account: ACCOUNT, usdcIssuer: 'GCENTRE' });
+
+    const outboundPayment: HorizonPayment = {
+      id: 'id-retry-outbound',
+      paging_token: 'pt-retry-outbound',
+      type: 'payment',
+      from: ACCOUNT,
+      to: 'GRECIPIENT',
+      asset_type: 'native',
+      amount: '5.0000000',
+      transaction_hash: 'tx-retry-outbound',
+      transaction_successful: true,
+      transaction: { memo: 'payout-memo', memo_type: 'text', successful: true },
+    };
+    const outcome = await capturedProcess!(outboundPayment);
+    expect(outcome).toEqual(
+      expect.objectContaining({ kind: 'skip', reason: 'processing_error', orderId: null }),
+    );
   });
 });
 

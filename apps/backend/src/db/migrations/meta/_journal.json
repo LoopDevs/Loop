@@ -393,6 +393,13 @@
       "when": 1780188600000,
       "tag": "0055_watchdog_alert_state",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1780188700000,
+      "tag": "0056_watcher_skip_unrecognized_deposit",
+      "breakpoints": true
     }
   ]
 }
